@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.4.0",
+      "changes": [
+        { "type": "changed", "mod": "Better Rune Recycler", "text": "Upgraded Better Rune Recycler." }
+      ]
+    },
+    {
       "version": "3.3.18",
       "changes": [
         { "type": "fixed", "mod": "Cyclopedia", "text": "Fixed HomeSearch clicks getting stuck while ability indexing was running." }

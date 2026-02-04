@@ -3,45 +3,39 @@
 
   console.log('[Better Rune Recycler] Mod loaded');
 
+  // Translation helper (use api from loader, context, or BestiaryModAPI)
+  const t = (key) => {
+    const a = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : window.BestiaryModAPI;
+    return (a && a.i18n && typeof a.i18n.t === 'function') ? a.i18n.t(key) : key;
+  };
+
   // =====================================================
   // Constants and Configuration
   // =====================================================
   
   const MOD_NAME = 'Better Rune Recycler';
-  const MOD_VERSION = '1.0.0';
   
-  // =====================================================
-  // Modal Dimensions Configuration
-  // =====================================================
-  // Adjust these constants to change the modal size:
-  // - MODAL_WIDTH: Total width of the modal window
-  // - MODAL_HEIGHT: Total height of the modal window
-  // - MODAL_PADDING_*: Internal spacing (don't change unless layout breaks)
-  // 
-  // Example: For a larger modal, try:
-  //   MODAL_WIDTH = 800
-  //   MODAL_HEIGHT = 900
-  // =====================================================
-  
-  const MODAL_WIDTH = 550;              // Main modal width in pixels
-  const MODAL_HEIGHT = 750;             // Main modal height in pixels
+  const MODAL_WIDTH = 750;              // Main modal width in pixels (wide layout: col1 + col2)
+  const MODAL_HEIGHT = 500;             // Main modal height in pixels
   const MODAL_PADDING_WIDTH = 30;       // Padding to subtract from width for content
   const MODAL_PADDING_HEIGHT = 50;      // Padding to subtract from height for content
   
-  const RUNE_TYPES = [
-    { key: 'runeAvarice', displayName: 'Avarice Rune', icon: '/assets/icons/rune-avarice.png', rarity: '2' },
-    { key: 'runeHp', displayName: 'Hitpoints Rune', icon: '/assets/icons/rune-hp.png', rarity: '3' },
-    { key: 'runeAp', displayName: 'Ability Power Rune', icon: '/assets/icons/rune-ap.png', rarity: '3' },
-    { key: 'runeAd', displayName: 'Attack Damage Rune', icon: '/assets/icons/rune-ad.png', rarity: '3' },
-    { key: 'runeAr', displayName: 'Armor Rune', icon: '/assets/icons/rune-ar.png', rarity: '3' },
-    { key: 'runeMr', displayName: 'Magic Resist Rune', icon: '/assets/icons/rune-mr.png', rarity: '3' },
-    { key: 'runeBlank', displayName: 'Blank Rune', icon: '/assets/icons/rune-blank.png', rarity: '4' },
-    { key: 'runeRecycle', displayName: 'Recycle Rune', icon: '/assets/icons/rune-recycle.png', rarity: '4' },
-    { key: 'runeRecycleMonster', displayName: 'Kaleidoscopic Rune', icon: '/assets/icons/rune-monster-recycle.png', rarity: '5' },
-    { key: 'runeConversionHp', displayName: 'Conversion Rune (hp)', icon: '/assets/icons/rune-conversion-hp.png', rarity: '5' },
-    { key: 'runeConversionAd', displayName: 'Conversion Rune (ad)', icon: '/assets/icons/rune-conversion-ad.png', rarity: '5' },
-    { key: 'runeConversionAp', displayName: 'Conversion Rune (ap)', icon: '/assets/icons/rune-conversion-ap.png', rarity: '5' },
-  ];
+  // Rune list from inventory database (single source of truth); fallback if DB not loaded yet
+  const RUNE_KEYS_ORDER = ['runeAvarice', 'runeHp', 'runeAp', 'runeAd', 'runeAr', 'runeMr', 'runeBlank', 'runeRecycle', 'runeKaleidoscopic', 'runeRecycleMonster', 'runeConversionHp', 'runeConversionAd', 'runeConversionAp'];
+  const RUNE_DB_ALIAS = { runeRecycleMonster: 'runeKaleidoscopic' }; // game API may return runeRecycleMonster
+  const RUNE_TYPES = (function () {
+    const db = (typeof window !== 'undefined' && window.inventoryDatabase?.tooltips) ? window.inventoryDatabase.tooltips : null;
+    return RUNE_KEYS_ORDER.map(key => {
+      const dbKey = RUNE_DB_ALIAS[key] || key;
+      const entry = db && db[dbKey] ? db[dbKey] : null;
+      return {
+        key: key,
+        displayName: entry?.displayName || (key.replace(/^rune/, '').replace(/([A-Z])/g, ' $1').trim() + ' Rune'),
+        icon: entry?.icon || '/assets/icons/rune-blank.png',
+        rarity: entry?.rarity || '3'
+      };
+    });
+  })();
 
   // =====================================================
   // State Management
@@ -60,11 +54,14 @@
     runeMr: 0,
     runeRecycle: 0,
     cycles: 1,
+    useBlankRune: false, // if true, use blank rune after each recycle when available
+    useMaxCycles: false, // if true, run until no runes/gold left instead of fixed cycles
   };
   
   // Statistics tracking
   let recyclingStats = {
     cyclesCompleted: 0,
+    totalCyclesTarget: null, // set at start of each run so "X / Y" keeps Y fixed
     runesConsumed: {},
     runesCreated: {},
     goldSpent: 0,
@@ -73,6 +70,8 @@
   
   // API rate limiting
   const API_DELAY = 500; // ms between API calls
+  const BLANK_RUNE_GOLD_COST = 3000; // gold cost per blank rune use
+  const RECYCLE_GOLD_COST = 5000; // gold cost per recycle
 
 
   // =====================================================
@@ -238,7 +237,69 @@
   }
 
   /**
-   * Validate if recycling is possible with current resources
+   * Use one Blank Rune via API (e.g. to convert to another rune).
+   */
+  async function performUseBlankRune() {
+    try {
+      const url = 'https://bestiaryarena.com/api/trpc/inventory.useBlankRune?batch=1';
+      const payload = { "0": { "json": null, "meta": { "values": ["undefined"] } } };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'accept': '*/*',
+          'content-type': 'application/json',
+          'x-game-version': '1'
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      const result = data[0]?.result?.data?.json;
+      if (result && result.inventoryDiff != null) {
+        updateLocalInventory(result.inventoryDiff, result.goldDiff || 0);
+        return { success: true, inventoryDiff: result.inventoryDiff };
+      } else {
+        updateLocalInventory({ runeBlank: -1 }, 0);
+        return { success: true, inventoryDiff: { runeBlank: -1 } };
+      }
+    } catch (error) {
+      console.error('[Better Rune Recycler] Error using blank rune:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Returns true if we can perform at least one more cycle (either blank or recycle).
+   */
+  function canDoOneMoreCycle() {
+    const config = recyclingConfig;
+    const inv = getPlayerInventory();
+    if (!inv) return false;
+    const gold = getPlayerGold();
+    const sacrifice = buildSacrificeArray(config);
+    const useBlank = config.useBlankRune && (inv.runeBlank || 0) > 0 && gold >= BLANK_RUNE_GOLD_COST;
+    if (useBlank) return true;
+    if (gold < RECYCLE_GOLD_COST) return false;
+    const needRecycle = 1 + sacrifice.filter(k => k === 'runeRecycle').length;
+    if ((inv.runeRecycle || 0) < needRecycle) return false;
+    for (const key of sacrifice) {
+      const count = inv[key] || 0;
+      const need = (key === 'runeRecycle' ? needRecycle : 1);
+      if (count < need) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Validate if recycling is possible with current resources.
+   * When useBlankRune is on, blank cycles cost 3000 gold each, recycle cycles cost 5000 each.
+   * When useMaxCycles is on, we only need to be able to do at least one cycle.
    */
   function validateRecycling(config) {
     const inventory = getPlayerInventory();
@@ -247,46 +308,100 @@
     }
 
     const gold = getPlayerGold();
-    const cycles = config.cycles || 1;
+    const cycles = config.useMaxCycles ? 1 : (config.cycles || 1);
+    const blankCount = (inventory.runeBlank || 0);
+    const useBlank = !!config.useBlankRune;
+    const blankCycles = useBlank ? Math.min(blankCount, cycles) : 0;
+    const recycleCycles = cycles - blankCycles;
 
-    // Check if we have enough gold (5000 per cycle)
-    const goldNeeded = cycles * 5000;
+    if (config.useMaxCycles && !canDoOneMoreCycle()) {
+      return { valid: false, reason: t('mods.betterRuneRecycler.cannotPerformOneCycle') };
+    }
+
+    // Gold: 3000 per blank cycle, 5000 per recycle cycle
+    const goldNeeded = blankCycles * BLANK_RUNE_GOLD_COST + recycleCycles * RECYCLE_GOLD_COST;
     if (gold < goldNeeded) {
       return { valid: false, reason: `Not enough gold (have ${gold}, need ${goldNeeded})` };
     }
 
-    // Check if we have enough runes to sacrifice (including Recycle Runes if used)
+    // Check if we have enough runes to sacrifice for recycle cycles (including Recycle Runes if used)
     const runesNeeded = {
-      runeAvarice: config.runeAvarice * cycles,
-      runeHp: config.runeHp * cycles,
-      runeAp: config.runeAp * cycles,
-      runeAd: config.runeAd * cycles,
-      runeAr: config.runeAr * cycles,
-      runeMr: config.runeMr * cycles,
-      runeRecycle: config.runeRecycle * cycles,
+      runeAvarice: config.runeAvarice * recycleCycles,
+      runeHp: config.runeHp * recycleCycles,
+      runeAp: config.runeAp * recycleCycles,
+      runeAd: config.runeAd * recycleCycles,
+      runeAr: config.runeAr * recycleCycles,
+      runeMr: config.runeMr * recycleCycles,
+      runeRecycle: config.runeRecycle * recycleCycles,
     };
-
-    // Add the Recycle Runes needed to perform the recycling (1 per cycle)
-    runesNeeded.runeRecycle += cycles;
+    runesNeeded.runeRecycle += recycleCycles;
 
     for (const [runeKey, needed] of Object.entries(runesNeeded)) {
       if (needed > 0) {
         const available = inventory[runeKey] || 0;
         if (available < needed) {
           const runeName = RUNE_TYPES.find(r => r.key === runeKey)?.displayName || runeKey;
-          const forRecycling = runeKey === 'runeRecycle' ? ` (${cycles} to use + ${config.runeRecycle * cycles} to sacrifice)` : '';
+          const forRecycling = runeKey === 'runeRecycle' ? ` (${recycleCycles} to use + ${config.runeRecycle * recycleCycles} to sacrifice)` : '';
           return { valid: false, reason: `Not enough ${runeName}${forRecycling} (have ${available}, need ${needed})` };
         }
       }
     }
 
-    // Check if exactly 3 runes are selected per cycle
+    // Check if exactly 3 runes are selected per cycle (needed when we do any recycle)
     const totalRunesPerCycle = config.runeAvarice + config.runeHp + config.runeAp + config.runeAd + config.runeAr + config.runeMr + config.runeRecycle;
     if (totalRunesPerCycle !== 3) {
       return { valid: false, reason: `Must select exactly 3 runes per cycle (currently ${totalRunesPerCycle})` };
     }
 
     return { valid: true };
+  }
+
+  /**
+   * Get maximum cycles possible with current rune selection, inventory, and gold.
+   * When useBlankRune is on: blank cycles cost 3000 gold each, recycle cycles 5000 each.
+   */
+  function getMaxCycles() {
+    const totalRunesPerCycle = recyclingConfig.runeAvarice + recyclingConfig.runeHp + recyclingConfig.runeAp +
+      recyclingConfig.runeAd + recyclingConfig.runeAr + recyclingConfig.runeMr + recyclingConfig.runeRecycle;
+    if (totalRunesPerCycle !== 3) return 999;
+
+    const inventory = getPlayerInventory();
+    if (!inventory) return 999;
+
+    const gold = getPlayerGold();
+
+    const perCycle = {
+      runeAvarice: recyclingConfig.runeAvarice,
+      runeHp: recyclingConfig.runeHp,
+      runeAp: recyclingConfig.runeAp,
+      runeAd: recyclingConfig.runeAd,
+      runeAr: recyclingConfig.runeAr,
+      runeMr: recyclingConfig.runeMr,
+      runeRecycle: recyclingConfig.runeRecycle + 1, // +1 for the 1 Recycle Rune cost per cycle
+    };
+
+    let maxRecycleCyclesFromRunes = 999;
+    for (const [runeKey, needPerCycle] of Object.entries(perCycle)) {
+      if (needPerCycle > 0) {
+        const available = inventory[runeKey] || 0;
+        maxRecycleCyclesFromRunes = Math.min(maxRecycleCyclesFromRunes, Math.floor(available / needPerCycle));
+      }
+    }
+    maxRecycleCyclesFromRunes = Math.max(0, maxRecycleCyclesFromRunes);
+
+    if (recyclingConfig.useBlankRune) {
+      const blankCount = inventory.runeBlank || 0;
+      const maxBlankFromGold = Math.floor(gold / BLANK_RUNE_GOLD_COST);
+      const maxBlankCycles = Math.min(blankCount, maxBlankFromGold);
+      const goldAfterBlanks = gold - maxBlankCycles * BLANK_RUNE_GOLD_COST;
+      const maxRecycleFromGold = Math.floor(goldAfterBlanks / RECYCLE_GOLD_COST);
+      const maxRecycleCycles = Math.min(maxRecycleCyclesFromRunes, maxRecycleFromGold);
+      return Math.max(1, maxBlankCycles + maxRecycleCycles);
+    }
+
+    const maxFromGold = Math.floor(gold / RECYCLE_GOLD_COST);
+    const maxRecycleCycles = Math.min(maxRecycleCyclesFromRunes, maxFromGold);
+    return Math.max(1, maxRecycleCycles);
   }
 
   /**
@@ -313,6 +428,7 @@
   function resetStats() {
     recyclingStats = {
       cyclesCompleted: 0,
+      totalCyclesTarget: null,
       runesConsumed: {},
       runesCreated: {},
       goldSpent: 0,
@@ -327,13 +443,15 @@
     if (result.success) {
       recyclingStats.cyclesCompleted++;
       
-      // Track consumed runes
+      // Track consumed runes (the 3 sacrificed)
       sacrifice.forEach(runeKey => {
         if (!recyclingStats.runesConsumed[runeKey]) {
           recyclingStats.runesConsumed[runeKey] = 0;
         }
         recyclingStats.runesConsumed[runeKey]++;
       });
+      // Each recycle also consumes 1 Recycle Rune as the cost to use the recycler
+      recyclingStats.runesConsumed['runeRecycle'] = (recyclingStats.runesConsumed['runeRecycle'] || 0) + 1;
       
       // Track created rune
       const createdRune = result.runeCreated;
@@ -345,6 +463,27 @@
       recyclingStats.goldSpent += Math.abs(result.goldDiff || 0);
     } else {
       recyclingStats.errors++;
+    }
+  }
+
+  /**
+   * Update statistics after using a Blank Rune (instead of recycling for that cycle).
+   * Blank rune use costs BLANK_RUNE_GOLD_COST gold.
+   */
+  function updateStatsForBlankRune(blankResult) {
+    if (!blankResult.success) return;
+    recyclingStats.cyclesCompleted++;
+    recyclingStats.runesConsumed['runeBlank'] = (recyclingStats.runesConsumed['runeBlank'] || 0) + 1;
+    recyclingStats.goldSpent += BLANK_RUNE_GOLD_COST;
+    const diff = blankResult.inventoryDiff;
+    if (diff && typeof diff === 'object') {
+      const runeKeys = ['runeAvarice', 'runeHp', 'runeAp', 'runeAd', 'runeAr', 'runeMr', 'runeBlank', 'runeRecycle', 'runeKaleidoscopic', 'runeRecycleMonster', 'runeConversionHp', 'runeConversionAd', 'runeConversionAp'];
+      for (const runeKey of runeKeys) {
+        const delta = diff[runeKey];
+        if (typeof delta === 'number' && delta > 0) {
+          recyclingStats.runesCreated[runeKey] = (recyclingStats.runesCreated[runeKey] || 0) + delta;
+        }
+      }
     }
   }
 
@@ -366,51 +505,83 @@
 
     recycleInProgress = true;
     resetStats();
+    const useMaxCycles = !!recyclingConfig.useMaxCycles;
+    const totalCycles = useMaxCycles ? null : recyclingConfig.cycles;
+    recyclingStats.totalCyclesTarget = totalCycles; // null = "Max" mode, show "X / Max"
     
     const sacrifice = buildSacrificeArray(recyclingConfig);
-    const totalCycles = recyclingConfig.cycles;
 
-    console.log('[Better Rune Recycler] Starting recycling process:', {
-      cycles: totalCycles,
-      sacrifice: sacrifice,
-    });
-
-    updateStatusMessage(`Starting recycling... (0/${totalCycles})`, 'info');
+    const statusTotal = useMaxCycles ? t('mods.betterRuneRecycler.maxCheckboxLabel') : String(totalCycles);
+    updateStatusMessage(useMaxCycles ? t('mods.betterRuneRecycler.startingRecyclingMax') : t('mods.betterRuneRecycler.startingRecycling').replace('{total}', statusTotal), 'info');
     updateStartStopButton(true);
 
-    for (let i = 0; i < totalCycles; i++) {
-      if (!recycleInProgress) {
-        updateStatusMessage(`Stopped at cycle ${i}/${totalCycles}`, 'warning');
-        break;
-      }
-
-      updateStatusMessage(`Recycling... (${i + 1}/${totalCycles})`, 'info');
-      
-      const result = await performRuneRecycle(sacrifice[0], sacrifice[1], sacrifice[2]);
-      updateStats(result, sacrifice);
-
-      if (!result.success) {
-        updateStatusMessage(`Error at cycle ${i + 1}: ${result.error}`, 'error');
+    let i = 0;
+    const runCycle = async () => {
+      if (!recycleInProgress) return false;
+      if (!isRuneRecyclerModalOpen()) {
         recycleInProgress = false;
-        break;
+        updateStatusMessage(t('mods.betterRuneRecycler.stoppedAtCycle').replace('{current}', String(i)).replace('{total}', statusTotal), 'warning');
+        return false;
+      }
+      if (useMaxCycles && !canDoOneMoreCycle()) return false;
+
+      updateStatusMessage(t('mods.betterRuneRecycler.recyclingProgress').replace('{current}', String(i + 1)).replace('{total}', statusTotal), 'info');
+
+      const useBlankThisCycle = recyclingConfig.useBlankRune && getRuneCount('runeBlank') > 0 && getPlayerGold() >= BLANK_RUNE_GOLD_COST;
+
+      if (useBlankThisCycle) {
+        const blankResult = await performUseBlankRune();
+        updateStatsForBlankRune(blankResult);
+        if (!blankResult.success) {
+          updateStatusMessage(t('mods.betterRuneRecycler.errorAtCycle').replace('{current}', String(i + 1)).replace('{error}', blankResult.error || ''), 'error');
+          recycleInProgress = false;
+          return false;
+        }
+      } else {
+        const result = await performRuneRecycle(sacrifice[0], sacrifice[1], sacrifice[2]);
+        updateStats(result, sacrifice);
+        if (!result.success) {
+          updateStatusMessage(t('mods.betterRuneRecycler.errorAtCycle').replace('{current}', String(i + 1)).replace('{error}', result.error || ''), 'error');
+          recycleInProgress = false;
+          return false;
+        }
       }
 
-      // Update displays after each recycle
       updateStatsDisplay();
       updateInventoryDisplay();
+      i++;
+      return true;
+    };
 
-      // Wait before next cycle (rate limiting)
-      if (i < totalCycles - 1) {
-        await new Promise(resolve => setTimeout(resolve, API_DELAY));
+    if (useMaxCycles) {
+      while (recycleInProgress && isRuneRecyclerModalOpen() && canDoOneMoreCycle()) {
+        const ok = await runCycle();
+        if (!ok) break;
+        const chunk = 100;
+        for (let waited = 0; waited < API_DELAY && recycleInProgress && isRuneRecyclerModalOpen(); waited += chunk) {
+          await new Promise(resolve => setTimeout(resolve, chunk));
+        }
+      }
+      recyclingStats.totalCyclesTarget = recyclingStats.cyclesCompleted; // final "X / X" after max run
+    } else {
+      for (; i < totalCycles; ) {
+        const ok = await runCycle();
+        if (!ok) break;
+        if (i < totalCycles) {
+          const chunk = 100;
+          for (let waited = 0; waited < API_DELAY && recycleInProgress && isRuneRecyclerModalOpen(); waited += chunk) {
+            await new Promise(resolve => setTimeout(resolve, chunk));
+          }
+        }
       }
     }
 
     if (recycleInProgress) {
       recycleInProgress = false;
-      updateStatusMessage(`✅ Completed ${recyclingStats.cyclesCompleted}/${totalCycles} cycles!`, 'success');
+      const completed = recyclingStats.cyclesCompleted;
+      const totalDisplay = recyclingStats.totalCyclesTarget != null ? String(recyclingStats.totalCyclesTarget) : statusTotal;
+      updateStatusMessage(t('mods.betterRuneRecycler.completedCycles').replace('{completed}', String(completed)).replace('{total}', totalDisplay), 'success');
       updateStartStopButton(false);
-      
-      // Final inventory update
       updateInventoryDisplay();
     } else {
       updateStartStopButton(false);
@@ -424,8 +595,18 @@
     if (!recycleInProgress) return;
     
     recycleInProgress = false;
-    updateStatusMessage('Stopping...', 'warning');
+    updateStatusMessage(t('mods.betterRuneRecycler.stopping'), 'warning');
     console.log('[Better Rune Recycler] Recycling stopped by user');
+  }
+
+  /**
+   * Check if the Better Rune Recycler modal is still open (like Autoscroller's isModalOpen).
+   * When the user closes the modal (button, overlay, Escape), content is unmounted so our button is gone.
+   */
+  function isRuneRecyclerModalOpen() {
+    const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+    if (!dialog) return false;
+    return !!dialog.querySelector('#start-stop-btn');
   }
 
   // =====================================================
@@ -512,7 +693,7 @@
         <div class="relative grid h-full place-items-center">
           ${borderDiv}
           <img src="/assets/icons/rune-recycle.png" alt="Better Rune Recycler" style="width: 32px; height: 32px; object-fit: contain; position: relative; z-index: 2;">
-          <div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5" style="z-index: 3;"><span class="relative" style="line-height: 1; font-size: 12px; color: #fff; font-family: 'Yalla', 'Trebuchet MS', Arial, sans-serif; letter-spacing: 0; font-weight: 600; text-shadow: -1px 0 0 #000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000; text-align: left; display: inline-block; width: 100%;" translate="no">Auto</span></div>
+          <div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5" style="z-index: 3;"><span class="relative" style="line-height: 1; font-size: 12px; color: #fff; font-family: 'Yalla', 'Trebuchet MS', Arial, sans-serif; letter-spacing: 0; font-weight: 600; text-shadow: -1px 0 0 #000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000; text-align: left; display: inline-block; width: 100%;" translate="no">${t('mods.betterRuneRecycler.buttonLabelAuto')}</span></div>
         </div>
       </div>
     `;
@@ -667,36 +848,51 @@
           contentDiv.style.boxSizing = 'border-box';
           contentDiv.style.overflow = 'hidden';
           contentDiv.style.display = 'flex';
-          contentDiv.style.flexDirection = 'column';
-          contentDiv.style.gap = '0';
+          contentDiv.style.flexDirection = 'row';
+          contentDiv.style.gap = '8px';
           contentDiv.style.flex = '1 1 0';
           
-          // Single column: Configuration with Statistics
+          // Col1: Configuration
           const configBox = createBox({
-            title: 'Configuration',
+            title: t('mods.betterRuneRecycler.configuration'),
             content: getConfigContent()
           });
           configBox.style.flex = '1 1 0';
           configBox.style.minWidth = '0';
           configBox.style.height = '100%';
           
+          // Col2: Statistics
+          const statsBox = createBox({
+            title: t('mods.betterRuneRecycler.statistics'),
+            content: getStatsContent()
+          });
+          statsBox.style.flex = '1 1 0';
+          statsBox.style.minWidth = '0';
+          statsBox.style.height = '100%';
+          
           contentDiv.appendChild(configBox);
+          contentDiv.appendChild(statsBox);
           
           const modalInstance = api.ui.components.createModal({
-            title: 'Better Rune Recycler',
+            title: t('mods.betterRuneRecycler.modalTitle'),
             width: MODAL_WIDTH,
             height: MODAL_HEIGHT,
             content: contentDiv,
-            buttons: [{ text: 'Close', primary: true }]
+            buttons: [{ text: t('controls.close'), primary: true }],
+            onClose: () => {
+              // Force-stop recycling when modal is closed (by button, overlay, or Escape)
+              if (recycleInProgress) {
+                stopRecycling();
+              }
+              console.log('[Better Rune Recycler] Modal closed');
+            }
           });
           
           if (modalInstance && typeof modalInstance.onClose === 'function') {
             modalInstance.onClose(() => {
-              // Stop recycling if in progress
-              if (recyclerState.isRecycling) {
+              if (recycleInProgress) {
                 stopRecycling();
               }
-              console.log('[Better Rune Recycler] Modal closed');
             });
           }
           
@@ -756,7 +952,7 @@
                   margin-right: auto;
                 `;
                 
-                const createdByText = document.createTextNode('Created by ');
+                const createdByText = document.createTextNode(t('mods.betterRuneRecycler.createdBy'));
                 const btlucasLink = document.createElement('a');
                 btlucasLink.href = 'https://bestiaryarena.com/profile/btlucas';
                 btlucasLink.target = '_blank';
@@ -806,7 +1002,7 @@
     const runeCounts = getAllRuneCounts();
     
     // Only show common/sacrificable runes (exclude Blank, Kaleidoscopic, and Conversion runes)
-    const nonSacrificableRunes = ['runeBlank', 'runeRecycleMonster', 'runeConversionHp', 'runeConversionAd', 'runeConversionAp'];
+    const nonSacrificableRunes = ['runeBlank', 'runeKaleidoscopic', 'runeRecycleMonster', 'runeConversionHp', 'runeConversionAd', 'runeConversionAp'];
     const recyclableRunes = RUNE_TYPES.filter(r => !nonSacrificableRunes.includes(r.key));
     
     const container = document.createElement('div');
@@ -815,7 +1011,7 @@
     // Info text
     const infoText = document.createElement('div');
     infoText.style.cssText = 'color: rgba(255,255,255,0.8); font-size: 15px; text-align: center; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 3px;';
-    infoText.textContent = 'Select exactly 3 runes to sacrifice per cycle. Each recycle costs 5,000 gold.';
+    infoText.textContent = t('mods.betterRuneRecycler.infoText');
     container.appendChild(infoText);
     
     // Rune config grid
@@ -832,11 +1028,8 @@
       const img = document.createElement('img');
       img.src = rune.icon;
       img.alt = rune.displayName;
-      img.style.cssText = 'width: 20px; height: 20px;';
-      
-      const name = document.createElement('span');
-      name.style.cssText = 'font-size: 15px; color: rgb(255,255,255);';
-      name.textContent = rune.displayName.replace(' Rune', '');
+      img.title = rune.displayName;
+      img.style.cssText = 'width: 30px; height: 30px; cursor: help;';
       
       const count = document.createElement('span');
       count.style.cssText = 'font-size: 14px; color: #808080;';
@@ -845,7 +1038,6 @@
       count.dataset.runeKey = rune.key;
       
       left.appendChild(img);
-      left.appendChild(name);
       left.appendChild(count);
       
       const input = document.createElement('input');
@@ -853,7 +1045,7 @@
       input.id = `config-${rune.key}`;
       input.min = '0';
       input.max = '3';
-      input.value = '0';
+      input.value = String(recyclingConfig[rune.key] ?? 0);
       input.dataset.runeKey = rune.key;
       input.style.cssText = 'width: 55px; padding: 5px 8px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 3px; color: rgb(255,255,255); font-size: 16px; text-align: center; font-weight: bold;';
       
@@ -862,76 +1054,145 @@
       runeGrid.appendChild(item);
     });
     
+    // Blank Rune cell inside same grid: icon + count, checkbox (Use when available)
+    const blankRune = RUNE_TYPES.find(r => r.key === 'runeBlank');
+    if (blankRune) {
+      const item = document.createElement('div');
+      item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 4px 6px;';
+      const left = document.createElement('div');
+      left.style.cssText = 'display: flex; align-items: center; gap: 4px;';
+      const img = document.createElement('img');
+      img.src = blankRune.icon;
+      img.alt = blankRune.displayName;
+      img.title = blankRune.displayName;
+      img.style.cssText = 'width: 30px; height: 30px; cursor: help;';
+      const count = document.createElement('span');
+      count.style.cssText = 'font-size: 14px; color: #808080;';
+      count.textContent = `(${runeCounts.runeBlank || 0})`;
+      count.className = 'rune-count-display';
+      count.dataset.runeKey = 'runeBlank';
+      left.appendChild(img);
+      left.appendChild(count);
+      item.appendChild(left);
+      const right = document.createElement('div');
+      right.style.cssText = 'display: flex; align-items: center; gap: 4px;';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.id = 'config-useBlankRune';
+      checkbox.checked = !!recyclingConfig.useBlankRune;
+      checkbox.style.cssText = 'width: 18px; height: 18px; cursor: pointer; margin: 0;';
+      right.appendChild(checkbox);
+      const help = document.createElement('span');
+      help.textContent = '(?)';
+      help.title = t('mods.betterRuneRecycler.useBlankRuneHelp');
+      help.style.cssText = 'font-size: 14px; color: rgba(255,255,255,0.7); cursor: help; font-weight: bold;';
+      right.appendChild(help);
+      item.appendChild(right);
+      runeGrid.appendChild(item);
+    }
+    
     container.appendChild(runeGrid);
     
-    // Cycles input
+    // Cycles input + Max checkbox
     const cyclesRow = document.createElement('div');
     cyclesRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 6px 8px;';
     
     const cyclesLabel = document.createElement('span');
     cyclesLabel.style.cssText = 'font-size: 16px; color: rgb(255,255,255); font-weight: bold;';
-    cyclesLabel.textContent = '🔁 Number of Cycles:';
+    cyclesLabel.textContent = t('mods.betterRuneRecycler.numberOfCycles');
+    
+    const cyclesRight = document.createElement('div');
+    cyclesRight.style.cssText = 'display: flex; align-items: center; gap: 8px;';
     
     const cyclesInput = document.createElement('input');
     cyclesInput.type = 'number';
     cyclesInput.id = 'config-cycles';
     cyclesInput.min = '1';
-    cyclesInput.max = '999';
-    cyclesInput.value = '1';
-    cyclesInput.style.cssText = 'width: 80px; padding: 8px 12px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 3px; color: rgb(255,255,255); font-size: 18px; text-align: center; font-weight: bold;';
+    const initialMax = getMaxCycles();
+    cyclesInput.max = String(initialMax);
+    const initialCycles = Math.min(recyclingConfig.cycles ?? 1, initialMax);
+    cyclesInput.value = String(initialCycles);
+    recyclingConfig.cycles = initialCycles;
+    const cyclesInputStyleNormal = 'width: 80px; padding: 8px 12px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 3px; color: rgb(255,255,255); font-size: 18px; text-align: center; font-weight: bold; cursor: text; opacity: 1;';
+    const cyclesInputStyleDisabled = 'width: 80px; padding: 8px 12px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; color: rgba(255,255,255,0.5); font-size: 18px; text-align: center; font-weight: bold; cursor: not-allowed; opacity: 0.7;';
+    cyclesInput.style.cssText = cyclesInputStyleNormal;
     
+    const maxCheckbox = document.createElement('input');
+    maxCheckbox.type = 'checkbox';
+    maxCheckbox.id = 'config-useMaxCycles';
+    maxCheckbox.checked = !!recyclingConfig.useMaxCycles;
+    maxCheckbox.style.cssText = 'width: 18px; height: 18px; cursor: pointer; margin: 0;';
+    maxCheckbox.title = t('mods.betterRuneRecycler.maxCheckboxTitle');
+    const maxLabel = document.createElement('label');
+    maxLabel.htmlFor = 'config-useMaxCycles';
+    maxLabel.style.cssText = 'font-size: 14px; color: rgb(255,255,255); cursor: pointer; font-weight: bold; user-select: none;';
+    maxLabel.textContent = t('mods.betterRuneRecycler.maxCheckboxLabel');
+    
+    cyclesRight.appendChild(cyclesInput);
+    cyclesRight.appendChild(maxCheckbox);
+    cyclesRight.appendChild(maxLabel);
     cyclesRow.appendChild(cyclesLabel);
-    cyclesRow.appendChild(cyclesInput);
+    cyclesRow.appendChild(cyclesRight);
     container.appendChild(cyclesRow);
+    
+    if (recyclingConfig.useMaxCycles) {
+      cyclesInput.disabled = true;
+      cyclesInput.style.cssText = cyclesInputStyleDisabled;
+    }
+    
+    // Status message (above button) - always visible
+    const statusMsg = document.createElement('div');
+    statusMsg.id = 'status-message';
+    statusMsg.style.cssText = 'padding: 10px; border-radius: 3px; font-size: 15px; text-align: center; font-weight: bold; background: rgba(100,100,100,0.4); border: 1px solid rgba(140,140,140,0.6); color: rgba(255,255,255,0.9);';
+    statusMsg.textContent = t('mods.betterRuneRecycler.noRunesSelected');
+    container.appendChild(statusMsg);
     
     // Start button
     const startBtn = document.createElement('button');
     startBtn.id = 'start-stop-btn';
     startBtn.style.cssText = 'width: 100%; padding: 12px; background: linear-gradient(180deg, rgba(60,150,100,0.8) 0%, rgba(40,120,80,0.8) 100%); border: 2px solid rgba(80,180,120,0.6); border-radius: 4px; color: rgb(255,255,255); font-size: 17px; font-weight: bold; cursor: pointer; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);';
-    startBtn.textContent = '▶️ Start Recycling';
+    startBtn.textContent = t('mods.betterRuneRecycler.startRecycling');
     container.appendChild(startBtn);
     
-    // Status message
-    const statusMsg = document.createElement('div');
-    statusMsg.id = 'status-message';
-    statusMsg.style.cssText = 'display: none; padding: 10px; border-radius: 3px; font-size: 15px; text-align: center; font-weight: bold;';
-    container.appendChild(statusMsg);
-    
-    // Add statistics section
-    const statsTitle = document.createElement('div');
-    statsTitle.style.cssText = 'font-size: 16px; color: rgba(255,255,255,0.9); margin-top: 12px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 2px solid rgba(255,255,255,0.1); font-weight: bold; text-align: center;';
-    statsTitle.textContent = '📊 Statistics';
-    container.appendChild(statsTitle);
+    return container;
+  }
+
+  /**
+   * Get statistics column content (col2)
+   */
+  function getStatsContent() {
+    const container = document.createElement('div');
+    container.style.cssText = 'padding: 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; height: 100%;';
     
     // Stats grid
     const statsGrid = document.createElement('div');
-    statsGrid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: 1;';
+    statsGrid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: 1; min-height: 0;';
     
     // Consumed box
     const consumedBox = document.createElement('div');
-    consumedBox.style.cssText = 'background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 6px;';
+    consumedBox.style.cssText = 'background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 6px; display: flex; flex-direction: column; min-height: 0;';
     const consumedTitle = document.createElement('div');
-    consumedTitle.style.cssText = 'font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 6px; text-transform: uppercase; font-weight: bold;';
-    consumedTitle.textContent = 'Consumed';
+    consumedTitle.style.cssText = 'font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 6px; text-transform: uppercase; font-weight: bold; text-align: center;';
+    consumedTitle.textContent = t('mods.betterRuneRecycler.consumed');
     consumedBox.appendChild(consumedTitle);
     const consumedStats = document.createElement('div');
     consumedStats.id = 'consumed-stats';
-    consumedStats.style.cssText = 'display: flex; flex-direction: column; gap: 4px; font-size: 15px; max-height: 150px; overflow-y: auto; overflow-x: hidden;';
-    consumedStats.innerHTML = '<div style="color: rgba(255,255,255,0.5);">No data yet</div>';
+    consumedStats.style.cssText = 'display: flex; flex-direction: column; gap: 4px; font-size: 15px; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;';
+    consumedStats.innerHTML = `<div style="color: rgba(255,255,255,0.5);">${t('mods.betterRuneRecycler.noDataYet')}</div>`;
     consumedBox.appendChild(consumedStats);
     statsGrid.appendChild(consumedBox);
     
     // Created box
     const createdBox = document.createElement('div');
-    createdBox.style.cssText = 'background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 6px;';
+    createdBox.style.cssText = 'background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 6px; display: flex; flex-direction: column; min-height: 0;';
     const createdTitle = document.createElement('div');
-    createdTitle.style.cssText = 'font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 6px; text-transform: uppercase; font-weight: bold;';
-    createdTitle.textContent = 'Created';
+    createdTitle.style.cssText = 'font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 6px; text-transform: uppercase; font-weight: bold; text-align: center;';
+    createdTitle.textContent = t('mods.betterRuneRecycler.created');
     createdBox.appendChild(createdTitle);
     const createdStats = document.createElement('div');
     createdStats.id = 'created-stats';
-    createdStats.style.cssText = 'display: flex; flex-direction: column; gap: 4px; font-size: 15px; max-height: 150px; overflow-y: auto; overflow-x: hidden;';
-    createdStats.innerHTML = '<div style="color: rgba(255,255,255,0.5);">No data yet</div>';
+    createdStats.style.cssText = 'display: flex; flex-direction: column; gap: 4px; font-size: 15px; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;';
+    createdStats.innerHTML = `<div style="color: rgba(255,255,255,0.5);">${t('mods.betterRuneRecycler.noDataYet')}</div>`;
     createdBox.appendChild(createdStats);
     statsGrid.appendChild(createdBox);
     
@@ -939,28 +1200,22 @@
     
     // Summary stats
     const summaryDiv = document.createElement('div');
-    summaryDiv.style.cssText = 'display: flex; flex-direction: column; gap: 4px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 6px;';
+    summaryDiv.style.cssText = 'display: flex; flex-direction: column; gap: 4px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 6px; flex-shrink: 0;';
+    const goldLabel = t('mods.betterRuneRecycler.goldSpent');
+    const cyclesLabelStat = t('mods.betterRuneRecycler.cycles');
     summaryDiv.innerHTML = `
       <div style="display: flex; justify-content: space-between; font-size: 15px;">
-        <span style="color: rgba(255,255,255,0.8);">💰 Gold Spent:</span>
+        <span style="color: rgba(255,255,255,0.8);">💰 ${goldLabel}</span>
         <span id="gold-spent-stat" style="color: rgb(255,255,255); font-weight: bold;">0</span>
       </div>
       <div style="display: flex; justify-content: space-between; font-size: 15px;">
-        <span style="color: rgba(255,255,255,0.8);">🔄 Cycles:</span>
+        <span style="color: rgba(255,255,255,0.8);">🔄 ${cyclesLabelStat}</span>
         <span id="cycles-completed-stat" style="color: rgb(255,255,255); font-weight: bold;">0</span>
       </div>
     `;
     container.appendChild(summaryDiv);
     
     return container;
-  }
-
-  /**
-   * Get statistics column content (deprecated - now integrated into config)
-   */
-  function getStatsContent() {
-    // This function is no longer used - stats are now in getConfigContent()
-    return document.createElement('div');
   }
 
   /**
@@ -995,12 +1250,14 @@
         });
       });
 
-      // Cycles input validation
+      // Cycles input validation (max is dynamic from getMaxCycles())
       const cyclesInput = document.getElementById('config-cycles');
       if (cyclesInput) {
         cyclesInput.addEventListener('input', () => {
+          const maxC = getMaxCycles();
+          cyclesInput.max = String(maxC);
           const value = parseInt(cyclesInput.value) || 1;
-          cyclesInput.value = Math.max(1, Math.min(999, value));
+          cyclesInput.value = Math.max(1, Math.min(maxC, value));
           recyclingConfig.cycles = parseInt(cyclesInput.value) || 1;
           validateRuneSelection();
         });
@@ -1017,7 +1274,51 @@
           }
         });
       }
+
+      // Use Blank Rune checkbox
+      const useBlankRuneCheckbox = document.getElementById('config-useBlankRune');
+      if (useBlankRuneCheckbox) {
+        useBlankRuneCheckbox.addEventListener('change', () => {
+          recyclingConfig.useBlankRune = useBlankRuneCheckbox.checked;
+          validateRuneSelection();
+        });
+      }
+
+      // Max cycles checkbox: disable cycles input and grey it out when checked
+      const maxCheckbox = document.getElementById('config-useMaxCycles');
+      const cyclesInputForMax = document.getElementById('config-cycles');
+      if (maxCheckbox && cyclesInputForMax) {
+        const styleNormal = 'width: 80px; padding: 8px 12px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 3px; color: rgb(255,255,255); font-size: 18px; text-align: center; font-weight: bold; cursor: text; opacity: 1;';
+        const styleDisabled = 'width: 80px; padding: 8px 12px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; color: rgba(255,255,255,0.5); font-size: 18px; text-align: center; font-weight: bold; cursor: not-allowed; opacity: 0.7;';
+        maxCheckbox.addEventListener('change', () => {
+          recyclingConfig.useMaxCycles = maxCheckbox.checked;
+          cyclesInputForMax.disabled = maxCheckbox.checked;
+          cyclesInputForMax.style.cssText = maxCheckbox.checked ? styleDisabled : styleNormal;
+          validateRuneSelection();
+        });
+      }
+
+      // Sync status message to current selection (e.g. after reopening modal)
+      validateRuneSelection();
     }, 100);
+  }
+
+  /**
+   * Update the cycles input max from getMaxCycles() and clamp value to [1, max].
+   * No-op when useMaxCycles is checked (input is disabled).
+   */
+  function updateCyclesInputLimit() {
+    if (recyclingConfig.useMaxCycles) return;
+    const cyclesInput = document.getElementById('config-cycles');
+    if (!cyclesInput) return;
+    const maxC = getMaxCycles();
+    cyclesInput.max = String(maxC);
+    const current = parseInt(cyclesInput.value, 10) || 1;
+    const clamped = Math.max(1, Math.min(maxC, current));
+    if (clamped !== current) {
+      cyclesInput.value = String(clamped);
+      recyclingConfig.cycles = clamped;
+    }
   }
 
   /**
@@ -1031,18 +1332,28 @@
     const statusMsg = document.getElementById('status-message');
     if (!statusMsg) return;
 
+    // Update cycles input max from inventory (limited by lowest rune count)
+    updateCyclesInputLimit();
+
+    const baseStyle = 'padding: 10px; border-radius: 3px; font-size: 15px; text-align: center; font-weight: bold;';
     if (total === 0) {
-      statusMsg.style.display = 'none';
+      statusMsg.style.cssText = baseStyle + ' background: rgba(100,100,100,0.4); border: 1px solid rgba(140,140,140,0.6); color: rgba(255,255,255,0.9);';
+      statusMsg.textContent = t('mods.betterRuneRecycler.noRunesSelected');
     } else if (total !== 3) {
-      statusMsg.style.display = 'block';
-      statusMsg.style.cssText = 'padding: 10px; border-radius: 3px; font-size: 15px; text-align: center; font-weight: bold; background: rgba(220,160,60,0.4); border: 1px solid rgba(240,180,80,0.6); color: rgb(255,240,200);';
-      statusMsg.textContent = `⚠️ Must select exactly 3 runes (currently ${total})`;
+      statusMsg.style.cssText = baseStyle + ' background: rgba(220,160,60,0.4); border: 1px solid rgba(240,180,80,0.6); color: rgb(255,240,200);';
+      statusMsg.textContent = t('mods.betterRuneRecycler.mustSelectThree').replace('{total}', String(total));
     } else {
-      statusMsg.style.display = 'block';
-      statusMsg.style.cssText = 'padding: 10px; border-radius: 3px; font-size: 15px; text-align: center; font-weight: bold; background: rgba(70,120,200,0.4); border: 1px solid rgba(90,150,230,0.6); color: rgb(200,220,255);';
-      const cycles = recyclingConfig.cycles;
-      const goldCost = cycles * 5000;
-      statusMsg.textContent = `✓ Ready: ${cycles} cycle${cycles > 1 ? 's' : ''} (${cycles * 3} runes, ${goldCost.toLocaleString()} gold)`;
+      statusMsg.style.cssText = baseStyle + ' background: rgba(70,120,200,0.4); border: 1px solid rgba(90,150,230,0.6); color: rgb(200,220,255);';
+      if (recyclingConfig.useMaxCycles) {
+        statusMsg.textContent = t('mods.betterRuneRecycler.readyMax');
+      } else {
+        const cycles = recyclingConfig.cycles;
+        const goldCost = cycles * 5000;
+        statusMsg.textContent = t('mods.betterRuneRecycler.readyCycles')
+          .replace('{cycles}', String(cycles))
+          .replace('{runes}', String(cycles * 3))
+          .replace('{gold}', goldCost.toLocaleString());
+      }
     }
   }
 
@@ -1076,10 +1387,10 @@
 
     if (isRunning) {
       btn.style.cssText = 'width: 100%; padding: 12px; background: linear-gradient(180deg, rgba(180,80,80,0.8) 0%, rgba(140,50,50,0.8) 100%); border: 2px solid rgba(200,100,100,0.6); border-radius: 4px; color: rgb(255,255,255); font-size: 17px; font-weight: bold; cursor: pointer; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);';
-      btn.textContent = '⏹️ Stop Recycling';
+      btn.textContent = t('mods.betterRuneRecycler.stopRecycling');
     } else {
       btn.style.cssText = 'width: 100%; padding: 12px; background: linear-gradient(180deg, rgba(60,150,100,0.8) 0%, rgba(40,120,80,0.8) 100%); border: 2px solid rgba(80,180,120,0.6); border-radius: 4px; color: rgb(255,255,255); font-size: 17px; font-weight: bold; cursor: pointer; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);';
-      btn.textContent = '▶️ Start Recycling';
+      btn.textContent = t('mods.betterRuneRecycler.startRecycling');
     }
   }
 
@@ -1089,15 +1400,16 @@
   function updateInventoryDisplay() {
     const runeCounts = getAllRuneCounts();
 
-    // Update rune counts in config section
+    // Update rune counts in config section (including Blank Rune row)
     RUNE_TYPES.forEach(rune => {
-      if (rune.key !== 'runeBlank') {
-        const countDisplay = document.querySelector(`.rune-count-display[data-rune-key="${rune.key}"]`);
-        if (countDisplay) {
-          countDisplay.textContent = `(${runeCounts[rune.key] || 0})`;
-        }
+      const countDisplay = document.querySelector(`.rune-count-display[data-rune-key="${rune.key}"]`);
+      if (countDisplay) {
+        countDisplay.textContent = `(${runeCounts[rune.key] || 0})`;
       }
     });
+
+    // Cycles max may have changed (e.g. after recycling)
+    updateCyclesInputLimit();
   }
 
   /**
@@ -1120,7 +1432,7 @@
             return `
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 6px;">
-                  <img src="${iconPath}" style="width: 20px; height: 20px;" onerror="this.style.display='none'" />
+                  <img src="${iconPath}" style="width: 30px; height: 30px;" onerror="this.style.display='none'" />
                   <span style="color: rgba(255,255,255,0.9); font-size: 15px;">${displayName}</span>
                 </div>
                 <span style="color: rgb(255,150,150); font-weight: bold; font-size: 15px;">-${count}</span>
@@ -1128,7 +1440,7 @@
             `;
           }).join('');
       } else {
-        consumedStats.innerHTML = '<div style="color: rgba(255,255,255,0.5);">No data yet</div>';
+        consumedStats.innerHTML = `<div style="color: rgba(255,255,255,0.5);">${t('mods.betterRuneRecycler.noDataYet')}</div>`;
       }
     }
 
@@ -1149,7 +1461,7 @@
             return `
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 6px;">
-                  <img src="${iconPath}" style="width: 20px; height: 20px;" onerror="this.style.display='none'" />
+                  <img src="${iconPath}" style="width: 30px; height: 30px;" onerror="this.style.display='none'" />
                   <span style="color: rgba(255,255,255,0.9); font-size: 15px;">${displayName}</span>
                 </div>
                 <span style="color: rgb(150,255,150); font-weight: bold; font-size: 15px;">+${count}</span>
@@ -1157,7 +1469,7 @@
             `;
           }).join('');
       } else {
-        createdStats.innerHTML = '<div style="color: rgba(255,255,255,0.5);">No data yet</div>';
+        createdStats.innerHTML = `<div style="color: rgba(255,255,255,0.5);">${t('mods.betterRuneRecycler.noDataYet')}</div>`;
       }
     }
 
@@ -1167,10 +1479,10 @@
       goldSpentStat.textContent = recyclingStats.goldSpent.toLocaleString();
     }
 
-    // Update cycles completed
+    // Update cycles completed (show count only)
     const cyclesCompletedStat = document.getElementById('cycles-completed-stat');
     if (cyclesCompletedStat) {
-      cyclesCompletedStat.textContent = `${recyclingStats.cyclesCompleted} / ${recyclingConfig.cycles}`;
+      cyclesCompletedStat.textContent = recyclingStats.cyclesCompleted.toLocaleString();
     }
   }
 
@@ -1185,12 +1497,8 @@
    * Initialize the Better Rune Recycler mod
    */
   function init() {
-    console.log(`[${MOD_NAME}] v${MOD_VERSION} initializing...`);
-
     // Observe inventory and add button
     observeInventory();
-
-    console.log(`[${MOD_NAME}] v${MOD_VERSION} initialized successfully!`);
   }
 
   /**
@@ -1228,7 +1536,7 @@
 
   // Export for debugging
   window.BetterRuneRecycler = {
-    version: MOD_VERSION,
+    version: '1.0.0',
     getAllRuneCounts,
     logInventoryState,
     openRuneRecyclerModal,
