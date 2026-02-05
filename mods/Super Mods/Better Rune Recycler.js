@@ -261,12 +261,13 @@
 
       const data = await response.json();
       const result = data[0]?.result?.data?.json;
+      const runeCreated = result?.rune ?? result?.runeCreated;
       if (result && result.inventoryDiff != null) {
         updateLocalInventory(result.inventoryDiff, result.goldDiff || 0);
-        return { success: true, inventoryDiff: result.inventoryDiff };
+        return { success: true, inventoryDiff: result.inventoryDiff, runeCreated };
       } else {
         updateLocalInventory({ runeBlank: -1 }, 0);
-        return { success: true, inventoryDiff: { runeBlank: -1 } };
+        return { success: true, inventoryDiff: { runeBlank: -1 }, runeCreated };
       }
     } catch (error) {
       console.error('[Better Rune Recycler] Error using blank rune:', error);
@@ -485,6 +486,14 @@
         }
       }
     }
+    // Also add resulting rune from API when returned as single field (rune / runeCreated)
+    const createdRune = blankResult.runeCreated;
+    if (typeof createdRune === 'string' && createdRune) {
+      const alreadyFromDiff = diff && typeof diff[createdRune] === 'number' && diff[createdRune] > 0;
+      if (!alreadyFromDiff) {
+        recyclingStats.runesCreated[createdRune] = (recyclingStats.runesCreated[createdRune] || 0) + 1;
+      }
+    }
   }
 
   /**
@@ -531,6 +540,14 @@
 
       if (useBlankThisCycle) {
         const blankResult = await performUseBlankRune();
+        if (blankResult.success) {
+          const fromField = blankResult.runeCreated;
+          const fromDiff = blankResult.inventoryDiff && Object.entries(blankResult.inventoryDiff)
+            .filter(([, d]) => typeof d === 'number' && d > 0)
+            .map(([k]) => k);
+          const created = fromField ? [fromField] : (fromDiff || []);
+          if (created.length) console.log('[Better Rune Recycler] Blank rune created:', created);
+        }
         updateStatsForBlankRune(blankResult);
         if (!blankResult.success) {
           updateStatusMessage(t('mods.betterRuneRecycler.errorAtCycle').replace('{current}', String(i + 1)).replace('{error}', blankResult.error || ''), 'error');
@@ -584,6 +601,9 @@
       updateStartStopButton(false);
       updateInventoryDisplay();
     } else {
+      const completed = recyclingStats.cyclesCompleted;
+      const totalDisplay = recyclingStats.totalCyclesTarget != null ? String(recyclingStats.totalCyclesTarget) : statusTotal;
+      updateStatusMessage(t('mods.betterRuneRecycler.stoppedAtCycle').replace('{current}', String(completed)).replace('{total}', totalDisplay), 'warning');
       updateStartStopButton(false);
     }
   }
@@ -593,7 +613,6 @@
    */
   function stopRecycling() {
     if (!recycleInProgress) return;
-    
     recycleInProgress = false;
     updateStatusMessage(t('mods.betterRuneRecycler.stopping'), 'warning');
     console.log('[Better Rune Recycler] Recycling stopped by user');

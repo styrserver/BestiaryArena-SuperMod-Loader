@@ -25,6 +25,7 @@
   
   // Panel constants
   const EXALTATION_PANEL_WIDTH = 450;
+  const DISENCHANT_DIM_OPACITY = '0.25';
   
   // Equipment that cannot be obtained from exaltation chests
   const EXCLUDED_EQUIPMENT = [
@@ -142,7 +143,9 @@
   
   // Equipment filtering state
   let lastOpenedEquipment = null;
+  let disenchantConfirmPending = false;
   let equipmentCheckTimeout = null;
+  let disenchantSuccessMessageTimeout = null;
   let originalFetch = null;
   
   // Flag to ignore state-based capacity updates after initial modal load
@@ -636,12 +639,89 @@
       
       // Update the status display
       const descriptionP = tooltipProse.querySelector('p.inline:not(.text-rarity-5)');
-      if (descriptionP && descriptionP.innerHTML.includes('Total Opened:')) {
+      if (descriptionP) {
         descriptionP.innerHTML = createStatusDisplay();
       }
       
     } catch (error) {
       console.warn('[Better Exaltation Chest] Error updating status display:', error);
+    }
+  }
+  
+  function showDisenchantConfirmMessage(equipmentName, tier, stat) {
+    try {
+      const exaltationModal = findExaltationChestModalContent();
+      if (!exaltationModal) return;
+      const tooltipProse = exaltationModal.querySelector('.tooltip-prose');
+      if (!tooltipProse) return;
+      const descriptionP = tooltipProse.querySelector('p.inline:not(.text-rarity-5)');
+      if (!descriptionP) return;
+      const safeName = (equipmentName || 'Unknown').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const t = tier != null ? Number(tier) : 0;
+      const statStr = (stat || '').toString().toUpperCase() || '';
+      const statPart = statStr ? ` (${statStr})` : '';
+      descriptionP.innerHTML = `<div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px;"><p style="color: #fff;">Are you sure you want to disenchant T${t}${statPart} ${safeName}?</p></div>`;
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error showing disenchant confirm message:', error);
+    }
+  }
+  
+  function showDisenchantSuccessMessage(equipmentName, tier, stat) {
+    try {
+      const exaltationModal = findExaltationChestModalContent();
+      if (!exaltationModal) return;
+      const tooltipProse = exaltationModal.querySelector('.tooltip-prose');
+      if (!tooltipProse) return;
+      const descriptionP = tooltipProse.querySelector('p.inline:not(.text-rarity-5)');
+      if (!descriptionP) return;
+      const safeName = (equipmentName || 'Unknown').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const t = tier != null ? Number(tier) : 0;
+      const statStr = (stat || '').toString().toUpperCase() || '';
+      const statPart = statStr ? ` ${statStr}` : '';
+      descriptionP.innerHTML = `<div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px;"><p style="color: #32cd32; font-weight: bold;">Successfully disenchanted T${t}${statPart} ${safeName}</p></div>`;
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error showing disenchant success message:', error);
+    }
+  }
+  
+  function setExaltationModalChestAreaOpacity(modal, opacity) {
+    if (!modal) return;
+    const slotColumns = modal.querySelectorAll('.container-slot.relative[style*="114px"]');
+    slotColumns.forEach((col) => { col.style.opacity = opacity; });
+    const flexContainer = modal.querySelector('.flex.items-center.gap-2.ml-auto');
+    if (flexContainer) {
+      const disenchantBtn = flexContainer.querySelector('#better-exaltation-disenchant-btn');
+      const equipmentPortrait = disenchantBtn ? disenchantBtn.nextElementSibling : flexContainer.children[1];
+      if (equipmentPortrait && equipmentPortrait.classList.contains('equipment-portrait')) {
+        equipmentPortrait.style.opacity = opacity;
+      }
+      const wFull = flexContainer.closest('.w-full');
+      if (wFull) {
+        const gridGap1 = wFull.querySelector('.grid.gap-1');
+        if (gridGap1) gridGap1.style.opacity = opacity;
+      }
+    }
+    const scrollArea = modal.querySelector('[data-radix-scroll-area-viewport]');
+    if (scrollArea) scrollArea.style.opacity = opacity;
+  }
+  
+  function restoreExaltationModalUIForNewChest() {
+    try {
+      const exaltationModal = findExaltationChestModalContent();
+      if (!exaltationModal) return;
+      setExaltationModalChestAreaOpacity(exaltationModal, '1');
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error restoring modal UI for new chest:', error);
+    }
+  }
+  
+  function resetExaltationModalUIAfterDisenchant() {
+    try {
+      const exaltationModal = findExaltationChestModalContent();
+      if (!exaltationModal) return;
+      setExaltationModalChestAreaOpacity(exaltationModal, DISENCHANT_DIM_OPACITY);
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error resetting modal UI after disenchant:', error);
     }
   }
   
@@ -712,6 +792,137 @@
     console.log('Footer marked as processed');
   }
   
+  function handleDisenchantButtonClick() {
+    if (!lastOpenedEquipment || !lastOpenedEquipment.id) return;
+    const btn = document.getElementById('better-exaltation-disenchant-btn');
+    if (!disenchantConfirmPending) {
+      const equipment = getEquipmentDetailsFromChestResponse(lastOpenedEquipment);
+      const name = equipment ? equipment.name : 'Unknown';
+      const tier = equipment ? equipment.tier : lastOpenedEquipment.tier;
+      const stat = equipment ? equipment.stat : lastOpenedEquipment.stat;
+      showDisenchantConfirmMessage(name, tier, stat);
+      disenchantConfirmPending = true;
+      if (btn) btn.title = 'Confirm disenchant';
+      updateDisenchantButtonConfirmMode();
+      return;
+    }
+    disenchantConfirmPending = false;
+    updateDisenchantButtonConfirmMode();
+    const equipmentId = lastOpenedEquipment.id;
+    if (btn) btn.disabled = true;
+    disenchantEquipment(equipmentId)
+      .then(result => {
+        if (result.success) {
+          equipmentStats.disenchanted++;
+          if (result.dustGained && result.dustGained > 0) {
+            equipmentStats.dustGained += result.dustGained;
+            try {
+              const player = globalThis.state?.player;
+              if (player) {
+                player.send({
+                  type: 'setState',
+                  fn: (prev) => ({ ...prev, dust: (prev.dust || 0) + result.dustGained })
+                });
+              }
+            } catch (e) {
+              console.warn('[Better Exaltation Chest] Failed to update player state:', e);
+            }
+            updateDustDisplayWithAnimation(result.dustGained);
+            updateCapacityDisplayImmediatelyDecrement();
+            if (equipmentLog.length > 0) {
+              const lastEntry = equipmentLog[equipmentLog.length - 1];
+              if (lastEntry.equipment.id === equipmentId && lastEntry.action === 'opened') {
+                lastEntry.action = 'disenchanted';
+                lastEntry.dustGained = result.dustGained;
+              }
+            }
+          }
+          const equipment = getEquipmentDetailsFromChestResponse(lastOpenedEquipment);
+          const name = equipment ? equipment.name : 'Unknown';
+          const tier = equipment ? equipment.tier : lastOpenedEquipment?.tier;
+          const stat = equipment ? equipment.stat : lastOpenedEquipment?.stat;
+          lastOpenedEquipment = null;
+          showDisenchantSuccessMessage(name, tier, stat);
+          resetExaltationModalUIAfterDisenchant();
+          if (disenchantSuccessMessageTimeout) {
+            clearTimeout(disenchantSuccessMessageTimeout);
+            pendingTimeouts.delete(disenchantSuccessMessageTimeout);
+          }
+          const successMsgTimeoutId = setTimeout(() => {
+            disenchantSuccessMessageTimeout = null;
+            pendingTimeouts.delete(successMsgTimeoutId);
+            updateStatusDisplay();
+          }, 2000);
+          disenchantSuccessMessageTimeout = successMsgTimeoutId;
+          pendingTimeouts.add(successMsgTimeoutId);
+        } else {
+          console.warn('[Better Exaltation Chest] Disenchant failed:', result.error || result.message);
+          updateStatusDisplay();
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.title = 'Disenchant';
+          updateDisenchantButtonConfirmMode();
+        }
+      })
+      .catch(() => {
+        disenchantConfirmPending = false;
+        updateDisenchantButtonConfirmMode();
+        updateStatusDisplay();
+        if (btn) {
+          btn.disabled = false;
+          btn.title = 'Disenchant';
+        }
+      });
+  }
+  
+  const DISENCHANT_CONFIRM_CLASS = 'better-exaltation-disenchant-confirm-pending';
+  
+  function injectDisenchantButtonStyles() {
+    if (document.getElementById('better-exaltation-disenchant-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'better-exaltation-disenchant-styles';
+    style.textContent = `
+      @keyframes better-exaltation-disenchant-pulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.35); }
+        50% { transform: scale(1.1); box-shadow: 0 0 14px 3px rgba(255, 107, 107, 0.55); }
+      }
+      #better-exaltation-disenchant-btn.${DISENCHANT_CONFIRM_CLASS} {
+        animation: better-exaltation-disenchant-pulse 1.1s ease-in-out infinite;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  function updateDisenchantButtonConfirmMode() {
+    const btn = document.getElementById('better-exaltation-disenchant-btn');
+    if (!btn) return;
+    if (disenchantConfirmPending) {
+      btn.classList.add(DISENCHANT_CONFIRM_CLASS);
+    } else {
+      btn.classList.remove(DISENCHANT_CONFIRM_CLASS);
+    }
+  }
+  
+  function addDisenchantButton() {
+    const exaltationModal = findExaltationChestModalContent();
+    if (!exaltationModal) return;
+    const emptySlotImg = exaltationModal.querySelector('img[alt="empty equipment"]');
+    if (!emptySlotImg) return;
+    const container = emptySlotImg.closest('.flex.items-center.gap-2');
+    if (!container || container.querySelector('#better-exaltation-disenchant-btn')) return;
+    injectDisenchantButtonStyles();
+    container.classList.add('ml-auto');
+    const disenchantBtn = document.createElement('button');
+    disenchantBtn.type = 'button';
+    disenchantBtn.id = 'better-exaltation-disenchant-btn';
+    disenchantBtn.className = 'focus-style-visible flex items-center justify-center frame-1 active:frame-pressed-1 surface-regular size-[34px] shrink-0';
+    disenchantBtn.title = 'Disenchant';
+    disenchantBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-gavel" aria-hidden="true"><path d="m14 13-8.381 8.38a1 1 0 0 1-3.001-3l8.384-8.381"></path><path d="m16 16 6-6"></path><path d="m21.5 10.5-8-8"></path><path d="m8 8 6-6"></path><path d="m8.5 7.5 8 8"></path></svg>`;
+    addManagedEventListener(disenchantBtn, 'click', handleDisenchantButtonClick);
+    container.insertBefore(disenchantBtn, container.firstChild);
+  }
+  
   function updateAutoButtonState(button) {
     if (autoModeEnabled) {
       // Enabled state - Green
@@ -753,6 +964,13 @@
   function handleSettingsButtonClick() {
     console.log('Settings button clicked');
     console.log('activeExaltationPanel state:', activeExaltationPanel ? 'exists' : 'null');
+    
+    // Cancel disenchant confirmation if user opens/closes settings instead of confirming
+    if (disenchantConfirmPending) {
+      disenchantConfirmPending = false;
+      updateDisenchantButtonConfirmMode();
+      updateStatusDisplay();
+    }
     
     // Check if settings panel is already open
     if (activeExaltationPanel) {
@@ -1465,11 +1683,16 @@
     originalFetch = window.fetch;
     
     window.fetch = function(...args) {
-      const [url, options] = args;
+      const [urlOrRequest, options] = args;
+      const urlStr = typeof urlOrRequest === 'string' ? urlOrRequest : (urlOrRequest && urlOrRequest.url);
       
-      // Check if this is a chest opening request
-      if (typeof url === 'string' && url.includes('inventory.equipChest')) {
+      // Check if this is a chest opening request (game may pass URL string or Request object)
+      if (urlStr && typeof urlStr === 'string' && urlStr.includes('inventory.equipChest')) {
         console.log('[Better Exaltation Chest] 🎁 Chest opening request detected');
+        // Cancel disenchant confirmation as soon as user initiates opening another chest
+        disenchantConfirmPending = false;
+        updateDisenchantButtonConfirmMode();
+        updateStatusDisplay();
         
         // Call the original fetch
         return originalFetch.apply(this, args)
@@ -1491,7 +1714,27 @@
                         stat: equipData.stat,
                         tier: equipData.tier
                       });
-                      // Update capacity display immediately (before animation completes)
+                      lastOpenedEquipment = equipData;
+                      disenchantConfirmPending = false;
+                      updateDisenchantButtonConfirmMode();
+                      restoreExaltationModalUIForNewChest();
+                      if (!autoModeEnabled) {
+                        equipmentStats.totalOpened++;
+                        const equipment = getEquipmentDetailsFromChestResponse(equipData);
+                        equipmentLog.push({
+                          timestamp: new Date().toISOString(),
+                          equipment: {
+                            name: equipment ? equipment.name : 'Unknown',
+                            tier: equipData.tier != null ? equipData.tier : 0,
+                            stat: equipData.stat || 'Unknown',
+                            gameId: equipData.gameId || 0,
+                            id: equipData.id
+                          },
+                          action: 'opened',
+                          dustGained: 0
+                        });
+                        updateStatusDisplay();
+                      }
                       updateCapacityDisplayImmediately();
                       handleOpenedEquipmentFromChestResponse(equipData);
                     } else {
@@ -1550,6 +1793,14 @@
       }
       cleanupInProgress = true;
       
+      lastOpenedEquipment = null;
+      disenchantConfirmPending = false;
+      updateDisenchantButtonConfirmMode();
+      if (disenchantSuccessMessageTimeout) {
+        clearTimeout(disenchantSuccessMessageTimeout);
+        pendingTimeouts.delete(disenchantSuccessMessageTimeout);
+        disenchantSuccessMessageTimeout = null;
+      }
       console.log('[Better Exaltation Chest] cleanupExaltationPanel called, activeExaltationPanel:', activeExaltationPanel ? 'exists' : 'null');
       
       // Stop auto-opening when panel is closed
@@ -3027,6 +3278,11 @@
       return false;
     }
     
+    // Clear state from any previous session (e.g. user closed modal and re-opened)
+    lastOpenedEquipment = null;
+    disenchantConfirmPending = false;
+    updateDisenchantButtonConfirmMode();
+    
     // Check if already processed
     if (isProcessed(exaltationModal)) {
       console.log('Modal already processed, returning true');
@@ -3043,6 +3299,9 @@
     // Preload equipment list when modal opens (gives more time before user clicks settings)
     preloadEquipmentList();
     
+    // Set up network interception so manual and auto opens are both tracked
+    setupNetworkInterception();
+    
     try {
       console.log('Enhancing exaltation chest title');
       enhanceExaltationChestTitle();
@@ -3050,6 +3309,7 @@
       replaceModalDescriptionWithStatus();
       console.log('Adding auto and settings buttons');
       addAutoAndSettingsButtons();
+      addDisenchantButton();
       markAsProcessed(exaltationModal);
       console.log('Modal enhanced successfully');
       return true;

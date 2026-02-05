@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.4.1",
+      "changes": [
+        { "type": "added", "mod": "Better Exaltation Chest", "text": "Added disenchant button with two-click confirmation." },
+        { "type": "fixed", "mod": "Better Rune Recycler", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.4.0",
       "changes": [
         { "type": "changed", "mod": "Better Rune Recycler", "text": "Upgraded Better Rune Recycler." }
