@@ -1165,28 +1165,44 @@ async function fetchTRPC(method) {
   }
 }
 
-// Check if any guild member holds a world record
+// Count records in a category (ticks/rank/floor) where predicate(userName) is true
+function countRecordsInCategory(categoryObj, predicate) {
+  if (!categoryObj || typeof categoryObj !== 'object') return 0;
+  let n = 0;
+  for (const mapCode in categoryObj) {
+    const rec = categoryObj[mapCode];
+    if (rec && rec.userName && predicate(rec.userName)) n++;
+  }
+  return n;
+}
+
+// Check if any guild member holds a world record (ticks, rank, or floor)
 async function checkGuildWorldRecords(memberUsernames) {
   try {
     const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
-    if (!leaderboardData || !leaderboardData.ticks) {
-      return false;
-    }
-    
-    // Create a set of member usernames for quick lookup (case-insensitive)
+    if (!leaderboardData) return false;
+
     const memberSet = new Set(memberUsernames.map(name => name.toLowerCase()));
-    
-    // Check all maps for world records
-    for (const mapCode in leaderboardData.ticks) {
-      const worldRecord = leaderboardData.ticks[mapCode];
-      if (worldRecord && worldRecord.userName) {
-        // Check if any guild member holds this world record
-        if (memberSet.has(worldRecord.userName.toLowerCase())) {
-          return true;
-        }
+    const isMember = (userName) => userName && memberSet.has(userName.toLowerCase());
+
+    if (leaderboardData.ticks) {
+      for (const mapCode in leaderboardData.ticks) {
+        const rec = leaderboardData.ticks[mapCode];
+        if (rec && rec.userName && isMember(rec.userName)) return true;
       }
     }
-    
+    if (leaderboardData.rank) {
+      for (const mapCode in leaderboardData.rank) {
+        const rec = leaderboardData.rank[mapCode];
+        if (rec && rec.userName && isMember(rec.userName)) return true;
+      }
+    }
+    if (leaderboardData.floor) {
+      for (const mapCode in leaderboardData.floor) {
+        const rec = leaderboardData.floor[mapCode];
+        if (rec && rec.userName && isMember(rec.userName)) return true;
+      }
+    }
     return false;
   } catch (error) {
     console.error('[Guilds] Error checking world records:', error);
@@ -1194,24 +1210,33 @@ async function checkGuildWorldRecords(memberUsernames) {
   }
 }
 
-// Check if a specific member holds a world record
+// Check if a specific member holds a world record (ticks, rank, or floor)
 async function checkMemberWorldRecord(username) {
   try {
     const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
-    if (!leaderboardData || !leaderboardData.ticks) {
-      return false;
-    }
+    if (!leaderboardData) return false;
 
-    const usernameLower = username.toLowerCase();
+    const usernameLower = (username || '').toLowerCase();
+    const isUser = (userName) => userName && userName.toLowerCase() === usernameLower;
 
-    // Check all maps for world records
-    for (const mapCode in leaderboardData.ticks) {
-      const worldRecord = leaderboardData.ticks[mapCode];
-      if (worldRecord && worldRecord.userName && worldRecord.userName.toLowerCase() === usernameLower) {
-        return true;
+    if (leaderboardData.ticks) {
+      for (const mapCode in leaderboardData.ticks) {
+        const rec = leaderboardData.ticks[mapCode];
+        if (rec && rec.userName && isUser(rec.userName)) return true;
       }
     }
-
+    if (leaderboardData.rank) {
+      for (const mapCode in leaderboardData.rank) {
+        const rec = leaderboardData.rank[mapCode];
+        if (rec && rec.userName && isUser(rec.userName)) return true;
+      }
+    }
+    if (leaderboardData.floor) {
+      for (const mapCode in leaderboardData.floor) {
+        const rec = leaderboardData.floor[mapCode];
+        if (rec && rec.userName && isUser(rec.userName)) return true;
+      }
+    }
     return false;
   } catch (error) {
     console.error('[Guilds] Error checking member world record:', error);
@@ -1219,25 +1244,19 @@ async function checkMemberWorldRecord(username) {
   }
 }
 
-// Count how many world records a specific member holds
+// Count how many world records a specific member holds (ticks + rank + floor)
 async function countMemberWorldRecords(username) {
   try {
     const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
-    if (!leaderboardData || !leaderboardData.ticks) {
-      return 0;
-    }
+    if (!leaderboardData) return 0;
 
-    const usernameLower = username.toLowerCase();
+    const usernameLower = (username || '').toLowerCase();
+    const isUser = (userName) => userName && userName.toLowerCase() === usernameLower;
+
     let count = 0;
-
-    // Count all maps where this member holds the world record
-    for (const mapCode in leaderboardData.ticks) {
-      const worldRecord = leaderboardData.ticks[mapCode];
-      if (worldRecord && worldRecord.userName && worldRecord.userName.toLowerCase() === usernameLower) {
-        count++;
-      }
-    }
-
+    count += countRecordsInCategory(leaderboardData.ticks, isUser);
+    count += countRecordsInCategory(leaderboardData.rank, isUser);
+    count += countRecordsInCategory(leaderboardData.floor, isUser);
     return count;
   } catch (error) {
     console.error('[Guilds] Error counting member world records:', error);
@@ -1245,33 +1264,21 @@ async function countMemberWorldRecords(username) {
   }
 }
 
-// Count total world records across all guild members
+// Count total world records across all guild members (ticks + rank + floor, each +5 pts)
 async function countGuildWorldRecords(memberUsernames) {
   try {
-    if (!memberUsernames || memberUsernames.length === 0) {
-      return 0;
-    }
+    if (!memberUsernames || memberUsernames.length === 0) return 0;
 
     const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
-    if (!leaderboardData || !leaderboardData.ticks) {
-      return 0;
-    }
-    
-    // Create a set of member usernames for quick lookup (case-insensitive)
+    if (!leaderboardData) return 0;
+
     const memberSet = new Set(memberUsernames.map(name => name.toLowerCase()));
+    const isMember = (userName) => userName && memberSet.has(userName.toLowerCase());
+
     let totalCount = 0;
-    
-    // Count all maps where any guild member holds the world record
-    for (const mapCode in leaderboardData.ticks) {
-      const worldRecord = leaderboardData.ticks[mapCode];
-      if (worldRecord && worldRecord.userName) {
-        // Check if any guild member holds this world record
-        if (memberSet.has(worldRecord.userName.toLowerCase())) {
-          totalCount++;
-        }
-      }
-    }
-    
+    totalCount += countRecordsInCategory(leaderboardData.ticks, isMember);
+    totalCount += countRecordsInCategory(leaderboardData.rank, isMember);
+    totalCount += countRecordsInCategory(leaderboardData.floor, isMember);
     return totalCount;
   } catch (error) {
     console.error('[Guilds] Error counting guild world records:', error);
@@ -6882,7 +6889,7 @@ async function openGuildPanel(viewGuildId = null) {
     text-shadow: 0 0 6px rgba(255, 215, 0, 0.5);
   `;
 
-  // Create tooltip for points breakdown
+  // Create tooltip for points breakdown (z-index above Administration modal so it stays visible)
   const tooltip = document.createElement('div');
   tooltip.style.cssText = `
     position: absolute;
@@ -6891,7 +6898,7 @@ async function openGuildPanel(viewGuildId = null) {
     border-radius: 6px;
     padding: 12px;
     min-width: 250px;
-    z-index: 1000;
+    z-index: 10003;
     display: none;
     pointer-events: none;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);

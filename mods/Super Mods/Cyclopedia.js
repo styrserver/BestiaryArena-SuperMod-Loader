@@ -4,6 +4,13 @@
 'use strict';
 
 console.log('[Cyclopedia] initializing...');
+
+// Translation helper (api from loader, context, or BestiaryModAPI)
+function cyclopediaT(key) {
+  const a = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : (typeof window !== 'undefined' && window.BestiaryModAPI) ? window.BestiaryModAPI : null;
+  return (a && a.i18n && typeof a.i18n.t === 'function') ? a.i18n.t(key) : key;
+}
+
 const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDDLE: 300, RIGHT: 300 }, API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData', FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png' };
 const inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
 const inventoryDatabase = (typeof window !== 'undefined' && window.inventoryDatabase) || {};
@@ -3781,24 +3788,24 @@ function createStartPageManager() {
     loading: () => `
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT};">
         <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
-        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Cyclopedia...</div>
-        <div style="font-size: 14px; color: #888;">Fetching your profile data</div>
+        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${cyclopediaT('mods.cyclopedia.startpage.loadingTitle')}</div>
+        <div style="font-size: 14px; color: #888;">${cyclopediaT('mods.cyclopedia.startpage.loadingSubtitle')}</div>
       </div>
     `,
     error: (message) => `
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
         <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Profile Data</div>
+        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${cyclopediaT('mods.cyclopedia.startpage.errorTitle')}</div>
         <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${message}</div>
-        <button id="retry-profile-load" style="padding: 8px 16px; background: #444; border: 1px solid #666; border-radius: 4px; color: white; cursor: pointer; font-family: ${FONT_CONSTANTS.PRIMARY};">Retry</button>
+        <button id="retry-profile-load" style="padding: 8px 16px; background: #444; border: 1px solid #666; border-radius: 4px; color: white; cursor: pointer; font-family: ${FONT_CONSTANTS.PRIMARY};">${cyclopediaT('mods.cyclopedia.startpage.retry')}</button>
       </div>
     `
   };
 
   const ERROR_MESSAGES = {
-    'AbortError': 'Request timed out. Please check your internet connection and try again.',
-    'Player name not available': 'Player name not available. Please ensure you are logged into the game.',
-    'HTTP': 'Failed to fetch profile data. Please try again.'
+    'AbortError': cyclopediaT('mods.cyclopedia.startpage.errorAbort'),
+    'Player name not available': cyclopediaT('mods.cyclopedia.startpage.errorPlayerName'),
+    'HTTP': cyclopediaT('mods.cyclopedia.startpage.errorHttp')
   };
 
   class StartPageManager {
@@ -3860,7 +3867,7 @@ function createStartPageManager() {
       for (const [key, message] of Object.entries(ERROR_MESSAGES)) {
         if (error.name === key || error.message.includes(key)) return message;
       }
-      return 'An unexpected error occurred while loading the profile data.';
+      return cyclopediaT('mods.cyclopedia.startpage.errorUnexpected');
     }
 
     showError(message, retryFunction) {
@@ -14422,7 +14429,9 @@ function renderCyclopediaWelcomeColumn(playerName) {
     headline.style.marginTop = '0';
     headline.style.textAlign = 'center';
     headline.style.width = '100%';
-    headline.textContent = `Welcome${playerName ? ' ' + playerName : ''}!`;
+    headline.textContent = playerName
+      ? cyclopediaT('mods.cyclopedia.startpage.welcomeName').replace('{name}', playerName)
+      : cyclopediaT('mods.cyclopedia.startpage.welcome');
     div.appendChild(headline);
 
     const desc = document.createElement('p');
@@ -14431,12 +14440,7 @@ function renderCyclopediaWelcomeColumn(playerName) {
     desc.style.textAlign = 'left';
     desc.style.margin = '0';
     desc.style.width = '100%';
-    desc.innerHTML = `
-      This is the <b>Cyclopedia</b> mod for Bestiary Arena.<br>
-      Here you can view your player profile, browse creatures, and explore game data.<br>
-      Use the tabs above to navigate, and click on creatures for detailed info.<br><br>
-      <i>Enjoy your adventure!</i>
-    `;
+    desc.innerHTML = cyclopediaT('mods.cyclopedia.startpage.welcomeDesc');
     div.appendChild(desc);
     return div;
   } catch (error) {
@@ -14444,7 +14448,7 @@ function renderCyclopediaWelcomeColumn(playerName) {
     const fallbackDiv = document.createElement('div');
     fallbackDiv.style.padding = '24px';
     fallbackDiv.style.color = '#e6d7b0';
-    fallbackDiv.textContent = 'Welcome to Cyclopedia!';
+    fallbackDiv.textContent = cyclopediaT('mods.cyclopedia.startpage.welcomeFallback');
     return fallbackDiv;
   }
 }
@@ -14461,7 +14465,7 @@ function renderCyclopediaSearchColumn() {
   container.style.minHeight = '0';
   container.style.height = '100%';
 
-  const title = DOMUtils.createTitle('Search');
+  const title = DOMUtils.createTitle(cyclopediaT('mods.cyclopedia.startpage.searchTitle'));
   container.appendChild(title);
 
   const panel = document.createElement('div');
@@ -14480,7 +14484,7 @@ function renderCyclopediaSearchColumn() {
 
   const input = document.createElement('input');
   input.type = 'text';
-  input.placeholder = 'Search Cyclopedia';
+  input.placeholder = cyclopediaT('mods.cyclopedia.startpage.searchPlaceholder');
   input.autocomplete = 'off';
   input.spellcheck = false;
   inputWrap.appendChild(input);
@@ -14524,7 +14528,7 @@ function renderCyclopediaSearchColumn() {
 
   const resultsTitle = document.createElement('div');
   resultsTitle.className = FONT_CONSTANTS.SIZES.SMALL;
-  resultsTitle.textContent = 'Results';
+  resultsTitle.textContent = cyclopediaT('mods.cyclopedia.startpage.results');
   Object.assign(resultsTitle.style, { color: COLOR_CONSTANTS.SECONDARY, paddingLeft: '2px' });
   panel.appendChild(resultsTitle);
 
@@ -14588,12 +14592,12 @@ function renderCyclopediaSearchColumn() {
     }
 
     if (!query || qTrim.length < 2) {
-      setEmptyState('Type at least 2 characters to search.');
+      setEmptyState(cyclopediaT('mods.cyclopedia.startpage.emptyStateMinChars'));
       return;
     }
     if (!results || results.length === 0) {
-      if (wantsAbilityText && !abilityReady) setEmptyState('Indexing ability text... Results will appear shortly.');
-      else setEmptyState('No results found.');
+      if (wantsAbilityText && !abilityReady) setEmptyState(cyclopediaT('mods.cyclopedia.startpage.indexingAbility'));
+      else setEmptyState(cyclopediaT('mods.cyclopedia.startpage.noResults'));
       return;
     }
 
@@ -14626,7 +14630,7 @@ function renderCyclopediaSearchColumn() {
 
       const badge = document.createElement('span');
       badge.className = FONT_CONSTANTS.SIZES.SMALL;
-      badge.textContent = r.kindLabel || 'Result';
+      badge.textContent = r.kindLabel || cyclopediaT('mods.cyclopedia.startpage.resultBadge');
       Object.assign(badge.style, { color: COLOR_CONSTANTS.PRIMARY, whiteSpace: 'nowrap' });
 
       const label = document.createElement('span');
@@ -14750,7 +14754,7 @@ function renderCyclopediaSearchColumn() {
   });
 
   // Initial state
-  setEmptyState('Type at least 2 characters to search.');
+  setEmptyState(cyclopediaT('mods.cyclopedia.startpage.emptyStateMinChars'));
 
   panel.appendChild(resultsEl);
   container.appendChild(panel);
@@ -14805,7 +14809,7 @@ function renderCyclopediaPlayerInfo(profileData) {
     if (profileData && profileData.json) profileData = profileData.json;
     if (!profileData) {
       const div = document.createElement('div');
-      div.innerHTML = `<span style="color: #ff6b6b;">No profile data found.</span>`;
+      div.innerHTML = `<span style="color: #ff6b6b;">${cyclopediaT('mods.cyclopedia.startpage.noProfileData')}</span>`;
       return div;
     }
 
@@ -14871,14 +14875,14 @@ function renderCyclopediaPlayerInfo(profileData) {
   infoBox.className = 'widget-top widget-top-text flex items-center gap-1';
   infoBox.style.marginBottom = '0';
   const infoIcon = document.createElement('img');
-  infoIcon.alt = 'Account';
+  infoIcon.alt = cyclopediaT('mods.cyclopedia.startpage.accountAlt');
   infoIcon.src = '/assets/icons/migrate.png';
   infoIcon.className = 'pixelated inline-block translate-y-px';
   infoIcon.width = 13;
   infoIcon.height = 13;
   infoBox.appendChild(infoIcon);
   const infoTitle = document.createElement('span');
-  infoTitle.textContent = 'Player information';
+  infoTitle.textContent = cyclopediaT('mods.cyclopedia.startpage.playerInformation');
   infoBox.appendChild(infoTitle);
   container.appendChild(infoBox);
 
@@ -14892,7 +14896,7 @@ function renderCyclopediaPlayerInfo(profileData) {
   avatarWrap.className = 'relative z-1 h-sprite w-sprite';
   const avatarImg = document.createElement('img');
   avatarImg.src = 'https://bestiaryarena.com/assets/logo.png';
-  avatarImg.alt = 'Player Icon';
+  avatarImg.alt = cyclopediaT('mods.cyclopedia.startpage.playerIconAlt');
   avatarImg.width = 32;
   avatarImg.height = 32;
   avatarImg.style.width = '32px';
@@ -14907,14 +14911,14 @@ function renderCyclopediaPlayerInfo(profileData) {
   nameCol.className = 'truncate pb-px pr-0.5';
   const nameP = document.createElement('p');
   nameP.className = 'line-clamp-1 text-whiteExp animate-in fade-in';
-  nameP.textContent = getProfileValue('name') || 'Player';
+  nameP.textContent = getProfileValue('name') || cyclopediaT('mods.cyclopedia.startpage.playerFallback');
   nameCol.appendChild(nameP);
   const levelRow = document.createElement('div');
   levelRow.className = 'flex justify-between gap-2';
       levelRow.title = FormatUtils.number(getProfileValue('xp')) + ' exp';
   const levelLabel = document.createElement('span');
   levelLabel.className = 'pixel-font-14 text-whiteRegular';
-  levelLabel.textContent = 'Level';
+  levelLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.level');
   const levelValue = document.createElement('span');
   levelValue.className = 'text-whiteExp animate-in fade-in';
       levelValue.textContent = FormatUtils.number(getProfileValue('level'));
@@ -14950,7 +14954,7 @@ function renderCyclopediaPlayerInfo(profileData) {
   const createdDiv = document.createElement('div');
   const createdLabel = document.createElement('div');
   createdLabel.className = 'pixel-font-14';
-  createdLabel.textContent = CYCLOPEDIA_TRANSLATION.createdAt.label;
+  createdLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.stats.createdAt');
   const createdValue = document.createElement('div');
   createdValue.className = 'text-whiteHighlight';
   createdValue.textContent = getProfileValue('createdAt');
@@ -14961,13 +14965,13 @@ function renderCyclopediaPlayerInfo(profileData) {
   const statusDiv = document.createElement('div');
   const statusLabel = document.createElement('div');
   statusLabel.className = 'pixel-font-14';
-  statusLabel.textContent = CYCLOPEDIA_TRANSLATION.premium.label;
+  statusLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.stats.premium');
   const statusGrid = document.createElement('div');
   statusGrid.className = 'grid grid-cols-[min-content_1fr] gap-1 text-whiteHighlight';
   const statusIconWrap = document.createElement('div');
   statusIconWrap.className = 'relative h-full w-[22px]';
   const statusIcon = document.createElement('img');
-  statusIcon.alt = 'Premium pass';
+  statusIcon.alt = cyclopediaT('mods.cyclopedia.startpage.premiumPassAlt');
   statusIcon.src = '/assets/icons/premium-yes.png';
   statusIcon.className = 'pixelated absolute -bottom-0.5 left-0';
   statusIcon.width = 22;
@@ -14976,7 +14980,7 @@ function renderCyclopediaPlayerInfo(profileData) {
   statusGrid.appendChild(statusIconWrap);
   const statusText = document.createElement('span');
   statusText.className = 'text-ally';
-  statusText.textContent = getProfileValue('premium');
+  statusText.textContent = profileData.premium ? cyclopediaT('mods.cyclopedia.startpage.statusPremium') : cyclopediaT('mods.cyclopedia.startpage.statusFree');
   statusGrid.appendChild(statusText);
   statusDiv.appendChild(statusLabel);
   statusDiv.appendChild(statusGrid);
@@ -14985,7 +14989,7 @@ function renderCyclopediaPlayerInfo(profileData) {
   const loyaltyDiv = document.createElement('div');
   const loyaltyLabel = document.createElement('div');
   loyaltyLabel.className = 'pixel-font-14';
-  loyaltyLabel.textContent = 'Loyalty Points';
+  loyaltyLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.loyaltyPoints');
   const loyaltyValue = document.createElement('div');
   loyaltyValue.className = 'text-whiteHighlight';
   let loyaltyPoints = getProfileValue('loyaltyPoints');
@@ -15005,14 +15009,14 @@ function renderCyclopediaPlayerInfo(profileData) {
   const statsBox = document.createElement('div');
   statsBox.className = 'widget-top widget-top-text flex items-center gap-1 whitespace-nowrap';
   const statsIcon = document.createElement('img');
-  statsIcon.alt = 'Account';
+  statsIcon.alt = cyclopediaT('mods.cyclopedia.startpage.accountAlt');
   statsIcon.src = '/assets/icons/progress.png';
   statsIcon.className = 'pixelated inline-block translate-y-px';
   statsIcon.width = 12;
   statsIcon.height = 12;
   statsBox.appendChild(statsIcon);
   const statsTitle = document.createElement('span');
-  statsTitle.textContent = 'Player stats';
+  statsTitle.textContent = cyclopediaT('mods.cyclopedia.startpage.playerStats');
   statsBox.appendChild(statsTitle);
   container.appendChild(statsBox);
 
@@ -15023,41 +15027,41 @@ function renderCyclopediaPlayerInfo(profileData) {
   const tbody = document.createElement('tbody');
   tbody.className = 'whitespace-nowrap';
 
-  addRow({ label: 'Current total', highlight: true, colspan: 2 });
-  addRow({ label: CYCLOPEDIA_TRANSLATION.shell.label, icon: '/assets/icons/shell-count.png', value: (getProfileValue('shell') !== undefined ? FormatUtils.number(getProfileValue('shell')) + 'x' : '-') });
-  addRow({ label: CYCLOPEDIA_TRANSLATION.tasks.label, icon: '/assets/icons/task-count.png', value: (getProfileValue('tasks') !== undefined ? FormatUtils.number(getProfileValue('tasks')) + 'x' : '-') });
-  addRow({ label: CYCLOPEDIA_TRANSLATION.playCount.label, icon: '/assets/icons/match-count.png', value: (getProfileValue('playCount') !== undefined ? FormatUtils.number(getProfileValue('playCount')) + 'x' : '-') });
+  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.currentTotal'), highlight: true, colspan: 2 });
+  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.stats.shell'), icon: '/assets/icons/shell-count.png', value: (getProfileValue('shell') !== undefined ? FormatUtils.number(getProfileValue('shell')) + 'x' : '-') });
+  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.stats.tasks'), icon: '/assets/icons/task-count.png', value: (getProfileValue('tasks') !== undefined ? FormatUtils.number(getProfileValue('tasks')) + 'x' : '-') });
+  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.stats.playCount'), icon: '/assets/icons/match-count.png', value: (getProfileValue('playCount') !== undefined ? FormatUtils.number(getProfileValue('playCount')) + 'x' : '-') });
 
-  addRow({ label: 'Progress', highlight: true, colspan: 2 });
+  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.progress'), highlight: true, colspan: 2 });
   CYCLOPEDIA_PROGRESS_STATS.forEach(stat => {
     const val = getProfileValue(stat.key);
     const isMax = val === stat.max;
     const valueStr = `${FormatUtils.number(val)}/${stat.max}`;
     addRow({
-      label: CYCLOPEDIA_TRANSLATION[stat.key].label,
+      label: cyclopediaT('mods.cyclopedia.startpage.stats.' + stat.key),
       icon: stat.icon,
       value: valueStr,
       valueClass: isMax ? 'stat-maxed' : undefined
     });
   });
 
-  addRow({ label: 'Rankings', highlight: true, colspan: 2 });
+  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.rankings'), highlight: true, colspan: 2 });
   addRow({
-    label: CYCLOPEDIA_TRANSLATION.rankPoints.label,
+    label: cyclopediaT('mods.cyclopedia.startpage.stats.rankPoints'),
     icon: '/assets/icons/star-tier.png',
     value: (getProfileValue('rankPoints') !== undefined ? FormatUtils.number(getProfileValue('rankPoints')) : '-'),
     title: profileData.rankPointsPosition !== undefined ? 'Position: ' + profileData.rankPointsPosition : undefined,
     extraIcon: { alt: 'Highscore', src: '/assets/icons/highscore.png' }
   });
   addRow({
-    label: CYCLOPEDIA_TRANSLATION.timeSum.label,
+    label: cyclopediaT('mods.cyclopedia.startpage.stats.timeSum'),
     icon: '/assets/icons/speed.png',
     value: (getProfileValue('timeSum') !== undefined ? FormatUtils.number(getProfileValue('timeSum')) : '-'),
     title: profileData.ticksPosition !== undefined ? 'Position: ' + profileData.ticksPosition : undefined,
     extraIcon: { alt: 'Highscore', src: '/assets/icons/highscore.png' }
   });
   addRow({
-    label: CYCLOPEDIA_TRANSLATION.floorsSum.label,
+    label: cyclopediaT('mods.cyclopedia.startpage.stats.floorsSum'),
     icon: '/assets/UI/floor-15.png',
     iconConfig: { width: 14, height: 7, className: 'pixelated -ml-px mr-0.5 inline-block -translate-y-0.5' },
     value: (getProfileValue('floorsSum') !== undefined ? FormatUtils.number(getProfileValue('floorsSum')) : '-'),
@@ -15073,7 +15077,7 @@ function renderCyclopediaPlayerInfo(profileData) {
     const fallbackDiv = document.createElement('div');
     fallbackDiv.style.padding = '24px';
     fallbackDiv.style.color = '#ff6b6b';
-    fallbackDiv.textContent = 'Failed to load player information.';
+    fallbackDiv.textContent = cyclopediaT('mods.cyclopedia.startpage.noProfileData');
     return fallbackDiv;
   }
 }

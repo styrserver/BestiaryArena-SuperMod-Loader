@@ -2,7 +2,12 @@
 // Better Exaltation Chest
 // =======================
 (function() {
-  
+  // Translation helper (use api from loader, context, or BestiaryModAPI)
+  const t = (key) => {
+    const a = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : window.BestiaryModAPI;
+    return (a && a.i18n && typeof a.i18n.t === 'function') ? a.i18n.t(key) : key;
+  };
+
   // =======================
   // 1. Configuration & Constants
   // =======================
@@ -26,6 +31,15 @@
   // Panel constants
   const EXALTATION_PANEL_WIDTH = 450;
   const DISENCHANT_DIM_OPACITY = '0.25';
+  
+  // Stat icons for disenchant messages (HP, AD, AP)
+  const STAT_ICONS = {
+    HP: '/assets/icons/heal.png',
+    AD: '/assets/icons/attackdamage.png',
+    AP: '/assets/icons/abilitypower.png'
+  };
+  // Tier star icons for disenchant messages (T1–T5 etc.: slot-star-1.png, slot-star-2.png, ...)
+  const TIER_ICON_BASE = 'https://bestiaryarena.com/assets/icons/slot-star-';
   
   // Equipment that cannot be obtained from exaltation chests
   const EXCLUDED_EQUIPMENT = [
@@ -249,7 +263,7 @@
       summary += `\n`;
       summary += `2. [12/25/2024, 3:46:15 PM] ❌ DISENCHANTED\n`;
       summary += `   Equipment: Shield (T1 HP)\n`;
-      summary += `   Reason: No matching setup rules\n`;
+      summary += `   Reason: ${t('mods.betterExaltationChest.noMatchingRules')}\n`;
       summary += `   Dust Gained: 150\n`;
     } else {
       equipmentLog.forEach((entry, index) => {
@@ -265,7 +279,8 @@
         if (entry.action === 'kept' && entry.matchedRule) {
           summary += `   Matched Rule: ${entry.matchedRule.equipment}/${entry.matchedRule.tier}/${entry.matchedRule.stat}\n`;
         } else if (entry.action === 'disenchanted') {
-          summary += `   Reason: ${entry.reason || 'No matching setup rules'}\n`;
+          const reasonDisplay = !entry.reason ? t('mods.betterExaltationChest.noMatchingRules') : (entry.reason === 'No matching setup rules' ? t('mods.betterExaltationChest.noMatchingRules') : (entry.reason === 'Equipment not found' ? t('mods.betterExaltationChest.equipmentNotFound') : (entry.reason === 'Error checking equipment' ? t('mods.betterExaltationChest.errorCheckingEquipment') : entry.reason)));
+          summary += `   Reason: ${reasonDisplay}\n`;
           if (entry.dustGained > 0) {
             summary += `   Dust Gained: ${entry.dustGained.toLocaleString()}\n`;
           }
@@ -350,7 +365,16 @@
   }
   
   function formatNumber(num) {
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const n = Number(num);
+    if (n >= 1e6) {
+      const value = n / 1e6;
+      return (value % 1 === 0 ? value : value.toFixed(1).replace(/\.0$/, '')) + 'M';
+    }
+    if (n >= 1e3) {
+      const value = n / 1e3;
+      return (value % 1 === 0 ? value : value.toFixed(1).replace(/\.0$/, '')) + 'k';
+    }
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
   
   /**
@@ -559,7 +583,7 @@
     
     if (titleElement.textContent === 'Exaltation Chest') {
       console.log('Changing title from Exaltation Chest to Better Exaltation Chest activated!');
-      titleElement.textContent = 'Better Exaltation Chest activated!';
+      titleElement.textContent = t('mods.betterExaltationChest.titleActivated');
       titleElement.style.color = '#32cd32'; // Green color
       markAsProcessed(titleElement);
       console.log('Title enhanced successfully');
@@ -605,19 +629,19 @@
     return `
       <div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="color: #fff;">Total Opened:</span>
+          <span style="color: #fff;">${t('mods.betterExaltationChest.totalOpened')}</span>
           <span style="color: #32cd32; font-weight: bold;">${equipmentStats.totalOpened}</span>
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="color: #fff;">Kept:</span>
+          <span style="color: #fff;">${t('mods.betterExaltationChest.kept')}</span>
           <span style="color: #32cd32; font-weight: bold;">${equipmentStats.kept}</span>
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="color: #fff;">Disenchanted:</span>
+          <span style="color: #fff;">${t('mods.betterExaltationChest.disenchanted')}</span>
           <span style="color: #ff6b6b; font-weight: bold;">${equipmentStats.disenchanted}</span>
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="color: #fff;">Dust Gained:</span>
+          <span style="color: #fff;">${t('mods.betterExaltationChest.dustGained')}</span>
           <span style="color: #87ceeb; font-weight: bold;">${equipmentStats.dustGained.toLocaleString()}</span>
         </div>
       </div>
@@ -648,6 +672,24 @@
     }
   }
   
+  function getTierDisplayHtml(tier) {
+    const t = tier != null ? Number(tier) : 0;
+    if (t >= 1) {
+      return `<img src="${TIER_ICON_BASE}${t}.png" alt="T${t}" title="T${t}" style="width: 14px; height: 14px; vertical-align: middle; display: inline-block;">`;
+    }
+    return `T${t}`;
+  }
+
+  function getStatDisplayHtml(stat) {
+    const statStr = (stat || '').toString().toUpperCase() || '';
+    if (!statStr) return '';
+    const iconSrc = STAT_ICONS[statStr];
+    if (iconSrc) {
+      return ` <img src="${iconSrc}" alt="${statStr}" title="${statStr}" style="width: 14px; height: 14px; vertical-align: middle; display: inline-block;">`;
+    }
+    return ` (${statStr})`;
+  }
+
   function showDisenchantConfirmMessage(equipmentName, tier, stat) {
     try {
       const exaltationModal = findExaltationChestModalContent();
@@ -656,11 +698,10 @@
       if (!tooltipProse) return;
       const descriptionP = tooltipProse.querySelector('p.inline:not(.text-rarity-5)');
       if (!descriptionP) return;
-      const safeName = (equipmentName || 'Unknown').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const t = tier != null ? Number(tier) : 0;
-      const statStr = (stat || '').toString().toUpperCase() || '';
-      const statPart = statStr ? ` (${statStr})` : '';
-      descriptionP.innerHTML = `<div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px;"><p style="color: #fff;">Are you sure you want to disenchant T${t}${statPart} ${safeName}?</p></div>`;
+      const safeName = (equipmentName || t('mods.betterExaltationChest.unknown')).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const tierPart = getTierDisplayHtml(tier);
+      const statPart = getStatDisplayHtml(stat);
+      descriptionP.innerHTML = `<div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px;"><p style="color: #dc3545; text-align: center;">${t('mods.betterExaltationChest.confirmDisenchantQuestion')}</p><p style="color: #dc3545; text-align: center;">${tierPart} ${safeName}${statPart}?</p></div>`;
     } catch (error) {
       console.warn('[Better Exaltation Chest] Error showing disenchant confirm message:', error);
     }
@@ -674,11 +715,10 @@
       if (!tooltipProse) return;
       const descriptionP = tooltipProse.querySelector('p.inline:not(.text-rarity-5)');
       if (!descriptionP) return;
-      const safeName = (equipmentName || 'Unknown').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const t = tier != null ? Number(tier) : 0;
-      const statStr = (stat || '').toString().toUpperCase() || '';
-      const statPart = statStr ? ` ${statStr}` : '';
-      descriptionP.innerHTML = `<div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px;"><p style="color: #32cd32; font-weight: bold;">Successfully disenchanted T${t}${statPart} ${safeName}</p></div>`;
+      const safeName = (equipmentName || t('mods.betterExaltationChest.unknown')).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const tierPart = getTierDisplayHtml(tier);
+      const statPart = getStatDisplayHtml(stat);
+      descriptionP.innerHTML = `<div style="display: flex; flex-direction: column; gap: 6px; font-size: 14px;"><p style="color: #32cd32; font-weight: bold; text-align: center;">${t('mods.betterExaltationChest.successfullyDisenchanted')}</p><p style="color: #32cd32; font-weight: bold; text-align: center;">${tierPart} ${safeName}${statPart}</p></div>`;
     } catch (error) {
       console.warn('[Better Exaltation Chest] Error showing disenchant success message:', error);
     }
@@ -763,13 +803,13 @@
     // Create Auto button (toggle button)
     const autoButton = document.createElement('button');
     autoButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
-    autoButton.textContent = 'Auto';
+    autoButton.textContent = t('mods.betterExaltationChest.buttonAuto');
     autoButton.id = 'better-exaltation-auto-btn';
     
     // Create Settings button
     const settingsButton = document.createElement('button');
     settingsButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
-    settingsButton.textContent = 'Settings';
+    settingsButton.textContent = t('mods.betterExaltationChest.buttonSettings');
     settingsButton.id = 'better-exaltation-settings-btn';
     
     // Set initial state for Auto button (disabled/red)
@@ -802,7 +842,7 @@
       const stat = equipment ? equipment.stat : lastOpenedEquipment.stat;
       showDisenchantConfirmMessage(name, tier, stat);
       disenchantConfirmPending = true;
-      if (btn) btn.title = 'Confirm disenchant';
+      if (btn) btn.title = t('mods.betterExaltationChest.tooltipConfirmDisenchant');
       updateDisenchantButtonConfirmMode();
       return;
     }
@@ -861,7 +901,7 @@
         }
         if (btn) {
           btn.disabled = false;
-          btn.title = 'Disenchant';
+          btn.title = t('mods.betterExaltationChest.tooltipDisenchant');
           updateDisenchantButtonConfirmMode();
         }
       })
@@ -871,7 +911,7 @@
         updateStatusDisplay();
         if (btn) {
           btn.disabled = false;
-          btn.title = 'Disenchant';
+          btn.title = t('mods.betterExaltationChest.tooltipDisenchant');
         }
       });
   }
@@ -917,7 +957,7 @@
     disenchantBtn.type = 'button';
     disenchantBtn.id = 'better-exaltation-disenchant-btn';
     disenchantBtn.className = 'focus-style-visible flex items-center justify-center frame-1 active:frame-pressed-1 surface-regular size-[34px] shrink-0';
-    disenchantBtn.title = 'Disenchant';
+    disenchantBtn.title = t('mods.betterExaltationChest.tooltipDisenchant');
     disenchantBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-gavel" aria-hidden="true"><path d="m14 13-8.381 8.38a1 1 0 0 1-3.001-3l8.384-8.381"></path><path d="m16 16 6-6"></path><path d="m21.5 10.5-8-8"></path><path d="m8 8 6-6"></path><path d="m8.5 7.5 8 8"></path></svg>`;
     addManagedEventListener(disenchantBtn, 'click', handleDisenchantButtonClick);
     container.insertBefore(disenchantBtn, container.firstChild);
@@ -2310,7 +2350,7 @@
     `;
     
     const title = document.createElement('h4');
-    title.textContent = 'Auto Settings';
+    title.textContent = t('mods.betterExaltationChest.autoSettingsTitle');
     title.className = 'pixel-font-14';
     title.style.cssText = `
       margin: 0 0 16px 0;
@@ -2332,7 +2372,7 @@
     `;
     
     const speedLabel = document.createElement('label');
-    speedLabel.textContent = 'Auto-open Speed:';
+    speedLabel.textContent = t('mods.betterExaltationChest.autoOpenSpeed');
     speedLabel.style.cssText = `
       color: #fff;
       font-size: 12px;
@@ -2428,7 +2468,7 @@
     
     // Copy Log button
     const copyLogButton = document.createElement('button');
-    copyLogButton.textContent = 'Copy Log';
+    copyLogButton.textContent = t('mods.betterExaltationChest.copyLog');
     copyLogButton.style.cssText = createButtonStyle('green', `
       width: 100%;
       height: 32px;
@@ -2440,12 +2480,12 @@
       const summaryText = generateSummaryLogText();
       console.log('[Better Exaltation Chest] Generated summary text:', summaryText);
       const success = await copyToClipboard(summaryText);
-      showFeedbackMessage(success ? 'Log copied!' : 'Failed to copy!', success);
+      showFeedbackMessage(success ? t('mods.betterExaltationChest.logCopied') : t('mods.betterExaltationChest.failedToCopy'), success);
     });
     
     // Clear Log button
     const clearLogButton = document.createElement('button');
-    clearLogButton.textContent = 'Clear Log';
+    clearLogButton.textContent = t('mods.betterExaltationChest.clearLog');
     clearLogButton.style.cssText = createButtonStyle('red', `
       width: 100%;
       height: 32px;
@@ -2456,7 +2496,7 @@
       event.stopPropagation();
       clearEquipmentLog();
       updateStatusDisplay();
-      showFeedbackMessage('Log cleared!', false);
+      showFeedbackMessage(t('mods.betterExaltationChest.logCleared'), false);
     });
     
     logButtonsContainer.appendChild(copyLogButton);
@@ -2484,7 +2524,7 @@
     `;
     
     const title = document.createElement('h4');
-    title.textContent = 'Chest Settings';
+    title.textContent = t('mods.betterExaltationChest.chestSettingsTitle');
     title.className = 'pixel-font-14';
     title.style.cssText = `
       margin: 0 0 8px 0;
@@ -2497,7 +2537,7 @@
     
     // Add description
     const description = document.createElement('div');
-    description.textContent = 'Pick equipment, tiers to keep, and stats to keep';
+    description.textContent = t('mods.betterExaltationChest.chestSettingsDescription');
     description.style.cssText = `
       margin: 0 0 12px 0;
       color: #ccc;
@@ -2563,7 +2603,7 @@
     
     // Reset button
     const resetButton = document.createElement('button');
-    resetButton.textContent = 'Reset';
+    resetButton.textContent = t('mods.betterExaltationChest.reset');
     resetButton.style.cssText = createButtonStyle('red', `
       flex: 3;
       height: 32px;
@@ -2814,7 +2854,7 @@
       // Max retries reached, show fallback message
       const fallbackOption = document.createElement('option');
       fallbackOption.value = '';
-      fallbackOption.textContent = 'Loading equipment...';
+      fallbackOption.textContent = t('mods.betterExaltationChest.loadingEquipment');
       select.appendChild(fallbackOption);
       console.warn('[Better Exaltation Chest] Failed to load equipment list after', CONSTANTS.EQUIPMENT_LOAD_MAX_RETRIES, 'retries');
       console.warn('[Better Exaltation Chest] Database ready:', isEquipmentDatabaseReady());
@@ -2940,7 +2980,7 @@
       
       const capacityIcon = document.createElement('img');
       capacityIcon.src = '/assets/icons/inventory.png';
-      capacityIcon.alt = 'Capacity';
+      capacityIcon.alt = t('mods.betterExaltationChest.capacity');
       capacityIcon.className = 'pixelated';
       capacityIcon.style.width = '10px';
       capacityIcon.style.height = '10px';

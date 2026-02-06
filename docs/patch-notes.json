@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.4.2",
+      "changes": [
+        { "type": "added", "mod": "Core", "text": "Various translations." },
+        { "type": "fixed", "mod": "Better Exaltation Chest", "text": "Bug fixes." },
+        { "type": "fixed", "mod": "Guilds", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.4.1",
       "changes": [
         { "type": "added", "mod": "Better Exaltation Chest", "text": "Added disenchant button with two-click confirmation." },
