@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.4.3",
+      "changes": [
+        { "type": "fixed", "mod": "Better Exaltation Chest", "text": "Hotfix." }
+      ]
+    },
+    {
       "version": "3.4.2",
       "changes": [
         { "type": "added", "mod": "Core", "text": "Various translations." },
