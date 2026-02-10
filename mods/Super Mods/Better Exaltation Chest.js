@@ -856,17 +856,7 @@
           equipmentStats.disenchanted++;
           if (result.dustGained && result.dustGained > 0) {
             equipmentStats.dustGained += result.dustGained;
-            try {
-              const player = globalThis.state?.player;
-              if (player) {
-                player.send({
-                  type: 'setState',
-                  fn: (prev) => ({ ...prev, dust: (prev.dust || 0) + result.dustGained })
-                });
-              }
-            } catch (e) {
-              console.warn('[Better Exaltation Chest] Failed to update player state:', e);
-            }
+            updateLocalStateAfterDisenchant(equipmentId, result.dustGained);
             updateDustDisplayWithAnimation(result.dustGained);
             updateCapacityDisplayImmediatelyDecrement();
             if (equipmentLog.length > 0) {
@@ -1550,6 +1540,48 @@
     });
   }
   
+  /**
+   * Update local player state after disenchanting: remove equipment from arsenal
+   * and add dust. Mirrors Better Forge / Better Rune Recycler pattern so inventory
+   * and UI update without requiring F5.
+   */
+  function updateLocalStateAfterDisenchant(equipmentId, dustGained) {
+    try {
+      const player = globalThis.state?.player;
+      if (!player || typeof player.send !== 'function') return;
+      
+      player.send({
+        type: 'setState',
+        fn: (prev) => {
+          const newState = { ...prev };
+          newState.inventory = { ...prev.inventory };
+          newState.context = { ...prev.context };
+          
+          // Remove disenchanted equipment from arsenal (equips may live on root or context)
+          if (prev.equips && Array.isArray(prev.equips)) {
+            newState.equips = prev.equips.filter(e => e.id !== equipmentId);
+          }
+          if (prev.context?.equips && Array.isArray(prev.context.equips)) {
+            newState.context.equips = prev.context.equips.filter(e => e.id !== equipmentId);
+          }
+          
+          // Update dust in all places the game reads from (like Better Forge)
+          if (dustGained != null && dustGained > 0) {
+            const currentDust = Number(prev.inventory?.dust ?? prev.dust ?? prev.context?.dust ?? 0);
+            const safeDust = Math.max(0, currentDust + dustGained);
+            newState.inventory.dust = safeDust;
+            newState.dust = safeDust;
+            newState.context.dust = safeDust;
+          }
+          
+          return newState;
+        }
+      });
+    } catch (e) {
+      console.warn('[Better Exaltation Chest] Failed to update local state after disenchant:', e);
+    }
+  }
+  
   
   function handleOpenedEquipmentFromChestResponse(equipData) {
     // Clear the chest open in progress flag now that the response is received
@@ -1628,24 +1660,7 @@
                 equipmentStats.dustGained += result.dustGained;
                 updateStatusDisplay();
                 
-                // Update player state with new dust amount
-                try {
-                  const player = globalThis.state?.player;
-                  if (player) {
-                    player.send({
-                      type: "setState",
-                      fn: (prev) => ({
-                        ...prev,
-                        dust: (prev.dust || 0) + result.dustGained
-                      }),
-                    });
-                    console.log('[Better Exaltation Chest] Player state updated with dust gain:', result.dustGained);
-                  }
-                } catch (e) {
-                  console.warn('[Better Exaltation Chest] Failed to update player state:', e);
-                }
-                
-                // Manually update dust display with animation (state updates don't reliably trigger subscription)
+                updateLocalStateAfterDisenchant(equipData.id, result.dustGained);
                 updateDustDisplayWithAnimation(result.dustGained);
                 
                 // Update capacity display immediately after disenchanting (decrement by 1)

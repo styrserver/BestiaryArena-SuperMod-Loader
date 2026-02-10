@@ -406,6 +406,33 @@
         }
       }
       
+      // Format inventory quantity for display (e.g. 1234 -> "1,2k", 100000 -> "100k"); uses comma as decimal separator
+      function formatQuantityDisplay(num) {
+        if (num == null || typeof num !== 'number' || num < 0) return '0';
+        const locale = 'sv-SE'; // comma as decimal separator (1,7k)
+        if (num < 1000) return String(num);
+        if (num < 1e6) {
+          const k = num / 1000;
+          const formatted = k % 1 === 0
+            ? k.toLocaleString(locale, { maximumFractionDigits: 0 })
+            : k.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+          return formatted + 'k';
+        }
+        const m = num / 1e6;
+        const formattedM = m % 1 === 0
+          ? m.toLocaleString(locale, { maximumFractionDigits: 0 })
+          : m.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+        return formattedM + 'M';
+      }
+      
+      // Set quantity span display (abbreviated) and raw value for parsing
+      function setQuantitySpanDisplay(quantitySpan, rawQuantity) {
+        if (!quantitySpan) return;
+        const n = typeof rawQuantity === 'number' ? rawQuantity : parseInt(rawQuantity, 10) || 0;
+        quantitySpan.textContent = formatQuantityDisplay(n);
+        quantitySpan.dataset.rawQuantity = String(n);
+      }
+      
       // Get minimum quantity from DOM for an item
       function getMinimumQuantityFromDOM(itemSlot) {
         return safeExecute(() => {
@@ -416,6 +443,12 @@
           if (quantityIndicator) {
             const quantitySpan = quantityIndicator.querySelector('span');
             if (quantitySpan) {
+              // Prefer raw quantity (set when we use abbreviated display)
+              const raw = quantitySpan.dataset.rawQuantity;
+              if (raw !== undefined && raw !== '') {
+                const minQuantity = parseInt(raw, 10);
+                if (!isNaN(minQuantity)) return minQuantity;
+              }
               const quantityText = quantitySpan.textContent;
               const match = quantityText.match(/(\d+)x/);
               if (match) {
@@ -1105,7 +1138,7 @@
         quantitySpan.className = 'relative font-outlined-fill text-white';
         quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
         quantitySpan.setAttribute('translate', 'no');
-        quantitySpan.textContent = `${quantity}x`;
+        setQuantitySpanDisplay(quantitySpan, quantity);
         
         // Assemble the structure
         quantityIndicator.appendChild(quantitySpan);
@@ -1364,7 +1397,7 @@
               if (quantityIndicator) {
                 const quantitySpan = quantityIndicator.querySelector('span');
                 if (quantitySpan) {
-                  quantitySpan.textContent = `${currentQuantity}x`;
+                  setQuantitySpanDisplay(quantitySpan, currentQuantity);
                   // Ensure the text is visible
                   quantitySpan.style.color = 'transparent';
                   quantitySpan.style.textShadow = '1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000';
@@ -1402,7 +1435,7 @@
               if (isSellSection) {
                 const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
                 if (quantitySpan) {
-                  quantitySpan.textContent = `${inventory.insightStone5}x`;
+                  setQuantitySpanDisplay(quantitySpan, inventory.insightStone5);
                   // Apply the same styling as dice manipulators for consistent appearance
                   quantitySpan.className = 'relative font-outlined-fill text-white';
                   quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
@@ -1428,7 +1461,7 @@
                   if (isSellSection) {
                     const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
                     if (quantitySpan) {
-                      quantitySpan.textContent = `${quantity}x`;
+                      setQuantitySpanDisplay(quantitySpan, quantity);
                       // Use the same styling as Stone of Insight for consistent appearance
                       quantitySpan.className = 'relative font-outlined-fill text-white';
                       quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
@@ -1457,7 +1490,7 @@
                 if (isSellSection) {
                   const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
                   if (quantitySpan) {
-                    quantitySpan.textContent = `${quantity}x`;
+                    setQuantitySpanDisplay(quantitySpan, quantity);
                     // Use the same styling as Stone of Insight for consistent appearance
                     quantitySpan.className = 'relative font-outlined-fill text-white';
                     quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
@@ -1989,7 +2022,7 @@
                       // Get quantity from inventory
                       const inventory = getInventoryState();
                       const quantity = inventory[targetItemKey] || 0;
-                      quantitySpan.textContent = `${quantity}x`;
+                      setQuantitySpanDisplay(quantitySpan, quantity);
                       
                       // Assemble the structure
                       quantityIndicator.appendChild(quantitySpan);
@@ -2150,7 +2183,7 @@
                 quantitySpan.className = 'relative font-outlined-fill text-white';
                 quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
                 quantitySpan.setAttribute('translate', 'no');
-                quantitySpan.textContent = `${diceManipulatorQuantity}x`;
+                setQuantitySpanDisplay(quantitySpan, diceManipulatorQuantity);
                 
                 // Assemble the structure
                 quantityIndicator.appendChild(quantitySpan);
@@ -2809,11 +2842,11 @@
                 if (insightStoneSlot) {
                   const quantitySpan = insightStoneSlot.querySelector('.revert-pixel-font-spacing span');
                   if (quantitySpan) {
-                    // Calculate the new quantity based on the pending update
-                    const currentQuantity = parseInt(quantitySpan.textContent.replace('x', '')) || 0;
+                    // Calculate the new quantity based on the pending update (use raw value when we use abbreviated display)
+                    const currentQuantity = parseInt(quantitySpan.dataset.rawQuantity || quantitySpan.textContent.replace(/[^\d]/g, ''), 10) || 0;
                     const change = pendingUpdates.insightStone5 || 0;
                     const newQuantity = Math.max(0, currentQuantity + change);
-                    quantitySpan.textContent = `${newQuantity}x`;
+                    setQuantitySpanDisplay(quantitySpan, newQuantity);
                   }
                 }
               }

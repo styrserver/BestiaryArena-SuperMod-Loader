@@ -1001,8 +1001,8 @@
               console.log(`[Better Forge] 💰 Converted dust change: ${dustChange}`);
               // Accumulate dust change instead of updating immediately
               forgeState.cumulativeDustChange += dustChange;
-              // Still update display for UX feedback
-              updateDustDisplayWithAnimation(dustChange);
+              // Update display with cumulative delta so UI shows progressive decrease (state not updated until completion)
+              updateDustDisplayWithAnimation(dustChange, { cumulativeDisplay: forgeState.cumulativeDustChange });
             }
 
             updateAutoUpgradeStatus(`Forged ${step.equipment} T${step.fromTier} → T${step.toTier}`);
@@ -3705,40 +3705,49 @@
     }
   }
 
-  function updateDustDisplayWithAnimation(dustChange = 0) {
+  function updateDustDisplayWithAnimation(dustChange = 0, options = {}) {
     try {
       // Ensure dustChange is a number
       const numericDustChange = Number(dustChange) || 0;
-      
+      const cumulativeDisplay = options.cumulativeDisplay;
+
       const dustAmountElement = document.getElementById('better-forge-dust-amount');
       if (!dustAmountElement) {
         updateDustDisplay();
         return;
       }
-      
-      // Get current dust from global state (already updated by updateLocalInventoryGoldDust)
+
+      // Get current dust from global state (already updated by updateLocalInventoryGoldDust when not forging)
       const playerContext = globalThis.state?.player?.getSnapshot()?.context;
       const currentDust = Number(playerContext?.dust) || 0;
-      
+
       // Safety check: if dust is 0 but we're not supposed to have 0 dust, log a warning
       if (currentDust === 0 && numericDustChange > 0) {
         console.warn(`[Better Forge] ⚠️ Dust is 0 but we're adding ${numericDustChange} dust - potential state sync issue`);
       }
-      
+
       if (numericDustChange !== 0) {
-        // Calculate the start value for animation (current dust BEFORE the change)
-        const startValue = currentDust - numericDustChange;
-        const endValue = currentDust;
-        
-        // Ensure start value is never negative for display purposes
-        const safeStartValue = Math.max(0, startValue);
-        const safeEndValue = Math.max(0, endValue);
-        
-        animateDustCount(safeStartValue, safeEndValue, 800);
+        let startValue, endValue;
+        if (typeof cumulativeDisplay === 'number') {
+          // Forge in progress: state not updated yet; show progressive total (initial + cumulative)
+          endValue = currentDust + cumulativeDisplay;
+          startValue = endValue - numericDustChange; // animate from previous total to new total
+          startValue = Math.max(0, startValue);
+          endValue = Math.max(0, endValue);
+        } else {
+          // Normal case: state already updated (e.g. after disenchant or single update)
+          startValue = currentDust - numericDustChange;
+          endValue = currentDust;
+          startValue = Math.max(0, startValue);
+          endValue = Math.max(0, endValue);
+        }
+        animateDustCount(startValue, endValue, 800);
+      } else if (typeof cumulativeDisplay === 'number') {
+        dustAmountElement.textContent = Math.max(0, currentDust + cumulativeDisplay).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
       } else {
         dustAmountElement.textContent = Math.max(0, currentDust).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
       }
-      
+
     } catch (error) {
       console.warn('[Better Forge] Error updating dust display with animation:', error);
       updateDustDisplay();

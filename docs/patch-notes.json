@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.4.4",
+      "changes": [
+        { "type": "fixed", "mod": "Better Exaltation Chest", "text": "Bug fixes." },
+        { "type": "fixed", "mod": "Better Forge", "text": "Bug fixes." },
+        { "type": "fixed", "mod": "Better Yasir", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.4.3",
       "changes": [
         { "type": "fixed", "mod": "Better Exaltation Chest", "text": "Hotfix." }
