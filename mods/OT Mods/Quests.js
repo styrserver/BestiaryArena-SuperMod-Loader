@@ -15,6 +15,7 @@ const OBSERVER_DEBOUNCE_DELAY = 250;
 const OBSERVER_MIN_INTERVAL = 100;
 const KING_TIBI_MODAL_WIDTH = 450;
 const KING_TIBI_MODAL_HEIGHT = 500;
+const COSTELLO_MODAL_HEIGHT = 200;
 const QUEST_ITEMS_MODAL_WIDTH = 500;
 const QUEST_ITEMS_MODAL_HEIGHT = 190;
 const KING_GUILD_COIN_REWARD = 50;
@@ -108,6 +109,24 @@ const KING_LETTER_MISSION = {
   rewardCoins: KING_GUILD_COIN_REWARD
 };
 
+const KING_MONKS_STUDY_MISSION = {
+  id: 'king_monks_study',
+  title: 'The Monks Study',
+  prompt: 'I see you carry the Holy Tible – you have proven yourself in the search for the Light. Now I ask you to seek out Costello within the White Raven Monastery. He is a learned man and may have wisdom that serves the crown. Will you undertake this task?',
+  accept: 'Go to the White Raven Monastery and seek out Costello. Return to me when you have news.',
+  askForItem: 'Have you found Costello?',
+  complete: 'Excellent work. Costello has long been a friend of the crown.',
+  missingItem: 'You claim yes but I have had no word from the monastery. Find Costello and speak with him.',
+  keepSearching: 'Then journey to the White Raven Monastery and search for Costello.',
+  answerYesNo: 'Answer yes or no: have you found Costello?',
+  alreadyCompleted: 'You have already completed this task. My thanks.',
+  alreadyActive: 'You are already on this task. Seek Costello in the White Raven Monastery.',
+  objectiveLine1: 'Travel to the White Raven Monastery.',
+  objectiveLine2: 'Search for Costello within the monastery.',
+  hint: 'The White Raven Monastery lies somewhere beyond the realm. Look for Costello there.',
+  rewardCoins: KING_GUILD_COIN_REWARD
+};
+
 const AL_DEE_FISHING_MISSION = {
   id: 'al_dee_fishing_gold',
   title: 'Fishing for gold',
@@ -143,6 +162,93 @@ const AL_DEE_GOLDEN_ROPE_MISSION = {
   hint: 'Search areas where elves are known to roam.',
   rewardCoins: 0
 };
+
+// Castello mission (offered after completing The Monks Study). Player receives Castello's diary and must complete the seven seals of Ghostlands.
+const COSTELLO_QUEEN_BANSHEES_MISSION = {
+  id: 'costello_queen_banshees',
+  title: 'The Queen Of The Banshees',
+  prompt: 'There is a matter I would ask of you. The seven seals of Ghostlands – I need you to complete them and return to me when you have done so. I will give you my diary; it may guide you. Will you undertake this task?',
+  accept: 'Complete the seven seals of Ghostlands and return when you have done so.',
+  alreadyCompleted: 'You have already completed this task. My thanks.',
+  alreadyActive: 'You have accepted my task. Complete the seven seals of Ghostlands and return when you have done so.',
+  objectiveLine1: 'Complete the seven seals of Ghostlands.',
+  objectiveLine2: 'Return to Castello when all seven have been completed.',
+  diaryItemName: 'Castello\'s diary',
+  diaryIcon: 'Book_(Black).gif',
+  rewardItemName: 'Blessed Ankh',
+  rewardIcon: 'Blessed_Ankh.gif',
+  rewardDescription: 'You see the engraving of a white raven on its surface.'
+};
+
+// Room names that count as "the seven seals of Ghostlands". Index i = i-th seal (0 = First Seal, 6 = Seventh Seal).
+const SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES = [
+  'Seal I', 'Seal II', 'Seal III', 'Seal IV', 'Seal V', 'Seal VI', 'Seal VII'
+];
+const SEVEN_SEALS_COUNT = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.length;
+
+// Transcript text for Castello's diary: shown per seal (incomplete = hint, complete = sealed message).
+const SEAL_TRANSCRIPTS = [
+  { incomplete: 'Wander to the surface and fill the cracks with the green blood to seal the first.', complete: 'Seal I has been sealed.' },
+  { incomplete: 'A lever is hidden among the bookshelves.', complete: 'Seal II has been sealed.' },
+  { incomplete: 'You must activate the runewords in the ritual site.', complete: 'Seal III has been sealed.' },
+  { incomplete: 'You must defeat the hellish skeletons in a timely manner to complete the fourth seal.', complete: 'Seal IV has been sealed.' },
+  { incomplete: 'Find the lever in the Throne of the Destroyer to complete the seal.', complete: 'Seal V has been sealed.' },
+  { incomplete: 'Leverage yourself in the Seal of the Demonrage in the correct order.', complete: 'Seal VI has been sealed.' },
+  { incomplete: 'When the sixth seal is sealed, a portal opens in the Demonrage. Step through to face the last.', complete: 'Seal VII has been sealed.' }
+];
+
+// Seal indices for completing seals separately (use with setSealCompleted(sealIndex, true)).
+const FIRST_SEAL = 0;
+const SECOND_SEAL = 1;
+const THIRD_SEAL = 2;
+const FOURTH_SEAL = 3;
+const FIFTH_SEAL = 4;
+const SIXTH_SEAL = 5;
+const SEVENTH_SEAL = 6;
+function getDefaultSevenSealsCompleted() {
+  return Array(SEVEN_SEALS_COUNT).fill(false);
+}
+
+// First Seal: completed on Ghostlands Surface by placing poison creatures on ≥3 of the configured tiles and winning the battle.
+const FIRST_SEAL_GHOSTLANDS_SURFACE_ROOM = 'Ghostlands Surface';
+
+// Second Seal: completed in Ghostlands Library by right-clicking on tile 34 (lever in the bookshelves).
+const SECOND_SEAL_ROOM = 'Ghostlands Library';
+const SECOND_SEAL_TILE_34 = 34;
+const SECOND_SEAL_LEVER_ANIMATION_MS = 1500;
+
+// Third Seal: completed in Ghostlands Ritual Site by right-clicking on tile 52 (rune) — spell animation then seal completed.
+const THIRD_SEAL_ROOM = 'Ghostlands Ritual Site';
+const THIRD_SEAL_TILE_52 = 52;
+const THIRD_SEAL_SPELL_ANIMATION_MS = 2000;
+
+// Fourth Seal: completed on Demon Skeleton Hell by winning the battle with tick count under 150.
+const FOURTH_SEAL_ROOM = 'Demon Skeleton Hell';
+const FOURTH_SEAL_MAX_TICKS = 150;
+
+// Fifth Seal: completed on Zathroth's Throne by right-clicking on tile 41 (lever); sprite 2772 → 2773.
+const FIFTH_SEAL_ROOM = "Zathroth's Throne";
+const FIFTH_SEAL_TILE_41 = 41;
+const FIFTH_SEAL_LEVER_SPRITE = { from: '2772', to: '2773' };
+
+const FIRST_SEAL_POISON_TILES = [21, 49, 56, 68, 77, 124];
+const FIRST_SEAL_MIN_POISON_TILES = 3;
+const FIRST_SEAL_CELEBRATION_DURATION_MS = 5000;
+
+// Sixth Seal: completed on Demonrage Seal by right-clicking levers in order 70, 100, 85, 55, 115.
+const SIXTH_SEAL_ROOM = 'Demonrage Seal';
+const SIXTH_SEAL_LEVER_TILES = [55, 70, 85, 100, 115];
+const SIXTH_SEAL_LEVER_ORDER = [70, 100, 85, 55, 115];
+const SIXTH_SEAL_LEVER_SPRITE = { from: '2773', to: '2772' }; // unpulled -> pulled
+
+// Seventh seal: when sixth is completed and seventh is not, tile 126 (and 127) sprite 1959 is replaced with 1949 (teleport)
+const SEVENTH_SEAL_TILE_126 = 126;
+const SEVENTH_SEAL_TILE_127 = 127;
+const SEVENTH_SEAL_TILE_126_SPRITE = { from: '1959', to: '1949' };
+const SEVENTH_SEAL_TILE_127_SPRITE = { from: '1959', to: '1949' }; // same sprite swap; when seventh completed, tile 127 will not transform
+const BANSHEE_LAST_ROOM_NAME = "Banshee's Last Room";
+// If Banshee's Last Room is not in ROOM_NAME, we run the battle on Demonrage Seal (same map as portal).
+const BANSHEE_LAST_ROOM_USE_DEMONRAGE_IF_MISSING = true;
 
 const KING_ARENA_RANKS = [
   'Scout of the Arena',      // 0 missions
@@ -247,6 +353,63 @@ const AL_DEE_RESPONSES = {
   'axe': 'Ah, my Small Axe! It fell into the cave waters while I was fleeing from minotaurs and goblins.',
   'small axe': 'Ah, my Small Axe! It fell into the cave waters while I was fleeing from minotaurs and goblins.'
 };
+
+// Costello (White Raven Monastery) keyword responses
+const COSTELLO_RESPONSES = {
+  'hi': 'Welcome, Player! Feel free to tell me what brings you here.',
+  'hello': 'Welcome, Player! Feel free to tell me what brings you here.',
+  'name': 'My name is Costello.',
+  'job': "I'm the abbot of the White Raven Monastery on the Isle of the Kings.",
+  'isle': 'We founded our monastery to guard the royal tombs and to gather wisdom and knowledge.',
+  'order': 'We founded our monastery to guard the royal tombs and to gather wisdom and knowledge.',
+  'wisdom': "You may enter the library upstairs. Don't go any further upstairs, though, as this area is reserved for members of our order.",
+  'king': 'The deceased leaders of the Thaian empire rest beneath this monastery in tombs and crypts.',
+  'caves': 'Anselm, the first monk of our order, discovered them while looking for a suitable burial place for his king.',
+  'anselm': 'He was a humble and pious man, and he was chosen by the royal family of Thais to find a resting place for their dead.',
+  'bye': 'Good bye, Player!',
+  'goodbye': 'Good bye, Player!'
+};
+
+// Seal phrase patterns (longer first so "first seal" matches before "seal"): [ [ pattern, sealIndex ], ... ]
+const COSTELLO_SEAL_PATTERNS = [
+  ['first seal', 0], ['seal 1', 0], ['seal i', 0],
+  ['second seal', 1], ['seal 2', 1], ['seal ii', 1],
+  ['third seal', 2], ['seal 3', 2], ['seal iii', 2],
+  ['fourth seal', 3], ['seal 4', 3], ['seal iv', 3],
+  ['fifth seal', 4], ['seal 5', 4], ['seal v', 4],
+  ['sixth seal', 5], ['seal 6', 5], ['seal vi', 5],
+  ['seventh seal', 6], ['seal 7', 6], ['seal vii', 6]
+];
+
+function getCostelloResponse(message, playerName = 'Player') {
+  const lowerMessage = message.toLowerCase().trim();
+
+  // Seal-related questions (check before generic keywords so "first seal" matches)
+  for (const [phrase, sealIndex] of COSTELLO_SEAL_PATTERNS) {
+    const p = phrase.trim();
+    if (lowerMessage.includes(p) || lowerMessage === p) {
+      if (typeof getSealCompleted === 'function' && SEAL_TRANSCRIPTS && SEAL_TRANSCRIPTS[sealIndex]) {
+        const transcript = SEAL_TRANSCRIPTS[sealIndex];
+        return getSealCompleted(sealIndex) ? transcript.complete : transcript.incomplete;
+      }
+    }
+  }
+  if (lowerMessage.includes('seals') || lowerMessage === 'seal') {
+    return "The seven seals of Ghostlands must be completed one by one. I have given you my diary – it will show you which are done. Ask me about a specific seal, such as the first seal, if you wish guidance.";
+  }
+
+  const sortedKeys = Object.keys(COSTELLO_RESPONSES).sort((a, b) => b.length - a.length);
+  for (const keyword of sortedKeys) {
+    if (lowerMessage.includes(keyword)) {
+      let response = COSTELLO_RESPONSES[keyword];
+      if (response.includes('Player')) {
+        response = response.replace(/Player/g, playerName);
+      }
+      return response;
+    }
+  }
+  return "I'm not sure I understand. You may ask me about my name, my job, this isle and our order, wisdom, the king, the caves, the seals, or Anselm.";
+}
 
 function getAlDeeResponse(message, playerName = 'Player') {
   const lowerMessage = message.toLowerCase().trim();
@@ -453,7 +616,11 @@ function createNPCCooldownManager(cooldownMs = 1000) {
   let lastProcessedCopperKeySeed = null;
   let trackedBoardConfig = null; // Track boardConfig before battle for verification
   let equipmentSlotObserver = null; // Observer for equipment slot display
-  
+
+  let firstSealBoardSubscription = null;
+  let trackedBoardConfigFirstSeal = null; // Track boardConfig before battle for First Seal (poison tiles) verification
+  let fourthSealBoardSubscription = null;
+
   // =======================
   // King Tibianus System State
   // =======================
@@ -461,8 +628,12 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     progressCopper: { accepted: false, completed: false },
     progressDragon: { accepted: false, completed: false },
     progressLetter: { accepted: false, completed: false },
+    progressMonksStudy: { accepted: false, completed: false },
+    progressQueenBanshees: { accepted: false, completed: false },
     progressAlDeeFishing: { accepted: false, completed: false },
     progressAlDeeGoldenRope: { accepted: false, completed: false },
+    costelloVisited: false,
+    sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
     missionOffered: false,
     offeredMission: null,
     awaitingKeyConfirm: false,
@@ -514,7 +685,32 @@ function createNPCCooldownManager(cooldownMs = 1000) {
   let tile79ContextMenu = null;
   let tile79BoardSubscription = null;
   let tile79PlayerSubscription = null;
-  
+
+  // Costello (tile 53, Isle of Kings, Carlin)
+  let tile53RightClickEnabled = false;
+  let tile53ContextMenu = null;
+  let tile53BoardSubscription = null;
+  let sevenSealsBoardSubscription = null; // Queen Banshees: track visits to seven seals of Ghostlands
+
+  // Sixth Seal (Demonrage Seal levers)
+  let sixthSealLeverSequence = [];
+  let sixthSealRightClickEnabled = false;
+  let sixthSealBoardSubscription = null;
+
+  // Second Seal (Ghostlands Library, tile 34 lever in bookshelves)
+  let secondSealRightClickEnabled = false;
+  let secondSealBoardSubscription = null;
+  let thirdSealRightClickEnabled = false;
+  let thirdSealBoardSubscription = null;
+  let fifthSealRightClickEnabled = false;
+  let fifthSealBoardSubscription = null;
+
+  // Seventh Seal portal (tile 126 → Banshee's Last Room, one-time battle then return to Demonrage Seal)
+  let playerUsedPortalToBansheeLastRoom = false;
+  let bansheeLastRoomBattle = null;
+  let tile126PortalRightClickEnabled = false;
+  let bansheeVillainSetupDone = false; // one-time villain setup when entering Banshee's Last Room (like Mornenion)
+
   // =======================
   // Quest Log System State
   // =======================
@@ -746,6 +942,174 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     };
 
     return window.CustomBattles.create(mornenionConfig);
+  }
+
+  // Banshee's Last Room: same style as Mornenion — one-time battle, then return to Demonrage Seal.
+  // roomId resolved at runtime via getRoomIdByRoomName(BANSHEE_LAST_ROOM_NAME).
+  function initializeBansheeLastRoomBattle(roomId) {
+    if (!window.CustomBattles) {
+      console.warn('[Quests Mod][Banshee Last Room] CustomBattles not available, waiting...');
+      const scriptCheck = document.querySelector('script[src*="custom-battles.js"]');
+      if (!scriptCheck) {
+        console.error('[Quests Mod][Banshee Last Room] custom-battles.js not found');
+        return null;
+      }
+      return new Promise((resolve, reject) => {
+        let retries = 0;
+        const maxRetries = 40;
+        const interval = setInterval(() => {
+          retries++;
+          if (window.CustomBattles) {
+            clearInterval(interval);
+            resolve(createBansheeLastRoomBattleInstance(roomId));
+          } else if (retries >= maxRetries) {
+            clearInterval(interval);
+            reject(new Error('CustomBattles not available'));
+          }
+        }, 50);
+      });
+    }
+    return createBansheeLastRoomBattleInstance(roomId);
+  }
+
+  function getGameIdByCreatureName(name, fallback) {
+    if (!name) return fallback != null ? fallback : 1;
+    try {
+      if (window.creatureDatabase?.findMonsterByName) {
+        const m = window.creatureDatabase.findMonsterByName(name);
+        if (m?.gameId) return m.gameId;
+      }
+      const utils = globalThis.state?.utils;
+      if (utils?.getMonster) {
+        for (let i = 1; i < 500; i++) {
+          try {
+            const monster = utils.getMonster(i);
+            if (monster?.metadata?.name === name) return i;
+          } catch (_) { break; }
+        }
+      }
+    } catch (e) {
+      console.warn('[Quests Mod][Banshee Last Room] getGameIdByCreatureName failed for', name, e);
+    }
+    return fallback != null ? fallback : 1;
+  }
+
+  function createBansheeLastRoomBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error('[Quests Mod][Banshee Last Room] CustomBattles still not available');
+      return null;
+    }
+    console.log('[Quests Mod][Banshee Last Room] Creating battle instance for roomId:', roomId);
+    const bansheeGameId = getGameIdByCreatureName('Banshee', 1);
+    const giantSpiderGameId = getGameIdByCreatureName('Giant Spider', 2);
+    const dragonLordGameId = getGameIdByCreatureName('Dragon Lord', 26);
+    const genesDefault = { hp: 30, ad: 30, ap: 30, armor: 30, magicResist: 30 };
+    const villains = [
+      {
+        nickname: 'Queen of the Banshee',
+        keyPrefix: 'banshee-queen-tile-95-',
+        tileIndex: 95,
+        gameId: bansheeGameId,
+        level: 100,
+        tier: 4,
+        direction: 'south',
+        genes: genesDefault
+      },
+      {
+        nickname: 'Banshee',
+        keyPrefix: 'banshee-tile-64-',
+        tileIndex: 64,
+        gameId: bansheeGameId,
+        level: 50,
+        tier: 4,
+        direction: 'south',
+        genes: genesDefault
+      },
+      {
+        nickname: 'Banshee',
+        keyPrefix: 'banshee-tile-66-',
+        tileIndex: 66,
+        gameId: bansheeGameId,
+        level: 50,
+        tier: 4,
+        direction: 'south',
+        genes: genesDefault
+      },
+      {
+        nickname: 'Giant Spider',
+        keyPrefix: 'banshee-giant-spider-tile-139-',
+        tileIndex: 139,
+        gameId: giantSpiderGameId,
+        level: 100,
+        tier: 4,
+        direction: 'south',
+        genes: genesDefault
+      },
+      {
+        nickname: 'Giant Spider',
+        keyPrefix: 'banshee-giant-spider-tile-17-',
+        tileIndex: 17,
+        gameId: giantSpiderGameId,
+        level: 100,
+        tier: 4,
+        direction: 'south',
+        genes: genesDefault
+      },
+      {
+        nickname: 'Dragon Lord',
+        keyPrefix: 'banshee-dragon-lord-tile-100-',
+        tileIndex: 100,
+        gameId: dragonLordGameId,
+        level: 50,
+        tier: 4,
+        direction: 'south',
+        genes: genesDefault
+      },
+      {
+        nickname: 'Dragon Lord',
+        keyPrefix: 'banshee-dragon-lord-tile-26-',
+        tileIndex: 26,
+        gameId: dragonLordGameId,
+        level: 50,
+        tier: 4,
+        direction: 'south',
+        genes: genesDefault
+      }
+    ];
+    const bansheeConfig = {
+      name: "Banshee's Last Room",
+      roomId: roomId,
+      villains: villains,
+      allyLimit: 5,
+      preventVillainMovement: true,
+      hideVillainSprites: true,
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerUsedPortalToBansheeLastRoom;
+      },
+      victoryDefeat: {
+        onVictory: async () => {
+          await setSealCompleted(SEVENTH_SEAL, true).catch((err) => console.error('[Quests Mod][Banshee Last Room] Error saving seventh seal:', err));
+          showToast({
+            message: 'Seventh seal completed',
+            duration: TOAST_DURATION_IMPORTANT,
+            logPrefix: '[Quests Mod][Banshee Last Room]'
+          });
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          cleanupBansheeLastRoomQuest();
+          setTimeout(() => navigateToDemonrageSeal(), 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: "Banshee's Last Room cleared.",
+        defeatMessage: "The banshees were too strong.",
+        showItems: false,
+        items: []
+      }
+    };
+    console.log('[Quests Mod][Banshee Last Room] Config villains:', villains.map(v => ({ nickname: v.nickname, tileIndex: v.tileIndex })));
+    return window.CustomBattles.create(bansheeConfig);
   }
 
   // =======================
@@ -1993,6 +2357,28 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       productDefinitions.push(holyTibleDef);
     }
 
+    // Add Castello's diary (from Queen Banshees mission). Description shows each seal green/red from sevenSealsCompleted; use setSealCompleted(sealIndex, true) to complete a seal.
+    const castelloDiaryDef = {
+      name: 'Castello\'s diary',
+      icon: 'Book_(Black).gif',
+      description: SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.join('\n'),
+      rarity: 5
+    };
+    if (!productDefinitions.find(p => p.name === castelloDiaryDef.name)) {
+      productDefinitions.push(castelloDiaryDef);
+    }
+
+    // Add Blessed Ankh (reward for completing Queen Banshees / seven seals)
+    const blessedAnkhDef = {
+      name: COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName,
+      icon: COSTELLO_QUEEN_BANSHEES_MISSION.rewardIcon,
+      description: COSTELLO_QUEEN_BANSHEES_MISSION.rewardDescription,
+      rarity: 5
+    };
+    if (!productDefinitions.find(p => p.name === blessedAnkhDef.name)) {
+      productDefinitions.push(blessedAnkhDef);
+    }
+
     // Add global Rookgaard drops to product definitions
     for (const globalDrop of ROOKGAARD_GLOBAL_DROPS) {
       if (!productDefinitions.find(p => p.name === globalDrop.name)) {
@@ -2190,6 +2576,179 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       console.error('[Quests Mod][Copper Key] Error checking if on Mine Hub:', error);
       return false;
     }
+  }
+
+  function getRoomIdByRoomName(roomName) {
+    try {
+      if (!roomName || !globalThis.state?.utils?.ROOM_NAME) return null;
+      const roomNames = globalThis.state.utils.ROOM_NAME;
+      for (const [roomId, name] of Object.entries(roomNames)) {
+        if (name === roomName) return roomId;
+      }
+      return null;
+    } catch (error) {
+      console.error('[Quests Mod] Error getting room ID by name:', error);
+      return null;
+    }
+  }
+
+  function isOnRoomByName(roomName) {
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+      const currentRoomId = boardContext?.selectedMap?.selectedRoom?.id;
+      if (!currentRoomId) return false;
+      const targetRoomId = getRoomIdByRoomName(roomName);
+      return targetRoomId != null && currentRoomId === targetRoomId;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function getCreatureRolesByGameId(gameId) {
+    try {
+      const monsterData = globalThis.state?.utils?.getMonster?.(gameId);
+      const roles = monsterData?.metadata?.roles;
+      if (Array.isArray(roles)) return roles;
+      if (typeof roles === 'string') return [roles];
+      if (roles && typeof roles === 'object' && !Array.isArray(roles)) return null;
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Same as Cyclopedia: build name -> roles from full monster list (getMonster(i)) so we see the same roles the UI shows.
+  let questsCreatureNameToRolesCache = null;
+  function getCreatureRolesByCreatureName(creatureName) {
+    if (typeof creatureName !== 'string' || !creatureName) return null;
+    try {
+      if (!questsCreatureNameToRolesCache) {
+        questsCreatureNameToRolesCache = new Map();
+        const utils = globalThis.state?.utils;
+        if (utils?.getMonster) {
+          for (let i = 1; i <= 1000; i++) {
+            try {
+              const monster = utils.getMonster(i);
+              const name = monster?.metadata?.name;
+              const roles = monster?.metadata?.roles;
+              if (name) {
+                const key = name.toLowerCase();
+                const arr = Array.isArray(roles) ? roles : (typeof roles === 'string' ? [roles] : null);
+                if (arr && arr.length) questsCreatureNameToRolesCache.set(key, arr);
+              }
+            } catch (e) { break; }
+          }
+        }
+      }
+      const roles = questsCreatureNameToRolesCache.get(creatureName.toLowerCase());
+      return roles && roles.length ? roles : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function hasPoisonRole(gameId) {
+    const roles = getCreatureRolesByGameId(gameId);
+    if (roles == null) return false;
+    return roles.some(r => isPoisonRole(r));
+  }
+
+  function isPoisonRole(role) {
+    const s = typeof role === 'object' && role !== null && role.name != null ? String(role.name) : String(role);
+    return s.toLowerCase() === 'poisonous';
+  }
+
+  // Resolve roles for a board piece like Cyclopedia: by gameId first, then by creature name from the same monster list (name -> roles cache).
+  function hasPoisonRoleForPiece(piece, serverResults) {
+    const gameId = getPieceGameId(piece, serverResults);
+    if (gameId == null) return false;
+    let roles = getCreatureRolesByGameId(gameId);
+    if (roles == null) {
+      const monsterData = globalThis.state?.utils?.getMonster?.(gameId);
+      const name = monsterData?.metadata?.name;
+      if (name) roles = getCreatureRolesByCreatureName(name);
+      if (roles == null && (typeof window !== 'undefined' && window.creatureDatabase?.findMonsterByGameId)) {
+        const monster = window.creatureDatabase.findMonsterByGameId(gameId);
+        roles = monster?.metadata?.roles;
+        if (!Array.isArray(roles) && typeof roles === 'string') roles = [roles];
+      }
+    }
+    if (roles == null) return false;
+    return roles.some(r => isPoisonRole(r));
+  }
+
+  function getPieceGameId(piece, serverResults) {
+    let gameId = piece.gameId ?? piece.monsterId;
+    if (gameId != null) return gameId;
+    if (!piece.databaseId) return null;
+    try {
+      const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+      if (playerContext?.monsters) {
+        const monster = playerContext.monsters.find(m => m.id === piece.databaseId);
+        if (monster?.gameId) return monster.gameId;
+      }
+      if (serverResults?.rewardScreen?.party) {
+        const partyMember = serverResults.rewardScreen.party.find(p => p.id === piece.databaseId);
+        if (partyMember?.gameId) return partyMember.gameId;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  // Debug: what roles we resolve for a piece (for First Seal poison detection)
+  function getCreatureRolesDebug(piece, serverResults) {
+    const gameId = getPieceGameId(piece, serverResults);
+    const monsterData = gameId != null ? globalThis.state?.utils?.getMonster?.(gameId) : null;
+    const name = monsterData?.metadata?.name ?? null;
+    const rolesByGameId = gameId != null ? getCreatureRolesByGameId(gameId) : null;
+    const rolesByName = name ? getCreatureRolesByCreatureName(name) : null;
+    let rolesFromDb = null;
+    if (gameId != null && typeof window !== 'undefined' && window.creatureDatabase?.findMonsterByGameId) {
+      const m = window.creatureDatabase.findMonsterByGameId(gameId);
+      rolesFromDb = m?.metadata?.roles;
+    }
+    return {
+      tileIndex: piece.tileIndex,
+      gameId,
+      creatureName: name,
+      pieceKeys: Object.keys(piece || {}),
+      getMonsterMetadata: monsterData?.metadata ? { name: monsterData.metadata.name, roles: monsterData.metadata.roles } : null,
+      rolesByGameId,
+      rolesByName,
+      rolesFromDb,
+      hasPoison: hasPoisonRoleForPiece(piece, serverResults)
+    };
+  }
+
+  function countTilesWithPoisonCreature(boardConfig, tileIndices, serverResults) {
+    if (!boardConfig || !Array.isArray(boardConfig) || !Array.isArray(tileIndices)) return 0;
+    const tilesWithPoison = new Set();
+    const allyTilesNoPoison = new Set();
+    for (const piece of boardConfig) {
+      if (!piece) continue;
+      const isAlly = piece.type === 'player' || (piece.type === 'custom' && piece.villain === false);
+      if (!isAlly) continue;
+      const tileIndex = piece.tileIndex;
+      if (tileIndex == null || !tileIndices.includes(tileIndex)) continue;
+      if (hasPoisonRoleForPiece(piece, serverResults)) {
+        tilesWithPoison.add(tileIndex);
+      } else {
+        allyTilesNoPoison.add(tileIndex);
+      }
+    }
+    if (allyTilesNoPoison.size > 0 && tilesWithPoison.size === 0) {
+      console.log('[Quests Mod][First Seal] Allies on poison tiles but none have poison role (game uses metadata.roles). Check creature data.');
+      for (const piece of boardConfig) {
+        if (!piece) continue;
+        const isAlly = piece.type === 'player' || (piece.type === 'custom' && piece.villain === false);
+        if (!isAlly) continue;
+        const tileIndex = piece.tileIndex;
+        if (tileIndex == null || !tileIndices.includes(tileIndex)) continue;
+        const debug = getCreatureRolesDebug(piece, serverResults);
+        console.log('[Quests Mod][First Seal] Ally on tile ' + tileIndex + ':', debug);
+      }
+    }
+    return tilesWithPoison.size;
   }
 
   // Check if current battle is in Rookgaard region
@@ -2527,9 +3086,18 @@ function createNPCCooldownManager(cooldownMs = 1000) {
   // Dev helper to grant/remove quest items for testing (exposed to console)
   // Use positive numbers to grant items, negative numbers to remove items
   function registerDevGrantHelper() {
-    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0, copperKey = 0, stampedLetter = 0, elvenhairRope = 0, holyTible = 0 } = {}) {
+    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0, copperKey = 0, stampedLetter = 0, elvenhairRope = 0, holyTible = 0, blessedAnkh = 0, monksStudy = 0, queenBanshees = 0, firstSeal = 0, secondSeal = 0, thirdSeal = 0, fourthSeal = 0, fifthSeal = 0, sixthSeal = 0, seventhSeal = 0, resetAllSeals = false } = {}) {
       try {
         const actions = [];
+        if (resetAllSeals) {
+          firstSeal = -1;
+          secondSeal = -1;
+          thirdSeal = -1;
+          fourthSeal = -1;
+          fifthSeal = -1;
+          sixthSeal = -1;
+          seventhSeal = -1;
+        }
 
         // Helper function to handle both granting and removing
         const processItem = async (itemName, amount, displayName) => {
@@ -2555,9 +3123,70 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         await processItem('Stamped Letter', stampedLetter, 'Stamped Letter');
         await processItem('Elvenhair Rope', elvenhairRope, 'Elvenhair Rope');
         await processItem('The Holy Tible', holyTible, 'The Holy Tible');
+        await processItem('Blessed Ankh', blessedAnkh, 'Blessed Ankh');
+
+        if (monksStudy !== 0) {
+          if (monksStudy >= 1) {
+            kingChatState.progressMonksStudy = { accepted: true, completed: monksStudy >= 2 };
+            actions.push(monksStudy >= 2 ? 'Monks Study: completed' : 'Monks Study: accepted');
+          } else {
+            kingChatState.progressMonksStudy = { accepted: false, completed: false };
+            actions.push('Monks Study: reset');
+          }
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            const allProgress = getAllMissionProgress();
+            await saveKingTibianusProgress(playerName, allProgress);
+          }
+        }
+
+        if (queenBanshees !== 0) {
+          if (queenBanshees >= 1) {
+            kingChatState.progressQueenBanshees = { accepted: true, completed: queenBanshees >= 2 };
+            actions.push(queenBanshees >= 2 ? 'Queen Banshees: completed' : 'Queen Banshees: accepted');
+            if (queenBanshees >= 2) {
+              kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().map(() => true);
+            }
+          } else {
+            kingChatState.progressQueenBanshees = { accepted: false, completed: false };
+            kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
+            actions.push('Queen Banshees: reset');
+          }
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            const allProgress = getAllMissionProgress();
+            await saveKingTibianusProgress(playerName, allProgress);
+          }
+        }
+
+        const sealParams = [
+          { key: 'firstSeal', value: firstSeal, index: FIRST_SEAL },
+          { key: 'secondSeal', value: secondSeal, index: SECOND_SEAL },
+          { key: 'thirdSeal', value: thirdSeal, index: THIRD_SEAL },
+          { key: 'fourthSeal', value: fourthSeal, index: FOURTH_SEAL },
+          { key: 'fifthSeal', value: fifthSeal, index: FIFTH_SEAL },
+          { key: 'sixthSeal', value: sixthSeal, index: SIXTH_SEAL },
+          { key: 'seventhSeal', value: seventhSeal, index: SEVENTH_SEAL }
+        ];
+        for (const { key, value, index } of sealParams) {
+          if (value !== 0) {
+            if (!Array.isArray(kingChatState.sevenSealsCompleted) || kingChatState.sevenSealsCompleted.length !== SEVEN_SEALS_COUNT) {
+              kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
+            }
+            kingChatState.sevenSealsCompleted[index] = value >= 1;
+            actions.push(`Seal ${index + 1}: ${value >= 1 ? 'completed' : 'reset'}`);
+          }
+        }
+        if (sealParams.some(s => s.value !== 0)) {
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            const allProgress = getAllMissionProgress();
+            await saveKingTibianusProgress(playerName, allProgress);
+          }
+        }
 
         console.log('[Quests Mod][Dev] Quest items modified:', actions.join(', '));
-        console.log('[Quests Mod][Dev] Parameters used:', { leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter, elvenhairRope, holyTible });
+        console.log('[Quests Mod][Dev] Parameters used:', { leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter, elvenhairRope, holyTible, monksStudy, queenBanshees, firstSeal, secondSeal, thirdSeal, fourthSeal, fifthSeal, sixthSeal, seventhSeal });
       } catch (err) {
         console.error('[Quests Mod][Dev] Operation failed:', err);
       }
@@ -2582,6 +3211,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           copper: { accepted: true, completed: true },
           dragon: { accepted: true, completed: true },
           letter: { accepted: true, completed: true },
+          monksStudy: { accepted: true, completed: true },
+          queenBanshees: { accepted: true, completed: true },
           alDeeFishing: { accepted: true, completed: true },
           alDeeGoldenRope: { accepted: true, completed: true },
           ironOre: {
@@ -2591,7 +3222,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           },
           mornenion: {
             defeated: true
-          }
+          },
+          costelloVisited: true,
+          sevenSealsCompleted: getDefaultSevenSealsCompleted().map(() => true)
         };
 
         // Save to Firebase
@@ -2605,6 +3238,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           'Dragon Claw': 1,       // From Red Dragon mission
           'Light Shovel': 1,      // From Al Dee Fishing mission
           'The Holy Tible': 1,    // From Al Dee Golden Rope mission
+          'Castello\'s diary': 1, // From Queen Banshees mission (when accepted)
+          'Blessed Ankh': 1       // From Queen Banshees mission (when completed)
         };
 
         const granted = [];
@@ -2719,6 +3354,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     [KING_COPPER_KEY_MISSION.id]: 'progressCopper',
     [KING_RED_DRAGON_MISSION.id]: 'progressDragon',
     [KING_LETTER_MISSION.id]: 'progressLetter',
+    [KING_MONKS_STUDY_MISSION.id]: 'progressMonksStudy',
+    [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'progressQueenBanshees',
     [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
     [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope'
   };
@@ -2727,6 +3364,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     [KING_COPPER_KEY_MISSION.id]: 'copper',
     [KING_RED_DRAGON_MISSION.id]: 'dragon',
     [KING_LETTER_MISSION.id]: 'letter',
+    [KING_MONKS_STUDY_MISSION.id]: 'monksStudy',
+    [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'queenBanshees',
     [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
     [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope'
   };
@@ -2749,7 +3388,41 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         }
       }
     }
+    result.costelloVisited = !!kingChatState.costelloVisited;
+    result.sevenSealsCompleted = normalizeSevenSealsCompleted(kingChatState.sevenSealsCompleted);
     return result;
+  }
+
+  function normalizeSevenSealsCompleted(arr) {
+    if (!Array.isArray(arr) || arr.length !== SEVEN_SEALS_COUNT) {
+      return getDefaultSevenSealsCompleted().slice();
+    }
+    return arr.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
+  }
+
+  function areAllSevenSealsCompleted() {
+    const completed = kingChatState.sevenSealsCompleted;
+    if (!Array.isArray(completed) || completed.length < SEVEN_SEALS_COUNT) return false;
+    return completed.slice(0, SEVEN_SEALS_COUNT).every(Boolean);
+  }
+
+  async function setSealCompleted(sealIndex, completed) {
+    if (sealIndex < 0 || sealIndex >= SEVEN_SEALS_COUNT) return;
+    if (!Array.isArray(kingChatState.sevenSealsCompleted) || kingChatState.sevenSealsCompleted.length !== SEVEN_SEALS_COUNT) {
+      kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
+    }
+    kingChatState.sevenSealsCompleted[sealIndex] = !!completed;
+    const playerName = getCurrentPlayerName();
+    if (playerName) {
+      const allProgress = getAllMissionProgress();
+      await saveKingTibianusProgress(playerName, allProgress);
+    }
+  }
+
+  function getSealCompleted(sealIndex) {
+    if (sealIndex < 0 || sealIndex >= SEVEN_SEALS_COUNT) return false;
+    const completed = kingChatState.sevenSealsCompleted;
+    return Array.isArray(completed) && completed[sealIndex] === true;
   }
 
   // Validation: Ensure registry consistency at initialization
@@ -2797,7 +3470,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     }
     // New shape preferred: nested format with all missions from registry
     // Check if any registered mission field exists in data
-    const hasAnyMissionField = Object.values(MISSION_FIREBASE_KEY_MAP).some(key => data[key]) || data.ironOre || data.mornenion;
+    const hasAnyMissionField = Object.values(MISSION_FIREBASE_KEY_MAP).some(key => data[key]) || data.ironOre || data.mornenion || data.costelloVisited || Array.isArray(data.sevenSealsCompleted) || Array.isArray(data.sevenSealsVisited);
     
     if (hasAnyMissionField) {
       const result = {};
@@ -2831,6 +3504,14 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         defeated: false
       };
       
+      result.costelloVisited = !!data.costelloVisited;
+      if (Array.isArray(data.sevenSealsCompleted) && data.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
+        result.sevenSealsCompleted = data.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
+      } else if (Array.isArray(data.sevenSealsVisited)) {
+        result.sevenSealsCompleted = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.map(roomName => data.sevenSealsVisited.includes(roomName));
+      } else {
+        result.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
+      }
       result.__isEmpty = false;
       return result;
     }
@@ -2847,11 +3528,13 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     if (!playerName) return;
     const hashedPlayer = await hashUsername(playerName);
     
-    // Check if progress has any registered mission fields, ironOre, or mornenion
+    // Check if progress has any registered mission fields, ironOre, mornenion, or sevenSealsCompleted
     const hasNestedFormat = progress && (
       Object.values(MISSION_FIREBASE_KEY_MAP).some(key => progress[key]) || 
       progress.ironOre ||
-      progress.mornenion
+      progress.mornenion ||
+      progress.costelloVisited ||
+      Array.isArray(progress.sevenSealsCompleted)
     );
     
     const normalized = hasNestedFormat
@@ -2887,6 +3570,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             defeated: false
           };
           
+          result.costelloVisited = !!progress.costelloVisited;
+          result.sevenSealsCompleted = normalizeSevenSealsCompleted(progress.sevenSealsCompleted);
           return result;
         })()
       : {
@@ -3004,6 +3689,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     }
     if (progress.letter) {
       if (progress.letter.completed) count++;
+    }
+    if (progress.monksStudy) {
+      if (progress.monksStudy.completed) count++;
     }
     if (progress.alDeeFishing) {
       if (progress.alDeeFishing.completed) count++;
@@ -3273,7 +3961,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         'Magnet',
         'Light Shovel',
         'Elvenhair Rope',
-        'The Holy Tible'
+        'The Holy Tible',
+        'Castello\'s diary',
+        'Blessed Ankh'
       ].includes(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
@@ -5314,8 +6004,22 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
           `;
           const descDiv = document.createElement('div');
-          descDiv.textContent = productDef.description;
-          descDiv.style.cssText = 'font-size: 11px; color: rgb(150, 150, 150); font-style: italic; text-align: center;';
+          if (productDef.name === 'Castello\'s diary') {
+            descDiv.style.cssText = 'font-size: 11px; font-style: italic; text-align: center;';
+            SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.forEach((label, i) => {
+              const done = getSealCompleted(i);
+              const line = document.createElement('div');
+              line.textContent = label;
+              line.style.color = done ? '#4CAF50' : '#f44336';
+              descDiv.appendChild(line);
+            });
+          } else {
+            descDiv.textContent = productDef.description;
+            descDiv.style.cssText = 'font-size: 11px; color: rgb(150, 150, 150); font-style: italic; text-align: center;';
+            if (productDef.description && productDef.description.includes('\n')) {
+              descDiv.style.whiteSpace = 'pre-line';
+            }
+          }
           descFrame.appendChild(descDiv);
 
           // Add toggle button for Fishing Rod or Light Shovel inside the description frame
@@ -5848,8 +6552,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       }
 
       // kingChatState is now defined globally
-      // All missions (Al Dee missions are shown but can only be accepted through Al Dee)
-      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION];
+      // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = display order in Quest Log (Monks Study after The search for the Light; Queen Banshees after Monks Study).
+      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION, KING_MONKS_STUDY_MISSION, COSTELLO_QUEEN_BANSHEES_MISSION];
 
       // Mission Registry: Maps mission IDs to their state property names in kingChatState
       // This centralizes mission-to-state mapping for easier maintenance
@@ -5857,6 +6561,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         [KING_COPPER_KEY_MISSION.id]: 'progressCopper',
         [KING_RED_DRAGON_MISSION.id]: 'progressDragon',
         [KING_LETTER_MISSION.id]: 'progressLetter',
+        [KING_MONKS_STUDY_MISSION.id]: 'progressMonksStudy',
+        [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'progressQueenBanshees',
         [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
         [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope'
       };
@@ -5866,6 +6572,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         [KING_COPPER_KEY_MISSION.id]: 'copper',
         [KING_RED_DRAGON_MISSION.id]: 'dragon',
         [KING_LETTER_MISSION.id]: 'letter',
+        [KING_MONKS_STUDY_MISSION.id]: 'monksStudy',
+        [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'queenBanshees',
         [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
         [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope'
       };
@@ -5891,20 +6599,23 @@ function createNPCCooldownManager(cooldownMs = 1000) {
 
       function areAllMissionsCompleted() {
         // Only check King Tibianus missions for completion status
+        const hasHolyTible = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
         const kingMissions = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION];
+        if (hasHolyTible) kingMissions.push(KING_MONKS_STUDY_MISSION);
         return kingMissions.every(mission => getMissionProgress(mission).completed);
       }
 
       function currentMission() {
         // Return the first incomplete King Tibianus mission, or null if all are completed
-        // Note: Al Dee missions are shown in UI but handled separately
+        // The Monks Study is only available after completing the search for the Light (player has Holy Tible)
+        const hasHolyTible = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
         const kingMissions = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION];
+        if (hasHolyTible) kingMissions.push(KING_MONKS_STUDY_MISSION);
         for (const mission of kingMissions) {
           if (!getMissionProgress(mission).completed) {
             return mission;
           }
         }
-        // All King Tibianus missions completed, no more missions available
         return null;
       }
 
@@ -5940,9 +6651,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           missionPrompt: mission.prompt,
           thankYou: mission.accept,
           thankYouNoLetter: mission.acceptNoLetter || mission.accept,
-          keyQuestion: mission.askForKey || mission.askForItems || 'Have you found what I asked for?',
+          keyQuestion: mission.askForKey || mission.askForItems || mission.askForItem || 'Have you found what I asked for?',
           keyComplete: mission.complete,
-          keyScoldNoKey: mission.missingKey || mission.missingItems || 'You claim yes but lack what I asked for.',
+          keyScoldNoKey: mission.missingKey || mission.missingItems || mission.missingItem || 'You claim yes but lack what I asked for.',
           keyKeepSearching: mission.keepSearching,
           keyAnswerYesNo: mission.answerYesNo,
           missionCompleted: mission.alreadyCompleted,
@@ -6209,8 +6920,12 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             line2.textContent = 'Reward: Light Shovel.';
           } else if (selectedMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
             line2.textContent = 'Reward: The Holy Tible.';
-          } else {
+          } else if (selectedMission.id === KING_MONKS_STUDY_MISSION.id) {
             line2.textContent = `Reward: ${selectedMission.rewardCoins} guild coins.`;
+          } else if (selectedMission.id === COSTELLO_QUEEN_BANSHEES_MISSION.id) {
+            line2.textContent = 'Reward: Blessed Ankh.';
+          } else {
+            line2.textContent = selectedMission.rewardCoins ? `Reward: ${selectedMission.rewardCoins} guild coins.` : '';
           }
           descBlock.appendChild(line1);
           descBlock.appendChild(line2);
@@ -6320,6 +7035,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
 
       async function loadKingTibianusProgress() {
         try {
+          // Refresh quest items so currentMission() can check for Holy Tible (Monks Study availability)
+          await getQuestItems(false);
           const playerName = getCurrentPlayerName();
           const progress = await getKingTibianusProgress(playerName);
           await grantStarterSilverTokenIfNeeded(progress, playerName);
@@ -6409,6 +7126,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             kingChatState.progressDragon.accepted = true;
           } else if (mission.id === KING_LETTER_MISSION.id) {
             kingChatState.progressLetter.accepted = true;
+          } else if (mission.id === KING_MONKS_STUDY_MISSION.id) {
+            kingChatState.progressMonksStudy.accepted = true;
           }
           activeMission = currentMission();
           selectedMissionId = null;
@@ -6447,6 +7166,10 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             } catch (err) {
               console.error('[Quests Mod][King Tibianus] Error awarding Obsidian Knife:', err);
             }
+          }
+
+          if (mission.id === KING_MONKS_STUDY_MISSION.id && typeof updateTile53CostelloRightClickState === 'function') {
+            updateTile53CostelloRightClickState();
           }
 
           // Exchange Letter from Al Dee for Stamped Letter when letter mission is accepted
@@ -6718,6 +7441,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         const mentionsKey = lowerText.includes('key') || lowerText.includes('copper key');
         const mentionsDragon = lowerText.includes('dragon') || lowerText.includes('scale') || lowerText.includes('leather');
         const mentionsLetter = lowerText.includes('letter') || lowerText.includes('scroll');
+        const mentionsMonks = lowerText.includes('costello') || lowerText.includes('monastery') || lowerText.includes('monks') || lowerText.includes('white raven');
+        // Monks Study is only available after completing the search for the Light (player must have Holy Tible in quest inventory)
+        const hasHolyTible = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
 
         if (areAllMissionsCompleted()) {
           return activeMission;
@@ -6729,6 +7455,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           return MISSIONS.find(m => m.id === KING_COPPER_KEY_MISSION.id) || activeMission;
         } else if (mentionsDragon) {
           return MISSIONS.find(m => m.id === KING_RED_DRAGON_MISSION.id) || activeMission;
+        } else if (mentionsMonks && hasHolyTible) {
+          return MISSIONS.find(m => m.id === KING_MONKS_STUDY_MISSION.id) || activeMission;
         }
         return activeMission;
       }
@@ -6752,6 +7480,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             hasItems = await hasRedDragonMaterials();
           } else if (activeMission.id === KING_LETTER_MISSION.id) {
             // TODO: Implement proper letter delivery tracking
+            hasItems = false;
+          } else if (activeMission.id === KING_MONKS_STUDY_MISSION.id) {
+            // Completion can be set when player finds Costello (e.g. via Costello NPC); until then keep searching
             hasItems = false;
           }
 
@@ -6868,6 +7599,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         const mentionsKey = lowerText.includes('key') || lowerText.includes('copper key');
         const mentionsDragon = lowerText.includes('dragon') || lowerText.includes('scale') || lowerText.includes('leather');
         const mentionsLetter = lowerText.includes('letter') || lowerText.includes('scroll');
+        const mentionsMonks = lowerText.includes('costello') || lowerText.includes('monastery') || lowerText.includes('monks') || lowerText.includes('white raven');
 
         // Determine target mission based on what player mentioned
         const targetMission = determineTargetMission(lowerText, activeMission);
@@ -6893,14 +7625,18 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
           showCoinReceivedToast();
-        } else if (areAllMissionsCompleted() && (mentionsKey || mentionsDragon || lowerText.includes('mission') || lowerText.includes('quest'))) {
+        } else if (areAllMissionsCompleted() && (mentionsKey || mentionsDragon || mentionsMonks || lowerText.includes('mission') || lowerText.includes('quest'))) {
           // All missions completed, tell player to come back later
           kingResponse = 'All missions have been completed. Come back later for more tasks.';
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
-        } else if (mentionsKey || mentionsDragon || mentionsLetter) {
-          // Prevent King Tibianus from offering Al Dee missions
-          if (targetMission.id === AL_DEE_FISHING_MISSION.id || targetMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
+        } else if (mentionsKey || mentionsDragon || mentionsLetter || mentionsMonks) {
+          const hasHolyTibleForMonks = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
+          if (mentionsMonks && !hasHolyTibleForMonks) {
+            kingResponse = 'You must first complete the search for the Light and possess the Holy Tible before I can entrust you with that task.';
+            kingChatState.missionOffered = false;
+            kingChatState.offeredMission = null;
+          } else if (targetMission.id === AL_DEE_FISHING_MISSION.id || targetMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
             kingResponse = 'That mission belongs to Al Dee, the rope merchant in Rookgaard. You must speak with him to accept it.';
             kingChatState.missionOffered = false;
             kingChatState.offeredMission = null;
@@ -8165,6 +8901,300 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     }, 50);
   }
 
+  // Costello Modal (Isle of Kings, Carlin) – same layout as Al Dee but with Costello image and greeting
+  function showCostelloModal() {
+    clearTimeoutOrInterval(modalTimeout);
+    clearTimeoutOrInterval(dialogTimeout);
+    for (let i = 0; i < 2; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    }
+
+    kingChatState.costelloVisited = true;
+    const playerName = getCurrentPlayerName();
+    if (playerName) {
+      getKingTibianusProgress(playerName).then((currentProgress) => {
+        const merged = { ...currentProgress, costelloVisited: true };
+        saveKingTibianusProgress(playerName, merged).catch((err) => console.error('[Quests Mod][Costello] Error saving costelloVisited:', err));
+      }).catch((err) => console.error('[Quests Mod][Costello] Error loading progress for costelloVisited:', err));
+    }
+
+    modalTimeout = setTimeout(() => {
+      const contentDiv = document.createElement('div');
+      applyModalContentStyles(contentDiv, KING_TIBI_MODAL_WIDTH, COSTELLO_MODAL_HEIGHT);
+
+      const costelloIconUrl = getQuestItemsAssetUrl('Costello.gif');
+
+      const modalContent = document.createElement('div');
+      modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; height: 100%;';
+
+      const row1 = document.createElement('div');
+      row1.className = 'grid gap-3 sm:grid-cols-[min-content_1fr]';
+      row1.style.cssText = 'align-self: center; flex: 1 1 0; min-height: 0;';
+
+      const imageContainer = document.createElement('div');
+      imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
+      imageContainer.style.cssText = 'width: 110px; min-width: 110px; height: 150px; min-height: 150px; padding: 0; align-self: stretch;';
+
+      const costelloImgWrapper = document.createElement('div');
+      costelloImgWrapper.style.cssText = 'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
+
+      const costelloImg = document.createElement('img');
+      costelloImg.src = costelloIconUrl;
+      costelloImg.alt = 'Costello';
+      costelloImg.className = 'pixelated';
+      costelloImg.style.cssText = 'max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; image-rendering: pixelated;';
+      costelloImgWrapper.appendChild(costelloImg);
+      imageContainer.appendChild(costelloImgWrapper);
+
+      const messageContainer = document.createElement('div');
+      messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular';
+      messageContainer.style.cssText = 'width: 290px; height: 150px; min-height: 150px; max-height: 150px; overflow-y: auto; flex-shrink: 0; box-sizing: border-box;';
+      messageContainer.id = 'costello-messages';
+
+      const costelloPlayerName = getCurrentPlayerName() || 'Player';
+      const costelloCooldown = createNPCCooldownManager(1000);
+
+      function addMessageToConversation(sender, text, isCostello = false) {
+        const messageP = document.createElement('p');
+        messageP.className = 'inline text-monster';
+        messageP.style.color = isCostello ? 'rgb(135, 206, 250)' : 'rgb(200, 180, 255)';
+        messageP.textContent = sender + ': ' + text;
+        messageContainer.appendChild(messageP);
+        setTimeout(() => { messageContainer.scrollTop = messageContainer.scrollHeight; }, 0);
+      }
+
+      const welcomeText = 'Welcome, ' + costelloPlayerName + '! Feel free to tell me what brings you here.';
+      addMessageToConversation('Costello', welcomeText, true);
+
+      row1.appendChild(imageContainer);
+      row1.appendChild(messageContainer);
+      modalContent.appendChild(row1);
+
+      const inputRow = document.createElement('div');
+      inputRow.style.cssText = 'display: flex; gap: 6px; align-items: center; flex-shrink: 0;';
+      const costelloTextarea = document.createElement('textarea');
+      costelloTextarea.setAttribute('wrap', 'off');
+      costelloTextarea.placeholder = 'Type your message to Costello...';
+      costelloTextarea.style.cssText = 'flex:1;height:28px;max-height:28px;min-height:28px;padding:4px 6px;background-color:#333;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;color:rgb(255,255,255);font-size:13px;resize:none;box-sizing:border-box;outline:none;';
+      costelloTextarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessageToCostello();
+        }
+      });
+      const costelloSendBtn = document.createElement('button');
+      costelloSendBtn.textContent = 'Send';
+      costelloSendBtn.className = 'primary';
+      costelloSendBtn.style.cssText = `
+        height: 28px;
+        padding: 4px 10px;
+        white-space: nowrap;
+        font-size: 13px;
+        line-height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') center center / cover;
+        border: 4px solid transparent;
+        border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+        color: rgb(255, 255, 255);
+        cursor: pointer;
+        font-family: inherit;
+      `;
+      costelloSendBtn.addEventListener('click', sendMessageToCostello);
+
+      let costelloAwaitingHolyTible = false;
+      let costelloOfferingQueenBanshees = false;
+
+      async function sendMessageToCostello() {
+        const text = (costelloTextarea.value || '').trim();
+        if (!text) return;
+        addMessageToConversation(costelloPlayerName, text, false);
+        costelloTextarea.value = '';
+        costelloCooldown.clearPendingResponse();
+        const lowerText = text.toLowerCase();
+
+        // Complete Queen Banshees when all seven seals are done and player says they are done (even without saying "mission")
+        const queenBansheesProgress = getMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION);
+        const completionKeywords = ['done', 'task', 'finished', 'completed', 'return', 'yes', 'complete', 'ready'];
+        if (queenBansheesProgress.accepted && !queenBansheesProgress.completed && areAllSevenSealsCompleted() && completionKeywords.some(kw => lowerText.includes(kw))) {
+          try {
+            await addQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName, 1);
+            await consumeQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName, 1);
+            setMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION, { accepted: true, completed: true });
+            kingChatState.progressQueenBanshees.accepted = true;
+            kingChatState.progressQueenBanshees.completed = true;
+            const allProgress = getAllMissionProgress();
+            await saveKingTibianusProgress(costelloPlayerName, allProgress);
+            showToast({
+              productName: COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName,
+              message: 'Received Blessed Ankh!',
+              duration: TOAST_DURATION_IMPORTANT,
+              logPrefix: '[Quests Mod][Costello]'
+            });
+            showToast({
+              message: 'Castello\'s diary has been returned.',
+              duration: TOAST_DURATION_IMPORTANT,
+              logPrefix: '[Quests Mod][Costello]'
+            });
+            costelloCooldown.queueResponse(text, 'You have completed the seven seals of Ghostlands. The Queen Of The Banshees task is complete. You have received the Blessed Ankh. My thanks.', addMessageToConversation, 'Costello');
+          } catch (err) {
+            console.error('[Quests Mod][Costello] Error completing Queen Banshees:', err);
+            costelloCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessageToConversation, 'Costello');
+          }
+          return;
+        }
+
+        if (lowerText.includes('mission') || lowerText.includes('quest')) {
+          const monksProgress = getMissionProgress(KING_MONKS_STUDY_MISSION);
+          const queenBansheesProgress = getMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION);
+          if (monksProgress.accepted && !monksProgress.completed) {
+            costelloAwaitingHolyTible = true;
+            costelloCooldown.queueResponse(text, 'The King has sent you. Do you have the Holy Tible with you? I need to see it to complete your study here.', addMessageToConversation, 'Costello');
+          } else if (monksProgress.completed && !queenBansheesProgress.accepted) {
+            costelloOfferingQueenBanshees = true;
+            costelloCooldown.queueResponse(text, COSTELLO_QUEEN_BANSHEES_MISSION.prompt, addMessageToConversation, 'Costello');
+          } else if (queenBansheesProgress.accepted && !queenBansheesProgress.completed) {
+            const hasAllSeven = areAllSevenSealsCompleted();
+            if (hasAllSeven && (lowerText.includes('done') || lowerText.includes('return') || lowerText.includes('finished') || lowerText.includes('completed') || lowerText.includes('yes'))) {
+              try {
+                await addQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName, 1);
+                await consumeQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName, 1);
+                setMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION, { accepted: true, completed: true });
+                kingChatState.progressQueenBanshees.accepted = true;
+                kingChatState.progressQueenBanshees.completed = true;
+                const allProgress = getAllMissionProgress();
+                await saveKingTibianusProgress(costelloPlayerName, allProgress);
+                showToast({
+                  productName: COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName,
+                  message: 'Received Blessed Ankh!',
+                  duration: TOAST_DURATION_IMPORTANT,
+                  logPrefix: '[Quests Mod][Costello]'
+                });
+                showToast({
+                  message: 'Castello\'s diary has been returned.',
+                  duration: TOAST_DURATION_IMPORTANT,
+                  logPrefix: '[Quests Mod][Costello]'
+                });
+                costelloCooldown.queueResponse(text, 'You have completed the seven seals of Ghostlands. The Queen Of The Banshees task is complete. You have received the Blessed Ankh. My thanks.', addMessageToConversation, 'Costello');
+              } catch (err) {
+                console.error('[Quests Mod][Costello] Error completing Queen Banshees:', err);
+                costelloCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessageToConversation, 'Costello');
+              }
+            } else {
+              costelloCooldown.queueResponse(text, hasAllSeven
+                ? 'You have completed all seven seals. Return to me and say you are done when you wish to complete this task.'
+                : COSTELLO_QUEEN_BANSHEES_MISSION.alreadyActive, addMessageToConversation, 'Costello');
+            }
+          } else {
+            costelloCooldown.queueResponse(text, 'I have no further mission for you. Perhaps the King has work for you.', addMessageToConversation, 'Costello');
+          }
+          return;
+        }
+
+        if (costelloOfferingQueenBanshees && lowerText.includes('yes')) {
+          costelloOfferingQueenBanshees = false;
+          try {
+            await addQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName, 1);
+            setMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION, { accepted: true, completed: false });
+            kingChatState.progressQueenBanshees.accepted = true;
+            kingChatState.progressQueenBanshees.completed = false;
+            setMissionProgress(KING_MONKS_STUDY_MISSION, { accepted: true, completed: true });
+            kingChatState.progressMonksStudy.accepted = true;
+            kingChatState.progressMonksStudy.completed = true;
+            const allProgress = getAllMissionProgress();
+            await saveKingTibianusProgress(costelloPlayerName, allProgress);
+            costelloCooldown.queueResponse(text, COSTELLO_QUEEN_BANSHEES_MISSION.accept + ' You have received my diary.', addMessageToConversation, 'Costello');
+          } catch (err) {
+            console.error('[Quests Mod][Costello] Error accepting Queen Banshees:', err);
+            costelloCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessageToConversation, 'Costello');
+          }
+          return;
+        }
+        if (costelloOfferingQueenBanshees && (lowerText.includes('no') || lowerText.includes('not'))) {
+          costelloOfferingQueenBanshees = false;
+          costelloCooldown.queueResponse(text, 'Return when you are ready for this task.', addMessageToConversation, 'Costello');
+          return;
+        }
+
+        if (costelloAwaitingHolyTible && lowerText.includes('yes')) {
+          try {
+            const questItems = await getQuestItems(false);
+            const hasTible = (questItems['The Holy Tible'] || 0) >= 1;
+            if (hasTible) {
+              await consumeQuestItem('The Holy Tible', 1);
+              setMissionProgress(KING_MONKS_STUDY_MISSION, { accepted: true, completed: true });
+              kingChatState.progressMonksStudy.accepted = true;
+              kingChatState.progressMonksStudy.completed = true;
+              const allProgress = getAllMissionProgress();
+              await saveKingTibianusProgress(costelloPlayerName, allProgress);
+              const coinsAdder = globalThis.addGuildCoins ||
+                (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+                (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
+                (typeof addGuildCoins === 'function' ? addGuildCoins : null);
+              if (coinsAdder) {
+                await coinsAdder(KING_GUILD_COIN_REWARD);
+              }
+              costelloAwaitingHolyTible = false;
+              costelloCooldown.queueResponse(text, 'Thank you. Your study here is complete. Here are ' + KING_GUILD_COIN_REWARD + ' guild coins as a reward.', addMessageToConversation, 'Costello');
+            } else {
+              costelloCooldown.queueResponse(text, 'You do not have the Holy Tible. Return when you have it.', addMessageToConversation, 'Costello');
+            }
+          } catch (err) {
+            console.error('[Quests Mod][Costello] Error completing Monks Study:', err);
+            costelloCooldown.queueResponse(text, 'Something went wrong. Return when you have the Holy Tible.', addMessageToConversation, 'Costello');
+          }
+          return;
+        }
+
+        if (costelloAwaitingHolyTible && lowerText.includes('no')) {
+          costelloAwaitingHolyTible = false;
+          costelloCooldown.queueResponse(text, 'Return when you have the Holy Tible.', addMessageToConversation, 'Costello');
+          return;
+        }
+
+        const response = getCostelloResponse(text, costelloPlayerName);
+        costelloCooldown.queueResponse(text, response, addMessageToConversation, 'Costello');
+      }
+
+      inputRow.appendChild(costelloTextarea);
+      inputRow.appendChild(costelloSendBtn);
+      modalContent.appendChild(inputRow);
+      contentDiv.appendChild(modalContent);
+
+      const api = (typeof globalThis !== 'undefined' && globalThis.BestiaryModAPI) || (typeof window !== 'undefined' && window.BestiaryModAPI);
+      if (api && api.ui && api.ui.components && api.ui.components.createModal) {
+        const modal = api.ui.components.createModal({
+          title: 'Costello',
+          width: KING_TIBI_MODAL_WIDTH,
+          height: COSTELLO_MODAL_HEIGHT,
+          content: contentDiv,
+          buttons: []
+        });
+        dialogTimeout = setTimeout(() => {
+          let dialog = modal?.element || document.querySelector('div[role="dialog"][data-state="open"]');
+          if (dialog) {
+            const dialogRoot = dialog.getAttribute?.('role') === 'dialog' ? dialog : (dialog.closest?.('[role="dialog"]') || dialog);
+            if (typeof applyDialogStyles === 'function') {
+              applyDialogStyles(dialogRoot, KING_TIBI_MODAL_WIDTH, COSTELLO_MODAL_HEIGHT);
+            }
+            dialogRoot.style.setProperty('width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
+            dialogRoot.style.setProperty('min-width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
+            dialogRoot.style.setProperty('max-width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
+            dialogRoot.style.setProperty('height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
+            dialogRoot.style.setProperty('min-height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
+            dialogRoot.style.setProperty('max-height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
+            if (typeof removeDefaultModalFooter === 'function') {
+              removeDefaultModalFooter(dialogRoot);
+            }
+          }
+          dialogTimeout = null;
+        }, 0);
+      }
+      modalTimeout = null;
+    }, 50);
+  }
+
   // =======================
   // 7. Quest Log Tab Functions
   // =======================
@@ -8734,7 +9764,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
   // - checkMissionState(): Check current mission state in console
   // - setMissionAccepted(missionId): Set a mission as accepted (default: king_letter_al_dee)
   // - resetQuest(missionId): Reset a quest to not accepted/not completed
-  //   Available mission IDs: 'king_copper_key', 'king_red_dragon', 'king_letter_al_dee', 'al_dee_fishing_gold'
+  //   Available mission IDs: 'king_copper_key', 'king_red_dragon', 'king_letter_al_dee', 'king_monks_study', 'costello_queen_banshees', 'al_dee_fishing_gold', 'al_dee_golden_rope'
   // - resetAlDeeFishing(): Convenience function to reset Al Dee fishing mission specifically
   // - resetAllQuests(): Reset ALL quests, quest items, Al Dee shop purchases, Copper Key received status, DELETE all Firebase entries, and grant Silver Token
 
@@ -8778,6 +9808,19 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           await saveKingTibianusProgress(playerName, progress);
           console.log('[Quests Mod][Dev] Mission progress saved to Firebase');
         }
+      } else if (missionId === 'king_monks_study') {
+        setMissionProgress(KING_MONKS_STUDY_MISSION, { accepted: true, completed: false });
+        console.log('[Quests Mod][Dev] KING_MONKS_STUDY_MISSION set to accepted locally');
+
+        const playerName = getCurrentPlayerName();
+        if (playerName) {
+          const allProgress = getAllMissionProgress();
+          await saveKingTibianusProgress(playerName, allProgress);
+          console.log('[Quests Mod][Dev] Mission progress saved to Firebase');
+        }
+        if (typeof updateTile53CostelloRightClickState === 'function') {
+          updateTile53CostelloRightClickState();
+        }
       }
       // Force update tile 79 state
       updateTile79RightClickState();
@@ -8819,6 +9862,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         'king_copper_key': 'progressCopper',
         'king_red_dragon': 'progressDragon',
         'king_letter_al_dee': 'progressLetter',
+        'king_monks_study': 'progressMonksStudy',
+        'costello_queen_banshees': 'progressQueenBanshees',
         'al_dee_fishing_gold': 'progressAlDeeFishing',
         'al_dee_golden_rope': 'progressAlDeeGoldenRope'
       };
@@ -8831,6 +9876,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
 
       // Reset local state
       kingChatState[stateKey] = { accepted: false, completed: false };
+      if (missionId === 'costello_queen_banshees') {
+        kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
+      }
       console.log('[Quests Mod][Dev] Local state reset for', missionId);
 
       // Save to Firebase
@@ -8838,12 +9886,20 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         copper: kingChatState.progressCopper,
         dragon: kingChatState.progressDragon,
         letter: kingChatState.progressLetter,
+        monksStudy: kingChatState.progressMonksStudy,
+        queenBanshees: kingChatState.progressQueenBanshees,
         alDeeFishing: kingChatState.progressAlDeeFishing,
-        alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope
+        alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope,
+        costelloVisited: kingChatState.costelloVisited,
+        sevenSealsCompleted: normalizeSevenSealsCompleted(kingChatState.sevenSealsCompleted)
       };
 
       await saveKingTibianusProgress(playerName, progress);
       console.log('[Quests Mod][Dev] Quest reset saved to Firebase for', missionId);
+
+      if (missionId === 'king_monks_study' && typeof updateTile53CostelloRightClickState === 'function') {
+        updateTile53CostelloRightClickState();
+      }
 
       // If resetting golden rope quest and it's not accepted/completed, remove Elvenhair Rope from inventory
       if (missionId === 'al_dee_golden_rope') {
@@ -8874,6 +9930,13 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     await resetQuest('al_dee_fishing_gold');
   };
 
+  // Seven seals (Queen Banshees): complete each seal separately. Use setSealCompleted(sealIndex, true) to mark a seal done.
+  window.setSealCompleted = setSealCompleted;
+  window.getSealCompleted = getSealCompleted;
+  window.areAllSevenSealsCompleted = areAllSevenSealsCompleted;
+  window.QUESTS_SEAL_INDICES = { FIRST_SEAL, SECOND_SEAL, THIRD_SEAL, FOURTH_SEAL, FIFTH_SEAL, SIXTH_SEAL, SEVENTH_SEAL };
+  window.SEVEN_SEALS_COUNT = SEVEN_SEALS_COUNT;
+
   // Debug function to reset ALL quests and quest items
   window.resetAllQuests = async function() {
     console.log('[Quests Mod][Dev] Resetting ALL quests and quest items');
@@ -8888,8 +9951,12 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       kingChatState.progressCopper = { accepted: false, completed: false };
       kingChatState.progressDragon = { accepted: false, completed: false };
       kingChatState.progressLetter = { accepted: false, completed: false };
+      kingChatState.progressMonksStudy = { accepted: false, completed: false };
+      kingChatState.progressQueenBanshees = { accepted: false, completed: false };
       kingChatState.progressAlDeeFishing = { accepted: false, completed: false };
       kingChatState.progressAlDeeGoldenRope = { accepted: false, completed: false };
+      kingChatState.costelloVisited = false;
+      kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
       console.log('[Quests Mod][Dev] Local quest state reset');
 
       // Delete quest progress from Firebase
@@ -8926,6 +9993,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
 
       // Force update UI state
       updateTile79RightClickState();
+      if (typeof updateTile53CostelloRightClickState === 'function') {
+        updateTile53CostelloRightClickState();
+      }
       console.log('[Quests Mod][Dev] UI state updated');
 
       console.log('[Quests Mod][Dev] All quests and quest items reset complete');
@@ -9222,6 +10292,31 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             stopGameTimerSubscription();
             overlayHidingDone = false;
             villainSetupDone = false;
+          }
+
+          // Check if we're leaving Banshee's Last Room (reset one-time setup flag)
+          if (currentRoomName && currentRoomName !== BANSHEE_LAST_ROOM_NAME && bansheeVillainSetupDone) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Banshee\'s Last Room - resetting villain setup flag');
+            bansheeVillainSetupDone = false;
+          }
+
+          // Banshee's Last Room: same as Mornenion — when we enter via portal, remove original villains and add Queen of the Banshee
+          if (currentRoomName === BANSHEE_LAST_ROOM_NAME && playerUsedPortalToBansheeLastRoom && bansheeLastRoomBattle) {
+            if (!bansheeVillainSetupDone) {
+              console.log('[Quests Mod][Overlay Hider] Entering Banshee\'s Last Room - removing original villains and adding custom villain');
+              hideQuestOverlays();
+              hideHeroEditorButton();
+              bansheeLastRoomBattle.removeOriginalVillains();
+              bansheeVillainSetupDone = true;
+            }
+            // Re-add custom villains if any missing (e.g. after battle)
+            const queenExists = boardConfig.some(entity =>
+              entity.key && entity.key.startsWith('banshee-queen-tile-95-')
+            );
+            if (!queenExists) {
+              console.log('[Quests Mod][Overlay Hider] Banshee Last Room villains missing - re-adding');
+              bansheeLastRoomBattle.addVillains();
+            }
           }
 
           // Check if we're in Ab'Dendriel Hive or related areas
@@ -9928,6 +11023,82 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     }
   }
 
+  // Navigate to Demonrage Seal (e.g. after Banshee's Last Room battle)
+  function navigateToDemonrageSeal() {
+    try {
+      const roomId = getRoomIdByRoomName(SIXTH_SEAL_ROOM);
+      if (!roomId) {
+        console.warn('[Quests Mod][Banshee Last Room] Demonrage Seal room not found');
+        return;
+      }
+      console.log('[Quests Mod][Banshee Last Room] Navigating to Demonrage Seal');
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId: roomId
+      });
+    } catch (error) {
+      console.error('[Quests Mod][Banshee Last Room] Error navigating to Demonrage Seal:', error);
+    }
+  }
+
+  // Restore board setup for Banshee's Last Room (delegates to CustomBattle)
+  function restoreBoardSetupBanshee() {
+    if (bansheeLastRoomBattle) {
+      bansheeLastRoomBattle.restoreBoardSetup();
+    } else {
+      console.warn('[Quests Mod][Banshee Last Room] Battle not initialized');
+    }
+  }
+
+  // Clean up Banshee's Last Room quest state and battle; call after victory/defeat modal close (same style as Mornenion)
+  function cleanupBansheeLastRoomQuest() {
+    try {
+      playerUsedPortalToBansheeLastRoom = false;
+      bansheeVillainSetupDone = false;
+      if (bansheeLastRoomBattle) {
+        bansheeLastRoomBattle.cleanup(restoreBoardSetupBanshee, showQuestOverlays);
+        bansheeLastRoomBattle = null;
+        console.log('[Quests Mod][Banshee Last Room] Battle cleaned up');
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Banshee Last Room] Error cleaning up:', error);
+    }
+  }
+
+  // Setup Banshee's Last Room tile restrictions (delegates to CustomBattle, same as Mornenion)
+  function setupBansheeTileRestrictions() {
+    if (bansheeLastRoomBattle) {
+      bansheeLastRoomBattle.setupTileRestrictions(
+        () => playerUsedPortalToBansheeLastRoom,
+        (toastData) => {
+          showToast({
+            message: toastData.message,
+            duration: toastData.duration || 3000,
+            logPrefix: '[Quests Mod][Banshee Last Room]'
+          });
+        }
+      );
+      setupBansheeAllyLimit();
+    } else {
+      console.warn('[Quests Mod][Banshee Last Room] Battle not initialized');
+    }
+  }
+
+  // Setup ally limit for Banshee's Last Room (delegates to CustomBattle)
+  function setupBansheeAllyLimit() {
+    if (bansheeLastRoomBattle) {
+      bansheeLastRoomBattle.setupAllyLimit(
+        () => playerUsedPortalToBansheeLastRoom,
+        (toastData) => {
+          showToast({
+            message: toastData.message,
+            duration: toastData.duration || 3000,
+            logPrefix: '[Quests Mod][Banshee Last Room]'
+          });
+        }
+      );
+    }
+  }
 
   // Setup Mornenion tile restrictions (delegates to CustomBattle)
   function setupMornenionTileRestrictions() {
@@ -10541,6 +11712,1032 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     return tile79ContextMenu;
   }
 
+  // =======================
+  // Tile 53 Costello (Isle of Kings, Carlin)
+  // =======================
+
+  const COSTELLO_TILE_INDEX = 53;
+
+  function setupTile53CostelloObserver() {
+    if (tile53BoardSubscription) return;
+
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+      tile53BoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        updateTile53CostelloRightClickState(boardContext);
+      });
+      updateTile53CostelloRightClickState(globalThis.state?.board?.getSnapshot()?.context);
+      console.log('[Quests Mod][Tile 53 Costello] Board subscription set up for Isle of Kings');
+    }
+  }
+
+  function cleanupTile53CostelloObserver() {
+    if (tile53BoardSubscription) {
+      try {
+        tile53BoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tile 53 Costello] Error unsubscribing from board:', e);
+      }
+      tile53BoardSubscription = null;
+    }
+  }
+
+  function setupSevenSealsRoomObserver() {
+    if (sevenSealsBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+
+    sevenSealsBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      const progress = kingChatState.progressQueenBanshees;
+      if (!progress?.accepted || progress.completed) return;
+
+      const currentRoomId = getCurrentRoomId(boardContext);
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      const currentRoomName = roomNames && currentRoomId ? roomNames[currentRoomId] : null;
+      if (!currentRoomName || !SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.includes(currentRoomName)) return;
+
+      const sealIndex = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.indexOf(currentRoomName);
+      if (sealIndex >= 0 && sealIndex < SEVEN_SEALS_COUNT) {
+        if (!Array.isArray(kingChatState.sevenSealsCompleted) || kingChatState.sevenSealsCompleted.length !== SEVEN_SEALS_COUNT) {
+          kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
+        }
+        if (!kingChatState.sevenSealsCompleted[sealIndex]) {
+          kingChatState.sevenSealsCompleted[sealIndex] = true;
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            const allProgress = getAllMissionProgress();
+            saveKingTibianusProgress(playerName, allProgress).catch((err) =>
+              console.error('[Quests Mod][Queen Banshees] Error saving seal completion:', err)
+            );
+          }
+        }
+      }
+    });
+    console.log('[Quests Mod][Queen Banshees] Seven seals room observer set up');
+  }
+
+  function cleanupSevenSealsRoomObserver() {
+    if (sevenSealsBoardSubscription) {
+      try {
+        sevenSealsBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Queen Banshees] Error unsubscribing seven seals observer:', e);
+      }
+      sevenSealsBoardSubscription = null;
+    }
+  }
+
+  let lastProcessedFirstSealSeed = null;
+  let lastProcessedFourthSealSeed = null;
+
+  function playFirstSealTileCelebration() {
+    const styleId = 'quests-first-seal-celebration-style';
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        @keyframes quests-first-seal-celebration {
+          0% {
+            box-shadow: 0 0 0 0 rgba(56, 142, 60, 0), 0 0 0 0 rgba(129, 199, 132, 0);
+            filter: brightness(1) saturate(1);
+            transform: scale(1);
+          }
+          8% {
+            box-shadow: 0 0 0 4px rgba(56, 142, 60, 0.9), 0 0 24px 8px rgba(129, 199, 132, 0.8);
+            filter: brightness(1.35) saturate(1.3);
+            transform: scale(1.08);
+          }
+          16% {
+            box-shadow: 0 0 0 2px rgba(56, 142, 60, 0.6), 0 0 16px 6px rgba(129, 199, 132, 0.5);
+            filter: brightness(1.15) saturate(1.15);
+            transform: scale(1.02);
+          }
+          50% {
+            box-shadow: 0 0 0 3px rgba(56, 142, 60, 0.5), 0 0 20px 6px rgba(129, 199, 132, 0.6);
+            filter: brightness(1.2) saturate(1.2);
+            transform: scale(1.03);
+          }
+          84% {
+            box-shadow: 0 0 0 2px rgba(56, 142, 60, 0.4), 0 0 12px 4px rgba(129, 199, 132, 0.4);
+            filter: brightness(1.1) saturate(1.1);
+            transform: scale(1.01);
+          }
+          100% {
+            box-shadow: 0 0 0 2px rgba(56, 142, 60, 0.35), 0 0 10px 3px rgba(129, 199, 132, 0.35);
+            filter: brightness(1.08) saturate(1.08);
+            transform: scale(1);
+          }
+        }
+        .quests-first-seal-celebration {
+          animation: quests-first-seal-celebration 5s ease-in-out 1 forwards;
+          pointer-events: auto;
+        }
+        .quests-first-seal-poisonous-tile {
+          box-shadow: inset 0 0 0 2px rgba(56, 142, 60, 0.5), 0 0 12px 4px rgba(129, 199, 132, 0.4) !important;
+          filter: brightness(1.05) saturate(1.15) hue-rotate(-8deg) !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    const tiles = [];
+    for (const tileIndex of FIRST_SEAL_POISON_TILES) {
+      const el = document.getElementById('tile-index-' + tileIndex) || document.querySelector('[id="tile-index-' + tileIndex + '"]');
+      if (el) tiles.push(el);
+    }
+    for (const el of tiles) el.classList.add('quests-first-seal-celebration');
+    setTimeout(() => {
+      for (const el of tiles) {
+        el.classList.remove('quests-first-seal-celebration');
+        el.classList.add('quests-first-seal-poisonous-tile');
+      }
+    }, FIRST_SEAL_CELEBRATION_DURATION_MS);
+  }
+
+  function setupFirstSealBoardObserver() {
+    if (firstSealBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+
+    firstSealBoardSubscription = globalThis.state.board.subscribe(async ({ context }) => {
+      const progress = kingChatState.progressQueenBanshees;
+      if (!progress?.accepted || progress.completed) return;
+      if (getSealCompleted(FIRST_SEAL)) return;
+
+      if (context.boardConfig && !context.serverResults) {
+        if (isOnRoomByName(FIRST_SEAL_GHOSTLANDS_SURFACE_ROOM)) {
+          trackedBoardConfigFirstSeal = JSON.parse(JSON.stringify(context.boardConfig));
+        } else {
+          trackedBoardConfigFirstSeal = null;
+        }
+        return;
+      }
+
+      const serverResults = context.serverResults;
+      if (!serverResults?.rewardScreen?.victory || typeof serverResults.seed === 'undefined') return;
+      if (getSealCompleted(FIRST_SEAL)) return;
+
+      const ghostlandsSurfaceRoomId = getRoomIdByRoomName(FIRST_SEAL_GHOSTLANDS_SURFACE_ROOM);
+      let roomId = serverResults.rewardScreen?.roomId;
+      if (roomId == null) {
+        roomId = context?.selectedMap?.selectedRoom?.id ?? globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom?.id;
+      }
+      if (!ghostlandsSurfaceRoomId || roomId !== ghostlandsSurfaceRoomId) {
+        console.log('[Quests Mod][First Seal] Skipped: room mismatch', { roomId, ghostlandsSurfaceRoomId, roomName: FIRST_SEAL_GHOSTLANDS_SURFACE_ROOM });
+        return;
+      }
+
+      if (serverResults.seed === lastProcessedFirstSealSeed) return;
+      lastProcessedFirstSealSeed = serverResults.seed;
+
+      let boardToCheck = context.boardConfig || trackedBoardConfigFirstSeal;
+      if (!boardToCheck) {
+        const snap = globalThis.state?.board?.getSnapshot?.()?.context;
+        boardToCheck = snap?.boardConfig;
+      }
+      trackedBoardConfigFirstSeal = null;
+
+      if (!boardToCheck || !Array.isArray(boardToCheck)) {
+        console.log('[Quests Mod][First Seal] Skipped: no board config available');
+        return;
+      }
+
+      console.log('[Quests Mod][First Seal] Ghostlands Surface victory – checking poison tiles', FIRST_SEAL_POISON_TILES);
+      const count = countTilesWithPoisonCreature(boardToCheck, FIRST_SEAL_POISON_TILES, serverResults);
+      console.log('[Quests Mod][First Seal] Poison tiles count:', count, '(need', FIRST_SEAL_MIN_POISON_TILES + ')');
+      if (count < FIRST_SEAL_MIN_POISON_TILES) {
+        return;
+      }
+      await setSealCompleted(FIRST_SEAL, true);
+      console.log('[Quests Mod][First Seal] Completed: poison creatures on', count, 'tiles on Ghostlands Surface');
+      showToast({
+        message: 'First seal completed',
+        duration: TOAST_DURATION_IMPORTANT,
+        logPrefix: '[Quests Mod][First Seal]'
+      });
+      setTimeout(() => playFirstSealTileCelebration(), 100);
+    });
+    console.log('[Quests Mod][First Seal] Board observer set up for Ghostlands Surface (poison tiles)');
+  }
+
+  function cleanupFirstSealBoardObserver() {
+    if (firstSealBoardSubscription) {
+      try {
+        firstSealBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][First Seal] Error unsubscribing board observer:', e);
+      }
+      firstSealBoardSubscription = null;
+    }
+    trackedBoardConfigFirstSeal = null;
+    lastProcessedFirstSealSeed = null;
+  }
+
+  // Fourth Seal: completed on Demon Skeleton Hell by winning the battle with tick count under 150.
+  function setupFourthSealBoardObserver() {
+    if (fourthSealBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+
+    fourthSealBoardSubscription = globalThis.state.board.subscribe(async ({ context }) => {
+      const progress = kingChatState.progressQueenBanshees;
+      if (!progress?.accepted || progress.completed) return;
+      if (getSealCompleted(FOURTH_SEAL)) return;
+
+      const serverResults = context.serverResults;
+      if (!serverResults?.rewardScreen?.victory || typeof serverResults.seed === 'undefined') return;
+      if (getSealCompleted(FOURTH_SEAL)) return;
+
+      const demonSkeletonHellRoomId = getRoomIdByRoomName(FOURTH_SEAL_ROOM);
+      let roomId = serverResults.rewardScreen?.roomId;
+      if (roomId == null) {
+        roomId = context?.selectedMap?.selectedRoom?.id ?? globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom?.id;
+      }
+      if (!demonSkeletonHellRoomId || roomId !== demonSkeletonHellRoomId) {
+        return;
+      }
+
+      const gameTicks = serverResults.rewardScreen?.gameTicks;
+      if (typeof gameTicks !== 'number' || gameTicks >= FOURTH_SEAL_MAX_TICKS) {
+        console.log('[Quests Mod][Fourth Seal] Skipped: ticks not under 150', { gameTicks, required: '< ' + FOURTH_SEAL_MAX_TICKS });
+        return;
+      }
+
+      if (serverResults.seed === lastProcessedFourthSealSeed) return;
+      lastProcessedFourthSealSeed = serverResults.seed;
+
+      await setSealCompleted(FOURTH_SEAL, true);
+      console.log('[Quests Mod][Fourth Seal] Completed: victory on Demon Skeleton Hell with', gameTicks, 'ticks (< ' + FOURTH_SEAL_MAX_TICKS + ')');
+      showToast({
+        message: 'Fourth seal completed',
+        duration: TOAST_DURATION_IMPORTANT,
+        logPrefix: '[Quests Mod][Fourth Seal]'
+      });
+    });
+    console.log('[Quests Mod][Fourth Seal] Board observer set up for Demon Skeleton Hell (victory with ticks < ' + FOURTH_SEAL_MAX_TICKS + ')');
+  }
+
+  function cleanupFourthSealBoardObserver() {
+    if (fourthSealBoardSubscription) {
+      try {
+        fourthSealBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Fourth Seal] Error unsubscribing board observer:', e);
+      }
+      fourthSealBoardSubscription = null;
+    }
+    lastProcessedFourthSealSeed = null;
+  }
+
+  // =======================
+  // Sixth Seal (Demonrage Seal – levers in order 70, 100, 85, 55, 115; any lever can be pulled independently)
+  // =======================
+
+  function getSixthSealTileElement(tileIndex) {
+    return document.getElementById('tile-index-' + tileIndex) || document.querySelector('[id="tile-index-' + tileIndex + '"]');
+  }
+
+  function findLeverSprite(tileElement, spriteId) {
+    if (!tileElement) return null;
+    return tileElement.querySelector(`.sprite.item.relative.id-${spriteId}`) || tileElement.querySelector(`.sprite.item.id-${spriteId}`);
+  }
+
+  function setLeverSprite(tileElement, fromId, toId) {
+    const sprite = findLeverSprite(tileElement, fromId);
+    if (!sprite) return false;
+    sprite.classList.remove(`id-${fromId}`);
+    sprite.classList.add(`id-${toId}`);
+    const img = sprite.querySelector('img');
+    if (img) {
+      img.alt = toId;
+      img.setAttribute('data-cropped', 'false');
+      img.style.setProperty('--cropX', '0');
+      img.style.setProperty('--cropY', '0');
+    }
+    return true;
+  }
+
+  function resetSixthSealLevers() {
+    sixthSealLeverSequence = [];
+    for (const tileIndex of SIXTH_SEAL_LEVER_TILES) {
+      const tileEl = getSixthSealTileElement(tileIndex);
+      if (tileEl) setLeverSprite(tileEl, SIXTH_SEAL_LEVER_SPRITE.to, SIXTH_SEAL_LEVER_SPRITE.from);
+    }
+    console.log('[Quests Mod][Sixth Seal] Levers reset to unpulled');
+  }
+
+  function setAllSixthSealLeversTo(spriteId) {
+    for (const tileIndex of SIXTH_SEAL_LEVER_TILES) {
+      const tileEl = getSixthSealTileElement(tileIndex);
+      if (!tileEl) continue;
+      const fromId = findLeverSprite(tileEl, SIXTH_SEAL_LEVER_SPRITE.from) ? SIXTH_SEAL_LEVER_SPRITE.from : SIXTH_SEAL_LEVER_SPRITE.to;
+      if (fromId !== spriteId) setLeverSprite(tileEl, fromId, spriteId);
+    }
+  }
+
+  function playSixthSealLeverCelebration() {
+    const durationMs = 2000;
+    const times = 4;
+    const steps = durationMs / (times * 2);
+    let step = 0;
+    const interval = setInterval(() => {
+      const isPulled = step % 2 === 0;
+      setAllSixthSealLeversTo(isPulled ? SIXTH_SEAL_LEVER_SPRITE.to : SIXTH_SEAL_LEVER_SPRITE.from);
+      step++;
+      if (step > times * 2) {
+        clearInterval(interval);
+        setAllSixthSealLeversTo(SIXTH_SEAL_LEVER_SPRITE.to);
+      }
+    }, steps);
+  }
+
+  function handleSixthSealLeverRightClickDocument(event) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return;
+    if (getSealCompleted(SIXTH_SEAL)) return;
+    if (!isOnRoomByName(SIXTH_SEAL_ROOM)) return;
+
+    let clickedTileIndex = null;
+    for (const tileIndex of SIXTH_SEAL_LEVER_TILES) {
+      const tileEl = getSixthSealTileElement(tileIndex);
+      if (tileEl && tileEl.contains(event.target)) {
+        clickedTileIndex = tileIndex;
+        break;
+      }
+    }
+    if (clickedTileIndex == null) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    const tileEl = getSixthSealTileElement(clickedTileIndex);
+    const hasUnpulled = findLeverSprite(tileEl, SIXTH_SEAL_LEVER_SPRITE.from);
+    const hasPulled = findLeverSprite(tileEl, SIXTH_SEAL_LEVER_SPRITE.to);
+
+    if (hasUnpulled) {
+      setLeverSprite(tileEl, SIXTH_SEAL_LEVER_SPRITE.from, SIXTH_SEAL_LEVER_SPRITE.to);
+      sixthSealLeverSequence.push(clickedTileIndex);
+
+      console.log('[Quests Mod][Sixth Seal] Lever pulled', {
+        tile: clickedTileIndex,
+        sequenceAfter: sixthSealLeverSequence.slice(),
+        requiredOrder: SIXTH_SEAL_LEVER_ORDER
+      });
+
+      if (sixthSealLeverSequence.length === SIXTH_SEAL_LEVER_ORDER.length) {
+        const orderMatch = sixthSealLeverSequence.length === SIXTH_SEAL_LEVER_ORDER.length &&
+          sixthSealLeverSequence.every((t, i) => t === SIXTH_SEAL_LEVER_ORDER[i]);
+        if (orderMatch) {
+          setSealCompleted(SIXTH_SEAL, true).catch((err) => console.error('[Quests Mod][Sixth Seal] Error saving:', err));
+          replaceSeventhSealTile126SpriteIfNeeded();
+          setTimeout(replaceSeventhSealTile126SpriteIfNeeded, 300);
+          replaceSeventhSealTile127SpriteIfNeeded();
+          setTimeout(replaceSeventhSealTile127SpriteIfNeeded, 300);
+          updateTile126PortalState();
+          showToast({
+            message: 'Sixth seal completed',
+            duration: TOAST_DURATION_IMPORTANT,
+            logPrefix: '[Quests Mod][Sixth Seal]'
+          });
+          sixthSealLeverSequence = [];
+          console.log('[Quests Mod][Sixth Seal] Completed in correct order');
+          setTimeout(() => playSixthSealLeverCelebration(), 100);
+        } else {
+          console.log('[Quests Mod][Sixth Seal] All 5 pulled but wrong order – resetting levers');
+          resetSixthSealLevers();
+        }
+      }
+    } else if (hasPulled) {
+      console.log('[Quests Mod][Sixth Seal] Lever already pulled on tile', clickedTileIndex, '- sequence:', sixthSealLeverSequence.slice());
+    } else {
+      console.log('[Quests Mod][Sixth Seal] Right-click on tile', clickedTileIndex, 'but no lever sprite (2773/2772) found');
+    }
+  }
+
+  function handleTile126PortalRightClickDocument(event) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return;
+    if (!getSealCompleted(SIXTH_SEAL) || getSealCompleted(SEVENTH_SEAL)) return;
+    if (!isOnRoomByName(SIXTH_SEAL_ROOM)) return;
+
+    const tile126El = getSixthSealTileElement(SEVENTH_SEAL_TILE_126);
+    if (!tile126El || !tile126El.contains(event.target)) return;
+    if (!findLeverSprite(tile126El, SEVENTH_SEAL_TILE_126_SPRITE.to)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    let roomId = getRoomIdByRoomName(BANSHEE_LAST_ROOM_NAME);
+    let usedFallback = false;
+    if (!roomId && BANSHEE_LAST_ROOM_USE_DEMONRAGE_IF_MISSING) {
+      roomId = getRoomIdByRoomName(SIXTH_SEAL_ROOM);
+      usedFallback = !!roomId;
+      if (usedFallback) {
+        console.log('[Quests Mod][Banshee Last Room] "Banshee\'s Last Room" not in game — running battle on Demonrage Seal (roomId:', roomId, ')');
+      }
+    }
+    if (!roomId) {
+      showToast({ message: "Banshee's Last Room not found.", duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Banshee Last Room]' });
+      return;
+    }
+    console.log('[Quests Mod][Banshee Last Room] Portal clicked — roomId:', roomId, usedFallback ? '(fallback: Demonrage Seal)' : '');
+
+    playerUsedPortalToBansheeLastRoom = true;
+    if (bansheeLastRoomBattle) {
+      bansheeLastRoomBattle.cleanup(restoreBoardSetupBanshee, showQuestOverlays);
+      bansheeLastRoomBattle = null;
+    }
+
+    console.log('[Quests Mod][Banshee Last Room] Initializing battle for roomId:', roomId);
+    const initResult = initializeBansheeLastRoomBattle(roomId);
+    if (initResult && initResult.then) {
+      initResult.then((battle) => {
+        if (battle) {
+          bansheeLastRoomBattle = battle;
+          bansheeLastRoomBattle.setup(
+            () => playerUsedPortalToBansheeLastRoom,
+            (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Banshee Last Room]' })
+          );
+          setupBansheeTileRestrictions();
+          console.log('[Quests Mod][Banshee Last Room] Battle initialized successfully (async); villains will be added when overlay hider sees room', roomId);
+        } else {
+          console.error('[Quests Mod][Banshee Last Room] Failed to initialize battle after waiting');
+        }
+      }).catch((err) => console.error('[Quests Mod][Banshee Last Room] Error initializing battle:', err));
+    } else if (initResult) {
+      bansheeLastRoomBattle = initResult;
+      bansheeLastRoomBattle.setup(
+        () => playerUsedPortalToBansheeLastRoom,
+        (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Banshee Last Room]' })
+      );
+      setupBansheeTileRestrictions();
+      console.log('[Quests Mod][Banshee Last Room] Battle initialized successfully (sync); villains will be added when overlay hider sees room', roomId);
+    } else {
+      console.error('[Quests Mod][Banshee Last Room] CustomBattles not available');
+    }
+
+    if (!usedFallback) {
+      console.log('[Quests Mod][Banshee Last Room] Sending selectRoomById:', roomId);
+      globalThis.state.board.send({ type: 'selectRoomById', roomId: roomId });
+      showToast({ message: "Traveling to Banshee's Last Room...", duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Banshee Last Room]' });
+    } else {
+      showToast({ message: "Banshee's Last Room battle starting here.", duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Banshee Last Room]' });
+    }
+  }
+
+  function shouldEnableTile126Portal(boardContext = null) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return false;
+    if (!getSealCompleted(SIXTH_SEAL) || getSealCompleted(SEVENTH_SEAL)) return false;
+    return isOnRoomByName(SIXTH_SEAL_ROOM);
+  }
+
+  function applyTile126PortalPointerEvents() {
+    if (!tile126PortalRightClickEnabled) return;
+    const tile126El = getSixthSealTileElement(SEVENTH_SEAL_TILE_126);
+    if (tile126El) {
+      tile126El.style.pointerEvents = 'auto';
+    }
+  }
+
+  function updateTile126PortalState(boardContext = null) {
+    try {
+      const shouldBeEnabled = shouldEnableTile126Portal(boardContext);
+      if (shouldBeEnabled && !tile126PortalRightClickEnabled) {
+        document.addEventListener('contextmenu', handleTile126PortalRightClickDocument, true);
+        tile126PortalRightClickEnabled = true;
+        applyTile126PortalPointerEvents();
+        setTimeout(() => {
+          if (tile126PortalRightClickEnabled && shouldEnableTile126Portal()) {
+            applyTile126PortalPointerEvents();
+          }
+        }, 350);
+        console.log('[Quests Mod][Banshee Last Room] Tile 126 portal right-click enabled');
+      } else if (!shouldBeEnabled && tile126PortalRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleTile126PortalRightClickDocument, true);
+        tile126PortalRightClickEnabled = false;
+        const tile126El = getSixthSealTileElement(SEVENTH_SEAL_TILE_126);
+        if (tile126El) tile126El.style.pointerEvents = '';
+        console.log('[Quests Mod][Banshee Last Room] Tile 126 portal right-click disabled');
+      } else if (shouldBeEnabled && tile126PortalRightClickEnabled) {
+        applyTile126PortalPointerEvents();
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Banshee Last Room] Error updating tile 126 portal state:', e);
+    }
+  }
+
+  function shouldEnableSixthSealLevers(boardContext = null) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return false;
+    if (getSealCompleted(SIXTH_SEAL)) return false;
+    return isOnRoomByName(SIXTH_SEAL_ROOM);
+  }
+
+  function updateSixthSealLeverState(boardContext = null) {
+    try {
+      const shouldBeEnabled = shouldEnableSixthSealLevers(boardContext);
+      if (shouldBeEnabled && !sixthSealRightClickEnabled) {
+        document.addEventListener('contextmenu', handleSixthSealLeverRightClickDocument, true);
+        sixthSealRightClickEnabled = true;
+        const found = {};
+        for (const tileIndex of SIXTH_SEAL_LEVER_TILES) {
+          const tileEl = getSixthSealTileElement(tileIndex);
+          found[tileIndex] = !!tileEl;
+          if (tileEl) tileEl.style.pointerEvents = 'auto';
+        }
+        console.log('[Quests Mod][Sixth Seal] Levers enabled on Demonrage Seal', { tiles: SIXTH_SEAL_LEVER_TILES, found });
+      } else if (!shouldBeEnabled && sixthSealRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleSixthSealLeverRightClickDocument, true);
+        sixthSealRightClickEnabled = false;
+        sixthSealLeverSequence = [];
+        for (const tileIndex of SIXTH_SEAL_LEVER_TILES) {
+          const tileEl = getSixthSealTileElement(tileIndex);
+          if (tileEl) tileEl.style.pointerEvents = '';
+        }
+        console.log('[Quests Mod][Sixth Seal] Levers disabled');
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Sixth Seal] Error updating lever state:', e);
+    }
+  }
+
+  function replaceSeventhSealTile126SpriteIfNeeded() {
+    if (!getSealCompleted(SIXTH_SEAL) || getSealCompleted(SEVENTH_SEAL)) return;
+    const tileEl = getSixthSealTileElement(SEVENTH_SEAL_TILE_126);
+    if (!tileEl) return;
+    if (findLeverSprite(tileEl, SEVENTH_SEAL_TILE_126_SPRITE.from)) {
+      setLeverSprite(tileEl, SEVENTH_SEAL_TILE_126_SPRITE.from, SEVENTH_SEAL_TILE_126_SPRITE.to);
+    }
+  }
+
+  function replaceSeventhSealTile127SpriteIfNeeded() {
+    if (!getSealCompleted(SIXTH_SEAL) || getSealCompleted(SEVENTH_SEAL)) return;
+    const tileEl = getSixthSealTileElement(SEVENTH_SEAL_TILE_127);
+    if (!tileEl) return;
+    if (findLeverSprite(tileEl, SEVENTH_SEAL_TILE_127_SPRITE.from)) {
+      setLeverSprite(tileEl, SEVENTH_SEAL_TILE_127_SPRITE.from, SEVENTH_SEAL_TILE_127_SPRITE.to);
+    }
+  }
+
+  function revertSeventhSealTile127WhenCompleted() {
+    if (!getSealCompleted(SEVENTH_SEAL)) return;
+    const tileEl = getSixthSealTileElement(SEVENTH_SEAL_TILE_127);
+    if (!tileEl) return;
+    if (findLeverSprite(tileEl, SEVENTH_SEAL_TILE_127_SPRITE.to)) {
+      setLeverSprite(tileEl, SEVENTH_SEAL_TILE_127_SPRITE.to, SEVENTH_SEAL_TILE_127_SPRITE.from);
+    }
+  }
+
+  // Second Seal: Ghostlands Library, tile 34 (lever in bookshelves). Right-click → lever animation → complete seal + toast.
+  function playSecondSealLeverAnimation() {
+    const styleId = 'quests-second-seal-lever-style';
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        @keyframes quests-second-seal-lever-pull {
+          0% { filter: brightness(1); transform: scale(1); box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+          15% { filter: brightness(1.4); transform: scale(1.05); box-shadow: 0 0 12px 4px rgba(76, 175, 80, 0.6); }
+          30% { filter: brightness(1.2); transform: scale(0.98); box-shadow: 0 0 8px 2px rgba(76, 175, 80, 0.5); }
+          50% { filter: brightness(1.3); transform: scale(1.02); box-shadow: 0 0 10px 3px rgba(76, 175, 80, 0.55); }
+          100% { filter: brightness(1.1); transform: scale(1); box-shadow: 0 0 6px 2px rgba(76, 175, 80, 0.35); }
+        }
+        .quests-second-seal-lever-pull {
+          animation: quests-second-seal-lever-pull ${SECOND_SEAL_LEVER_ANIMATION_MS}ms ease-in-out 1 forwards;
+          pointer-events: none;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    const tileEl = getSixthSealTileElement(SECOND_SEAL_TILE_34);
+    if (!tileEl) return;
+    tileEl.classList.add('quests-second-seal-lever-pull');
+    setTimeout(() => {
+      tileEl.classList.remove('quests-second-seal-lever-pull');
+    }, SECOND_SEAL_LEVER_ANIMATION_MS);
+  }
+
+  function handleSecondSealTile34RightClickDocument(event) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return;
+    if (getSealCompleted(SECOND_SEAL)) return;
+    if (!isOnRoomByName(SECOND_SEAL_ROOM)) return;
+
+    const tile34El = getSixthSealTileElement(SECOND_SEAL_TILE_34);
+    if (!tile34El || !tile34El.contains(event.target)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    setSealCompleted(SECOND_SEAL, true).catch((err) => console.error('[Quests Mod][Second Seal] Error saving:', err));
+    playSecondSealLeverAnimation();
+    showToast({
+      message: 'Second seal completed',
+      duration: TOAST_DURATION_IMPORTANT,
+      logPrefix: '[Quests Mod][Second Seal]'
+    });
+  }
+
+  function shouldEnableSecondSealTile34(boardContext = null) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return false;
+    if (getSealCompleted(SECOND_SEAL)) return false;
+    return isOnRoomByName(SECOND_SEAL_ROOM);
+  }
+
+  function updateSecondSealTile34State(boardContext = null) {
+    try {
+      const shouldBeEnabled = shouldEnableSecondSealTile34(boardContext);
+      if (shouldBeEnabled && !secondSealRightClickEnabled) {
+        document.addEventListener('contextmenu', handleSecondSealTile34RightClickDocument, true);
+        secondSealRightClickEnabled = true;
+        const tile34El = getSixthSealTileElement(SECOND_SEAL_TILE_34);
+        if (tile34El) tile34El.style.pointerEvents = 'auto';
+        console.log('[Quests Mod][Second Seal] Tile 34 right-click enabled on Ghostlands Library');
+      } else if (!shouldBeEnabled && secondSealRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleSecondSealTile34RightClickDocument, true);
+        secondSealRightClickEnabled = false;
+        const tile34El = getSixthSealTileElement(SECOND_SEAL_TILE_34);
+        if (tile34El) tile34El.style.pointerEvents = '';
+        console.log('[Quests Mod][Second Seal] Tile 34 right-click disabled');
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Second Seal] Error updating tile 34 state:', e);
+    }
+  }
+
+  function setupSecondSealBoardObserver() {
+    if (secondSealBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    secondSealBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      updateSecondSealTile34State(boardContext);
+    });
+    updateSecondSealTile34State(globalThis.state?.board?.getSnapshot()?.context);
+    console.log('[Quests Mod][Second Seal] Board observer set up for Ghostlands Library');
+  }
+
+  function cleanupSecondSealSystem() {
+    if (secondSealRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleSecondSealTile34RightClickDocument, true);
+      secondSealRightClickEnabled = false;
+      const tile34El = getSixthSealTileElement(SECOND_SEAL_TILE_34);
+      if (tile34El) tile34El.style.pointerEvents = '';
+    }
+    if (secondSealBoardSubscription) {
+      try {
+        secondSealBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Second Seal] Error unsubscribing board observer:', e);
+      }
+      secondSealBoardSubscription = null;
+    }
+  }
+
+  // Third Seal: Ghostlands Ritual Site, tile 52 (rune). Right-click → spell animation → complete seal + toast.
+  function playThirdSealSpellAnimation() {
+    const styleId = 'quests-third-seal-spell-style';
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        @keyframes quests-third-seal-spell {
+          0% { filter: brightness(1) hue-rotate(0deg); transform: scale(1); box-shadow: 0 0 0 0 rgba(156, 39, 176, 0), 0 0 0 0 rgba(103, 58, 183, 0); opacity: 1; }
+          20% { filter: brightness(1.5) hue-rotate(-10deg); transform: scale(1.08); box-shadow: 0 0 20px 8px rgba(156, 39, 176, 0.7), 0 0 40px 12px rgba(103, 58, 183, 0.5); opacity: 1; }
+          40% { filter: brightness(1.4) hue-rotate(5deg); transform: scale(1.04); box-shadow: 0 0 24px 10px rgba(156, 39, 176, 0.8), 0 0 48px 16px rgba(103, 58, 183, 0.4); opacity: 1; }
+          60% { filter: brightness(1.5) hue-rotate(-5deg); transform: scale(1.06); box-shadow: 0 0 28px 12px rgba(156, 39, 176, 0.6), 0 0 56px 18px rgba(103, 58, 183, 0.35); opacity: 1; }
+          80% { filter: brightness(1.3) hue-rotate(0deg); transform: scale(1.02); box-shadow: 0 0 16px 6px rgba(156, 39, 176, 0.5), 0 0 32px 10px rgba(103, 58, 183, 0.3); opacity: 1; }
+          100% { filter: brightness(1.1) hue-rotate(0deg); transform: scale(1); box-shadow: 0 0 8px 3px rgba(156, 39, 176, 0.3), 0 0 16px 4px rgba(103, 58, 183, 0.2); opacity: 1; }
+        }
+        .quests-third-seal-spell {
+          animation: quests-third-seal-spell ${THIRD_SEAL_SPELL_ANIMATION_MS}ms ease-in-out 1 forwards;
+          pointer-events: none;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    const tileEl = getSixthSealTileElement(THIRD_SEAL_TILE_52);
+    if (!tileEl) return;
+    tileEl.classList.add('quests-third-seal-spell');
+    setTimeout(() => {
+      tileEl.classList.remove('quests-third-seal-spell');
+    }, THIRD_SEAL_SPELL_ANIMATION_MS);
+  }
+
+  function handleThirdSealTile52RightClickDocument(event) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return;
+    if (getSealCompleted(THIRD_SEAL)) return;
+    if (!isOnRoomByName(THIRD_SEAL_ROOM)) return;
+
+    const tile52El = getSixthSealTileElement(THIRD_SEAL_TILE_52);
+    if (!tile52El || !tile52El.contains(event.target)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    setSealCompleted(THIRD_SEAL, true).catch((err) => console.error('[Quests Mod][Third Seal] Error saving:', err));
+    playThirdSealSpellAnimation();
+    showToast({
+      message: 'Third seal completed',
+      duration: TOAST_DURATION_IMPORTANT,
+      logPrefix: '[Quests Mod][Third Seal]'
+    });
+  }
+
+  function shouldEnableThirdSealTile52(boardContext = null) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return false;
+    if (getSealCompleted(THIRD_SEAL)) return false;
+    return isOnRoomByName(THIRD_SEAL_ROOM);
+  }
+
+  function updateThirdSealTile52State(boardContext = null) {
+    try {
+      const shouldBeEnabled = shouldEnableThirdSealTile52(boardContext);
+      if (shouldBeEnabled && !thirdSealRightClickEnabled) {
+        document.addEventListener('contextmenu', handleThirdSealTile52RightClickDocument, true);
+        thirdSealRightClickEnabled = true;
+        const tile52El = getSixthSealTileElement(THIRD_SEAL_TILE_52);
+        if (tile52El) tile52El.style.pointerEvents = 'auto';
+        console.log('[Quests Mod][Third Seal] Tile 52 right-click enabled on Ghostlands Ritual Site');
+      } else if (!shouldBeEnabled && thirdSealRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleThirdSealTile52RightClickDocument, true);
+        thirdSealRightClickEnabled = false;
+        const tile52El = getSixthSealTileElement(THIRD_SEAL_TILE_52);
+        if (tile52El) tile52El.style.pointerEvents = '';
+        console.log('[Quests Mod][Third Seal] Tile 52 right-click disabled');
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Third Seal] Error updating tile 52 state:', e);
+    }
+  }
+
+  function setupThirdSealBoardObserver() {
+    if (thirdSealBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    thirdSealBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      updateThirdSealTile52State(boardContext);
+    });
+    updateThirdSealTile52State(globalThis.state?.board?.getSnapshot()?.context);
+    console.log('[Quests Mod][Third Seal] Board observer set up for Ghostlands Ritual Site');
+  }
+
+  function cleanupThirdSealSystem() {
+    if (thirdSealRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleThirdSealTile52RightClickDocument, true);
+      thirdSealRightClickEnabled = false;
+      const tile52El = getSixthSealTileElement(THIRD_SEAL_TILE_52);
+      if (tile52El) tile52El.style.pointerEvents = '';
+    }
+    if (thirdSealBoardSubscription) {
+      try {
+        thirdSealBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Third Seal] Error unsubscribing board observer:', e);
+      }
+      thirdSealBoardSubscription = null;
+    }
+  }
+
+  // Fifth Seal: Zathroth's Throne, tile 41 (lever). Right-click → sprite 2772 → 2773 → complete seal + toast.
+  function handleFifthSealTile41RightClickDocument(event) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return;
+    if (getSealCompleted(FIFTH_SEAL)) return;
+    if (!isOnRoomByName(FIFTH_SEAL_ROOM)) return;
+
+    const tile41El = getSixthSealTileElement(FIFTH_SEAL_TILE_41);
+    if (!tile41El || !tile41El.contains(event.target)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    const updated = setLeverSprite(tile41El, FIFTH_SEAL_LEVER_SPRITE.from, FIFTH_SEAL_LEVER_SPRITE.to);
+    if (updated) {
+      setSealCompleted(FIFTH_SEAL, true).catch((err) => console.error('[Quests Mod][Fifth Seal] Error saving:', err));
+      showToast({
+        message: 'Fifth seal completed',
+        duration: TOAST_DURATION_IMPORTANT,
+        logPrefix: '[Quests Mod][Fifth Seal]'
+      });
+      console.log('[Quests Mod][Fifth Seal] Lever on tile 41 pulled on Zathroth\'s Throne');
+    }
+  }
+
+  function shouldEnableFifthSealTile41(boardContext = null) {
+    const progress = kingChatState.progressQueenBanshees;
+    if (!progress?.accepted || progress.completed) return false;
+    if (getSealCompleted(FIFTH_SEAL)) return false;
+    return isOnRoomByName(FIFTH_SEAL_ROOM);
+  }
+
+  function updateFifthSealTile41State(boardContext = null) {
+    try {
+      const shouldBeEnabled = shouldEnableFifthSealTile41(boardContext);
+      if (shouldBeEnabled && !fifthSealRightClickEnabled) {
+        document.addEventListener('contextmenu', handleFifthSealTile41RightClickDocument, true);
+        fifthSealRightClickEnabled = true;
+        const tile41El = getSixthSealTileElement(FIFTH_SEAL_TILE_41);
+        if (tile41El) tile41El.style.pointerEvents = 'auto';
+        console.log('[Quests Mod][Fifth Seal] Tile 41 right-click enabled on Zathroth\'s Throne');
+      } else if (!shouldBeEnabled && fifthSealRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleFifthSealTile41RightClickDocument, true);
+        fifthSealRightClickEnabled = false;
+        const tile41El = getSixthSealTileElement(FIFTH_SEAL_TILE_41);
+        if (tile41El) tile41El.style.pointerEvents = '';
+        console.log('[Quests Mod][Fifth Seal] Tile 41 right-click disabled');
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Fifth Seal] Error updating tile 41 state:', e);
+    }
+  }
+
+  function setupFifthSealBoardObserver() {
+    if (fifthSealBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    fifthSealBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      updateFifthSealTile41State(boardContext);
+    });
+    updateFifthSealTile41State(globalThis.state?.board?.getSnapshot()?.context);
+    console.log('[Quests Mod][Fifth Seal] Board observer set up for Zathroth\'s Throne');
+  }
+
+  function cleanupFifthSealSystem() {
+    if (fifthSealRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleFifthSealTile41RightClickDocument, true);
+      fifthSealRightClickEnabled = false;
+      const tile41El = getSixthSealTileElement(FIFTH_SEAL_TILE_41);
+      if (tile41El) tile41El.style.pointerEvents = '';
+    }
+    if (fifthSealBoardSubscription) {
+      try {
+        fifthSealBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Fifth Seal] Error unsubscribing board observer:', e);
+      }
+      fifthSealBoardSubscription = null;
+    }
+  }
+
+  function setupSixthSealLeverObserver() {
+    if (sixthSealBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    sixthSealBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      updateSixthSealLeverState(boardContext);
+      updateTile126PortalState(boardContext);
+      replaceSeventhSealTile126SpriteIfNeeded();
+      setTimeout(replaceSeventhSealTile126SpriteIfNeeded, 400);
+      replaceSeventhSealTile127SpriteIfNeeded();
+      setTimeout(replaceSeventhSealTile127SpriteIfNeeded, 400);
+      revertSeventhSealTile127WhenCompleted();
+      setTimeout(revertSeventhSealTile127WhenCompleted, 400);
+    });
+    updateSixthSealLeverState(globalThis.state?.board?.getSnapshot()?.context);
+    updateTile126PortalState(globalThis.state?.board?.getSnapshot()?.context);
+    replaceSeventhSealTile126SpriteIfNeeded();
+    setTimeout(replaceSeventhSealTile126SpriteIfNeeded, 400);
+    replaceSeventhSealTile127SpriteIfNeeded();
+    setTimeout(replaceSeventhSealTile127SpriteIfNeeded, 400);
+    revertSeventhSealTile127WhenCompleted();
+    setTimeout(revertSeventhSealTile127WhenCompleted, 400);
+    console.log('[Quests Mod][Sixth Seal] Board observer set up for Demonrage Seal');
+  }
+
+  function cleanupSixthSealLeverSystem() {
+    if (sixthSealRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleSixthSealLeverRightClickDocument, true);
+      sixthSealRightClickEnabled = false;
+      for (const tileIndex of SIXTH_SEAL_LEVER_TILES) {
+        const tileEl = getSixthSealTileElement(tileIndex);
+        if (tileEl) tileEl.style.pointerEvents = '';
+      }
+    }
+    if (tile126PortalRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleTile126PortalRightClickDocument, true);
+      tile126PortalRightClickEnabled = false;
+      const tile126El = getSixthSealTileElement(SEVENTH_SEAL_TILE_126);
+      if (tile126El) tile126El.style.pointerEvents = '';
+    }
+    sixthSealLeverSequence = [];
+    if (sixthSealBoardSubscription) {
+      try {
+        sixthSealBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Sixth Seal] Error unsubscribing board observer:', e);
+      }
+      sixthSealBoardSubscription = null;
+    }
+    console.log('[Quests Mod][Sixth Seal] System cleaned up');
+  }
+
+  function shouldEnableTile53CostelloRightClick(boardContext = null) {
+    try {
+      const context = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+      const currentRoomId = context?.selectedMap?.selectedRoom?.id || globalThis.state?.selectedMap?.selectedRoom?.id;
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      const currentRoomName = roomNames && currentRoomId ? roomNames[currentRoomId] : '';
+      const isOnIsleOfKings = currentRoomName && (currentRoomName === 'Isle of Kings' || String(currentRoomName).includes('Isle of Kings'));
+      if (!isOnIsleOfKings) return false;
+      // Only show Visit Costello when Monks Study is accepted or completed (not when both are false)
+      const monksProgress = kingChatState.progressMonksStudy;
+      const hasMonksStudyActiveOrDone = !!(monksProgress && (monksProgress.accepted || monksProgress.completed));
+      return hasMonksStudyActiveOrDone;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function updateTile53CostelloRightClickState(boardContext = null) {
+    try {
+      const shouldBeEnabled = shouldEnableTile53CostelloRightClick(boardContext);
+      const tile53Element = getTileElement(COSTELLO_TILE_INDEX);
+
+      if (shouldBeEnabled && tile53Element && !tile53RightClickEnabled) {
+        document.addEventListener('contextmenu', handleTile53CostelloRightClickDocument, true);
+        tile53Element.style.pointerEvents = 'auto';
+        tile53RightClickEnabled = true;
+        console.log('[Quests Mod][Tile 53 Costello] Right-click enabled on Isle of Kings');
+      } else if (shouldBeEnabled && !tile53Element) {
+        setTimeout(() => updateTile53CostelloRightClickState(boardContext), 200);
+      } else if (!shouldBeEnabled && tile53RightClickEnabled) {
+        document.removeEventListener('contextmenu', handleTile53CostelloRightClickDocument, true);
+        if (getTileElement(COSTELLO_TILE_INDEX)) {
+          getTileElement(COSTELLO_TILE_INDEX).style.pointerEvents = '';
+        }
+        tile53RightClickEnabled = false;
+        console.log('[Quests Mod][Tile 53 Costello] Right-click disabled');
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Tile 53 Costello] Error updating right-click state:', error);
+    }
+  }
+
+  function handleTile53CostelloRightClickDocument(event) {
+    const tile53Element = getTileElement(COSTELLO_TILE_INDEX);
+    if (!tile53Element) return;
+    if (!tile53Element.contains(event.target)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+    createTile53CostelloContextMenu(event.clientX, event.clientY);
+    return false;
+  }
+
+  function createTile53CostelloContextMenu(x, y) {
+    if (tile53ContextMenu && tile53ContextMenu.closeMenu) {
+      tile53ContextMenu.closeMenu();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:transparent;pointer-events:auto;cursor:default;';
+
+    const menu = document.createElement('div');
+    menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:9999;min-width:120px;background:url(\'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png\') repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;padding:8px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = 'display:flex;justify-content:center;';
+
+    const visitCostelloButton = document.createElement('button');
+    visitCostelloButton.className = 'pixel-font-14';
+    visitCostelloButton.textContent = 'Visit Costello';
+    visitCostelloButton.style.cssText = 'width:120px;height:28px;font-size:12px;background-color:#2a4a2a;color:#4CAF50;border:1px solid #4CAF50;border-radius:4px;cursor:pointer;text-shadow:1px 1px 0 rgba(0,0,0,0.8);font-weight:bold;';
+    visitCostelloButton.addEventListener('mouseenter', () => {
+      visitCostelloButton.style.backgroundColor = '#1a2a1a';
+      visitCostelloButton.style.borderColor = '#66BB6A';
+    });
+    visitCostelloButton.addEventListener('mouseleave', () => {
+      visitCostelloButton.style.backgroundColor = '#2a4a2a';
+      visitCostelloButton.style.borderColor = '#4CAF50';
+    });
+    visitCostelloButton.addEventListener('click', () => {
+      showCostelloModal();
+      closeMenu();
+    });
+
+    buttonContainer.appendChild(visitCostelloButton);
+    menu.appendChild(buttonContainer);
+
+    function closeMenu() {
+      overlay.removeEventListener('mousedown', overlayClickHandler);
+      overlay.removeEventListener('click', overlayClickHandler);
+      document.removeEventListener('keydown', escHandler);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      if (menu.parentNode) menu.parentNode.removeChild(menu);
+      tile53ContextMenu = null;
+    }
+    const overlayClickHandler = (e) => { if (e.target === overlay) closeMenu(); };
+    const escHandler = (e) => { if (e.key === 'Escape') closeMenu(); };
+    overlay.addEventListener('mousedown', overlayClickHandler);
+    overlay.addEventListener('click', overlayClickHandler);
+    document.addEventListener('keydown', escHandler);
+    document.body.appendChild(overlay);
+    document.body.appendChild(menu);
+    tile53ContextMenu = { overlay, menu, closeMenu };
+    return tile53ContextMenu;
+  }
+
   // Create water fishing context menu at specified coordinates
   function createWaterFishingContextMenu(x, y) {
 
@@ -10906,6 +13103,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     // Cleanup Tile 79 system
     cleanupTile79System();
 
+    // Cleanup Tile 53 Costello system
+    cleanupTile53CostelloSystem();
+
     // Cleanup water fishing system
     cleanupWaterFishingSystem();
 
@@ -11031,6 +13231,29 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     console.log('[Quests Mod][Tile 79] System cleaned up');
   }
 
+  function cleanupTile53CostelloSystem() {
+    if (tile53RightClickEnabled) {
+      document.removeEventListener('contextmenu', handleTile53CostelloRightClickDocument, true);
+      const tile53Element = getTileElement(COSTELLO_TILE_INDEX);
+      if (tile53Element) {
+        tile53Element.style.pointerEvents = '';
+      }
+      tile53RightClickEnabled = false;
+    }
+    if (tile53ContextMenu && tile53ContextMenu.closeMenu) {
+      tile53ContextMenu.closeMenu();
+    }
+    cleanupTile53CostelloObserver();
+    cleanupSevenSealsRoomObserver();
+    cleanupFirstSealBoardObserver();
+    cleanupFourthSealBoardObserver();
+    cleanupSecondSealSystem();
+    cleanupThirdSealSystem();
+    cleanupFifthSealSystem();
+    cleanupSixthSealLeverSystem();
+    console.log('[Quests Mod][Tile 53 Costello] System cleaned up');
+  }
+
   function cleanupWaterFishingSystem() {
     // Remove event listener from document and restore tile pointer events
     if (fishingState.enabled) {
@@ -11113,7 +13336,15 @@ function createNPCCooldownManager(cooldownMs = 1000) {
   setupQuestItemsDropSystem();
   setupCopperKeySystem();
   setupEquipmentSlotObserver();
-  
+    setupTile53CostelloObserver();
+    setupSevenSealsRoomObserver();
+    setupFirstSealBoardObserver();
+    setupFourthSealBoardObserver();
+    setupSecondSealBoardObserver();
+    setupThirdSealBoardObserver();
+    setupFifthSealBoardObserver();
+    setupSixthSealLeverObserver();
+
   // Load quest items from Firebase on initialization
   loadQuestItemsOnInit();
 
@@ -11226,6 +13457,14 @@ function createNPCCooldownManager(cooldownMs = 1000) {
                                              !progress.ironOre.completed &&
                                              !!progress.ironOre.startTime;
         }
+        if (progress.costelloVisited !== undefined) {
+          kingChatState.costelloVisited = !!progress.costelloVisited;
+        }
+        if (Array.isArray(progress.sevenSealsCompleted) && progress.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
+          kingChatState.sevenSealsCompleted = progress.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
+        } else if (Array.isArray(progress.sevenSealsVisited)) {
+          kingChatState.sevenSealsCompleted = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.map(roomName => progress.sevenSealsVisited.includes(roomName));
+        }
 
         // If Al Dee fishing mission is completed, mark Iron Ore quest as completed
         // since Iron Ore was part of that mission and the overall quest line is now done
@@ -11275,6 +13514,39 @@ function createNPCCooldownManager(cooldownMs = 1000) {
 
         // Clean up quest items that shouldn't exist if missions aren't completed
         await cleanupInvalidQuestItems(progress);
+
+        // Migration: having Castello's diary implies Monks Study was completed and Queen Banshees was accepted (diary is only given when accepting Queen Banshees)
+        try {
+          const questItems = await getQuestItems(false);
+          const diaryCount = questItems[COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName] || 0;
+          let needsSave = false;
+          if (diaryCount >= 1 && !kingChatState.progressMonksStudy.completed) {
+            console.log('[Quests Mod] Syncing Monks Study to completed (player has Castello\'s diary)');
+            setMissionProgress(KING_MONKS_STUDY_MISSION, { accepted: true, completed: true });
+            kingChatState.progressMonksStudy.accepted = true;
+            kingChatState.progressMonksStudy.completed = true;
+            needsSave = true;
+          }
+          if (diaryCount >= 1 && !kingChatState.progressQueenBanshees.accepted) {
+            console.log('[Quests Mod] Syncing Queen Banshees to accepted (player has Castello\'s diary)');
+            setMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION, { accepted: true, completed: !!kingChatState.progressQueenBanshees.completed });
+            kingChatState.progressQueenBanshees.accepted = true;
+            needsSave = true;
+          }
+          if (needsSave) {
+            const allProgress = getAllMissionProgress();
+            if (progress.ironOre) {
+              allProgress.ironOre = {
+                active: fishingState.ironOreQuestActive,
+                startTime: fishingState.ironOreQuestStartTime,
+                completed: fishingState.ironOreQuestCompleted
+              };
+            }
+            await saveKingTibianusProgress(getCurrentPlayerName(), allProgress);
+          }
+        } catch (err) {
+          console.error('[Quests Mod] Error syncing mission state from diary:', err);
+        }
 
         // Log all mission progress using registry (future-proof)
         const loggedProgress = getAllMissionProgress();

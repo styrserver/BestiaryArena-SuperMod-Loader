@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.4.5",
+      "changes": [
+        { "type": "added", "mod": "Quests", "text": "Added Castello quest-line." }
+      ]
+    },
+    {
       "version": "3.4.4",
       "changes": [
         { "type": "fixed", "mod": "Better Exaltation Chest", "text": "Bug fixes." },
