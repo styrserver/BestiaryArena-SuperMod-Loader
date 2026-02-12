@@ -22,11 +22,13 @@ if (window.CustomBattles) {
                     board: null,
                     allyLimit: null,
                     tileRestriction: null,
+                    preventVillainMovement: null,
                     victoryDefeat: null
                 };
                 this.setupUnsubscribe = null;
                 this.setupUnsubscribeHandler = null;
                 this.tileRestrictionActive = false;
+                this.preventVillainMovementActive = false;
                 this.lastVillainAddTime = 0;
                 this.isAddingVillains = false;
                 
@@ -181,6 +183,7 @@ if (window.CustomBattles) {
                                 type: "custom",
                                 key: key,
                                 nickname: villainConfig.nickname,
+                                name: villainConfig.nickname || undefined,
                                 tileIndex: villainConfig.tileIndex,
                                 villain: true,
                                 gameId: villainConfig.gameId,
@@ -432,9 +435,10 @@ if (window.CustomBattles) {
 
             /**
              * Prevent villain movement (keep them on their assigned tiles)
+             * Runs when tileRestrictionActive is true (from tile restrictions or from preventVillainMovement-only subscription).
              */
             preventVillainMovement() {
-                if (!this.tileRestrictionActive) return;
+                if (!this.tileRestrictionActive && !this.preventVillainMovementActive) return;
                 
                 try {
                     const boardContext = globalThis.state.board.getSnapshot().context;
@@ -565,6 +569,25 @@ if (window.CustomBattles) {
                 });
 
                 console.log(`[Custom Battles][${this.config.name || 'Battle'}] Tile restriction system set up`);
+            }
+
+            /**
+             * Setup villain movement prevention only (no tile restrictions).
+             * When config.preventVillainMovement is true, villains are kept on their assigned tiles.
+             */
+            setupPreventVillainMovement(activationCallback) {
+                if (this.subscriptions.preventVillainMovement) {
+                    this.subscriptions.preventVillainMovement.unsubscribe();
+                    this.subscriptions.preventVillainMovement = null;
+                }
+                this.subscriptions.preventVillainMovement = globalThis.state.board.subscribe(() => {
+                    const shouldBeActive = this.shouldRestrictionsBeActive(activationCallback);
+                    this.preventVillainMovementActive = shouldBeActive;
+                    if (shouldBeActive) {
+                        this.preventVillainMovement();
+                    }
+                });
+                console.log(`[Custom Battles][${this.config.name || 'Battle'}] Villain movement prevention set up`);
             }
 
             /**
@@ -980,6 +1003,11 @@ if (window.CustomBattles) {
                     this.setupTileRestrictions(activationCallback, showToastCallback);
                 }
 
+                // Setup villain movement prevention only (if not already via tile restrictions)
+                if (this.config.preventVillainMovement && !this.config.tileRestrictions) {
+                    this.setupPreventVillainMovement(activationCallback);
+                }
+
                 // Setup victory/defeat detection if configured
                 if (this.config.victoryDefeat) {
                     this.setupVictoryDefeatDetection();
@@ -1012,6 +1040,11 @@ if (window.CustomBattles) {
                         this.subscriptions.tileRestriction();
                     }
                     this.subscriptions.tileRestriction = null;
+                }
+
+                if (this.subscriptions.preventVillainMovement) {
+                    this.subscriptions.preventVillainMovement.unsubscribe();
+                    this.subscriptions.preventVillainMovement = null;
                 }
 
                 // Unsubscribe from autoSetupBoard event
@@ -1104,6 +1137,10 @@ if (window.CustomBattles) {
                 console.log(`[Custom Battles][${this.config.name || 'Battle'}] Cleanup completed`);
             }
         }
+
+        // Battle configs (e.g. Mornenion, Banshee's Last Room) live in Quests.js. This file only provides
+        // CustomBattle and create(config). Same flow for all: create(config) → setup(activationCallback, showToast)
+        // → onClose does cleanup(restoreBoardSetup, showQuestOverlays) + navigate.
 
         // Expose globally
             try {
