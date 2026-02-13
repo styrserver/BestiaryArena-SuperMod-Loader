@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.4.6",
+      "changes": [
+        { "type": "added", "mod": "Quests", "text": "Added Wyda's quest line." }
+      ]
+    },
+    {
       "version": "3.4.5",
       "changes": [
         { "type": "added", "mod": "Quests", "text": "Added Castello quest-line." }

@@ -24,6 +24,9 @@ const KING_GUILD_COIN_REWARD = 50;
 const TOAST_DURATION_DEFAULT = 5000;      // 5 seconds - general notifications
 const TOAST_DURATION_IMPORTANT = 10000;   // 10 seconds - important quest milestones
 
+// NPC chat: delay (ms) before showing response after player types. Used by all NPCs (Costello, Wyda, Al Dee, King Tibianus).
+const NPC_CHAT_RESPONSE_DELAY_MS = 1000;
+
 // Mornenion quest messages
 const MORNENION_DEFEATED_MESSAGE = 'The cave entrance is sealed. Mornenion has been defeated.';
 
@@ -180,6 +183,35 @@ const COSTELLO_QUEEN_BANSHEES_MISSION = {
   rewardDescription: 'You see the engraving of a white raven on its surface.'
 };
 
+// The Follower of Zathroth (offered by Castello after completing Queen of the Banshee). Player must bring the Blessed Ankh to Wyda in the swamps of Venore.
+const FOLLOWER_OF_ZATHROTH_MISSION = {
+  id: 'follower_of_zathroth',
+  title: 'The Follower of Zathroth',
+  prompt: 'I have another matter for you. Take the Blessed Ankh you earned and bring it to my friend Wyda in the swamps of Venore. She has need of it. Will you go?',
+  accept: 'Bring the Blessed Ankh to Wyda in the swamps of Venore. She will know what to do with it.',
+  alreadyCompleted: 'You have already brought the Blessed Ankh to Wyda. My thanks.',
+  alreadyActive: 'You must bring the Blessed Ankh to Wyda in the swamps of Venore.',
+  objectiveLine1: 'Bring the Blessed Ankh to Wyda in the swamps of Venore.',
+  objectiveLine2: 'Give the Blessed Ankh to Wyda to complete the task.',
+  rewardCoins: KING_GUILD_COIN_REWARD
+};
+
+// The Mother of All Spiders (offered by Wyda after completing The Follower of Zathroth). Player must descend the secluded herb, defeat the mother of all spiders, and return with the silk.
+const MOTHER_OF_ALL_SPIDERS_MISSION = {
+  id: 'mother_of_all_spiders',
+  title: 'The Mother of All Spiders',
+  prompt: 'A new task? Very well. You must descend the secluded herb to find the mother of all spiders. Defeat it and return to me with the silk. Will you do this?',
+  accept: 'Descend the secluded herb, find the mother of all spiders, defeat it and bring me the silk.',
+  alreadyCompleted: 'You have already completed that task. My thanks.',
+  alreadyActive: 'You must descend the secluded herb, defeat the mother of all spiders and return with the silk.',
+  objectiveLine1: 'Descend the secluded herb and find the mother of all spiders.',
+  objectiveLine2: 'Defeat the mother of all spiders and return with the silk to Wyda.',
+  rewardItemName: 'Spool of Yarn',
+  rewardIcon: 'Spool_of_Yarn.gif',
+  rewardDescription: 'It is made from fine spider silk.',
+  rewardCoins: 0
+};
+
 // Room names that count as "the seven seals of Ghostlands". Index i = i-th seal (0 = First Seal, 6 = Seventh Seal).
 const SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES = [
   'Seal I', 'Seal II', 'Seal III', 'Seal IV', 'Seal V', 'Seal VI', 'Seal VII'
@@ -249,6 +281,22 @@ const SEVENTH_SEAL_TILE_127_SPRITE = { from: '1959', to: '1949' }; // same sprit
 const BANSHEE_LAST_ROOM_NAME = "Banshee's Last Room";
 // If Banshee's Last Room is not in ROOM_NAME, we run the battle on Demonrage Seal (same map as portal).
 const BANSHEE_LAST_ROOM_USE_DEMONRAGE_IF_MISSING = true;
+
+// Mother of All Spiders: tile 77 in "A Secluded Herb" (Venore) leads to "Spider Lair" custom battle.
+const SECLUDED_HERB_ROOM_NAME = 'A Secluded Herb';
+const SPIDER_LAIR_ROOM_NAME = 'Spider Lair';
+const SPIDER_LAIR_USE_SECLUDED_HERB_IF_MISSING = true;
+const SECLUDED_HERB_TILE_77 = 77;
+// Spider Lair: replace tile 85/86 sprites with id-1951 and id-1950 for visual consistency. Remove sprite id-233 from tile 85.
+const SPIDER_LAIR_TILE_86 = 85;
+const SPIDER_LAIR_TILE_87 = 86;
+const SPIDER_LAIR_TILE_86_SPRITE_ID = '1951';
+const SPIDER_LAIR_TILE_87_SPRITE_ID = '1950';
+const SPIDER_LAIR_SPRITE_TO_REMOVE_ID = '233';
+const SPIDER_LAIR_TILES_ADD_SPRITE_2127 = [82, 52, 98, 95, 78, 111]; // append sprite 2127 to these tiles (keep existing content)
+const SPIDER_LAIR_ADD_SPRITE_2127_ID = '2127';
+const SPIDER_LAIR_TILES_ADD_SPRITE_4312 = [37, 32, 96, 84]; // append sprite 4312 to these tiles (keep existing content)
+const SPIDER_LAIR_ADD_SPRITE_4312_ID = '4312';
 
 const KING_ARENA_RANKS = [
   'Scout of the Arena',      // 0 missions
@@ -369,6 +417,97 @@ const COSTELLO_RESPONSES = {
   'bye': 'Good bye, Player!',
   'goodbye': 'Good bye, Player!'
 };
+
+// Wyda (swamps of Venore) keyword responses. Each key maps to an array of response lines (Wyda may say multiple lines).
+// Keys are normalized to lowercase; match by containment. Replace "Player" with actual player name at runtime.
+const WYDA_RESPONSES = {
+  'hi': ['What? Talking to me, Player?', "I'm bored! Bored bored bored! Nothing ever happens here!"],
+  'hello': ['Good day, Player.'],
+  'job': ["I am a witch. Didn't you notice?", "I think witches these days are underpaid. Who needs a witch anyway?"],
+  'profession': ["I am a witch. Didn't you notice?", "I think witches these days are underpaid. Who needs a witch anyway?"],
+  'gods': ['I believe that nature itself is God.', 'Goddess, yes, you may call me that, thank you.'],
+  'nature': ['There are many swamp plants, mushrooms, and herbs around here.'],
+  'plants': ['There are many kinds of swamp plants, some can be used for potions, some not.', "I've heard about a whole different set of corrupted plants. I wonder what kind of potions you could make from them?"],
+  'mushrooms': ['Mushrooms taste good and are useful for potions.', 'Some mushrooms have strange effects. I just recently noticed that one certain sort lets your hands grow.'],
+  'herbs': ['The swamp is home to a wide variety of herbs, but the most famous is the blood herb.', "To be honest, I'm drowning in blood herbs by now."],
+  'blood herb': ['The blood herb is very rare. This plant would be very useful for me, but I don\'t know any accessible places to find it.', "To be honest, I'm drowning in blood herbs by now. But if it helps you, well yes.. I guess I could use another blood herb..."],
+  'bloodherb': ['The blood herb is very rare. This plant would be very useful for me, but I don\'t know any accessible places to find it.', "To be honest, I'm drowning in blood herbs by now. But if it helps you, well yes.. I guess I could use another blood herb..."],
+  'potion': ["The recipe of the potions is one of the witches' secrets!"],
+  'recipe': ["The recipe of the potions is one of the witches' secrets!"],
+  'secret': ["The recipe of the potions is one of the witches' secrets!"],
+  'magic': ["The magic of the witches is one of our secrets!", 'I want to invent a new spell. I just need a good idea.'],
+  'spell': ["The magic of the witches is one of our secrets!", 'I want to invent a new spell. I just need a good idea.'],
+  'key': ["I keep my keys where they belong - in my pocket.", "Here's a secret I've never told anyone before. I actually have a key to the Kazordoon treasury. No, you can't have it."],
+  'help': ['I can only help with knowledge. About what do you want me to tell you something?'],
+  'king': ["There are too many royals on this continent if you ask me...", "I've heard of a new festival called 'Kingsday'. Why don't they make a 'Witchday'?"],
+  'tibianus': ["Haha, that's a stupid name. Who's that?", "Haha, still a stupid name."],
+  'queen eloise': ['Eloise is Queen of Carlin. I don\'t care about royals much, as long as they don\'t try to tax me.', "She has become kinda fat over the years, don't you think? Ha... nothing beats some good gossip. I feel almost entertained."],
+  'eloise': ['Eloise is Queen of Carlin. I don\'t care about royals much, as long as they don\'t try to tax me.', "She has become kinda fat over the years, don't you think? Ha... nothing beats some good gossip. I feel almost entertained."],
+  'name': ['My name is Wyda, and what\'s yours?', 'You should know me after all these years!'],
+  'my name is': ['Nice to meet you.'],
+  'quest': ["A quest? Well, if you're so keen on doing me a favour... Why don't you try to find a blood herb?", "To be honest, I'm drowning in blood herbs by now."],
+  'time': ["I think it is the fourth year after Queen Eloise's crowning, but I cannot tell you date or time.", "It's about time SOMETHING HAPPENED HERE!"],
+  'swamp': ["Be careful of the swamp water, it's poisonous!", 'Swamp water is good for your skin.'],
+  'druid': ["Druids are mostly fine people. I'm always happy when I meet one.", 'Being a druid is fine, you know. Since household injuries are among the most common, you can at least mend your own wounds well.'],
+  'sorcerer': ['Sorcerers have forgotten about the root of all beings: nature.', "I wouldn't mind learning a new spell or two. Maybe I should dabble some in sorcerer magic."],
+  'knight': ['Knights succumb to the blindness of rage and the desire for violence and blood.', "Even a knight would be a welcome distraction right now. I could use his little sword to poke him in the eye."],
+  'paladin': ['Paladins can use bows, but not brains.', "I once knew a paladin who had a magic lamp. No wait... different story."],
+  'monsters': ['Many creatures live in, around, and beneath the swamp. Be careful!'],
+  'creatures': ['Many creatures live in, around, and beneath the swamp. Be careful!'],
+  'black knight': ['A black knight? Black is the color of witches, why whould any knight carry black?', 'Many creatures live in, around, and beneath the swamp. Be careful... MWIHIHIHIHIHI.'],
+  'bonelords': ['Bonelords? Strange creatures that have mysterious magical abilities.'],
+  'giant spider': ['Yes, there is such a thing in the east, on a small island. It\'s very powerful.', 'Oooooh why are you asking? *whistles*'],
+  'hunter': ['To the east, there is a little settlement of hunters. They are cruel humans who attack everything they see.', 'To hunt or to be hunted, I guess it\'s either of the two.'],
+  'slime': ["There's lots of slime around. It is said that they live from the swamp water."],
+  'witches': ['Some sisters of mine are having a meeting nearby. Don\'t disturb them, or they will get angry and attack you.', "They never let me join their parties. It's not my fault that I'm smarter and prettier than them. They're just jealous!"],
+  'sister': ['Some sisters of mine are having a meeting nearby. Don\'t disturb them, or they will get angry and attack you.', "They never let me join their parties. It's not my fault that I'm smarter and prettier than them. They're just jealous!"],
+  'cookie': ['I bake cookies now and then in my spare time.', "I was so bored that I made cookies with insects in them. I sold them in Venore. Maybe you ate one recently."],
+  'wand': ['I use a wooden spellwand. Why are you asking?', 'I use a wooden wand. Why are you asking?'],
+  'crystal ball': ["It's a magical item that only witches can use.", "Let me take a look... ah, yes, you'll have a good day. Or maybe a bad one. Doesn't really say it clearly."],
+  'coffin': ["That's none of your business.", 'Want to end up in one? Keep your nose out!'],
+  'broom': ['What about it?'],
+  'fly broom': ['Haha, no... where did you get that idea? I use it to sweep my platform.', 'Sadly, my license expired.'],
+  'fly': ['Haha, no... where did you get that idea? I use it to sweep my platform.', 'Sadly, my license expired.'],
+  'orange': ['I love exotic fruits. I have oranges imported from the south sometimes, but that\'s very expensive.', 'Actually, I feel more like mangos.'],
+  'carlin': ['Carlin is a beautiful town, but far from here. Do you live there?', "I've heard a band of male bards plays there sometimes. Maybe I should pay it a visit."],
+  'kazordoon': ["Isn't that the name of the little bearded fellows' town?", 'Ah, the pretty city of... dullness.'],
+  'little bearded fellows': ["The little bearded fellows have a town somewhere to the north-west."],
+  'dwarf': ["The little bearded fellows have a town somewhere to the north-west."],
+  'dwarves': ["The little bearded fellows have a town somewhere to the north-west."],
+  'thais': ["I've heard stories about that city. It's nowhere near here, that's all I can tell you about it.", 'Not. Interested.'],
+  'plains of havoc': ['Many tales exist about some so-called Plains of Havoc. It seems to be a dangerous place.', 'The Plains of Havoc... ah, fond memories. I used to go there as a little witch and run from all the giant spiders. How scary!'],
+  'dwarven bridge': ["There's a bridge to the west, but it's guarded by dwarfs.", "Good if you don't want to get your feet wet, I guess. Hey, actually that's a brilliant idea. I could destroy a few bridges... hahaha."],
+  'earthquakes': ["The earth in this region shakes now and then. Foolish people think that this is because the gods are angry."],
+  'ferumbras': ["Haha, that's a stupid name. Who's that?", 'Look, behind you!! WAHAHAHAHAHAHA.'],
+  'witch': ['Aye, I am a witch.'],
+  'become witch': ["You're a MAN!"],
+  'evil': ["Evilness doesn't scare me.", "I'm not evil. What are you implying?"],
+  'man': ['There are only female witches.'],
+  'tibia': ['Tibia is the name of our continent.', "You're a smart one, aren't you?"],
+  'health': ['I do not have any potions for healing available right now.', 'Nah sorry. Hehehehehe.'],
+  'platform': ['This platform and house were built by my mother, long ago.'],
+  'mother': ['Of course my mother was also a witch!'],
+  'voodoo': ["I don't practice such nonsense, that's just a rumour.", "I've recently met that fellow Chondur on a convention. He has some... interesting... skills. *giggles*"],
+  'granny weatherwax': ["I think I've heard that name before..."],
+  'nanny ogg': ["I think I've heard that name before..."],
+  'buy': ["I'm currently not selling anything."],
+  'sell': ["There's nothing I need right now, thanks."],
+  'see you': ['Good luck on your journeys, Player.', "NO! Don't go! I need someone to entertain me!"],
+  'bye': ['Good luck on your journeys.', "NO! Don't go! I need someone to entertain me!"],
+  'goodbye': ['Good luck on your journeys.', "NO! Don't go! I need someone to entertain me!"]
+};
+
+function getWydaResponse(message, playerName = 'Player') {
+  const lowerMessage = message.toLowerCase().trim();
+  const sortedKeys = Object.keys(WYDA_RESPONSES).sort((a, b) => b.length - a.length);
+  for (const keyword of sortedKeys) {
+    if (lowerMessage.includes(keyword)) {
+      const lines = WYDA_RESPONSES[keyword];
+      return lines.map(line => line.replace(/Player/g, playerName));
+    }
+  }
+  return ["I don't know what you mean. Ask me about plants, mushrooms, herbs, or the swamp."];
+}
 
 // Seal phrase patterns (longer first so "first seal" matches before "seal"): [ [ pattern, sealIndex ], ... ]
 const COSTELLO_SEAL_PATTERNS = [
@@ -521,7 +660,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
  * @param {number} cooldownMs - Cooldown delay in milliseconds (default: 1000)
  * @returns {Object} Cooldown manager with methods to handle message responses
  */
-function createNPCCooldownManager(cooldownMs = 1000) {
+function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   let pendingResponseTimeout = null;
   let latestMessage = null;
 
@@ -630,9 +769,12 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     progressLetter: { accepted: false, completed: false },
     progressMonksStudy: { accepted: false, completed: false },
     progressQueenBanshees: { accepted: false, completed: false },
+    progressFollowerOfZathroth: { accepted: false, completed: false },
+    progressMotherOfAllSpiders: { accepted: false, completed: false },
     progressAlDeeFishing: { accepted: false, completed: false },
     progressAlDeeGoldenRope: { accepted: false, completed: false },
     costelloVisited: false,
+    mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
     sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
     missionOffered: false,
     offeredMission: null,
@@ -690,6 +832,12 @@ function createNPCCooldownManager(cooldownMs = 1000) {
   let tile53RightClickEnabled = false;
   let tile53ContextMenu = null;
   let tile53BoardSubscription = null;
+  // Wyda (tile 83, Wyda's House in Venore)
+  const WYDA_HOUSE_ROOM_NAMES = ["Wyda's House", "Wyda's House in Venore"];
+  const WYDA_TILE_INDEX = 83;
+  let tile83WydaRightClickEnabled = false;
+  let tile83WydaContextMenu = null;
+  let tile83WydaBoardSubscription = null;
   let sevenSealsBoardSubscription = null; // Queen Banshees: track visits to seven seals of Ghostlands
 
   // Sixth Seal (Demonrage Seal levers)
@@ -710,6 +858,15 @@ function createNPCCooldownManager(cooldownMs = 1000) {
   let bansheeLastRoomBattle = null;
   let tile126PortalRightClickEnabled = false;
   let bansheeVillainSetupDone = false; // one-time villain setup when entering Banshee's Last Room (like Mornenion)
+
+  // Spider Lair (Mother of All Spiders: tile 77 in A Secluded Herb → Spider Lair custom battle)
+  let playerUsedTile77ToSpiderLair = false;
+  let spiderLairBattle = null;
+  let spiderLairVillainSetupDone = false;
+  let spiderLairReinitTriggered = false; // avoid re-initing every tick after defeat
+  let lastOverlayHiderRoomName = null; // track previous room so we only remove originals when entering Spider Lair via quest
+  let tile77SpiderLairRightClickEnabled = false;
+  let tile77SpiderLairBoardSubscription = null;
 
   // =======================
   // Quest Log System State
@@ -907,6 +1064,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             const playerName = getCurrentPlayerName();
             if (playerName) {
               console.log('[Quests Mod][Mornenion] Mornenion victory detected! Setting defeated flag...');
+              kingChatState.mornenionDefeated = true;
               const existingProgress = await getKingTibianusProgress(playerName);
               const mergedProgress = {
                 ...existingProgress,
@@ -1110,6 +1268,138 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     };
     console.log('[Quests Mod][Banshee Last Room] Config villains:', villains.map(v => ({ nickname: v.nickname, tileIndex: v.tileIndex })));
     return window.CustomBattles.create(bansheeConfig);
+  }
+
+  // Resolve equipment gameId by name (game expects equip: { gameId, tier, stat } per Cyclopedia/board).
+  function getEquipmentGameIdByName(equipmentName) {
+    if (!equipmentName) return null;
+    try {
+      const nameLower = equipmentName.toLowerCase().trim();
+      if (window.BestiaryModAPI?.utility?.maps?.equipmentNamesToGameIds?.get) {
+        const id = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds.get(nameLower);
+        if (id != null) return id;
+      }
+      if (globalThis.state?.utils?.getEquipment) {
+        for (let i = 1; i < 500; i++) {
+          try {
+            const eq = globalThis.state.utils.getEquipment(i);
+            if (eq?.metadata?.name?.toLowerCase() === nameLower) return i;
+          } catch (e) { break; }
+        }
+      }
+    } catch (e) {
+      console.warn('[Quests Mod] getEquipmentGameIdByName failed for', equipmentName, e);
+    }
+    return null;
+  }
+
+  // Spider Lair (Mother of All Spiders): custom battle when entering from tile 77 in A Secluded Herb. roomId from getRoomIdByRoomName(SPIDER_LAIR_ROOM_NAME) or fallback to A Secluded Herb.
+  function createSpiderLairBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error('[Quests Mod][Spider Lair] CustomBattles still not available');
+      return null;
+    }
+    const giantSpiderGameId = getGameIdByCreatureName('Giant Spider', 1);
+    const genesDefault = { hp: 30, ad: 30, ap: 30, armor: 30, magicResist: 30 };
+    const bootsOfHasteGameId = getEquipmentGameIdByName('Boots of Haste');
+    const spiderEquip = bootsOfHasteGameId != null ? { gameId: bootsOfHasteGameId, tier: 5, stat: 'hp' } : null;
+    const villains = [
+      {
+        nickname: 'The Old Widow',
+        keyPrefix: 'spider-old-widow-tile-81-',
+        tileIndex: 81,
+        gameId: giantSpiderGameId,
+        level: 275,
+        tier: 4,
+        direction: 'east',
+        genes: genesDefault,
+        ...(spiderEquip && { equip: spiderEquip })
+      },
+      {
+        nickname: 'Giant Spider',
+        keyPrefix: 'spider-lair-giant-tile-64-',
+        tileIndex: 64,
+        gameId: giantSpiderGameId,
+        level: 225,
+        tier: 4,
+        direction: 'east',
+        genes: genesDefault,
+        ...(spiderEquip && { equip: spiderEquip })
+      },
+      {
+        nickname: 'Giant Spider',
+        keyPrefix: 'spider-lair-giant-tile-68-',
+        tileIndex: 68,
+        gameId: giantSpiderGameId,
+        level: 225,
+        tier: 4,
+        direction: 'east',
+        genes: genesDefault,
+        ...(spiderEquip && { equip: spiderEquip })
+      }
+    ];
+    if (spiderEquip) {
+      console.log('[Quests Mod][Spider Lair] Villains with Boots of Haste (T5 HP), equipment gameId:', bootsOfHasteGameId);
+    } else {
+      console.log('[Quests Mod][Spider Lair] Boots of Haste not found in dictionary; villains have no equip. Villains config:', JSON.parse(JSON.stringify(villains)));
+    }
+    const spiderLairConfig = {
+      name: SPIDER_LAIR_ROOM_NAME,
+      roomId: roomId,
+      villains: villains,
+      allyLimit: 5,
+      preventVillainMovement: true,
+      hideVillainSprites: true,
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerUsedTile77ToSpiderLair;
+      },
+      victoryDefeat: {
+        onVictory: async () => {
+          console.log('[Quests Mod][Spider Lair] The Old Widow defeated! Adding Spider Silk');
+          await addQuestItem('Spider Silk', 1).catch(error => {
+            console.error('[Quests Mod][Spider Lair] Error adding Spider Silk:', error);
+          });
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          cleanupSpiderLairQuest();
+          setTimeout(() => navigateToSecludedHerb(), 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: 'The Old Widow was slain. You found Spider Silk.',
+        defeatMessage: 'The Old Widow was too strong.',
+        showItems: false,
+        items: [{ name: 'Spider Silk', amount: 1 }]
+      }
+    };
+    return window.CustomBattles.create(spiderLairConfig);
+  }
+
+  function initializeSpiderLairBattle(roomId) {
+    if (!window.CustomBattles) {
+      console.warn('[Quests Mod][Spider Lair] CustomBattles not available, waiting...');
+      const scriptCheck = document.querySelector('script[src*="custom-battles.js"]');
+      if (!scriptCheck) {
+        console.error('[Quests Mod][Spider Lair] custom-battles.js not found');
+        return null;
+      }
+      return new Promise((resolve, reject) => {
+        let retries = 0;
+        const maxRetries = 40;
+        const interval = setInterval(() => {
+          retries++;
+          if (window.CustomBattles) {
+            clearInterval(interval);
+            resolve(createSpiderLairBattleInstance(roomId));
+          } else if (retries >= maxRetries) {
+            clearInterval(interval);
+            resolve(null);
+          }
+        }, 50);
+      });
+    }
+    return createSpiderLairBattleInstance(roomId);
   }
 
   // =======================
@@ -2379,6 +2669,27 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       productDefinitions.push(blessedAnkhDef);
     }
 
+    // Add Spider Silk (drop from Mother of All Spiders boss; hand in to Wyda for Spool of Yarn)
+    const spiderSilkDef = {
+      name: 'Spider Silk',
+      icon: 'Spider_Silk.gif',
+      description: 'Fine silk from the mother of all spiders.',
+      rarity: 2
+    };
+    if (!productDefinitions.find(p => p.name === spiderSilkDef.name)) {
+      productDefinitions.push(spiderSilkDef);
+    }
+    // Add Spool of Yarn (reward for completing Mother of All Spiders)
+    const spoolOfYarnDef = {
+      name: MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName,
+      icon: MOTHER_OF_ALL_SPIDERS_MISSION.rewardIcon,
+      description: MOTHER_OF_ALL_SPIDERS_MISSION.rewardDescription,
+      rarity: 5
+    };
+    if (!productDefinitions.find(p => p.name === spoolOfYarnDef.name)) {
+      productDefinitions.push(spoolOfYarnDef);
+    }
+
     // Add global Rookgaard drops to product definitions
     for (const globalDrop of ROOKGAARD_GLOBAL_DROPS) {
       if (!productDefinitions.find(p => p.name === globalDrop.name)) {
@@ -3086,7 +3397,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
   // Dev helper to grant/remove quest items for testing (exposed to console)
   // Use positive numbers to grant items, negative numbers to remove items
   function registerDevGrantHelper() {
-    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0, copperKey = 0, stampedLetter = 0, elvenhairRope = 0, holyTible = 0, blessedAnkh = 0, monksStudy = 0, queenBanshees = 0, firstSeal = 0, secondSeal = 0, thirdSeal = 0, fourthSeal = 0, fifthSeal = 0, sixthSeal = 0, seventhSeal = 0, resetAllSeals = false } = {}) {
+    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0, copperKey = 0, stampedLetter = 0, elvenhairRope = 0, holyTible = 0, blessedAnkh = 0, monksStudy = 0, queenBanshees = 0, followerOfZathroth = 0, motherOfAllSpiders = 0, firstSeal = 0, secondSeal = 0, thirdSeal = 0, fourthSeal = 0, fifthSeal = 0, sixthSeal = 0, seventhSeal = 0, resetAllSeals = false } = {}) {
       try {
         const actions = [];
         if (resetAllSeals) {
@@ -3159,6 +3470,44 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           }
         }
 
+        if (followerOfZathroth !== 0) {
+          if (followerOfZathroth >= 1) {
+            kingChatState.progressFollowerOfZathroth = { accepted: true, completed: followerOfZathroth >= 2 };
+            actions.push(followerOfZathroth >= 2 ? 'Follower of Zathroth: completed' : 'Follower of Zathroth: accepted');
+          } else {
+            kingChatState.progressFollowerOfZathroth = { accepted: false, completed: false };
+            actions.push('Follower of Zathroth: reset');
+            await addQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName, 1);
+            actions.push('+1 Blessed Ankh');
+          }
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            const allProgress = getAllMissionProgress();
+            await saveKingTibianusProgress(playerName, allProgress);
+          }
+        }
+
+        if (motherOfAllSpiders !== 0) {
+          if (motherOfAllSpiders >= 1) {
+            kingChatState.progressMotherOfAllSpiders = { accepted: true, completed: motherOfAllSpiders >= 2 };
+            actions.push(motherOfAllSpiders >= 2 ? 'Mother of All Spiders: completed' : 'Mother of All Spiders: accepted');
+          } else {
+            kingChatState.progressMotherOfAllSpiders = { accepted: false, completed: false };
+            actions.push('Mother of All Spiders: reset');
+            const questItems = await getQuestItems(false);
+            const spoolCount = questItems[MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName] || 0;
+            if (spoolCount > 0) {
+              await consumeQuestItem(MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName, spoolCount);
+              actions.push(`-${spoolCount} Spool of Yarn`);
+            }
+          }
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            const allProgress = getAllMissionProgress();
+            await saveKingTibianusProgress(playerName, allProgress);
+          }
+        }
+
         const sealParams = [
           { key: 'firstSeal', value: firstSeal, index: FIRST_SEAL },
           { key: 'secondSeal', value: secondSeal, index: SECOND_SEAL },
@@ -3186,7 +3535,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         }
 
         console.log('[Quests Mod][Dev] Quest items modified:', actions.join(', '));
-        console.log('[Quests Mod][Dev] Parameters used:', { leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter, elvenhairRope, holyTible, monksStudy, queenBanshees, firstSeal, secondSeal, thirdSeal, fourthSeal, fifthSeal, sixthSeal, seventhSeal });
+        console.log('[Quests Mod][Dev] Parameters used:', { leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter, elvenhairRope, holyTible, monksStudy, queenBanshees, followerOfZathroth, motherOfAllSpiders, firstSeal, secondSeal, thirdSeal, fourthSeal, fifthSeal, sixthSeal, seventhSeal });
       } catch (err) {
         console.error('[Quests Mod][Dev] Operation failed:', err);
       }
@@ -3213,6 +3562,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           letter: { accepted: true, completed: true },
           monksStudy: { accepted: true, completed: true },
           queenBanshees: { accepted: true, completed: true },
+          followerOfZathroth: { accepted: true, completed: true },
+          motherOfAllSpiders: { accepted: true, completed: true },
           alDeeFishing: { accepted: true, completed: true },
           alDeeGoldenRope: { accepted: true, completed: true },
           ironOre: {
@@ -3239,7 +3590,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           'Light Shovel': 1,      // From Al Dee Fishing mission
           'The Holy Tible': 1,    // From Al Dee Golden Rope mission
           'Castello\'s diary': 1, // From Queen Banshees mission (when accepted)
-          'Blessed Ankh': 1       // From Queen Banshees mission (when completed)
+          'Blessed Ankh': 1,      // From Queen Banshees mission (when completed)
+          'Spool of Yarn': 1     // From Mother of All Spiders mission (when completed)
         };
 
         const granted = [];
@@ -3356,6 +3708,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     [KING_LETTER_MISSION.id]: 'progressLetter',
     [KING_MONKS_STUDY_MISSION.id]: 'progressMonksStudy',
     [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'progressQueenBanshees',
+    [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'progressFollowerOfZathroth',
+    [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'progressMotherOfAllSpiders',
     [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
     [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope'
   };
@@ -3366,6 +3720,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     [KING_LETTER_MISSION.id]: 'letter',
     [KING_MONKS_STUDY_MISSION.id]: 'monksStudy',
     [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'queenBanshees',
+    [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'followerOfZathroth',
+    [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'motherOfAllSpiders',
     [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
     [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope'
   };
@@ -3389,6 +3745,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       }
     }
     result.costelloVisited = !!kingChatState.costelloVisited;
+    result.mornenion = { defeated: !!kingChatState.mornenionDefeated };
     result.sevenSealsCompleted = normalizeSevenSealsCompleted(kingChatState.sevenSealsCompleted);
     return result;
   }
@@ -3963,7 +4320,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         'Elvenhair Rope',
         'The Holy Tible',
         'Castello\'s diary',
-        'Blessed Ankh'
+        'Blessed Ankh',
+        'Spider Silk',
+        'Spool of Yarn'
       ].includes(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
@@ -6552,8 +6911,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       }
 
       // kingChatState is now defined globally
-      // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = display order in Quest Log (Monks Study after The search for the Light; Queen Banshees after Monks Study).
-      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION, KING_MONKS_STUDY_MISSION, COSTELLO_QUEEN_BANSHEES_MISSION];
+      // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = display order in Quest Log (Monks Study after The search for the Light; Queen Banshees after Monks Study; Follower of Zathroth after Queen Banshees).
+      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION, KING_MONKS_STUDY_MISSION, COSTELLO_QUEEN_BANSHEES_MISSION, FOLLOWER_OF_ZATHROTH_MISSION, MOTHER_OF_ALL_SPIDERS_MISSION];
 
       // Mission Registry: Maps mission IDs to their state property names in kingChatState
       // This centralizes mission-to-state mapping for easier maintenance
@@ -6563,6 +6922,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         [KING_LETTER_MISSION.id]: 'progressLetter',
         [KING_MONKS_STUDY_MISSION.id]: 'progressMonksStudy',
         [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'progressQueenBanshees',
+        [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'progressFollowerOfZathroth',
+        [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'progressMotherOfAllSpiders',
         [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
         [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope'
       };
@@ -6574,6 +6935,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         [KING_LETTER_MISSION.id]: 'letter',
         [KING_MONKS_STUDY_MISSION.id]: 'monksStudy',
         [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'queenBanshees',
+        [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'followerOfZathroth',
+        [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'motherOfAllSpiders',
         [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
         [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope'
       };
@@ -6629,7 +6992,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       let modalRef = null;
 
       // Create cooldown manager for Tibianus conversation
-      const tibianusCooldown = createNPCCooldownManager(1000);
+      const tibianusCooldown = createNPCCooldownManager(NPC_CHAT_RESPONSE_DELAY_MS);
 
       function buildStrings(mission) {
         // Handle case where all missions are completed (mission is null)
@@ -6924,6 +7287,10 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             line2.textContent = `Reward: ${selectedMission.rewardCoins} guild coins.`;
           } else if (selectedMission.id === COSTELLO_QUEEN_BANSHEES_MISSION.id) {
             line2.textContent = 'Reward: Blessed Ankh.';
+          } else if (selectedMission.id === FOLLOWER_OF_ZATHROTH_MISSION.id) {
+            line2.textContent = selectedMission.rewardCoins ? `Reward: ${selectedMission.rewardCoins} guild coins.` : 'Bring the Blessed Ankh to Wyda in the swamps of Venore.';
+          } else if (selectedMission.id === MOTHER_OF_ALL_SPIDERS_MISSION.id) {
+            line2.textContent = 'Reward: Spool of Yarn.';
           } else {
             line2.textContent = selectedMission.rewardCoins ? `Reward: ${selectedMission.rewardCoins} guild coins.` : '';
           }
@@ -7058,6 +7425,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
                 };
               }
             }
+            kingChatState.mornenionDefeated = !!(progress.mornenion && progress.mornenion.defeated);
           }
           
           // Auto-accept Al Dee golden rope mission if player has Elvenhair Rope but mission not accepted
@@ -7128,6 +7496,11 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             kingChatState.progressLetter.accepted = true;
           } else if (mission.id === KING_MONKS_STUDY_MISSION.id) {
             kingChatState.progressMonksStudy.accepted = true;
+          } else if (mission.id === FOLLOWER_OF_ZATHROTH_MISSION.id) {
+            kingChatState.progressFollowerOfZathroth.accepted = true;
+            if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
+          } else if (mission.id === MOTHER_OF_ALL_SPIDERS_MISSION.id) {
+            kingChatState.progressMotherOfAllSpiders.accepted = true;
           }
           activeMission = currentMission();
           selectedMissionId = null;
@@ -7962,7 +8335,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       };
 
       // Create cooldown manager for Al Dee conversation
-      const alDeeCooldown = createNPCCooldownManager(1000);
+      const alDeeCooldown = createNPCCooldownManager(NPC_CHAT_RESPONSE_DELAY_MS);
 
       // Function to add message to conversation
       function addMessageToConversation(sender, text, isAlDee = false) {
@@ -8469,6 +8842,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
                   
                   // Set Mornenion as defeated when golden rope mission is completed
                   // (completing this mission means Mornenion was defeated to obtain the rope)
+                  kingChatState.mornenionDefeated = true;
                   allProgress.mornenion = { defeated: true };
                   console.log('[Quests Mod][Al Dee] Mornenion marked as defeated - golden rope mission completed');
                   
@@ -8901,7 +9275,101 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     }, 50);
   }
 
-  // Costello Modal (Isle of Kings, Carlin) – same layout as Al Dee but with Costello image and greeting
+  // Shared NPC chat modal content (image + messages + input). Used by Costello and Wyda.
+  function createNPCChatModalContent(options) {
+    const {
+      npcName,
+      playerName,
+      imageUrl,
+      imageAlt,
+      welcomeMessage,
+      placeholder,
+      modalWidth,
+      modalHeight,
+      messageContainerId
+    } = options;
+
+    const contentDiv = document.createElement('div');
+    applyModalContentStyles(contentDiv, modalWidth, modalHeight);
+
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; height: 100%;';
+
+    const row1 = document.createElement('div');
+    row1.className = 'grid gap-3 sm:grid-cols-[min-content_1fr]';
+    row1.style.cssText = 'align-self: center; flex: 1 1 0; min-height: 0;';
+
+    const imageContainer = document.createElement('div');
+    imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
+    imageContainer.style.cssText = 'width: 110px; min-width: 110px; height: 150px; min-height: 150px; padding: 0; align-self: stretch;';
+
+    const imgWrapper = document.createElement('div');
+    imgWrapper.style.cssText = 'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
+
+    const img = document.createElement('img');
+    img.src = imageUrl;
+    img.alt = imageAlt || npcName;
+    img.className = 'pixelated';
+    img.style.cssText = 'max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; image-rendering: pixelated;';
+    imgWrapper.appendChild(img);
+    imageContainer.appendChild(imgWrapper);
+
+    const messageContainer = document.createElement('div');
+    messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular';
+    messageContainer.style.cssText = 'width: 290px; height: 150px; min-height: 150px; max-height: 150px; overflow-y: auto; flex-shrink: 0; box-sizing: border-box;';
+    if (messageContainerId) messageContainer.id = messageContainerId;
+
+    function addMessage(sender, text, isNpc) {
+      const messageP = document.createElement('p');
+      messageP.className = 'inline text-monster';
+      messageP.style.color = isNpc ? 'rgb(135, 206, 250)' : 'rgb(200, 180, 255)';
+      messageP.textContent = sender + ': ' + text;
+      messageContainer.appendChild(messageP);
+      setTimeout(() => { messageContainer.scrollTop = messageContainer.scrollHeight; }, 0);
+    }
+
+    addMessage(npcName, welcomeMessage, true);
+
+    row1.appendChild(imageContainer);
+    row1.appendChild(messageContainer);
+    modalContent.appendChild(row1);
+
+    const inputRow = document.createElement('div');
+    inputRow.style.cssText = 'display: flex; gap: 6px; align-items: center; flex-shrink: 0;';
+    const textarea = document.createElement('textarea');
+    textarea.setAttribute('wrap', 'off');
+    textarea.placeholder = placeholder;
+    textarea.style.cssText = 'flex:1;height:28px;max-height:28px;min-height:28px;padding:4px 6px;background-color:#333;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;color:rgb(255,255,255);font-size:13px;resize:none;box-sizing:border-box;outline:none;';
+
+    const sendBtn = document.createElement('button');
+    sendBtn.textContent = 'Send';
+    sendBtn.className = 'primary';
+    sendBtn.style.cssText = `
+      height: 28px;
+      padding: 4px 10px;
+      white-space: nowrap;
+      font-size: 13px;
+      line-height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') center center / cover;
+      border: 4px solid transparent;
+      border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+      color: rgb(255, 255, 255);
+      cursor: pointer;
+      font-family: inherit;
+    `;
+
+    inputRow.appendChild(textarea);
+    inputRow.appendChild(sendBtn);
+    modalContent.appendChild(inputRow);
+    contentDiv.appendChild(modalContent);
+
+    return { contentDiv, addMessage, messageContainer, textarea, sendBtn };
+  }
+
+  // Costello Modal (Isle of Kings, Carlin) – uses shared NPC chat layout
   function showCostelloModal() {
     clearTimeoutOrInterval(modalTimeout);
     clearTimeoutOrInterval(dialogTimeout);
@@ -8918,95 +9386,34 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       }).catch((err) => console.error('[Quests Mod][Costello] Error loading progress for costelloVisited:', err));
     }
 
-    modalTimeout = setTimeout(() => {
-      const contentDiv = document.createElement('div');
-      applyModalContentStyles(contentDiv, KING_TIBI_MODAL_WIDTH, COSTELLO_MODAL_HEIGHT);
+    const costelloPlayerName = getCurrentPlayerName() || 'Player';
+    const costelloIconUrl = getQuestItemsAssetUrl('Costello.gif');
+    const { contentDiv, addMessage: addMessageToConversation, textarea: costelloTextarea, sendBtn: costelloSendBtn } = createNPCChatModalContent({
+      npcName: 'Costello',
+      playerName: costelloPlayerName,
+      imageUrl: costelloIconUrl,
+      imageAlt: 'Costello',
+      welcomeMessage: 'Welcome, ' + costelloPlayerName + '! Feel free to tell me what brings you here.',
+      placeholder: 'Type your message to Costello...',
+      modalWidth: KING_TIBI_MODAL_WIDTH,
+      modalHeight: COSTELLO_MODAL_HEIGHT,
+      messageContainerId: 'costello-messages'
+    });
 
-      const costelloIconUrl = getQuestItemsAssetUrl('Costello.gif');
-
-      const modalContent = document.createElement('div');
-      modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; height: 100%;';
-
-      const row1 = document.createElement('div');
-      row1.className = 'grid gap-3 sm:grid-cols-[min-content_1fr]';
-      row1.style.cssText = 'align-self: center; flex: 1 1 0; min-height: 0;';
-
-      const imageContainer = document.createElement('div');
-      imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
-      imageContainer.style.cssText = 'width: 110px; min-width: 110px; height: 150px; min-height: 150px; padding: 0; align-self: stretch;';
-
-      const costelloImgWrapper = document.createElement('div');
-      costelloImgWrapper.style.cssText = 'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
-
-      const costelloImg = document.createElement('img');
-      costelloImg.src = costelloIconUrl;
-      costelloImg.alt = 'Costello';
-      costelloImg.className = 'pixelated';
-      costelloImg.style.cssText = 'max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; image-rendering: pixelated;';
-      costelloImgWrapper.appendChild(costelloImg);
-      imageContainer.appendChild(costelloImgWrapper);
-
-      const messageContainer = document.createElement('div');
-      messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular';
-      messageContainer.style.cssText = 'width: 290px; height: 150px; min-height: 150px; max-height: 150px; overflow-y: auto; flex-shrink: 0; box-sizing: border-box;';
-      messageContainer.id = 'costello-messages';
-
-      const costelloPlayerName = getCurrentPlayerName() || 'Player';
-      const costelloCooldown = createNPCCooldownManager(1000);
-
-      function addMessageToConversation(sender, text, isCostello = false) {
-        const messageP = document.createElement('p');
-        messageP.className = 'inline text-monster';
-        messageP.style.color = isCostello ? 'rgb(135, 206, 250)' : 'rgb(200, 180, 255)';
-        messageP.textContent = sender + ': ' + text;
-        messageContainer.appendChild(messageP);
-        setTimeout(() => { messageContainer.scrollTop = messageContainer.scrollHeight; }, 0);
+    costelloTextarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessageToCostello();
       }
+    });
+    costelloSendBtn.addEventListener('click', sendMessageToCostello);
 
-      const welcomeText = 'Welcome, ' + costelloPlayerName + '! Feel free to tell me what brings you here.';
-      addMessageToConversation('Costello', welcomeText, true);
+    const costelloCooldown = createNPCCooldownManager(NPC_CHAT_RESPONSE_DELAY_MS);
+    let costelloAwaitingHolyTible = false;
+    let costelloOfferingQueenBanshees = false;
+    let costelloOfferingBloodProtector = false;
 
-      row1.appendChild(imageContainer);
-      row1.appendChild(messageContainer);
-      modalContent.appendChild(row1);
-
-      const inputRow = document.createElement('div');
-      inputRow.style.cssText = 'display: flex; gap: 6px; align-items: center; flex-shrink: 0;';
-      const costelloTextarea = document.createElement('textarea');
-      costelloTextarea.setAttribute('wrap', 'off');
-      costelloTextarea.placeholder = 'Type your message to Costello...';
-      costelloTextarea.style.cssText = 'flex:1;height:28px;max-height:28px;min-height:28px;padding:4px 6px;background-color:#333;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;color:rgb(255,255,255);font-size:13px;resize:none;box-sizing:border-box;outline:none;';
-      costelloTextarea.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          sendMessageToCostello();
-        }
-      });
-      const costelloSendBtn = document.createElement('button');
-      costelloSendBtn.textContent = 'Send';
-      costelloSendBtn.className = 'primary';
-      costelloSendBtn.style.cssText = `
-        height: 28px;
-        padding: 4px 10px;
-        white-space: nowrap;
-        font-size: 13px;
-        line-height: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') center center / cover;
-        border: 4px solid transparent;
-        border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
-        color: rgb(255, 255, 255);
-        cursor: pointer;
-        font-family: inherit;
-      `;
-      costelloSendBtn.addEventListener('click', sendMessageToCostello);
-
-      let costelloAwaitingHolyTible = false;
-      let costelloOfferingQueenBanshees = false;
-
-      async function sendMessageToCostello() {
+    async function sendMessageToCostello() {
         const text = (costelloTextarea.value || '').trim();
         if (!text) return;
         addMessageToConversation(costelloPlayerName, text, false);
@@ -9048,6 +9455,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         if (lowerText.includes('mission') || lowerText.includes('quest')) {
           const monksProgress = getMissionProgress(KING_MONKS_STUDY_MISSION);
           const queenBansheesProgress = getMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION);
+          const followerOfZathrothProgress = getMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION);
           if (monksProgress.accepted && !monksProgress.completed) {
             costelloAwaitingHolyTible = true;
             costelloCooldown.queueResponse(text, 'The King has sent you. Do you have the Holy Tible with you? I need to see it to complete your study here.', addMessageToConversation, 'Costello');
@@ -9086,6 +9494,13 @@ function createNPCCooldownManager(cooldownMs = 1000) {
                 ? 'You have completed all seven seals. Return to me and say you are done when you wish to complete this task.'
                 : COSTELLO_QUEEN_BANSHEES_MISSION.alreadyActive, addMessageToConversation, 'Costello');
             }
+          } else if (queenBansheesProgress.completed && !followerOfZathrothProgress.accepted) {
+            costelloOfferingBloodProtector = true;
+            costelloCooldown.queueResponse(text, FOLLOWER_OF_ZATHROTH_MISSION.prompt, addMessageToConversation, 'Costello');
+          } else if (followerOfZathrothProgress.accepted && !followerOfZathrothProgress.completed) {
+            costelloCooldown.queueResponse(text, FOLLOWER_OF_ZATHROTH_MISSION.alreadyActive, addMessageToConversation, 'Costello');
+          } else if (followerOfZathrothProgress.completed) {
+            costelloCooldown.queueResponse(text, FOLLOWER_OF_ZATHROTH_MISSION.alreadyCompleted, addMessageToConversation, 'Costello');
           } else {
             costelloCooldown.queueResponse(text, 'I have no further mission for you. Perhaps the King has work for you.', addMessageToConversation, 'Costello');
           }
@@ -9114,6 +9529,28 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         if (costelloOfferingQueenBanshees && (lowerText.includes('no') || lowerText.includes('not'))) {
           costelloOfferingQueenBanshees = false;
           costelloCooldown.queueResponse(text, 'Return when you are ready for this task.', addMessageToConversation, 'Costello');
+          return;
+        }
+
+        if (costelloOfferingBloodProtector && lowerText.includes('yes')) {
+          costelloOfferingBloodProtector = false;
+          try {
+            setMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION, { accepted: true, completed: false });
+            kingChatState.progressFollowerOfZathroth.accepted = true;
+            kingChatState.progressFollowerOfZathroth.completed = false;
+            const allProgress = getAllMissionProgress();
+            await saveKingTibianusProgress(costelloPlayerName, allProgress);
+            if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
+            costelloCooldown.queueResponse(text, FOLLOWER_OF_ZATHROTH_MISSION.accept, addMessageToConversation, 'Costello');
+          } catch (err) {
+            console.error('[Quests Mod][Costello] Error accepting Follower of Zathroth:', err);
+            costelloCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessageToConversation, 'Costello');
+          }
+          return;
+        }
+        if (costelloOfferingBloodProtector && (lowerText.includes('no') || lowerText.includes('not'))) {
+          costelloOfferingBloodProtector = false;
+          costelloCooldown.queueResponse(text, 'Return when you are ready to bring the Blessed Ankh to Wyda.', addMessageToConversation, 'Costello');
           return;
         }
 
@@ -9155,17 +9592,213 @@ function createNPCCooldownManager(cooldownMs = 1000) {
 
         const response = getCostelloResponse(text, costelloPlayerName);
         costelloCooldown.queueResponse(text, response, addMessageToConversation, 'Costello');
-      }
+    }
 
-      inputRow.appendChild(costelloTextarea);
-      inputRow.appendChild(costelloSendBtn);
-      modalContent.appendChild(inputRow);
-      contentDiv.appendChild(modalContent);
-
+    modalTimeout = setTimeout(() => {
       const api = (typeof globalThis !== 'undefined' && globalThis.BestiaryModAPI) || (typeof window !== 'undefined' && window.BestiaryModAPI);
       if (api && api.ui && api.ui.components && api.ui.components.createModal) {
         const modal = api.ui.components.createModal({
           title: 'Costello',
+          width: KING_TIBI_MODAL_WIDTH,
+          height: COSTELLO_MODAL_HEIGHT,
+          content: contentDiv,
+          buttons: []
+        });
+        dialogTimeout = setTimeout(() => {
+          let dialog = modal?.element || document.querySelector('div[role="dialog"][data-state="open"]');
+          if (dialog) {
+            const dialogRoot = dialog.getAttribute?.('role') === 'dialog' ? dialog : (dialog.closest?.('[role="dialog"]') || dialog);
+            if (typeof applyDialogStyles === 'function') {
+              applyDialogStyles(dialogRoot, KING_TIBI_MODAL_WIDTH, COSTELLO_MODAL_HEIGHT);
+            }
+            dialogRoot.style.setProperty('width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
+            dialogRoot.style.setProperty('min-width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
+            dialogRoot.style.setProperty('max-width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
+            dialogRoot.style.setProperty('height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
+            dialogRoot.style.setProperty('min-height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
+            dialogRoot.style.setProperty('max-height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
+            if (typeof removeDefaultModalFooter === 'function') {
+              removeDefaultModalFooter(dialogRoot);
+            }
+          }
+          dialogTimeout = null;
+        }, 0);
+      }
+      modalTimeout = null;
+    }, 50);
+  }
+
+  // Wyda Modal (Wyda's House, swamps of Venore) – uses shared NPC chat layout and transcript
+  function showWydaModal() {
+    clearTimeoutOrInterval(modalTimeout);
+    clearTimeoutOrInterval(dialogTimeout);
+    for (let i = 0; i < 2; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    }
+
+    const wydaPlayerName = getCurrentPlayerName() || 'Player';
+    const wydaIconUrl = getQuestItemsAssetUrl('Wyda.gif');
+    const { contentDiv, addMessage, textarea, sendBtn } = createNPCChatModalContent({
+      npcName: 'Wyda',
+      playerName: wydaPlayerName,
+      imageUrl: wydaIconUrl,
+      imageAlt: 'Wyda',
+      welcomeMessage: "What? Talking to me, " + wydaPlayerName + "? I'm bored! Bored bored bored! Nothing ever happens here!",
+      placeholder: 'Type your message to Wyda...',
+      modalWidth: KING_TIBI_MODAL_WIDTH,
+      modalHeight: COSTELLO_MODAL_HEIGHT,
+      messageContainerId: 'wyda-messages'
+    });
+
+    const wydaCooldown = createNPCCooldownManager(NPC_CHAT_RESPONSE_DELAY_MS);
+    let wydaOfferingMotherOfAllSpiders = false;
+
+    async function sendMessageToWyda() {
+      const text = (textarea.value || '').trim();
+      if (!text) return;
+      addMessage(wydaPlayerName, text, false);
+      textarea.value = '';
+      wydaCooldown.clearPendingResponse();
+      const lowerText = text.toLowerCase();
+
+      const followerOfZathrothProgress = getMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION);
+      const motherProgress = getMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION);
+
+      // The Mother of All Spiders: give Spider Silk to Wyda to complete (check before mission/quest so "silk" / "spider silk" complete the hand-in)
+      const giveSilkKeywords = ['silk', 'spider silk', 'give', 'here', 'take', 'offer', 'mission', 'quest'];
+      const wantsToGiveSilk = giveSilkKeywords.some(kw => lowerText.includes(kw));
+      if (motherProgress.accepted && !motherProgress.completed && wantsToGiveSilk) {
+        try {
+          const questItems = await getQuestItems(false);
+          const hasSilk = (questItems['Spider Silk'] || 0) >= 1;
+          if (hasSilk) {
+            await consumeQuestItem('Spider Silk', 1);
+            setMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION, { accepted: true, completed: true });
+            kingChatState.progressMotherOfAllSpiders.accepted = true;
+            kingChatState.progressMotherOfAllSpiders.completed = true;
+            const playerName = getCurrentPlayerName();
+            if (playerName) {
+              const allProgress = getAllMissionProgress();
+              await saveKingTibianusProgress(playerName, allProgress);
+            }
+            await addQuestItem(MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName, 1);
+            if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
+            wydaCooldown.queueResponse(text, 'The silk! Excellent. I can make good use of this. Here, take this Spool of Yarn as thanks.', addMessage, 'Wyda');
+            showToast({ message: 'Received Spool of Yarn!', duration: TOAST_DURATION_IMPORTANT, logPrefix: '[Quests Mod][Wyda]' });
+            return;
+          }
+          wydaCooldown.queueResponse(text, "You don't have the spider silk. Defeat the mother of all spiders in the secluded herb and return with the silk.", addMessage, 'Wyda');
+          return;
+        } catch (err) {
+          console.error('[Quests Mod][Wyda] Error completing Mother of All Spiders:', err);
+          wydaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Wyda');
+          return;
+        }
+      }
+
+      // The Follower of Zathroth: give Blessed Ankh to Wyda to complete
+      const giveAnkhKeywords = ['ankh', 'blessed ankh', 'give', 'here', 'take', 'offer', 'mission', 'quest'];
+      const wantsToGiveAnkh = giveAnkhKeywords.some(kw => lowerText.includes(kw));
+      if (followerOfZathrothProgress.accepted && !followerOfZathrothProgress.completed && wantsToGiveAnkh) {
+        try {
+          const questItems = await getQuestItems(false);
+          const hasAnkh = (questItems['Blessed Ankh'] || 0) >= 1;
+          if (hasAnkh) {
+            await consumeQuestItem('Blessed Ankh', 1);
+            setMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION, { accepted: true, completed: true });
+            kingChatState.progressFollowerOfZathroth.accepted = true;
+            kingChatState.progressFollowerOfZathroth.completed = true;
+            const playerName = getCurrentPlayerName();
+            if (playerName) {
+              const allProgress = getAllMissionProgress();
+              await saveKingTibianusProgress(playerName, allProgress);
+            }
+            const coinsAdder = globalThis.addGuildCoins ||
+              (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+              (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
+              (typeof addGuildCoins === 'function' ? addGuildCoins : null);
+            if (coinsAdder) {
+              await coinsAdder(FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins);
+            }
+            if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
+            const coinMsg = FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins ? ' Here are ' + FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins + ' guild coins for your trouble.' : '';
+            wydaCooldown.queueResponse(text, 'The Blessed Ankh! Yes, this is what I needed. You have done well. The matter Castello spoke of is complete.' + coinMsg, addMessage, 'Wyda');
+            showToast({ message: 'The Follower of Zathroth task is complete. Received ' + FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins + ' guild coins!', duration: TOAST_DURATION_IMPORTANT, logPrefix: '[Quests Mod][Wyda]' });
+            return;
+          }
+        } catch (err) {
+          console.error('[Quests Mod][Wyda] Error completing Follower of Zathroth:', err);
+        }
+      }
+
+      // The Mother of All Spiders: offer after Follower of Zathroth is completed
+      if (lowerText.includes('mission') || lowerText.includes('quest')) {
+        const motherProgress = getMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION);
+        if (followerOfZathrothProgress.completed && !motherProgress.accepted) {
+          wydaOfferingMotherOfAllSpiders = true;
+          wydaCooldown.queueResponse(text, MOTHER_OF_ALL_SPIDERS_MISSION.prompt, addMessage, 'Wyda');
+          return;
+        }
+        if (motherProgress.accepted && !motherProgress.completed) {
+          wydaCooldown.queueResponse(text, MOTHER_OF_ALL_SPIDERS_MISSION.alreadyActive, addMessage, 'Wyda');
+          return;
+        }
+        if (motherProgress.completed) {
+          wydaCooldown.queueResponse(text, MOTHER_OF_ALL_SPIDERS_MISSION.alreadyCompleted, addMessage, 'Wyda');
+          return;
+        }
+      }
+
+      if (wydaOfferingMotherOfAllSpiders && (lowerText.includes('yes') || lowerText.includes('accept'))) {
+        wydaOfferingMotherOfAllSpiders = false;
+        try {
+          setMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION, { accepted: true, completed: false });
+          kingChatState.progressMotherOfAllSpiders.accepted = true;
+          kingChatState.progressMotherOfAllSpiders.completed = false;
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            const allProgress = getAllMissionProgress();
+            await saveKingTibianusProgress(playerName, allProgress);
+          }
+          wydaCooldown.queueResponse(text, MOTHER_OF_ALL_SPIDERS_MISSION.accept, addMessage, 'Wyda');
+        } catch (err) {
+          console.error('[Quests Mod][Wyda] Error accepting Mother of All Spiders:', err);
+          wydaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Wyda');
+        }
+        return;
+      }
+      if (wydaOfferingMotherOfAllSpiders && (lowerText.includes('no') || lowerText.includes('not'))) {
+        wydaOfferingMotherOfAllSpiders = false;
+        wydaCooldown.queueResponse(text, 'Return when you are ready for this task.', addMessage, 'Wyda');
+        return;
+      }
+
+      const lines = getWydaResponse(text, wydaPlayerName);
+      if (lines.length === 0) return;
+      if (lines.length === 1) {
+        wydaCooldown.queueResponse(text, lines[0], addMessage, 'Wyda');
+        return;
+      }
+      lines.forEach((line, i) => {
+        setTimeout(() => {
+          addMessage('Wyda', line, true);
+        }, (i + 1) * NPC_CHAT_RESPONSE_DELAY_MS);
+      });
+    }
+
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessageToWyda();
+      }
+    });
+    sendBtn.addEventListener('click', sendMessageToWyda);
+
+    modalTimeout = setTimeout(() => {
+      const api = (typeof globalThis !== 'undefined' && globalThis.BestiaryModAPI) || (typeof window !== 'undefined' && window.BestiaryModAPI);
+      if (api && api.ui && api.ui.components && api.ui.components.createModal) {
+        const modal = api.ui.components.createModal({
+          title: 'Wyda',
           width: KING_TIBI_MODAL_WIDTH,
           height: COSTELLO_MODAL_HEIGHT,
           content: contentDiv,
@@ -9864,6 +10497,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         'king_letter_al_dee': 'progressLetter',
         'king_monks_study': 'progressMonksStudy',
         'costello_queen_banshees': 'progressQueenBanshees',
+        'follower_of_zathroth': 'progressFollowerOfZathroth',
+        'mother_of_all_spiders': 'progressMotherOfAllSpiders',
         'al_dee_fishing_gold': 'progressAlDeeFishing',
         'al_dee_golden_rope': 'progressAlDeeGoldenRope'
       };
@@ -9888,6 +10523,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         letter: kingChatState.progressLetter,
         monksStudy: kingChatState.progressMonksStudy,
         queenBanshees: kingChatState.progressQueenBanshees,
+        followerOfZathroth: kingChatState.progressFollowerOfZathroth,
+        motherOfAllSpiders: kingChatState.progressMotherOfAllSpiders,
         alDeeFishing: kingChatState.progressAlDeeFishing,
         alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope,
         costelloVisited: kingChatState.costelloVisited,
@@ -9953,6 +10590,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       kingChatState.progressLetter = { accepted: false, completed: false };
       kingChatState.progressMonksStudy = { accepted: false, completed: false };
       kingChatState.progressQueenBanshees = { accepted: false, completed: false };
+      kingChatState.progressFollowerOfZathroth = { accepted: false, completed: false };
+      kingChatState.progressMotherOfAllSpiders = { accepted: false, completed: false };
       kingChatState.progressAlDeeFishing = { accepted: false, completed: false };
       kingChatState.progressAlDeeGoldenRope = { accepted: false, completed: false };
       kingChatState.costelloVisited = false;
@@ -10300,6 +10939,15 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             bansheeVillainSetupDone = false;
           }
 
+          // Check if we're leaving Spider Lair (reset one-time setup flags)
+          if (currentRoomName && currentRoomName !== SPIDER_LAIR_ROOM_NAME) {
+            if (spiderLairVillainSetupDone) {
+              console.log('[Quests Mod][Overlay Hider] Leaving Spider Lair - resetting villain setup flag');
+              spiderLairVillainSetupDone = false;
+            }
+            spiderLairReinitTriggered = false;
+          }
+
           // Banshee's Last Room: same as Mornenion — when we enter via portal, remove original villains and add Queen of the Banshee
           if (currentRoomName === BANSHEE_LAST_ROOM_NAME && playerUsedPortalToBansheeLastRoom && bansheeLastRoomBattle) {
             if (!bansheeVillainSetupDone) {
@@ -10317,6 +10965,58 @@ function createNPCCooldownManager(cooldownMs = 1000) {
               console.log('[Quests Mod][Overlay Hider] Banshee Last Room villains missing - re-adding');
               bansheeLastRoomBattle.addVillains();
             }
+          }
+
+          // Spider Lair: re-init battle if we're still here after defeat (cleanup set spiderLairBattle = null) so player can retry without re-entering from A Secluded Herb
+          const motherProgress = kingChatState.progressMotherOfAllSpiders;
+          const canRetrySpiderLair = motherProgress?.accepted && !motherProgress?.completed;
+          if (currentRoomName === SPIDER_LAIR_ROOM_NAME && canRetrySpiderLair && !spiderLairBattle && currentRoomId && !spiderLairReinitTriggered) {
+            spiderLairReinitTriggered = true;
+            console.log('[Quests Mod][Overlay Hider] Spider Lair: re-initializing battle after defeat so player can retry');
+            playerUsedTile77ToSpiderLair = true;
+            spiderLairVillainSetupDone = false;
+            const initResult = initializeSpiderLairBattle(currentRoomId);
+            if (initResult && initResult.then) {
+              initResult.then((battle) => {
+                if (battle) {
+                  spiderLairBattle = battle;
+                  spiderLairBattle.setup(
+                    () => playerUsedTile77ToSpiderLair,
+                    (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
+                  );
+                  setupSpiderLairTileRestrictions();
+                }
+              }).catch((err) => console.error('[Quests Mod][Spider Lair] Re-init error:', err));
+            } else if (initResult) {
+              spiderLairBattle = initResult;
+              spiderLairBattle.setup(
+                () => playerUsedTile77ToSpiderLair,
+                (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
+              );
+              setupSpiderLairTileRestrictions();
+            }
+          }
+
+          // Spider Lair (The Old Widow + Giant Spiders): only when we entered via tile 77 in A Secluded Herb (questline)
+          if (currentRoomName === SPIDER_LAIR_ROOM_NAME && playerUsedTile77ToSpiderLair && spiderLairBattle) {
+            const justEnteredSpiderLairViaQuest = lastOverlayHiderRoomName !== SPIDER_LAIR_ROOM_NAME;
+            if (justEnteredSpiderLairViaQuest) {
+              console.log('[Quests Mod][Overlay Hider] Entering Spider Lair (via quest) - removing original villains and adding custom villains');
+              hideQuestOverlays();
+              hideHeroEditorButton();
+              spiderLairBattle.removeOriginalVillains();
+              spiderLairVillainSetupDone = true;
+              replaceSpiderLairTileSprites();
+              [0, 50, 150].forEach(delay => setTimeout(() => replaceSpiderLairTileSprites(), delay));
+            }
+            const oldWidowExists = boardConfig.some(entity =>
+              entity.key && entity.key.startsWith('spider-old-widow-tile-81-')
+            );
+            if (!oldWidowExists) {
+              console.log('[Quests Mod][Overlay Hider] Spider Lair villains missing - re-adding');
+              spiderLairBattle.addVillains();
+            }
+            replaceSpiderLairTileSprites();
           }
 
           // Check if we're in Ab'Dendriel Hive or related areas
@@ -10529,6 +11229,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             }
             // If we were never in Ab'Dendriel, do nothing
           }
+          lastOverlayHiderRoomName = currentRoomName;
         } catch (error) {
           console.error('[Quests Mod][Overlay Hider] Error checking room:', error);
         }
@@ -11023,6 +11724,24 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     }
   }
 
+  // Navigate to A Secluded Herb (e.g. after Spider Lair battle)
+  function navigateToSecludedHerb() {
+    try {
+      const roomId = getRoomIdByRoomName(SECLUDED_HERB_ROOM_NAME);
+      if (!roomId) {
+        console.warn('[Quests Mod][Spider Lair] A Secluded Herb room not found');
+        return;
+      }
+      console.log('[Quests Mod][Spider Lair] Navigating to A Secluded Herb');
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId: roomId
+      });
+    } catch (error) {
+      console.error('[Quests Mod][Spider Lair] Error navigating to A Secluded Herb:', error);
+    }
+  }
+
   // Navigate to Demonrage Seal (e.g. after Banshee's Last Room battle)
   function navigateToDemonrageSeal() {
     try {
@@ -11094,6 +11813,106 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             message: toastData.message,
             duration: toastData.duration || 3000,
             logPrefix: '[Quests Mod][Banshee Last Room]'
+          });
+        }
+      );
+    }
+  }
+
+  // Build inner HTML for a single sprite (id-1950/1951 style) for Spider Lair tile replacement.
+  function getSpiderLairSpriteInnerHTML(spriteId) {
+    return `<div class="sprite item relative id-${spriteId}" style="z-index: 1000;"><div class="viewport"><img alt="${spriteId}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div></div>`;
+  }
+
+  // Replace tile 85 content with sprite 1951 and tile 86 with sprite 1950 in Spider Lair. Remove sprite id-233 from tile 85 and tile 86. Append sprite 2127 to tile 82 (keeps existing sprites).
+  function replaceSpiderLairTileSprites() {
+    const tile85 = getTileElement(SPIDER_LAIR_TILE_86);
+    const tile86 = getTileElement(SPIDER_LAIR_TILE_87);
+    if (tile85) {
+      const sprite233on85 = tile85.querySelector('.sprite.item.relative.id-' + SPIDER_LAIR_SPRITE_TO_REMOVE_ID);
+      if (sprite233on85) sprite233on85.remove();
+      if (!tile85.querySelector('.id-' + SPIDER_LAIR_TILE_86_SPRITE_ID)) {
+        tile85.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_TILE_86_SPRITE_ID);
+      }
+    }
+    if (tile86) {
+      const sprite233on86 = tile86.querySelector('.sprite.item.relative.id-' + SPIDER_LAIR_SPRITE_TO_REMOVE_ID);
+      if (sprite233on86) sprite233on86.remove();
+      if (!tile86.querySelector('.id-' + SPIDER_LAIR_TILE_87_SPRITE_ID)) {
+        tile86.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_TILE_87_SPRITE_ID);
+      }
+    }
+    for (const tileIndex of SPIDER_LAIR_TILES_ADD_SPRITE_2127) {
+      const tile = getTileElement(tileIndex);
+      if (tile && !tile.querySelector('.id-' + SPIDER_LAIR_ADD_SPRITE_2127_ID)) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_ADD_SPRITE_2127_ID);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      }
+    }
+    for (const tileIndex of SPIDER_LAIR_TILES_ADD_SPRITE_4312) {
+      const tile = getTileElement(tileIndex);
+      if (tile && !tile.querySelector('.id-' + SPIDER_LAIR_ADD_SPRITE_4312_ID)) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_ADD_SPRITE_4312_ID);
+        if (wrap.firstElementChild) tile.appendChild(wrap.firstElementChild);
+      }
+    }
+  }
+
+  // Restore board setup for Spider Lair (delegates to CustomBattle)
+  function restoreBoardSetupSpiderLair() {
+    if (spiderLairBattle) {
+      spiderLairBattle.restoreBoardSetup();
+    } else {
+      console.warn('[Quests Mod][Spider Lair] Battle not initialized');
+    }
+  }
+
+  // Clean up Spider Lair quest state and battle; call after victory/defeat modal close
+  function cleanupSpiderLairQuest() {
+    try {
+      playerUsedTile77ToSpiderLair = false;
+      spiderLairVillainSetupDone = false;
+      spiderLairReinitTriggered = false;
+      if (spiderLairBattle) {
+        spiderLairBattle.cleanup(restoreBoardSetupSpiderLair, showQuestOverlays);
+        spiderLairBattle = null;
+        console.log('[Quests Mod][Spider Lair] Battle cleaned up');
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Spider Lair] Error cleaning up:', error);
+    }
+  }
+
+  // Setup Spider Lair tile restrictions and ally limit (delegates to CustomBattle)
+  function setupSpiderLairTileRestrictions() {
+    if (spiderLairBattle) {
+      spiderLairBattle.setupTileRestrictions(
+        () => playerUsedTile77ToSpiderLair,
+        (toastData) => {
+          showToast({
+            message: toastData.message,
+            duration: toastData.duration || 3000,
+            logPrefix: '[Quests Mod][Spider Lair]'
+          });
+        }
+      );
+      setupSpiderLairAllyLimit();
+    } else {
+      console.warn('[Quests Mod][Spider Lair] Battle not initialized');
+    }
+  }
+
+  function setupSpiderLairAllyLimit() {
+    if (spiderLairBattle) {
+      spiderLairBattle.setupAllyLimit(
+        () => playerUsedTile77ToSpiderLair,
+        (toastData) => {
+          showToast({
+            message: toastData.message,
+            duration: toastData.duration || 3000,
+            logPrefix: '[Quests Mod][Spider Lair]'
           });
         }
       );
@@ -12224,6 +13043,148 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     }
   }
 
+  // Tile 77 in A Secluded Herb (Mother of All Spiders) — right-click to enter Spider Lair custom battle
+  function handleTile77SpiderLairRightClickDocument(event) {
+    const progress = kingChatState.progressMotherOfAllSpiders;
+    if (!progress?.accepted || progress.completed) return;
+    if (!isOnRoomByName(SECLUDED_HERB_ROOM_NAME)) return;
+
+    const tile77El = getTileElement(SECLUDED_HERB_TILE_77);
+    if (!tile77El || !tile77El.contains(event.target)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    let roomId = getRoomIdByRoomName(SPIDER_LAIR_ROOM_NAME);
+    let usedFallback = false;
+    if (!roomId && SPIDER_LAIR_USE_SECLUDED_HERB_IF_MISSING) {
+      roomId = getRoomIdByRoomName(SECLUDED_HERB_ROOM_NAME);
+      usedFallback = !!roomId;
+      if (usedFallback) {
+        console.log('[Quests Mod][Spider Lair] "Spider Lair" not in game — running battle on A Secluded Herb (roomId:', roomId, ')');
+      }
+    }
+    if (!roomId) {
+      showToast({ message: 'Spider Lair not found.', duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Spider Lair]' });
+      return;
+    }
+    console.log('[Quests Mod][Spider Lair] Tile 77 clicked — roomId:', roomId, usedFallback ? '(fallback: A Secluded Herb)' : '');
+
+    playerUsedTile77ToSpiderLair = true;
+    if (spiderLairBattle) {
+      spiderLairBattle.cleanup(restoreBoardSetupSpiderLair, showQuestOverlays);
+      spiderLairBattle = null;
+    }
+
+    const initResult = initializeSpiderLairBattle(roomId);
+    if (initResult && initResult.then) {
+      initResult.then((battle) => {
+        if (battle) {
+          spiderLairBattle = battle;
+          spiderLairBattle.setup(
+            () => playerUsedTile77ToSpiderLair,
+            (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
+          );
+          setupSpiderLairTileRestrictions();
+          console.log('[Quests Mod][Spider Lair] Battle initialized (async); villains added when overlay hider sees room', roomId);
+        } else {
+          console.error('[Quests Mod][Spider Lair] Failed to initialize battle after waiting');
+        }
+      }).catch((err) => console.error('[Quests Mod][Spider Lair] Error initializing battle:', err));
+    } else if (initResult) {
+      spiderLairBattle = initResult;
+      spiderLairBattle.setup(
+        () => playerUsedTile77ToSpiderLair,
+        (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
+      );
+      setupSpiderLairTileRestrictions();
+      console.log('[Quests Mod][Spider Lair] Battle initialized (sync); villains added when overlay hider sees room', roomId);
+    } else {
+      console.error('[Quests Mod][Spider Lair] CustomBattles not available');
+    }
+
+    if (!usedFallback) {
+      globalThis.state.board.send({ type: 'selectRoomById', roomId: roomId });
+      showToast({ message: 'Entering Old Widow\'s Lair...', duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Spider Lair]' });
+    } else {
+      showToast({ message: 'Spider Lair battle starting here.', duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Spider Lair]' });
+    }
+  }
+
+  function shouldEnableTile77SpiderLair(boardContext = null) {
+    const progress = kingChatState.progressMotherOfAllSpiders;
+    if (!progress?.accepted || progress.completed) return false;
+    return isOnRoomByName(SECLUDED_HERB_ROOM_NAME);
+  }
+
+  // Listener is on whenever we're not in Spider Lair (so we don't disable on map view or other rooms); pointer-events only when on A Secluded Herb
+  function shouldEnableTile77SpiderLairListener(boardContext = null) {
+    const progress = kingChatState.progressMotherOfAllSpiders;
+    if (!progress?.accepted || progress.completed) return false;
+    return !isOnRoomByName(SPIDER_LAIR_ROOM_NAME);
+  }
+
+  function updateTile77SpiderLairState(boardContext = null, retryCount = 0) {
+    try {
+      const listenerShouldBeOn = shouldEnableTile77SpiderLairListener(boardContext);
+      const pointerEventsShouldBeOn = shouldEnableTile77SpiderLair(boardContext);
+      const tile77El = getTileElement(SECLUDED_HERB_TILE_77);
+      if (listenerShouldBeOn && !tile77SpiderLairRightClickEnabled) {
+        document.addEventListener('contextmenu', handleTile77SpiderLairRightClickDocument, true);
+        tile77SpiderLairRightClickEnabled = true;
+      }
+      if (!listenerShouldBeOn && tile77SpiderLairRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleTile77SpiderLairRightClickDocument, true);
+        const el = getTileElement(SECLUDED_HERB_TILE_77);
+        if (el) el.style.pointerEvents = '';
+        tile77SpiderLairRightClickEnabled = false;
+        console.log('[Quests Mod][Tile 77 Spider Lair] Right-click disabled');
+        return;
+      }
+      if (pointerEventsShouldBeOn && tile77El) {
+        tile77El.style.pointerEvents = 'auto';
+        if (retryCount === 0) console.log('[Quests Mod][Tile 77 Spider Lair] Right-click enabled on A Secluded Herb');
+      } else if (pointerEventsShouldBeOn && !tile77El && retryCount < 5) {
+        setTimeout(() => updateTile77SpiderLairState(boardContext || globalThis.state?.board?.getSnapshot?.()?.context, retryCount + 1), 200);
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Tile 77 Spider Lair] Error updating right-click state:', e);
+    }
+  }
+
+  function setupTile77SpiderLairObserver() {
+    if (tile77SpiderLairBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+    tile77SpiderLairBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      updateTile77SpiderLairState(boardContext);
+    });
+    updateTile77SpiderLairState(globalThis.state?.board?.getSnapshot()?.context);
+    console.log('[Quests Mod][Tile 77 Spider Lair] Board observer set up for A Secluded Herb');
+  }
+
+  function cleanupTile77SpiderLairObserver() {
+    if (tile77SpiderLairBoardSubscription) {
+      try {
+        tile77SpiderLairBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tile 77 Spider Lair] Error unsubscribing from board:', e);
+      }
+      tile77SpiderLairBoardSubscription = null;
+    }
+  }
+
+  function cleanupTile77SpiderLairSystem() {
+    if (tile77SpiderLairRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleTile77SpiderLairRightClickDocument, true);
+      const tile77El = getTileElement(SECLUDED_HERB_TILE_77);
+      if (tile77El) tile77El.style.pointerEvents = '';
+      tile77SpiderLairRightClickEnabled = false;
+    }
+    cleanupTile77SpiderLairObserver();
+    console.log('[Quests Mod][Tile 77 Spider Lair] System cleaned up');
+  }
+
   function shouldEnableSixthSealLevers(boardContext = null) {
     const progress = kingChatState.progressQueenBanshees;
     if (!progress?.accepted || progress.completed) return false;
@@ -12738,6 +13699,136 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     return tile53ContextMenu;
   }
 
+  // Tile 83 Wyda (Wyda's House in Venore)
+  function shouldEnableTile83WydaRightClick(boardContext = null) {
+    try {
+      const followerOfZathroth = kingChatState.progressFollowerOfZathroth;
+      const hasFollowerOfZathrothActiveOrDone = !!(followerOfZathroth && (followerOfZathroth.accepted || followerOfZathroth.completed));
+      if (!hasFollowerOfZathrothActiveOrDone) return false;
+
+      const context = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+      const currentRoomId = context?.selectedMap?.selectedRoom?.id || globalThis.state?.selectedMap?.selectedRoom?.id;
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      const currentRoomName = roomNames && currentRoomId ? roomNames[currentRoomId] : '';
+      const isInWydaHouse = currentRoomName && WYDA_HOUSE_ROOM_NAMES.some(name => currentRoomName === name || String(currentRoomName).includes(name));
+      return !!isInWydaHouse;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function updateTile83WydaRightClickState(boardContext = null) {
+    try {
+      const shouldBeEnabled = shouldEnableTile83WydaRightClick(boardContext);
+      const tile83Element = getTileElement(WYDA_TILE_INDEX);
+
+      if (shouldBeEnabled && tile83Element && !tile83WydaRightClickEnabled) {
+        document.addEventListener('contextmenu', handleTile83WydaRightClickDocument, true);
+        tile83Element.style.pointerEvents = 'auto';
+        tile83WydaRightClickEnabled = true;
+        console.log('[Quests Mod][Tile 83 Wyda] Right-click enabled on Wyda\'s House');
+      } else if (shouldBeEnabled && !tile83Element) {
+        setTimeout(() => updateTile83WydaRightClickState(boardContext), 200);
+      } else if (!shouldBeEnabled && tile83WydaRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleTile83WydaRightClickDocument, true);
+        const el = getTileElement(WYDA_TILE_INDEX);
+        if (el) el.style.pointerEvents = '';
+        tile83WydaRightClickEnabled = false;
+        console.log('[Quests Mod][Tile 83 Wyda] Right-click disabled');
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Tile 83 Wyda] Error updating right-click state:', error);
+    }
+  }
+
+  function handleTile83WydaRightClickDocument(event) {
+    const tile83Element = getTileElement(WYDA_TILE_INDEX);
+    if (!tile83Element) return;
+    if (!tile83Element.contains(event.target)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+    createTile83WydaContextMenu(event.clientX, event.clientY);
+    return false;
+  }
+
+  function createTile83WydaContextMenu(x, y) {
+    if (tile83WydaContextMenu && tile83WydaContextMenu.closeMenu) {
+      tile83WydaContextMenu.closeMenu();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:transparent;pointer-events:auto;cursor:default;';
+
+    const menu = document.createElement('div');
+    menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:9999;min-width:120px;background:url(\'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png\') repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;padding:8px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = 'display:flex;justify-content:center;';
+
+    const visitWydaButton = document.createElement('button');
+    visitWydaButton.className = 'pixel-font-14';
+    visitWydaButton.textContent = 'Visit Wyda';
+    visitWydaButton.style.cssText = 'width:120px;height:28px;font-size:12px;background-color:#2a4a2a;color:#4CAF50;border:1px solid #4CAF50;border-radius:4px;cursor:pointer;text-shadow:1px 1px 0 rgba(0,0,0,0.8);font-weight:bold;';
+    visitWydaButton.addEventListener('mouseenter', () => {
+      visitWydaButton.style.backgroundColor = '#1a2a1a';
+      visitWydaButton.style.borderColor = '#66BB6A';
+    });
+    visitWydaButton.addEventListener('mouseleave', () => {
+      visitWydaButton.style.backgroundColor = '#2a4a2a';
+      visitWydaButton.style.borderColor = '#4CAF50';
+    });
+    visitWydaButton.addEventListener('click', () => {
+      showWydaModal();
+      closeMenu();
+    });
+
+    buttonContainer.appendChild(visitWydaButton);
+    menu.appendChild(buttonContainer);
+
+    function closeMenu() {
+      overlay.removeEventListener('mousedown', overlayClickHandler);
+      overlay.removeEventListener('click', overlayClickHandler);
+      document.removeEventListener('keydown', escHandler);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      if (menu.parentNode) menu.parentNode.removeChild(menu);
+      tile83WydaContextMenu = null;
+    }
+    const overlayClickHandler = (e) => { if (e.target === overlay) closeMenu(); };
+    const escHandler = (e) => { if (e.key === 'Escape') closeMenu(); };
+    overlay.addEventListener('mousedown', overlayClickHandler);
+    overlay.addEventListener('click', overlayClickHandler);
+    document.addEventListener('keydown', escHandler);
+    document.body.appendChild(overlay);
+    document.body.appendChild(menu);
+    tile83WydaContextMenu = { overlay, menu, closeMenu };
+    return tile83WydaContextMenu;
+  }
+
+  function setupTile83WydaObserver() {
+    if (tile83WydaBoardSubscription) return;
+
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+      tile83WydaBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        updateTile83WydaRightClickState(boardContext);
+      });
+      updateTile83WydaRightClickState(globalThis.state?.board?.getSnapshot()?.context);
+      console.log('[Quests Mod][Tile 83 Wyda] Board subscription set up for Wyda\'s House');
+    }
+  }
+
+  function cleanupTile83WydaObserver() {
+    if (tile83WydaBoardSubscription) {
+      try {
+        tile83WydaBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tile 83 Wyda] Error unsubscribing from board:', e);
+      }
+      tile83WydaBoardSubscription = null;
+    }
+  }
+
   // Create water fishing context menu at specified coordinates
   function createWaterFishingContextMenu(x, y) {
 
@@ -13105,6 +14196,10 @@ function createNPCCooldownManager(cooldownMs = 1000) {
 
     // Cleanup Tile 53 Costello system
     cleanupTile53CostelloSystem();
+    // Cleanup Tile 83 Wyda system
+    cleanupTile83WydaSystem();
+    // Cleanup Tile 77 Spider Lair system
+    cleanupTile77SpiderLairSystem();
 
     // Cleanup water fishing system
     cleanupWaterFishingSystem();
@@ -13254,6 +14349,22 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     console.log('[Quests Mod][Tile 53 Costello] System cleaned up');
   }
 
+  function cleanupTile83WydaSystem() {
+    if (tile83WydaRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleTile83WydaRightClickDocument, true);
+      const tile83Element = getTileElement(WYDA_TILE_INDEX);
+      if (tile83Element) {
+        tile83Element.style.pointerEvents = '';
+      }
+      tile83WydaRightClickEnabled = false;
+    }
+    if (tile83WydaContextMenu && tile83WydaContextMenu.closeMenu) {
+      tile83WydaContextMenu.closeMenu();
+    }
+    cleanupTile83WydaObserver();
+    console.log('[Quests Mod][Tile 83 Wyda] System cleaned up');
+  }
+
   function cleanupWaterFishingSystem() {
     // Remove event listener from document and restore tile pointer events
     if (fishingState.enabled) {
@@ -13337,6 +14448,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
   setupCopperKeySystem();
   setupEquipmentSlotObserver();
     setupTile53CostelloObserver();
+    setupTile83WydaObserver();
+    setupTile77SpiderLairObserver();
     setupSevenSealsRoomObserver();
     setupFirstSealBoardObserver();
     setupFourthSealBoardObserver();
