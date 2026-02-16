@@ -231,7 +231,7 @@ const DEBUG = false; // Set to true for development
         button.addEventListener('click', (e) => {
           if (btn.onClick) btn.onClick(e, modalObject);
           if (btn.closeOnClick !== false) {
-            document.body.removeChild(modal);
+            modalObject.close();
           }
         });
         
@@ -252,12 +252,16 @@ const DEBUG = false; // Set to true for development
     const modalObject = {
       element: modal,
       close: () => {
-        if (modal.parentNode) {
-          document.body.removeChild(modal);
-        }
-        if (overlay.parentNode) {
-          document.body.removeChild(overlay);
-        }
+        try {
+          if (modal.parentNode === document.body) {
+            document.body.removeChild(modal);
+          }
+        } catch (e) { /* ignore removeChild errors */ }
+        try {
+          if (overlay.parentNode === document.body) {
+            document.body.removeChild(overlay);
+          }
+        } catch (e) { /* ignore removeChild errors */ }
       }
     };
     

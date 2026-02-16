@@ -434,7 +434,8 @@ if (window.CustomBattles) {
             }
 
             /**
-             * Prevent villain movement (keep them on their assigned tiles)
+             * Prevent villain movement (keep them on their assigned tiles).
+             * Also re-add any custom villains that were removed from the board (e.g. dragged off).
              * Runs when tileRestrictionActive is true (from tile restrictions or from preventVillainMovement-only subscription).
              */
             preventVillainMovement() {
@@ -445,30 +446,80 @@ if (window.CustomBattles) {
                     const boardConfig = boardContext.boardConfig || [];
                     
                     let needsRestore = false;
-                    const restoredConfig = boardConfig.map(entity => {
+                    let restoredConfig = boardConfig.map(entity => {
                         if (entity.key && entity.villain) {
-                            // Check each villain's expected tile
-                            for (const { prefix, tileIndex, hasTileInPrefix } of this.villainKeyPrefixes) {
+                            // Check each villain's expected tile and equipment
+                            for (let i = 0; i < this.villainKeyPrefixes.length; i++) {
+                                const { prefix, tileIndex, hasTileInPrefix } = this.villainKeyPrefixes[i];
                                 let matches = false;
                                 if (hasTileInPrefix) {
-                                    // Prefix includes tile, simple startsWith check
                                     matches = entity.key.startsWith(prefix);
                                 } else {
-                                    // Prefix doesn't include tile, check prefix and tile separately
                                     matches = entity.key.startsWith(prefix) && entity.tileIndex === tileIndex;
                                 }
                                 
                                 if (matches) {
+                                    const villainConfig = this.config.villains[i];
+                                    const expectedEquip = villainConfig.equip || null;
+                                    const currentEquip = entity.equip !== undefined ? entity.equip : null;
+                                    const equipRemovedOrChanged = (expectedEquip != null && currentEquip === null) ||
+                                        (expectedEquip != null && (currentEquip?.gameId !== expectedEquip?.gameId || currentEquip?.tier !== expectedEquip?.tier || currentEquip?.stat !== expectedEquip?.stat));
                                     if (entity.tileIndex !== tileIndex) {
                                         console.log(`[Custom Battles][${this.config.name || 'Battle'}] Villain moved from tile ${tileIndex} to ${entity.tileIndex} - restoring`);
                                         needsRestore = true;
-                                        return { ...entity, tileIndex: tileIndex };
+                                        return { ...entity, tileIndex: tileIndex, equip: expectedEquip };
+                                    }
+                                    if (equipRemovedOrChanged) {
+                                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Villain equipment removed or changed - restoring`);
+                                        needsRestore = true;
+                                        return { ...entity, equip: expectedEquip };
                                     }
                                     break;
                                 }
                             }
                         }
                         return entity;
+                    });
+
+                    // Re-add any custom villains that were removed from the board (dragged off / deleted)
+                    this.config.villains.forEach((villainConfig, idx) => {
+                        const { prefix, tileIndex, hasTileInPrefix } = this.villainKeyPrefixes[idx];
+                        const exists = restoredConfig.some(entity => {
+                            if (!entity.key || !entity.villain) return false;
+                            if (hasTileInPrefix) return entity.key.startsWith(prefix);
+                            return entity.key.startsWith(prefix) && entity.tileIndex === tileIndex;
+                        });
+                        if (!exists) {
+                            console.log(`[Custom Battles][${this.config.name || 'Battle'}] Villain removed from board - re-adding ${villainConfig.nickname || 'villain'} to tile ${tileIndex}`);
+                            needsRestore = true;
+                            let key;
+                            if (prefix.includes(`-${tileIndex}-`) || prefix.endsWith(`-${tileIndex}-`)) {
+                                key = prefix + Date.now() + Math.random();
+                            } else {
+                                key = `${prefix}${tileIndex}-${Date.now()}-${Math.random()}`;
+                            }
+                            const villain = {
+                                type: 'custom',
+                                key: key,
+                                nickname: villainConfig.nickname,
+                                name: villainConfig.nickname || undefined,
+                                tileIndex: villainConfig.tileIndex,
+                                villain: true,
+                                gameId: villainConfig.gameId,
+                                direction: villainConfig.direction || 'south',
+                                level: villainConfig.level || 1,
+                                tier: villainConfig.tier || 0,
+                                equip: villainConfig.equip || null,
+                                genes: villainConfig.genes || {
+                                    hp: 1,
+                                    ad: 1,
+                                    ap: 1,
+                                    armor: 1,
+                                    magicResist: 1
+                                }
+                            };
+                            restoredConfig = restoredConfig.concat([villain]);
+                        }
                     });
                     
                     if (needsRestore) {
@@ -858,38 +909,49 @@ if (window.CustomBattles) {
 
                 const title = isVictory ? (victoryDefeatConfig.victoryTitle || 'Victory!') : (victoryDefeatConfig.defeatTitle || 'Defeat');
                 const titleColor = isVictory ? '#4CAF50' : '#e74c3c';
-                
-                // Create content element
-                const content = document.createElement('div');
-                content.style.cssText = 'text-align: center; padding: 20px;';
-                
-                // Title
-                const titleEl = document.createElement('h2');
-                titleEl.textContent = title;
-                titleEl.style.cssText = `color: ${titleColor}; margin-bottom: 15px; font-size: 24px; font-weight: bold;`;
-                content.appendChild(titleEl);
-                
-                // Victory/defeat message
-                const message = isVictory ? 
-                    (victoryDefeatConfig.victoryMessage || 'You have achieved victory!') :
-                    (victoryDefeatConfig.defeatMessage || 'You have been defeated.');
-                
-                if (message) {
-                    const msgEl = document.createElement('div');
-                    msgEl.textContent = message;
-                    msgEl.style.cssText = `color: ${titleColor}; margin-bottom: 15px; font-weight: bold;`;
-                    content.appendChild(msgEl);
+
+                let content;
+                if (isVictory && typeof victoryDefeatConfig.victoryContent === 'function') {
+                    const customContent = victoryDefeatConfig.victoryContent(gameData);
+                    if (customContent instanceof Node) {
+                        content = customContent;
+                    } else if (typeof customContent === 'string') {
+                        content = document.createElement('div');
+                        content.innerHTML = customContent;
+                    } else {
+                        content = document.createElement('div');
+                    }
                 }
-                
-                // Items awarded (if victory and configured)
-                if (isVictory && victoryDefeatConfig.showItems && victoryDefeatConfig.items && victoryDefeatConfig.items.length > 0) {
-                    const itemsEl = document.createElement('div');
-                    itemsEl.style.cssText = 'margin-top: 15px;';
-                    itemsEl.textContent = 'Items received: ' + victoryDefeatConfig.items.map(item => `${item.name} x${item.amount}`).join(', ');
-                    itemsEl.style.color = '#4CAF50';
-                    content.appendChild(itemsEl);
+                if (!content) {
+                    // Default content element
+                    content = document.createElement('div');
+                    content.style.cssText = 'text-align: center; padding: 20px;';
+
+                    const titleEl = document.createElement('h2');
+                    titleEl.textContent = title;
+                    titleEl.style.cssText = `color: ${titleColor}; margin-bottom: 15px; font-size: 24px; font-weight: bold;`;
+                    content.appendChild(titleEl);
+
+                    const message = isVictory ?
+                        (victoryDefeatConfig.victoryMessage || 'You have achieved victory!') :
+                        (victoryDefeatConfig.defeatMessage || 'You have been defeated.');
+
+                    if (message) {
+                        const msgEl = document.createElement('div');
+                        msgEl.textContent = message;
+                        msgEl.style.cssText = `color: ${titleColor}; margin-bottom: 15px; font-weight: bold;`;
+                        content.appendChild(msgEl);
+                    }
+
+                    if (isVictory && victoryDefeatConfig.showItems && victoryDefeatConfig.items && victoryDefeatConfig.items.length > 0) {
+                        const itemsEl = document.createElement('div');
+                        itemsEl.style.cssText = 'margin-top: 15px;';
+                        itemsEl.textContent = 'Items received: ' + victoryDefeatConfig.items.map(item => `${item.name} x${item.amount}`).join(', ');
+                        itemsEl.style.color = '#4CAF50';
+                        content.appendChild(itemsEl);
+                    }
                 }
-                
+
                 // Create modal using window.BestiaryModAPI.showModal
                 if (typeof window !== 'undefined' && window.BestiaryModAPI && typeof window.BestiaryModAPI.showModal === 'function') {
                     this.victoryDefeatModal = window.BestiaryModAPI.showModal({
@@ -946,8 +1008,12 @@ if (window.CustomBattles) {
                 // Monitor game timer for victory/defeat
                 this.subscriptions.victoryDefeat = globalThis.state.gameTimer.subscribe(async (timerState) => {
                     try {
-                        const { state, currentTick, readableGrade, rankPoints } = timerState.context;
-                        
+                        const ctx = timerState.context || {};
+                        const { state, currentTick, readableGrade, rankPoints } = ctx;
+                        // Debug: log full context to inspect grade (readableGrade may be undefined or default if not yet computed)
+                        if (state === 'victory' || state === 'defeat') {
+                            console.log('[Custom Battles] timerState.context (grade debug):', JSON.stringify({ state, currentTick, readableGrade, rankPoints, keys: Object.keys(ctx) }));
+                        }
                         // Show victory/defeat modals when game ends
                         if ((state === 'victory' || state === 'defeat') && 
                             (this.lastGameState === 'initial' || this.lastGameState === 'playing')) {
