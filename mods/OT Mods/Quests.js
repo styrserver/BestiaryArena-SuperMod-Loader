@@ -299,17 +299,17 @@ const SPIDER_LAIR_TILES_ADD_SPRITE_4312 = [37, 32, 96, 84]; // append sprite 431
 const SPIDER_LAIR_ADD_SPRITE_4312_ID = '4312';
 
 const KING_ARENA_RANKS = [
-  'Scout of the Arena',      // 0 missions
-  'Sentinel of the Arena',   // 1 mission
-  'Steward of the Arena',    // 2 missions
-  'Warden of the Arena',     // 3 missions
-  'Squire of the Arena',     // 4 missions
-  'Warrior of the Arena',    // 5 missions
-  'Keeper of the Arena',     // 6 missions
-  'Guardian of the Arena',   // 7 missions
-  'Sage of the Arena',       // 8 missions
-  'Savant of the Arena',     // 9 missions
-  'Enlightened of the Arena' // 10+ missions
+  'Scout of the Arena',      // 0–1 missions
+  'Sentinel of the Arena',   // 2–3 missions
+  'Steward of the Arena',    // 4–5 missions
+  'Warden of the Arena',     // 6–7 missions
+  'Squire of the Arena',     // 8–9 missions
+  'Warrior of the Arena',    // 10–11 missions
+  'Keeper of the Arena',     // 12–13 missions
+  'Guardian of the Arena',   // 14–15 missions
+  'Sage of the Arena',       // 16–17 missions
+  'Savant of the Arena',     // 18–19 missions
+  'Enlightened of the Arena' // 20+ missions
 ];
 
 // Firebase configuration
@@ -4037,25 +4037,19 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
     let count = 0;
 
-    // Handle new nested structure
-    if (progress.copper) {
-      if (progress.copper.completed) count++;
-    }
-    if (progress.dragon) {
-      if (progress.dragon.completed) count++;
-    }
-    if (progress.letter) {
-      if (progress.letter.completed) count++;
-    }
-    if (progress.monksStudy) {
-      if (progress.monksStudy.completed) count++;
-    }
-    if (progress.alDeeFishing) {
-      if (progress.alDeeFishing.completed) count++;
-    }
+    // Handle new nested structure — count ALL King/Arena quests
+    if (progress.copper && progress.copper.completed) count++;
+    if (progress.dragon && progress.dragon.completed) count++;
+    if (progress.letter && progress.letter.completed) count++;
+    if (progress.monksStudy && progress.monksStudy.completed) count++;
+    if (progress.queenBanshees && progress.queenBanshees.completed) count++;
+    if (progress.followerOfZathroth && progress.followerOfZathroth.completed) count++;
+    if (progress.motherOfAllSpiders && progress.motherOfAllSpiders.completed) count++;
+    if (progress.alDeeFishing && progress.alDeeFishing.completed) count++;
+    if (progress.alDeeGoldenRope && progress.alDeeGoldenRope.completed) count++;
 
     // Handle legacy flat structure for backward compatibility
-    if (progress.completed === true) {
+    if (progress.completed === true && count === 0) {
       count = 1; // Assume at least one mission completed in old format
     }
 
@@ -4063,17 +4057,18 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   }
 
   function getCurrentArenaRank(completedMissions) {
-    // Cap at the highest rank (10+ missions = Enlightened)
-    const rankIndex = Math.min(completedMissions, KING_ARENA_RANKS.length - 1);
+    // 2 missions per rank; cap at the highest rank (20+ missions = Enlightened)
+    const rankIndex = Math.min(Math.floor(completedMissions / 2), KING_ARENA_RANKS.length - 1);
     return KING_ARENA_RANKS[rankIndex];
   }
 
   function getRankColor(completedMissions) {
-    // Rarity-based color progression: grey → green → blue → purple → gold
-    if (completedMissions <= 1) return 'rgb(150, 150, 150)'; // Grey (Scout, Sentinel)
-    if (completedMissions <= 3) return 'rgb(100, 200, 100)'; // Green (Steward, Warden)
-    if (completedMissions <= 5) return 'rgb(100, 150, 255)'; // Blue (Squire, Warrior)
-    if (completedMissions <= 7) return 'rgb(150, 100, 255)'; // Purple (Keeper, Guardian)
+    const rankIndex = Math.min(Math.floor(completedMissions / 2), KING_ARENA_RANKS.length - 1);
+    // Rarity-based color progression: grey → green → blue → purple → gold (by rank tier)
+    if (rankIndex <= 1) return 'rgb(150, 150, 150)'; // Grey (Scout, Sentinel)
+    if (rankIndex <= 3) return 'rgb(100, 200, 100)'; // Green (Steward, Warden)
+    if (rankIndex <= 5) return 'rgb(100, 150, 255)'; // Blue (Squire, Warrior)
+    if (rankIndex <= 7) return 'rgb(150, 100, 255)'; // Purple (Keeper, Guardian)
     return 'rgb(255, 215, 0)'; // Gold (Sage, Savant, Enlightened)
   }
 

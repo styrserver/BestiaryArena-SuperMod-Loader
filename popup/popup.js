@@ -1006,6 +1006,7 @@ const modDescriptions = {
   'Better Yasir': 'Improved Yasir interaction and features.',
   'Cyclopedia': 'Comprehensive creature and item encyclopedia.',
   'Dice Roller': 'Roll dice for various game mechanics.',
+  'Challenges': 'Challenges and related features.',
   'Guilds': 'Guild management and interaction features.',
   'Hunt Analyzer': 'Analyze and optimize hunting strategies.',
   'Raid Hunter': 'Enhanced raid hunting features and tracking.',
@@ -1042,6 +1043,7 @@ const superModNames = [
 
 // OT Mods list - kept in sync with mod-registry.js
 const otModNames = [
+  'Challenges.js',
   'Quests.js',
   'Guilds.js',
   'VIP List.js'

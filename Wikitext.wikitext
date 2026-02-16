@@ -104,6 +104,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 
 == Project Structure ==
 * <code>assets/</code> - Static assets such as fonts, icons, and scripts
+** <code>challenges/</code> - Assets for the Challenges mod (e.g. Exalted Core icon)
 ** <code>fonts/</code> - Custom fonts used by the UI components
 ** <code>icons/</code> - Icons used by the extension and mods
 ** <code>js/</code> - JavaScript libraries, including UI components
@@ -325,7 +326,13 @@ Automatically manages stamina levels by starting/stopping gameplay (by [https://
 * Automatic gameplay pause when stamina drops below minimum threshold
 
 === OT Mods ===
-These are community and social mods that enhance player interaction and community features. All 3 OT Mods listed below are included by default in this loader:
+These are community and social mods that enhance player interaction and community features. All 4 OT Mods listed below are included by default in this loader:
+
+==== Challenges ====
+Challenges mod with inventory integration:
+* Clickable Exalted Core icon in the inventory that opens the Challenges modal
+* Modal with Start button (placeholder for future challenge features)
+* Same modal size as Cyclopedia for consistent UX
 
 ==== Guilds ====
 Social guild system for creating and managing player communities:
