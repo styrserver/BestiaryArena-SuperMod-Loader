@@ -8,16 +8,19 @@ console.log('[Challenges Mod] Initializing...');
 // =======================
 
 // Same size as Cyclopedia modal (from Super Mods/Cyclopedia.js LAYOUT_CONSTANTS)
-const MODAL_WIDTH = 900;
-const MODAL_HEIGHT = 600;
+const MODAL_WIDTH = 950;
+const MODAL_HEIGHT = 700;
 // Three-column layout (reference: Cyclopedia.js LAYOUT_CONSTANTS)
-const COLUMN_WIDTH = 247;
+const COLUMN_WIDTH = 270;
 const COL1_WIDTH = COLUMN_WIDTH - 30;
 const COL3_WIDTH = COLUMN_WIDTH + 30;
 // UI theming (reference: Cyclopedia.js COLOR_CONSTANTS)
 const CHALLENGE_COLORS = { TEXT: '#fff', PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BORDER: '#444' };
 
 const CHALLENGES_ASSET_PATH = '/assets/challenges/Exalted_Core.gif';
+
+/** Subnav styling (Cyclopedia-like). Injected when opening Challenges modal so subnav works without opening Cyclopedia first. */
+const CHALLENGES_SUBNAV_CSS = '.challenges-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.challenges-subnav > button.challenges-btn, nav.challenges-subnav > button.challenges-btn:hover, nav.challenges-subnav > button.challenges-btn:focus { background: url(\'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png\') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url(\'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png\') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: \'Trebuchet MS\', \'Arial Black\', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.challenges-subnav > button.challenges-btn.active { border-image: url(\'https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png\') 6 fill stretch !important; } nav.challenges-subnav > button.challenges-btn[data-tab="help"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; margin-left: 20px !important; }';
 const OBSERVER_DEBOUNCE_DELAY = 250;
 const OBSERVER_MIN_INTERVAL = 100;
 const BUTTON_CHECK_INTERVAL = 1000;
@@ -38,7 +41,7 @@ const CHALLENGE_EQUIP_STATS = ['ad', 'ap', 'hp'];
 const CHALLENGE_EQUIP_TIER_MIN = 1;
 const CHALLENGE_EQUIP_TIER_MAX = 5;
 const CHALLENGE_EQUIP_GAMEID_MAX = 300;
-const CHALLENGE_LEADERBOARD_TOP = 20;
+const CHALLENGE_LEADERBOARD_TOP = 10;
 /** Max villain creatures per challenge roll (1 to this value, inclusive). */
 const CHALLENGE_MAX_VILLAINS = 10;
 /** localStorage key for personal (non-global) challenge runs, keyed by player name. */
@@ -185,7 +188,7 @@ function getChallengeReplayStringWithRetry(done, maxAttempts) {
 }
 
 /**
- * Save a challenge run: if it makes global top 20, update Firebase; otherwise save locally only.
+ * Save a challenge run: if it makes global top 10, update Firebase; otherwise save locally only.
  * @param {{ name: string, mapName: string, difficulty: number, score: number, replay: string, ticks?: number, grade?: string }} run
  */
 function saveChallengeRunToLeaderboard(run) {
@@ -203,13 +206,13 @@ function saveChallengeRunToLeaderboard(run) {
     var arr = Array.isArray(list) ? list.slice() : [];
     var merged = arr.concat([runEntry]);
     merged.sort(function(a, b) { return (b.score - a.score); });
-    var top20 = merged.slice(0, CHALLENGE_LEADERBOARD_TOP);
+    var top10 = merged.slice(0, CHALLENGE_LEADERBOARD_TOP);
     var ourIndex = merged.findIndex(function(r) {
       return r.name === runEntry.name && r.score === runEntry.score && (r.map || '') === (runEntry.map || '');
     });
     savePersonalRecordToStorage(runEntry);
     if (ourIndex >= 0 && ourIndex < CHALLENGE_LEADERBOARD_TOP) {
-      return ChallengeFirebaseService.put(path, top20).then(function() {
+      return ChallengeFirebaseService.put(path, top10).then(function() {
         console.log('[Challenges Mod] Global leaderboard updated with run:', run.name, run.score);
       });
     }
@@ -289,20 +292,25 @@ function openChallengesModal() {
   }
   const api = context.api;
 
-  // Three-column layout container (reference: Cyclopedia.js createBestiaryTabPage)
-  const container = document.createElement('div');
-  Object.assign(container.style, {
+  // Inject subnav styles (Cyclopedia-like) if not already present
+  if (typeof document !== 'undefined' && !document.getElementById('challenges-subnav-css')) {
+    var styleEl = document.createElement('style');
+    styleEl.id = 'challenges-subnav-css';
+    styleEl.textContent = CHALLENGES_SUBNAV_CSS;
+    document.head.appendChild(styleEl);
+  }
+
+  // Outer wrapper: subnav at top, then tab content area (reference: Cyclopedia.js subnav)
+  const wrapper = document.createElement('div');
+  Object.assign(wrapper.style, {
     display: 'flex',
-    flexDirection: 'row',
+    flexDirection: 'column',
     width: '100%',
     height: '100%',
-    alignItems: 'stretch',
-    justifyContent: 'center',
-    gap: '0',
-    minHeight: '0'
+    minHeight: '0',
+    overflow: 'hidden'
   });
   // Stop propagation so clicks inside modal don't reach game React (prevents removeChild crash).
-  // Don't stop propagation for the leaderboard load-setup button so its click handler can run.
   function isLoadSetupButton(target) {
     var el = target && target.nodeType === 1 ? target : (target && target.parentElement);
     if (!el) return false;
@@ -310,20 +318,27 @@ function openChallengesModal() {
     if (el.closest && el.closest('button[title="Load this challenge setup"]')) return true;
     return false;
   }
-  container.addEventListener('click', function(e) {
-    if (isLoadSetupButton(e.target)) return;
-    e.stopPropagation();
+  function shouldAllowEventToTarget(e) {
+    var el = e.target && e.target.nodeType === 1 ? e.target : null;
+    if (!el) return false;
+    if (isLoadSetupButton(el)) return true;
+    if (el.closest && el.closest('.challenges-subnav')) return true;
+    return false;
+  }
+  wrapper.addEventListener('click', function(e) {
+    if (!shouldAllowEventToTarget(e)) e.stopPropagation();
   }, true);
-  container.addEventListener('mousedown', function(e) {
-    if (isLoadSetupButton(e.target)) return;
-    e.stopPropagation();
+  wrapper.addEventListener('mousedown', function(e) {
+    if (!shouldAllowEventToTarget(e)) e.stopPropagation();
   }, true);
-  container.addEventListener('mouseup', function(e) {
-    if (isLoadSetupButton(e.target)) return;
-    e.stopPropagation();
+  wrapper.addEventListener('mouseup', function(e) {
+    if (!shouldAllowEventToTarget(e)) e.stopPropagation();
   }, true);
+  wrapper.addEventListener('click', function(e) {
+    e.stopPropagation();
+  }, false);
 
-  // Helper: create a box with title and body (reference: Cyclopedia.js createBox / createTitle)
+  // Helper: create a box with title and body (same frame as Global top 10 / Cyclopedia)
   function createPlaceholderBox(titleText, bodyHtml) {
     const box = document.createElement('div');
     box.style.cssText = 'display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; border: 4px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; border-radius: 6px; overflow: hidden;';
@@ -342,6 +357,127 @@ function openChallengesModal() {
     box.appendChild(body);
     return box;
   }
+
+  // Subnav: Solo | Multiplayer | Help (icon button, wiki-style)
+  const tabNav = document.createElement('nav');
+  tabNav.className = 'challenges-subnav';
+  const tabButtons = [];
+  ['Solo', 'Multiplayer'].forEach(function(tab, i) {
+    var btn = document.createElement('button');
+    btn.className = 'challenges-btn';
+    if (i === 0) btn.classList.add('active');
+    btn.type = 'button';
+    btn.textContent = tab;
+    tabButtons.push(btn);
+    tabNav.appendChild(btn);
+  });
+  var helpBtn = document.createElement('button');
+  helpBtn.className = 'challenges-btn';
+  helpBtn.setAttribute('data-tab', 'help');
+  helpBtn.type = 'button';
+  helpBtn.title = 'Help';
+  helpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>';
+  tabButtons.push(helpBtn);
+  tabNav.appendChild(helpBtn);
+  wrapper.appendChild(tabNav);
+
+  // Content area holds the three tab panels
+  const contentArea = document.createElement('div');
+  Object.assign(contentArea.style, {
+    flex: '1 1 0',
+    minHeight: '0',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column'
+  });
+
+  // Solo panel: three-column layout (current challenge UI)
+  const soloPanel = document.createElement('div');
+  Object.assign(soloPanel.style, {
+    display: 'flex',
+    flexDirection: 'row',
+    width: '100%',
+    height: '100%',
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    gap: '0',
+    minHeight: '0',
+    flex: '1 1 0'
+  });
+
+  // Multiplayer panel: framed box (same style as Global top 10)
+  const multiplayerPanel = document.createElement('div');
+  Object.assign(multiplayerPanel.style, {
+    display: 'none',
+    flex: '1 1 0',
+    minHeight: '0',
+    overflow: 'hidden',
+    flexDirection: 'column',
+    padding: '8px'
+  });
+  multiplayerPanel.appendChild(createPlaceholderBox('Multiplayer', '<p style="margin:0;">Coming soon.</p>'));
+
+  // Points panel: framed box with wall of text
+  const pointsPanel = document.createElement('div');
+  Object.assign(pointsPanel.style, {
+    display: 'none',
+    flex: '1 1 0',
+    minHeight: '0',
+    overflow: 'hidden',
+    flexDirection: 'column',
+    padding: '8px'
+  });
+  var pointsBodyHtml = [
+    '<p style="margin:0 0 12px 0; color:' + CHALLENGE_COLORS.PRIMARY + '; font-weight:bold;">How challenge score is calculated</p>',
+    '<p style="margin:0 0 8px 0;"><strong>Formula</strong></p>',
+    '<p style="margin:0 0 16px 0;">Score = round( ( (1000 − ticks) + gradeBonus ) × difficultyMultiplier )</p>',
+    '<p style="margin:0 0 8px 0;"><strong>Ticks</strong></p>',
+    '<p style="margin:0 0 16px 0;">Base value: (1000 − ticks).</p>',
+    '<p style="margin:0 0 8px 0;"><strong>Grade bonus</strong></p>',
+    '<ul style="margin:0 0 16px 0; padding-left:20px;">',
+    '<li>S+ : +500</li>',
+    '<li>S : +400</li>',
+    '<li>A : +300</li>',
+    '<li>B : +200</li>',
+    '<li>C : +100</li>',
+    '<li>D : +50</li>',
+    '</ul>',
+    '<p style="margin:0 0 8px 0;"><strong>Difficulty multiplier</strong></p>',
+    '<p style="margin:0 0 16px 0;">Based on how many allies you were allowed vs how many enemy creatures (e.g. 1 v 5). Higher difficulty (fewer allies, more enemies) gives a multiplier greater than 1×. The multiplier is (raw difficulty ÷ 100); it is shown in the summary and on the leaderboard (e.g. 1.50×).</p>',
+    '<p style="margin:0 0 8px 0;"><strong>Raw difficulty</strong></p>',
+    '<p style="margin:0 0 0 0;">Raw difficulty is the internal number that encodes how hard the setup is (how many allies you get vs how many enemies). A higher raw difficulty means fewer allies and more enemies, and the displayed multiplier is that value divided by 100 (e.g. raw 150 → 1.50×, raw 600 → 6.00×).</p>'
+  ].join('');
+  pointsPanel.appendChild(createPlaceholderBox('Help', pointsBodyHtml));
+
+  contentArea.appendChild(soloPanel);
+  contentArea.appendChild(multiplayerPanel);
+  contentArea.appendChild(pointsPanel);
+  wrapper.appendChild(contentArea);
+
+  function setActiveTab(idx) {
+    tabButtons.forEach(function(btn, i) {
+      btn.classList.toggle('active', i === idx);
+    });
+    soloPanel.style.display = idx === 0 ? 'flex' : 'none';
+    multiplayerPanel.style.display = idx === 1 ? 'flex' : 'none';
+    pointsPanel.style.display = idx === 2 ? 'flex' : 'none';
+  }
+  tabButtons.forEach(function(btn, i) {
+    btn.addEventListener('click', function() { setActiveTab(i); });
+  });
+
+  // Three-column layout lives inside Solo panel (reference: Cyclopedia.js createBestiaryTabPage)
+  const container = document.createElement('div');
+  Object.assign(container.style, {
+    display: 'flex',
+    flexDirection: 'row',
+    width: '100%',
+    height: '100%',
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    gap: '0',
+    minHeight: '0'
+  });
 
   // Summary elements – created first so Col1/Col2 roll handlers can update them (shown in Col1 bottom)
   const summaryMapEl = document.createElement('p');
@@ -433,7 +569,10 @@ function openChallengesModal() {
     mapResultContainer.textContent = text;
   }
 
+  var rollState = { isRolling: false, skipRequested: false };
+
   function delay(ms) {
+    if (rollState.skipRequested) return Promise.resolve();
     return new Promise(function(resolve) { setTimeout(resolve, ms); });
   }
 
@@ -463,7 +602,10 @@ function openChallengesModal() {
     do {
       attempt++;
       var count = Math.min(CHALLENGE_MAX_VILLAINS, Math.max(1, Math.floor(Math.random() * CHALLENGE_MAX_VILLAINS) + 1));
-      var gameIds = pickRandomFromArray(creatureIds, count);
+      var gameIds = [];
+      for (var g = 0; g < count; g++) {
+        gameIds.push(creatureIds[Math.floor(Math.random() * creatureIds.length)]);
+      }
       rolledCreatureSpecs = gameIds.map(function(gameId) {
         return {
           gameId: gameId,
@@ -782,12 +924,23 @@ function openChallengesModal() {
       setMapResultToRolled(finalRoomId, finalRoomName);
       return Promise.resolve();
     }
+    if (rollState.skipRequested) {
+      setMapResultToRolled(finalRoomId, finalRoomName);
+      return Promise.resolve();
+    }
     return new Promise(function(resolve) {
       var interval = setInterval(function() {
+        if (rollState.skipRequested) {
+          clearInterval(interval);
+          clearTimeout(timeoutId);
+          setMapResultToRolled(finalRoomId, finalRoomName);
+          resolve();
+          return;
+        }
         var r = allRooms[Math.floor(Math.random() * allRooms.length)];
         setMapResultToRolled(r.roomId, r.roomName);
       }, ROLL_REEL_TICK_MS);
-      setTimeout(function() {
+      var timeoutId = setTimeout(function() {
         clearInterval(interval);
         setMapResultToRolled(finalRoomId, finalRoomName);
         resolve();
@@ -802,16 +955,30 @@ function openChallengesModal() {
       parentEl.appendChild(card);
       return Promise.resolve(card);
     }
+    if (rollState.skipRequested) {
+      var card = buildCreatureCard(finalSpec, { showEquipment: false });
+      parentEl.appendChild(card);
+      return Promise.resolve(card);
+    }
     return new Promise(function(resolve) {
       var reelCard = buildReelCreatureCard(creatureIds[0]);
       parentEl.appendChild(reelCard);
       var interval = setInterval(function() {
+        if (rollState.skipRequested) {
+          clearInterval(interval);
+          clearTimeout(timeoutId);
+          reelCard.remove();
+          var card = buildCreatureCard(finalSpec, { showEquipment: false });
+          parentEl.appendChild(card);
+          resolve(card);
+          return;
+        }
         var nextId = creatureIds[Math.floor(Math.random() * creatureIds.length)];
         var next = buildReelCreatureCard(nextId);
         reelCard.replaceWith(next);
         reelCard = next;
       }, ROLL_REEL_TICK_MS);
-      setTimeout(function() {
+      var timeoutId = setTimeout(function() {
         clearInterval(interval);
         reelCard.remove();
         var card = buildCreatureCard(finalSpec, { showEquipment: false });
@@ -828,6 +995,10 @@ function openChallengesModal() {
       addEquipmentToCreatureCard(card, spec);
       return Promise.resolve();
     }
+    if (rollState.skipRequested) {
+      addEquipmentToCreatureCard(card, spec);
+      return Promise.resolve();
+    }
     var placeholder = document.createElement('div');
     placeholder.style.cssText = 'display: flex; justify-content: center; align-items: center; width: 40px; height: 40px; flex-shrink: 0; color: #888; font-size: 18px;';
     placeholder.textContent = '?';
@@ -835,10 +1006,18 @@ function openChallengesModal() {
     return new Promise(function(resolve) {
       var ticks = 0;
       var interval = setInterval(function() {
+        if (rollState.skipRequested) {
+          clearInterval(interval);
+          clearTimeout(timeoutId);
+          placeholder.remove();
+          addEquipmentToCreatureCard(card, spec);
+          resolve();
+          return;
+        }
         placeholder.textContent = ticks % 2 === 0 ? '?' : '…';
         ticks++;
       }, ROLL_REEL_TICK_MS);
-      setTimeout(function() {
+      var timeoutId = setTimeout(function() {
         clearInterval(interval);
         placeholder.remove();
         addEquipmentToCreatureCard(card, spec);
@@ -877,7 +1056,8 @@ function openChallengesModal() {
       var dialog = dialogs[d];
       var btns = dialog.querySelectorAll('button');
       for (var i = 0; i < btns.length; i++) {
-        if (btns[i].textContent.trim() === 'Randomize') return btns[i];
+        var t = btns[i].textContent.trim();
+        if (t === 'Randomize' || t === 'Skip') return btns[i];
       }
     }
     return null;
@@ -891,7 +1071,7 @@ function openChallengesModal() {
       var hasRoll = false, startBtn = null;
       for (var i = 0; i < btns.length; i++) {
         var t = btns[i].textContent.trim();
-        if (t === 'Randomize') hasRoll = true;
+        if (t === 'Randomize' || t === 'Skip') hasRoll = true;
         if (t === 'Start') startBtn = btns[i];
       }
       if (hasRoll && startBtn) return startBtn;
@@ -920,9 +1100,29 @@ function openChallengesModal() {
     }
   }
 
-  function rollMapAndCreaturesHandler() {
+  function finishRollState() {
+    rollState.isRolling = false;
+    rollState.skipRequested = false;
     var rollBtn = getChallengesRollButton();
-    if (rollBtn) rollBtn.disabled = true;
+    if (rollBtn) {
+      rollBtn.textContent = 'Randomize';
+      rollBtn.disabled = false;
+    }
+    updateChallengesStartButtonState();
+  }
+
+  function rollMapAndCreaturesHandler() {
+    if (rollState.isRolling) {
+      rollState.skipRequested = true;
+      return;
+    }
+    var rollBtn = getChallengesRollButton();
+    rollState.isRolling = true;
+    rollState.skipRequested = false;
+    if (rollBtn) {
+      rollBtn.textContent = 'Skip';
+      rollBtn.disabled = false;
+    }
     setMapResultText('Rolling…');
     creaturesListEl.innerHTML = '';
     creaturesListEl.textContent = 'Rolling…';
@@ -944,8 +1144,7 @@ function openChallengesModal() {
         setMapResultText('Error: ' + (e && e.message ? e.message : 'Roll failed'));
         creaturesListEl.textContent = 'Error: ' + (e && e.message ? e.message : 'Roll failed');
         creaturesListEl.style.textAlign = '';
-        if (rollBtn) rollBtn.disabled = false;
-        updateChallengesStartButtonState();
+        finishRollState();
         return;
       }
 
@@ -963,8 +1162,7 @@ function openChallengesModal() {
             summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
             summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
             summaryDifficultyEl.title = 'Allies v Enemies (allies allowed vs number of enemy creatures)';
-            if (rollBtn) rollBtn.disabled = false;
-            updateChallengesStartButtonState();
+            finishRollState();
           });
         }
         return spinCreatureReel(creatureIds, specs[index], creaturesListEl, ROLL_SLOT_DELAY_MS)
@@ -984,8 +1182,7 @@ function openChallengesModal() {
           summaryCreaturesEl.textContent = 'Creatures: —';
           summaryDifficultyValueSpan.textContent = '— (— v —)';
           summaryDifficultyValueSpan.style.color = '';
-          if (rollBtn) rollBtn.disabled = false;
-          updateChallengesStartButtonState();
+          finishRollState();
           return;
         }
         runCreatureEquipmentSequence(0);
@@ -993,7 +1190,7 @@ function openChallengesModal() {
     })();
   }
 
-  // Col3: Global top 20 + Personal top 10 (two boxes)
+  // Col3: Global top 10 + Personal top 10 (two boxes)
   const rightCol = document.createElement('div');
   Object.assign(rightCol.style, {
     width: COL3_WIDTH + 'px',
@@ -1007,7 +1204,7 @@ function openChallengesModal() {
     overflowY: 'auto',
     minHeight: '0'
   });
-  const globalLeaderboardBox = createPlaceholderBox('Global top 20', '');
+  const globalLeaderboardBox = createPlaceholderBox('Global top 10', '');
   const leaderboardBody = globalLeaderboardBox.querySelector('.widget-bottom');
   leaderboardBody.innerHTML = '<p style="margin:0;color:#888;">Loading…</p>';
   rightCol.appendChild(globalLeaderboardBox);
@@ -1108,8 +1305,8 @@ function openChallengesModal() {
       leaderboardBody.innerHTML = '<p style="margin:0;color:#888;">No runs yet. Complete a challenge to appear here.</p>';
       return;
     }
-    var globalTop20 = entries.slice(0, 20);
-    leaderboardBody.appendChild(buildLeaderboardTable(globalTop20, true, true));
+    var globalTop10 = entries.slice(0, CHALLENGE_LEADERBOARD_TOP);
+    leaderboardBody.appendChild(buildLeaderboardTable(globalTop10, true, true));
   }
 
   function renderPersonalLeaderboard(personalEntries) {
@@ -1123,20 +1320,17 @@ function openChallengesModal() {
 
   loadChallengeLeaderboard().then(function(entries) {
     renderChallengeLeaderboard(entries || []);
-    var currentName = (getCurrentPlayerName() || '').trim();
-    var fromGlobal = (entries || []).filter(function(row) { return (row.name || '').trim() === currentName; });
-    var fromLocal = getPersonalRecordsFromStorage();
-    var merged = fromGlobal.concat(fromLocal).sort(function(a, b) { return (b.score || 0) - (a.score || 0); });
-    var personalTop10 = merged.slice(0, 10);
-    renderPersonalLeaderboard(personalTop10);
   }).catch(function() {
     leaderboardBody.innerHTML = '<p style="margin:0;color:#888;">Could not load leaderboard.</p>';
-    personalLeaderboardBody.innerHTML = '<p style="margin:0;color:#888;">Could not load leaderboard.</p>';
   });
+  // Personal: only locally saved runs (localStorage), top 10
+  var personalEntries = getPersonalRecordsFromStorage().slice(0, 10);
+  renderPersonalLeaderboard(personalEntries);
 
   container.appendChild(leftCol);
   container.appendChild(middleCol);
   container.appendChild(rightCol);
+  soloPanel.appendChild(container);
 
   function restoreLastRollInModal() {
     if (rolledRoomId && rolledRoomName) {
@@ -1166,7 +1360,7 @@ function openChallengesModal() {
     title: 'Challenges',
     width: MODAL_WIDTH,
     height: MODAL_HEIGHT,
-    content: container,
+    content: wrapper,
     buttons: [
       { text: 'Randomize', primary: false, onClick: rollMapAndCreaturesHandler, closeOnClick: false },
       {
@@ -1436,7 +1630,7 @@ var CREATURE_DIFFICULTY_MULTIPLIERS = {
   'the percht queen': 3,
   'regeneration tank': 3,
   'sweaty cyclops': 1.3,
-  'dharalion': 2,
+  'dharalion': 0.1,
   'old giant spider': 2,
   'dead tree': 1.5,
   'monster cauldron': 3,
@@ -1489,19 +1683,23 @@ var CHALLENGE_ALLIES_EXPONENT = Math.log(5) / Math.log(10); // ~0.699
 function computeChallengeDifficulty(creatureSpecs) {
   if (!creatureSpecs || !creatureSpecs.length) return { difficulty: 0, alliesAllowed: 0 };
   var difficulty = 0;
+  var hasDharalion = false;
   for (var i = 0; i < creatureSpecs.length; i++) {
     var spec = creatureSpecs[i];
+    var name = getCreatureName(spec.gameId);
+    if (name && (name.toLowerCase().trim() === 'dharalion')) hasDharalion = true;
     var level = spec.level != null ? spec.level : 0;
     var equipPoints = (spec.equip && spec.equip.tier != null) ? 10 * spec.equip.tier : 0;
-    var creatureMult = getCreatureDifficultyMultiplier(getCreatureName(spec.gameId));
+    var creatureMult = getCreatureDifficultyMultiplier(name);
     var equipMult = 1;
     if (spec.equip && spec.equip.gameId != null) {
       equipMult = getEquipmentDifficultyMultiplier(getEquipmentName(spec.equip.gameId));
     }
     difficulty += (level + equipPoints) * creatureMult * equipMult;
   }
-  var alliesAllowed = Math.max(1, Math.round(2 * Math.pow(difficulty / CHALLENGE_ALLIES_BASE_DIFFICULTY, CHALLENGE_ALLIES_EXPONENT)));
   difficulty = Math.round(difficulty);
+  if (hasDharalion) difficulty = Math.round(difficulty * 0.5);
+  var alliesAllowed = Math.max(1, Math.round(2 * Math.pow(difficulty / CHALLENGE_ALLIES_BASE_DIFFICULTY, CHALLENGE_ALLIES_EXPONENT)));
   return { difficulty: difficulty, alliesAllowed: alliesAllowed };
 }
 
@@ -1510,13 +1708,14 @@ function getDifficultyMultiplier(rawDifficulty) {
   return (rawDifficulty || 0) / 100;
 }
 
-/** Color for difficulty multiplier: green (low) → yellow → orange → red; >8× = super red. */
+/** Color for difficulty multiplier (0–15×+): green (low) → yellow → orange → red → dark red. */
 function getDifficultyColor(mult) {
   if (mult <= 0) return undefined;
-  if (mult > 8) return '#b30000';
-  if (mult > 6) return '#e63900';
-  if (mult > 4) return '#e6a800';
-  if (mult > 2) return '#99cc00';
+  if (mult >= 15) return '#b30000';
+  if (mult >= 12) return '#cc2200';
+  if (mult >= 9) return '#e63900';
+  if (mult >= 6) return '#e6a800';
+  if (mult >= 3) return '#99cc00';
   return '#4d9900';
 }
 
@@ -1637,7 +1836,6 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
         console.log('[Challenges Mod] onVictory gameData:', gameData);
         var ticks = (gameData && typeof gameData.ticks === 'number') ? gameData.ticks : 0;
         var grade = (gameData && gameData.grade) ? gameData.grade : null;
-        console.log('[Challenges Mod] onVictory grade:', grade, 'type:', typeof grade, 'gradePoints:', getGradePoints(grade));
         var score = computeChallengeScore(ticks, difficulty, grade);
         var name = getCurrentPlayerName();
         var villainConfig = {
@@ -1668,7 +1866,6 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
         console.log('[Challenges Mod] victoryContent gameData:', gameData);
         var ticks = (gameData && typeof gameData.ticks === 'number') ? gameData.ticks : 0;
         var grade = (gameData && gameData.grade) ? gameData.grade : null;
-        console.log('[Challenges Mod] victoryContent grade:', grade, 'type:', typeof grade, 'gradePoints:', getGradePoints(grade));
         var score = computeChallengeScore(ticks, difficulty, grade);
         var wrap = document.createElement('div');
         wrap.style.cssText = 'padding: 12px 16px; text-align: left;';

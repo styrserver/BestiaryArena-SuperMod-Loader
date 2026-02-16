@@ -329,10 +329,12 @@ Automatically manages stamina levels by starting/stopping gameplay (by [https://
 These are community and social mods that enhance player interaction and community features. All 4 OT Mods listed below are included by default in this loader:
 
 ==== Challenges ====
-Challenges mod with inventory integration:
-* Clickable Exalted Core icon in the inventory that opens the Challenges modal
-* Modal with Start button (placeholder for future challenge features)
-* Same modal size as Cyclopedia for consistent UX
+Randomized challenge runs with leaderboards and replay sharing:
+* Clickable Exalted Core icon in the inventory opens the Challenges modal (Cyclopedia-sized three-column layout)
+* Roll random challenges: random map, villain creatures, and equipment via slot-reel UI, then start the run in CustomBattle
+* Scoring uses difficulty (allies vs enemies), ticks, and grade bonuses (S+, S, A, B, C, D); runs save $replay() links for sharing
+* Global top-20 leaderboard (Firebase) and personal records (localStorage) with load-setup from leaderboard or personal entries
+* View summary and leaderboard in the modal; load a saved setup to replay challenges
 
 ==== Guilds ====
 Social guild system for creating and managing player communities:

@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.5.1",
+      "changes": [
+        { "type": "fixed", "mod": "Challenges", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.5.0",
       "changes": [
         { "type": "added", "mod": "Challenges", "text": "Added Challenges to OT mods." }
