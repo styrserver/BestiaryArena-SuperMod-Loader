@@ -683,6 +683,29 @@ const unsubscribe = globalThis.state.board.subscribe((state) => {
 unsubscribe();
 ```
 
+### Reading allies (creatures alive) at battle end
+
+When a battle ends, the game may not pass `creaturesAlive` or `currentTeamSize` in the victory callback payload. To get the number of ally creatures still on the board at that moment, read the board state and count ally pieces (same logic as the Custom Battles system):
+
+```javascript
+function getCreaturesAliveFromBoardState() {
+  try {
+    const state = globalThis.state;
+    if (!state?.board?.getSnapshot) return null;
+    const ctx = state.board.getSnapshot().context;
+    const boardConfig = ctx?.boardConfig;
+    if (!Array.isArray(boardConfig)) return null;
+    const isAlly = (piece) =>
+      piece?.type === 'player' || (piece?.type === 'custom' && piece?.villain === false);
+    return boardConfig.filter(isAlly).length;
+  } catch (e) {
+    return null;
+  }
+}
+```
+
+Use this when your victory/defeat handler needs to compute grade or score from how many allies survived. If the result is `null` or unavailable, fall back to assuming full survival (e.g. `creaturesAlive = currentTeamSize`). See the Challenges mod and `content/custom-battles.js` (`countAllyCreatures`) for reference.
+
 For more details on the game state API, see the [Game State API Documentation](game_state_api.md).
 
 ## Best Practices

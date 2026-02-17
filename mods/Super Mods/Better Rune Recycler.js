@@ -867,9 +867,13 @@
           contentDiv.style.boxSizing = 'border-box';
           contentDiv.style.overflow = 'hidden';
           contentDiv.style.display = 'flex';
-          contentDiv.style.flexDirection = 'row';
+          contentDiv.style.flexDirection = 'column';
           contentDiv.style.gap = '8px';
           contentDiv.style.flex = '1 1 0';
+          
+          // Row wrapper: Configuration | Statistics (so "Created by" can sit below)
+          const mainRow = document.createElement('div');
+          mainRow.style.cssText = 'display: flex; flex-direction: row; gap: 8px; flex: 1 1 0; min-height: 0; overflow: hidden;';
           
           // Col1: Configuration
           const configBox = createBox({
@@ -889,8 +893,9 @@
           statsBox.style.minWidth = '0';
           statsBox.style.height = '100%';
           
-          contentDiv.appendChild(configBox);
-          contentDiv.appendChild(statsBox);
+          mainRow.appendChild(configBox);
+          mainRow.appendChild(statsBox);
+          contentDiv.appendChild(mainRow);
           
           const modalInstance = api.ui.components.createModal({
             title: t('mods.betterRuneRecycler.modalTitle'),
@@ -918,91 +923,46 @@
           setTimeout(() => {
             try {
               const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-              if (dialog) {
-                dialog.style.width = `${MODAL_WIDTH}px`;
-                dialog.style.minWidth = `${MODAL_WIDTH}px`;
-                dialog.style.maxWidth = `${MODAL_WIDTH}px`;
-                dialog.style.height = `${MODAL_HEIGHT}px`;
-                dialog.style.minHeight = `${MODAL_HEIGHT}px`;
-                dialog.style.maxHeight = `${MODAL_HEIGHT}px`;
-                dialog.classList.remove('max-w-[300px]');
-                
-                let contentWrapper = null;
-                const children = Array.from(dialog.children);
-                for (const child of children) {
-                  if (child !== dialog.firstChild && child.tagName === 'DIV') {
-                    contentWrapper = child;
-                    break;
-                  }
+              if (!dialog || !dialog.querySelector('#start-stop-btn')) return;
+              dialog.style.width = `${MODAL_WIDTH}px`;
+              dialog.style.minWidth = `${MODAL_WIDTH}px`;
+              dialog.style.maxWidth = `${MODAL_WIDTH}px`;
+              dialog.style.height = `${MODAL_HEIGHT}px`;
+              dialog.style.minHeight = `${MODAL_HEIGHT}px`;
+              dialog.style.maxHeight = `${MODAL_HEIGHT}px`;
+              dialog.classList.remove('max-w-[300px]');
+              let contentWrapper = null;
+              const children = Array.from(dialog.children);
+              for (const child of children) {
+                if (child !== dialog.firstChild && child.tagName === 'DIV') {
+                  contentWrapper = child;
+                  break;
                 }
-                if (!contentWrapper) {
-                  contentWrapper = dialog.querySelector(':scope > div');
-                }
-                if (contentWrapper) {
-                  contentWrapper.style.height = '100%';
-                  contentWrapper.style.display = 'flex';
-                  contentWrapper.style.flexDirection = 'column';
-                  contentWrapper.style.flex = '1 1 0';
-                }
+              }
+              if (!contentWrapper) {
+                contentWrapper = dialog.querySelector(':scope > div');
+              }
+              if (contentWrapper) {
+                contentWrapper.style.height = '100%';
+                contentWrapper.style.display = 'flex';
+                contentWrapper.style.flexDirection = 'column';
+                contentWrapper.style.flex = '1 1 0';
               }
             } catch (dialogError) {
               console.error('[Better Rune Recycler] Error styling dialog:', dialogError);
             }
           }, 50);
           
-          // Setup event listeners after modal is created
+          // Setup event listeners after modal is created (only if our modal is still open)
           setTimeout(() => {
+            if (!isRuneRecyclerModalOpen()) return;
             setupModalEventListeners();
           }, 100);
           
-          // Inject "Created by" footer into the modal footer
+          // Inject "Created by btlucas" into the framework footer (same pattern as Better Forge)
           setTimeout(() => {
-            const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
-            if (modalElement) {
-              const footer = modalElement.querySelector('.flex.justify-end.gap-2');
-              if (footer) {
-                // Create "Created by" element
-                const createdBy = document.createElement('div');
-                createdBy.className = 'pixel-font-16';
-                createdBy.style.cssText = `
-                  font-size: 11px;
-                  color: rgba(255, 255, 255, 0.6);
-                  font-style: italic;
-                  margin-right: auto;
-                `;
-                
-                const createdByText = document.createTextNode(t('mods.betterRuneRecycler.createdBy'));
-                const btlucasLink = document.createElement('a');
-                btlucasLink.href = 'https://bestiaryarena.com/profile/btlucas';
-                btlucasLink.target = '_blank';
-                btlucasLink.rel = 'noopener noreferrer';
-                btlucasLink.textContent = 'btlucas';
-                btlucasLink.style.cssText = `
-                  color: #61AFEF;
-                  text-decoration: none;
-                `;
-                btlucasLink.addEventListener('mouseenter', () => {
-                  btlucasLink.style.textDecoration = 'underline';
-                });
-                btlucasLink.addEventListener('mouseleave', () => {
-                  btlucasLink.style.textDecoration = 'none';
-                });
-                
-                createdBy.appendChild(createdByText);
-                createdBy.appendChild(btlucasLink);
-                
-                // Modify footer to use space-between layout
-                footer.style.cssText = `
-                  display: flex;
-                  justify-content: space-between;
-                  align-items: center;
-                  gap: 2px;
-                `;
-                
-                // Insert "Created by" at the beginning
-                footer.insertBefore(createdBy, footer.firstChild);
-              }
-            }
+            if (!isRuneRecyclerModalOpen()) return;
+            injectCreatedByIntoModalFooter();
           }, 100);
           
         } catch (contentError) {
@@ -1245,6 +1205,34 @@
   }
 
   /**
+   * Inject "Created by btlucas" into the modal footer (same pattern as Better Forge's dust display).
+   */
+  function injectCreatedByIntoModalFooter() {
+    try {
+      const buttonContainer = document.querySelector('div[role="dialog"][data-state="open"] .flex.justify-end.gap-2');
+      if (!buttonContainer) return;
+      if (!buttonContainer.closest('div[role="dialog"]')?.querySelector('#start-stop-btn')) return;
+      const createdBy = document.createElement('div');
+      createdBy.className = 'pixel-font-16 flex items-center text-whiteRegular mr-auto';
+      createdBy.style.cssText = 'font-size: 11px; color: rgba(255,255,255,0.6); font-style: italic;';
+      const createdByText = document.createTextNode(t('mods.betterRuneRecycler.createdBy') + ' ');
+      const btlucasLink = document.createElement('a');
+      btlucasLink.href = 'https://bestiaryarena.com/profile/btlucas';
+      btlucasLink.target = '_blank';
+      btlucasLink.rel = 'noopener noreferrer';
+      btlucasLink.textContent = 'btlucas';
+      btlucasLink.style.cssText = 'color: #61AFEF; text-decoration: none;';
+      btlucasLink.addEventListener('mouseenter', () => { btlucasLink.style.textDecoration = 'underline'; });
+      btlucasLink.addEventListener('mouseleave', () => { btlucasLink.style.textDecoration = 'none'; });
+      createdBy.appendChild(createdByText);
+      createdBy.appendChild(btlucasLink);
+      buttonContainer.insertBefore(createdBy, buttonContainer.firstChild);
+    } catch (error) {
+      console.warn('[Better Rune Recycler] Error injecting created-by footer:', error);
+    }
+  }
+
+  /**
    * Setup event listeners for modal interactions
    */
   function setupModalEventListeners() {
@@ -1417,6 +1405,7 @@
    * Update the inventory display in the modal
    */
   function updateInventoryDisplay() {
+    if (!isRuneRecyclerModalOpen()) return;
     const runeCounts = getAllRuneCounts();
 
     // Update rune counts in config section (including Blank Rune row)
@@ -1435,6 +1424,7 @@
    * Update the statistics display
    */
   function updateStatsDisplay() {
+    if (!isRuneRecyclerModalOpen()) return;
     // Update consumed stats
     const consumedStats = document.getElementById('consumed-stats');
     if (consumedStats) {

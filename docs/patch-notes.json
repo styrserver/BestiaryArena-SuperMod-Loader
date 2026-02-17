@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.5.2",
+      "changes": [
+        { "type": "fixed", "mod": "Better Rune Recycler", "text": "Bug fixes." },
+        { "type": "fixed", "mod": "Challenges", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.5.1",
       "changes": [
         { "type": "fixed", "mod": "Challenges", "text": "Bug fixes." }

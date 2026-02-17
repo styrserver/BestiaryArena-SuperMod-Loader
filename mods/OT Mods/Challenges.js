@@ -53,14 +53,15 @@ const ROLL_SLOT_DELAY_MS = 200;
 /** Interval in ms between reel "ticks" (one-armed bandit spin). */
 const ROLL_REEL_TICK_MS = 70;
 
-/** Grade bonus points added to challenge score (by grade string, case-insensitive). */
+/** Grade bonus points added to challenge score (by grade string, case-insensitive). S+ = 1500, each rank below −250. F = 0. */
 var CHALLENGE_GRADE_POINTS = {
-  's+': 500,
-  's': 400,
-  'a': 300,
-  'b': 200,
-  'c': 100,
-  'd': 50
+  's+': 1500,
+  's': 1250,
+  'a': 1000,
+  'b': 750,
+  'c': 500,
+  'd': 250,
+  'f': 0
 };
 
 // Firebase (same base URL as Quests/Guilds)
@@ -281,6 +282,106 @@ function savePersonalRecordToStorage(runEntry) {
   }
 }
 
+/**
+ * Remove one personal run from localStorage (match by map, score, difficulty, replay).
+ * @param {{ map: string, difficulty: number, score: number, replay: string }} entry - Entry to remove (as in leaderboard row)
+ * @returns {boolean} True if an entry was removed
+ */
+function deletePersonalRecordFromStorage(entry) {
+  try {
+    var raw = typeof localStorage !== 'undefined' && localStorage.getItem(CHALLENGE_PERSONAL_RECORDS_KEY);
+    if (!raw) return false;
+    var data = JSON.parse(raw);
+    var name = (getCurrentPlayerName() || 'Unknown').trim();
+    var list = Array.isArray(data[name]) ? data[name].slice() : [];
+    var match = function(r) {
+      return (r.map || '') === (entry.map || '') && r.difficulty === entry.difficulty && r.score === entry.score && (r.replay || '') === (entry.replay || '');
+    };
+    var idx = list.findIndex(match);
+    if (idx < 0) return false;
+    list.splice(idx, 1);
+    data[name] = list;
+    if (typeof localStorage !== 'undefined') localStorage.setItem(CHALLENGE_PERSONAL_RECORDS_KEY, JSON.stringify(data));
+    console.log('[Challenges Mod] Personal run deleted from storage:', entry.map, entry.score);
+    return true;
+  } catch (e) {
+    console.warn('[Challenges Mod] Failed to delete personal record:', e);
+    return false;
+  }
+}
+
+/** Reference to open context menu for Challenges (overlay, menu, closeMenu) - only one at a time. */
+var challengesOpenContextMenu = null;
+
+/**
+ * Show a right-click context menu with "Delete run" for a personal leaderboard row.
+ * @param {number} x - Client X position
+ * @param {number} y - Client Y position
+ * @param {{ map: string, difficulty: number, score: number, replay: string }} entry - Row data
+ * @param {Function} onDelete - Called when user chooses Delete run
+ * @param {Function} onClose - Called when menu closes (e.g. to refresh list)
+ */
+function createDeleteRunContextMenu(x, y, entry, onDelete, onClose) {
+  if (challengesOpenContextMenu && challengesOpenContextMenu.closeMenu) {
+    challengesOpenContextMenu.closeMenu();
+  }
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:transparent;pointer-events:auto;cursor:default;';
+  var menu = document.createElement('div');
+  menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:9999;min-width:180px;background:url(\'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png\') repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;padding:10px 12px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
+  var deleteBtn = document.createElement('button');
+  deleteBtn.className = 'pixel-font-14';
+  deleteBtn.textContent = 'Delete run';
+  deleteBtn.style.cssText = 'display:block;width:100%;padding:8px 12px;text-align:left;background:#1a1a1a;color:#ff6b6b;border:1px solid #555;border-radius:3px;cursor:pointer;font-size:13px;font-weight:bold;box-sizing:border-box;';
+  deleteBtn.addEventListener('mouseenter', function() {
+    deleteBtn.style.backgroundColor = '#2a2a2a';
+    deleteBtn.style.borderColor = '#ff6b6b';
+  });
+  deleteBtn.addEventListener('mouseleave', function() {
+    deleteBtn.style.backgroundColor = '#1a1a1a';
+    deleteBtn.style.borderColor = '#555';
+  });
+  var documentClickHandler = function(e) {
+    if (!menu.contains(e.target)) {
+      closeMenu();
+    }
+  };
+  function closeMenu() {
+    overlay.removeEventListener('mousedown', overlayClickHandler);
+    overlay.removeEventListener('click', overlayClickHandler);
+    document.removeEventListener('keydown', escHandler);
+    document.removeEventListener('mousedown', documentClickHandler, true);
+    if (menu.parentNode) menu.parentNode.removeChild(menu);
+    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    if (challengesOpenContextMenu && (challengesOpenContextMenu.overlay === overlay || challengesOpenContextMenu.menu === menu)) {
+      challengesOpenContextMenu = null;
+    }
+    if (onClose) onClose();
+  }
+  deleteBtn.addEventListener('click', function() {
+    onDelete();
+    closeMenu();
+  });
+  menu.appendChild(deleteBtn);
+  var overlayClickHandler = function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenu();
+  };
+  var escHandler = function(e) {
+    if (e.key === 'Escape') closeMenu();
+  };
+  document.body.appendChild(overlay);
+  document.body.appendChild(menu);
+  overlay.addEventListener('mousedown', overlayClickHandler);
+  overlay.addEventListener('click', overlayClickHandler);
+  document.addEventListener('keydown', escHandler);
+  document.addEventListener('mousedown', documentClickHandler, true);
+  menu.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+  menu.addEventListener('click', function(e) { e.stopPropagation(); });
+  challengesOpenContextMenu = { overlay: overlay, menu: menu, closeMenu: closeMenu };
+}
+
 // =======================
 // 3. Modal
 // =======================
@@ -431,21 +532,21 @@ function openChallengesModal() {
     '<p style="margin:0 0 12px 0; color:' + CHALLENGE_COLORS.PRIMARY + '; font-weight:bold;">How challenge score is calculated</p>',
     '<p style="margin:0 0 8px 0;"><strong>Formula</strong></p>',
     '<p style="margin:0 0 16px 0;">Score = round( ( (1000 − ticks) + gradeBonus ) × difficultyMultiplier )</p>',
-    '<p style="margin:0 0 8px 0;"><strong>Ticks</strong></p>',
+    '<p style="margin:0 0 8px 0;"><strong>Remove Ticks</strong></p>',
     '<p style="margin:0 0 16px 0;">Base value: (1000 − ticks).</p>',
     '<p style="margin:0 0 8px 0;"><strong>Grade bonus</strong></p>',
+    '<p style="margin:0 0 8px 0;">Grade is from max team size, current team size and creatures alive (time is not used). Defeat = F, 0 points.</p>',
     '<ul style="margin:0 0 16px 0; padding-left:20px;">',
-    '<li>S+ : +500</li>',
-    '<li>S : +400</li>',
-    '<li>A : +300</li>',
-    '<li>B : +200</li>',
-    '<li>C : +100</li>',
-    '<li>D : +50</li>',
+    '<li>S+ : +1500</li>',
+    '<li>S : +1250</li>',
+    '<li>A : +1000</li>',
+    '<li>B : +750</li>',
+    '<li>C : +500</li>',
+    '<li>D : +250</li>',
+    '<li>F : +0 (defeat)</li>',
     '</ul>',
     '<p style="margin:0 0 8px 0;"><strong>Difficulty multiplier</strong></p>',
-    '<p style="margin:0 0 16px 0;">Based on how many allies you were allowed vs how many enemy creatures (e.g. 1 v 5). Higher difficulty (fewer allies, more enemies) gives a multiplier greater than 1×. The multiplier is (raw difficulty ÷ 100); it is shown in the summary and on the leaderboard (e.g. 1.50×).</p>',
-    '<p style="margin:0 0 8px 0;"><strong>Raw difficulty</strong></p>',
-    '<p style="margin:0 0 0 0;">Raw difficulty is the internal number that encodes how hard the setup is (how many allies you get vs how many enemies). A higher raw difficulty means fewer allies and more enemies, and the displayed multiplier is that value divided by 100 (e.g. raw 150 → 1.50×, raw 600 → 6.00×).</p>'
+    '<p style="margin:0 0 0 0;">Based on how many allies you were allowed vs how many enemy creatures (e.g. 1 v 5). Raw difficulty is the internal number that encodes how hard the setup is; the displayed/score multiplier is 10 × (raw÷1000)^' + CHALLENGE_DIFFICULTY_POWER + ', so lower difficulties grant more score (steep at the low end). Shown in the summary and leaderboard (e.g. raw 100 → ~3.16×, raw 500 → ~7.07×, raw 1000 → 10×).</p>'
   ].join('');
   pointsPanel.appendChild(createPlaceholderBox('Help', pointsBodyHtml));
 
@@ -493,6 +594,13 @@ function openChallengesModal() {
   const summaryDifficultyValueSpan = document.createElement('span');
   summaryDifficultyValueSpan.textContent = '— (— v —)';
   summaryDifficultyEl.appendChild(summaryDifficultyValueSpan);
+  const summaryExpectedScoreEl = document.createElement('p');
+  summaryExpectedScoreEl.style.margin = '0';
+  summaryExpectedScoreEl.title = 'Score you would get for A rank with 500 ticks';
+  summaryExpectedScoreEl.appendChild(document.createTextNode('Expected score: '));
+  const summaryExpectedScoreValueSpan = document.createElement('span');
+  summaryExpectedScoreValueSpan.textContent = '—';
+  summaryExpectedScoreEl.appendChild(summaryExpectedScoreValueSpan);
 
   // Col1: Top = Maps, Bottom = Summary
   const leftCol = document.createElement('div');
@@ -544,6 +652,7 @@ function openChallengesModal() {
   summaryBox.querySelector('.widget-bottom').appendChild(summaryMapEl);
   summaryBox.querySelector('.widget-bottom').appendChild(summaryCreaturesEl);
   summaryBox.querySelector('.widget-bottom').appendChild(summaryDifficultyEl);
+  summaryBox.querySelector('.widget-bottom').appendChild(summaryExpectedScoreEl);
   leftCol.appendChild(summaryBox);
 
   function getRoomThumbnailUrl(roomId) {
@@ -1042,6 +1151,7 @@ function openChallengesModal() {
       summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
       summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
       summaryDifficultyEl.title = 'Allies v Enemies (allies allowed vs number of enemy creatures)';
+      summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
       console.log('[Challenges Mod] rollCreatures: rolled', rolledCreatureSpecs.length, names.join(', '), 'difficulty', diff.difficulty, 'allies', diff.alliesAllowed);
     } catch (e) {
       console.error('[Challenges Mod] rollCreaturesHandler error:', e);
@@ -1131,6 +1241,7 @@ function openChallengesModal() {
     summaryCreaturesEl.textContent = 'Creatures: —';
     summaryDifficultyValueSpan.textContent = '— (— v —)';
     summaryDifficultyValueSpan.style.color = '';
+    summaryExpectedScoreValueSpan.textContent = '—';
 
     (function runSlotRoll() {
       var roomId, roomName, specs;
@@ -1162,6 +1273,7 @@ function openChallengesModal() {
             summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
             summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
             summaryDifficultyEl.title = 'Allies v Enemies (allies allowed vs number of enemy creatures)';
+            summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
             finishRollState();
           });
         }
@@ -1182,6 +1294,7 @@ function openChallengesModal() {
           summaryCreaturesEl.textContent = 'Creatures: —';
           summaryDifficultyValueSpan.textContent = '— (— v —)';
           summaryDifficultyValueSpan.style.color = '';
+          summaryExpectedScoreValueSpan.textContent = '—';
           finishRollState();
           return;
         }
@@ -1216,7 +1329,7 @@ function openChallengesModal() {
 
   var CHALLENGE_BLUE_BG_URL = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
 
-  function buildLeaderboardTable(entries, showNameColumn, highlightCurrentUser) {
+  function buildLeaderboardTable(entries, showNameColumn, highlightCurrentUser, onDeleteRun) {
     highlightCurrentUser = highlightCurrentUser && showNameColumn;
     var currentName = highlightCurrentUser ? (getCurrentPlayerName() || '').trim() : '';
     var table = document.createElement('div');
@@ -1234,25 +1347,35 @@ function openChallengesModal() {
     entries.forEach(function(row) {
       var tr = document.createElement('div');
       tr.style.cssText = 'display:table-row; color:' + CHALLENGE_COLORS.SECONDARY + ';';
+      if (onDeleteRun) {
+        tr.addEventListener('contextmenu', function(e) {
+          e.preventDefault();
+          createDeleteRunContextMenu(e.clientX, e.clientY, row, function() {
+            if (deletePersonalRecordFromStorage(row)) {
+              var updated = getPersonalRecordsFromStorage().slice(0, 10);
+              renderPersonalLeaderboard(updated);
+            }
+          }, function() {});
+        });
+      }
       if (showNameColumn) {
         var nameCell = document.createElement('a');
-        var displayName = (row.name || '—').substring(0, 12);
         nameCell.href = 'https://bestiaryarena.com/profile/' + encodeURIComponent(row.name || '');
         nameCell.target = '_blank';
         nameCell.rel = 'noopener noreferrer';
         nameCell.style.cssText = 'display:table-cell; padding:2px 4px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + '; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:' + CHALLENGE_COLORS.PRIMARY + '; text-decoration:none;';
-        nameCell.textContent = displayName;
+        nameCell.textContent = row.name || '—';
         nameCell.title = row.name ? (row.name + ' (open profile)') : '';
         tr.appendChild(nameCell);
       }
       var mapCell = document.createElement('div');
       mapCell.style.cssText = 'display:table-cell; padding:2px 4px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + '; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
-      mapCell.textContent = (row.map || '—').substring(0, 12);
+      mapCell.textContent = row.map || '—';
       mapCell.title = row.map || '';
       tr.appendChild(mapCell);
       var diffCell = document.createElement('div');
       diffCell.style.cssText = 'display:table-cell; padding:2px 4px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + ';';
-      diffCell.textContent = row.difficulty != null ? (row.difficulty / 100).toFixed(2) + '×' : '—';
+      diffCell.textContent = row.difficulty != null ? getDifficultyMultiplier(row.difficulty).toFixed(2) + '×' : '—';
       tr.appendChild(diffCell);
       var scoreCell = document.createElement('div');
       scoreCell.style.cssText = 'display:table-cell; padding:2px 4px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + '; cursor:help;';
@@ -1315,7 +1438,7 @@ function openChallengesModal() {
       personalLeaderboardBody.innerHTML = '<p style="margin:0;color:#888;">No personal runs yet.</p>';
       return;
     }
-    personalLeaderboardBody.appendChild(buildLeaderboardTable(personalEntries, false));
+    personalLeaderboardBody.appendChild(buildLeaderboardTable(personalEntries, false, false, true));
   }
 
   loadChallengeLeaderboard().then(function(entries) {
@@ -1350,6 +1473,7 @@ function openChallengesModal() {
       summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
       summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
       summaryDifficultyEl.title = 'Allies v Enemies (allies allowed vs number of enemy creatures)';
+      summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
     }
   }
   restoreLastRollInModal();
@@ -1625,18 +1749,18 @@ function getEquipmentName(gameId) {
 // Per-creature difficulty multipliers (by name, case-insensitive). Default 1 if not listed.
 var CREATURE_DIFFICULTY_MULTIPLIERS = {
   'sheep': 0.5,
-  'black knight': 5,
+  'black knight': 3,
   'lavahole': 4,
-  'the percht queen': 3,
+  'the percht queen': 2,
   'regeneration tank': 3,
   'sweaty cyclops': 1.3,
   'dharalion': 0.1,
   'old giant spider': 2,
   'dead tree': 1.5,
-  'monster cauldron': 3,
-  'earth crystal': 3,
-  'magma crystal': 3,
-  'energy crystal': 3
+  'monster cauldron': 2,
+  'earth crystal': 2,
+  'magma crystal': 2,
+  'energy crystal': 2
 };
 
 // Per-equipment difficulty multipliers (by name, case-insensitive). Default 1 if not listed.
@@ -1676,7 +1800,7 @@ function getCreatureDifficultyContribution(spec) {
 }
 
 // Difficulty = sum over creatures of (level + 10*equipTier) * creatureMult * equipmentMult, rounded.
-// Difficulty multiplier (for display and score) = difficulty / 100.
+// Display/score multiplier = getDifficultyMultiplier(difficulty), power curve (see below).
 // Allies = round(2 * (difficulty/150)^p), min 1, with p = log(5)/log(10) so 150→2, 375→4, 600→5, 1500→10, 2000→12.
 var CHALLENGE_ALLIES_BASE_DIFFICULTY = 150;
 var CHALLENGE_ALLIES_EXPONENT = Math.log(5) / Math.log(10); // ~0.699
@@ -1703,9 +1827,14 @@ function computeChallengeDifficulty(creatureSpecs) {
   return { difficulty: difficulty, alliesAllowed: alliesAllowed };
 }
 
-/** Difficulty multiplier for display and score: raw difficulty / 100. */
+/** Power-curve exponent for score: lower difficulties grant more score (steep at low end). Smaller = more boost (0.5 = strong, 0.65 = moderate). */
+var CHALLENGE_DIFFICULTY_POWER = 0.5;
+
+/** Difficulty multiplier for display and score: 10 × (raw/1000)^power so lower difficulties are boosted (steeper curve at low end). */
 function getDifficultyMultiplier(rawDifficulty) {
-  return (rawDifficulty || 0) / 100;
+  var linear = (rawDifficulty || 0) / 100;
+  if (linear <= 0) return 0;
+  return 10 * Math.pow(linear / 10, CHALLENGE_DIFFICULTY_POWER);
 }
 
 /** Color for difficulty multiplier (0–15×+): green (low) → yellow → orange → red → dark red. */
@@ -1719,7 +1848,61 @@ function getDifficultyColor(mult) {
   return '#4d9900';
 }
 
-/** Grade bonus points (S+ = 500, S = 400, A = 300, etc.). Returns 0 for unknown grade. */
+/** Max grade index (0-based) from max team size: 0 if maxTeamSize <= 1, else maxTeamSize + 1. */
+function maxGrade(maxTeamSize) {
+  return maxTeamSize <= 1 ? 0 : maxTeamSize + 1;
+}
+
+/**
+ * Count ally creatures currently on the board from game state (same logic as Custom Battles countAllyCreatures).
+ * Used when gameData does not provide creaturesAlive. Returns null if state is unavailable.
+ * @returns {number|null} Number of allies on board, or null.
+ */
+function getCreaturesAliveFromBoardState() {
+  try {
+    var state = getState();
+    if (!state || !state.board || typeof state.board.getSnapshot !== 'function') return null;
+    var ctx = state.board.getSnapshot();
+    if (!ctx || !ctx.context) return null;
+    var boardConfig = ctx.context.boardConfig;
+    if (!boardConfig || !Array.isArray(boardConfig)) return null;
+    function isAlly(piece) {
+      return piece && (piece.type === 'player' || (piece.type === 'custom' && piece.villain === false));
+    }
+    return boardConfig.filter(isAlly).length;
+  } catch (e) {
+    console.warn('[Challenges Mod] getCreaturesAliveFromBoardState error:', e);
+    return null;
+  }
+}
+
+/** Grade letters by index (0 = F, 1 = D … 6 = S+). Time is not used; grade is from max team size, current team size, and creatures alive. */
+var CHALLENGE_GRADE_LETTERS = ['F', 'D', 'C', 'B', 'A', 'S', 'S+'];
+
+/**
+ * Compute challenge grade from max team size, current team size, and creatures alive (no ticks).
+ * On defeat (creaturesAlive <= 0) returns 'F'. Otherwise uses survival ratio and maxGrade(maxTeamSize).
+ * @param {number} maxTeamSize - Allies allowed (max team size).
+ * @param {number} currentTeamSize - Your team size at battle start / max.
+ * @param {number} creaturesAlive - Number of your creatures alive after battle.
+ * @returns {string} Letter grade F, D, C, B, A, S, or S+.
+ */
+function computeChallengeGrade(maxTeamSize, currentTeamSize, creaturesAlive) {
+  if (creaturesAlive <= 0) {
+    console.log('[Challenges Mod] computeChallengeGrade: defeat (creaturesAlive <= 0) -> F');
+    return 'F';
+  }
+  var maxVal = maxGrade(maxTeamSize);
+  if (maxVal <= 0) return 'D';
+  var denominator = currentTeamSize > 0 ? currentTeamSize : 1;
+  var ratio = Math.max(0, Math.min(1, creaturesAlive / denominator));
+  var gradeIndex = Math.min(maxVal, Math.floor(ratio * (maxVal + 1)));
+  var grade = CHALLENGE_GRADE_LETTERS[Math.min(gradeIndex, CHALLENGE_GRADE_LETTERS.length - 1)];
+  console.log('[Challenges Mod] computeChallengeGrade:', { maxTeamSize, currentTeamSize, creaturesAlive, maxVal, ratio, gradeIndex, grade });
+  return grade;
+}
+
+/** Grade bonus points (S+ = 1500, S = 1250, A = 1000, etc., −250 per rank). Returns 0 for unknown grade. */
 function getGradePoints(grade) {
   if (grade == null || typeof grade !== 'string') return 0;
   var key = grade.trim().toLowerCase();
@@ -1835,7 +2018,11 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
       onVictory: function(gameData) {
         console.log('[Challenges Mod] onVictory gameData:', gameData);
         var ticks = (gameData && typeof gameData.ticks === 'number') ? gameData.ticks : 0;
-        var grade = (gameData && gameData.grade) ? gameData.grade : null;
+        var currentTeamSize = (gameData && typeof gameData.currentTeamSize === 'number') ? gameData.currentTeamSize : allyLimit;
+        var creaturesAlive = (gameData && typeof gameData.creaturesAlive === 'number') ? gameData.creaturesAlive : getCreaturesAliveFromBoardState();
+        if (typeof creaturesAlive !== 'number' || creaturesAlive < 0) creaturesAlive = currentTeamSize;
+        var grade = computeChallengeGrade(allyLimit, currentTeamSize, creaturesAlive);
+        console.log('[Challenges Mod] grade (onVictory):', { maxTeamSize: allyLimit, currentTeamSize, creaturesAlive, grade });
         var score = computeChallengeScore(ticks, difficulty, grade);
         var name = getCurrentPlayerName();
         var villainConfig = {
@@ -1865,7 +2052,11 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
       victoryContent: function(gameData) {
         console.log('[Challenges Mod] victoryContent gameData:', gameData);
         var ticks = (gameData && typeof gameData.ticks === 'number') ? gameData.ticks : 0;
-        var grade = (gameData && gameData.grade) ? gameData.grade : null;
+        var currentTeamSize = (gameData && typeof gameData.currentTeamSize === 'number') ? gameData.currentTeamSize : allyLimit;
+        var creaturesAlive = (gameData && typeof gameData.creaturesAlive === 'number') ? gameData.creaturesAlive : getCreaturesAliveFromBoardState();
+        if (typeof creaturesAlive !== 'number' || creaturesAlive < 0) creaturesAlive = currentTeamSize;
+        var grade = computeChallengeGrade(allyLimit, currentTeamSize, creaturesAlive);
+        console.log('[Challenges Mod] grade (victoryContent):', { maxTeamSize: allyLimit, currentTeamSize, creaturesAlive, grade });
         var score = computeChallengeScore(ticks, difficulty, grade);
         var wrap = document.createElement('div');
         wrap.style.cssText = 'padding: 12px 16px; text-align: left;';
@@ -1897,7 +2088,9 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
         });
         return wrap;
       },
-      onDefeat: function() {},
+      onDefeat: function() {
+        // Defeat: grade F, 0 rank points — do not save to leaderboard.
+      },
       onClose: function() {
         cleanupChallengeBattle();
         setTimeout(triggerChallengeStopButton, 0);
