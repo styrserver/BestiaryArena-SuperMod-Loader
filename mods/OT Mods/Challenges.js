@@ -331,7 +331,8 @@ function createDeleteRunContextMenu(x, y, entry, onDelete, onClose) {
   menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:9999;min-width:180px;background:url(\'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png\') repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;padding:10px 12px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
   var deleteBtn = document.createElement('button');
   deleteBtn.className = 'pixel-font-14';
-  deleteBtn.textContent = 'Delete run';
+  var ctxT = (typeof context !== 'undefined' && context.api && context.api.i18n && typeof context.api.i18n.t === 'function') ? context.api.i18n.t.bind(context.api.i18n) : function(k) { return k === 'mods.challenges.deleteRun' ? 'Delete run' : k; };
+  deleteBtn.textContent = ctxT('mods.challenges.deleteRun');
   deleteBtn.style.cssText = 'display:block;width:100%;padding:8px 12px;text-align:left;background:#1a1a1a;color:#ff6b6b;border:1px solid #555;border-radius:3px;cursor:pointer;font-size:13px;font-weight:bold;box-sizing:border-box;';
   deleteBtn.addEventListener('mouseenter', function() {
     deleteBtn.style.backgroundColor = '#2a2a2a';
@@ -392,6 +393,16 @@ function openChallengesModal() {
     return;
   }
   const api = context.api;
+  var challengesFallback = { 'mods.challenges.title': 'Challenges', 'mods.challenges.tabs.solo': 'Solo', 'mods.challenges.tabs.multiplayer': 'Multiplayer', 'mods.challenges.help': 'Help', 'mods.challenges.maps': 'Maps', 'mods.challenges.creatures': 'Creatures', 'mods.challenges.summary': 'Summary', 'mods.challenges.randomize': 'Randomize', 'mods.challenges.skip': 'Skip', 'mods.challenges.start': 'Start', 'mods.challenges.close': 'Close', 'mods.challenges.comingSoon': 'Coming soon.', 'mods.challenges.rolling': 'Rolling…', 'mods.challenges.rollFailed': 'Roll failed', 'mods.challenges.loadSetupTitle': 'Load this challenge setup', 'mods.challenges.mapLabel': 'Map:', 'mods.challenges.creaturesLabel': 'Creatures:', 'mods.challenges.difficultyLabel': 'Difficulty: ', 'mods.challenges.expectedScoreLabel': 'Expected score: ', 'mods.challenges.expectedScoreTitle': 'Score you would get for A rank with 500 ticks', 'mods.challenges.alliesVsEnemiesTitle': 'Allies v Enemies (allies allowed vs number of enemy creatures)', 'mods.challenges.globalTop10': 'Global Top 10', 'mods.challenges.personalTop10': 'Personal Top 10', 'mods.challenges.loading': 'Loading…', 'mods.challenges.rankLabel': 'Rank:', 'mods.challenges.victory': 'Victory!', 'mods.challenges.deleteRun': 'Delete run', 'mods.challenges.helpPanel.howToPlayTitle': 'How to play', 'mods.challenges.helpPanel.howToPlayText': 'Click Randomize to roll a map and creatures, then Start to play the battle. Your score is based on ticks, grade (team size and creatures alive), and difficulty.', 'mods.challenges.helpPanel.title': 'How challenge score is calculated', 'mods.challenges.helpPanel.formula': 'Formula', 'mods.challenges.helpPanel.formulaText': 'Score = round( ( (1000 − ticks) + gradeBonus ) × difficultyMultiplier )', 'mods.challenges.helpPanel.removeTicks': 'Remove Ticks', 'mods.challenges.helpPanel.baseValueTicks': 'Base value: (1000 − ticks).', 'mods.challenges.helpPanel.gradeBonus': 'Grade bonus', 'mods.challenges.helpPanel.gradeSPlus': 'S+ : +1500', 'mods.challenges.helpPanel.gradeS': 'S : +1250', 'mods.challenges.helpPanel.gradeA': 'A : +1000', 'mods.challenges.helpPanel.gradeB': 'B : +750', 'mods.challenges.helpPanel.gradeC': 'C : +500', 'mods.challenges.helpPanel.gradeD': 'D : +250', 'mods.challenges.helpPanel.gradeDescription': 'Grade is from max team size, current team size and creatures alive (time is not used). Defeat = F, 0 points.', 'mods.challenges.helpPanel.gradeF': 'F : +0 (defeat)', 'mods.challenges.helpPanel.difficultyMultiplier': 'Difficulty multiplier', 'mods.challenges.helpPanel.difficultyMultiplierDescription': 'Based on how many allies you were allowed vs how many enemy creatures (e.g. 1 v 5). Raw difficulty is the internal number that encodes how hard the setup is; the displayed/score multiplier is 10 × (raw÷1000)^{power}, so lower difficulties grant more score (steep at the low end). Shown in the summary and leaderboard (e.g. raw 100 → ~3.16×, raw 500 → ~7.07×, raw 1000 → 10×).' };
+  const t = function (k) {
+    if (api.i18n && typeof api.i18n.t === 'function') {
+      try {
+        var s = api.i18n.t(k);
+        if (s && typeof s === 'string' && s !== k) return s;
+      } catch (e) {}
+    }
+    return challengesFallback[k] != null ? challengesFallback[k] : k;
+  };
 
   // Inject subnav styles (Cyclopedia-like) if not already present
   if (typeof document !== 'undefined' && !document.getElementById('challenges-subnav-css')) {
@@ -415,8 +426,8 @@ function openChallengesModal() {
   function isLoadSetupButton(target) {
     var el = target && target.nodeType === 1 ? target : (target && target.parentElement);
     if (!el) return false;
-    if (el.tagName === 'BUTTON' && el.title === 'Load this challenge setup') return true;
-    if (el.closest && el.closest('button[title="Load this challenge setup"]')) return true;
+    if (el.tagName === 'BUTTON' && el.getAttribute('data-challenges-action') === 'load-setup') return true;
+    if (el.closest && el.closest('button[data-challenges-action="load-setup"]')) return true;
     return false;
   }
   function shouldAllowEventToTarget(e) {
@@ -463,7 +474,7 @@ function openChallengesModal() {
   const tabNav = document.createElement('nav');
   tabNav.className = 'challenges-subnav';
   const tabButtons = [];
-  ['Solo', 'Multiplayer'].forEach(function(tab, i) {
+  [t('mods.challenges.tabs.solo'), t('mods.challenges.tabs.multiplayer')].forEach(function(tab, i) {
     var btn = document.createElement('button');
     btn.className = 'challenges-btn';
     if (i === 0) btn.classList.add('active');
@@ -476,7 +487,7 @@ function openChallengesModal() {
   helpBtn.className = 'challenges-btn';
   helpBtn.setAttribute('data-tab', 'help');
   helpBtn.type = 'button';
-  helpBtn.title = 'Help';
+  helpBtn.title = t('mods.challenges.help');
   helpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>';
   tabButtons.push(helpBtn);
   tabNav.appendChild(helpBtn);
@@ -516,7 +527,7 @@ function openChallengesModal() {
     flexDirection: 'column',
     padding: '8px'
   });
-  multiplayerPanel.appendChild(createPlaceholderBox('Multiplayer', '<p style="margin:0;">Coming soon.</p>'));
+  multiplayerPanel.appendChild(createPlaceholderBox(t('mods.challenges.tabs.multiplayer'), '<p style="margin:0;">' + t('mods.challenges.comingSoon') + '</p>'));
 
   // Points panel: framed box with wall of text
   const pointsPanel = document.createElement('div');
@@ -528,40 +539,62 @@ function openChallengesModal() {
     flexDirection: 'column',
     padding: '8px'
   });
+  var hp = 'mods.challenges.helpPanel.';
   var pointsBodyHtml = [
-    '<p style="margin:0 0 12px 0; color:' + CHALLENGE_COLORS.PRIMARY + '; font-weight:bold;">How challenge score is calculated</p>',
-    '<p style="margin:0 0 8px 0;"><strong>Formula</strong></p>',
-    '<p style="margin:0 0 16px 0;">Score = round( ( (1000 − ticks) + gradeBonus ) × difficultyMultiplier )</p>',
-    '<p style="margin:0 0 8px 0;"><strong>Remove Ticks</strong></p>',
-    '<p style="margin:0 0 16px 0;">Base value: (1000 − ticks).</p>',
-    '<p style="margin:0 0 8px 0;"><strong>Grade bonus</strong></p>',
-    '<p style="margin:0 0 8px 0;">Grade is from max team size, current team size and creatures alive (time is not used). Defeat = F, 0 points.</p>',
+    '<p style="margin:0 0 12px 0; color:' + CHALLENGE_COLORS.PRIMARY + '; font-weight:bold;">' + t(hp + 'howToPlayTitle') + '</p>',
+    '<p style="margin:0 0 16px 0;">' + t(hp + 'howToPlayText') + '</p>',
+    '<p style="margin:0 0 12px 0; color:' + CHALLENGE_COLORS.PRIMARY + '; font-weight:bold;">' + t(hp + 'title') + '</p>',
+    '<p style="margin:0 0 8px 0;"><strong>' + t(hp + 'formula') + '</strong></p>',
+    '<p style="margin:0 0 16px 0;">' + t(hp + 'formulaText') + '</p>',
+    '<p style="margin:0 0 8px 0;"><strong>' + t(hp + 'gradeBonus') + '</strong></p>',
+    '<p style="margin:0 0 8px 0;">' + t(hp + 'gradeDescription') + '</p>',
     '<ul style="margin:0 0 16px 0; padding-left:20px;">',
-    '<li>S+ : +1500</li>',
-    '<li>S : +1250</li>',
-    '<li>A : +1000</li>',
-    '<li>B : +750</li>',
-    '<li>C : +500</li>',
-    '<li>D : +250</li>',
-    '<li>F : +0 (defeat)</li>',
+    '<li>' + t(hp + 'gradeSPlus') + '</li>',
+    '<li>' + t(hp + 'gradeS') + '</li>',
+    '<li>' + t(hp + 'gradeA') + '</li>',
+    '<li>' + t(hp + 'gradeB') + '</li>',
+    '<li>' + t(hp + 'gradeC') + '</li>',
+    '<li>' + t(hp + 'gradeD') + '</li>',
+    '<li>' + t(hp + 'gradeF') + '</li>',
     '</ul>',
-    '<p style="margin:0 0 8px 0;"><strong>Difficulty multiplier</strong></p>',
-    '<p style="margin:0 0 0 0;">Based on how many allies you were allowed vs how many enemy creatures (e.g. 1 v 5). Raw difficulty is the internal number that encodes how hard the setup is; the displayed/score multiplier is 10 × (raw÷1000)^' + CHALLENGE_DIFFICULTY_POWER + ', so lower difficulties grant more score (steep at the low end). Shown in the summary and leaderboard (e.g. raw 100 → ~3.16×, raw 500 → ~7.07×, raw 1000 → 10×).</p>'
+    '<p style="margin:0 0 8px 0;"><strong>' + t(hp + 'difficultyMultiplier') + '</strong></p>',
+    '<p style="margin:0 0 0 0;">' + t(hp + 'difficultyMultiplierDescription').replace('^{power}', '^' + CHALLENGE_DIFFICULTY_POWER) + '</p>'
   ].join('');
-  pointsPanel.appendChild(createPlaceholderBox('Help', pointsBodyHtml));
+  pointsPanel.appendChild(createPlaceholderBox(t('mods.challenges.help'), pointsBodyHtml));
 
   contentArea.appendChild(soloPanel);
   contentArea.appendChild(multiplayerPanel);
   contentArea.appendChild(pointsPanel);
   wrapper.appendChild(contentArea);
 
+  var challengesActiveTabIndex = 0;
   function setActiveTab(idx) {
+    challengesActiveTabIndex = idx;
     tabButtons.forEach(function(btn, i) {
       btn.classList.toggle('active', i === idx);
     });
     soloPanel.style.display = idx === 0 ? 'flex' : 'none';
     multiplayerPanel.style.display = idx === 1 ? 'flex' : 'none';
     pointsPanel.style.display = idx === 2 ? 'flex' : 'none';
+    var onSolo = (idx === 0);
+    var randomizeBtn = getChallengesRollButton();
+    var startBtn = getChallengesStartButton();
+    if (randomizeBtn) {
+      randomizeBtn.disabled = !onSolo;
+      randomizeBtn.style.opacity = onSolo ? '' : '0.5';
+      randomizeBtn.style.pointerEvents = onSolo ? '' : 'none';
+      randomizeBtn.style.cursor = onSolo ? '' : 'not-allowed';
+    }
+    if (startBtn) {
+      if (onSolo) {
+        updateChallengesStartButtonState();
+      } else {
+        startBtn.disabled = true;
+        startBtn.style.opacity = '0.5';
+        startBtn.style.pointerEvents = 'none';
+        startBtn.style.cursor = 'not-allowed';
+      }
+    }
   }
   tabButtons.forEach(function(btn, i) {
     btn.addEventListener('click', function() { setActiveTab(i); });
@@ -583,21 +616,21 @@ function openChallengesModal() {
   // Summary elements – created first so Col1/Col2 roll handlers can update them (shown in Col1 bottom)
   const summaryMapEl = document.createElement('p');
   summaryMapEl.style.margin = '0 0 4px 0';
-  summaryMapEl.textContent = 'Map: —';
+  summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' —';
   const summaryCreaturesEl = document.createElement('p');
   summaryCreaturesEl.style.margin = '0';
-  summaryCreaturesEl.textContent = 'Creatures: —';
+  summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
   const summaryDifficultyEl = document.createElement('p');
   summaryDifficultyEl.style.margin = '0';
-  summaryDifficultyEl.title = 'Allies v Enemies (allies allowed vs number of enemy creatures)';
-  summaryDifficultyEl.appendChild(document.createTextNode('Difficulty: '));
+  summaryDifficultyEl.title = t('mods.challenges.alliesVsEnemiesTitle');
+  summaryDifficultyEl.appendChild(document.createTextNode(t('mods.challenges.difficultyLabel')));
   const summaryDifficultyValueSpan = document.createElement('span');
   summaryDifficultyValueSpan.textContent = '— (— v —)';
   summaryDifficultyEl.appendChild(summaryDifficultyValueSpan);
   const summaryExpectedScoreEl = document.createElement('p');
   summaryExpectedScoreEl.style.margin = '0';
-  summaryExpectedScoreEl.title = 'Score you would get for A rank with 500 ticks';
-  summaryExpectedScoreEl.appendChild(document.createTextNode('Expected score: '));
+  summaryExpectedScoreEl.title = t('mods.challenges.expectedScoreTitle');
+  summaryExpectedScoreEl.appendChild(document.createTextNode(t('mods.challenges.expectedScoreLabel')));
   const summaryExpectedScoreValueSpan = document.createElement('span');
   summaryExpectedScoreValueSpan.textContent = '—';
   summaryExpectedScoreEl.appendChild(summaryExpectedScoreValueSpan);
@@ -616,7 +649,7 @@ function openChallengesModal() {
     overflowY: 'auto',
     minHeight: '0'
   });
-  const mapBox = createPlaceholderBox('Maps', '');
+  const mapBox = createPlaceholderBox(t('mods.challenges.maps'), '');
   const mapResultContainer = document.createElement('div');
   mapResultContainer.style.cssText = 'margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;';
   mapBox.querySelector('.widget-bottom').innerHTML = '';
@@ -647,7 +680,7 @@ function openChallengesModal() {
   setMapPlaceholder();
 
   leftCol.appendChild(mapBox);
-  const summaryBox = createPlaceholderBox('Summary', '');
+  const summaryBox = createPlaceholderBox(t('mods.challenges.summary'), '');
   summaryBox.querySelector('.widget-bottom').innerHTML = '';
   summaryBox.querySelector('.widget-bottom').appendChild(summaryMapEl);
   summaryBox.querySelector('.widget-bottom').appendChild(summaryCreaturesEl);
@@ -756,7 +789,7 @@ function openChallengesModal() {
     gap: '8px',
     overflowY: 'auto'
   });
-  const creaturesBox = createPlaceholderBox('Creatures', '');
+  const creaturesBox = createPlaceholderBox(t('mods.challenges.creatures'), '');
   const creaturesListEl = document.createElement('div');
   creaturesListEl.style.cssText = 'margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px;';
   creaturesBox.querySelector('.widget-bottom').innerHTML = '';
@@ -1144,13 +1177,13 @@ function openChallengesModal() {
         creaturesListEl.appendChild(buildCreatureCard(spec));
       });
       var names = rolledCreatureSpecs.map(function(s) { return getCreatureName(s.gameId); });
-      summaryCreaturesEl.textContent = 'Creatures: ' + rolledCreatureSpecs.length;
+      summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' ' + rolledCreatureSpecs.length;
       var diff = computeChallengeDifficulty(rolledCreatureSpecs);
       var mult = getDifficultyMultiplier(diff.difficulty);
       var enemyCount = rolledCreatureSpecs.length;
       summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
       summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
-      summaryDifficultyEl.title = 'Allies v Enemies (allies allowed vs number of enemy creatures)';
+      summaryDifficultyEl.title = t('mods.challenges.alliesVsEnemiesTitle');
       summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
       console.log('[Challenges Mod] rollCreatures: rolled', rolledCreatureSpecs.length, names.join(', '), 'difficulty', diff.difficulty, 'allies', diff.alliesAllowed);
     } catch (e) {
@@ -1163,12 +1196,8 @@ function openChallengesModal() {
   function getChallengesRollButton() {
     var dialogs = document.querySelectorAll('div[role="dialog"]');
     for (var d = 0; d < dialogs.length; d++) {
-      var dialog = dialogs[d];
-      var btns = dialog.querySelectorAll('button');
-      for (var i = 0; i < btns.length; i++) {
-        var t = btns[i].textContent.trim();
-        if (t === 'Randomize' || t === 'Skip') return btns[i];
-      }
+      var btn = dialogs[d].querySelector('[data-challenges-btn="randomize"]');
+      if (btn) return btn;
     }
     return null;
   }
@@ -1176,15 +1205,8 @@ function openChallengesModal() {
   function getChallengesStartButton() {
     var dialogs = document.querySelectorAll('div[role="dialog"]');
     for (var d = 0; d < dialogs.length; d++) {
-      var dialog = dialogs[d];
-      var btns = dialog.querySelectorAll('button');
-      var hasRoll = false, startBtn = null;
-      for (var i = 0; i < btns.length; i++) {
-        var t = btns[i].textContent.trim();
-        if (t === 'Randomize' || t === 'Skip') hasRoll = true;
-        if (t === 'Start') startBtn = btns[i];
-      }
-      if (hasRoll && startBtn) return startBtn;
+      var startBtn = dialogs[d].querySelector('[data-challenges-btn="start"]');
+      if (startBtn && dialogs[d].querySelector('[data-challenges-btn="randomize"]')) return startBtn;
     }
     return null;
   }
@@ -1192,8 +1214,16 @@ function openChallengesModal() {
   function updateChallengesStartButtonState() {
     var startBtn = getChallengesStartButton();
     if (!startBtn) return;
+    if (challengesActiveTabIndex !== 0) {
+      startBtn.disabled = true;
+      startBtn.style.opacity = '0.5';
+      startBtn.style.pointerEvents = 'none';
+      startBtn.style.cursor = 'not-allowed';
+      return;
+    }
     var canStart = !!(rolledRoomId && rolledCreatureSpecs && rolledCreatureSpecs.length && !hasNavigatedWithCurrentRoll);
     startBtn.disabled = !canStart;
+    startBtn.style.pointerEvents = ''; // clear grey-out from Multiplayer/Help tab
     if (canStart) {
       startBtn.style.backgroundImage = 'url(' + CHALLENGE_GREEN_BG + ')';
       startBtn.style.backgroundSize = 'cover';
@@ -1215,8 +1245,11 @@ function openChallengesModal() {
     rollState.skipRequested = false;
     var rollBtn = getChallengesRollButton();
     if (rollBtn) {
-      rollBtn.textContent = 'Randomize';
-      rollBtn.disabled = false;
+      rollBtn.textContent = t('mods.challenges.randomize');
+      rollBtn.disabled = (challengesActiveTabIndex !== 0);
+      rollBtn.style.opacity = (challengesActiveTabIndex === 0) ? '' : '0.5';
+      rollBtn.style.pointerEvents = (challengesActiveTabIndex === 0) ? '' : 'none';
+      rollBtn.style.cursor = (challengesActiveTabIndex === 0) ? '' : 'not-allowed';
     }
     updateChallengesStartButtonState();
   }
@@ -1230,15 +1263,15 @@ function openChallengesModal() {
     rollState.isRolling = true;
     rollState.skipRequested = false;
     if (rollBtn) {
-      rollBtn.textContent = 'Skip';
+      rollBtn.textContent = t('mods.challenges.skip');
       rollBtn.disabled = false;
     }
-    setMapResultText('Rolling…');
+    setMapResultText(t('mods.challenges.rolling'));
     creaturesListEl.innerHTML = '';
-    creaturesListEl.textContent = 'Rolling…';
+    creaturesListEl.textContent = t('mods.challenges.rolling');
     creaturesListEl.style.textAlign = 'center';
-    summaryMapEl.textContent = 'Map: —';
-    summaryCreaturesEl.textContent = 'Creatures: —';
+    summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' —';
+    summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
     summaryDifficultyValueSpan.textContent = '— (— v —)';
     summaryDifficultyValueSpan.style.color = '';
     summaryExpectedScoreValueSpan.textContent = '—';
@@ -1252,8 +1285,9 @@ function openChallengesModal() {
         specs = computeCreaturesRoll();
       } catch (e) {
         console.error('[Challenges Mod] slot roll error:', e);
-        setMapResultText('Error: ' + (e && e.message ? e.message : 'Roll failed'));
-        creaturesListEl.textContent = 'Error: ' + (e && e.message ? e.message : 'Roll failed');
+        var errMsg = (e && e.message ? e.message : t('mods.challenges.rollFailed'));
+        setMapResultText('Error: ' + errMsg);
+        creaturesListEl.textContent = 'Error: ' + errMsg;
         creaturesListEl.style.textAlign = '';
         finishRollState();
         return;
@@ -1265,14 +1299,14 @@ function openChallengesModal() {
       function runCreatureEquipmentSequence(index) {
         if (index >= specs.length) {
           return delay(ROLL_SLOT_DELAY_MS).then(function() {
-            summaryMapEl.textContent = 'Map: ' + roomName;
-            summaryCreaturesEl.textContent = 'Creatures: ' + specs.length;
+            summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' ' + roomName;
+            summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' ' + specs.length;
             var diff = computeChallengeDifficulty(specs);
             var mult = getDifficultyMultiplier(diff.difficulty);
             var enemyCount = specs.length;
             summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
             summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
-            summaryDifficultyEl.title = 'Allies v Enemies (allies allowed vs number of enemy creatures)';
+            summaryDifficultyEl.title = t('mods.challenges.alliesVsEnemiesTitle');
             summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
             finishRollState();
           });
@@ -1290,8 +1324,8 @@ function openChallengesModal() {
         creaturesListEl.textContent = '';
         creaturesListEl.style.textAlign = '';
         if (specs.length === 0) {
-          summaryMapEl.textContent = 'Map: ' + roomName;
-          summaryCreaturesEl.textContent = 'Creatures: —';
+          summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' ' + roomName;
+          summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
           summaryDifficultyValueSpan.textContent = '— (— v —)';
           summaryDifficultyValueSpan.style.color = '';
           summaryExpectedScoreValueSpan.textContent = '—';
@@ -1317,14 +1351,14 @@ function openChallengesModal() {
     overflowY: 'auto',
     minHeight: '0'
   });
-  const globalLeaderboardBox = createPlaceholderBox('Global top 10', '');
+  const globalLeaderboardBox = createPlaceholderBox(t('mods.challenges.globalTop10'), '');
   const leaderboardBody = globalLeaderboardBox.querySelector('.widget-bottom');
-  leaderboardBody.innerHTML = '<p style="margin:0;color:#888;">Loading…</p>';
+  leaderboardBody.innerHTML = '<p style="margin:0;color:#888;">' + t('mods.challenges.loading') + '</p>';
   rightCol.appendChild(globalLeaderboardBox);
 
-  const personalLeaderboardBox = createPlaceholderBox('Personal top 10', '');
+  const personalLeaderboardBox = createPlaceholderBox(t('mods.challenges.personalTop10'), '');
   const personalLeaderboardBody = personalLeaderboardBox.querySelector('.widget-bottom');
-  personalLeaderboardBody.innerHTML = '<p style="margin:0;color:#888;">Loading…</p>';
+  personalLeaderboardBody.innerHTML = '<p style="margin:0;color:#888;">' + t('mods.challenges.loading') + '</p>';
   rightCol.appendChild(personalLeaderboardBox);
 
   var CHALLENGE_BLUE_BG_URL = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
@@ -1387,7 +1421,8 @@ function openChallengesModal() {
       if (row.replay && row.replay.length > 0) {
         var replayBtn = document.createElement('button');
         replayBtn.type = 'button';
-        replayBtn.title = 'Load this challenge setup';
+        replayBtn.setAttribute('data-challenges-action', 'load-setup');
+        replayBtn.title = t('mods.challenges.loadSetupTitle');
         replayBtn.innerHTML = '▶';
         replayBtn.style.cssText = 'background:none; border:none; color:' + CHALLENGE_COLORS.PRIMARY + '; cursor:pointer; padding:0 4px; font-size:14px;';
         replayBtn.addEventListener('click', function() {
@@ -1466,13 +1501,13 @@ function openChallengesModal() {
         creaturesListEl.appendChild(buildCreatureCard(spec));
       });
       var names = rolledCreatureSpecs.map(function(s) { return getCreatureName(s.gameId); });
-      summaryCreaturesEl.textContent = 'Creatures: ' + rolledCreatureSpecs.length;
+      summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' ' + rolledCreatureSpecs.length;
       var diff = computeChallengeDifficulty(rolledCreatureSpecs);
       var mult = getDifficultyMultiplier(diff.difficulty);
       var enemyCount = rolledCreatureSpecs.length;
       summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
       summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
-      summaryDifficultyEl.title = 'Allies v Enemies (allies allowed vs number of enemy creatures)';
+      summaryDifficultyEl.title = t('mods.challenges.alliesVsEnemiesTitle');
       summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
     }
   }
@@ -1481,14 +1516,14 @@ function openChallengesModal() {
 
   // Roll (map + creatures) / Start as modal footer buttons. Start: close modal then run challenge (sandbox + execute).
   api.ui.components.createModal({
-    title: 'Challenges',
+    title: t('mods.challenges.title'),
     width: MODAL_WIDTH,
     height: MODAL_HEIGHT,
     content: wrapper,
     buttons: [
-      { text: 'Randomize', primary: false, onClick: rollMapAndCreaturesHandler, closeOnClick: false },
+      { text: t('mods.challenges.randomize'), primary: false, onClick: rollMapAndCreaturesHandler, closeOnClick: false },
       {
-        text: 'Start',
+        text: t('mods.challenges.start'),
         primary: true,
         onClick: function(e, modalObj) {
           if (modalObj && typeof modalObj.close === 'function') modalObj.close();
@@ -1496,7 +1531,7 @@ function openChallengesModal() {
         },
         closeOnClick: false
       },
-      { text: 'Close', primary: false }
+      { text: t('mods.challenges.close'), primary: false }
     ]
   });
 
@@ -1512,6 +1547,13 @@ function openChallengesModal() {
     dialog.style.maxWidth = MODAL_WIDTH + 'px';
     dialog.style.height = MODAL_HEIGHT + 'px';
     dialog.style.minHeight = MODAL_HEIGHT + 'px';
+    var footer = dialog.querySelector('.flex.justify-end.gap-2');
+    if (footer) {
+      var fb = footer.querySelectorAll('button');
+      if (fb[0]) fb[0].setAttribute('data-challenges-btn', 'randomize');
+      if (fb[1]) fb[1].setAttribute('data-challenges-btn', 'start');
+      if (fb[2]) fb[2].setAttribute('data-challenges-btn', 'close');
+    }
     var innerContent = dialog.firstElementChild;
     if (innerContent) {
       innerContent.style.display = 'flex';
@@ -2060,8 +2102,9 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
         var score = computeChallengeScore(ticks, difficulty, grade);
         var wrap = document.createElement('div');
         wrap.style.cssText = 'padding: 12px 16px; text-align: left;';
+        var victoryT = (typeof context !== 'undefined' && context.api && context.api.i18n && typeof context.api.i18n.t === 'function') ? context.api.i18n.t.bind(context.api.i18n) : function(k) { var f = { 'mods.challenges.victory': 'Victory!', 'mods.challenges.rankLabel': 'Rank:' }; return f[k] != null ? f[k] : k; };
         var titleEl = document.createElement('h2');
-        titleEl.textContent = 'Victory!';
+        titleEl.textContent = victoryT('mods.challenges.victory');
         titleEl.style.cssText = 'color: #4CAF50; margin: 0 0 12px 0; font-size: 20px; font-weight: bold; text-align: center;';
         wrap.appendChild(titleEl);
         function row(label, value) {
@@ -2077,14 +2120,14 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
         wrap.appendChild(row('Grade', (grade && String(grade).trim()) ? String(grade) + ' (+' + getGradePoints(grade) + ')' : '—'));
         var rankP = document.createElement('p');
         rankP.style.cssText = 'margin: 6px 0; font-size: 14px;';
-        rankP.textContent = 'Rank: …';
+        rankP.textContent = victoryT('mods.challenges.rankLabel') + ' …';
         wrap.appendChild(rankP);
         loadChallengeLeaderboard().then(function(entries) {
           var better = entries.filter(function(e) { return e.score > score; }).length;
           var rank = better + 1;
-          rankP.textContent = 'Rank: ' + rank;
+          rankP.textContent = victoryT('mods.challenges.rankLabel') + ' ' + rank;
         }).catch(function() {
-          rankP.textContent = 'Rank: —';
+          rankP.textContent = victoryT('mods.challenges.rankLabel') + ' —';
         });
         return wrap;
       },

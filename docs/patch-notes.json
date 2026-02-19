@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.5.3",
+      "changes": [
+        { "type": "fixed", "mod": "Challenges", "text": "Bugs and translation fixes." },
+        { "type": "fixed", "mod": "Core", "text": "Optimized modals opening and closing." },
+        { "type": "fixed", "mod": "Raid Hunter", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.5.2",
       "changes": [
         { "type": "fixed", "mod": "Better Rune Recycler", "text": "Bug fixes." },
