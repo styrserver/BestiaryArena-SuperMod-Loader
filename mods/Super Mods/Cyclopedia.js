@@ -8426,7 +8426,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           '35909': { key: 'diceManipulator1', name: 'Dice Manipulator (Common)' },
           '653': { key: 'outfitBag1', name: 'Outfit Bag' },
           '21383': { key: 'insightStone1', name: 'Stone of Insight (Glimpse)' },
-          '43672': { key: 'monsterCauldron', name: 'Monster Cauldron' },
+          '43672': { key: 'monsterCauldron', name: 'Monstrous Cauldron' },
           '42363': { key: 'hygenie', name: 'Hy\'genie' }
         };
 
@@ -8474,7 +8474,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           'premium': () => ({ key: 'premium', name: 'Premium' }),
           'yasir-contract': () => ({ key: 'yasirTradingContract', name: 'Yasir\'s Trading Contract' }),
           'hygenie': () => ({ key: 'hygenie', name: 'Hy\'genie' }),
-          'monster-cauldron': () => ({ key: 'monsterCauldron', name: 'Monster Cauldron' }),
+          'monster-cauldron': () => ({ key: 'monsterCauldron', name: 'Monstrous Cauldron' }),
           'yasir-trading-contract': () => ({ key: 'yasirTradingContract', name: 'Yasir\'s Trading Contract' }),
           'boosted-map': () => ({ key: 'dailyBoostedMap', name: 'Daily Boosted Map' }),
           'outfit-bag': () => ({ key: 'outfitBag1', name: 'Outfit Bag' }),
@@ -8608,7 +8608,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           'Daycare',
           'Dragon Plant',
           'Hy\'genie',
-          'Monster Cauldron',
+          'Monstrous Cauldron',
           'Monster Squeezer',
           'Mountain Fortress',
           'Premium',

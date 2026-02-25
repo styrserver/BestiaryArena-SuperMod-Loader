@@ -381,7 +381,7 @@ const inventoryTooltips = {
     obtain: 'Store (15,000 gold)'
   },
   monsterCauldron: {
-    displayName: "Monster Cauldron",
+    displayName: "Monstrous Cauldron",
     text: 'All sold creatures go to the cauldron. You may bring a creature back, if is not yet dissolved.',
     icon: 'sprite://43672',
     rarity: '3',
@@ -443,7 +443,7 @@ const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
   'Runes': ['Avarice Rune', 'Hitpoints Rune', 'Attack Damage Rune', 'Ability Power Rune', 'Armor Rune', 'Magic Resist Rune', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Conversion Rune (hp)', 'Conversion Rune (ad)', 'Conversion Rune (ap)'],
-  'Upgrades': ['Baby Dragon Plant', 'Daily Boosted Map', 'Daycare', 'Dungeon Ascension', 'Dragon Plant', 'Hy\'genie', 'Monster Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
+  'Upgrades': ['Baby Dragon Plant', 'Daily Boosted Map', 'Daycare', 'Dungeon Ascension', 'Dragon Plant', 'Hy\'genie', 'Monstrous Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
 const INVENTORY_VARIANTS = {
@@ -459,7 +459,7 @@ const INVENTORY_VARIANTS = {
   'Blank Rune': ['runeBlank'], 'Recycle Rune': ['runeRecycle'],
   'Kaleidoscopic Rune': ['runeKaleidoscopic'], 'Conversion Rune (hp)': ['runeConversionHp'], 'Conversion Rune (ad)': ['runeConversionAd'], 'Conversion Rune (ap)': ['runeConversionAp'],
   'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dungeon Ascension': ['dungeonAscension'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
-  'Monster Cauldron': ['monsterCauldron'], 'Monster Raids': ['monsterRaids'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
+  'Monstrous Cauldron': ['monsterCauldron'], 'Monster Raids': ['monsterRaids'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
   'Premium': ['premium'], 'The Sweaty Cyclop\'s Forge': ['forge'], 'Yasir\'s Trading Contract': ['yasirTradingContract']
 };
 
@@ -474,7 +474,7 @@ const INVENTORY_STATIC_ITEMS = {
   'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
   'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },
   'babyDragonPlant': { name: 'Baby Dragon Plant', rarity: '3' }, 'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
-  'dungeonAscension': { name: 'Dungeon Ascension', rarity: '5' }, 'dragonPlant': { name: 'Dragon Plant', rarity: '4' }, 'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monster Cauldron', rarity: '4' },
+  'dungeonAscension': { name: 'Dungeon Ascension', rarity: '5' }, 'dragonPlant': { name: 'Dragon Plant', rarity: '4' }, 'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monstrous Cauldron', rarity: '4' },
   'monsterRaids': { name: 'Monster Raids', rarity: '4' }, 'monsterSqueezer': { name: 'Monster Squeezer', rarity: '3' }, 'mountainFortress': { name: 'Mountain Fortress', rarity: '4' },
   'premium': { name: 'Premium', rarity: '5' }, 'forge': { name: 'The Sweaty Cyclop\'s Forge', rarity: '5' },
   'yasirTradingContract': { name: 'Yasir\'s Trading Contract', rarity: '4' }

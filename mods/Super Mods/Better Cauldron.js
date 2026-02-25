@@ -64,14 +64,16 @@
     
     function isCauldronModal(element) {
         // Check if this element or its children contain the cauldron modal
-        const hasCauldronTitle = element.querySelector && 
-            element.querySelector('h2') && 
-            (element.querySelector('h2').textContent === 'Monster Cauldron' || 
-             element.querySelector('h2').textContent === 'Caldeirão de Monstros');
+        const titleEl = element.querySelector && element.querySelector('h2');
+        const title = titleEl ? titleEl.textContent.trim() : '';
+        const hasCauldronTitle = title === 'Monstrous Cauldron' ||
+            title === 'Monstruous Cauldron' ||
+            title === 'Caldeirão de Monstros';
         
         const hasCauldronText = element.textContent && 
             (element.textContent.includes('All sold creatures go to the cauldron') ||
-             element.textContent.includes('Todas as criaturas vendidas vão para o caldeirão'));
+             element.textContent.includes('Todas as criaturas vendidas vão para o caldeirão') ||
+             element.textContent.includes('In the end, every thing goes to the cauldron'));
         
         return hasCauldronTitle || hasCauldronText;
     }
@@ -90,52 +92,138 @@
                 return;
             }
             
-            // Check if controls already exist
-            if (contentContainer.querySelector('.cauldron-controls')) {
+            // Check if controls already exist (equipment controls indicate both tabs were enhanced)
+            if (contentContainer.querySelector('#cauldron-search-equip')) {
                 log('Controls already exist in this modal');
                 return;
             }
             
-            // Find the native table
-            const nativeTable = contentContainer.querySelector('table');
-            if (!nativeTable) {
-                log('Native table not found');
-                return;
+            // Update tooltip title to indicate Better Cauldron (green like "Better Yasir activated!")
+            const tooltipTitle = modalElement.querySelector('.tooltip-prose p.text-monster');
+            if (tooltipTitle) {
+                tooltipTitle.textContent = 'Better Cauldron activated!';
+                tooltipTitle.classList.add('inline');
+                tooltipTitle.style.color = 'rgb(50, 205, 50)';
             }
             
-            log('Found native table, adding controls...');
+            const tabPanels = contentContainer.querySelectorAll('[role="tabpanel"]');
+            let creaturesTabPanel = null;
+            let creaturesTable = null;
+            let equipTabPanel = null;
+            let equipTable = null;
             
-            // Store original rows for filtering
-            const tbody = nativeTable.querySelector('tbody');
-            if (tbody) {
-                cauldronState.originalRows = Array.from(tbody.querySelectorAll('tr'));
+            for (const panel of tabPanels) {
+                const table = panel.querySelector('table');
+                if (!table) continue;
+                const isEquipment = table.querySelector('.equipment-portrait');
+                if (isEquipment) {
+                    equipTabPanel = panel;
+                    equipTable = table;
+                } else {
+                    creaturesTabPanel = panel;
+                    creaturesTable = table;
+                }
             }
             
-            // Create controls
-            const controlsContainer = createControls();
-            
-            // Insert controls before the scrollable area
-            const scrollArea = contentContainer.querySelector('[data-radix-scroll-area-viewport]');
-            if (scrollArea) {
-                // Insert before the scroll area container
-                scrollArea.parentNode.parentNode.insertBefore(controlsContainer, scrollArea.parentNode);
-            } else {
-                // Fallback: insert before the table
-                nativeTable.parentNode.insertBefore(controlsContainer, nativeTable);
+            // Fallback: single table (old layout or only one tab has content)
+            if (!creaturesTable && !equipTable) {
+                const nativeTable = contentContainer.querySelector('table');
+                if (nativeTable) {
+                    creaturesTable = nativeTable;
+                    creaturesTabPanel = nativeTable.closest('[role="tabpanel"]');
+                }
             }
             
-            // Set up event listeners
-            setupEventListeners(controlsContainer, nativeTable);
+            if (creaturesTable) {
+                log('Adding controls to Creatures tab...');
+                const tbody = creaturesTable.querySelector('tbody');
+                if (tbody) {
+                    cauldronState.originalRows = Array.from(tbody.querySelectorAll('tr'));
+                }
+                const controlsContainer = createControls('creatures');
+                if (creaturesTabPanel && creaturesTabPanel.firstElementChild) {
+                    creaturesTabPanel.insertBefore(controlsContainer, creaturesTabPanel.firstElementChild);
+                } else {
+                    const scrollArea = contentContainer.querySelector('[data-radix-scroll-area-viewport]');
+                    if (scrollArea) {
+                        scrollArea.parentNode.parentNode.insertBefore(controlsContainer, scrollArea.parentNode);
+                    } else {
+                        creaturesTable.parentNode.insertBefore(controlsContainer, creaturesTable);
+                    }
+                }
+                setupTabEventListeners('creatures', controlsContainer, creaturesTable, creaturesTabPanel);
+            }
+            
+            if (equipTable && equipTabPanel) {
+                log('Adding controls to Equipments tab...');
+                const equipControls = createControls('equipment');
+                equipTabPanel.insertBefore(equipControls, equipTabPanel.firstElementChild);
+                setupTabEventListeners('equipment', equipControls, equipTable, equipTabPanel);
+            } else if (tabPanels.length >= 2) {
+                // Equipments tab may be lazy-rendered when user switches to it; observe for table
+                const otherPanel = Array.from(tabPanels).find(p => p !== creaturesTabPanel);
+                if (otherPanel && !otherPanel.querySelector('#cauldron-search-equip')) {
+                    const tryAddEquipControls = () => {
+                        const table = otherPanel.querySelector('table');
+                        if (!table || !table.querySelector('.equipment-portrait')) return false;
+                        if (otherPanel.querySelector('#cauldron-search-equip')) return true;
+                        log('Adding controls to Equipments tab...');
+                        const equipControls = createControls('equipment');
+                        otherPanel.insertBefore(equipControls, otherPanel.firstElementChild);
+                        setupTabEventListeners('equipment', equipControls, table, otherPanel);
+                        return true;
+                    };
+                    if (!tryAddEquipControls()) {
+                        const equipObserver = new MutationObserver(() => {
+                            if (tryAddEquipControls()) {
+                                equipObserver.disconnect();
+                                eventListeners.delete('equip-lazy-observer');
+                            }
+                        });
+                        equipObserver.observe(otherPanel, { childList: true, subtree: true });
+                        eventListeners.set('equip-lazy-observer', { observer: equipObserver, disconnect: () => equipObserver.disconnect() });
+                    }
+                }
+            }
             
             cauldronState.controlsAdded = true;
-            log('Cauldron table enhanced successfully');
+            log('Cauldron table(s) enhanced successfully');
             
         } catch (error) {
             log('Error enhancing cauldron table:', error);
         }
     }
     
-    function createControls() {
+    // Shared tier options (both creatures and equipment filter by tier)
+    const TIER_OPTIONS = [
+        { value: '1', text: 'Grey' },
+        { value: '2', text: 'Green' },
+        { value: '3', text: 'Blue' },
+        { value: '4', text: 'Purple' },
+        { value: '5', text: 'Yellow' }
+    ];
+
+    const TAB_CONFIG = {
+        creatures: {
+            searchId: 'cauldron-search',
+            filterId: 'cauldron-filter-select',
+            placeholder: 'Search monsters...',
+            allLabel: 'All Monsters',
+            eventKeyPrefix: 'creatures'
+        },
+        equipment: {
+            searchId: 'cauldron-search-equip',
+            filterId: 'cauldron-filter-equip',
+            placeholder: 'Search equipment...',
+            allLabel: 'All Tiers',
+            eventKeyPrefix: 'equip'
+        }
+    };
+
+    function createControls(type) {
+        const config = TAB_CONFIG[type];
+        const filterOptions = [{ value: 'all', text: config.allLabel }, ...TIER_OPTIONS];
+        
         const container = document.createElement('div');
         container.className = 'cauldron-controls';
         container.style.cssText = `
@@ -150,13 +238,12 @@
             font-family: inherit;
         `;
         
-        // Search input
         const searchContainer = document.createElement('div');
         searchContainer.style.cssText = 'display: flex; align-items: center; flex: 1;';
         
         const searchInput = document.createElement('input');
-        searchInput.id = 'cauldron-search';
-        searchInput.placeholder = 'Search monsters...';
+        searchInput.id = config.searchId;
+        searchInput.placeholder = config.placeholder;
         searchInput.style.cssText = `
             background: rgba(255, 255, 255, 0.1);
             color: #fff;
@@ -172,19 +259,17 @@
         searchInput.addEventListener('focus', () => {
             searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
         });
-        
         searchInput.addEventListener('blur', () => {
             searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
         });
         
         searchContainer.appendChild(searchInput);
         
-        // Filter dropdown
         const filterContainer = document.createElement('div');
         filterContainer.style.cssText = 'display: flex; align-items: center;';
         
         const filterSelect = document.createElement('select');
-        filterSelect.id = 'cauldron-filter-select';
+        filterSelect.id = config.filterId;
         filterSelect.style.cssText = `
             background: rgba(255, 255, 255, 0.1);
             color: #fff;
@@ -198,15 +283,6 @@
             min-width: 120px;
         `;
         
-        const filterOptions = [
-            { value: 'all', text: 'All Monsters' },
-            { value: '1', text: 'Grey' },
-            { value: '2', text: 'Green' },
-            { value: '3', text: 'Blue' },
-            { value: '4', text: 'Purple' },
-            { value: '5', text: 'Yellow' }
-        ];
-        
         filterOptions.forEach(option => {
             const optionElement = document.createElement('option');
             optionElement.value = option.value;
@@ -216,130 +292,166 @@
         });
         
         filterContainer.appendChild(filterSelect);
-        
         container.appendChild(searchContainer);
         container.appendChild(filterContainer);
         
         return container;
     }
     
-    function setupEventListeners(controlsContainer, table) {
-        const searchInput = controlsContainer.querySelector('#cauldron-search');
-        const filterSelect = controlsContainer.querySelector('#cauldron-filter-select');
-        
-        // Search functionality
-        const searchHandler = () => applyFiltering(table);
-        searchInput.addEventListener('input', searchHandler);
-        eventListeners.set('search-input', { element: searchInput, event: 'input', handler: searchHandler });
-        
-        // Filter functionality
-        const filterHandler = () => {
-            cauldronState.currentFilter = filterSelect.value;
-            applyFiltering(table);
-        };
-        filterSelect.addEventListener('change', filterHandler);
-        eventListeners.set('filter-select', { element: filterSelect, event: 'change', handler: filterHandler });
-        
-        // Initial application
-        setTimeout(() => applyFiltering(table), 100);
+    function isTabActive(tabPanel) {
+        if (!tabPanel) return true;
+        return tabPanel.getAttribute('data-state') === 'active' && !tabPanel.hasAttribute('hidden');
     }
     
-    function applyFiltering(table) {
-        const searchInput = document.querySelector('#cauldron-search');
-        const filterSelect = document.querySelector('#cauldron-filter-select');
-        
+    function setupTabEventListeners(type, controlsContainer, table, tabPanel) {
+        const config = TAB_CONFIG[type];
+        const searchInput = controlsContainer.querySelector('#' + config.searchId);
+        const filterSelect = controlsContainer.querySelector('#' + config.filterId);
         if (!searchInput || !filterSelect) return;
-        
+
+        const applyIfActive = () => {
+            if (isTabActive(tabPanel)) {
+                applyTabFiltering(type, table, tabPanel);
+            }
+        };
+
+        searchInput.addEventListener('input', applyIfActive);
+        eventListeners.set('search-input-' + config.eventKeyPrefix, { element: searchInput, event: 'input', handler: applyIfActive });
+
+        const filterHandler = () => {
+            if (type === 'creatures') cauldronState.currentFilter = filterSelect.value;
+            applyIfActive();
+        };
+        filterSelect.addEventListener('change', filterHandler);
+        eventListeners.set('filter-select-' + config.eventKeyPrefix, { element: filterSelect, event: 'change', handler: filterHandler });
+
+        if (tabPanel) {
+            const tabObserver = new MutationObserver(() => {
+                if (isTabActive(tabPanel)) {
+                    applyTabFiltering(type, table, tabPanel);
+                }
+            });
+            tabObserver.observe(tabPanel, {
+                attributes: true,
+                attributeFilter: ['data-state', 'hidden']
+            });
+            eventListeners.set('tab-observer-' + config.eventKeyPrefix, { observer: tabObserver, disconnect: () => tabObserver.disconnect() });
+        }
+
+        setTimeout(applyIfActive, 100);
+    }
+    
+    function getRowTier(row, type) {
+        const selector = type === 'equipment' ? '.equipment-portrait .has-rarity' : '.has-rarity';
+        const el = row.querySelector(selector);
+        return el ? (el.getAttribute('data-rarity') || '1') : '1';
+    }
+
+    // Equipment: ad -> attack damage, ap -> ability power, hp -> heal (from stat icon src)
+    const STAT_SEARCH_MAP = { ad: 'attackdamage', ap: 'abilitypower', hp: 'heal' };
+
+    function getEquipmentStatType(row) {
+        const icon = row.querySelector('.equipment-portrait img[alt="stat type"]');
+        if (!icon || !icon.src) return '';
+        const match = icon.src.match(/\/([^/]+)\.png$/);
+        return match ? match[1].toLowerCase() : '';
+    }
+
+    function parseEquipmentSearch(searchValue) {
+        const trimmed = searchValue.trim().toLowerCase();
+        for (const [short, stat] of Object.entries(STAT_SEARCH_MAP)) {
+            if (trimmed === short) {
+                return { statFilter: stat, nameSearch: '' };
+            }
+            if (trimmed.startsWith(short + ' ')) {
+                return { statFilter: stat, nameSearch: trimmed.slice(short.length).trim() };
+            }
+        }
+        return { statFilter: null, nameSearch: trimmed };
+    }
+
+    function applyTabFiltering(type, table, tabPanel) {
+        if (tabPanel && !isTabActive(tabPanel)) return;
+
+        const config = TAB_CONFIG[type];
+        const searchInput = document.querySelector('#' + config.searchId);
+        const filterSelect = document.querySelector('#' + config.filterId);
+        if (!searchInput || !filterSelect) return;
+
+        const currentTable = tabPanel ? tabPanel.querySelector('table') : table;
+        const tableToUse = currentTable || table;
+        const tbody = tableToUse.querySelector('tbody');
+        if (!tbody) return;
+
         const searchValue = searchInput.value.toLowerCase();
         const filterValue = filterSelect.value;
-        
-        const tbody = table.querySelector('tbody');
-        if (!tbody) return;
-        
         const rows = Array.from(tbody.querySelectorAll('tr'));
-        
-        // Sort rows by shiny status first, then rarity when showing all
-        if (filterValue === 'all') {
+
+        // Creatures-only: sort by shiny then rarity when showing all
+        if (type === 'creatures' && filterValue === 'all') {
             rows.sort((a, b) => {
                 const isShiny = (row) => {
                     const img = row.querySelector('img');
                     return img && img.src.includes('-shiny.png') ? 1 : 0;
                 };
-                
-                const getRarity = (row) => {
-                    const rarityElement = row.querySelector('.has-rarity');
-                    return rarityElement ? parseInt(rarityElement.getAttribute('data-rarity')) || 1 : 1;
-                };
-                
-                // Sort by shiny first (shiny = 1, non-shiny = 0), then by rarity
+                const getRarity = (row) => parseInt(getRowTier(row, 'creatures')) || 1;
                 const shinyDiff = isShiny(b) - isShiny(a);
                 if (shinyDiff !== 0) return shinyDiff;
-                
-                return getRarity(b) - getRarity(a); // Then by rarity descending
+                return getRarity(b) - getRarity(a);
             });
-            
-            // Re-append rows in sorted order
             rows.forEach(row => tbody.appendChild(row));
         }
-        
+
+        const equipmentSearch = type === 'equipment' ? parseEquipmentSearch(searchValue) : null;
+
         rows.forEach(row => {
             const nameCell = row.querySelector('p.text-whiteHighlight');
             const name = nameCell ? nameCell.textContent.toLowerCase() : '';
-            
+            const tier = getRowTier(row, type);
             let show = true;
-            
-            // Apply search filter
-            if (searchValue && !name.includes(searchValue)) {
+            if (type === 'equipment' && equipmentSearch) {
+                if (equipmentSearch.statFilter !== null) {
+                    const rowStat = getEquipmentStatType(row);
+                    if (rowStat !== equipmentSearch.statFilter) show = false;
+                }
+                if (show && equipmentSearch.nameSearch && !name.includes(equipmentSearch.nameSearch)) show = false;
+            } else if (searchValue && !name.includes(searchValue)) {
                 show = false;
             }
-            
-            // Apply rarity filter
-            if (filterValue !== 'all') {
-                const rarityElement = row.querySelector('.has-rarity');
-                if (rarityElement) {
-                    const rarity = rarityElement.getAttribute('data-rarity');
-                    if (rarity !== filterValue) {
-                        show = false;
-                    }
-                } else if (filterValue !== '1') {
-                    // If no rarity element, it's common (1), so hide if filtering for other rarities
-                    show = false;
-                }
-            }
-            
+            if (filterValue !== 'all' && tier !== filterValue) show = false;
             row.style.display = show ? 'table-row' : 'none';
         });
-        
-        log('Applied filtering:', { 
-            searchValue, 
-            filterValue, 
-            visibleRows: rows.filter(r => r.style.display !== 'none').length 
-        });
+
+        log('Applied ' + type + ' filtering:', { searchValue, filterValue, visibleRows: rows.filter(r => r.style.display !== 'none').length });
     }
     
-    // Reset state when modal closes
-    function resetState() {
-        cauldronState.controlsAdded = false;
-        cauldronState.originalRows = [];
-        
-        // Clean up event listeners
-        eventListeners.forEach((listener, key) => {
+    function cleanupEventListeners() {
+        eventListeners.forEach((listener) => {
             try {
-                listener.element.removeEventListener(listener.event, listener.handler);
+                if (listener.observer) {
+                    if (listener.disconnect) listener.disconnect();
+                    else if (listener.observer.disconnect) listener.observer.disconnect();
+                } else if (listener.element && listener.handler) {
+                    listener.element.removeEventListener(listener.event, listener.handler);
+                }
             } catch (error) {
                 log('Error removing event listener:', error);
             }
         });
         eventListeners.clear();
-        
+    }
+
+    // Reset state when modal closes
+    function resetState() {
+        cauldronState.controlsAdded = false;
+        cauldronState.originalRows = [];
+        cleanupEventListeners();
         log('State reset');
     }
-    
+
     // Complete cleanup function
     function cleanup() {
         log('Cleaning up Better Cauldron mod...');
-        
-        // Disconnect observers
         if (mainObserver) {
             mainObserver.disconnect();
             mainObserver = null;
@@ -348,27 +460,13 @@
             closeObserver.disconnect();
             closeObserver = null;
         }
-        
-        // Clean up event listeners
-        eventListeners.forEach((listener, key) => {
-            try {
-                listener.element.removeEventListener(listener.event, listener.handler);
-            } catch (error) {
-                log('Error removing event listener:', error);
-            }
-        });
-        eventListeners.clear();
-        
-        // Reset state
+        cleanupEventListeners();
         cauldronState.isInitialized = false;
         cauldronState.controlsAdded = false;
         cauldronState.originalRows = [];
-        
-        // Remove global reference
         if (window.CauldronUpgrade) {
             delete window.CauldronUpgrade;
         }
-        
         log('Better Cauldron mod cleaned up successfully');
     }
     

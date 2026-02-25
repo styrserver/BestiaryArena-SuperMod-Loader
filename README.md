@@ -196,7 +196,7 @@ Enhances the Exaltation Chest interface with automated opening and intelligent e
 - Equipment statistics tracking (kept, disenchanted, dust gained) with comprehensive settings panel
 
 #### Better Cauldron
-Enhances the native Monster Cauldron interface with powerful search and filter functionality:
+Enhances the native Monstrous Cauldron interface with powerful search and filter functionality:
 - Real-time search through all monsters in your cauldron
 - Filter monsters by rarity (Grey, Green, Blue, Purple, Yellow)
 - Game-styled UI controls that integrate seamlessly with the existing interface

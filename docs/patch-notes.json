@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.5.4",
+      "changes": [
+        { "type": "fixed", "mod": "Better Cauldron", "text": "Fixes for latest update." },
+        { "type": "fixed", "mod": "Better Forge", "text": "Mass disenchant fix." },
+        { "type": "fixed", "mod": "Guilds", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.5.3",
       "changes": [
         { "type": "fixed", "mod": "Challenges", "text": "Bugs and translation fixes." },

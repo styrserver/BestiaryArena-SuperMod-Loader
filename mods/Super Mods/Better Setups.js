@@ -941,10 +941,13 @@ function showEditLabelsModal() {
       const labelRow = document.createElement('div');
       labelRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 8px; margin-bottom: 5px; background-color: rgba(255, 255, 255, 0.1); border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.1);';
       
-      // Label name
+      // Label name (truncate long names to avoid layout break)
       const labelSpan = document.createElement('span');
-      labelSpan.textContent = label;
-      labelSpan.style.cssText = 'color: #fff; font-size: 14px; flex: 1;';
+      const maxLabelLength = 20;
+      const displayLabel = label.length > maxLabelLength ? label.slice(0, maxLabelLength) + '...' : label;
+      labelSpan.textContent = displayLabel;
+      if (label.length > maxLabelLength) labelSpan.title = label;
+      labelSpan.style.cssText = 'color: #fff; font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;';
       labelRow.appendChild(labelSpan);
       
       // Edit button

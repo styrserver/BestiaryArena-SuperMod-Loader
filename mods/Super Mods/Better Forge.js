@@ -264,7 +264,7 @@
       confirmation: {
         text: hasHighTier ? 'Confirm\nDisenchant' : 'Confirm Disenchant',
         borderColor: '#ff8800',
-        color: hasHighTier ? '#ff4444' : '#ffcc88'
+        color: '#ff4444'
       },
       disenchanting: {
         text: 'Stop',
@@ -448,7 +448,7 @@
         if (hasHighTier) {
           updateDisenchantStatus('⚠️ WARNING: High-tier items (T3/T4/T5) detected! Click the warning button to proceed', true);
         } else {
-          updateDisenchantStatus('Click "Confirm Disenchant" to start disenchanting process');
+          updateDisenchantStatus();
         }
         
         addEscKeyHandler(button);
@@ -1573,8 +1573,59 @@
         element: btn,
         id: btn.getAttribute('data-equipment-id')
       }));
+      const allIds = equipmentToProcess.map(eq => eq.id);
       
-      processEquipmentWithProgress(equipmentToProcess, 0);
+      const statusText = document.getElementById('disenchant-status');
+      if (statusText) statusText.textContent = `Disenchanting ${equipmentToProcess.length} item(s)...`;
+      
+      disenchantEquipments(allIds)
+        .then(result => {
+          if (!forgeState.isDisenchanting) {
+            forgeState.isDisenchantingInProgress = false;
+            return;
+          }
+          if (result.success) {
+            equipmentToProcess.forEach(eq => {
+              eq.element.remove();
+              removeEquipmentFromArsenal(eq.id);
+              removeEquipmentFromLocalInventory(eq.id);
+            });
+            const dustGained = result.dustGained ?? 0;
+            updateLocalInventoryGoldDust(0, dustGained);
+            if (forgeState.disenchantInterval) {
+              clearInterval(forgeState.disenchantInterval);
+              forgeState.disenchantInterval = null;
+            }
+            showDisenchantCompletionInColumn(dustGained);
+            const disenchantBtn = getDisenchantButton();
+            if (disenchantBtn) updateDisenchantButtonState(disenchantBtn, 'normal');
+            forgeState.isDisenchanting = false;
+            forgeState.isDisenchantingInProgress = false;
+          } else {
+            if (forgeState.disenchantInterval) {
+              clearInterval(forgeState.disenchantInterval);
+              forgeState.disenchantInterval = null;
+            }
+            const disenchantBtn = getDisenchantButton();
+            if (disenchantBtn) updateDisenchantButtonState(disenchantBtn, 'normal');
+            updateDisenchantStatus(result.message || result.error || 'Disenchant failed');
+            forgeState.isDisenchanting = false;
+            forgeState.isDisenchantingInProgress = false;
+          }
+        })
+        .catch(error => {
+          console.error('[Better Forge] Batch disenchant error:', error);
+          handleError(error, 'performDisenchantStep', false);
+          if (forgeState.disenchantInterval) {
+            clearInterval(forgeState.disenchantInterval);
+            forgeState.disenchantInterval = null;
+          }
+          const disenchantBtn = getDisenchantButton();
+          if (disenchantBtn) updateDisenchantButtonState(disenchantBtn, 'normal');
+          updateDisenchantStatus('Disenchant failed');
+          forgeState.isDisenchanting = false;
+          forgeState.isDisenchantingInProgress = false;
+        });
       
       if (forgeState.rateLimitedEquipment.size > 0 && forgeState.isDisenchanting) {
         setTimeout(() => {
@@ -1734,16 +1785,23 @@
   // 5. API AND NETWORK FUNCTIONS
   // ============================================================================
   
-  function disenchantEquipment(equipmentId) {
+  /**
+   * Disenchant multiple equipments in one API call (game.equipsToDust).
+   * @param {string[]} equipmentIds - Array of equipment IDs to disenchant
+   * @returns {Promise<{success: boolean, dustGained?: number, status?: number, message?: string, error?: string}>}
+   */
+  function disenchantEquipments(equipmentIds) {
+    if (!equipmentIds || equipmentIds.length === 0) {
+      return Promise.resolve({ success: false, error: 'No equipment IDs' });
+    }
     return new Promise((resolve, reject) => {
       try {
-               const payload = {
+        const payload = {
           "0": {
-            "json": equipmentId
+            "json": equipmentIds
           }
         };
-        
-               fetch('https://bestiaryarena.com/api/trpc/game.equipToDust?batch=1', {
+        fetch('https://bestiaryarena.com/api/trpc/game.equipsToDust?batch=1', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1763,14 +1821,13 @@
           }
           return response.json();
         })
-                 .then(data => {
-           try {
-             if (data && data.success === false) {
-               resolve(data);
-               return;
-             }
-             
-             const result = data[0]?.result?.data?.json;
+        .then(data => {
+          try {
+            if (data && data.success === false) {
+              resolve(data);
+              return;
+            }
+            const result = data[0]?.result?.data?.json;
             if (result && result.dustDiff !== undefined) {
               resolve({
                 success: true,
@@ -1792,11 +1849,17 @@
         .catch(error => {
           reject(error);
         });
-        
       } catch (error) {
         reject(error);
       }
     });
+  }
+
+  /**
+   * Disenchant a single equipment (delegates to batch API with one ID for compatibility).
+   */
+  function disenchantEquipment(equipmentId) {
+    return disenchantEquipments([equipmentId]);
   }
 
   // ============================================================================
@@ -4576,7 +4639,7 @@
        
        const disenchantBtn = document.createElement('button');
        
-       disenchantBtn.style.cssText = 'background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border: 6px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 0.6; text-align: center; white-space: pre-line; line-height: 1.2;';
+       disenchantBtn.style.cssText = 'background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border: 6px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 1; text-align: center; white-space: pre-line; line-height: 1.2;';
        
        if (forgeState.isConfirmationMode) {
          const hasHighTier = hasHighTierItems();
@@ -4619,24 +4682,7 @@
          addEscKeyHandler(disenchantBtn);
        }
        
-       const progressBar = document.createElement('div');
-       progressBar.style.cssText = 'height: 20px; background: rgba(40,40,40,0.96); border: 2px solid rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; position: relative; flex: 0.4;';
-       progressBar.id = 'disenchant-progress';
-       
-       const progressFill = document.createElement('div');
-       progressFill.style.cssText = 'width: 0%; height: 100%; background: linear-gradient(90deg, #4CAF50, #45a049); transition: width 0.3s ease;';
-       progressFill.id = 'disenchant-progress-fill';
-       
-       const progressText = document.createElement('div');
-       progressText.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: bold; font-family: Arial, sans-serif; z-index: 1;';
-       progressText.textContent = '0%';
-       progressText.id = 'disenchant-progress-text';
-       
-       progressBar.appendChild(progressFill);
-       progressBar.appendChild(progressText);
-       
        disenchantControls.appendChild(disenchantBtn);
-       disenchantControls.appendChild(progressBar);
        
        const statusSeparator = document.createElement('div');
        statusSeparator.className = 'separator my-2.5';
@@ -4649,7 +4695,20 @@
        statusText.style.cssText = 'color: #e6d7b0; font-size: 12px; font-weight: bold; text-align: center;';
        
        if (forgeState.isConfirmationMode) {
-         statusText.textContent = 'Click "Confirm Disenchant" to start disenchanting process';
+         const confirmEquipmentItems = colContent.querySelectorAll('button[data-equipment-id]');
+         const confirmCount = confirmEquipmentItems.length;
+         let confirmDust = 0;
+         confirmEquipmentItems.forEach(btn => {
+           const tier = parseInt(btn.getAttribute('data-tier')) || 1;
+           confirmDust += getDisenchantDust({ tier });
+         });
+         if (confirmCount > 0) {
+           statusText.style.color = '#e6d7b0';
+           statusText.innerHTML = `Click <span style="color:#ff4444">Confirm Disenchant</span> to <span style="color:#ff4444">disenchant</span> ${confirmCount} equips for ${confirmDust} dust`;
+         } else {
+           statusText.textContent = 'No equipment selected';
+           statusText.style.color = '#e6d7b0';
+         }
        } else if (forgeState.isDisenchanting) {
          statusText.textContent = 'Disenchanting in progress...';
        } else {
@@ -5119,14 +5178,17 @@
           totalDust += getDisenchantDust(equipment);
         });
         
-        if (totalItems === 1) {
-          statusText.textContent = `1 item selected - ${totalDust} dust`;
+        if (forgeState.isConfirmationMode) {
+          statusText.style.color = '#e6d7b0';
+          statusText.innerHTML = `Click <span style="color:#ff4444">Confirm Disenchant</span> to <span style="color:#ff4444">disenchant</span> ${totalItems} equips for ${totalDust} dust`;
         } else {
-          statusText.textContent = `${totalItems} items selected - ${totalDust} dust`;
+          if (totalItems === 1) {
+            statusText.textContent = `1 item selected - ${totalDust} dust`;
+          } else {
+            statusText.textContent = `${totalItems} items selected - ${totalDust} dust`;
+          }
+          statusText.style.color = '#e6d7b0';
         }
-        
-        // Reset color to default white for normal status updates
-        statusText.style.color = '#e6d7b0';
       }
     } catch (error) {
       handleError(error, 'updateDisenchantStatus', false);

@@ -877,7 +877,7 @@ const getGuildCoinsApiUrl = () => getApiUrl('coins');
 // Utility Functions
 // =======================
 
-// Sanitize username for Firebase key (Firebase keys cannot start with . or $)
+// Sanitize username for Firebase key (Firebase keys cannot contain . $ # [ ] /)
 const sanitizeFirebaseKey = (username) => {
   if (!username) return '';
   let sanitized = username.toLowerCase();
@@ -889,6 +889,8 @@ const sanitizeFirebaseKey = (username) => {
   if (sanitized.startsWith('$')) {
     sanitized = '_dollar_' + sanitized.substring(1);
   }
+  // Replace ALL dots (Firebase paths reject . in key segments; 400 Bad Request otherwise)
+  sanitized = sanitized.replace(/\./g, '_dot_');
   // Replace other invalid characters for Firebase keys
   sanitized = sanitized.replace(/[\/\[\]#]/g, '_');
   return sanitized;
@@ -1020,6 +1022,49 @@ function buildProfileApiUrl(playerName) {
   return `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
 }
 
+// Rate limit: Bestiary Arena profile API allows 30 requests per 10 seconds
+const PROFILE_RATE_WINDOW_MS = 10000;
+const PROFILE_RATE_MAX = 28; // stay under 30 to avoid 429
+const profileRequestTimestamps = [];
+const profileRateLimitQueue = [];
+
+function processProfileRateLimitQueue() {
+  if (profileRateLimitQueue.length === 0) return;
+  const now = Date.now();
+  while (profileRequestTimestamps.length && profileRequestTimestamps[0] < now - PROFILE_RATE_WINDOW_MS) {
+    profileRequestTimestamps.shift();
+  }
+  if (profileRequestTimestamps.length >= PROFILE_RATE_MAX) {
+    const waitMs = Math.min(PROFILE_RATE_WINDOW_MS, profileRequestTimestamps[0] + PROFILE_RATE_WINDOW_MS - now + 50);
+    setTimeout(processProfileRateLimitQueue, Math.max(100, waitMs));
+    return;
+  }
+  const next = profileRateLimitQueue.shift();
+  if (!next) return;
+  profileRequestTimestamps.push(Date.now());
+  next.run();
+  if (profileRateLimitQueue.length > 0) {
+    setTimeout(processProfileRateLimitQueue, 0);
+  }
+}
+
+/** Run a profile API request respecting rate limit (28 per 10s). */
+function withProfileRateLimit(fn) {
+  return new Promise((resolve, reject) => {
+    profileRateLimitQueue.push({
+      run: () => {
+        Promise.resolve(fn()).then(resolve).catch(reject);
+      }
+    });
+    processProfileRateLimitQueue();
+  });
+}
+
+/** Default wait (ms) when server returns 429 Too Many Requests */
+const PROFILE_429_RETRY_AFTER_MS = 10500;
+/** Max number of retries on 429 before giving up (initial attempt + this many retries) */
+const PROFILE_429_MAX_RETRIES = 2;
+
 // Check if a player exists by fetching their profile data (with caching)
 async function playerExists(playerName) {
   if (!playerName || typeof playerName !== 'string') {
@@ -1033,22 +1078,21 @@ async function playerExists(playerName) {
   }
   
   try {
-    const apiUrl = buildProfileApiUrl(playerName);
-    
-    const response = await fetch(apiUrl, {
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (!response.ok) {
-      const exists = false;
-      playerExistsCache.set(playerName, exists);
-      return exists;
-    }
-    
-    const data = await response.json();
-    
-    // Check if player data exists
-    let exists = false;
+    return await withProfileRateLimit(async () => {
+      const apiUrl = buildProfileApiUrl(playerName);
+      let response = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
+      if (response.status === 429) {
+        const retryAfter = parseInt(response.headers.get('Retry-After'), 10);
+        const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : PROFILE_429_RETRY_AFTER_MS;
+        await new Promise(r => setTimeout(r, waitMs));
+        response = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
+      }
+      if (!response.ok) {
+        playerExistsCache.set(playerName, false);
+        return false;
+      }
+      const data = await response.json();
+      let exists = false;
     
     if (Array.isArray(data) && data[0]?.result?.data?.json !== undefined) {
       const profileData = data[0].result.data.json;
@@ -1062,7 +1106,8 @@ async function playerExists(playerName) {
     
     // Cache the result
     playerExistsCache.set(playerName, exists);
-    return exists;
+      return exists;
+    });
   } catch (error) {
     // Network or parsing errors - don't cache false, let it retry next time
     // Only log unexpected errors (not network timeouts which are common)
@@ -1085,33 +1130,37 @@ function formatNumber(num) {
   return num.toLocaleString('en-US');
 }
 
-// Fetch player profile data
+// Fetch player profile data (rate-limited; retries once on 429)
 async function fetchPlayerProfile(playerName) {
   if (!playerName || typeof playerName !== 'string') {
     return null;
   }
   
-  // Check cache first
   const cached = playerProfileCache.get(playerName);
   if (cached !== null) {
     return cached;
   }
   
-  try {
+  const doFetch = async (retryCount) => {
     const apiUrl = buildProfileApiUrl(playerName);
-    
-    const response = await fetch(apiUrl, {
-      headers: { 'Accept': 'application/json' }
-    });
-    
+    const response = await fetch(apiUrl, { headers: { 'Accept': 'application/json' } });
+    if (response.status === 429 && retryCount < PROFILE_429_MAX_RETRIES) {
+      const retryAfter = parseInt(response.headers.get('Retry-After'), 10);
+      let waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : PROFILE_429_RETRY_AFTER_MS;
+      // Slight backoff on each retry so we don't hammer the server
+      if (retryCount > 0) waitMs = Math.min(20000, waitMs + retryCount * 2000);
+      if (waitMs > 0) {
+        console.warn('[Guilds] Profile API rate limited (429), retrying after', Math.round(waitMs / 1000), 's (attempt', retryCount + 1, 'of', PROFILE_429_MAX_RETRIES + 1, ')');
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+      return doFetch(retryCount + 1);
+    }
     if (!response.ok) {
       playerProfileCache.set(playerName, null);
       return null;
     }
-    
     const data = await response.json();
     let profileData = null;
-    
     if (Array.isArray(data) && data[0]?.result?.data?.json !== undefined) {
       profileData = data[0].result.data.json;
       if (data[0]?.result?.error || !profileData || (typeof profileData === 'object' && !profileData.name)) {
@@ -1123,10 +1172,11 @@ async function fetchPlayerProfile(playerName) {
         profileData = null;
       }
     }
-    
-    // Cache the result
     playerProfileCache.set(playerName, profileData);
     return profileData;
+  };
+  try {
+    return await withProfileRateLimit(() => doFetch(0));
   } catch (error) {
     if (!error.message || (!error.message.includes('fetch') && !error.message.includes('network'))) {
       console.error('[Guilds] Error fetching player profile:', error);
@@ -1440,79 +1490,124 @@ async function calculateMemberPoints(username) {
   }
 }
 
-// Calculate guild points based on member data
-async function calculateGuildPoints(guildId) {
+// Helper: compute guild points from running totals (optionally without world record bonus)
+function computeGuildPointsFromTotals(totals, worldRecordBonus = 0) {
+  const levelPoints = calculateLevelPoints(totals.totalLevels);
+  const rankPoints = calculateRankPoints(totals.totalRankPoints);
+  const timeSumPenalty = calculateTimeSumPenalty(totals.totalTimeSum);
+  const floorPoints = calculateFloorPoints(totals.totalFloors);
+  const totalPoints = levelPoints + rankPoints - timeSumPenalty + totals.totalEquipmentPoints + floorPoints + worldRecordBonus;
+  return Math.max(0, Math.floor(totalPoints));
+}
+
+// Calculate guild points based on member data.
+// If options.onProgress is provided, calls it with (points, { partial }) as each member is processed so the UI can update progressively.
+async function calculateGuildPoints(guildId, options = {}) {
+  const { onProgress } = options;
   try {
     // Check cache first
     const cached = guildPointsCache.get(guildId);
     if (cached !== null) {
+      if (onProgress) onProgress(cached, { partial: false });
       return cached;
     }
-    
+
     const members = await getGuildMembers(guildId);
     if (!members || members.length === 0) {
       const points = 0;
       guildPointsCache.set(guildId, points);
+      if (onProgress) onProgress(points, { partial: false });
       return points;
     }
-    
+
     let totalLevels = 0;
     let totalRankPoints = 0;
     let totalTimeSum = 0;
     let totalEquipmentPoints = 0;
     let totalFloors = 0;
-    
-    // Fetch profile data for all members (with rate limiting consideration)
+    let missingProfiles = 0;
+
+    if (onProgress) {
+      // Progressive: fetch one member at a time and report after each
+      for (let i = 0; i < members.length; i++) {
+        const member = members[i];
+        const [profile, equipmentPoints] = await Promise.all([
+          fetchPlayerProfile(member.username),
+          getPlayerEquipmentPoints(member.username)
+        ]);
+        if (profile) {
+          totalLevels += calculateLevelFromExp(profile.exp || 0);
+          totalRankPoints += profile.rankPoints || 0;
+          totalTimeSum += profile.ticks || 0;
+          totalFloors += profile.floors || 0;
+        } else {
+          missingProfiles++;
+        }
+        totalEquipmentPoints += equipmentPoints || 0;
+        const pointsSoFar = computeGuildPointsFromTotals({
+          totalLevels,
+          totalRankPoints,
+          totalTimeSum,
+          totalEquipmentPoints,
+          totalFloors
+        }, 0);
+        onProgress(pointsSoFar, { partial: true });
+      }
+      // Add world record bonus and report final
+      const memberUsernames = members.map(m => m.username).filter(Boolean);
+      const totalWorldRecords = memberUsernames.length > 0 ? await countGuildWorldRecords(memberUsernames) : 0;
+      const worldRecordBonus = totalWorldRecords * POINTS_CONFIG.WORLD_RECORD_BONUS;
+      const points = computeGuildPointsFromTotals({
+        totalLevels,
+        totalRankPoints,
+        totalTimeSum,
+        totalEquipmentPoints,
+        totalFloors
+      }, worldRecordBonus);
+      if (missingProfiles === 0) {
+        guildPointsCache.set(guildId, points);
+      } else {
+        console.warn(`[Guilds] Guild points for ${guildId} are partial (${missingProfiles}/${members.length} profiles missing, likely 429); not caching.`);
+      }
+      onProgress(points, { partial: false });
+      return points;
+    }
+
+    // Non-progressive: fetch all in parallel (original behaviour)
     const profilePromises = members.map(member => fetchPlayerProfile(member.username));
     const profiles = await Promise.all(profilePromises);
-    
-    // Fetch equipment points for all members
     const equipmentPromises = members.map(member => getPlayerEquipmentPoints(member.username));
     const equipmentPointsArray = await Promise.all(equipmentPromises);
-    
+
     for (let i = 0; i < profiles.length; i++) {
       const profile = profiles[i];
-      if (!profile) continue;
-      
-      // Calculate level from exp
-      const exp = profile.exp || 0;
-      const level = calculateLevelFromExp(exp);
-      totalLevels += level;
-      
-      // Get rank points
-      const rankPoints = profile.rankPoints || 0;
-      totalRankPoints += rankPoints;
-      
-      // Get time sum (ticks)
-      const timeSum = profile.ticks || 0;
-      totalTimeSum += timeSum;
-      
-      // Add equipment points
+      if (!profile) {
+        missingProfiles++;
+        continue;
+      }
+      totalLevels += calculateLevelFromExp(profiles[i].exp || 0);
+      totalRankPoints += profiles[i].rankPoints || 0;
+      totalTimeSum += profiles[i].ticks || 0;
       totalEquipmentPoints += equipmentPointsArray[i] || 0;
-      
-      // Get floors
-      const floors = profile.floors || 0;
-      totalFloors += floors;
+      totalFloors += profiles[i].floors || 0;
     }
-    
-    // Calculate points using helper functions
-    const levelPoints = calculateLevelPoints(totalLevels);
-    const rankPoints = calculateRankPoints(totalRankPoints);
-    const timeSumPenalty = calculateTimeSumPenalty(totalTimeSum);
-    const floorPoints = calculateFloorPoints(totalFloors);
-    
-    // Count total world records across all members and calculate bonus (5 points per record)
+
     const memberUsernames = members.map(m => m.username).filter(Boolean);
     const totalWorldRecords = memberUsernames.length > 0 ? await countGuildWorldRecords(memberUsernames) : 0;
     const worldRecordBonus = totalWorldRecords * POINTS_CONFIG.WORLD_RECORD_BONUS;
-    
-    const totalPoints = levelPoints + rankPoints - timeSumPenalty + totalEquipmentPoints + floorPoints + worldRecordBonus;
-    
-    // Ensure points are never negative - minimum is 0
-    const points = Math.max(0, Math.floor(totalPoints));
-    
-    // Cache the result
-    guildPointsCache.set(guildId, points);
+    const points = computeGuildPointsFromTotals({
+      totalLevels,
+      totalRankPoints,
+      totalTimeSum,
+      totalEquipmentPoints,
+      totalFloors
+    }, worldRecordBonus);
+
+    if (missingProfiles === 0) {
+      guildPointsCache.set(guildId, points);
+    } else {
+      console.warn(`[Guilds] Guild points for ${guildId} are partial (${missingProfiles}/${members.length} profiles missing, likely 429); not caching.`);
+    }
     return points;
   } catch (error) {
     console.error('[Guilds] Error calculating guild points:', error);
@@ -2806,7 +2901,9 @@ async function getAllGuilds() {
     if (!data || typeof data !== 'object') {
       return [];
     }
-    return Object.values(data).sort((a, b) => {
+    // Attach guild id from Firebase key (key is the id; stored object may not have it)
+    const guildsWithIds = Object.entries(data).map(([id, guild]) => ({ ...guild, id }));
+    return guildsWithIds.sort((a, b) => {
       // Sort by member count (descending), then by name
       if (b.memberCount !== a.memberCount) {
         return (b.memberCount || 0) - (a.memberCount || 0);
@@ -5398,61 +5495,42 @@ async function showGuildBrowser() {
   let sortDirection = 'desc';
 
   async function loadGuilds(searchTerm = '', sortColumn = null, direction = 'asc') {
+    guildsList.innerHTML = '';
+    const loadingGuildsEl = document.createElement('div');
+    loadingGuildsEl.className = 'guild-browser-loading-guilds';
+    loadingGuildsEl.style.cssText = `
+      padding: 24px 16px;
+      text-align: center;
+      color: rgba(230, 215, 176, 0.9);
+      font-size: 14px;
+      font-family: ${getFontFamily()};
+      animation: guild-members-loading-pulse 1.2s ease-in-out infinite;
+    `;
+    loadingGuildsEl.textContent = t('mods.guilds.loadingGuilds') || 'Loading guilds...';
+    guildsList.appendChild(loadingGuildsEl);
+    if (!document.getElementById('guild-members-loading-style')) {
+      const style = document.createElement('style');
+      style.id = 'guild-members-loading-style';
+      style.textContent = '@keyframes guild-members-loading-pulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }';
+      document.head.appendChild(style);
+    }
+
     const allGuilds = await getAllGuilds();
     const currentPlayer = getCurrentPlayerName();
     const playerGuild = getPlayerGuild();
     const hashedPlayer = currentPlayer ? await hashUsername(currentPlayer) : null;
 
-    guildsList.innerHTML = '';
-
     let filteredGuilds = allGuilds;
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
-      filteredGuilds = allGuilds.filter(guild => 
+      filteredGuilds = allGuilds.filter(guild =>
         guild.name.toLowerCase().includes(term) ||
         (guild.abbreviation && guild.abbreviation.toLowerCase().includes(term)) ||
         (guild.description && guild.description.toLowerCase().includes(term))
       );
     }
 
-    // Fetch points for all guilds to calculate rankings
-    const pointsPromises = filteredGuilds.map(async (guild) => {
-      const points = await calculateGuildPoints(guild.id);
-      return { guild, points };
-    });
-    const guildsWithPoints = await Promise.all(pointsPromises);
-    filteredGuilds = guildsWithPoints.map(item => ({ ...item.guild, _points: item.points }));
-
-    // Calculate rankings based on points (descending)
-    const sortedByPoints = [...filteredGuilds].sort((a, b) => (b._points || 0) - (a._points || 0));
-    const rankings = new Map();
-    sortedByPoints.forEach((guild, index) => {
-      rankings.set(guild.id, index + 1);
-    });
-
-    // Apply sorting
-    if (sortColumn) {
-      filteredGuilds.sort((a, b) => {
-        let aVal, bVal;
-        
-        if (sortColumn === 'name') {
-          aVal = (a.name || '').toLowerCase();
-          bVal = (b.name || '').toLowerCase();
-        } else if (sortColumn === 'members') {
-          aVal = a.memberCount || 0;
-          bVal = b.memberCount || 0;
-        } else if (sortColumn === 'points') {
-          aVal = a._points || 0;
-          bVal = b._points || 0;
-        } else {
-          return 0;
-        }
-        
-        if (aVal < bVal) return direction === 'asc' ? -1 : 1;
-        if (aVal > bVal) return direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
+    loadingGuildsEl.remove();
 
     if (filteredGuilds.length === 0) {
       const emptyMsg = document.createElement('div');
@@ -5478,8 +5556,90 @@ async function showGuildBrowser() {
       return;
     }
 
-    for (const guild of filteredGuilds) {
-      const rank = rankings.get(guild.id) || 999;
+    // Firebase: fetch members for each guild in parallel (for "is member?" check)
+    const membersPerGuild = await Promise.all(filteredGuilds.map(g => getGuildMembers(g.id)));
+
+    const guildPointsMap = new Map();
+    const loadingPointsEl = document.createElement('div');
+    loadingPointsEl.className = 'guild-browser-loading-points';
+    loadingPointsEl.style.cssText = `
+      padding: 12px 16px;
+      text-align: center;
+      color: rgba(230, 215, 176, 0.8);
+      font-size: 12px;
+      font-family: ${getFontFamily()};
+      animation: guild-members-loading-pulse 1.2s ease-in-out infinite;
+    `;
+    loadingPointsEl.textContent = t('mods.guilds.loadingPoints') || 'Loading points...';
+    guildsList.appendChild(loadingPointsEl);
+
+    const getRankFromPoints = (pointsMap) => {
+      const sorted = [...filteredGuilds].sort((a, b) => (pointsMap.get(b.id) ?? -1) - (pointsMap.get(a.id) ?? -1));
+      const rankMap = new Map();
+      sorted.forEach((g, i) => rankMap.set(g.id, i + 1));
+      return rankMap;
+    };
+    const applySortAndRank = () => {
+      const rankings = getRankFromPoints(guildPointsMap);
+      const sorted = [...filteredGuilds].sort((a, b) => {
+        let aVal, bVal;
+        if (sortColumn === 'points' || !sortColumn) {
+          aVal = guildPointsMap.get(a.id) ?? -1;
+          bVal = guildPointsMap.get(b.id) ?? -1;
+          return (bVal - aVal) * (direction === 'desc' ? 1 : -1);
+        }
+        if (sortColumn === 'name') {
+          aVal = (a.name || '').toLowerCase();
+          bVal = (b.name || '').toLowerCase();
+          return (aVal < bVal ? -1 : aVal > bVal ? 1 : 0) * (direction === 'asc' ? 1 : -1);
+        }
+        if (sortColumn === 'members') {
+          aVal = a.memberCount || 0;
+          bVal = b.memberCount || 0;
+          return (aVal - bVal) * (direction === 'asc' ? 1 : -1);
+        }
+        return 0;
+      });
+      sorted.forEach(guild => {
+        const row = guildsList.querySelector(`.guild-browser-row[data-guild-id="${guild.id}"]`);
+        if (row) guildsList.appendChild(row);
+      });
+      guildsList.querySelectorAll('.guild-browser-row').forEach(row => {
+        const gid = row.dataset.guildId;
+        const rank = getRankFromPoints(guildPointsMap).get(gid) || 999;
+        let bgColor = 'rgba(255, 255, 255, 0.05)';
+        if (rank === 1) bgColor = 'rgba(255, 215, 0, 0.15)';
+        else if (rank === 2) bgColor = 'rgba(192, 192, 192, 0.15)';
+        else if (rank === 3) bgColor = 'rgba(205, 127, 50, 0.15)';
+        else if (rank <= 10) bgColor = 'rgba(200, 200, 255, 0.1)';
+        row.style.background = bgColor;
+      });
+    };
+    const updateGuildPoints = (guildId, points) => {
+      guildPointsMap.set(guildId, points);
+      const row = guildsList.querySelector(`.guild-browser-row[data-guild-id="${guildId}"]`);
+      if (row) {
+        const pointsEl = row.querySelector('.guild-browser-points');
+        if (pointsEl) pointsEl.textContent = formatNumber(points);
+      }
+      applySortAndRank();
+      if (guildPointsMap.size === filteredGuilds.length && loadingPointsEl.parentNode) {
+        loadingPointsEl.remove();
+      }
+    };
+
+    let playerGuildRef = null;
+    if (hashedPlayer) {
+      try {
+        const r = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
+        if (r.ok) playerGuildRef = await r.json();
+      } catch (_) {}
+    }
+
+    for (let idx = 0; idx < filteredGuilds.length; idx++) {
+      const guild = filteredGuilds[idx];
+      const members = membersPerGuild[idx] || [];
+      const rank = 999;
       
       // Get background color based on rank
       let bgColor = 'rgba(255, 255, 255, 0.05)'; // Default
@@ -5494,6 +5654,8 @@ async function showGuildBrowser() {
       }
       
       const guildItem = document.createElement('div');
+      guildItem.className = 'guild-browser-row';
+      guildItem.dataset.guildId = guild.id;
       guildItem.style.cssText = `
         display: flex;
         flex-direction: row;
@@ -5562,6 +5724,7 @@ async function showGuildBrowser() {
       memberCountCell.textContent = `${guild.memberCount || 0}/${GUILD_CONFIG.maxMembers}`;
 
       const pointsCell = document.createElement('div');
+      pointsCell.className = 'guild-browser-points';
       pointsCell.style.cssText = `
         flex: 0.8 1 0%;
         text-align: center;
@@ -5571,18 +5734,7 @@ async function showGuildBrowser() {
         font-weight: 600;
         font-family: ${getFontFamily()};
       `;
-      
-      // Use cached points if available, otherwise calculate
-      if (guild._points !== undefined) {
-        pointsCell.textContent = formatNumber(guild._points);
-      } else {
-        pointsCell.textContent = '...';
-        calculateGuildPoints(guild.id).then(points => {
-          pointsCell.textContent = formatNumber(points);
-        }).catch(() => {
-          pointsCell.textContent = '0';
-        });
-      }
+      pointsCell.textContent = '...';
       
       const leaderCell = document.createElement('div');
       leaderCell.style.cssText = `
@@ -5599,46 +5751,21 @@ async function showGuildBrowser() {
       // Check if this is the player's guild (from localStorage)
       let isPlayerGuild = playerGuild && playerGuild.id === guild.id;
       
-      // Also verify from Firebase if localStorage doesn't match
-      // Check if player is actually a member (to handle localStorage sync issues)
-      let isAlreadyMember = false;
-      let playerRole = null;
-      if (hashedPlayer) {
-        const members = await getGuildMembers(guild.id);
-        const member = members.find(m => m.usernameHashed === hashedPlayer);
-        if (member) {
-          isAlreadyMember = true;
-          playerRole = member.role;
-          // If player is a member but localStorage doesn't match, fix it
-          if (!isPlayerGuild) {
-            // Check Firebase to verify if this is actually their guild
-            try {
-              const playerGuildResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
-              if (playerGuildResponse.ok) {
-                const playerGuildData = await playerGuildResponse.json();
-                if (playerGuildData && playerGuildData.guildId === guild.id) {
-                  // Firebase confirms this is their guild - update localStorage
-                  isPlayerGuild = true;
-                  savePlayerGuild(guild);
-                  // Sync guild chat tab if VIP List mod is loaded
-                  if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
-                    window.syncGuildChatTab();
-                  }
-                }
-              }
-            } catch (error) {
-              // If Firebase check fails, still treat as their guild if they're a member
-              // (especially if leader)
-              if (playerRole === GUILD_ROLES.LEADER || isGuildLeader(guild, currentPlayer)) {
-                isPlayerGuild = true;
-                savePlayerGuild(guild);
-                // Sync guild chat tab if VIP List mod is loaded
-                if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
-                  window.syncGuildChatTab();
-                }
-              }
-            }
-          }
+      // Use pre-fetched members (Firebase) for membership check
+      const member = hashedPlayer ? members.find(m => m.usernameHashed === hashedPlayer) : null;
+      const isAlreadyMember = !!member;
+      const playerRole = member ? member.role : null;
+      if (member && !isPlayerGuild && playerGuildRef && playerGuildRef.guildId === guild.id) {
+        isPlayerGuild = true;
+        savePlayerGuild(guild);
+        if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
+          window.syncGuildChatTab();
+        }
+      } else if (member && !isPlayerGuild && (playerRole === GUILD_ROLES.LEADER || isGuildLeader(guild, currentPlayer))) {
+        isPlayerGuild = true;
+        savePlayerGuild(guild);
+        if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
+          window.syncGuildChatTab();
         }
       }
 
@@ -5714,6 +5841,15 @@ async function showGuildBrowser() {
 
       guildsList.appendChild(guildItem);
     }
+
+    applySortAndRank();
+    filteredGuilds.forEach(guild => {
+      calculateGuildPoints(guild.id, {
+        onProgress: (points) => updateGuildPoints(guild.id, points)
+      }).catch(() => {
+        updateGuildPoints(guild.id, 0);
+      });
+    });
   }
 
   // Create header row
@@ -6186,38 +6322,119 @@ async function openGuildPanel(viewGuildId = null) {
     padding: 3px;
   `;
 
-  // Calculate points for all members first, then sort
-  const membersWithPoints = await Promise.all(members.map(async (member) => {
-    const pointsData = await calculateMemberPoints(member.username);
-    return {
-      ...member,
-      _points: pointsData.total
+  // Skeleton: show loading placeholders until member points and list are ready
+  for (let i = 0; i < 5; i++) {
+    const skeletonRow = document.createElement('div');
+    skeletonRow.style.cssText = `
+      height: 36px;
+      margin-bottom: 3px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 2px;
+      width: 100%;
+    `;
+    membersList.appendChild(skeletonRow);
+  }
+  leftPanel.appendChild(membersList);
+  contentDiv.appendChild(leftPanel);
+
+  // Fill members: show Firebase data (names, roles) immediately, then load server-side points (rate-limited) and update
+  const fillMembersAndInvites = async () => {
+    membersList.innerHTML = '';
+    const rolePriority = {
+      [GUILD_ROLES.LEADER]: 0,
+      [GUILD_ROLES.OFFICER]: 1,
+      [GUILD_ROLES.MEMBER]: 2
     };
-  }));
+    const sortByRoleAndName = (a, b) => {
+      const roleDiff = (rolePriority[a.role] ?? 99) - (rolePriority[b.role] ?? 99);
+      if (roleDiff !== 0) return roleDiff;
+      return (a.username || '').toLowerCase().localeCompare((b.username || '').toLowerCase());
+    };
+    const memberPointsMap = new Map(); // username -> points (filled by server-side fetches)
 
-  // Sort members by role (Leader > Officer > Member), then by points (descending), then by name
-  const rolePriority = {
-    [GUILD_ROLES.LEADER]: 0,
-    [GUILD_ROLES.OFFICER]: 1,
-    [GUILD_ROLES.MEMBER]: 2
+    if (members.length === 0) {
+      addInviteAndInvitedSection();
+      return;
+    }
+
+    // 1) Immediately show all rows from Firebase (name, role); points show "..." until server data loads
+    const sortedByRoleAndName = [...members].sort(sortByRoleAndName);
+    sortedByRoleAndName.forEach(member => {
+      const memberForRow = { ...member, _points: undefined };
+      const memberItem = buildMemberRow(memberForRow);
+      memberItem.dataset.username = member.username;
+      memberItem.className = 'guild-member-row';
+      membersList.appendChild(memberItem);
+    });
+
+    const loadingPointsEl = document.createElement('div');
+    loadingPointsEl.className = 'guild-members-loading-points';
+    loadingPointsEl.style.cssText = `
+      padding: 8px 8px;
+      text-align: center;
+      color: rgba(230, 215, 176, 0.75);
+      font-size: 11px;
+      font-family: ${getFontFamily()};
+      animation: guild-members-loading-pulse 1.2s ease-in-out infinite;
+    `;
+    loadingPointsEl.textContent = t('mods.guilds.loadingPoints') || 'Loading points...';
+    membersList.insertBefore(loadingPointsEl, membersList.firstChild);
+    if (!document.getElementById('guild-members-loading-style')) {
+      const style = document.createElement('style');
+      style.id = 'guild-members-loading-style';
+      style.textContent = '@keyframes guild-members-loading-pulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }';
+      document.head.appendChild(style);
+    }
+
+    addInviteAndInvitedSection();
+
+    // 2) Re-sort rows when points change (role, then points desc, then name); keep invite section at bottom
+    const reSortMemberRows = () => {
+      const rows = Array.from(membersList.querySelectorAll('.guild-member-row'));
+      if (rows.length === 0) return;
+      const withPoints = rows.map(row => ({
+        row,
+        username: row.dataset.username,
+        role: (members.find(m => m.username === row.dataset.username) || {}).role,
+        points: memberPointsMap.get(row.dataset.username) ?? -1
+      }));
+      withPoints.sort((a, b) => {
+        const roleDiff = (rolePriority[a.role] ?? 99) - (rolePriority[b.role] ?? 99);
+        if (roleDiff !== 0) return roleDiff;
+        const pointsDiff = (b.points ?? -1) - (a.points ?? -1);
+        if (pointsDiff !== 0) return pointsDiff;
+        return (a.username || '').toLowerCase().localeCompare((b.username || '').toLowerCase());
+      });
+      const firstNonRow = Array.from(membersList.children).find(el => !el.classList.contains('guild-member-row'));
+      withPoints.forEach(({ row }) => membersList.insertBefore(row, firstNonRow || null));
+    };
+
+    const updateMemberPoints = (username, points) => {
+      memberPointsMap.set(username, points);
+      const row = membersList.querySelector(`.guild-member-row[data-username="${username}"]`);
+      if (row) {
+        const pointsEl = row.querySelector('.guild-member-points');
+        if (pointsEl) pointsEl.textContent = formatNumber(points);
+      }
+      reSortMemberRows();
+      if (loadingPointsEl.parentNode && memberPointsMap.size === members.length) {
+        loadingPointsEl.remove();
+      }
+    };
+
+    // 3) Load server-side profile data (rate-limited) and update each row as it arrives
+    members.forEach(member => {
+      calculateMemberPoints(member.username).then(pointsData => {
+        const worldRecordBonus = (pointsData.worldRecordCount || 0) * POINTS_CONFIG.WORLD_RECORD_BONUS;
+        const pointsIncludingWR = pointsData.total + worldRecordBonus;
+        updateMemberPoints(member.username, pointsIncludingWR);
+      }).catch(() => {
+        updateMemberPoints(member.username, 0);
+      });
+    });
   };
-  
-  const sortedMembers = membersWithPoints.sort((a, b) => {
-    // First sort by role
-    const roleDiff = (rolePriority[a.role] ?? 99) - (rolePriority[b.role] ?? 99);
-    if (roleDiff !== 0) {
-      return roleDiff;
-    }
-    // Then sort by points (descending - higher points first)
-    const pointsDiff = (b._points || 0) - (a._points || 0);
-    if (pointsDiff !== 0) {
-      return pointsDiff;
-    }
-    // Finally sort by name (case-insensitive)
-    return (a.username || '').toLowerCase().localeCompare((b.username || '').toLowerCase());
-  });
 
-  sortedMembers.forEach(member => {
+  function buildMemberRow(member) {
     const memberItem = document.createElement('div');
     memberItem.style.cssText = `
       display: flex;
@@ -6388,8 +6605,11 @@ async function openGuildPanel(viewGuildId = null) {
     `;
 
     const pointsDisplay = document.createElement('div');
-    const memberPoints = member._points !== undefined ? member._points : 0;
-    pointsDisplay.textContent = formatNumber(memberPoints);
+    pointsDisplay.className = 'guild-member-points';
+    const memberPoints = member._points;
+    pointsDisplay.textContent = member._points !== undefined && member._points !== null
+      ? formatNumber(member._points)
+      : '...';
     pointsDisplay.style.cssText = `
       color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
       font-size: 11px;
@@ -6423,9 +6643,12 @@ async function openGuildPanel(viewGuildId = null) {
 
     // Recalculate for tooltip (to get detailed breakdown)
     calculateMemberPoints(member.username).then(pointsData => {
-      // Update display if points changed (shouldn't happen, but just in case)
-      if (pointsData.total !== memberPoints) {
-        pointsDisplay.textContent = formatNumber(pointsData.total);
+      const worldRecordBonus = (pointsData.worldRecordCount || 0) * POINTS_CONFIG.WORLD_RECORD_BONUS;
+      const totalWithWR = pointsData.total + worldRecordBonus;
+      // Update display if points changed (e.g. first time we have server data)
+      const currentText = pointsDisplay.textContent;
+      if (currentText === '...' || (member._points !== undefined && totalWithWR !== member._points)) {
+        pointsDisplay.textContent = formatNumber(totalWithWR);
       }
       
       // Build tooltip content with game-native styling
@@ -6496,7 +6719,7 @@ async function openGuildPanel(viewGuildId = null) {
         font-size: 12px;
         color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
       `;
-      total.textContent = `Total: ${formatNumber(pointsData.total)}`;
+      total.textContent = `Total: ${formatNumber(totalWithWR)}`;
       tooltipContent.appendChild(total);
       
       tooltip.appendChild(tooltipContent);
@@ -6602,9 +6825,10 @@ async function openGuildPanel(viewGuildId = null) {
       }
     }
 
-    membersList.appendChild(memberItem);
-  });
+    return memberItem;
+    }
 
+    async function addInviteAndInvitedSection() {
   if (currentMember && hasPermission(currentMember.role, 'invite')) {
     const inviteBtn = createButton('+ ' + t('mods.guilds.invitePlayerTitle'), async () => {
       const inviteModal = api.ui.components.createModal({
@@ -6793,9 +7017,7 @@ async function openGuildPanel(viewGuildId = null) {
     await loadInvitedPlayers();
     membersList.appendChild(invitedPlayersContainer);
   }
-
-  leftPanel.appendChild(membersList);
-  contentDiv.appendChild(leftPanel);
+    }
 
   const rightPanel = document.createElement('div');
   rightPanel.style.cssText = `
@@ -7744,7 +7966,7 @@ async function openGuildPanel(viewGuildId = null) {
     }]
   });
 
-  setTimeout(() => {
+  setTimeout(async () => {
     const dialog = getOpenDialog();
     if (dialog) {
       applyModalStyles(dialog, GUILD_PANEL_DIMENSIONS.WIDTH, GUILD_PANEL_DIMENSIONS.HEIGHT);
@@ -7752,6 +7974,7 @@ async function openGuildPanel(viewGuildId = null) {
       if (buttonContainer) {
         setupFooter(buttonContainer);
       }
+      await fillMembersAndInvites();
     }
   }, 100);
 }
