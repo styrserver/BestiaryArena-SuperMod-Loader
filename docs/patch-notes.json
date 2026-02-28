@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.5.5",
+      "changes": [
+        { "type": "added", "mod": "Challenges", "text": "Tests for multiplayer." },
+        { "type": "fixed", "mod": "Better Cauldron", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.5.4",
       "changes": [
         { "type": "fixed", "mod": "Better Cauldron", "text": "Fixes for latest update." },

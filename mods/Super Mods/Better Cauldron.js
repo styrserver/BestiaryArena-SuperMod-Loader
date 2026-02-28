@@ -387,7 +387,7 @@
         const filterValue = filterSelect.value;
         const rows = Array.from(tbody.querySelectorAll('tr'));
 
-        // Creatures-only: sort by shiny then rarity when showing all
+        // Creatures: sort by shiny then tier when showing all
         if (type === 'creatures' && filterValue === 'all') {
             rows.sort((a, b) => {
                 const isShiny = (row) => {
@@ -397,6 +397,15 @@
                 const getRarity = (row) => parseInt(getRowTier(row, 'creatures')) || 1;
                 const shinyDiff = isShiny(b) - isShiny(a);
                 if (shinyDiff !== 0) return shinyDiff;
+                return getRarity(b) - getRarity(a);
+            });
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        // Equipment: sort by tier when "All Tiers" is selected (same as creatures default)
+        if (type === 'equipment' && filterValue === 'all') {
+            rows.sort((a, b) => {
+                const getRarity = (row) => parseInt(getRowTier(row, 'equipment')) || 1;
                 return getRarity(b) - getRarity(a);
             });
             rows.forEach(row => tbody.appendChild(row));
