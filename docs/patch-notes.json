@@ -4,6 +4,17 @@
   },
   "notes": [
     {
+      "version": "3.5.7",
+      "changes": [
+        { "type": "added", "mod": "Cyclopedia", "text": "Added Shiny Creatures on front page." },
+        { "type": "changed", "mod": "Core", "text": "Popup mod card descriptions aligned with README." },
+        { "type": "changed", "mod": "Guilds", "text": "Guild calculation optimizations." },
+        { "type": "fixed", "mod": "Challenges", "text": "Bug fixes." },
+        { "type": "fixed", "mod": "Manual Runner", "text": "Bug fixes." },
+        { "type": "fixed", "mod": "VIP List", "text": "Chat message loading when switching All Chat and guild tabs fix." }
+      ]
+    },
+    {
       "version": "3.5.6",
       "changes": [
         { "type": "fixed", "mod": "Autoseller", "text": "Bug fix" }

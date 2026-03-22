@@ -19,12 +19,16 @@ const defaultConfig = {
 const STORAGE_KEY = 'manualRunnerConfig';
 
 // Load config from localStorage (preferred) or context.config
-function loadConfig() {
+// options.silent — avoid duplicate logs when createConfigPanel() refreshes after initial load
+function loadConfig(options = {}) {
+  const silent = !!options.silent;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved !== null) {
       const parsed = JSON.parse(saved);
-      console.log('[Manual Runner] Loaded config from localStorage:', parsed);
+      if (!silent) {
+        console.log('[Manual Runner] Loaded config from localStorage:', parsed);
+      }
       return Object.assign({}, defaultConfig, parsed);
     }
   } catch (error) {
@@ -35,14 +39,28 @@ function loadConfig() {
   return Object.assign({}, defaultConfig, context.config || {});
 }
 
-// Save config to localStorage
-function saveConfig() {
+// Save config to localStorage. options.silent — caller logs a single summary line
+function saveConfig(options = {}) {
+  const silent = !!options.silent;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-    console.log('[Manual Runner] Saved config to localStorage:', config);
+    if (!silent) {
+      console.log('[Manual Runner] Saved config to localStorage:', config);
+    }
   } catch (error) {
     console.error('[Manual Runner] Error saving config to localStorage:', error);
   }
+}
+
+function logConfigSummary(prefix) {
+  console.log(`[Manual Runner] ${prefix}`, {
+    stop: config.stopCondition,
+    ticksMax: config.stopWhenTicksReached,
+    maxFloor: config.maxFloor,
+    refill: config.enableAutoRefillStamina,
+    autoSell: config.enableAutoSellCreatures,
+    hideBoard: config.hideGameBoard
+  });
 }
 
 // Initialize config
@@ -282,7 +300,6 @@ const modalManager = new ModalManager();
 
 // Add a global function to forcefully close all analysis modals
 function forceCloseAllModals() {
-  console.log('[Manual Runner] Closing all registered modals...');
   modalManager.closeAll();
 }
 
@@ -291,7 +308,6 @@ function closeRunningModal() {
   try {
     modalManager.close('running-modal');
     activeRunningModal = null;
-    console.log('[Manual Runner] Running modal closed successfully');
   } catch (error) {
     console.warn('[Manual Runner] Error closing running modal:', error);
   }
@@ -476,7 +492,6 @@ function getMaxTeamSize(serverResults = null) {
     // First try to get roomId from serverResults (most reliable)
     if (serverResults && serverResults.rewardScreen && serverResults.rewardScreen.roomId) {
       roomId = serverResults.rewardScreen.roomId;
-      console.log(`[Manual Runner] Using roomId from serverResults:`, roomId);
     }
     
     // Fallback to board context
@@ -484,7 +499,6 @@ function getMaxTeamSize(serverResults = null) {
       const boardContext = globalThis.state.board.getSnapshot().context;
       const selectedMap = boardContext.selectedMap || {};
       roomId = selectedMap.selectedRoom?.id;
-      console.log(`[Manual Runner] Using roomId from board context:`, roomId);
     }
     
     if (roomId && globalThis.state?.utils?.ROOMS) {
@@ -498,10 +512,7 @@ function getMaxTeamSize(serverResults = null) {
         roomData = rooms.find(room => room.file?.name === roomId || room.file?.id === roomId);
       }
       
-      console.log(`[Manual Runner] Room data found:`, roomData ? { id: roomData.id, maxTeamSize: roomData.maxTeamSize, file: roomData.file?.name } : 'not found');
-      
       if (roomData && typeof roomData.maxTeamSize === 'number') {
-        console.log(`[Manual Runner] Using maxTeamSize from room data:`, roomData.maxTeamSize);
         return roomData.maxTeamSize;
       }
     }
@@ -510,7 +521,6 @@ function getMaxTeamSize(serverResults = null) {
   }
   
   // Default fallback (most common is 5, but some maps are different)
-  console.log(`[Manual Runner] Using default maxTeamSize: 5`);
   return 5;
 }
 
@@ -561,7 +571,6 @@ function ensureManualMode() {
       globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
       return true;
     } else {
-      console.log('[Manual Runner] Already in manual mode');
       return false;
     }
   } catch (error) {
@@ -686,7 +695,6 @@ function setupGameTimerSubscription() {
       if (context.readableGrade) persistentLastGrade = context.readableGrade;
       if (context.rankPoints !== undefined) persistentLastRankPoints = context.rankPoints;
     });
-    console.log('[Manual Runner] Persistent gameTimer subscription set up');
   } catch (error) {
     console.warn('[Manual Runner] Error setting up gameTimer subscription:', error);
   }
@@ -697,24 +705,13 @@ function cleanupGameTimerSubscription() {
   if (gameTimerUnsubscribe) {
     gameTimerUnsubscribe();
     gameTimerUnsubscribe = null;
-    console.log('[Manual Runner] Persistent gameTimer subscription cleaned up');
   }
 }
 
 // Function to wait for game completion (tracking reward screen - 1 reward screen = 1 run)
 async function waitForGameCompletion(analysisId) {
-  console.log('[Manual Runner] Waiting for reward screen to open (1 reward screen = 1 run)...');
-  
-  // Use persistent tracking variables (updated by persistent gameTimer subscription)
-  console.log('[Manual Runner] Current tracked values:', { 
-    lastTick: persistentLastTick, 
-    lastGrade: persistentLastGrade, 
-    lastRankPoints: persistentLastRankPoints 
-  });
-  
   // Reset reward screen state at start (should already be false, but ensure it)
   rewardScreenOpen = false;
-  console.log('[Manual Runner] waitForGameCompletion: Reset rewardScreenOpen to false');
   
   // Promise-based approach: wait for callback to fire or timeout
   const maxWaitMs = 240000; // 4 minutes max
@@ -726,7 +723,6 @@ async function waitForGameCompletion(analysisId) {
     
     // Register callback for immediate resolution when reward screen opens
     rewardScreenOpenedCallback = () => {
-      console.log('[Manual Runner] Reward screen opened via callback - resolving immediately');
       if (intervalId) clearInterval(intervalId);
       rewardScreenOpenedCallback = null;
       resolve('callback');
@@ -785,6 +781,14 @@ async function waitForGameCompletion(analysisId) {
         resolve('polling');
         return;
       }
+
+      // Recovery: if no run is active and no reward UI, the first Start may have been ignored — nudge Start periodically
+      if (checkCount >= 8 && (checkCount - 8) % 10 === 0) {
+        if (!getOpenRewardsStateWithFallback() && !isBoardGameRunning()) {
+          console.warn('[Manual Runner] No reward screen and no active game — clicking Start again (recovery)');
+          clickStartButton();
+        }
+      }
       
       // Log progress every 10 seconds
       if (checkCount % 10 === 0) {
@@ -803,8 +807,7 @@ async function waitForGameCompletion(analysisId) {
   
   // Wait for completion or error
   try {
-    const triggerSource = await completionPromise;
-    console.log(`[Manual Runner] Game completed (triggered by: ${triggerSource})`);
+    await completionPromise;
   } catch (reason) {
     if (reason === 'invalid_id' || reason === 'stopped' || reason === 'force_stopped') {
       return createForceStopResult();
@@ -822,14 +825,7 @@ async function waitForGameCompletion(analysisId) {
     }
   }
   
-  // Process completion
-  console.log(`[Manual Runner] Tracked game data when reward screen opened:`, { 
-    lastTick: persistentLastTick, 
-    lastGrade: persistentLastGrade, 
-    lastRankPoints: persistentLastRankPoints 
-  });
-  
-  // Get game state from gameTimer context (for victory check and grade/rank) - like Board Analyzer
+  // Process completion — get game state from gameTimer context (for victory check and grade/rank) - like Board Analyzer
   const gameTimerContext = globalThis.state.gameTimer.getSnapshot().context;
   const gameState = gameTimerContext.state;
   
@@ -845,33 +841,23 @@ async function waitForGameCompletion(analysisId) {
   let rankPoints = gameTimerContext.rankPoints !== undefined ? gameTimerContext.rankPoints : persistentLastRankPoints;
   let currentTick = gameTimerContext.currentTick !== undefined ? gameTimerContext.currentTick : persistentLastTick;
   
-  console.log(`[Manual Runner] gameTimer context:`, {
-    state: gameState,
-    readableGrade: gameTimerContext.readableGrade,
-    rankPoints: gameTimerContext.rankPoints,
-    currentTick: gameTimerContext.currentTick
-  });
-  
   // Check pending serverResults first (captured by subscription)
   let serverResults = null;
   if (pendingServerResults.size > 0) {
     const lastSeed = Array.from(pendingServerResults.keys()).pop();
     serverResults = pendingServerResults.get(lastSeed);
-    console.log(`[Manual Runner] Got serverResults from pending map for game completion check`);
   }
   
   // Also check current board context as fallback
   const boardContext = globalThis.state.board.getSnapshot().context;
   if (!serverResults && boardContext?.serverResults) {
     serverResults = boardContext.serverResults;
-    console.log(`[Manual Runner] Got serverResults from board context`);
   }
   
   let completed = gameState === 'victory';
   
   if (serverResults?.rewardScreen) {
     const serverVictory = typeof serverResults.rewardScreen.victory === 'boolean' ? serverResults.rewardScreen.victory : false;
-    console.log(`[Manual Runner] Found serverResults - gameState: ${gameState}, serverVictory: ${serverVictory}, gameTicks: ${serverResults.rewardScreen.gameTicks}`);
     
     // Use serverResults as authoritative for victory
     completed = serverVictory;
@@ -879,13 +865,11 @@ async function waitForGameCompletion(analysisId) {
     // Use serverResults for tick info if available (especially important in manual mode)
     if (typeof serverResults.rewardScreen.gameTicks === 'number') {
       currentTick = serverResults.rewardScreen.gameTicks;
-      console.log(`[Manual Runner] Using gameTicks from serverResults: ${currentTick}`);
     }
     
     // Try to get rank points from serverResults.rank (not rankPoints) - like RunTracker
     if (typeof serverResults.rewardScreen.rank === 'number') {
       rankPoints = serverResults.rewardScreen.rank;
-      console.log(`[Manual Runner] Using rank from serverResults.rewardScreen.rank: ${rankPoints}`);
     }
     
     // Check if serverResults has grade field
@@ -893,39 +877,20 @@ async function waitForGameCompletion(analysisId) {
         serverResults.rewardScreen.grade !== '' && 
         typeof serverResults.rewardScreen.grade === 'string') {
       readableGrade = serverResults.rewardScreen.grade;
-      console.log(`[Manual Runner] Using grade from serverResults.rewardScreen.grade: ${readableGrade}`);
     }
     // Only calculate grade if neither gameTimer nor serverResults provided a valid one
     else if (!readableGrade || readableGrade === '' || readableGrade === 'F') {
       // Get maxTeamSize for proper grade calculation (fallback only) - pass serverResults for roomId lookup
       const maxTeamSize = getMaxTeamSize(serverResults);
       readableGrade = calculateGradeFromRankPoints(rankPoints, maxTeamSize);
-      console.log(`[Manual Runner] Calculated grade from rankPoints ${rankPoints} and maxTeamSize ${maxTeamSize}: ${readableGrade} (neither gameTimer nor serverResults provided grade)`);
-    } else {
-      // Trust gameTimer's grade (same as Board Analyzer does)
-      console.log(`[Manual Runner] Using grade from gameTimer: ${readableGrade}`);
-    }
-    
-    // Log all available serverResults fields for debugging
-    console.log(`[Manual Runner] serverResults.rewardScreen keys:`, Object.keys(serverResults.rewardScreen));
-    if (serverResults.rewardScreen.grade !== undefined) {
-      console.log(`[Manual Runner] serverResults.rewardScreen.grade:`, serverResults.rewardScreen.grade);
     }
   } else {
-    console.log(`[Manual Runner] No serverResults available yet, using gameState: ${gameState}`);
-    
     // Only calculate grade if gameTimer didn't provide a valid one (use game's calculation as authoritative)
     if (!readableGrade || readableGrade === '' || readableGrade === 'F') {
       const maxTeamSize = getMaxTeamSize(null);
       readableGrade = calculateGradeFromRankPoints(rankPoints, maxTeamSize);
-      console.log(`[Manual Runner] Calculated grade from rankPoints ${rankPoints} and maxTeamSize ${maxTeamSize}: ${readableGrade} (gameTimer didn't provide valid grade)`);
-    } else {
-      // Trust gameTimer's grade (same as Board Analyzer does)
-      console.log(`[Manual Runner] Using grade from gameTimer: ${readableGrade}`);
     }
   }
-  
-  console.log(`[Manual Runner] Final victory determination: ${completed}, ticks: ${currentTick}, grade: ${readableGrade}, rankPoints: ${rankPoints}`);
   
   return {
     ticks: currentTick,
@@ -950,7 +915,6 @@ function setupBoardSubscription() {
   let lastProcessedSeed = null;
   
   if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
-    console.log('[Manual Runner] Setting up board subscription for serverResults...');
     boardSubscription = globalThis.state.board.subscribe(({ context }) => {
       const serverResults = context.serverResults;
       if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') {
@@ -982,7 +946,7 @@ function setupBoardSubscription() {
       // Make a deep copy to avoid mutation
       pendingServerResults.set(seed, JSON.parse(JSON.stringify(serverResults)));
       
-      console.log('[Manual Runner] ServerResults captured, seed:', seed, 'victory:', serverResults.rewardScreen.victory, 'full serverResults:', serverResults);
+      console.log('[Manual Runner] ServerResults captured, seed:', seed, 'victory:', serverResults.rewardScreen.victory, 'ticks:', serverResults.rewardScreen.gameTicks);
     });
   }
 }
@@ -999,28 +963,21 @@ function setupRewardsScreenSubscription() {
   }
   
   if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.select) {
-    console.log('[Manual Runner] Setting up openRewards subscription to track reward screen...');
-    
     try {
       const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
       
       openRewardsSubscription = openRewards.subscribe((isOpen) => {
-        console.log('[Manual Runner] openRewards changed:', isOpen);
-        
         // Just track the state - don't auto-close here (we'll close it after detecting game completion)
         if (isOpen && !rewardScreenOpen) {
           // Reward screen just opened - this indicates a game completed
-          console.log('[Manual Runner] Reward screen opened - game completed! (1 reward screen = 1 run)');
           rewardScreenOpen = true;
           
           // Trigger immediate check if callback is registered
           if (rewardScreenOpenedCallback) {
-            console.log('[Manual Runner] Triggering immediate check via callback');
             rewardScreenOpenedCallback();
           }
         } else if (!isOpen && rewardScreenOpen) {
           // Reward screen just closed
-          console.log('[Manual Runner] Reward screen closed');
           rewardScreenOpen = false;
           
           // Notify any waiting code
@@ -1030,8 +987,6 @@ function setupRewardsScreenSubscription() {
           }
         }
       });
-      
-      console.log('[Manual Runner] openRewards subscription set up successfully');
     } catch (error) {
       console.warn('[Manual Runner] Error setting up openRewards subscription:', error);
     }
@@ -1040,21 +995,9 @@ function setupRewardsScreenSubscription() {
 
 // Function to close the reward screen (like btlucas fix.js)
 function closeRewardScreen() {
-  console.log('[Manual Runner] Attempting to close reward screen using ESC key...');
-  
-  // Check if there's a modal open (data-scroll-locked="1") - like btlucas fix.js
-  const bodyElement = document.body;
-  const scrollLocked = bodyElement.getAttribute('data-scroll-locked');
-  
-  if (scrollLocked === '1') {
-    console.log('[Manual Runner] Modal detected (data-scroll-locked="1") - pressing ESC to close...');
-  } else {
-    console.log('[Manual Runner] No data-scroll-locked="1" detected, but pressing ESC anyway...');
-  }
-  
-  // Use ESC key directly (like btlucas fix.js - simpler and more reliable)
+  const scrollLocked = document.body?.getAttribute('data-scroll-locked');
   dispatchEsc();
-  console.log('[Manual Runner] ESC key pressed to close reward screen');
+  console.log('[Manual Runner] ESC → close reward screen' + (scrollLocked === '1' ? ' (modal)' : ''));
 }
 
 // Helper function to find skip button (from btlucas fix.js)
@@ -1065,8 +1008,6 @@ function findSkipButton() {
     if (specificSkipButton) {
       const buttonText = specificSkipButton.textContent.trim();
       if (buttonText.includes('Skip') || buttonText.includes('Pular')) {
-        console.log('[Manual Runner] Found skip button using specific selector');
-        console.log('[Manual Runner] Button text:', `"${buttonText}"`);
         return specificSkipButton;
       }
     }
@@ -1076,8 +1017,6 @@ function findSkipButton() {
     for (const button of skipButtons) {
       const buttonText = button.textContent.trim();
       if (buttonText.includes('Skip') || buttonText.includes('Pular')) {
-        console.log('[Manual Runner] Found skip button using text search');
-        console.log('[Manual Runner] Button text:', `"${buttonText}"`);
         return button;
       }
     }
@@ -1087,8 +1026,6 @@ function findSkipButton() {
     for (const button of skipButtonsByAttr) {
       const buttonText = button.textContent.trim();
       if (buttonText.includes('Skip') || buttonText.includes('Pular')) {
-        console.log('[Manual Runner] Found skip button using data attributes');
-        console.log('[Manual Runner] Button text:', `"${buttonText}"`);
         return button;
       }
     }
@@ -1105,10 +1042,9 @@ async function handleSkipButton() {
   try {
     const skipButton = findSkipButton();
     if (skipButton) {
-      console.log('[Manual Runner] Skip button found - clicking to skip time-limit loss...');
+      console.log('[Manual Runner] Skip:', skipButton.textContent.trim());
       skipButton.click();
       await sleep(500); // Wait for skip to process
-      console.log('[Manual Runner] Skip button clicked successfully');
       
       // Close loot summary window after a short delay
       setTimeout(() => {
@@ -1157,7 +1093,6 @@ async function waitForRewardScreenToClose(maxWaitMs = 2500) {
   }
   
   if (!isCurrentlyOpen) {
-    console.log('[Manual Runner] Reward screen is already closed (verified via openRewards state)');
     rewardScreenOpen = false; // Sync the flag
     return true;
   }
@@ -1171,22 +1106,20 @@ async function waitForRewardScreenToClose(maxWaitMs = 2500) {
     // Set up callback for when subscription detects closure
     rewardScreenClosedCallback = () => {
       if (!callbackTriggered) {
-        console.log('[Manual Runner] Reward screen closed callback triggered');
         callbackTriggered = true;
         resolve(true);
       }
     };
     
     // Polling fallback in case subscription doesn't fire
+    let pollLogAt = 0;
     const checkInterval = setInterval(() => {
       try {
         const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
         const isOpen = openRewards.getSnapshot();
         
-        console.log(`[Manual Runner] Polling openRewards: ${isOpen}, rewardScreenOpen: ${rewardScreenOpen}`);
-        
         if (!isOpen) {
-          console.log('[Manual Runner] Reward screen closed (detected via polling)');
+          console.log('[Manual Runner] Reward screen closed (polling)');
           clearInterval(checkInterval);
           rewardScreenOpen = false;
           if (!callbackTriggered) {
@@ -1198,7 +1131,7 @@ async function waitForRewardScreenToClose(maxWaitMs = 2500) {
         
         const elapsed = performance.now() - startTime;
         if (elapsed > maxWaitMs) {
-          console.warn(`[Manual Runner] Timeout waiting for reward screen to close (${elapsed}ms elapsed)`);
+          console.warn(`[Manual Runner] Timeout waiting for reward screen to close (${Math.round(elapsed)}ms)`);
           clearInterval(checkInterval);
           if (!callbackTriggered) {
             callbackTriggered = true;
@@ -1207,9 +1140,10 @@ async function waitForRewardScreenToClose(maxWaitMs = 2500) {
           return;
         }
         
-        // Log progress every 500ms
-        if (Math.floor(elapsed / 500) !== Math.floor((elapsed - 100) / 500)) {
-          console.log(`[Manual Runner] Still waiting for reward screen to close... (${Math.floor(elapsed / 1000)}s elapsed)`);
+        // Log progress ~every 2s while waiting
+        if (elapsed - pollLogAt >= 2000) {
+          pollLogAt = elapsed;
+          console.log(`[Manual Runner] Still waiting for reward screen to close… (${Math.floor(elapsed / 1000)}s)`);
         }
         
       } catch (e) {
@@ -1230,7 +1164,6 @@ function cleanupRewardsScreenSubscription() {
     try {
       if (typeof openRewardsSubscription.unsubscribe === 'function') {
         openRewardsSubscription.unsubscribe();
-        console.log('[Manual Runner] openRewards subscription unsubscribed');
       }
     } catch (e) {
       console.warn('[Manual Runner] Error cleaning up openRewards subscription:', e);
@@ -1293,24 +1226,22 @@ async function waitForModCoordinationTasks(options = {}) {
     return ops;
   };
 
-  // Log initial coordination state
   const initialMeta = getAutomatorMetadata();
   const initialOps = getActiveOperations();
   const contextSuffix = context ? ` [${context}]` : '';
-  console.log(`[Manual Runner] Checking coordination flags${contextSuffix}:`, {
-    automatorRefilling: !!initialMeta.refilling,
-    automatorCollectingRewards: !!initialMeta.collectingRewards,
-    automatorHandlingDaycare: !!initialMeta.handlingDaycare,
-    automatorCollectingSeashell: !!initialMeta.collectingSeashell,
-    activeOperations: initialOps.length > 0 ? initialOps : 'none'
-  });
 
   let activeOperations = initialOps;
 
-  while (activeOperations.length > 0) {
-    const attemptLabel = waitAttempts + 1;
-    console.log(`[Manual Runner] Waiting for Bestiary Automator to finish ${activeOperations.join(', ')}... (${attemptLabel})${contextSuffix}`);
+  if (activeOperations.length > 0) {
+    console.log(`[Manual Runner] Coordination: waiting for Automator (${activeOperations.join(', ')})${contextSuffix}`, {
+      automatorRefilling: !!initialMeta.refilling,
+      automatorCollectingRewards: !!initialMeta.collectingRewards,
+      automatorHandlingDaycare: !!initialMeta.handlingDaycare,
+      automatorCollectingSeashell: !!initialMeta.collectingSeashell
+    });
+  }
 
+  while (activeOperations.length > 0) {
     const elapsed = performance.now() - start;
     if (elapsed >= maxWaitMs) {
       console.warn(`[Manual Runner] Waited ${Math.round(elapsed)}ms for Bestiary Automator${contextSuffix}, continuing analysis anyway`);
@@ -1324,9 +1255,7 @@ async function waitForModCoordinationTasks(options = {}) {
 
   if (waitAttempts > 0) {
     const elapsed = Math.round(performance.now() - start);
-    console.log(`[Manual Runner] Bestiary Automator finished after ${elapsed}ms, resuming analysis${contextSuffix}`);
-  } else {
-    console.log(`[Manual Runner] No Automator operations active, continuing immediately${contextSuffix}`);
+    console.log(`[Manual Runner] Automator idle after ${elapsed}ms${contextSuffix}`);
   }
 }
 
@@ -1336,18 +1265,63 @@ function prepareAttemptState(nextAttemptNumber) {
   persistentLastTick = 0;
   persistentLastGrade = 'F';
   persistentLastRankPoints = 0;
-  console.log(`[Manual Runner] Reset state for attempt ${nextAttemptNumber}`);
+}
+
+/** True when the board reports an active run (same signal as Better Tasker). */
+function isBoardGameRunning() {
+  try {
+    return !!globalThis.state.board.getSnapshot().context.gameStarted;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * After clicking Start, confirm the run actually began. Retries the click if the board never
+ * enters gameStarted (ignored click, overlay, wrong button match, etc.).
+ * @returns {'started'|'aborted'|'failed'}
+ */
+async function waitForGameStartAfterClick(analysisId) {
+  const maxWaitPerTryMs = 5000;
+  const maxRetries = 4;
+  const pollMs = 120;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const deadline = performance.now() + maxWaitPerTryMs;
+    while (performance.now() < deadline) {
+      if (shouldAbortAnalysisLoop(analysisId)) {
+        return 'aborted';
+      }
+      if (getOpenRewardsStateWithFallback()) {
+        console.log('[Manual Runner] Reward screen opened while waiting for game start');
+        return 'started';
+      }
+      if (isBoardGameRunning()) {
+        if (attempt > 1) {
+          console.log(`[Manual Runner] Game started after ${attempt} attempt(s) to click Start`);
+        }
+        return 'started';
+      }
+      await sleep(pollMs);
+    }
+    console.warn(`[Manual Runner] No active game after ${maxWaitPerTryMs}ms (start click ${attempt}/${maxRetries}) — clicking Start again`);
+    clickStartButton();
+    await sleep(200);
+  }
+  console.error('[Manual Runner] Failed to start a run: board never entered gameStarted');
+  return 'failed';
 }
 
 async function ensureGameStopped(maxChecks = 5, delayMs = 80) {
   const startTime = performance.now();
   let stopWaitCount = 0;
-  console.log('[Manual Runner] Checking if game has stopped...');
   while (stopWaitCount < maxChecks) {
     const boardContext = globalThis.state.board.getSnapshot().context;
     if (!boardContext.gameStarted) {
       const elapsed = Math.round(performance.now() - startTime);
-      console.log(`[Manual Runner] Game stopped after ${elapsed}ms (${stopWaitCount} checks)`);
+      if (elapsed > 50 || stopWaitCount > 0) {
+        console.log(`[Manual Runner] Game stopped after ${elapsed}ms (${stopWaitCount} checks)`);
+      }
       break;
     }
     await sleep(delayMs);
@@ -1355,14 +1329,12 @@ async function ensureGameStopped(maxChecks = 5, delayMs = 80) {
   }
   
   if (stopWaitCount >= maxChecks) {
-    console.log(`[Manual Runner] Game state still showing as started after ${stopWaitCount * delayMs}ms, continuing anyway`);
+    console.warn(`[Manual Runner] gameStarted still true after ${stopWaitCount * delayMs}ms, continuing`);
   }
 }
 
 // Function to auto-sell creatures from reward screen
 async function autoSellCreatures() {
-  console.log('[Manual Runner] Attempting to auto-sell creatures...');
-  
   // Wait a bit for reward screen to fully render
   await sleep(300);
   
@@ -1378,7 +1350,6 @@ async function autoSellCreatures() {
     
     if (sellButtonTexts.includes(buttonText) || hasSellImg) {
       sellButton = button;
-      console.log('[Manual Runner] Found sell button:', buttonText);
       break;
     }
   }
@@ -1389,17 +1360,14 @@ async function autoSellCreatures() {
   }
   
   try {
-    // Click the sell button
-    console.log('[Manual Runner] Clicking sell button...');
+    const soldLabel = sellButton.textContent.trim() || 'sell';
     sellButton.click();
     await sleep(500); // Wait for sell action to complete
     
-    // Press ESC to close the reward screen
-    console.log('[Manual Runner] Pressing ESC to close reward screen...');
     dispatchEsc();
     await sleep(200);
     
-    console.log('[Manual Runner] Auto-sell completed');
+    console.log('[Manual Runner] Auto-sell:', soldLabel);
     return true;
   } catch (error) {
     console.error('[Manual Runner] Error during auto-sell:', error);
@@ -1412,14 +1380,11 @@ async function ensureRewardScreenHandled() {
   try {
     const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
     isRewardScreenOpen = openRewards.getSnapshot();
-    console.log(`[Manual Runner] Verified reward screen state: ${isRewardScreenOpen}, rewardScreenOpen flag: ${rewardScreenOpen}`);
   } catch (e) {
-    console.log('[Manual Runner] Could not check openRewards state, using flag');
     isRewardScreenOpen = rewardScreenOpen;
   }
 
   if (!isRewardScreenOpen) {
-    console.log('[Manual Runner] Reward screen is not open, skipping close step');
     return;
   }
 
@@ -1428,14 +1393,12 @@ async function ensureRewardScreenHandled() {
   // Auto-sell creatures if enabled
   let autoSellSuccess = false;
   if (config.enableAutoSellCreatures) {
-    console.log('[Manual Runner] Auto-sell enabled, attempting to sell creatures...');
     autoSellSuccess = await autoSellCreatures();
   }
 
   // If auto-sell didn't succeed or wasn't enabled, close reward screen normally
   if (!autoSellSuccess) {
     const closeStart = performance.now();
-    console.log('[Manual Runner] Closing reward screen after game completion...');
     closeRewardScreen();
     await sleep(200);
 
@@ -1452,14 +1415,13 @@ async function ensureRewardScreenHandled() {
         if (isOpen) {
           console.error('[Manual Runner] Reward screen still open after ESC key - this may cause issues');
         } else {
-          console.log('[Manual Runner] Reward screen closed after ESC key');
           rewardScreenOpen = false;
         }
       } catch (e) {
-        console.log('[Manual Runner] Could not check reward screen state after ESC');
+        /* openRewards unavailable */
       }
     } else {
-      console.log(`[Manual Runner] Reward screen closed successfully in ${closeElapsed}ms, processing result...`);
+      console.log(`[Manual Runner] Reward screen closed in ${closeElapsed}ms`);
     }
   } else {
     // Auto-sell handled closing, just verify it's closed
@@ -1469,10 +1431,9 @@ async function ensureRewardScreenHandled() {
       const isOpen = openRewards.getSnapshot();
       if (!isOpen) {
         rewardScreenOpen = false;
-        console.log('[Manual Runner] Reward screen closed after auto-sell');
       }
     } catch (e) {
-      console.log('[Manual Runner] Could not verify reward screen state after auto-sell');
+      // openRewards may be unavailable briefly after ESC; subscription still tracks rewardScreenOpen
     }
   }
 }
@@ -1485,7 +1446,6 @@ async function waitForServerResults(maxWaitTime = 2000) {
     const contextServerResults = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults;
     if (contextServerResults && contextServerResults.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
       serverResults = JSON.parse(JSON.stringify(contextServerResults));
-      console.log('[Manual Runner] Got serverResults from context, seed:', serverResults.seed, 'victory:', serverResults.rewardScreen.victory);
       break;
     }
 
@@ -1493,7 +1453,6 @@ async function waitForServerResults(maxWaitTime = 2000) {
       const lastSeed = Array.from(pendingServerResults.keys()).pop();
       serverResults = pendingServerResults.get(lastSeed);
       pendingServerResults.delete(lastSeed);
-      console.log('[Manual Runner] Got serverResults from pending map, seed:', serverResults?.seed, 'victory:', serverResults?.rewardScreen?.victory);
       break;
     }
 
@@ -1516,7 +1475,6 @@ function trackStaminaUsage(serverResults, attemptNumber) {
   if (typeof serverResults?.next?.playerExpDiff === 'number') {
     attemptStaminaSpent = serverResults.next.playerExpDiff;
     totalStaminaSpent += attemptStaminaSpent;
-    console.log(`[Manual Runner] Stamina spent this attempt: ${attemptStaminaSpent}, total: ${totalStaminaSpent}`);
   } else {
     console.warn(`[Manual Runner] No valid playerExpDiff found in serverResults for attempt ${attemptNumber}`);
   }
@@ -1592,7 +1550,6 @@ async function handleSkipDetection(message) {
   if (skipButton) {
     if (!skipInProgress) {
       skipInProgress = true;
-      console.log('[Manual Runner] Skip button detected — handling...');
       await handleSkipButton();
       setTimeout(() => { skipInProgress = false; }, 1200);
       return true;
@@ -1713,7 +1670,23 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       await sleep(200);
 
-      const result = await waitForGameCompletion(thisAnalysisId);
+      const startOutcome = await waitForGameStartAfterClick(thisAnalysisId);
+      let result;
+      if (startOutcome === 'aborted') {
+        result = createForceStopResult();
+      } else if (startOutcome === 'failed') {
+        result = {
+          ticks: 0,
+          grade: 'F',
+          rankPoints: 0,
+          completed: false,
+          forceStopped: false,
+          failedToStart: true
+        };
+        console.warn('[Manual Runner] Skipping wait for reward screen — run never started');
+      } else {
+        result = await waitForGameCompletion(thisAnalysisId);
+      }
       if (result && result.skipped) {
         skipCount += 1;
       }
@@ -1733,7 +1706,6 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       if (serverResults && serverResults.rewardScreen) {
         const serverVictory = serverResults.rewardScreen.victory === true;
-        console.log(`[Manual Runner] Victory status - serverResults: ${serverVictory}, result.completed: ${result.completed}`);
         if (typeof serverResults.rewardScreen.victory === 'boolean') {
           isVictory = serverVictory;
         }
@@ -1741,7 +1713,6 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         console.warn('[Manual Runner] No serverResults available, using result.completed:', result.completed);
       }
 
-      console.log(`[Manual Runner] Final victory determination: ${isVictory}`);
       updateVictoryDefeatCounters(isVictory);
 
       const attemptStaminaSpent = trackStaminaUsage(serverResults, attemptCount);
@@ -1767,28 +1738,14 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       allAttempts.push(attemptData);
 
-      console.log(`[Manual Runner] Attempt ${attemptCount} completed:`, {
+      console.log(`[Manual Runner] Attempt ${attemptCount} done:`, {
+        victory: isVictory,
         ticks: result.ticks,
         grade: result.grade,
         rankPoints: result.rankPoints,
-        completed: isVictory,
-        victory: isVictory,
-        victoryFromServer: serverResults?.rewardScreen?.victory,
-        time: runTime,
-        hasServerResults: !!serverResults,
-        defeatsCount: defeatsCount,
-        totalStaminaSpent: totalStaminaSpent,
-        serverResultsKeys: serverResults ? Object.keys(serverResults) : null
+        staminaThis: attemptStaminaSpent,
+        staminaTotal: totalStaminaSpent
       });
-
-      if (serverResults) {
-        console.log('[Manual Runner] serverResults structure:', {
-          hasRewardScreen: !!serverResults.rewardScreen,
-          hasNext: !!serverResults.next,
-          rewardScreenKeys: serverResults.rewardScreen ? Object.keys(serverResults.rewardScreen) : null,
-          nextKeys: serverResults.next ? Object.keys(serverResults.next) : null
-        });
-      }
       
       // Check if stop was requested during this run (after recording attempt data)
       if (!analysisState.isRunning()) {
@@ -1809,13 +1766,10 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       // Handle maxFloor mode separately
       if (config.stopCondition === 'maxFloor' && isVictory) {
         const currentFloor = getCurrentFloor();
-        console.log(`[Manual Runner] Victory on floor ${currentFloor}, target max floor: ${config.maxFloor}`);
-        
         if (currentFloor >= config.maxFloor) {
           // Reached or exceeded max floor, stop
           const totalTime = performance.now() - startTime;
-          console.log(`[Manual Runner] ✓ VICTORY DETECTED on floor ${currentFloor} (target: ${config.maxFloor}). Stopping analysis.`);
-          console.log(`[Manual Runner] Maximum floor reached after ${attemptCount} attempts! Total time: ${formatMilliseconds(totalTime)}`);
+          console.log(`[Manual Runner] ✓ Max floor ${currentFloor}/${config.maxFloor} — stopping (${attemptCount} attempts, ${formatMilliseconds(totalTime)})`);
           
           const finalResult = {
             ...result,
@@ -1833,35 +1787,30 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
           };
         } else {
           // Advance to next floor and continue
-          console.log(`[Manual Runner] Victory on floor ${currentFloor}, advancing to floor ${currentFloor + 1}...`);
+          console.log(`[Manual Runner] Victory floor ${currentFloor} → ${currentFloor + 1}`);
           advanceToNextFloor();
           await sleep(300); // Wait for floor change to take effect
           
           // Continue loop to next attempt on new floor
           const cleanupStart = performance.now();
-          console.log('[Manual Runner] Starting post-victory cleanup before floor advance...');
           
           await ensureGameStopped();
           
           if (rewardScreenOpen) {
-            console.log('[Manual Runner] Reward screen is open, closing it...');
             closeRewardScreen();
           }
 
           const screenClosed = await waitForRewardScreenToClose(3000);
-          if (screenClosed) {
-            console.log('[Manual Runner] Reward screen closed, ready to continue');
-          } else {
+          if (!screenClosed) {
             console.warn('[Manual Runner] Reward screen did not close in time, continuing anyway');
           }
 
           await waitForModCoordinationTasks({ context: `post-victory cleanup ${attemptCount}` });
 
-          console.log(`[Manual Runner] Waiting ${GAME_RESTART_DELAY_MS}ms before next attempt on new floor...`);
           await sleep(GAME_RESTART_DELAY_MS);
           
           const cleanupElapsed = Math.round(performance.now() - cleanupStart);
-          console.log(`[Manual Runner] Cleanup complete in ${cleanupElapsed}ms, ready to start attempt ${attemptCount + 1} on floor ${currentFloor + 1}`);
+          console.log(`[Manual Runner] Next attempt on floor ${currentFloor + 1} after ${cleanupElapsed}ms`);
           
           // Continue to next iteration
           continue;
@@ -1880,19 +1829,8 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         if (config.stopWhenTicksReached > 0) {
           if (result.ticks <= config.stopWhenTicksReached) {
             const totalTime = performance.now() - startTime;
-            console.log(`[Manual Runner] ✓ VICTORY DETECTED${targetRankPoints != null ? ` with rank ${result.rankPoints} (target S+${targetRankPoints})` : ''} and ticks ${result.ticks} <= ${config.stopWhenTicksReached}. Stopping analysis.`);
-            console.log(`[Manual Runner] Victory achieved after ${attemptCount} attempts! Total time: ${formatMilliseconds(totalTime)}`);
-            console.log('[Manual Runner] Result details:', {
-              ticks: result.ticks,
-              grade: result.grade,
-              rankPoints: result.rankPoints,
-              serverVictory: serverResults?.rewardScreen?.victory,
-              isVictory: isVictory,
-              resultCompleted: result.completed
-            });
-            console.log('[Manual Runner] About to return from runUntilVictory with success: true');
-            console.log('[Manual Runner] Current analysisState:', analysisState.state);
-            console.log('[Manual Runner] All attempts collected:', allAttempts.length);
+            const rankSuffix = targetRankPoints != null ? `rank ${result.rankPoints} (S+${targetRankPoints})` : `rank ${result.rankPoints}`;
+            console.log(`[Manual Runner] ✓ Stop: victory, ${rankSuffix}, ticks ${result.ticks} ≤ ${config.stopWhenTicksReached} — ${formatMilliseconds(totalTime)} (${attemptCount} attempts)`);
 
             const finalResult = {
               ...result,
@@ -1908,33 +1846,15 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
               allAttempts
             };
 
-            console.log('[Manual Runner] Returning victory result:', {
-              success: returnValue.success,
-              attempts: returnValue.attempts,
-              totalTimeMs: returnValue.totalTimeMs,
-              allAttemptsLength: returnValue.allAttempts.length
-            });
-
             return returnValue;
           } else {
             victoryContinueDueToTicks = true;
-            console.log(`[Manual Runner] ✓ VICTORY DETECTED${targetRankPoints != null ? ` with rank ${result.rankPoints} (target S+${targetRankPoints})` : ''} but ticks ${result.ticks} > ${config.stopWhenTicksReached}, continuing to find better run...`);
+            console.log(`[Manual Runner] ✓ Victory but ticks ${result.ticks} > ${config.stopWhenTicksReached} — searching for better run`);
           }
         } else {
           const totalTime = performance.now() - startTime;
-          console.log(`[Manual Runner] ✓ VICTORY DETECTED${targetRankPoints != null ? ` with rank ${result.rankPoints} (target S+${targetRankPoints})` : ''}. Stopping analysis.`);
-          console.log(`[Manual Runner] Victory achieved after ${attemptCount} attempts! Total time: ${formatMilliseconds(totalTime)}`);
-          console.log('[Manual Runner] Result details:', {
-            ticks: result.ticks,
-            grade: result.grade,
-            rankPoints: result.rankPoints,
-            serverVictory: serverResults?.rewardScreen?.victory,
-            isVictory: isVictory,
-            resultCompleted: result.completed
-          });
-          console.log('[Manual Runner] About to return from runUntilVictory with success: true');
-          console.log('[Manual Runner] Current analysisState:', analysisState.state);
-          console.log('[Manual Runner] All attempts collected:', allAttempts.length);
+          const rankSuffix = targetRankPoints != null ? `rank ${result.rankPoints} (S+${targetRankPoints})` : `rank ${result.rankPoints}`;
+          console.log(`[Manual Runner] ✓ Stop: victory, ${rankSuffix}, ticks ${result.ticks} — ${formatMilliseconds(totalTime)} (${attemptCount} attempts)`);
 
           const finalResult = {
             ...result,
@@ -1950,47 +1870,33 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
             allAttempts
           };
 
-          console.log('[Manual Runner] Returning victory result:', {
-            success: returnValue.success,
-            attempts: returnValue.attempts,
-            totalTimeMs: returnValue.totalTimeMs,
-            allAttemptsLength: returnValue.allAttempts.length
-          });
-
           return returnValue;
         }
       }
 
-      if (victoryContinueDueToTicks) {
-        console.log('[Manual Runner] Victory found but didn\'t meet ticks threshold, restarting to find better run...');
-      } else {
-        console.log(`[Manual Runner] Defeat on attempt ${attemptCount} - will restart`);
+      if (!victoryContinueDueToTicks && !isVictory) {
+        console.log(`[Manual Runner] Defeat on attempt ${attemptCount} — retry`);
       }
 
       const cleanupStart = performance.now();
-      console.log('[Manual Runner] Starting post-attempt cleanup...');
       
       await ensureGameStopped();
 
       if (rewardScreenOpen) {
-        console.log('[Manual Runner] Reward screen is open, closing it...');
         closeRewardScreen();
       }
 
       const screenClosed = await waitForRewardScreenToClose(3000);
-      if (screenClosed) {
-        console.log('[Manual Runner] Reward screen closed, ready to continue');
-      } else {
+      if (!screenClosed) {
         console.warn('[Manual Runner] Reward screen did not close in time, continuing anyway');
       }
 
       await waitForModCoordinationTasks({ context: `post-attempt cleanup ${attemptCount}` });
 
-      console.log(`[Manual Runner] Waiting ${GAME_RESTART_DELAY_MS}ms before next attempt...`);
       await sleep(GAME_RESTART_DELAY_MS);
       
       const cleanupElapsed = Math.round(performance.now() - cleanupStart);
-      console.log(`[Manual Runner] Cleanup complete in ${cleanupElapsed}ms, ready to start attempt ${attemptCount + 1}`);
+      console.log(`[Manual Runner] Ready attempt ${attemptCount + 1} (+${cleanupElapsed}ms cleanup)`);
     }
     
     const totalTime = performance.now() - startTime;
@@ -2013,14 +1919,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       allAttempts: allAttempts
     };
   } finally {
-    // Cleanup - ensure state is reset
-    console.log('[Manual Runner] runUntilVictory finally block entered');
-    console.log('[Manual Runner] Current state before reset:', analysisState.state);
-    console.log('[Manual Runner] attemptCount at finally:', attemptCount);
-    console.log('[Manual Runner] allAttempts length at finally:', allAttempts.length);
     analysisState.reset();
-    console.log('[Manual Runner] State after reset:', analysisState.state);
-    console.log('[Manual Runner] runUntilVictory finally block completed');
     
     // Cleanup board subscription
     cleanupBoardSubscription();
@@ -2208,7 +2107,7 @@ function hasAllyCreaturesOnBoard() {
 function createConfigPanel() {
   // Reload config from localStorage to ensure we have the latest values
   // This ensures the config is always current, even if the mod was reloaded
-  const currentConfig = loadConfig();
+  const currentConfig = loadConfig({ silent: true });
   Object.assign(config, currentConfig);
   
   const content = document.createElement('div');
@@ -2353,8 +2252,6 @@ function createConfigPanel() {
       primary: true,
       disabled: !hasAlly || !analysisState.canStart(), // Disable if no ally creatures or already running
       onClick: () => {
-        console.log('[Manual Runner] Start button clicked, canStart:', analysisState.canStart(), 'state:', analysisState.state);
-        
         // Double-check ally creatures (in case board changed since panel opened)
         if (!hasAllyCreaturesOnBoard()) {
           console.log('[Manual Runner] No ally creatures on board, cannot start');
@@ -2386,9 +2283,7 @@ function createConfigPanel() {
         // Clamp maxFloor to valid range
         if (config.maxFloor < 0) config.maxFloor = 0;
         if (config.maxFloor > 15) config.maxFloor = 15;
-        // Save to localStorage (preferred method)
-        saveConfig();
-        // Also save via API for backward compatibility
+        saveConfig({ silent: true });
         api.service.updateScriptConfig(context.hash, {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
@@ -2397,14 +2292,7 @@ function createConfigPanel() {
           stopWhenTicksReached: config.stopWhenTicksReached,
           maxFloor: config.maxFloor
         });
-        console.log('[Manual Runner] Config saved on Start,', {
-          hideGameBoard: config.hideGameBoard,
-          stopCondition: config.stopCondition,
-          enableAutoRefillStamina: config.enableAutoRefillStamina,
-          enableAutoSellCreatures: config.enableAutoSellCreatures,
-          stopWhenTicksReached: config.stopWhenTicksReached,
-          maxFloor: config.maxFloor
-        });
+        logConfigSummary('Start');
         
         // Close config panel
         if (activeConfigPanel) {
@@ -2434,9 +2322,7 @@ function createConfigPanel() {
         // Clamp maxFloor to valid range
         if (config.maxFloor < 0) config.maxFloor = 0;
         if (config.maxFloor > 15) config.maxFloor = 15;
-        // Save to localStorage (preferred method)
-        saveConfig();
-        // Also save via API for backward compatibility
+        saveConfig({ silent: true });
         api.service.updateScriptConfig(context.hash, {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
@@ -2445,14 +2331,7 @@ function createConfigPanel() {
           stopWhenTicksReached: config.stopWhenTicksReached,
           maxFloor: config.maxFloor
         });
-        console.log('[Manual Runner] Config saved', {
-          hideGameBoard: config.hideGameBoard,
-          stopCondition: config.stopCondition,
-          enableAutoRefillStamina: config.enableAutoRefillStamina,
-          enableAutoSellCreatures: config.enableAutoSellCreatures,
-          stopWhenTicksReached: config.stopWhenTicksReached,
-          maxFloor: config.maxFloor
-        });
+        logConfigSummary('Config saved');
       }
     },
     {
@@ -2594,11 +2473,9 @@ function showRunningAnalysisModal(
   stopBtn.textContent = t('mods.manualRunner.stop');
   stopBtn.className = 'manual-runner-button';
   stopBtn.addEventListener('click', (e) => {
-    console.log('[Manual Runner] Stop button clicked, current state:', analysisState.state);
-    
       // If already stopping, force-stop everything immediately
       if (analysisState.isStopping()) {
-        console.log('[Manual Runner] Already stopping - force-stopping everything now');
+        console.log('[Manual Runner] Stop — force (already stopping)');
         analysisState.forceStop();
         
         // Force cleanup immediately
@@ -2625,8 +2502,9 @@ function showRunningAnalysisModal(
         return;
       }
     
+    const prev = analysisState.state;
     analysisState.stop();
-    console.log('[Manual Runner] After stop(), state:', analysisState.state);
+    console.log(`[Manual Runner] Stop (${prev} → ${analysisState.state})`);
     stopBtn.disabled = true;
     stopBtn.textContent = t('mods.manualRunner.stopping');
   });
@@ -2764,14 +2642,6 @@ async function ensureResultsSafeToOpen(timeoutMs = ENSURE_RESULTS_SAFE_TIMEOUT_M
 
 // Show results modal
 async function showResultsModal(results) {
-  console.log('[Manual Runner] showResultsModal called with results:', {
-    success: results?.success,
-    attempts: results?.attempts,
-    hasAllAttempts: !!results?.allAttempts,
-    allAttemptsLength: results?.allAttempts?.length,
-    hasFinalResult: !!results?.finalResult
-  });
-
   // Guard against opening while body is scroll-locked (would crash)
   const safeToOpen = await ensureResultsSafeToOpen(ENSURE_RESULTS_SAFE_TIMEOUT_MS);
   if (!safeToOpen) {
@@ -2781,7 +2651,6 @@ async function showResultsModal(results) {
   }
 
   setTimeout(() => {
-    console.log('[Manual Runner] showResultsModal setTimeout callback executing...');
     const content = document.createElement('div');
     
     // Add a note if stopped by user
@@ -3148,14 +3017,10 @@ async function showResultsModal(results) {
       ]
     });
     
-    console.log('[Manual Runner] Modal created by API:', modal);
-    console.log('[Manual Runner] Modal type:', typeof modal);
-    
     // Handle modal - it might be a function (closeModal) or an object
     let modalObject = modal;
     if (typeof modal === 'function') {
       // If it's a function, wrap it in an object with close method
-      console.log('[Manual Runner] Modal is a function, wrapping it...');
       modalObject = {
         close: modal,
         element: null, // Will find in DOM if needed
@@ -3176,7 +3041,6 @@ async function showResultsModal(results) {
         const header = el.querySelector('.widget-top-text');
         if (header && header.textContent.includes(t('mods.manualRunner.resultsTitle'))) {
           modalObject.element = el;
-          console.log('[Manual Runner] Found modal element in DOM and attached to modalObject');
         }
       });
     }, 50);
@@ -3184,34 +3048,20 @@ async function showResultsModal(results) {
     // Register results modal with modal manager (like Board Analyzer)
     modalManager.register('results-modal', modalObject);
     
-    console.log('[Manual Runner] Results modal created and registered');
-    console.log('[Manual Runner] Modal object details:', {
-      hasModal: !!modalObject,
-      hasClose: typeof modalObject?.close === 'function',
-      hasElement: !!modalObject?.element,
-      type: modalObject?.type
-    });
-    
     return modalObject;
   }, 100);
-  
-  console.log('[Manual Runner] showResultsModal returned (setTimeout scheduled)');
 }
 
 // Main entry point - Run the analysis
 async function runAnalysis() {
-  console.log('[Manual Runner] runAnalysis called, current state:', analysisState.state, 'canStart:', analysisState.canStart());
-  
   if (!analysisState.canStart()) {
-    console.log('[Manual Runner] Already running, cannot start new analysis. State:', analysisState.state);
+    console.log('[Manual Runner] Already running (state:', analysisState.state + ')');
     return;
   }
   
   // Close any existing modals using modal manager (like Board Analyzer)
   modalManager.closeByType(MODAL_TYPES.RUNNING);
   activeRunningModal = null;
-  
-  console.log('[Manual Runner] Cleared any existing running modals');
   
   let runningModal = null;
   
@@ -3254,8 +3104,6 @@ async function runAnalysis() {
     );
     activeRunningModal = runningModal;
     
-    // Run until victory with status updates
-    console.log('[Manual Runner] Starting runUntilVictory, about to await...');
     const results = await runUntilVictory(targetRankPoints, (status) => {
       updateTextContent('manual-runner-progress', t('mods.manualRunner.attempt').replace('{n}', status.attempts));
 
@@ -3286,49 +3134,20 @@ async function runAnalysis() {
       }
     });
     
-    console.log('[Manual Runner] runUntilVictory returned! Results:', results);
-    console.log('[Manual Runner] Results type:', typeof results);
-    console.log('[Manual Runner] Results keys:', results ? Object.keys(results) : 'null');
-    console.log('[Manual Runner] Results.success:', results?.success);
-    console.log('[Manual Runner] Results.attempts:', results?.attempts);
-    console.log('[Manual Runner] Results.allAttempts length:', results?.allAttempts?.length);
+    console.log('[Manual Runner] Run finished:', {
+      success: results?.success,
+      attempts: results?.attempts,
+      forceStopped: results?.forceStopped,
+      allAttempts: results?.allAttempts?.length
+    });
     
-    // Always show results, even if analysis was stopped early
-    console.log('[Manual Runner] Analysis completed, showing results:', results);
-    console.log('[Manual Runner] Current runningModal state:', !!runningModal);
-    console.log('[Manual Runner] Current activeRunningModal state:', !!activeRunningModal);
-    
-    // Force close all modals (like Board Analyzer does)
-    console.log('[Manual Runner] Step 1: Calling forceCloseAllModals() first time...');
     forceCloseAllModals();
-    console.log('[Manual Runner] Step 1: forceCloseAllModals() completed');
-    
-    // Ensure we do NOT close the running modal twice.
-    // Step 1 already closed all registered modals via ModalManager.
-    if (runningModal) {
-      console.log('[Manual Runner] Step 2: Skipping runningModal close (already closed by forceCloseAllModals)');
-    }
     runningModal = null;
     activeRunningModal = null;
     
-    // Small delay to ensure UI updates properly (like Board Analyzer)
-    console.log('[Manual Runner] Step 3: Waiting', UI_UPDATE_DELAY_MS, 'ms for UI update...');
     await sleep(UI_UPDATE_DELAY_MS);
-    console.log('[Manual Runner] Step 3: Wait completed');
     
-    // Show the results modal (works for both completed and partial results)
-    // Don't call forceCloseAllModals again before showing results - let the results modal show
-    console.log('[Manual Runner] Step 4: About to call showResultsModal()...');
-    console.log('[Manual Runner] Step 4: Results being passed:', {
-      success: results?.success,
-      attempts: results?.attempts,
-      hasAllAttempts: !!results?.allAttempts,
-      allAttemptsLength: results?.allAttempts?.length
-    });
-    
-    // Show results modal - it handles its own cleanup
     showResultsModal(results);
-    console.log('[Manual Runner] Step 4: showResultsModal() called');
     
   } catch (error) {
     console.error('[Manual Runner] Analysis error:', error);
@@ -3488,8 +3307,7 @@ context.exports = {
   run: runAnalysis,
   updateConfig: (newConfig) => {
     Object.assign(config, newConfig);
-    // Save to localStorage (preferred method)
-    saveConfig();
+    saveConfig({ silent: true });
     // Also save via API for backward compatibility
     api.service.updateScriptConfig(context.hash, {
       hideGameBoard: config.hideGameBoard

@@ -1120,6 +1120,8 @@ async function playerExists(playerName) {
 
 // Player profile cache (1 hour TTL)
 const playerProfileCache = createTTLCache(60 * 60 * 1000);
+/** Coalesce concurrent fetchPlayerProfile(name) calls (same tick / modal open). */
+const profileFetchInFlight = new Map();
 
 // Guild points cache (5 minutes TTL)
 const guildPointsCache = createTTLCache(5 * 60 * 1000);
@@ -1139,6 +1141,11 @@ async function fetchPlayerProfile(playerName) {
   const cached = playerProfileCache.get(playerName);
   if (cached !== null) {
     return cached;
+  }
+
+  const inFlight = profileFetchInFlight.get(playerName);
+  if (inFlight) {
+    return inFlight;
   }
   
   const doFetch = async (retryCount) => {
@@ -1175,14 +1182,22 @@ async function fetchPlayerProfile(playerName) {
     playerProfileCache.set(playerName, profileData);
     return profileData;
   };
-  try {
-    return await withProfileRateLimit(() => doFetch(0));
-  } catch (error) {
-    if (!error.message || (!error.message.includes('fetch') && !error.message.includes('network'))) {
-      console.error('[Guilds] Error fetching player profile:', error);
+
+  const promise = (async () => {
+    try {
+      return await withProfileRateLimit(() => doFetch(0));
+    } catch (error) {
+      if (!error.message || (!error.message.includes('fetch') && !error.message.includes('network'))) {
+        console.error('[Guilds] Error fetching player profile:', error);
+      }
+      return null;
+    } finally {
+      profileFetchInFlight.delete(playerName);
     }
-    return null;
-  }
+  })();
+
+  profileFetchInFlight.set(playerName, promise);
+  return promise;
 }
 
 // Calculate level from experience
@@ -1215,6 +1230,35 @@ async function fetchTRPC(method) {
   }
 }
 
+// One highscores payload is reused for all WR checks during a short window (avoids N identical fetches per modal)
+const roomsHighscoresCacheState = { data: null, expiresAt: 0, inFlight: null };
+const ROOMS_HIGHSCORES_TTL_MS = 20000;
+
+/** Max guilds computing points at once in the browser list (profile API is shared across all). */
+const GUILD_BROWSER_POINTS_CONCURRENCY = 3;
+
+async function getRoomsHighscoresCached() {
+  const now = Date.now();
+  if (roomsHighscoresCacheState.data != null && now < roomsHighscoresCacheState.expiresAt) {
+    return roomsHighscoresCacheState.data;
+  }
+  if (roomsHighscoresCacheState.inFlight) {
+    return roomsHighscoresCacheState.inFlight;
+  }
+  roomsHighscoresCacheState.inFlight = fetchTRPC('game.getRoomsHighscores')
+    .then((data) => {
+      roomsHighscoresCacheState.data = data;
+      roomsHighscoresCacheState.expiresAt = Date.now() + ROOMS_HIGHSCORES_TTL_MS;
+      roomsHighscoresCacheState.inFlight = null;
+      return data;
+    })
+    .catch((err) => {
+      roomsHighscoresCacheState.inFlight = null;
+      throw err;
+    });
+  return roomsHighscoresCacheState.inFlight;
+}
+
 // Count records in a category (ticks/rank/floor) where predicate(userName) is true
 function countRecordsInCategory(categoryObj, predicate) {
   if (!categoryObj || typeof categoryObj !== 'object') return 0;
@@ -1229,7 +1273,7 @@ function countRecordsInCategory(categoryObj, predicate) {
 // Check if any guild member holds a world record (ticks, rank, or floor)
 async function checkGuildWorldRecords(memberUsernames) {
   try {
-    const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
+    const leaderboardData = await getRoomsHighscoresCached();
     if (!leaderboardData) return false;
 
     const memberSet = new Set(memberUsernames.map(name => name.toLowerCase()));
@@ -1260,44 +1304,10 @@ async function checkGuildWorldRecords(memberUsernames) {
   }
 }
 
-// Check if a specific member holds a world record (ticks, rank, or floor)
-async function checkMemberWorldRecord(username) {
-  try {
-    const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
-    if (!leaderboardData) return false;
-
-    const usernameLower = (username || '').toLowerCase();
-    const isUser = (userName) => userName && userName.toLowerCase() === usernameLower;
-
-    if (leaderboardData.ticks) {
-      for (const mapCode in leaderboardData.ticks) {
-        const rec = leaderboardData.ticks[mapCode];
-        if (rec && rec.userName && isUser(rec.userName)) return true;
-      }
-    }
-    if (leaderboardData.rank) {
-      for (const mapCode in leaderboardData.rank) {
-        const rec = leaderboardData.rank[mapCode];
-        if (rec && rec.userName && isUser(rec.userName)) return true;
-      }
-    }
-    if (leaderboardData.floor) {
-      for (const mapCode in leaderboardData.floor) {
-        const rec = leaderboardData.floor[mapCode];
-        if (rec && rec.userName && isUser(rec.userName)) return true;
-      }
-    }
-    return false;
-  } catch (error) {
-    console.error('[Guilds] Error checking member world record:', error);
-    return false;
-  }
-}
-
 // Count how many world records a specific member holds (ticks + rank + floor)
 async function countMemberWorldRecords(username) {
   try {
-    const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
+    const leaderboardData = await getRoomsHighscoresCached();
     if (!leaderboardData) return 0;
 
     const usernameLower = (username || '').toLowerCase();
@@ -1314,12 +1324,23 @@ async function countMemberWorldRecords(username) {
   }
 }
 
+function countMemberWorldRecordsFromLeaderboard(leaderboardData, username) {
+  if (!leaderboardData) return 0;
+  const usernameLower = (username || '').toLowerCase();
+  const isUser = (userName) => userName && userName.toLowerCase() === usernameLower;
+  let count = 0;
+  count += countRecordsInCategory(leaderboardData.ticks, isUser);
+  count += countRecordsInCategory(leaderboardData.rank, isUser);
+  count += countRecordsInCategory(leaderboardData.floor, isUser);
+  return count;
+}
+
 // Count total world records across all guild members (ticks + rank + floor, each +5 pts)
 async function countGuildWorldRecords(memberUsernames) {
   try {
     if (!memberUsernames || memberUsernames.length === 0) return 0;
 
-    const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
+    const leaderboardData = await getRoomsHighscoresCached();
     if (!leaderboardData) return 0;
 
     const memberSet = new Set(memberUsernames.map(name => name.toLowerCase()));
@@ -1413,63 +1434,12 @@ async function getPlayerEquipmentPoints(username) {
 async function calculateMemberPoints(username) {
   try {
     const profile = await fetchPlayerProfile(username);
-    if (!profile) {
-      return {
-        total: 0,
-        levelPoints: 0,
-        rankPoints: 0,
-        timeSumPenalty: 0,
-        equipmentPoints: 0,
-        level: 0,
-        exp: 0,
-        rankPointsValue: 0,
-        timeSum: 0,
-        hasWorldRecord: false
-      };
-    }
-    
-    // Calculate level from exp
-    const exp = profile.exp || 0;
-    const level = calculateLevelFromExp(exp);
-    const levelPoints = calculateLevelPoints(level);
-    
-    // Get rank points
-    const rankPointsValue = profile.rankPoints || 0;
-    const rankPoints = calculateRankPoints(rankPointsValue);
-    
-    // Get time sum (ticks)
-    const timeSum = profile.ticks || 0;
-    const timeSumPenalty = calculateTimeSumPenalty(timeSum);
-    
-    // Get equipment points
     const equipmentPoints = await getPlayerEquipmentPoints(username);
-    
-    // Get floors
-    const floors = profile.floors || 0;
-    const floorPoints = calculateFloorPoints(floors);
-    
-    // Check if member holds a world record (individual check, but bonus is guild-wide)
-    const hasWorldRecord = await checkMemberWorldRecord(username);
-    const worldRecordCount = hasWorldRecord ? await countMemberWorldRecords(username) : 0;
-
-    // Individual member points (without world record bonus, as that's guild-wide)
-    const total = levelPoints + rankPoints - timeSumPenalty + equipmentPoints + floorPoints;
-
-    return {
-      total: Math.max(0, Math.floor(total)),
-      levelPoints,
-      rankPoints,
-      timeSumPenalty,
-      equipmentPoints,
-      floorPoints,
-      level,
-      exp,
-      rankPointsValue,
-      timeSum,
-      floors,
-      hasWorldRecord,
-      worldRecordCount
-    };
+    const leaderboardData = await getRoomsHighscoresCached();
+    const worldRecordCount = leaderboardData
+      ? countMemberWorldRecordsFromLeaderboard(leaderboardData, username)
+      : 0;
+    return computeMemberPointsDetail(profile, equipmentPoints, worldRecordCount);
   } catch (error) {
     console.error('[Guilds] Error calculating member points:', error);
     return {
@@ -1498,6 +1468,318 @@ function computeGuildPointsFromTotals(totals, worldRecordBonus = 0) {
   const floorPoints = calculateFloorPoints(totals.totalFloors);
   const totalPoints = levelPoints + rankPoints - timeSumPenalty + totals.totalEquipmentPoints + floorPoints + worldRecordBonus;
   return Math.max(0, Math.floor(totalPoints));
+}
+
+function computeMemberPointsDetail(profile, equipmentPoints, worldRecordCount) {
+  const wrCount = worldRecordCount || 0;
+  if (!profile) {
+    return {
+      total: 0,
+      levelPoints: 0,
+      rankPoints: 0,
+      timeSumPenalty: 0,
+      equipmentPoints: 0,
+      floorPoints: 0,
+      level: 0,
+      exp: 0,
+      rankPointsValue: 0,
+      timeSum: 0,
+      floors: 0,
+      hasWorldRecord: false,
+      worldRecordCount: wrCount
+    };
+  }
+  const exp = profile.exp || 0;
+  const level = calculateLevelFromExp(exp);
+  const levelPoints = calculateLevelPoints(level);
+  const rankPointsValue = profile.rankPoints || 0;
+  const rankPoints = calculateRankPoints(rankPointsValue);
+  const timeSum = profile.ticks || 0;
+  const timeSumPenalty = calculateTimeSumPenalty(timeSum);
+  const floors = profile.floors || 0;
+  const floorPoints = calculateFloorPoints(floors);
+  const eq = equipmentPoints || 0;
+  const total = Math.max(0, Math.floor(levelPoints + rankPoints - timeSumPenalty + eq + floorPoints));
+  return {
+    total,
+    levelPoints,
+    rankPoints,
+    timeSumPenalty,
+    equipmentPoints: eq,
+    floorPoints,
+    level,
+    exp,
+    rankPointsValue,
+    timeSum,
+    floors,
+    hasWorldRecord: wrCount > 0,
+    worldRecordCount: wrCount
+  };
+}
+
+function fillMemberPointsTooltip(tooltip, pointsDisplay, member, pointsData) {
+  const worldRecordBonus = (pointsData.worldRecordCount || 0) * POINTS_CONFIG.WORLD_RECORD_BONUS;
+  const totalWithWR = pointsData.total + worldRecordBonus;
+  pointsDisplay.textContent = formatNumber(totalWithWR);
+
+  const tooltipContent = document.createElement('div');
+  tooltipContent.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+
+  const title = document.createElement('div');
+  title.textContent = `${member.username}'s Points`;
+  title.style.cssText = `
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 2px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+    padding-bottom: 6px;
+    color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+  `;
+  tooltipContent.appendChild(title);
+
+  const addDetail = (label, value, color = CSS_CONSTANTS.COLORS.TEXT_WHITE) => {
+    const detail = document.createElement('div');
+    detail.style.cssText = `
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      color: ${color};
+      font-size: 11px;
+      line-height: 1.4;
+    `;
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = label;
+    labelSpan.style.opacity = '0.9';
+    const valueSpan = document.createElement('span');
+    valueSpan.textContent = value;
+    valueSpan.style.fontWeight = '600';
+    valueSpan.style.color = color;
+    detail.appendChild(labelSpan);
+    detail.appendChild(valueSpan);
+    tooltipContent.appendChild(detail);
+  };
+
+  addDetail('Level Points', `+${pointsData.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
+  addDetail(`  (Level ${pointsData.level})`, ``, 'rgba(255, 255, 255, 0.6)');
+  addDetail('Rank Points', `+${pointsData.rankPoints}`, '#64b5f6');
+  addDetail(`  (${formatNumber(pointsData.rankPointsValue)} total, every ${POINTS_CONFIG.RANK_POINTS_PER_POINT} = 1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+  if (pointsData.floorPoints > 0) {
+    addDetail(t('mods.guilds.equipment.floorPoints') || 'Floor Points', `+${pointsData.floorPoints}`, '#ba68c8');
+    addDetail(`  (${tReplace('mods.guilds.equipment.floorPointsDescription', { floors: formatNumber(pointsData.floors) }) || `${formatNumber(pointsData.floors)} floors, 1 floor = 1 pt`})`, ``, 'rgba(255, 255, 255, 0.6)');
+  }
+  if (pointsData.equipmentPoints > 0) {
+    addDetail(t('mods.guilds.equipment.equipmentPoints') || 'Equipment Points', `+${pointsData.equipmentPoints}`, '#81c784');
+    addDetail(`  (equipment + skill points)`, ``, 'rgba(255, 255, 255, 0.6)');
+  }
+  addDetail('Time Penalty', `-${pointsData.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
+  addDetail(`  (${formatNumber(pointsData.timeSum)} ticks, every ${POINTS_CONFIG.TIME_SUM_PENALTY_DIVISOR} = -1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+
+  if (pointsData.hasWorldRecord) {
+    const wrBonus = (pointsData.worldRecordCount || 1) * POINTS_CONFIG.WORLD_RECORD_BONUS;
+    addDetail('World Record Holder', `+${wrBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
+    addDetail(`  (${pointsData.worldRecordCount || 1} world record${(pointsData.worldRecordCount || 1) !== 1 ? 's' : ''}, every 1 = ${POINTS_CONFIG.WORLD_RECORD_BONUS} pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+  }
+
+  const total = document.createElement('div');
+  total.style.cssText = `
+    margin-top: 2px;
+    padding-top: 6px;
+    border-top: 2px solid rgba(255, 255, 255, 0.3);
+    font-weight: 600;
+    font-size: 12px;
+    color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+  `;
+  total.textContent = `Total: ${formatNumber(totalWithWR)}`;
+  tooltipContent.appendChild(total);
+
+  tooltip.innerHTML = '';
+  tooltip.appendChild(tooltipContent);
+}
+
+function applyGuildPointsBreakdownToUI(ref, breakdown) {
+  if (!ref || !ref.currentPoints || !ref.tooltip) return;
+  const { currentPoints, tooltip } = ref;
+  currentPoints.textContent = formatNumber(breakdown.total);
+
+  while (tooltip.children.length > 1) {
+    tooltip.removeChild(tooltip.lastChild);
+  }
+
+  const addDetail = (label, value, color = CSS_CONSTANTS.COLORS.TEXT_WHITE) => {
+    const detail = document.createElement('div');
+    detail.style.cssText = `
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      color: ${color};
+      font-size: 11px;
+      line-height: 1.4;
+      margin-bottom: 2px;
+    `;
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = label;
+    labelSpan.style.opacity = '0.9';
+    const valueSpan = document.createElement('span');
+    valueSpan.textContent = value;
+    valueSpan.style.fontWeight = '600';
+    valueSpan.style.color = color;
+    detail.appendChild(labelSpan);
+    detail.appendChild(valueSpan);
+    tooltip.appendChild(detail);
+  };
+
+  addDetail('Level Points', `+${breakdown.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
+  addDetail(`  (${formatNumber(breakdown.totalLevels)} total levels)`, ``, 'rgba(255, 255, 255, 0.6)');
+  addDetail('Rank Points', `+${breakdown.rankPoints}`, '#64b5f6');
+  addDetail(`  (${formatNumber(breakdown.totalRankPointsValue)} total)`, ``, 'rgba(255, 255, 255, 0.6)');
+  if (breakdown.floorPoints > 0) {
+    addDetail('Floor Points', `+${breakdown.floorPoints}`, '#ba68c8');
+    addDetail(`  (${formatNumber(breakdown.totalFloors)} floors)`, ``, 'rgba(255, 255, 255, 0.6)');
+  }
+  if (breakdown.equipmentPoints > 0) {
+    addDetail('Equipment Points', `+${breakdown.equipmentPoints}`, '#81c784');
+    addDetail(`  (equipment + skill points)`, ``, 'rgba(255, 255, 255, 0.6)');
+  }
+  addDetail('Time Penalty', `-${breakdown.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
+  addDetail(`  (${formatNumber(breakdown.totalTimeSum)} ticks)`, ``, 'rgba(255, 255, 255, 0.6)');
+
+  if (breakdown.worldRecordBonus > 0) {
+    addDetail('World Record Bonus', `+${breakdown.worldRecordBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
+    addDetail(`  (${breakdown.totalWorldRecords || 0} world record${(breakdown.totalWorldRecords || 0) !== 1 ? 's' : ''}, every 1 = ${POINTS_CONFIG.WORLD_RECORD_BONUS} pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+  }
+
+  const total = document.createElement('div');
+  total.style.cssText = `
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 2px solid rgba(255, 255, 255, 0.2);
+    text-align: center;
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 12px;
+    font-weight: 700;
+  `;
+  total.textContent = `Total: ${formatNumber(breakdown.total)} points`;
+  tooltip.appendChild(total);
+}
+
+/**
+ * Single pass for guild panel: profiles + equipment + one highscores snapshot, member rows + guild total/breakdown.
+ * handlers.onMemberRowPoints(username, pointsIncludingWR, pointsDetail)
+ * handlers.onGuildBreakdown(breakdown)
+ */
+async function loadGuildPanelPointsData(guildId, members, handlers = {}) {
+  const { onMemberRowPoints, onGuildBreakdown } = handlers;
+
+  const emptyBreakdown = {
+    total: 0,
+    levelPoints: 0,
+    rankPoints: 0,
+    timeSumPenalty: 0,
+    equipmentPoints: 0,
+    floorPoints: 0,
+    worldRecordBonus: 0,
+    hasWorldRecord: false,
+    totalWorldRecords: 0,
+    memberCount: 0,
+    totalLevels: 0,
+    totalRankPointsValue: 0,
+    totalTimeSum: 0,
+    totalFloors: 0
+  };
+
+  try {
+    if (!members || members.length === 0) {
+      guildPointsCache.set(guildId, 0);
+      if (onGuildBreakdown) onGuildBreakdown(emptyBreakdown);
+      return emptyBreakdown;
+    }
+
+    const leaderboardData = await getRoomsHighscoresCached();
+
+    const results = await Promise.all(members.map(async (member) => {
+      const username = member.username;
+      const profile = await fetchPlayerProfile(username);
+      const equipmentPoints = await getPlayerEquipmentPoints(username);
+      const worldRecordCount = leaderboardData
+        ? countMemberWorldRecordsFromLeaderboard(leaderboardData, username)
+        : 0;
+      const pointsDetail = computeMemberPointsDetail(profile, equipmentPoints, worldRecordCount);
+      const pointsIncludingWR =
+        pointsDetail.total + (pointsDetail.worldRecordCount || 0) * POINTS_CONFIG.WORLD_RECORD_BONUS;
+      if (onMemberRowPoints) {
+        onMemberRowPoints(username, pointsIncludingWR, pointsDetail);
+      }
+      return { profile, equipmentPoints };
+    }));
+
+    let totalLevels = 0;
+    let totalRankPoints = 0;
+    let totalTimeSum = 0;
+    let totalEquipmentPoints = 0;
+    let totalFloors = 0;
+    let missingProfiles = 0;
+
+    for (let i = 0; i < results.length; i++) {
+      const profile = results[i].profile;
+      if (!profile) {
+        missingProfiles++;
+        continue;
+      }
+      totalLevels += calculateLevelFromExp(profile.exp || 0);
+      totalRankPoints += profile.rankPoints || 0;
+      totalTimeSum += profile.ticks || 0;
+      totalFloors += profile.floors || 0;
+      totalEquipmentPoints += results[i].equipmentPoints || 0;
+    }
+
+    const memberUsernames = members.map(m => m.username).filter(Boolean);
+    const totalWorldRecords = memberUsernames.length > 0 ? await countGuildWorldRecords(memberUsernames) : 0;
+    const worldRecordBonus = totalWorldRecords * POINTS_CONFIG.WORLD_RECORD_BONUS;
+    const hasWorldRecord = totalWorldRecords > 0;
+
+    const levelPoints = calculateLevelPoints(totalLevels);
+    const rankPoints = calculateRankPoints(totalRankPoints);
+    const timeSumPenalty = calculateTimeSumPenalty(totalTimeSum);
+    const floorPoints = calculateFloorPoints(totalFloors);
+    const totalPoints =
+      levelPoints + rankPoints - timeSumPenalty + totalEquipmentPoints + floorPoints + worldRecordBonus;
+    const finalPoints = Math.max(0, Math.floor(totalPoints));
+
+    const breakdown = {
+      total: finalPoints,
+      levelPoints,
+      rankPoints,
+      timeSumPenalty,
+      equipmentPoints: totalEquipmentPoints,
+      floorPoints,
+      worldRecordBonus,
+      hasWorldRecord,
+      totalWorldRecords,
+      memberCount: members.length,
+      totalLevels,
+      totalRankPointsValue: totalRankPoints,
+      totalTimeSum,
+      totalFloors
+    };
+
+    if (missingProfiles === 0) {
+      guildPointsCache.set(guildId, finalPoints);
+    } else {
+      console.warn(`[Guilds] Guild points for ${guildId} are partial (${missingProfiles}/${members.length} profiles missing, likely 429); not caching.`);
+    }
+
+    if (onGuildBreakdown) onGuildBreakdown(breakdown);
+    return breakdown;
+  } catch (error) {
+    console.error('[Guilds] Error loading guild panel points:', error);
+    if (onGuildBreakdown) {
+      onGuildBreakdown({
+        ...emptyBreakdown,
+        hasWorldRecord: false
+      });
+    }
+    return { ...emptyBreakdown, hasWorldRecord: false };
+  }
 }
 
 // Calculate guild points based on member data.
@@ -1615,107 +1897,10 @@ async function calculateGuildPoints(guildId, options = {}) {
   }
 }
 
-// Calculate guild points with detailed breakdown
+// Calculate guild points with detailed breakdown (uses same path as guild panel open)
 async function calculateGuildPointsBreakdown(guildId) {
-  try {
-    const members = await getGuildMembers(guildId);
-    if (!members || members.length === 0) {
-      return {
-        total: 0,
-        levelPoints: 0,
-        rankPoints: 0,
-        timeSumPenalty: 0,
-        equipmentPoints: 0,
-        floorPoints: 0,
-        worldRecordBonus: 0,
-        hasWorldRecord: false,
-        totalWorldRecords: 0
-      };
-    }
-
-    let totalLevels = 0;
-    let totalRankPoints = 0;
-    let totalTimeSum = 0;
-    let totalEquipmentPoints = 0;
-    let totalFloors = 0;
-
-    // Fetch profile data for all members (with rate limiting consideration)
-    const profilePromises = members.map(member => fetchPlayerProfile(member.username));
-    const profiles = await Promise.all(profilePromises);
-
-    // Fetch equipment points for all members
-    const equipmentPromises = members.map(member => getPlayerEquipmentPoints(member.username));
-    const equipmentPointsArray = await Promise.all(equipmentPromises);
-
-    for (let i = 0; i < profiles.length; i++) {
-      const profile = profiles[i];
-      if (!profile) continue;
-
-      // Calculate level from exp
-      const exp = profile.exp || 0;
-      const level = calculateLevelFromExp(exp);
-      totalLevels += level;
-
-      // Get rank points
-      const rankPoints = profile.rankPoints || 0;
-      totalRankPoints += rankPoints;
-
-      // Get time sum (ticks)
-      const timeSum = profile.ticks || 0;
-      totalTimeSum += timeSum;
-
-      // Add equipment points
-      totalEquipmentPoints += equipmentPointsArray[i] || 0;
-
-      // Get floors
-      const floors = profile.floors || 0;
-      totalFloors += floors;
-    }
-
-    // Calculate points using helper functions
-    const levelPoints = calculateLevelPoints(totalLevels);
-    const rankPoints = calculateRankPoints(totalRankPoints);
-    const timeSumPenalty = calculateTimeSumPenalty(totalTimeSum);
-    const floorPoints = calculateFloorPoints(totalFloors);
-
-    // Count total world records across all members and calculate bonus (5 points per record)
-    const memberUsernames = members.map(m => m.username).filter(Boolean);
-    const totalWorldRecords = memberUsernames.length > 0 ? await countGuildWorldRecords(memberUsernames) : 0;
-    const worldRecordBonus = totalWorldRecords * POINTS_CONFIG.WORLD_RECORD_BONUS;
-    const hasWorldRecord = totalWorldRecords > 0;
-
-    const totalPoints = levelPoints + rankPoints - timeSumPenalty + totalEquipmentPoints + floorPoints + worldRecordBonus;
-    const finalPoints = Math.max(0, Math.floor(totalPoints));
-
-    return {
-      total: finalPoints,
-      levelPoints,
-      rankPoints,
-      timeSumPenalty,
-      equipmentPoints: totalEquipmentPoints,
-      floorPoints,
-      worldRecordBonus,
-      hasWorldRecord,
-      totalWorldRecords,
-      memberCount: members.length,
-      totalLevels,
-      totalRankPointsValue: totalRankPoints,
-      totalTimeSum,
-      totalFloors
-    };
-  } catch (error) {
-    console.error('[Guilds] Error calculating guild points breakdown:', error);
-    return {
-      total: 0,
-      levelPoints: 0,
-      rankPoints: 0,
-      timeSumPenalty: 0,
-      equipmentPoints: 0,
-      floorPoints: 0,
-      worldRecordBonus: 0,
-      hasWorldRecord: false
-    };
-  }
+  const members = await getGuildMembers(guildId);
+  return loadGuildPanelPointsData(guildId, members, {});
 }
 
 // =======================
@@ -5843,13 +6028,20 @@ async function showGuildBrowser() {
     }
 
     applySortAndRank();
-    filteredGuilds.forEach(guild => {
-      calculateGuildPoints(guild.id, {
-        onProgress: (points) => updateGuildPoints(guild.id, points)
-      }).catch(() => {
-        updateGuildPoints(guild.id, 0);
-      });
-    });
+    (async () => {
+      for (let i = 0; i < filteredGuilds.length; i += GUILD_BROWSER_POINTS_CONCURRENCY) {
+        const batch = filteredGuilds.slice(i, i + GUILD_BROWSER_POINTS_CONCURRENCY);
+        await Promise.all(
+          batch.map(guild =>
+            calculateGuildPoints(guild.id, {
+              onProgress: (points) => updateGuildPoints(guild.id, points)
+            }).catch(() => {
+              updateGuildPoints(guild.id, 0);
+            })
+          )
+        );
+      }
+    })();
   }
 
   // Create header row
@@ -6282,6 +6474,8 @@ async function openGuildPanel(viewGuildId = null) {
   contentDiv.style.flexDirection = 'row';
   contentDiv.style.gap = '8px';
 
+  let guildPointsUiRef = null;
+
   const leftPanel = document.createElement('div');
   leftPanel.style.cssText = `
     width: 200px;
@@ -6354,6 +6548,11 @@ async function openGuildPanel(viewGuildId = null) {
 
     if (members.length === 0) {
       addInviteAndInvitedSection();
+      await loadGuildPanelPointsData(guild.id, [], {
+        onGuildBreakdown: (breakdown) => {
+          if (guildPointsUiRef) applyGuildPointsBreakdownToUI(guildPointsUiRef, breakdown);
+        }
+      });
       return;
     }
 
@@ -6409,12 +6608,18 @@ async function openGuildPanel(viewGuildId = null) {
       withPoints.forEach(({ row }) => membersList.insertBefore(row, firstNonRow || null));
     };
 
-    const updateMemberPoints = (username, points) => {
+    const updateMemberPoints = (username, points, pointsDetail) => {
       memberPointsMap.set(username, points);
       const row = membersList.querySelector(`.guild-member-row[data-username="${username}"]`);
       if (row) {
         const pointsEl = row.querySelector('.guild-member-points');
         if (pointsEl) pointsEl.textContent = formatNumber(points);
+        if (pointsDetail && row._guildPointsUi) {
+          const m = members.find(x => x.username === username);
+          if (m) {
+            fillMemberPointsTooltip(row._guildPointsUi.tooltip, row._guildPointsUi.pointsDisplay, m, pointsDetail);
+          }
+        }
       }
       reSortMemberRows();
       if (loadingPointsEl.parentNode && memberPointsMap.size === members.length) {
@@ -6422,16 +6627,21 @@ async function openGuildPanel(viewGuildId = null) {
       }
     };
 
-    // 3) Load server-side profile data (rate-limited) and update each row as it arrives
-    members.forEach(member => {
-      calculateMemberPoints(member.username).then(pointsData => {
-        const worldRecordBonus = (pointsData.worldRecordCount || 0) * POINTS_CONFIG.WORLD_RECORD_BONUS;
-        const pointsIncludingWR = pointsData.total + worldRecordBonus;
-        updateMemberPoints(member.username, pointsIncludingWR);
-      }).catch(() => {
-        updateMemberPoints(member.username, 0);
+    // 3) Single load: profile + equipment + guild breakdown (no duplicate fetches vs. header)
+    try {
+      await loadGuildPanelPointsData(guild.id, members, {
+        onMemberRowPoints: (username, pointsIncludingWR, pointsDetail) => {
+          updateMemberPoints(username, pointsIncludingWR, pointsDetail);
+        },
+        onGuildBreakdown: (breakdown) => {
+          if (guildPointsUiRef) applyGuildPointsBreakdownToUI(guildPointsUiRef, breakdown);
+        }
       });
-    });
+    } catch (_) {
+      if (guildPointsUiRef && guildPointsUiRef.currentPoints) {
+        guildPointsUiRef.currentPoints.textContent = '0';
+      }
+    }
   };
 
   function buildMemberRow(member) {
@@ -6640,92 +6850,7 @@ async function openGuildPanel(viewGuildId = null) {
       font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
     `;
     document.body.appendChild(tooltip);
-
-    // Recalculate for tooltip (to get detailed breakdown)
-    calculateMemberPoints(member.username).then(pointsData => {
-      const worldRecordBonus = (pointsData.worldRecordCount || 0) * POINTS_CONFIG.WORLD_RECORD_BONUS;
-      const totalWithWR = pointsData.total + worldRecordBonus;
-      // Update display if points changed (e.g. first time we have server data)
-      const currentText = pointsDisplay.textContent;
-      if (currentText === '...' || (member._points !== undefined && totalWithWR !== member._points)) {
-        pointsDisplay.textContent = formatNumber(totalWithWR);
-      }
-      
-      // Build tooltip content with game-native styling
-      const tooltipContent = document.createElement('div');
-      tooltipContent.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
-      
-      const title = document.createElement('div');
-      title.textContent = `${member.username}'s Points`;
-      title.style.cssText = `
-        font-weight: 600;
-        font-size: 12px;
-        margin-bottom: 2px;
-        border-bottom: 2px solid rgba(255, 255, 255, 0.2);
-        padding-bottom: 6px;
-        color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
-      `;
-      tooltipContent.appendChild(title);
-      
-      const addDetail = (label, value, color = CSS_CONSTANTS.COLORS.TEXT_WHITE) => {
-        const detail = document.createElement('div');
-        detail.style.cssText = `
-          display: flex;
-          justify-content: space-between;
-          gap: 16px;
-          color: ${color};
-          font-size: 11px;
-          line-height: 1.4;
-        `;
-        const labelSpan = document.createElement('span');
-        labelSpan.textContent = label;
-        labelSpan.style.opacity = '0.9';
-        const valueSpan = document.createElement('span');
-        valueSpan.textContent = value;
-        valueSpan.style.fontWeight = '600';
-        valueSpan.style.color = color;
-        detail.appendChild(labelSpan);
-        detail.appendChild(valueSpan);
-        tooltipContent.appendChild(detail);
-      };
-      
-      addDetail('Level Points', `+${pointsData.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
-      addDetail(`  (Level ${pointsData.level})`, ``, 'rgba(255, 255, 255, 0.6)');
-      addDetail('Rank Points', `+${pointsData.rankPoints}`, '#64b5f6');
-      addDetail(`  (${formatNumber(pointsData.rankPointsValue)} total, every ${POINTS_CONFIG.RANK_POINTS_PER_POINT} = 1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
-      if (pointsData.floorPoints > 0) {
-        addDetail(t('mods.guilds.equipment.floorPoints') || 'Floor Points', `+${pointsData.floorPoints}`, '#ba68c8');
-        addDetail(`  (${tReplace('mods.guilds.equipment.floorPointsDescription', { floors: formatNumber(pointsData.floors) }) || `${formatNumber(pointsData.floors)} floors, 1 floor = 1 pt`})`, ``, 'rgba(255, 255, 255, 0.6)');
-      }
-      if (pointsData.equipmentPoints > 0) {
-        addDetail(t('mods.guilds.equipment.equipmentPoints') || 'Equipment Points', `+${pointsData.equipmentPoints}`, '#81c784');
-        addDetail(`  (equipment + skill points)`, ``, 'rgba(255, 255, 255, 0.6)');
-      }
-      addDetail('Time Penalty', `-${pointsData.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
-      addDetail(`  (${formatNumber(pointsData.timeSum)} ticks, every ${POINTS_CONFIG.TIME_SUM_PENALTY_DIVISOR} = -1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
-      
-      if (pointsData.hasWorldRecord) {
-        const worldRecordBonus = (pointsData.worldRecordCount || 1) * POINTS_CONFIG.WORLD_RECORD_BONUS;
-        addDetail('World Record Holder', `+${worldRecordBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
-        addDetail(`  (${pointsData.worldRecordCount || 1} world record${(pointsData.worldRecordCount || 1) !== 1 ? 's' : ''}, every 1 = ${POINTS_CONFIG.WORLD_RECORD_BONUS} pt)`, ``, 'rgba(255, 255, 255, 0.6)');
-      }
-      
-      const total = document.createElement('div');
-      total.style.cssText = `
-        margin-top: 2px;
-        padding-top: 6px;
-        border-top: 2px solid rgba(255, 255, 255, 0.3);
-        font-weight: 600;
-        font-size: 12px;
-        color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
-      `;
-      total.textContent = `Total: ${formatNumber(totalWithWR)}`;
-      tooltipContent.appendChild(total);
-      
-      tooltip.appendChild(tooltipContent);
-    }).catch(() => {
-      pointsDisplay.textContent = '0';
-    });
+    memberItem._guildPointsUi = { tooltip, pointsDisplay };
 
     // Show/hide tooltip on hover with smart positioning
     let tooltipTimeout;
@@ -7140,75 +7265,7 @@ async function openGuildPanel(viewGuildId = null) {
   tooltipTitle.textContent = 'Guild Points Breakdown';
   tooltip.appendChild(tooltipTitle);
 
-  const addDetail = (label, value, color = CSS_CONSTANTS.COLORS.TEXT_WHITE) => {
-    const detail = document.createElement('div');
-    detail.style.cssText = `
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      color: ${color};
-      font-size: 11px;
-      line-height: 1.4;
-      margin-bottom: 2px;
-    `;
-    const labelSpan = document.createElement('span');
-    labelSpan.textContent = label;
-    labelSpan.style.opacity = '0.9';
-    const valueSpan = document.createElement('span');
-    valueSpan.textContent = value;
-    valueSpan.style.fontWeight = '600';
-    valueSpan.style.color = color;
-    detail.appendChild(labelSpan);
-    detail.appendChild(valueSpan);
-    tooltip.appendChild(detail);
-  };
-
-  // Calculate and display points with breakdown
-  calculateGuildPointsBreakdown(guild.id).then(breakdown => {
-    currentPoints.textContent = formatNumber(breakdown.total);
-
-    // Clear existing tooltip content (except title)
-    while (tooltip.children.length > 1) {
-      tooltip.removeChild(tooltip.lastChild);
-    }
-
-    // Add breakdown details
-    addDetail('Level Points', `+${breakdown.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
-    addDetail(`  (${formatNumber(breakdown.totalLevels)} total levels)`, ``, 'rgba(255, 255, 255, 0.6)');
-    addDetail('Rank Points', `+${breakdown.rankPoints}`, '#64b5f6');
-    addDetail(`  (${formatNumber(breakdown.totalRankPointsValue)} total)`, ``, 'rgba(255, 255, 255, 0.6)');
-    if (breakdown.floorPoints > 0) {
-      addDetail('Floor Points', `+${breakdown.floorPoints}`, '#ba68c8');
-      addDetail(`  (${formatNumber(breakdown.totalFloors)} floors)`, ``, 'rgba(255, 255, 255, 0.6)');
-    }
-    if (breakdown.equipmentPoints > 0) {
-      addDetail('Equipment Points', `+${breakdown.equipmentPoints}`, '#81c784');
-      addDetail(`  (equipment + skill points)`, ``, 'rgba(255, 255, 255, 0.6)');
-    }
-    addDetail('Time Penalty', `-${breakdown.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
-    addDetail(`  (${formatNumber(breakdown.totalTimeSum)} ticks)`, ``, 'rgba(255, 255, 255, 0.6)');
-
-    if (breakdown.worldRecordBonus > 0) {
-      addDetail('World Record Bonus', `+${breakdown.worldRecordBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
-      addDetail(`  (${breakdown.totalWorldRecords || 0} world record${(breakdown.totalWorldRecords || 0) !== 1 ? 's' : ''}, every 1 = ${POINTS_CONFIG.WORLD_RECORD_BONUS} pt)`, ``, 'rgba(255, 255, 255, 0.6)');
-    }
-
-    const total = document.createElement('div');
-    total.style.cssText = `
-      margin-top: 8px;
-      padding-top: 6px;
-      border-top: 2px solid rgba(255, 255, 255, 0.2);
-      text-align: center;
-      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-      font-size: 12px;
-      font-weight: 700;
-    `;
-    total.textContent = `Total: ${formatNumber(breakdown.total)} points`;
-    tooltip.appendChild(total);
-
-  }).catch(() => {
-    currentPoints.textContent = '0';
-  });
+  guildPointsUiRef = { currentPoints, tooltip };
 
   // Add hover functionality
   let tooltipTimeout;

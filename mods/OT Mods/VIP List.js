@@ -136,6 +136,8 @@ const sanitizeFirebaseKey = (username) => {
   }
   // Replace other invalid characters for Firebase keys
   sanitized = sanitized.replace(/[\/\[\]#]/g, '_');
+  // Dots in path segments break URLs (e.g. name ending with "." becomes ".../player..json" → 400)
+  sanitized = sanitized.replace(/\./g, '_dot_');
   return sanitized;
 };
 
@@ -240,6 +242,8 @@ const CACHE_TTL = 30000; // Cache time-to-live: 30 seconds (optimized for faster
 const playerGuildCache = new Map(); // Cache for player guild info (playerName -> { abbreviation, guildId, timestamp })
 const GUILD_CACHE_TTL = 3600000; // Cache guild info for 1 hour
 const MESSAGES_PER_PAGE = 20; // Number of messages to load per page for pagination
+// Cap incremental All Chat fetches (polling) — never pull unbounded history
+const ALL_CHAT_INCREMENTAL_FETCH_LIMIT = 200;
 
 // Track timeouts for cleanup (memory leak prevention)
 const pendingTimeouts = new Set();
@@ -1984,6 +1988,11 @@ async function loadOlderMessages(container, fetchFunction, config) {
     // Fetch older messages using provided function and args
     const olderMessages = await fetchFunction(...config.fetchArgs(oldestMessageId));
     
+    if (config.expectedChatType && !chatStateManager.isChatTypeActive(config.expectedChatType)) {
+      hideLoadingIndicator(container);
+      return;
+    }
+    
     if (olderMessages.length === 0) {
       panel[config.oldestIdKey] = null;
       // Hide loading indicator
@@ -2032,6 +2041,11 @@ async function loadOlderMessages(container, fetchFunction, config) {
     
     // Sort new messages (should already be sorted, but ensure)
     newMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    
+    if (config.expectedChatType && !chatStateManager.isChatTypeActive(config.expectedChatType)) {
+      hideLoadingIndicator(container);
+      return;
+    }
     
     // Get first existing message for boundary date check
     const firstExistingMessage = container.querySelector('[data-message-id]');
@@ -2097,6 +2111,11 @@ async function loadOlderMessages(container, fetchFunction, config) {
       }
     }
     
+    if (config.expectedChatType && !chatStateManager.isChatTypeActive(config.expectedChatType)) {
+      hideLoadingIndicator(container);
+      return;
+    }
+    
     // Insert elements at the beginning of container (preserve scroll position)
     const firstChild = container.firstChild;
     elementsToPrepend.reverse().forEach(element => {
@@ -2137,7 +2156,8 @@ async function loadOlderGuildChatMessages(container, guildId) {
   await loadOlderMessages(container, getGuildChatMessages, {
     loadingFlag: '_isLoadingOlderGuildChat',
     oldestIdKey: `_oldestLoadedMessageId_${guildKey}`,
-    fetchArgs: (oldestMessageId) => [guildId, 10, oldestMessageId]
+    fetchArgs: (oldestMessageId) => [guildId, 10, oldestMessageId],
+    expectedChatType: guildKey
   });
 }
 
@@ -6053,7 +6073,8 @@ async function loadOlderConversationMessages(container, playerName) {
     loadingFlag: '_isLoadingOlderConversation',
     oldestIdKey: `_oldestLoadedMessageId_${playerKey}`,
     fetchArgs: (oldestMessageId) => [playerName, false, 10, oldestMessageId],
-    playerName: playerName // Pass playerName for runs-only filter
+    playerName: playerName, // Pass playerName for runs-only filter
+    expectedChatType: playerName
   });
 }
 
@@ -6849,7 +6870,8 @@ async function loadOlderAllChatMessages(container) {
   await loadOlderMessages(container, getAllChatMessages, {
     loadingFlag: '_isLoadingOlderAllChat',
     oldestIdKey: '_oldestLoadedMessageId',
-    fetchArgs: (oldestMessageId) => [false, 10, oldestMessageId]
+    fetchArgs: (oldestMessageId) => [false, 10, oldestMessageId],
+    expectedChatType: 'all-chat'
   });
 }
 
@@ -6979,9 +7001,9 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
     let messages;
     let forceRebuildForDateChange = false;
     if (isInitialLoad) {
-      // If forceRefresh is true, load all messages (user wants fresh data)
-      // Otherwise, load only the most recent 20 messages initially for faster loading
-      const limit = forceRefresh ? null : MESSAGES_PER_PAGE;
+      // Always load a recent page only. forceRefresh clears stale DOM from other tabs; it must not
+      // disable pagination (that was loading the entire Firebase history on every tab switch).
+      const limit = MESSAGES_PER_PAGE;
       messages = await getAllChatMessages(forceRefresh, limit, null, abortController);
       
       // Check if cancelled after loading messages
@@ -7004,8 +7026,8 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
         panel._oldestLoadedMessageId = null;
       }
     } else {
-      // For updates, fetch all new messages (will append to existing)
-      const allMessages = await getAllChatMessages(forceRefresh, null, null, abortController);
+      // For updates, fetch a bounded recent window (never unbounded — was loading full history on poll)
+      const allMessages = await getAllChatMessages(forceRefresh, ALL_CHAT_INCREMENTAL_FETCH_LIMIT, null, abortController);
       
       // Check if cancelled after loading messages
       if (checkCancelled && checkCancelled()) {
@@ -7145,6 +7167,10 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
       return;
     }
     
+    if (messages.length > 0) {
+      container.querySelectorAll('[data-vip-chat-empty="true"]').forEach((el) => el.remove());
+    }
+    
     if (needsFullRebuild) {
       container.innerHTML = '';
       // Reset oldest loaded message ID on rebuild
@@ -7159,6 +7185,7 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
     
     if (messages.length === 0 && isInitialLoad) {
       const emptyMsg = createEmptyChatMessage(t('mods.vipList.allChatEmptyState'));
+      emptyMsg.setAttribute('data-vip-chat-empty', 'true');
       container.appendChild(emptyMsg);
       if (panel) panel._previousMessageCount = 0;
       panel._oldestLoadedMessageId = null;
@@ -7319,6 +7346,7 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
     
     // Append elements using DocumentFragment (reduces flicker)
     appendElementsToContainer(container, elementsToAppend);
+    container.querySelectorAll('[data-vip-chat-empty="true"]').forEach((el) => el.remove());
     
     // Final check: verify no system messages made it through
     const displayedMessages = Array.from(container.querySelectorAll('[data-message-id]'));

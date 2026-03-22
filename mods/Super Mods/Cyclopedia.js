@@ -1199,6 +1199,8 @@ const cyclopediaState = {
   observer: null, modalOpen: false, currentModal: null,
   profileData: null, lastFetch: 0, fetchInProgress: false,
   monsterNameMap: null, monsterNameMapBuilt: false, monsterLocationCache: new Map(),
+  /** When true, creature detail shows awakened ability text until toggled off. */
+  creatureDetailShowAwakenedAbility: false,
   searchDebounceTimer: null, searchedUsername: null,
   lazyLoadQueue: [], isProcessingQueue: false,
   cache: {
@@ -13608,7 +13610,6 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   let currentAbilityContainer = null;
   let normalTooltipComponent = null;
   let awakenTooltipComponent = null;
-  let showAwakenedAbility = false;
 
   // Create a flex container for title and button (matching Creatures title style)
   const abilityTitleContainer = document.createElement('div');
@@ -13665,11 +13666,18 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   awakenIconImg.alt = 'Awakened Ability';
   awakenIconImg.style.cssText = 'width: 10px; height: 10px;';
   awakenIconButton.appendChild(awakenIconImg);
+
+  if (cyclopediaState.creatureDetailShowAwakenedAbility) {
+    awakenIconButton.title = 'Awakened Mode';
+    awakenIconButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png") repeat';
+    awakenIconButton.style.border = '1px solid #4CAF50';
+  }
   
   // Add click handler to toggle between normal and awakened ability
   awakenIconButton.addEventListener('click', (e) => {
     e.stopPropagation();
-    showAwakenedAbility = !showAwakenedAbility;
+    cyclopediaState.creatureDetailShowAwakenedAbility = !cyclopediaState.creatureDetailShowAwakenedAbility;
+    const showAwakenedAbility = cyclopediaState.creatureDetailShowAwakenedAbility;
     awakenIconButton.title = showAwakenedAbility ? 'Awakened Mode' : 'Normal Mode';
     
     // Update background and border color to show toggle state
@@ -13789,10 +13797,17 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
       const AbilityTooltip = abilityMonsterData.metadata.skill.TooltipContent;
       
       if (typeof globalThis.state.utils.createUIComponent === 'function') {
-        tooltipComponent = globalThis.state.utils.createUIComponent(rootElement, AbilityTooltip);
+        const useAwakened = cyclopediaState.creatureDetailShowAwakenedAbility;
+        tooltipComponent = useAwakened
+          ? globalThis.state.utils.createUIComponent(rootElement, AbilityTooltip, { awaken: true })
+          : globalThis.state.utils.createUIComponent(rootElement, AbilityTooltip);
         currentTooltipComponent = tooltipComponent; // Store reference
-        normalTooltipComponent = tooltipComponent; // Store normal reference for toggling
-        normalRootElement = rootElement; // Store normal root element for toggling
+        if (useAwakened) {
+          awakenTooltipComponent = tooltipComponent;
+        } else {
+          normalTooltipComponent = tooltipComponent; // Store normal reference for toggling
+          normalRootElement = rootElement; // Store normal root element for toggling
+        }
         
         if (tooltipComponent && typeof tooltipComponent.mount === 'function') {
           tooltipComponent.mount();
@@ -14761,6 +14776,42 @@ function renderCyclopediaSearchColumn() {
   return container;
 }
 
+/** Obtainable creature count from creature-database.js (excludes unobtainable; applies Cyclopedia hide list). */
+function getObtainableCreatureCountFromDatabase() {
+  return (window.creatureDatabase?.ALL_CREATURES || []).filter(
+    (name) => !HIDE_FROM_CYCLOPEDIA.includes(name)
+  ).length;
+}
+
+/** Unique obtainable species (gameId) with at least one shiny owned; unobtainable shinies excluded. */
+function countUniqueObtainableShinyCreatureGameIds(monsters) {
+  if (!Array.isArray(monsters)) return 0;
+  const obtainableLower = new Set(
+    (window.creatureDatabase?.ALL_CREATURES || [])
+      .filter((name) => !HIDE_FROM_CYCLOPEDIA.includes(name))
+      .map((n) => n.toLowerCase())
+  );
+  const db = window.creatureDatabase;
+  const ids = new Set();
+  for (const m of monsters) {
+    if (!m || m.shiny !== true || m.gameId == null) continue;
+    let name = null;
+    if (db?.findMonsterByGameId) {
+      const monster = db.findMonsterByGameId(m.gameId);
+      name = monster?.metadata?.name;
+    } else if (globalThis.state?.utils?.getMonster) {
+      try {
+        const monster = globalThis.state.utils.getMonster(m.gameId);
+        name = monster?.metadata?.name;
+      } catch (e) {}
+    }
+    if (name && obtainableLower.has(name.toLowerCase())) {
+      ids.add(m.gameId);
+    }
+  }
+  return ids.size;
+}
+
 const CYCLOPEDIA_MAX_VALUES = {
   perfectCreatures: 69,
   bisEquipments: 114,
@@ -14771,6 +14822,7 @@ const CYCLOPEDIA_MAX_VALUES = {
 
 const CYCLOPEDIA_PROGRESS_STATS = [
   { key: 'perfectCreatures', icon: '/assets/icons/enemy.png', max: CYCLOPEDIA_MAX_VALUES.perfectCreatures },
+  { key: 'shinyCreatures', icon: 'https://bestiaryarena.com/assets/icons/shiny-star.png', max: getObtainableCreatureCountFromDatabase },
   { key: 'bisEquipments', icon: '/assets/icons/equips.png', max: CYCLOPEDIA_MAX_VALUES.bisEquipments },
   { key: 'raids', icon: '/assets/icons/raid.png', max: CYCLOPEDIA_MAX_VALUES.raids },
   { key: 'exploredMaps', icon: '/assets/icons/map.png', max: CYCLOPEDIA_MAX_VALUES.exploredMaps },
@@ -14782,6 +14834,17 @@ const CYCLOPEDIA_TRANSLATION = {
   tasks: { label: 'Hunting tasks', value: d => d.tasks },
   playCount: { label: 'Total runs', value: d => d.playCount },
   perfectCreatures: { label: 'Perfect Creatures', value: d => d.perfectMonsters },
+  shinyCreatures: {
+    label: 'Shiny Creatures',
+    value: (d) => {
+      const ctx = globalThis.state?.player?.getSnapshot?.()?.context;
+      if (d?.name && ctx?.name && d.name === ctx.name && Array.isArray(ctx.monsters)) {
+        return countUniqueObtainableShinyCreatureGameIds(ctx.monsters);
+      }
+      if (typeof d.uniqueShinyCreatures === 'number') return d.uniqueShinyCreatures;
+      return null;
+    }
+  },
   bisEquipments: { label: 'BIS Equipments', value: d => d.bisEquips },
   raids: { label: 'Completed raids', value: d => d.raids },
   exploredMaps: { label: 'Explored maps', value: d => d.maps },
@@ -15035,8 +15098,11 @@ function renderCyclopediaPlayerInfo(profileData) {
   addRow({ label: cyclopediaT('mods.cyclopedia.startpage.progress'), highlight: true, colspan: 2 });
   CYCLOPEDIA_PROGRESS_STATS.forEach(stat => {
     const val = getProfileValue(stat.key);
-    const isMax = val === stat.max;
-    const valueStr = `${FormatUtils.number(val)}/${stat.max}`;
+    const maxVal = typeof stat.max === 'function' ? stat.max() : stat.max;
+    const isMax = typeof val === 'number' && val === maxVal;
+    const valueStr = (val === null || val === undefined || val === '-')
+      ? `-/${maxVal}`
+      : `${FormatUtils.number(val)}/${maxVal}`;
     addRow({
       label: cyclopediaT('mods.cyclopedia.startpage.stats.' + stat.key),
       icon: stat.icon,

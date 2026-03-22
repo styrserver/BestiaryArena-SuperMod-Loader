@@ -153,7 +153,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 23 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 22 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
