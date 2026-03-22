@@ -1276,27 +1276,32 @@ async function waitForModCoordinationTasks(options = {}) {
   const start = performance.now();
   let waitAttempts = 0;
 
-  // Get automator metadata once to avoid duplicate calls
-  const automatorState = window.ModCoordination?.getModState('Bestiary Automator');
-  const automatorMetadata = automatorState?.metadata || {};
-  
+  // ModCoordination replaces `metadata` with a new object on each updateModState call.
+  // Must re-read getModState each time; a captured metadata reference becomes stale.
+  const getAutomatorMetadata = () => {
+    const automatorState = window.ModCoordination?.getModState('Bestiary Automator');
+    return automatorState?.metadata || {};
+  };
+
   const getActiveOperations = () => {
+    const m = getAutomatorMetadata();
     const ops = [];
-    if (automatorMetadata.refilling) ops.push('refilling stamina');
-    if (automatorMetadata.collectingRewards) ops.push('collecting rewards');
-    if (automatorMetadata.handlingDaycare) ops.push('handling daycare');
-    if (automatorMetadata.collectingSeashell) ops.push('collecting seashell');
+    if (m.refilling) ops.push('refilling stamina');
+    if (m.collectingRewards) ops.push('collecting rewards');
+    if (m.handlingDaycare) ops.push('handling daycare');
+    if (m.collectingSeashell) ops.push('collecting seashell');
     return ops;
   };
 
   // Log initial coordination state
+  const initialMeta = getAutomatorMetadata();
   const initialOps = getActiveOperations();
   const contextSuffix = context ? ` [${context}]` : '';
   console.log(`[Manual Runner] Checking coordination flags${contextSuffix}:`, {
-    automatorRefilling: !!automatorMetadata.refilling,
-    automatorCollectingRewards: !!automatorMetadata.collectingRewards,
-    automatorHandlingDaycare: !!automatorMetadata.handlingDaycare,
-    automatorCollectingSeashell: !!automatorMetadata.collectingSeashell,
+    automatorRefilling: !!initialMeta.refilling,
+    automatorCollectingRewards: !!initialMeta.collectingRewards,
+    automatorHandlingDaycare: !!initialMeta.handlingDaycare,
+    automatorCollectingSeashell: !!initialMeta.collectingSeashell,
     activeOperations: initialOps.length > 0 ? initialOps : 'none'
   });
 

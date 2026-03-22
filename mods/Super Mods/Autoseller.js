@@ -5602,7 +5602,9 @@
     
     function addAutosellerNavButton() {
         function tryInsert() {
-            const nav = queryElement('nav.shrink-0');
+            // Game header: nav used to be nav.shrink-0; it is now nav.grow under #header-slot
+            const headerSlot = document.getElementById('header-slot');
+            const nav = headerSlot?.querySelector('nav') || queryElement('nav.shrink-0');
             if (!nav) {
                 setTimeout(tryInsert, 500);
                 return;

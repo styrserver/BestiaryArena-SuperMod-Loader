@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.5.6",
+      "changes": [
+        { "type": "fixed", "mod": "Autoseller", "text": "Bug fix" }
+      ]
+    },
+    {
       "version": "3.5.5",
       "changes": [
         { "type": "added", "mod": "Challenges", "text": "Tests for multiplayer." },

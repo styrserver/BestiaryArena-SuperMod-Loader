@@ -605,11 +605,17 @@ if (typeof browserAPI === 'undefined') {
         return window.BestiaryUIComponents.createModal({
           title: options.title || 'Information',
           content: options.content || '',
-          buttons: options.buttons || [{ text: 'OK', primary: true }]
+          buttons: options.buttons || [{ text: 'OK', primary: true }],
+          width: options.width,
+          height: options.height
         });
       }
       // Fallback to game-styled implementation if UI Components aren't loaded
-      const { title, content, buttons } = options || {};
+      const { title, content, buttons, width, height } = options || {};
+      const hasCustomSize = (typeof width === 'number' && width > 0) || (typeof height === 'number' && height > 0) ||
+        (typeof width === 'string' && width.length > 0) || (typeof height === 'string' && height.length > 0);
+      const widthCss = typeof width === 'number' ? width + 'px' : (width || '');
+      const heightCss = typeof height === 'number' ? height + 'px' : (height || '');
       // Create overlay to capture clicks outside the modal
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: transparent; z-index: 9998;';
@@ -618,13 +624,29 @@ if (typeof browserAPI === 'undefined') {
       const modalEl = document.createElement('div');
       modalEl.setAttribute('role', 'dialog');
       modalEl.setAttribute('data-state', 'open');
-      modalEl.className = 'auto-centered fixed z-modals w-full shadow-lg outline-none duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] max-w-[300px]';
+      // Use default small modal + zoom animation only when no custom size (avoids blur from resize-after-paint)
+      const baseClass = 'auto-centered fixed z-modals w-full shadow-lg outline-none';
+      const animationClass = hasCustomSize
+        ? 'duration-0'
+        : 'duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]';
+      const maxWidthClass = hasCustomSize ? '' : ' max-w-[300px]';
+      modalEl.className = baseClass + ' ' + animationClass + maxWidthClass;
       
+      // Base centering; add explicit dimensions when mod provides width/height so no resize-after-paint
+      let modalStyle = 'pointer-events: auto; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999;';
+      if (hasCustomSize) {
+        if (widthCss) {
+          modalStyle += ' width: ' + widthCss + '; min-width: ' + widthCss + '; max-width: ' + widthCss + ';';
+        }
+        if (heightCss) {
+          modalStyle += ' height: ' + heightCss + '; min-height: ' + heightCss + '; max-height: ' + heightCss + ';';
+        }
+      }
       // Patch: Exclude Cyclopedia modal from centering styles
       if (title && title.toLowerCase().includes('cyclopedia')) {
         modalEl.style.cssText = 'pointer-events: auto; position: fixed; z-index: 9999;';
       } else {
-        modalEl.style.cssText = 'pointer-events: auto; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999;';
+        modalEl.style.cssText = modalStyle;
       }
       
       const innerContent = document.createElement('div');

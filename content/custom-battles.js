@@ -41,6 +41,9 @@ if (window.CustomBattles) {
                 // Victory/defeat state
                 this.lastGameState = 'initial';
                 this.victoryDefeatModal = null;
+                this.allyDeathsThisGame = 0;
+                this.allyDeathTrackingUnsubs = [];
+                this.newGameUnsub = null;
                 
                 // Validate config
                 if (!config.roomId) {
@@ -991,16 +994,45 @@ if (window.CustomBattles) {
                     this.subscriptions.victoryDefeat.unsubscribe();
                     this.subscriptions.victoryDefeat = null;
                 }
+                this.unsubscribeAllyDeathTracking();
 
                 if (typeof globalThis === 'undefined' || !globalThis.state || !globalThis.state.gameTimer) {
                     console.warn('[Custom Battles] GameTimer not available');
                     return;
                 }
 
+                // Track ally deaths per game (boardConfig may not remove dead pieces, so count deaths instead)
+                const board = globalThis.state.board;
+                if (board && typeof board.on === 'function') {
+                    if (this.newGameUnsub) {
+                        try { this.newGameUnsub(); } catch (e) {}
+                        this.newGameUnsub = null;
+                    }
+                    this.newGameUnsub = board.on('newGame', (event) => {
+                        const world = event && event.world;
+                        if (!world || !world.grid || !world.grid.onActorDeath) return;
+                        this.allyDeathsThisGame = 0;
+                        this.unsubscribeAllyDeathTracking();
+                        const deathSub = world.grid.onActorDeath.subscribe((deathEvent) => {
+                            const killed = deathEvent && deathEvent.killedActor;
+                            if (killed && killed.villain === false) {
+                                this.allyDeathsThisGame += 1;
+                            }
+                        });
+                        this.allyDeathTrackingUnsubs.push(deathSub);
+                        var onGameEnd = world.onGameEnd;
+                        var endSub = onGameEnd && typeof onGameEnd.once === 'function' ? onGameEnd.once(() => {
+                            this.unsubscribeAllyDeathTracking();
+                        }) : undefined;
+                        if (endSub) this.allyDeathTrackingUnsubs.push(endSub);
+                    });
+                }
+
                 // Initialize last state
                 try {
                     const currentState = globalThis.state.gameTimer.getSnapshot();
-                    this.lastGameState = currentState?.context?.state || 'initial';
+                    const ctx = currentState && currentState.context;
+                    this.lastGameState = (ctx && ctx.state) || 'initial';
                 } catch (e) {
                     this.lastGameState = 'initial';
                 }
@@ -1010,31 +1042,29 @@ if (window.CustomBattles) {
                     try {
                         const ctx = timerState.context || {};
                         const { state, currentTick, readableGrade, rankPoints } = ctx;
-                        // Debug: log full context to inspect grade (readableGrade may be undefined or default if not yet computed)
                         if (state === 'victory' || state === 'defeat') {
                             console.log('[Custom Battles] timerState.context (grade debug):', JSON.stringify({ state, currentTick, readableGrade, rankPoints, keys: Object.keys(ctx) }));
                         }
-                        // Show victory/defeat modals when game ends
                         if ((state === 'victory' || state === 'defeat') && 
                             (this.lastGameState === 'initial' || this.lastGameState === 'playing')) {
                             
                             const isVictory = state === 'victory';
+                            const allyLimit = (this.config.allyLimit != null && typeof this.config.allyLimit === 'number') ? this.config.allyLimit : 0;
+                            const creaturesAlive = isVictory ? Math.max(0, allyLimit - this.allyDeathsThisGame) : 0;
+                            const currentTeamSize = allyLimit > 0 ? allyLimit : undefined;
                             const gameData = {
                                 ticks: currentTick,
                                 grade: readableGrade,
                                 rankPoints: rankPoints,
-                                completed: isVictory
+                                completed: isVictory,
+                                creaturesAlive: creaturesAlive,
+                                currentTeamSize: currentTeamSize
                             };
-                            
                             console.log(`[Custom Battles][${this.config.name || 'Battle'}] Game ended: ${state}`, gameData);
-                            
-                            // Show modal
                             setTimeout(() => {
                                 this.showVictoryDefeatModal(isVictory, gameData);
                             }, 100);
                         }
-                        
-                        // Update last state
                         this.lastGameState = state;
                     } catch (error) {
                         console.error('[Custom Battles] Error in game timer subscription:', error);
@@ -1044,17 +1074,27 @@ if (window.CustomBattles) {
                 console.log(`[Custom Battles][${this.config.name || 'Battle'}] Victory/Defeat detection set up`);
             }
 
+            unsubscribeAllyDeathTracking() {
+                while (this.allyDeathTrackingUnsubs && this.allyDeathTrackingUnsubs.length > 0) {
+                    const unsub = this.allyDeathTrackingUnsubs.pop();
+                    try {
+                        if (typeof unsub === 'function') unsub();
+                        else if (unsub && typeof unsub.unsubscribe === 'function') unsub.unsubscribe();
+                    } catch (e) {}
+                }
+            }
+
             /**
              * Setup the battle system
              */
             setup(activationCallback, showToastCallback) {
                 if (this.isActive) {
-                    console.warn(`[Custom Battles][${this.config.name || 'Battle'}] Already set up`);
+                    console.warn('[Custom Battles][' + (this.config.name || 'Battle') + '] Already set up');
                     return;
                 }
 
                 this.isActive = true;
-                console.log(`[Custom Battles][${this.config.name || 'Battle'}] Setting up battle system`);
+                console.log('[Custom Battles][' + (this.config.name || 'Battle') + '] Setting up battle system');
 
                 // Setup stop button disabler (always enabled)
                 this.setupStopButtonDisabler();
@@ -1093,7 +1133,7 @@ if (window.CustomBattles) {
             cleanup(restoreBoardCallback, showOverlaysCallback) {
                 if (!this.isActive) return;
 
-                console.log(`[Custom Battles][${this.config.name || 'Battle'}] Cleaning up battle system`);
+                console.log('[Custom Battles][' + (this.config.name || 'Battle') + '] Cleaning up battle system');
 
                 // Unsubscribe from all subscriptions
                 if (this.subscriptions.allyLimit) {
@@ -1134,6 +1174,11 @@ if (window.CustomBattles) {
                 if (this.subscriptions.victoryDefeat) {
                     this.subscriptions.victoryDefeat.unsubscribe();
                     this.subscriptions.victoryDefeat = null;
+                }
+                this.unsubscribeAllyDeathTracking();
+                if (this.newGameUnsub) {
+                    try { this.newGameUnsub(); } catch (e) {}
+                    this.newGameUnsub = null;
                 }
 
                 // Cleanup stop button disabler
@@ -1200,7 +1245,7 @@ if (window.CustomBattles) {
                 this.tileRestrictionActive = false;
                 this.isActive = false;
                 this.lastGameState = 'initial';
-                console.log(`[Custom Battles][${this.config.name || 'Battle'}] Cleanup completed`);
+                console.log('[Custom Battles][' + (this.config.name || 'Battle') + '] Cleanup completed');
             }
         }
 

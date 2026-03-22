@@ -356,7 +356,11 @@ function buildMultiplayerLiveToastMessage(ctx) {
   var name2 = (ctx.cachedMatch && ctx.cachedMatch.player2 != null) ? String(ctx.cachedMatch.player2).trim() || keys[1] : keys[1];
   var s1 = (ctx.cachedMatch && ctx.cachedMatch.scores && typeof ctx.cachedMatch.scores[keys[0]] === 'number') ? ctx.cachedMatch.scores[keys[0]] : '—';
   var s2 = (ctx.cachedMatch && ctx.cachedMatch.scores && typeof ctx.cachedMatch.scores[keys[1]] === 'number') ? ctx.cachedMatch.scores[keys[1]] : '—';
-  return 'Time: ' + timeStr + '\n' + name1 + ': ' + s1 + '\n' + name2 + ': ' + s2;
+  var alliesAllowedText = (ctx && typeof ctx.alliesAllowed === 'number') ? String(ctx.alliesAllowed) : '—';
+  return 'Time: ' + timeStr + '\n' +
+    'Creatures allowed: ' + alliesAllowedText + '\n' +
+    name1 + ': ' + s1 + '\n' +
+    name2 + ': ' + s2;
 }
 
 function updateMultiplayerChallengeToast() {
