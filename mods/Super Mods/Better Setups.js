@@ -330,8 +330,13 @@ function addTrashButtonConfirmation(trashButton) {
   // Set up global click handler if not already set
   if (!globalClickHandler) {
     globalClickHandler = function(e) {
-      // If clicking outside any trash button, cancel all confirmations
-      const clickedTrashButton = e.target.closest('button svg.lucide-trash2')?.closest('button');
+      // Capture phase runs on document BEFORE the trash button's listener. Detecting
+      // "click on trash" only via closest('button svg...') misses when e.target is
+      // the <button> itself (padding / empty hit area), so we wrongly cancel and the
+      // confirm click restarts confirmation instead of deleting.
+      const btn = e.target.closest('button');
+      const clickedTrashButton =
+        btn && btn.querySelector('svg.lucide-trash2') ? btn : null;
       if (!clickedTrashButton) {
         cancelAllConfirmations();
       }

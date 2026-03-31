@@ -4125,8 +4125,21 @@ function generateSummaryLogText() {
             } else if (session.victory === false) {
                 mapGroups[mapName].losses++;
             }
-            mapGroups[mapName].totalGold += session.gold || 0;
-            mapGroups[mapName].totalDust += session.dust || 0;
+            // Prefer explicit session totals, but fall back to deriving from loot for older data.
+            let sessionGold = typeof session.gold === 'number' ? session.gold : 0;
+            let sessionDust = typeof session.dust === 'number' ? session.dust : 0;
+            if ((typeof session.gold !== 'number' || typeof session.dust !== 'number') && Array.isArray(session.loot)) {
+                session.loot.forEach(item => {
+                    if (!item || typeof item.count !== 'number') return;
+                    if (typeof session.gold !== 'number' && item.originalName === 'Gold') {
+                        sessionGold += item.count;
+                    } else if (typeof session.dust !== 'number' && item.originalName === 'Dust') {
+                        sessionDust += item.count;
+                    }
+                });
+            }
+            mapGroups[mapName].totalGold += sessionGold;
+            mapGroups[mapName].totalDust += sessionDust;
             mapGroups[mapName].totalStamina += session.staminaSpent || 0;
             
             // Track time range for this map
@@ -4201,13 +4214,33 @@ function generateSummaryLogText() {
             summary += `  Rates: ${mapSessionRate} sessions/h | ${mapGoldRate} gold/h | ${mapCreatureRate} creatures/h | ${mapEquipmentRate} equipment/h\n`;
             summary += `  Efficiency: ${mapGoldPerStamina} gold/stamina | ${mapSessionsPerStamina} sessions/stamina | ${mapStaminaRate} stamina/h\n`;
             
-            // Show top loot items for this map (limit to 8 most common)
-            const sortedLoot = Array.from(mapData.loot.values()).sort((a, b) => b.count - a.count);
-            const topLoot = sortedLoot.slice(0, 8);
+            // Show all loot items using the same order as panel rendering:
+            // category (Runes -> Equipment -> Everything else), then name, then rarity.
+            const sortedLoot = Array.from(mapData.loot.values()).sort((a, b) => {
+                const categoryA = getItemCategory(a);
+                const categoryB = getItemCategory(b);
+                if (categoryA !== categoryB) {
+                    return categoryA - categoryB;
+                }
+
+                const nameCompare = (a.originalName || '').localeCompare(b.originalName || '');
+                if (nameCompare !== 0) {
+                    return nameCompare;
+                }
+
+                if ((a.rarity || 0) !== (b.rarity || 0)) {
+                    return (b.rarity || 0) - (a.rarity || 0);
+                }
+
+                if ((a.gameId || 0) !== (b.gameId || 0)) {
+                    return (a.gameId || 0) - (b.gameId || 0);
+                }
+                return 0;
+            });
             
-            if (topLoot.length > 0) {
-                summary += `  Top Loot:\n`;
-                topLoot.forEach(item => {
+            if (sortedLoot.length > 0) {
+                summary += `  Loot:\n`;
+                sortedLoot.forEach(item => {
                     let itemLine = `    ${item.originalName}: x${item.count}`;
                     if (item.rarity > 0) {
                         const rarityText = item._descriptiveRarity || 
@@ -4222,13 +4255,31 @@ function generateSummaryLogText() {
                 });
             }
             
-            // Show creatures for this map (limit to 8 most common)
-            const sortedCreatures = Array.from(mapData.creatures.values()).sort((a, b) => b.count - a.count);
-            const topCreatures = sortedCreatures.slice(0, 8);
+            // Show all creatures using the same order as panel rendering:
+            // shiny first, then name, then tier (high->low), then gameId.
+            const sortedCreatures = Array.from(mapData.creatures.values()).sort((a, b) => {
+                if (a.isShiny !== b.isShiny) {
+                    return b.isShiny ? 1 : -1;
+                }
+
+                const nameCompare = (a.originalName || '').localeCompare(b.originalName || '');
+                if (nameCompare !== 0) {
+                    return nameCompare;
+                }
+
+                if ((a.tierLevel || 0) !== (b.tierLevel || 0)) {
+                    return (b.tierLevel || 0) - (a.tierLevel || 0);
+                }
+
+                if ((a.gameId || 0) !== (b.gameId || 0)) {
+                    return (a.gameId || 0) - (b.gameId || 0);
+                }
+                return 0;
+            });
             
-            if (topCreatures.length > 0) {
+            if (sortedCreatures.length > 0) {
                 summary += `  Creatures:\n`;
-                topCreatures.forEach(creature => {
+                sortedCreatures.forEach(creature => {
                     let creatureLine = `    ${creature.originalName} (${creature.tierName}): x${creature.count}`;
                     if (creature.isShiny) {
                         creatureLine = `    ✨ ${creatureLine}`;

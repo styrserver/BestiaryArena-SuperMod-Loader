@@ -5602,9 +5602,13 @@
     
     function addAutosellerNavButton() {
         function tryInsert() {
-            // Game header: nav used to be nav.shrink-0; it is now nav.grow under #header-slot
+            // Header/HUD nav selectors changed over time; try old + new variants
             const headerSlot = document.getElementById('header-slot');
-            const nav = headerSlot?.querySelector('nav') || queryElement('nav.shrink-0');
+            const nav =
+                headerSlot?.querySelector('nav') ||
+                queryElement('nav.shrink-0') ||
+                queryElement('nav.grow') ||
+                queryElement('div.z-floatingHud nav');
             if (!nav) {
                 setTimeout(tryInsert, 500);
                 return;

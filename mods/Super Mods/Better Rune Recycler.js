@@ -424,20 +424,6 @@
   }
 
   /**
-   * Reset statistics
-   */
-  function resetStats() {
-    recyclingStats = {
-      cyclesCompleted: 0,
-      totalCyclesTarget: null,
-      runesConsumed: {},
-      runesCreated: {},
-      goldSpent: 0,
-      errors: 0,
-    };
-  }
-
-  /**
    * Update statistics after a recycle
    */
   function updateStats(result, sacrifice) {
@@ -513,7 +499,7 @@
     }
 
     recycleInProgress = true;
-    resetStats();
+    const cyclesAtRunStart = recyclingStats.cyclesCompleted;
     const useMaxCycles = !!recyclingConfig.useMaxCycles;
     const totalCycles = useMaxCycles ? null : recyclingConfig.cycles;
     recyclingStats.totalCyclesTarget = totalCycles; // null = "Max" mode, show "X / Max"
@@ -579,7 +565,7 @@
           await new Promise(resolve => setTimeout(resolve, chunk));
         }
       }
-      recyclingStats.totalCyclesTarget = recyclingStats.cyclesCompleted; // final "X / X" after max run
+      recyclingStats.totalCyclesTarget = recyclingStats.cyclesCompleted - cyclesAtRunStart; // this run only, for status text
     } else {
       for (; i < totalCycles; ) {
         const ok = await runCycle();
@@ -593,17 +579,15 @@
       }
     }
 
+    const completedThisRun = recyclingStats.cyclesCompleted - cyclesAtRunStart;
+    const totalDisplayForMessage = recyclingStats.totalCyclesTarget != null ? String(recyclingStats.totalCyclesTarget) : statusTotal;
     if (recycleInProgress) {
       recycleInProgress = false;
-      const completed = recyclingStats.cyclesCompleted;
-      const totalDisplay = recyclingStats.totalCyclesTarget != null ? String(recyclingStats.totalCyclesTarget) : statusTotal;
-      updateStatusMessage(t('mods.betterRuneRecycler.completedCycles').replace('{completed}', String(completed)).replace('{total}', totalDisplay), 'success');
+      updateStatusMessage(t('mods.betterRuneRecycler.completedCycles').replace('{completed}', String(completedThisRun)).replace('{total}', totalDisplayForMessage), 'success');
       updateStartStopButton(false);
       updateInventoryDisplay();
     } else {
-      const completed = recyclingStats.cyclesCompleted;
-      const totalDisplay = recyclingStats.totalCyclesTarget != null ? String(recyclingStats.totalCyclesTarget) : statusTotal;
-      updateStatusMessage(t('mods.betterRuneRecycler.stoppedAtCycle').replace('{current}', String(completed)).replace('{total}', totalDisplay), 'warning');
+      updateStatusMessage(t('mods.betterRuneRecycler.stoppedAtCycle').replace('{current}', String(completedThisRun)).replace('{total}', totalDisplayForMessage), 'warning');
       updateStartStopButton(false);
     }
   }
@@ -957,6 +941,7 @@
           setTimeout(() => {
             if (!isRuneRecyclerModalOpen()) return;
             setupModalEventListeners();
+            updateStatsDisplay();
           }, 100);
           
           // Inject "Created by btlucas" into the framework footer (same pattern as Better Forge)

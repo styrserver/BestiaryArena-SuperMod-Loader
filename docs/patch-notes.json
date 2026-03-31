@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "3.5.8",
+      "changes": [
+        { "type": "fixed", "mod": "Autoseller", "text": "Fixed Autoseller nav button not appearing after HUD layout changes." },
+        { "type": "fixed", "mod": "Better Rune Recycler", "text": "Statistics persist across stop/start and when reopening the modal." },
+        { "type": "fixed", "mod": "Better Setups", "text": "Delete confirmation no longer ignored when the click lands on the trash button outside the icon." },
+        { "type": "fixed", "mod": "Cyclopedia", "text": "Bug fixes." },
+        { "type": "fixed", "mod": "Hunt Analyzer", "text": "Fixed summary export missing loot entries and incorrect gold/stamina map efficiency calculations." }
+      ]
+    },
+    {
       "version": "3.5.7",
       "changes": [
         { "type": "added", "mod": "Cyclopedia", "text": "Added Shiny Creatures on front page." },

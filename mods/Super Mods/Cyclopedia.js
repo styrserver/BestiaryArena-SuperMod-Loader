@@ -348,6 +348,7 @@ const CyclopediaHomeSearch = (() => {
   const ABILITY_TEXT_CACHE_VERSION = 2;
 
   let baseEntries = null;
+  let creatureEntries = null; // cached: baseEntries filtered to creatures
   let roomCreatureIndex = null; // Map<roomId, Set<creatureName>>
   let creatureAbilityTextCache = null; // Map<creatureNameLower, { v: number, text: string } | string>
   let abilityIndexState = {
@@ -1001,7 +1002,9 @@ const CyclopediaHomeSearch = (() => {
   }
 
   function scoreEntry(entry, qNorm) {
-    const labelNorm = cyclopediaNormalizeSearchText(entry.label);
+    // Cache label normalization on the entry to avoid re-normalizing on every keystroke.
+    // (Label is normalized once and then re-used by scoring + ability matching.)
+    const labelNorm = entry.labelNorm ?? (entry.labelNorm = cyclopediaNormalizeSearchText(entry.label));
     if (!labelNorm) return 0;
     if (labelNorm === qNorm) return 100;
     if (labelNorm.startsWith(qNorm)) return 80;
@@ -1029,15 +1032,70 @@ const CyclopediaHomeSearch = (() => {
     }
 
     if (!baseEntries) baseEntries = buildBaseEntries();
+    if (!creatureEntries) creatureEntries = baseEntries.filter(e => e.kind === 'creature');
 
-    const scored = [];
+    // Top-N selection without sorting the full scored list.
+    // Heap holds the current "worst" of the best-N so we can evict quickly.
+    const bestHeap = [];
+
+    const isWorse = (a, b) => {
+      // a worse than b:
+      // - lower score is worse
+      // - when score ties, later label is worse (since earlier label sorts first)
+      if (a.score !== b.score) return a.score < b.score;
+      return a.entry.label.localeCompare(b.entry.label) > 0;
+    };
+
+    const heapSiftUp = (idx) => {
+      while (idx > 0) {
+        const parent = (idx - 1) >> 1;
+        // If current is worse than parent, swap to keep the worst at the top.
+        if (!isWorse(bestHeap[idx], bestHeap[parent])) break;
+        const tmp = bestHeap[parent];
+        bestHeap[parent] = bestHeap[idx];
+        bestHeap[idx] = tmp;
+        idx = parent;
+      }
+    };
+
+    const heapSiftDown = (idx) => {
+      const n = bestHeap.length;
+      while (true) {
+        const left = idx * 2 + 1;
+        if (left >= n) break;
+        const right = left + 1;
+        let worstChild = left;
+        if (right < n && isWorse(bestHeap[right], bestHeap[left])) worstChild = right;
+        // If child is worse than current, swap.
+        if (!isWorse(bestHeap[worstChild], bestHeap[idx])) break;
+        const tmp = bestHeap[idx];
+        bestHeap[idx] = bestHeap[worstChild];
+        bestHeap[worstChild] = tmp;
+        idx = worstChild;
+      }
+    };
+
     for (const entry of baseEntries) {
       const score = scoreEntry(entry, qNorm);
-      if (score > 0) scored.push({ entry, score });
+      if (score <= 0) continue;
+
+      const item = { entry, score };
+      if (bestHeap.length < MAX_RESULTS) {
+        bestHeap.push(item);
+        heapSiftUp(bestHeap.length - 1);
+        continue;
+      }
+
+      // Root is the current "worst" among the best-N. If the new item is better,
+      // replace root and restore heap property.
+      if (isWorse(bestHeap[0], item)) {
+        bestHeap[0] = item;
+        heapSiftDown(0);
+      }
     }
 
-    scored.sort((a, b) => (b.score - a.score) || a.entry.label.localeCompare(b.entry.label));
-    const results = scored.slice(0, MAX_RESULTS).map(({ entry }) => ({
+    bestHeap.sort((a, b) => (b.score - a.score) || a.entry.label.localeCompare(b.entry.label));
+    const results = bestHeap.map(({ entry }) => ({
       kind: entry.kind,
       kindLabel: kindLabel(entry.kind),
       label: entry.label,
@@ -1122,14 +1180,13 @@ const CyclopediaHomeSearch = (() => {
           results.filter(r => r.target?.type === 'creature').map(r => cyclopediaNormalizeSearchText(r.label))
         );
 
-        const creatureEntries = baseEntries.filter(e => e.kind === 'creature');
         for (const entry of creatureEntries) {
           if (results.length >= MAX_RESULTS) break;
 
           // Skip if already matched by name/role
           if (entry.search && entry.search.includes(qNorm)) continue;
 
-          const nameKey = cyclopediaNormalizeSearchText(entry.label);
+          const nameKey = entry.labelNorm ?? cyclopediaNormalizeSearchText(entry.label);
           if (existingCreatureKeys.has(nameKey)) continue;
 
           // Prefer cached text. If not cached yet, skip for now — background indexer will populate and UI will refresh.
@@ -1157,6 +1214,7 @@ const CyclopediaHomeSearch = (() => {
 
   function reset() {
     baseEntries = null;
+    creatureEntries = null;
     roomCreatureIndex = null;
     creatureAbilityTextCache = null;
     abilityIndexPromise = null;
@@ -5043,7 +5101,7 @@ function openCyclopediaModal(options) {
           padding: '20px', boxSizing: 'border-box', overflowY: 'scroll'
         });
 
-        const userInfoContent = renderCyclopediaPlayerInfo(profileData);
+        const userInfoContent = renderCyclopediaPlayerInfo(profileData, { showShinyCreatures: false });
         const centeredContent = DOMUtils.createElement('div');
         Object.assign(centeredContent.style, {
           display: 'flex', justifyContent: 'center', alignItems: 'flex-start', width: '100%', height: '100%'
@@ -7316,7 +7374,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             bagOutfits: '-',
             rankPoints: '-',
             timeSum: '-'
-          });
+          }, { showShinyCreatures: false });
           
           // Find the name element and make it red
           const nameElement = templateContent.querySelector('p.line-clamp-1.text-whiteExp.animate-in.fade-in');
@@ -7341,7 +7399,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           container.appendChild(centeredContent);
         } else {
           // Create the player info content for valid player data
-          const playerInfoContent = renderCyclopediaPlayerInfo(profileData);
+          const playerInfoContent = renderCyclopediaPlayerInfo(profileData, { showShinyCreatures: false });
           
           // Add profile button after the player name
           const nameElement = playerInfoContent.querySelector('p.line-clamp-1.text-whiteExp.animate-in.fade-in');
@@ -7919,7 +7977,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       ownedOutfits: 0,
                       rankPoints: 0,
                       ticks: 0
-                      });
+                      }, { showShinyCreatures: false });
                       
                       centeredContent.appendChild(templateContent);
                       container.appendChild(centeredContent);
@@ -8002,7 +8060,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       ownedOutfits: 0,
                       rankPoints: 0,
                       ticks: 0
-                    });
+                    }, { showShinyCreatures: false });
                     
                     centeredContent.appendChild(templateContent);
                     container.appendChild(centeredContent);
@@ -8274,7 +8332,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               ownedOutfits: 0,
               rankPoints: 0,
               ticks: 0
-            });
+            }, { showShinyCreatures: false });
             
             centeredContent.appendChild(templateContent);
             container.appendChild(centeredContent);
@@ -14816,7 +14874,7 @@ const CYCLOPEDIA_MAX_VALUES = {
   perfectCreatures: 69,
   bisEquipments: 114,
   exploredMaps: 64,
-  bagOutfits: 199,
+  bagOutfits: 202,
   raids: 16
 };
 
@@ -14867,8 +14925,9 @@ const CYCLOPEDIA_TRANSLATION = {
   document.head.appendChild(style);
 }
 
-function renderCyclopediaPlayerInfo(profileData) {
+function renderCyclopediaPlayerInfo(profileData, options = {}) {
   try {
+    const { showShinyCreatures = true } = options;
     if (profileData && profileData.json) profileData = profileData.json;
     if (!profileData) {
       const div = document.createElement('div');
@@ -15096,7 +15155,11 @@ function renderCyclopediaPlayerInfo(profileData) {
   addRow({ label: cyclopediaT('mods.cyclopedia.startpage.stats.playCount'), icon: '/assets/icons/match-count.png', value: (getProfileValue('playCount') !== undefined ? FormatUtils.number(getProfileValue('playCount')) + 'x' : '-') });
 
   addRow({ label: cyclopediaT('mods.cyclopedia.startpage.progress'), highlight: true, colspan: 2 });
-  CYCLOPEDIA_PROGRESS_STATS.forEach(stat => {
+  const progressStats = showShinyCreatures
+    ? CYCLOPEDIA_PROGRESS_STATS
+    : CYCLOPEDIA_PROGRESS_STATS.filter((stat) => stat.key !== 'shinyCreatures');
+
+  progressStats.forEach(stat => {
     const val = getProfileValue(stat.key);
     const maxVal = typeof stat.max === 'function' ? stat.max() : stat.max;
     const isMax = typeof val === 'number' && val === maxVal;
