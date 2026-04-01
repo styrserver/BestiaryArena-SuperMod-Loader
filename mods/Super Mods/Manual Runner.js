@@ -12,7 +12,9 @@ const defaultConfig = {
   enableAutoRefillStamina: false,
   enableAutoSellCreatures: false,
   stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
-  maxFloor: 10 // Maximum floor to reach (0-15)
+  maxFloor: 10, // Maximum floor to reach (0-15)
+  /** When true, auto-click Skip when it shows a stamina cost. Default off; normal free skips still auto-click regardless. */
+  enableStaminaSkip: false
 };
 
 // Storage key for localStorage
@@ -59,7 +61,8 @@ function logConfigSummary(prefix) {
     maxFloor: config.maxFloor,
     refill: config.enableAutoRefillStamina,
     autoSell: config.enableAutoSellCreatures,
-    hideBoard: config.hideGameBoard
+    hideBoard: config.hideGameBoard,
+    staminaSkip: config.enableStaminaSkip
   });
 }
 
@@ -924,11 +927,14 @@ function setupBoardSubscription() {
       // If server signals enableSkip, attempt to skip immediately (debounced)
       try {
         if (serverResults.enableSkip === true && !skipInProgress) {
-          skipInProgress = true;
-          console.log('[Manual Runner] enableSkip=true received from server (subscription) — attempting to skip');
-          handleSkipButton().finally(() => {
-            setTimeout(() => { skipInProgress = false; }, 1200);
-          });
+          const skipBtn = findSkipButton();
+          if (shouldProcessAutoSkip(skipBtn)) {
+            skipInProgress = true;
+            console.log('[Manual Runner] enableSkip=true received from server (subscription) — attempting to skip');
+            handleSkipButton().finally(() => {
+              setTimeout(() => { skipInProgress = false; }, 1200);
+            });
+          }
         }
       } catch (_) {}
       
@@ -1000,6 +1006,25 @@ function closeRewardScreen() {
   console.log('[Manual Runner] ESC → close reward screen' + (scrollLocked === '1' ? ' (modal)' : ''));
 }
 
+/** Skip button shows a stamina cost (e.g. Skip (stamina icon 2)). */
+function isStaminaSkipButton(button) {
+  if (!button) return false;
+  try {
+    return button.querySelector('img[alt="stamina"], img[src*="stamina"]') !== null;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** If skipButton is null, allow (handleSkipButton will resolve); if stamina skip and disabled in config, block. */
+function shouldProcessAutoSkip(skipButton) {
+  if (!skipButton) return true;
+  if (isStaminaSkipButton(skipButton) && !config.enableStaminaSkip) {
+    return false;
+  }
+  return true;
+}
+
 // Helper function to find skip button (from btlucas fix.js)
 function findSkipButton() {
   try {
@@ -1042,6 +1067,10 @@ async function handleSkipButton() {
   try {
     const skipButton = findSkipButton();
     if (skipButton) {
+      if (!shouldProcessAutoSkip(skipButton)) {
+        console.log('[Manual Runner] Skip not auto-clicked (stamina skip disabled in config):', skipButton.textContent.trim());
+        return false;
+      }
       console.log('[Manual Runner] Skip:', skipButton.textContent.trim());
       skipButton.click();
       await sleep(500); // Wait for skip to process
@@ -1068,7 +1097,7 @@ async function quickSkipScan(totalMs = 5000, stepMs = 400) {
     const interval = Math.max(150, Math.min(stepMs, 1000));
     while (performance.now() < deadline) {
       const btn = findSkipButton();
-      if (btn) {
+      if (btn && shouldProcessAutoSkip(btn)) {
         await handleSkipButton();
         return true;
       }
@@ -1538,6 +1567,10 @@ function serverSignalsSkipEnabled() {
 
 async function handleSkipDetection(message) {
   if (serverSignalsSkipEnabled() && !skipInProgress) {
+    const skipBtnEarly = findSkipButton();
+    if (!shouldProcessAutoSkip(skipBtnEarly)) {
+      return false;
+    }
     skipInProgress = true;
     console.log(message || '[Manual Runner] enableSkip=true received — attempting to skip');
     await handleSkipButton().finally(() => {
@@ -1547,7 +1580,7 @@ async function handleSkipDetection(message) {
   }
 
   const skipButton = findSkipButton();
-  if (skipButton) {
+  if (skipButton && shouldProcessAutoSkip(skipButton)) {
     if (!skipInProgress) {
       skipInProgress = true;
       await handleSkipButton();
@@ -2234,6 +2267,20 @@ function createConfigPanel() {
   sellContainer.appendChild(sellLabel);
   content.appendChild(sellContainer);
 
+  // Auto-skip when skip costs stamina (toggleable; normal free skips are always auto-clicked)
+  const staminaSkipContainer = document.createElement('div');
+  staminaSkipContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  const staminaSkipInput = document.createElement('input');
+  staminaSkipInput.type = 'checkbox';
+  staminaSkipInput.id = `${CONFIG_PANEL_ID}-stamina-skip-input`;
+  staminaSkipInput.checked = Boolean(config.enableStaminaSkip);
+  const staminaSkipLabel = document.createElement('label');
+  staminaSkipLabel.htmlFor = staminaSkipInput.id;
+  staminaSkipLabel.textContent = t('mods.manualRunner.enableStaminaSkip');
+  staminaSkipContainer.appendChild(staminaSkipInput);
+  staminaSkipContainer.appendChild(staminaSkipLabel);
+  content.appendChild(staminaSkipContainer);
+
   // Check if board has ally creatures
   const hasAlly = hasAllyCreaturesOnBoard();
   
@@ -2278,6 +2325,7 @@ function createConfigPanel() {
         config.stopCondition = stopSelect.value;
         config.enableAutoRefillStamina = refillInput.checked;
         config.enableAutoSellCreatures = sellInput.checked;
+        config.enableStaminaSkip = staminaSkipInput.checked;
         config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
         config.maxFloor = parseInt(maxFloorInput.value, 10) || 10;
         // Clamp maxFloor to valid range
@@ -2289,6 +2337,7 @@ function createConfigPanel() {
           stopCondition: config.stopCondition,
           enableAutoRefillStamina: config.enableAutoRefillStamina,
           enableAutoSellCreatures: config.enableAutoSellCreatures,
+          enableStaminaSkip: config.enableStaminaSkip,
           stopWhenTicksReached: config.stopWhenTicksReached,
           maxFloor: config.maxFloor
         });
@@ -2317,6 +2366,7 @@ function createConfigPanel() {
         config.stopCondition = stopSelect.value;
         config.enableAutoRefillStamina = refillInput.checked;
         config.enableAutoSellCreatures = sellInput.checked;
+        config.enableStaminaSkip = staminaSkipInput.checked;
         config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
         config.maxFloor = parseInt(maxFloorInput.value, 10) || 10;
         // Clamp maxFloor to valid range
@@ -2328,6 +2378,7 @@ function createConfigPanel() {
           stopCondition: config.stopCondition,
           enableAutoRefillStamina: config.enableAutoRefillStamina,
           enableAutoSellCreatures: config.enableAutoSellCreatures,
+          enableStaminaSkip: config.enableStaminaSkip,
           stopWhenTicksReached: config.stopWhenTicksReached,
           maxFloor: config.maxFloor
         });

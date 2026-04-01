@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.5.9",
+      "changes": [
+        { "type": "added", "mod": "Manual Runner", "text": "Added Stamina Skip." }
+      ]
+    },
+    {
       "version": "3.5.8",
       "changes": [
         { "type": "fixed", "mod": "Autoseller", "text": "Fixed Autoseller nav button not appearing after HUD layout changes." },
