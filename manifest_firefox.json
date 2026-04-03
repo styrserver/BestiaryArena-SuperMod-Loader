@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "3.5.9",
+  "version": "3.5.10",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -30,9 +30,15 @@
       ],
       "exclude_matches": [
         "*://bestiaryarena.com/profile/*",
+        "*://*.bestiaryarena.com/profile/*",
         "*://bestiaryarena.com/recolor*",
+        "*://*.bestiaryarena.com/recolor*",
         "*://bestiaryarena.com/assets*",
-        "*://bestiaryarena.com/_next/*"
+        "*://*.bestiaryarena.com/assets*",
+        "*://bestiaryarena.com/_next/*",
+        "*://*.bestiaryarena.com/_next/*",
+        "*://bestiaryarena.com/seasons*",
+        "*://*.bestiaryarena.com/seasons*"
       ],
       "js": ["content/injector.js"],
       "run_at": "document_start",
@@ -45,9 +51,15 @@
       ],
       "exclude_matches": [
         "*://bestiaryarena.com/profile/*",
+        "*://*.bestiaryarena.com/profile/*",
         "*://bestiaryarena.com/recolor*",
+        "*://*.bestiaryarena.com/recolor*",
         "*://bestiaryarena.com/assets*",
-        "*://bestiaryarena.com/_next/*"
+        "*://*.bestiaryarena.com/assets*",
+        "*://bestiaryarena.com/_next/*",
+        "*://*.bestiaryarena.com/_next/*",
+        "*://bestiaryarena.com/seasons*",
+        "*://*.bestiaryarena.com/seasons*"
       ],
       "js": ["content/utility_injector.js"],
       "run_at": "document_idle",

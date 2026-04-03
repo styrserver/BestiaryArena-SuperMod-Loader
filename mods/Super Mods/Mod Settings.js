@@ -96,6 +96,42 @@ const SELECTORS = {
   LEVEL_SPAN: '.pixel-font-16.text-whiteExp span'
 };
 
+/** Resolves the main game nav <ul> (matches Autoseller: layout uses nav.grow / floating HUD on some viewports). */
+function getPrimaryGameNavUl() {
+  const headerSlot = document.getElementById('header-slot');
+  const nav =
+    headerSlot?.querySelector('nav') ||
+    document.querySelector('nav.shrink-0') ||
+    document.querySelector('nav.grow') ||
+    document.querySelector('div.z-floatingHud nav');
+  if (!nav) return null;
+  const ul = nav.querySelector('ul.flex.items-center');
+  return ul || null;
+}
+
+/** Responsive label spans inside nav buttons (Tailwind sm:inline and/or @[…]:inline). */
+function isNavBarLabelSpan(span) {
+  if (!span.classList.contains('hidden')) return false;
+  const cn = typeof span.className === 'string' ? span.className : String(span.className);
+  if (cn.includes('sm:inline')) return true;
+  if (/\[[^\]]+\]:inline/.test(cn)) return true;
+  return false;
+}
+
+/** All nav roots that may host the main bar (header vs mobile floating HUD can differ). */
+function getNavElementsForCompactBar() {
+  const navs = new Set();
+  const headerSlot = document.getElementById('header-slot');
+  const hNav = headerSlot?.querySelector('nav');
+  if (hNav) navs.add(hNav);
+  const nShrink = document.querySelector('nav.shrink-0');
+  if (nShrink) navs.add(nShrink);
+  const nGrow = document.querySelector('nav.grow');
+  if (nGrow) navs.add(nGrow);
+  document.querySelectorAll('div.z-floatingHud nav').forEach(n => navs.add(n));
+  return [...navs];
+}
+
 // Game constants
 const GAME_CONSTANTS = {
   MAX_STAT_VALUE: 20,
@@ -6142,13 +6178,7 @@ function toggleBetterHighscoresContainer(event) {
 // Add Better Highscores nav button after Autoseller
 function addBetterHighscoresNavButton() {
   const tryInsert = () => {
-    const nav = document.querySelector('nav.shrink-0');
-    if (!nav) {
-      const timeoutId = scheduleTimeout(tryInsert, 500);
-      return;
-    }
-    
-    const ul = nav.querySelector('ul.flex.items-center');
+    const ul = getPrimaryGameNavUl();
     if (!ul) {
       const timeoutId = scheduleTimeout(tryInsert, 500);
       return;
@@ -6199,12 +6229,7 @@ function addBetterHighscoresNavButton() {
 
 // Remove Better Highscores nav button
 function removeBetterHighscoresNavButton() {
-  const nav = document.querySelector('nav.shrink-0');
-  if (!nav) {
-    return;
-  }
-  
-  const ul = nav.querySelector('ul.flex.items-center');
+  const ul = getPrimaryGameNavUl();
   if (!ul) {
     return;
   }
@@ -6247,98 +6272,55 @@ function showWebsiteFooter() {
 
 // Apply compact nav bar (hide text, show only icons)
 function applyCompactNavBar() {
-  const headerSlot = document.querySelector('#header-slot');
-  if (!headerSlot) {
-    console.log('[Mod Settings] Header slot not found');
+  const navs = getNavElementsForCompactBar();
+  if (navs.length === 0) {
+    console.log('[Mod Settings] No nav elements found for compact bar');
     return;
   }
-  
-  // Find all nav text spans - they have class "hidden sm:inline" which means they're hidden on mobile but shown on larger screens
-  const nav = headerSlot.querySelector('nav');
-  if (!nav) {
-    console.log('[Mod Settings] Nav element not found');
-    return;
-  }
-  
-  // Find all spans within nav buttons that contain text labels
-  // The spans we want to hide have classes "hidden sm:inline" (Tailwind CSS responsive classes)
-  const navButtons = nav.querySelectorAll('button');
-  navButtons.forEach(button => {
-    // Find spans that are text labels (they have "hidden sm:inline" classes)
-    const spans = button.querySelectorAll('span');
-    spans.forEach(span => {
-      // Check if this span has the "hidden" class and "sm:inline" in className
-      // Tailwind uses "sm:inline" as a class name, so we check the className string
-      if (span.classList.contains('hidden') && span.className.includes('sm:inline')) {
-        span.style.display = 'none';
-        span.setAttribute('data-compact-nav-hidden', 'true');
-      }
+
+  navs.forEach(nav => {
+    nav.querySelectorAll('button').forEach(button => {
+      button.querySelectorAll('span').forEach(span => {
+        if (isNavBarLabelSpan(span)) {
+          span.style.display = 'none';
+          span.setAttribute('data-compact-nav-hidden', 'true');
+        }
+      });
     });
   });
-  
+
   console.log('[Mod Settings] Compact nav bar applied - text hidden');
 }
 
 // Remove compact nav bar (show text again)
 function removeCompactNavBar() {
-  const headerSlot = document.querySelector('#header-slot');
-  if (!headerSlot) {
-    console.log('[Mod Settings] Header slot not found');
-    return;
-  }
-  
-  const nav = headerSlot.querySelector('nav');
-  if (!nav) {
-    console.log('[Mod Settings] Nav element not found');
-    return;
-  }
-  
-  // Find all spans that were hidden by compact nav bar and restore their display
-  const navButtons = nav.querySelectorAll('button');
-  navButtons.forEach(button => {
-    const spans = button.querySelectorAll('span');
-    spans.forEach(span => {
-      // Check if this span was hidden by our compact nav bar feature
-      if (span.classList.contains('hidden') && span.className.includes('sm:inline') && span.getAttribute('data-compact-nav-hidden') === 'true') {
-        span.style.display = '';
-        span.removeAttribute('data-compact-nav-hidden');
-      }
-    });
+  document.querySelectorAll('[data-compact-nav-hidden="true"]').forEach(span => {
+    span.style.display = '';
+    span.removeAttribute('data-compact-nav-hidden');
   });
-  
   console.log('[Mod Settings] Compact nav bar removed - text shown');
 }
 
 // Start observer for compact nav bar
 function startCompactNavBarObserver() {
   console.log('[Mod Settings] Starting compact nav bar observer');
-  
+
   const observer = new MutationObserver(() => {
-    // Reapply compact nav bar whenever DOM changes
-    if (config.compactNavBar) {
-      const headerSlot = document.querySelector('#header-slot');
-      if (headerSlot) {
-        const nav = headerSlot.querySelector('nav');
-        if (nav) {
-          // Check if any text spans are visible when they shouldn't be
-          const navButtons = nav.querySelectorAll('button');
-          let needsUpdate = false;
-          navButtons.forEach(button => {
-            const spans = button.querySelectorAll('span');
-            spans.forEach(span => {
-              if (span.classList.contains('hidden') && span.className.includes('sm:inline')) {
-                if (span.style.display !== 'none') {
-                  needsUpdate = true;
-                }
-              }
-            });
-          });
-          
-          if (needsUpdate) {
-            applyCompactNavBar();
+    if (!config.compactNavBar) return;
+
+    let needsUpdate = false;
+    outer: for (const nav of getNavElementsForCompactBar()) {
+      for (const button of nav.querySelectorAll('button')) {
+        for (const span of button.querySelectorAll('span')) {
+          if (isNavBarLabelSpan(span) && span.style.display !== 'none') {
+            needsUpdate = true;
+            break outer;
           }
         }
       }
+    }
+    if (needsUpdate) {
+      applyCompactNavBar();
     }
   });
   
@@ -8494,13 +8476,7 @@ const addLastMapNavButton = () => {
   }
 
   function tryInsert() {
-    const nav = document.querySelector('nav.shrink-0');
-    if (!nav) {
-      setTimeout(tryInsert, 500);
-      return;
-    }
-
-    const ul = nav.querySelector('ul.flex.items-center');
+    const ul = getPrimaryGameNavUl();
     if (!ul) {
       setTimeout(tryInsert, 500);
       return;

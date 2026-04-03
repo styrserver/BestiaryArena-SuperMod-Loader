@@ -1796,7 +1796,7 @@ function createSettingsButton() {
 
 // Create the toggle button
 function createToggleButton() {
-    return createStyledButton(TASKER_TOGGLE_ID, 'Disabled', 'red', () => {
+    return createStyledButton(TASKER_TOGGLE_ID, t('mods.betterTasker.disabled'), 'red', () => {
         console.log('[Better Tasker] Toggle button clicked');
         toggleTasker();
     });
@@ -2163,11 +2163,11 @@ function updateToggleButton() {
     
     switch (taskerState) {
         case TASKER_STATES.DISABLED:
-            toggleButton.textContent = 'Disabled';
+            toggleButton.textContent = t('mods.betterTasker.disabled');
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
             break;
         case TASKER_STATES.NEW_TASK_ONLY:
-            toggleButton.textContent = 'New Task+';
+            toggleButton.textContent = t('mods.betterTasker.newTaskPlus');
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
             // Set custom blue background
             toggleButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png")';

@@ -12001,16 +12001,24 @@ function stopAccountMenuObserver() {
   }
 }
 
+// Same nav resolution as Autoseller / Mod Settings (mobile uses nav.grow + floating HUD).
+function getGameNavUlForChat() {
+  const headerSlot = document.getElementById('header-slot');
+  const nav =
+    headerSlot?.querySelector('nav') ||
+    document.querySelector('nav.shrink-0') ||
+    document.querySelector('nav.grow') ||
+    document.querySelector('div.z-floatingHud nav');
+  if (!nav) return null;
+  return nav.querySelector('ul.flex.items-center') || null;
+}
+
 // Create Chat button in header navigation
 function updateChatHeaderButtonVisibility() {
   const chatEnabled = getMessagingEnabled();
-  const headerUl = document.querySelector('#header-slot nav ul');
-  if (!headerUl) return;
-  
-  const chatButtonLi = Array.from(headerUl.children).find(
-    el => el.querySelector('.vip-chat-header-btn')
-  );
-  
+  const chatBtn = document.querySelector('.vip-chat-header-btn');
+  if (!chatBtn) return;
+  const chatButtonLi = chatBtn.closest('li');
   if (chatButtonLi) {
     chatButtonLi.style.display = chatEnabled ? '' : 'none';
   }
@@ -12018,8 +12026,7 @@ function updateChatHeaderButtonVisibility() {
 
 function createChatHeaderButton() {
   const tryInsert = () => {
-    // Find the header <ul> inside #header-slot nav
-    const headerUl = document.querySelector('#header-slot nav ul');
+    const headerUl = getGameNavUlForChat();
     if (!headerUl) {
       const timeoutId = setTimeout(tryInsert, 500);
       trackTimeout(timeoutId);

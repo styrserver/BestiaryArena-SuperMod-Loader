@@ -4,6 +4,18 @@
   },
   "notes": [
     {
+      "version": "3.5.10",
+      "changes": [
+        { "type": "fixed", "mod": "Better Boosted Maps", "text": "Localized Disabled toggle label." },
+        { "type": "fixed", "mod": "Better Tasker", "text": "Localized Disabled and New task+ toggle labels." },
+        { "type": "fixed", "mod": "Core", "text": "Fixed injection on Seasons, player profiles, and other manifest-excluded paths." },
+        { "type": "fixed", "mod": "Cyclopedia", "text": "Player info shows correct premium/free icon and status colors." },
+        { "type": "fixed", "mod": "Mod Settings", "text": "Return to Map, Better Highscores, and Compact Navigation Bar hook the HUD nav (nav.grow / floating bar)." },
+        { "type": "fixed", "mod": "Raid Hunter", "text": "Localized Disabled toggle label." },
+        { "type": "fixed", "mod": "VIP List", "text": "Chat nav button uses the same HUD nav resolution as Autoseller when chat is enabled." }
+      ]
+    },
+    {
       "version": "3.5.9",
       "changes": [
         { "type": "added", "mod": "Manual Runner", "text": "Added Stamina Skip." }

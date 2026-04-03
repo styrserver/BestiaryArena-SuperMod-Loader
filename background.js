@@ -1036,8 +1036,30 @@ browserAPI.tabs.onRemoved.addListener((tabId) => {
   registeredTabs.delete(tabId);
 });
 
+// Mirrors content_scripts exclude_matches in manifest.json — when a URL is excluded,
+// no content script runs, so checkAPI fails and this listener would otherwise inject
+// injector.js via scripting.executeScript and bypass the exclusion.
+function isBestiaryExcludedFromModInjectionUrl(url) {
+  try {
+    const u = new URL(url);
+    if (!u.hostname.endsWith('bestiaryarena.com')) return false;
+    const p = u.pathname;
+    if (p.startsWith('/profile/') || p === '/profile') return true;
+    if (p.startsWith('/recolor')) return true;
+    if (p.startsWith('/assets')) return true;
+    if (p.startsWith('/_next/')) return true;
+    if (p === '/seasons' || p.startsWith('/seasons/')) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url && tab.url.match(/bestiaryarena\.com/)) {
+    if (isBestiaryExcludedFromModInjectionUrl(tab.url)) {
+      return;
+    }
     console.log(`Tab ${tabId} updated with URL ${tab.url}`);
     
     // First refresh all scripts to get latest versions

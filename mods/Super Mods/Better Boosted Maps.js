@@ -1150,7 +1150,7 @@ function updateToggleButton() {
         toggleButton.textContent = t('mods.betterBoostedMaps.enabled');
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
     } else {
-        toggleButton.textContent = 'Disabled'; // Not in translations yet, keeping as-is
+        toggleButton.textContent = t('mods.betterBoostedMaps.disabled');
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
     }
 }

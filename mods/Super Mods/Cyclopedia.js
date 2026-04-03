@@ -15094,14 +15094,14 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   statusIconWrap.className = 'relative h-full w-[22px]';
   const statusIcon = document.createElement('img');
   statusIcon.alt = cyclopediaT('mods.cyclopedia.startpage.premiumPassAlt');
-  statusIcon.src = '/assets/icons/premium-yes.png';
+  statusIcon.src = profileData.premium ? '/assets/icons/premium-yes.png' : '/assets/icons/premium-no.png';
   statusIcon.className = 'pixelated absolute -bottom-0.5 left-0';
   statusIcon.width = 22;
   statusIcon.height = 19;
   statusIconWrap.appendChild(statusIcon);
   statusGrid.appendChild(statusIconWrap);
   const statusText = document.createElement('span');
-  statusText.className = 'text-ally';
+  statusText.className = profileData.premium ? 'text-ally' : 'text-villain';
   statusText.textContent = profileData.premium ? cyclopediaT('mods.cyclopedia.startpage.statusPremium') : cyclopediaT('mods.cyclopedia.startpage.statusFree');
   statusGrid.appendChild(statusText);
   statusDiv.appendChild(statusLabel);
