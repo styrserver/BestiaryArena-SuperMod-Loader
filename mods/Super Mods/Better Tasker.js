@@ -245,6 +245,24 @@ function createCheckboxSetting(id, labelText, description, checked = false) {
     return settingDiv;
 }
 
+function attachSettingsListRowHover(rowEl, isDimmed) {
+    if (!rowEl) return;
+    rowEl.style.borderRadius = '3px';
+    rowEl.style.transition = 'background-color 0.05s ease, box-shadow 0.05s ease';
+    rowEl.addEventListener('mouseenter', () => {
+        rowEl.style.backgroundColor = isDimmed
+            ? 'rgba(255, 255, 255, 0.06)'
+            : 'rgba(255, 224, 102, 0.14)';
+        rowEl.style.boxShadow = isDimmed
+            ? 'inset 0 0 0 1px rgba(255, 255, 255, 0.12)'
+            : 'inset 0 0 0 1px rgba(255, 224, 102, 0.4)';
+    });
+    rowEl.addEventListener('mouseleave', () => {
+        rowEl.style.backgroundColor = 'transparent';
+        rowEl.style.boxShadow = 'none';
+    });
+}
+
 function createDropdownSetting(id, label, description, value = 'Auto-setup', options = ['Auto-setup']) {
     const settingDiv = document.createElement('div');
     settingDiv.style.cssText = `
@@ -3155,7 +3173,7 @@ function createGeneralSettings() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = 'Auto-Task Settings'; // Not in translations yet, keeping as-is
+    title.textContent = t('mods.betterTasker.defaultSettings');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -3444,6 +3462,7 @@ function createMonsterSelectionSettings() {
             creatureDiv.appendChild(checkbox);
             creatureDiv.appendChild(warningSymbol);
             creatureDiv.appendChild(label);
+            attachSettingsListRowHover(creatureDiv, isUnselectable);
             monsterContainer.appendChild(creatureDiv);
         });
     }

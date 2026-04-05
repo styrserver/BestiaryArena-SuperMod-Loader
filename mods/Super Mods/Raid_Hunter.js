@@ -1281,6 +1281,24 @@ function createCheckboxSetting(id, labelText, description, checked = false) {
     return settingDiv;
 }
 
+function attachSettingsListRowHover(rowEl, isDimmed) {
+    if (!rowEl) return;
+    rowEl.style.borderRadius = '3px';
+    rowEl.style.transition = 'background-color 0.05s ease, box-shadow 0.05s ease';
+    rowEl.addEventListener('mouseenter', () => {
+        rowEl.style.backgroundColor = isDimmed
+            ? 'rgba(255, 255, 255, 0.06)'
+            : 'rgba(255, 224, 102, 0.14)';
+        rowEl.style.boxShadow = isDimmed
+            ? 'inset 0 0 0 1px rgba(255, 255, 255, 0.12)'
+            : 'inset 0 0 0 1px rgba(255, 224, 102, 0.4)';
+    });
+    rowEl.addEventListener('mouseleave', () => {
+        rowEl.style.backgroundColor = 'transparent';
+        rowEl.style.boxShadow = 'none';
+    });
+}
+
 function createDropdownSetting(id, label, description, value = 'Auto-setup', options = ['Auto-setup']) {
     const settingDiv = document.createElement('div');
     settingDiv.style.cssText = `
@@ -5704,6 +5722,7 @@ function createRaidMapSelection() {
             });
             raidDiv.appendChild(floorSelect);
             
+            attachSettingsListRowHover(raidDiv, false);
             mapContainer.appendChild(raidDiv);
         });
     });

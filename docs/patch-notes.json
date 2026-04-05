@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.5.11",
+      "changes": [
+        { "type": "added", "mod": "Better Boosted Maps", "text": "Added Right-click context menu with options." }
+      ]
+    },
+    {
       "version": "3.5.10",
       "changes": [
         { "type": "fixed", "mod": "Better Boosted Maps", "text": "Localized Disabled toggle label." },
