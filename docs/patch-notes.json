@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.5.12",
+      "changes": [
+        { "type": "changed", "mod": "Better Boosted Maps", "text": "Improved Right-click context menu." }
+      ]
+    },
+    {
       "version": "3.5.11",
       "changes": [
         { "type": "added", "mod": "Better Boosted Maps", "text": "Added Right-click context menu with options." }

@@ -426,6 +426,24 @@ let betterBoostedMapsOpenContextMenu = null;
 const BBM_CTX_COLOR_ACCENT = '#ffe066';
 const BBM_CTX_COLOR_WHITE = '#ffffff';
 const BBM_CTX_COLOR_DARK_GRAY = '#2a2a2a';
+/** Match Better Boosted Maps modal tab panel / list inset styling */
+const BBM_CTX_PANEL_BORDER = '#444444';
+const BBM_CTX_INSET_BORDER = '#555555';
+const BBM_CTX_PANEL_BG = 'rgba(0, 0, 0, 0.2)';
+const BBM_CTX_INSET_BG = 'rgba(0, 0, 0, 0.3)';
+/** Same repeating texture as the main Better Boosted Maps settings panel (not flat black). */
+const BBM_CTX_PANEL_TEXTURE =
+    "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+/** Fixed shell height so the panel does not grow/shrink with content; inner areas scroll. */
+const BBM_CTX_MENU_HEIGHT = 'min(400px, 85vh)';
+/** Fixed shell width so adding rules / equipment does not widen the menu (viewport-capped). */
+const BBM_CTX_MENU_WIDTH = 'min(440px, 94vw)';
+/** In-game stat icons (same assets as equipment portrait / Cyclopedia). */
+const BBM_RULE_STAT_ICON_URL = {
+    ad: 'https://bestiaryarena.com/assets/icons/attackdamage.png',
+    ap: 'https://bestiaryarena.com/assets/icons/abilitypower.png',
+    hp: 'https://bestiaryarena.com/assets/icons/heal.png'
+};
 
 const BBM_CTX_FOOTER_BTN_FRAME =
     'width: 70px; height: 28px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: bold;';
@@ -450,24 +468,14 @@ function bbmCtxFillSelectSetupOptions(select, setupOptions, value) {
 }
 
 /**
- * @param {'save' | 'clear' | 'cancel'} variant
+ * @param {'clear' | 'cancel'} variant — cancel styling used for Close (dismiss only).
  */
 function bbmCtxCreateContextMenuFooterButton(text, variant) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'pixel-font-14';
     b.textContent = text;
-    if (variant === 'save') {
-        b.style.cssText = `${BBM_CTX_FOOTER_BTN_FRAME} background: #1a3a1a; color: #4CAF50; border: 1px solid #555;`;
-        b.addEventListener('mouseenter', () => {
-            b.style.backgroundColor = '#2a4a2a';
-            b.style.borderColor = '#4CAF50';
-        });
-        b.addEventListener('mouseleave', () => {
-            b.style.backgroundColor = '#1a3a1a';
-            b.style.borderColor = '#555';
-        });
-    } else if (variant === 'clear') {
+    if (variant === 'clear') {
         b.style.cssText = `${BBM_CTX_FOOTER_BTN_FRAME} background: #1a1a1a; color: #888888; border: 1px solid #555;`;
         b.addEventListener('mouseenter', () => {
             b.style.backgroundColor = '#2a2a2a';
@@ -503,6 +511,90 @@ function bbmClampEquipmentSetToSingleName(set) {
     const pick = [...set].sort((a, b) => a.localeCompare(b))[0];
     set.clear();
     set.add(pick);
+}
+
+function bbmNormalizeEquipmentRuleStatsArray(input) {
+    if (input == null) {
+        return ['all'];
+    }
+    if (Array.isArray(input)) {
+        const u = new Set();
+        input.forEach(x => {
+            const s = String(x).toLowerCase().trim();
+            if (s === 'all') {
+                u.add('all');
+            } else if (['ad', 'ap', 'hp'].includes(s)) {
+                u.add(s);
+            }
+        });
+        if (u.has('all')) {
+            return ['all'];
+        }
+        const out = [...u].sort((a, b) => a.localeCompare(b));
+        return out.length ? out : ['all'];
+    }
+    if (typeof input === 'string') {
+        const s = input.toLowerCase().trim();
+        if (s === 'all') {
+            return ['all'];
+        }
+        if (['ad', 'ap', 'hp'].includes(s)) {
+            return [s];
+        }
+        return ['all'];
+    }
+    return ['all'];
+}
+
+/** Legacy single field or new array; used when loading rules. */
+function bbmNormalizeEquipmentRuleStatsFromRule(rule) {
+    if (rule && Array.isArray(rule.equipmentStats)) {
+        return bbmNormalizeEquipmentRuleStatsArray(rule.equipmentStats);
+    }
+    if (rule && rule.equipmentStat != null) {
+        return bbmNormalizeEquipmentRuleStatsArray(rule.equipmentStat);
+    }
+    return ['all'];
+}
+
+function bbmEquipmentRuleStatsKey(stats) {
+    return bbmNormalizeEquipmentRuleStatsArray(stats).join('|');
+}
+
+/** True if two stat sets would match the same boost type for some equipment (used to block duplicate rules). */
+function bbmEquipmentRuleStatsOverlap(a, b) {
+    const na = bbmNormalizeEquipmentRuleStatsArray(a);
+    const nb = bbmNormalizeEquipmentRuleStatsArray(b);
+    if (na.includes('all') || nb.includes('all')) {
+        return true;
+    }
+    const setA = new Set(na);
+    for (let i = 0; i < nb.length; i++) {
+        if (setA.has(nb[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function bbmGetEquipmentStatFromEquipId(equipId) {
+    try {
+        const equipment = globalThis.state?.utils?.getEquipment(equipId);
+        const st = equipment?.metadata?.stat || equipment?.stats?.[0]?.type;
+        if (st && ['hp', 'ad', 'ap'].includes(String(st).toLowerCase())) {
+            return String(st).toLowerCase();
+        }
+    } catch (_) {}
+    return null;
+}
+
+/** Rule matches if actual boost stat is included, or rule includes "all". */
+function bbmRuleStatsMatchEquipment(ruleStatsNorm, actualStat) {
+    const r = bbmNormalizeEquipmentRuleStatsArray(ruleStatsNorm);
+    if (r.includes('all')) {
+        return true;
+    }
+    return !!actualStat && r.includes(actualStat);
 }
 
 // =======================
@@ -1565,6 +1657,7 @@ function getEffectiveMapAutomationSettings(roomId, settings, equipId) {
             equipName = getEquipmentName(equipId);
         } catch (_) {}
     }
+    const actualEquipStat = bbmGetEquipmentStatFromEquipId(equipId);
     if (equipName && Array.isArray(ov.equipmentRules)) {
         for (let i = 0; i < ov.equipmentRules.length; i++) {
             const rule = ov.equipmentRules[i];
@@ -1572,19 +1665,24 @@ function getEffectiveMapAutomationSettings(roomId, settings, equipId) {
                 continue;
             }
             const ruleEq = bbmNormalizeEquipmentRuleNames(rule.equipmentNames);
-            if (ruleEq.includes(equipName)) {
-                const fallbackSetup = s.setupMethod || t('mods.betterBoostedMaps.autoSetup');
-                const floor = rule.hasOwnProperty('floor')
-                    ? bbmClampRuleFloor(rule.floor)
-                    : defaultFloor;
-                return {
-                    setupMethod: rule.setupMethod || fallbackSetup,
-                    autoRefillStamina: rule.hasOwnProperty('autoRefillStamina')
-                        ? !!rule.autoRefillStamina
-                        : !!s.autoRefillStamina,
-                    floor
-                };
+            if (!ruleEq.includes(equipName)) {
+                continue;
             }
+            const ruleStats = bbmNormalizeEquipmentRuleStatsFromRule(rule);
+            if (!bbmRuleStatsMatchEquipment(ruleStats, actualEquipStat)) {
+                continue;
+            }
+            const fallbackSetup = s.setupMethod || t('mods.betterBoostedMaps.autoSetup');
+            const floor = rule.hasOwnProperty('floor')
+                ? bbmClampRuleFloor(rule.floor)
+                : defaultFloor;
+            return {
+                setupMethod: rule.setupMethod || fallbackSetup,
+                autoRefillStamina: rule.hasOwnProperty('autoRefillStamina')
+                    ? !!rule.autoRefillStamina
+                    : !!s.autoRefillStamina,
+                floor
+            };
         }
     }
     const setupMethod = ov.setupMethod || s.setupMethod || t('mods.betterBoostedMaps.autoSetup');
@@ -1663,27 +1761,67 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     overlay.style.cursor = 'default';
     
     const menu = document.createElement('div');
+    menu.setAttribute('data-bbm-context-menu', '1');
     menu.style.position = 'fixed';
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
     menu.style.zIndex = '9999';
-    menu.style.minWidth = 'min(400px, 94vw)';
-    menu.style.maxWidth = 'min(520px, 96vw)';
-    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
-    menu.style.border = '4px solid transparent';
-    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
-    menu.style.borderRadius = '6px';
-    menu.style.padding = '12px';
-    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+    menu.style.width = BBM_CTX_MENU_WIDTH;
+    menu.style.minWidth = BBM_CTX_MENU_WIDTH;
+    menu.style.maxWidth = BBM_CTX_MENU_WIDTH;
+    menu.style.height = BBM_CTX_MENU_HEIGHT;
+    menu.style.minHeight = BBM_CTX_MENU_HEIGHT;
+    menu.style.maxHeight = BBM_CTX_MENU_HEIGHT;
+    menu.style.boxSizing = 'border-box';
+    menu.style.display = 'flex';
+    menu.style.flexDirection = 'column';
+    menu.style.overflow = 'hidden';
+    menu.style.background = BBM_CTX_PANEL_TEXTURE;
+    menu.style.color = '#fff';
+    menu.style.border = `1px solid ${BBM_CTX_PANEL_BORDER}`;
+    menu.style.borderRadius = '5px';
+    menu.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.45)';
     
-    const titleEl = document.createElement('div');
+    const menuShell = document.createElement('div');
+    menuShell.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        flex: 1 1 0%;
+        min-height: 0;
+        overflow: hidden;
+        padding: 10px;
+        box-sizing: border-box;
+        gap: 20px;
+    `;
+    
+    const titleEl = document.createElement('h3');
     titleEl.className = 'pixel-font-16';
     titleEl.textContent = mapName;
-    titleEl.style.color = BBM_CTX_COLOR_ACCENT;
-    titleEl.style.fontWeight = 'bold';
-    titleEl.style.marginBottom = '12px';
-    titleEl.style.textAlign = 'center';
-    menu.appendChild(titleEl);
+    titleEl.style.cssText = `
+        margin: 0 0 0 0;
+        color: ${BBM_CTX_COLOR_ACCENT};
+        font-weight: bold;
+        text-align: center;
+        flex-shrink: 0;
+    `;
+    
+    const contentPanel = document.createElement('div');
+    contentPanel.setAttribute('data-bbm-ctx-tab-content', '1');
+    contentPanel.style.cssText = `
+        flex: 1 1 0%;
+        min-height: 0;
+        overflow: hidden;
+        border: 1px solid ${BBM_CTX_PANEL_BORDER};
+        border-radius: 5px;
+        background: ${BBM_CTX_PANEL_BG};
+        padding: 10px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    `;
     
     const setupOptions = getAvailableSetupOptions();
     const equipmentNamesList = bbmGenerateEquipmentNameListForRules();
@@ -1691,18 +1829,26 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     equipSectionLabel.className = 'pixel-font-14';
     equipSectionLabel.textContent = t('mods.betterBoostedMaps.contextMenuIfEquipment');
     equipSectionLabel.style.cssText = `
-        color: ${BBM_CTX_COLOR_WHITE};
+        color: ${BBM_CTX_COLOR_ACCENT};
         font-size: 12px;
         font-weight: bold;
-        margin-bottom: 6px;
+        margin: 0 0 6px 0;
+        flex-shrink: 0;
     `;
-    menu.appendChild(equipSectionLabel);
     
     const rulesWrapper = document.createElement('div');
+    rulesWrapper.setAttribute('data-bbm-ctx-rules-scroll', '1');
     rulesWrapper.style.cssText = `
-        max-height: 280px;
+        flex: 1 1 0%;
+        min-height: 0;
         overflow-y: auto;
-        margin-bottom: 6px;
+        overflow-x: hidden;
+        margin: 0;
+        padding: 10px;
+        box-sizing: border-box;
+        border: 1px solid ${BBM_CTX_INSET_BORDER};
+        border-radius: 3px;
+        background: ${BBM_CTX_INSET_BG};
     `;
     const equipmentDropdownClosers = [];
     let persistMapContextMenuSettings = () => {};
@@ -1710,7 +1856,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     function populateRuleSetupSelect(sel, value) {
         sel.className = 'pixel-font-14';
         sel.setAttribute('data-bbm-rule-setup', '1');
-        sel.style.cssText = bbmCtxStyleMenuSelectCompact('112px', '10px', '3px 5px', '');
+        sel.style.cssText = bbmCtxStyleMenuSelectCompact('100%', '9px', '3px 4px', '');
         bbmCtxFillSelectSetupOptions(sel, setupOptions, value);
     }
     
@@ -1718,7 +1864,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         const sel = document.createElement('select');
         sel.className = 'pixel-font-14';
         sel.setAttribute('data-bbm-rule-floor', '1');
-        sel.style.cssText = bbmCtxStyleMenuSelectCompact('86px', '9px', '3px 3px', ' flex-shrink: 0;');
+        sel.style.cssText = bbmCtxStyleMenuSelectCompact('100%', '9px', '3px 3px', ' flex-shrink: 0;');
         for (let i = 0; i <= 15; i++) {
             const optionElement = document.createElement('option');
             optionElement.value = String(i);
@@ -1732,7 +1878,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     function applyRuleStaminaToggleStyle(btn, on) {
         btn.style.minWidth = '0';
         btn.style.maxWidth = '92px';
-        btn.style.padding = '4px 6px';
+        btn.style.padding = '2px 6px';
         btn.style.fontSize = '9px';
         btn.style.fontWeight = 'bold';
         btn.style.borderRadius = '3px';
@@ -1777,15 +1923,12 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
             const iconStrip = document.createElement('div');
             iconStrip.style.cssText = 'display: flex; flex-direction: row; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow: hidden;';
             const maxIcons = compact || singleEquipmentRule ? 1 : 4;
-            const holderPx = compact ? 24 : 30;
-            const iconScale = compact ? '0.68' : '0.82';
+            const holderPx = 34;
             names.slice(0, maxIcons).forEach(name => {
                 const holder = document.createElement('span');
-                holder.style.cssText = `display: inline-flex; width: ${holderPx}px; height: ${holderPx}px; flex-shrink: 0; align-items: center; justify-content: center; overflow: hidden;`;
+                holder.style.cssText = `display: inline-flex; width: ${holderPx}px; height: ${holderPx}px; flex-shrink: 0; align-items: center; justify-content: center; overflow: visible;`;
                 const ib = bbmCreateForgeStyleEquipmentIconButton(name, null);
                 ib.style.pointerEvents = 'none';
-                ib.style.transform = `scale(${iconScale})`;
-                ib.style.transformOrigin = 'center center';
                 holder.appendChild(ib);
                 iconStrip.appendChild(holder);
             });
@@ -1807,6 +1950,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     }
     
     const BBM_EQUIP_RULE_DD_Z_OPEN = 100120;
+    const BBM_STAT_RULE_DD_Z_OPEN = 100131;
     
     function createRuleEquipmentIconDropdown(draft, onNamesMutated, opts) {
         opts = opts || {};
@@ -1829,8 +1973,9 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
             flex-direction: row;
             align-items: center;
             gap: 2px;
-            padding: 2px 3px;
-            min-height: 28px;
+            padding: 0 3px;
+            min-height: 36px;
+            height: 36px;
             box-sizing: border-box;
             background: ${BBM_CTX_COLOR_DARK_GRAY};
             border: 1px solid ${BBM_CTX_COLOR_ACCENT};
@@ -1850,10 +1995,11 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         }
         syncTrigger();
         
-        const equipmentRuleRowPx = 38;
+        const equipmentRuleRowPx = 34;
         const equipmentRuleVisibleRows = 5;
         const equipmentListViewportPx = equipmentRuleRowPx * equipmentRuleVisibleRows;
-        const equipmentRulePanelSearchBandPx = 44;
+        const equipmentRulePanelSearchBandPx = 40;
+        const equipmentPanelMinWidthPx = 92;
         
         const panel = document.createElement('div');
         panel.setAttribute('data-bbm-equip-dropdown-panel', '1');
@@ -1881,8 +2027,8 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         searchInput.style.cssText = `
             width: 100%;
             box-sizing: border-box;
-            padding: 4px 6px;
-            font-size: 10px;
+            padding: 3px 5px;
+            font-size: 9px;
             background: rgba(0,0,0,0.45);
             border: none;
             border-bottom: 1px solid rgba(255,255,255,0.12);
@@ -1917,8 +2063,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
             const vh = window.innerHeight;
             const panelH = equipmentListViewportPx + equipmentRulePanelSearchBandPx;
             let left = r.left;
-            const minPanelW = 148;
-            let width = Math.max(r.width, minPanelW);
+            let width = Math.max(r.width, equipmentPanelMinWidthPx);
             if (left + width > vw - margin) {
                 left = Math.max(margin, vw - width - margin);
             }
@@ -1990,6 +2135,21 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         
         function paintList() {
             listScroll.innerHTML = '';
+            let purgedExcluded = false;
+            [...draft.names].forEach(n => {
+                if (EXCLUDED_EQUIPMENT.includes(n)) {
+                    draft.names.delete(n);
+                    purgedExcluded = true;
+                }
+            });
+            if (purgedExcluded) {
+                syncTrigger();
+                queueMicrotask(() => {
+                    if (typeof onNamesMutated === 'function') {
+                        onNamesMutated();
+                    }
+                });
+            }
             const q = searchInput.value.toLowerCase().trim();
             const filtered = q
                 ? equipmentNamesList.filter(n => n.toLowerCase().includes(q))
@@ -2003,22 +2163,28 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
                 return;
             }
             filtered.forEach(eqName => {
+                const excluded = EXCLUDED_EQUIPMENT.includes(eqName);
                 const claimedHere = draft.names.has(eqName);
-                const blocked = typeof opts.claimedElsewhere === 'function'
+                const blockedClaim =
+                    typeof opts.claimedElsewhere === 'function'
                     && opts.claimedElsewhere(eqName)
                     && !claimedHere;
+                const blocked = blockedClaim || excluded;
                 
                 const rowEl = document.createElement('div');
-                rowEl.title = blocked && typeof opts.claimedElsewhereTitle === 'function'
-                    ? opts.claimedElsewhereTitle()
-                    : eqName;
+                const wInfoRow = bbmEquipmentRuleWarningInfo(eqName, settings);
+                rowEl.title = excluded
+                    ? wInfoRow.title
+                    : blockedClaim && typeof opts.claimedElsewhereTitle === 'function'
+                      ? opts.claimedElsewhereTitle()
+                      : eqName;
                 rowEl.style.cssText = `
                     display: flex;
                     flex-direction: row;
                     align-items: center;
                     justify-content: flex-start;
-                    gap: 4px;
-                    padding: 2px 4px;
+                    gap: 2px;
+                    padding: 1px 3px;
                     min-height: ${equipmentRuleRowPx}px;
                     box-sizing: border-box;
                     cursor: ${blocked ? 'not-allowed' : 'pointer'};
@@ -2029,7 +2195,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
                 cb.type = 'checkbox';
                 cb.checked = claimedHere;
                 cb.disabled = blocked;
-                cb.style.cssText = `width: 14px; height: 14px; accent-color: #8BC34A; cursor: ${
+                cb.style.cssText = `width: 12px; height: 12px; accent-color: #8BC34A; cursor: ${
                     blocked ? 'not-allowed' : 'pointer'
                 }; flex-shrink: 0;`;
                 cb.addEventListener('click', e => e.stopPropagation());
@@ -2049,12 +2215,10 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
                 });
                 
                 const iconHold = document.createElement('div');
-                iconHold.style.cssText = 'width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden;';
+                iconHold.style.cssText = 'width: 34px; height: 34px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: visible;';
                 const iconBtn = bbmCreateForgeStyleEquipmentIconButton(eqName, null);
                 iconBtn.style.pointerEvents = 'none';
-                iconBtn.style.transform = 'scale(0.88)';
-                iconBtn.style.transformOrigin = 'center center';
-                const wInfo = bbmEquipmentRuleWarningInfo(eqName, settings);
+                const wInfo = wInfoRow;
                 if (wInfo.warn) {
                     iconBtn.style.boxShadow = draft.names.has(eqName)
                         ? '0 0 0 2px #8BC34A, 0 0 0 4px rgba(255, 193, 7, 0.45)'
@@ -2162,6 +2326,11 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     }
     
     function bbmCloseRuleRowEquipmentDropdown(r) {
+        if (typeof r._bbmStatDdClose === 'function') {
+            try {
+                r._bbmStatDdClose();
+            } catch (_) {}
+        }
         if (typeof r._bbmEquipmentDdClose === 'function') {
             try {
                 r._bbmEquipmentDdClose();
@@ -2174,10 +2343,13 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
             if (typeof r._bbmEquipmentDdRefreshList === 'function') {
                 r._bbmEquipmentDdRefreshList();
             }
+            if (typeof r._bbmStatDdRefreshSummary === 'function') {
+                r._bbmStatDdRefreshSummary();
+            }
         });
     }
     
-    function dedupeLoadedEquipmentRulesAcrossRows() {
+    function dedupeLoadedEquipmentRulesAcrossRows(skipPersist) {
         let anyChange = false;
         let rows = [...rulesWrapper.querySelectorAll('.bbm-equipment-rule')];
         rows.forEach(r => {
@@ -2198,17 +2370,22 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
             const o = r._bbmEqNamesSet;
             if (!o || o.size === 0) return;
             const sole = [...o][0];
-            if (seen.has(sole)) {
+            const stKey = bbmEquipmentRuleStatsKey(r._bbmRulePayload?.equipmentStats);
+            const dedupeKey = `${sole}\u0000${stKey}`;
+            if (seen.has(dedupeKey)) {
                 anyChange = true;
                 bbmCloseRuleRowEquipmentDropdown(r);
                 r.remove();
                 return;
             }
-            seen.add(sole);
+            seen.add(dedupeKey);
         });
         if (anyChange) {
             bbmRefreshAllRuleEquipmentDropdownLists();
-            persistMapContextMenuSettings();
+            bbmRefreshRuleRowHeaderLabels();
+            if (!skipPersist) {
+                persistMapContextMenuSettings();
+            }
         }
     }
     
@@ -2216,31 +2393,16 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         const set = row._bbmEqNamesSet;
         if (!set || set.size === 0) {
             bbmCloseRuleRowEquipmentDropdown(row);
-            row.remove();
+            if (row._bbmRulePayload) {
+                row._bbmRulePayload.equipmentNames = [];
+            }
+            if (row._bbmEquipmentDdSync) {
+                row._bbmEquipmentDdSync();
+            }
             bbmRefreshAllRuleEquipmentDropdownLists();
             persistMapContextMenuSettings();
             return;
         }
-        const names = Array.from(set);
-        rulesWrapper.querySelectorAll('.bbm-equipment-rule').forEach(r => {
-            if (r === row) return;
-            const o = r._bbmEqNamesSet;
-            if (!o) return;
-            let changed = false;
-            for (let i = 0; i < names.length; i++) {
-                if (o.delete(names[i])) {
-                    changed = true;
-                }
-            }
-            if (!changed) return;
-            if (o.size === 0) {
-                bbmCloseRuleRowEquipmentDropdown(r);
-                r.remove();
-            } else {
-                r._bbmRulePayload.equipmentNames = Array.from(o).sort((a, b) => a.localeCompare(b));
-                if (r._bbmEquipmentDdSync) r._bbmEquipmentDdSync();
-            }
-        });
         bbmClampEquipmentSetToSingleName(set);
         row._bbmRulePayload.equipmentNames = Array.from(set).sort((a, b) => a.localeCompare(b));
         if (row._bbmEquipmentDdSync) row._bbmEquipmentDdSync();
@@ -2248,21 +2410,22 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         persistMapContextMenuSettings();
     }
     
-    function appendRuleRowFlowArrow(bar) {
-        const a = document.createElement('span');
-        a.textContent = '\u2192';
-        a.setAttribute('aria-hidden', 'true');
-        a.style.cssText = `
-            color: rgba(255, 255, 255, 0.45);
-            font-size: 11px;
-            flex-shrink: 0;
-            padding: 0 1px;
-            user-select: none;
-            line-height: 1;
-            font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
-            font-weight: 600;
-        `;
-        bar.appendChild(a);
+    function bbmGetRuleIndexForRow(row) {
+        const rows = [...rulesWrapper.querySelectorAll('.bbm-equipment-rule')];
+        const idx = rows.indexOf(row);
+        if (idx >= 0) {
+            return idx + 1;
+        }
+        return rows.length + 1;
+    }
+    
+    function bbmRefreshRuleRowHeaderLabels() {
+        rulesWrapper.querySelectorAll('.bbm-equipment-rule').forEach((r, i) => {
+            const el = r.querySelector('.bbm-rule-title');
+            if (el) {
+                el.textContent = tReplace('mods.betterBoostedMaps.contextMenuRuleLabel', { n: String(i + 1) });
+            }
+        });
     }
     
     function renderRuleRow(body, row) {
@@ -2274,93 +2437,33 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         const bar = document.createElement('div');
         bar.style.cssText = `
             display: flex;
-            flex-direction: row;
-            align-items: center;
-            gap: 4px;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 5px;
             width: 100%;
             min-width: 0;
         `;
         
-        const strip = document.createElement('div');
-        strip.style.cssText = `
+        const headerRow = document.createElement('div');
+        headerRow.style.cssText = `
             display: flex;
-            flex-flow: row nowrap;
+            flex-direction: row;
+            justify-content: space-between;
             align-items: center;
-            gap: 2px 4px;
-            flex: 1 1 auto;
+            gap: 8px;
+            width: 100%;
             min-width: 0;
-            overflow-x: auto;
         `;
         
         const ifEl = document.createElement('span');
-        ifEl.className = 'pixel-font-14';
-        ifEl.textContent = t('mods.betterBoostedMaps.contextMenuIfLabel');
+        ifEl.className = 'pixel-font-14 bbm-rule-title';
+        ifEl.textContent = tReplace('mods.betterBoostedMaps.contextMenuRuleLabel', { n: String(bbmGetRuleIndexForRow(row)) });
         ifEl.style.cssText = `
             color: ${BBM_CTX_COLOR_ACCENT};
             font-weight: bold;
             font-size: 11px;
             flex-shrink: 0;
         `;
-        strip.appendChild(ifEl);
-        appendRuleRowFlowArrow(strip);
-        
-        const equipmentDd = createRuleEquipmentIconDropdown(
-            { names: row._bbmEqNamesSet },
-            () => onRuleEquipmentNamesMutated(row),
-            {
-                claimedElsewhere(eqName) {
-                    const all = rulesWrapper.querySelectorAll('.bbm-equipment-rule');
-                    for (let i = 0; i < all.length; i++) {
-                        const r = all[i];
-                        if (r === row) continue;
-                        if (r._bbmEqNamesSet && r._bbmEqNamesSet.has(eqName)) return true;
-                    }
-                    return false;
-                },
-                claimedElsewhereTitle() {
-                    return t('mods.betterBoostedMaps.ruleEquipmentClaimedElsewhereTooltip');
-                }
-            }
-        );
-        row._bbmEquipmentDdSync = equipmentDd.syncTrigger;
-        row._bbmEquipmentDdRefreshList = equipmentDd.refreshListIfOpen;
-        row._bbmEquipmentDdClose = equipmentDd.closePanel;
-        strip.appendChild(equipmentDd.wrap);
-        appendRuleRowFlowArrow(strip);
-        
-        const staminaBtn = document.createElement('button');
-        staminaBtn.type = 'button';
-        staminaBtn.title = t('mods.betterBoostedMaps.autoRefillStamina');
-        function paintStaminaBtn() {
-            staminaBtn.textContent = t('mods.betterBoostedMaps.ruleAutostaminaLabel');
-            applyRuleStaminaToggleStyle(staminaBtn, !!p.autoRefillStamina);
-        }
-        paintStaminaBtn();
-        staminaBtn.addEventListener('click', () => {
-            p.autoRefillStamina = !p.autoRefillStamina;
-            paintStaminaBtn();
-            persistMapContextMenuSettings();
-        });
-        strip.appendChild(staminaBtn);
-        appendRuleRowFlowArrow(strip);
-        
-        const floorSel = createRuleFloorSelect(p.floor);
-        floorSel.addEventListener('change', () => {
-            p.floor = bbmClampRuleFloor(parseInt(floorSel.value, 10));
-            persistMapContextMenuSettings();
-        });
-        strip.appendChild(floorSel);
-        appendRuleRowFlowArrow(strip);
-        
-        const ruleSetupSel = document.createElement('select');
-        populateRuleSetupSelect(ruleSetupSel, p.setupMethod);
-        p.setupMethod = ruleSetupSel.value;
-        ruleSetupSel.style.flexShrink = '0';
-        ruleSetupSel.addEventListener('change', () => {
-            p.setupMethod = ruleSetupSel.value;
-            persistMapContextMenuSettings();
-        });
-        strip.appendChild(ruleSetupSel);
         
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
@@ -2398,10 +2501,507 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         removeBtn.addEventListener('click', () => {
             bbmCloseRuleRowEquipmentDropdown(row);
             row.remove();
+            bbmRefreshRuleRowHeaderLabels();
             persistMapContextMenuSettings();
         });
+        
+        headerRow.appendChild(ifEl);
+        headerRow.appendChild(removeBtn);
+        bar.appendChild(headerRow);
+        
+        const strip = document.createElement('div');
+        strip.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 3px;
+            flex: 1 1 auto;
+            min-width: 0;
+            width: 100%;
+        `;
+        
+        const equipmentDd = createRuleEquipmentIconDropdown(
+            { names: row._bbmEqNamesSet },
+            () => onRuleEquipmentNamesMutated(row),
+            {
+                claimedElsewhere(eqName) {
+                    const myStats = p.equipmentStats;
+                    const all = rulesWrapper.querySelectorAll('.bbm-equipment-rule');
+                    for (let i = 0; i < all.length; i++) {
+                        const r = all[i];
+                        if (r === row) continue;
+                        if (!r._bbmEqNamesSet || !r._bbmEqNamesSet.has(eqName)) continue;
+                        if (bbmEquipmentRuleStatsOverlap(myStats, r._bbmRulePayload?.equipmentStats)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                },
+                claimedElsewhereTitle() {
+                    return t('mods.betterBoostedMaps.ruleEquipmentClaimedElsewhereTooltip');
+                }
+            }
+        );
+        row._bbmEquipmentDdSync = equipmentDd.syncTrigger;
+        row._bbmEquipmentDdRefreshList = equipmentDd.refreshListIfOpen;
+        row._bbmEquipmentDdClose = equipmentDd.closePanel;
+        equipmentDd.wrap.style.cssText = `
+            position: relative;
+            flex: 3 1 0%;
+            min-width: 0;
+            width: auto;
+            max-width: none;
+            z-index: 1;
+        `;
+        const equipTriggerBtn = equipmentDd.wrap.querySelector('button[type="button"]');
+        if (equipTriggerBtn) {
+            equipTriggerBtn.style.maxWidth = '100%';
+        }
+        
+        const equipStatRow = document.createElement('div');
+        equipStatRow.style.cssText = `
+            display: flex;
+            flex-direction: row;
+            align-items: stretch;
+            gap: 6px;
+            width: 100%;
+            min-width: 0;
+        `;
+        
+        const statWrap = document.createElement('div');
+        statWrap.setAttribute('data-bbm-rule-equipment-stats', '1');
+        statWrap.style.cssText = `
+            position: relative;
+            flex: 2 1 0%;
+            min-width: 0;
+            width: auto;
+            max-width: none;
+            z-index: 1;
+        `;
+        
+        const statTrigger = document.createElement('button');
+        statTrigger.type = 'button';
+        statTrigger.title = t('mods.betterBoostedMaps.ruleEquipmentStatTitle');
+        statTrigger.style.cssText = `
+            width: 100%;
+            max-width: 100%;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 2px;
+            padding: 2px 4px;
+            min-height: 36px;
+            box-sizing: border-box;
+            background: ${BBM_CTX_COLOR_DARK_GRAY};
+            border: 1px solid ${BBM_CTX_COLOR_ACCENT};
+            color: ${BBM_CTX_COLOR_WHITE};
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 9px;
+            line-height: 1.15;
+            overflow: hidden;
+        `;
+        const statChev = document.createElement('span');
+        statChev.textContent = '\u25be';
+        statChev.style.cssText = 'flex-shrink: 0; font-size: 9px; line-height: 1; color: rgba(255,255,255,0.65); margin-left: 1px;';
+        const statTriggerLabel = document.createElement('span');
+        statTriggerLabel.style.cssText = 'flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left;';
+        statTrigger.appendChild(statTriggerLabel);
+        statTrigger.appendChild(statChev);
+        
+        const statPanel = document.createElement('div');
+        statPanel.setAttribute('data-bbm-stat-dropdown-panel', '1');
+        statPanel.style.cssText = `
+            display: none;
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: calc(100% + 4px);
+            flex-direction: column;
+            align-items: stretch;
+            gap: 4px;
+            padding: 5px 6px;
+            min-width: 72px;
+            max-width: 88px;
+            width: auto;
+            box-sizing: border-box;
+            background: rgba(22, 22, 28, 0.98);
+            border: 1px solid ${BBM_CTX_COLOR_ACCENT};
+            border-radius: 4px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.55);
+            z-index: 1;
+        `;
+        
+        function makeStatCheckbox(statId, labelKey) {
+            const lab = document.createElement('label');
+            lab.style.cssText = `
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                gap: 4px;
+                cursor: pointer;
+                font-size: 8px;
+                line-height: 1.1;
+                color: rgba(255,255,255,0.92);
+                user-select: none;
+                min-width: 0;
+            `;
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.style.cssText = 'width: 11px; height: 11px; accent-color: #8BC34A; cursor: pointer; margin: 0; flex-shrink: 0;';
+            cb.setAttribute('data-bbm-stat', statId);
+            lab.appendChild(cb);
+            if (statId === 'all') {
+                const sp = document.createElement('span');
+                sp.textContent = t(`mods.betterBoostedMaps.${labelKey}`);
+                sp.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1;';
+                lab.appendChild(sp);
+            } else {
+                const iconUrl = BBM_RULE_STAT_ICON_URL[statId];
+                if (iconUrl) {
+                    const img = document.createElement('img');
+                    img.src = iconUrl;
+                    img.alt = t(`mods.betterBoostedMaps.${labelKey}`);
+                    img.title = img.alt;
+                    img.draggable = false;
+                    img.className = 'pixelated';
+                    img.style.cssText =
+                        'width: 14px; height: 14px; image-rendering: pixelated; flex-shrink: 0; object-fit: contain;';
+                    lab.appendChild(img);
+                } else {
+                    const sp = document.createElement('span');
+                    sp.textContent = t(`mods.betterBoostedMaps.${labelKey}`);
+                    sp.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1;';
+                    lab.appendChild(sp);
+                }
+            }
+            return { lab, cb };
+        }
+        
+        const { lab: labAll, cb: cbAll } = makeStatCheckbox('all', 'ruleEquipmentStatAll');
+        const { lab: labAd, cb: cbAd } = makeStatCheckbox('ad', 'ruleEquipmentStatAd');
+        const { lab: labAp, cb: cbAp } = makeStatCheckbox('ap', 'ruleEquipmentStatAp');
+        const { lab: labHp, cb: cbHp } = makeStatCheckbox('hp', 'ruleEquipmentStatHp');
+        
+        statPanel.appendChild(labAll);
+        statPanel.appendChild(labAd);
+        statPanel.appendChild(labAp);
+        statPanel.appendChild(labHp);
+        
+        function syncPayloadToStatCheckboxes() {
+            const stats = bbmNormalizeEquipmentRuleStatsArray(p.equipmentStats);
+            p.equipmentStats = stats;
+            if (stats.includes('all')) {
+                cbAll.checked = true;
+                cbAd.checked = false;
+                cbAp.checked = false;
+                cbHp.checked = false;
+            } else {
+                cbAll.checked = false;
+                cbAd.checked = stats.includes('ad');
+                cbAp.checked = stats.includes('ap');
+                cbHp.checked = stats.includes('hp');
+            }
+        }
+        
+        function applyStatCheckboxesToPayload() {
+            if (cbAll.checked) {
+                p.equipmentStats = ['all'];
+            } else {
+                const next = [];
+                if (cbAd.checked) next.push('ad');
+                if (cbAp.checked) next.push('ap');
+                if (cbHp.checked) next.push('hp');
+                if (next.length === 0) {
+                    cbAll.checked = true;
+                    p.equipmentStats = ['all'];
+                } else if (next.length === 3) {
+                    p.equipmentStats = ['all'];
+                } else {
+                    p.equipmentStats = next.sort((a, b) => a.localeCompare(b));
+                }
+            }
+        }
+        
+        function refreshStatSummary() {
+            syncPayloadToStatCheckboxes();
+            const stats = bbmNormalizeEquipmentRuleStatsArray(p.equipmentStats);
+            statTriggerLabel.innerHTML = '';
+            statTriggerLabel.style.cssText =
+                'flex: 1; min-width: 0; overflow: hidden; text-align: left; display: flex; align-items: center; gap: 2px; flex-wrap: nowrap;';
+            if (stats.includes('all')) {
+                statTriggerLabel.textContent = t('mods.betterBoostedMaps.ruleEquipmentStatAll');
+            } else {
+                stats.forEach(s => {
+                    const id = String(s).toLowerCase();
+                    const url = BBM_RULE_STAT_ICON_URL[id];
+                    if (url) {
+                        const img = document.createElement('img');
+                        img.src = url;
+                        img.alt = id.toUpperCase();
+                        img.title = id.toUpperCase();
+                        img.draggable = false;
+                        img.className = 'pixelated';
+                        img.style.cssText =
+                            'width: 12px; height: 12px; image-rendering: pixelated; flex-shrink: 0; object-fit: contain;';
+                        statTriggerLabel.appendChild(img);
+                    }
+                });
+            }
+        }
+        
+        row._bbmStatDdRefreshSummary = refreshStatSummary;
+        
+        function onStatCheckboxChange(changed) {
+            if (changed === 'all' && cbAll.checked) {
+                cbAd.checked = false;
+                cbAp.checked = false;
+                cbHp.checked = false;
+            } else if (changed !== 'all' && (cbAd.checked || cbAp.checked || cbHp.checked)) {
+                cbAll.checked = false;
+            }
+            applyStatCheckboxesToPayload();
+            syncPayloadToStatCheckboxes();
+            refreshStatSummary();
+            bbmRefreshAllRuleEquipmentDropdownLists();
+            persistMapContextMenuSettings();
+        }
+        
+        cbAll.addEventListener('change', () => onStatCheckboxChange('all'));
+        cbAd.addEventListener('change', () => onStatCheckboxChange('ad'));
+        cbAp.addEventListener('change', () => onStatCheckboxChange('ap'));
+        cbHp.addEventListener('change', () => onStatCheckboxChange('hp'));
+        
+        let statOpen = false;
+        let statDocClose = null;
+        let statPanelScrollSync = null;
+        
+        function positionStatPanelFixed() {
+            const r = statTrigger.getBoundingClientRect();
+            const margin = 8;
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const panelW = Math.min(220, Math.max(96, Math.round(r.width)));
+            statPanel.style.width = `${panelW}px`;
+            statPanel.style.maxWidth = `${panelW}px`;
+            statPanel.style.minWidth = `${panelW}px`;
+            statPanel.style.right = 'auto';
+            const panelH = statPanel.offsetHeight || 152;
+            let left = r.left;
+            if (left + panelW > vw - margin) {
+                left = Math.max(margin, vw - panelW - margin);
+            }
+            left = Math.max(margin, left);
+            let topPx = r.bottom + 4;
+            if (topPx + panelH > vh - margin) {
+                const above = r.top - panelH - 4;
+                topPx = above >= margin ? above : Math.max(margin, vh - panelH - margin);
+            }
+            statPanel.style.position = 'fixed';
+            statPanel.style.left = `${Math.round(left)}px`;
+            statPanel.style.top = `${Math.round(topPx)}px`;
+            statPanel.style.zIndex = '100131';
+        }
+        
+        function unbindStatPanelScrollSync() {
+            if (!statPanelScrollSync) {
+                return;
+            }
+            rulesWrapper.removeEventListener('scroll', statPanelScrollSync);
+            window.removeEventListener('scroll', statPanelScrollSync, true);
+            window.removeEventListener('resize', statPanelScrollSync);
+            statPanelScrollSync = null;
+        }
+        
+        function bindStatPanelScrollSync() {
+            unbindStatPanelScrollSync();
+            statPanelScrollSync = () => {
+                if (statOpen) {
+                    positionStatPanelFixed();
+                }
+            };
+            rulesWrapper.addEventListener('scroll', statPanelScrollSync, { passive: true });
+            window.addEventListener('scroll', statPanelScrollSync, true);
+            window.addEventListener('resize', statPanelScrollSync, { passive: true });
+        }
+        
+        function closeStatPanel() {
+            statOpen = false;
+            unbindStatPanelScrollSync();
+            if (statDocClose) {
+                document.removeEventListener('mousedown', statDocClose, true);
+                document.removeEventListener('click', statDocClose, true);
+                document.removeEventListener('pointerdown', statDocClose, true);
+                statDocClose = null;
+            }
+            statPanel.style.display = 'none';
+            statWrap.style.zIndex = '1';
+            if (statPanel.parentNode === document.body) {
+                try {
+                    if (statWrap.isConnected) {
+                        statWrap.appendChild(statPanel);
+                    } else {
+                        statPanel.remove();
+                    }
+                } catch (_) {
+                    statPanel.remove();
+                }
+            }
+            statPanel.style.position = '';
+            statPanel.style.left = '';
+            statPanel.style.top = '';
+            statPanel.style.right = '';
+            statPanel.style.width = '';
+            statPanel.style.minWidth = '';
+            statPanel.style.maxWidth = '';
+            statPanel.style.zIndex = '';
+        }
+        
+        statPanel.addEventListener('mousedown', e => e.stopPropagation());
+        statPanel.addEventListener('click', e => e.stopPropagation());
+        statPanel.addEventListener('pointerdown', e => e.stopPropagation());
+        
+        statTrigger.addEventListener('click', e => {
+            e.stopPropagation();
+            if (statOpen) {
+                closeStatPanel();
+            } else {
+                equipmentDropdownClosers.forEach(fn => {
+                    if (fn !== closeStatPanel) {
+                        try {
+                            fn();
+                        } catch (_) {}
+                    }
+                });
+                statOpen = true;
+                statWrap.style.zIndex = String(BBM_STAT_RULE_DD_Z_OPEN);
+                document.body.appendChild(statPanel);
+                statPanel.style.right = 'auto';
+                statPanel.style.position = 'fixed';
+                statPanel.style.left = '-10000px';
+                statPanel.style.top = '0';
+                statPanel.style.display = 'flex';
+                positionStatPanelFixed();
+                bindStatPanelScrollSync();
+                statDocClose = ev => {
+                    if (!statWrap.isConnected) {
+                        closeStatPanel();
+                        return;
+                    }
+                    const t = ev.target;
+                    if (t && (t === statPanel || statPanel.contains(t) || t === statWrap || statWrap.contains(t))) {
+                        return;
+                    }
+                    closeStatPanel();
+                };
+                document.addEventListener('pointerdown', statDocClose, true);
+                document.addEventListener('mousedown', statDocClose, true);
+                document.addEventListener('click', statDocClose, true);
+            }
+        });
+        
+        statWrap.appendChild(statTrigger);
+        statWrap.appendChild(statPanel);
+        row._bbmStatDdClose = closeStatPanel;
+        equipmentDropdownClosers.push(closeStatPanel);
+        
+        refreshStatSummary();
+        
+        equipStatRow.appendChild(equipmentDd.wrap);
+        equipStatRow.appendChild(statWrap);
+        strip.appendChild(equipStatRow);
+        
+        const staminaFloorBlock = document.createElement('div');
+        staminaFloorBlock.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0;
+            width: 100%;
+            min-width: 0;
+        `;
+        
+        const staminaRow = document.createElement('div');
+        staminaRow.style.cssText = `
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            width: 100%;
+            min-width: 0;
+        `;
+        const staminaBtn = document.createElement('button');
+        staminaBtn.type = 'button';
+        staminaBtn.title = t('mods.betterBoostedMaps.autoRefillStamina');
+        function paintStaminaBtn() {
+            staminaBtn.textContent = t('mods.betterBoostedMaps.ruleAutostaminaLabel');
+            applyRuleStaminaToggleStyle(staminaBtn, !!p.autoRefillStamina);
+            staminaBtn.style.width = '100%';
+            staminaBtn.style.maxWidth = '100%';
+        }
+        paintStaminaBtn();
+        staminaBtn.addEventListener('click', () => {
+            p.autoRefillStamina = !p.autoRefillStamina;
+            paintStaminaBtn();
+            persistMapContextMenuSettings();
+        });
+        staminaRow.appendChild(staminaBtn);
+        staminaFloorBlock.appendChild(staminaRow);
+        
+        const floorSetupRow = document.createElement('div');
+        floorSetupRow.style.cssText = `
+            display: flex;
+            flex-direction: row;
+            align-items: stretch;
+            gap: 6px;
+            width: 100%;
+            min-width: 0;
+        `;
+        
+        const setupWrap = document.createElement('div');
+        setupWrap.style.cssText = `
+            position: relative;
+            flex: 3 1 0%;
+            min-width: 0;
+            width: auto;
+            max-width: none;
+        `;
+        const ruleSetupSel = document.createElement('select');
+        populateRuleSetupSelect(ruleSetupSel, p.setupMethod);
+        p.setupMethod = ruleSetupSel.value;
+        ruleSetupSel.style.flexShrink = '0';
+        ruleSetupSel.style.width = '100%';
+        ruleSetupSel.style.maxWidth = '100%';
+        ruleSetupSel.addEventListener('change', () => {
+            p.setupMethod = ruleSetupSel.value;
+            persistMapContextMenuSettings();
+        });
+        setupWrap.appendChild(ruleSetupSel);
+        
+        const floorWrap = document.createElement('div');
+        floorWrap.style.cssText = `
+            position: relative;
+            flex: 2 1 0%;
+            min-width: 0;
+            width: auto;
+            max-width: none;
+        `;
+        const floorSel = createRuleFloorSelect(p.floor);
+        floorSel.style.width = '100%';
+        floorSel.style.maxWidth = '100%';
+        floorSel.addEventListener('change', () => {
+            p.floor = bbmClampRuleFloor(parseInt(floorSel.value, 10));
+            persistMapContextMenuSettings();
+        });
+        floorWrap.appendChild(floorSel);
+        
+        floorSetupRow.appendChild(setupWrap);
+        floorSetupRow.appendChild(floorWrap);
+        staminaFloorBlock.appendChild(floorSetupRow);
+        strip.appendChild(staminaFloorBlock);
+        
         bar.appendChild(strip);
-        bar.appendChild(removeBtn);
         
         body.appendChild(bar);
     }
@@ -2419,10 +3019,10 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         const row = document.createElement('div');
         row.className = 'bbm-equipment-rule';
         row.style.cssText = `
-            margin-bottom: 6px;
-            padding: 5px 6px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 4px;
+            margin-bottom: 5px;
+            padding: 4px 5px;
+            border: 1px solid ${BBM_CTX_INSET_BORDER};
+            border-radius: 3px;
             background: rgba(0, 0, 0, 0.25);
             min-width: 0;
         `;
@@ -2441,9 +3041,10 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         
         row._bbmRulePayload = {
             equipmentNames: [...normalizedRuleNames],
+            equipmentStats: bbmNormalizeEquipmentRuleStatsFromRule(rule),
             autoRefillStamina: rule && rule.hasOwnProperty('autoRefillStamina')
                 ? !!rule.autoRefillStamina
-                : !!settings.autoRefillStamina,
+                : false,
             setupMethod: ruleSetupVal,
             floor: ruleFloor
         };
@@ -2458,17 +3059,16 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         rulesWrapper.appendChild(row);
     }
     
-    menu.appendChild(rulesWrapper);
-    
     const addRuleBtn = document.createElement('button');
     addRuleBtn.type = 'button';
     addRuleBtn.className = 'pixel-font-14';
     addRuleBtn.textContent = t('mods.betterBoostedMaps.contextMenuAddEquipmentRule');
     addRuleBtn.style.cssText = `
         width: 100%;
-        margin-bottom: 12px;
-        padding: 6px;
-        font-size: 12px;
+        margin-top: 2px;
+        margin-bottom: 0;
+        padding: 5px;
+        font-size: 11px;
         cursor: pointer;
         background: #1a2a1a;
         color: #8BC34A;
@@ -2476,7 +3076,6 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         border-radius: 3px;
     `;
     addRuleBtn.addEventListener('click', () => addEquipmentRuleRow(null));
-    menu.appendChild(addRuleBtn);
     
     const otherwiseLabel = document.createElement('div');
     otherwiseLabel.className = 'pixel-font-14';
@@ -2485,18 +3084,15 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         color: ${BBM_CTX_COLOR_ACCENT};
         font-size: 12px;
         font-weight: bold;
-        margin: 4px 0 8px 0;
-        border-top: 1px solid rgba(255, 255, 255, 0.15);
-        padding-top: 10px;
+        margin: 0 0 4px 0;
     `;
-    menu.appendChild(otherwiseLabel);
     
     const staminaContainer = document.createElement('div');
     staminaContainer.style.cssText = `
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 12px;
+        margin-bottom: 0;
     `;
     
     const staminaCheckbox = document.createElement('input');
@@ -2522,14 +3118,13 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     `;
     staminaContainer.appendChild(staminaCheckbox);
     staminaContainer.appendChild(staminaLabel);
-    menu.appendChild(staminaContainer);
     
     const setupContainer = document.createElement('div');
     setupContainer.style.cssText = `
         display: flex;
         flex-direction: column;
         gap: 6px;
-        margin-bottom: 12px;
+        margin-bottom: 0;
     `;
     
     const setupLabel = document.createElement('label');
@@ -2547,7 +3142,57 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     setupSelect.style.cssText = bbmCtxStyleMenuSelectFull();
     bbmCtxFillSelectSetupOptions(setupSelect, setupOptions, currentSetupMethod);
     setupContainer.appendChild(setupSelect);
-    menu.appendChild(setupContainer);
+    
+    const columnsRow = document.createElement('div');
+    columnsRow.style.cssText = `
+        display: flex;
+        flex-direction: row;
+        align-items: stretch;
+        gap: 10px;
+        width: 100%;
+        flex: 1 1 0%;
+        min-height: 0;
+    `;
+    
+    const colIf = document.createElement('div');
+    colIf.style.cssText = `
+        flex: 1 1 50%;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    `;
+    
+    const colOtherwise = document.createElement('div');
+    colOtherwise.style.cssText = `
+        flex: 1 1 50%;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px;
+        box-sizing: border-box;
+        border: 1px solid ${BBM_CTX_INSET_BORDER};
+        border-radius: 3px;
+        background: ${BBM_CTX_INSET_BG};
+        overflow-y: auto;
+    `;
+    
+    colIf.appendChild(equipSectionLabel);
+    colIf.appendChild(rulesWrapper);
+    colIf.appendChild(addRuleBtn);
+    
+    colOtherwise.appendChild(otherwiseLabel);
+    colOtherwise.appendChild(staminaContainer);
+    colOtherwise.appendChild(setupContainer);
+    
+    columnsRow.appendChild(colIf);
+    columnsRow.appendChild(colOtherwise);
+    contentPanel.appendChild(columnsRow);
+    
+    let syncResetButtonState = () => {};
     
     persistMapContextMenuSettings = function persistMapContextMenuSettingsImpl() {
         rulesWrapper.querySelectorAll('.bbm-equipment-rule').forEach(r => {
@@ -2557,6 +3202,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
                 pl.equipmentNames = bbmNormalizeEquipmentRuleNames(Array.from(set));
             }
         });
+        dedupeLoadedEquipmentRulesAcrossRows(true);
         const collectedRules = [];
         rulesWrapper.querySelectorAll('.bbm-equipment-rule').forEach(r => {
             const pl = r._bbmRulePayload;
@@ -2565,6 +3211,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
             }
             collectedRules.push({
                 equipmentNames: bbmNormalizeEquipmentRuleNames(pl.equipmentNames),
+                equipmentStats: bbmNormalizeEquipmentRuleStatsArray(pl.equipmentStats),
                 autoRefillStamina: !!pl.autoRefillStamina,
                 setupMethod: pl.setupMethod,
                 floor: bbmClampRuleFloor(pl.floor)
@@ -2583,6 +3230,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         }
         s.mapSettings[mapId] = payload;
         localStorage.setItem('betterBoostedMapsSettings', JSON.stringify(s));
+        syncResetButtonState();
     };
     
     staminaCheckbox.addEventListener('change', () => persistMapContextMenuSettings());
@@ -2593,38 +3241,53 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     dedupeLoadedEquipmentRulesAcrossRows();
     
     const buttonContainer = document.createElement('div');
-    buttonContainer.style.display = 'flex';
-    buttonContainer.style.gap = '6px';
-    buttonContainer.style.justifyContent = 'center';
+    buttonContainer.style.cssText = `
+        display: flex;
+        flex-shrink: 0;
+        gap: 10px;
+        justify-content: center;
+        margin-top: 0;
+    `;
     
-    const saveButton = bbmCtxCreateContextMenuFooterButton('Save', 'save');
-    
-    let clearButton = null;
-    if (hasMapCustomSettings(mapId)) {
-        clearButton = bbmCtxCreateContextMenuFooterButton('Clear', 'clear');
-        clearButton.addEventListener('click', () => {
-            const s = loadSettings();
-            if (s.mapSettings && s.mapSettings[mapId]) {
-                delete s.mapSettings[mapId];
-                if (Object.keys(s.mapSettings).length === 0) {
-                    delete s.mapSettings;
-                }
-                localStorage.setItem('betterBoostedMapsSettings', JSON.stringify(s));
-                console.log(`[Better Boosted Maps] Cleared per-map settings for ${mapId}`);
+    const resetButton = bbmCtxCreateContextMenuFooterButton(
+        t('mods.betterBoostedMaps.contextMenuResetMap'),
+        'clear'
+    );
+    resetButton.addEventListener('click', () => {
+        if (resetButton.disabled) {
+            return;
+        }
+        const s = loadSettings();
+        if (s.mapSettings && s.mapSettings[mapId]) {
+            delete s.mapSettings[mapId];
+            if (Object.keys(s.mapSettings).length === 0) {
+                delete s.mapSettings;
             }
-            closeMenu();
-        });
-    }
+            localStorage.setItem('betterBoostedMapsSettings', JSON.stringify(s));
+            console.log(`[Better Boosted Maps] Reset per-map settings for ${mapId}`);
+        }
+        closeMenu();
+    });
+    syncResetButtonState = function syncResetButtonStateImpl() {
+        const has = hasMapCustomSettings(mapId);
+        resetButton.disabled = !has;
+        resetButton.style.opacity = has ? '1' : '0.45';
+        resetButton.style.cursor = has ? 'pointer' : 'not-allowed';
+    };
+    syncResetButtonState();
     
-    const cancelButton = bbmCtxCreateContextMenuFooterButton('Cancel', 'cancel');
-    cancelButton.addEventListener('click', closeMenu);
+    const closeButton = bbmCtxCreateContextMenuFooterButton(
+        t('mods.betterBoostedMaps.contextMenuClose'),
+        'cancel'
+    );
+    closeButton.addEventListener('click', closeMenu);
     
-    buttonContainer.appendChild(saveButton);
-    if (clearButton) {
-        buttonContainer.appendChild(clearButton);
-    }
-    buttonContainer.appendChild(cancelButton);
-    menu.appendChild(buttonContainer);
+    buttonContainer.appendChild(resetButton);
+    buttonContainer.appendChild(closeButton);
+    menuShell.appendChild(titleEl);
+    menuShell.appendChild(contentPanel);
+    menuShell.appendChild(buttonContainer);
+    menu.appendChild(menuShell);
     
     function closeMenu() {
         equipmentDropdownClosers.forEach(fn => {
@@ -2647,12 +3310,6 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         }
         if (onClose) onClose();
     }
-    
-    saveButton.addEventListener('click', () => {
-        persistMapContextMenuSettings();
-        console.log(`[Better Boosted Maps] Saved per-map settings for ${mapId}:`, loadSettings().mapSettings?.[mapId]);
-        closeMenu();
-    });
     
     betterBoostedMapsOpenContextMenu = {
         overlay,
@@ -2733,7 +3390,7 @@ function createSettingsContent() {
         max-height: 400px;
         box-sizing: border-box;
         overflow: hidden;
-        background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+        background: ${BBM_CTX_PANEL_TEXTURE};
         color: #fff;
         font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
         border: 4px solid transparent;
