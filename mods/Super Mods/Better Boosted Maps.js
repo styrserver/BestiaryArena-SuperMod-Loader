@@ -577,7 +577,7 @@ function bbmEquipmentRuleStatsOverlap(a, b) {
     return false;
 }
 
-function bbmGetEquipmentStatFromEquipId(equipId) {
+function bbmGetEquipmentStatFromEquipId(equipId, equipStatHint) {
     try {
         const equipment = globalThis.state?.utils?.getEquipment(equipId);
         const st = equipment?.metadata?.stat || equipment?.stats?.[0]?.type;
@@ -585,6 +585,19 @@ function bbmGetEquipmentStatFromEquipId(equipId) {
             return String(st).toLowerCase();
         }
     } catch (_) {}
+    try {
+        const boostedMap = globalThis.state?.daily?.getSnapshot?.()?.context?.boostedMap;
+        if (boostedMap && String(boostedMap.equipId) === String(equipId)) {
+            const st = String(boostedMap.equipStat || '').toLowerCase().trim();
+            if (['hp', 'ad', 'ap'].includes(st)) {
+                return st;
+            }
+        }
+    } catch (_) {}
+    const hinted = String(equipStatHint || '').toLowerCase().trim();
+    if (['hp', 'ad', 'ap'].includes(hinted)) {
+        return hinted;
+    }
     return null;
 }
 
@@ -1639,6 +1652,7 @@ function saveSettings() {
  * @param {string} roomId
  * @param {object} [settings]
  * @param {string|number|null} [equipId] - daily boost equipment id; when set, matching equipmentRules apply first
+ * @param {string|null} [equipStatHint] - boosted map stat hint ("hp"|"ad"|"ap"), used if runtime stat lookup is unavailable
  * @returns {{ setupMethod: string, autoRefillStamina: boolean, floor: number }}
  */
 function bbmClampRuleFloor(n) {
@@ -1646,7 +1660,7 @@ function bbmClampRuleFloor(n) {
     return Math.max(0, Math.min(15, x));
 }
 
-function getEffectiveMapAutomationSettings(roomId, settings, equipId) {
+function getEffectiveMapAutomationSettings(roomId, settings, equipId, equipStatHint) {
     const s = settings || loadSettings();
     const ov = (s.mapSettings && s.mapSettings[roomId]) || {};
     const mapFloors = s.mapFloors || {};
@@ -1657,25 +1671,45 @@ function getEffectiveMapAutomationSettings(roomId, settings, equipId) {
             equipName = getEquipmentName(equipId);
         } catch (_) {}
     }
-    const actualEquipStat = bbmGetEquipmentStatFromEquipId(equipId);
+    const actualEquipStat = bbmGetEquipmentStatFromEquipId(equipId, equipStatHint);
     if (equipName && Array.isArray(ov.equipmentRules)) {
+        console.log(
+            `[Better Boosted Maps] Evaluating ${ov.equipmentRules.length} equipment rule(s) for room ${roomId} ` +
+            `(equip: "${equipName}", stat: "${actualEquipStat || 'unknown'}")`
+        );
         for (let i = 0; i < ov.equipmentRules.length; i++) {
             const rule = ov.equipmentRules[i];
             if (!rule || !Array.isArray(rule.equipmentNames) || rule.equipmentNames.length === 0) {
+                console.log(`[Better Boosted Maps] Rule #${i + 1}: skipped (no equipment names)`);
                 continue;
             }
             const ruleEq = bbmNormalizeEquipmentRuleNames(rule.equipmentNames);
-            if (!ruleEq.includes(equipName)) {
+            const equipMatch = ruleEq.includes(equipName);
+            if (!equipMatch) {
+                console.log(
+                    `[Better Boosted Maps] Rule #${i + 1}: equipment mismatch ` +
+                    `(rule: [${ruleEq.join(', ')}], current: "${equipName}")`
+                );
                 continue;
             }
             const ruleStats = bbmNormalizeEquipmentRuleStatsFromRule(rule);
-            if (!bbmRuleStatsMatchEquipment(ruleStats, actualEquipStat)) {
+            const statMatch = bbmRuleStatsMatchEquipment(ruleStats, actualEquipStat);
+            if (!statMatch) {
+                console.log(
+                    `[Better Boosted Maps] Rule #${i + 1}: stat mismatch ` +
+                    `(rule: [${ruleStats.join(', ')}], current: "${actualEquipStat || 'unknown'}")`
+                );
                 continue;
             }
             const fallbackSetup = s.setupMethod || t('mods.betterBoostedMaps.autoSetup');
             const floor = rule.hasOwnProperty('floor')
                 ? bbmClampRuleFloor(rule.floor)
                 : defaultFloor;
+            console.log(
+                `[Better Boosted Maps] Rule #${i + 1}: matched ` +
+                `(setup: "${rule.setupMethod || fallbackSetup}", floor: ${floor}, autoRefill: ` +
+                `${rule.hasOwnProperty('autoRefillStamina') ? !!rule.autoRefillStamina : !!s.autoRefillStamina})`
+            );
             return {
                 setupMethod: rule.setupMethod || fallbackSetup,
                 autoRefillStamina: rule.hasOwnProperty('autoRefillStamina')
@@ -1684,6 +1718,10 @@ function getEffectiveMapAutomationSettings(roomId, settings, equipId) {
                 floor
             };
         }
+        console.log(
+            `[Better Boosted Maps] No equipment rule matched for room ${roomId}; using fallback ` +
+            `(setup: "${ov.setupMethod || s.setupMethod || t('mods.betterBoostedMaps.autoSetup')}", floor: ${defaultFloor})`
+        );
     }
     const setupMethod = ov.setupMethod || s.setupMethod || t('mods.betterBoostedMaps.autoSetup');
     const autoRefillStamina = ov.hasOwnProperty('autoRefillStamina')
@@ -4364,7 +4402,8 @@ async function startBoostedMapFarming(force = false) {
             const { floor } = getEffectiveMapAutomationSettings(
                 farmCheck.roomId,
                 initialSettings,
-                farmCheck.equipId
+                farmCheck.equipId,
+                farmCheck.equipStat
             );
             console.log(`[Better Boosted Maps] Setting floor to ${floor} for map ${farmCheck.roomId}`);
             globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: floor }) });
@@ -4385,7 +4424,8 @@ async function startBoostedMapFarming(force = false) {
         const { setupMethod, autoRefillStamina: effectiveAutoRefill } = getEffectiveMapAutomationSettings(
             farmCheck.roomId,
             setupSettings,
-            farmCheck.equipId
+            farmCheck.equipId,
+            farmCheck.equipStat
         );
         
         // Find and click the appropriate setup button
@@ -4692,8 +4732,9 @@ function validateSettingsAfterNavigation() {
         const settings = loadSettings();
         const roomId = modState.farming.currentMapInfo?.roomId;
         const equipId = modState.farming.currentMapInfo?.equipId;
+        const equipStat = modState.farming.currentMapInfo?.equipStat;
         const effectiveRefill = roomId
-            ? getEffectiveMapAutomationSettings(roomId, settings, equipId).autoRefillStamina
+            ? getEffectiveMapAutomationSettings(roomId, settings, equipId, equipStat).autoRefillStamina
             : !!settings.autoRefillStamina;
         let validationIssues = [];
         

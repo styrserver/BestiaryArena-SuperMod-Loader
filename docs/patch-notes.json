@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.5.13",
+      "changes": [
+        { "type": "fixed", "mod": "Better Boosted Maps", "text": "Fixed equipment stat rule matching fallback so boosted map floor and setup are applied correctly." }
+      ]
+    },
+    {
       "version": "3.5.12",
       "changes": [
         { "type": "changed", "mod": "Better Boosted Maps", "text": "Improved Right-click context menu." }
