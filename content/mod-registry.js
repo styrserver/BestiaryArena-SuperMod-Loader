@@ -61,6 +61,7 @@ export const SUPER_MODS = [
   'Better Yasir.js',
   'Cyclopedia.js',
   'Dice_Roller.js',
+  'Depot Manager.js',
   'Hunt Analyzer.js',
   'Mod Settings.js',
   'Outfiter.js',
