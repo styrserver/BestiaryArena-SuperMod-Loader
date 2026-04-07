@@ -153,7 +153,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 22 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 23 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -266,6 +266,14 @@ A comprehensive game data viewer and player profile manager with advanced featur
 - **Player Profiles**: Search and view detailed player profiles with statistics and achievements
 - **Leaderboards**: Access real-time leaderboards for maps, rankings, and competitions
 - **Run Tracking**: View and analyze personal run history with RunTracker integration
+
+#### Depot Manager
+A complete depot overview and inventory utility for tracking stored resources:
+- View and browse depot content with game-styled UI integration
+- Search and filter stored items for faster management
+- Organize large storage collections with clearer visibility
+- Helps plan crafting and upgrades by surfacing item availability
+- Designed to work smoothly alongside other inventory-focused mods
 
 #### Dice Roller
 Automates dice rolling for stat rerolling:

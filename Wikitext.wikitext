@@ -260,6 +260,14 @@ A comprehensive game data viewer and player profile manager with advanced featur
 * '''Leaderboards''': Access real-time leaderboards for maps, rankings, and competitions
 * '''Run Tracking''': View and analyze personal run history with RunTracker integration
 
+==== Depot Manager ====
+A complete depot overview and inventory utility for tracking stored resources:
+* View and browse depot content with game-styled UI integration
+* Search and filter stored items for faster management
+* Organize large storage collections with clearer visibility
+* Helps plan crafting and upgrades by surfacing item availability
+* Designed to work smoothly alongside other inventory-focused mods
+
 ==== Dice Roller ====
 Automates dice rolling for stat rerolling:
 * Automatically clicks the roll button and checks for target stats

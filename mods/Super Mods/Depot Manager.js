@@ -61,6 +61,7 @@ const SELECTORS = {
 /** Set on the grid cell `div.flex` when user sends a creature to depot — layout uses this id (menu path) instead of re-guessing from DOM order. */
 const DATA_DEPOT_SLOT_ID = 'data-depot-creature-id';
 const DATA_DEPOT_HIDDEN = 'data-depot-hidden';
+const DATA_DEPOT_EQUIPMENT_HIDDEN = 'data-depot-equipment-hidden';
 
 const TIMEOUT_DELAYS = {
   MENU_CLOSE: 10,
@@ -553,51 +554,51 @@ function removeClickedEquipmentSlotFromDom() {
   if (!target) return false;
   const stateSlot = target.closest?.('div.flex[data-state]');
   if (stateSlot && stateSlot.querySelector('button')) {
-    stateSlot.remove();
+    stateSlot.setAttribute(DATA_DEPOT_EQUIPMENT_HIDDEN, 'true');
+    stateSlot.style.setProperty('display', 'none', 'important');
     return true;
   }
   const button = target.closest?.('button');
   if (button && !button.closest('[role="dialog"]')) {
-    button.remove();
+    button.setAttribute(DATA_DEPOT_EQUIPMENT_HIDDEN, 'true');
+    button.style.setProperty('display', 'none', 'important');
     return true;
   }
   return false;
 }
 
 function applyEquipmentDepotLayout() {
+  if (document.querySelector('[role="dialog"], [data-radix-dialog-content]')) return;
+  if (depotArsenalObserveTarget === document.body) return;
   const buttons = getArsenalGridButtons();
   if (buttons.length === 0) return;
-  const equipmentRows = getPlayerEquipmentRows({ sort: false });
-  if (equipmentRows.length === 0 || depotEquipmentState.ids.length === 0) {
-    return;
-  }
-
-  const byId = new Map(equipmentRows.map((row) => [String(row.id), row]));
+  const depotIds = depotEquipmentState.ids.map(String);
+  const shouldHideAny = depotIds.length > 0;
   const idCounts = new Map();
-  for (const id of depotEquipmentState.ids) {
-    const sid = String(id);
-    idCounts.set(sid, (idCounts.get(sid) || 0) + 1);
-  }
+  for (const sid of depotIds) idCounts.set(sid, (idCounts.get(sid) || 0) + 1);
 
-  let removedCount = 0;
-  // Strict exact-id matching only; prevents duplicate signature over-removal cascades.
+  let hiddenCount = 0;
+  // Non-destructive mode: never remove/reinsert React-owned nodes; only hide/show.
   for (const btn of buttons) {
+    const slot = btn.closest('div.flex[data-state]') || btn;
+    slot.removeAttribute(DATA_DEPOT_EQUIPMENT_HIDDEN);
+    slot.style.removeProperty('display');
+    if (!shouldHideAny) continue;
     const sid = String(btn.getAttribute('data-equipment-id') || '');
     if (!sid) continue;
     const remainingById = idCounts.get(sid) || 0;
     if (remainingById <= 0) continue;
     idCounts.set(sid, remainingById - 1);
-    const slot = btn.closest('div.flex[data-state]');
-    if (slot) slot.remove();
-    else btn.remove();
-    removedCount += 1;
+    slot.setAttribute(DATA_DEPOT_EQUIPMENT_HIDDEN, 'true');
+    slot.style.setProperty('display', 'none', 'important');
+    hiddenCount += 1;
   }
   const stillPending = Array.from(idCounts.values()).reduce((sum, n) => sum + (n > 0 ? n : 0), 0);
-  const removeKey = `${buttons.length}|${removedCount}|${stillPending}|${idCounts.size}`;
-  if (removedCount > 0 || removeKey !== lastRemoveSummaryKey) {
+  const removeKey = `${buttons.length}|${hiddenCount}|${stillPending}|${idCounts.size}`;
+  if (hiddenCount > 0 || removeKey !== lastRemoveSummaryKey) {
     depotDebug('arsenal remove', {
       buttons: buttons.length,
-      removed: removedCount,
+      removed: hiddenCount,
       pending: stillPending,
       ids: idCounts.size
     });
@@ -606,11 +607,12 @@ function applyEquipmentDepotLayout() {
 }
 
 function resolveArsenalDomRefs() {
+  const isInsideDialog = (node) => !!node?.closest?.('[role="dialog"], [data-radix-dialog-content]');
   const directScroll =
     document.getElementById('equip-scroll') ||
     document.querySelector('[id*="equip"][id*="scroll"]') ||
     document.querySelector('[id*="arsenal"][id*="scroll"]');
-  if (directScroll) {
+  if (directScroll && !isInsideDialog(directScroll)) {
     const viewport = directScroll.querySelector('[data-radix-scroll-area-viewport]');
     const grid = viewport?.querySelector('div.flex.flex-wrap') || null;
     return { equipScroll: directScroll, viewport: viewport || null, grid };
@@ -619,6 +621,7 @@ function resolveArsenalDomRefs() {
   const viewports = Array.from(document.querySelectorAll('[data-radix-scroll-area-viewport]'));
   let best = null;
   for (const viewport of viewports) {
+    if (isInsideDialog(viewport)) continue;
     const grid = viewport.querySelector('div.flex.flex-wrap');
     if (!grid) continue;
     const equipmentButtonCount = grid.querySelectorAll('button .sprite.item, button img[alt="stat type"]').length;
@@ -639,6 +642,7 @@ function getArsenalGridButtons() {
   const refs = resolveArsenalDomRefs();
   if (!refs.grid) return [];
   return Array.from(refs.grid.querySelectorAll(':scope button')).filter((btn) => {
+    if (btn.closest?.('[role="dialog"], [data-radix-dialog-content]')) return false;
     return !!(btn.querySelector('.sprite.item') || btn.querySelector('img[alt="stat type"]'));
   });
 }
@@ -716,49 +720,8 @@ function getArsenalSortRowFromButton(button) {
 
 function restoreDepotEquipmentToArsenalDom(row) {
   if (!row?.id) return false;
-  const refs = resolveArsenalDomRefs();
-  if (!refs.grid) return false;
-  const sid = String(row.id);
-  const alreadyVisible = getArsenalGridButtons().some((btn) => String(btn.getAttribute('data-equipment-id') || '') === sid);
-  if (alreadyVisible) return true;
-  const slot = document.createElement('div');
-  slot.className = 'flex';
-  slot.setAttribute('data-state', 'closed');
-  const newButton = createArsenalEquipmentButtonFromRow(row);
-  slot.appendChild(newButton);
-
-  const slots = Array.from(refs.grid.querySelectorAll(':scope > div.flex[data-state]'));
-  // First priority: keep exact tuple blocks together (same tier + name + stat).
-  const rowStat = normalizeEquipmentStat(row?.stat || '');
-  const sameTupleSlots = slots.filter((existingSlot) => {
-    const existingBtn = existingSlot.querySelector('button');
-    if (!existingBtn) return false;
-    const existingRow = getArsenalSortRowFromButton(existingBtn);
-    if (!existingRow) return false;
-    return Number(existingRow.tier || 1) === Number(row.tier || 1)
-      && String(existingRow.name || '') === String(row.name || '')
-      && normalizeEquipmentStat(existingRow.stat || '') === rowStat;
-  });
-  if (sameTupleSlots.length > 0) {
-    const lastSame = sameTupleSlots[sameTupleSlots.length - 1];
-    if (lastSame.nextSibling) refs.grid.insertBefore(slot, lastSame.nextSibling);
-    else refs.grid.appendChild(slot);
-    return true;
-  }
-
-  let inserted = false;
-  for (const existingSlot of slots) {
-    const existingBtn = existingSlot.querySelector('button');
-    if (!existingBtn) continue;
-    const existingRow = getArsenalSortRowFromButton(existingBtn);
-    if (!existingRow) continue;
-    if (compareArsenalEquipmentSort(row, existingRow) < 0) {
-      refs.grid.insertBefore(slot, existingSlot);
-      inserted = true;
-      break;
-    }
-  }
-  if (!inserted) refs.grid.appendChild(slot);
+  // Non-destructive mode: unhide will be handled by applyEquipmentDepotLayout.
+  applyEquipmentDepotLayout();
   return true;
 }
 
@@ -980,19 +943,20 @@ function attachArsenalObservation() {
     depotDebug('arsenal observe:scroll');
     return;
   }
-  depotArsenalObserveTarget = document.body;
-  depotObservers.arsenalGrid.observe(document.body, { childList: true, subtree: true });
-  depotDebug('arsenal observe:body');
+  depotArsenalObserveTarget = null;
+  depotDebug('arsenal observe:none');
 }
 
 function startArsenalGridObserver() {
   if (depotObservers.arsenalGrid) return;
   const run = () => {
     if (!depotConfig?.enableCreatureDepot) return;
+    if (document.querySelector('[role="dialog"], [data-radix-dialog-content]')) return;
     const buttons = getArsenalGridButtons();
     const target = depotArsenalObserveTarget === document.body
       ? 'body'
       : (depotArsenalObserveTarget?.id || depotArsenalObserveTarget?.className || 'unknown');
+    if (!depotArsenalObserveTarget || buttons.length === 0) return;
     const now = Date.now();
     const runStateKey = `${target}|${buttons.length}|${depotEquipmentState.ids.length}`;
     const shouldLogNoButtonsHeartbeat = buttons.length === 0 && (now - lastArsenalNoButtonsLogAt > 4000);
@@ -1501,12 +1465,41 @@ function startDepotInventoryObserver() {
     depotInventoryDebounceTimeout = scheduleTimeout(() => {
       addDepotInventoryButton();
       depotInventoryDebounceTimeout = null;
-    }, 150);
+    }, 80);
   };
-  depotObservers.inventory = new MutationObserver(run);
+  const shouldRunForNode = (node) => {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+    return Boolean(
+      node.classList?.contains('container-inventory-4') ||
+      node.querySelector?.('.container-inventory-4') ||
+      node.querySelector?.('button.focus-style-visible') ||
+      node.matches?.('[role="tab"]')
+    );
+  };
+  depotObservers.inventory = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === 'attributes') {
+        const target = mutation.target;
+        if (
+          target?.getAttribute?.('role') === 'tab' &&
+          mutation.attributeName === 'aria-selected' &&
+          target.getAttribute('aria-selected') === 'true'
+        ) {
+          run();
+          return;
+        }
+      }
+      for (const node of mutation.addedNodes) {
+        if (shouldRunForNode(node)) {
+          run();
+          return;
+        }
+      }
+    }
+  });
   depotObservers.inventory.observe(document.body, { childList: true, subtree: true });
   run();
-  depotInventoryRefreshInterval = setInterval(() => addDepotInventoryButton(), 1200);
+  depotInventoryRefreshInterval = setInterval(() => addDepotInventoryButton(), 1000);
 }
 
 function stopDepotInventoryObserver() {
