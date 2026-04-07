@@ -14,8 +14,6 @@ const defaultConfig = {
   maxCreaturesColor: 'prismatic',
   enableMaxShinies: false,
   maxShiniesColor: 'prismatic',
-  enableFavorites: false,
-  favoriteSymbol: 'heart',
   showSetupLabels: false,
   enableShinyEnemies: false,
   enableAutoplayRefresh: false,
@@ -43,7 +41,6 @@ const defaultConfig = {
 
 // Storage key for this mod
 const STORAGE_KEY = 'better-ui-config';
-const FAVORITES_STORAGE_KEY = 'better-ui-favorites';
 
 // Load config from localStorage
 let config;
@@ -60,6 +57,8 @@ try {
   console.error('[Mod Settings] Error loading config from localStorage:', error);
   config = Object.assign({}, defaultConfig);
 }
+delete config.enableFavorites;
+delete config.favoriteSymbol;
 
 // Last visited map feature globals
 const LAST_MAP_STORAGE_KEY = 'mod-settings-map-history';
@@ -184,7 +183,6 @@ const TIMEOUT_DELAYS = {
   TAB_REAPPLY: 100,
   STATE_VERIFY: 100,
   INIT_RETRY: 500,
-  FAVORITES_INIT: 500,
   OBSERVER_RETRY: 1000,
   CONTAINER_DEBOUNCE: 200,
   BROWSER_REFRESH: 1000
@@ -213,7 +211,6 @@ const activeTimeouts = new Set();
 const observers = {
   stamina: null,
   tab: null,
-  contextMenu: null,
   creature: null,
   setupLabels: null,
   scrollLock: null,
@@ -231,14 +228,6 @@ const timerState = {
 // UI state
 const uiState = {
   settingsButton: null
-};
-
-// Favorites state
-const favoritesState = {
-  creatures: new Map(), // Maps uniqueId -> symbolKey
-  buttonListeners: new WeakMap(), // Track event listeners on creature buttons
-  lastOptimizedUpdate: 0, // Track last optimized favorite update to prevent double-refresh
-  lastLoggedResult: null // Track last logged result to prevent duplicate logs
 };
 
 // Subscriptions state
@@ -305,51 +294,6 @@ const COLOR_OPTIONS = {
     textColor: 'rgb(200 150 255)',
     borderGradient: 'linear-gradient(135deg, #4a148c, #6a1b9a, #8e24aa, #ab47bc)',
     starColor: 'linear-gradient(135deg, #311b92, #512da8, #673ab7, #9575cd)'
-  }
-};
-
-// Favorite symbol options using Bestiary Arena stat icons
-const FAVORITE_SYMBOLS = {
-  heart: {
-    name: 'Heart',
-    icon: '❤️'
-  },
-  hp: {
-    name: 'HP',
-    icon: 'https://bestiaryarena.com/assets/icons/heal.png'
-  },
-  attackdamage: {
-    name: 'AD',
-    icon: 'https://bestiaryarena.com/assets/icons/attackdamage.png'
-  },
-  abilitypower: {
-    name: 'AP',
-    icon: 'https://bestiaryarena.com/assets/icons/abilitypower.png'
-  },
-  attackspeed: {
-    name: 'APS',
-    icon: 'https://bestiaryarena.com/assets/icons/attackspeed.png'
-  },
-  armor: {
-    name: 'ARM',
-    icon: 'https://bestiaryarena.com/assets/icons/armor.png'
-  },
-  magicresist: {
-    name: 'MR',
-    icon: 'https://bestiaryarena.com/assets/icons/magicresist.png'
-  },
-  speed: {
-    name: 'SPD',
-    icon: 'https://bestiaryarena.com/assets/icons/speed.png'
-  },
-  shinystar: {
-    name: 'Shiny',
-    icon: 'https://bestiaryarena.com/assets/icons/shiny-star.png'
-  },
-  none: {
-    name: '(none)',
-    icon: null,
-    isNone: true
   }
 };
 
@@ -446,7 +390,7 @@ function getCreatureLevel(levelElement) {
 }
 
 // Check if scroll is locked at level 2 or above (modals/dialogs)
-// Level 1 (context menus) should still allow favorite button injection
+// Level 1 (context menus) still get styling; higher locks block bulk portrait updates
 // When unlocked, the attribute is removed (returns null), which evaluates to false
 function isScrollLocked() {
   const scrollLocked = document.body.getAttribute('data-scroll-locked');
@@ -664,6 +608,37 @@ function saveConfig() {
     console.log('[Mod Settings] Configuration saved to localStorage:', config);
   } catch (error) {
     console.error('[Mod Settings] Error saving config:', error);
+  }
+}
+
+const DEPOT_CONFIG_STORAGE_KEY = 'depot-manager-config';
+const DEPOT_DEFAULT_CONFIG = {
+  enableFavorites: false,
+  favoriteSymbol: 'heart',
+  enableCreatureDepot: true
+};
+
+function readDepotConfigFromStorage() {
+  try {
+    const raw = localStorage.getItem(DEPOT_CONFIG_STORAGE_KEY);
+    if (!raw) return { ...DEPOT_DEFAULT_CONFIG };
+    return Object.assign({}, DEPOT_DEFAULT_CONFIG, JSON.parse(raw));
+  } catch (e) {
+    return { ...DEPOT_DEFAULT_CONFIG };
+  }
+}
+
+function writeDepotConfigToStorage(next) {
+  try {
+    localStorage.setItem(DEPOT_CONFIG_STORAGE_KEY, JSON.stringify(next));
+    if (typeof window !== 'undefined') {
+      window.depotManagerConfig = next;
+    }
+    if (window.depotManager && typeof window.depotManager.reloadDepotConfigFromStorage === 'function') {
+      window.depotManager.reloadDepotConfigFromStorage();
+    }
+  } catch (e) {
+    console.error('[Mod Settings] Error saving Depot config:', e);
   }
 }
 
@@ -2980,157 +2955,6 @@ async function resetAllSettings(modal) {
   }
 }
 
-function loadFavorites() {
-  try {
-    const saved = localStorage.getItem(FAVORITES_STORAGE_KEY);
-    console.log('[Mod Settings] Loading favorites from localStorage:', saved);
-    if (saved) {
-      const data = JSON.parse(saved);
-      console.log('[Mod Settings] Parsed favorites data:', data);
-      favoritesState.creatures = new Map(Object.entries(data));
-      console.log('[Mod Settings] Loaded', favoritesState.creatures.size, 'favorites:', favoritesState.creatures);
-    } else {
-      console.log('[Mod Settings] No saved favorites found');
-    }
-  } catch (error) {
-    console.error('[Mod Settings] Error loading favorites:', error);
-    favoritesState.creatures = new Map();
-  }
-}
-
-function saveFavorites() {
-  try {
-    const data = Object.fromEntries(favoritesState.creatures);
-    const jsonData = JSON.stringify(data);
-    localStorage.setItem(FAVORITES_STORAGE_KEY, jsonData);
-    console.log('[Mod Settings] Favorites saved:', favoritesState.creatures.size, 'data:', jsonData);
-  } catch (error) {
-    console.error('[Mod Settings] Error saving favorites:', error);
-  }
-}
-
-// Lock creature via API
-async function lockCreatureAPI(uniqueId) {
-  const requestBody = {
-    "0": {
-      "json": {
-        "locked": true,
-        "monsterId": uniqueId
-      }
-    }
-  };
-  console.log('[Mod Settings] 📤 Lock API request body:', JSON.stringify(requestBody, null, 2));
-  
-  const response = await fetch('https://bestiaryarena.com/api/trpc/game.lockMonster?batch=1', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Game-Version': '1'
-    },
-    body: JSON.stringify(requestBody)
-  });
-  
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-  
-  return await response.json();
-}
-
-// Update local state for locked creature
-function updateLocalCreatureLock(uniqueId) {
-  try {
-    globalThis.state.player.send({
-      type: 'setState',
-      fn: (prev) => {
-        const monsters = (prev.monsters || []).map(m => 
-          m.id === uniqueId ? { ...m, locked: true } : m
-        );
-        return { ...prev, monsters };
-      }
-    });
-    console.log('[Mod Settings] State update sent via setState');
-    
-    // Verify and close menu
-    scheduleTimeout(() => {
-      const monsters = getPlayerMonsters();
-      const creature = monsters.find(m => m.id === uniqueId);
-      console.log('[Mod Settings] 🔍 Creature AFTER state update:', {
-        id: creature?.id,
-        gameId: creature?.gameId,
-        locked: creature?.locked
-      });
-      
-      if (!creature?.locked) {
-        console.error('[Mod Settings] ❌ CRITICAL: Creature is NOT locked after API call and state update!');
-      } else {
-        console.log('[Mod Settings] ✅ Creature is confirmed locked in local state');
-      }
-      
-      // Close context menu
-      const contextMenu = document.querySelector('[role="menu"][data-state="open"]');
-      if (contextMenu) {
-        document.body.click();
-        console.log('[Mod Settings] Context menu closed - right-click again to see updated state');
-      }
-    }, TIMEOUT_DELAYS.STATE_VERIFY);
-  } catch (e) {
-    console.error('[Mod Settings] Failed to update state:', e);
-    
-    // Fallback: direct update
-    try {
-      const monsters = getPlayerMonsters();
-      const creature = monsters.find(m => m.id === uniqueId);
-      if (creature) {
-        creature.locked = true;
-        console.log('[Mod Settings] Fallback: directly updated creature.locked');
-      }
-    } catch (fallbackError) {
-      console.error('[Mod Settings] Fallback also failed:', fallbackError);
-    }
-  }
-}
-
-// Toggle favorite status for a creature with a specific symbol
-async function toggleFavorite(uniqueId, symbolKey = 'heart') {
-  if (favoritesState.creatures.has(uniqueId)) {
-    // If already favorited, update the symbol instead of removing
-    favoritesState.creatures.set(uniqueId, symbolKey);
-    console.log('[Mod Settings] Updated favorite symbol to', symbolKey + ':', uniqueId);
-  } else {
-    favoritesState.creatures.set(uniqueId, symbolKey);
-    console.log('[Mod Settings] Added to favorites with symbol', symbolKey + ':', uniqueId);
-    
-    // Log creature state before locking
-    const monstersBefore = getPlayerMonsters();
-    const creatureBefore = monstersBefore.find(m => m.id === uniqueId);
-    console.log('[Mod Settings] 🔍 Creature BEFORE lock API call:', {
-      id: creatureBefore?.id,
-      gameId: creatureBefore?.gameId,
-      locked: creatureBefore?.locked
-    });
-    
-    // Attempt to lock the creature
-    try {
-      const data = await lockCreatureAPI(uniqueId);
-      console.log('[Mod Settings] Lock API response:', data);
-      
-      // API returns null/undefined but the lock still succeeds
-      // No need to verify - the local state update handles it
-      
-      console.log('[Mod Settings] Locked successfully:', uniqueId);
-      updateLocalCreatureLock(uniqueId);
-    } catch (error) {
-      console.error('[Mod Settings] Failed to lock creature:', error);
-      favoritesState.creatures.delete(uniqueId);
-      console.log('[Mod Settings] Removed from favorites due to lock failure:', uniqueId);
-    }
-  }
-  
-  saveFavorites();
-  updateFavoriteHearts(uniqueId);
-}
-
 // Create settings event handler for checkboxes
 function createSettingsCheckboxHandler(configKey, onEnable, onDisable) {
   return (checkbox) => {
@@ -3252,6 +3076,7 @@ function showSettingsModal() {
     // Create menu items for left column
     let menuItems = [
       { id: 'creatures', label: t('mods.betterUI.menuCreatures'), selected: true },
+      { id: 'depot-manager', label: t('mods.depot.title'), selected: false },
       { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
       { id: 'mod-coordination', label: t('mods.betterUI.menuModCoordination'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
@@ -3261,15 +3086,15 @@ function showSettingsModal() {
     // Check if Hunt Analyzer mod is enabled and add the tab if it is
     const huntAnalyzerMod = window.localMods.find(mod => mod.name === 'Super Mods/Hunt Analyzer.js');
     if (huntAnalyzerMod?.enabled) {
-      // Insert Hunt Analyzer tab after ui
-      menuItems.splice(2, 0, { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false });
+      // Insert Hunt Analyzer tab after ui (base: creatures, depot-manager, ui, …)
+      menuItems.splice(3, 0, { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false });
     }
 
     // Check if VIP List mod is enabled and add the tab if it is
     const vipListMod = window.localMods.find(mod => mod.name === 'OT Mods/VIP List.js');
     if (vipListMod?.enabled) {
       // Insert VIP List tab after hunt-analyzer (or after ui if hunt-analyzer is not enabled)
-      const insertPosition = huntAnalyzerMod?.enabled ? 3 : 2;
+      const insertPosition = huntAnalyzerMod?.enabled ? 4 : 3;
       menuItems.splice(insertPosition, 0, { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false });
     }
     
@@ -3405,12 +3230,6 @@ function showSettingsModal() {
         creaturesContent.innerHTML = `
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="favorites-toggle" checked="" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.enableFavorites')}</span>
-            </label>
-          </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="rainbow-tiers-toggle" checked="" style="transform: scale(1.2);">
               <span>${t('mods.betterUI.enableMaxCreatures')}</span>
             </label>
@@ -3451,6 +3270,36 @@ function showSettingsModal() {
           </div>
         `;
         rightColumn.appendChild(creaturesContent);
+      } else if (categoryId === 'depot-manager') {
+        const depotContent = document.createElement('div');
+        depotContent.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="depot-enable-favorites-toggle" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.enableFavorites')}</span>
+            </label>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="color: #ccc;">${t('mods.depot.defaultFavoriteSymbol')}</span>
+            <select id="depot-favorite-symbol-select" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+              <option value="heart">Heart</option>
+              <option value="hp">HP</option>
+              <option value="attackdamage">AD</option>
+              <option value="abilitypower">AP</option>
+              <option value="attackspeed">APS</option>
+              <option value="armor">ARM</option>
+              <option value="magicresist">MR</option>
+              <option value="speed">SPD</option>
+              <option value="shinystar">Shiny</option>
+            </select>
+          </div>
+          <div style="margin-top: 14px;">
+            <button id="depot-reset-manager-btn" class="btn btn-secondary" style="color: #dc3545;">
+              Reset Depot Manager
+            </button>
+          </div>
+        `;
+        rightColumn.appendChild(depotContent);
       } else if (categoryId === 'advanced') {
         // Read Bestiary Automator config values BEFORE creating HTML to ensure correct initial state
         let useApiForStaminaRefill = false;
@@ -3744,6 +3593,73 @@ function showSettingsModal() {
         )(staminaCheckbox);
       }
     
+      const depotFavoritesToggle = content.querySelector('#depot-enable-favorites-toggle');
+      const depotSymbolSelect = content.querySelector('#depot-favorite-symbol-select');
+      const depotResetButton = content.querySelector('#depot-reset-manager-btn');
+      if (depotFavoritesToggle && depotSymbolSelect) {
+        const depotCfg = readDepotConfigFromStorage();
+        depotFavoritesToggle.checked = !!depotCfg.enableFavorites;
+        const sym = depotCfg.favoriteSymbol || 'heart';
+        depotSymbolSelect.value = depotSymbolSelect.querySelector(`option[value="${sym}"]`) ? sym : 'heart';
+        depotFavoritesToggle.addEventListener('change', () => {
+          const d = readDepotConfigFromStorage();
+          d.enableCreatureDepot = true;
+          d.enableFavorites = depotFavoritesToggle.checked;
+          writeDepotConfigToStorage(d);
+        });
+        depotSymbolSelect.addEventListener('change', () => {
+          const d = readDepotConfigFromStorage();
+          d.enableCreatureDepot = true;
+          d.favoriteSymbol = depotSymbolSelect.value;
+          writeDepotConfigToStorage(d);
+        });
+      }
+      if (depotResetButton) {
+        let depotResetConfirmArmed = false;
+        let depotResetConfirmTimeout = null;
+        depotResetButton.addEventListener('click', () => {
+          if (!depotResetConfirmArmed) {
+            depotResetConfirmArmed = true;
+            depotResetButton.textContent = 'Click again to confirm reset';
+            depotResetButton.style.borderColor = '#dc3545';
+            depotResetButton.style.background = 'rgba(220, 53, 69, 0.2)';
+            if (depotResetConfirmTimeout) clearTimeout(depotResetConfirmTimeout);
+            depotResetConfirmTimeout = setTimeout(() => {
+              depotResetConfirmArmed = false;
+              depotResetButton.textContent = 'Reset Depot Manager';
+              depotResetButton.style.borderColor = '';
+              depotResetButton.style.background = '';
+              depotResetConfirmTimeout = null;
+            }, 5000);
+            return;
+          }
+
+          depotResetConfirmArmed = false;
+          if (depotResetConfirmTimeout) {
+            clearTimeout(depotResetConfirmTimeout);
+            depotResetConfirmTimeout = null;
+          }
+          depotResetButton.textContent = 'Reset Depot Manager';
+          depotResetButton.style.borderColor = '';
+          depotResetButton.style.background = '';
+          try {
+            if (window.depotManager?.resetDepotCreatureIds) {
+              window.depotManager.resetDepotCreatureIds();
+            } else {
+              localStorage.removeItem('depot-manager-depot-creature-ids');
+              localStorage.removeItem('depot-manager-depot-equipment-ids-v1');
+            }
+            createToast({
+              message: '<span class="text-success">✅ Depot Manager reset.</span>',
+              type: 'success',
+              duration: 2500
+            });
+          } catch (error) {
+            console.error('[Mod Settings] Failed to reset Depot Manager:', error);
+          }
+        });
+      }
+
       const rainbowCheckbox = content.querySelector('#rainbow-tiers-toggle');
       if (rainbowCheckbox) {
         createSettingsCheckboxHandler('enableMaxCreatures', applyMaxCreatures, removeMaxCreatures)(rainbowCheckbox);
@@ -3766,14 +3682,6 @@ function showSettingsModal() {
         createSettingsDropdownHandler('maxShiniesColor', () => {
           if (config.enableMaxShinies) applyMaxShinies();
         })(shinyColorPicker);
-      }
-      
-      const favoritesCheckbox = content.querySelector('#favorites-toggle');
-      if (favoritesCheckbox) {
-        createSettingsCheckboxHandler('enableFavorites',
-          updateFavoriteHearts,
-          removeFavoriteHearts
-        )(favoritesCheckbox);
       }
       
       const setupLabelsCheckbox = content.querySelector('#setup-labels-toggle');
@@ -4876,717 +4784,6 @@ function createSettingsButton() {
   };
   tryInsert();
 }
-
-// =======================
-// 6. Favorite Creatures Functions
-// =======================
-
-// Get creature name from context menu
-function getCreatureNameFromMenu(menuElem) {
-  // Look for the group element (like Cyclopedia does)
-  const group = menuElem.querySelector('div[role="group"]');
-  if (!group) {
-    return null;
-  }
-  
-  // Get first item from the group
-  const firstItem = group.querySelector('.dropdown-menu-item');
-  if (!firstItem) {
-    return null;
-  }
-  
-  const text = firstItem.textContent;
-  
-  // Check for monster pattern: "Monster Name (X%)"
-  const monsterMatch = text.match(/^(.*?)\s*\(\d+%\)/);
-  if (monsterMatch) {
-    return monsterMatch[1].trim();
-  }
-  
-  // Check for equipment pattern: "Equipment Name (Tier: X)"
-  const equipmentMatch = text.match(/^(.*?)\s*\(Tier: \d+\)/);
-  if (equipmentMatch) {
-    return equipmentMatch[1].trim();
-  }
-  
-  return null;
-}
-
-// Validate if context menu should receive favorite button
-function validateContextMenu(menuElem) {
-  if (!config.enableFavorites) {
-    return false;
-  }
-  if (isScrollLocked()) {
-    return false;
-  }
-  if (menuElem.hasAttribute('data-favorite-processed')) {
-    return false;
-  }
-  
-  const creatureName = getCreatureNameFromMenu(menuElem);
-  if (!creatureName) {
-    return false;
-  }
-  
-  const menuText = menuElem.textContent || '';
-  if (/\(Tier: \d+\)/.test(menuText)) {
-    return false;
-  }
-  if (menuText.toLowerCase().includes('my account') || menuText.toLowerCase().includes('logout')) {
-    return false;
-  }
-  if (menuText.toLowerCase().includes('game mode') || menuText.toLowerCase().includes('manual')) {
-    return false;
-  }
-  
-  return true;
-}
-
-// Identify creature from context menu
-function identifyCreatureFromMenu(menuElem) {
-  let contextMenuPercentage = null;
-  const group = menuElem.querySelector('div[role="group"]');
-  if (group) {
-    const firstItem = group.querySelector('.dropdown-menu-item');
-    if (firstItem) {
-      const text = firstItem.textContent;
-      const percentageMatch = text.match(/\((\d+)%\)/);
-      if (percentageMatch) {
-        contextMenuPercentage = parseInt(percentageMatch[1]);
-      }
-    }
-  }
-  
-  if (!currentRightClickedCreature?.creatureImg) return null;
-  
-  const creatureInfo = getCreatureUniqueId(currentRightClickedCreature.creatureImg, contextMenuPercentage);
-  if (!creatureInfo) return null;
-  
-  const monsters = getPlayerMonsters();
-  const creature = monsters.find(m => m.id === creatureInfo.uniqueId);
-  
-  return {
-    gameId: creatureInfo.gameId,
-    uniqueId: creatureInfo.uniqueId,
-    creatureIndex: creatureInfo.index,
-    isLocked: creature?.locked || false
-  };
-}
-
-// Create favorite main menu item
-function createFavoriteMainMenuItem() {
-  const item = document.createElement('div');
-  item.className = 'focus-style dropdown-menu-item flex cursor-default select-none items-center gap-2 outline-none data-[state=open]:bg-whiteDarkest data-[state=open]:text-whiteBrightest';
-  item.setAttribute('role', 'menuitem');
-  item.setAttribute('aria-haspopup', 'menu');
-  item.setAttribute('aria-expanded', 'false');
-  item.setAttribute('aria-controls', 'favorite-submenu');
-  item.setAttribute('data-state', 'closed');
-  item.setAttribute('tabindex', '-1');
-  item.setAttribute('data-orientation', 'vertical');
-  item.setAttribute('data-radix-collection-item', '');
-  return item;
-}
-
-// Create favorite submenu with symbol items
-function createFavoriteSubmenu(uniqueId, currentSymbol) {
-  const submenu = document.createElement('div');
-  submenu.id = 'favorite-submenu';
-  submenu.className = 'pixel-font-16 frame-3 surface-regular z-modals min-w-[7rem] overflow-hidden py-1 text-whiteHighlight shadow-md';
-  submenu.setAttribute('role', 'menu');
-  submenu.setAttribute('aria-orientation', 'vertical');
-  submenu.setAttribute('data-state', 'closed');
-  submenu.setAttribute('data-radix-menu-content', '');
-  submenu.style.cssText = `position: absolute; left: 100%; top: 0; display: none; z-index: 1000; min-width: 120px;`;
-  
-  const isFavorite = uniqueId ? favoritesState.creatures.has(uniqueId) : false;
-  
-  Object.entries(FAVORITE_SYMBOLS).forEach(([symbolKey, symbol]) => {
-    const symbolItem = document.createElement('div');
-    symbolItem.className = 'dropdown-menu-item relative flex cursor-default select-none items-center gap-1 outline-none';
-    symbolItem.setAttribute('role', 'menuitem');
-    symbolItem.setAttribute('tabindex', '-1');
-    symbolItem.setAttribute('data-orientation', 'vertical');
-    symbolItem.setAttribute('data-radix-collection-item', '');
-    symbolItem.style.cssText = 'color: white; background: transparent; padding: 4px 8px; font-size: 14px; font-weight: 400; line-height: 1.2;';
-    
-    symbolItem.addEventListener('mouseenter', () => symbolItem.style.background = 'rgba(255, 255, 255, 0.15)');
-    symbolItem.addEventListener('mouseleave', () => symbolItem.style.background = 'transparent');
-    
-    const isCurrentSymbol = isFavorite && currentSymbol === symbolKey;
-    let iconElement = '';
-    if (!symbol.isNone) {
-      iconElement = symbolKey === 'heart' ? `<span style="font-size: 14px; line-height: 1;">${symbol.icon}</span>` : `<img src="${symbol.icon}" width="14" height="14" style="image-rendering: pixelated;" alt="${symbol.name}">`;
-    }
-    
-    symbolItem.innerHTML = `${iconElement}${symbol.name}${isCurrentSymbol ? ' ✓' : ''}`;
-    
-    symbolItem.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (uniqueId) {
-        if (symbol.isNone) {
-          favoritesState.creatures.delete(uniqueId);
-          saveFavorites();
-          updateFavoriteHearts(uniqueId);
-        } else {
-          toggleFavorite(uniqueId, symbolKey);
-        }
-      }
-      currentRightClickedCreature = null;
-      scheduleTimeout(() => {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-      }, TIMEOUT_DELAYS.MENU_CLOSE);
-    });
-    
-    submenu.appendChild(symbolItem);
-  });
-  
-  return submenu;
-}
-
-// Attach submenu event handlers
-function attachSubmenuHandlers(mainItem, submenu) {
-  mainItem.addEventListener('mouseenter', () => {
-    mainItem.style.background = 'rgba(255, 255, 255, 0.15)';
-    mainItem.setAttribute('data-state', 'open');
-    mainItem.setAttribute('aria-expanded', 'true');
-    submenu.setAttribute('data-state', 'open');
-    submenu.style.display = 'block';
-  });
-  
-  mainItem.addEventListener('mouseleave', () => {
-    mainItem.style.background = 'transparent';
-    scheduleTimeout(() => {
-      if (!submenu.matches(':hover') && !mainItem.matches(':hover')) {
-        mainItem.setAttribute('data-state', 'closed');
-        mainItem.setAttribute('aria-expanded', 'false');
-        submenu.setAttribute('data-state', 'closed');
-        submenu.style.display = 'none';
-      }
-    }, TIMEOUT_DELAYS.SUBMENU_HIDE);
-  });
-  
-  submenu.addEventListener('mouseenter', () => {
-    submenu.style.display = 'block';
-    submenu.setAttribute('data-state', 'open');
-  });
-  
-  submenu.addEventListener('mouseleave', () => {
-    submenu.style.display = 'none';
-    submenu.setAttribute('data-state', 'closed');
-    mainItem.setAttribute('data-state', 'closed');
-    mainItem.setAttribute('aria-expanded', 'false');
-  });
-}
-
-// Inject favorite button into context menu
-function injectFavoriteButton(menuElem) {
-  if (!validateContextMenu(menuElem)) {
-    return false;
-  }
-  menuElem.setAttribute('data-favorite-processed', 'true');
-  
-  const creatureData = identifyCreatureFromMenu(menuElem);
-  const uniqueId = creatureData?.uniqueId || null;
-  const currentSymbol = uniqueId ? favoritesState.creatures.get(uniqueId) : null;
-  
-  const favoriteMainItem = createFavoriteMainMenuItem();
-  const submenu = createFavoriteSubmenu(uniqueId, currentSymbol);
-  
-  attachSubmenuHandlers(favoriteMainItem, submenu);
-  
-  favoriteMainItem.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${t('mods.betterUI.favoriteMenuLabel')}<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right ml-auto" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>`;
-  
-  favoriteMainItem.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (uniqueId) {
-      toggleFavorite(uniqueId, 'heart');
-    }
-    currentRightClickedCreature = null;
-    scheduleTimeout(() => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-    }, TIMEOUT_DELAYS.MENU_CLOSE);
-  });
-  
-  favoriteMainItem.appendChild(submenu);
-  menuElem.appendChild(favoriteMainItem);
-  
-  console.log('[Mod Settings] Favorite button injected successfully');
-  return true;
-}
-
-// Remove all favorite hearts
-function removeFavoriteHearts() {
-  document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove());
-}
-
-// Update heart icons on creature portraits
-function updateFavoriteHearts(targetUniqueId = null) {
-  // Skip if Board Analyzer or Autoscroller is running
-  if (isBlockedByAnalysisMods()) {
-    return;
-  }
-  
-  if (!config.enableFavorites) {
-    removeFavoriteHearts();
-    return;
-  }
-  
-  if (isScrollLocked()) {
-    return;
-  }
-  
-  // Get all creatures, but exclude those inside the Impact Analyzer and autoplay session
-  const allCreatures = Array.from(getVisibleCreatures());
-  const creatures = allCreatures.filter(imgEl => {
-    // Exclude creatures inside the Impact Analyzer panel
-    const isInAnalyzer = imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
-                         imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
-    
-    // Exclude creatures inside the autoplay session widget
-    const isInAutoplaySession = imgEl.closest('div[data-autosetup]') ||
-                               imgEl.closest('#autoseller-session-widget') ||
-                               imgEl.closest('#drop-widget-bottom-element');
-    
-    return !isInAnalyzer && !isInAutoplaySession;
-  });
-  
-  // If no creatures visible, don't remove existing hearts - collection might be transitioning
-  if (creatures.length === 0) {
-    return;
-  }
-  
-  const monsters = getPlayerMonsters();
-  
-  // OPTIMIZATION: If updating a specific creature, only update that one
-  if (targetUniqueId) {
-    updateSingleFavoriteHeart(targetUniqueId, creatures, monsters);
-    favoritesState.lastOptimizedUpdate = Date.now(); // Track time to prevent observer double-refresh
-    return;
-  }
-  
-  // Full update: reset index and process all creatures
-  resetCreatureMatchingIndex();
-  
-  // Remove all existing hearts first (only when we have creatures to re-apply them)
-  removeFavoriteHearts();
-  
-  let heartsAdded = 0;
-  let creaturesChecked = 0;
-  
-  creatures.forEach((imgEl, idx) => {
-    const identifiedMonster = matchCreatureBySequentialIndex(imgEl, monsters);
-    const uniqueId = identifiedMonster?.id;
-    if (!uniqueId) return;
-    
-    creaturesChecked++;
-    
-    const isFavorite = favoritesState.creatures.has(uniqueId);
-    const container = imgEl.parentElement;
-    
-    // Add favorite symbol if favorited
-    if (isFavorite) {
-      const symbolKey = favoritesState.creatures.get(uniqueId) || 'heart';
-      const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
-      
-      const heart = createFavoriteHeartElement(symbolKey, symbol);
-      container.appendChild(heart);
-      heartsAdded++;
-    }
-  });
-  
-  // Only log when hearts were actually added and result is different from last time
-  if (heartsAdded > 0) {
-    const currentResult = `${creaturesChecked}-${heartsAdded}`;
-    if (favoritesState.lastLoggedResult !== currentResult) {
-      console.log('[Mod Settings] updateFavoriteHearts completed. Creatures checked:', creaturesChecked, 'Total hearts added:', heartsAdded);
-      favoritesState.lastLoggedResult = currentResult;
-    }
-  }
-}
-
-// Helper: Update a single creature's favorite heart (optimized for single-creature updates)
-function updateSingleFavoriteHeart(targetUniqueId, allCreatures, monsters) {
-  // Filter out analyzer creatures and autoplay session creatures
-  const creatures = allCreatures.filter(imgEl => {
-    const isInAnalyzer = imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
-                         imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
-    
-    // Exclude creatures inside the autoplay session widget
-    const isInAutoplaySession = imgEl.closest('div[data-autosetup]') ||
-                               imgEl.closest('#autoseller-session-widget') ||
-                               imgEl.closest('#drop-widget-bottom-element');
-    
-    return !isInAnalyzer && !isInAutoplaySession;
-  });
-  
-  resetCreatureMatchingIndex();
-  
-  let targetFound = false;
-  
-  for (let idx = 0; idx < creatures.length; idx++) {
-    const imgEl = creatures[idx];
-    const identifiedMonster = matchCreatureBySequentialIndex(imgEl, monsters);
-    const uniqueId = identifiedMonster?.id;
-    
-    if (!uniqueId) continue;
-    
-    // Only process the target creature
-    if (uniqueId === targetUniqueId) {
-      targetFound = true;
-      const container = imgEl.parentElement;
-      
-      // Remove existing heart for this creature
-      const existingHeart = container.querySelector('.favorite-heart');
-      if (existingHeart) {
-        existingHeart.remove();
-      }
-      
-      // Add heart if favorited
-      const isFavorite = favoritesState.creatures.has(uniqueId);
-      if (isFavorite) {
-        const symbolKey = favoritesState.creatures.get(uniqueId) || 'heart';
-        const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
-        
-        const heart = createFavoriteHeartElement(symbolKey, symbol);
-        container.appendChild(heart);
-      }
-      
-      break; // Found and updated, exit early
-    }
-  }
-  
-  if (!targetFound) {
-    console.warn('[Mod Settings] Target creature not found in visible creatures:', targetUniqueId);
-  }
-}
-
-// Helper: Create favorite heart element
-function createFavoriteHeartElement(symbolKey, symbol) {
-  const heart = document.createElement('div');
-  heart.className = 'favorite-heart pixelated';
-  heart.style.cssText = 'position: absolute; bottom: 1px; right: 0; z-index: 3; width: 16px; height: 16px; pointer-events: none;';
-  
-  // Use the appropriate icon for the favorite marker
-  if (symbolKey === 'heart') {
-    // For heart, use emoji directly with proper alignment
-    heart.innerHTML = symbol.icon;
-    heart.style.fontSize = '16px';
-    heart.style.display = 'flex';
-    heart.style.alignItems = 'center';
-    heart.style.justifyContent = 'center';
-    heart.style.lineHeight = '1';
-  } else {
-    // For stat icons, use the actual game icons
-    heart.innerHTML = `<img src="${symbol.icon}" width="16" height="16" style="image-rendering: pixelated;" alt="${symbol.name}">`;
-  }
-  
-  return heart;
-}
-
-// Match visible creature to game state using sequential indexing
-function matchCreatureBySequentialIndex(imgEl, monsters) {
-  const gameId = getCreatureGameId(imgEl);
-  if (!gameId) return null;
-  
-  const button = imgEl.closest('button');
-  const levelSpan = button?.querySelector('span[translate="no"]');
-  const displayedLevel = levelSpan ? parseInt(levelSpan.textContent) : null;
-  
-  const indexKey = `${gameId}-${displayedLevel || 'unknown'}`;
-  
-  if (!matchCreatureBySequentialIndex.indexMap) {
-    matchCreatureBySequentialIndex.indexMap = new Map();
-  }
-  
-  if (!matchCreatureBySequentialIndex.indexMap.has(indexKey)) {
-    matchCreatureBySequentialIndex.indexMap.set(indexKey, 0);
-  }
-  
-  const currentIndex = matchCreatureBySequentialIndex.indexMap.get(indexKey);
-  
-  // Get all monsters with this gameId, sorted by game's visual order
-  const matchingMonsters = getSortedMonstersByGameId(monsters, gameId);
-  
-  let candidateMonsters = matchingMonsters;
-  if (displayedLevel && matchingMonsters.length > 1) {
-    const sameLevelMonsters = matchingMonsters.filter(m => getLevelFromExp(m.exp || 0) === displayedLevel);
-    if (sameLevelMonsters.length > 0) {
-      candidateMonsters = sameLevelMonsters;
-    }
-  }
-  
-  const identifiedMonster = candidateMonsters[currentIndex] || matchingMonsters[currentIndex];
-  matchCreatureBySequentialIndex.indexMap.set(indexKey, currentIndex + 1);
-  
-  return identifiedMonster;
-}
-
-// Reset creature matching index (call before each batch operation)
-function resetCreatureMatchingIndex() {
-  if (matchCreatureBySequentialIndex.indexMap) {
-    matchCreatureBySequentialIndex.indexMap.clear();
-  }
-}
-
-// Sort monsters to match game's visual order: EXP (desc) → Name (asc) → CreatedAt (asc)
-function sortMonstersByVisualOrder(monsters) {
-  return monsters.slice().sort((a, b) => {
-    // Primary: EXP (descending)
-    if (b.exp !== a.exp) return b.exp - a.exp;
-    
-    // Secondary: Name (ascending) - with safe fallback
-    if (a.metadata?.name && b.metadata?.name) {
-      const nameCompare = a.metadata.name.localeCompare(b.metadata.name);
-      if (nameCompare !== 0) return nameCompare;
-    }
-    
-    // Tertiary: CreatedAt (ascending)
-    return (a.createdAt || 0) - (b.createdAt || 0);
-  });
-}
-
-// Helper: Get sorted monsters filtered by gameId
-function getSortedMonstersByGameId(monsters, gameId) {
-  return sortMonstersByVisualOrder(monsters.filter(m => m.gameId === gameId));
-}
-
-// Match monster by stat percentage
-function matchMonsterByPercentage(matchingMonsters, percentage, displayedLevel) {
-  const monstersWithPercentage = matchingMonsters.filter(m => {
-    const statSum = (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
-    return statSum === percentage;
-  });
-  
-  console.log('[Mod Settings] Found', monstersWithPercentage.length, 'monster(s) with', percentage + '%');
-  
-  if (monstersWithPercentage.length === 0) return null;
-  if (monstersWithPercentage.length === 1) return monstersWithPercentage[0];
-  
-  // Multiple monsters with same percentage - use level to disambiguate
-  if (displayedLevel) {
-    console.log('[Mod Settings] Multiple monsters with same percentage, using displayed level:', displayedLevel);
-    const levelMatch = monstersWithPercentage.find(m => getLevelFromExp(m.exp || 0) === displayedLevel);
-    if (levelMatch) return levelMatch;
-  }
-  
-  return monstersWithPercentage[0];
-}
-
-// Match monster by level and visual clues
-function matchMonsterByLevelAndVisuals(matchingMonsters, displayedLevel, isShiny, hasStars) {
-  if (!displayedLevel) return null;
-  
-  const levelMatches = matchingMonsters.filter(m => getLevelFromExp(m.exp) === displayedLevel);
-  
-  if (levelMatches.length === 0) return null;
-  if (levelMatches.length === 1) return levelMatches[0];
-  
-  // Multiple creatures with same level - use visual clues
-  return levelMatches.find(m => {
-    if (isShiny && !m.shiny) return false;
-    if (!isShiny && m.shiny) return false;
-    if (hasStars && !m.tier) return false;
-    if (!hasStars && m.tier) return false;
-    return true;
-  }) || null;
-}
-
-// Calculate and format creature stats
-function calculateCreatureStats(monster) {
-  const statSum = (monster?.hp || 0) + (monster?.ad || 0) + (monster?.ap || 0) + (monster?.armor || 0) + (monster?.magicResist || 0);
-  const statPercent = Math.round((statSum / 100) * 100);
-  const level = getLevelFromExp(monster?.exp || 0);
-  
-  return {
-    id: monster?.id,
-    level,
-    hp: monster?.hp,
-    ad: monster?.ad,
-    ap: monster?.ap,
-    armor: monster?.armor,
-    magicResist: monster?.magicResist,
-    total: statSum,
-    percentage: statPercent + '%'
-  };
-}
-
-// Helper function to get the unique ID of a creature from its image element
-// Uses sequential counter logic to match DOM order with game state order
-function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
-  if (!creatureImg) return null;
-  
-  const gameId = getCreatureGameId(creatureImg);
-  if (!gameId) return null;
-  
-  // Get all monsters from game state
-  const monsters = getPlayerMonsters();
-  const matchingMonsters = getSortedMonstersByGameId(monsters, gameId);
-  
-  // Get ALL visible creatures in DOM order, EXCLUDING creatures inside context menus or modals
-  const allVisibleCreatures = Array.from(document.querySelectorAll('img[alt="creature"]')).filter(img => {
-    // Exclude creatures inside context menus
-    const isInContextMenu = img.closest('[role="menu"]');
-    // Exclude creatures inside dialogs/modals
-    const isInModal = img.closest('[role="dialog"]');
-    return !isInContextMenu && !isInModal;
-  });
-  
-  // Use sequential counter logic to match DOM order with game state
-  const gameIdIndexMap = new Map();
-  
-  // Iterate through all creatures to find the target one
-  for (let i = 0; i < allVisibleCreatures.length; i++) {
-    const currentImg = allVisibleCreatures[i];
-    const currentGameId = getCreatureGameId(currentImg);
-    
-    if (!currentGameId) continue;
-    
-    // Get or initialize the index for this gameId
-    if (!gameIdIndexMap.has(currentGameId)) {
-      gameIdIndexMap.set(currentGameId, 0);
-    }
-    const currentIndex = gameIdIndexMap.get(currentGameId);
-    
-  // Check if this is the target creature
-  if (currentImg === creatureImg) {
-    // Get all available data from the button
-    const button = currentImg.closest('button');
-    const levelSpan = button.querySelector('span[translate="no"]');
-    const displayedLevel = levelSpan ? parseInt(levelSpan.textContent) : null;
-    
-    // Try to match by context menu percentage first (most reliable)
-    let identifiedMonster = matchingMonsters[currentIndex];
-    let matchedByPercentage = false;
-    
-    if (contextMenuPercentage !== null) {
-      const monster = matchMonsterByPercentage(matchingMonsters, contextMenuPercentage, displayedLevel);
-      
-      if (monster) {
-        identifiedMonster = monster;
-        matchedByPercentage = true;
-      } else {
-        console.warn('[Mod Settings] getCreatureUniqueId - No monster found with percentage:', contextMenuPercentage + '%');
-      }
-    }
-    
-    // Fallback to level-based matching if percentage matching failed
-    if (!matchedByPercentage && displayedLevel) {
-      const button = currentImg.closest('button');
-      const isShiny = currentImg.src.includes('-shiny');
-      const hasStars = button.querySelector('.tier-stars') !== null;
-      
-      const bestMatch = matchMonsterByLevelAndVisuals(matchingMonsters, displayedLevel, isShiny, hasStars);
-      if (bestMatch) {
-        identifiedMonster = bestMatch;
-      }
-    }
-    
-    return {
-      uniqueId: identifiedMonster?.id,
-      gameId: currentGameId,
-      index: currentIndex
-    };
-  }
-    
-    // Increment the index for next creature with same gameId
-    gameIdIndexMap.set(currentGameId, currentIndex + 1);
-  }
-  
-  console.error('[Mod Settings] getCreatureUniqueId - FAILED to find target in DOM!');
-  return null;
-}
-
-// Store reference to the currently right-clicked creature
-let currentRightClickedCreature = null;
-
-// Start context menu observer
-function startContextMenuObserver() {
-  if (observers.contextMenu) {
-    console.log('[Mod Settings] Context menu observer already running');
-    return;
-  }
-  
-  // Handle right-click on creature button
-  function handleCreatureRightClick(event) {
-    const creatureImg = event.target.closest('button').querySelector('img[alt="creature"]');
-    if (creatureImg) {
-      // Store just the image element - we'll identify it properly when the context menu appears
-      currentRightClickedCreature = { creatureImg };
-      console.log('[Mod Settings] Right-clicked creature stored (will identify from context menu)');
-    }
-  }
-  
-  // First, add right-click listeners to all creature buttons
-  function addRightClickListeners() {
-    const creatureButtons = document.querySelectorAll('button[data-picked]');
-    creatureButtons.forEach(button => {
-      // Only add listener if not already added
-      if (!favoritesState.buttonListeners.has(button)) {
-        button.addEventListener('contextmenu', handleCreatureRightClick);
-        favoritesState.buttonListeners.set(button, handleCreatureRightClick);
-      }
-    });
-  }
-  
-  const processMenuMutations = (mutations) => {
-    addRightClickListeners();
-    
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType !== 1) continue;
-        
-        const isMenu = node.getAttribute?.('role') === 'menu';
-        const hasMenu = node.querySelector?.('[role="menu"]');
-        const isDropdown = node.classList?.contains('dropdown-content') || node.querySelector?.('.dropdown-content');
-        
-        const menu = isMenu ? node : hasMenu;
-        if (menu) {
-          scheduleTimeout(() => injectFavoriteButton(menu), TIMEOUT_DELAYS.MENU_CLOSE);
-        } else if (isDropdown || node.querySelector?.('.dropdown-menu-item')) {
-          scheduleTimeout(() => injectFavoriteButton(node), TIMEOUT_DELAYS.MENU_CLOSE);
-        }
-      }
-    }
-  };
-  
-  observers.contextMenu = createThrottledObserver(processMenuMutations, 50);
-  
-  // Observe both document.body and document.documentElement to catch portals
-  observers.contextMenu.observe(document.body, { childList: true, subtree: true });
-  
-  // Initial setup
-  addRightClickListeners();
-  
-  console.log('[Mod Settings] Context menu observer started and observing document.body');
-}
-
-// Stop context menu observer
-function stopContextMenuObserver() {
-  if (observers.contextMenu) {
-    observers.contextMenu.disconnect();
-    observers.contextMenu = null;
-    console.log('[Mod Settings] Context menu observer stopped');
-  }
-  
-  // Remove all creature button event listeners
-  const creatureButtons = document.querySelectorAll('button[data-picked]');
-  let removedCount = 0;
-  creatureButtons.forEach(button => {
-    const listener = favoritesState.buttonListeners.get(button);
-    if (listener) {
-      button.removeEventListener('contextmenu', listener);
-      favoritesState.buttonListeners.delete(button);
-      removedCount++;
-    }
-  });
-  if (removedCount > 0) {
-    console.log(`[Mod Settings] Removed ${removedCount} creature button event listeners`);
-  }
-}
-
-// =======================
 // 7. Rainbow Tiers Functions
 // =======================
 
@@ -6533,12 +5730,7 @@ function initTabObserver() {
                 applyShinyEnemies();
               }, TIMEOUT_DELAYS.TAB_REAPPLY);
             }
-            // Update favorite hearts if enabled
-            if (config.enableFavorites) {
-              scheduleTimeout(() => {
-                updateFavoriteHearts();
-              }, TIMEOUT_DELAYS.TAB_REAPPLY);
-            }
+            window.depotManager?.notifyFavoriteGridRefresh?.('tab');
           }
         }
       });
@@ -6637,16 +5829,7 @@ function startCreatureContainerObserver() {
             applyShinyEnemies();
           }
           
-          // Update favorite hearts if enabled
-          // Skip if we just did an optimized update (within 500ms) to prevent double-refresh
-          if (config.enableFavorites) {
-            const timeSinceOptimizedUpdate = Date.now() - favoritesState.lastOptimizedUpdate;
-            if (timeSinceOptimizedUpdate > 500) {
-              updateFavoriteHearts();
-            } else {
-              console.log('[Mod Settings] Skipping full favorite refresh - recent optimized update:', timeSinceOptimizedUpdate + 'ms ago');
-            }
-          }
+          window.depotManager?.notifyFavoriteGridRefresh?.('creature');
           
           // Reconnect observer
           if (observers.creature && creatureContainer) {
@@ -6708,9 +5891,7 @@ function initScrollLockObserver() {
               applyShinyEnemies();
             }
             
-            if (config.enableFavorites) {
-              updateFavoriteHearts();
-            }
+            window.depotManager?.notifyFavoriteGridRefresh?.('scroll');
             
             scrollUnlockDebounce = null;
           }, GLOBAL_UPDATE_DEBOUNCE);
@@ -7928,8 +7109,6 @@ function initBetterUI() {
   try {
     console.log('[Mod Settings] Starting initialization');
     
-    loadFavorites();
-    
     const features = [
       { name: 'Stamina Timer', enabled: config.showStaminaTimer, init: initStaminaTimer },
       { name: 'Settings Button', enabled: config.showSettingsButton, init: createSettingsButton }
@@ -7983,13 +7162,8 @@ function initBetterUI() {
     }
     
     initTabObserver();
-    startContextMenuObserver();
     startCreatureContainerObserver();
     initScrollLockObserver();
-    
-    if (config.enableFavorites) {
-      scheduleTimeout(() => updateFavoriteHearts(), TIMEOUT_DELAYS.FAVORITES_INIT);
-    }
     
     // Apply initial setup labels visibility and start observer
     scheduleTimeout(() => {
@@ -8099,7 +7273,6 @@ function cleanupBetterUI() {
     
     observers.stamina = disconnectObserver(observers.stamina, 'Stamina');
     observers.tab = disconnectObserver(observers.tab, 'Tab');
-    stopContextMenuObserver();
     observers.creature = disconnectObserver(observers.creature, 'Creature container');
     observers.setupLabels = disconnectObserver(observers.setupLabels, 'Setup labels');
     observers.scrollLock = disconnectObserver(observers.scrollLock, 'Scroll lock');
@@ -8159,14 +7332,6 @@ function cleanupBetterUI() {
     } catch (error) {
       console.warn('[Mod Settings] Error cleaning up modals:', error);
     }
-    
-    document.querySelectorAll('.favorite-heart').forEach(heart => {
-      try {
-        heart.remove();
-      } catch (error) {
-        console.warn('[Mod Settings] Error removing favorite heart:', error);
-      }
-    });
     
     if (timerState.element && timerState.element.parentNode) {
       try {
@@ -8268,11 +7433,6 @@ function cleanupBetterUI() {
     
     // Reset UI state
     uiState.settingsButton = null;
-    
-    // Reset favorites state
-    favoritesState.creatures.clear();
-    favoritesState.lastOptimizedUpdate = 0;
-    // Note: buttonListeners is a WeakMap and will be garbage collected
     
     // Reset subscriptions
     subscriptions.autoplayRefreshGame = null;

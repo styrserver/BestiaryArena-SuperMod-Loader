@@ -864,6 +864,8 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   let spiderLairBattle = null;
   let spiderLairVillainSetupDone = false;
   let spiderLairReinitTriggered = false; // avoid re-initing every tick after defeat
+  // After defeat modal: allow one re-init when re-entering Spider Lair from map (tile 77 not required). Cleared on abandon or after re-init.
+  let spiderLairRetryWithoutTile77 = false;
   let lastOverlayHiderRoomName = null; // track previous room so we only remove originals when entering Spider Lair via quest
   let tile77SpiderLairRightClickEnabled = false;
   let tile77SpiderLairBoardSubscription = null;
@@ -1363,6 +1365,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         onDefeat: () => {},
         onClose: (isVictory) => {
           cleanupSpiderLairQuest();
+          spiderLairRetryWithoutTile77 = !isVictory;
           setTimeout(() => navigateToSecludedHerb(), 100);
         },
         victoryTitle: 'Victory!',
@@ -10934,13 +10937,19 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             bansheeVillainSetupDone = false;
           }
 
-          // Check if we're leaving Spider Lair (reset one-time setup flags)
-          if (currentRoomName && currentRoomName !== SPIDER_LAIR_ROOM_NAME) {
+          // Spider Lair: leaving room — full cleanup like Mornenion leaving Ab'Dendriel (restore vanilla Spider Lair).
+          // Exception: warp to A Secluded Herb after defeat keeps spiderLairRetryWithoutTile77 so map re-entry can re-init without tile 77.
+          if (lastOverlayHiderRoomName === SPIDER_LAIR_ROOM_NAME && currentRoomName && currentRoomName !== SPIDER_LAIR_ROOM_NAME) {
             if (spiderLairVillainSetupDone) {
               console.log('[Quests Mod][Overlay Hider] Leaving Spider Lair - resetting villain setup flag');
               spiderLairVillainSetupDone = false;
             }
             spiderLairReinitTriggered = false;
+            const postDefeatSecludedHerb = spiderLairRetryWithoutTile77 && currentRoomName === SECLUDED_HERB_ROOM_NAME;
+            if (!postDefeatSecludedHerb && (playerUsedTile77ToSpiderLair || spiderLairBattle)) {
+              console.log('[Quests Mod][Overlay Hider] Leaving Spider Lair - clearing quest/tile-77 state (CustomBattle cleanup)');
+              cleanupSpiderLairQuest();
+            }
           }
 
           // Banshee's Last Room: same as Mornenion — when we enter via portal, remove original villains and add Queen of the Banshee
@@ -10962,10 +10971,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             }
           }
 
-          // Spider Lair: re-init battle if we're still here after defeat (cleanup set spiderLairBattle = null) so player can retry without re-entering from A Secluded Herb
+          // Spider Lair: re-init battle after defeat (cleanup cleared battle) so player can retry without tile 77 — only when spiderLairRetryWithoutTile77 (set in onClose on defeat)
           const motherProgress = kingChatState.progressMotherOfAllSpiders;
           const canRetrySpiderLair = motherProgress?.accepted && !motherProgress?.completed;
-          if (currentRoomName === SPIDER_LAIR_ROOM_NAME && canRetrySpiderLair && !spiderLairBattle && currentRoomId && !spiderLairReinitTriggered) {
+          if (currentRoomName === SPIDER_LAIR_ROOM_NAME && canRetrySpiderLair && spiderLairRetryWithoutTile77 && !spiderLairBattle && currentRoomId && !spiderLairReinitTriggered) {
             spiderLairReinitTriggered = true;
             console.log('[Quests Mod][Overlay Hider] Spider Lair: re-initializing battle after defeat so player can retry');
             playerUsedTile77ToSpiderLair = true;
@@ -10974,15 +10983,23 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             if (initResult && initResult.then) {
               initResult.then((battle) => {
                 if (battle) {
+                  spiderLairRetryWithoutTile77 = false;
                   spiderLairBattle = battle;
                   spiderLairBattle.setup(
                     () => playerUsedTile77ToSpiderLair,
                     (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
                   );
                   setupSpiderLairTileRestrictions();
+                } else {
+                  spiderLairReinitTriggered = false;
+                  console.warn('[Quests Mod][Spider Lair] Re-init returned no battle instance');
                 }
-              }).catch((err) => console.error('[Quests Mod][Spider Lair] Re-init error:', err));
+              }).catch((err) => {
+                console.error('[Quests Mod][Spider Lair] Re-init error:', err);
+                spiderLairReinitTriggered = false;
+              });
             } else if (initResult) {
+              spiderLairRetryWithoutTile77 = false;
               spiderLairBattle = initResult;
               spiderLairBattle.setup(
                 () => playerUsedTile77ToSpiderLair,
@@ -10992,7 +11009,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             }
           }
 
-          // Spider Lair (The Old Widow + Giant Spiders): only when we entered via tile 77 in A Secluded Herb (questline)
+          // Spider Lair (The Old Widow + Giant Spiders): tile 77 entry or re-init after defeat (spiderLairRetryWithoutTile77)
           if (currentRoomName === SPIDER_LAIR_ROOM_NAME && playerUsedTile77ToSpiderLair && spiderLairBattle) {
             const justEnteredSpiderLairViaQuest = lastOverlayHiderRoomName !== SPIDER_LAIR_ROOM_NAME;
             if (justEnteredSpiderLairViaQuest) {
@@ -11870,6 +11887,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       playerUsedTile77ToSpiderLair = false;
       spiderLairVillainSetupDone = false;
       spiderLairReinitTriggered = false;
+      spiderLairRetryWithoutTile77 = false;
       if (spiderLairBattle) {
         spiderLairBattle.cleanup(restoreBoardSetupSpiderLair, showQuestOverlays);
         spiderLairBattle = null;
@@ -13177,6 +13195,11 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       tile77SpiderLairRightClickEnabled = false;
     }
     cleanupTile77SpiderLairObserver();
+    try {
+      cleanupSpiderLairQuest();
+    } catch (e) {
+      console.warn('[Quests Mod][Tile 77 Spider Lair] cleanupSpiderLairQuest during teardown:', e);
+    }
     console.log('[Quests Mod][Tile 77 Spider Lair] System cleaned up');
   }
 

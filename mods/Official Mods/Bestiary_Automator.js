@@ -19,6 +19,7 @@ const defaultConfig = {
   autoRefillStamina: false,
   minimumStaminaWithoutRefill: 15,
   autoCollectRewards: false,
+  autoOpenCubes: false,
   autoDayCare: false,
   autoPlayAfterDefeat: false,
   fasterAutoplay: false,
@@ -111,12 +112,15 @@ const SUPER_AUTOPLAY_TIMING = {
 // Common timing constants
 const TIMING = {
   TOAST_AUTO_REMOVE: 4000,      // Auto-remove toast after 4 seconds
+  CUBE_REWARD_TOAST_MS: 10000,   // Cube open reward toast duration
   TOAST_STACK_OFFSET: 46,        // Offset between stacked toasts
   QUEST_LOG_CLOSE_ATTEMPTS: 3,   // Number of ESC key presses to close quest log
   QUEST_LOG_CLOSE_DELAY: 50,     // Delay between ESC key presses
   STAMINA_REFILL_DELAY: 500,     // Delay for stamina refill operations
   MODAL_CLOSE_DELAY: 500,        // Delay after closing modals
   REWARDS_COLLECT_DELAY: 500,    // Delay for rewards collection
+  CUBE_OPEN_DELAY: 500,          // Delay between Surprise Cube API calls
+  CUBE_INVENTORY_SETTLE_MS: 50, // Wait after apply before snapshot (reward diff)
   DAYCARE_LEVELUP_DELAY: 1000,   // Delay after daycare level up
   DAYCARE_EJECTION_DELAY: 1000,  // Delay after daycare ejection
   SCROLL_LOCK_CHECK_DELAY: 150,  // Delay after ESC key for scroll lock check
@@ -136,6 +140,15 @@ let currentState = null;
 // Translations
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
+const tReplace = (key, replacements) => {
+  let text = t(key);
+  if (replacements && typeof replacements === 'object') {
+    Object.entries(replacements).forEach(([placeholder, value]) => {
+      text = text.replace(new RegExp(`\\{${placeholder}\\}`, 'g'), String(value));
+    });
+  }
+  return text;
+};
 
 // State machine helper functions
 const setState = (newState) => {
@@ -443,6 +456,74 @@ const showStaminaRestoredToast = (pointsRestored) => {
   } catch (error) {
     console.error('[Bestiary Automator] Error showing stamina restored toast:', error);
   }
+};
+
+// Custom toast stack (Quests.js–style DOM). Never uses modal fallback — avoids blocking dialogs after cube flows.
+const showAutomatorToastMessage = (message, durationMs = TIMING.CUBE_REWARD_TOAST_MS) => {
+  try {
+    let mainContainer = document.getElementById('bestiary-automator-toast-container');
+    if (!mainContainer) {
+      mainContainer = document.createElement('div');
+      mainContainer.id = 'bestiary-automator-toast-container';
+      mainContainer.style.cssText = `
+        position: fixed;
+        z-index: 9999;
+        inset: 16px 16px 64px;
+        pointer-events: none;
+      `;
+      document.body.appendChild(mainContainer);
+    }
+    const existingToasts = mainContainer.querySelectorAll('.toast-item');
+    const stackOffset = existingToasts.length * TIMING.TOAST_STACK_OFFSET;
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'toast-item';
+    flexContainer.style.cssText = `
+      left: 0px;
+      right: 0px;
+      display: flex;
+      position: absolute;
+      transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+      transform: translateY(-${stackOffset}px);
+      bottom: 0px;
+      justify-content: flex-end;
+    `;
+    const toast = document.createElement('button');
+    toast.type = 'button';
+    toast.style.pointerEvents = 'auto';
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+    const textLeft = document.createElement('div');
+    textLeft.className = 'text-left';
+    const paragraph = document.createElement('p');
+    paragraph.style.cssText = 'margin: 0; max-width: 28rem; white-space: pre-wrap;';
+    paragraph.textContent = message;
+    textLeft.appendChild(paragraph);
+    widgetBottom.appendChild(textLeft);
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    mainContainer.appendChild(flexContainer);
+    const remove = () => {
+      if (flexContainer && flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        const toasts = mainContainer.querySelectorAll('.toast-item');
+        toasts.forEach((el, index) => {
+          el.style.transform = `translateY(-${index * TIMING.TOAST_STACK_OFFSET}px)`;
+        });
+      }
+    };
+    toast.addEventListener('click', remove);
+    setTimeout(remove, durationMs);
+  } catch (error) {
+    console.error('[Bestiary Automator] Error showing automator toast:', error);
+  }
+};
+
+const showCubeRewardToast = (message) => {
+  showAutomatorToastMessage(message, TIMING.CUBE_REWARD_TOAST_MS);
 };
 
 // Automation Tasks
@@ -789,6 +870,18 @@ const extractAPIResponseData = (result) => {
   return null;
 };
 
+/** Shallow merge of extra fields from tRPC batch (e.g. meta) for reward hints. */
+const extractAPIResponseExtras = (result) => {
+  try {
+    const data = result?.[0]?.result?.data;
+    if (!data || typeof data !== 'object') return null;
+    const { json, ...rest } = data;
+    return Object.keys(rest).length ? rest : null;
+  } catch (_) {
+    return null;
+  }
+};
+
 // Helper to update inventory state from inventoryDiff
 const updateInventoryFromDiff = (inventoryDiff) => {
   if (!inventoryDiff || !isGameStateAPIAvailable()) {
@@ -815,6 +908,338 @@ const updateInventoryFromDiff = (inventoryDiff) => {
       return newState;
     }
   });
+};
+
+const getInventoryItemCount = (inventory, key) => {
+  if (!inventory) return 0;
+  const v = inventory[key];
+  if (v == null) return 0;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'object' && typeof v.count === 'number') return v.count;
+  return 0;
+};
+
+const setInventoryItemCountMutable = (inventory, key, count) => {
+  const old = inventory[key];
+  if (old !== undefined && typeof old === 'object' && old !== null && typeof old.count === 'number') {
+    inventory[key] = { ...old, count };
+  } else {
+    inventory[key] = count;
+  }
+};
+
+/** Coerce tRPC / JSON diff values (numbers or numeric strings). */
+const normalizeNumericDiffValue = (value) => {
+  if (typeof value === 'number' && !Number.isNaN(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    if (!Number.isNaN(n)) {
+      return n;
+    }
+  }
+  return null;
+};
+
+/** Apply API `rewardInventoryDiff` (partial counts for opened rewards). */
+const applyRewardInventoryPartial = (diff) => {
+  if (!diff || !isGameStateAPIAvailable()) {
+    return;
+  }
+  globalThis.state.player.send({
+    type: 'setState',
+    fn: (prev) => {
+      const newState = { ...prev };
+      newState.inventory = { ...prev.inventory };
+      for (const [key, value] of Object.entries(diff)) {
+        const num = normalizeNumericDiffValue(value);
+        if (num === null) continue;
+        const prevCount = getInventoryItemCount(newState.inventory, key);
+        let nextCount;
+        if (num < 0) {
+          nextCount = Math.max(0, prevCount + num);
+        } else {
+          nextCount = num;
+        }
+        setInventoryItemCountMutable(newState.inventory, key, nextCount);
+      }
+      return newState;
+    }
+  });
+};
+
+/** Additive diff for surpriseCube keys (when server sends inventoryDiff-style deltas). */
+const applySurpriseCubeAdditiveDiff = (diff) => {
+  if (!diff || !isGameStateAPIAvailable()) {
+    return;
+  }
+  globalThis.state.player.send({
+    type: 'setState',
+    fn: (prev) => {
+      const newState = { ...prev };
+      newState.inventory = { ...prev.inventory };
+      for (const [key, delta] of Object.entries(diff)) {
+        if (!/^surpriseCube[1-5]$/.test(key)) continue;
+        const num = normalizeNumericDiffValue(delta);
+        if (num === null) continue;
+        const prevCount = getInventoryItemCount(newState.inventory, key);
+        setInventoryItemCountMutable(newState.inventory, key, Math.max(0, prevCount + num));
+      }
+      return newState;
+    }
+  });
+};
+
+const applySurpriseCubeOpenResponse = (data, openedTier) => {
+  if (!data || !isGameStateAPIAvailable()) {
+    return;
+  }
+  const cubeKey = `surpriseCube${openedTier}`;
+  if (data.rewardInventoryDiff && Object.keys(data.rewardInventoryDiff).length > 0) {
+    const merged = { ...data.rewardInventoryDiff };
+    if (!Object.prototype.hasOwnProperty.call(merged, cubeKey) || normalizeNumericDiffValue(merged[cubeKey]) === null) {
+      merged[cubeKey] = -1;
+    }
+    applyRewardInventoryPartial(merged);
+    return;
+  }
+  const cubeAdditive = {};
+  if (data.inventoryDiff) {
+    for (const [k, v] of Object.entries(data.inventoryDiff)) {
+      if (!/^surpriseCube[1-5]$/.test(k)) continue;
+      const n = normalizeNumericDiffValue(v);
+      if (n !== null) {
+        cubeAdditive[k] = n;
+      }
+    }
+  }
+  if (Object.keys(cubeAdditive).length > 0) {
+    if (!Object.prototype.hasOwnProperty.call(cubeAdditive, cubeKey)) {
+      cubeAdditive[cubeKey] = -1;
+    }
+    applySurpriseCubeAdditiveDiff(cubeAdditive);
+    return;
+  }
+  applyRewardInventoryPartial({ [cubeKey]: -1 });
+};
+
+const snapshotInventoryCounts = () => {
+  const inv = getPlayerInventory();
+  if (!inv || typeof inv !== 'object') {
+    return {};
+  }
+  const snap = {};
+  for (const key of Object.keys(inv)) {
+    snap[key] = getInventoryItemCount(inv, key);
+  }
+  return snap;
+};
+
+const getSurpriseCubeDisplayName = (tier) => {
+  const key = `surpriseCube${tier}`;
+  const tt = typeof window !== 'undefined' ? window.inventoryTooltips : null;
+  if (tt && tt[key] && tt[key].displayName) {
+    return tt[key].displayName;
+  }
+  return `Surprise Cube (${tier})`;
+};
+
+const formatInventoryItemDisplayName = (itemKey) => {
+  const tt = typeof window !== 'undefined' ? window.inventoryTooltips : null;
+  if (tt && tt[itemKey] && tt[itemKey].displayName) {
+    return tt[itemKey].displayName;
+  }
+  return itemKey;
+};
+
+const describeRewardFromCubeApiData = (data, invBefore, invAfter, extras) => {
+  const segments = [];
+  const seen = new Set();
+  const pushGain = (key, gained) => {
+    if (!key || /^surpriseCube[1-5]$/.test(key) || gained <= 0) return;
+    const label = formatInventoryItemDisplayName(key);
+    const sig = `${key}:${gained}`;
+    if (seen.has(sig)) return;
+    seen.add(sig);
+    segments.push(`${label} ×${gained}`);
+  };
+
+  if (data && typeof data === 'object') {
+    const rid = data.rewardInventoryDiff;
+    if (rid && typeof rid === 'object') {
+      for (const [key, value] of Object.entries(rid)) {
+        if (/^surpriseCube[1-5]$/.test(key)) continue;
+        if (typeof value !== 'number') continue;
+        const before = invBefore[key] ?? 0;
+        let gained = value - before;
+        if (gained <= 0 && value > 0 && before === 0) {
+          gained = value;
+        }
+        pushGain(key, gained);
+      }
+    }
+    const idiff = data.inventoryDiff;
+    if (idiff && typeof idiff === 'object') {
+      for (const [key, delta] of Object.entries(idiff)) {
+        if (/^surpriseCube[1-5]$/.test(key)) continue;
+        if (typeof delta !== 'number' || delta <= 0) continue;
+        pushGain(key, delta);
+      }
+    }
+    if (typeof data.rewardKey === 'string' && data.rewardKey && !/^surpriseCube[1-5]$/.test(data.rewardKey)) {
+      const qty = typeof data.rewardQuantity === 'number' && data.rewardQuantity > 0 ? data.rewardQuantity : 1;
+      pushGain(data.rewardKey, qty);
+    }
+    const roll = data.roll ?? data.rewardRoll ?? data.loot;
+    if (roll && typeof roll === 'object') {
+      const rk = roll.itemKey ?? roll.key ?? roll.id;
+      const rq = typeof roll.quantity === 'number' ? roll.quantity : (typeof roll.amount === 'number' ? roll.amount : 1);
+      if (typeof rk === 'string' && rk && !/^surpriseCube[1-5]$/.test(rk)) {
+        pushGain(rk, rq);
+      }
+    }
+  }
+
+  if (extras && typeof extras === 'object') {
+    const exJson = extras.json && typeof extras.json === 'object' ? extras.json : extras;
+    for (const k of ['reward', 'rewardItem', 'item', 'itemKey']) {
+      const v = exJson[k] ?? extras[k];
+      if (typeof v === 'string' && v && !/^surpriseCube[1-5]$/.test(v) && v !== 'surpriseCube') {
+        pushGain(v, 1);
+      }
+    }
+  }
+
+  if (segments.length === 0 && invAfter && typeof invAfter === 'object') {
+    const allKeys = new Set([...Object.keys(invBefore || {}), ...Object.keys(invAfter)]);
+    for (const key of allKeys) {
+      if (/^surpriseCube[1-5]$/.test(key)) continue;
+      const before = invBefore[key] ?? 0;
+      const after = invAfter[key] ?? 0;
+      const gained = after - before;
+      pushGain(key, gained);
+    }
+  }
+
+  if (segments.length === 0) {
+    return t('mods.automator.cubeRewardUnknown');
+  }
+  return segments.join(', ');
+};
+
+const buildCubeOpenToastMessage = (tier, data, invBefore, invAfter, extras) => {
+  const cubeName = getSurpriseCubeDisplayName(tier);
+  const rewardPart = describeRewardFromCubeApiData(data, invBefore, invAfter, extras);
+  return tReplace('mods.automator.cubeRewardLine', { cube: cubeName, reward: rewardPart });
+};
+
+const openOneSurpriseCubeViaApi = async (tier) => {
+  const invBefore = snapshotInventoryCounts();
+  automatorMakingAPICall = true;
+  try {
+    const response = await fetch('https://bestiaryarena.com/api/trpc/inventory.surpriseCube?batch=1', {
+      method: 'POST',
+      headers: {
+        'accept': '*/*',
+        'content-type': 'application/json',
+        'Referer': 'https://bestiaryarena.com/game',
+        'X-Game-Version': '1'
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        '0': {
+          json: tier
+        }
+      })
+    });
+    if (!response.ok) {
+      return false;
+    }
+    const result = await response.json();
+    const data = extractAPIResponseData(result);
+    const extras = extractAPIResponseExtras(result);
+    if (data) {
+      applySurpriseCubeOpenResponse(data, tier);
+    } else {
+      applyRewardInventoryPartial({ [`surpriseCube${tier}`]: -1 });
+    }
+    await sleep(TIMING.CUBE_INVENTORY_SETTLE_MS);
+    const invAfter = snapshotInventoryCounts();
+    const toastMessage = buildCubeOpenToastMessage(tier, data, invBefore, invAfter, extras);
+    showCubeRewardToast(toastMessage);
+    return true;
+  } catch (error) {
+    console.log('[Bestiary Automator] openOneSurpriseCubeViaApi error:', error);
+    return false;
+  } finally {
+    automatorMakingAPICall = false;
+  }
+};
+
+const openAllSurpriseCubesFromInventory = async (options = {}) => {
+  const silentWhenEmpty = options.silentWhenEmpty === true;
+  const abortWhenAutoOpenOff = options.abortWhenAutoOpenOff === true;
+  const statusToastMs = TIMING.TOAST_AUTO_REMOVE;
+  if (!isGameStateAPIAvailable()) {
+    showAutomatorToastMessage(t('mods.automator.autoOpenCubesNoGameState'), statusToastMs);
+    return 'error';
+  }
+  let opened = 0;
+  const maxOpens = 2000;
+  for (let tier = 1; tier <= 5; tier++) {
+    for (;;) {
+      if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
+        return 'aborted';
+      }
+      const inv = getPlayerInventory();
+      const key = `surpriseCube${tier}`;
+      const n = getInventoryItemCount(inv, key);
+      if (n <= 0) break;
+      if (opened >= maxOpens) {
+        showAutomatorToastMessage(t('mods.automator.autoOpenCubesAborted'), statusToastMs);
+        if (opened > 0) {
+          showAutomatorToastMessage(tReplace('mods.automator.autoOpenCubesPartial', { count: opened }), statusToastMs);
+        }
+        return 'error';
+      }
+      const ok = await openOneSurpriseCubeViaApi(tier);
+      if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
+        return 'aborted';
+      }
+      if (!ok) {
+        showAutomatorToastMessage(t('mods.automator.autoOpenCubesError'), statusToastMs);
+        if (opened > 0) {
+          showAutomatorToastMessage(tReplace('mods.automator.autoOpenCubesPartial', { count: opened }), statusToastMs);
+        }
+        return 'error';
+      }
+      opened++;
+      await sleep(TIMING.CUBE_OPEN_DELAY);
+      if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
+        return 'aborted';
+      }
+    }
+  }
+  if (opened === 0) {
+    if (!silentWhenEmpty) {
+      showAutomatorToastMessage(t('mods.automator.autoOpenCubesNone'), statusToastMs);
+    }
+  }
+  return 'done';
+};
+
+const openCubesIfEnabled = async () => {
+  if (!config.autoOpenCubes || cubesOpenedThisSession) {
+    return;
+  }
+  if (!isGameStateAPIAvailable()) {
+    return;
+  }
+  const outcome = await openAllSurpriseCubesFromInventory({ silentWhenEmpty: true, abortWhenAutoOpenOff: true });
+  if (outcome !== 'aborted') {
+    cubesOpenedThisSession = true;
+  }
 };
 
 // Helper to update staminaWillBeFullAt timestamp
@@ -1211,6 +1636,7 @@ const refillStaminaIfNeeded = async () => {
 
 // Track if we've already collected rewards for this game session
 let rewardsCollectedThisSession = false;
+let cubesOpenedThisSession = false;
 
 // Track if Faster Autoplay has been executed for this game session
 let fasterAutoplayExecutedThisSession = false;
@@ -2205,6 +2631,7 @@ const subscribeToGameState = () => {
         
         console.log('[Bestiary Automator] New game detected, resetting session flags');
         rewardsCollectedThisSession = false;
+        cubesOpenedThisSession = false;
         fasterAutoplayExecutedThisSession = false;
         fasterAutoplayRunning = false;
         
@@ -2927,6 +3354,7 @@ const startAutomation = () => {
   
   // Reset session flags when starting automation
   rewardsCollectedThisSession = false;
+  cubesOpenedThisSession = false;
   fasterAutoplayExecutedThisSession = false;
   fasterAutoplayRunning = false;
   
@@ -3044,6 +3472,7 @@ const runAutomationTasks = async () => {
     
     // Core automation tasks that should always run
     await takeRewardsIfAvailable();
+    await openCubesIfEnabled();
     await handleDayCare();
     updateRequiredStamina();
     await refillStaminaIfNeeded();
@@ -3275,8 +3704,9 @@ const setupPotionThresholdAutoSave = (input, potionType) => {
 
 // Create the configuration panel
 const createConfigPanel = () => {
+  const rowGap = '12px';
   const content = document.createElement('div');
-  content.style.cssText = 'display: flex; flex-direction: column; gap: 15px;';
+  content.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
   
   // Auto refill stamina checkbox
   const refillContainer = createCheckboxContainer('auto-refill-checkbox', t('mods.automator.autoRefillStamina'), config.autoRefillStamina);
@@ -3287,6 +3717,14 @@ const createConfigPanel = () => {
   // Auto collect rewards checkbox with info icon
   const rewardsContainer = createCheckboxContainerWithInfo('auto-rewards-checkbox', t('mods.automator.autoCollectRewards'), config.autoCollectRewards, 
     t('mods.automator.autoCollectRewardsTooltip'));
+  
+  const rewardsSection = document.createElement('div');
+  rewardsSection.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
+  rewardsSection.appendChild(rewardsContainer);
+  
+  const autoOpenCubesContainer = createCheckboxContainerWithInfo('auto-open-cubes-checkbox', t('mods.automator.autoOpenCubes'), config.autoOpenCubes,
+    t('mods.automator.autoOpenCubesTooltip'));
+  rewardsSection.appendChild(autoOpenCubesContainer);
   
   // Auto day care checkbox
   const dayCareContainer = createCheckboxContainer('auto-daycare-checkbox', t('mods.automator.autoDayCare'), config.autoDayCare);
@@ -3309,7 +3747,7 @@ const createConfigPanel = () => {
   
   // Create header row for potion thresholds
   const potionHeaderRow = document.createElement('div');
-  potionHeaderRow.style.cssText = 'display: flex; align-items: center; margin: 5px 0px; font-weight: bold;';
+  potionHeaderRow.style.cssText = 'display: flex; align-items: center; margin: 0; font-weight: bold;';
   
   // Add spacer to account for checkbox width (16px) + margin-right (10px) = 26px
   const checkboxSpacer = document.createElement('span');
@@ -3364,7 +3802,7 @@ const createConfigPanel = () => {
   // Create container for items above Advanced section
   const mainItemsContainer = document.createElement('div');
   mainItemsContainer.id = 'main-items-container';
-  mainItemsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 15px;';
+  mainItemsContainer.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
   mainItemsContainer.appendChild(refillContainer);
   mainItemsContainer.appendChild(staminaContainer);
   
@@ -3372,11 +3810,11 @@ const createConfigPanel = () => {
   const warningMsg = document.createElement('div');
   warningMsg.id = 'potion-warning-message';
   warningMsg.textContent = t('mods.automator.noPotionWarning');
-  warningMsg.style.cssText = 'color: #e74c3c; margin-top: 8px; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.9em;';
+  warningMsg.style.cssText = 'color: #e74c3c; margin: 0; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.9em;';
   warningMsg.style.display = (config.autoRefillStamina && !hasAnyPotionSelected()) ? 'block' : 'none';
   mainItemsContainer.appendChild(warningMsg);
   
-  mainItemsContainer.appendChild(rewardsContainer);
+  mainItemsContainer.appendChild(rewardsSection);
   
   mainItemsContainer.appendChild(dayCareContainer);
   mainItemsContainer.appendChild(autoPlayContainer);
@@ -3384,16 +3822,16 @@ const createConfigPanel = () => {
   
   // Create separator between potion thresholds and faster autoplay delay
   const separator = document.createElement('div');
-  separator.style.cssText = 'height: 1px; background-color: #555; margin: 15px 0px; width: 100%;';
+  separator.style.cssText = 'height: 1px; background-color: #555; margin: 0; width: 100%;';
   
   // Faster autoplay delay input
   const fasterAutoplayDelayContainer = createNumberInputContainer('faster-autoplay-input', t('mods.automator.autoplayDelay'), config.fasterAutoplayMs, 0, 3000);
   
   // Separator and credit footer for advanced section
   const creditSeparator = document.createElement('div');
-  creditSeparator.style.cssText = 'margin-top: 8px; border-top: 1px solid #444; opacity: 0.6;';
+  creditSeparator.style.cssText = 'margin: 0; border-top: 1px solid #444; opacity: 0.6;';
   const credit = document.createElement('div');
-  credit.style.cssText = 'margin-top: 2px; font-size: 11px; font-style: italic; color: #aaa; text-align: right;';
+  credit.style.cssText = 'margin: 0; font-size: 11px; font-style: italic; color: #aaa; text-align: right;';
   const linkHtml = '<a href="https://bestiaryarena.com/profile/whoman2" target="_blank" rel="noopener noreferrer" style="color:#61AFEF; text-decoration: underline;">whoman2</a>';
   credit.innerHTML = t('mods.automator.madeWithHelp').replace('{link}', linkHtml);
   
@@ -3426,6 +3864,7 @@ const createConfigPanel = () => {
     // Setup checkboxes with auto-save
     setupCheckboxAutoSave(document.getElementById('auto-refill-checkbox'), 'autoRefillStamina', updatePotionWarning);
     setupCheckboxAutoSave(document.getElementById('auto-rewards-checkbox'), 'autoCollectRewards');
+    setupCheckboxAutoSave(document.getElementById('auto-open-cubes-checkbox'), 'autoOpenCubes');
     setupCheckboxAutoSave(document.getElementById('auto-daycare-checkbox'), 'autoDayCare');
     setupCheckboxAutoSave(document.getElementById('auto-play-defeat-checkbox'), 'autoPlayAfterDefeat');
     setupCheckboxAutoSave(document.getElementById('faster-autoplay-checkbox'), 'fasterAutoplay');
@@ -3465,7 +3904,7 @@ const createConfigPanel = () => {
   function createCollapsibleSection(id, title, children, mainItemsContainer = null) {
     const container = document.createElement('div');
     container.id = id;
-    container.style.cssText = 'display: flex; flex-direction: column; gap: 10px;';
+    container.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
     
     // Create the toggle button
     const toggleButton = document.createElement('button');
@@ -3506,8 +3945,8 @@ const createConfigPanel = () => {
     contentContainer.style.cssText = `
       display: none;
       flex-direction: column;
-      gap: 0px;
-      margin-top: 5px;
+      gap: ${rowGap};
+      margin-top: 0;
     `;
     
     // Add children to content container
@@ -3545,7 +3984,7 @@ const createConfigPanel = () => {
   // Helper to create a checkbox container
   function createCheckboxContainer(id, label, checked) {
     const container = document.createElement('div');
-    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0px;';
+    container.style.cssText = 'display: flex; align-items: center; margin: 0;';
     
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -3567,7 +4006,7 @@ const createConfigPanel = () => {
   // Helper to create a number input container
   function createNumberInputContainer(id, label, value, min, max, step = null) {
     const container = document.createElement('div');
-    container.style.cssText = 'margin: 5px 0;';
+    container.style.cssText = 'margin: 0;';
     
     const labelElement = document.createElement('label');
     labelElement.htmlFor = id;
@@ -3620,7 +4059,7 @@ const createConfigPanel = () => {
   // Helper to create a checkbox with number input container
   function createCheckboxWithNumberInput(checkboxId, inputId, label, checked, value, min, max) {
     const container = document.createElement('div');
-    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0px;';
+    container.style.cssText = 'display: flex; align-items: center; margin: 0;';
     
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -3713,7 +4152,7 @@ const createConfigPanel = () => {
   // Helper to create a checkbox container with info icon and tooltip
   function createCheckboxContainerWithInfo(id, label, checked, infoText) {
     const container = document.createElement('div');
-    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0px;';
+    container.style.cssText = 'display: flex; align-items: center; margin: 0;';
     
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -3743,7 +4182,7 @@ const createConfigPanel = () => {
   // Helper to create a checkbox container with warning symbol and tooltip
   function createCheckboxContainerWithWarning(id, label, checked, warningText) {
     const container = document.createElement('div');
-    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0px;';
+    container.style.cssText = 'display: flex; align-items: center; margin: 0;';
     
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -3826,6 +4265,7 @@ const applyButtonStyling = (btn) => {
     console.log('[Bestiary Automator] Applying button styling:');
     console.log('  - autoRefillStamina:', config.autoRefillStamina);
     console.log('  - autoCollectRewards:', config.autoCollectRewards);
+    console.log('  - autoOpenCubes:', config.autoOpenCubes);
     console.log('  - autoDayCare:', config.autoDayCare);
     console.log('  - autoPlayAfterDefeat:', config.autoPlayAfterDefeat);
     console.log('  - fasterAutoplay:', config.fasterAutoplay);
@@ -3849,7 +4289,7 @@ const applyButtonStyling = (btn) => {
     console.log('[Bestiary Automator] Applying BLUE background for fasterAutoplayRunning');
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
-  } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat) {
+  } else if (config.autoCollectRewards || config.autoOpenCubes || config.autoDayCare || config.autoPlayAfterDefeat) {
     // Priority 3: Blue background for other auto features
     console.log('[Bestiary Automator] Applying BLUE background for other features');
     btn.style.background = `url('${blueBgUrl}') repeat`;
@@ -3879,6 +4319,7 @@ function init() {
   
   // Reset session flags on initialization
   rewardsCollectedThisSession = false;
+  cubesOpenedThisSession = false;
   fasterAutoplayExecutedThisSession = false;
   fasterAutoplayRunning = false;
   
@@ -3921,6 +4362,7 @@ init();
 let lastButtonState = {
   autoRefillStamina: config.autoRefillStamina,
   autoCollectRewards: config.autoCollectRewards,
+  autoOpenCubes: config.autoOpenCubes,
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   fasterAutoplay: config.fasterAutoplay,
@@ -3932,6 +4374,7 @@ let lastButtonState = {
 lastButtonState = {
   autoRefillStamina: config.autoRefillStamina,
   autoCollectRewards: config.autoCollectRewards,
+  autoOpenCubes: config.autoOpenCubes,
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   fasterAutoplay: config.fasterAutoplay,
@@ -3945,6 +4388,7 @@ function updateAutomatorButton() {
   const currentButtonState = {
     autoRefillStamina: config.autoRefillStamina,
     autoCollectRewards: config.autoCollectRewards,
+    autoOpenCubes: config.autoOpenCubes,
     autoDayCare: config.autoDayCare,
     autoPlayAfterDefeat: config.autoPlayAfterDefeat,
     fasterAutoplay: config.fasterAutoplay,
@@ -4031,6 +4475,7 @@ function updateSettingsModalUI() {
     console.log('[Bestiary Automator] Found elements:');
     console.log('  - refillCheckbox:', !!refillCheckbox);
     console.log('  - rewardsCheckbox:', !!rewardsCheckbox);
+    console.log('  - autoOpenCubesCheckbox:', !!document.getElementById('auto-open-cubes-checkbox'));
     console.log('  - dayCareCheckbox:', !!dayCareCheckbox);
     console.log('  - autoPlayCheckbox:', !!autoPlayCheckbox);
     console.log('  - fasterAutoplayCheckbox:', !!fasterAutoplayCheckbox);
@@ -4058,6 +4503,18 @@ function updateSettingsModalUI() {
       setupCheckboxAutoSave(rewardsCheckbox, 'autoCollectRewards');
       rewardsCheckbox.setAttribute('data-listener-added', 'true');
     }
+    
+    const autoOpenCubesCheckbox = document.getElementById('auto-open-cubes-checkbox');
+    if (autoOpenCubesCheckbox) {
+      if (autoOpenCubesCheckbox.checked !== config.autoOpenCubes) {
+        autoOpenCubesCheckbox.checked = config.autoOpenCubes;
+      }
+      if (!autoOpenCubesCheckbox.hasAttribute('data-listener-added')) {
+        setupCheckboxAutoSave(autoOpenCubesCheckbox, 'autoOpenCubes');
+        autoOpenCubesCheckbox.setAttribute('data-listener-added', 'true');
+      }
+    }
+    
     if (dayCareCheckbox && !dayCareCheckbox.hasAttribute('data-listener-added')) {
       dayCareCheckbox.checked = config.autoDayCare;
       setupCheckboxAutoSave(dayCareCheckbox, 'autoDayCare');
@@ -4205,6 +4662,7 @@ context.exports = {
     fasterAutoplayExecutedThisSession = false;
     fasterAutoplayRunning = false;
     rewardsCollectedThisSession = false;
+    cubesOpenedThisSession = false;
     
     // Unregister from coordination system
     if (window.ModCoordination) {
@@ -4217,6 +4675,7 @@ context.exports = {
   collectSeashell: collectSeashellIfReady,
   // Manual rewards collection for testing
   collectRewards: takeRewardsIfAvailable,
+  openSurpriseCubes: openAllSurpriseCubesFromInventory,
   // Seashell timer management
   clearSeashellTimer: clearSeashellTimer,
   setupSeashellTimer: setupSeashellTimer,

@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.6.0",
+      "changes": [
+        { "type": "added", "mod": "Bestiary Automator", "text": "Added Auto-open Cubes to Bestiary Automator Settings." },
+        { "type": "added", "mod": "Depot Manager", "text": "NEW MOD! Depot Manager." },
+        { "type": "fixed", "mod": "Quests", "text": "Old Widow: quest battle state now clears when leaving the room." }
+      ]
+    },
+    {
       "version": "3.5.13",
       "changes": [
         { "type": "fixed", "mod": "Better Boosted Maps", "text": "Fixed equipment stat rule matching fallback so boosted map floor and setup are applied correctly." }
