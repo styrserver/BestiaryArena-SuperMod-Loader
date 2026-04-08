@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.6.2",
+      "changes": [
+        { "type": "fixed", "mod": "Depot Manager", "text": "Various bug fixes and improvements." },
+        { "type": "fixed", "mod": "Mod Settings", "text": "Added stats, equipment and ability tooltip on hover." }
+      ]
+    },
+    {
       "version": "3.6.1",
       "changes": [
         { "type": "fixed", "mod": "Depot Manager", "text": "Fixed depot equipment search crash." },

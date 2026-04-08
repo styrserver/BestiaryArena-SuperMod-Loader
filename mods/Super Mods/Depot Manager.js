@@ -54,6 +54,15 @@ const GAME_CONSTANTS = {
   MAX_TIER: 4
 };
 
+function isEliteMonster(monster) {
+  return monster.ad === GAME_CONSTANTS.MAX_STAT_VALUE &&
+         monster.ap === GAME_CONSTANTS.MAX_STAT_VALUE &&
+         monster.armor === GAME_CONSTANTS.MAX_STAT_VALUE &&
+         monster.hp === GAME_CONSTANTS.MAX_STAT_VALUE &&
+         monster.magicResist === GAME_CONSTANTS.MAX_STAT_VALUE &&
+         monster.tier === GAME_CONSTANTS.MAX_TIER;
+}
+
 const SELECTORS = {
   CREATURE_IMG: 'img[alt="creature"]'
 };
@@ -418,6 +427,41 @@ function updateDepotInventoryButtonCount() {
   if (!countEl) return;
   // Counter intentionally hidden; keep hook for potential future re-enable.
   countEl.textContent = '';
+}
+
+function syncDepotStateWithOwnedInventory() {
+  let creatureChanged = false;
+  let equipmentChanged = false;
+
+  const ownedCreatureIds = new Set(getPlayerMonsters().map((m) => String(m?.id || '')).filter(Boolean));
+  const nextCreatureIds = depotCreatureState.ids.filter((id) => ownedCreatureIds.has(String(id)));
+  if (nextCreatureIds.length !== depotCreatureState.ids.length) {
+    depotCreatureState.ids = nextCreatureIds;
+    creatureChanged = true;
+  }
+
+  const validCreatureIds = new Set(depotCreatureState.ids.map(String));
+  for (const key of Array.from(depotCreatureState.metaById.keys())) {
+    if (!validCreatureIds.has(String(key))) {
+      depotCreatureState.metaById.delete(String(key));
+      creatureChanged = true;
+    }
+  }
+
+  const ownedEquipmentIds = new Set(getPlayerEquipmentRows({ sort: false }).map((e) => String(e?.id || '')).filter(Boolean));
+  const nextEquipmentIds = depotEquipmentState.ids.filter((id) => ownedEquipmentIds.has(String(id)));
+  if (nextEquipmentIds.length !== depotEquipmentState.ids.length) {
+    depotEquipmentState.ids = nextEquipmentIds;
+    equipmentChanged = true;
+  }
+
+  if (creatureChanged) {
+    saveDepotCreatureIds();
+    saveDepotCreatureMeta();
+  }
+  if (equipmentChanged) {
+    saveDepotEquipmentIds();
+  }
 }
 
 function getDepotCreatureRows() {
@@ -1000,8 +1044,9 @@ const DEPOT_CREATURE_SEARCH_TOOLTIP = `Search Syntaxes:
 
 const DEPOT_EQUIPMENT_SEARCH_TOOLTIP = `Search Syntaxes (Better Forge style):
 • Name contains text (case-insensitive)
-• Examples: helmet, amulet, blue robe
-• Tier filtering uses the tier button on the right`;
+• Exact match: "Boots of Haste"
+• Combined: fire axe AND cranial basher
+• Tier filtering uses the tier button on the right (All, T1-T5)`;
 
 function createDepotTooltipStatRow(label, value, maxValue, barColor = 'rgb(96, 192, 96)') {
   const statRow = document.createElement('div');
@@ -1108,7 +1153,7 @@ function attachDepotCreatureStatTooltip(targetEl, row) {
 
 function createDepotModalColumnFrame(titleText) {
   const frame = document.createElement('div');
-  frame.style.cssText = 'flex:0 0 230px;width:230px;min-width:230px;max-width:230px;display:flex;flex-direction:column;min-height:220px;background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;overflow:hidden;';
+  frame.style.cssText = 'flex:0 0 245px;width:245px;min-width:245px;max-width:245px;display:flex;flex-direction:column;min-height:220px;background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;overflow:hidden;';
   const titleEl = document.createElement('h2');
   titleEl.className = 'widget-top widget-top-text pixel-font-16';
   titleEl.style.cssText = 'margin:0;padding:2px 8px;height:24px;min-height:24px;max-height:24px;display:flex;align-items:center;justify-content:center;text-align:center;color:#fff;box-sizing:border-box;';
@@ -1123,7 +1168,7 @@ function createDepotModalColumnFrame(titleText) {
 
 function createDepotModalSearchWrap() {
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'display:flex;align-items:center;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:3px;margin:4px auto 4px 4px;width:90%;box-sizing:border-box;';
+  wrap.style.cssText = 'display:flex;align-items:center;flex-wrap:nowrap;padding:4px 6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:3px;margin:4px 4px 4px 4px;width:calc(100% - 8px);box-sizing:border-box;';
   return wrap;
 }
 
@@ -1205,19 +1250,35 @@ function matchesDepotSearchExpression(row, expression) {
   return isExact ? name === value : name.includes(value);
 }
 
+function matchesEquipmentSearchExpression(row, expression) {
+  const normalized = (expression || '').trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized.includes(' or')) {
+    return normalized.split(/\s+or\s*/).some((part) => matchesEquipmentSearchExpression(row, part));
+  }
+  if (normalized.includes(' and')) {
+    return normalized.split(/\s+and\s*/).every((part) => matchesEquipmentSearchExpression(row, part));
+  }
+  const { isExact, value } = extractDepotQuotedString(normalized);
+  const name = String(row.name || '').toLowerCase();
+  const stat = String(row.stat || '').toLowerCase();
+  return isExact ? (name === value || stat === value) : (name.includes(value) || stat.includes(value));
+}
+
 function showDepotModal() {
   // Match Dice Roller flow: close existing modal(s) via ESC before opening.
   for (let i = 0; i < 2; i++) {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
   }
   setTimeout(() => {
+    syncDepotStateWithOwnedInventory();
     const DEPOT_UI = {
       COLUMNS: 6,
       CELL: 34,
       GRID_GAP: 0,
       GRID_PAD_LEFT: 5,
       GRID_PAD_RIGHT: 12,
-      MODAL_WIDTH: 510,
+      MODAL_WIDTH: 530,
       MODAL_HEIGHT: 420
     };
     const content = document.createElement('div');
@@ -1236,8 +1297,12 @@ function showDepotModal() {
     creatureSearch.type = 'text';
     creatureSearch.placeholder = 'Search creatures...';
     creatureSearch.title = DEPOT_CREATURE_SEARCH_TOOLTIP;
-    creatureSearch.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 6px;border-radius:2px;font-size:12px;width:100%;font-family:inherit;outline:none;box-sizing:border-box;';
+    creatureSearch.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 6px;border-radius:2px;font-size:12px;flex:1;min-width:0;font-family:inherit;outline:none;box-sizing:border-box;';
+    const creatureFilterBtn = document.createElement('button');
+    creatureFilterBtn.textContent = 'All';
+    creatureFilterBtn.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 8px;border-radius:2px;font-size:12px;cursor:pointer;font-family:inherit;outline:none;white-space:nowrap;min-width:50px;margin-left:4px;';
     creatureSearchWrap.appendChild(creatureSearch);
+    creatureSearchWrap.appendChild(creatureFilterBtn);
     creatureFrame.appendChild(creatureSearchWrap);
     const creatureArea = createDepotModalGridArea(DEPOT_UI);
     creatureFrame.appendChild(creatureArea);
@@ -1247,7 +1312,7 @@ function showDepotModal() {
     equipmentSearch.type = 'text';
     equipmentSearch.placeholder = 'Search equipment...';
     equipmentSearch.title = DEPOT_EQUIPMENT_SEARCH_TOOLTIP;
-    equipmentSearch.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 6px;border-radius:2px;font-size:12px;flex:1;font-family:inherit;outline:none;box-sizing:border-box;';
+    equipmentSearch.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 6px;border-radius:2px;font-size:12px;flex:1;min-width:0;font-family:inherit;outline:none;box-sizing:border-box;';
     const equipmentFilterBtn = document.createElement('button');
     equipmentFilterBtn.textContent = 'All';
     equipmentFilterBtn.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 8px;border-radius:2px;font-size:12px;cursor:pointer;font-family:inherit;outline:none;white-space:nowrap;min-width:50px;margin-left:4px;';
@@ -1312,8 +1377,10 @@ function showDepotModal() {
 
     function renderCreatureRows() {
       const term = (creatureSearch.value || '').trim();
+      const filterLabel = creatureFilterOptions[creatureFilterIdx] || 'All';
       const rows = getDepotCreatureRows()
         .filter((r) => matchesDepotSearchExpression(r, term))
+        .filter((r) => matchesCreatureTier(r, filterLabel))
         .sort((a, b) => {
           const nameCompare = String(a.name || '').localeCompare(String(b.name || ''));
           if (nameCompare !== 0) return nameCompare;
@@ -1364,25 +1431,41 @@ function showDepotModal() {
       return btn;
     }
 
+    let creatureFilterIdx = 0;
+    const creatureFilterOptions = ['All', 'Grey', 'Green', 'Blue', 'Purple', 'Yellow'];
     let equipmentFilterIdx = 0;
-    const equipmentFilterOptions = ['All', 'Grey', 'Green', 'Blue', 'Purple', 'Yellow'];
+    const equipmentFilterOptions = ['All', 'T1', 'T2', 'T3', 'T4', 'T5'];
+
+    function matchesCreatureTier(row, label) {
+      if (!label || label.toLowerCase() === 'all') return true;
+      const statSum = Number(row.hp || 0) + Number(row.ad || 0) + Number(row.ap || 0) + Number(row.armor || 0) + Number(row.magicResist || 0);
+      switch (label.toLowerCase()) {
+        case 'grey': return statSum >= 5 && statSum <= 49;
+        case 'green': return statSum >= 50 && statSum <= 59;
+        case 'blue': return statSum >= 60 && statSum <= 69;
+        case 'purple': return statSum >= 70 && statSum <= 79;
+        case 'yellow': return statSum >= 80 && statSum <= 100;
+        default: return false;
+      }
+    }
 
     function matchesEquipmentTier(row, label) {
       if (!label || label.toLowerCase() === 'all') return true;
       const tier = Number(row.tier || 1);
-      const map = { grey: 1, green: 2, blue: 3, purple: 4, yellow: 5 };
-      return tier === (map[label.toLowerCase()] || tier);
+      const matched = String(label).trim().match(/^t([1-5])$/i);
+      if (!matched) return true;
+      return tier === Number(matched[1]);
     }
 
     function renderEquipmentRows() {
-      const term = (equipmentSearch.value || '').trim().toLowerCase();
+      const term = (equipmentSearch.value || '').trim();
       const filterLabel = equipmentFilterOptions[equipmentFilterIdx] || 'All';
       const allEquipment = getPlayerEquipmentRows();
       const byId = new Map(allEquipment.map((e) => [String(e.id), e]));
       const rows = depotEquipmentState.ids
         .map((id) => byId.get(String(id)))
         .filter(Boolean)
-        .filter((r) => (!term || r.name.toLowerCase().includes(term)) && matchesEquipmentTier(r, filterLabel))
+        .filter((r) => matchesEquipmentSearchExpression(r, term) && matchesEquipmentTier(r, filterLabel))
         .sort((a, b) => {
           if (a.tier !== b.tier) return b.tier - a.tier;
           if (a.name !== b.name) return a.name.localeCompare(b.name);
@@ -1413,6 +1496,11 @@ function showDepotModal() {
     }
 
     creatureSearch.addEventListener('input', renderCreatureRows);
+    creatureFilterBtn.addEventListener('click', () => {
+      creatureFilterIdx = (creatureFilterIdx + 1) % creatureFilterOptions.length;
+      creatureFilterBtn.textContent = creatureFilterOptions[creatureFilterIdx];
+      renderCreatureRows();
+    });
     equipmentSearch.addEventListener('input', renderEquipmentRows);
     equipmentFilterBtn.addEventListener('click', () => {
       equipmentFilterIdx = (equipmentFilterIdx + 1) % equipmentFilterOptions.length;
@@ -1860,6 +1948,18 @@ function injectDepotMenuItems(menuElem) {
         magicResist: matchedMonster?.magicResist ?? 0,
         tier: matchedMonster?.tier ?? null
       });
+      // Match Favorites behavior: auto-lock creature when adding to depot.
+      if (!matchedMonster?.locked) {
+        const lockId = Number.isFinite(Number(liveSid)) ? Number(liveSid) : liveSid;
+        (async () => {
+          try {
+            await lockCreatureAPI(lockId);
+            updateLocalCreatureLock(lockId);
+          } catch (error) {
+            console.error('[Depot Manager] Failed to lock creature after sending to depot:', error);
+          }
+        })();
+      }
       setDepotSlotTagFromImg(imgEl, liveSid);
     }
     saveDepotCreatureIds();
@@ -2487,8 +2587,13 @@ function matchCreatureBySequentialIndex(imgEl, monsters) {
   const button = imgEl.closest('button');
   const levelSpan = button?.querySelector('span[translate="no"]');
   const displayedLevel = levelSpan ? parseInt(levelSpan.textContent, 10) : null;
+  const slot = imgEl.closest('.container-slot');
+  const wantsElite = Boolean(slot?.querySelector('img[data-max-creatures="true"]'));
+  const wantsShiny = imgEl.src.includes('-shiny');
+  const rarityEl = slot?.querySelector('.has-rarity');
+  const wantsRarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
 
-  const indexKey = `${gameId}-${displayedLevel || 'unknown'}`;
+  const indexKey = String(gameId);
 
   if (!matchCreatureBySequentialIndex.indexMap) {
     matchCreatureBySequentialIndex.indexMap = new Map();
@@ -2499,15 +2604,43 @@ function matchCreatureBySequentialIndex(imgEl, monsters) {
 
   const currentIndex = matchCreatureBySequentialIndex.indexMap.get(indexKey);
   const matchingMonsters = getSortedMonstersByGameId(monsters, gameId);
+  let idx = currentIndex || 0;
+  let identifiedMonster = matchingMonsters[idx] || null;
 
-  let candidateMonsters = matchingMonsters;
-  if (displayedLevel && matchingMonsters.length > 1) {
-    const sameLevelMonsters = matchingMonsters.filter(m => getLevelFromExp(m.exp || 0) === displayedLevel);
-    if (sameLevelMonsters.length > 0) candidateMonsters = sameLevelMonsters;
+  if (matchingMonsters.length > 1) {
+    const tail = matchingMonsters.slice(idx);
+    const scoredCandidates = tail.length > 0 ? tail : matchingMonsters;
+    const scoredBaseIdx = tail.length > 0 ? idx : 0;
+
+    const rarityFromMonster = (m) => {
+      if (isEliteMonster(m)) return 6;
+      const tier = Number(m?.tier || 1);
+      return Math.max(1, Math.min(5, tier + 1));
+    };
+
+    let bestLocalIdx = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < scoredCandidates.length; i++) {
+      const m = scoredCandidates[i];
+      let score = 0;
+      if (displayedLevel && getLevelFromExp(m.exp || 0) === displayedLevel) score += 100;
+      if (isEliteMonster(m) === wantsElite) score += 40;
+      if (Boolean(m.shiny) === wantsShiny) score += 20;
+      if (Number.isFinite(wantsRarity) && rarityFromMonster(m) === wantsRarity) score += 15;
+      score -= i * 0.001; // stable ordering for exact ties
+      if (score > bestScore) {
+        bestScore = score;
+        bestLocalIdx = i;
+      }
+    }
+
+    if (bestLocalIdx >= 0) {
+      idx = scoredBaseIdx + bestLocalIdx;
+      identifiedMonster = matchingMonsters[idx] || identifiedMonster;
+    }
   }
 
-  const identifiedMonster = candidateMonsters[currentIndex] || matchingMonsters[currentIndex];
-  matchCreatureBySequentialIndex.indexMap.set(indexKey, currentIndex + 1);
+  matchCreatureBySequentialIndex.indexMap.set(indexKey, idx + 1);
   return identifiedMonster;
 }
 

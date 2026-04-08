@@ -14,6 +14,8 @@ const defaultConfig = {
   maxCreaturesColor: 'prismatic',
   enableMaxShinies: false,
   maxShiniesColor: 'prismatic',
+  showAdvancedStatsOnHover: false,
+  showAbilityOnHover: false,
   showSetupLabels: false,
   enableShinyEnemies: false,
   enableAutoplayRefresh: false,
@@ -3268,6 +3270,18 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.shinyEnemiesWarning')}">${t('mods.betterUI.shinyEnemies')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="advanced-stats-hover-toggle" style="transform: scale(1.2);">
+              <span>Show advanced stats on hover</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="ability-hover-toggle" style="transform: scale(1.2);">
+              <span>Show ability on hover</span>
+            </label>
+          </div>
         `;
         rightColumn.appendChild(creaturesContent);
       } else if (categoryId === 'depot-manager') {
@@ -3707,6 +3721,38 @@ function showSettingsModal() {
           },
           removeShinyEnemies
         )(shinyEnemiesCheckbox);
+      }
+
+      const advancedStatsHoverCheckbox = content.querySelector('#advanced-stats-hover-toggle');
+      if (advancedStatsHoverCheckbox) {
+        createSettingsCheckboxHandler(
+          'showAdvancedStatsOnHover',
+          applyAdvancedStatsOnHover,
+          () => {
+            if (isCreatureHoverTooltipEnabled()) {
+              removeAdvancedStatsOnHover();
+              applyAdvancedStatsOnHover();
+            } else {
+              removeAdvancedStatsOnHover();
+            }
+          }
+        )(advancedStatsHoverCheckbox);
+      }
+
+      const abilityHoverCheckbox = content.querySelector('#ability-hover-toggle');
+      if (abilityHoverCheckbox) {
+        createSettingsCheckboxHandler(
+          'showAbilityOnHover',
+          applyAdvancedStatsOnHover,
+          () => {
+            if (isCreatureHoverTooltipEnabled()) {
+              removeAdvancedStatsOnHover();
+              applyAdvancedStatsOnHover();
+            } else {
+              removeAdvancedStatsOnHover();
+            }
+          }
+        )(abilityHoverCheckbox);
       }
       
       const betterHighscoresButtonCheckbox = content.querySelector('#better-highscores-button-toggle');
@@ -5084,7 +5130,725 @@ function removeMaxShinies() {
 }
 
 // =======================
-// 9. Shiny Enemies
+// 9. Advanced Creature Hover
+// =======================
+
+function getCreatureHoverTargetButtons() {
+  const images = document.querySelectorAll('img[alt="creature"]');
+  const buttons = new Set();
+
+  images.forEach((img) => {
+    const button = img.closest('button');
+    if (button) {
+      buttons.add(button);
+    }
+  });
+
+  return [...buttons];
+}
+
+function isInventoryCreatureButton(button) {
+  if (!button) return false;
+  if (!button.querySelector('img[alt="creature"]')) return false;
+  if (button.closest('[role="menu"]') || button.closest('[role="dialog"]')) return false;
+  return Boolean(
+    button.closest('#monster-scroll') ||
+    button.closest('.tab-picker-scroll') ||
+    button.closest('[id*="monster-scroll"]')
+  );
+}
+
+const advancedHoverState = {
+  resolvedByImg: new WeakMap(),
+  debugByImg: new WeakMap(),
+  sequence: 0,
+  delegatedBound: false,
+  delegatedHandler: null
+};
+
+function getVisibleInventoryCreatureImgsForHover() {
+  return Array.from(document.querySelectorAll('img[alt="creature"]')).filter((img) => {
+    const button = img.closest('button');
+    if (!isInventoryCreatureButton(button)) return false;
+    const slot = img.closest('div.flex');
+    if (!slot) return true;
+    const style = window.getComputedStyle(slot);
+    return style.display !== 'none';
+  });
+}
+
+function sortMonstersByVisualOrder(monsters) {
+  return monsters.slice().sort((a, b) => {
+    if ((b.exp || 0) !== (a.exp || 0)) return (b.exp || 0) - (a.exp || 0);
+    const aName = a?.metadata?.name || '';
+    const bName = b?.metadata?.name || '';
+    const nameCompare = aName.localeCompare(bName);
+    if (nameCompare !== 0) return nameCompare;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
+}
+
+function resolveHoverCreaturesSequentially(creatures, monsters) {
+  const gameIdBuckets = new Map();
+  const gameIdIndexMap = new Map();
+  const resolved = [];
+
+  for (const creatureImg of creatures) {
+    const gameId = getCreatureGameId(creatureImg);
+    if (!gameId) {
+      const seq = advancedHoverState.sequence++;
+      resolved.push({ imgEl: creatureImg, monster: null });
+      advancedHoverState.debugByImg.set(creatureImg, {
+        sequence: seq,
+        gameId: null,
+        displayedLevel: null,
+        wantsElite: false,
+        baseIdx: null,
+        finalIdx: null,
+        bucketLength: 0,
+        chosenMonsterId: null,
+        chosenStats: null,
+        candidates: []
+      });
+      continue;
+    }
+
+    if (!gameIdBuckets.has(gameId)) {
+      const matching = monsters.filter((m) => m.gameId === gameId);
+      gameIdBuckets.set(gameId, sortMonstersByVisualOrder(matching));
+      gameIdIndexMap.set(gameId, 0);
+    }
+
+    const bucket = gameIdBuckets.get(gameId) || [];
+    let idx = gameIdIndexMap.get(gameId) || 0;
+    let selected = bucket[idx] || null;
+
+    // If duplicates exist, use visible level + elite marker as tie-breakers,
+    // but only within the unconsumed tail of the bucket.
+    const button = creatureImg.closest('button');
+    const levelSpan = button?.querySelector('span[translate="no"]');
+    const displayedLevel = levelSpan ? parseInt(levelSpan.textContent, 10) : null;
+    const slot = creatureImg.closest('.container-slot');
+    const wantsElite = Boolean(slot?.querySelector('img[data-max-creatures="true"]'));
+    const wantsShiny = creatureImg.src.includes('-shiny');
+    const rarityEl = slot?.querySelector('.has-rarity');
+    const wantsRarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+    const baseIdx = idx;
+
+    if (bucket.length > 1) {
+      const tail = bucket.slice(idx);
+      const scoredCandidates = tail.length > 0 ? tail : bucket;
+      const scoredBaseIdx = tail.length > 0 ? idx : 0;
+
+      const rarityFromMonster = (m) => {
+        if (isEliteMonster(m)) return 6;
+        const tier = Number(m?.tier || 1);
+        // Game DOM usually shows rarity as tier+1 (1..5), with elite override to 6.
+        return Math.max(1, Math.min(5, tier + 1));
+      };
+
+      // Weighted score to break ties when same species/level exists multiple times.
+      let bestLocalIdx = -1;
+      let bestScore = -Infinity;
+      for (let i = 0; i < scoredCandidates.length; i++) {
+        const m = scoredCandidates[i];
+        let score = 0;
+        if (displayedLevel && getLevelFromExp(m.exp || 0) === displayedLevel) score += 100;
+        if (isEliteMonster(m) === wantsElite) score += 40;
+        if (Boolean(m.shiny) === wantsShiny) score += 20;
+        if (Number.isFinite(wantsRarity) && rarityFromMonster(m) === wantsRarity) score += 15;
+        // Keep stable order in tail when scores are tied.
+        score -= i * 0.001;
+        if (score > bestScore) {
+          bestScore = score;
+          bestLocalIdx = i;
+        }
+      }
+      if (bestLocalIdx >= 0) {
+        idx = scoredBaseIdx + bestLocalIdx;
+        selected = bucket[idx];
+      }
+    }
+
+    gameIdIndexMap.set(gameId, idx + 1);
+    const seq = advancedHoverState.sequence++;
+    resolved.push({ imgEl: creatureImg, monster: selected });
+    advancedHoverState.debugByImg.set(creatureImg, {
+      sequence: seq,
+      gameId,
+      displayedLevel,
+      wantsElite,
+      wantsShiny,
+      wantsRarity: Number.isFinite(wantsRarity) ? wantsRarity : null,
+      baseIdx,
+      finalIdx: idx,
+      bucketLength: bucket.length,
+      chosenMonsterId: selected?.id || null,
+      chosenStats: selected ? {
+        hp: selected.hp || 0,
+        ad: selected.ad || 0,
+        ap: selected.ap || 0,
+        armor: selected.armor || 0,
+        magicResist: selected.magicResist || 0
+      } : null,
+      candidates: bucket.map((m, i) => ({
+        i,
+        id: m.id,
+        level: getLevelFromExp(m.exp || 0),
+        elite: isEliteMonster(m),
+        shiny: Boolean(m.shiny),
+        rarity: isEliteMonster(m) ? 6 : Math.max(1, Math.min(5, Number(m?.tier || 1) + 1)),
+        hp: m.hp || 0,
+        ad: m.ad || 0,
+        ap: m.ap || 0,
+        armor: m.armor || 0,
+        magicResist: m.magicResist || 0
+      }))
+    });
+  }
+
+  return resolved;
+}
+
+function rebuildAdvancedHoverResolvedMap() {
+  const monsters = getPlayerMonsters();
+  const visibleImgs = getVisibleInventoryCreatureImgsForHover();
+  const resolved = resolveHoverCreaturesSequentially(visibleImgs, monsters);
+  advancedHoverState.resolvedByImg = new WeakMap();
+  resolved.forEach(({ imgEl, monster }) => {
+    advancedHoverState.resolvedByImg.set(imgEl, monster);
+  });
+}
+
+function resolveMonsterForButtonOnDemand(button) {
+  const creatureImg = button?.querySelector?.('img[alt="creature"]');
+  if (!creatureImg) return null;
+
+  // 1) Try sequential resolver over currently visible inventory creatures.
+  const visibleImgs = getVisibleInventoryCreatureImgsForHover();
+  if (visibleImgs.length > 0) {
+    const resolved = resolveHoverCreaturesSequentially(visibleImgs, getPlayerMonsters());
+    const hit = resolved.find((r) => r.imgEl === creatureImg);
+    if (hit?.monster) {
+      return hit.monster;
+    }
+  }
+
+  // 2) Last-resort score-based candidate match for this one button.
+  const gameId = getCreatureGameId(creatureImg);
+  if (!gameId) return null;
+  const monsters = getPlayerMonsters().filter((m) => m.gameId === gameId);
+  if (monsters.length === 0) return null;
+
+  const levelSpan = button.querySelector('span[translate="no"]');
+  const displayedLevel = levelSpan ? parseInt(levelSpan.textContent, 10) : null;
+  const slot = creatureImg.closest('.container-slot');
+  const wantsElite = Boolean(slot?.querySelector('img[data-max-creatures="true"]'));
+  const wantsShiny = creatureImg.src.includes('-shiny');
+  const rarityEl = slot?.querySelector('.has-rarity');
+  const wantsRarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+
+  const rarityFromMonster = (m) => {
+    if (isEliteMonster(m)) return 6;
+    const tier = Number(m?.tier || 1);
+    return Math.max(1, Math.min(5, tier + 1));
+  };
+
+  let best = null;
+  let bestScore = -Infinity;
+  for (const m of monsters) {
+    let score = 0;
+    if (displayedLevel && getLevelFromExp(m.exp || 0) === displayedLevel) score += 100;
+    if (isEliteMonster(m) === wantsElite) score += 40;
+    if (Boolean(m.shiny) === wantsShiny) score += 20;
+    if (Number.isFinite(wantsRarity) && rarityFromMonster(m) === wantsRarity) score += 15;
+    if (score > bestScore) {
+      bestScore = score;
+      best = m;
+    }
+  }
+  return best;
+}
+
+function getReactFiberNode(el) {
+  if (!el) return null;
+  const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+  return key ? el[key] : null;
+}
+
+function findMonsterIdInObject(value, seen = new Set(), depth = 0) {
+  if (!value || typeof value !== 'object' || seen.has(value) || depth > 4) return null;
+  seen.add(value);
+
+  // Direct keys commonly used in board/setup objects
+  if (typeof value.monsterId === 'string' || typeof value.monsterId === 'number') return value.monsterId;
+  if (typeof value.databaseId === 'string' || typeof value.databaseId === 'number') return value.databaseId;
+  if (value.piece && (typeof value.piece.monsterId === 'string' || typeof value.piece.monsterId === 'number')) return value.piece.monsterId;
+
+  for (const child of Object.values(value)) {
+    const found = findMonsterIdInObject(child, seen, depth + 1);
+    if (found != null) return found;
+  }
+  return null;
+}
+
+function resolveMonsterFromReactFiber(button) {
+  try {
+    const fiber = getReactFiberNode(button);
+    if (!fiber) return null;
+    const monsters = getPlayerMonsters();
+    if (!Array.isArray(monsters) || monsters.length === 0) return null;
+
+    let node = fiber;
+    let hops = 0;
+    while (node && hops < 35) {
+      const props = node.memoizedProps || node.pendingProps || null;
+      const maybeId = props ? findMonsterIdInObject(props) : null;
+      if (maybeId != null) {
+        const match = monsters.find((m) => String(m.id) === String(maybeId));
+        if (match) {
+          return match;
+        }
+      }
+      node = node.return || null;
+      hops += 1;
+    }
+  } catch (error) {
+    // Silent fallback to heuristic resolver.
+  }
+  return null;
+}
+
+function getEquipmentForMonster(monster) {
+  if (!monster) return null;
+  const equipId = monster.equipId ?? monster.equip?.gameId;
+  if (!equipId) return null;
+
+  const equipment = {
+    id: equipId,
+    name: `Equipment ${equipId}`,
+    stat: monster.equip?.stat || null,
+    tier: monster.equip?.tier || null
+  };
+
+  try {
+    const equips = globalThis.state?.player?.getSnapshot?.()?.context?.equips || [];
+    const matchedById = equips.find((e) => String(e?.id) === String(equipId));
+    const matchedByGameId = equips.find((e) => String(e?.gameId) === String(equipId));
+    const matched = matchedById || matchedByGameId;
+    if (matched) {
+      equipment.stat = equipment.stat || matched.stat || null;
+      equipment.tier = equipment.tier || matched.tier || null;
+      equipment.id = matched.gameId || equipId;
+    }
+  } catch (error) {
+    // Best effort lookup only.
+  }
+
+  try {
+    const equipData = globalThis.state?.utils?.getEquipment?.(equipment.id);
+    if (equipData?.metadata?.name) {
+      equipment.name = equipData.metadata.name;
+    }
+    if (equipData?.metadata?.spriteId) {
+      equipment.spriteId = equipData.metadata.spriteId;
+    }
+  } catch (error) {
+    // Name fallback is good enough.
+  }
+
+  return equipment;
+}
+
+function getMonsterInfoFromButton(button) {
+  const creatureImg = button.querySelector('img[alt="creature"]');
+  if (!creatureImg) return null;
+
+  // Best source when Depot Manager tagged the slot with unique creature id.
+  const slotWithId = button.closest('div.flex[data-depot-creature-id]');
+  const taggedId = slotWithId?.getAttribute('data-depot-creature-id');
+  const monsters = getPlayerMonsters();
+  if (taggedId && Array.isArray(monsters)) {
+    const taggedMonster = monsters.find((m) => String(m.id) === String(taggedId));
+    if (taggedMonster) {
+      const gameIdTagged = getCreatureGameId(creatureImg);
+      return {
+        gameId: gameIdTagged,
+        creatureName: (() => {
+          try {
+            return globalThis.state?.utils?.getMonster?.(gameIdTagged)?.metadata?.name || `Creature ${gameIdTagged}`;
+          } catch (error) {
+            return `Creature ${gameIdTagged}`;
+          }
+        })(),
+        level: getLevelFromExp(taggedMonster.exp || 0),
+        hp: taggedMonster.hp || 0,
+        ad: taggedMonster.ad || 0,
+        ap: taggedMonster.ap || 0,
+        armor: taggedMonster.armor || 0,
+        magicResist: taggedMonster.magicResist || 0,
+        equipment: getEquipmentForMonster(taggedMonster)
+      };
+    }
+  }
+
+  const gameId = getCreatureGameId(creatureImg);
+  const monsterFromFiber = resolveMonsterFromReactFiber(button);
+  const monster = monsterFromFiber || advancedHoverState.resolvedByImg.get(creatureImg) || resolveMonsterForButtonOnDemand(button);
+  if (!monster) return null;
+
+  const level = (() => {
+    try {
+      return globalThis.state?.utils?.expToCurrentLevel ? globalThis.state.utils.expToCurrentLevel(monster.exp || 0) : 1;
+    } catch (error) {
+      return 1;
+    }
+  })();
+
+  return {
+    gameId,
+    creatureName: (() => {
+      try {
+        return globalThis.state?.utils?.getMonster?.(gameId)?.metadata?.name || `Creature ${gameId}`;
+      } catch (error) {
+        return `Creature ${gameId}`;
+      }
+    })(),
+    level,
+    hp: monster.hp || 0,
+    ad: monster.ad || 0,
+    ap: monster.ap || 0,
+    armor: monster.armor || 0,
+    magicResist: monster.magicResist || 0,
+    equipment: getEquipmentForMonster(monster)
+  };
+}
+
+function getAbilityInfoForGameId(gameId) {
+  if (!gameId) return null;
+  try {
+    const monsterData = globalThis.state?.utils?.getMonster?.(gameId);
+    const skill = monsterData?.metadata?.skill;
+    if (!skill) return null;
+    const icon = skill.icon || (skill.src ? `https://bestiaryarena.com/assets/spells/${skill.src}.png` : null);
+    return {
+      name: skill.name || 'Ability',
+      icon,
+      TooltipContent: skill.TooltipContent || null
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function createAdvancedHoverStatRow(label, value, maxValue, barColor = 'rgb(96, 192, 96)') {
+  const statRow = document.createElement('div');
+  statRow.setAttribute('data-transparent', 'false');
+  statRow.className = 'pixel-font-16 whitespace-nowrap text-whiteRegular';
+
+  const topRow = document.createElement('div');
+  topRow.className = 'flex justify-between';
+
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = label;
+  topRow.appendChild(labelSpan);
+
+  const valueSpan = document.createElement('span');
+  valueSpan.className = 'text-right text-whiteExp';
+  valueSpan.style.width = '3ch';
+  valueSpan.textContent = value.toString();
+  topRow.appendChild(valueSpan);
+
+  statRow.appendChild(topRow);
+
+  const barRow = document.createElement('div');
+  barRow.className = 'relative';
+
+  const barOuter = document.createElement('div');
+  barOuter.className = 'frame-pressed-1 relative h-1 w-full overflow-hidden border border-solid border-black bg-black gene-stats-bar-filled';
+  barOuter.style.animationDelay = '700ms';
+
+  const barFillWrap = document.createElement('div');
+  barFillWrap.className = 'absolute left-0 top-0 flex h-full w-full';
+
+  const barFill = document.createElement('div');
+  barFill.className = 'h-full shrink-0';
+  const percentage = Math.min(100, Math.max(0, (value / maxValue) * 100));
+  barFill.style.width = `${percentage}%`;
+  barFill.style.background = barColor;
+
+  barFillWrap.appendChild(barFill);
+  barOuter.appendChild(barFillWrap);
+
+  const barRight = document.createElement('div');
+  barRight.className = 'absolute left-full top-1/2 z-[201] -translate-y-1/2';
+  barRight.style.display = 'block';
+
+  const skillBar = document.createElement('div');
+  skillBar.className = 'relative text-skillBar';
+
+  const spill1 = document.createElement('div');
+  spill1.className = 'spill-particles absolute left-full h-px w-0.5 bg-current';
+  const spill2 = document.createElement('div');
+  spill2.className = 'spill-particles-2 absolute left-full h-px w-0.5 bg-current';
+
+  skillBar.appendChild(spill1);
+  skillBar.appendChild(spill2);
+  barRight.appendChild(skillBar);
+
+  barRow.appendChild(barOuter);
+  barRow.appendChild(barRight);
+  statRow.appendChild(barRow);
+
+  return statRow;
+}
+
+function createEquipmentIconForTooltip(equipment) {
+  if (!equipment?.spriteId || !api?.ui?.components?.createItemPortrait) {
+    return null;
+  }
+  try {
+    return api.ui.components.createItemPortrait({
+      itemId: equipment.spriteId,
+      stat: equipment.stat || 'ad',
+      tier: equipment.tier || 1,
+      onClick: () => {}
+    });
+  } catch (error) {
+    return null;
+  }
+}
+
+function buildAdvancedStatsTooltip(info) {
+  const mountedComponents = [];
+  const tooltip = document.createElement('div');
+  tooltip.className = 'mod-settings-advanced-hover-tooltip';
+  tooltip.style.cssText = `
+    position: fixed;
+    display: none;
+    z-index: 10000;
+    pointer-events: none;
+  `;
+
+  const tooltipContent = document.createElement('div');
+  tooltipContent.className = 'frame-pressed-1 surface-dark flex shrink-0 flex-col gap-1.5 px-2 py-1 pb-2';
+
+  if (config.showAdvancedStatsOnHover) {
+    tooltipContent.appendChild(createAdvancedHoverStatRow('Hitpoints', info.hp, 20));
+    tooltipContent.appendChild(createAdvancedHoverStatRow('Attack', info.ad, 20));
+    tooltipContent.appendChild(createAdvancedHoverStatRow('Ability Power', info.ap, 20));
+    tooltipContent.appendChild(createAdvancedHoverStatRow('Armor', info.armor, 20));
+    tooltipContent.appendChild(createAdvancedHoverStatRow('Magic Resist', info.magicResist, 20));
+
+    const equipmentRow = document.createElement('div');
+    equipmentRow.className = 'flex items-center gap-2 pt-1';
+    const equipmentLabel = document.createElement('span');
+    equipmentLabel.className = 'pixel-font-16 text-whiteRegular';
+    equipmentLabel.textContent = 'Equipment:';
+    equipmentRow.appendChild(equipmentLabel);
+
+    const equipIcon = createEquipmentIconForTooltip(info.equipment);
+    if (equipIcon) {
+      equipmentRow.appendChild(equipIcon);
+    } else {
+      const noEquip = document.createElement('span');
+      noEquip.className = 'pixel-font-16 text-whiteDark';
+      noEquip.textContent = 'none';
+      equipmentRow.appendChild(noEquip);
+    }
+    tooltipContent.appendChild(equipmentRow);
+  }
+
+  if (config.showAbilityOnHover) {
+    const abilityInfo = getAbilityInfoForGameId(info.gameId);
+    if (abilityInfo) {
+      if (config.showAdvancedStatsOnHover) {
+        const divider = document.createElement('div');
+        divider.style.cssText = 'height: 1px; background: rgba(255,255,255,0.2); margin: 2px 0;';
+        tooltipContent.appendChild(divider);
+      }
+
+      const abilityHeader = document.createElement('div');
+      abilityHeader.className = 'flex items-center gap-2 pt-1';
+      const abilityLabel = document.createElement('span');
+      abilityLabel.className = 'pixel-font-16 text-whiteExp';
+      abilityLabel.textContent = abilityInfo.name || 'Ability';
+      abilityHeader.appendChild(abilityLabel);
+      tooltipContent.appendChild(abilityHeader);
+
+      const pushAbilityBlock = (title, awaken) => {
+        const root = document.createElement('div');
+        root.classList.add('tooltip-prose');
+        root.classList.add('pixel-font-14');
+        root.style.cssText = 'max-width: 320px; color: #fff; line-height: 1.1;';
+        tooltipContent.appendChild(root);
+
+        if (typeof globalThis.state?.utils?.createUIComponent === 'function' && abilityInfo.TooltipContent) {
+          try {
+            const component = awaken
+              ? globalThis.state.utils.createUIComponent(root, abilityInfo.TooltipContent, { awaken: true })
+              : globalThis.state.utils.createUIComponent(root, abilityInfo.TooltipContent);
+            if (component && typeof component.mount === 'function') {
+              component.mount();
+              mountedComponents.push(component);
+              const blockquotes = root.querySelectorAll('blockquote');
+              blockquotes.forEach((bq) => {
+                bq.style.setProperty('font-size', '10px', 'important');
+              });
+            } else {
+              root.textContent = 'Ability details unavailable';
+              root.className = 'pixel-font-14 text-whiteDark';
+            }
+          } catch (error) {
+            root.textContent = 'Ability details unavailable';
+            root.className = 'pixel-font-14 text-whiteDark';
+          }
+        } else {
+          root.textContent = 'Ability details unavailable';
+          root.className = 'pixel-font-14 text-whiteDark';
+        }
+      };
+
+      pushAbilityBlock('Awakened', true);
+    }
+  }
+
+  tooltip.appendChild(tooltipContent);
+
+  return {
+    tooltip,
+    cleanup: () => {
+      mountedComponents.forEach((component) => {
+        try {
+          component?.unmount?.();
+        } catch (error) {
+          // Best effort cleanup.
+        }
+      });
+    }
+  };
+}
+
+function positionAdvancedStatsTooltip(tooltip, button) {
+  const rect = button.getBoundingClientRect();
+  const tooltipRect = tooltip.getBoundingClientRect();
+
+  let left = rect.right + 8;
+  let top = rect.top;
+
+  if (left + tooltipRect.width > window.innerWidth - 8) {
+    left = rect.left - tooltipRect.width - 8;
+  }
+  if (top + tooltipRect.height > window.innerHeight - 8) {
+    top = window.innerHeight - tooltipRect.height - 8;
+  }
+  if (top < 8) top = 8;
+
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}
+
+function attachAdvancedStatsTooltip(button) {
+  if (!button || button.dataset.advancedStatsHoverAttached === 'true') return;
+  if (!isInventoryCreatureButton(button)) return;
+
+  let tooltip = null;
+  let cleanup = null;
+
+  const ensureTooltip = () => {
+    if (tooltip) return true;
+    const info = getMonsterInfoFromButton(button);
+    if (!info) return false;
+    const built = buildAdvancedStatsTooltip(info);
+    tooltip = built.tooltip;
+    cleanup = built.cleanup;
+    document.body.appendChild(tooltip);
+    return true;
+  };
+
+  const show = () => {
+    if (!ensureTooltip()) return;
+    tooltip.style.display = 'block';
+    positionAdvancedStatsTooltip(tooltip, button);
+  };
+  const hide = () => {
+    if (!tooltip) return;
+    tooltip.style.display = 'none';
+  };
+  const move = () => {
+    if (tooltip && tooltip.style.display === 'block') {
+      positionAdvancedStatsTooltip(tooltip, button);
+    }
+  };
+
+  button.addEventListener('mouseenter', show);
+  button.addEventListener('mouseleave', hide);
+  button.addEventListener('mousemove', move);
+
+  button.dataset.advancedStatsHoverAttached = 'true';
+  button._advancedStatsHover = {
+    get tooltip() { return tooltip; },
+    show,
+    hide,
+    move,
+    cleanup: () => {
+      cleanup?.();
+      cleanup = null;
+    }
+  };
+}
+
+function isCreatureHoverTooltipEnabled() {
+  return Boolean(config.showAdvancedStatsOnHover || config.showAbilityOnHover);
+}
+
+function ensureAdvancedHoverDelegation() {
+  if (advancedHoverState.delegatedBound) return;
+  const handler = (event) => {
+    if (!isCreatureHoverTooltipEnabled()) return;
+    const button = event.target?.closest?.('button[data-picked]');
+    if (!button || !isInventoryCreatureButton(button)) return;
+    if (button.dataset.advancedStatsHoverAttached === 'true') return;
+    rebuildAdvancedHoverResolvedMap();
+    attachAdvancedStatsTooltip(button);
+  };
+  document.addEventListener('mouseover', handler, true);
+  advancedHoverState.delegatedHandler = handler;
+  advancedHoverState.delegatedBound = true;
+}
+
+function teardownAdvancedHoverDelegation() {
+  if (!advancedHoverState.delegatedBound || !advancedHoverState.delegatedHandler) return;
+  document.removeEventListener('mouseover', advancedHoverState.delegatedHandler, true);
+  advancedHoverState.delegatedHandler = null;
+  advancedHoverState.delegatedBound = false;
+}
+
+function applyAdvancedStatsOnHover() {
+  if (!isCreatureHoverTooltipEnabled()) return;
+  rebuildAdvancedHoverResolvedMap();
+  getCreatureHoverTargetButtons().forEach(attachAdvancedStatsTooltip);
+  ensureAdvancedHoverDelegation();
+}
+
+function removeAdvancedStatsOnHover() {
+  teardownAdvancedHoverDelegation();
+  document.querySelectorAll('button[data-advanced-stats-hover-attached="true"]').forEach((button) => {
+    const refs = button._advancedStatsHover;
+    if (refs) {
+      button.removeEventListener('mouseenter', refs.show);
+      button.removeEventListener('mouseleave', refs.hide);
+      button.removeEventListener('mousemove', refs.move);
+      refs.cleanup?.();
+      refs.tooltip?.remove();
+      delete button._advancedStatsHover;
+    }
+    button.removeAttribute('data-advanced-stats-hover-attached');
+  });
+}
+
+// =======================
+// 10. Shiny Enemies
 // =======================
 
 // Helper: Get sprite ID from monster metadata (handles item-type monsters)
@@ -5828,6 +6592,10 @@ function startCreatureContainerObserver() {
           if (config.enableShinyEnemies) {
             applyShinyEnemies();
           }
+
+          if (isCreatureHoverTooltipEnabled()) {
+            applyAdvancedStatsOnHover();
+          }
           
           window.depotManager?.notifyFavoriteGridRefresh?.('creature');
           
@@ -5889,6 +6657,10 @@ function initScrollLockObserver() {
             
             if (config.enableShinyEnemies) {
               applyShinyEnemies();
+            }
+
+            if (isCreatureHoverTooltipEnabled()) {
+              applyAdvancedStatsOnHover();
             }
             
             window.depotManager?.notifyFavoriteGridRefresh?.('scroll');
@@ -7137,6 +7909,11 @@ function initBetterUI() {
       console.log('[Mod Settings] Applying shiny enemies');
       startBattleBoardObserver();
       applyShinyEnemies();
+    }
+
+    if (isCreatureHoverTooltipEnabled()) {
+      console.log('[Mod Settings] Applying creature hover tooltip');
+      applyAdvancedStatsOnHover();
     }
     
     if (config.enableAutoplayRefresh) {
