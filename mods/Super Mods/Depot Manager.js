@@ -80,7 +80,9 @@ const TIMEOUT_DELAYS = {
   /** Coalesced layout after external DOM changes (observer / favorites refresh). */
   CONTAINER_DEBOUNCE: 450,
   /** User explicitly moved a creature; apply soon after. */
-  DEPOT_USER_ACTION: 80
+  DEPOT_USER_ACTION: 80,
+  /** Creature stat tooltip on depot tiles (matches Mod Settings advanced hover). */
+  HOVER_TOOLTIP_SHOW: 150
 };
 
 const EXP_TABLE = [
@@ -1129,7 +1131,7 @@ function attachDepotCreatureStatTooltip(targetEl, row) {
       if (!tooltipEl) tooltipEl = buildTooltip();
       tooltipEl.style.display = 'block';
       updatePosition();
-    }, 220);
+    }, TIMEOUT_DELAYS.HOVER_TOOLTIP_SHOW);
   };
 
   const hide = () => {

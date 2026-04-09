@@ -2329,18 +2329,23 @@ const handleDayCare = async () => {
       }
     } catch (_) {}
     
-    // Single query with early exit - if no blip elements, skip processing
+    // Single query with guarded early exit
     const blipElements = document.querySelectorAll('[data-blip="true"]');
     if (blipElements.length === 0) {
-      // Clear the flag if no daycare to handle
-      try {
-        if (window.ModCoordination) {
-          window.ModCoordination.updateModState('Bestiary Automator', {
-            metadata: { handlingDaycare: false }
-          });
-        }
-      } catch (_) {}
-      return;
+      // Only skip when there is no daycare content at all.
+      // Some UI states may have daycare creatures without visible blips.
+      const anyDaycareImage = document.querySelector('img[alt="daycare"], img[alt="Daycare"]');
+      if (!anyDaycareImage) {
+        // Clear the flag if no daycare to handle
+        try {
+          if (window.ModCoordination) {
+            window.ModCoordination.updateModState('Bestiary Automator', {
+              metadata: { handlingDaycare: false }
+            });
+          }
+        } catch (_) {}
+        return;
+      }
     }
     
     // Check for daycare button with visual indicator

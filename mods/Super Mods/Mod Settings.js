@@ -187,7 +187,9 @@ const TIMEOUT_DELAYS = {
   INIT_RETRY: 500,
   OBSERVER_RETRY: 1000,
   CONTAINER_DEBOUNCE: 200,
-  BROWSER_REFRESH: 1000
+  BROWSER_REFRESH: 1000,
+  /** Creature stat / advanced hover tooltip delay (matches Depot Manager). */
+  HOVER_TOOLTIP_SHOW: 150
 };
 
 // Use shared translation system via API
@@ -5163,8 +5165,28 @@ const advancedHoverState = {
   debugByImg: new WeakMap(),
   sequence: 0,
   delegatedBound: false,
-  delegatedHandler: null
+  delegatedHandler: null,
+  activeTooltip: null,
+  activeCleanup: null,
+  activeButton: null,
+  activeToken: 0
 };
+
+function destroyActiveAdvancedHoverTooltip() {
+  if (advancedHoverState.activeTooltip) {
+    advancedHoverState.activeTooltip.remove();
+    advancedHoverState.activeTooltip = null;
+  }
+  if (advancedHoverState.activeCleanup) {
+    try {
+      advancedHoverState.activeCleanup();
+    } catch (error) {
+      // Best effort cleanup.
+    }
+    advancedHoverState.activeCleanup = null;
+  }
+  advancedHoverState.activeButton = null;
+}
 
 function getVisibleInventoryCreatureImgsForHover() {
   return Array.from(document.querySelectorAll('img[alt="creature"]')).filter((img) => {
@@ -5752,32 +5774,47 @@ function attachAdvancedStatsTooltip(button) {
   if (!button || button.dataset.advancedStatsHoverAttached === 'true') return;
   if (!isInventoryCreatureButton(button)) return;
 
-  let tooltip = null;
-  let cleanup = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let showTimeout = null;
 
-  const ensureTooltip = () => {
-    if (tooltip) return true;
-    const info = getMonsterInfoFromButton(button);
-    if (!info) return false;
-    const built = buildAdvancedStatsTooltip(info);
-    tooltip = built.tooltip;
-    cleanup = built.cleanup;
-    document.body.appendChild(tooltip);
-    return true;
+  const destroyTooltip = () => {
+    if (showTimeout) {
+      clearTimeout(showTimeout);
+      showTimeout = null;
+    }
+    if (advancedHoverState.activeButton === button) {
+      destroyActiveAdvancedHoverTooltip();
+    }
   };
 
   const show = () => {
-    if (!ensureTooltip()) return;
-    tooltip.style.display = 'block';
-    positionAdvancedStatsTooltip(tooltip, button);
+    if (showTimeout) clearTimeout(showTimeout);
+    const token = ++advancedHoverState.activeToken;
+    // Ensure only one tooltip can ever exist while hovering between slots.
+    destroyActiveAdvancedHoverTooltip();
+    showTimeout = setTimeout(() => {
+      showTimeout = null;
+      if (token !== advancedHoverState.activeToken) return;
+      // Always rebuild fresh so stats are up to date when hovering.
+      destroyTooltip();
+      rebuildAdvancedHoverResolvedMap();
+      const info = getMonsterInfoFromButton(button);
+      if (!info) return;
+      const built = buildAdvancedStatsTooltip(info);
+      advancedHoverState.activeTooltip = built.tooltip;
+      advancedHoverState.activeCleanup = built.cleanup;
+      advancedHoverState.activeButton = button;
+      document.body.appendChild(advancedHoverState.activeTooltip);
+      advancedHoverState.activeTooltip.style.display = 'block';
+      positionAdvancedStatsTooltip(advancedHoverState.activeTooltip, button);
+    }, TIMEOUT_DELAYS.HOVER_TOOLTIP_SHOW);
   };
   const hide = () => {
-    if (!tooltip) return;
-    tooltip.style.display = 'none';
+    destroyTooltip();
   };
   const move = () => {
-    if (tooltip && tooltip.style.display === 'block') {
-      positionAdvancedStatsTooltip(tooltip, button);
+    if (advancedHoverState.activeButton === button && advancedHoverState.activeTooltip && advancedHoverState.activeTooltip.style.display === 'block') {
+      positionAdvancedStatsTooltip(advancedHoverState.activeTooltip, button);
     }
   };
 
@@ -5787,14 +5824,11 @@ function attachAdvancedStatsTooltip(button) {
 
   button.dataset.advancedStatsHoverAttached = 'true';
   button._advancedStatsHover = {
-    get tooltip() { return tooltip; },
+    get tooltip() { return advancedHoverState.activeButton === button ? advancedHoverState.activeTooltip : null; },
     show,
     hide,
     move,
-    cleanup: () => {
-      cleanup?.();
-      cleanup = null;
-    }
+    cleanup: destroyTooltip
   };
 }
 
@@ -5833,6 +5867,7 @@ function applyAdvancedStatsOnHover() {
 
 function removeAdvancedStatsOnHover() {
   teardownAdvancedHoverDelegation();
+  destroyActiveAdvancedHoverTooltip();
   document.querySelectorAll('button[data-advanced-stats-hover-attached="true"]').forEach((button) => {
     const refs = button._advancedStatsHover;
     if (refs) {

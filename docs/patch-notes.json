@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "3.6.3",
+      "changes": [
+        { "type": "fixed", "mod": "Bestiary Automator", "text": "Auto Daycare no longer skips maxed creature withdrawal when daycare creatures appear without blip markers." },
+        { "type": "fixed", "mod": "Depot Manager", "text": "Creature stat tooltip waits 150ms on hover before opening." },
+        { "type": "fixed", "mod": "Mod Settings", "text": "Advanced hover tooltips wait 150ms before opening." },
+        { "type": "fixed", "mod": "Mod Settings", "text": "Advanced stats hover tooltip rebuilds on each hover so values stay up to date." },
+        { "type": "fixed", "mod": "Mod Settings", "text": "Only one tooltip can be active at a time." }
+      ]
+    },
+    {
       "version": "3.6.2",
       "changes": [
         { "type": "fixed", "mod": "Depot Manager", "text": "Various bug fixes and improvements." },
