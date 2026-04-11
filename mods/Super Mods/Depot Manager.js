@@ -1,5 +1,5 @@
 // =======================
-// Depot Manager — Super Mod (creature favorites; options live in Mod Settings → Depot Manager tab)
+// Depot Manager — Super Mod
 // =======================
 'use strict';
 
@@ -51,7 +51,8 @@ let lastDepotLayoutCreatureRefreshAt = 0;
 const GAME_CONSTANTS = {
   MAX_STAT_VALUE: 20,
   MAX_LEVEL: 50,
-  MAX_TIER: 4
+  MAX_TIER: 4,
+  ELITE_RARITY_LEVEL: 6
 };
 
 function isEliteMonster(monster) {
@@ -63,11 +64,7 @@ function isEliteMonster(monster) {
          monster.tier === GAME_CONSTANTS.MAX_TIER;
 }
 
-const SELECTORS = {
-  CREATURE_IMG: 'img[alt="creature"]'
-};
-
-/** Set on the grid cell `div.flex` when user sends a creature to depot — layout uses this id (menu path) instead of re-guessing from DOM order. */
+/** Set on hidden bestiary cells for depot creatures — refreshed each layout from visual match (and boosted when user tagged this slot). */
 const DATA_DEPOT_SLOT_ID = 'data-depot-creature-id';
 const DATA_DEPOT_HIDDEN = 'data-depot-hidden';
 const DATA_DEPOT_EQUIPMENT_HIDDEN = 'data-depot-equipment-hidden';
@@ -77,6 +74,8 @@ const TIMEOUT_DELAYS = {
   SUBMENU_HIDE: 100,
   TAB_REAPPLY: 100,
   FAVORITES_INIT: 500,
+  /** After depot hide pass; lets the grid paint before resolving favorite hearts. */
+  FAVORITES_AFTER_DEPOT_LAYOUT: 250,
   /** Coalesced layout after external DOM changes (observer / favorites refresh). */
   CONTAINER_DEBOUNCE: 450,
   /** User explicitly moved a creature; apply soon after. */
@@ -84,6 +83,9 @@ const TIMEOUT_DELAYS = {
   /** Creature stat tooltip on depot tiles (matches Mod Settings advanced hover). */
   HOVER_TOOLTIP_SHOW: 150
 };
+
+/** Tab remount stagger: equipment + optional bestiary `applyDepotLayout` (see `tabReapplyDelayedCreatureAndEquipmentPass`). */
+const TAB_REAPPLY_CREATURE_GRID_DELAYS_MS = [0, 120, 320, 700, 1300];
 
 const EXP_TABLE = [
   [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
@@ -118,6 +120,9 @@ const favoritesState = {
 
 const activeTimeouts = new Set();
 const depotObservers = { contextMenu: null, monsterGrid: null, arsenalGrid: null, tabButtons: null, inventory: null };
+
+/** Vanilla bestiary filter input (game UI); when non-empty, skip depot layout passes driven by grid mutations. */
+const MONSTER_BESTIARY_INPUT_ID = 'monster-input-id';
 let depotInventoryRefreshInterval = null;
 let depotInventoryDebounceTimeout = null;
 let depotArsenalObserveTarget = null;
@@ -1641,6 +1646,59 @@ function getMonsterGridFlexContainer() {
   return viewport.querySelector('div.flex.flex-wrap') || null;
 }
 
+/** Direct `div.flex` children of the flex-wrap grid that contain a creature portrait, DOM order. */
+function getMonsterGridCreatureSlotElements(grid) {
+  const g = grid ?? getMonsterGridFlexContainer();
+  if (!g) return [];
+  return Array.from(g.children).filter(
+    (el) => el.matches('div.flex') && el.querySelector('img[alt="creature"]')
+  );
+}
+
+function getMonsterBestiarySearchQuery() {
+  const el = document.getElementById(MONSTER_BESTIARY_INPUT_ID);
+  return el && typeof el.value === 'string' ? el.value.trim() : '';
+}
+
+/** Vanilla bestiary filter is active — depot layout must not run on partial/empty grid DOM. */
+function isMonsterBestiarySearchFiltering() {
+  return getMonsterBestiarySearchQuery().length > 0;
+}
+
+function onMonsterBestiarySearchInput(event) {
+  if (event.target?.id !== MONSTER_BESTIARY_INPUT_ID) return;
+  if (getMonsterBestiarySearchQuery().length === 0) {
+    scheduleTimeout(() => scheduleApplyDepotLayout(), 0);
+  }
+}
+
+function onMonsterBestiarySearchFocusOut(event) {
+  if (event.target?.id !== MONSTER_BESTIARY_INPUT_ID) return;
+  if (getMonsterBestiarySearchQuery().length > 0) return;
+  scheduleTimeout(() => scheduleApplyDepotLayout(), 0);
+  const logDelay = TIMEOUT_DELAYS.CONTAINER_DEBOUNCE + 50;
+  scheduleTimeout(() => depotDebugLogMonsterGridCreatureIdsFromDom('search cleared (focusout, after grid settle)'), logDelay);
+}
+
+let depotMonsterSearchListeners = null;
+
+function startMonsterBestiarySearchListener() {
+  if (depotMonsterSearchListeners) return;
+  depotMonsterSearchListeners = {
+    input: onMonsterBestiarySearchInput,
+    focusout: onMonsterBestiarySearchFocusOut
+  };
+  document.addEventListener('input', depotMonsterSearchListeners.input, true);
+  document.addEventListener('focusout', depotMonsterSearchListeners.focusout, true);
+}
+
+function stopMonsterBestiarySearchListener() {
+  if (!depotMonsterSearchListeners) return;
+  document.removeEventListener('input', depotMonsterSearchListeners.input, true);
+  document.removeEventListener('focusout', depotMonsterSearchListeners.focusout, true);
+  depotMonsterSearchListeners = null;
+}
+
 /** Remove inline flex `order` we set for depot vs main (e.g. when toggling depot off). */
 function clearDepotVisualOrderOnGridSlots(grid) {
   if (!grid) return;
@@ -1671,6 +1729,20 @@ function isInMonsterInventoryGrid(imgEl) {
   return Boolean(imgEl && imgEl.closest('#monster-scroll'));
 }
 
+/** Creature tiles under the grid that should not participate in favorites ID resolution. */
+function isCreatureImgExcludedFromFavoriteGrid(img) {
+  if (!img) return true;
+  if (img.closest('[role="menu"]') || img.closest('[role="dialog"]')) return true;
+  const isInAnalyzer =
+    img.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
+    img.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
+  const isInAutoplaySession =
+    img.closest('div[data-autosetup]') ||
+    img.closest('#autoseller-session-widget') ||
+    img.closest('#drop-widget-bottom-element');
+  return Boolean(isInAnalyzer || isInAutoplaySession);
+}
+
 /** Grid cell wrapper: direct child of the flex-wrap inventory grid (not inner flex wrappers). */
 function getMonsterInventorySlotFromImg(creatureImg) {
   if (!creatureImg) return null;
@@ -1683,6 +1755,21 @@ function getMonsterInventorySlotFromImg(creatureImg) {
     el = el.parentElement;
   }
   return null;
+}
+
+/**
+ * Bestiary flex grid slots in DOM order — same sequence depot layout and sequential ID resolution use.
+ * Skips creature imgs inside menus/dialogs and analyzer/autoplay widgets if they appear under the grid.
+ */
+function getMonsterGridFavoriteSlotEntries() {
+  const out = [];
+  for (const el of getMonsterGridCreatureSlotElements()) {
+    const img = el.querySelector('img[alt="creature"]');
+    if (!img || !isInMonsterInventoryGrid(img)) continue;
+    if (isCreatureImgExcludedFromFavoriteGrid(img)) continue;
+    out.push({ slot: el, img });
+  }
+  return out;
 }
 
 function setDepotSlotTagFromImg(creatureImg, uniqueIdOrNull) {
@@ -1722,6 +1809,128 @@ function resumeMonsterGridObserverAfterLayout() {
   attachMonsterGridObservation();
 }
 
+/** Rarity band on the slot overlay (1–5) vs elite (6), aligned with `matchCreatureBySequentialIndex`. */
+function depotRarityFromMonster(m) {
+  if (isEliteMonster(m)) return 6;
+  const tier = Number(m?.tier || 1);
+  return Math.max(1, Math.min(5, tier + 1));
+}
+
+/**
+ * DOM cannot distinguish max-tier vs elite (Mod Settings `creatureSlotDomAmbiguousDuplicates` — keep in sync).
+ * @param {boolean} wantsElite - from `inferWantsEliteFromCreatureSlot` / `row.wantsElite`
+ * @param {number} rarityOverlay - parsed `.has-rarity` `data-rarity` (NaN if missing)
+ */
+function bestiaryDuplicateDomAmbiguous(wantsElite, rarityOverlay) {
+  if (wantsElite) return false;
+  if (rarityOverlay === GAME_CONSTANTS.ELITE_RARITY_LEVEL) return false;
+  return !Number.isFinite(rarityOverlay) || rarityOverlay < GAME_CONSTANTS.ELITE_RARITY_LEVEL;
+}
+
+/**
+ * @returns {{ slot: Element, img: HTMLImageElement, gameId: number, displayedLevel: number|null, wantsElite: boolean, isShiny: boolean, rarity: number, domIndex: number } | null}
+ */
+function getBestiarySlotVisualRow(slot, domIndex) {
+  const img = slot.querySelector('img[alt="creature"]');
+  if (!img || !isInMonsterInventoryGrid(img)) return null;
+  const gameId = getCreatureGameId(img);
+  if (!gameId) return null;
+  const button = img.closest('button');
+  const levelSpan = button?.querySelector('span[translate="no"]');
+  const displayedLevelRaw = levelSpan ? parseInt(levelSpan.textContent, 10) : NaN;
+  const displayedLevel = Number.isFinite(displayedLevelRaw) ? displayedLevelRaw : null;
+  const container = img.closest('.container-slot');
+  const wantsElite = inferWantsEliteFromCreatureSlot(container);
+  const isShiny = img.src.includes('-shiny');
+  const rarityEl = container?.querySelector('.has-rarity');
+  const rarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+  return {
+    slot,
+    img,
+    gameId,
+    displayedLevel,
+    wantsElite,
+    isShiny,
+    rarity: Number.isFinite(rarity) ? rarity : NaN,
+    domIndex
+  };
+}
+
+/**
+ * Returns a score if this grid row could be that monster instance; null if ruled out.
+ * Uses game species + shiny + level + rarity/elite — not portrait order heuristics.
+ */
+function depotVisualScoreForMonster(row, m) {
+  if (row.gameId !== m.gameId) return null;
+  if (Boolean(m.shiny) !== row.isShiny) return null;
+  const mLevel = getLevelFromExp(m.exp || 0);
+  if (row.displayedLevel != null && Number.isFinite(mLevel)) {
+    if (mLevel !== row.displayedLevel) return null;
+  }
+  const ambiguousDom = bestiaryDuplicateDomAmbiguous(row.wantsElite, row.rarity);
+  let score = 100;
+  if (!ambiguousDom) {
+    if (isEliteMonster(m) === row.wantsElite) score += 400;
+    const mr = depotRarityFromMonster(m);
+    if (Number.isFinite(row.rarity) && row.rarity === mr) score += 200;
+  }
+  score -= row.domIndex * 1e-6;
+  return score;
+}
+
+/**
+ * Assigns each depot creature id to at most one bestiary cell that visually matches that monster.
+ * Order follows `depotCreatureState.ids` (multiset). Strongly prefers a cell that already has
+ * `data-depot-creature-id` equal to that id (user-tagged send-to-depot).
+ */
+function collectBestiaryVisualRowsFromSlotElements(slotElements) {
+  const rows = [];
+  for (let i = 0; i < slotElements.length; i++) {
+    const row = getBestiarySlotVisualRow(slotElements[i], i);
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
+function buildDepotHideSlotPairsFromVisualMatch(slotElements) {
+  const monsters = getPlayerMonsters();
+  const byId = new Map(monsters.map((m) => [String(m.id), m]));
+
+  const rows = collectBestiaryVisualRowsFromSlotElements(slotElements);
+
+  const usedSlots = new Set();
+  /** @type {Array<{ slot: Element, id: string }>} */
+  const pairs = [];
+
+  for (const rawSid of depotCreatureState.ids) {
+    const sid = String(rawSid);
+    const m = byId.get(sid);
+    if (!m) continue;
+
+    let bestRow = null;
+    let bestAdjusted = -Infinity;
+    let bestDomIdx = Infinity;
+    for (const row of rows) {
+      if (usedSlots.has(row.slot)) continue;
+      const sc = depotVisualScoreForMonster(row, m);
+      if (sc == null) continue;
+      const tag = String(row.slot.getAttribute(DATA_DEPOT_SLOT_ID) || '').trim();
+      const adjusted = sc + (tag === sid ? 1e9 : 0);
+      if (adjusted > bestAdjusted || (adjusted === bestAdjusted && row.domIndex < bestDomIdx)) {
+        bestAdjusted = adjusted;
+        bestRow = row;
+        bestDomIdx = row.domIndex;
+      }
+    }
+    if (bestRow) {
+      usedSlots.add(bestRow.slot);
+      pairs.push({ slot: bestRow.slot, id: sid });
+    }
+  }
+
+  return pairs;
+}
+
 function applyDepotLayout() {
   if (!depotConfig.enableCreatureDepot) {
     const grid = getMonsterGridFlexContainer();
@@ -1744,65 +1953,43 @@ function applyDepotLayout() {
       return;
     }
 
-    const slotElements = Array.from(grid.children).filter(
-      (el) => el.matches('div.flex') && el.querySelector('img[alt="creature"]')
-    );
-    // Reset visibility first; we re-hide selected slots below.
+    if (isMonsterBestiarySearchFiltering()) {
+      return;
+    }
+
+    const slotElements = getMonsterGridCreatureSlotElements(grid);
+    if (slotElements.length === 0) {
+      depotDebug('applyDepotLayout: skip (no creature slots in grid)');
+      return;
+    }
+
     slotElements.forEach((slot) => {
       slot.removeAttribute(DATA_DEPOT_HIDDEN);
       slot.style.removeProperty('display');
     });
 
-    const gridImgs = slotElements
-      .map((slot) => slot.querySelector('img[alt="creature"]'))
-      .filter((img) => Boolean(img && isInMonsterInventoryGrid(img)));
-    const creatureIdMap = buildCreatureImgToUniqueIdMap(gridImgs);
-    const slotIdPairs = [];
-    for (const slot of slotElements) {
-      const img = slot.querySelector('img[alt="creature"]');
-      if (!img || !isInMonsterInventoryGrid(img)) continue;
-      let uid = slot.getAttribute(DATA_DEPOT_SLOT_ID);
-      if (uid) uid = String(uid).trim();
-      if (!uid) {
-        let info = creatureIdMap.get(img);
-        if (!info) {
-          info = getCreatureUniqueId(img, null);
-        }
-        uid = info?.uniqueId != null ? String(info.uniqueId) : null;
-      }
-      if (uid) slotIdPairs.push({ slot, id: uid });
-    }
+    const hidePairs = buildDepotHideSlotPairsFromVisualMatch(slotElements);
 
-    const desiredCountsForTags = getDepotIdCounts();
-    for (const slot of slotElements) {
-      const tagged = slot.getAttribute(DATA_DEPOT_SLOT_ID);
-      if (!tagged) continue;
-      const tid = String(tagged).trim();
-      const remaining = desiredCountsForTags.get(tid) || 0;
-      if (remaining <= 0) {
-        slot.removeAttribute(DATA_DEPOT_SLOT_ID);
-      } else {
-        desiredCountsForTags.set(tid, remaining - 1);
-      }
-    }
+    slotElements.forEach((slot) => slot.removeAttribute(DATA_DEPOT_SLOT_ID));
 
-    // Important: do NOT auto-prune persisted depot ids during layout.
-    // React/radix remounts and duplicate creatures can change slot->id guessing between renders.
-    depotDebug('applyDepotLayout: preserve persisted depot ids', {
+    depotDebug('applyDepotLayout: visual-match assignment', {
       slotCount: slotElements.length,
-      mappedCount: slotIdPairs.length,
+      assignedHideCount: hidePairs.length,
+      depotListLength: depotCreatureState.ids.length,
       depotIds: [...depotCreatureState.ids]
     });
+    if (hidePairs.length < depotCreatureState.ids.length) {
+      depotDebug('applyDepotLayout: unmatched depot entries (no grid cell matched visuals)', {
+        unmatched: depotCreatureState.ids.length - hidePairs.length
+      });
+    }
 
-    const remainingToHide = getDepotIdCounts();
     let hiddenSlots = 0;
-    for (const { slot, id } of slotIdPairs) {
-      const remaining = remainingToHide.get(id) || 0;
-      if (remaining <= 0) continue;
+    for (const { slot, id } of hidePairs) {
+      slot.setAttribute(DATA_DEPOT_SLOT_ID, String(id));
       slot.setAttribute(DATA_DEPOT_HIDDEN, 'true');
       slot.style.setProperty('display', 'none', 'important');
       hiddenSlots += 1;
-      remainingToHide.set(id, remaining - 1);
     }
 
     // In hidden-mode depot, no visual separator/row is rendered.
@@ -1811,6 +1998,10 @@ function applyDepotLayout() {
       hiddenSlots,
       depotIds: [...depotCreatureState.ids]
     });
+
+    if (depotConfig.enableFavorites && !isBlockedByAnalysisMods()) {
+      scheduleTimeout(() => updateFavoriteHearts(), TIMEOUT_DELAYS.FAVORITES_AFTER_DEPOT_LAYOUT);
+    }
   } finally {
     depotLayoutApplying = false;
     scheduleTimeout(() => resumeMonsterGridObserverAfterLayout(), 0);
@@ -1818,6 +2009,7 @@ function applyDepotLayout() {
 }
 
 function scheduleApplyDepotLayout(delay = TIMEOUT_DELAYS.CONTAINER_DEBOUNCE) {
+  if (isMonsterBestiarySearchFiltering()) return;
   if (depotLayoutPendingTimeout !== null) {
     clearTimeout(depotLayoutPendingTimeout);
     activeTimeouts.delete(depotLayoutPendingTimeout);
@@ -1834,6 +2026,7 @@ function startMonsterGridObserver() {
 
   const run = () => {
     if (!depotConfig.enableCreatureDepot || depotLayoutApplying) return;
+    if (isMonsterBestiarySearchFiltering()) return;
     scheduleApplyDepotLayout();
   };
 
@@ -2173,10 +2366,6 @@ function getPlayerMonsters() {
   return globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
 }
 
-function getVisibleCreatures() {
-  return document.querySelectorAll(SELECTORS.CREATURE_IMG);
-}
-
 // =======================
 // 8. Favorites
 // =======================
@@ -2493,42 +2682,34 @@ function updateFavoriteHearts(targetUniqueId = null) {
 
   if (isScrollLocked()) return;
 
-  const allCreatures = Array.from(getVisibleCreatures());
-  const creatures = allCreatures.filter(imgEl => {
-    const isInAnalyzer = imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
-      imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
-    const isInAutoplaySession = imgEl.closest('div[data-autosetup]') ||
-      imgEl.closest('#autoseller-session-widget') ||
-      imgEl.closest('#drop-widget-bottom-element');
-    return !isInAnalyzer && !isInAutoplaySession;
-  });
-
-  if (creatures.length === 0) return;
-
-  const monsters = getPlayerMonsters();
+  const slotEntries = getMonsterGridFavoriteSlotEntries();
+  if (slotEntries.length === 0) return;
 
   if (targetUniqueId) {
-    updateSingleFavoriteHeart(targetUniqueId, creatures, monsters);
+    updateSingleFavoriteHeart(targetUniqueId, slotEntries);
     favoritesState.lastOptimizedUpdate = Date.now();
     return;
   }
 
   removeFavoriteHearts();
-  const resolvedCreatures = resolveCreaturesSequentially(creatures, monsters);
+  const uniqueIdByImg = buildBestiaryFavoriteUniqueIdMap(slotEntries);
 
   let heartsAdded = 0;
   let creaturesChecked = 0;
 
-  resolvedCreatures.forEach(({ imgEl, uniqueId }) => {
+  for (const { slot, img } of slotEntries) {
+    const uniqueId = uniqueIdByImg.get(img);
+    if (uniqueId == null) continue;
     creaturesChecked++;
+    if (slot.getAttribute(DATA_DEPOT_HIDDEN) === 'true') continue;
     if (favoritesState.creatures.has(uniqueId)) {
       const symbolKey = favoritesState.creatures.get(uniqueId) || 'heart';
       const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
       const heart = createFavoriteHeartElement(symbolKey, symbol);
-      imgEl.parentElement.appendChild(heart);
+      img.parentElement.appendChild(heart);
       heartsAdded++;
     }
-  });
+  }
 
   if (heartsAdded > 0) {
     const currentResult = `${creaturesChecked}-${heartsAdded}`;
@@ -2538,30 +2719,21 @@ function updateFavoriteHearts(targetUniqueId = null) {
   }
 }
 
-function updateSingleFavoriteHeart(targetUniqueId, allCreatures, monsters) {
-  const creatures = allCreatures.filter(imgEl => {
-    const isInAnalyzer = imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
-      imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
-    const isInAutoplaySession = imgEl.closest('div[data-autosetup]') ||
-      imgEl.closest('#autoseller-session-widget') ||
-      imgEl.closest('#drop-widget-bottom-element');
-    return !isInAnalyzer && !isInAutoplaySession;
-  });
-
-  const resolvedCreatures = resolveCreaturesSequentially(creatures, monsters);
-  for (let idx = 0; idx < resolvedCreatures.length; idx++) {
-    const { imgEl, uniqueId } = resolvedCreatures[idx];
-    if (uniqueId === targetUniqueId) {
-      const container = imgEl.parentElement;
-      const existingHeart = container.querySelector('.favorite-heart');
-      if (existingHeart) existingHeart.remove();
-      if (favoritesState.creatures.has(uniqueId)) {
-        const symbolKey = favoritesState.creatures.get(uniqueId) || 'heart';
-        const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
-        container.appendChild(createFavoriteHeartElement(symbolKey, symbol));
-      }
-      return;
+function updateSingleFavoriteHeart(targetUniqueId, slotEntries) {
+  const uniqueIdByImg = buildBestiaryFavoriteUniqueIdMap(slotEntries);
+  const sid = String(targetUniqueId);
+  for (const { slot, img } of slotEntries) {
+    if (String(uniqueIdByImg.get(img) || '') !== sid) continue;
+    if (slot.getAttribute(DATA_DEPOT_HIDDEN) === 'true') return;
+    const container = img.parentElement;
+    const existingHeart = container.querySelector('.favorite-heart');
+    if (existingHeart) existingHeart.remove();
+    if (favoritesState.creatures.has(sid)) {
+      const symbolKey = favoritesState.creatures.get(sid) || 'heart';
+      const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
+      container.appendChild(createFavoriteHeartElement(symbolKey, symbol));
     }
+    return;
   }
 }
 
@@ -2582,6 +2754,29 @@ function createFavoriteHeartElement(symbolKey, symbol) {
   return heart;
 }
 
+function inferWantsEliteFromCreatureSlot(containerSlot) {
+  if (!containerSlot) return false;
+  if (containerSlot.querySelector('img[data-max-creatures="true"]')) return true;
+  const rarityEl = containerSlot.querySelector('.has-rarity');
+  const r = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+  if (r === GAME_CONSTANTS.ELITE_RARITY_LEVEL) return true;
+  const textRarityEl = containerSlot.querySelector('.has-rarity-text');
+  const r2 = parseInt(textRarityEl?.getAttribute('data-rarity') || '', 10);
+  return r2 === GAME_CONSTANTS.ELITE_RARITY_LEVEL;
+}
+
+function filterMonstersForCreaturePortrait(monsters, creatureImg, displayedLevel) {
+  if (!Array.isArray(monsters) || !creatureImg) return monsters;
+  const wantsShiny = creatureImg.src.includes('-shiny');
+  let out = monsters.filter((m) => Boolean(m.shiny) === wantsShiny);
+  if (out.length === 0) out = monsters;
+  if (displayedLevel != null && Number.isFinite(displayedLevel)) {
+    const byLevel = out.filter((m) => getLevelFromExp(m.exp || 0) === displayedLevel);
+    if (byLevel.length > 0) out = byLevel;
+  }
+  return out;
+}
+
 function matchCreatureBySequentialIndex(imgEl, monsters) {
   const gameId = getCreatureGameId(imgEl);
   if (!gameId) return null;
@@ -2590,10 +2785,11 @@ function matchCreatureBySequentialIndex(imgEl, monsters) {
   const levelSpan = button?.querySelector('span[translate="no"]');
   const displayedLevel = levelSpan ? parseInt(levelSpan.textContent, 10) : null;
   const slot = imgEl.closest('.container-slot');
-  const wantsElite = Boolean(slot?.querySelector('img[data-max-creatures="true"]'));
+  const wantsElite = inferWantsEliteFromCreatureSlot(slot);
   const wantsShiny = imgEl.src.includes('-shiny');
   const rarityEl = slot?.querySelector('.has-rarity');
   const wantsRarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+  const ambiguousDom = bestiaryDuplicateDomAmbiguous(wantsElite, wantsRarity);
 
   const indexKey = String(gameId);
 
@@ -2611,34 +2807,47 @@ function matchCreatureBySequentialIndex(imgEl, monsters) {
 
   if (matchingMonsters.length > 1) {
     const tail = matchingMonsters.slice(idx);
-    const scoredCandidates = tail.length > 0 ? tail : matchingMonsters;
-    const scoredBaseIdx = tail.length > 0 ? idx : 0;
+    const tailOrFull = tail.length > 0 ? tail : matchingMonsters;
+    const narrowed = filterMonstersForCreaturePortrait(tailOrFull, imgEl, displayedLevel);
+    const scoredCandidates = narrowed.length > 0 ? narrowed : tailOrFull;
 
-    const rarityFromMonster = (m) => {
-      if (isEliteMonster(m)) return 6;
-      const tier = Number(m?.tier || 1);
-      return Math.max(1, Math.min(5, tier + 1));
-    };
-
-    let bestLocalIdx = -1;
-    let bestScore = -Infinity;
-    for (let i = 0; i < scoredCandidates.length; i++) {
-      const m = scoredCandidates[i];
-      let score = 0;
-      if (displayedLevel && getLevelFromExp(m.exp || 0) === displayedLevel) score += 100;
-      if (isEliteMonster(m) === wantsElite) score += 40;
-      if (Boolean(m.shiny) === wantsShiny) score += 20;
-      if (Number.isFinite(wantsRarity) && rarityFromMonster(m) === wantsRarity) score += 15;
-      score -= i * 0.001; // stable ordering for exact ties
-      if (score > bestScore) {
-        bestScore = score;
-        bestLocalIdx = i;
+    if (ambiguousDom && scoredCandidates.length > 1) {
+      const inTail = scoredCandidates.filter((m) => matchingMonsters.indexOf(m) >= idx);
+      if (inTail.length > 0) {
+        inTail.sort((a, b) => matchingMonsters.indexOf(a) - matchingMonsters.indexOf(b));
+        const pick = inTail[0];
+        idx = matchingMonsters.indexOf(pick);
+        identifiedMonster = pick;
       }
-    }
+    } else {
+      const rarityFromMonster = (m) => {
+        if (isEliteMonster(m)) return 6;
+        const tier = Number(m?.tier || 1);
+        return Math.max(1, Math.min(5, tier + 1));
+      };
 
-    if (bestLocalIdx >= 0) {
-      idx = scoredBaseIdx + bestLocalIdx;
-      identifiedMonster = matchingMonsters[idx] || identifiedMonster;
+      let bestGlobalIdx = -1;
+      let bestScore = -Infinity;
+      for (let i = 0; i < scoredCandidates.length; i++) {
+        const m = scoredCandidates[i];
+        const globalIdx = matchingMonsters.indexOf(m);
+        if (globalIdx < idx) continue;
+        let score = 0;
+        if (displayedLevel && getLevelFromExp(m.exp || 0) === displayedLevel) score += 100;
+        if (isEliteMonster(m) === wantsElite) score += 40;
+        if (Boolean(m.shiny) === wantsShiny) score += 20;
+        if (Number.isFinite(wantsRarity) && rarityFromMonster(m) === wantsRarity) score += 15;
+        score -= (globalIdx - idx) * 0.001;
+        if (score > bestScore) {
+          bestScore = score;
+          bestGlobalIdx = globalIdx;
+        }
+      }
+
+      if (bestGlobalIdx >= 0) {
+        idx = bestGlobalIdx;
+        identifiedMonster = matchingMonsters[idx] || identifiedMonster;
+      }
     }
   }
 
@@ -2672,18 +2881,113 @@ function resolveCreaturesSequentially(creatures, monsters) {
   return resolved;
 }
 
+/**
+ * img → save uniqueId for bestiary grid cells. When depot is on, hidden rows must use
+ * `data-depot-creature-id` (visual depot assignment). Sequential resolution across *all* slots
+ * would consume a different instance at those indices and shift every following visible id — wrong
+ * favorite hearts. Visible rows match against non-depot monsters with the same visual scoring as
+ * depot layout; sequential fallback only for leftovers.
+ */
+function buildBestiaryFavoriteUniqueIdMap(slotEntries) {
+  const monsters = getPlayerMonsters();
+  const imgs = slotEntries.map((e) => e.img);
+
+  if (!depotConfig.enableCreatureDepot || depotCreatureState.ids.length === 0) {
+    return new Map(resolveCreaturesSequentially(imgs, monsters).map((r) => [r.imgEl, r.uniqueId]));
+  }
+
+  const byId = new Map(monsters.map((m) => [String(m.id), m]));
+  const depotSet = new Set(depotCreatureState.ids.map((id) => String(id)));
+  const uniqueIdByImg = new Map();
+  const visiblePool = monsters.filter((m) => !depotSet.has(String(m.id)));
+  const unusedVisible = new Set(visiblePool.map((m) => String(m.id)));
+  const siblingsByGameId = new Map();
+  for (const m of visiblePool) {
+    const gid = m.gameId;
+    if (!siblingsByGameId.has(gid)) siblingsByGameId.set(gid, []);
+    siblingsByGameId.get(gid).push(m);
+  }
+  const speciesOrderRank = new Map();
+  for (const arr of siblingsByGameId.values()) {
+    sortMonstersByVisualOrder(arr).forEach((m, idx) => {
+      speciesOrderRank.set(String(m.id), idx);
+    });
+  }
+  const firstPoolIndexById = new Map();
+  visiblePool.forEach((m, idx) => {
+    const s = String(m.id);
+    if (!firstPoolIndexById.has(s)) firstPoolIndexById.set(s, idx);
+  });
+
+  for (let i = 0; i < slotEntries.length; i++) {
+    const { slot, img } = slotEntries[i];
+    if (slot.getAttribute(DATA_DEPOT_HIDDEN) === 'true') {
+      const tag = String(slot.getAttribute(DATA_DEPOT_SLOT_ID) || '').trim();
+      if (tag && byId.has(tag)) uniqueIdByImg.set(img, tag);
+      continue;
+    }
+
+    const row = getBestiarySlotVisualRow(slot, i);
+    if (!row) continue;
+
+    let bestId = null;
+    let bestScore = -Infinity;
+    let bestSpeciesRank = Infinity;
+    let bestPoolIdx = Infinity;
+    for (const m of visiblePool) {
+      const sid = String(m.id);
+      if (!unusedVisible.has(sid)) continue;
+      const sc = depotVisualScoreForMonster(row, m);
+      if (sc == null) continue;
+      const sr = speciesOrderRank.get(sid) ?? 0;
+      const pi = firstPoolIndexById.get(sid) ?? 0;
+      const better =
+        sc > bestScore ||
+        (sc === bestScore && sr < bestSpeciesRank) ||
+        (sc === bestScore && sr === bestSpeciesRank && pi < bestPoolIdx);
+      if (better) {
+        bestScore = sc;
+        bestId = sid;
+        bestSpeciesRank = sr;
+        bestPoolIdx = pi;
+      }
+    }
+    if (bestId != null) {
+      uniqueIdByImg.set(img, bestId);
+      unusedVisible.delete(bestId);
+    }
+  }
+
+  const unmappedVisible = slotEntries.filter(
+    ({ slot, img }) => slot.getAttribute(DATA_DEPOT_HIDDEN) !== 'true' && !uniqueIdByImg.has(img)
+  );
+  if (unmappedVisible.length > 0) {
+    const assignedIds = new Set(uniqueIdByImg.values());
+    const pool = monsters.filter((m) => !assignedIds.has(String(m.id)));
+    const resolved = resolveCreaturesSequentially(
+      unmappedVisible.map((e) => e.img),
+      pool
+    );
+    for (const r of resolved) {
+      uniqueIdByImg.set(r.imgEl, r.uniqueId);
+    }
+  }
+
+  return uniqueIdByImg;
+}
+
+/** img → save uniqueId for monster-scroll grid; same rules as favorites (depot-aware). Exposed for Mod Settings hover tooltips. */
+function getBestiaryCreatureIdMapForInterop() {
+  const entries = getMonsterGridFavoriteSlotEntries();
+  if (entries.length === 0) return new Map();
+  return buildBestiaryFavoriteUniqueIdMap(entries);
+}
+
 function getResolvedUniqueIdForCreatureImg(creatureImg) {
   if (!creatureImg || !isInMonsterInventoryGrid(creatureImg)) return null;
-  const grid = getMonsterGridFlexContainer();
-  if (grid) {
-    const gridImgs = Array.from(grid.children)
-      .filter((el) => el.matches('div.flex') && el.querySelector('img[alt="creature"]'))
-      .map((slot) => slot.querySelector('img[alt="creature"]'))
-      .filter((img) => Boolean(img && isInMonsterInventoryGrid(img)));
-    const resolved = resolveCreaturesSequentially(gridImgs, getPlayerMonsters());
-    const match = resolved.find((r) => r.imgEl === creatureImg);
-    if (match?.uniqueId != null) return String(match.uniqueId);
-  }
+  const map = getBestiaryCreatureIdMapForInterop();
+  const uid = map.get(creatureImg);
+  if (uid != null) return String(uid);
   const fallback = getCreatureUniqueId(creatureImg, null)?.uniqueId;
   return fallback != null ? String(fallback) : null;
 }
@@ -2817,6 +3121,105 @@ function buildCreatureImgToUniqueIdMap(creatureImgs = null) {
   return map;
 }
 
+/**
+ * Logs instance unique ids (and portrait game ids) from the monster inventory grid DOM — same
+ * resolution rules as depot layout. Enable with window.BESTIARY_DEBUG = true.
+ *
+ * `bySlot` is aligned with `grid` creature rows (DOM child order): index 0 is the first matching
+ * `div.flex` under the flex-wrap grid. Depot-hidden cells are still listed (`hidden: true`); use
+ * `visibleOnly` for the sequence of on-screen portraits. `resolvedUniqueId` matches
+ * `data-depot-creature-id` when the mod set it; otherwise it is inferred (can differ from React keys).
+ */
+function depotDebugLogMonsterGridCreatureIdsFromDom(reason) {
+  if (!(typeof window !== 'undefined' && window.BESTIARY_DEBUG === true)) return;
+
+  const grid = getMonsterGridFlexContainer();
+  if (!grid) {
+    depotDebug('bestiary DOM creature ids', { reason, uniqueIds: [], gameIds: [], slotCount: 0, note: 'no monster grid' });
+    return;
+  }
+
+  const slotElements = getMonsterGridCreatureSlotElements(grid);
+
+  const gridImgs = slotElements
+    .map((slot) => slot.querySelector('img[alt="creature"]'))
+    .filter((img) => Boolean(img && isInMonsterInventoryGrid(img)));
+
+  const creatureIdMap = buildCreatureImgToUniqueIdMap(gridImgs);
+
+  const uniqueIds = [];
+  const gameIds = [];
+  const bySlot = [];
+  const visibleResolvedUniqueIds = [];
+  const visibleGameIds = [];
+  let unmapped = 0;
+
+  for (let domIndex = 0; domIndex < slotElements.length; domIndex++) {
+    const slot = slotElements[domIndex];
+    const img = slot.querySelector('img[alt="creature"]');
+    if (!img || !isInMonsterInventoryGrid(img)) {
+      bySlot.push({ domIndex, skip: 'no creature img in #monster-scroll' });
+      continue;
+    }
+
+    const portraitMatch = (img.src || '').match(/\/portraits\/([^/?#]+)/i);
+    const portraitFile = portraitMatch ? portraitMatch[1] : null;
+    const attrRaw = slot.getAttribute(DATA_DEPOT_SLOT_ID);
+    const attrId = attrRaw != null && String(attrRaw).trim() !== '' ? String(attrRaw).trim() : null;
+
+    let uid = attrId;
+    if (!uid) {
+      let info = creatureIdMap.get(img);
+      if (!info) info = getCreatureUniqueId(img, null);
+      uid = info?.uniqueId != null ? String(info.uniqueId) : null;
+    }
+
+    const gid = getCreatureGameId(img);
+    const hidden =
+      slot.getAttribute(DATA_DEPOT_HIDDEN) === 'true' ||
+      slot.style.display === 'none' ||
+      (typeof window !== 'undefined' && window.getComputedStyle(slot).display === 'none');
+
+    bySlot.push({
+      domIndex,
+      portraitFile,
+      gameId: gid,
+      dataDepotCreatureId: attrId,
+      resolvedUniqueId: uid,
+      attrMatchesResolved: attrId == null || attrId === uid,
+      hidden
+    });
+
+    if (uid) {
+      uniqueIds.push(uid);
+      gameIds.push(gid);
+      if (!hidden) {
+        visibleResolvedUniqueIds.push(uid);
+        visibleGameIds.push(gid);
+      }
+    } else {
+      unmapped += 1;
+    }
+  }
+
+  const attrMismatchCount = bySlot.filter((r) => r && r.attrMatchesResolved === false).length;
+
+  depotDebug('bestiary DOM creature ids', {
+    reason,
+    note:
+      'bySlot[] order = DOM under flex grid (includes hidden depot slots). Compare portraitFile to img src. resolvedUniqueId uses data-depot-creature-id when present, else heuristic (same as layout).',
+    slotCount: slotElements.length,
+    mappedCount: uniqueIds.length,
+    unmapped,
+    attrMismatchCount,
+    visibleSlotCount: visibleResolvedUniqueIds.length,
+    visibleOnly: { uniqueIds: visibleResolvedUniqueIds, gameIds: visibleGameIds },
+    uniqueIds,
+    gameIds,
+    bySlot
+  });
+}
+
 // =======================
 // 9. Observers & Reapply
 // =======================
@@ -2910,6 +3313,21 @@ function stopContextMenuObserver() {
   }
 }
 
+function tabReapplyDelayedCreatureAndEquipmentPass(delayMs) {
+  attachArsenalObservation();
+  loadDepotCreatureIds();
+  loadDepotEquipmentIds();
+  depotDebug('handleTabSwitchReapply: delayed pass', {
+    delay: delayMs,
+    depotCreatureIds: depotCreatureState.ids.length,
+    depotEquipmentIds: depotEquipmentState.ids.length
+  });
+  assignEquipmentIdsToArsenalButtons();
+  logArsenalDiagnosisSnapshot(`tab-reapply-delay-${delayMs}-before-remove`);
+  applyEquipmentDepotLayout();
+  if (getMonsterGridFlexContainer()) applyDepotLayout();
+}
+
 function handleTabSwitchReapply() {
   // Keep depot/favorites in sync with persisted storage after tab-driven rerenders.
   depotDebug('handleTabSwitchReapply: start');
@@ -2925,21 +3343,8 @@ function handleTabSwitchReapply() {
   applyEquipmentDepotLayout();
   notifyFavoriteGridRefresh('tab');
   // Tab content is often remounted in phases; run several passes to restore depot moves.
-  [0, 120, 320, 700, 1300].forEach((delay) => {
-    scheduleTimeout(() => {
-      attachArsenalObservation();
-      loadDepotCreatureIds();
-      loadDepotEquipmentIds();
-      depotDebug('handleTabSwitchReapply: delayed pass', {
-        delay,
-        depotCreatureIds: depotCreatureState.ids.length,
-        depotEquipmentIds: depotEquipmentState.ids.length
-      });
-      assignEquipmentIdsToArsenalButtons();
-      logArsenalDiagnosisSnapshot(`tab-reapply-delay-${delay}-before-remove`);
-      applyEquipmentDepotLayout();
-      if (getMonsterGridFlexContainer()) applyDepotLayout();
-    }, delay);
+  TAB_REAPPLY_CREATURE_GRID_DELAYS_MS.forEach((delay) => {
+    scheduleTimeout(() => tabReapplyDelayedCreatureAndEquipmentPass(delay), delay);
   });
 }
 
@@ -3023,11 +3428,11 @@ function notifyFavoriteGridRefresh(kind) {
   if (depotConfig.enableCreatureDepot && !isBlockedByAnalysisMods()) {
     if (kind === 'creature') {
       const timeSince = Date.now() - lastDepotLayoutCreatureRefreshAt;
-      if (timeSince > 400) {
+      if (timeSince > 400 && !isMonsterBestiarySearchFiltering()) {
         lastDepotLayoutCreatureRefreshAt = Date.now();
         scheduleApplyDepotLayout();
       }
-    } else {
+    } else if (!isMonsterBestiarySearchFiltering()) {
       scheduleApplyDepotLayout();
     }
   }
@@ -3073,6 +3478,7 @@ function initDepotManager() {
   startTabButtonObserver();
   startDepotInventoryObserver();
   startArsenalGridObserver();
+  startMonsterBestiarySearchListener();
   if (depotConfig.enableCreatureDepot) {
     startMonsterGridObserver();
     scheduleTimeout(() => applyDepotLayout(), TIMEOUT_DELAYS.FAVORITES_INIT);
@@ -3084,7 +3490,8 @@ function initDepotManager() {
     reloadDepotConfigFromStorage,
     applyDepotLayout,
     resetDepotCreatureIds,
-    showDepotModal
+    showDepotModal,
+    getBestiaryCreatureIdMap: getBestiaryCreatureIdMapForInterop
   };
 
   if (depotConfig.enableFavorites) {
@@ -3109,6 +3516,7 @@ function cleanupDepotManager() {
   stopDepotInventoryObserver();
   stopArsenalGridObserver();
   stopMonsterGridObserver();
+  stopMonsterBestiarySearchListener();
   removeFavoriteHearts();
   activeTimeouts.forEach(id => {
     try {

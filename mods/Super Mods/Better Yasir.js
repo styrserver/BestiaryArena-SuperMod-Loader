@@ -23,6 +23,11 @@
         MAX_INPUT_WIDTH: 50
       };
       
+      const BETTER_YASIR_PO_ORDERS_STORAGE_KEY = 'better-yasir-po-orders-v1';
+      const BETTER_YASIR_PO_HISTORY_STORAGE_KEY = 'better-yasir-po-purchase-history-v1';
+      const BETTER_YASIR_PO_HISTORY_MAX = 200;
+      const BETTER_YASIR_PO_PLACEMENT_GRACE_MS = 30000;
+      
       // DOM selectors cache
       const SELECTORS = {
         YASIR_MODAL: '.widget-bottom',
@@ -93,6 +98,22 @@
       let confirmationOutsideHandler = null;
       let observer = null;
       let observerTimeout = null;
+      
+      let yasirActiveSettingsPanel = null;
+      let yasirSettingsEscListenerKey = null;
+      let yasirSettingsResizeListenerKey = null;
+      let yasirSettingsModalObserver = null;
+      let yasirSettingsRepositionTimer = null;
+      let yasirSettingsResizeObserver = null;
+      let yasirSettingsResizeObserverTarget = null;
+      let yasirSettingsPanelCleanupLock = false;
+      let yasirPoOrderFulfillmentInProgress = false;
+      let yasirPoAffordabilityUnsub = null;
+      let yasirDailyPoUnsub = null;
+      let yasirDailyPoLastSig = null;
+      let yasirDailyPoSetupRetryTimer = null;
+      let yasirPoHeadlessFulfillTimer = null;
+      let yasirPoOrderPlacementGraceUntil = 0;
       
       // Track processed elements to prevent re-processing
       const processedElements = new WeakSet();
@@ -199,6 +220,399 @@
           border: 1px solid #32cd32 !important;
           box-shadow: 0 0 8px rgba(50, 205, 50, 0.6) !important;
         }
+        
+        .better-yasir-po-section {
+          margin-bottom: 10px;
+          padding-bottom: 10px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .better-yasir-po-section:last-of-type {
+          border-bottom: none;
+          margin-bottom: 0;
+          padding-bottom: 0;
+        }
+        .better-yasir-settings-main {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          flex: 1;
+          min-height: 0;
+          box-sizing: border-box;
+          overflow: hidden;
+        }
+        .better-yasir-settings-tab-panels {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .better-yasir-settings-tab-panel {
+          flex: 1;
+          min-height: 0;
+          display: none;
+          flex-direction: column;
+          overflow-y: auto;
+          overflow-x: hidden;
+          background: rgba(0, 0, 0, 0.18);
+          padding: 16px;
+          box-sizing: border-box;
+        }
+        .better-yasir-settings-tab-panel.is-active {
+          display: flex;
+        }
+        .better-yasir-settings-tab-panel.better-yasir-settings-tab-panel--po-orders {
+          overflow: hidden;
+        }
+        .better-yasir-settings-tab-bar {
+          display: flex;
+          flex-direction: row;
+          gap: 6px;
+          margin-top: 10px;
+        }
+        .better-yasir-settings-tab {
+          flex: 1;
+          min-width: 0;
+          text-align: center;
+        }
+        .better-yasir-settings-panel-header {
+          flex-shrink: 0;
+          padding: 12px 16px 8px;
+          box-sizing: border-box;
+          border-bottom: 1px solid #444;
+          background: rgba(0, 0, 0, 0.15);
+        }
+        .better-yasir-orders-typography {
+          font-size: 10px;
+          line-height: 1.38;
+        }
+        .better-yasir-orders-typography .better-yasir-settings-section-title {
+          font-size: 11px;
+          line-height: 1.3;
+        }
+        .better-yasir-orders-typography .better-yasir-settings-panel-header .better-yasir-settings-section-title {
+          font-size: 12px;
+        }
+        .better-yasir-orders-typography .better-yasir-po-add-btn {
+          font-size: 14px !important;
+        }
+        .better-yasir-orders-typography .better-yasir-po-row-order-remove {
+          font-size: 10px !important;
+        }
+        .better-yasir-orders-typography .better-yasir-settings-tab {
+          font-size: 13px !important;
+        }
+        .better-yasir-po-currency-inline {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          vertical-align: middle;
+          font-weight: 700;
+        }
+        .better-yasir-po-currency-inline .better-yasir-po-currency-icon {
+          width: 13px;
+          height: 13px;
+          object-fit: contain;
+          flex-shrink: 0;
+        }
+        [data-better-yasir-po-floating="true"] {
+          font-size: 10px;
+          line-height: 1.38;
+        }
+        [data-better-yasir-po-floating="true"] .better-yasir-po-item-option {
+          font-size: 10px;
+        }
+        .better-yasir-settings-section-title {
+          margin: 0 0 12px 0;
+          color: #ffe066;
+          font-weight: bold;
+          text-align: left;
+          text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        .better-yasir-settings-section-title.is-compact {
+          margin-bottom: 8px;
+        }
+        .better-yasir-po-composer {
+          display: flex;
+          flex-direction: column;
+          flex: 0 0 150px;
+          height: 150px;
+          min-height: 150px;
+          max-height: 150px;
+          box-sizing: border-box;
+          overflow: hidden;
+          padding-bottom: 10px;
+          margin-bottom: 10px;
+          border-bottom: 1px solid #444;
+        }
+        .better-yasir-po-placed {
+          flex: 1 1 auto;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          margin-top: 4px;
+          overflow: hidden;
+        }
+        .better-yasir-po-placed > .better-yasir-settings-section-title {
+          flex-shrink: 0;
+        }
+        .better-yasir-po-placed-scroll {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow-y: auto;
+          overflow-x: hidden;
+          box-sizing: border-box;
+        }
+        .better-yasir-po-edit-input {
+          height: 22px;
+          box-sizing: border-box;
+          text-align: center;
+          background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');
+          background-size: auto;
+          background-repeat: repeat;
+          border: none;
+          color: #fff;
+          font-size: 11px;
+          padding: 2px 4px;
+          border-radius: 2px;
+        }
+        .better-yasir-po-edit-input.better-yasir-po-qty-input {
+          width: 52px;
+        }
+        .better-yasir-po-edit-input.better-yasir-po-price-input {
+          width: 92px;
+        }
+        .better-yasir-po-edit-input:focus {
+          outline: none;
+          box-shadow: 0 0 0 2px rgba(106, 106, 106, 0.55);
+        }
+        .better-yasir-po-card {
+          padding: 8px;
+          margin-bottom: 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .better-yasir-po-card-toolbar {
+          display: flex;
+          justify-content: flex-end;
+        }
+        .better-yasir-po-add-btn {
+          margin-top: 6px;
+          width: 100%;
+          flex-shrink: 0;
+        }
+        .better-yasir-po-composer-editor {
+          padding-bottom: 2px;
+          font-size: 10px;
+          line-height: 1.38;
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow-y: auto;
+          overflow-x: hidden;
+        }
+        .better-yasir-po-composer-editor .better-yasir-po-item-trigger,
+        .better-yasir-po-composer-editor .better-yasir-po-item-option {
+          font-size: 10px;
+        }
+        .better-yasir-po-composer-editor .better-yasir-po-edit-input {
+          font-size: 10px;
+          height: 20px;
+          padding: 1px 3px;
+        }
+        .better-yasir-po-composer-line {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 4px 5px;
+          line-height: 1.38;
+        }
+        .better-yasir-po-composer-row-price {
+          margin-top: 6px;
+        }
+        .better-yasir-po-composer-total-block {
+          margin-top: 8px;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 3px;
+          line-height: 1.38;
+        }
+        .better-yasir-po-composer-total-block .better-yasir-po-composer-total-preview {
+          margin-left: 0;
+        }
+        .better-yasir-po-composer-picker {
+          flex: 0 1 200px;
+          min-width: 0;
+          max-width: 200px;
+        }
+        .better-yasir-po-composer-editor .better-yasir-po-item-trigger {
+          width: 180px;
+          max-width: 180px;
+          min-height: 30px;
+          padding: 2px 5px;
+        }
+        .better-yasir-po-composer-editor .better-yasir-po-item-trigger-chevron {
+          font-size: 9px;
+        }
+        .better-yasir-po-row-order {
+          display: flex;
+          flex-direction: row;
+          align-items: flex-start;
+          gap: 6px;
+          padding: 4px 5px;
+          margin-bottom: 3px;
+        }
+        .better-yasir-po-row-em {
+          font-weight: 700;
+        }
+        .better-yasir-po-row-order-body {
+          flex: 1;
+          min-width: 0;
+        }
+        .better-yasir-po-row-order-line {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 3px 5px;
+          line-height: 1.35;
+        }
+        .better-yasir-po-row-order-total {
+          margin-top: 3px;
+          line-height: 1.3;
+          opacity: 0.9;
+        }
+        .better-yasir-po-row-order-actions {
+          flex-shrink: 0;
+          align-self: flex-start;
+          margin-top: -1px;
+        }
+        .better-yasir-po-item-trigger {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          min-height: 38px;
+          padding: 4px 6px;
+          box-sizing: border-box;
+          text-align: left;
+          color: #fff;
+          background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');
+          border: 2px solid transparent;
+          border-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png') 4 fill stretch;
+          cursor: pointer;
+        }
+        .better-yasir-po-item-trigger .better-yasir-po-item-slot img,
+        .better-yasir-po-item-option .better-yasir-po-item-slot img {
+          width: 28px;
+          height: 28px;
+          object-fit: contain;
+          flex-shrink: 0;
+        }
+        .better-yasir-po-trigger-visual .container-slot,
+        .better-yasir-po-item-option .container-slot {
+          pointer-events: none;
+          flex-shrink: 0;
+        }
+        .better-yasir-po-item-trigger-chevron {
+          margin-left: auto;
+          opacity: 0.75;
+          font-size: 10px;
+        }
+        .better-yasir-po-item-trigger-placeholder-label {
+          color: rgba(255, 255, 255, 0.38);
+          letter-spacing: 0.12em;
+        }
+        .better-yasir-po-trigger-placeholder-slot {
+          box-sizing: border-box;
+          border-radius: 2px;
+          background: rgba(0, 0, 0, 0.2);
+        }
+        .better-yasir-po-currency-insufficient,
+        .better-yasir-po-currency-insufficient .better-yasir-po-currency-icon {
+          color: #ff6b6b !important;
+        }
+        .better-yasir-po-row-order--suspended {
+          opacity: 1;
+          background-color: rgba(100, 18, 18, 0.88) !important;
+          background-image: none !important;
+          border: 2px solid rgba(255, 90, 90, 0.95) !important;
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+        }
+        .better-yasir-po-row-order--suspended,
+        .better-yasir-po-row-order--suspended .better-yasir-po-row-order-body,
+        .better-yasir-po-row-order--suspended .better-yasir-po-row-order-line,
+        .better-yasir-po-row-order--suspended .better-yasir-po-row-order-total,
+        .better-yasir-po-row-order--suspended .better-yasir-po-row-em,
+        .better-yasir-po-row-order--suspended .text-whiteRegular,
+        .better-yasir-po-row-order--suspended [class*="text-rarity"] {
+          color: #ffdede !important;
+        }
+        .better-yasir-po-row-order--suspended .better-yasir-po-currency-insufficient,
+        .better-yasir-po-row-order--suspended .better-yasir-po-currency-insufficient .better-yasir-po-currency-inline,
+        .better-yasir-po-row-order--suspended .better-yasir-po-currency-insufficient span {
+          color: #ffb4b4 !important;
+        }
+        .better-yasir-po-row-order--suspended .better-yasir-po-row-order-remove {
+          color: #fff5f5 !important;
+          border-color: rgba(255, 160, 160, 0.85) !important;
+        }
+        .better-yasir-po-row-order--suspended .better-yasir-po-suspended-note {
+          font-size: 9px;
+          line-height: 1.25;
+          margin-top: 4px;
+          color: #ffc8c8 !important;
+          font-weight: 700;
+        }
+        .better-yasir-po-suspended-note {
+          font-size: 9px;
+          line-height: 1.25;
+          margin-top: 4px;
+          color: #ff9a9a;
+        }
+        .better-yasir-po-item-picker-root {
+          position: relative;
+          z-index: 2;
+        }
+        .better-yasir-po-item-list {
+          display: none;
+          flex-direction: column;
+          gap: 4px;
+          box-sizing: border-box;
+          padding: 6px;
+          background: rgba(22, 22, 28, 0.98);
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          border-radius: 4px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+        }
+        .better-yasir-po-item-option {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          width: 100%;
+          min-height: 36px;
+          padding: 4px 6px;
+          box-sizing: border-box;
+          text-align: left;
+          color: #fff;
+          background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');
+          border: 2px solid transparent;
+          border-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png') 4 fill stretch;
+          cursor: pointer;
+        }
+        .better-yasir-po-item-option:hover {
+          filter: brightness(1.08);
+        }
+        .better-yasir-po-item-slot {
+          width: 32px;
+          height: 32px;
+          flex-shrink: 0;
+          display: grid;
+          place-items: center;
+          background: rgba(0, 0, 0, 0.25);
+          border: 2px solid transparent;
+          border-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png') 4 fill stretch;
+        }
     
       `;
       
@@ -286,120 +700,57 @@
         }
       };
     
-      // Generic cache manager
-      const cacheManager = {
-        caches: new Map(),
-        
-        get(key, ttl = 1000) {
-          const cached = this.caches.get(key);
-          if (cached && Date.now() - cached.timestamp < ttl) {
-            return cached.data;
-          }
-          return null;
-        },
-        
-        set(key, data, ttl = 1000) {
-          this.caches.set(key, { data, timestamp: Date.now() });
-        },
-        
-        clear() {
-          this.caches.clear();
-        }
-      };
-      
-      // Safe game state access with caching
+      // Game state: always read fresh snapshots (no TTL cache — clearCaches was invalidating it constantly).
       function getGameState() {
-        // Only load if Yasir modal is present or likely to be present
-        if (!document.querySelector('.widget-bottom') && 
+        if (!document.querySelector('.widget-bottom') &&
             !document.querySelector('h2 p')?.textContent?.includes('Yasir')) {
           return null;
         }
-        
-        const cached = cacheManager.get('gameState', 1000);
-        if (cached) return cached;
-        
         try {
           const playerState = globalThis.state?.player?.getSnapshot()?.context;
           const dailyState = globalThis.state?.daily?.getSnapshot()?.context;
           const globalState = globalThis.state?.global?.getSnapshot()?.context;
-          
-          const stateData = { playerState, dailyState, globalState };
-          cacheManager.set('gameState', stateData, 1000);
-          
-          return stateData;
+          return { playerState, dailyState, globalState };
         } catch (error) {
           handleError(error, 'Error accessing game state');
           return null;
         }
       }
       
-      // Get Yasir's shop data from daily state
       function getYasirShopData() {
-        // Only load if Yasir modal is present
-        if (!document.querySelector('.widget-bottom')) {
-          return {};
-        }
-        
-        const cached = cacheManager.get('yasirShopData', 3000);
-        if (cached) return cached;
-        
         try {
-          const gameState = getGameState();
-          const yasirData = gameState?.dailyState?.yasir || {};
-          
-          cacheManager.set('yasirShopData', yasirData, 3000);
-          return yasirData;
+          const yasir = globalThis.state?.daily?.getSnapshot?.()?.context?.yasir;
+          return yasir && typeof yasir === 'object' ? yasir : {};
         } catch (error) {
           handleError(error, 'Error accessing Yasir shop data');
           return {};
         }
       }
       
-      // Get inventory specifically
       function getInventoryState() {
-        const cached = cacheManager.get('inventoryState', 1000);
-        if (cached) return cached;
-        
         try {
           const gameState = getGameState();
-          const inventory = gameState?.playerState?.inventory || {};
-          
-          cacheManager.set('inventoryState', inventory, 1000);
-          return inventory;
+          return gameState?.playerState?.inventory || {};
         } catch (error) {
           handleError(error, 'Error accessing inventory state');
           return {};
         }
       }
     
-      // Get player's dust amount with caching
       function getPlayerDust() {
-        const cached = cacheManager.get('playerDust', 500);
-        if (cached !== null) return cached;
-        
         try {
-          const gameState = getGameState();
-          const dust = gameState?.playerState?.dust || 0;
-          
-          cacheManager.set('playerDust', dust, 500);
-          return dust;
+          const ctx = globalThis.state?.player?.getSnapshot()?.context;
+          return ctx?.dust ?? 0;
         } catch (error) {
           handleError(error, 'Error accessing player dust');
           return 0;
         }
       }
       
-      // Get player's gold amount with caching
       function getPlayerGold() {
-        const cached = cacheManager.get('playerGold', 500);
-        if (cached !== null) return cached;
-        
         try {
-          const gameState = getGameState();
-          const gold = gameState?.playerState?.gold || 0;
-          
-          cacheManager.set('playerGold', gold, 500);
-          return gold;
+          const ctx = globalThis.state?.player?.getSnapshot()?.context;
+          return ctx?.gold ?? 0;
         } catch (error) {
           handleError(error, 'Error accessing player gold');
           return 0;
@@ -475,11 +826,8 @@
             }
           }
           
-          // For exaltation chest, we need to check if it's available and get its price
           if (itemKey === 'exaltationChest') {
-            // Check if exaltation chest is available in the API data
-            // For now, return a default price or check if it's in stock
-            return null; // Will fall back to DOM method
+            return 150;
           }
           
           // For recycle rune, we need to check if it's available and get its price
@@ -507,10 +855,14 @@
             const itemSlot = container.querySelector(SELECTORS.ITEM_SLOT);
             minQuantity = getMinimumQuantityFromDOM(itemSlot) || 10;
           } else {
-            // Try to find the item slot in the document if no container provided
             const itemSlot = document.querySelector(`[data-item-key="${itemKey}"]`);
             if (itemSlot) {
               minQuantity = getMinimumQuantityFromDOM(itemSlot) || 10;
+            } else {
+              const bundle = YASIR_PO_PRICING[itemKey]?.bundle;
+              if (Number.isFinite(bundle) && bundle > 0) {
+                minQuantity = bundle;
+              }
             }
           }
           const totalPrice = diceCost * minQuantity;
@@ -851,8 +1203,34 @@
         }
       }
       
+      /**
+       * English dice names: singular when listingQuantity === 1 (one Yasir listing), else plural.
+       * DOM-derived names get a best-effort manipulator / manipulators fix when quantity is known.
+       */
+      function adjustDiceManipulatorPlural(displayName, itemKey, listingQuantity) {
+        if (!displayName || !(itemKey && itemKey.startsWith('diceManipulator'))) {
+          return displayName;
+        }
+        const q = listingQuantity != null ? parseInt(String(listingQuantity), 10) : NaN;
+        if (!Number.isFinite(q) || q < 1) {
+          return displayName;
+        }
+        if (q === 1) {
+          return displayName.replace(/\bmanipulators\b/gi, (m) =>
+            m.charAt(0) === 'M' ? 'Manipulator' : 'manipulator'
+          );
+        }
+        return displayName.replace(/\bmanipulator\b/gi, (m) =>
+          m.charAt(0) === 'M' ? 'Manipulators' : 'manipulators'
+        );
+      }
+      
       // Show confirmation prompt inside Yasir tooltip
-      function getItemDisplayName(itemKey, contextElement = null) {
+      function getItemDisplayName(itemKey, contextElement = null, nameOpts = null) {
+        const listingQty =
+          nameOpts && nameOpts.listingQuantity != null
+            ? parseInt(String(nameOpts.listingQuantity), 10)
+            : null;
         // Try to get the name from the DOM first (will be in correct language)
         let itemSlot = null;
         
@@ -899,7 +1277,7 @@
               clone.querySelectorAll('p').forEach(p => p.remove());
               const nameText = clone.textContent?.trim();
               if (nameText) {
-                return nameText;
+                return adjustDiceManipulatorPlural(nameText, itemKey, listingQty);
               }
             }
           }
@@ -922,17 +1300,244 @@
           return 'Summon Scroll';
         }
         if (itemKey.startsWith('diceManipulator')) {
-          const tier = parseInt(itemKey.replace('diceManipulator',''));
-          const names = {
+          const tier = parseInt(itemKey.replace('diceManipulator', ''), 10);
+          const plural = {
             1: 'Common dice manipulators',
             2: 'Uncommon dice manipulators',
             3: 'Rare dice manipulators',
             4: 'Mythic dice manipulators',
             5: 'Legendary dice manipulators'
           };
-          return names[tier] || 'dice manipulators';
+          const singular = {
+            1: 'Common dice manipulator',
+            2: 'Uncommon dice manipulator',
+            3: 'Rare dice manipulator',
+            4: 'Mythic dice manipulator',
+            5: 'Legendary dice manipulator'
+          };
+          if (listingQty === 1) {
+            return singular[tier] || 'dice manipulator';
+          }
+          return plural[tier] || 'dice manipulators';
         }
         return 'items';
+      }
+      
+      function loadYasirPoOrdersFromStorage() {
+        try {
+          const raw = localStorage.getItem(BETTER_YASIR_PO_ORDERS_STORAGE_KEY);
+          if (!raw) {
+            return [];
+          }
+          const arr = JSON.parse(raw);
+          return Array.isArray(arr) ? arr : [];
+        } catch (_) {
+          return [];
+        }
+      }
+      
+      function saveYasirPoOrdersToStorage(rows) {
+        try {
+          localStorage.setItem(BETTER_YASIR_PO_ORDERS_STORAGE_KEY, JSON.stringify(rows));
+        } catch (error) {
+          handleError(error, 'saveYasirPoOrdersToStorage');
+        }
+      }
+      
+      function loadYasirPoPurchaseHistoryCountFromStorage() {
+        try {
+          const raw = localStorage.getItem(BETTER_YASIR_PO_HISTORY_STORAGE_KEY);
+          if (!raw) {
+            return 0;
+          }
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed.length : 0;
+        } catch (_) {
+          return 0;
+        }
+      }
+      
+      function refreshBetterYasirOrdersPanelTabCounts() {
+        const panel = document.getElementById('better-yasir-settings-panel');
+        if (!panel) {
+          return;
+        }
+        const orderBtn = panel.querySelector('[data-better-yasir-tab="orders"]');
+        const historyBtn = panel.querySelector('[data-better-yasir-tab="history"]');
+        if (!orderBtn || !historyBtn) {
+          return;
+        }
+        const orderCount = loadYasirPoOrdersFromStorage().length;
+        const histCount = loadYasirPoPurchaseHistoryCountFromStorage();
+        orderBtn.textContent = `${t('mods.betterYasir.settingsPurchaseOrdersTitle')} (${orderCount})`;
+        historyBtn.textContent = `${t('mods.betterYasir.settingsPurchaseHistoryTitle')} (${histCount})`;
+      }
+      
+      function formatHistoryGoldAmountLabel(amount) {
+        return t('mods.betterYasir.historyCostGold').replace(
+          /\{amount\}/g,
+          Math.round(amount).toLocaleString()
+        );
+      }
+      
+      function formatHistoryDustAmountLabel(amount) {
+        return t('mods.betterYasir.historyCostDust').replace(
+          /\{amount\}/g,
+          Math.round(amount).toLocaleString()
+        );
+      }
+      
+      /** Same sentence as saved purchase history (incl. batch/total gold or dust). */
+      function buildYasirPoPurchaseSummaryLine(itemKey, quantity, costMeta = null) {
+        const safeQuantity = parseInt(quantity, 10) || 1;
+        const itemName = getItemDisplayName(itemKey, null, { listingQuantity: safeQuantity });
+        const g = costMeta?.gold;
+        const d = costMeta?.dust;
+        if (typeof g === 'number' && g > 0) {
+          const batchG = costMeta?.goldBatch;
+          let costPhrase;
+          if (
+            typeof batchG === 'number' &&
+            batchG > 0 &&
+            Math.round(batchG) !== Math.round(g)
+          ) {
+            costPhrase = t('mods.betterYasir.historyPurchaseGoldBatchAndTotal')
+              .replace(/\{batch\}/g, formatHistoryGoldAmountLabel(batchG))
+              .replace(/\{total\}/g, formatHistoryGoldAmountLabel(g));
+          } else {
+            costPhrase = formatHistoryGoldAmountLabel(g);
+          }
+          return t('mods.betterYasir.successBuyWithCost')
+            .replace(/\{quantity\}/g, String(safeQuantity))
+            .replace(/\{itemName\}/g, itemName)
+            .replace(/\{cost\}/g, costPhrase);
+        }
+        if (typeof d === 'number' && d > 0) {
+          const batchD = costMeta?.dustBatch;
+          let costPhrase;
+          if (
+            typeof batchD === 'number' &&
+            batchD > 0 &&
+            Math.round(batchD) !== Math.round(d)
+          ) {
+            costPhrase = t('mods.betterYasir.historyPurchaseDustBatchAndTotal')
+              .replace(/\{batch\}/g, formatHistoryDustAmountLabel(batchD))
+              .replace(/\{total\}/g, formatHistoryDustAmountLabel(d));
+          } else {
+            costPhrase = formatHistoryDustAmountLabel(d);
+          }
+          return t('mods.betterYasir.successBuyWithCost')
+            .replace(/\{quantity\}/g, String(safeQuantity))
+            .replace(/\{itemName\}/g, itemName)
+            .replace(/\{cost\}/g, costPhrase);
+        }
+        return t('mods.betterYasir.successBuy')
+          .replace(/\{quantity\}/g, String(safeQuantity))
+          .replace(/\{itemName\}/g, itemName);
+      }
+      
+      function appendYasirPurchaseHistoryRecord(itemKey, quantity, costMeta = null) {
+        try {
+          const line = buildYasirPoPurchaseSummaryLine(itemKey, quantity, costMeta);
+          const raw = localStorage.getItem(BETTER_YASIR_PO_HISTORY_STORAGE_KEY);
+          let list = [];
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              list = parsed;
+            }
+          }
+          list.unshift({ ts: Date.now(), line });
+          localStorage.setItem(
+            BETTER_YASIR_PO_HISTORY_STORAGE_KEY,
+            JSON.stringify(list.slice(0, BETTER_YASIR_PO_HISTORY_MAX))
+          );
+          refreshBetterYasirOrdersPanelTabCounts();
+        } catch (error) {
+          handleError(error, 'appendYasirPurchaseHistoryRecord');
+        }
+      }
+      
+      const BETTER_YASIR_PO_TOAST_DURATION_MS = 30000;
+      const BETTER_YASIR_PO_TOAST_CONTAINER_ID = 'better-yasir-po-toast-container';
+      
+      /** Transient toast (Challenges.js-style DOM): long duration, × to dismiss, separate id from Challenges. */
+      function showBetterYasirPurchaseOrderToast(message, durationMs) {
+        const ms = typeof durationMs === 'number' && durationMs > 0 ? durationMs : BETTER_YASIR_PO_TOAST_DURATION_MS;
+        const safeMsg = message != null && message !== '' ? String(message).replace(/</g, '\u003c') : '';
+        try {
+          let container = document.getElementById(BETTER_YASIR_PO_TOAST_CONTAINER_ID);
+          if (!container) {
+            container = document.createElement('div');
+            container.id = BETTER_YASIR_PO_TOAST_CONTAINER_ID;
+            container.style.cssText =
+              'position: fixed; z-index: 10002; inset: 16px 16px 64px; pointer-events: none;';
+            document.body.appendChild(container);
+          }
+          const existing = container.querySelectorAll('.better-yasir-po-toast-item');
+          const stackOffset = existing.length * 46;
+          const flexWrap = document.createElement('div');
+          flexWrap.className = 'better-yasir-po-toast-item';
+          flexWrap.style.cssText =
+            'left: 0; right: 0; display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-' +
+            stackOffset +
+            'px); bottom: 0; justify-content: flex-end; pointer-events: auto;';
+          const toast = document.createElement('div');
+          toast.setAttribute('role', 'status');
+          toast.className =
+            'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+          toast.style.cssText = 'pointer-events: auto;';
+          const widgetTop = document.createElement('div');
+          widgetTop.className = 'widget-top h-2.5';
+          const widgetBottom = document.createElement('div');
+          widgetBottom.className =
+            'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+          const messageDiv = document.createElement('div');
+          messageDiv.className = 'text-left';
+          messageDiv.style.flex = '1 1 auto';
+          if (safeMsg.indexOf('\n') !== -1) {
+            messageDiv.style.whiteSpace = 'pre-line';
+          } else {
+            messageDiv.style.whiteSpace = 'normal';
+          }
+          messageDiv.style.color = '#b8f5b8';
+          messageDiv.textContent = safeMsg;
+          const closeBtn = document.createElement('button');
+          closeBtn.type = 'button';
+          closeBtn.setAttribute('aria-label', t('mods.betterYasir.poOrderToastDismissAria'));
+          closeBtn.className = 'flex-shrink-0';
+          closeBtn.style.cssText =
+            'width: 28px; height: 28px; padding: 0; border: none; background: transparent; cursor: pointer; color: #e74c3c; font-size: 20px; line-height: 1; display: flex; align-items: center; justify-content: center; border-radius: 4px;';
+          closeBtn.textContent = '\u00d7';
+          widgetBottom.appendChild(messageDiv);
+          widgetBottom.appendChild(closeBtn);
+          toast.appendChild(widgetTop);
+          toast.appendChild(widgetBottom);
+          flexWrap.appendChild(toast);
+          container.appendChild(flexWrap);
+          
+          let autoTimer = null;
+          const dismiss = () => {
+            if (autoTimer != null) {
+              clearTimeout(autoTimer);
+              autoTimer = null;
+            }
+            if (flexWrap.parentNode) {
+              flexWrap.parentNode.removeChild(flexWrap);
+            }
+            const rest = container.querySelectorAll('.better-yasir-po-toast-item');
+            rest.forEach((el, index) => {
+              el.style.transform = 'translateY(-' + index * 46 + 'px)';
+            });
+          };
+          closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dismiss();
+          });
+          autoTimer = setTimeout(dismiss, ms);
+        } catch (e) {
+          handleError(e, 'showBetterYasirPurchaseOrderToast', 'warn');
+        }
       }
     
       function showConfirmationPrompt(quantity, itemKey, actionButton, actionType) {
@@ -951,7 +1556,7 @@
             delete btn.dataset.confirm;
           });
     
-          const itemName = getItemDisplayName(itemKey, actionButton);
+          const itemName = getItemDisplayName(itemKey, actionButton, { listingQuantity: quantity });
           const actionText = actionType === 'buy' ? t('mods.betterYasir.buy').toLowerCase() : t('mods.betterYasir.sell').toLowerCase();
           
           // Calculate the total cost
@@ -1505,23 +2110,45 @@
         }
       }
       
+      /** Flex wrapper or td in Yasir buy table for reliable price / bundle reads (globalThis.state + DOM). */
+      function findYasirBuyFlexContainerForItemKey(modalRoot, itemKey) {
+        const root = modalRoot || domUtils.findYasirModal();
+        if (!root || !itemKey) {
+          return null;
+        }
+        const slot = root.querySelector(`tbody .container-slot[data-item-key="${itemKey}"]`);
+        if (!slot) {
+          return null;
+        }
+        return slot.closest('div.flex.items-center.gap-1\\.5') || slot.closest('td');
+      }
+      
       // Perform the actual purchase/trade via API call
-      async function performAction(itemKey, quantity, actionType) {
+      async function performAction(itemKey, quantity, actionType, actionOptions = {}) {
+        const suppressDefaultSuccessUi = actionOptions.suppressDefaultSuccessUi === true;
         // Create unique request key for deduplication
         const requestKey = `${actionType}-${itemKey}-${quantity}-${Date.now()}`;
         
         return deduplicateRequest(requestKey, async () => {
+          let buyPreflight = null;
           try {
             if (!itemKey || quantity <= 0) {
               handleError(new Error('Invalid action parameters'), { itemKey, quantity, actionType });
-              return;
+              return false;
             }
             
             // For dice manipulators, convert visual quantity to actual quantity (only for buy actions)
             let actualQuantity = quantity;
             if (actionType === 'buy' && itemKey && itemKey.startsWith('diceManipulator')) {
-              const minQuantity = getMinimumQuantityFromDOM(document.querySelector(`[data-item-key="${itemKey}"]`)) || 10;
-              actualQuantity = quantity * minQuantity; // Convert visual quantity to actual dice quantity
+              const yasirModal = domUtils.findYasirModal();
+              const slot = yasirModal?.querySelector(`[data-item-key="${itemKey}"]`);
+              const fromDom = slot ? getMinimumQuantityFromDOM(slot) : null;
+              const bundle = YASIR_PO_PRICING[itemKey]?.bundle;
+              const minQuantity =
+                (Number.isFinite(fromDom) && fromDom > 0 ? fromDom : null) ||
+                (Number.isFinite(bundle) && bundle > 0 ? bundle : null) ||
+                10;
+              actualQuantity = quantity * minQuantity;
             }
             
             // Re-validate current inventory before proceeding
@@ -1533,7 +2160,7 @@
               if (actionType === 'sell') {
                 if (currentQuantity < quantity) {
                   handleError(new Error('Insufficient items for trade'), { requested: quantity, available: currentQuantity, itemKey });
-                  return;
+                  return false;
                 }
               }
             }
@@ -1553,12 +2180,31 @@
                 resourceType = 'dust';
               }
               
-              const itemPrice = getItemPriceWithFallback(itemKey);
+              const priceCtx = findYasirBuyFlexContainerForItemKey(null, itemKey);
+              let itemPrice = getItemPriceWithFallback(itemKey, priceCtx);
+              if (itemKey === 'exaltationChest' && (!Number.isFinite(itemPrice) || itemPrice <= 0)) {
+                itemPrice = 150;
+              }
               const totalCost = itemPrice * quantity;
+              let batchGoldCost = null;
+              let dustBatchCost = null;
+              if (itemKey && itemKey.startsWith('diceManipulator')) {
+                const yd = getYasirShopData();
+                const dc = yd?.diceCost;
+                const b = YASIR_PO_PRICING[itemKey]?.bundle;
+                if (Number.isFinite(dc) && Number.isFinite(b) && b > 0) {
+                  batchGoldCost = dc * b;
+                }
+              } else if (itemKey === 'recycleRune' && Number.isFinite(itemPrice) && itemPrice > 0) {
+                batchGoldCost = itemPrice;
+              } else if (itemKey === 'exaltationChest' && Number.isFinite(itemPrice) && itemPrice > 0) {
+                dustBatchCost = itemPrice;
+              }
+              buyPreflight = { resourceType, totalCost, itemPrice, batchGoldCost, dustBatchCost };
               
               if (playerResource < totalCost) {
                 handleError(new Error(`Insufficient ${resourceType} for purchase`), { requested: totalCost, available: playerResource });
-                return;
+                return false;
               }
             }
             
@@ -1568,7 +2214,7 @@
             
             if (!yasirLocation) {
               handleError(new Error('Could not determine Yasir location'), { yasirData });
-              return;
+              return false;
             }
             
             // Determine the endpoint and payload based on action type and item
@@ -1676,9 +2322,9 @@
             
             const result = await response.json();
             
-            // Update local inventory based on API response
+            let responseData = null;
             if (result && Array.isArray(result) && result[0]?.result?.data?.json) {
-              const responseData = result[0].result.data.json;
+              responseData = result[0].result.data.json;
               
               // Create inventory diff from the response
               const inventoryDiff = {};
@@ -1703,16 +2349,74 @@
               }
             }
             
+            if (actionType === 'buy' && actionOptions && typeof actionOptions === 'object') {
+              let gold = null;
+              let dust = null;
+              if (responseData) {
+                if (responseData.goldDiff !== undefined && responseData.goldDiff < 0) {
+                  gold = Math.abs(responseData.goldDiff);
+                }
+                if (responseData.dustDiff !== undefined && responseData.dustDiff < 0) {
+                  dust = Math.abs(responseData.dustDiff);
+                }
+              }
+              if (gold == null && dust == null && buyPreflight) {
+                if (buyPreflight.resourceType === 'gold' && buyPreflight.totalCost > 0) {
+                  gold = Math.round(buyPreflight.totalCost);
+                }
+                if (buyPreflight.resourceType === 'dust' && buyPreflight.totalCost > 0) {
+                  dust = Math.round(buyPreflight.totalCost);
+                }
+              }
+              let goldBatch = null;
+              if (
+                buyPreflight?.batchGoldCost != null &&
+                Number.isFinite(buyPreflight.batchGoldCost) &&
+                buyPreflight.batchGoldCost > 0
+              ) {
+                goldBatch = Math.round(buyPreflight.batchGoldCost);
+              } else if (
+                itemKey &&
+                itemKey.startsWith('diceManipulator') &&
+                gold != null &&
+                quantity > 0
+              ) {
+                const inferred = gold / quantity;
+                if (Number.isFinite(inferred) && inferred > 0) {
+                  goldBatch = Math.round(inferred);
+                }
+              }
+              let dustBatch = null;
+              if (
+                buyPreflight?.dustBatchCost != null &&
+                Number.isFinite(buyPreflight.dustBatchCost) &&
+                buyPreflight.dustBatchCost > 0
+              ) {
+                dustBatch = Math.round(buyPreflight.dustBatchCost);
+              } else if (itemKey === 'exaltationChest' && dust != null && quantity > 0) {
+                const inferred = dust / quantity;
+                if (Number.isFinite(inferred) && inferred > 0) {
+                  dustBatch = Math.round(inferred);
+                }
+              }
+              actionOptions._resolvedBuyCost = { gold, dust, goldBatch, dustBatch };
+            }
+            
             // Show success message
             removeConfirmationPrompt();
             const safeQuantity = parseInt(quantity) || 1;
-            const itemName = getItemDisplayName(itemKey);
+            const itemName = getItemDisplayName(itemKey, null, { listingQuantity: safeQuantity });
             const successKey = actionType === 'buy' ? 'mods.betterYasir.successBuy' : 'mods.betterYasir.successSell';
             const successText = t(successKey)
               .replace('{quantity}', safeQuantity)
               .replace('{itemName}', itemName);
             
-            showTooltipMessage(successText, '#32cd32', 5000);
+            if (!suppressDefaultSuccessUi) {
+              showTooltipMessage(successText, '#32cd32', 5000);
+              if (actionType === 'buy') {
+                appendYasirPurchaseHistoryRecord(itemKey, safeQuantity, actionOptions._resolvedBuyCost);
+              }
+            }
             
             // Clear caches immediately after successful action to get fresh state
             clearCaches();
@@ -1818,6 +2522,7 @@
               });
             }, 100);
             
+            return true;
           } catch (error) {
             handleError(error, `${actionType} action failed`);
             
@@ -1830,7 +2535,9 @@
             }
             
             // Show error state briefly
-            showTooltipMessage(errorMessage);
+            if (!suppressDefaultSuccessUi) {
+              showTooltipMessage(errorMessage);
+            }
             throw error; // Re-throw to be handled by the calling function
           }
         });
@@ -2544,48 +3251,2290 @@
       }
       
     // =======================
-    // 4. Core UI Functions
+    // 4. Core UI Functions (footer Settings + Exaltation-style side panel)
     // =======================
       
+      const YASIR_SETTINGS_PANEL_WIDTH = 350;
+      
+      const YASIR_SETTINGS_BTN_BASE = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
+      
+      function yasirSettingsFooterButtonClass() {
+        return `${YASIR_SETTINGS_BTN_BASE} frame-1-blue active:frame-pressed-1-blue surface-blue text-whiteHighlight`;
+      }
+      
+      function refreshBetterYasirFooterOrdersIndicator() {
+        const hasOrders = loadYasirPoOrdersFromStorage().length > 0;
+        const tabLabel = t('mods.betterYasir.tabSettings');
+        const queuedTip = t('mods.betterYasir.footerOrdersHasQueuedTooltip');
+        document.querySelectorAll('[data-better-yasir-footer-settings]').forEach((btn) => {
+          btn.className = yasirSettingsFooterButtonClass();
+          let warn = btn.querySelector('[data-better-yasir-footer-po-warn]');
+          if (hasOrders) {
+            if (!warn) {
+              warn = document.createElement('span');
+              warn.dataset.betterYasirFooterPoWarn = 'true';
+              warn.setAttribute('aria-hidden', 'true');
+              warn.className = 'better-yasir-footer-po-warn';
+              warn.textContent = '⚠️';
+              warn.style.cssText =
+                'font-size:12px;line-height:1;display:inline-flex;align-items:center;margin-right:3px;color:#ffc107;flex-shrink:0;';
+              btn.insertBefore(warn, btn.firstChild);
+            }
+            btn.title = queuedTip;
+            btn.setAttribute('aria-label', `${tabLabel}. ${queuedTip}`);
+          } else {
+            warn?.remove();
+            btn.removeAttribute('title');
+            btn.setAttribute('aria-label', tabLabel);
+          }
+        });
+      }
+      
+      function syncYasirFooterSettingsButton(widgetBottom) {
+        refreshBetterYasirFooterOrdersIndicator();
+      }
+      
+      function positionYasirSettingsPanel(panel, dialogEl) {
+        const modalRect = dialogEl.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const modalHeight = modalRect.height;
+        let left = modalRect.right;
+        let top = modalRect.top;
+        if (left + YASIR_SETTINGS_PANEL_WIDTH > viewportWidth) {
+          left = modalRect.left - YASIR_SETTINGS_PANEL_WIDTH;
+        }
+        if (top + modalHeight > viewportHeight) {
+          top = viewportHeight - modalHeight - 10;
+        }
+        if (top < 10) {
+          top = 10;
+        }
+        if (left < 10) {
+          left = 10;
+        }
+        panel.style.position = 'absolute';
+        panel.style.zIndex = '10001';
+        panel.style.left = (left - modalRect.left) + 'px';
+        panel.style.top = (top - modalRect.top) + 'px';
+        panel.style.height = modalHeight + 'px';
+      }
+      
+      function cleanupYasirSettingsPanel() {
+        if (yasirSettingsPanelCleanupLock) {
+          return;
+        }
+        yasirSettingsPanelCleanupLock = true;
+        try {
+          detachYasirPoAffordabilityPlayerListener();
+          if (yasirSettingsRepositionTimer) {
+            clearTimeout(yasirSettingsRepositionTimer);
+            yasirSettingsRepositionTimer = null;
+          }
+          if (yasirSettingsModalObserver) {
+            yasirSettingsModalObserver.disconnect();
+            yasirSettingsModalObserver = null;
+          }
+          if (yasirSettingsResizeListenerKey) {
+            removeManagedEventListener(yasirSettingsResizeListenerKey);
+            yasirSettingsResizeListenerKey = null;
+          }
+          if (yasirSettingsResizeObserver && yasirSettingsResizeObserverTarget) {
+            yasirSettingsResizeObserver.disconnect();
+            yasirSettingsResizeObserver = null;
+            yasirSettingsResizeObserverTarget = null;
+          }
+          if (yasirSettingsEscListenerKey) {
+            removeManagedEventListener(yasirSettingsEscListenerKey);
+            yasirSettingsEscListenerKey = null;
+          }
+          document.querySelectorAll('[data-better-yasir-po-floating="true"]').forEach((node) => {
+            try {
+              node.remove();
+            } catch (_) {
+              /* ignore */
+            }
+          });
+          document.querySelectorAll('[data-better-yasir-po-overlay="true"]').forEach((node) => {
+            try {
+              node.remove();
+            } catch (_) {
+              /* ignore */
+            }
+          });
+          if (yasirActiveSettingsPanel) {
+            yasirActiveSettingsPanel.remove();
+            yasirActiveSettingsPanel = null;
+          }
+          syncYasirFooterSettingsButton(null);
+        } finally {
+          yasirSettingsPanelCleanupLock = false;
+        }
+      }
+      
+      function setupYasirSettingsPanelObservers(dialogEl) {
+        yasirSettingsModalObserver = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            if (mutation.type === 'childList') {
+              for (const node of mutation.removedNodes) {
+                if (node === dialogEl) {
+                  cleanupYasirSettingsPanel();
+                  return;
+                }
+              }
+            }
+            if (mutation.type === 'attributes' && mutation.attributeName === 'data-state') {
+              const s = dialogEl.getAttribute('data-state');
+              if (s === 'closed' || !s) {
+                cleanupYasirSettingsPanel();
+                return;
+              }
+            }
+            if (mutation.type === 'attributes' && mutation.attributeName === 'style' && yasirActiveSettingsPanel) {
+              if (yasirSettingsRepositionTimer) {
+                clearTimeout(yasirSettingsRepositionTimer);
+              }
+              yasirSettingsRepositionTimer = setTimeout(() => {
+                yasirSettingsRepositionTimer = null;
+                if (yasirActiveSettingsPanel && dialogEl.isConnected) {
+                  positionYasirSettingsPanel(yasirActiveSettingsPanel, dialogEl);
+                }
+              }, 100);
+            }
+          }
+        });
+        yasirSettingsModalObserver.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['data-state', 'style']
+        });
+        yasirSettingsModalObserver.observe(dialogEl, {
+          attributes: true,
+          attributeFilter: ['data-state', 'style']
+        });
+      }
+      
+      function setupYasirSettingsPanelResize(dialogEl) {
+        const onResize = () => {
+          if (yasirActiveSettingsPanel && dialogEl.isConnected) {
+            positionYasirSettingsPanel(yasirActiveSettingsPanel, dialogEl);
+          }
+        };
+        yasirSettingsResizeListenerKey = addManagedEventListener(window, 'resize', onResize);
+        yasirSettingsResizeObserver = new ResizeObserver(onResize);
+        yasirSettingsResizeObserver.observe(dialogEl);
+        yasirSettingsResizeObserverTarget = dialogEl;
+      }
+      
+      /** Same item id as Yasir shop / Cyclopedia (Hunt Analyzer createItemSprite pattern). */
+      const YASIR_DICE_MANIPULATOR_SPRITE_ID = 35909;
+      
+      /** Dice Manipulator: game spritesheet + rarity border (see Hunt Analyzer.js createItemSprite). */
+      function createYasirPoDiceManipulatorSprite(rarity, altText) {
+        const containerSlot = document.createElement('div');
+        containerSlot.className = 'container-slot surface-darker';
+        containerSlot.style.cssText = 'width:32px;height:32px;min-width:32px;min-height:32px;overflow:visible;padding:0;';
+        containerSlot.setAttribute('data-hoverable', 'false');
+        containerSlot.setAttribute('data-highlighted', 'false');
+        containerSlot.setAttribute('data-disabled', 'false');
+        
+        const rarityDiv = document.createElement('div');
+        rarityDiv.className = 'has-rarity relative grid h-full place-items-center';
+        rarityDiv.setAttribute('data-rarity', String(rarity));
+        
+        const spriteContainer = document.createElement('div');
+        spriteContainer.className = 'relative size-sprite';
+        spriteContainer.style.overflow = 'visible';
+        
+        const spriteElement = document.createElement('div');
+        spriteElement.className = `sprite item id-${YASIR_DICE_MANIPULATOR_SPRITE_ID} absolute bottom-0 right-0`;
+        
+        const viewport = document.createElement('div');
+        viewport.className = 'viewport';
+        
+        const img = document.createElement('img');
+        img.alt = altText || 'Dice Manipulator';
+        img.setAttribute('data-cropped', 'false');
+        img.className = 'spritesheet';
+        img.style.setProperty('--cropX', '0');
+        img.style.setProperty('--cropY', '0');
+        
+        viewport.appendChild(img);
+        spriteElement.appendChild(viewport);
+        spriteContainer.appendChild(spriteElement);
+        rarityDiv.appendChild(spriteContainer);
+        containerSlot.appendChild(rarityDiv);
+        return containerSlot;
+      }
+      
+      function createYasirPoStaticItemIcon(src, altText) {
+        const slot = document.createElement('div');
+        slot.className = 'better-yasir-po-item-slot';
+        const im = document.createElement('img');
+        im.alt = altText || '';
+        im.className = 'pixelated';
+        im.width = 26;
+        im.height = 26;
+        im.src = src;
+        slot.appendChild(im);
+        return slot;
+      }
+      
+      function createYasirPoItemPickerVisual(entry) {
+        if (entry.kind === 'dice') {
+          return createYasirPoDiceManipulatorSprite(entry.rarity, t(entry.labelKey));
+        }
+        return createYasirPoStaticItemIcon(entry.icon, t(entry.labelKey));
+      }
+      
+      function createYasirPoNumberInput(ariaLabelKey, widthClass) {
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.inputMode = 'numeric';
+        inp.autocomplete = 'off';
+        inp.className = `better-yasir-po-edit-input pixel-font-14 ${widthClass}`;
+        inp.setAttribute('aria-label', t(ariaLabelKey));
+        return inp;
+      }
+      
+      /** Per-item bundle size, dust cost, and allowed gold listing price range (per Yasir bundle slot). */
+      const YASIR_PO_PRICING = {
+        exaltationChest: { currency: 'dust', perUnit: 150, bundle: 1 },
+        recycleRune: { currency: 'gold', minPerBundle: 10000, maxPerBundle: 14000, bundle: 1 },
+        diceManipulator4: { currency: 'gold', minPerBundle: 45000, maxPerBundle: 60000, bundle: 10 },
+        diceManipulator3: { currency: 'gold', minPerBundle: 30000, maxPerBundle: 45000, bundle: 30 }
+      };
+      
+      /** Product phrase for PO rows, e.g. "30x Rare Dice Manipulators" (bundle size baked in). */
+      function getYasirPoOrderProductPhrase(itemKey) {
+        const rule = YASIR_PO_PRICING[itemKey];
+        if (!rule) {
+          return '';
+        }
+        if (itemKey === 'diceManipulator3') {
+          return t('mods.betterYasir.settingsPoOrderProductDiceRare').replace(/\{bundle\}/g, String(rule.bundle));
+        }
+        if (itemKey === 'diceManipulator4') {
+          return t('mods.betterYasir.settingsPoOrderProductDiceMythic').replace(/\{bundle\}/g, String(rule.bundle));
+        }
+        if (itemKey === 'recycleRune') {
+          return t('mods.betterYasir.settingsPoOrderProductRecycleRune');
+        }
+        if (itemKey === 'exaltationChest') {
+          return t('mods.betterYasir.settingsPoOrderProductExaltationChest');
+        }
+        return '';
+      }
+      
+      function getYasirPoPriceBounds(itemKey) {
+        const rule = YASIR_PO_PRICING[itemKey];
+        if (!rule || rule.currency === 'dust') {
+          return null;
+        }
+        return { min: rule.minPerBundle, max: rule.maxPerBundle };
+      }
+      
+      function parseYasirPoQtyInt(raw) {
+        const n = parseInt(String(raw ?? '').replace(/[^\d]/g, ''), 10);
+        return Number.isFinite(n) && n > 0 ? n : NaN;
+      }
+      
+      function parseYasirPoPriceInt(raw) {
+        const n = parseInt(String(raw ?? '').replace(/[^\d]/g, ''), 10);
+        return Number.isFinite(n) ? n : NaN;
+      }
+      
+      function clampYasirPoPrice(n, min, max) {
+        return Math.min(max, Math.max(min, Math.round(n)));
+      }
+      
+      function formatYasirPoAmount(n) {
+        return Math.round(n).toLocaleString();
+      }
+      
+      /** Dice manipulators: qty is Yasir listing count (1 listing = 30 rare or 10 mythic). */
+      function yasirPoQtyIsDiceListingBatches(itemKey) {
+        return itemKey === 'diceManipulator3' || itemKey === 'diceManipulator4';
+      }
+      
+      const YASIR_PO_GOLD_ICON_SRC = '/assets/icons/goldpile.png';
+      const YASIR_PO_DUST_ICON_SRC = '/assets/icons/dust.png';
+      
+      /** @returns {{ kind: 'gold'|'dust', amount: string } | null} */
+      function computeYasirPoOrderTotalParts(itemKey, qtyRaw, priceRaw) {
+        const qty = parseYasirPoQtyInt(qtyRaw);
+        const rule = YASIR_PO_PRICING[itemKey];
+        if (!rule || !Number.isFinite(qty)) {
+          return null;
+        }
+        if (rule.currency === 'dust') {
+          return { kind: 'dust', amount: formatYasirPoAmount(qty * rule.perUnit) };
+        }
+        const bounds = getYasirPoPriceBounds(itemKey);
+        if (!bounds) {
+          return null;
+        }
+        let listing = parseYasirPoPriceInt(priceRaw);
+        if (!Number.isFinite(listing)) {
+          listing = bounds.min;
+        }
+        listing = clampYasirPoPrice(listing, bounds.min, bounds.max);
+        const listings = yasirPoQtyIsDiceListingBatches(itemKey)
+          ? qty
+          : Math.ceil(qty / rule.bundle);
+        const totalGold = listings * listing;
+        return { kind: 'gold', amount: formatYasirPoAmount(totalGold) };
+      }
+      
+      /** Total gold for a gold-currency PO at the given listing cap(s); null for dust / invalid. */
+      function computeYasirPoOrderGoldTotalNumber(itemKey, qtyRaw, priceRaw) {
+        const qty = parseYasirPoQtyInt(qtyRaw);
+        const rule = YASIR_PO_PRICING[itemKey];
+        if (!rule || rule.currency !== 'gold' || !Number.isFinite(qty)) {
+          return null;
+        }
+        const bounds = getYasirPoPriceBounds(itemKey);
+        if (!bounds) {
+          return null;
+        }
+        let listing = parseYasirPoPriceInt(priceRaw);
+        if (!Number.isFinite(listing)) {
+          listing = bounds.min;
+        }
+        listing = clampYasirPoPrice(listing, bounds.min, bounds.max);
+        const listings = yasirPoQtyIsDiceListingBatches(itemKey)
+          ? qty
+          : Math.ceil(qty / rule.bundle);
+        return listings * listing;
+      }
+      
+      function computeYasirPoOrderTotalText(itemKey, qtyRaw, priceRaw) {
+        const p = computeYasirPoOrderTotalParts(itemKey, qtyRaw, priceRaw);
+        if (!p) {
+          return null;
+        }
+        if (p.kind === 'dust') {
+          return `${p.amount} ${t('mods.betterYasir.settingsPoCurrencyDust')}`;
+        }
+        return `${p.amount} ${t('mods.betterYasir.settingsPoCurrencyGold')}`;
+      }
+      
+      function yasirPoOrderRecordsMatch(a, b) {
+        const normLg = (x) => {
+          if (x == null || x === '') {
+            return null;
+          }
+          const n = parseInt(String(x), 10);
+          return Number.isFinite(n) ? n : null;
+        };
+        return (
+          a.itemKey === b.itemKey &&
+          parseInt(String(a.qty), 10) === parseInt(String(b.qty), 10) &&
+          normLg(a.listingGold) === normLg(b.listingGold)
+        );
+      }
+      
+      function removeYasirPoOrderRecord(rec) {
+        const orders = loadYasirPoOrdersFromStorage();
+        const idx = orders.findIndex((o) => yasirPoOrderRecordsMatch(o, rec));
+        if (idx < 0) {
+          return false;
+        }
+        const next = orders.slice(0, idx).concat(orders.slice(idx + 1));
+        saveYasirPoOrdersToStorage(next);
+        return true;
+      }
+      
+      function removePurchaseOrderCardFromOpenSettingsPanel(rec) {
+        const panel = document.getElementById('better-yasir-settings-panel');
+        if (!panel) {
+          return;
+        }
+        const cards = panel.querySelectorAll('[data-better-yasir-po-card]');
+        for (const card of cards) {
+          const lg = card.dataset.poListingGold;
+          const recLg = rec.listingGold != null && rec.listingGold !== '' ? String(rec.listingGold) : '';
+          if (
+            card.dataset.poItemKey === rec.itemKey &&
+            parseInt(card.dataset.poQty, 10) === parseInt(String(rec.qty), 10) &&
+            (lg || '') === recLg
+          ) {
+            card.remove();
+            break;
+          }
+        }
+      }
+      
+      /** Gold cost per Yasir "quantity" unit at current shop listing (game state daily + DOM). */
+      function getYasirCurrentShopBuyUnitGold(modal, itemKey) {
+        const row = findYasirBuyFlexContainerForItemKey(modal, itemKey)?.closest('tr');
+        if (!row || isItemOutOfStock(row)) {
+          return null;
+        }
+        if (itemKey && itemKey.startsWith('diceManipulator')) {
+          const slot = row.querySelector('.container-slot');
+          const yasirData = getYasirShopData();
+          const diceCost = yasirData?.diceCost;
+          const minQ = getMinimumQuantityFromDOM(slot) || 10;
+          if (!Number.isFinite(diceCost) || diceCost <= 0) {
+            return null;
+          }
+          return diceCost * minQ;
+        }
+        if (itemKey === 'recycleRune') {
+          const p = getItemPrice(row);
+          return p > 0 ? p : null;
+        }
+        return null;
+      }
+      
+      /** Total gold for this PO at current listing prices (globalThis.state.player + DOM). */
+      function getYasirPoCurrentTotalGoldCost(modal, rec) {
+        const rule = YASIR_PO_PRICING[rec.itemKey];
+        if (!rule || rule.currency === 'dust') {
+          return null;
+        }
+        const per = getYasirCurrentShopBuyUnitGold(modal, rec.itemKey);
+        if (per == null) {
+          return null;
+        }
+        const qty = parseInt(String(rec.qty), 10);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          return null;
+        }
+        if (yasirPoQtyIsDiceListingBatches(rec.itemKey)) {
+          return per * qty;
+        }
+        return per * Math.ceil(qty / rule.bundle);
+      }
+      
+      /** Per-listing gold for dice PO when Yasir table is not in the DOM (daily diceCost + fixed bundle size). */
+      function getYasirCurrentShopBuyUnitGoldHeadless(itemKey) {
+        if (!(itemKey && itemKey.startsWith('diceManipulator'))) {
+          return null;
+        }
+        const rule = YASIR_PO_PRICING[itemKey];
+        if (!rule || rule.currency !== 'gold') {
+          return null;
+        }
+        const yasirData = getYasirShopData();
+        const diceCost = yasirData?.diceCost;
+        const minQ = rule.bundle;
+        if (!Number.isFinite(diceCost) || diceCost <= 0 || !Number.isFinite(minQ) || minQ <= 0) {
+          return null;
+        }
+        return diceCost * minQ;
+      }
+      
+      function getYasirPoCurrentTotalGoldCostHeadless(rec) {
+        const rule = YASIR_PO_PRICING[rec.itemKey];
+        if (!rule || rule.currency === 'dust') {
+          return null;
+        }
+        const per = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
+        if (per == null) {
+          return null;
+        }
+        const qty = parseInt(String(rec.qty), 10);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          return null;
+        }
+        if (yasirPoQtyIsDiceListingBatches(rec.itemKey)) {
+          return per * qty;
+        }
+        return per * Math.ceil(qty / rule.bundle);
+      }
+      
+      /** Human-readable validation failure codes (purchase-order console logging is always on). */
+      const BETTER_YASIR_PO_LOG_REASONS = {
+        no_state: 'Missing game state or order itemKey',
+        no_yasir: 'Daily state has no Yasir location',
+        bad_item: 'Item is not supported for purchase orders',
+        bad_qty: 'Invalid quantity on order',
+        no_row: 'Buy row not found in Yasir modal DOM',
+        oos: 'Item out of stock in shop table',
+        dust: 'Not enough dust for this order',
+        no_cap: 'Gold order missing listingGold cap',
+        no_price: 'Could not read current shop gold price',
+        over_cap: 'Current listing gold exceeds your price cap',
+        gold: 'Not enough gold for this order at current prices',
+        below_committed_gold: 'Not enough gold to cover this order at your listing cap (order suspended)',
+        below_committed_dust: 'Not enough dust for this order (order suspended)',
+        needs_shop_ui:
+          'Open the Yasir shop for this item (live gold price or stock is read from the shop table)'
+      };
+      
+      function betterYasirPoConsoleLog(message, detail) {
+        if (detail !== undefined) {
+          console.log(`[Better Yasir PO] ${message}`, detail);
+        } else {
+          console.log(`[Better Yasir PO] ${message}`);
+        }
+      }
+      
+      /**
+       * Validates a queued purchase order against globalThis.state (player + daily) and live Yasir DOM.
+       * Does not perform network I/O.
+       */
+      function validateYasirPurchaseOrderAgainstGameState(modal, rec) {
+        if (!rec?.itemKey || !globalThis.state?.player?.getSnapshot) {
+          return { ok: false, reason: 'no_state' };
+        }
+        clearCaches();
+        const dailySnap = globalThis.state.daily?.getSnapshot?.()?.context;
+        if (!dailySnap?.yasir?.location) {
+          return { ok: false, reason: 'no_yasir' };
+        }
+        const rule = YASIR_PO_PRICING[rec.itemKey];
+        if (!rule) {
+          return { ok: false, reason: 'bad_item' };
+        }
+        const qty = parseInt(String(rec.qty), 10);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          return { ok: false, reason: 'bad_qty' };
+        }
+        
+        if (rule.currency === 'dust') {
+          const needDust = qty * rule.perUnit;
+          if (getPlayerDust() < needDust) {
+            return { ok: false, reason: 'below_committed_dust' };
+          }
+        } else {
+          const committedGold = computeYasirPoOrderGoldTotalNumber(
+            rec.itemKey,
+            String(rec.qty),
+            rec.listingGold != null && rec.listingGold !== '' ? String(rec.listingGold) : undefined
+          );
+          if (committedGold != null && getPlayerGold() < committedGold) {
+            return { ok: false, reason: 'below_committed_gold' };
+          }
+        }
+        
+        const priceCtx = findYasirBuyFlexContainerForItemKey(modal, rec.itemKey);
+        if (!priceCtx) {
+          return { ok: false, reason: 'no_row' };
+        }
+        const shopRow = priceCtx.closest('tr');
+        if (!shopRow || isItemOutOfStock(shopRow)) {
+          return { ok: false, reason: 'oos' };
+        }
+        
+        if (rule.currency === 'dust') {
+          return { ok: true };
+        }
+        
+        const cap = parseInt(String(rec.listingGold), 10);
+        if (!Number.isFinite(cap)) {
+          return { ok: false, reason: 'no_cap' };
+        }
+        const perListing = getYasirCurrentShopBuyUnitGold(modal, rec.itemKey);
+        if (perListing == null) {
+          return { ok: false, reason: 'no_price' };
+        }
+        if (perListing > cap) {
+          return { ok: false, reason: 'over_cap' };
+        }
+        const totalGold = getYasirPoCurrentTotalGoldCost(modal, rec);
+        if (totalGold == null || totalGold > getPlayerGold()) {
+          return { ok: false, reason: 'gold' };
+        }
+        return { ok: true };
+      }
+      
+      /**
+       * Validates a PO using only globalThis.state + fixed rules (no Yasir DOM).
+       * Supports dice manipulators and Exaltation Chest (dust). Recycle Rune needs the shop open.
+       */
+      function validateYasirPurchaseOrderHeadless(rec) {
+        if (!rec?.itemKey || !globalThis.state?.player?.getSnapshot) {
+          return { ok: false, reason: 'no_state' };
+        }
+        if (rec.itemKey === 'recycleRune') {
+          return { ok: false, reason: 'needs_shop_ui' };
+        }
+        clearCaches();
+        const dailySnap = globalThis.state.daily?.getSnapshot?.()?.context;
+        if (!dailySnap?.yasir?.location) {
+          return { ok: false, reason: 'no_yasir' };
+        }
+        const rule = YASIR_PO_PRICING[rec.itemKey];
+        if (!rule) {
+          return { ok: false, reason: 'bad_item' };
+        }
+        const qty = parseInt(String(rec.qty), 10);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          return { ok: false, reason: 'bad_qty' };
+        }
+        
+        if (rule.currency === 'dust') {
+          const needDust = qty * rule.perUnit;
+          if (getPlayerDust() < needDust) {
+            return { ok: false, reason: 'below_committed_dust' };
+          }
+          return { ok: true };
+        }
+        
+        if (!rec.itemKey.startsWith('diceManipulator')) {
+          return { ok: false, reason: 'needs_shop_ui' };
+        }
+        
+        const committedGold = computeYasirPoOrderGoldTotalNumber(
+          rec.itemKey,
+          String(rec.qty),
+          rec.listingGold != null && rec.listingGold !== '' ? String(rec.listingGold) : undefined
+        );
+        if (committedGold != null && getPlayerGold() < committedGold) {
+          return { ok: false, reason: 'below_committed_gold' };
+        }
+        
+        const cap = parseInt(String(rec.listingGold), 10);
+        if (!Number.isFinite(cap)) {
+          return { ok: false, reason: 'no_cap' };
+        }
+        const perListing = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
+        if (perListing == null) {
+          return { ok: false, reason: 'no_price' };
+        }
+        if (perListing > cap) {
+          return { ok: false, reason: 'over_cap' };
+        }
+        const totalGold = getYasirPoCurrentTotalGoldCostHeadless(rec);
+        if (totalGold == null || totalGold > getPlayerGold()) {
+          return { ok: false, reason: 'gold' };
+        }
+        return { ok: true };
+      }
+      
+      function buildFallbackPoHistoryCost(rec, modalOrNull) {
+        const rule = YASIR_PO_PRICING[rec.itemKey];
+        if (!rule) {
+          return null;
+        }
+        if (rule.currency === 'dust') {
+          const qty = parseInt(String(rec.qty), 10) || 0;
+          const per = rule.perUnit;
+          const totalD = qty * per;
+          return {
+            gold: null,
+            dust: totalD,
+            goldBatch: null,
+            dustBatch: per
+          };
+        }
+        let goldBatch = null;
+        if (rec.itemKey.startsWith('diceManipulator')) {
+          const per =
+            modalOrNull != null
+              ? getYasirCurrentShopBuyUnitGold(modalOrNull, rec.itemKey)
+              : getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
+          if (per != null) {
+            goldBatch = Math.round(per);
+          }
+        } else if (rec.itemKey === 'recycleRune') {
+          const per =
+            modalOrNull != null
+              ? getYasirCurrentShopBuyUnitGold(modalOrNull, rec.itemKey)
+              : null;
+          if (per != null) {
+            goldBatch = Math.round(per);
+          }
+        }
+        const total =
+          modalOrNull != null
+            ? getYasirPoCurrentTotalGoldCost(modalOrNull, rec)
+            : getYasirPoCurrentTotalGoldCostHeadless(rec);
+        if (total == null) {
+          return null;
+        }
+        const totalR = Math.round(total);
+        if (goldBatch == null && rec.itemKey === 'recycleRune') {
+          const qty = parseInt(String(rec.qty), 10) || 1;
+          goldBatch = Math.round(totalR / Math.max(1, qty));
+        }
+        return { gold: totalR, dust: null, goldBatch, dustBatch: null };
+      }
+      
+      /**
+       * Fulfills at most one order per successful API call; re-scans until no order matches.
+       * modalOrNull: null = headless path (dice + exaltation chest only).
+       * Concurrency: single-flight via yasirPoOrderFulfillmentInProgress.
+       */
+      async function fulfillYasirPurchaseOrderQueue(modalOrNull) {
+        if (!globalThis.state?.player?.getSnapshot) {
+          betterYasirPoConsoleLog('fulfillment aborted: no player state', {
+            mode: modalOrNull != null ? 'modal' : 'headless'
+          });
+          return;
+        }
+        if (!loadYasirPoOrdersFromStorage().length) {
+          return;
+        }
+        
+        const validate =
+          modalOrNull != null
+            ? (rec) => validateYasirPurchaseOrderAgainstGameState(modalOrNull, rec)
+            : (rec) => validateYasirPurchaseOrderHeadless(rec);
+        const mode = modalOrNull != null ? 'modal' : 'headless';
+        
+        clearCaches();
+        const yasirSnap = getYasirShopData();
+        const initialQueue = loadYasirPoOrdersFromStorage();
+        betterYasirPoConsoleLog(`fulfillment start (${mode}) — queued purchase orders and Yasir context`, {
+          purchaseOrders: initialQueue.map((o) => ({
+            itemKey: o.itemKey,
+            qty: o.qty,
+            listingGoldCap: o.listingGold != null && o.listingGold !== '' ? o.listingGold : null
+          })),
+          orderCount: initialQueue.length,
+          yasir: {
+            location: yasirSnap?.location ?? null,
+            diceCost: yasirSnap?.diceCost ?? null
+          },
+          playerSnapshot: {
+            gold: getPlayerGold(),
+            dust: getPlayerDust()
+          }
+        });
+        
+        let safety = 0;
+        while (safety < 32) {
+          safety++;
+          clearCaches();
+          const orders = loadYasirPoOrdersFromStorage();
+          if (!orders.length) {
+            break;
+          }
+          let progressed = false;
+          for (const rec of orders) {
+            const gate = validate(rec);
+            if (!gate.ok) {
+              betterYasirPoConsoleLog('order skipped (validation)', {
+                mode,
+                order: {
+                  itemKey: rec.itemKey,
+                  qty: rec.qty,
+                  listingGoldCap: rec.listingGold != null && rec.listingGold !== '' ? rec.listingGold : null
+                },
+                reasonCode: gate.reason,
+                reason: BETTER_YASIR_PO_LOG_REASONS[gate.reason] || gate.reason,
+                yasirLocation: globalThis.state?.daily?.getSnapshot?.()?.context?.yasir?.location ?? null
+              });
+              continue;
+            }
+            try {
+              betterYasirPoConsoleLog('attempting purchase for order', {
+                mode,
+                itemKey: rec.itemKey,
+                qty: rec.qty,
+                listingGoldCap: rec.listingGold != null && rec.listingGold !== '' ? rec.listingGold : null,
+                yasirLocation: globalThis.state?.daily?.getSnapshot?.()?.context?.yasir?.location ?? null
+              });
+              const actionOpts = { suppressDefaultSuccessUi: true };
+              const ok = await performAction(rec.itemKey, rec.qty, 'buy', actionOpts);
+              if (ok === true) {
+                betterYasirPoConsoleLog('purchase SUCCESS — removed from queue and recorded in history', {
+                  mode,
+                  itemKey: rec.itemKey,
+                  qty: rec.qty,
+                  yasirLocation: globalThis.state?.daily?.getSnapshot?.()?.context?.yasir?.location ?? null
+                });
+                removeYasirPoOrderRecord(rec);
+                removePurchaseOrderCardFromOpenSettingsPanel(rec);
+                const qtyN = parseInt(String(rec.qty), 10) || 1;
+                const costMeta =
+                  actionOpts._resolvedBuyCost ||
+                  buildFallbackPoHistoryCost(rec, modalOrNull);
+                appendYasirPurchaseHistoryRecord(rec.itemKey, qtyN, costMeta);
+                const summaryLine = buildYasirPoPurchaseSummaryLine(rec.itemKey, qtyN, costMeta);
+                const toastTitle = t('mods.betterYasir.poOrderToastYasirTrade');
+                showBetterYasirPurchaseOrderToast(`${toastTitle}: ${summaryLine}`);
+                refreshBetterYasirFooterOrdersIndicator();
+                refreshBetterYasirOrdersPanelTabCounts();
+                progressed = true;
+                break;
+              }
+              betterYasirPoConsoleLog('purchase NOT executed (performAction returned false — e.g. pre-flight validation)', {
+                mode,
+                itemKey: rec.itemKey,
+                qty: rec.qty,
+                performActionResult: ok
+              });
+            } catch (poErr) {
+              betterYasirPoConsoleLog('purchase FAILED (error from shop / network)', {
+                mode,
+                itemKey: rec.itemKey,
+                qty: rec.qty,
+                error: poErr?.message || String(poErr),
+                yasirLocation: globalThis.state?.daily?.getSnapshot?.()?.context?.yasir?.location ?? null
+              });
+              break;
+            }
+          }
+          if (!progressed) {
+            break;
+          }
+        }
+        
+        clearCaches();
+        const remaining = loadYasirPoOrdersFromStorage();
+        betterYasirPoConsoleLog('fulfillment finished', {
+          mode,
+          remainingOrderCount: remaining.length,
+          remainingOrders: remaining.map((o) => ({
+            itemKey: o.itemKey,
+            qty: o.qty,
+            listingGoldCap: o.listingGold != null && o.listingGold !== '' ? o.listingGold : null
+          })),
+          yasirLocation: globalThis.state?.daily?.getSnapshot?.()?.context?.yasir?.location ?? null
+        });
+      }
+      
+      function runAfterPurchaseOrderPlacementGrace(done) {
+        const wait = yasirPoOrderPlacementGraceUntil - Date.now();
+        if (wait > 0) {
+          betterYasirPoConsoleLog(
+            `PO fulfillment delayed ${Math.ceil(wait / 1000)}s (grace after placing an order)`
+          );
+          setTimeout(() => runAfterPurchaseOrderPlacementGrace(done), wait);
+          return;
+        }
+        done();
+      }
+      
+      function scheduleYasirPurchaseOrderFulfillment(modalWidgetBottom) {
+        if (!modalWidgetBottom || yasirPoOrderFulfillmentInProgress) {
+          if (!modalWidgetBottom) {
+            betterYasirPoConsoleLog('schedule skipped: no modal widget');
+          } else if (yasirPoOrderFulfillmentInProgress) {
+            betterYasirPoConsoleLog('schedule skipped: fulfillment already in progress');
+          }
+          return;
+        }
+        if (!loadYasirPoOrdersFromStorage().length) {
+          return;
+        }
+        if (modalWidgetBottom.dataset.betterYasirPoFulfillScheduled === '1') {
+          betterYasirPoConsoleLog('schedule skipped: fulfillment timer already queued for this modal');
+          return;
+        }
+        modalWidgetBottom.dataset.betterYasirPoFulfillScheduled = '1';
+        betterYasirPoConsoleLog('scheduled purchase-order fulfillment (320ms debounce, then placement grace if any)', {
+          queuedCount: loadYasirPoOrdersFromStorage().length
+        });
+        setTimeout(() => {
+          if (yasirPoOrderFulfillmentInProgress) {
+            delete modalWidgetBottom.dataset.betterYasirPoFulfillScheduled;
+            betterYasirPoConsoleLog('delayed run skipped: fulfillment already in progress');
+            return;
+          }
+          runAfterPurchaseOrderPlacementGrace(() => {
+            delete modalWidgetBottom.dataset.betterYasirPoFulfillScheduled;
+            if (!loadYasirPoOrdersFromStorage().length) {
+              return;
+            }
+            if (yasirPoOrderFulfillmentInProgress) {
+              return;
+            }
+            yasirPoOrderFulfillmentInProgress = true;
+            fulfillYasirPurchaseOrderQueue(modalWidgetBottom)
+              .catch((e) => {
+                betterYasirPoConsoleLog('fulfillment promise rejected', {
+                  error: e?.message || String(e)
+                });
+                handleError(e, 'scheduleYasirPurchaseOrderFulfillment');
+              })
+              .finally(() => {
+                yasirPoOrderFulfillmentInProgress = false;
+              });
+          });
+        }, 320);
+      }
+      
+      function scheduleHeadlessYasirPurchaseOrderFulfillment() {
+        if (!loadYasirPoOrdersFromStorage().length) {
+          return;
+        }
+        if (yasirPoOrderFulfillmentInProgress) {
+          betterYasirPoConsoleLog('headless schedule skipped: fulfillment already in progress');
+          return;
+        }
+        if (yasirPoHeadlessFulfillTimer != null) {
+          return;
+        }
+        betterYasirPoConsoleLog('scheduled headless purchase-order fulfillment (320ms debounce, then placement grace if any)', {
+          queuedCount: loadYasirPoOrdersFromStorage().length
+        });
+        yasirPoHeadlessFulfillTimer = setTimeout(() => {
+          if (yasirPoOrderFulfillmentInProgress) {
+            yasirPoHeadlessFulfillTimer = null;
+            betterYasirPoConsoleLog('headless delayed run skipped: fulfillment already in progress');
+            return;
+          }
+          runAfterPurchaseOrderPlacementGrace(() => {
+            yasirPoHeadlessFulfillTimer = null;
+            if (!loadYasirPoOrdersFromStorage().length) {
+              return;
+            }
+            if (yasirPoOrderFulfillmentInProgress) {
+              return;
+            }
+            yasirPoOrderFulfillmentInProgress = true;
+            fulfillYasirPurchaseOrderQueue(null)
+              .catch((e) => {
+                betterYasirPoConsoleLog('headless fulfillment promise rejected', {
+                  error: e?.message || String(e)
+                });
+                handleError(e, 'scheduleHeadlessYasirPurchaseOrderFulfillment');
+              })
+              .finally(() => {
+                yasirPoOrderFulfillmentInProgress = false;
+              });
+          });
+        }, 320);
+      }
+      
+      function yasirDailyContextSignature(y) {
+        if (!y || typeof y !== 'object') {
+          return '';
+        }
+        return `${y.location ?? ''}|${y.diceCost ?? ''}`;
+      }
+      
+      /**
+       * When daily Yasir data changes or on init, run PO fulfillment: modal path when shop is open, else headless
+       * for dice + Exaltation Chest (Recycle Rune still needs the shop once for live gold/stock).
+       */
+      function maybeSchedulePoFulfillmentFromDailyUpdate(reason) {
+        if (!loadYasirPoOrdersFromStorage().length) {
+          return;
+        }
+        const modal = domUtils.findYasirModal();
+        if (modal) {
+          betterYasirPoConsoleLog(`scheduling PO fulfillment (${reason})`, {
+            yasir: getYasirShopData(),
+            queuedCount: loadYasirPoOrdersFromStorage().length
+          });
+          scheduleYasirPurchaseOrderFulfillment(modal);
+        } else {
+          betterYasirPoConsoleLog(`scheduling headless PO fulfillment (${reason})`, {
+            yasir: getYasirShopData(),
+            queuedCount: loadYasirPoOrdersFromStorage().length
+          });
+          scheduleHeadlessYasirPurchaseOrderFulfillment();
+        }
+      }
+      
+      function cleanupYasirDailyPoWatch() {
+        if (yasirPoHeadlessFulfillTimer != null) {
+          clearTimeout(yasirPoHeadlessFulfillTimer);
+          yasirPoHeadlessFulfillTimer = null;
+        }
+        if (yasirDailyPoSetupRetryTimer != null) {
+          clearTimeout(yasirDailyPoSetupRetryTimer);
+          yasirDailyPoSetupRetryTimer = null;
+        }
+        if (!yasirDailyPoUnsub) {
+          yasirDailyPoLastSig = null;
+          return;
+        }
+        try {
+          if (typeof yasirDailyPoUnsub.unsubscribe === 'function') {
+            yasirDailyPoUnsub.unsubscribe();
+          }
+        } catch (_) {
+          /* ignore */
+        }
+        yasirDailyPoUnsub = null;
+        yasirDailyPoLastSig = null;
+      }
+      
+      function setupYasirDailyPurchaseOrderWatch() {
+        cleanupYasirDailyPoWatch();
+        const daily = globalThis.state?.daily;
+        if (!daily || typeof daily.subscribe !== 'function') {
+          yasirDailyPoSetupRetryTimer = setTimeout(() => {
+            yasirDailyPoSetupRetryTimer = null;
+            setupYasirDailyPurchaseOrderWatch();
+          }, 2000);
+          return;
+        }
+        yasirDailyPoLastSig = yasirDailyContextSignature(daily.getSnapshot?.()?.context?.yasir);
+        yasirDailyPoUnsub = daily.subscribe((snap) => {
+          const y = snap?.context?.yasir;
+          const sig = yasirDailyContextSignature(y);
+          if (sig === yasirDailyPoLastSig) {
+            return;
+          }
+          yasirDailyPoLastSig = sig;
+          maybeSchedulePoFulfillmentFromDailyUpdate('globalThis.state.daily yasir context changed');
+        });
+        betterYasirPoConsoleLog('watching globalThis.state.daily for purchase-order fulfillment triggers');
+      }
+      
+      function yasirPoFillTotalWithCurrencyIcon(targetEl, parts, placeholderText, fillOpts) {
+        targetEl.replaceChildren();
+        targetEl.classList.remove('better-yasir-po-currency-insufficient');
+        if (!parts) {
+          targetEl.textContent = placeholderText;
+          return;
+        }
+        const insufficient = fillOpts && fillOpts.insufficient === true;
+        const wrap = document.createElement('span');
+        wrap.className = 'better-yasir-po-currency-inline better-yasir-po-row-em';
+        if (insufficient) {
+          wrap.classList.add('better-yasir-po-currency-insufficient');
+        }
+        const amt = document.createElement('span');
+        amt.style.letterSpacing = '0.02em';
+        amt.textContent = parts.amount;
+        wrap.appendChild(amt);
+        const im = document.createElement('img');
+        im.className = 'pixelated better-yasir-po-currency-icon';
+        im.alt =
+          parts.kind === 'gold'
+            ? t('mods.betterYasir.settingsPoCurrencyGoldIconAlt')
+            : t('mods.betterYasir.settingsPoCurrencyDustIconAlt');
+        im.src = parts.kind === 'gold' ? YASIR_PO_GOLD_ICON_SRC : YASIR_PO_DUST_ICON_SRC;
+        im.width = 13;
+        im.height = 13;
+        wrap.appendChild(im);
+        targetEl.appendChild(wrap);
+        if (insufficient) {
+          targetEl.classList.add('better-yasir-po-currency-insufficient');
+        }
+      }
+      
+      function createYasirSettingsSidePanel() {
+        const panel = document.createElement('div');
+        panel.id = 'better-yasir-settings-panel';
+        panel.classList.add('better-yasir-orders-typography');
+        panel.style.cssText = `
+          width: ${YASIR_SETTINGS_PANEL_WIDTH}px;
+          background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+          color: #fff;
+          font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+          border: 4px solid transparent;
+          border-image: url('https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png') 6 fill stretch;
+          border-radius: 6px;
+          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        `;
+        
+        const stopIfNonInteractive = (event) => {
+          const target = event.target;
+          const interactive = target.tagName === 'SELECT' ||
+            target.tagName === 'BUTTON' ||
+            target.tagName === 'INPUT' ||
+            target.closest('select') ||
+            target.closest('button') ||
+            target.closest('input');
+          if (!interactive) {
+            event.stopPropagation();
+            event.preventDefault();
+          }
+        };
+        addManagedEventListener(panel, 'click', stopIfNonInteractive);
+        addManagedEventListener(panel, 'mousedown', stopIfNonInteractive);
+        addManagedEventListener(panel, 'mouseup', stopIfNonInteractive);
+        
+        const panelHeader = document.createElement('div');
+        panelHeader.className = 'better-yasir-settings-panel-header';
+        const panelTitle = document.createElement('h3');
+        panelTitle.className = 'better-yasir-settings-section-title';
+        panelTitle.style.marginBottom = '0';
+        panelTitle.textContent = t('mods.betterYasir.tabSettings');
+        panelHeader.appendChild(panelTitle);
+        
+        const tabBar = document.createElement('div');
+        tabBar.className = 'better-yasir-settings-tab-bar';
+        const tabBtnOrders = document.createElement('button');
+        tabBtnOrders.type = 'button';
+        tabBtnOrders.className = `better-yasir-settings-tab is-active ${YASIR_SETTINGS_BTN_BASE} frame-1 active:frame-pressed-1 surface-regular text-whiteRegular`;
+        tabBtnOrders.dataset.betterYasirTab = 'orders';
+        tabBtnOrders.textContent = t('mods.betterYasir.settingsPurchaseOrdersTitle');
+        tabBtnOrders.setAttribute('aria-selected', 'true');
+        const tabBtnHistory = document.createElement('button');
+        tabBtnHistory.type = 'button';
+        tabBtnHistory.className = `better-yasir-settings-tab ${YASIR_SETTINGS_BTN_BASE} frame-1 active:frame-pressed-1 surface-regular text-whiteRegular`;
+        tabBtnHistory.dataset.betterYasirTab = 'history';
+        tabBtnHistory.textContent = t('mods.betterYasir.settingsPurchaseHistoryTitle');
+        tabBtnHistory.setAttribute('aria-selected', 'false');
+        tabBar.appendChild(tabBtnOrders);
+        tabBar.appendChild(tabBtnHistory);
+        panelHeader.appendChild(tabBar);
+        panel.appendChild(panelHeader);
+        
+        const mainContainer = document.createElement('div');
+        mainContainer.className = 'better-yasir-settings-main';
+        
+        const tabPanelsWrap = document.createElement('div');
+        tabPanelsWrap.className = 'better-yasir-settings-tab-panels';
+        
+        const tabPanelOrders = document.createElement('div');
+        tabPanelOrders.className =
+          'better-yasir-settings-tab-panel is-active better-yasir-settings-tab-panel--po-orders';
+        tabPanelOrders.dataset.betterYasirOrdersTab = 'orders';
+        
+        const tabPanelHistory = document.createElement('div');
+        tabPanelHistory.className = 'better-yasir-settings-tab-panel';
+        tabPanelHistory.dataset.betterYasirOrdersTab = 'history';
+        
+        const poColTitle = document.createElement('h4');
+        poColTitle.className = 'better-yasir-settings-section-title';
+        poColTitle.textContent = t('mods.betterYasir.settingsPoComposerSectionTitle');
+        tabPanelOrders.appendChild(poColTitle);
+        
+        const composerTop = document.createElement('div');
+        composerTop.className = 'better-yasir-po-composer';
+        
+        const PO_PICKER_ITEMS = [
+          { key: 'diceManipulator3', labelKey: 'mods.betterYasir.settingsPoItemDiceRare', rarityClass: 'text-rarity-3', kind: 'dice', rarity: 3 },
+          { key: 'diceManipulator4', labelKey: 'mods.betterYasir.settingsPoItemDiceMythic', rarityClass: 'text-rarity-4', kind: 'dice', rarity: 4 },
+          {
+            key: 'recycleRune',
+            labelKey: 'mods.betterYasir.settingsPoItemRecycleRune',
+            rarityClass: '',
+            kind: 'icon',
+            icon: 'https://bestiaryarena.com/assets/icons/rune-recycle.png'
+          },
+          {
+            key: 'exaltationChest',
+            labelKey: 'mods.betterYasir.settingsPoItemExaltationChest',
+            rarityClass: 'text-rarity-5',
+            kind: 'icon',
+            icon: 'https://bestiaryarena.com/assets/icons/exaltation-chest.png'
+          }
+        ];
+        
+        function mountYasirPoItemPicker(initialEntry, onItemChange) {
+          const itemPickerWrap = document.createElement('div');
+          itemPickerWrap.className = 'better-yasir-po-item-picker-root';
+          itemPickerWrap.style.marginTop = '0';
+          
+          const itemList = document.createElement('div');
+          itemList.className = 'better-yasir-po-item-list';
+          itemList.dataset.open = 'false';
+          itemList.style.display = 'none';
+          
+          const trigger = document.createElement('button');
+          trigger.type = 'button';
+          trigger.className = 'better-yasir-po-item-trigger';
+          
+          const triggerVisualHost = document.createElement('div');
+          triggerVisualHost.className = 'better-yasir-po-trigger-visual flex shrink-0 items-center justify-center';
+          const triggerLabel = document.createElement('span');
+          triggerLabel.className = 'flex-1 min-w-0 truncate';
+          const chev = document.createElement('span');
+          chev.className = 'better-yasir-po-item-trigger-chevron';
+          chev.textContent = '▼';
+          trigger.appendChild(triggerVisualHost);
+          trigger.appendChild(triggerLabel);
+          trigger.appendChild(chev);
+          
+          function renderTriggerPlaceholder() {
+            triggerVisualHost.replaceChildren();
+            const ph = document.createElement('div');
+            ph.className = 'better-yasir-po-trigger-placeholder-slot';
+            ph.setAttribute('aria-hidden', 'true');
+            ph.style.cssText = 'width:32px;height:32px;min-width:32px;min-height:32px;flex-shrink:0;';
+            triggerVisualHost.appendChild(ph);
+            triggerLabel.className =
+              'flex-1 min-w-0 truncate better-yasir-po-item-trigger-placeholder-label';
+            const phText = t('mods.betterYasir.settingsPoSelectItemPlaceholder');
+            triggerLabel.textContent = phText;
+            trigger.removeAttribute('data-selected-key');
+            trigger.setAttribute('aria-haspopup', 'listbox');
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.setAttribute('aria-label', t('mods.betterYasir.settingsPoSelectItemAria'));
+          }
+          
+          function renderTriggerFromEntry(entry) {
+            triggerVisualHost.replaceChildren(createYasirPoItemPickerVisual(entry));
+            triggerLabel.className = `flex-1 min-w-0 truncate ${entry.rarityClass}`.trim();
+            triggerLabel.textContent = t(entry.labelKey);
+            trigger.dataset.selectedKey = entry.key;
+            trigger.setAttribute('aria-haspopup', 'listbox');
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.removeAttribute('aria-label');
+          }
+          
+          if (initialEntry) {
+            renderTriggerFromEntry(initialEntry);
+          } else {
+            renderTriggerPlaceholder();
+          }
+          
+          let listOpen = false;
+          let ddScrollKey = null;
+          let ddResizeKey = null;
+          let ddPanelScrollKeys = [];
+          let ddDocPtrKey = null;
+          let ddDocMouseKey = null;
+          let ddDocClickKey = null;
+          let poDropOverlay = null;
+          
+          /** Viewport vs fixed containing block: Radix/dialog often uses transform, so fixed+viewport px misaligns. */
+          function getPoListFixedContainingBlockRect(listEl) {
+            let el = listEl.parentElement;
+            while (el) {
+              const cs = window.getComputedStyle(el);
+              if (
+                (cs.transform && cs.transform !== 'none') ||
+                (cs.filter && cs.filter !== 'none') ||
+                (cs.perspective && cs.perspective !== 'none')
+              ) {
+                return el.getBoundingClientRect();
+              }
+              el = el.parentElement;
+            }
+            return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+          }
+          
+          function repositionFloatingList() {
+            if (!listOpen || !trigger.isConnected) {
+              return;
+            }
+            const r = trigger.getBoundingClientRect();
+            const margin = 8;
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const w = Math.max(Math.min(r.width, vw - 2 * margin), 176);
+            let leftVp = r.left;
+            if (leftVp + w > vw - margin) {
+              leftVp = Math.max(margin, vw - w - margin);
+            }
+            leftVp = Math.max(margin, leftVp);
+            let topVp = r.bottom + 4;
+            const spaceBelow = vh - topVp - margin;
+            const spaceAbove = r.top - margin;
+            const wantMin = 100;
+            let maxH = Math.min(280, Math.max(spaceBelow, wantMin));
+            if (spaceBelow < wantMin && spaceAbove > spaceBelow) {
+              maxH = Math.min(280, spaceAbove - 4);
+              topVp = Math.max(margin, r.top - maxH - 4);
+            } else {
+              maxH = Math.min(280, spaceBelow);
+            }
+            const cb = getPoListFixedContainingBlockRect(itemList);
+            const left = leftVp - cb.left;
+            const top = topVp - cb.top;
+            itemList.style.position = 'fixed';
+            itemList.style.left = `${Math.round(left)}px`;
+            itemList.style.top = `${Math.round(top)}px`;
+            itemList.style.width = `${Math.round(w)}px`;
+            itemList.style.maxHeight = `${Math.round(maxH)}px`;
+            itemList.style.overflowY = 'auto';
+            itemList.style.overflowX = 'hidden';
+            itemList.style.zIndex = '200010';
+          }
+          
+          function unbindFloatingListListeners() {
+            if (ddScrollKey) {
+              removeManagedEventListener(ddScrollKey);
+              ddScrollKey = null;
+            }
+            if (ddResizeKey) {
+              removeManagedEventListener(ddResizeKey);
+              ddResizeKey = null;
+            }
+            ddPanelScrollKeys.forEach((k) => removeManagedEventListener(k));
+            ddPanelScrollKeys = [];
+            if (ddDocPtrKey) {
+              removeManagedEventListener(ddDocPtrKey);
+              ddDocPtrKey = null;
+            }
+            if (ddDocMouseKey) {
+              removeManagedEventListener(ddDocMouseKey);
+              ddDocMouseKey = null;
+            }
+            if (ddDocClickKey) {
+              removeManagedEventListener(ddDocClickKey);
+              ddDocClickKey = null;
+            }
+          }
+          
+          function closePoItemList() {
+            if (!listOpen) {
+              return;
+            }
+            listOpen = false;
+            itemList.dataset.open = 'false';
+            itemList.style.display = 'none';
+            itemList.removeAttribute('data-better-yasir-po-floating');
+            trigger.setAttribute('aria-expanded', 'false');
+            chev.textContent = '▼';
+            unbindFloatingListListeners();
+            itemList.style.position = '';
+            itemList.style.left = '';
+            itemList.style.top = '';
+            itemList.style.width = '';
+            itemList.style.maxHeight = '';
+            itemList.style.overflowY = '';
+            itemList.style.overflowX = '';
+            itemList.style.zIndex = '';
+            if (poDropOverlay) {
+              poDropOverlay.style.display = 'none';
+              if (poDropOverlay.parentNode) {
+                poDropOverlay.remove();
+              }
+            }
+            if (itemList.parentNode && itemList.parentNode !== itemPickerWrap) {
+              try {
+                if (itemPickerWrap.isConnected) {
+                  itemPickerWrap.appendChild(itemList);
+                } else {
+                  itemList.remove();
+                }
+              } catch (_) {
+                itemList.remove();
+              }
+            }
+          }
+          
+          function openPoItemList() {
+            if (listOpen) {
+              return;
+            }
+            listOpen = true;
+            itemList.dataset.open = 'true';
+            itemList.setAttribute('data-better-yasir-po-floating', 'true');
+            trigger.setAttribute('aria-expanded', 'true');
+            if (!poDropOverlay) {
+              poDropOverlay = document.createElement('div');
+              poDropOverlay.setAttribute('data-better-yasir-po-overlay', 'true');
+              poDropOverlay.style.cssText =
+                'position:fixed;inset:0;z-index:200009;background:transparent;pointer-events:auto;cursor:default;display:none;';
+              const overlayClose = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                closePoItemList();
+              };
+              addManagedEventListener(poDropOverlay, 'mousedown', overlayClose);
+              addManagedEventListener(poDropOverlay, 'pointerdown', overlayClose);
+              addManagedEventListener(poDropOverlay, 'click', overlayClose);
+            }
+            poDropOverlay.style.display = 'block';
+            const floatRoot =
+              itemPickerWrap.closest('[role="dialog"]') ||
+              itemPickerWrap.closest('.widget-bottom') ||
+              document.body;
+            floatRoot.appendChild(poDropOverlay);
+            floatRoot.appendChild(itemList);
+            itemList.style.display = 'flex';
+            repositionFloatingList();
+            chev.textContent = '▲';
+            const onRepos = () => repositionFloatingList();
+            ddScrollKey = addManagedEventListener(window, 'scroll', onRepos, true);
+            ddResizeKey = addManagedEventListener(window, 'resize', onRepos, { passive: true });
+            const panelRoot = itemPickerWrap.closest('#better-yasir-settings-panel');
+            if (panelRoot) {
+              const scrollEls = [panelRoot];
+              panelRoot.querySelectorAll(
+                '.better-yasir-settings-main, .better-yasir-settings-tab-panels, .better-yasir-settings-tab-panel'
+              ).forEach((el) => scrollEls.push(el));
+              scrollEls.forEach((el) => {
+                ddPanelScrollKeys.push(addManagedEventListener(el, 'scroll', onRepos, { passive: true }));
+              });
+            }
+            const docClose = (ev) => {
+              if (!itemPickerWrap.isConnected) {
+                closePoItemList();
+                return;
+              }
+              const t = ev.target;
+              const path = typeof ev.composedPath === 'function' ? ev.composedPath() : null;
+              const inFloatingUi =
+                (path && path.includes(itemList)) ||
+                (path && path.includes(trigger)) ||
+                itemList.contains(t) ||
+                trigger.contains(t);
+              if (inFloatingUi) {
+                return;
+              }
+              closePoItemList();
+            };
+            ddDocPtrKey = addManagedEventListener(document, 'pointerdown', docClose, true);
+            ddDocMouseKey = addManagedEventListener(document, 'mousedown', docClose, true);
+            ddDocClickKey = addManagedEventListener(document, 'click', docClose, true);
+          }
+          
+          function applyPoItemSelection(entry) {
+            if (!entry) {
+              renderTriggerPlaceholder();
+            } else {
+              renderTriggerFromEntry(entry);
+            }
+            if (typeof onItemChange === 'function') {
+              onItemChange();
+            }
+          }
+          
+          addManagedEventListener(itemList, 'mousedown', (e) => e.stopPropagation());
+          addManagedEventListener(itemList, 'pointerdown', (e) => e.stopPropagation());
+          addManagedEventListener(itemList, 'click', (e) => e.stopPropagation());
+          
+          PO_PICKER_ITEMS.forEach((entry) => {
+            const opt = document.createElement('button');
+            opt.type = 'button';
+            opt.className = 'better-yasir-po-item-option';
+            opt.dataset.itemKey = entry.key;
+            opt.style.touchAction = 'manipulation';
+            opt.appendChild(createYasirPoItemPickerVisual(entry));
+            const lab = document.createElement('span');
+            lab.className = `flex-1 min-w-0 leading-tight ${entry.rarityClass}`.trim();
+            lab.textContent = t(entry.labelKey);
+            opt.appendChild(lab);
+            function pickPoItemOption(e) {
+              if (e.button != null && e.button !== 0) {
+                return;
+              }
+              e.stopPropagation();
+              if (e.cancelable) {
+                e.preventDefault();
+              }
+              applyPoItemSelection(entry);
+              closePoItemList();
+            }
+            addManagedEventListener(opt, 'pointerdown', pickPoItemOption, true);
+            addManagedEventListener(opt, 'click', (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+            });
+            itemList.appendChild(opt);
+          });
+          
+          addManagedEventListener(trigger, 'click', (e) => {
+            e.stopPropagation();
+            if (listOpen) {
+              closePoItemList();
+            } else {
+              openPoItemList();
+            }
+          });
+          
+          itemPickerWrap.appendChild(trigger);
+          itemPickerWrap.appendChild(itemList);
+          
+          function resetPickerToDefault() {
+            closePoItemList();
+            applyPoItemSelection(null);
+          }
+          
+          return { wrap: itemPickerWrap, resetPickerToDefault, closePoItemList };
+        }
+        
+        const composerEditor = document.createElement('div');
+        composerEditor.className = 'better-yasir-po-composer-editor';
+        
+        const composerLineBuy = document.createElement('div');
+        composerLineBuy.className = 'better-yasir-po-composer-line text-whiteRegular';
+        
+        const buyLbl = document.createElement('span');
+        buyLbl.textContent = t('mods.betterYasir.settingsPoBuy');
+        composerLineBuy.appendChild(buyLbl);
+        
+        const qtyComposerInput = createYasirPoNumberInput('mods.betterYasir.settingsPoQtyAriaDiceRare', 'better-yasir-po-qty-input');
+        qtyComposerInput.value = '1';
+        composerLineBuy.appendChild(qtyComposerInput);
+        
+        const ofOnlyLbl = document.createElement('span');
+        ofOnlyLbl.textContent = t('mods.betterYasir.settingsPoOf');
+        composerLineBuy.appendChild(ofOnlyLbl);
+        
+        const composerLinePrice = document.createElement('div');
+        composerLinePrice.className =
+          'better-yasir-po-composer-line better-yasir-po-composer-row-price text-whiteRegular';
+        
+        function getComposerItemKey() {
+          return composerEditor.querySelector('.better-yasir-po-item-trigger')?.dataset?.selectedKey;
+        }
+        
+        function syncComposerQtyLabel() {
+          const key = getComposerItemKey();
+          if (key === 'diceManipulator3') {
+            qtyComposerInput.setAttribute('aria-label', t('mods.betterYasir.settingsPoQtyAriaDiceRare'));
+          } else if (key === 'diceManipulator4') {
+            qtyComposerInput.setAttribute('aria-label', t('mods.betterYasir.settingsPoQtyAriaDiceMythic'));
+          } else {
+            qtyComposerInput.setAttribute('aria-label', t('mods.betterYasir.settingsPoQtyAria'));
+          }
+        }
+        
+        const whenPrefix = document.createElement('span');
+        whenPrefix.textContent = t('mods.betterYasir.settingsPoComposerPriceLead');
+        const priceComposerInput = createYasirPoNumberInput('mods.betterYasir.settingsPoPriceInputAria', 'better-yasir-po-price-input');
+        const whenSuffix = document.createElement('span');
+        whenSuffix.textContent = t('mods.betterYasir.settingsPoPriceLimitSuffix');
+        const priceLineDust = document.createElement('span');
+        priceLineDust.className = 'better-yasir-po-ref-dust';
+        priceLineDust.style.display = 'none';
+        composerLinePrice.appendChild(whenPrefix);
+        composerLinePrice.appendChild(priceComposerInput);
+        composerLinePrice.appendChild(whenSuffix);
+        composerLinePrice.appendChild(priceLineDust);
+        
+        let composerGoldBoundKey = null;
+        
+        function clampComposerPriceField(ev) {
+          const min = parseInt(priceComposerInput.dataset.poPriceMin, 10);
+          const max = parseInt(priceComposerInput.dataset.poPriceMax, 10);
+          if (!Number.isFinite(min) || !Number.isFinite(max)) {
+            return;
+          }
+          if (ev.type === 'blur' || ev.type === 'change') {
+            let v = parseYasirPoPriceInt(priceComposerInput.value);
+            if (!Number.isFinite(v)) {
+              v = min;
+            }
+            priceComposerInput.value = String(clampYasirPoPrice(v, min, max));
+            updateComposerTotalPreview();
+            return;
+          }
+          if (ev.type === 'input') {
+            const v = parseYasirPoPriceInt(priceComposerInput.value);
+            if (Number.isFinite(v) && v > max) {
+              priceComposerInput.value = String(max);
+            }
+            updateComposerTotalPreview();
+          }
+        }
+        
+        const totalPreviewRow = document.createElement('div');
+        totalPreviewRow.className = 'better-yasir-po-composer-total-block text-whiteRegular';
+        totalPreviewRow.style.cssText = 'opacity:0.92;font-size:10px;';
+        const totalPreviewLbl = document.createElement('div');
+        totalPreviewLbl.textContent = `${t('mods.betterYasir.settingsPoTotalCost')}:`;
+        const totalPreviewVal = document.createElement('div');
+        totalPreviewVal.className = 'better-yasir-po-composer-total-preview';
+        totalPreviewVal.style.letterSpacing = '0.02em';
+        totalPreviewRow.appendChild(totalPreviewLbl);
+        totalPreviewRow.appendChild(totalPreviewVal);
+        
+        function updateComposerPriceDisplay() {
+          const key = getComposerItemKey();
+          if (!key) {
+            whenPrefix.style.display = 'none';
+            priceComposerInput.style.display = 'none';
+            whenSuffix.style.display = 'none';
+            priceLineDust.style.display = 'none';
+            composerLinePrice.style.display = 'none';
+            composerEditor.removeAttribute('aria-label');
+            return;
+          }
+          composerLinePrice.style.display = '';
+          const rule = YASIR_PO_PRICING[key];
+          if (rule?.currency === 'dust') {
+            whenPrefix.style.display = 'none';
+            priceComposerInput.style.display = 'none';
+            whenSuffix.style.display = 'none';
+            priceLineDust.style.display = '';
+            priceLineDust.textContent = t('mods.betterYasir.settingsPoComposerDustClause')
+              .replace(/\{dust\}/g, formatYasirPoAmount(rule.perUnit));
+            const dustPick = PO_PICKER_ITEMS.find((e) => e.key === key);
+            const dustItemLab = dustPick ? t(dustPick.labelKey) : '';
+            composerEditor.setAttribute(
+              'aria-label',
+              `${t('mods.betterYasir.settingsPoBuy')} ${qtyComposerInput.value} ${t('mods.betterYasir.settingsPoOf')} ${dustItemLab}. ${priceLineDust.textContent}`
+            );
+          } else {
+            priceLineDust.style.display = 'none';
+            whenPrefix.style.display = '';
+            priceComposerInput.style.display = '';
+            whenSuffix.style.display = '';
+            const bounds = getYasirPoPriceBounds(key);
+            if (bounds) {
+              priceComposerInput.dataset.poPriceMin = String(bounds.min);
+              priceComposerInput.dataset.poPriceMax = String(bounds.max);
+              if (composerGoldBoundKey !== key) {
+                priceComposerInput.value = String(bounds.min);
+                composerGoldBoundKey = key;
+              } else {
+                let v = parseYasirPoPriceInt(priceComposerInput.value);
+                if (!Number.isFinite(v)) {
+                  v = bounds.min;
+                }
+                priceComposerInput.value = String(clampYasirPoPrice(v, bounds.min, bounds.max));
+              }
+              priceComposerInput.setAttribute(
+                'aria-label',
+                t('mods.betterYasir.settingsPoPriceInputAria')
+                  .replace(/\{min\}/g, formatYasirPoAmount(bounds.min))
+                  .replace(/\{max\}/g, formatYasirPoAmount(bounds.max))
+              );
+            }
+            const pickEnt = PO_PICKER_ITEMS.find((e) => e.key === key);
+            const itemLab = pickEnt ? t(pickEnt.labelKey) : '';
+            const pv = parseYasirPoPriceInt(priceComposerInput.value);
+            const pvShow = Number.isFinite(pv) ? formatYasirPoAmount(pv) : '';
+            const lead = t('mods.betterYasir.settingsPoComposerPriceLead');
+            const suf = t('mods.betterYasir.settingsPoPriceLimitSuffix');
+            composerEditor.setAttribute(
+              'aria-label',
+              `${t('mods.betterYasir.settingsPoBuy')} ${qtyComposerInput.value} ${t('mods.betterYasir.settingsPoOf')} ${itemLab}. ${lead}${pvShow}${suf}`
+            );
+          }
+        }
+        
+        function updateComposerTotalPreview() {
+          const key = getComposerItemKey();
+          const ph = t('mods.betterYasir.settingsPoPlaceholder');
+          if (!key) {
+            yasirPoFillTotalWithCurrencyIcon(totalPreviewVal, null, ph);
+            return;
+          }
+          clearCaches();
+          const rule = YASIR_PO_PRICING[key];
+          const priceArg = rule?.currency === 'dust' ? undefined : priceComposerInput.value;
+          const parts = computeYasirPoOrderTotalParts(key, qtyComposerInput.value, priceArg);
+          let insufficient = false;
+          if (parts?.kind === 'gold') {
+            const need = computeYasirPoOrderGoldTotalNumber(key, qtyComposerInput.value, priceArg);
+            insufficient = need != null && getPlayerGold() < need;
+          } else if (parts?.kind === 'dust' && rule) {
+            const qty = parseYasirPoQtyInt(qtyComposerInput.value);
+            insufficient = Number.isFinite(qty) && getPlayerDust() < qty * rule.perUnit;
+          }
+          yasirPoFillTotalWithCurrencyIcon(totalPreviewVal, parts, ph, { insufficient });
+        }
+        
+        const pickerApi = mountYasirPoItemPicker(null, () => {
+          syncComposerQtyLabel();
+          updateComposerPriceDisplay();
+          updateComposerTotalPreview();
+        });
+        pickerApi.wrap.classList.add('better-yasir-po-composer-picker');
+        
+        composerLineBuy.appendChild(pickerApi.wrap);
+        
+        composerEditor.appendChild(composerLineBuy);
+        composerEditor.appendChild(composerLinePrice);
+        composerEditor.appendChild(totalPreviewRow);
+        
+        function resetComposerToDefaults() {
+          qtyComposerInput.value = '1';
+          composerGoldBoundKey = null;
+          pickerApi.resetPickerToDefault();
+          syncComposerQtyLabel();
+          updateComposerPriceDisplay();
+          updateComposerTotalPreview();
+        }
+        
+        addManagedEventListener(qtyComposerInput, 'input', () => {
+          updateComposerPriceDisplay();
+          updateComposerTotalPreview();
+        });
+        addManagedEventListener(qtyComposerInput, 'change', () => {
+          updateComposerPriceDisplay();
+          updateComposerTotalPreview();
+        });
+        
+        addManagedEventListener(priceComposerInput, 'input', (ev) => clampComposerPriceField(ev));
+        addManagedEventListener(priceComposerInput, 'change', (ev) => clampComposerPriceField(ev));
+        addManagedEventListener(priceComposerInput, 'blur', (ev) => clampComposerPriceField(ev));
+        
+        const poListEl = document.createElement('div');
+        poListEl.className = 'better-yasir-po-list';
+        
+        function syncPoOrderCardAffordabilityUi(card) {
+          const itemKey = card?.dataset?.poItemKey;
+          if (!itemKey) {
+            return;
+          }
+          clearCaches();
+          const qty = parseInt(card.dataset.poQty, 10);
+          const lg = card.dataset.poListingGold;
+          const rule = YASIR_PO_PRICING[itemKey];
+          const totalHost = card.querySelector('[data-better-yasir-po-total-host="true"]');
+          if (!totalHost) {
+            return;
+          }
+          const parts = computeYasirPoOrderTotalParts(
+            itemKey,
+            String(qty),
+            lg != null && lg !== '' ? String(lg) : undefined
+          );
+          let insufficient = false;
+          if (rule?.currency === 'gold') {
+            const need = computeYasirPoOrderGoldTotalNumber(
+              itemKey,
+              String(qty),
+              lg != null && lg !== '' ? String(lg) : undefined
+            );
+            insufficient = need != null && getPlayerGold() < need;
+          } else if (rule?.currency === 'dust') {
+            insufficient = !Number.isFinite(qty) || getPlayerDust() < qty * rule.perUnit;
+          }
+          yasirPoFillTotalWithCurrencyIcon(
+            totalHost,
+            parts,
+            t('mods.betterYasir.settingsPoPlaceholder'),
+            { insufficient }
+          );
+          card.classList.toggle('better-yasir-po-row-order--suspended', insufficient);
+          let note = card.querySelector('[data-better-yasir-po-suspended-note="true"]');
+          if (insufficient) {
+            if (!note) {
+              note = document.createElement('div');
+              note.dataset.betterYasirPoSuspendedNote = 'true';
+              note.className = 'better-yasir-po-suspended-note text-whiteRegular';
+              note.textContent =
+                rule?.currency === 'dust'
+                  ? t('mods.betterYasir.settingsPoOrderSuspendedDust')
+                  : t('mods.betterYasir.settingsPoOrderSuspendedGold');
+              const bodyEl = card.querySelector('.better-yasir-po-row-order-body');
+              if (bodyEl) {
+                bodyEl.appendChild(note);
+              }
+            }
+          } else if (note) {
+            note.remove();
+          }
+        }
+        
+        function reorderSuspendedPoOrderCardsToTop() {
+          const cards = Array.from(poListEl.querySelectorAll('[data-better-yasir-po-card]'));
+          if (cards.length < 2) {
+            return;
+          }
+          const suspended = [];
+          const active = [];
+          for (const c of cards) {
+            if (c.classList.contains('better-yasir-po-row-order--suspended')) {
+              suspended.push(c);
+            } else {
+              active.push(c);
+            }
+          }
+          if (suspended.length === 0) {
+            return;
+          }
+          const ordered = suspended.concat(active);
+          const frag = document.createDocumentFragment();
+          for (const c of ordered) {
+            frag.appendChild(c);
+          }
+          poListEl.appendChild(frag);
+        }
+        
+        function refreshPoOrdersAffordability() {
+          poListEl.querySelectorAll('[data-better-yasir-po-card]').forEach((c) => syncPoOrderCardAffordabilityUi(c));
+          reorderSuspendedPoOrderCardsToTop();
+          updateComposerTotalPreview();
+        }
+        
+        function collectPoOrdersSnapshot() {
+          return Array.from(poListEl.querySelectorAll('[data-better-yasir-po-card]'))
+            .map((card) => ({
+              itemKey: card.dataset.poItemKey,
+              qty: parseInt(card.dataset.poQty, 10),
+              listingGold:
+                card.dataset.poListingGold != null && card.dataset.poListingGold !== ''
+                  ? parseInt(card.dataset.poListingGold, 10)
+                  : null
+            }))
+            .filter((r) => r.itemKey && Number.isFinite(r.qty) && r.qty > 0);
+        }
+        
+        function persistPoOrders(options = {}) {
+          saveYasirPoOrdersToStorage(collectPoOrdersSnapshot());
+          refreshBetterYasirFooterOrdersIndicator();
+          refreshBetterYasirOrdersPanelTabCounts();
+          refreshPoOrdersAffordability();
+          if (options.afterUserPlacedOrder === true) {
+            yasirPoOrderPlacementGraceUntil = Date.now() + BETTER_YASIR_PO_PLACEMENT_GRACE_MS;
+          }
+          const modalHost = poListEl.closest('.widget-bottom');
+          if (modalHost) {
+            scheduleYasirPurchaseOrderFulfillment(modalHost);
+          } else {
+            scheduleHeadlessYasirPurchaseOrderFulfillment();
+          }
+        }
+        
+        function createReadOnlyPurchaseOrderRow(itemKey, qty, goldListingRaw) {
+          const entry = PO_PICKER_ITEMS.find((e) => e.key === itemKey);
+          if (!entry || !Number.isFinite(qty) || qty <= 0) {
+            return null;
+          }
+          
+          const card = document.createElement('div');
+          card.dataset.betterYasirPoCard = 'true';
+          card.className = 'better-yasir-po-row-order frame-pressed-1 surface-dark';
+          card.dataset.poItemKey = itemKey;
+          card.dataset.poQty = String(qty);
+          
+          const body = document.createElement('div');
+          body.className = 'better-yasir-po-row-order-body';
+          
+          const name = t(entry.labelKey);
+          const bounds = getYasirPoPriceBounds(itemKey);
+          const rule = YASIR_PO_PRICING[itemKey];
+          
+          let listingGold = null;
+          if (bounds) {
+            let v = parseYasirPoPriceInt(goldListingRaw);
+            if (!Number.isFinite(v)) {
+              v = bounds.min;
+            }
+            listingGold = clampYasirPoPrice(v, bounds.min, bounds.max);
+            card.dataset.poListingGold = String(listingGold);
+          }
+          
+          const totalParts = computeYasirPoOrderTotalParts(
+            itemKey,
+            String(qty),
+            listingGold != null ? String(listingGold) : undefined
+          );
+          
+          const line1 = document.createElement('div');
+          line1.className = 'better-yasir-po-row-order-line text-whiteRegular';
+          
+          const spanBuy = document.createElement('span');
+          spanBuy.textContent = t('mods.betterYasir.settingsPoBuy');
+          line1.appendChild(spanBuy);
+          
+          const spanQty = document.createElement('span');
+          spanQty.className = 'better-yasir-po-row-em';
+          spanQty.textContent = formatYasirPoAmount(qty);
+          line1.appendChild(spanQty);
+          
+          const spanOf = document.createElement('span');
+          spanOf.textContent = t('mods.betterYasir.settingsPoOf');
+          line1.appendChild(spanOf);
+          
+          const nameSpan = document.createElement('span');
+          nameSpan.className = (entry.rarityClass || '').trim();
+          const productPhrase = getYasirPoOrderProductPhrase(itemKey);
+          nameSpan.textContent = productPhrase || name;
+          line1.appendChild(nameSpan);
+          
+          if (listingGold != null) {
+            const wp = document.createElement('span');
+            wp.textContent = t('mods.betterYasir.settingsPoPriceLimitPrefix');
+            line1.appendChild(wp);
+            const pr = document.createElement('span');
+            pr.className = 'better-yasir-po-row-em';
+            pr.textContent = formatYasirPoAmount(listingGold);
+            pr.style.letterSpacing = '0.02em';
+            line1.appendChild(pr);
+            const ws = document.createElement('span');
+            ws.textContent = t('mods.betterYasir.settingsPoPriceLimitSuffix');
+            line1.appendChild(ws);
+          } else if (rule?.currency === 'dust') {
+            const dustSpan = document.createElement('span');
+            const dustRaw = t('mods.betterYasir.settingsPoComposerDustClause');
+            const dustAmt = formatYasirPoAmount(rule.perUnit);
+            const dustParts = dustRaw.split('{dust}');
+            if (dustParts.length === 2) {
+              dustSpan.appendChild(document.createTextNode(dustParts[0]));
+              const dustBold = document.createElement('span');
+              dustBold.className = 'better-yasir-po-row-em';
+              dustBold.textContent = dustAmt;
+              dustSpan.appendChild(dustBold);
+              dustSpan.appendChild(document.createTextNode(dustParts[1]));
+            } else {
+              dustSpan.textContent = dustRaw.replace(/\{dust\}/g, dustAmt);
+            }
+            line1.appendChild(dustSpan);
+          }
+          
+          const line2 = document.createElement('div');
+          line2.className = 'better-yasir-po-row-order-total text-whiteRegular';
+          line2.appendChild(
+            document.createTextNode(`${t('mods.betterYasir.settingsPoTotalCost')}: `)
+          );
+          const totalHost = document.createElement('span');
+          totalHost.dataset.betterYasirPoTotalHost = 'true';
+          yasirPoFillTotalWithCurrencyIcon(
+            totalHost,
+            totalParts,
+            t('mods.betterYasir.settingsPoPlaceholder')
+          );
+          line2.appendChild(totalHost);
+          
+          body.appendChild(line1);
+          body.appendChild(line2);
+          
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.dataset.betterYasirPoRemove = 'true';
+          removeBtn.className = `better-yasir-po-row-order-remove ${YASIR_SETTINGS_BTN_BASE} frame-1-red active:frame-pressed-1-red surface-red text-whiteHighlight`;
+          removeBtn.textContent = t('mods.betterYasir.settingsPoRemove');
+          addManagedEventListener(removeBtn, 'click', () => {
+            card.remove();
+            persistPoOrders({});
+          });
+          
+          const actions = document.createElement('div');
+          actions.className = 'better-yasir-po-row-order-actions';
+          actions.appendChild(removeBtn);
+          
+          card.appendChild(body);
+          card.appendChild(actions);
+          syncPoOrderCardAffordabilityUi(card);
+          return card;
+        }
+        
+        const addPoBtn = document.createElement('button');
+        addPoBtn.type = 'button';
+        addPoBtn.className = `${YASIR_SETTINGS_BTN_BASE} frame-1-green active:frame-pressed-1-green surface-green text-whiteHighlight better-yasir-po-add-btn`;
+        addPoBtn.textContent = t('mods.betterYasir.settingsPoAdd');
+        addManagedEventListener(addPoBtn, 'click', () => {
+          const key = getComposerItemKey();
+          const qty = parseYasirPoQtyInt(qtyComposerInput.value);
+          if (!key || !Number.isFinite(qty)) {
+            return;
+          }
+          const rule = YASIR_PO_PRICING[key];
+          let goldRaw = null;
+          if (rule?.currency !== 'dust' && getYasirPoPriceBounds(key)) {
+            clampComposerPriceField({ type: 'blur' });
+            goldRaw = priceComposerInput.value;
+          }
+          clearCaches();
+          if (rule?.currency === 'gold') {
+            const needGold = computeYasirPoOrderGoldTotalNumber(key, String(qty), goldRaw);
+            if (needGold != null && getPlayerGold() < needGold) {
+              updateComposerTotalPreview();
+              return;
+            }
+          } else if (rule?.currency === 'dust') {
+            if (getPlayerDust() < qty * rule.perUnit) {
+              updateComposerTotalPreview();
+              return;
+            }
+          }
+          const row = createReadOnlyPurchaseOrderRow(key, qty, goldRaw);
+          if (row) {
+            poListEl.appendChild(row);
+            resetComposerToDefaults();
+            persistPoOrders({ afterUserPlacedOrder: true });
+          }
+        });
+        
+        const queuedOrdersTitle = document.createElement('h4');
+        queuedOrdersTitle.className = 'better-yasir-settings-section-title is-compact';
+        queuedOrdersTitle.textContent = t('mods.betterYasir.settingsPlacedOrdersTitle');
+        
+        const placedWrap = document.createElement('div');
+        placedWrap.className = 'better-yasir-po-placed';
+        const placedScroll = document.createElement('div');
+        placedScroll.className = 'better-yasir-po-placed-scroll';
+        placedScroll.appendChild(poListEl);
+        
+        composerTop.appendChild(composerEditor);
+        composerTop.appendChild(addPoBtn);
+        placedWrap.appendChild(queuedOrdersTitle);
+        placedWrap.appendChild(placedScroll);
+        
+        loadYasirPoOrdersFromStorage().forEach((rec) => {
+          if (!rec.itemKey || !Number.isFinite(rec.qty)) {
+            return;
+          }
+          const row = createReadOnlyPurchaseOrderRow(
+            rec.itemKey,
+            rec.qty,
+            rec.listingGold != null && Number.isFinite(rec.listingGold) ? String(rec.listingGold) : undefined
+          );
+          if (row) {
+            poListEl.appendChild(row);
+          }
+        });
+        
+        syncComposerQtyLabel();
+        updateComposerPriceDisplay();
+        updateComposerTotalPreview();
+        
+        tabPanelOrders.appendChild(composerTop);
+        tabPanelOrders.appendChild(placedWrap);
+        
+        const histTitleH = document.createElement('h4');
+        histTitleH.className = 'better-yasir-settings-section-title';
+        histTitleH.textContent = t('mods.betterYasir.settingsPurchaseHistoryTitle');
+        const histContainer = document.createElement('div');
+        histContainer.className = 'better-yasir-po-history-list text-whiteRegular';
+        histContainer.style.opacity = '0.9';
+        tabPanelHistory.appendChild(histTitleH);
+        tabPanelHistory.appendChild(histContainer);
+        
+        function renderYasirPurchaseHistoryInto(container) {
+          container.replaceChildren();
+          let entries = [];
+          try {
+            const raw = localStorage.getItem(BETTER_YASIR_PO_HISTORY_STORAGE_KEY);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) {
+                entries = parsed;
+              }
+            }
+          } catch (_) {
+            entries = [];
+          }
+          if (entries.length === 0) {
+            const p = document.createElement('p');
+            p.className = 'text-whiteRegular';
+            p.style.cssText = 'margin:0;opacity:0.85;line-height:1.38;';
+            p.textContent = t('mods.betterYasir.settingsPoHistoryEmpty');
+            container.appendChild(p);
+            return;
+          }
+          entries.forEach((e) => {
+            const row = document.createElement('div');
+            row.className = 'better-yasir-po-history-row frame-pressed-1 surface-dark';
+            row.style.cssText = 'padding:6px 8px;margin-bottom:4px;line-height:1.35;';
+            const time = new Date(e.ts).toLocaleString(undefined, {
+              dateStyle: 'short',
+              timeStyle: 'short',
+              hour12: false
+            });
+            row.textContent = `${time} — ${e.line}`;
+            container.appendChild(row);
+          });
+        }
+        
+        function setOrdersSettingsTab(which) {
+          refreshBetterYasirOrdersPanelTabCounts();
+          const showOrders = which === 'orders';
+          tabPanelOrders.classList.toggle('is-active', showOrders);
+          tabPanelHistory.classList.toggle('is-active', !showOrders);
+          tabBtnOrders.classList.toggle('is-active', showOrders);
+          tabBtnHistory.classList.toggle('is-active', !showOrders);
+          tabBtnOrders.setAttribute('aria-selected', showOrders ? 'true' : 'false');
+          tabBtnHistory.setAttribute('aria-selected', showOrders ? 'false' : 'true');
+          if (showOrders) {
+            refreshPoOrdersAffordability();
+          } else {
+            renderYasirPurchaseHistoryInto(histContainer);
+          }
+        }
+        
+        addManagedEventListener(tabBtnOrders, 'click', (e) => {
+          e.stopPropagation();
+          setOrdersSettingsTab('orders');
+        });
+        addManagedEventListener(tabBtnHistory, 'click', (e) => {
+          e.stopPropagation();
+          setOrdersSettingsTab('history');
+        });
+        
+        tabPanelsWrap.appendChild(tabPanelOrders);
+        tabPanelsWrap.appendChild(tabPanelHistory);
+        mainContainer.appendChild(tabPanelsWrap);
+        panel.appendChild(mainContainer);
+        
+        panel._betterYasirRefreshPoAffordability = refreshPoOrdersAffordability;
+        refreshPoOrdersAffordability();
+        
+        return panel;
+      }
+      
+      function detachYasirPoAffordabilityPlayerListener() {
+        if (!yasirPoAffordabilityUnsub) {
+          return;
+        }
+        try {
+          if (typeof yasirPoAffordabilityUnsub === 'function') {
+            yasirPoAffordabilityUnsub();
+          } else if (typeof yasirPoAffordabilityUnsub.unsubscribe === 'function') {
+            yasirPoAffordabilityUnsub.unsubscribe();
+          }
+        } catch (_) {
+          /* ignore */
+        }
+        yasirPoAffordabilityUnsub = null;
+      }
+      
+      function openYasirSettingsPanel(widgetBottom) {
+        cleanupYasirSettingsPanel();
+        const dialogEl = widgetBottom?.closest('[role="dialog"]');
+        if (!dialogEl) {
+          return;
+        }
+        const panel = createYasirSettingsSidePanel();
+        positionYasirSettingsPanel(panel, dialogEl);
+        widgetBottom.appendChild(panel);
+        refreshBetterYasirOrdersPanelTabCounts();
+        yasirActiveSettingsPanel = panel;
+        panel.setAttribute('data-modal-part', 'true');
+        panel.dataset.attachedModalId = dialogEl.id || 'yasir-dialog';
+        
+        setupYasirSettingsPanelObservers(dialogEl);
+        setupYasirSettingsPanelResize(dialogEl);
+        
+        const escHandler = (event) => {
+          if (event.key === 'Escape' && yasirActiveSettingsPanel) {
+            cleanupYasirSettingsPanel();
+          }
+        };
+        yasirSettingsEscListenerKey = addManagedEventListener(document, 'keydown', escHandler);
+        
+        syncYasirFooterSettingsButton(widgetBottom);
+        
+        detachYasirPoAffordabilityPlayerListener();
+        const playerActor = globalThis.state?.player;
+        if (playerActor?.subscribe && typeof panel._betterYasirRefreshPoAffordability === 'function') {
+          const sub = playerActor.subscribe(() => {
+            if (!document.getElementById('better-yasir-settings-panel')) {
+              detachYasirPoAffordabilityPlayerListener();
+              return;
+            }
+            try {
+              panel._betterYasirRefreshPoAffordability();
+            } catch (_) {
+              /* ignore */
+            }
+          });
+          if (sub && typeof sub.unsubscribe === 'function') {
+            yasirPoAffordabilityUnsub = () => {
+              try {
+                sub.unsubscribe();
+              } catch (_) {
+                /* ignore */
+              }
+            };
+          }
+        }
+      }
+      
+      function injectYasirFooterSettingsButton(widgetBottom) {
+        if (!widgetBottom || widgetBottom.querySelector('[data-better-yasir-footer-settings]')) {
+          return;
+        }
+        const footer = widgetBottom.querySelector('.flex.justify-end.gap-2');
+        if (!footer) {
+          return;
+        }
+        const closeButton = footer.querySelector('button:last-of-type');
+        if (!closeButton) {
+          return;
+        }
+        const footerBtn = document.createElement('button');
+        footerBtn.type = 'button';
+        footerBtn.dataset.betterYasirFooterSettings = 'true';
+        footerBtn.textContent = t('mods.betterYasir.tabSettings');
+        footerBtn.className = yasirSettingsFooterButtonClass();
+        footerBtn.setAttribute('aria-label', t('mods.betterYasir.tabSettings'));
+        addManagedEventListener(footerBtn, 'click', () => {
+          if (yasirActiveSettingsPanel) {
+            cleanupYasirSettingsPanel();
+            syncYasirFooterSettingsButton(widgetBottom);
+            return;
+          }
+          openYasirSettingsPanel(widgetBottom);
+        });
+        footer.insertBefore(footerBtn, closeButton);
+        refreshBetterYasirFooterOrdersIndicator();
+      }
+      
+      function teardownBetterYasirUi() {
+        cleanupYasirSettingsPanel();
+        document.querySelectorAll('[data-better-yasir-footer-settings]').forEach((el) => el.remove());
+        document.querySelectorAll('[data-better-yasir-header-row]').forEach((row) => {
+          const h2 = row.querySelector('h2.widget-top');
+          const rowParent = row.parentElement;
+          if (h2 && rowParent) {
+            rowParent.insertBefore(h2, row);
+          }
+          row.remove();
+        });
+        document.querySelectorAll('.widget-bottom').forEach((wb) => {
+          const shopPane = wb.querySelector('.better-yasir-shop-pane');
+          const settingsPane = wb.querySelector('.better-yasir-settings-pane');
+          if (shopPane && wb.contains(shopPane)) {
+            while (shopPane.firstChild) {
+              wb.insertBefore(shopPane.firstChild, shopPane);
+            }
+            shopPane.remove();
+          }
+          if (settingsPane) {
+            settingsPane.remove();
+          }
+          delete wb.dataset.betterYasirTabsInit;
+          delete wb.dataset.betterYasirActiveTab;
+        });
+        document.getElementById('better-yasir-settings-panel')?.remove();
+      }
+      
       // Main function to enhance the Yasir modal
-      function enhanceYasirModal() {
+      // candidateWidget: optional .widget-bottom from mutation loop (must not pre-set betterYasirProcessing on it — enhance manages that flag).
+      function enhanceYasirModal(candidateWidget = null) {
         // Inject styles only when enhancing modal
         injectStyles();
         
         // Try multiple ways to find the Yasir modal
         let modal = null;
+        const buyLabel = t('mods.betterYasir.buy');
+        const sellLabel = t('mods.betterYasir.sell');
+        const currentStockText = t('mods.betterYasir.currentStock');
+        const exchangeText = t('mods.betterYasir.exchangeItems');
         
-        // Method 1: Look for h2 with p containing "Yasir" and find the correct widget-bottom
-        const yasirTitle = document.querySelector('h2 p');
-        if (yasirTitle && yasirTitle.textContent.includes('Yasir')) {
-          // Look for the widget-bottom that contains both the title and the tables
-          const widgetBottom = yasirTitle.closest('.widget-bottom');
-          const widgetText = widgetBottom?.textContent || '';
-          const currentStockText = t('mods.betterYasir.currentStock');
-          if (widgetBottom && (widgetText.includes('Current stock') || widgetText.includes(currentStockText))) {
-            modal = widgetBottom;
+        const matchesYasirWidgetBottom = (w) => {
+          if (!w?.classList?.contains('widget-bottom') || !w.querySelector('table')) {
+            return false;
+          }
+          const text = w.textContent || '';
+          const hasYasir = text.includes('Yasir');
+          const hasBuySection = text.includes('Current stock') ||
+            text.includes(currentStockText) ||
+            text.includes(buyLabel);
+          const hasSellSection = text.includes('Exchange your items for dust') ||
+            text.includes(exchangeText) ||
+            text.includes(sellLabel);
+          return hasYasir && hasBuySection && hasSellSection;
+        };
+        
+        if (candidateWidget && matchesYasirWidgetBottom(candidateWidget)) {
+          modal = candidateWidget;
+          console.log('[Better Yasir]', 'enhance: modal via candidate (mutation loop)');
+        }
+        
+        // Method 1: visible shop title (skip sr-only duplicate h2 in dialog)
+        if (!modal) {
+          const yasirTitle = document.querySelector('h2.widget-top:not(.sr-only) p') ||
+            document.querySelector('h2.widget-top p') ||
+            document.querySelector('h2 p');
+          if (yasirTitle && yasirTitle.textContent.includes('Yasir')) {
+            const titleH2 = yasirTitle.closest('h2');
+            let widgetBottom = titleH2?.nextElementSibling?.classList?.contains('widget-bottom')
+              ? titleH2.nextElementSibling
+              : null;
+            if (!widgetBottom && titleH2) {
+              const dialog = titleH2.closest('[role="dialog"]');
+              widgetBottom = dialog?.querySelector('.widget-bottom') || null;
+            }
+            const widgetText = widgetBottom?.textContent || '';
+            const hasBuyMarkers = widgetText.includes('Current stock') ||
+              widgetText.includes(currentStockText) ||
+              widgetText.includes(buyLabel);
+            if (widgetBottom && hasBuyMarkers) {
+              modal = widgetBottom;
+              console.log('[Better Yasir]', 'enhance: modal via method1 (title h2 + widget-bottom sibling)');
+            }
           }
         }
         
-        // Method 2: Look for any widget-bottom containing both "Yasir" and the tables (English or Portuguese)
+        // Method 2: widget-bottom with Yasir copy and buy/sell tables (raw or after updateSectionTitles)
         if (!modal) {
           const widgetBottoms = document.querySelectorAll('.widget-bottom');
           for (const widget of widgetBottoms) {
-            const text = widget.textContent || '';
-            const hasYasir = text.includes('Yasir');
-            const currentStockText = t('mods.betterYasir.currentStock');
-            const exchangeText = t('mods.betterYasir.exchangeItems');
-            const hasBuySection = text.includes('Current stock') || text.includes(currentStockText);
-            const hasSellSection = text.includes('Exchange your items for dust') || text.includes(exchangeText);
-            
-            if (hasYasir && hasBuySection && hasSellSection) {
+            if (matchesYasirWidgetBottom(widget)) {
               modal = widget;
+              console.log('[Better Yasir]', 'enhance: modal via method2 (scan widget-bottoms)');
               break;
             }
           }
         }
         
         if (!modal) {
+          console.log('[Better Yasir]', 'enhance: no modal matched', {
+            buyLabel,
+            sellLabel,
+            widgetBottomCount: document.querySelectorAll('.widget-bottom').length
+          });
           return false;
         }
         
@@ -2605,11 +5554,19 @@
         // Process flex containers (for the new div structure) - this handles everything now
         addQuantityInputsToFlexContainers();
         
+        injectYasirFooterSettingsButton(modal);
+        
         // Mark as enhanced
         modal.dataset.betterYasirEnhanced = 'true';
         
         // Remove processing marker
         delete modal.dataset.betterYasirProcessing;
+        
+        console.log('[Better Yasir]', 'enhance: complete', {
+          hasFooterBtn: !!modal.querySelector('[data-better-yasir-footer-settings]')
+        });
+        
+        scheduleYasirPurchaseOrderFulfillment(modal);
         
         return true;
       }
@@ -2702,11 +5659,9 @@
         } catch (e) { /* silent */ }
       }
     
-      // Clear all caches to force fresh data
+      // Clear DOM / item-key caches (game state is read fresh each call; no snapshot TTL cache).
       function clearCaches() {
-        cacheManager.clear();
-        clearDomCache(); // Clear DOM cache
-        // WeakMap doesn't have clear() method, so we create a new one
+        clearDomCache();
         itemKeyCache = new WeakMap();
       }
       
@@ -2899,36 +5854,31 @@
           // Always attempt tooltip transform
           transformYasirTooltip();
           
-          // Check for flex containers that might need enhancement
           // Only process if we're not currently in a UI refresh cycle
           if (!document.body.dataset.betterYasirRefreshing) {
+            // Run enhance BEFORE addQuantityInputsToFlexContainers: that path calls
+            // updateSectionTitles() which rewrites "Current stock" -> "Buy" etc., and would
+            // break enhanceYasirModal() detection on the same tick.
+            const existingModal = document.querySelector(`${SELECTORS.YASIR_MODAL}[data-better-yasir-enhanced]`);
+            if (!existingModal) {
+              clearCaches();
+              const widgetBottoms = document.querySelectorAll(SELECTORS.YASIR_MODAL);
+              for (const widget of widgetBottoms) {
+                if (widget.querySelector('table') && !widget.dataset.betterYasirEnhanced) {
+                  console.log('[Better Yasir]', 'mutation: running enhanceYasirModal before flex/quantity pass');
+                  // Do not set betterYasirProcessing here — enhanceYasirModal sets it on the modal it
+                  // resolves; pre-setting it caused an immediate return false (same node).
+                  enhanceYasirModal(widget);
+                  break;
+                }
+              }
+            } else {
+              console.log('[Better Yasir]', 'mutation: Yasir modal already enhanced, skipping enhance pass');
+            }
+            
             const flexContainers = document.querySelectorAll('div.flex.items-center.gap-1\\.5.dithered.px-1, div.flex.items-center.gap-1\\.5');
             if (flexContainers.length > 0) {
               addQuantityInputsToFlexContainers();
-            }
-          }
-          
-          // Check if already processing to avoid duplicate work
-          const existingModal = document.querySelector(`${SELECTORS.YASIR_MODAL}[data-better-yasir-enhanced]`);
-          if (existingModal) {
-            return;
-          }
-          
-          // Clear caches when modal changes
-          clearCaches();
-          
-          // Find and process the modal
-          const widgetBottoms = document.querySelectorAll(SELECTORS.YASIR_MODAL);
-          for (const widget of widgetBottoms) {
-            if (widget.querySelector('table') && 
-                !widget.dataset.betterYasirProcessing && 
-                !widget.dataset.betterYasirEnhanced) {
-              widget.dataset.betterYasirProcessing = 'true';
-              enhanceYasirModal();
-              if (widget.dataset.betterYasirProcessing) {
-                delete widget.dataset.betterYasirProcessing;
-              }
-              break; // Only process one modal at a time
             }
           }
         }, CONSTANTS.DEBOUNCE_DELAY);
@@ -2973,9 +5923,17 @@
     
         // Don't try to enhance modal on startup - wait for it to be opened
         // The MutationObserver will handle detecting when the modal is actually opened
+        
+        setupYasirDailyPurchaseOrderWatch();
+        setTimeout(() => {
+          maybeSchedulePoFulfillmentFromDailyUpdate('mod init (after state hydrate)');
+        }, 750);
       }
       
       function cleanup() {
+        teardownBetterYasirUi();
+        yasirPoOrderPlacementGraceUntil = 0;
+        
         // Cleanup all event listeners
         cleanupAllEventListeners();
         
@@ -2984,6 +5942,7 @@
         
         // Cleanup observers and timeouts
         cleanupObservers();
+        cleanupYasirDailyPoWatch();
         
         // Cleanup state update timeout
         if (stateUpdateTimeout) {

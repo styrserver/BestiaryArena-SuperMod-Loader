@@ -4,6 +4,15 @@
   },
   "notes": [
     {
+      "version": "3.6.4",
+      "changes": [
+        { "type": "added", "mod": "Better Yasir", "text": "Added purchase orders to Better Yasir." },
+        { "type": "added", "mod": "Mod Settings", "text": "Added equipment tooltips." },
+        { "type": "fixed", "mod": "Depot Manager", "text": "Bug fixes." },
+        { "type": "fixed", "mod": "Mod Settings", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.6.3",
       "changes": [
         { "type": "fixed", "mod": "Bestiary Automator", "text": "Auto Daycare no longer skips maxed creature withdrawal when daycare creatures appear without blip markers." },

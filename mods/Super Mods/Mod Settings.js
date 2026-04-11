@@ -192,6 +192,9 @@ const TIMEOUT_DELAYS = {
   HOVER_TOOLTIP_SHOW: 150
 };
 
+/** Vanilla bestiary filter input — same id as Depot Manager. */
+const BESTIARY_SEARCH_INPUT_ID = 'monster-input-id';
+
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
 
@@ -210,6 +213,9 @@ const tReplace = (key, replacements) => {
 
 // Track timeouts for cleanup
 const activeTimeouts = new Set();
+
+let bestiarySearchStyleListeners = null;
+let bestiarySearchStylePendingTimeout = null;
 
 // Observer state
 const observers = {
@@ -365,14 +371,59 @@ function isShinyCreature(imgElement) {
   return imgElement.src.includes('-shiny.png');
 }
 
-function getPlayerMonsters() {
-  return globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
+/** Max-creatures star (mod) or game elite overlay (`data-rarity="6"`). */
+function inferWantsEliteFromCreatureSlot(containerSlot) {
+  if (!containerSlot) return false;
+  if (containerSlot.querySelector('img[data-max-creatures="true"]')) return true;
+  const rarityEl = containerSlot.querySelector('.has-rarity');
+  const r = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+  if (r === GAME_CONSTANTS.ELITE_RARITY_LEVEL) return true;
+  const textRarityEl = containerSlot.querySelector('.has-rarity-text');
+  const r2 = parseInt(textRarityEl?.getAttribute('data-rarity') || '', 10);
+  return r2 === GAME_CONSTANTS.ELITE_RARITY_LEVEL;
 }
 
-function getTier4Monsters() {
-  return getPlayerMonsters().filter(
-    (m) => m.tier === GAME_CONSTANTS.MAX_TIER
-  );
+/**
+ * Keep in sync with Depot Manager `bestiaryDuplicateDomAmbiguous` (same predicate).
+ * @param {boolean} wantsElite
+ * @param {number} rarityOverlay - parsed `data-rarity` (NaN if missing)
+ */
+function bestiaryDuplicateDomAmbiguous(wantsElite, rarityOverlay) {
+  if (wantsElite) return false;
+  if (rarityOverlay === GAME_CONSTANTS.ELITE_RARITY_LEVEL) return false;
+  return !Number.isFinite(rarityOverlay) || rarityOverlay < GAME_CONSTANTS.ELITE_RARITY_LEVEL;
+}
+
+/**
+ * When the slot shows no elite signal and overlay rarity is not 6, max-tier and elite often look identical
+ * (same data-rarity). Match duplicates by game list order only (exp → name → createdAt).
+ */
+function creatureSlotDomAmbiguousDuplicates(containerSlot) {
+  if (!containerSlot) return true;
+  const wantsElite = inferWantsEliteFromCreatureSlot(containerSlot);
+  const rarityEl = containerSlot.querySelector('.has-rarity');
+  const r = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+  return bestiaryDuplicateDomAmbiguous(wantsElite, r);
+}
+
+/**
+ * Portrait src and level are authoritative for duplicate disambiguation (shiny path, level span).
+ * Prevents picking a shiny save instance when the cell shows a non-shiny portrait (or vice versa).
+ */
+function filterMonstersForCreaturePortrait(monsters, creatureImg, displayedLevel) {
+  if (!Array.isArray(monsters) || !creatureImg) return monsters;
+  const wantsShiny = creatureImg.src.includes('-shiny');
+  let out = monsters.filter((m) => Boolean(m.shiny) === wantsShiny);
+  if (out.length === 0) out = monsters;
+  if (displayedLevel != null && Number.isFinite(displayedLevel)) {
+    const byLevel = out.filter((m) => getLevelFromExp(m.exp || 0) === displayedLevel);
+    if (byLevel.length > 0) out = byLevel;
+  }
+  return out;
+}
+
+function getPlayerMonsters() {
+  return globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
 }
 
 // DOM utility functions
@@ -4883,27 +4934,44 @@ function applySpecialStyling(options) {
 function filterEligibleCreatures(visibleCreatures) {
   // Skip if scroll is locked (e.g., Bestiary tab)
   if (isScrollLocked()) return [];
-  
-  const tier4Monsters = getTier4Monsters();
+
+  const allMonsters = getPlayerMonsters();
+  const depotIdMap =
+    typeof window !== 'undefined' && typeof window.depotManager?.getBestiaryCreatureIdMap === 'function'
+      ? window.depotManager.getBestiaryCreatureIdMap()
+      : null;
+  const monstersById = new Map((Array.isArray(allMonsters) ? allMonsters : []).map((m) => [String(m.id), m]));
+
   const eligibleCreatures = [];
-  
+
   visibleCreatures.forEach((imgEl) => {
     const gameId = getCreatureGameId(imgEl);
     if (!gameId) return;
 
-    const monster = tier4Monsters.find((m) => m.gameId === gameId);
-    if (!monster) return;
-    
+    const button = imgEl.closest('button');
+    if (!button) return;
+
+    let monster = null;
+    if (button.closest('#monster-scroll') && depotIdMap) {
+      const uid = depotIdMap.get(imgEl);
+      if (uid != null) monster = monstersById.get(String(uid)) || null;
+      if (!monster) monster = scoreMatchMonsterForCreatureButton(button, allMonsters);
+    } else {
+      monster = resolveMonsterForButtonOnDemand(button);
+    }
+
+    if (!monster || monster.tier !== GAME_CONSTANTS.MAX_TIER) return;
+
     // Skip shinies if max shinies is enabled (shinies take priority)
     if (config.enableMaxShinies && isShinyCreature(imgEl)) {
       return;
     }
-    
+
     const elements = getCreatureElements(imgEl.parentElement);
     const levelText = getCreatureLevel(elements.levelEl);
     const isLevel50 = isMaxLevel(levelText);
     const hasAllMaxStats = isEliteMonster(monster);
-    
+
     if (isLevel50 && hasAllMaxStats && elements.starImg && elements.rarityDiv) {
       eligibleCreatures.push({
         imgEl,
@@ -4913,7 +4981,7 @@ function filterEligibleCreatures(visibleCreatures) {
       });
     }
   });
-  
+
   return eligibleCreatures;
 }
 
@@ -5160,6 +5228,447 @@ function isInventoryCreatureButton(button) {
   );
 }
 
+// Equipment arsenal hover (Show ability on hover) — grid resolution mirrors Depot Manager;
+// effect text mirrors Cyclopedia (description HTML or EffectComponent).
+function resolveEquipmentHoverGrid() {
+  const isInsideDialog = (node) => !!node?.closest?.('[role="dialog"], [data-radix-dialog-content]');
+  const directScroll =
+    document.getElementById('equip-scroll') ||
+    document.querySelector('[id*="equip"][id*="scroll"]') ||
+    document.querySelector('[id*="arsenal"][id*="scroll"]');
+  if (directScroll && !isInsideDialog(directScroll)) {
+    const viewport = directScroll.querySelector('[data-radix-scroll-area-viewport]');
+    const grid =
+      viewport?.querySelector('div.flex.flex-wrap') || directScroll.querySelector('div.flex.flex-wrap');
+    if (grid) return grid;
+  }
+  const viewports = Array.from(document.querySelectorAll('[data-radix-scroll-area-viewport]'));
+  let bestGrid = null;
+  let bestCount = 0;
+  for (const viewport of viewports) {
+    if (isInsideDialog(viewport)) continue;
+    const grid = viewport.querySelector('div.flex.flex-wrap');
+    if (!grid) continue;
+    const count = grid.querySelectorAll('button .sprite.item, button img[alt="stat type"]').length;
+    if (count > bestCount) {
+      bestCount = count;
+      bestGrid = grid;
+    }
+  }
+  return bestCount > 0 ? bestGrid : null;
+}
+
+function getPlayerEquipmentRowsForHover() {
+  try {
+    const playerSnapshot = globalThis.state?.player?.getSnapshot?.();
+    const equips = playerSnapshot?.context?.equips || [];
+    if (!Array.isArray(equips) || equips.length === 0) return [];
+    return equips
+      .filter((equip) => equip && equip.gameId != null)
+      .map((equip, index) => {
+        let equipData = null;
+        try {
+          equipData = globalThis.state?.utils?.getEquipment?.(equip.gameId) || null;
+        } catch (e) {
+          /* ignore */
+        }
+        const name = equipData?.metadata?.name || `Equipment ${equip.gameId}`;
+        const spriteId =
+          equipData?.metadata?.spriteId != null ? String(equipData.metadata.spriteId) : '';
+        return {
+          id: String(equip.id || `equip_${index}`),
+          gameId: equip.gameId,
+          name,
+          spriteId,
+          stat: String(equip.stat || 'unknown'),
+          tier: Number(equip.tier || 1)
+        };
+      });
+  } catch (error) {
+    return [];
+  }
+}
+
+function normalizeEquipmentStatForHover(statRaw) {
+  const s = String(statRaw || '').toLowerCase().trim();
+  const map = {
+    hp: 'heal',
+    heal: 'heal',
+    ad: 'attackdamage',
+    attackdamage: 'attackdamage',
+    ap: 'abilitypower',
+    abilitypower: 'abilitypower',
+    arm: 'armor',
+    armor: 'armor',
+    mr: 'magicresist',
+    magicresist: 'magicresist',
+    aps: 'attackspeed',
+    attackspeed: 'attackspeed',
+    spd: 'speed',
+    speed: 'speed'
+  };
+  return map[s] || s;
+}
+
+function getEquipmentSpriteIdFromInventoryButton(button) {
+  const sprite = button?.querySelector?.('.sprite.item');
+  if (!sprite) return '';
+  for (const cls of Array.from(sprite.classList)) {
+    const m = /^id-(\d+)$/.exec(cls);
+    if (m) return m[1];
+  }
+  return '';
+}
+
+function getEquipmentTierFromInventoryButton(button) {
+  const directTierRaw = button?.getAttribute?.('data-tier') || '';
+  const directTier = Number.parseInt(directTierRaw, 10);
+  if (Number.isFinite(directTier) && directTier > 0) return directTier;
+
+  const rarityRaw = button?.querySelector?.('.has-rarity')?.getAttribute?.('data-rarity') || '';
+  const rarityTier = Number.parseInt(rarityRaw, 10);
+  if (Number.isFinite(rarityTier) && rarityTier > 0) return rarityTier;
+
+  const buttonRarityRaw = button?.getAttribute?.('data-rarity') || '';
+  const buttonRarityTier = Number.parseInt(buttonRarityRaw, 10);
+  if (Number.isFinite(buttonRarityTier) && buttonRarityTier > 0) return buttonRarityTier;
+
+  return 1;
+}
+
+function getEquipmentStatFromInventoryButton(button) {
+  const src = button?.querySelector('img[alt="stat type"]')?.getAttribute('src') || '';
+  const filename = src.split('/').pop() || '';
+  const key = filename.replace('.png', '').trim().toLowerCase();
+  return normalizeEquipmentStatForHover(key);
+}
+
+function resolveEquipmentGameIdFromInventoryButton(button) {
+  const directId = button?.getAttribute?.('data-equipment-id');
+  if (directId) {
+    const rows = getPlayerEquipmentRowsForHover();
+    const row = rows.find((r) => String(r.id) === String(directId));
+    if (row?.gameId != null) return row.gameId;
+  }
+
+  const spriteId = getEquipmentSpriteIdFromInventoryButton(button);
+  const tier = getEquipmentTierFromInventoryButton(button);
+  const statNorm = getEquipmentStatFromInventoryButton(button);
+  const rows = getPlayerEquipmentRowsForHover();
+
+  if (spriteId) {
+    const matches = rows.filter(
+      (r) =>
+        String(r.spriteId) === String(spriteId) &&
+        Number(r.tier) === Number(tier) &&
+        normalizeEquipmentStatForHover(r.stat) === statNorm
+    );
+    if (matches.length > 0) return matches[0].gameId;
+  }
+
+  const nameFromAttr = button?.getAttribute?.('data-equipment')?.trim() || '';
+  const title = String(button?.getAttribute?.('title') || '');
+  const nameFromTitle = title.includes('|') ? title.split('|')[0].trim() : title.trim();
+  const name = nameFromAttr || nameFromTitle;
+
+  if (name) {
+    const map = window.BestiaryModAPI?.utility?.maps?.equipmentNamesToGameIds;
+    if (map?.get) {
+      const gid = map.get(name.toLowerCase());
+      if (gid != null) return gid;
+    }
+    const byNameTier = rows.filter(
+      (r) => r.name === name && Number(r.tier) === Number(tier)
+    );
+    if (byNameTier.length > 0) return byNameTier[0].gameId;
+  }
+
+  if (spriteId && typeof globalThis.state?.utils?.getEquipment === 'function') {
+    const utils = globalThis.state.utils;
+    let emptyStreak = 0;
+    for (let i = 0; i < 20000; i++) {
+      try {
+        const eq = utils.getEquipment(i);
+        if (!eq) {
+          emptyStreak++;
+          if (emptyStreak > 80) break;
+          continue;
+        }
+        emptyStreak = 0;
+        if (eq?.metadata?.spriteId != null && String(eq.metadata.spriteId) === String(spriteId)) {
+          return i;
+        }
+      } catch (e) {
+        emptyStreak++;
+        if (emptyStreak > 80) break;
+      }
+    }
+  }
+
+  return null;
+}
+
+function isEquipmentHoverCandidateButton(button) {
+  if (!button) return false;
+  if (button.querySelector('img[alt="creature"]')) return false;
+  if (!(button.querySelector('.sprite.item') || button.querySelector('img[alt="stat type"]'))) return false;
+  if (
+    button.closest('[role="menu"]') ||
+    button.closest('[role="dialog"]') ||
+    button.closest('[data-radix-dialog-content]')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function getEquipmentHoverTargetButtons() {
+  const grid = resolveEquipmentHoverGrid();
+  if (!grid) return [];
+  return Array.from(grid.querySelectorAll(':scope button')).filter(
+    (btn) => isEquipmentHoverCandidateButton(btn) && grid.contains(btn)
+  );
+}
+
+/**
+ * Hover resolution traces (depot vs fiber vs sequential). Enabled when any of:
+ * - Extension popup **Mod debug** (`bestiary-debug` in localStorage → `window.BESTIARY_DEBUG`)
+ * - `localStorage.setItem('mod-settings-debug-hover','1')` (Mod Settings–only override)
+ * - `window.__MOD_SETTINGS_DEBUG_HOVER__ = true`
+ */
+function isAdvancedHoverDebugEnabled() {
+  try {
+    if (typeof window !== 'undefined' && window.__MOD_SETTINGS_DEBUG_HOVER__ === true) return true;
+    // Injected by local_mods `with (context)` (same flag as Depot Manager uses).
+    if (typeof BESTIARY_DEBUG !== 'undefined' && BESTIARY_DEBUG === true) return true;
+    if (typeof window !== 'undefined' && window.BESTIARY_DEBUG === true) return true;
+    if (localStorage.getItem('bestiary-debug') === 'true') return true;
+    return localStorage.getItem('mod-settings-debug-hover') === '1';
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Grid slot position under #monster-scroll (for comparing DOM order vs resolvers).
+ */
+function getBestiaryHoverSlotDomContext(button) {
+  const slot = button?.closest?.('#monster-scroll .flex.flex-wrap.gap-1 > div.flex');
+  if (!slot || !slot.parentElement) return null;
+  const grid = slot.parentElement;
+  const siblings = Array.from(grid.children).filter((el) => el.classList?.contains?.('flex'));
+  const domIndex = siblings.indexOf(slot);
+  return {
+    domIndex: domIndex >= 0 ? domIndex : null,
+    siblingSlotCount: siblings.length,
+    dataDepotCreatureId: slot.getAttribute('data-depot-creature-id'),
+    dataDepotHidden: slot.getAttribute('data-depot-hidden'),
+    slotDisplay: window.getComputedStyle(slot).display
+  };
+}
+
+/**
+ * Player monsters that match the portrait cell's obvious visuals (same species / level / shiny / rarity band).
+ */
+function listHoverVisualTwinCandidates(creatureImg, button, monsters) {
+  if (!creatureImg || !button || !Array.isArray(monsters)) return [];
+  const gameId = getCreatureGameId(creatureImg);
+  if (!gameId) return [];
+  const levelSpan = button.querySelector('span[translate="no"]');
+  const displayedLevel = levelSpan ? parseInt(levelSpan.textContent, 10) : NaN;
+  const slot = creatureImg.closest('.container-slot');
+  const wantsElite = inferWantsEliteFromCreatureSlot(slot);
+  const wantsShiny = creatureImg.src.includes('-shiny');
+  const rarityEl = slot?.querySelector('.has-rarity');
+  const wantsRarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+  const rarityFromMonster = (m) => {
+    if (isEliteMonster(m)) return 6;
+    const tier = Number(m?.tier || 1);
+    return Math.max(1, Math.min(5, tier + 1));
+  };
+  return monsters
+    .filter((m) => {
+      if (m.gameId !== gameId) return false;
+      if (Number.isFinite(displayedLevel) && getLevelFromExp(m.exp || 0) !== displayedLevel) return false;
+      if (Boolean(m.shiny) !== wantsShiny) return false;
+      if (isEliteMonster(m) !== wantsElite) return false;
+      if (Number.isFinite(wantsRarity) && rarityFromMonster(m) !== wantsRarity) return false;
+      return true;
+    })
+    .map((m) => monsterHoverDebugSnapshot(m));
+}
+
+/**
+ * When debug is on, one grouped log per hover: compares depot UID → monster, React fiber, weak map,
+ * onDemand, and visible-only sequential (duplicate-safe baseline for filtered grids).
+ */
+function logHoveredCreatureResolutionCompare(button) {
+  if (!isAdvancedHoverDebugEnabled() || !button) return;
+  const creatureImg = button.querySelector('img[alt="creature"]');
+  if (!creatureImg) return;
+  const monsters = getPlayerMonsters();
+  if (!Array.isArray(monsters)) return;
+
+  const gameId = getCreatureGameId(creatureImg);
+  const portrait = (creatureImg.src || '').split('/').pop() || '';
+  const inMonsterScroll = Boolean(button.closest('#monster-scroll'));
+  const domCtx = inMonsterScroll ? getBestiaryHoverSlotDomContext(button) : null;
+
+  const depotMap =
+    typeof window !== 'undefined' && typeof window.depotManager?.getBestiaryCreatureIdMap === 'function'
+      ? window.depotManager.getBestiaryCreatureIdMap()
+      : null;
+  const depotUidRaw = depotMap?.get(creatureImg);
+  const depotUid = depotUidRaw != null ? String(depotUidRaw) : null;
+  const monsterFromDepotUid = depotUid ? monsters.find((m) => String(m.id) === depotUid) : null;
+
+  const taggedSlot = button.closest('div.flex[data-depot-creature-id]');
+  const taggedAttrId = taggedSlot?.getAttribute('data-depot-creature-id');
+  const monsterFromTaggedSlot =
+    taggedAttrId && Array.isArray(monsters)
+      ? monsters.find((m) => String(m.id) === String(taggedAttrId))
+      : null;
+
+  const fiberM = resolveMonsterFromReactFiber(button);
+  const weakM = advancedHoverState.resolvedByImg.get(creatureImg);
+  const onDemandM = resolveMonsterForButtonOnDemand(button);
+
+  let sequentialVisibleM = null;
+  if (inMonsterScroll) {
+    const visibleScrollImgs = getVisibleInventoryCreatureImgsForHover().filter((img) =>
+      img.closest('#monster-scroll')
+    );
+    const resolved = resolveHoverCreaturesSequentially(visibleScrollImgs, monsters);
+    const hit = resolved.find((r) => r.imgEl === creatureImg);
+    sequentialVisibleM = hit?.monster || null;
+  }
+
+  // Mirror getMonsterInfoFromButton: DOM slot tag beats scroll weakMap/fiber ordering.
+  const chosenForTooltip = monsterFromTaggedSlot
+    ? monsterFromTaggedSlot
+    : inMonsterScroll
+      ? onDemandM || weakM || fiberM
+      : fiberM || weakM || onDemandM;
+  const chosenId = chosenForTooltip ? String(chosenForTooltip.id) : null;
+
+  const summary = {
+    depotMapUid: depotUid,
+    monsterIfDepotUidHonored: monsterFromDepotUid ? String(monsterFromDepotUid.id) : null,
+    slotDataDepotCreatureId: taggedAttrId || null,
+    monsterIfSlotTagHonored: monsterFromTaggedSlot ? String(monsterFromTaggedSlot.id) : null,
+    reactFiber: fiberM ? String(fiberM.id) : null,
+    rebuildWeakMap: weakM ? String(weakM.id) : null,
+    onDemand: onDemandM ? String(onDemandM.id) : null,
+    visibleOnlySequential: sequentialVisibleM ? String(sequentialVisibleM.id) : null,
+    tooltipChosen: chosenId
+  };
+
+  const referenceIds = [
+    summary.monsterIfDepotUidHonored,
+    summary.monsterIfSlotTagHonored,
+    summary.reactFiber,
+    summary.visibleOnlySequential
+  ].filter(Boolean);
+  const mismatch =
+    referenceIds.length > 0 && chosenId && referenceIds.some((rid) => rid !== chosenId);
+
+  const label = `[Mod Settings][hover-compare] ${portrait} gameId=${gameId}${mismatch ? ' ⚠ ID MISMATCH' : ''}`;
+  console.groupCollapsed(label);
+  // Use console.info (not .log): local_mods.js silences console.log unless bestiary-debug is on — but when
+  // hover debug is enabled via mod-settings-debug-hover alone, info still prints.
+  console.info(
+    'enable',
+    'Extension: Mod debug in popup sets bestiary-debug / BESTIARY_DEBUG; optional: mod-settings-debug-hover=1'
+  );
+  console.info('domSlot', domCtx);
+  console.info('idSummary (what each resolver says)', summary);
+  console.info('statSnapshots', {
+    tooltipShows: monsterHoverDebugSnapshot(chosenForTooltip),
+    ifSlotDataDepotIdWereUsed: monsterHoverDebugSnapshot(monsterFromTaggedSlot),
+    ifPortraitDepotMapUidWereUsed: monsterHoverDebugSnapshot(monsterFromDepotUid),
+    reactFiber: monsterHoverDebugSnapshot(fiberM),
+    visibleOnlySequential: monsterHoverDebugSnapshot(sequentialVisibleM)
+  });
+  const twins = listHoverVisualTwinCandidates(creatureImg, button, monsters);
+  if (twins.length > 1) {
+    console.info(`visualTwinCandidates (${twins.length} instances match this cell's portrait/level/shiny/rarity)`, twins);
+  }
+  const seqDbg = advancedHoverState.debugByImg.get(creatureImg);
+  if (seqDbg) console.info('visibleSequentialInternal', seqDbg);
+
+  if (
+    depotUid &&
+    monsterFromDepotUid &&
+    chosenId &&
+    String(monsterFromDepotUid.id) !== chosenId &&
+    !monsterFromTaggedSlot
+  ) {
+    console.warn('Tooltip creature ≠ depot map UID on this portrait img (tagged slot not overriding)', {
+      depotUid,
+      expectedMonsterId: String(monsterFromDepotUid.id),
+      tooltipMonsterId: chosenId
+    });
+  }
+  if (
+    inMonsterScroll &&
+    sequentialVisibleM &&
+    chosenId &&
+    String(sequentialVisibleM.id) !== chosenId
+  ) {
+    console.warn(
+      'Tooltip creature ≠ visible-only sequential (duplicate order: depot map vs visible DOM order)',
+      { sequentialId: String(sequentialVisibleM.id), tooltipId: chosenId }
+    );
+  }
+  if (fiberM && chosenId && String(fiberM.id) !== chosenId) {
+    console.info('React fiber id ≠ tooltip (expected when #monster-scroll prefers depot map over fiber)', {
+      fiberId: String(fiberM.id),
+      tooltipId: chosenId
+    });
+  }
+  if (
+    depotUid &&
+    taggedAttrId &&
+    String(depotUid) !== String(taggedAttrId) &&
+    monsterFromDepotUid &&
+    monsterFromTaggedSlot &&
+    String(monsterFromDepotUid.id) !== String(monsterFromTaggedSlot.id)
+  ) {
+    console.warn('Portrait depot map UID ≠ slot data-depot-creature-id (two sources of truth disagree)', {
+      depotMapUid: depotUid,
+      slotAttrId: taggedAttrId
+    });
+  }
+  console.groupEnd();
+}
+
+function monsterHoverDebugSnapshot(m) {
+  if (!m) return null;
+  const hp = m.hp || 0;
+  const ad = m.ad || 0;
+  const ap = m.ap || 0;
+  const armor = m.armor || 0;
+  const magicResist = m.magicResist || 0;
+  const barMax = 20;
+  return {
+    id: m.id,
+    gameId: m.gameId,
+    level: getLevelFromExp(m.exp || 0),
+    hp,
+    ad,
+    ap,
+    armor,
+    magicResist,
+    barPctVs20: {
+      hp: Math.round(Math.min(100, Math.max(0, (hp / barMax) * 100))),
+      ad: Math.round(Math.min(100, Math.max(0, (ad / barMax) * 100))),
+      ap: Math.round(Math.min(100, Math.max(0, (ap / barMax) * 100))),
+      armor: Math.round(Math.min(100, Math.max(0, (armor / barMax) * 100))),
+      magicResist: Math.round(Math.min(100, Math.max(0, (magicResist / barMax) * 100)))
+    }
+  };
+}
+
 const advancedHoverState = {
   resolvedByImg: new WeakMap(),
   debugByImg: new WeakMap(),
@@ -5170,6 +5679,11 @@ const advancedHoverState = {
   activeCleanup: null,
   activeButton: null,
   activeToken: 0
+};
+
+const equipmentHoverDelegationState = {
+  delegatedBound: false,
+  delegatedHandler: null
 };
 
 function destroyActiveAdvancedHoverTooltip() {
@@ -5197,6 +5711,18 @@ function getVisibleInventoryCreatureImgsForHover() {
     const style = window.getComputedStyle(slot);
     return style.display !== 'none';
   });
+}
+
+/** Visible #monster-scroll order: how many same gameId portraits appear strictly before this img. */
+function countSameGameIdPrecedingInMonsterScroll(creatureImg, gameId) {
+  if (!creatureImg || !gameId) return 0;
+  const imgs = getVisibleInventoryCreatureImgsForHover().filter((img) => img.closest('#monster-scroll'));
+  let before = 0;
+  for (const img of imgs) {
+    if (img === creatureImg) return before;
+    if (getCreatureGameId(img) === gameId) before++;
+  }
+  return before;
 }
 
 function sortMonstersByVisualOrder(monsters) {
@@ -5251,44 +5777,55 @@ function resolveHoverCreaturesSequentially(creatures, monsters) {
     const levelSpan = button?.querySelector('span[translate="no"]');
     const displayedLevel = levelSpan ? parseInt(levelSpan.textContent, 10) : null;
     const slot = creatureImg.closest('.container-slot');
-    const wantsElite = Boolean(slot?.querySelector('img[data-max-creatures="true"]'));
+    const wantsElite = inferWantsEliteFromCreatureSlot(slot);
     const wantsShiny = creatureImg.src.includes('-shiny');
     const rarityEl = slot?.querySelector('.has-rarity');
     const wantsRarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
     const baseIdx = idx;
+    const ambiguousDom = creatureSlotDomAmbiguousDuplicates(slot);
 
     if (bucket.length > 1) {
       const tail = bucket.slice(idx);
-      const scoredCandidates = tail.length > 0 ? tail : bucket;
-      const scoredBaseIdx = tail.length > 0 ? idx : 0;
+      const tailOrFull = tail.length > 0 ? tail : bucket;
+      const narrowed = filterMonstersForCreaturePortrait(tailOrFull, creatureImg, displayedLevel);
+      const scoredCandidates = narrowed.length > 0 ? narrowed : tailOrFull;
 
-      const rarityFromMonster = (m) => {
-        if (isEliteMonster(m)) return 6;
-        const tier = Number(m?.tier || 1);
-        // Game DOM usually shows rarity as tier+1 (1..5), with elite override to 6.
-        return Math.max(1, Math.min(5, tier + 1));
-      };
-
-      // Weighted score to break ties when same species/level exists multiple times.
-      let bestLocalIdx = -1;
-      let bestScore = -Infinity;
-      for (let i = 0; i < scoredCandidates.length; i++) {
-        const m = scoredCandidates[i];
-        let score = 0;
-        if (displayedLevel && getLevelFromExp(m.exp || 0) === displayedLevel) score += 100;
-        if (isEliteMonster(m) === wantsElite) score += 40;
-        if (Boolean(m.shiny) === wantsShiny) score += 20;
-        if (Number.isFinite(wantsRarity) && rarityFromMonster(m) === wantsRarity) score += 15;
-        // Keep stable order in tail when scores are tied.
-        score -= i * 0.001;
-        if (score > bestScore) {
-          bestScore = score;
-          bestLocalIdx = i;
+      if (ambiguousDom && scoredCandidates.length > 1) {
+        const inTail = scoredCandidates.filter((m) => bucket.indexOf(m) >= idx);
+        if (inTail.length > 0) {
+          inTail.sort((a, b) => bucket.indexOf(a) - bucket.indexOf(b));
+          const pick = inTail[0];
+          idx = bucket.indexOf(pick);
+          selected = pick;
         }
-      }
-      if (bestLocalIdx >= 0) {
-        idx = scoredBaseIdx + bestLocalIdx;
-        selected = bucket[idx];
+      } else {
+        const rarityFromMonster = (m) => {
+          if (isEliteMonster(m)) return 6;
+          const tier = Number(m?.tier || 1);
+          return Math.max(1, Math.min(5, tier + 1));
+        };
+
+        let bestGlobalIdx = -1;
+        let bestScore = -Infinity;
+        for (let i = 0; i < scoredCandidates.length; i++) {
+          const m = scoredCandidates[i];
+          const globalIdx = bucket.indexOf(m);
+          if (globalIdx < idx) continue;
+          let score = 0;
+          if (displayedLevel && getLevelFromExp(m.exp || 0) === displayedLevel) score += 100;
+          if (isEliteMonster(m) === wantsElite) score += 40;
+          if (Boolean(m.shiny) === wantsShiny) score += 20;
+          if (Number.isFinite(wantsRarity) && rarityFromMonster(m) === wantsRarity) score += 15;
+          score -= (globalIdx - idx) * 0.001;
+          if (score > bestScore) {
+            bestScore = score;
+            bestGlobalIdx = globalIdx;
+          }
+        }
+        if (bestGlobalIdx >= 0) {
+          idx = bestGlobalIdx;
+          selected = bucket[idx];
+        }
       }
     }
 
@@ -5302,6 +5839,7 @@ function resolveHoverCreaturesSequentially(creatures, monsters) {
       wantsElite,
       wantsShiny,
       wantsRarity: Number.isFinite(wantsRarity) ? wantsRarity : null,
+      ambiguousDom,
       baseIdx,
       finalIdx: idx,
       bucketLength: bucket.length,
@@ -5334,38 +5872,53 @@ function resolveHoverCreaturesSequentially(creatures, monsters) {
 
 function rebuildAdvancedHoverResolvedMap() {
   const monsters = getPlayerMonsters();
+  const byId = new Map((Array.isArray(monsters) ? monsters : []).map((m) => [String(m.id), m]));
   const visibleImgs = getVisibleInventoryCreatureImgsForHover();
-  const resolved = resolveHoverCreaturesSequentially(visibleImgs, monsters);
-  advancedHoverState.resolvedByImg = new WeakMap();
-  resolved.forEach(({ imgEl, monster }) => {
-    advancedHoverState.resolvedByImg.set(imgEl, monster);
-  });
-}
 
-function resolveMonsterForButtonOnDemand(button) {
-  const creatureImg = button?.querySelector?.('img[alt="creature"]');
-  if (!creatureImg) return null;
+  const depotIdMap =
+    typeof window !== 'undefined' && typeof window.depotManager?.getBestiaryCreatureIdMap === 'function'
+      ? window.depotManager.getBestiaryCreatureIdMap()
+      : null;
 
-  // 1) Try sequential resolver over currently visible inventory creatures.
-  const visibleImgs = getVisibleInventoryCreatureImgsForHover();
-  if (visibleImgs.length > 0) {
-    const resolved = resolveHoverCreaturesSequentially(visibleImgs, getPlayerMonsters());
-    const hit = resolved.find((r) => r.imgEl === creatureImg);
-    if (hit?.monster) {
-      return hit.monster;
-    }
+  const monsterScrollImgs = [];
+  const otherInventoryImgs = [];
+  for (const img of visibleImgs) {
+    if (img.closest('#monster-scroll')) monsterScrollImgs.push(img);
+    else otherInventoryImgs.push(img);
   }
 
-  // 2) Last-resort score-based candidate match for this one button.
+  advancedHoverState.resolvedByImg = new WeakMap();
+
+  for (const img of monsterScrollImgs) {
+    const uid = depotIdMap?.get(img);
+    let monster = uid != null ? byId.get(String(uid)) : null;
+    if (!monster) {
+      const button = img.closest('button');
+      monster = scoreMatchMonsterForCreatureButton(button, monsters);
+    }
+    if (monster) advancedHoverState.resolvedByImg.set(img, monster);
+  }
+
+  if (otherInventoryImgs.length > 0) {
+    const resolved = resolveHoverCreaturesSequentially(otherInventoryImgs, monsters);
+    resolved.forEach(({ imgEl, monster }) => {
+      if (monster) advancedHoverState.resolvedByImg.set(imgEl, monster);
+    });
+  }
+}
+
+function scoreMatchMonsterForCreatureButton(button, monstersArg) {
+  const creatureImg = button?.querySelector?.('img[alt="creature"]');
+  if (!creatureImg) return null;
   const gameId = getCreatureGameId(creatureImg);
   if (!gameId) return null;
-  const monsters = getPlayerMonsters().filter((m) => m.gameId === gameId);
-  if (monsters.length === 0) return null;
+  const pool = Array.isArray(monstersArg) ? monstersArg.filter((m) => m.gameId === gameId) : [];
+  if (pool.length === 0) return null;
 
   const levelSpan = button.querySelector('span[translate="no"]');
   const displayedLevel = levelSpan ? parseInt(levelSpan.textContent, 10) : null;
   const slot = creatureImg.closest('.container-slot');
-  const wantsElite = Boolean(slot?.querySelector('img[data-max-creatures="true"]'));
+  const wantsElite = inferWantsEliteFromCreatureSlot(slot);
   const wantsShiny = creatureImg.src.includes('-shiny');
   const rarityEl = slot?.querySelector('.has-rarity');
   const wantsRarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
@@ -5376,9 +5929,22 @@ function resolveMonsterForButtonOnDemand(button) {
     return Math.max(1, Math.min(5, tier + 1));
   };
 
+  let poolUse = filterMonstersForCreaturePortrait(pool, creatureImg, displayedLevel);
+  if (poolUse.length === 0) poolUse = pool;
+
+  if (
+    poolUse.length > 1 &&
+    creatureSlotDomAmbiguousDuplicates(slot) &&
+    button.closest('#monster-scroll')
+  ) {
+    const sorted = sortMonstersByVisualOrder(poolUse);
+    const k = countSameGameIdPrecedingInMonsterScroll(creatureImg, gameId);
+    return sorted[Math.min(k, sorted.length - 1)] || null;
+  }
+
   let best = null;
   let bestScore = -Infinity;
-  for (const m of monsters) {
+  for (const m of poolUse) {
     let score = 0;
     if (displayedLevel && getLevelFromExp(m.exp || 0) === displayedLevel) score += 100;
     if (isEliteMonster(m) === wantsElite) score += 40;
@@ -5390,6 +5956,42 @@ function resolveMonsterForButtonOnDemand(button) {
     }
   }
   return best;
+}
+
+/**
+ * #monster-scroll: Depot Manager full-grid id map (depot + visual match) — not visible-only sequential,
+ * which breaks after search/hidden depot. Other inventory UIs keep sequential over their visible imgs.
+ */
+function resolveMonsterForButtonOnDemand(button) {
+  const creatureImg = button?.querySelector?.('img[alt="creature"]');
+  if (!creatureImg) return null;
+  const monsters = getPlayerMonsters();
+
+  if (button.closest('#monster-scroll')) {
+    const depotMap =
+      typeof window !== 'undefined' && typeof window.depotManager?.getBestiaryCreatureIdMap === 'function'
+        ? window.depotManager.getBestiaryCreatureIdMap()
+        : null;
+    if (depotMap) {
+      const uid = depotMap.get(creatureImg);
+      if (uid != null && Array.isArray(monsters)) {
+        const tagged = monsters.find((m) => String(m.id) === String(uid));
+        if (tagged) return tagged;
+      }
+    }
+    return scoreMatchMonsterForCreatureButton(button, monsters);
+  }
+
+  const visibleImgs = getVisibleInventoryCreatureImgsForHover().filter(
+    (img) => !img.closest('#monster-scroll')
+  );
+  if (visibleImgs.length > 0) {
+    const resolved = resolveHoverCreaturesSequentially(visibleImgs, monsters);
+    const hit = resolved.find((r) => r.imgEl === creatureImg);
+    if (hit?.monster) return hit.monster;
+  }
+
+  return scoreMatchMonsterForCreatureButton(button, monsters);
 }
 
 function getReactFiberNode(el) {
@@ -5515,8 +6117,19 @@ function getMonsterInfoFromButton(button) {
   }
 
   const gameId = getCreatureGameId(creatureImg);
+  const inMonsterScroll = Boolean(button.closest('#monster-scroll'));
   const monsterFromFiber = resolveMonsterFromReactFiber(button);
-  const monster = monsterFromFiber || advancedHoverState.resolvedByImg.get(creatureImg) || resolveMonsterForButtonOnDemand(button);
+  const monsterFromMap = advancedHoverState.resolvedByImg.get(creatureImg);
+  const monsterFromOnDemand = resolveMonsterForButtonOnDemand(button);
+
+  // Bestiary grid: depot / visual map must beat React fiber — fiber often points at the wrong duplicate.
+  let monster = null;
+  if (inMonsterScroll) {
+    monster = monsterFromOnDemand || monsterFromMap || monsterFromFiber;
+  } else {
+    monster = monsterFromFiber || monsterFromMap || monsterFromOnDemand;
+  }
+
   if (!monster) return null;
 
   const level = (() => {
@@ -5751,6 +6364,177 @@ function buildAdvancedStatsTooltip(info) {
   };
 }
 
+function buildEquipmentEffectTooltip(gameId) {
+  if (gameId == null) return null;
+  let equipData = null;
+  try {
+    equipData = globalThis.state?.utils?.getEquipment?.(gameId);
+  } catch (error) {
+    return null;
+  }
+  if (!equipData) return null;
+
+  const mountedComponents = [];
+  const tooltip = document.createElement('div');
+  tooltip.className = 'mod-settings-advanced-hover-tooltip';
+  tooltip.style.cssText = `
+    position: fixed;
+    display: none;
+    z-index: 10000;
+    pointer-events: none;
+  `;
+
+  const tooltipContent = document.createElement('div');
+  tooltipContent.className = 'frame-pressed-1 surface-dark flex shrink-0 flex-col gap-1.5 px-2 py-1 pb-2';
+
+  const abilityHeader = document.createElement('div');
+  abilityHeader.className = 'flex items-center gap-2 pt-1';
+  const abilityLabel = document.createElement('span');
+  abilityLabel.className = 'pixel-font-16 text-whiteExp';
+  abilityLabel.textContent = equipData?.metadata?.name || 'Equipment';
+  abilityHeader.appendChild(abilityLabel);
+  tooltipContent.appendChild(abilityHeader);
+
+  const root = document.createElement('div');
+  root.classList.add('tooltip-prose');
+  root.classList.add('pixel-font-14');
+  root.style.cssText = 'max-width: 320px; color: #e6d7b0; line-height: 1.1;';
+  tooltipContent.appendChild(root);
+
+  if (equipData?.metadata?.description) {
+    root.innerHTML = equipData.metadata.description;
+  } else if (
+    equipData?.metadata?.EffectComponent &&
+    typeof globalThis.state?.utils?.createUIComponent === 'function'
+  ) {
+    try {
+      const component = globalThis.state.utils.createUIComponent(
+        root,
+        equipData.metadata.EffectComponent
+      );
+      if (component && typeof component.mount === 'function') {
+        component.mount();
+        mountedComponents.push(component);
+        root.querySelectorAll('blockquote').forEach((bq) => {
+          bq.style.setProperty('font-size', '10px', 'important');
+        });
+      } else {
+        root.textContent = 'Effect details unavailable';
+        root.className = 'pixel-font-14 text-whiteDark';
+      }
+    } catch (error) {
+      root.textContent = 'Effect details unavailable';
+      root.className = 'pixel-font-14 text-whiteDark';
+    }
+  } else {
+    root.textContent = 'No description available.';
+    root.className = 'pixel-font-14 text-whiteDark';
+  }
+
+  tooltip.appendChild(tooltipContent);
+
+  return {
+    tooltip,
+    cleanup: () => {
+      mountedComponents.forEach((component) => {
+        try {
+          component?.unmount?.();
+        } catch (error) {
+          // Best effort cleanup.
+        }
+      });
+    }
+  };
+}
+
+function attachEquipmentAbilityHoverTooltip(button) {
+  if (!button || button.dataset.equipmentEffectHoverAttached === 'true') return;
+  if (!config.showAbilityOnHover) return;
+  const grid = resolveEquipmentHoverGrid();
+  if (!grid || !grid.contains(button) || !isEquipmentHoverCandidateButton(button)) return;
+
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let showTimeout = null;
+
+  const destroyTooltip = () => {
+    if (showTimeout) {
+      clearTimeout(showTimeout);
+      showTimeout = null;
+    }
+    if (advancedHoverState.activeButton === button) {
+      destroyActiveAdvancedHoverTooltip();
+    }
+  };
+
+  const show = () => {
+    if (showTimeout) clearTimeout(showTimeout);
+    const token = ++advancedHoverState.activeToken;
+    destroyActiveAdvancedHoverTooltip();
+    showTimeout = setTimeout(() => {
+      showTimeout = null;
+      if (token !== advancedHoverState.activeToken) return;
+      destroyTooltip();
+      const equipGameId = resolveEquipmentGameIdFromInventoryButton(button);
+      if (equipGameId == null) return;
+      const built = buildEquipmentEffectTooltip(equipGameId);
+      if (!built) return;
+      advancedHoverState.activeTooltip = built.tooltip;
+      advancedHoverState.activeCleanup = built.cleanup;
+      advancedHoverState.activeButton = button;
+      document.body.appendChild(advancedHoverState.activeTooltip);
+      advancedHoverState.activeTooltip.style.display = 'block';
+      positionAdvancedStatsTooltip(advancedHoverState.activeTooltip, button);
+    }, TIMEOUT_DELAYS.HOVER_TOOLTIP_SHOW);
+  };
+  const hide = () => {
+    destroyTooltip();
+  };
+  const move = () => {
+    if (advancedHoverState.activeButton === button && advancedHoverState.activeTooltip && advancedHoverState.activeTooltip.style.display === 'block') {
+      positionAdvancedStatsTooltip(advancedHoverState.activeTooltip, button);
+    }
+  };
+
+  button.addEventListener('mouseenter', show);
+  button.addEventListener('mouseleave', hide);
+  button.addEventListener('mousemove', move);
+
+  button.dataset.equipmentEffectHoverAttached = 'true';
+  button._equipmentEffectHover = {
+    get tooltip() {
+      return advancedHoverState.activeButton === button ? advancedHoverState.activeTooltip : null;
+    },
+    show,
+    hide,
+    move,
+    cleanup: destroyTooltip
+  };
+}
+
+function ensureEquipmentHoverDelegation() {
+  if (equipmentHoverDelegationState.delegatedBound || !config.showAbilityOnHover) return;
+  const handler = (event) => {
+    if (!config.showAbilityOnHover) return;
+    const grid = resolveEquipmentHoverGrid();
+    if (!grid) return;
+    const button = event.target?.closest?.('button');
+    if (!button || !grid.contains(button)) return;
+    if (!isEquipmentHoverCandidateButton(button)) return;
+    if (button.dataset.equipmentEffectHoverAttached === 'true') return;
+    attachEquipmentAbilityHoverTooltip(button);
+  };
+  document.addEventListener('mouseover', handler, true);
+  equipmentHoverDelegationState.delegatedHandler = handler;
+  equipmentHoverDelegationState.delegatedBound = true;
+}
+
+function teardownEquipmentHoverDelegation() {
+  if (!equipmentHoverDelegationState.delegatedBound || !equipmentHoverDelegationState.delegatedHandler) return;
+  document.removeEventListener('mouseover', equipmentHoverDelegationState.delegatedHandler, true);
+  equipmentHoverDelegationState.delegatedHandler = null;
+  equipmentHoverDelegationState.delegatedBound = false;
+}
+
 function positionAdvancedStatsTooltip(tooltip, button) {
   const rect = button.getBoundingClientRect();
   const tooltipRect = tooltip.getBoundingClientRect();
@@ -5798,6 +6582,7 @@ function attachAdvancedStatsTooltip(button) {
       // Always rebuild fresh so stats are up to date when hovering.
       destroyTooltip();
       rebuildAdvancedHoverResolvedMap();
+      logHoveredCreatureResolutionCompare(button);
       const info = getMonsterInfoFromButton(button);
       if (!info) return;
       const built = buildAdvancedStatsTooltip(info);
@@ -5859,14 +6644,20 @@ function teardownAdvancedHoverDelegation() {
 }
 
 function applyAdvancedStatsOnHover() {
-  if (!isCreatureHoverTooltipEnabled()) return;
-  rebuildAdvancedHoverResolvedMap();
-  getCreatureHoverTargetButtons().forEach(attachAdvancedStatsTooltip);
-  ensureAdvancedHoverDelegation();
+  if (isCreatureHoverTooltipEnabled()) {
+    rebuildAdvancedHoverResolvedMap();
+    getCreatureHoverTargetButtons().forEach(attachAdvancedStatsTooltip);
+    ensureAdvancedHoverDelegation();
+  }
+  if (config.showAbilityOnHover) {
+    getEquipmentHoverTargetButtons().forEach(attachEquipmentAbilityHoverTooltip);
+    ensureEquipmentHoverDelegation();
+  }
 }
 
 function removeAdvancedStatsOnHover() {
   teardownAdvancedHoverDelegation();
+  teardownEquipmentHoverDelegation();
   destroyActiveAdvancedHoverTooltip();
   document.querySelectorAll('button[data-advanced-stats-hover-attached="true"]').forEach((button) => {
     const refs = button._advancedStatsHover;
@@ -5879,6 +6670,18 @@ function removeAdvancedStatsOnHover() {
       delete button._advancedStatsHover;
     }
     button.removeAttribute('data-advanced-stats-hover-attached');
+  });
+  document.querySelectorAll('button[data-equipment-effect-hover-attached="true"]').forEach((button) => {
+    const refs = button._equipmentEffectHover;
+    if (refs) {
+      button.removeEventListener('mouseenter', refs.show);
+      button.removeEventListener('mouseleave', refs.hide);
+      button.removeEventListener('mousemove', refs.move);
+      refs.cleanup?.();
+      refs.tooltip?.remove();
+      delete button._equipmentEffectHover;
+    }
+    button.removeAttribute('data-equipment-effect-hover-attached');
   });
 }
 
@@ -6658,6 +7461,57 @@ function startCreatureContainerObserver() {
   });
   
   console.log('[Mod Settings] Creature container observer started');
+}
+
+/**
+ * Bestiary search often toggles visibility without childList mutations, so max creatures / shinies /
+ * hover never refresh. Mirror Depot Manager: debounce reapply on search input + focusout.
+ */
+function scheduleInventoryCosmeticsAfterBestiarySearch() {
+  if (bestiarySearchStylePendingTimeout !== null) {
+    clearTimeout(bestiarySearchStylePendingTimeout);
+    activeTimeouts.delete(bestiarySearchStylePendingTimeout);
+  }
+  bestiarySearchStylePendingTimeout = setTimeout(() => {
+    bestiarySearchStylePendingTimeout = null;
+    if (isBlockedByAnalysisMods()) return;
+    if (config.enableMaxCreatures) applyMaxCreatures();
+    if (config.enableMaxShinies) applyMaxShinies();
+    if (isCreatureHoverTooltipEnabled()) applyAdvancedStatsOnHover();
+  }, TIMEOUT_DELAYS.CONTAINER_DEBOUNCE);
+  activeTimeouts.add(bestiarySearchStylePendingTimeout);
+}
+
+function onBestiarySearchInputForCosmetics(event) {
+  if (event.target?.id !== BESTIARY_SEARCH_INPUT_ID) return;
+  scheduleInventoryCosmeticsAfterBestiarySearch();
+}
+
+function onBestiarySearchFocusOutForCosmetics(event) {
+  if (event.target?.id !== BESTIARY_SEARCH_INPUT_ID) return;
+  scheduleInventoryCosmeticsAfterBestiarySearch();
+}
+
+function startMonsterBestiarySearchCosmeticsListener() {
+  if (bestiarySearchStyleListeners) return;
+  bestiarySearchStyleListeners = {
+    input: onBestiarySearchInputForCosmetics,
+    focusout: onBestiarySearchFocusOutForCosmetics
+  };
+  document.addEventListener('input', bestiarySearchStyleListeners.input, true);
+  document.addEventListener('focusout', bestiarySearchStyleListeners.focusout, true);
+}
+
+function stopMonsterBestiarySearchCosmeticsListener() {
+  if (!bestiarySearchStyleListeners) return;
+  document.removeEventListener('input', bestiarySearchStyleListeners.input, true);
+  document.removeEventListener('focusout', bestiarySearchStyleListeners.focusout, true);
+  bestiarySearchStyleListeners = null;
+  if (bestiarySearchStylePendingTimeout !== null) {
+    clearTimeout(bestiarySearchStylePendingTimeout);
+    activeTimeouts.delete(bestiarySearchStylePendingTimeout);
+    bestiarySearchStylePendingTimeout = null;
+  }
 }
 
 // Start observer for scroll lock state changes
@@ -7975,6 +8829,7 @@ function initBetterUI() {
     
     initTabObserver();
     startCreatureContainerObserver();
+    startMonsterBestiarySearchCosmeticsListener();
     initScrollLockObserver();
     
     // Apply initial setup labels visibility and start observer
@@ -8089,6 +8944,7 @@ function cleanupBetterUI() {
     observers.setupLabels = disconnectObserver(observers.setupLabels, 'Setup labels');
     observers.scrollLock = disconnectObserver(observers.scrollLock, 'Scroll lock');
     observers.compactNavBar = disconnectObserver(observers.compactNavBar, 'Compact nav bar');
+    stopMonsterBestiarySearchCosmeticsListener();
     battleBoardObserver = disconnectObserver(battleBoardObserver, 'Battle board');
     
     // Unsubscribe from board state events

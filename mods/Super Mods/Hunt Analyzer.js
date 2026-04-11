@@ -697,7 +697,7 @@ const LAYOUT_MODES = {
     MINIMIZED: 'minimized'
 };
 const LAYOUT_DIMENSIONS = {
-    [LAYOUT_MODES.VERTICAL]: { width: 350, height: 750, minWidth: 260, maxWidth: 500, minHeight: 500, maxHeight: 750 },
+    [LAYOUT_MODES.VERTICAL]: { width: 350, height: 750, minWidth: 260, maxWidth: 500, minHeight: 500, maxHeight: 850 },
     [LAYOUT_MODES.HORIZONTAL]: { width: 300, height: 300, minWidth: 650, maxWidth: 1000, minHeight: 220, maxHeight: 400 },
     [LAYOUT_MODES.MINIMIZED]: { width: 250, height: 250, minWidth: 250, maxWidth: 250, minHeight: 250, maxHeight: 250 }
 };
@@ -7025,7 +7025,14 @@ function applyPanelSettings(panel, settings) {
         // Apply min/max constraints
         if (settings.minWidth) panel.style.minWidth = settings.minWidth;
         if (settings.maxWidth) panel.style.maxWidth = settings.maxWidth;
-        if (settings.maxHeight) panel.style.maxHeight = settings.maxHeight;
+        if (settings.maxHeight) {
+            const maxH = parseInt(settings.maxHeight, 10);
+            if (!isNaN(maxH)) {
+                panel.style.maxHeight = clamp(maxH, layout.minHeight, layout.maxHeight) + 'px';
+            } else {
+                panel.style.maxHeight = settings.maxHeight;
+            }
+        }
         
         // Apply top position (ensure panel stays within viewport)
         if (settings.top) {
@@ -7093,7 +7100,7 @@ const defaultConfig = {
     maxWidth: "500px",
     minWidth: "300px",
     height: "700px",
-    maxHeight: "750px",
+    maxHeight: "850px",
     minHeight: "500px",
     top: "50px",
     left: "10px",
