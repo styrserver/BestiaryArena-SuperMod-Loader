@@ -1056,6 +1056,7 @@ const formatInventoryItemDisplayName = (itemKey) => {
 const describeRewardFromCubeApiData = (data, invBefore, invAfter, extras) => {
   const segments = [];
   const seen = new Set();
+  const toNumberOrNull = (value) => normalizeNumericDiffValue(value);
   const pushGain = (key, gained) => {
     if (!key || /^surpriseCube[1-5]$/.test(key) || gained <= 0) return;
     const label = formatInventoryItemDisplayName(key);
@@ -1070,11 +1071,12 @@ const describeRewardFromCubeApiData = (data, invBefore, invAfter, extras) => {
     if (rid && typeof rid === 'object') {
       for (const [key, value] of Object.entries(rid)) {
         if (/^surpriseCube[1-5]$/.test(key)) continue;
-        if (typeof value !== 'number') continue;
+        const normalizedValue = toNumberOrNull(value);
+        if (normalizedValue === null) continue;
         const before = invBefore[key] ?? 0;
-        let gained = value - before;
-        if (gained <= 0 && value > 0 && before === 0) {
-          gained = value;
+        let gained = normalizedValue - before;
+        if (gained <= 0 && normalizedValue > 0 && before === 0) {
+          gained = normalizedValue;
         }
         pushGain(key, gained);
       }
@@ -1083,18 +1085,21 @@ const describeRewardFromCubeApiData = (data, invBefore, invAfter, extras) => {
     if (idiff && typeof idiff === 'object') {
       for (const [key, delta] of Object.entries(idiff)) {
         if (/^surpriseCube[1-5]$/.test(key)) continue;
-        if (typeof delta !== 'number' || delta <= 0) continue;
-        pushGain(key, delta);
+        const normalizedDelta = toNumberOrNull(delta);
+        if (normalizedDelta === null || normalizedDelta <= 0) continue;
+        pushGain(key, normalizedDelta);
       }
     }
     if (typeof data.rewardKey === 'string' && data.rewardKey && !/^surpriseCube[1-5]$/.test(data.rewardKey)) {
-      const qty = typeof data.rewardQuantity === 'number' && data.rewardQuantity > 0 ? data.rewardQuantity : 1;
+      const qtyRaw = toNumberOrNull(data.rewardQuantity);
+      const qty = qtyRaw !== null && qtyRaw > 0 ? qtyRaw : 1;
       pushGain(data.rewardKey, qty);
     }
     const roll = data.roll ?? data.rewardRoll ?? data.loot;
     if (roll && typeof roll === 'object') {
       const rk = roll.itemKey ?? roll.key ?? roll.id;
-      const rq = typeof roll.quantity === 'number' ? roll.quantity : (typeof roll.amount === 'number' ? roll.amount : 1);
+      const qtyRaw = toNumberOrNull(roll.quantity) ?? toNumberOrNull(roll.amount);
+      const rq = qtyRaw !== null ? qtyRaw : 1;
       if (typeof rk === 'string' && rk && !/^surpriseCube[1-5]$/.test(rk)) {
         pushGain(rk, rq);
       }

@@ -3,8 +3,6 @@
 // =======================
 'use strict';
 
-console.log('[Cyclopedia] initializing...');
-
 // Translation helper (api from loader, context, or BestiaryModAPI)
 function cyclopediaT(key) {
   const a = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : (typeof window !== 'undefined' && window.BestiaryModAPI) ? window.BestiaryModAPI : null;
@@ -64,7 +62,8 @@ const MapsTabDOMOptimizer = {
     selectedMap: null,
     selectedCategory: null,
     roomData: null,
-    roomName: null
+    roomName: null,
+    season: null
   },
   
   // Get or create cached element
@@ -144,21 +143,6 @@ const UNOBTAINABLE_CREATURES = (window.creatureDatabase?.UNOBTAINABLE_CREATURES 
 const ALL_CREATURES = (window.creatureDatabase?.ALL_CREATURES || [])
   .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
 
-// Debug logging for creature database integration
-console.log('[Cyclopedia] Creature database integration:', {
-  hasDatabase: !!window.creatureDatabase,
-  allCreaturesFromDB: window.creatureDatabase?.ALL_CREATURES?.length || 0,
-  unobtainableFromDB: window.creatureDatabase?.UNOBTAINABLE_CREATURES?.length || 0,
-  usingFallback: !window.creatureDatabase
-});
-
-// Debug logging for equipment database integration
-console.log('[Cyclopedia] Equipment database integration:', {
-  hasDatabase: !!window.equipmentDatabase,
-  allEquipmentFromDB: window.equipmentDatabase?.ALL_EQUIPMENT?.length || 0,
-  usingFallback: !window.equipmentDatabase
-});
-
 // Get equipment data from centralized database
 const ALL_EQUIPMENT = window.equipmentDatabase?.ALL_EQUIPMENT || [];
 
@@ -178,7 +162,6 @@ const EXP_TABLE = [
   [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
   [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
 ];
-
 
 const MAP_INTERACTION_CONFIG = {
   cursor: 'pointer',
@@ -1256,6 +1239,10 @@ if (typeof window.cyclopediaGlobalObserver === 'undefined') {
 const cyclopediaState = {
   observer: null, modalOpen: false, currentModal: null,
   profileData: null, lastFetch: 0, fetchInProgress: false,
+  /** 1 or 2 — filters profilePageData season stats and season-scoped rooms/highscores in Cyclopedia. */
+  profileSeason: 1,
+  /** Latest raw JSON from serverSide.profilePageData (start page) for season-scoped leaderboard rows. */
+  lastStartupProfileData: null,
   monsterNameMap: null, monsterNameMapBuilt: false, monsterLocationCache: new Map(),
   /** When true, creature detail shows awakened ability text until toggled off. */
   creatureDetailShowAwakenedAbility: false,
@@ -1354,6 +1341,178 @@ const cyclopediaState = {
   }
 };
 
+const CYCLOPEDIA_PROFILE_SEASONS = [1, 2];
+
+const CYCLOPEDIA_ASSETS = {
+  seasonIcon: 'https://bestiaryarena.com/assets/icons/season.png',
+  bracketPlatinum: 'https://bestiaryarena.com/assets/icons/bracket-platinum.png',
+  bracketDiamond: 'https://bestiaryarena.com/assets/icons/bracket-diamond.png',
+  bracketChallenger: 'https://bestiaryarena.com/assets/icons/bracket-challenger.png'
+};
+
+function cyclopediaBracketIconUrl(bracketName) {
+  if (bracketName == null || bracketName === '') return null;
+  const u = String(bracketName).trim().toUpperCase();
+  if (u.includes('CHALLENGER')) return CYCLOPEDIA_ASSETS.bracketChallenger;
+  if (u.includes('DIAMOND')) return CYCLOPEDIA_ASSETS.bracketDiamond;
+  if (u.includes('PLATINUM')) return CYCLOPEDIA_ASSETS.bracketPlatinum;
+  return null;
+}
+
+function unwrapProfilePageJson(profileData) {
+  if (!profileData) return null;
+  return profileData.json !== undefined ? profileData.json : profileData;
+}
+
+function getLatestProfileSeason(profileData, fallbackSeason = 1) {
+  const pd = unwrapProfilePageJson(profileData);
+  const list = Array.isArray(pd?.seasons) ? pd.seasons : [];
+  let latest = Number(fallbackSeason) || 1;
+  list.forEach((entry) => {
+    const sn = Number(entry?.season);
+    if (Number.isFinite(sn) && sn > latest) latest = sn;
+  });
+  return latest;
+}
+
+function cyclopediaSeasonNA() {
+  return cyclopediaT('mods.cyclopedia.startpage.notAvailable');
+}
+
+function getMapsTabStatisticsHeading() {
+  const n = cyclopediaState.profileSeason || 1;
+  return cyclopediaT('mods.cyclopedia.maps.statisticsSeason').replace('{n}', String(n));
+}
+
+function filterProfileArrayBySeason(arr, seasonNum) {
+  if (!Array.isArray(arr)) return [];
+  return arr.filter((item) => {
+    if (!item || item.season === undefined || item.season === null) return Number(seasonNum) === 1;
+    return Number(item.season) === Number(seasonNum);
+  });
+}
+
+function findProfileSeasonEntry(profileData, seasonNum) {
+  const pd = unwrapProfilePageJson(profileData);
+  const list = pd?.seasons;
+  if (!Array.isArray(list)) return null;
+  return list.find((s) => Number(s?.season) === Number(seasonNum)) || null;
+}
+
+/** Apply selected season aggregates to profile copy for Player stats table (rankings rows). */
+function patchProfileDataForActiveSeason(profileData, seasonNum) {
+  const pd = unwrapProfilePageJson(profileData);
+  if (!pd) return profileData;
+  const next = { ...pd };
+  const s = findProfileSeasonEntry(pd, seasonNum);
+  if (s) {
+    next.rankPoints = s.rank;
+    next.ticks = s.ticks;
+    next.floors = s.floors;
+    if (s.rankBracket !== undefined && s.rankBracket !== null && s.rankBracket !== '') {
+      next.rankPointsPosition = String(s.rankBracket);
+    }
+    if (s.ticksBracket !== undefined && s.ticksBracket !== null && s.ticksBracket !== '') {
+      next.ticksPosition = String(s.ticksBracket);
+    }
+    if (s.floorsBracket !== undefined && s.floorsBracket !== null && s.floorsBracket !== '') {
+      next.floorsPosition = String(s.floorsBracket);
+    }
+  } else {
+    next.rankPoints = undefined;
+    next.ticks = undefined;
+    next.floors = undefined;
+  }
+  return next;
+}
+
+function filterRoomsMapBySeason(rooms, seasonNum) {
+  if (!rooms || typeof rooms !== 'object') return {};
+  const out = {};
+  for (const [roomId, roomData] of Object.entries(rooms)) {
+    if (!roomData || typeof roomData !== 'object') continue;
+    if (roomData.season !== undefined && roomData.season !== null) {
+      if (Number(roomData.season) === Number(seasonNum)) out[roomId] = roomData;
+    } else if (Number(seasonNum) === 1) {
+      out[roomId] = roomData;
+    }
+  }
+  return out;
+}
+
+/**
+ * Build per-room stats from profilePageData for a season (speedrun/rank/floor rows in leaderboards).
+ * Merges `rooms`, `highscores`, and `floorHighscores` when entries carry `season`.
+ */
+function mergeProfileRoomsForSeason(profileData, seasonNum) {
+  const pd = unwrapProfilePageJson(profileData);
+  if (!pd) return {};
+  const merged = { ...filterRoomsMapBySeason(pd.rooms || {}, seasonNum) };
+
+  const highscores = filterProfileArrayBySeason(pd.highscores || [], seasonNum);
+  highscores.forEach((score) => {
+    if (!score?.roomId) return;
+    const rid = score.roomId;
+    if (!merged[rid]) merged[rid] = {};
+    const m = merged[rid];
+    if (score.rank === -1) {
+      if (score.ticks != null && (m.ticks === undefined || score.ticks < m.ticks)) {
+        m.ticks = score.ticks;
+      }
+    } else if (score.rank != null && score.rank > 0) {
+      if (m.rank === undefined || score.rank < m.rank) {
+        m.rank = score.rank;
+        if (score.rankTicks !== undefined) m.rankTicks = score.rankTicks;
+      }
+    }
+  });
+
+  filterProfileArrayBySeason(pd.floorHighscores || [], seasonNum).forEach((fh) => {
+    if (!fh || fh.softDeleted || !fh.roomId) return;
+    const rid = fh.roomId;
+    if (!merged[rid]) merged[rid] = {};
+    const m = merged[rid];
+    if (fh.floor !== undefined && fh.floor !== null) m.floor = fh.floor;
+    if (fh.ticks !== undefined && fh.ticks !== null) {
+      m.floorTicks = fh.ticks;
+      if (m.ticks === undefined) m.ticks = fh.ticks;
+    }
+  });
+
+  return merged;
+}
+
+/** Shallow copy of profile JSON with season-filtered rooms / highscores / floorHighscores for search UI. */
+function narrowProfilePageDataForSeason(profileData, seasonNum) {
+  const pd = unwrapProfilePageJson(profileData);
+  if (!pd) return profileData;
+  return {
+    ...pd,
+    rooms: mergeProfileRoomsForSeason(pd, seasonNum),
+    highscores: filterProfileArrayBySeason(pd.highscores || [], seasonNum),
+    floorHighscores: filterProfileArrayBySeason(pd.floorHighscores || [], seasonNum)
+  };
+}
+
+function getYourRoomsForCyclopediaSeason(liveRooms) {
+  const season = cyclopediaState.profileSeason || 1;
+  const cached = cyclopediaState.lastStartupProfileData;
+  if (!cached) {
+    return Number(season) === 1 ? (liveRooms || {}) : {};
+  }
+  const fromProfile = mergeProfileRoomsForSeason(cached, season);
+  if (Object.keys(fromProfile).length > 0) return fromProfile;
+  if (Number(season) === 1) return liveRooms || {};
+  return {};
+}
+
+function refreshLeaderboardCacheYourRoomsForSeason() {
+  const w = typeof window !== 'undefined' ? window.currentSpeedrunRankData : null;
+  if (!w || typeof w !== 'object') return;
+  const live = globalThis.state?.player?.getSnapshot?.()?.context?.rooms;
+  w.yourRooms = getYourRoomsForCyclopediaSeason(live);
+}
+
 // =======================
 // 3. Utility Functions
 // =======================
@@ -1366,7 +1525,7 @@ const ObserverManager = {
     if (observer) {
       observer._cyclopediaName = name;
       this.observers.add(observer);
-      console.log(`[Cyclopedia] Observer added: ${name}`);
+      
     }
   },
   
@@ -1375,7 +1534,7 @@ const ObserverManager = {
       try {
         observer.disconnect();
         this.observers.delete(observer);
-        console.log(`[Cyclopedia] Observer removed: ${observer._cyclopediaName || 'unnamed'}`);
+        
       } catch (error) {
         console.warn(`[Cyclopedia] Error removing observer:`, error);
       }
@@ -1383,11 +1542,11 @@ const ObserverManager = {
   },
   
   cleanup: function() {
-    console.log(`[Cyclopedia] Cleaning up ${this.observers.size} observers`);
+    
     this.observers.forEach(observer => {
       try {
         observer.disconnect();
-        console.log(`[Cyclopedia] Observer disconnected: ${observer._cyclopediaName || 'unnamed'}`);
+        
       } catch (error) {
         console.warn(`[Cyclopedia] Error disconnecting observer:`, error);
       }
@@ -1409,7 +1568,7 @@ const TimerManager = {
       timer._cyclopediaName = name;
       timer._cyclopediaType = 'timeout';
       this.timers.add(timer);
-      console.log(`[Cyclopedia] Timeout added: ${name}`);
+      
     }
   },
   
@@ -1418,7 +1577,7 @@ const TimerManager = {
       timer._cyclopediaName = name;
       timer._cyclopediaType = 'interval';
       this.timers.add(timer);
-      console.log(`[Cyclopedia] Interval added: ${name}`);
+      
     }
   },
   
@@ -1431,7 +1590,7 @@ const TimerManager = {
           clearTimeout(timer);
         }
         this.timers.delete(timer);
-        console.log(`[Cyclopedia] Timer removed: ${timer._cyclopediaName || 'unnamed'}`);
+        
       } catch (error) {
         console.warn(`[Cyclopedia] Error removing timer:`, error);
       }
@@ -1439,7 +1598,7 @@ const TimerManager = {
   },
   
   cleanup: function() {
-    console.log(`[Cyclopedia] Cleaning up ${this.timers.size} timers`);
+    
     this.timers.forEach(timer => {
       try {
         if (timer._cyclopediaType === 'interval') {
@@ -1447,7 +1606,7 @@ const TimerManager = {
         } else {
           clearTimeout(timer);
         }
-        console.log(`[Cyclopedia] Timer cleared: ${timer._cyclopediaName || 'unnamed'}`);
+        
       } catch (error) {
         console.warn(`[Cyclopedia] Error clearing timer:`, error);
       }
@@ -1687,7 +1846,7 @@ function getCreatureStatus(creatureName) {
       
       // Debug logging for troubleshooting
       if (totalGenes >= 90) { // Log creatures close to perfect for debugging
-        console.log(`[Cyclopedia] ${creatureName} (gameId: ${monster.gameId}): level=${level}, genes=${totalGenes}, exp=${monster.exp}`);
+        
       }
       
       return level >= 50 && totalGenes >= 100;
@@ -1748,7 +1907,7 @@ function getEquipmentStatus(equipmentName) {
             break;
           }
         } catch (e) {
-          console.log('[Cyclopedia] Error in equipment ownership check:', e);
+          console.warn('[Cyclopedia] Error in equipment ownership check:', e);
         }
       }
     }
@@ -1779,7 +1938,7 @@ function getEquipmentStatus(equipmentName) {
     
     // Debug logging for troubleshooting
     if (t5Stats >= 2) { // Log equipment close to T5 for debugging
-      console.log(`[Cyclopedia] ${equipmentName} (gameId: ${equipmentGameId}): T5 stats=${t5Stats}/${totalStats}`);
+      
     }
     
     return {
@@ -2246,24 +2405,24 @@ function resolveMapName(mapId) {
 
 function getLocalRunData() {
   try {
-    console.log('[Cyclopedia] Getting local run data...');
+    
     if (window.RunTrackerAPI) {
-      console.log('[Cyclopedia] Using RunTrackerAPI.getAllRuns()');
+      
       const data = window.RunTrackerAPI.getAllRuns();
-      console.log('[Cyclopedia] RunTrackerAPI.getAllRuns() returned:', data);
+      
       return Promise.resolve(data);
     }
     // Fallback to direct storage access
     if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
-      console.log('[Cyclopedia] Using browserAPI.storage.local fallback');
+      
       return new Promise(resolve => {
         window.browserAPI.storage.local.get('ba_local_runs', result => {
-          console.log('[Cyclopedia] browserAPI.storage.local.get result:', result);
+          
           resolve(result.ba_local_runs || null);
         });
       });
     }
-    console.log('[Cyclopedia] No RunTrackerAPI or browserAPI available, returning null');
+    
     return Promise.resolve(null);
   } catch (error) {
     console.warn('[Cyclopedia] Error getting local run data:', error);
@@ -2273,30 +2432,30 @@ function getLocalRunData() {
 
 function getLocalRunsForMap(mapKey, category = null) {
   try {
-    console.log(`[Cyclopedia] Getting local runs for map: ${mapKey}, category: ${category}`);
+    
     if (window.RunTrackerAPI) {
-      console.log(`[Cyclopedia] Using RunTrackerAPI.getRuns(${mapKey}, ${category})`);
+      
       const data = window.RunTrackerAPI.getRuns(mapKey, category);
-      console.log(`[Cyclopedia] RunTrackerAPI.getRuns(${mapKey}, ${category}) returned:`, data);
+      
       return Promise.resolve(data);
     }
     // Fallback to direct storage access
-    console.log('[Cyclopedia] Using getLocalRunData() fallback');
+    
     return getLocalRunData().then(runData => {
-      console.log('[Cyclopedia] getLocalRunData() returned:', runData);
+      
       if (!runData || !runData.runs || !runData.runs[mapKey]) {
-        console.log(`[Cyclopedia] No data found for mapKey: ${mapKey}`);
+        
         return category ? [] : { speedrun: [], rank: [] };
       }
       
       if (category) {
         const categoryData = runData.runs[mapKey][category] || [];
-        console.log(`[Cyclopedia] Found ${categoryData.length} runs for ${mapKey}/${category}:`, categoryData);
+        
         return categoryData;
       }
       
       const mapData = runData.runs[mapKey];
-      console.log(`[Cyclopedia] Found data for ${mapKey}:`, mapData);
+      
       return mapData;
     });
   } catch (error) {
@@ -2499,13 +2658,17 @@ const MapsDataFetcher = {
     const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
     if (!playerState?.name) return null;
 
-    // Check for cached combined data
+    // Check for cached combined data (recompute yourRooms — season can change without refetch)
     const cachedData = this.getCached('combined-leaderboards');
     if (cachedData) {
-      return cachedData;
+      return {
+        ...cachedData,
+        yourRooms: getYourRoomsForCyclopediaSeason(playerState.rooms || {})
+      };
     }
 
     try {
+      console.log('[Cyclopedia] Fetching maps leaderboard batch: game.getTickHighscores, game.getTickLeaderboards, game.getRoomsHighscores');
       // Fetch all data in parallel with individual caching
       const [best, lbs, roomsHighscores] = await Promise.all([
         this.fetchTRPC('game.getTickHighscores'),
@@ -2517,7 +2680,7 @@ const MapsDataFetcher = {
         best,
         lbs,
         roomsHighscores,
-        yourRooms: playerState.rooms,
+        yourRooms: getYourRoomsForCyclopediaSeason(playerState.rooms || {}),
         ROOM_NAMES: globalThis.state.utils.ROOM_NAME
       };
 
@@ -2752,7 +2915,7 @@ const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
       }
     }
   } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
   
   for (let i = 1; i <= maxId; i++) {
@@ -2863,11 +3026,11 @@ function findMonsterLocations(monsterName) {
           locations.push({ roomId, roomName, positions: roomLocations });
         }
       } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
     });
   } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
   
   cyclopediaState.monsterLocationCache.set(cacheKey, locations);
@@ -3587,13 +3750,11 @@ function addCyclopediaHeaderButton() {
   }
 }
 
-
-
 function injectCyclopediaButton(menuElem) {
   const body = document.body;
   const scrollLocked = body.getAttribute('data-scroll-locked');
   if (scrollLocked >= '2') {
-    console.log('[Cyclopedia] Button injection blocked: scroll locked (level:', scrollLocked, ')');
+    
     return false;
   }
   
@@ -3602,12 +3763,12 @@ function injectCyclopediaButton(menuElem) {
     try {
       if (btn.parentNode) btn.parentNode.removeChild(btn);
     } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
   });
   
   if (existingButtons.length > 0) {
-    console.log('[Cyclopedia] Button injection skipped: existing buttons found (count:', existingButtons.length, ')');
+    
     return false;
   }
   
@@ -3616,13 +3777,7 @@ function injectCyclopediaButton(menuElem) {
   const monsterName = itemInfo?.type === 'monster' ? itemInfo.name : null;
   const equipmentName = itemInfo?.type === 'equipment' ? itemInfo.name : null;
   
-  console.log('[Cyclopedia] Content detection:', {
-    itemInfo: itemInfo,
-    monsterName: monsterName || 'null',
-    equipmentName: equipmentName || 'null',
-    itemType: itemInfo?.type || 'null',
-    menuText: menuElem.textContent?.substring(0, 200) || 'null'
-  });
+  
   
   // Additional check: ensure we're not in "My Account" or "Game Mode" menus
   const menuText = menuElem.textContent?.toLowerCase() || '';
@@ -3631,13 +3786,7 @@ function injectCyclopediaButton(menuElem) {
   
   // Only inject Cyclopedia button if we found a valid creature or equipment AND we're not in account/game mode menus
   if ((!monsterName && !equipmentName) || isAccountMenu || isGameModeMenu) {
-    console.log('[Cyclopedia] Button injection failed:', {
-      monsterName: monsterName || 'null',
-      equipmentName: equipmentName || 'null',
-      isAccountMenu,
-      isGameModeMenu,
-      menuText: menuText.substring(0, 100) + (menuText.length > 100 ? '...' : '')
-    });
+    
     return false; // Don't add Cyclopedia button to menus that don't contain creatures or equipment, or are account/game mode menus
   }
   
@@ -3702,27 +3851,17 @@ function injectCyclopediaButton(menuElem) {
   const separator = menuElem.querySelector('.separator');
   if (separator) {
     separator.parentNode.insertBefore(cyclopediaItem, separator);
-    console.log('[Cyclopedia] Button inserted before separator');
+    
   } else {
     menuElem.appendChild(cyclopediaItem);
-    console.log('[Cyclopedia] Button appended to menu end');
+    
   }
   
   // Verify the button is actually in the DOM
   const buttonInDOM = menuElem.querySelector('[data-radix-collection-item]');
-  console.log('[Cyclopedia] Button verification:', {
-    buttonInDOM: !!buttonInDOM,
-    buttonText: buttonInDOM?.textContent || 'null',
-    buttonClasses: buttonInDOM?.className || 'null',
-    menuChildren: menuElem.children.length,
-    menuHTML: menuElem.innerHTML.substring(0, 300) + '...'
-  });
   
-  console.log('[Cyclopedia] Button injected successfully:', {
-    monsterName: monsterName || 'null',
-    equipmentName: equipmentName || 'null',
-    hasSeparator: !!separator
-  });
+  
+  
   
   return true; // Return true to indicate successful injection
 }
@@ -3751,7 +3890,7 @@ function startContextMenuObserver() {
     try {
       window.cyclopediaGlobalObserver.disconnect();
     } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
     window.cyclopediaGlobalObserver = null;
   }
@@ -3760,7 +3899,7 @@ function startContextMenuObserver() {
     try {
       cyclopediaState.observer.disconnect();
     } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
     cyclopediaState.observer = null;
   }
@@ -3772,13 +3911,13 @@ function startContextMenuObserver() {
           if (node.matches && node.matches('div[data-radix-popper-content-wrapper]')) {
             const menu = node.querySelector('[role="menu"]');
             if (menu) {
-              console.log('[Cyclopedia] Menu detected, attempting injection...');
+              
               const injectionTimeout = setTimeout(() => {
                 if (!injectCyclopediaButton(menu)) {
-                  console.log('[Cyclopedia] First injection failed, retrying in 75ms...');
+                  
                   const retryTimeout = setTimeout(() => {
                     const retryResult = injectCyclopediaButton(menu);
-                    console.log('[Cyclopedia] Retry result:', retryResult ? 'SUCCESS' : 'FAILED');
+                    
                   }, 75);
                   TimerManager.addTimeout(retryTimeout, 'contextMenuRetry');
                 }
@@ -3790,13 +3929,13 @@ function startContextMenuObserver() {
             if (wrapper) {
               const menu = wrapper.querySelector('[role="menu"]');
               if (menu) {
-                console.log('[Cyclopedia] Menu detected (nested), attempting injection...');
+                
                 const nestedTimeout = setTimeout(() => {
                   if (!injectCyclopediaButton(menu)) {
-                    console.log('[Cyclopedia] First injection failed (nested), retrying in 75ms...');
+                    
                     const nestedRetryTimeout = setTimeout(() => {
                       const retryResult = injectCyclopediaButton(menu);
-                      console.log('[Cyclopedia] Retry result (nested):', retryResult ? 'SUCCESS' : 'FAILED');
+                      
                     }, 75);
                     TimerManager.addTimeout(nestedRetryTimeout, 'contextMenuNestedRetry');
                   }
@@ -3820,7 +3959,7 @@ function stopContextMenuObserver() {
     try {
     cyclopediaState.observer.disconnect();
     } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
     cyclopediaState.observer = null;
   }
@@ -3829,7 +3968,7 @@ function stopContextMenuObserver() {
     try {
       window.cyclopediaGlobalObserver.disconnect();
     } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
     window.cyclopediaGlobalObserver = null;
   }
@@ -3873,6 +4012,15 @@ function createStartPageManager() {
       this.container = this.createContainer();
       this.timerElements = {};
       this.isInitialized = false;
+      this.lastPlayerName = null;
+      this.lastProfileData = null;
+    }
+
+    refreshLayout() {
+      if (this.lastPlayerName && this.lastProfileData) {
+        this.renderLayout(this.lastPlayerName, this.lastProfileData);
+        this.setupTimers();
+      }
     }
 
     createContainer() {
@@ -3946,6 +4094,7 @@ function createStartPageManager() {
         const data = await this.fetchProfileData(playerState.name);
         const profileData = Array.isArray(data) && data[0]?.result?.data?.json 
           ? data[0].result.data.json : data;
+        cyclopediaState.profileSeason = getLatestProfileSeason(profileData, 1);
         
         this.renderLayout(playerState.name, profileData);
         this.setupTimers();
@@ -3956,6 +4105,11 @@ function createStartPageManager() {
     }
 
     renderLayout(playerName, profileData) {
+        this.lastPlayerName = playerName;
+        this.lastProfileData = profileData;
+        cyclopediaState.lastStartupProfileData = unwrapProfilePageJson(profileData);
+        refreshLeaderboardCacheYourRoomsForSeason();
+
         this.container.innerHTML = '';
         
         const mainFlexRow = document.createElement('div');
@@ -3964,7 +4118,11 @@ function createStartPageManager() {
           margin: '0 auto', gap: '0', alignItems: 'center'
         });
         
-      const leftCol = DOMUtils.createColumn(START_PAGE_CONFIG.COLUMN_WIDTHS.LEFT, renderCyclopediaWelcomeColumn(playerName));
+      const leftCol = DOMUtils.createColumn(
+        START_PAGE_CONFIG.COLUMN_WIDTHS.LEFT,
+        renderCyclopediaWelcomeColumn(playerName, profileData, () => this.refreshLayout()),
+        { justifyContent: 'center', alignItems: 'center', minHeight: '0' }
+      );
         mainFlexRow.appendChild(leftCol);
         
       const middleCol = DOMUtils.createColumn(
@@ -3975,9 +4133,10 @@ function createStartPageManager() {
       mainFlexRow.appendChild(middleCol);
       
       // Move the old middle column content (Player information) into the right column
+      const patchedProfile = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
       const rightCol = DOMUtils.createColumn(
         START_PAGE_CONFIG.COLUMN_WIDTHS.RIGHT,
-        renderCyclopediaPlayerInfo(profileData)
+        renderCyclopediaPlayerInfo(patchedProfile)
       );
       Object.assign(rightCol.style, { justifyContent: 'center', padding: '0 12px' });
       mainFlexRow.appendChild(rightCol);
@@ -4127,7 +4286,7 @@ function openCyclopediaModal(options) {
           try {
             mainContent.appendChild(page);
           } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
         }
       });
@@ -4155,7 +4314,7 @@ function openCyclopediaModal(options) {
                 }
               }
             } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
           }
         });
@@ -4293,7 +4452,7 @@ function openCyclopediaModal(options) {
                 toggleButton.style.border = '';
               }
               
-              console.log(`[Cyclopedia] Toggled to ${showShinyPortraits ? 'shiny' : 'normal'} portrait mode`);
+              
               
               // Update the right column to reflect the new mode
               updateRightColInternal();
@@ -4462,7 +4621,7 @@ function openCyclopediaModal(options) {
           return cache;
         }
         
-        console.log('[Cyclopedia] Building equipment creature cache...');
+        
         let totalActors = 0;
         let actorsWithEquipment = 0;
         
@@ -4828,7 +4987,7 @@ function openCyclopediaModal(options) {
                   break;
                 }
               } catch (e) {
-          console.log('[Cyclopedia] Error in creature ownership check:', e);
+          console.warn('[Cyclopedia] Error in creature ownership check:', e);
         }
             }
           }
@@ -4951,7 +5110,7 @@ function openCyclopediaModal(options) {
                     eqData = globalThis.state.utils.getEquipment(equipId);
                   }
                 } catch (e) {
-          console.log('[Cyclopedia] Error in creature ownership check:', e);
+          console.warn('[Cyclopedia] Error in creature ownership check:', e);
         }
 
                 let portrait = api.ui.components.createItemPortrait({
@@ -5101,7 +5260,8 @@ function openCyclopediaModal(options) {
           padding: '20px', boxSizing: 'border-box', overflowY: 'scroll'
         });
 
-        const userInfoContent = renderCyclopediaPlayerInfo(profileData, { showShinyCreatures: false });
+        const patched = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
+        const userInfoContent = renderCyclopediaPlayerInfo(patched, { showShinyCreatures: false });
         const centeredContent = DOMUtils.createElement('div');
         Object.assign(centeredContent.style, {
           display: 'flex', justifyContent: 'center', alignItems: 'flex-start', width: '100%', height: '100%'
@@ -5179,6 +5339,11 @@ function openCyclopediaModal(options) {
           }
 
           if (isCancelled(requestId)) return;
+
+          if (profileData?.name) {
+            cyclopediaState.lastStartupProfileData = unwrapProfilePageJson(profileData);
+            refreshLeaderboardCacheYourRoomsForSeason();
+          }
 
           // Update UI
           const container = createUserStatsContainer(profileData);
@@ -5266,7 +5431,7 @@ function openCyclopediaModal(options) {
           rows.forEach((row, rowIndex) => {
             const cols = row.split('|').map(s => s.trim()).filter(Boolean);
             if (cols.length < 11) {
-              console.log(`[Cyclopedia] Skipping row ${rowIndex + 1}: insufficient columns (${cols.length}), expected at least 11`);
+              
               return;
             }
             
@@ -5291,7 +5456,7 @@ function openCyclopediaModal(options) {
             const bagOutfits = hasFloors ? parseInt(cols[11], 10) : parseInt(cols[10], 10);
             
             if (isNaN(level) || !username) {
-              console.log(`[Cyclopedia] Skipping row ${rowIndex + 1}: invalid data (level: ${level}, username: ${username})`);
+              
               return;
             }
             
@@ -5438,7 +5603,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       async function displaySpeedrunOrRankData(category, playerState) {
         try {
           const ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
-          const rooms = playerState.rooms;
+          const roomsScoped = getYourRoomsForCyclopediaSeason(playerState.rooms || {});
           const you = playerState.userId;
 
           let best, lbs, roomsHighscores;
@@ -5456,8 +5621,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             setCachedLeaderboardData('speedrun-rank', { best, lbs, roomsHighscores });
           }
 
-          displayUserSpeedrunOrRankData(category, playerState.name, rooms, ROOM_NAMES, best, roomsHighscores, col2);
-          updateSearchForSpeedrunOrRank(category, rooms, ROOM_NAMES, best, roomsHighscores);
+          displayUserSpeedrunOrRankData(category, playerState.name, roomsScoped, ROOM_NAMES, best, roomsHighscores, col2);
+          updateSearchForSpeedrunOrRank(category, playerState.rooms || {}, ROOM_NAMES, best, roomsHighscores);
 
         } catch (error) {
           console.error('[Cyclopedia] Error displaying speedrun/rank data:', error);
@@ -5468,7 +5633,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       async function displayCombinedLeaderboardsData(playerState) {
         try {
           const ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
-          const rooms = playerState.rooms;
+          const roomsScoped = getYourRoomsForCyclopediaSeason(playerState.rooms || {});
           const you = playerState.userId;
 
           let best, lbs, roomsHighscores;
@@ -5486,8 +5651,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             setCachedLeaderboardData('combined-leaderboards', { best, lbs, roomsHighscores });
           }
 
-          displayUserCombinedLeaderboardsData(playerState.name, rooms, ROOM_NAMES, best, roomsHighscores, col2);
-          updateSearchForCombinedLeaderboards(rooms, ROOM_NAMES, best, roomsHighscores);
+          displayUserCombinedLeaderboardsData(playerState.name, roomsScoped, ROOM_NAMES, best, roomsHighscores, col2);
+          updateSearchForCombinedLeaderboards(playerState.rooms || {}, ROOM_NAMES, best, roomsHighscores);
 
         } catch (error) {
           console.error('[Cyclopedia] Error displaying combined leaderboards data:', error);
@@ -6183,12 +6348,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
       function updateSearchForSpeedrunOrRank(category, yourRooms, ROOM_NAMES, best, roomsHighscores) {
         window.currentSpeedrunRankCategory = category;
-        window.currentSpeedrunRankData = { yourRooms, ROOM_NAMES, best, roomsHighscores };
+        window.currentSpeedrunRankData = { yourRooms: getYourRoomsForCyclopediaSeason(yourRooms), ROOM_NAMES, best, roomsHighscores };
       }
 
       function updateSearchForCombinedLeaderboards(yourRooms, ROOM_NAMES, best, roomsHighscores) {
         window.currentSpeedrunRankCategory = 'Combined';
-        window.currentSpeedrunRankData = { yourRooms, ROOM_NAMES, best, roomsHighscores };
+        window.currentSpeedrunRankData = { yourRooms: getYourRoomsForCyclopediaSeason(yourRooms), ROOM_NAMES, best, roomsHighscores };
         
         col3.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;"><div style="font-size: 24px; margin-bottom: 16px;">🔍</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Search Results</div><div style="font-size: 14px; color: #888; margin-bottom: 16px;">Use the search box above to compare leaderboard data</div><div style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 16px; margin-top: 16px; border: 1px solid rgba(255, 255, 255, 0.1);"><div style="font-size: 14px; font-weight: bold; color: ${COLOR_CONSTANTS.PRIMARY}; margin-bottom: 8px;">How to use:</div><div style="font-size: 12px; color: #ccc; text-align: left; line-height: 1.4;">• Enter a player name in the search box<br>• View their leaderboard data compared to yours</div></div></div>`;
       }
@@ -7019,9 +7184,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           return;
         }
         
+        const season = cyclopediaState.profileSeason || 1;
+        const scopedProfile = narrowProfilePageDataForSeason(searchedProfileData, season);
         // Use new rooms data from profilePageData if available, otherwise fall back to highscores
-        const searchedRooms = searchedProfileData.rooms || {};
-        const searchedHighscores = searchedProfileData.highscores || [];
+        const searchedRooms = scopedProfile.rooms || {};
+        const searchedHighscores = scopedProfile.highscores || [];
+        const yourRoomsScoped = getYourRoomsForCyclopediaSeason(yourRooms);
         
         const searchedHighscoresMap = {};
         const searchedRankPointsMap = {};
@@ -7100,7 +7268,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           regionRooms.forEach(({ roomCode, roomName }) => {
             const searchedScore = searchedHighscoresMap[roomCode];
-            const yourRoom = yourRooms[roomCode];
+            const yourRoom = yourRoomsScoped[roomCode];
             const searchedRoom = searchedRooms[roomCode];
 
             const hasSearchedScore = searchedScore && searchedScore.ticks;
@@ -7399,7 +7567,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           container.appendChild(centeredContent);
         } else {
           // Create the player info content for valid player data
-          const playerInfoContent = renderCyclopediaPlayerInfo(profileData, { showShinyCreatures: false });
+          const playerInfoContent = renderCyclopediaPlayerInfo(
+            patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1),
+            { showShinyCreatures: false }
+          );
           
           // Add profile button after the player name
           const nameElement = playerInfoContent.querySelector('p.line-clamp-1.text-whiteExp.animate-in.fade-in');
@@ -8400,8 +8571,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       let selectedCategory = 'Consumables';
       let selectedInventoryItem = null;
 
-
-
       const getItemInfo = (itemKey) => {
         if (!itemKey) return { displayName: 'Unknown Item', rarity: '1' };
 
@@ -8676,8 +8845,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           'Yasir\'s Trading Contract'
         ]
       };
-
-
 
       const getItemDisplayName = memoize((itemKey) => {
         if (!itemKey) return 'Unknown Item';
@@ -9486,20 +9653,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Function to populate speedrun table with local data
       async function populateSpeedrunTable() {
         try {
-          console.log(`[Cyclopedia] Populating speedrun table for map: ${selectedMap}`);
+          
           // Resolve the map name to ensure consistency with RunTracker
           const resolvedMapName = resolveMapName(selectedMap);
           const mapKey = `map_${resolvedMapName.toLowerCase().replace(/\s+/g, '_')}`;
-          console.log(`[Cyclopedia] Resolved map name: "${selectedMap}" -> "${resolvedMapName}"`);
-          console.log(`[Cyclopedia] Generated mapKey: ${mapKey}`);
+          
+          
           let localRuns = await getLocalRunsForMap(mapKey, 'speedrun');
-          console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} speedrun records:`, localRuns);
+          
           
           // Ensure currentYourRooms is populated for warning icon comparisons
           if (!currentYourRooms) {
             const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-            currentYourRooms = playerState?.rooms || {};
-            console.log(`[Cyclopedia] Populated currentYourRooms from player state:`, currentYourRooms);
+            currentYourRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
           }
           
           // Filter out defeated runs with 0 rank points (for consistency)
@@ -9508,7 +9674,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             localRuns = localRuns.filter(run => !run.points || run.points > 0);
             const filteredCount = localRuns.length;
             if (originalCount !== filteredCount) {
-              console.log(`[Cyclopedia] Filtered out ${originalCount - filteredCount} defeated runs (0 rank points) from speedrun table`);
+              
             }
           }
           
@@ -9524,7 +9690,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const dateB = b.date || b.timestamp || 0;
               return dateB - dateA;
             });
-            console.log(`[Cyclopedia] Sorted speedrun records:`, localRuns);
+            
           }
           
           if (!localRuns || localRuns.length === 0) {
@@ -9573,7 +9739,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
             
             const run = localRuns[i];
-            console.log(`[Cyclopedia] Processing speedrun run ${i + 1}:`, run);
             
             if (!run) {
               // No run for this slot - show "No runs" without buttons
@@ -9618,7 +9783,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             
             if (run.time) {
               const timeText = document.createElement('span');
-              console.log(`[Cyclopedia] Speedrun run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
+              
               
               // Check if this run is invalid (lower than "Your Best" OR has level 1 creatures OR has empty pieces)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
@@ -9656,14 +9821,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Make the entire row red
                 row.style.color = '#ff6b6b';
-                console.log(`[Cyclopedia] Added warning icon for speedrun run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), hasLevel1=${hasLevel1Creature}, hasEmptyPieces=${hasEmptyPieces}`);
+                
               } else {
                 timeText.textContent = formatLocalRunTime(run.time);
                 timeCell.appendChild(timeText);
               }
             } else {
               timeCell.textContent = 'N/A';
-              console.log(`[Cyclopedia] Speedrun run ${i + 1} has no time property`);
+              
             }
             
             row.appendChild(timeCell);
@@ -9694,7 +9859,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   copyCell.style.opacity = '1';
                 }, 100);
                 
-                console.log(`[Cyclopedia] Copy button clicked for speedrun run:`, run);
+                
                 
                 // Generate replay command with board configuration if available
                 let replayData = {};
@@ -9706,7 +9871,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 // First, try to use the region name that RunTracker already resolved and saved
                 if (run.regionName) {
                   regionName = run.regionName;
-                  console.log('[Cyclopedia] Using saved region name from RunTracker:', regionName);
+                  
                 } else {
                   // Try to determine region from the map name/ID using game state utils
                   try {
@@ -9725,18 +9890,18 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     
                     if (foundRegion) {
                       regionName = GAME_DATA.REGION_NAME_MAP[foundRegion.id] || foundRegion.id;
-                      console.log('[Cyclopedia] Found region for map using game state utils:', regionName);
+                      
                     } else {
                       // Fallback: try to get region from current game state (this is the problematic part)
                       const boardSnapshot = globalThis.state?.board?.getSnapshot();
                       if (boardSnapshot?.context?.selectedMap?.selectedRegion?.name) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.name;
-                        console.log('[Cyclopedia] Using region name from current game state (fallback):', regionName);
+                        
                       } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
                         // Capitalize region name
                         regionName = GAME_DATA.REGION_NAME_MAP[regionName.toLowerCase()] || regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-                        console.log('[Cyclopedia] Using region ID from current game state (fallback):', regionName);
+                        
                       }
                     }
                   } catch (e) {
@@ -9749,13 +9914,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Always add floor (default to 0 if not available)
                 replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
-                console.log('[Cyclopedia] Added floor to replay data:', replayData.floor);
+                
                 
                 // Check if we have stored board setup data
                 if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
-                  console.log('[Cyclopedia] Found stored board setup, generating complete replay command');
-                  console.log('[Cyclopedia] Run setup data:', run.setup);
-                  console.log('[Cyclopedia] Run setup pieces:', run.setup.pieces);
+                  
+                  
+                  
                   
                   // Convert stored pieces to board format
                   const board = run.setup.pieces.map(piece => {
@@ -9785,19 +9950,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   });
                   
                   replayData.board = board;
-                  console.log('[Cyclopedia] Generated board configuration:', board);
-                  console.log('[Cyclopedia] Final replay data:', replayData);
+                  
+                  
                 } else {
-                  console.log('[Cyclopedia] No stored board setup found, using basic replay command');
+                  
                 }
                 
                 // Add seed at the end
                 replayData.seed = run.seed;
                 
                 const replayCommand = `$replay(${JSON.stringify(replayData)})`;
-                console.log(`[Cyclopedia] Generated speedrun replay command: ${replayCommand}`);
+                
                 navigator.clipboard.writeText(replayCommand).then(() => {
-                  console.log('[Cyclopedia] Successfully copied speedrun replay command to clipboard:', replayCommand);
+                  
                   // Update status bar with success message
                   if (row3 && row3.statusBar) {
                     // Check if there's an active delete confirmation
@@ -9873,17 +10038,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   deleteCell.style.opacity = '1';
                 }, 100);
                 
-                console.log(`[Cyclopedia] Delete button clicked for speedrun run:`, run);
+                
                 
                 // Check if delete cell is already in "confirm" state
                 if (deleteCell.getAttribute('data-confirming') === 'true') {
                   // User confirmed deletion
-                  console.log(`[Cyclopedia] Deleting speedrun #${i + 1} for ${selectedMap}`);
+                  
                   // Remove from local storage
                   if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
-                    console.log(`[Cyclopedia] Calling RunTrackerAPI.deleteRun(${mapKey}, 'speedrun', ${i})`);
+                    
                     window.RunTrackerAPI.deleteRun(mapKey, 'speedrun', i).then(success => {
-                      console.log(`[Cyclopedia] RunTrackerAPI.deleteRun result:`, success);
+                      
                       if (success) {
                         // Update status bar
                         if (row3 && row3.statusBar) {
@@ -10018,20 +10183,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Function to populate floors table with local data
       async function populateFloorsTable() {
         try {
-          console.log(`[Cyclopedia] Populating floors table for map: ${selectedMap}`);
+          
           // Resolve the map name to ensure consistency with RunTracker
           const resolvedMapName = resolveMapName(selectedMap);
           const mapKey = `map_${resolvedMapName.toLowerCase().replace(/\s+/g, '_')}`;
-          console.log(`[Cyclopedia] Resolved map name: "${selectedMap}" -> "${resolvedMapName}"`);
-          console.log(`[Cyclopedia] Generated mapKey: ${mapKey}`);
+          
+          
           let localRuns = await getLocalRunsForMap(mapKey, 'floor');
-          console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} floor records:`, localRuns);
+          
           
           // Ensure currentYourRooms is populated for warning icon comparisons
           if (!currentYourRooms) {
             const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-            currentYourRooms = playerState?.rooms || {};
-            console.log(`[Cyclopedia] Populated currentYourRooms from player state:`, currentYourRooms);
+            currentYourRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
           }
           
           // Sort floor data: 1. Floor (descending), 2. FloorTicks (ascending), 3. Date (newest first)
@@ -10050,7 +10214,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const dateB = b.date || b.timestamp || 0;
               return dateB - dateA;
             });
-            console.log(`[Cyclopedia] Sorted floor records:`, localRuns);
+            
           }
           
           if (!localRuns || localRuns.length === 0) {
@@ -10106,7 +10270,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
             
             const run = localRuns[i];
-            console.log(`[Cyclopedia] Processing floor run ${i + 1}:`, run);
             
             if (!run) {
               // No run for this slot - show "No runs" without buttons
@@ -10165,7 +10328,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             if (run.floor !== undefined && run.floor !== null) {
               const floorText = document.createElement('span');
               floorText.textContent = run.floor;
-              console.log(`[Cyclopedia] Floor run ${i + 1} floor: ${run.floor}`);
+              
               
               if (hasLevel1Creature || hasEmptyPieces) {
                 // Create warning icon separately for left alignment
@@ -10191,13 +10354,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Make the entire row red
                 row.style.color = '#ff6b6b';
-                console.log(`[Cyclopedia] Added warning icon for floor run ${i + 1}: hasLevel1=${hasLevel1Creature}, hasEmptyPieces=${hasEmptyPieces}`);
+                
               } else {
                 floorCell.appendChild(floorText);
               }
             } else {
               floorCell.textContent = 'N/A';
-              console.log(`[Cyclopedia] Floor run ${i + 1} has no floor property`);
+              
             }
             row.appendChild(floorCell);
             
@@ -10211,10 +10374,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             if (run.time !== undefined && run.time !== null) {
               const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
               timeCell.textContent = timeValue;
-              console.log(`[Cyclopedia] Floor run ${i + 1} time: ${run.time} -> ${timeValue}`);
+              
             } else {
               timeCell.textContent = '-';
-              console.log(`[Cyclopedia] Floor run ${i + 1} has no time property`);
+              
             }
             row.appendChild(timeCell);
             
@@ -10244,7 +10407,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   copyCell.style.opacity = '1';
                 }, 100);
                 
-                console.log(`[Cyclopedia] Copy button clicked for floor run:`, run);
+                
                 
                 // Generate replay command with board configuration if available
                 let replayData = {};
@@ -10256,7 +10419,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 // First, try to use the region name that RunTracker already resolved and saved
                 if (run.regionName) {
                   regionName = run.regionName;
-                  console.log('[Cyclopedia] Using saved region name from RunTracker:', regionName);
+                  
                 } else {
                   // Try to determine region from the map name/ID using game state utils
                   try {
@@ -10275,18 +10438,18 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     
                     if (foundRegion) {
                       regionName = GAME_DATA.REGION_NAME_MAP[foundRegion.id] || foundRegion.id;
-                      console.log('[Cyclopedia] Found region for map using game state utils:', regionName);
+                      
                     } else {
                       // Fallback: try to get region from current game state
                       const boardSnapshot = globalThis.state?.board?.getSnapshot();
                       if (boardSnapshot?.context?.selectedMap?.selectedRegion?.name) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.name;
-                        console.log('[Cyclopedia] Using region name from current game state (fallback):', regionName);
+                        
                       } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
                         // Capitalize region name
                         regionName = GAME_DATA.REGION_NAME_MAP[regionName.toLowerCase()] || regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-                        console.log('[Cyclopedia] Using region ID from current game state (fallback):', regionName);
+                        
                       }
                     }
                   } catch (e) {
@@ -10299,13 +10462,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Always add floor (default to 0 if not available)
                 replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
-                console.log('[Cyclopedia] Added floor to replay data:', replayData.floor);
+                
                 
                 // Check if we have stored board setup data
                 if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
-                  console.log('[Cyclopedia] Found stored board setup, generating complete replay command');
-                  console.log('[Cyclopedia] Run setup data:', run.setup);
-                  console.log('[Cyclopedia] Run setup pieces:', run.setup.pieces);
+                  
+                  
+                  
                   
                   // Convert stored pieces to board format
                   const board = run.setup.pieces.map(piece => {
@@ -10335,19 +10498,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   });
                   
                   replayData.board = board;
-                  console.log('[Cyclopedia] Generated board configuration:', board);
-                  console.log('[Cyclopedia] Final replay data:', replayData);
+                  
+                  
                 } else {
-                  console.log('[Cyclopedia] No stored board setup found, using basic replay command');
+                  
                 }
                 
                 // Add seed at the end
                 replayData.seed = run.seed;
                 
                 const replayCommand = `$replay(${JSON.stringify(replayData)})`;
-                console.log(`[Cyclopedia] Generated floor replay command: ${replayCommand}`);
+                
                 navigator.clipboard.writeText(replayCommand).then(() => {
-                  console.log('[Cyclopedia] Successfully copied floor replay command to clipboard:', replayCommand);
+                  
                   // Update status bar with success message
                   if (row3 && row3.statusBar) {
                     row3.statusBar.textContent = 'Successfully copied run!';
@@ -10392,13 +10555,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 // Check if already in confirmation mode
                 if (deleteCell.getAttribute('data-confirming') === 'true') {
                   // Confirm deletion
-                  console.log(`[Cyclopedia] Confirming deletion of floor run at index ${i} for ${mapKey}`);
+                  
                   
                   // Call RunTracker API to delete the run
                   if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
                     window.RunTrackerAPI.deleteRun(mapKey, 'floor', i).then(success => {
                       if (success) {
-                        console.log(`[Cyclopedia] Successfully deleted floor run at index ${i} for ${mapKey}`);
+                        
                         // Refresh the table
                         populateFloorsTable();
                         // Update status bar
@@ -10545,20 +10708,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Function to populate rank points table with local data
       async function populateRankPointsTable() {
         try {
-          console.log(`[Cyclopedia] Populating rank points table for map: ${selectedMap}`);
+          
           // Resolve the map name to ensure consistency with RunTracker
           const resolvedMapName = resolveMapName(selectedMap);
           const mapKey = `map_${resolvedMapName.toLowerCase().replace(/\s+/g, '_')}`;
-          console.log(`[Cyclopedia] Resolved map name: "${selectedMap}" -> "${resolvedMapName}"`);
-          console.log(`[Cyclopedia] Generated mapKey: ${mapKey}`);
+          
+          
           let localRuns = await getLocalRunsForMap(mapKey, 'rank');
-          console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} rank records:`, localRuns);
+          
           
           // Ensure currentYourRooms is populated for warning icon comparisons
           if (!currentYourRooms) {
             const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-            currentYourRooms = playerState?.rooms || {};
-            console.log(`[Cyclopedia] Populated currentYourRooms from player state:`, currentYourRooms);
+            currentYourRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
           }
           
           // Filter out defeated runs with 0 rank points
@@ -10567,7 +10729,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             localRuns = localRuns.filter(run => run.points > 0);
             const filteredCount = localRuns.length;
             if (originalCount !== filteredCount) {
-              console.log(`[Cyclopedia] Filtered out ${originalCount - filteredCount} defeated runs (0 rank points)`);
+              
             }
           }
           
@@ -10587,12 +10749,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const dateB = b.date || b.timestamp || 0;
               return dateB - dateA;
             });
-            console.log(`[Cyclopedia] Sorted rank records:`, localRuns);
+            
           }
           
           if (localRuns && localRuns.length > 0) {
-            console.log(`[Cyclopedia] First rank record properties:`, Object.keys(localRuns[0]));
-            console.log(`[Cyclopedia] First rank record values:`, localRuns[0]);
+            
+            
           }
           
           if (!localRuns || localRuns.length === 0) {
@@ -10648,7 +10810,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
             
             const run = localRuns[i];
-            console.log(`[Cyclopedia] Processing rank run ${i + 1}:`, run);
             
             if (!run) {
               // No run for this slot - show "No runs" without buttons
@@ -10698,10 +10859,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             rankCell.style.position = 'relative';
             if (run.points) {
               rankCell.textContent = run.points.toLocaleString();
-              console.log(`[Cyclopedia] Rank run ${i + 1} points: ${run.points} -> ${run.points.toLocaleString()}`);
+              
             } else {
               rankCell.textContent = 'N/A';
-              console.log(`[Cyclopedia] Rank run ${i + 1} has no points property`);
+              
             }
             row.appendChild(rankCell);
             
@@ -10717,7 +10878,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             
             if (run.time) {
               const timeText = document.createElement('span');
-              console.log(`[Cyclopedia] Rank run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
+              
               
               // Check if this run is invalid (either faster than your best time OR worse rank than your best OR has level 1 creatures OR has empty pieces)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
@@ -10759,7 +10920,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Make the entire row red
                 row.style.color = '#ff6b6b';
-                console.log(`[Cyclopedia] Added warning icon for rank run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), rank invalid=${isRankInvalid} (${run.points} > ${yourBestRank}), hasLevel1=${hasLevel1Creature}, hasEmptyPieces=${hasEmptyPieces}`);
+                
               } else {
                 const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
                 timeText.textContent = timeValue;
@@ -10767,7 +10928,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               }
             } else {
               timeCell.textContent = 'N/A';
-              console.log(`[Cyclopedia] Rank run ${i + 1} has no time property`);
+              
             }
             
             row.appendChild(timeCell);
@@ -10798,7 +10959,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   copyCell.style.opacity = '1';
                 }, 100);
                 
-                console.log(`[Cyclopedia] Copy button clicked for rank run:`, run);
+                
                 
                 // Generate replay command with board configuration if available
                 let replayData = {};
@@ -10810,7 +10971,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 // First, try to use the region name that RunTracker already resolved and saved
                 if (run.regionName) {
                   regionName = run.regionName;
-                  console.log('[Cyclopedia] Using saved region name from RunTracker:', regionName);
+                  
                 } else {
                   // Try to determine region from the map name/ID using game state utils
                   try {
@@ -10829,18 +10990,18 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     
                     if (foundRegion) {
                       regionName = GAME_DATA.REGION_NAME_MAP[foundRegion.id] || foundRegion.id;
-                      console.log('[Cyclopedia] Found region for map using game state utils:', regionName);
+                      
                     } else {
                       // Fallback: try to get region from current game state (this is the problematic part)
                       const boardSnapshot = globalThis.state?.board?.getSnapshot();
                       if (boardSnapshot?.context?.selectedMap?.selectedRegion?.name) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.name;
-                        console.log('[Cyclopedia] Using region name from current game state (fallback):', regionName);
+                        
                       } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
                         // Capitalize region name
                         regionName = GAME_DATA.REGION_NAME_MAP[regionName.toLowerCase()] || regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-                        console.log('[Cyclopedia] Using region ID from current game state (fallback):', regionName);
+                        
                       }
                     }
                   } catch (e) {
@@ -10853,13 +11014,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Always add floor (default to 0 if not available)
                 replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
-                console.log('[Cyclopedia] Added floor to replay data:', replayData.floor);
+                
                 
                 // Check if we have stored board setup data
                 if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
-                  console.log('[Cyclopedia] Found stored board setup, generating complete replay command');
-                  console.log('[Cyclopedia] Run setup data:', run.setup);
-                  console.log('[Cyclopedia] Run setup pieces:', run.setup.pieces);
+                  
+                  
+                  
                   
                   // Convert stored pieces to board format
                   const board = run.setup.pieces.map(piece => {
@@ -10889,19 +11050,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   });
                   
                   replayData.board = board;
-                  console.log('[Cyclopedia] Generated board configuration:', board);
-                  console.log('[Cyclopedia] Final replay data:', replayData);
+                  
+                  
                 } else {
-                  console.log('[Cyclopedia] No stored board setup found, using basic replay command');
+                  
                 }
                 
                 // Add seed at the end
                 replayData.seed = run.seed;
                 
                 const replayCommand = `$replay(${JSON.stringify(replayData)})`;
-                console.log(`[Cyclopedia] Generated rank replay command: ${replayCommand}`);
+                
                 navigator.clipboard.writeText(replayCommand).then(() => {
-                  console.log('[Cyclopedia] Successfully copied rank replay command to clipboard:', replayCommand);
+                  
                   // Update status bar with success message
                   if (row3 && row3.statusBar) {
                     row3.statusBar.textContent = 'Successfully copied run!';
@@ -10953,17 +11114,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   deleteCell.style.opacity = '1';
                 }, 100);
                 
-                console.log(`[Cyclopedia] Delete button clicked for rank run:`, run);
+                
                 
                 // Check if delete cell is already in "confirm" state
                 if (deleteCell.getAttribute('data-confirming') === 'true') {
                   // User confirmed deletion
-                  console.log(`[Cyclopedia] Deleting rank run #${i + 1} for ${selectedMap}`);
+                  
                   // Remove from local storage
                   if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
-                    console.log(`[Cyclopedia] Calling RunTrackerAPI.deleteRun(${mapKey}, 'rank', ${i})`);
+                    
                     window.RunTrackerAPI.deleteRun(mapKey, 'rank', i).then(success => {
-                      console.log(`[Cyclopedia] RunTrackerAPI.deleteRun result:`, success);
+                      
                       if (success) {
                         // Update status bar
                         if (row3 && row3.statusBar) {
@@ -11149,10 +11310,24 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             return;
           }
           
-          const { best, roomsHighscores, yourRooms } = data;
+          const { best, roomsHighscores } = data;
+          console.log(
+            '[Cyclopedia] Leaderboard data for map',
+            selectedMap,
+            '| Cyclopedia season toggle:',
+            cyclopediaState.profileSeason || 1,
+            '| game.getTickHighscores / getRoomsHighscores are global room WRs (no season in API payload).',
+            {
+              best: best?.[selectedMap],
+              rank: roomsHighscores?.rank?.[selectedMap],
+              floor: roomsHighscores?.floor?.[selectedMap],
+              ticks: roomsHighscores?.ticks?.[selectedMap]
+            }
+          );
           const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-          
-          // Store yourRooms data for warning icon comparisons
+          const yourRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
+
+          // Store yourRooms data for warning icon comparisons (season-scoped when profile is loaded)
           currentYourRooms = yourRooms;
           
           // Update speedrun content
@@ -11746,7 +11921,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       mapsContainer.style.paddingRight = '8px';
       
       const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-      const playerRooms = playerState?.rooms || {};
+      const playerRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
       
       // Filter out dynamic event maps from display
       const mapsToDisplay = mapsInRegion.filter(map => !isDynamicEventMap(map.id));
@@ -12057,7 +12232,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Title
       const title = document.createElement('h3');
       const regionName = GAME_DATA.REGION_NAME_MAP[regionId] || regionId;
-      title.textContent = `${regionName} Statistics`;
+      title.textContent = cyclopediaT('mods.cyclopedia.maps.regionStatisticsSeason')
+        .replace('{region}', regionName)
+        .replace('{n}', String(cyclopediaState.profileSeason || 1));
       title.style.margin = '0 0 12px 0';
       title.style.fontSize = '16px';
       title.style.fontWeight = 'bold';
@@ -12351,15 +12528,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           if (selectedCategory && globalThis.state?.utils?.REGIONS) {
             // Show maps from specific region
             const region = globalThis.state.utils.REGIONS.find(r => r.id === selectedCategory);
-            console.log('[Cyclopedia] Selected region:', region);
+            
             if (region && region.rooms) {
-              console.log('[Cyclopedia] Region rooms:', region.rooms);
+              
               mapsInRegion = region.rooms.map(room => ({
                 id: room.id,
                 name: globalThis.state.utils.ROOM_NAME[room.id] || room.id,
                 region: region.id
               }));
-              console.log('[Cyclopedia] Maps in region:', mapsInRegion);
+              
             }
           }
           
@@ -12383,7 +12560,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             setSelectedInventory: (mapName) => {
               const mapData = mapsInRegion.find(map => map.name === mapName);
               selectedMap = mapData ? mapData.id : mapName;
-              console.log('[Cyclopedia] Map selected:', { mapName, mapData, selectedMap });
+              
               updateRightCol();
             },
             updateRightCol: () => {}
@@ -12517,20 +12694,33 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         margin: '0', padding: '0', textAlign: 'center', color: 'rgb(255, 255, 255)',
         width: '100%', boxSizing: 'border-box'
       });
-      col3TitleP.textContent = 'Statistics';
+      col3TitleP.textContent = getMapsTabStatisticsHeading();
       col3Title.appendChild(col3TitleP);
       col3.appendChild(col3Title);
       col3.appendChild(col3Content);
+
+      let mapsTabStatsOnCol2 = false;
+
+      function syncMapsTabStatisticsHeadings() {
+        const label = getMapsTabStatisticsHeading();
+        if (mapsTabStatsOnCol2) col2TitleP.textContent = label;
+        else col3TitleP.textContent = label;
+        updateRightCol();
+      }
+
+      document.addEventListener('cyclopedia-season-changed', syncMapsTabStatisticsHeadings);
       
       // Function to update column layout based on selection
       function updateColumnLayout(isRegionSelected) {
+        const statsLabel = getMapsTabStatisticsHeading();
         if (isRegionSelected) {
+          mapsTabStatsOnCol2 = true;
           // Region selected: Statistics (small) on left (col2), Map Information (large) on right (col3)
           // col2 = Statistics (small, left)
           Object.assign(col2.style, {
             width: '250px', minWidth: '250px', maxWidth: '250px', flex: '0 0 250px'
           });
-          col2TitleP.textContent = 'Statistics';
+          col2TitleP.textContent = statsLabel;
           
           // col3 = Map Information (large, right)
           Object.assign(col3.style, {
@@ -12538,6 +12728,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           });
           col3TitleP.textContent = 'Map Information';
         } else {
+          mapsTabStatsOnCol2 = false;
           // Map selected: Map Information (small) on left (col2), Statistics (large) on right (col3)
           // col2 = Map Information (small, left)
           Object.assign(col2.style, {
@@ -12549,7 +12740,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           Object.assign(col3.style, {
             flex: '1 1 0', width: 'auto', minWidth: '0', maxWidth: 'none'
           });
-          col3TitleP.textContent = 'Statistics';
+          col3TitleP.textContent = statsLabel;
         }
       }
 
@@ -12559,12 +12750,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           // Check if we actually need to update
           const roomData = globalThis.state?.utils?.ROOMS?.[selectedMap];
           const roomName = globalThis.state?.utils?.ROOM_NAME?.[selectedMap] || selectedMap;
+          const activeSeason = cyclopediaState.profileSeason || 1;
           
           // Only update if state actually changed
           if (MapsTabDOMOptimizer.currentState.selectedMap === selectedMap && 
               MapsTabDOMOptimizer.currentState.selectedCategory === selectedCategory &&
               MapsTabDOMOptimizer.currentState.roomData === roomData &&
-              MapsTabDOMOptimizer.currentState.roomName === roomName) {
+              MapsTabDOMOptimizer.currentState.roomName === roomName &&
+              MapsTabDOMOptimizer.currentState.season === activeSeason) {
             return; // No change needed
           }
           
@@ -12573,6 +12766,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           MapsTabDOMOptimizer.currentState.selectedCategory = selectedCategory;
           MapsTabDOMOptimizer.currentState.roomData = roomData;
           MapsTabDOMOptimizer.currentState.roomName = roomName;
+          MapsTabDOMOptimizer.currentState.season = activeSeason;
           
           // Clear only content areas, preserve structure
           const col2Content = col2.querySelector('.maps-content-area');
@@ -12728,9 +12922,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               }
               
               // Debug logging
-              console.log('[Cyclopedia] Maps Tab - Room ID:', selectedMap);
-              console.log('[Cyclopedia] Maps Tab - Room Data:', roomData);
-              console.log('[Cyclopedia] Maps Tab - Room Actors:', roomActors);
+              
+              
+              
               
               const creaturesContainer = createCreatureListSection(roomActors, selectedMap);
               contentContainer.appendChild(creaturesContainer);
@@ -13440,7 +13634,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
           const spriteImg = monsterSprite.querySelector('img.actor.spritesheet');
           if (spriteImg) {
             spriteImg.setAttribute('data-shiny', 'true');
-            console.log(`[Cyclopedia] Set shiny attribute for monster ${monsterId}`);
+            
           }
           
           // Add shiny star overlay like in inventory (same size as owned section)
@@ -13460,7 +13654,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
           const spriteImg = monsterSprite.querySelector('img.actor.spritesheet');
           if (spriteImg) {
             spriteImg.removeAttribute('data-shiny');
-            console.log(`[Cyclopedia] Removed shiny attribute for monster ${monsterId}`);
+            
           }
           
           // Remove any existing shiny star icons
@@ -14335,7 +14529,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
       
       // Set shiny attribute on the sprite if creature is shiny
       if (monster.shiny === true) {
-        console.log('[Cyclopedia] Setting shiny attribute for owned creature:', monster);
+        
         const spriteImg = portrait.querySelector('img.actor.spritesheet');
         if (spriteImg) {
           spriteImg.setAttribute('data-shiny', 'true');
@@ -14484,16 +14678,23 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   return container;
 }
 
-function renderCyclopediaWelcomeColumn(playerName) {
+function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) {
   try {
+    const activeSeason = cyclopediaState.profileSeason || 1;
+    const s = findProfileSeasonEntry(profileData, activeSeason);
+
     const div = document.createElement('div');
-    div.style.flex = '1';
+    div.style.flex = '0 1 auto';
     div.style.display = 'flex';
     div.style.flexDirection = 'column';
-    div.style.justifyContent = 'center';
+    div.style.justifyContent = 'flex-start';
     div.style.alignItems = 'center';
     div.style.padding = '24px';
     div.style.width = '100%';
+    div.style.maxHeight = '100%';
+    div.style.minHeight = '0';
+    div.style.overflowY = 'auto';
+    div.style.boxSizing = 'border-box';
 
     const headline = document.createElement('h2');
     headline.style.color = '#ffe066';
@@ -14507,14 +14708,177 @@ function renderCyclopediaWelcomeColumn(playerName) {
       : cyclopediaT('mods.cyclopedia.startpage.welcome');
     div.appendChild(headline);
 
-    const desc = document.createElement('p');
-    desc.style.color = '#e6d7b0';
-    desc.style.fontSize = '15px';
-    desc.style.textAlign = 'left';
-    desc.style.margin = '0';
-    desc.style.width = '100%';
-    desc.innerHTML = cyclopediaT('mods.cyclopedia.startpage.welcomeDesc');
-    div.appendChild(desc);
+    const toggleRow = document.createElement('div');
+    toggleRow.style.display = 'flex';
+    toggleRow.style.flexDirection = 'row';
+    toggleRow.style.gap = '8px';
+    toggleRow.style.justifyContent = 'center';
+    toggleRow.style.width = '100%';
+    toggleRow.style.marginBottom = '10px';
+    CYCLOPEDIA_PROFILE_SEASONS.forEach((sn) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = sn === 1
+        ? cyclopediaT('mods.cyclopedia.startpage.seasonToggle1')
+        : cyclopediaT('mods.cyclopedia.startpage.seasonToggle2');
+      Object.assign(btn.style, {
+        flex: '1',
+        padding: '6px 10px',
+        cursor: 'pointer',
+        fontFamily: FONT_CONSTANTS.PRIMARY,
+        fontSize: '12px',
+        borderRadius: '4px',
+        border: Number(activeSeason) === sn ? '1px solid #ffe066' : '1px solid #555',
+        background: Number(activeSeason) === sn ? '#3a3a2a' : '#2a2a2a',
+        color: Number(activeSeason) === sn ? '#ffe066' : '#e6d7b0'
+      });
+      btn.addEventListener('click', () => {
+        if (Number(cyclopediaState.profileSeason) === sn) return;
+        cyclopediaState.profileSeason = sn;
+        if (typeof document !== 'undefined') {
+          document.dispatchEvent(new CustomEvent('cyclopedia-season-changed', { detail: { season: sn } }));
+        }
+        if (typeof onSeasonChange === 'function') onSeasonChange();
+      });
+      toggleRow.appendChild(btn);
+    });
+    div.appendChild(toggleRow);
+
+    const statsWrap = document.createElement('div');
+    statsWrap.style.width = '100%';
+    statsWrap.style.flex = '0 0 auto';
+    statsWrap.style.display = 'flex';
+    statsWrap.style.flexDirection = 'column';
+    statsWrap.style.gap = '10px';
+
+    const title = document.createElement('div');
+    title.style.color = '#ffe066';
+    title.style.fontSize = '16px';
+    title.style.fontWeight = 'bold';
+    title.style.textAlign = 'center';
+    title.style.width = '100%';
+    title.style.display = 'flex';
+    title.style.alignItems = 'center';
+    title.style.justifyContent = 'center';
+    title.style.gap = '6px';
+    const titleIcon = document.createElement('img');
+    titleIcon.src = CYCLOPEDIA_ASSETS.seasonIcon;
+    titleIcon.alt = '';
+    titleIcon.width = 18;
+    titleIcon.height = 18;
+    titleIcon.className = 'pixelated';
+    Object.assign(titleIcon.style, { width: '18px', height: '18px', flexShrink: '0' });
+    const titleLabel = document.createElement('span');
+    titleLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.seasonStatsTitle');
+    title.appendChild(titleIcon);
+    title.appendChild(titleLabel);
+    statsWrap.appendChild(title);
+
+    const appendStatRow = (parent, labelKey, rawValue, bracket) => {
+      const na = cyclopediaSeasonNA();
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+      row.style.gap = '8px';
+      row.style.fontSize = '13px';
+      row.style.color = '#e6d7b0';
+      row.style.height = '20px';
+      row.style.minHeight = '20px';
+      row.style.maxHeight = '20px';
+      row.style.boxSizing = 'border-box';
+      const lab = document.createElement('span');
+      lab.style.flexShrink = '0';
+      lab.textContent = cyclopediaT(labelKey);
+      const val = document.createElement('span');
+      val.style.display = 'flex';
+      val.style.flex = '1 1 auto';
+      val.style.minWidth = '0';
+      val.style.justifyContent = 'flex-end';
+      val.style.alignItems = 'center';
+      val.style.textAlign = 'right';
+      const inner = document.createElement('span');
+      inner.style.display = 'inline-flex';
+      inner.style.flexDirection = 'row';
+      inner.style.flexWrap = 'nowrap';
+      inner.style.alignItems = 'center';
+      inner.style.gap = '4px';
+      inner.style.maxWidth = '100%';
+      const hasVal = rawValue !== undefined && rawValue !== null;
+      const numSpan = document.createElement('span');
+      numSpan.style.flexShrink = '0';
+      numSpan.textContent = hasVal ? (typeof rawValue === 'number' ? FormatUtils.number(rawValue) : String(rawValue)) : na;
+      inner.appendChild(numSpan);
+      if (hasVal && bracket != null && bracket !== '') {
+        const iconUrl = cyclopediaBracketIconUrl(bracket);
+        const brOuter = document.createElement('span');
+        brOuter.style.display = 'inline-flex';
+        brOuter.style.alignItems = 'center';
+        brOuter.style.gap = '3px';
+        brOuter.style.flexShrink = '0';
+        if (iconUrl) {
+          const img = document.createElement('img');
+          img.src = iconUrl;
+          img.alt = String(bracket);
+          img.width = 18;
+          img.height = 18;
+          img.className = 'pixelated';
+          Object.assign(img.style, { width: '18px', height: '18px', verticalAlign: 'middle' });
+          brOuter.appendChild(img);
+        }
+        const brTxt = document.createElement('span');
+        brTxt.style.fontSize = '11px';
+        brTxt.style.color = '#c9b896';
+        brTxt.textContent = `(${bracket})`;
+        brOuter.appendChild(brTxt);
+        inner.appendChild(brOuter);
+      }
+      val.appendChild(inner);
+      row.appendChild(lab);
+      row.appendChild(val);
+      parent.appendChild(row);
+    };
+
+    const block = document.createElement('div');
+    block.style.border = '1px solid #444';
+    block.style.borderRadius = '4px';
+    block.style.padding = '8px 10px';
+    block.style.background = 'rgba(0,0,0,0.25)';
+    block.style.boxSizing = 'border-box';
+    block.style.height = '100px';
+    block.style.minHeight = '100px';
+    block.style.maxHeight = '100px';
+    block.style.overflowY = 'auto';
+
+    const sn = document.createElement('div');
+    sn.style.color = '#ffe066';
+    sn.style.fontSize = '14px';
+    sn.style.fontWeight = 'bold';
+    sn.style.marginBottom = '6px';
+    sn.style.display = 'flex';
+    sn.style.alignItems = 'center';
+    sn.style.justifyContent = 'center';
+    sn.style.gap = '6px';
+    const snIcon = document.createElement('img');
+    snIcon.src = CYCLOPEDIA_ASSETS.seasonIcon;
+    snIcon.alt = '';
+    snIcon.width = 16;
+    snIcon.height = 16;
+    snIcon.className = 'pixelated';
+    Object.assign(snIcon.style, { width: '16px', height: '16px', flexShrink: '0' });
+    const snText = document.createElement('span');
+    snText.textContent = cyclopediaT('mods.cyclopedia.startpage.seasonStatsSeason').replace('{n}', String(activeSeason));
+    sn.appendChild(snIcon);
+    sn.appendChild(snText);
+    block.appendChild(sn);
+
+    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsTicks', s ? s.ticks : undefined, s ? s.ticksBracket : undefined);
+    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsRank', s ? s.rank : undefined, s ? s.rankBracket : undefined);
+    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsFloors', s ? s.floors : undefined, s ? s.floorsBracket : undefined);
+
+    statsWrap.appendChild(block);
+
+    div.appendChild(statsWrap);
     return div;
   } catch (error) {
     console.error('[Cyclopedia] Error rendering welcome column:', error);
@@ -15178,23 +15542,32 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   addRow({
     label: cyclopediaT('mods.cyclopedia.startpage.stats.rankPoints'),
     icon: '/assets/icons/star-tier.png',
-    value: (getProfileValue('rankPoints') !== undefined ? FormatUtils.number(getProfileValue('rankPoints')) : '-'),
-    title: profileData.rankPointsPosition !== undefined ? 'Position: ' + profileData.rankPointsPosition : undefined,
+    value: (() => {
+      const v = getProfileValue('rankPoints');
+      return v !== undefined && v !== null ? FormatUtils.number(v) : cyclopediaSeasonNA();
+    })(),
+    title: profileData.rankPointsPosition !== undefined ? String(profileData.rankPointsPosition) : undefined,
     extraIcon: { alt: 'Highscore', src: '/assets/icons/highscore.png' }
   });
   addRow({
     label: cyclopediaT('mods.cyclopedia.startpage.stats.timeSum'),
     icon: '/assets/icons/speed.png',
-    value: (getProfileValue('timeSum') !== undefined ? FormatUtils.number(getProfileValue('timeSum')) : '-'),
-    title: profileData.ticksPosition !== undefined ? 'Position: ' + profileData.ticksPosition : undefined,
+    value: (() => {
+      const v = getProfileValue('timeSum');
+      return v !== undefined && v !== null ? FormatUtils.number(v) : cyclopediaSeasonNA();
+    })(),
+    title: profileData.ticksPosition !== undefined ? String(profileData.ticksPosition) : undefined,
     extraIcon: { alt: 'Highscore', src: '/assets/icons/highscore.png' }
   });
   addRow({
     label: cyclopediaT('mods.cyclopedia.startpage.stats.floorsSum'),
     icon: '/assets/UI/floor-15.png',
     iconConfig: { width: 14, height: 7, className: 'pixelated -ml-px mr-0.5 inline-block -translate-y-0.5' },
-    value: (getProfileValue('floorsSum') !== undefined ? FormatUtils.number(getProfileValue('floorsSum')) : '-'),
-    title: profileData.floorsPosition !== undefined ? 'Position: ' + profileData.floorsPosition : undefined,
+    value: (() => {
+      const v = getProfileValue('floorsSum');
+      return v !== undefined && v !== null ? FormatUtils.number(v) : cyclopediaSeasonNA();
+    })(),
+    title: profileData.floorsPosition !== undefined ? String(profileData.floorsPosition) : undefined,
     extraIcon: { alt: 'Highscore', src: '/assets/icons/highscore.png' }
   });
   statsTable.appendChild(tbody);
@@ -15619,7 +15992,7 @@ function cleanupCyclopediaModal() {
       window.cyclopediaMenuObserver = null;
 
     } catch (error) {
-    console.log('[Cyclopedia] Error in monster location cache:', error);
+    console.warn('[Cyclopedia] Error in monster location cache:', error);
   }
   }
   
@@ -15683,7 +16056,7 @@ function cleanupCyclopediaModal() {
 
 function cleanupCyclopedia() {
   try {
-    console.log('[Cyclopedia] Starting comprehensive cleanup...');
+    
     
     // Clean up all event handlers
     EventHandlerManager.cleanup();
@@ -15726,7 +16099,7 @@ function cleanupCyclopedia() {
     // Clear DOM cache
     DOMCache.clear();
     
-    console.log('[Cyclopedia] Cleanup completed successfully');
+    
   } catch (error) {
     console.error('[Cyclopedia] Error during cleanup:', error);
   }
@@ -15750,7 +16123,7 @@ exports = {
   
   cleanup: function() {
     try {
-      console.log('[Cyclopedia] Exports cleanup called');
+      
       
       // Comprehensive cleanup per mod development guide
       cleanupCyclopedia();
@@ -15769,7 +16142,7 @@ exports = {
         cyclopediaState.cleanup();
       }
       
-      console.log('[Cyclopedia] Exports cleanup completed');
+      
       return true;
     } catch (error) {
       console.error('[Cyclopedia] Cleanup error:', error);
@@ -15808,10 +16181,8 @@ if (typeof window !== 'undefined') {
   };
 }
 
-
 // Auto-initialize if running in mod context
 if (typeof context !== 'undefined' && context.api) {
   exports.init();
 }
-
 

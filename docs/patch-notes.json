@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.6.5",
+      "changes": [
+        { "type": "changed", "mod": "Cyclopedia", "text": "Preparing for seasons." },
+        { "type": "fixed", "mod": "Better Yasir", "text": "Purchase order amounts use comma thousands separators in all browsers." },
+        { "type": "fixed", "mod": "Better Yasir", "text": "Recycle Rune purchase orders fixed." }
+      ]
+    },
+    {
       "version": "3.6.4",
       "changes": [
         { "type": "added", "mod": "Better Yasir", "text": "Added purchase orders to Better Yasir." },

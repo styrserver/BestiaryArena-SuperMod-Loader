@@ -1498,7 +1498,9 @@
           if (safeMsg.indexOf('\n') !== -1) {
             messageDiv.style.whiteSpace = 'pre-line';
           } else {
-            messageDiv.style.whiteSpace = 'normal';
+            messageDiv.style.whiteSpace = 'nowrap';
+            messageDiv.style.overflow = 'hidden';
+            messageDiv.style.textOverflow = 'ellipsis';
           }
           messageDiv.style.color = '#b8f5b8';
           messageDiv.textContent = safeMsg;
@@ -1507,7 +1509,7 @@
           closeBtn.setAttribute('aria-label', t('mods.betterYasir.poOrderToastDismissAria'));
           closeBtn.className = 'flex-shrink-0';
           closeBtn.style.cssText =
-            'width: 28px; height: 28px; padding: 0; border: none; background: transparent; cursor: pointer; color: #e74c3c; font-size: 20px; line-height: 1; display: flex; align-items: center; justify-content: center; border-radius: 4px;';
+            'width: 16px; height: 16px; padding: 0; border: none; background: transparent; cursor: pointer; color: #e74c3c; font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; border-radius: 2px;';
           closeBtn.textContent = '\u00d7';
           widgetBottom.appendChild(messageDiv);
           widgetBottom.appendChild(closeBtn);
@@ -3550,7 +3552,7 @@
       }
       
       function formatYasirPoAmount(n) {
-        return Math.round(n).toLocaleString();
+        return priceUtils.formatNumberWithCommas(Math.round(n));
       }
       
       /** Dice manipulators: qty is Yasir listing count (1 listing = 30 rare or 10 mythic). */
@@ -3709,22 +3711,34 @@
         return per * Math.ceil(qty / rule.bundle);
       }
       
-      /** Per-listing gold for dice PO when Yasir table is not in the DOM (daily diceCost + fixed bundle size). */
-      function getYasirCurrentShopBuyUnitGoldHeadless(itemKey) {
-        if (!(itemKey && itemKey.startsWith('diceManipulator'))) {
+      /** Per-listing gold when Yasir table is not in the DOM (dice via daily diceCost, recycle rune via safe listing cap). */
+      function getYasirCurrentShopBuyUnitGoldHeadless(itemKey, recycleRuneListingCapRaw) {
+        if (!itemKey) {
           return null;
         }
         const rule = YASIR_PO_PRICING[itemKey];
         if (!rule || rule.currency !== 'gold') {
           return null;
         }
-        const yasirData = getYasirShopData();
-        const diceCost = yasirData?.diceCost;
-        const minQ = rule.bundle;
-        if (!Number.isFinite(diceCost) || diceCost <= 0 || !Number.isFinite(minQ) || minQ <= 0) {
-          return null;
+        if (itemKey.startsWith('diceManipulator')) {
+          const yasirData = getYasirShopData();
+          const diceCost = yasirData?.diceCost;
+          const minQ = rule.bundle;
+          if (!Number.isFinite(diceCost) || diceCost <= 0 || !Number.isFinite(minQ) || minQ <= 0) {
+            return null;
+          }
+          return diceCost * minQ;
         }
-        return diceCost * minQ;
+        if (itemKey === 'recycleRune') {
+          const bounds = getYasirPoPriceBounds(itemKey);
+          const cap = parseInt(String(recycleRuneListingCapRaw), 10);
+          if (!bounds || !Number.isFinite(cap) || cap < bounds.min || cap > bounds.max) {
+            return null;
+          }
+          // Headless mode uses the user cap as a strict per-listing safety ceiling.
+          return cap;
+        }
+        return null;
       }
       
       function getYasirPoCurrentTotalGoldCostHeadless(rec) {
@@ -3732,7 +3746,7 @@
         if (!rule || rule.currency === 'dust') {
           return null;
         }
-        const per = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
+        const per = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey, rec.listingGold);
         if (per == null) {
           return null;
         }
@@ -3844,14 +3858,11 @@
       
       /**
        * Validates a PO using only globalThis.state + fixed rules (no Yasir DOM).
-       * Supports dice manipulators and Exaltation Chest (dust). Recycle Rune needs the shop open.
+       * Supports dice manipulators, Recycle Rune (via safe listing cap), and Exaltation Chest (dust).
        */
       function validateYasirPurchaseOrderHeadless(rec) {
         if (!rec?.itemKey || !globalThis.state?.player?.getSnapshot) {
           return { ok: false, reason: 'no_state' };
-        }
-        if (rec.itemKey === 'recycleRune') {
-          return { ok: false, reason: 'needs_shop_ui' };
         }
         clearCaches();
         const dailySnap = globalThis.state.daily?.getSnapshot?.()?.context;
@@ -3875,7 +3886,7 @@
           return { ok: true };
         }
         
-        if (!rec.itemKey.startsWith('diceManipulator')) {
+        if (!rec.itemKey.startsWith('diceManipulator') && rec.itemKey !== 'recycleRune') {
           return { ok: false, reason: 'needs_shop_ui' };
         }
         
@@ -3892,7 +3903,7 @@
         if (!Number.isFinite(cap)) {
           return { ok: false, reason: 'no_cap' };
         }
-        const perListing = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
+        const perListing = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey, rec.listingGold);
         if (perListing == null) {
           return { ok: false, reason: 'no_price' };
         }
@@ -3927,7 +3938,7 @@
           const per =
             modalOrNull != null
               ? getYasirCurrentShopBuyUnitGold(modalOrNull, rec.itemKey)
-              : getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
+              : getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey, rec.listingGold);
           if (per != null) {
             goldBatch = Math.round(per);
           }
@@ -3935,7 +3946,7 @@
           const per =
             modalOrNull != null
               ? getYasirCurrentShopBuyUnitGold(modalOrNull, rec.itemKey)
-              : null;
+              : getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey, rec.listingGold);
           if (per != null) {
             goldBatch = Math.round(per);
           }
