@@ -1384,6 +1384,11 @@ function getMapsTabStatisticsHeading() {
   return cyclopediaT('mods.cyclopedia.maps.statisticsSeason').replace('{n}', String(n));
 }
 
+function getMapsTabMapInfoHeading() {
+  const n = cyclopediaState.profileSeason || 1;
+  return `Map Information Season ${String(n)}`;
+}
+
 function filterProfileArrayBySeason(arr, seasonNum) {
   if (!Array.isArray(arr)) return [];
   return arr.filter((item) => {
@@ -2430,14 +2435,29 @@ function getLocalRunData() {
   }
 }
 
+function filterLocalRunsByActiveSeason(runs) {
+  const activeSeason = Number(cyclopediaState.profileSeason || 1);
+  if (!Array.isArray(runs)) return [];
+  return runs.filter((run) => {
+    if (!run || run.season === undefined || run.season === null) return activeSeason === 1;
+    return Number(run.season) === activeSeason;
+  });
+}
+
 function getLocalRunsForMap(mapKey, category = null) {
   try {
     
     if (window.RunTrackerAPI) {
       
       const data = window.RunTrackerAPI.getRuns(mapKey, category);
-      
-      return Promise.resolve(data);
+      if (category) {
+        return Promise.resolve(filterLocalRunsByActiveSeason(Array.isArray(data) ? data : []));
+      }
+      return Promise.resolve({
+        speedrun: filterLocalRunsByActiveSeason(data?.speedrun || []),
+        rank: filterLocalRunsByActiveSeason(data?.rank || []),
+        floor: filterLocalRunsByActiveSeason(data?.floor || [])
+      });
     }
     // Fallback to direct storage access
     
@@ -2451,12 +2471,16 @@ function getLocalRunsForMap(mapKey, category = null) {
       if (category) {
         const categoryData = runData.runs[mapKey][category] || [];
         
-        return categoryData;
+        return filterLocalRunsByActiveSeason(categoryData);
       }
       
       const mapData = runData.runs[mapKey];
       
-      return mapData;
+      return {
+        speedrun: filterLocalRunsByActiveSeason(mapData?.speedrun || []),
+        rank: filterLocalRunsByActiveSeason(mapData?.rank || []),
+        floor: filterLocalRunsByActiveSeason(mapData?.floor || [])
+      };
     });
   } catch (error) {
     console.warn('[Cyclopedia] Error getting local runs for map:', error);
@@ -9407,7 +9431,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       try {
         if (window.RunTrackerAPI && window.RunTrackerAPI.getRuns) {
           const runs = window.RunTrackerAPI.getRuns(mapKey, category);
-          return Array.isArray(runs) ? runs : [];
+          return filterLocalRunsByActiveSeason(Array.isArray(runs) ? runs : []);
         }
         return [];
       } catch (error) {
@@ -11311,12 +11335,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           }
           
           const { best, roomsHighscores } = data;
+          const activeSeason = Number(cyclopediaState.profileSeason || 1);
+          // TRPC leaderboard payload is global (not season-scoped), so only trust it for season 1.
+          const allowGlobalWorldRecords = activeSeason === 1;
           console.log(
             '[Cyclopedia] Leaderboard data for map',
             selectedMap,
             '| Cyclopedia season toggle:',
-            cyclopediaState.profileSeason || 1,
+            activeSeason,
             '| game.getTickHighscores / getRoomsHighscores are global room WRs (no season in API payload).',
+            '| world record rendering enabled:',
+            allowGlobalWorldRecords,
             {
               best: best?.[selectedMap],
               rank: roomsHighscores?.rank?.[selectedMap],
@@ -11336,7 +11365,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const bestPlayer = best?.[selectedMap]?.userName || 'Unknown';
           
           let speedrunHtml = '';
-          if (bestTicks > 0) {
+          if (allowGlobalWorldRecords && bestTicks > 0) {
             speedrunHtml = `
               <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
               <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestTicks} ticks</div>
@@ -11348,6 +11377,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 <div style="font-size: 12px; color: #ccc;">${yourTicks} ticks</div>
               `;
             }
+          } else if (yourTicks > 0) {
+            speedrunHtml = `
+              <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
+              <div style="font-size: 12px; color: #ccc;">${yourTicks} ticks</div>
+            `;
           } else {
             speedrunHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
           }
@@ -11361,7 +11395,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const bestRankPlayer = roomsHighscores?.rank?.[selectedMap]?.userName || 'Unknown';
           
           let rankPointsHtml = '';
-          if (bestRankPoints > 0) {
+          if (allowGlobalWorldRecords && bestRankPoints > 0) {
             rankPointsHtml = `
               <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
               <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestRankPoints.toLocaleString()}${bestRankTicks !== undefined && bestRankTicks !== null ? ` <i style="color: #aaa;">(${bestRankTicks} ticks)</i>` : ' (null)'}</div>
@@ -11373,6 +11407,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ' (null)'}</div>
               `;
             }
+          } else if (yourRankPoints > 0) {
+            rankPointsHtml = `
+              <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
+              <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ''}</div>
+            `;
           } else {
             rankPointsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
           }
@@ -11385,7 +11424,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           let floorsHtml = '';
           // Check if we have world record data (best floor or fallback to ticks)
-          if (bestFloorTicks > 0) {
+          if (allowGlobalWorldRecords && bestFloorTicks > 0) {
             floorsHtml = `
               <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
               <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks} ticks)</i>` : ''}</div>
@@ -11736,6 +11775,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       const isSpeedrun = iconAlt === 'Speed';
       const isRankPoints = iconAlt === 'Grade';
       const isFloors = iconAlt === 'Floors';
+      const activeSeason = Number(cyclopediaState.profileSeason || 1);
+      const allowGlobalWorldRecords = activeSeason === 1;
       
       if (isSpeedrun) {
         const yourTicks = mapData?.ticks || 0;
@@ -11745,7 +11786,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         // Check if personal equals world record
         const isPersonalWR = yourTicks > 0 && bestTicks > 0 && yourTicks === bestTicks;
         
-        if (bestTicks > 0) {
+        if (allowGlobalWorldRecords && bestTicks > 0) {
           const wrDiv = document.createElement('div');
           wrDiv.style.color = '#ff8';
           wrDiv.style.fontWeight = 'bold';
@@ -11794,7 +11835,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         // Check if personal rank equals world record (excluding ticks)
         const isPersonalWR = yourRank > 0 && bestRank > 0 && yourRank === bestRank;
         
-        if (bestRank > 0) {
+        if (allowGlobalWorldRecords && bestRank > 0) {
           const wrDiv = document.createElement('div');
           wrDiv.style.color = '#ff8';
           wrDiv.style.fontWeight = 'bold';
@@ -11846,7 +11887,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           bestFloorTicks = bestFloorData.floorTicks;
         }
         
-        if (bestFloorTicks > 0 || bestFloor > 0) {
+        if (allowGlobalWorldRecords && (bestFloorTicks > 0 || bestFloor > 0)) {
           const wrDiv = document.createElement('div');
           wrDiv.style.color = '#ff8';
           wrDiv.style.fontWeight = 'bold';
@@ -11912,7 +11953,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       regionTitle.style.fontWeight = 'bold';
       regionTitle.style.textAlign = 'center';
       regionMapsDiv.appendChild(regionTitle);
-      
+
       // Maps container (no scroll - parent handles scrolling)
       const mapsContainer = document.createElement('div');
       mapsContainer.style.display = 'flex';
@@ -12087,7 +12128,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       // Get player state
       const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-      const playerRooms = playerState?.rooms || {};
+      const activeSeason = Number(cyclopediaState.profileSeason || 1);
+      const allowGlobalWorldRecords = activeSeason === 1;
+      const playerRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
       const roomsArray = globalThis.state?.utils?.ROOMS || [];
       
       // Calculate statistics
@@ -12187,31 +12230,36 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         maxRaidFloors += 15;
       });
       
-      // Fetch leaderboard data to calculate WR total ticks
-      fetchMapsLeaderboardData().then(leaderboardData => {
-        // Calculate WR total ticks for non-raid maps
-        nonRaidMaps.forEach(map => {
-          const bestTicks = leaderboardData?.best?.[map.id]?.ticks || 0;
-          if (bestTicks > 0) {
-            totalWRTicks += bestTicks;
-          }
+      // Fetch leaderboard data to calculate WR total ticks (season 1 only).
+      if (allowGlobalWorldRecords) {
+        fetchMapsLeaderboardData().then(leaderboardData => {
+          // Calculate WR total ticks for non-raid maps
+          nonRaidMaps.forEach(map => {
+            const bestTicks = leaderboardData?.best?.[map.id]?.ticks || 0;
+            if (bestTicks > 0) {
+              totalWRTicks += bestTicks;
+            }
+          });
+          
+          // Calculate WR total ticks for static raid maps
+          staticRaidMaps.forEach(map => {
+            const bestTicks = leaderboardData?.best?.[map.id]?.ticks || 0;
+            if (bestTicks > 0) {
+              totalWRRaidTicks += bestTicks;
+            }
+          });
+          
+          // Update Speedrun display with calculated values
+          updateSpeedrunDisplay();
+        }).catch(error => {
+          console.error('[Cyclopedia] Error fetching leaderboard data for region statistics:', error);
+          // Still show stats without WR data
+          updateSpeedrunDisplay();
         });
-        
-        // Calculate WR total ticks for static raid maps
-        staticRaidMaps.forEach(map => {
-          const bestTicks = leaderboardData?.best?.[map.id]?.ticks || 0;
-          if (bestTicks > 0) {
-            totalWRRaidTicks += bestTicks;
-          }
-        });
-        
-        // Update Speedrun display with calculated values
+      } else {
+        // Season-scoped mode: global WR payload is not season-safe, keep denominator unset.
         updateSpeedrunDisplay();
-      }).catch(error => {
-        console.error('[Cyclopedia] Error fetching leaderboard data for region statistics:', error);
-        // Still show stats without WR data
-        updateSpeedrunDisplay();
-      });
+      }
       
       // Function to update speedrun display (called after leaderboard data is fetched)
       function updateSpeedrunDisplay() {
@@ -12232,9 +12280,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Title
       const title = document.createElement('h3');
       const regionName = GAME_DATA.REGION_NAME_MAP[regionId] || regionId;
-      title.textContent = cyclopediaT('mods.cyclopedia.maps.regionStatisticsSeason')
-        .replace('{region}', regionName)
-        .replace('{n}', String(cyclopediaState.profileSeason || 1));
+      // Header already contains season; avoid repeating "Region · Season N" inside the card.
+      title.textContent = regionName;
       title.style.margin = '0 0 12px 0';
       title.style.fontSize = '16px';
       title.style.fontWeight = 'bold';
@@ -12677,7 +12724,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         margin: '0', padding: '0', textAlign: 'center', color: 'rgb(255, 255, 255)',
         width: '100%', boxSizing: 'border-box'
       });
-      col2TitleP.textContent = 'Map Information';
+      col2TitleP.textContent = getMapsTabMapInfoHeading();
       col2Title.appendChild(col2TitleP);
       col2.appendChild(col2Title);
       col2.appendChild(col2Content);
@@ -12703,8 +12750,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
       function syncMapsTabStatisticsHeadings() {
         const label = getMapsTabStatisticsHeading();
-        if (mapsTabStatsOnCol2) col2TitleP.textContent = label;
-        else col3TitleP.textContent = label;
+        const mapLabel = getMapsTabMapInfoHeading();
+        if (mapsTabStatsOnCol2) {
+          col2TitleP.textContent = label;
+          col3TitleP.textContent = mapLabel;
+        } else {
+          col3TitleP.textContent = label;
+          col2TitleP.textContent = mapLabel;
+        }
         updateRightCol();
       }
 
@@ -12726,7 +12779,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           Object.assign(col3.style, {
             flex: '1 1 0', width: 'auto', minWidth: '0', maxWidth: 'none'
           });
-          col3TitleP.textContent = 'Map Information';
+          col3TitleP.textContent = getMapsTabMapInfoHeading();
         } else {
           mapsTabStatsOnCol2 = false;
           // Map selected: Map Information (small) on left (col2), Statistics (large) on right (col3)
@@ -12734,7 +12787,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           Object.assign(col2.style, {
             width: '250px', minWidth: '250px', maxWidth: '250px', flex: '0 0 250px'
           });
-          col2TitleP.textContent = 'Map Information';
+          col2TitleP.textContent = getMapsTabMapInfoHeading();
           
           // col3 = Statistics (large, right)
           Object.assign(col3.style, {

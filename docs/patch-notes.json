@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.6.6",
+      "changes": [
+        { "type": "changed", "mod": "Cyclopedia", "text": "Further season preparations." },
+        { "type": "changed", "mod": "RunTracker", "text": "Further season preparations." },
+        { "type": "fixed", "mod": "Better Yasir", "text": "Commas fix." }
+      ]
+    },
+    {
       "version": "3.6.5",
       "changes": [
         { "type": "changed", "mod": "Cyclopedia", "text": "Preparing for seasons." },

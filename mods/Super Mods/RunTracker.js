@@ -26,7 +26,9 @@ if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
 // 1. Configuration
 // =======================
 const RUN_STORAGE_KEY = 'ba_local_runs';
-const MAX_RUNS_PER_MAP = 5; // Keep top 5 runs per map/category
+const MAX_RUNS_PER_MAP = 5; // Keep top 5 runs per category
+const PROFILE_PAGE_DATA_TIMEOUT = 8000;
+const PROFILE_PAGE_DATA_URL = 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData';
 
 // Debounce times
 const RUN_DEBOUNCE_TIME = 2000; // 2 seconds
@@ -73,6 +75,9 @@ let gameTimerUnsubscribe = null;
 let originalFetch = null;
 let originalConsoleLog = null;
 let retryInterval = null;
+let latestKnownSeason = 1;
+let seasonLastFetchedAt = 0;
+let seasonFetchPromise = null;
 
 // Cleanup function (defined early so it can be called from disable method)
 async function performCleanup() {
@@ -229,6 +234,70 @@ function resolveMapName(mapId) {
     console.warn('[RunTracker] Error resolving map name:', error);
     return mapId;
   }
+}
+
+function unwrapProfilePageJson(profileData) {
+  if (!profileData) return null;
+  return profileData.json !== undefined ? profileData.json : profileData;
+}
+
+function getLatestProfileSeason(profileData, fallbackSeason = 1) {
+  const pd = unwrapProfilePageJson(profileData);
+  const list = Array.isArray(pd?.seasons) ? pd.seasons : [];
+  let latest = Number(fallbackSeason) || 1;
+  list.forEach((entry) => {
+    const sn = Number(entry?.season);
+    if (Number.isFinite(sn) && sn > latest) latest = sn;
+  });
+  return latest;
+}
+
+function getPlayerNameForProfileSeasonFetch() {
+  try {
+    const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+    return playerContext?.playerName || playerContext?.name || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function fetchLatestProfileSeason() {
+  if (seasonFetchPromise) return seasonFetchPromise;
+  seasonFetchPromise = (async () => {
+    const playerName = getPlayerNameForProfileSeasonFetch();
+    if (!playerName) return latestKnownSeason || 1;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), PROFILE_PAGE_DATA_TIMEOUT);
+      const url = `${PROFILE_PAGE_DATA_URL}?batch=1&input=${encodeURIComponent(JSON.stringify({ '0': { json: playerName } }))}`;
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const profileData = Array.isArray(payload) && payload[0]?.result?.data?.json
+        ? payload[0].result.data.json
+        : payload;
+      const season = getLatestProfileSeason(profileData, latestKnownSeason || 1);
+      if (Number.isFinite(Number(season))) {
+        latestKnownSeason = Number(season);
+        seasonLastFetchedAt = Date.now();
+      }
+    } catch (error) {
+      // Keep run parsing synchronous and resilient; fallback season remains in cache.
+    } finally {
+      seasonFetchPromise = null;
+    }
+    return latestKnownSeason || 1;
+  })();
+  return seasonFetchPromise;
+}
+
+function getCurrentSeasonForRunData() {
+  const now = Date.now();
+  if (!seasonLastFetchedAt || now - seasonLastFetchedAt > 5 * 60 * 1000) {
+    fetchLatestProfileSeason();
+  }
+  return latestKnownSeason || 1;
 }
 
 // Get monster name from database ID by looking up in player's monster inventory
@@ -401,6 +470,7 @@ async function initializeStorage() {
     
     // Migrate existing runs to add floor: 0 fallback if missing
     let migratedCount = 0;
+    let seasonMigratedCount = 0;
     for (const mapKey in runStorage.runs) {
       const mapData = runStorage.runs[mapKey];
       if (mapData) {
@@ -411,6 +481,10 @@ async function initializeStorage() {
               run.floor = 0;
               migratedCount++;
             }
+            if (run.season === undefined || run.season === null) {
+              run.season = 1;
+              seasonMigratedCount++;
+            }
           });
         }
         // Check rank category
@@ -419,6 +493,10 @@ async function initializeStorage() {
             if (run.floor === undefined || run.floor === null) {
               run.floor = 0;
               migratedCount++;
+            }
+            if (run.season === undefined || run.season === null) {
+              run.season = 1;
+              seasonMigratedCount++;
             }
           });
         }
@@ -429,12 +507,19 @@ async function initializeStorage() {
               run.floor = 0;
               migratedCount++;
             }
+            if (run.season === undefined || run.season === null) {
+              run.season = 1;
+              seasonMigratedCount++;
+            }
           });
         }
       }
     }
     if (migratedCount > 0) {
       console.log(`[RunTracker] Migrated ${migratedCount} runs to add floor: 0 fallback`);
+    }
+    if (seasonMigratedCount > 0) {
+      console.log(`[RunTracker] Migrated ${seasonMigratedCount} runs to add season: 1 fallback`);
     }
     
     // Save the properly structured storage
@@ -657,7 +742,8 @@ function parseServerResults(serverResults) {
       timestamp: Date.now(),
       date: new Date().toISOString().split('T')[0],
       seed: serverResults.seed,
-      isLocal: true
+      isLocal: true,
+      season: getCurrentSeasonForRunData()
     };
     
     // Extract map information from rewardScreen.roomId
@@ -1104,18 +1190,20 @@ async function addRun(runData) {
 // Check and update speedrun category
 async function checkAndUpdateSpeedruns(runData) {
   const speedrunRuns = runStorage.runs[runData.mapKey].speedrun;
+  const runSeason = Number(runData.season || 1);
+  const seasonRuns = speedrunRuns.filter(run => Number(run?.season || 1) === runSeason);
   
   // Check if time is faster or equal to existing runs
-  const qualifyingRuns = speedrunRuns.filter(run => run.time >= runData.time);
+  const qualifyingRuns = seasonRuns.filter(run => run.time >= runData.time);
   
-  if (qualifyingRuns.length === 0 && speedrunRuns.length >= MAX_RUNS_PER_MAP) {
+  if (qualifyingRuns.length === 0 && seasonRuns.length >= MAX_RUNS_PER_MAP) {
     // No qualifying runs and already at max capacity
-    console.log(`[RunTracker] Skipping speedrun - time ${runData.time} not fast enough for ${runData.mapName}`);
+    console.log(`[RunTracker] Skipping speedrun - time ${runData.time} not fast enough for ${runData.mapName} (season ${runSeason})`);
     return false;
   }
   
   // Check for same setup (more robust comparison)
-  const sameSetupRun = speedrunRuns.find(run => {
+  const sameSetupRun = seasonRuns.find(run => {
     if (!run.setup || !runData.setup) return false;
     
     // Compare pieces array
@@ -1145,10 +1233,13 @@ async function checkAndUpdateSpeedruns(runData) {
     // Sort by time (fastest first)
     speedrunRuns.sort((a, b) => (a.time || Infinity) - (b.time || Infinity));
     
-    // Keep only top 5
-    if (speedrunRuns.length > MAX_RUNS_PER_MAP) {
-      speedrunRuns.splice(MAX_RUNS_PER_MAP);
-    }
+    // Keep only top 5 for this season; keep other seasons untouched
+    const sortedSeasonRuns = speedrunRuns
+      .filter(run => Number(run?.season || 1) === runSeason)
+      .sort((a, b) => (a.time || Infinity) - (b.time || Infinity));
+    const keptSeasonRuns = sortedSeasonRuns.slice(0, MAX_RUNS_PER_MAP);
+    const otherSeasonRuns = speedrunRuns.filter(run => Number(run?.season || 1) !== runSeason);
+    runStorage.runs[runData.mapKey].speedrun = [...otherSeasonRuns, ...keptSeasonRuns];
     
     console.log(`[RunTracker] Added new speedrun for ${runData.mapName} with unique setup: ${runData.time}`);
   }
@@ -1165,21 +1256,23 @@ async function checkAndUpdateRankRuns(runData) {
   }
   
   const rankRuns = runStorage.runs[runData.mapKey].rank;
+  const runSeason = Number(runData.season || 1);
+  const seasonRuns = rankRuns.filter(run => Number(run?.season || 1) === runSeason);
   
   // Check if it has higher rank points OR same rank points with better time
   // For rank runs, we prioritize rank points over time
-  const qualifyingRuns = rankRuns.filter(run => 
+  const qualifyingRuns = seasonRuns.filter(run => 
     (run.points < runData.points) || (run.points === runData.points && run.time >= runData.time)
   );
   
-  if (qualifyingRuns.length === 0 && rankRuns.length >= MAX_RUNS_PER_MAP) {
+  if (qualifyingRuns.length === 0 && seasonRuns.length >= MAX_RUNS_PER_MAP) {
     // No qualifying runs and already at max capacity
-    console.log(`[RunTracker] Skipping rank run - points ${runData.points} and time ${runData.time} not good enough for ${runData.mapName}`);
+    console.log(`[RunTracker] Skipping rank run - points ${runData.points} and time ${runData.time} not good enough for ${runData.mapName} (season ${runSeason})`);
     return false;
   }
   
   // Check for same setup (more robust comparison)
-  const sameSetupRun = rankRuns.find(run => {
+  const sameSetupRun = seasonRuns.find(run => {
     if (!run.setup || !runData.setup) return false;
     
     // Compare pieces array
@@ -1214,10 +1307,18 @@ async function checkAndUpdateRankRuns(runData) {
       return (a.time || Infinity) - (b.time || Infinity);
     });
     
-    // Keep only top 5
-    if (rankRuns.length > MAX_RUNS_PER_MAP) {
-      rankRuns.splice(MAX_RUNS_PER_MAP);
-    }
+    // Keep only top 5 for this season; keep other seasons untouched
+    const sortedSeasonRuns = rankRuns
+      .filter(run => Number(run?.season || 1) === runSeason)
+      .sort((a, b) => {
+        if (a.points !== b.points) {
+          return (b.points || 0) - (a.points || 0);
+        }
+        return (a.time || Infinity) - (b.time || Infinity);
+      });
+    const keptSeasonRuns = sortedSeasonRuns.slice(0, MAX_RUNS_PER_MAP);
+    const otherSeasonRuns = rankRuns.filter(run => Number(run?.season || 1) !== runSeason);
+    runStorage.runs[runData.mapKey].rank = [...otherSeasonRuns, ...keptSeasonRuns];
     
     console.log(`[RunTracker] Added new rank run for ${runData.mapName} with unique setup: ${runData.points} points, ${runData.time} time`);
   }
@@ -1228,27 +1329,37 @@ async function checkAndUpdateRankRuns(runData) {
 // Check and update floor category
 async function checkAndUpdateFloorRuns(runData) {
   const floorRuns = runStorage.runs[runData.mapKey].floor;
+  const runSeason = Number(runData.season || 1);
+  const seasonRuns = floorRuns.filter(run => Number(run?.season || 1) === runSeason);
   
   // Check if floor is higher or equal to existing runs
   // For same floor, prefer faster floorTicks (if available)
-  const qualifyingRuns = floorRuns.filter(run => 
+  const qualifyingRuns = seasonRuns.filter(run => 
     (run.floor < runData.floor) || 
     (run.floor === runData.floor && run.floorTicks && runData.floorTicks && run.floorTicks >= runData.floorTicks) ||
     (run.floor === runData.floor && !run.floorTicks && runData.floorTicks)
   );
   
-  if (qualifyingRuns.length === 0 && floorRuns.length >= MAX_RUNS_PER_MAP) {
+  if (qualifyingRuns.length === 0 && seasonRuns.length >= MAX_RUNS_PER_MAP) {
     // Check if this run is better than the worst run
-    const worstRun = floorRuns[floorRuns.length - 1];
+    const sortedSeasonRuns = [...seasonRuns].sort((a, b) => {
+      if (a.floor !== b.floor) return (b.floor || 0) - (a.floor || 0);
+      if (a.floorTicks && b.floorTicks) return (a.floorTicks || Infinity) - (b.floorTicks || Infinity);
+      if (a.floorTicks && !b.floorTicks) return -1;
+      if (!a.floorTicks && b.floorTicks) return 1;
+      if (a.time && b.time) return (a.time || Infinity) - (b.time || Infinity);
+      return 0;
+    });
+    const worstRun = sortedSeasonRuns[sortedSeasonRuns.length - 1];
     if (runData.floor < worstRun.floor || 
         (runData.floor === worstRun.floor && runData.floorTicks && worstRun.floorTicks && runData.floorTicks >= worstRun.floorTicks)) {
-      console.log(`[RunTracker] Skipping floor run - floor ${runData.floor} not high enough for ${runData.mapName}`);
+      console.log(`[RunTracker] Skipping floor run - floor ${runData.floor} not high enough for ${runData.mapName} (season ${runSeason})`);
       return false;
     }
   }
   
   // Check for same setup (more robust comparison)
-  const sameSetupRun = floorRuns.find(run => {
+  const sameSetupRun = seasonRuns.find(run => {
     if (!run.setup || !runData.setup) return false;
     
     // Compare pieces array
@@ -1314,10 +1425,26 @@ async function checkAndUpdateFloorRuns(runData) {
       return 0;
     });
     
-    // Keep only top 5
-    if (floorRuns.length > MAX_RUNS_PER_MAP) {
-      floorRuns.splice(MAX_RUNS_PER_MAP);
-    }
+    // Keep only top 5 for this season; keep other seasons untouched
+    const sortedSeasonRuns = floorRuns
+      .filter(run => Number(run?.season || 1) === runSeason)
+      .sort((a, b) => {
+        if (a.floor !== b.floor) {
+          return (b.floor || 0) - (a.floor || 0);
+        }
+        if (a.floorTicks && b.floorTicks) {
+          return (a.floorTicks || Infinity) - (b.floorTicks || Infinity);
+        }
+        if (a.floorTicks && !b.floorTicks) return -1;
+        if (!a.floorTicks && b.floorTicks) return 1;
+        if (a.time && b.time) {
+          return (a.time || Infinity) - (b.time || Infinity);
+        }
+        return 0;
+      });
+    const keptSeasonRuns = sortedSeasonRuns.slice(0, MAX_RUNS_PER_MAP);
+    const otherSeasonRuns = floorRuns.filter(run => Number(run?.season || 1) !== runSeason);
+    runStorage.runs[runData.mapKey].floor = [...otherSeasonRuns, ...keptSeasonRuns];
     
     console.log(`[RunTracker] Added new floor run for ${runData.mapName} with unique setup: floor ${runData.floor}${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}`);
   }
@@ -1368,10 +1495,7 @@ async function addReplayData(replayData) {
     // Sort replays by timestamp (newest first)
     runStorage.replays[replayData.mapKey].sort((a, b) => b.timestamp - a.timestamp);
     
-    // Keep only recent replays (last 10 per map)
-    if (runStorage.replays[replayData.mapKey].length > 10) {
-      runStorage.replays[replayData.mapKey].splice(10);
-    }
+    // Replays are intentionally unlimited per map (bounded by localStorage capacity).
     
     // Update metadata
     runStorage.lastUpdated = Date.now();
@@ -1622,6 +1746,7 @@ function setupNetworkListener() {
 async function initialize() {
   try {
     await initializeStorage();
+    fetchLatestProfileSeason();
     setupResultsListener();
     setupNetworkListener();
     

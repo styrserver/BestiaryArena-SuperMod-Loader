@@ -25,6 +25,7 @@
       
       const BETTER_YASIR_PO_ORDERS_STORAGE_KEY = 'better-yasir-po-orders-v1';
       const BETTER_YASIR_PO_HISTORY_STORAGE_KEY = 'better-yasir-po-purchase-history-v1';
+      const BETTER_YASIR_PO_HISTORY_COMMA_MIGRATION_KEY = 'better-yasir-po-history-comma-migration-v1';
       const BETTER_YASIR_PO_HISTORY_MAX = 200;
       const BETTER_YASIR_PO_PLACEMENT_GRACE_MS = 30000;
       
@@ -1356,6 +1357,43 @@
           return 0;
         }
       }
+
+      function runYasirPoHistoryCommaMigrationOnce() {
+        try {
+          if (localStorage.getItem(BETTER_YASIR_PO_HISTORY_COMMA_MIGRATION_KEY) === 'done') {
+            return;
+          }
+          const raw = localStorage.getItem(BETTER_YASIR_PO_HISTORY_STORAGE_KEY);
+          if (!raw) {
+            localStorage.setItem(BETTER_YASIR_PO_HISTORY_COMMA_MIGRATION_KEY, 'done');
+            return;
+          }
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) {
+            localStorage.setItem(BETTER_YASIR_PO_HISTORY_COMMA_MIGRATION_KEY, 'done');
+            return;
+          }
+          let changed = false;
+          const migrated = parsed.map((entry) => {
+            if (!entry || typeof entry !== 'object') {
+              return entry;
+            }
+            if (typeof entry.line !== 'string') {
+              return entry;
+            }
+            const nextLine = entry.line.replace(/(\d)[\u00A0\u202F](?=\d{3}\b)/g, '$1,');
+            if (nextLine !== entry.line) {
+              changed = true;
+              return { ...entry, line: nextLine };
+            }
+            return entry;
+          });
+          if (changed) {
+            localStorage.setItem(BETTER_YASIR_PO_HISTORY_STORAGE_KEY, JSON.stringify(migrated));
+          }
+          localStorage.setItem(BETTER_YASIR_PO_HISTORY_COMMA_MIGRATION_KEY, 'done');
+        } catch (_) {}
+      }
       
       function refreshBetterYasirOrdersPanelTabCounts() {
         const panel = document.getElementById('better-yasir-settings-panel');
@@ -1376,14 +1414,14 @@
       function formatHistoryGoldAmountLabel(amount) {
         return t('mods.betterYasir.historyCostGold').replace(
           /\{amount\}/g,
-          Math.round(amount).toLocaleString()
+          priceUtils.formatNumberWithCommas(Math.round(amount))
         );
       }
       
       function formatHistoryDustAmountLabel(amount) {
         return t('mods.betterYasir.historyCostDust').replace(
           /\{amount\}/g,
-          Math.round(amount).toLocaleString()
+          priceUtils.formatNumberWithCommas(Math.round(amount))
         );
       }
       
@@ -5302,7 +5340,8 @@
               timeStyle: 'short',
               hour12: false
             });
-            row.textContent = `${time} — ${e.line}`;
+            const normalizedLine = String(e.line || '').replace(/(\d)[\u00A0\u202F](?=\d{3}\b)/g, '$1,');
+            row.textContent = `${time} — ${normalizedLine}`;
             container.appendChild(row);
           });
         }
@@ -5917,6 +5956,8 @@
       }
       
       function initializeBetterYasir() {
+        runYasirPoHistoryCommaMigrationOnce();
+
         // Set up observer to watch for DOM changes
         observer = new MutationObserver(debouncedProcessMutations);
         
