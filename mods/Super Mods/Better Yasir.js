@@ -99,6 +99,8 @@
       let confirmationOutsideHandler = null;
       let observer = null;
       let observerTimeout = null;
+      /** Runs sync on intro mutations so we can rebuild before paint (debounced observer is too late). */
+      let yasirIntroSyncObserver = null;
       
       let yasirActiveSettingsPanel = null;
       let yasirSettingsEscListenerKey = null;
@@ -163,6 +165,10 @@
           clearTimeout(observerTimeout);
           observerTimeout = null;
         }
+        if (yasirIntroSyncObserver) {
+          yasirIntroSyncObserver.disconnect();
+          yasirIntroSyncObserver = null;
+        }
       }
       
       // CSS styles for the quantity input and action buttons
@@ -220,6 +226,12 @@
           background-image: url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') !important;
           border: 1px solid #32cd32 !important;
           box-shadow: 0 0 8px rgba(50, 205, 50, 0.6) !important;
+        }
+        
+        /* Hide React's one-frame plain-text intro until our .tooltip-prose is back (no visible flash). */
+        .widget-bottom[data-better-yasir-enhanced] > div.grid.gap-3:not(:has(.tooltip-prose)) {
+          visibility: hidden;
+          min-height: 92px;
         }
         
         .better-yasir-po-section {
@@ -1582,7 +1594,7 @@
     
       function showConfirmationPrompt(quantity, itemKey, actionButton, actionType) {
         try {
-          const tooltip = getCachedElement('.tooltip-prose');
+          const tooltip = ensureYasirTooltipStructure() || getCachedElement('.tooltip-prose');
           if (!tooltip) return;
           const paragraphs = tooltip.querySelectorAll('p');
           if (paragraphs.length < 2) return;
@@ -1665,7 +1677,7 @@
       
       function removeConfirmationPrompt() {
         try {
-          const tooltip = getCachedElement('.tooltip-prose');
+          const tooltip = ensureYasirTooltipStructure() || getCachedElement('.tooltip-prose');
           if (!tooltip || !tooltip.dataset.originalText) return;
           const paragraphs = tooltip.querySelectorAll('p');
           if (paragraphs.length < 2) return;
@@ -1799,7 +1811,7 @@
       // Show a temporary tooltip message (error/info)
       function showTooltipMessage(message, color = '#ff4d4d', duration = CONSTANTS.ERROR_DISPLAY_DURATION) {
         try {
-          const tooltip = document.querySelector('.tooltip-prose');
+          const tooltip = ensureYasirTooltipStructure() || document.querySelector('.tooltip-prose');
           if (!tooltip) return;
           const paragraphs = tooltip.querySelectorAll('p');
           if (paragraphs.length < 2) return;
@@ -2006,6 +2018,9 @@
           
           // Also update any visible resource displays (gold/dust)
           updateResourceDisplays(playerGold, playerDust);
+          
+          // React often re-renders the intro strip ~200ms after buys; rebuild portrait + tooltip if flattened.
+          scheduleEnsureYasirTooltipStructure(modal);
           
         } catch (error) {
           handleError(error, 'Error refreshing UI after action');
@@ -2478,6 +2493,7 @@
               const modal = domUtils.findYasirModal();
               if (modal) {
                 updateVisibleInventoryCounts(modal, currentInventory);
+                scheduleEnsureYasirTooltipStructure(modal);
               }
               
               // Update quantity inputs and buttons
@@ -5603,6 +5619,7 @@
         
         // Process flex containers (for the new div structure) - this handles everything now
         addQuantityInputsToFlexContainers();
+        ensureYasirTooltipStructure(modal);
         
         injectYasirFooterSettingsButton(modal);
         
@@ -5695,10 +5712,92 @@
         }
       }
       
+      /** Yasir shop `.widget-bottom` — never use the first `.widget-bottom` in the document (toasts/quests use it too). */
+      function getYasirShopWidgetBottomHost(preferred = null) {
+        if (preferred?.classList?.contains('widget-bottom') && preferred.querySelector('table')) {
+          return preferred;
+        }
+        const enhanced = document.querySelector('.widget-bottom[data-better-yasir-enhanced]');
+        if (enhanced?.querySelector('table')) return enhanced;
+        const found = domUtils.findYasirModal();
+        if (found?.classList?.contains('widget-bottom') && found.querySelector('table')) {
+          return found;
+        }
+        return null;
+      }
+      
+      /** Coalesce rapid ensure calls (React refresh + mutation + our timeouts) into one paint — reduces post-buy flash. */
+      let ensureYasirIntroRafId = null;
+      function scheduleEnsureYasirTooltipStructure(modal = null) {
+        if (ensureYasirIntroRafId != null) {
+          cancelAnimationFrame(ensureYasirIntroRafId);
+        }
+        ensureYasirIntroRafId = requestAnimationFrame(() => {
+          ensureYasirIntroRafId = null;
+          ensureYasirTooltipStructure(modal);
+        });
+      }
+      
+      function ensureYasirTooltipStructure(modal = null) {
+        try {
+          const host = getYasirShopWidgetBottomHost(modal);
+          if (!host) return null;
+          
+          const introGrid = host.querySelector('div.grid.gap-3');
+          if (!introGrid) return null;
+          if (introGrid.querySelector('table')) return null;
+          const introTooltip = introGrid.querySelector('.tooltip-prose');
+          if (introTooltip) return introTooltip;
+          
+          const activatedText = t('mods.betterYasir.activated');
+          const fullText = (introGrid.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!fullText) return null;
+          
+          let bodyText = fullText;
+          if (fullText.includes(activatedText)) {
+            bodyText = fullText.replace(activatedText, '').trim();
+          }
+          if (!bodyText) {
+            bodyText = "Greetings, mate! Sorry I didn't bring many products this time around.";
+          }
+          
+          const slotWrap = document.createElement('div');
+          slotWrap.className = 'container-slot surface-darker grid h-full place-items-center overflow-hidden px-4 py-2';
+          const yasirImg = document.createElement('img');
+          yasirImg.alt = 'Yasir';
+          yasirImg.className = 'pixelated';
+          yasirImg.width = 68;
+          yasirImg.height = 74;
+          yasirImg.src = '/assets/icons/yasir.png';
+          slotWrap.appendChild(yasirImg);
+          
+          const tooltip = document.createElement('div');
+          tooltip.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular';
+          
+          const titleP = document.createElement('p');
+          titleP.className = 'inline text-monster';
+          titleP.style.color = '#32cd32';
+          titleP.textContent = activatedText;
+          
+          const bodyP = document.createElement('p');
+          bodyP.className = 'inline';
+          bodyP.textContent = bodyText;
+          
+          tooltip.appendChild(titleP);
+          tooltip.appendChild(bodyP);
+          // Single DOM update avoids a blank frame from clearing before appending
+          introGrid.replaceChildren(slotWrap, tooltip);
+          
+          return tooltip;
+        } catch (e) {
+          return null;
+        }
+      }
+      
       // Utility to transform Yasir tooltip title to activation text
       function transformYasirTooltip() {
         try {
-          const tooltip = document.querySelector('.tooltip-prose');
+          const tooltip = ensureYasirTooltipStructure() || document.querySelector('.tooltip-prose');
           if (!tooltip) return;
           const titleElem = tooltip.querySelector('p'); // first <p> is title
           const activatedText = t('mods.betterYasir.activated');
@@ -5903,6 +6002,7 @@
         observerTimeout = setTimeout(() => {
           // Always attempt tooltip transform
           transformYasirTooltip();
+          scheduleEnsureYasirTooltipStructure();
           
           // Only process if we're not currently in a UI refresh cycle
           if (!document.body.dataset.betterYasirRefreshing) {
@@ -5932,6 +6032,31 @@
             }
           }
         }, CONSTANTS.DEBOUNCE_DELAY);
+      }
+      
+      function setupYasirIntroSyncObserver() {
+        if (yasirIntroSyncObserver) return;
+        yasirIntroSyncObserver = new MutationObserver((mutations) => {
+          const enhanced = document.querySelector('.widget-bottom[data-better-yasir-enhanced]');
+          if (!enhanced) return;
+          const intro = enhanced.querySelector('div.grid.gap-3');
+          if (!intro || intro.querySelector('.tooltip-prose')) return;
+          
+          for (let i = 0; i < mutations.length; i++) {
+            const m = mutations[i];
+            if (m.type !== 'childList') continue;
+            const t = m.target;
+            if (
+              t === enhanced ||
+              t === intro ||
+              (t.nodeType === Node.ELEMENT_NODE && intro.contains(t))
+            ) {
+              ensureYasirTooltipStructure(enhanced);
+              return;
+            }
+          }
+        });
+        yasirIntroSyncObserver.observe(document.body, { childList: true, subtree: true });
       }
       
       // Retry mechanism for modal enhancement
@@ -5967,6 +6092,8 @@
           subtree: true
         });
         
+        setupYasirIntroSyncObserver();
+        
         // Run initial tooltip transform
         transformYasirTooltip();
     
@@ -5983,6 +6110,10 @@
       }
       
       function cleanup() {
+        if (ensureYasirIntroRafId != null) {
+          cancelAnimationFrame(ensureYasirIntroRafId);
+          ensureYasirIntroRafId = null;
+        }
         teardownBetterYasirUi();
         yasirPoOrderPlacementGraceUntil = 0;
         

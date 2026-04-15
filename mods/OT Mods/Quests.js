@@ -1781,6 +1781,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                             }
                           );
                           setupMornenionTileRestrictions();
+                          showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
                           console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
                         } else {
                           console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle after waiting');
@@ -1802,6 +1803,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                         }
                       );
                       setupMornenionTileRestrictions();
+                      showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
                       console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
                     } else {
                       console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle - CustomBattles not available');
@@ -4986,6 +4988,9 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
         const messageDiv = document.createElement('div');
         messageDiv.className = 'text-left';
+        if (typeof message === 'string' && message.indexOf('\n') !== -1) {
+          messageDiv.style.whiteSpace = 'pre-line';
+        }
         messageDiv.textContent = message;
         widgetBottom.appendChild(messageDiv);
 
@@ -5059,6 +5064,79 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   // Generic toast notification function
   function showToast({ productName, message, duration = TOAST_DURATION_DEFAULT, logPrefix = '[Quests Mod]' }) {
     NotificationService.show({ productName, message, duration, logPrefix });
+  }
+
+  let customBattleStatusToastHandle = null;
+
+  function getCustomBattleStatusToastContainer() {
+    if (typeof document === 'undefined') return null;
+    let el = document.getElementById('quest-custom-battle-toast-container');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'quest-custom-battle-toast-container';
+      el.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  function removeCustomBattleStatusToast() {
+    if (customBattleStatusToastHandle && typeof customBattleStatusToastHandle.remove === 'function') {
+      customBattleStatusToastHandle.remove();
+    }
+    customBattleStatusToastHandle = null;
+  }
+
+  function showCustomBattleStatusToast({ battleName, allyLimit, logPrefix = '[Quests Mod][Battle]' }) {
+    if (!battleName) return;
+    const container = getCustomBattleStatusToastContainer();
+    if (!container) return;
+
+    const creaturesAllowed = typeof allyLimit === 'number' ? allyLimit : 'N/A';
+    const text = `Battling ${battleName}\nCreatures allowed: ${creaturesAllowed}`;
+
+    if (customBattleStatusToastHandle && typeof customBattleStatusToastHandle.updateMessage === 'function') {
+      customBattleStatusToastHandle.updateMessage(text);
+      return;
+    }
+
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'quest-custom-battle-toast-item';
+    flexContainer.style.cssText = 'left: 0px; right: 0px; display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(0px); bottom: 0px; justify-content: flex-end;';
+
+    const toast = document.createElement('div');
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    toast.setAttribute('role', 'presentation');
+
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'text-left';
+    messageDiv.style.whiteSpace = 'pre-line';
+    messageDiv.textContent = text;
+    widgetBottom.appendChild(messageDiv);
+
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    container.appendChild(flexContainer);
+
+    customBattleStatusToastHandle = {
+      updateMessage(newText) {
+        messageDiv.textContent = newText || '';
+      },
+      remove() {
+        if (flexContainer && flexContainer.parentNode) {
+          flexContainer.parentNode.removeChild(flexContainer);
+        }
+      }
+    };
+
+    console.log(`${logPrefix} Battle status toast shown: ${text}`);
   }
 
   function showQuestItemNotification(productName, amount) {
@@ -10925,6 +11003,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           if (currentRoomName && !currentRoomName.toLowerCase().includes('ab\'dendriel') && currentlyInAbDendriel) {
             console.log('[Quests Mod][Overlay Hider] Leaving Ab\'Dendriel area - resetting state');
             currentlyInAbDendriel = false;
+            removeCustomBattleStatusToast();
             stopAbDendrielMutationObserver();
             stopGameTimerSubscription();
             overlayHidingDone = false;
@@ -10935,6 +11014,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           if (currentRoomName && currentRoomName !== BANSHEE_LAST_ROOM_NAME && bansheeVillainSetupDone) {
             console.log('[Quests Mod][Overlay Hider] Leaving Banshee\'s Last Room - resetting villain setup flag');
             bansheeVillainSetupDone = false;
+            removeCustomBattleStatusToast();
           }
 
           // Spider Lair: leaving room — full cleanup like Mornenion leaving Ab'Dendriel (restore vanilla Spider Lair).
@@ -10990,6 +11070,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                     (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
                   );
                   setupSpiderLairTileRestrictions();
+                  showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
                 } else {
                   spiderLairReinitTriggered = false;
                   console.warn('[Quests Mod][Spider Lair] Re-init returned no battle instance');
@@ -11006,6 +11087,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                 (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
               );
               setupSpiderLairTileRestrictions();
+              showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
             }
           }
 
@@ -11054,6 +11136,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                       }
                     );
                     setupMornenionTileRestrictions();
+                    showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
                     console.log('[Quests Mod][Overlay Hider] Mornenion battle initialized successfully');
                   } else {
                     console.error('[Quests Mod][Overlay Hider] Failed to initialize Mornenion battle after waiting');
@@ -11075,6 +11158,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                   }
                 );
                 setupMornenionTileRestrictions();
+                showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
                 console.log('[Quests Mod][Overlay Hider] Mornenion battle initialized successfully');
               } else {
                 console.error('[Quests Mod][Overlay Hider] Failed to initialize Mornenion battle - CustomBattles not available');
@@ -11692,6 +11776,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   function cleanupMornenionQuest() {
     try {
       console.log('[Quests Mod][Mornenion] Cleaning up Mornenion quest state');
+      removeCustomBattleStatusToast();
       
       // Reset Mornenion flags
       playerUsedHoleToMornenion = false;
@@ -11784,6 +11869,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   // Clean up Banshee's Last Room quest state and battle; call after victory/defeat modal close (same style as Mornenion)
   function cleanupBansheeLastRoomQuest() {
     try {
+      removeCustomBattleStatusToast();
       playerUsedPortalToBansheeLastRoom = false;
       bansheeVillainSetupDone = false;
       if (bansheeLastRoomBattle) {
@@ -11884,6 +11970,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   // Clean up Spider Lair quest state and battle; call after victory/defeat modal close
   function cleanupSpiderLairQuest() {
     try {
+      removeCustomBattleStatusToast();
       playerUsedTile77ToSpiderLair = false;
       spiderLairVillainSetupDone = false;
       spiderLairReinitTriggered = false;
@@ -12988,6 +13075,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Banshee Last Room]' })
           );
           setupBansheeTileRestrictions();
+          showCustomBattleStatusToast({ battleName: 'Queen of the Banshee', allyLimit: 5, logPrefix: '[Quests Mod][Banshee Last Room]' });
           console.log('[Quests Mod][Banshee Last Room] Battle initialized successfully (async); villains will be added when overlay hider sees room', roomId);
         } else {
           console.error('[Quests Mod][Banshee Last Room] Failed to initialize battle after waiting');
@@ -13000,6 +13088,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Banshee Last Room]' })
       );
       setupBansheeTileRestrictions();
+      showCustomBattleStatusToast({ battleName: 'Queen of the Banshee', allyLimit: 5, logPrefix: '[Quests Mod][Banshee Last Room]' });
       console.log('[Quests Mod][Banshee Last Room] Battle initialized successfully (sync); villains will be added when overlay hider sees room', roomId);
     } else {
       console.error('[Quests Mod][Banshee Last Room] CustomBattles not available');
@@ -13100,6 +13189,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
           );
           setupSpiderLairTileRestrictions();
+          showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
           console.log('[Quests Mod][Spider Lair] Battle initialized (async); villains added when overlay hider sees room', roomId);
         } else {
           console.error('[Quests Mod][Spider Lair] Failed to initialize battle after waiting');
@@ -13112,6 +13202,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
       );
       setupSpiderLairTileRestrictions();
+      showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
       console.log('[Quests Mod][Spider Lair] Battle initialized (sync); villains added when overlay hider sees room', roomId);
     } else {
       console.error('[Quests Mod][Spider Lair] CustomBattles not available');

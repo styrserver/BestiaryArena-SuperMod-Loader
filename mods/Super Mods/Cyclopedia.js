@@ -2384,6 +2384,11 @@ function truncatePlayerName(name) {
   return name.length > 8 ? name.substring(0, 8) + '...' : name;
 }
 
+function truncateListPlayerName(name) {
+  if (!name || typeof name !== 'string') return name || '';
+  return name.length > 6 ? name.substring(0, 6) + '...' : name;
+}
+
 // RunTracker integration functions
 // Helper function to resolve map ID to map name (same as RunTracker)
 function resolveMapName(mapId) {
@@ -2497,6 +2502,10 @@ function formatLocalRunTime(ticks) {
 // Helper function to normalize user's floor data with fallback
 // If both floor and floorTicks are missing, defaults to floor 0 and uses room's ticks
 function normalizeUserFloorData(room) {
+  if (!room) {
+    return { floor: null, floorTicks: null };
+  }
+
   let floor = room?.floor;
   let floorTicks = room?.floorTicks;
   
@@ -7354,7 +7363,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
           `;
           searchedSpeedrun.innerHTML = `
-            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</span>
+            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncateListPlayerName(playerName)}:</span>
             <span>${searchedTicks !== null && searchedTicks >= 0 ? searchedTicks + ' ticks' : '-'}</span>
           `;
 
@@ -7411,7 +7420,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             font-weight: ${isRankTop ? 'bold' : 'normal'};
           `;
           searchedRankData.innerHTML = `
-            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</span>
+            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncateListPlayerName(playerName)}:</span>
             <span style="white-space: nowrap;"><img src="https://bestiaryarena.com/assets/icons/star-tier.png" alt="Rank" style="width: 9px; height: 10px; vertical-align: middle; margin-right: 2px; display: inline-block;">${searchedRank !== null && searchedRank >= 0 ? searchedRank + (searchedRankTicks !== undefined && searchedRankTicks !== null ? ` <i style="color: #aaa;">(${searchedRankTicks})</i>` : ' (null)') : '-'}</span>
           `;
 
@@ -7467,7 +7476,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             font-weight: ${isFloorTop ? 'bold' : 'normal'};
           `;
           searchedFloorData.innerHTML = `
-            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</span>
+            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncateListPlayerName(playerName)}:</span>
             <span style="white-space: nowrap;">${searchedFloor !== null && searchedFloor >= 0 ? `<img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floor" style="width: 14px; height: 7px; vertical-align: middle; margin-right: 2px; display: inline-block;">${searchedFloor}${searchedFloorTicks !== undefined && searchedFloorTicks !== null ? ` <i style="color: #aaa;">(${searchedFloorTicks})</i>` : ''}` : '-'}</span>
           `;
 
@@ -11575,7 +11584,28 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               font-size: 14px;
               color: ${COLOR_CONSTANTS.TEXT};
               text-align: center;
+              cursor: pointer;
+              text-decoration: underline;
+              text-decoration-style: dotted;
             `;
+            nameElement.title = `Open ${creatureName} in Bestiary`;
+            nameElement.addEventListener('click', () => {
+              if (!creatureName || creatureName === 'Unknown') return;
+              const normalizedCreatureName = creatureName.toLowerCase();
+              const canonicalCreatureName =
+                GAME_DATA.ALL_CREATURES.find(c => c.toLowerCase() === normalizedCreatureName) ||
+                GAME_DATA.UNOBTAINABLE_CREATURES.find(c => c.toLowerCase() === normalizedCreatureName) ||
+                creatureName;
+              if (typeof setActiveTab === 'function') {
+                setActiveTab(1);
+              }
+              const clickBestiaryTimeout = setTimeout(() => {
+                if (typeof _cyclopediaClickListItem === 'function' && typeof tabPages !== 'undefined' && tabPages[1]) {
+                  _cyclopediaClickListItem(tabPages[1], canonicalCreatureName);
+                }
+              }, 0);
+              TimerManager.addTimeout(clickBestiaryTimeout, 'mapsCreatureSelect');
+            });
             
             const levelElement = document.createElement('div');
             levelElement.textContent = `Level ${actor.level || 1}`;
@@ -11603,8 +11633,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             // Clear any previous content
             equipmentContainer.innerHTML = '';
             equipmentContainer.textContent = '';
+            if (equipmentContainer._cyclopediaEquipClickHandler) {
+              equipmentContainer.removeEventListener('click', equipmentContainer._cyclopediaEquipClickHandler);
+              delete equipmentContainer._cyclopediaEquipClickHandler;
+            }
+            equipmentContainer.style.cursor = 'default';
+            equipmentContainer.title = '';
             
             if (actor.equip && actor.equip.gameId) {
+              let equipmentName = null;
               // Create equipment icon using the game's UI components
               try {
                 if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
@@ -11613,6 +11650,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   try {
                     if (actor.equip.gameId && globalThis.state?.utils?.getEquipment) {
                       eqData = globalThis.state.utils.getEquipment(actor.equip.gameId);
+                      equipmentName = eqData?.metadata?.name || null;
                     }
                   } catch (e) {
                     console.warn('[Cyclopedia] Error getting equipment data:', e);
@@ -11707,6 +11745,24 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   color: #888;
                   font-weight: bold;
                 `;
+              }
+
+              if (equipmentName) {
+                equipmentContainer.style.cursor = 'pointer';
+                equipmentContainer.title = `Open ${equipmentName} in Equipment`;
+                const handleEquipmentClick = () => {
+                  if (typeof setActiveTab === 'function') {
+                    setActiveTab(2);
+                  }
+                  const clickEquipmentTimeout = setTimeout(() => {
+                    if (typeof _cyclopediaClickListItem === 'function' && typeof tabPages !== 'undefined' && tabPages[2]) {
+                      _cyclopediaClickListItem(tabPages[2], equipmentName);
+                    }
+                  }, 0);
+                  TimerManager.addTimeout(clickEquipmentTimeout, 'mapsEquipSelect');
+                };
+                equipmentContainer.addEventListener('click', handleEquipmentClick);
+                equipmentContainer._cyclopediaEquipClickHandler = handleEquipmentClick;
               }
             } else {
               equipmentContainer.textContent = '—';

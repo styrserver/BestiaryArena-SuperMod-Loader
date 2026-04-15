@@ -119,7 +119,7 @@ const TIMING = {
   STAMINA_REFILL_DELAY: 500,     // Delay for stamina refill operations
   MODAL_CLOSE_DELAY: 500,        // Delay after closing modals
   REWARDS_COLLECT_DELAY: 500,    // Delay for rewards collection
-  CUBE_OPEN_DELAY: 500,          // Delay between Surprise Cube API calls
+  CUBE_OPEN_DELAY: 1000,          // Min delay between Surprise Cube opens (≤1 per second)
   CUBE_INVENTORY_SETTLE_MS: 50, // Wait after apply before snapshot (reward diff)
   DAYCARE_LEVELUP_DELAY: 1000,   // Delay after daycare level up
   DAYCARE_EJECTION_DELAY: 1000,  // Delay after daycare ejection
@@ -522,10 +522,6 @@ const showAutomatorToastMessage = (message, durationMs = TIMING.CUBE_REWARD_TOAS
   }
 };
 
-const showCubeRewardToast = (message) => {
-  showAutomatorToastMessage(message, TIMING.CUBE_REWARD_TOAST_MS);
-};
-
 // Automation Tasks
 
 // Stamina refill tracking (simplified)
@@ -870,18 +866,6 @@ const extractAPIResponseData = (result) => {
   return null;
 };
 
-/** Shallow merge of extra fields from tRPC batch (e.g. meta) for reward hints. */
-const extractAPIResponseExtras = (result) => {
-  try {
-    const data = result?.[0]?.result?.data;
-    if (!data || typeof data !== 'object') return null;
-    const { json, ...rest } = data;
-    return Object.keys(rest).length ? rest : null;
-  } catch (_) {
-    return null;
-  }
-};
-
 // Helper to update inventory state from inventoryDiff
 const updateInventoryFromDiff = (inventoryDiff) => {
   if (!inventoryDiff || !isGameStateAPIAvailable()) {
@@ -1036,113 +1020,154 @@ const snapshotInventoryCounts = () => {
   return snap;
 };
 
+/** Total count of surpriseCube1..5 (game allows only one open at a time; we re-read inventory each step). */
+const getTotalSurpriseCubeCount = (inv) => {
+  if (!inv || typeof inv !== 'object') {
+    return 0;
+  }
+  let sum = 0;
+  for (let t = 1; t <= 5; t++) {
+    sum += getInventoryItemCount(inv, `surpriseCube${t}`);
+  }
+  return sum;
+};
+
+/** Matches `inventory-database.js` / in-game tooltips (Deformed … Perfect). */
+const SURPRISE_CUBE_DISPLAY_NAME_FALLBACK = {
+  1: 'Surprise Cube (Deformed)',
+  2: 'Surprise Cube (Irregular)',
+  3: 'Surprise Cube (Uniform)',
+  4: 'Surprise Cube (Precise)',
+  5: 'Surprise Cube (Perfect)'
+};
+
 const getSurpriseCubeDisplayName = (tier) => {
   const key = `surpriseCube${tier}`;
   const tt = typeof window !== 'undefined' ? window.inventoryTooltips : null;
   if (tt && tt[key] && tt[key].displayName) {
     return tt[key].displayName;
   }
-  return `Surprise Cube (${tier})`;
+  const db = typeof window !== 'undefined' ? window.inventoryDatabase : null;
+  if (db && db.tooltips && db.tooltips[key] && db.tooltips[key].displayName) {
+    return db.tooltips[key].displayName;
+  }
+  return SURPRISE_CUBE_DISPLAY_NAME_FALLBACK[tier] || `Surprise Cube (${tier})`;
 };
 
-const formatInventoryItemDisplayName = (itemKey) => {
-  const tt = typeof window !== 'undefined' ? window.inventoryTooltips : null;
-  if (tt && tt[itemKey] && tt[itemKey].displayName) {
-    return tt[itemKey].displayName;
+/** Official item art for all surprise cube tiers (tier accent via border/glow). */
+const SURPRISE_CUBE_TOAST_ICON_URL = 'https://bestiaryarena.com/assets/ITEM/23488.png';
+
+const getSurpriseCubeTierRarityColor = (tier) => {
+  const key = String(tier);
+  const colors = typeof window !== 'undefined' && window.inventoryDatabase && window.inventoryDatabase.rarityColors
+    ? window.inventoryDatabase.rarityColors
+    : null;
+  if (colors && colors[key]) {
+    return colors[key];
   }
-  return itemKey;
+  const fallback = { '1': '#9d9d9d', '2': '#1eff00', '3': '#0070dd', '4': '#a335ee', '5': '#ff8000' };
+  return fallback[key] || fallback['1'];
 };
 
-const describeRewardFromCubeApiData = (data, invBefore, invAfter, extras) => {
-  const segments = [];
-  const seen = new Set();
-  const toNumberOrNull = (value) => normalizeNumericDiffValue(value);
-  const pushGain = (key, gained) => {
-    if (!key || /^surpriseCube[1-5]$/.test(key) || gained <= 0) return;
-    const label = formatInventoryItemDisplayName(key);
-    const sig = `${key}:${gained}`;
-    if (seen.has(sig)) return;
-    seen.add(sig);
-    segments.push(`${label} ×${gained}`);
-  };
+const showCubeOpenedToast = (tier) => {
+  try {
+    const tierColor = getSurpriseCubeTierRarityColor(tier);
+    const label = tReplace('mods.automator.cubeOpenedToast', { cube: getSurpriseCubeDisplayName(tier) });
+    let mainContainer = document.getElementById('bestiary-automator-toast-container');
+    if (!mainContainer) {
+      mainContainer = document.createElement('div');
+      mainContainer.id = 'bestiary-automator-toast-container';
+      mainContainer.style.cssText = `
+        position: fixed;
+        z-index: 9999;
+        inset: 16px 16px 64px;
+        pointer-events: none;
+      `;
+      document.body.appendChild(mainContainer);
+    }
+    const existingToasts = mainContainer.querySelectorAll('.toast-item');
+    const stackOffset = existingToasts.length * TIMING.TOAST_STACK_OFFSET;
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'toast-item';
+    flexContainer.style.cssText = `
+      left: 0px;
+      right: 0px;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      position: absolute;
+      transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+      transform: translateY(-${stackOffset}px);
+      bottom: 0px;
+      justify-content: flex-end;
+    `;
+    const toast = document.createElement('button');
+    toast.type = 'button';
+    toast.style.pointerEvents = 'auto';
+    toast.style.alignSelf = 'flex-end';
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex flex-row items-center gap-2 px-2 py-1 text-whiteHighlight';
+    widgetBottom.style.alignItems = 'center';
 
-  if (data && typeof data === 'object') {
-    const rid = data.rewardInventoryDiff;
-    if (rid && typeof rid === 'object') {
-      for (const [key, value] of Object.entries(rid)) {
-        if (/^surpriseCube[1-5]$/.test(key)) continue;
-        const normalizedValue = toNumberOrNull(value);
-        if (normalizedValue === null) continue;
-        const before = invBefore[key] ?? 0;
-        let gained = normalizedValue - before;
-        if (gained <= 0 && normalizedValue > 0 && before === 0) {
-          gained = normalizedValue;
-        }
-        pushGain(key, gained);
+    const iconWrap = document.createElement('div');
+    iconWrap.style.cssText = `
+      flex: 0 0 auto;
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      border: 2px solid ${tierColor};
+      box-shadow: 0 0 8px ${tierColor};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      background: rgba(0, 0, 0, 0.2);
+    `;
+    const img = document.createElement('img');
+    img.src = SURPRISE_CUBE_TOAST_ICON_URL;
+    img.alt = '';
+    img.width = 26;
+    img.height = 26;
+    img.draggable = false;
+    img.style.cssText = 'width: 26px; height: 26px; image-rendering: pixelated; display: block; object-fit: contain;';
+    iconWrap.appendChild(img);
+
+    const textLeft = document.createElement('div');
+    textLeft.className = 'text-left min-w-0';
+    const paragraph = document.createElement('p');
+    paragraph.style.cssText = 'margin: 0; line-height: 1.2; max-width: 22rem;';
+    paragraph.textContent = label;
+    textLeft.appendChild(paragraph);
+
+    widgetBottom.appendChild(iconWrap);
+    widgetBottom.appendChild(textLeft);
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    mainContainer.appendChild(flexContainer);
+    const remove = () => {
+      if (flexContainer && flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        const toasts = mainContainer.querySelectorAll('.toast-item');
+        toasts.forEach((el, index) => {
+          el.style.transform = `translateY(-${index * TIMING.TOAST_STACK_OFFSET}px)`;
+        });
       }
-    }
-    const idiff = data.inventoryDiff;
-    if (idiff && typeof idiff === 'object') {
-      for (const [key, delta] of Object.entries(idiff)) {
-        if (/^surpriseCube[1-5]$/.test(key)) continue;
-        const normalizedDelta = toNumberOrNull(delta);
-        if (normalizedDelta === null || normalizedDelta <= 0) continue;
-        pushGain(key, normalizedDelta);
-      }
-    }
-    if (typeof data.rewardKey === 'string' && data.rewardKey && !/^surpriseCube[1-5]$/.test(data.rewardKey)) {
-      const qtyRaw = toNumberOrNull(data.rewardQuantity);
-      const qty = qtyRaw !== null && qtyRaw > 0 ? qtyRaw : 1;
-      pushGain(data.rewardKey, qty);
-    }
-    const roll = data.roll ?? data.rewardRoll ?? data.loot;
-    if (roll && typeof roll === 'object') {
-      const rk = roll.itemKey ?? roll.key ?? roll.id;
-      const qtyRaw = toNumberOrNull(roll.quantity) ?? toNumberOrNull(roll.amount);
-      const rq = qtyRaw !== null ? qtyRaw : 1;
-      if (typeof rk === 'string' && rk && !/^surpriseCube[1-5]$/.test(rk)) {
-        pushGain(rk, rq);
-      }
-    }
+    };
+    toast.addEventListener('click', remove);
+    setTimeout(remove, TIMING.CUBE_REWARD_TOAST_MS);
+  } catch (error) {
+    console.error('[Bestiary Automator] Error showing cube opened toast:', error);
   }
-
-  if (extras && typeof extras === 'object') {
-    const exJson = extras.json && typeof extras.json === 'object' ? extras.json : extras;
-    for (const k of ['reward', 'rewardItem', 'item', 'itemKey']) {
-      const v = exJson[k] ?? extras[k];
-      if (typeof v === 'string' && v && !/^surpriseCube[1-5]$/.test(v) && v !== 'surpriseCube') {
-        pushGain(v, 1);
-      }
-    }
-  }
-
-  if (segments.length === 0 && invAfter && typeof invAfter === 'object') {
-    const allKeys = new Set([...Object.keys(invBefore || {}), ...Object.keys(invAfter)]);
-    for (const key of allKeys) {
-      if (/^surpriseCube[1-5]$/.test(key)) continue;
-      const before = invBefore[key] ?? 0;
-      const after = invAfter[key] ?? 0;
-      const gained = after - before;
-      pushGain(key, gained);
-    }
-  }
-
-  if (segments.length === 0) {
-    return t('mods.automator.cubeRewardUnknown');
-  }
-  return segments.join(', ');
-};
-
-const buildCubeOpenToastMessage = (tier, data, invBefore, invAfter, extras) => {
-  const cubeName = getSurpriseCubeDisplayName(tier);
-  const rewardPart = describeRewardFromCubeApiData(data, invBefore, invAfter, extras);
-  return tReplace('mods.automator.cubeRewardLine', { cube: cubeName, reward: rewardPart });
 };
 
 const openOneSurpriseCubeViaApi = async (tier) => {
-  const invBefore = snapshotInventoryCounts();
   automatorMakingAPICall = true;
   try {
+    console.log('[Bestiary Automator] [cubes] API open request', { tier, name: getSurpriseCubeDisplayName(tier) });
     const response = await fetch('https://bestiaryarena.com/api/trpc/inventory.surpriseCube?batch=1', {
       method: 'POST',
       headers: {
@@ -1159,23 +1184,22 @@ const openOneSurpriseCubeViaApi = async (tier) => {
       })
     });
     if (!response.ok) {
+      console.log('[Bestiary Automator] [cubes] API open HTTP error', { tier, status: response.status });
       return false;
     }
     const result = await response.json();
     const data = extractAPIResponseData(result);
-    const extras = extractAPIResponseExtras(result);
     if (data) {
       applySurpriseCubeOpenResponse(data, tier);
     } else {
       applyRewardInventoryPartial({ [`surpriseCube${tier}`]: -1 });
     }
     await sleep(TIMING.CUBE_INVENTORY_SETTLE_MS);
-    const invAfter = snapshotInventoryCounts();
-    const toastMessage = buildCubeOpenToastMessage(tier, data, invBefore, invAfter, extras);
-    showCubeRewardToast(toastMessage);
+    showCubeOpenedToast(tier);
+    console.log('[Bestiary Automator] [cubes] API open OK', { tier, remainingThisTier: getInventoryItemCount(getPlayerInventory(), `surpriseCube${tier}`), totalSurpriseCubes: getTotalSurpriseCubeCount(getPlayerInventory()) });
     return true;
   } catch (error) {
-    console.log('[Bestiary Automator] openOneSurpriseCubeViaApi error:', error);
+    console.log('[Bestiary Automator] [cubes] openOneSurpriseCubeViaApi error:', error);
     return false;
   } finally {
     automatorMakingAPICall = false;
@@ -1186,7 +1210,9 @@ const openAllSurpriseCubesFromInventory = async (options = {}) => {
   const silentWhenEmpty = options.silentWhenEmpty === true;
   const abortWhenAutoOpenOff = options.abortWhenAutoOpenOff === true;
   const statusToastMs = TIMING.TOAST_AUTO_REMOVE;
+  console.log('[Bestiary Automator] [cubes] Batch start', { silentWhenEmpty, abortWhenAutoOpenOff, totalSurpriseCubes: getTotalSurpriseCubeCount(getPlayerInventory()) });
   if (!isGameStateAPIAvailable()) {
+    console.log('[Bestiary Automator] [cubes] Batch aborted: no game state');
     showAutomatorToastMessage(t('mods.automator.autoOpenCubesNoGameState'), statusToastMs);
     return 'error';
   }
@@ -1195,41 +1221,50 @@ const openAllSurpriseCubesFromInventory = async (options = {}) => {
   for (let tier = 1; tier <= 5; tier++) {
     for (;;) {
       if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
+        console.log('[Bestiary Automator] [cubes] Batch aborted: auto-open disabled', { opened });
         return 'aborted';
       }
       const inv = getPlayerInventory();
+      // One cube per API call: always use fresh inventory before deciding to open again.
       const key = `surpriseCube${tier}`;
       const n = getInventoryItemCount(inv, key);
       if (n <= 0) break;
       if (opened >= maxOpens) {
+        console.log('[Bestiary Automator] [cubes] Batch stopped: max opens', { opened, maxOpens });
         showAutomatorToastMessage(t('mods.automator.autoOpenCubesAborted'), statusToastMs);
-        if (opened > 0) {
-          showAutomatorToastMessage(tReplace('mods.automator.autoOpenCubesPartial', { count: opened }), statusToastMs);
-        }
         return 'error';
       }
+      const totalLeft = getTotalSurpriseCubeCount(inv);
+      console.log('[Bestiary Automator] [cubes] Next open', { tier, countThisTier: n, totalSurpriseCubes: totalLeft, openedSoFar: opened });
       const ok = await openOneSurpriseCubeViaApi(tier);
       if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
+        console.log('[Bestiary Automator] [cubes] Batch aborted: auto-open disabled after request', { opened });
         return 'aborted';
       }
       if (!ok) {
+        console.log('[Bestiary Automator] [cubes] Batch error: open failed', { tier, opened });
         showAutomatorToastMessage(t('mods.automator.autoOpenCubesError'), statusToastMs);
-        if (opened > 0) {
-          showAutomatorToastMessage(tReplace('mods.automator.autoOpenCubesPartial', { count: opened }), statusToastMs);
-        }
         return 'error';
       }
       opened++;
       await sleep(TIMING.CUBE_OPEN_DELAY);
       if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
+        console.log('[Bestiary Automator] [cubes] Batch aborted: auto-open disabled after delay', { opened });
         return 'aborted';
+      }
+      if (getTotalSurpriseCubeCount(getPlayerInventory()) === 0) {
+        console.log('[Bestiary Automator] [cubes] Batch done: no surprise cubes left in inventory', { opened });
+        return 'done';
       }
     }
   }
   if (opened === 0) {
+    console.log('[Bestiary Automator] [cubes] Batch done: none to open', { silentWhenEmpty });
     if (!silentWhenEmpty) {
       showAutomatorToastMessage(t('mods.automator.autoOpenCubesNone'), statusToastMs);
     }
+  } else {
+    console.log('[Bestiary Automator] [cubes] Batch done', { opened });
   }
   return 'done';
 };

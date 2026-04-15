@@ -4,6 +4,15 @@
   },
   "notes": [
     {
+      "version": "3.6.7",
+      "changes": [
+        { "type": "changed", "mod": "Cyclopedia", "text": "Various improvements." },
+        { "type": "changed", "mod": "Quests", "text": "Various improvements." },
+        { "type": "fixed", "mod": "Bestiary Automator", "text": "Fixed Auto-open Cubes." },
+        { "type": "fixed", "mod": "Better Yasir", "text": "Bug fix." }
+      ]
+    },
+    {
       "version": "3.6.6",
       "changes": [
         { "type": "changed", "mod": "Cyclopedia", "text": "Further season preparations." },
