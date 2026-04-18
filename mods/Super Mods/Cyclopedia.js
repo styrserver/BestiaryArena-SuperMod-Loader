@@ -145,6 +145,7 @@ const ALL_CREATURES = (window.creatureDatabase?.ALL_CREATURES || [])
 
 // Get equipment data from centralized database
 const ALL_EQUIPMENT = window.equipmentDatabase?.ALL_EQUIPMENT || [];
+const HARDCODED_BOOSTED_MAP = window.equipmentDatabase?.HARDCODED_BOOSTED_MAP || {};
 
 const GAME_KEYS = {
   NO_RARITY: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
@@ -279,6 +280,7 @@ const GAME_DATA = {
   UNOBTAINABLE_CREATURES,
   ALL_CREATURES,
   ALL_EQUIPMENT,
+  HARDCODED_BOOSTED_MAP,
   NO_RARITY_KEYS: GAME_KEYS.NO_RARITY,
   CURRENCY_KEYS: GAME_KEYS.CURRENCY,
   UPGRADE_KEYS: GAME_KEYS.UPGRADE,
@@ -4596,7 +4598,12 @@ function openCyclopediaModal(options) {
       Object.assign(d.style, EQUIPMENT_STYLES.container);
 
       const equipDetailsCol = document.createElement('div');
-      Object.assign(equipDetailsCol.style, EQUIPMENT_STYLES.column);
+      Object.assign(equipDetailsCol.style, EQUIPMENT_STYLES.column, {
+        flex: '0 0 450px',
+        width: '450px',
+        minWidth: '450px',
+        maxWidth: '450px'
+      });
       equipDetailsCol.classList.add('text-whiteHighlight');
 
       // Create top section for equipment details
@@ -4616,21 +4623,24 @@ function openCyclopediaModal(options) {
       const equipDetailsBottom = document.createElement('div');
       Object.assign(equipDetailsBottom.style, {
         flex: '0 0 65%', minHeight: '0', width: '100%', display: 'flex',
-        flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start',
-        borderTop: '2px solid #444', marginTop: '5px', paddingTop: '5px'
+        flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
+        borderTop: '2px solid #444', marginTop: '5px', paddingTop: '5px', boxSizing: 'border-box'
       });
 
       const updateCreatureUsageTitle = (titleP) => {
-        titleP.textContent = 'Creature Usage';
+        titleP.textContent = 'Found in:';
       };
-      const { title: creatureUsageTitle, titleP: creatureUsageTitleP } = createTitleElement('Creature Usage', updateCreatureUsageTitle);
+      const { title: creatureUsageTitle, titleP: creatureUsageTitleP } = createTitleElement('Found in:', updateCreatureUsageTitle);
       equipDetailsBottom.appendChild(creatureUsageTitle);
 
       equipDetailsCol.appendChild(equipDetailsTop);
       equipDetailsCol.appendChild(equipDetailsBottom);
 
       const ownedEquipCol = document.createElement('div');
-      Object.assign(ownedEquipCol.style, EQUIPMENT_STYLES.column);
+      Object.assign(ownedEquipCol.style, EQUIPMENT_STYLES.column, {
+        flex: '1 1 0',
+        minWidth: '0'
+      });
       ownedEquipCol.classList.add('text-whiteHighlight');
 
       const updateOwnedEquipTitle = (titleP) => {
@@ -4802,11 +4812,11 @@ function openCyclopediaModal(options) {
         if (!currentSelectedEquipment) {
           equipDetailsTitleP.textContent = 'Equipment Details';
           equipDetailsTop.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view details</div>';
-          creatureUsageTitleP.textContent = 'Creature Usage';
-          equipDetailsBottom.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view creature usage</div>';
+          creatureUsageTitleP.textContent = 'Found in:';
+          equipDetailsBottom.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view locations</div>';
         } else {
           equipDetailsTitleP.textContent = currentSelectedEquipment;
-          creatureUsageTitleP.textContent = `Creatures using ${currentSelectedEquipment}`;
+          creatureUsageTitleP.textContent = 'Found in:';
           
           // Find equipment ID by name
           let equipId = null;
@@ -4886,68 +4896,59 @@ function openCyclopediaModal(options) {
             wrap.appendChild(tooltipDiv);
             equipDetailsTop.appendChild(wrap);
 
-            // Creature usage section
+            const foundInRow = document.createElement('div');
+            foundInRow.style.cssText =
+              'display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; width: 100%; gap: 10px; align-items: stretch; box-sizing: border-box;';
+
+            const mapsColumn = document.createElement('div');
+            mapsColumn.style.cssText =
+              'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden;';
+            const mapsColTitle = document.createElement('div');
+            mapsColTitle.className = 'pixel-font-14';
+            mapsColTitle.textContent = 'Maps';
+            mapsColTitle.style.cssText =
+              'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 4px 4px 6px; border-bottom: 1px solid #555; box-sizing: border-box;';
+
             const creatureUsageContainer = document.createElement('div');
             creatureUsageContainer.style.cssText = `
-              width: 100%; height: 100%; overflow-y: auto; padding: 6px; box-sizing: border-box;
+              width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px; box-sizing: border-box;
               display: flex; flex-direction: column; gap: 4px;
             `;
 
-            // Get creature usage data
             const creatureUsageData = getCreatureUsageForEquipment(equipId);
-            
-            if (creatureUsageData.length === 0) {
-              const noUsageDiv = document.createElement('div');
-              noUsageDiv.className = FONT_CONSTANTS.SIZES.SMALL;
-              noUsageDiv.style.textAlign = 'center';
-              noUsageDiv.style.color = '#888';
-              noUsageDiv.style.padding = '20px';
-              noUsageDiv.style.fontStyle = 'italic';
-              noUsageDiv.textContent = 'No creatures found using this equipment';
-              creatureUsageContainer.appendChild(noUsageDiv);
-            } else {
-              
-              // Group maps by region
-              const mapsByRegion = {};
-              creatureUsageData.forEach(usage => {
-                const regionName = usage.regionName || 'Other Maps';
-                if (!mapsByRegion[regionName]) {
-                  mapsByRegion[regionName] = [];
+
+            function openCreatureInBestiary(creatureNameRaw) {
+              const creatureName = String(creatureNameRaw || '').trim();
+              if (!creatureName) return;
+              const normalizedCreatureName = creatureName.toLowerCase();
+              const canonicalCreatureName =
+                GAME_DATA.ALL_CREATURES.find((c) => c.toLowerCase() === normalizedCreatureName) ||
+                GAME_DATA.UNOBTAINABLE_CREATURES.find((c) => c.toLowerCase() === normalizedCreatureName) ||
+                creatureName;
+              if (typeof setActiveTab === 'function') {
+                setActiveTab(1);
+              }
+              const clickBestiaryTimeout = setTimeout(() => {
+                if (typeof _cyclopediaClickListItem === 'function' && typeof tabPages !== 'undefined' && tabPages[1]) {
+                  _cyclopediaClickListItem(tabPages[1], canonicalCreatureName);
                 }
-                mapsByRegion[regionName].push(usage);
-              });
-              
-              // Display maps grouped by region
-              Object.entries(mapsByRegion).forEach(([regionName, maps]) => {
-                // Add region header (styled like Bestiary Tab)
-                const regionHeader = document.createElement('div');
-                regionHeader.className = 'pixel-font-16';
-                regionHeader.style.cssText = `
-                  font-weight: 700; color: var(--theme-text, #e6d7b0);
-                  background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
-                  border-width: 6px; border-style: solid; border-color: rgb(255, 224, 102);
-                  border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill;
-                  border-radius: 0px; box-sizing: border-box; text-align: center;
-                  padding: 1px 4px; margin: 1px 0px 0px; display: block;
-                `;
-                regionHeader.textContent = regionName;
-                creatureUsageContainer.appendChild(regionHeader);
-                
-                // Add maps for this region
-                maps.forEach(usage => {
-                  const usageDiv = document.createElement('div');
-                  usageDiv.style.cssText = `
+              }, 0);
+              TimerManager.addTimeout(clickBestiaryTimeout, 'equipmentMapCreatureSelect');
+            }
+
+            function appendStyledMapRow(parentEl, mapName, creaturesLabel) {
+              const usageDiv = document.createElement('div');
+              usageDiv.style.cssText = `
                     padding: 4px 6px; display: flex; flex-direction: column; gap: 3px;
                     margin-top: 2px; margin-bottom: 2px; line-height: 1;
                     letter-spacing: 0.0625rem; word-spacing: -0.1875rem;
                     color: rgb(255, 255, 255);
                   `;
-                  usageDiv.className = 'pixel-font-16';
-                  
-                  // Map name with click functionality
-                  const mapNameDiv = document.createElement('div');
-                  mapNameDiv.className = 'pixel-font-14';
-                  mapNameDiv.style.cssText = `
+              usageDiv.className = 'pixel-font-16';
+
+              const mapNameDiv = document.createElement('div');
+              mapNameDiv.className = 'pixel-font-14';
+              mapNameDiv.style.cssText = `
                     font-weight: bold; line-height: 1; letter-spacing: 0.0625rem;
                     word-spacing: -0.1875rem; margin: 0px; padding: 2px 6px;
                     border-radius: 4px; display: flex; justify-content: space-between;
@@ -4955,45 +4956,208 @@ function openCyclopediaModal(options) {
                     text-decoration: underline; background: transparent;
                     color: rgb(255, 255, 255);
                   `;
-                  mapNameDiv.title = 'Click to go to this map';
-                  
-                  const mapNameSpan = document.createElement('span');
-                  mapNameSpan.style.cssText = `
+              mapNameDiv.title = 'Click to go to this map';
+
+              const mapNameSpan = document.createElement('span');
+              mapNameSpan.style.cssText = `
                     flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
                     white-space: nowrap;
                   `;
-                  mapNameSpan.textContent = usage.mapName;
-                  
-                  // Attach map navigation handler
-                  NavigationHandler.attachMapNavigation(mapNameDiv, usage.mapName);
-                  
-                  mapNameDiv.appendChild(mapNameSpan);
-                  usageDiv.appendChild(mapNameDiv);
-                  
-                  // Creature info
-                  const creatureInfoDiv = document.createElement('div');
-                  creatureInfoDiv.className = 'pixel-font-14';
-                  creatureInfoDiv.style.cssText = `
+              mapNameSpan.textContent = mapName;
+
+              NavigationHandler.attachMapNavigation(mapNameDiv, mapName);
+
+              mapNameDiv.appendChild(mapNameSpan);
+              usageDiv.appendChild(mapNameDiv);
+
+              if (creaturesLabel) {
+                const creatureInfoDiv = document.createElement('div');
+                creatureInfoDiv.className = 'pixel-font-14';
+                creatureInfoDiv.style.cssText = `
                     color: rgb(170, 170, 170); line-height: 1;
                     letter-spacing: 0.0625rem; word-spacing: -0.1875rem;
                     margin-left: 6px; margin-top: 0px; font-style: italic;
                   `;
-                  creatureInfoDiv.textContent = `${usage.creatures.join(', ')}`;
-                  usageDiv.appendChild(creatureInfoDiv);
-                  
-                  // Add separator
-                  const separator = document.createElement('div');
-                  separator.className = 'separator my-2.5';
-                  separator.setAttribute('role', 'none');
-                  separator.style.cssText = 'margin: 3px 0px;';
-                  usageDiv.appendChild(separator);
-                  
-                  creatureUsageContainer.appendChild(usageDiv);
+                const names = String(creaturesLabel)
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean);
+                names.forEach((name, i) => {
+                  if (i > 0) {
+                    creatureInfoDiv.appendChild(document.createTextNode(', '));
+                  }
+                  const nameSpan = document.createElement('span');
+                  nameSpan.textContent = name;
+                  nameSpan.style.cursor = 'pointer';
+                  nameSpan.style.textDecoration = 'underline';
+                  nameSpan.style.textDecorationStyle = 'dotted';
+                  nameSpan.style.color = 'rgb(170, 170, 170)';
+                  nameSpan.title = `Open ${name} in Bestiary`;
+                  nameSpan.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openCreatureInBestiary(name);
+                  });
+                  nameSpan.addEventListener('mouseenter', () => {
+                    nameSpan.style.color = 'rgb(255, 255, 255)';
+                  });
+                  nameSpan.addEventListener('mouseleave', () => {
+                    nameSpan.style.color = 'rgb(170, 170, 170)';
+                  });
+                  creatureInfoDiv.appendChild(nameSpan);
+                });
+                usageDiv.appendChild(creatureInfoDiv);
+              }
+
+              const separator = document.createElement('div');
+              separator.className = 'separator my-2.5';
+              separator.setAttribute('role', 'none');
+              separator.style.cssText = 'margin: 3px 0px;';
+              usageDiv.appendChild(separator);
+
+              parentEl.appendChild(usageDiv);
+            }
+
+            function appendRegionHeader(parentEl, regionName) {
+              const regionHeader = document.createElement('div');
+              regionHeader.className = 'pixel-font-16';
+              regionHeader.style.cssText = `
+                  font-weight: 700; color: var(--theme-text, #e6d7b0);
+                  background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
+                  border-width: 6px; border-style: solid; border-color: rgb(255, 224, 102);
+                  border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill;
+                  border-radius: 0px; box-sizing: border-box; text-align: center;
+                  padding: 1px 4px; margin: 1px 0px 0px; display: block;
+                `;
+              regionHeader.textContent = regionName;
+              parentEl.appendChild(regionHeader);
+            }
+
+            function buildMapNameToRegionMeta() {
+              const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+              const regions = globalThis.state?.utils?.REGIONS || [];
+              const map = new Map();
+              const indexByRegion = new Map();
+              let idx = 0;
+              regions.forEach((region) => {
+                if (!region?.rooms || !Array.isArray(region.rooms)) return;
+                const regionName = region.id
+                  ? (GAME_DATA.REGION_NAME_MAP[region.id.toLowerCase()] ||
+                    region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()))
+                  : 'Unknown Region';
+                if (!indexByRegion.has(regionName)) {
+                  indexByRegion.set(regionName, idx++);
+                }
+                region.rooms.forEach((room) => {
+                  const roomCode = room?.id;
+                  if (!roomCode) return;
+                  const mapName = roomNames[roomCode] || roomCode;
+                  map.set(mapName, { regionName, regionIndex: indexByRegion.get(regionName) });
+                });
+              });
+              return map;
+            }
+
+            if (creatureUsageData.length === 0) {
+              const noUsageDiv = document.createElement('div');
+              noUsageDiv.className = FONT_CONSTANTS.SIZES.SMALL;
+              noUsageDiv.style.textAlign = 'center';
+              noUsageDiv.style.color = '#888';
+              noUsageDiv.style.padding = '12px';
+              noUsageDiv.style.fontStyle = 'italic';
+              noUsageDiv.textContent = 'No map data';
+              creatureUsageContainer.appendChild(noUsageDiv);
+            } else {
+              const mapsByRegion = {};
+              creatureUsageData.forEach((usage) => {
+                const regionName = usage.regionName || 'Other Maps';
+                if (!mapsByRegion[regionName]) {
+                  mapsByRegion[regionName] = [];
+                }
+                mapsByRegion[regionName].push(usage);
+              });
+
+              Object.entries(mapsByRegion).forEach(([regionName, maps]) => {
+                appendRegionHeader(creatureUsageContainer, regionName);
+
+                maps.forEach((usage) => {
+                  appendStyledMapRow(creatureUsageContainer, usage.mapName, usage.creatures.join(', '));
                 });
               });
             }
 
-            equipDetailsBottom.appendChild(creatureUsageContainer);
+            mapsColumn.appendChild(mapsColTitle);
+            mapsColumn.appendChild(creatureUsageContainer);
+
+            const boostedColumn = document.createElement('div');
+            boostedColumn.style.cssText =
+              'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden; border-left: 1px solid #444; padding-left: 8px; box-sizing: border-box;';
+            const boostedColTitle = document.createElement('div');
+            boostedColTitle.className = 'pixel-font-14';
+            boostedColTitle.textContent = 'Boosted Maps';
+            boostedColTitle.style.cssText =
+              'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 4px 4px 6px; border-bottom: 1px solid #555; box-sizing: border-box;';
+
+            const boostedScroll = document.createElement('div');
+            boostedScroll.style.cssText = `
+              width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px; box-sizing: border-box;
+              display: flex; flex-direction: column; gap: 4px;
+            `;
+
+            const boostedWiki = GAME_DATA.HARDCODED_BOOSTED_MAP[currentSelectedEquipment];
+            if (boostedWiki === false) {
+              const noBoosted = document.createElement('div');
+              noBoosted.className = FONT_CONSTANTS.SIZES.SMALL;
+              noBoosted.style.textAlign = 'center';
+              noBoosted.style.color = '#888';
+              noBoosted.style.padding = '12px';
+              noBoosted.style.fontStyle = 'italic';
+              noBoosted.textContent = '—';
+              boostedScroll.appendChild(noBoosted);
+            } else if (typeof boostedWiki === 'string') {
+              const mapToRegionMeta = buildMapNameToRegionMeta();
+              const boostedByRegion = new Map();
+              boostedWiki
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .forEach((mapName) => {
+                  const meta = mapToRegionMeta.get(mapName) || { regionName: 'Other Maps', regionIndex: Number.MAX_SAFE_INTEGER };
+                  if (!boostedByRegion.has(meta.regionName)) {
+                    boostedByRegion.set(meta.regionName, { regionIndex: meta.regionIndex, maps: [] });
+                  }
+                  boostedByRegion.get(meta.regionName).maps.push(mapName);
+                });
+              [...boostedByRegion.entries()]
+                .sort((a, b) => {
+                  if (a[1].regionIndex !== b[1].regionIndex) {
+                    return a[1].regionIndex - b[1].regionIndex;
+                  }
+                  return a[0].localeCompare(b[0]);
+                })
+                .forEach(([regionName, meta]) => {
+                  appendRegionHeader(boostedScroll, regionName);
+                  meta.maps.forEach((mapName) => {
+                    appendStyledMapRow(boostedScroll, mapName, null);
+                  });
+                });
+            } else {
+              const unk = document.createElement('div');
+              unk.className = FONT_CONSTANTS.SIZES.SMALL;
+              unk.style.textAlign = 'center';
+              unk.style.color = '#888';
+              unk.style.padding = '12px';
+              unk.style.fontStyle = 'italic';
+              unk.textContent = '—';
+              unk.title = 'Not in wiki boosted map list';
+              boostedScroll.appendChild(unk);
+            }
+
+            boostedColumn.appendChild(boostedColTitle);
+            boostedColumn.appendChild(boostedScroll);
+
+            foundInRow.appendChild(mapsColumn);
+            foundInRow.appendChild(boostedColumn);
+            equipDetailsBottom.appendChild(foundInRow);
           }
         }
 

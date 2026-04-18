@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "3.6.7",
+  "version": "3.6.8",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -19,13 +19,15 @@
     }
   },
   "background": {
-    "scripts": ["background.js"],
+    "scripts": [
+      "background.js"
+    ],
     "persistent": true
   },
   "content_scripts": [
     {
       "matches": [
-        "*://*.bestiaryarena.com/*", 
+        "*://*.bestiaryarena.com/*",
         "*://bestiaryarena.com/*"
       ],
       "exclude_matches": [
@@ -40,13 +42,15 @@
         "*://bestiaryarena.com/seasons*",
         "*://*.bestiaryarena.com/seasons*"
       ],
-      "js": ["content/injector.js"],
+      "js": [
+        "content/injector.js"
+      ],
       "run_at": "document_start",
       "all_frames": true
     },
     {
       "matches": [
-        "*://*.bestiaryarena.com/*", 
+        "*://*.bestiaryarena.com/*",
         "*://bestiaryarena.com/*"
       ],
       "exclude_matches": [
@@ -61,7 +65,9 @@
         "*://bestiaryarena.com/seasons*",
         "*://*.bestiaryarena.com/seasons*"
       ],
-      "js": ["content/utility_injector.js"],
+      "js": [
+        "content/utility_injector.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -106,6 +112,7 @@
     "database/creature-database.js",
     "database/inventory-database.js",
     "database/maps-database.js",
+    "database/equipment-lua-export.js",
     "database/Welcome.js"
   ],
   "browser_specific_settings": {
@@ -115,4 +122,4 @@
     }
   },
   "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'self' https://*.gist.githubusercontent.com https://gist.githubusercontent.com"
-} 
+}

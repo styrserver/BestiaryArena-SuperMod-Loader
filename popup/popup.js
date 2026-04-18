@@ -1059,6 +1059,7 @@ const hiddenMods = [
   'Welcome.js',
   'equipment-database.js',
   'maps-database.js',
+  'equipment-lua-export.js',
   'playereq-database.js',
   'Mod Settings.js',
   'RunTracker.js',

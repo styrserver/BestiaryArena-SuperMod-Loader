@@ -1808,6 +1808,9 @@
         return containerSlot;
       }
       
+      // Most recent "safe" tooltip body text we can reuse across React/mutation rebuilds.
+      let lastYasirTooltipBodyText = '';
+
       // Show a temporary tooltip message (error/info)
       function showTooltipMessage(message, color = '#ff4d4d', duration = CONSTANTS.ERROR_DISPLAY_DURATION) {
         try {
@@ -1816,11 +1819,32 @@
           const paragraphs = tooltip.querySelectorAll('p');
           if (paragraphs.length < 2) return;
           const msgElem = paragraphs[1];
+          const isSuccessColor = color === '#32cd32';
+          const currentBodyText = (msgElem.textContent || '').trim();
+          const defaultBodyText = (tooltip.dataset.betterYasirDefaultText || '').trim();
+          const looksLikeTransientShopResult = /successfully\s+(purchased|traded|sold)\b/i.test(currentBodyText);
+          const preferredRestoreText = defaultBodyText || lastYasirTooltipBodyText;
+
+          // Persist clean success text so future tooltip rebuilds avoid stale/incorrect base UI lines.
+          if (color === '#32cd32' && typeof message === 'string' && message.trim()) {
+            lastYasirTooltipBodyText = message.trim();
+            tooltip.dataset.betterYasirDefaultText = lastYasirTooltipBodyText;
+          }
+
           if (!tooltip.dataset.originalText) {
-            tooltip.dataset.originalText = msgElem.textContent;
+            // Never restore stale shop result text (can be very large cumulative totals from base UI).
+            tooltip.dataset.originalText =
+              looksLikeTransientShopResult && preferredRestoreText
+                ? preferredRestoreText
+                : msgElem.textContent;
           }
           msgElem.textContent = message;
           msgElem.style.color = color;
+          if (isSuccessColor) {
+            // Keep successful purchase/trade text in green instead of reverting to white.
+            delete tooltip.dataset.originalText;
+            return;
+          }
           setTimeout(() => {
             if (!tooltip.dataset.originalText) return;
             msgElem.textContent = tooltip.dataset.originalText;
@@ -2181,8 +2205,9 @@
       // Perform the actual purchase/trade via API call
       async function performAction(itemKey, quantity, actionType, actionOptions = {}) {
         const suppressDefaultSuccessUi = actionOptions.suppressDefaultSuccessUi === true;
-        // Create unique request key for deduplication
-        const requestKey = `${actionType}-${itemKey}-${quantity}-${Date.now()}`;
+        // Stable request key so duplicate clicks / duplicate handlers collapse to one in-flight request.
+        // (Date.now() here defeats deduplication entirely.)
+        const requestKey = `${actionType}-${itemKey}-${quantity}`;
         
         return deduplicateRequest(requestKey, async () => {
           let buyPreflight = null;
@@ -3157,6 +3182,14 @@
       
       // Add event listeners to input and button
       function addEventListenersToInput(quantityInput, actionButton, itemKey, maxQuantity, index, itemSlot, actionType, itemPrice = 0) {
+        // If this UI node was re-processed by mutation logic, remove old handlers first.
+        if (quantityInput._betterYasirInputHandler) {
+          quantityInput.removeEventListener('input', quantityInput._betterYasirInputHandler);
+        }
+        if (actionButton._betterYasirButtonHandler) {
+          actionButton.removeEventListener('click', actionButton._betterYasirButtonHandler);
+        }
+
         // Debounce timer for input validation
         let validationTimeout = null;
         
@@ -3301,9 +3334,12 @@
         quantityInput.addEventListener('input', inputHandler);
         actionButton.addEventListener('click', buttonHandler);
         
-        // Store references for cleanup
-        quantityInput.dataset.betterYasirInputHandler = inputHandler;
-        actionButton.dataset.betterYasirButtonHandler = buttonHandler;
+        // Store function refs on elements so they can be removed correctly later.
+        quantityInput._betterYasirInputHandler = inputHandler;
+        actionButton._betterYasirButtonHandler = buttonHandler;
+        // Keep dataset flags for debugging/inspection without serializing functions.
+        quantityInput.dataset.betterYasirInputHandler = 'true';
+        actionButton.dataset.betterYasirButtonHandler = 'true';
       }
       
     // =======================
@@ -5757,9 +5793,14 @@
           if (fullText.includes(activatedText)) {
             bodyText = fullText.replace(activatedText, '').trim();
           }
+          // Ignore transient success/result lines from the base UI; prefer last safe text we showed.
+          if (/successfully\s+(purchased|traded|sold)\b/i.test(bodyText)) {
+            bodyText = lastYasirTooltipBodyText || '';
+          }
           if (!bodyText) {
             bodyText = "Greetings, mate! Sorry I didn't bring many products this time around.";
           }
+          lastYasirTooltipBodyText = bodyText;
           
           const slotWrap = document.createElement('div');
           slotWrap.className = 'container-slot surface-darker grid h-full place-items-center overflow-hidden px-4 py-2';
@@ -5782,6 +5823,7 @@
           const bodyP = document.createElement('p');
           bodyP.className = 'inline';
           bodyP.textContent = bodyText;
+          tooltip.dataset.betterYasirDefaultText = bodyText;
           
           tooltip.appendChild(titleP);
           tooltip.appendChild(bodyP);
@@ -5818,16 +5860,22 @@
       function cleanupEventListeners() {
         const inputs = document.querySelectorAll('.better-yasir-quantity-input');
         inputs.forEach(input => {
+          if (input._betterYasirInputHandler) {
+            input.removeEventListener('input', input._betterYasirInputHandler);
+            delete input._betterYasirInputHandler;
+          }
           if (input.dataset.betterYasirInputHandler) {
-            input.removeEventListener('input', input.dataset.betterYasirInputHandler);
             delete input.dataset.betterYasirInputHandler;
           }
         });
         
         const buttons = document.querySelectorAll('.better-yasir-action-button');
         buttons.forEach(button => {
+          if (button._betterYasirButtonHandler) {
+            button.removeEventListener('click', button._betterYasirButtonHandler);
+            delete button._betterYasirButtonHandler;
+          }
           if (button.dataset.betterYasirButtonHandler) {
-            button.removeEventListener('click', button.dataset.betterYasirButtonHandler);
             delete button.dataset.betterYasirButtonHandler;
           }
         });

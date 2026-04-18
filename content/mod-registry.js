@@ -26,6 +26,7 @@ export const DATABASE_MODS = [
   'creature-database.js',
   'equipment-database.js',
   'maps-database.js',
+  'equipment-lua-export.js',
   'playereq-database.js'
 ];
 
@@ -86,6 +87,7 @@ export const DEFAULT_ENABLED_MODS = [
   'database/creature-database.js',
   'database/equipment-database.js',
   'database/maps-database.js',
+  'database/equipment-lua-export.js',
   'database/playereq-database.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
@@ -112,6 +114,7 @@ export const HIDDEN_MODS = [
   'creature-database.js',
   'equipment-database.js',
   'maps-database.js',
+  'equipment-lua-export.js',
   'playereq-database.js',
   'Mod Settings.js',
   'RunTracker.js',

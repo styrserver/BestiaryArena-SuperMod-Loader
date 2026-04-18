@@ -1273,12 +1273,21 @@ const openCubesIfEnabled = async () => {
   if (!config.autoOpenCubes || cubesOpenedThisSession) {
     return;
   }
+  if (cubesOpenInProgress) {
+    console.log('[Bestiary Automator] [cubes] Skipping trigger: cube batch already in progress');
+    return;
+  }
   if (!isGameStateAPIAvailable()) {
     return;
   }
-  const outcome = await openAllSurpriseCubesFromInventory({ silentWhenEmpty: true, abortWhenAutoOpenOff: true });
-  if (outcome !== 'aborted') {
-    cubesOpenedThisSession = true;
+  cubesOpenInProgress = true;
+  try {
+    const outcome = await openAllSurpriseCubesFromInventory({ silentWhenEmpty: true, abortWhenAutoOpenOff: true });
+    if (outcome !== 'aborted') {
+      cubesOpenedThisSession = true;
+    }
+  } finally {
+    cubesOpenInProgress = false;
   }
 };
 
@@ -1677,6 +1686,7 @@ const refillStaminaIfNeeded = async () => {
 // Track if we've already collected rewards for this game session
 let rewardsCollectedThisSession = false;
 let cubesOpenedThisSession = false;
+let cubesOpenInProgress = false;
 
 // Track if Faster Autoplay has been executed for this game session
 let fasterAutoplayExecutedThisSession = false;
@@ -3400,12 +3410,10 @@ const startAutomation = () => {
   // Reset session flags when starting automation
   rewardsCollectedThisSession = false;
   cubesOpenedThisSession = false;
+  cubesOpenInProgress = false;
   fasterAutoplayExecutedThisSession = false;
   fasterAutoplayRunning = false;
   
-  
-  // Run immediately once
-  runAutomationTasks();
   
   // Set up adaptive automation interval based on tab visibility
   const getAutomationInterval = () => {
