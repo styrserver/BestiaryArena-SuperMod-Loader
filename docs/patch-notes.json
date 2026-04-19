@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.6.9",
+      "changes": [
+        {
+          "type": "added",
+          "mod": "Mod Settings",
+          "text": "Added hotkeys."
+        },
+        {
+          "type": "fixed",
+          "mod": "Bestiary Automator",
+          "text": "Fixed auto-open cubes."
+        }
+      ]
+    },
+    {
       "version": "3.6.8",
       "changes": [
         {

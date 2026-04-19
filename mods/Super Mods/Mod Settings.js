@@ -38,7 +38,19 @@ const defaultConfig = {
   betterHighscoresBackgroundOpacity: 1.0, // Opacity for Better Highscores background (0.0 to 1.0)
   enableFirebaseRunsUpload: false, // Enable uploading best runs to Firebase
   firebaseRunsPassword: '', // Encryption password for Firebase runs (stored encrypted)
-  autoUploadRuns: false // Automatically upload when new best run is recorded
+  autoUploadRuns: false, // Automatically upload when new best run is recorded
+  hotkeyOpenInventory: 'i', // KeyboardEvent.key id: letter/digit, or e.g. f1, insert, home, pageup
+  hotkeyOpenQuestLog: 'q',
+  hotkeyOpenStore: 's',
+  hotkeyReturnToMap: 'tab',
+  hotkeySetupSlot1: 'f1',
+  hotkeySetupSlot2: 'f2',
+  hotkeySetupSlot3: 'f3',
+  hotkeySetupSlot4: 'f4',
+  hotkeySetupSlot5: 'f5',
+  hotkeySetupSlot6: 'f6',
+  hotkeySetupSlot7: 'f7',
+  hotkeySetupSlot8: 'f8'
 };
 
 // Storage key for this mod
@@ -61,6 +73,18 @@ try {
 }
 delete config.enableFavorites;
 delete config.favoriteSymbol;
+config.hotkeyOpenInventory = sanitizeStoredHotkey(config.hotkeyOpenInventory, '');
+if (config.hotkeyOpenQuestLog === undefined) config.hotkeyOpenQuestLog = 'q';
+if (config.hotkeyOpenStore === undefined) config.hotkeyOpenStore = 's';
+config.hotkeyOpenQuestLog = sanitizeStoredHotkey(config.hotkeyOpenQuestLog, '');
+config.hotkeyOpenStore = sanitizeStoredHotkey(config.hotkeyOpenStore, '');
+if (config.hotkeyReturnToMap === undefined) config.hotkeyReturnToMap = 'tab';
+config.hotkeyReturnToMap = sanitizeStoredHotkey(config.hotkeyReturnToMap, '');
+for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
+  const setupKey = `hotkeySetupSlot${setupSlot}`;
+  if (config[setupKey] === undefined) config[setupKey] = `f${setupSlot}`;
+  config[setupKey] = sanitizeStoredHotkey(config[setupKey], '');
+}
 
 // Last visited map feature globals
 const LAST_MAP_STORAGE_KEY = 'mod-settings-map-history';
@@ -239,6 +263,444 @@ const timerState = {
 const uiState = {
   settingsButton: null
 };
+
+// Hotkeys state
+const hotkeysState = {
+  keydownListener: null,
+  /** Which config key is being rebound (nav + setup slots) or null */
+  hotkeyCaptureMode: null,
+  /** Removes active hotkey capture listeners (keydown + outside click). */
+  detachHotkeyCapture: null
+};
+
+/** Stable id from KeyboardEvent.key (letters/digits, F1–F24, Insert, Home, PageUp, …). */
+function normalizeHotkeyIdentifierFromKey(key) {
+  if (key == null || key === '') return '';
+  if (key === ' ') return 'space';
+  return key.length === 1 ? key.toLowerCase() : key.toLowerCase();
+}
+
+function sanitizeStoredHotkey(raw, fallback = 'i') {
+  if (raw == null || typeof raw !== 'string') return fallback;
+  const s = raw.trim();
+  if (!s) return fallback;
+  return s.length === 1 ? s.toLowerCase() : s.toLowerCase();
+}
+
+/** Short label for the hotkey button (syncs visually with Reset-sized control). */
+function formatHotkeyForDisplay(id, fallbackWhenEmpty = 'i') {
+  const safe = sanitizeStoredHotkey(id, fallbackWhenEmpty);
+  if (safe === '') return '—';
+  if (safe.length === 1) return safe.toUpperCase();
+  const fn = safe.match(/^f(\d{1,2})$/);
+  if (fn) return `F${fn[1]}`;
+  const map = {
+    insert: 'Ins',
+    delete: 'Del',
+    home: 'Home',
+    end: 'End',
+    pageup: 'PgUp',
+    pagedown: 'PgDn',
+    arrowup: '↑',
+    arrowdown: '↓',
+    arrowleft: '←',
+    arrowright: '→',
+    space: 'Spc',
+    escape: 'Esc',
+    enter: 'Ent',
+    tab: 'Tab',
+    backspace: 'BS'
+  };
+  return map[safe] || (safe.length <= 4 ? safe.toUpperCase() : safe.slice(0, 4).toUpperCase());
+}
+
+const IGNORED_HOTKEY_IDS = new Set(['control', 'shift', 'alt', 'meta', 'os', 'contextmenu', 'dead', 'help']);
+
+function isTypingIntoInput(target) {
+  if (!target) return false;
+  const tag = target.tagName?.toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+  if (target.isContentEditable) return true;
+  if (typeof target.closest === 'function' && target.closest('[contenteditable="true"]')) return true;
+  return false;
+}
+
+function findGameNavButtonByLabel(label) {
+  const normalizedLabel = String(label || '').toLowerCase();
+  if (!normalizedLabel) return null;
+
+  const navElements = getNavElementsForCompactBar();
+  for (const nav of navElements) {
+    const buttons = nav.querySelectorAll('button');
+    for (const button of buttons) {
+      const aria = (button.getAttribute('aria-label') || '').toLowerCase();
+      const title = (button.getAttribute('title') || '').toLowerCase();
+      const text = (button.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (aria.includes(normalizedLabel) || title.includes(normalizedLabel) || text.includes(normalizedLabel)) {
+        return button;
+      }
+    }
+  }
+
+  return null;
+}
+
+/** First nav button matching any of the search substrings (aria / title / text). */
+function findGameNavButtonBySearchTerms(terms) {
+  if (!Array.isArray(terms)) return null;
+  for (const term of terms) {
+    const btn = findGameNavButtonByLabel(term);
+    if (btn) return btn;
+  }
+  return null;
+}
+
+function openInventoryFromHotkey() {
+  const inventoryButton = findGameNavButtonByLabel('inventory');
+  if (!inventoryButton) {
+    console.warn('[Mod Settings] Inventory hotkey pressed but inventory button was not found');
+    return;
+  }
+
+  inventoryButton.click();
+}
+
+function openQuestLogFromHotkey() {
+  const btn = findGameNavButtonBySearchTerms(['quest', 'quests', 'quest log']);
+  if (!btn) {
+    console.warn('[Mod Settings] Quest log hotkey pressed but no matching nav button was found');
+    return;
+  }
+  btn.click();
+}
+
+function openStoreFromHotkey() {
+  const btn = findGameNavButtonBySearchTerms(['store', 'shop']);
+  if (!btn) {
+    console.warn('[Mod Settings] Store hotkey pressed but no matching nav button was found');
+    return;
+  }
+  btn.click();
+}
+
+/** Same action as the Last Visited Map / Return to Map nav button (caller must gate on `showLastVisitedMapButton`). */
+function triggerReturnToMapFromHotkey() {
+  try {
+    navigateToLastMap();
+  } catch (error) {
+    console.warn('[Mod Settings] Return to map hotkey failed:', error);
+  }
+}
+
+/**
+ * Ordered Setup/Save buttons from the stored-setups bar (same detection as Better Setups.js).
+ * @returns {HTMLButtonElement[]}
+ */
+function findBetterSetupMainActionButtonsInOrder() {
+  const setupContainer = document.querySelector('.mb-2.flex.items-center.gap-2');
+  if (!setupContainer) return [];
+  const out = [];
+  for (const btn of setupContainer.querySelectorAll('button')) {
+    const label = (btn.textContent || '').trim();
+    if (!label.includes('Setup (') && !label.includes('Save (')) continue;
+    if (btn.classList.contains('edit-label-btn')) continue;
+    out.push(btn);
+  }
+  return out;
+}
+
+function clickBetterSetupSlotFromHotkey(zeroBasedSlotIndex) {
+  const buttons = findBetterSetupMainActionButtonsInOrder();
+  const btn = buttons[zeroBasedSlotIndex];
+  if (!btn) {
+    console.warn(
+      `[Mod Settings] Setup hotkey slot ${zeroBasedSlotIndex + 1}: no matching button (found ${buttons.length} setup/save button(s))`
+    );
+    return;
+  }
+  btn.click();
+}
+
+function handleGlobalHotkeys(event) {
+  if (!event || event.repeat) return;
+  if (hotkeysState.hotkeyCaptureMode !== null) return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (isTypingIntoInput(event.target)) return;
+
+  const pressedId = normalizeHotkeyIdentifierFromKey(event.key);
+  if (!pressedId) return;
+
+  const invId = sanitizeStoredHotkey(config.hotkeyOpenInventory, '');
+  const questId = sanitizeStoredHotkey(config.hotkeyOpenQuestLog, '');
+  const storeId = sanitizeStoredHotkey(config.hotkeyOpenStore, '');
+
+  if (invId && pressedId === invId) {
+    event.preventDefault();
+    openInventoryFromHotkey();
+    return;
+  }
+  if (questId && pressedId === questId) {
+    event.preventDefault();
+    openQuestLogFromHotkey();
+    return;
+  }
+  if (storeId && pressedId === storeId) {
+    event.preventDefault();
+    openStoreFromHotkey();
+    return;
+  }
+  const returnMapId = sanitizeStoredHotkey(config.hotkeyReturnToMap, '');
+  if (returnMapId && pressedId === returnMapId) {
+    if (!config.showLastVisitedMapButton) return;
+    event.preventDefault();
+    triggerReturnToMapFromHotkey();
+    return;
+  }
+  for (let i = 0; i < 8; i++) {
+    const setupCfgKey = `hotkeySetupSlot${i + 1}`;
+    const setupKeyId = sanitizeStoredHotkey(config[setupCfgKey], '');
+    if (setupKeyId && pressedId === setupKeyId) {
+      event.preventDefault();
+      clickBetterSetupSlotFromHotkey(i);
+      return;
+    }
+  }
+}
+
+function initHotkeys() {
+  if (hotkeysState.keydownListener) {
+    window.removeEventListener('keydown', hotkeysState.keydownListener, true);
+  }
+
+  hotkeysState.keydownListener = handleGlobalHotkeys;
+  window.addEventListener('keydown', hotkeysState.keydownListener, true);
+}
+
+function cleanupHotkeys() {
+  if (typeof hotkeysState.detachHotkeyCapture === 'function') {
+    hotkeysState.detachHotkeyCapture();
+  }
+  if (!hotkeysState.keydownListener) return;
+  window.removeEventListener('keydown', hotkeysState.keydownListener, true);
+  hotkeysState.keydownListener = null;
+}
+
+const HOTKEY_CAPTURE_IDLE_CLASS =
+  'focus-style-visible hotkey-capture-btn pixel-font-14 flex shrink-0 cursor-pointer items-center justify-center tracking-wide text-whiteRegular frame-1 surface-regular px-2 py-0.5 pb-[3px]';
+const HOTKEY_CAPTURE_ACTIVE_CLASS =
+  'focus-style-visible hotkey-capture-btn pixel-font-14 flex shrink-0 cursor-pointer items-center justify-center tracking-wide text-whiteExp frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px]';
+const HOTKEY_RESET_BUTTON_CLASS =
+  'focus-style-visible hotkey-reset-btn pixel-font-14 frame-1 active:frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px] text-whiteRegular';
+
+const NAV_HOTKEY_BINDING_KEYS = ['hotkeyOpenInventory', 'hotkeyOpenQuestLog', 'hotkeyOpenStore'];
+
+const NAV_HOTKEY_UI_ROWS = [
+  {
+    configKey: 'hotkeyOpenInventory',
+    captureId: 'hotkey-open-inventory-capture-btn',
+    resetId: 'hotkey-open-inventory-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyOpenQuestLog',
+    captureId: 'hotkey-open-quest-log-capture-btn',
+    resetId: 'hotkey-open-quest-log-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyOpenStore',
+    captureId: 'hotkey-open-store-capture-btn',
+    resetId: 'hotkey-open-store-reset-btn',
+    displayFallback: ''
+  }
+];
+
+const MODS_HOTKEY_UI_ROWS = [
+  {
+    configKey: 'hotkeyReturnToMap',
+    captureId: 'hotkey-return-to-map-capture-btn',
+    resetId: 'hotkey-return-to-map-reset-btn',
+    displayFallback: ''
+  }
+];
+
+const SETUP_HOTKEY_UI_ROWS = [
+  { configKey: 'hotkeySetupSlot1', captureId: 'hotkey-setup-slot-1-capture-btn', resetId: 'hotkey-setup-slot-1-reset-btn', displayFallback: '' },
+  { configKey: 'hotkeySetupSlot2', captureId: 'hotkey-setup-slot-2-capture-btn', resetId: 'hotkey-setup-slot-2-reset-btn', displayFallback: '' },
+  { configKey: 'hotkeySetupSlot3', captureId: 'hotkey-setup-slot-3-capture-btn', resetId: 'hotkey-setup-slot-3-reset-btn', displayFallback: '' },
+  { configKey: 'hotkeySetupSlot4', captureId: 'hotkey-setup-slot-4-capture-btn', resetId: 'hotkey-setup-slot-4-reset-btn', displayFallback: '' },
+  { configKey: 'hotkeySetupSlot5', captureId: 'hotkey-setup-slot-5-capture-btn', resetId: 'hotkey-setup-slot-5-reset-btn', displayFallback: '' },
+  { configKey: 'hotkeySetupSlot6', captureId: 'hotkey-setup-slot-6-capture-btn', resetId: 'hotkey-setup-slot-6-reset-btn', displayFallback: '' },
+  { configKey: 'hotkeySetupSlot7', captureId: 'hotkey-setup-slot-7-capture-btn', resetId: 'hotkey-setup-slot-7-reset-btn', displayFallback: '' },
+  { configKey: 'hotkeySetupSlot8', captureId: 'hotkey-setup-slot-8-capture-btn', resetId: 'hotkey-setup-slot-8-reset-btn', displayFallback: '' }
+];
+
+const MODS_HOTKEY_BINDING_KEYS = MODS_HOTKEY_UI_ROWS.map((r) => r.configKey);
+const SETUP_HOTKEY_BINDING_KEYS = SETUP_HOTKEY_UI_ROWS.map((r) => r.configKey);
+const ALL_HOTKEY_BINDING_KEYS = NAV_HOTKEY_BINDING_KEYS.concat(MODS_HOTKEY_BINDING_KEYS).concat(SETUP_HOTKEY_BINDING_KEYS);
+
+const ALL_HOTKEY_UI_ROWS = NAV_HOTKEY_UI_ROWS.concat(MODS_HOTKEY_UI_ROWS).concat(SETUP_HOTKEY_UI_ROWS);
+
+function effectiveNavHotkeyBinding(configKey) {
+  return sanitizeStoredHotkey(config[configKey], '');
+}
+
+/** Clears the same key from other hotkey rows (nav + mods + setups) so only one row owns it. */
+function clearConflictingNavHotkeys(boundId, exceptConfigKey) {
+  for (const k of ALL_HOTKEY_BINDING_KEYS) {
+    if (k === exceptConfigKey) continue;
+    if (effectiveNavHotkeyBinding(k) === boundId) config[k] = '';
+  }
+}
+
+function sizeHotkeyCaptureToResetButton(captureButton, resetButton) {
+  if (!captureButton || !resetButton) return;
+  const r = resetButton.getBoundingClientRect();
+  const w = Math.max(1, Math.round(r.width));
+  const h = Math.max(1, Math.round(r.height));
+  const wPx = `${w}px`;
+  const hPx = `${h}px`;
+  captureButton.style.setProperty('width', wPx, 'important');
+  captureButton.style.setProperty('height', hPx, 'important');
+  captureButton.style.setProperty('min-width', wPx, 'important');
+  captureButton.style.setProperty('max-width', wPx, 'important');
+  captureButton.style.setProperty('min-height', hPx, 'important');
+  captureButton.style.setProperty('max-height', hPx, 'important');
+  captureButton.style.setProperty('box-sizing', 'border-box', 'important');
+  captureButton.style.setProperty('flex-shrink', '0', 'important');
+}
+
+function syncAllNavHotkeyCaptureDisplays() {
+  for (const row of ALL_HOTKEY_UI_ROWS) {
+    const cap = document.getElementById(row.captureId);
+    const res = document.getElementById(row.resetId);
+    if (cap) {
+      cap.textContent = formatHotkeyForDisplay(config[row.configKey], row.displayFallback);
+      cap.className = HOTKEY_CAPTURE_IDLE_CLASS;
+    }
+    if (res) res.className = HOTKEY_RESET_BUTTON_CLASS;
+    if (cap && res) sizeHotkeyCaptureToResetButton(cap, res);
+  }
+  scheduleTimeout(() => {
+    for (const row of ALL_HOTKEY_UI_ROWS) {
+      const cap = document.getElementById(row.captureId);
+      const res = document.getElementById(row.resetId);
+      if (cap && res) sizeHotkeyCaptureToResetButton(cap, res);
+    }
+  }, 0);
+}
+
+/**
+ * Hotkeys tab: capture + reset row. configKey is e.g. hotkeyOpenInventory; defaultKeyForReset is the key restored by Reset (e.g. 'i', 'q', 's').
+ */
+function bindHotkeyConfigRowInModal(captureButton, resetButton, configKey, defaultKeyForReset, displayFallback) {
+  if (!captureButton) return;
+
+  const syncHotkeyCaptureSizeToReset = () => {
+    const cap = captureButton;
+    const reset = resetButton;
+    if (!cap || !reset) return;
+    const r = reset.getBoundingClientRect();
+    const w = Math.max(1, Math.round(r.width));
+    const h = Math.max(1, Math.round(r.height));
+    const wPx = `${w}px`;
+    const hPx = `${h}px`;
+    cap.style.setProperty('width', wPx, 'important');
+    cap.style.setProperty('height', hPx, 'important');
+    cap.style.setProperty('min-width', wPx, 'important');
+    cap.style.setProperty('max-width', wPx, 'important');
+    cap.style.setProperty('min-height', hPx, 'important');
+    cap.style.setProperty('max-height', hPx, 'important');
+    cap.style.setProperty('box-sizing', 'border-box', 'important');
+    cap.style.setProperty('flex-shrink', '0', 'important');
+  };
+
+  const applyCaptureLook = (mode) => {
+    captureButton.className = mode === 'capture' ? HOTKEY_CAPTURE_ACTIVE_CLASS : HOTKEY_CAPTURE_IDLE_CLASS;
+    syncHotkeyCaptureSizeToReset();
+  };
+
+  const applyCaptureLabel = () => {
+    captureButton.textContent = formatHotkeyForDisplay(config[configKey], displayFallback);
+    applyCaptureLook('idle');
+  };
+
+  captureButton.style.pointerEvents = 'auto';
+  if (resetButton) {
+    resetButton.className = HOTKEY_RESET_BUTTON_CLASS;
+    resetButton.style.pointerEvents = 'auto';
+    resetButton.style.marginLeft = '14px';
+  }
+
+  applyCaptureLabel();
+  scheduleTimeout(syncHotkeyCaptureSizeToReset, 0);
+
+  captureButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (hotkeysState.hotkeyCaptureMode !== null) return;
+
+    hotkeysState.hotkeyCaptureMode = configKey;
+    captureButton.textContent = '…';
+    applyCaptureLook('capture');
+
+    const detachHotkeyCapture = () => {
+      window.removeEventListener('keydown', onCaptureKeydown, true);
+      document.removeEventListener('pointerdown', onCapturePointerDown, true);
+      hotkeysState.hotkeyCaptureMode = null;
+      if (hotkeysState.detachHotkeyCapture === detachHotkeyCapture) {
+        hotkeysState.detachHotkeyCapture = null;
+      }
+    };
+
+    const onCaptureKeydown = (keydownEvent) => {
+      keydownEvent.preventDefault();
+      keydownEvent.stopPropagation();
+      detachHotkeyCapture();
+
+      if (keydownEvent.key === 'Escape') {
+        applyCaptureLabel();
+        return;
+      }
+
+      const boundId = normalizeHotkeyIdentifierFromKey(keydownEvent.key);
+      if (!boundId || IGNORED_HOTKEY_IDS.has(boundId)) {
+        applyCaptureLabel();
+        return;
+      }
+
+      clearConflictingNavHotkeys(boundId, configKey);
+      config[configKey] = boundId;
+      saveConfig();
+      syncAllNavHotkeyCaptureDisplays();
+    };
+
+    const onCapturePointerDown = (pointerEvent) => {
+      if (captureButton.contains(pointerEvent.target) || resetButton?.contains(pointerEvent.target)) return;
+      detachHotkeyCapture();
+      applyCaptureLabel();
+    };
+
+    hotkeysState.detachHotkeyCapture = detachHotkeyCapture;
+    window.addEventListener('keydown', onCaptureKeydown, true);
+    scheduleTimeout(() => {
+      document.addEventListener('pointerdown', onCapturePointerDown, true);
+    }, 0);
+  });
+
+  if (resetButton) {
+    resetButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (typeof hotkeysState.detachHotkeyCapture === 'function') {
+        hotkeysState.detachHotkeyCapture();
+      }
+      config[configKey] = defaultKeyForReset;
+      clearConflictingNavHotkeys(defaultKeyForReset, configKey);
+      saveConfig();
+      syncAllNavHotkeyCaptureDisplays();
+    });
+  }
+}
 
 // Subscriptions state
 const subscriptions = {
@@ -3133,6 +3595,7 @@ function showSettingsModal() {
       { id: 'creatures', label: t('mods.betterUI.menuCreatures'), selected: true },
       { id: 'depot-manager', label: t('mods.depot.title'), selected: false },
       { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
+      { id: 'hotkeys', label: 'Hotkeys', selected: false },
       { id: 'mod-coordination', label: t('mods.betterUI.menuModCoordination'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
       { id: 'backup', label: t('mods.betterUI.menuBackup'), selected: false }
@@ -3141,15 +3604,15 @@ function showSettingsModal() {
     // Check if Hunt Analyzer mod is enabled and add the tab if it is
     const huntAnalyzerMod = window.localMods.find(mod => mod.name === 'Super Mods/Hunt Analyzer.js');
     if (huntAnalyzerMod?.enabled) {
-      // Insert Hunt Analyzer tab after ui (base: creatures, depot-manager, ui, …)
-      menuItems.splice(3, 0, { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false });
+      // Insert Hunt Analyzer tab after hotkeys (base: creatures, depot-manager, ui, hotkeys, …)
+      menuItems.splice(4, 0, { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false });
     }
 
     // Check if VIP List mod is enabled and add the tab if it is
     const vipListMod = window.localMods.find(mod => mod.name === 'OT Mods/VIP List.js');
     if (vipListMod?.enabled) {
-      // Insert VIP List tab after hunt-analyzer (or after ui if hunt-analyzer is not enabled)
-      const insertPosition = huntAnalyzerMod?.enabled ? 4 : 3;
+      // Insert VIP List tab after hunt-analyzer (or after hotkeys if hunt-analyzer is not enabled)
+      const insertPosition = huntAnalyzerMod?.enabled ? 5 : 4;
       menuItems.splice(insertPosition, 0, { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false });
     }
     
@@ -3367,6 +3830,73 @@ function showSettingsModal() {
           </div>
         `;
         rightColumn.appendChild(depotContent);
+      } else if (categoryId === 'hotkeys') {
+        const setupHotkeyRowsHtml = [1, 2, 3, 4, 5, 6, 7, 8]
+          .map(
+            (i) => `
+            <div class="hotkey-setup-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: ${i === 1 ? '0' : '12px'};">
+              <span style="color: #ccc; min-width: 130px;">Setup ${i}</span>
+              <button type="button" id="hotkey-setup-slot-${i}-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+                F${i}
+              </button>
+              <button type="button" id="hotkey-setup-slot-${i}-reset-btn" style="pointer-events: auto;">
+                Reset
+              </button>
+            </div>`
+          )
+          .join('');
+        const hotkeysContent = document.createElement('div');
+        hotkeysContent.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">General</h4>
+            <div class="hotkey-inventory-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span style="color: #ccc; min-width: 130px;">Open Inventory</span>
+              <button type="button" id="hotkey-open-inventory-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+                I
+              </button>
+              <button type="button" id="hotkey-open-inventory-reset-btn" style="pointer-events: auto;">
+                Reset
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
+              <span style="color: #ccc; min-width: 130px;">Open Quest Log</span>
+              <button type="button" id="hotkey-open-quest-log-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+                Q
+              </button>
+              <button type="button" id="hotkey-open-quest-log-reset-btn" style="pointer-events: auto;">
+                Reset
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
+              <span style="color: #ccc; min-width: 130px;">Open Store</span>
+              <button type="button" id="hotkey-open-store-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+                S
+              </button>
+              <button type="button" id="hotkey-open-store-reset-btn" style="pointer-events: auto;">
+                Reset
+              </button>
+            </div>
+          </div>
+          <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">Mods</h4>
+            <div id="hotkeys-mods-section">
+              <div class="hotkey-inventory-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <span style="color: #ccc; min-width: 130px;">Return to Map</span>
+                <button type="button" id="hotkey-return-to-map-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+                  Tab
+                </button>
+                <button type="button" id="hotkey-return-to-map-reset-btn" style="pointer-events: auto;">
+                  Reset
+                </button>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">Setups</h4>
+            <div id="hotkeys-setups-section">${setupHotkeyRowsHtml}</div>
+          </div>
+        `;
+        rightColumn.appendChild(hotkeysContent);
       } else if (categoryId === 'advanced') {
         // Read Bestiary Automator config values BEFORE creating HTML to ensure correct initial state
         let useApiForStaminaRefill = false;
@@ -3853,7 +4383,45 @@ function showSettingsModal() {
       if (inventoryBorderStyleSelector) {
         createSettingsDropdownHandler('inventoryBorderStyle')(inventoryBorderStyleSelector);
       }
-      
+
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-inventory-capture-btn'),
+        content.querySelector('#hotkey-open-inventory-reset-btn'),
+        'hotkeyOpenInventory',
+        'i',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-quest-log-capture-btn'),
+        content.querySelector('#hotkey-open-quest-log-reset-btn'),
+        'hotkeyOpenQuestLog',
+        'q',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-store-capture-btn'),
+        content.querySelector('#hotkey-open-store-reset-btn'),
+        'hotkeyOpenStore',
+        's',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-return-to-map-capture-btn'),
+        content.querySelector('#hotkey-return-to-map-reset-btn'),
+        'hotkeyReturnToMap',
+        'tab',
+        ''
+      );
+      for (let slot = 1; slot <= 8; slot++) {
+        bindHotkeyConfigRowInModal(
+          content.querySelector(`#hotkey-setup-slot-${slot}-capture-btn`),
+          content.querySelector(`#hotkey-setup-slot-${slot}-reset-btn`),
+          `hotkeySetupSlot${slot}`,
+          `f${slot}`,
+          ''
+        );
+      }
+
       const betterHighscoresOpacitySlider = content.querySelector('#better-highscores-opacity-slider');
       const betterHighscoresOpacityValue = content.querySelector('#better-highscores-opacity-value');
       if (betterHighscoresOpacitySlider && betterHighscoresOpacityValue) {
@@ -8877,6 +9445,8 @@ function initBetterUI() {
         hideWebsiteFooter();
       }, 1000); // Delay to ensure DOM is ready
     }
+
+    initHotkeys();
     
     console.log('[Mod Settings] Initialization completed');
     
@@ -8960,6 +9530,7 @@ function cleanupBetterUI() {
     
     stopAutoplayRefreshMonitor();
     disableAntiIdleSounds();
+    cleanupHotkeys();
     
     // Cleanup playercount
     if (playercountState.updateInterval) {

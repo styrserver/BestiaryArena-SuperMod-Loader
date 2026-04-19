@@ -121,11 +121,23 @@ const TIMING = {
   REWARDS_COLLECT_DELAY: 500,    // Delay for rewards collection
   CUBE_OPEN_DELAY: 1000,          // Min delay between Surprise Cube opens (≤1 per second)
   CUBE_INVENTORY_SETTLE_MS: 50, // Wait after apply before snapshot (reward diff)
+  CUBE_API_MAX_ATTEMPTS: 4,       // First try + retries for inventory.surpriseCube fetch
+  CUBE_API_RETRY_BASE_DELAY_MS: 500, // Backoff: (httpTry - 1) * this before each retry
   DAYCARE_LEVELUP_DELAY: 1000,   // Delay after daycare level up
   DAYCARE_EJECTION_DELAY: 1000,  // Delay after daycare ejection
   SCROLL_LOCK_CHECK_DELAY: 150,  // Delay after ESC key for scroll lock check
   ESC_KEY_REPEAT_DELAY: 200      // Delay between repeated ESC key presses
 };
+
+/** tRPC batch POST for `inventory.surpriseCube` (same-origin session cookies). */
+const SURPRISE_CUBE_TRPC_BATCH_URL = 'https://bestiaryarena.com/api/trpc/inventory.surpriseCube?batch=1';
+
+const getTrpcGamePostHeaders = () => ({
+  accept: '*/*',
+  'content-type': 'application/json',
+  Referer: 'https://bestiaryarena.com/game',
+  'X-Game-Version': '1'
+});
 
 // Only track states that prevent conflicts
 const AUTOMATION_STATES = {
@@ -926,8 +938,15 @@ const normalizeNumericDiffValue = (value) => {
   return null;
 };
 
-/** Apply API `rewardInventoryDiff` (partial counts for opened rewards). */
-const applyRewardInventoryPartial = (diff) => {
+const isSurpriseCubeInventoryKey = (key) => /^surpriseCube[1-5]$/.test(key);
+
+/**
+ * Apply additive inventory deltas (matches Hy'genie-style `inventoryDiff`).
+ * @param {Record<string, unknown>} diff
+ * @param {{ keyFilter?: (key: string) => boolean }} [options]
+ */
+const applyInventoryDelta = (diff, options = {}) => {
+  const keyFilter = options.keyFilter;
   if (!diff || !isGameStateAPIAvailable()) {
     return;
   }
@@ -937,38 +956,16 @@ const applyRewardInventoryPartial = (diff) => {
       const newState = { ...prev };
       newState.inventory = { ...prev.inventory };
       for (const [key, value] of Object.entries(diff)) {
-        const num = normalizeNumericDiffValue(value);
-        if (num === null) continue;
-        const prevCount = getInventoryItemCount(newState.inventory, key);
-        let nextCount;
-        if (num < 0) {
-          nextCount = Math.max(0, prevCount + num);
-        } else {
-          nextCount = num;
+        if (typeof keyFilter === 'function' && !keyFilter(key)) {
+          continue;
         }
-        setInventoryItemCountMutable(newState.inventory, key, nextCount);
-      }
-      return newState;
-    }
-  });
-};
-
-/** Additive diff for surpriseCube keys (when server sends inventoryDiff-style deltas). */
-const applySurpriseCubeAdditiveDiff = (diff) => {
-  if (!diff || !isGameStateAPIAvailable()) {
-    return;
-  }
-  globalThis.state.player.send({
-    type: 'setState',
-    fn: (prev) => {
-      const newState = { ...prev };
-      newState.inventory = { ...prev.inventory };
-      for (const [key, delta] of Object.entries(diff)) {
-        if (!/^surpriseCube[1-5]$/.test(key)) continue;
-        const num = normalizeNumericDiffValue(delta);
-        if (num === null) continue;
+        const num = normalizeNumericDiffValue(value);
+        if (num === null) {
+          continue;
+        }
         const prevCount = getInventoryItemCount(newState.inventory, key);
-        setInventoryItemCountMutable(newState.inventory, key, Math.max(0, prevCount + num));
+        const nextCount = Math.max(0, prevCount + num);
+        setInventoryItemCountMutable(newState.inventory, key, nextCount);
       }
       return newState;
     }
@@ -980,18 +977,32 @@ const applySurpriseCubeOpenResponse = (data, openedTier) => {
     return;
   }
   const cubeKey = `surpriseCube${openedTier}`;
+  const stacksBefore = getSurpriseCubeStackSnapshot(getPlayerInventory());
+  const dataKeys = typeof data === 'object' && data !== null ? Object.keys(data) : [];
   if (data.rewardInventoryDiff && Object.keys(data.rewardInventoryDiff).length > 0) {
     const merged = { ...data.rewardInventoryDiff };
-    if (!Object.prototype.hasOwnProperty.call(merged, cubeKey) || normalizeNumericDiffValue(merged[cubeKey]) === null) {
+    const hadCubeKey = Object.prototype.hasOwnProperty.call(merged, cubeKey);
+    const cubeValNorm = normalizeNumericDiffValue(merged[cubeKey]);
+    const injectedConsume = !hadCubeKey || cubeValNorm === null;
+    if (injectedConsume) {
       merged[cubeKey] = -1;
     }
-    applyRewardInventoryPartial(merged);
+    console.log('[Bestiary Automator] [cubes] apply response', {
+      path: 'rewardInventoryDiff',
+      openedTier,
+      cubeKey,
+      stacksBefore,
+      rewardInventoryDiff: summarizeDiffForCubeLog(data.rewardInventoryDiff),
+      mergedApplied: summarizeDiffForCubeLog(merged),
+      injectedConsumeMinusOne: injectedConsume
+    });
+    applyInventoryDelta(merged);
     return;
   }
   const cubeAdditive = {};
   if (data.inventoryDiff) {
     for (const [k, v] of Object.entries(data.inventoryDiff)) {
-      if (!/^surpriseCube[1-5]$/.test(k)) continue;
+      if (!isSurpriseCubeInventoryKey(k)) continue;
       const n = normalizeNumericDiffValue(v);
       if (n !== null) {
         cubeAdditive[k] = n;
@@ -999,13 +1010,29 @@ const applySurpriseCubeOpenResponse = (data, openedTier) => {
     }
   }
   if (Object.keys(cubeAdditive).length > 0) {
-    if (!Object.prototype.hasOwnProperty.call(cubeAdditive, cubeKey)) {
+    const injectedCubeConsume = !Object.prototype.hasOwnProperty.call(cubeAdditive, cubeKey);
+    if (injectedCubeConsume) {
       cubeAdditive[cubeKey] = -1;
     }
-    applySurpriseCubeAdditiveDiff(cubeAdditive);
+    console.log('[Bestiary Automator] [cubes] apply response', {
+      path: 'inventoryDiff.surpriseCube*',
+      openedTier,
+      cubeKey,
+      stacksBefore,
+      inventoryDiffSurpriseOnly: summarizeDiffForCubeLog(cubeAdditive),
+      injectedConsumeMinusOne: injectedCubeConsume
+    });
+    applyInventoryDelta(cubeAdditive, { keyFilter: isSurpriseCubeInventoryKey });
     return;
   }
-  applyRewardInventoryPartial({ [cubeKey]: -1 });
+  console.log('[Bestiary Automator] [cubes] apply response', {
+    path: 'fallbackMinusOne',
+    openedTier,
+    cubeKey,
+    stacksBefore,
+    dataKeys
+  });
+  applyInventoryDelta({ [cubeKey]: -1 });
 };
 
 const snapshotInventoryCounts = () => {
@@ -1030,6 +1057,73 @@ const getTotalSurpriseCubeCount = (inv) => {
     sum += getInventoryItemCount(inv, `surpriseCube${t}`);
   }
   return sum;
+};
+
+/** Per-tier counts for `[cubes]` debug (compact, stable field names). */
+const getSurpriseCubeStackSnapshot = (inv) => ({
+  t1: getInventoryItemCount(inv, 'surpriseCube1'),
+  t2: getInventoryItemCount(inv, 'surpriseCube2'),
+  t3: getInventoryItemCount(inv, 'surpriseCube3'),
+  t4: getInventoryItemCount(inv, 'surpriseCube4'),
+  t5: getInventoryItemCount(inv, 'surpriseCube5'),
+  total: getTotalSurpriseCubeCount(inv)
+});
+
+/** Lowest tier 1..5 with surpriseCube{tier} count greater than 0, or 0 if none (same order as the old nested tier loops). */
+const findFirstSurpriseCubeTierWithStock = (inv) => {
+  if (!inv || typeof inv !== 'object') {
+    return 0;
+  }
+  for (let t = 1; t <= 5; t++) {
+    if (getInventoryItemCount(inv, `surpriseCube${t}`) > 0) {
+      return t;
+    }
+  }
+  return 0;
+};
+
+const isCubeApiRetriableHttpStatus = (status) =>
+  status === 403 ||
+  status === 408 ||
+  status === 429 ||
+  (status >= 500 && status <= 599);
+
+/** After retries: treat as client/server mismatch and drop one local cube (no reward apply). */
+const isCubeApiLocalConsumeFallbackHttpStatus = (status) => status === 403;
+
+/** When fetch fails or HTTP errors persist: subtract one cube locally so the batch can continue. */
+const applyLocalSurpriseCubeConsumeMismatch = (tier, reason) => {
+  const key = `surpriseCube${tier}`;
+  const stacksBefore = getSurpriseCubeStackSnapshot(getPlayerInventory());
+  applyInventoryDelta({ [key]: -1 });
+  console.log('[Bestiary Automator] [cubes] Mismatch fallback: local -1 (no server payload)', {
+    tier,
+    reason,
+    stacksBefore,
+    stacksAfter: getSurpriseCubeStackSnapshot(getPlayerInventory())
+  });
+};
+
+/** Shallow copy of a diff object for logs (avoid huge payloads). */
+const summarizeDiffForCubeLog = (diff, maxKeys = 48) => {
+  if (!diff || typeof diff !== 'object') {
+    return null;
+  }
+  const keys = Object.keys(diff);
+  if (keys.length === 0) {
+    return {};
+  }
+  const out = {};
+  const slice = keys.length > maxKeys ? keys.slice(0, maxKeys) : keys;
+  for (const k of slice) {
+    const n = normalizeNumericDiffValue(diff[k]);
+    out[k] = n !== null ? n : typeof diff[k];
+  }
+  if (keys.length > maxKeys) {
+    out._truncated = true;
+    out._totalKeys = keys.length;
+  }
+  return out;
 };
 
 /** Matches `inventory-database.js` / in-game tooltips (Deformed … Perfect). */
@@ -1057,6 +1151,105 @@ const getSurpriseCubeDisplayName = (tier) => {
 /** Official item art for all surprise cube tiers (tier accent via border/glow). */
 const SURPRISE_CUBE_TOAST_ICON_URL = 'https://bestiaryarena.com/assets/ITEM/23488.png';
 
+const getInventoryTooltipForKey = (itemKey) => {
+  const tt = typeof window !== 'undefined' ? window.inventoryTooltips : null;
+  if (tt && tt[itemKey]) {
+    return tt[itemKey];
+  }
+  const db = typeof window !== 'undefined' ? window.inventoryDatabase : null;
+  if (db && db.tooltips && db.tooltips[itemKey]) {
+    return db.tooltips[itemKey];
+  }
+  return null;
+};
+
+const resolveInventoryIconAssetUrl = (icon) => {
+  if (!icon || typeof icon !== 'string') {
+    return null;
+  }
+  const t = icon.trim();
+  if (t.startsWith('http://') || t.startsWith('https://')) {
+    return t;
+  }
+  if (t.startsWith('sprite://')) {
+    const id = t.replace(/^sprite:\/\//, '');
+    if (/^\d+$/.test(id)) {
+      return `https://bestiaryarena.com/assets/ITEM/${id}.png`;
+    }
+  }
+  if (t.startsWith('/')) {
+    return `https://bestiaryarena.com${t}`;
+  }
+  return null;
+};
+
+const getToastDisplayNameForItemKey = (itemKey) => {
+  const tip = getInventoryTooltipForKey(itemKey);
+  return (tip && tip.displayName) || itemKey;
+};
+
+const getToastRarityTierForItemKey = (itemKey) => {
+  const tip = getInventoryTooltipForKey(itemKey);
+  const r = tip && tip.rarity != null ? Number(tip.rarity) : NaN;
+  return Number.isFinite(r) && r >= 1 && r <= 5 ? r : 1;
+};
+
+/** Primary loot row for the cube toast (prefers `rewardInventoryDiff`, else positive `inventoryDiff` lines). */
+const buildCubeOpenToastRewardContext = (data) => {
+  if (!data || typeof data !== 'object') {
+    return { primaryReward: null, summaryParts: [] };
+  }
+  let diff = data.rewardInventoryDiff;
+  if (!diff || typeof diff !== 'object' || Object.keys(diff).length === 0) {
+    const invD = data.inventoryDiff;
+    if (invD && typeof invD === 'object') {
+      const alt = {};
+      for (const [k, raw] of Object.entries(invD)) {
+        const n = normalizeNumericDiffValue(raw);
+        if (n === null || n <= 0) {
+          continue;
+        }
+        alt[k] = raw;
+      }
+      if (Object.keys(alt).length > 0) {
+        diff = alt;
+      }
+    }
+  }
+  if (!diff || typeof diff !== 'object') {
+    return { primaryReward: null, summaryParts: [] };
+  }
+  const positives = [];
+  for (const [key, raw] of Object.entries(diff)) {
+    const n = normalizeNumericDiffValue(raw);
+    if (n === null || n === 0) {
+      continue;
+    }
+    positives.push({ key, delta: n });
+  }
+  if (positives.length === 0) {
+    return { primaryReward: null, summaryParts: [] };
+  }
+  const nonCube = positives.filter((p) => !isSurpriseCubeInventoryKey(p.key));
+  const cubeOnly = positives.filter((p) => isSurpriseCubeInventoryKey(p.key));
+  const ordered = nonCube.length > 0 ? [...nonCube, ...cubeOnly] : cubeOnly;
+  const primary = ordered[0];
+  const summaryParts = ordered.map((p) => {
+    const name = getToastDisplayNameForItemKey(p.key);
+    const sign = p.delta > 0 ? '+' : '';
+    return `${sign}${p.delta} ${name}`;
+  });
+  return {
+    primaryReward: {
+      key: primary.key,
+      delta: primary.delta,
+      displayName: getToastDisplayNameForItemKey(primary.key),
+      rarityTier: getToastRarityTierForItemKey(primary.key)
+    },
+    summaryParts
+  };
+};
+
 const getSurpriseCubeTierRarityColor = (tier) => {
   const key = String(tier);
   const colors = typeof window !== 'undefined' && window.inventoryDatabase && window.inventoryDatabase.rarityColors
@@ -1069,10 +1262,100 @@ const getSurpriseCubeTierRarityColor = (tier) => {
   return fallback[key] || fallback['1'];
 };
 
-const showCubeOpenedToast = (tier) => {
+/**
+ * Icon slot matching Cyclopedia `renderSpriteIcon` / `renderStyledImgPortrait` (game CSS drives spritesheets).
+ * @param {string} borderColor
+ * @param {string} itemKey inventory key e.g. `surpriseCube5`, `diceManipulator5`
+ */
+const makeCubeToastIconForItemKey = (borderColor, itemKey) => {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = `
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    border: 2px solid ${borderColor};
+    box-shadow: 0 0 8px ${borderColor};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.2);
+  `;
+  const tip = getInventoryTooltipForKey(itemKey);
+  const icon = tip && tip.icon;
+  const rarity = tip && tip.rarity != null ? String(tip.rarity) : '1';
+
+  const appendPlainImg = (url) => {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    img.width = 26;
+    img.height = 26;
+    img.draggable = false;
+    img.className = 'pixelated';
+    img.style.cssText = 'width: 26px; height: 26px; image-rendering: pixelated; display: block; object-fit: contain;';
+    wrap.appendChild(img);
+  };
+
+  if (icon && typeof icon === 'string') {
+    const t = icon.trim();
+    if (t.startsWith('sprite://')) {
+      const id = t.replace(/^sprite:\/\//, '');
+      if (id === '23488') {
+        appendPlainImg('https://bestiaryarena.com/assets/ITEM/23488.png');
+        return wrap;
+      }
+      if (/^\d+$/.test(id)) {
+        const slot = document.createElement('div');
+        slot.className = 'container-slot surface-darker';
+        slot.style.cssText = 'overflow: visible; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;';
+        const hasRarity = document.createElement('div');
+        hasRarity.className = 'has-rarity relative grid h-full place-items-center';
+        hasRarity.setAttribute('data-rarity', rarity);
+        const rel = document.createElement('div');
+        rel.className = 'relative size-sprite';
+        rel.style.cssText = 'overflow: visible; width: 26px; height: 26px;';
+        const sprite = document.createElement('div');
+        sprite.className = `sprite item id-${id} absolute bottom-0 right-0`;
+        const viewport = document.createElement('div');
+        viewport.className = 'viewport';
+        const sheetImg = document.createElement('img');
+        sheetImg.alt = id;
+        sheetImg.setAttribute('data-cropped', 'false');
+        sheetImg.className = 'spritesheet';
+        sheetImg.style.setProperty('--cropX', '0');
+        sheetImg.style.setProperty('--cropY', '0');
+        viewport.appendChild(sheetImg);
+        sprite.appendChild(viewport);
+        rel.appendChild(sprite);
+        hasRarity.appendChild(rel);
+        slot.appendChild(hasRarity);
+        wrap.appendChild(slot);
+        return wrap;
+      }
+    }
+  }
+
+  const url = resolveInventoryIconAssetUrl(icon) || SURPRISE_CUBE_TOAST_ICON_URL;
+  appendPlainImg(url);
+  return wrap;
+};
+
+/**
+ * @param {number} tier
+ * @param {{ primaryReward?: { key: string, delta: number, displayName: string, rarityTier: number } | null, summaryParts?: string[] }} [rewardContext]
+ */
+const showCubeOpenedToast = (tier, rewardContext = {}) => {
   try {
     const tierColor = getSurpriseCubeTierRarityColor(tier);
     const label = tReplace('mods.automator.cubeOpenedToast', { cube: getSurpriseCubeDisplayName(tier) });
+    const primary = rewardContext.primaryReward || null;
+    const summaryParts = Array.isArray(rewardContext.summaryParts) ? rewardContext.summaryParts : [];
+    const rewardsLine = summaryParts.length > 0
+      ? tReplace('mods.automator.cubeOpenedToastRewards', { rewards: summaryParts.join(', ') })
+      : '';
+
     let mainContainer = document.getElementById('bestiary-automator-toast-container');
     if (!mainContainer) {
       mainContainer = document.createElement('div');
@@ -1111,29 +1394,21 @@ const showCubeOpenedToast = (tier) => {
     const widgetBottom = document.createElement('div');
     widgetBottom.className = 'widget-bottom pixel-font-16 flex flex-row items-center gap-2 px-2 py-1 text-whiteHighlight';
     widgetBottom.style.alignItems = 'center';
+    widgetBottom.style.flexWrap = 'nowrap';
 
-    const iconWrap = document.createElement('div');
-    iconWrap.style.cssText = `
-      flex: 0 0 auto;
-      width: 32px;
-      height: 32px;
-      border-radius: 4px;
-      border: 2px solid ${tierColor};
-      box-shadow: 0 0 8px ${tierColor};
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-sizing: border-box;
-      background: rgba(0, 0, 0, 0.2);
-    `;
-    const img = document.createElement('img');
-    img.src = SURPRISE_CUBE_TOAST_ICON_URL;
-    img.alt = '';
-    img.width = 26;
-    img.height = 26;
-    img.draggable = false;
-    img.style.cssText = 'width: 26px; height: 26px; image-rendering: pixelated; display: block; object-fit: contain;';
-    iconWrap.appendChild(img);
+    const iconsRow = document.createElement('div');
+    iconsRow.style.cssText = 'display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 0 0 auto;';
+
+    iconsRow.appendChild(makeCubeToastIconForItemKey(tierColor, `surpriseCube${tier}`));
+
+    if (primary && primary.key) {
+      const arrow = document.createElement('span');
+      arrow.textContent = '→';
+      arrow.style.cssText = 'opacity: 0.9; font-size: 18px; line-height: 1; flex: 0 0 auto;';
+      iconsRow.appendChild(arrow);
+      const rewardColor = getSurpriseCubeTierRarityColor(primary.rarityTier);
+      iconsRow.appendChild(makeCubeToastIconForItemKey(rewardColor, primary.key));
+    }
 
     const textLeft = document.createElement('div');
     textLeft.className = 'text-left min-w-0';
@@ -1141,8 +1416,14 @@ const showCubeOpenedToast = (tier) => {
     paragraph.style.cssText = 'margin: 0; line-height: 1.2; max-width: 22rem;';
     paragraph.textContent = label;
     textLeft.appendChild(paragraph);
+    if (rewardsLine) {
+      const sub = document.createElement('p');
+      sub.style.cssText = 'margin: 4px 0 0 0; line-height: 1.2; max-width: 22rem; opacity: 0.92; font-size: 13px;';
+      sub.textContent = rewardsLine;
+      textLeft.appendChild(sub);
+    }
 
-    widgetBottom.appendChild(iconWrap);
+    widgetBottom.appendChild(iconsRow);
     widgetBottom.appendChild(textLeft);
     toast.appendChild(widgetTop);
     toast.appendChild(widgetBottom);
@@ -1164,43 +1445,140 @@ const showCubeOpenedToast = (tier) => {
   }
 };
 
-const openOneSurpriseCubeViaApi = async (tier) => {
+const buildSurpriseCubeOpenRequestBody = (tier) =>
+  JSON.stringify({
+    '0': {
+      json: tier
+    }
+  });
+
+const postSurpriseCubeOpenHttp = (tier) =>
+  fetch(SURPRISE_CUBE_TRPC_BATCH_URL, {
+    method: 'POST',
+    headers: getTrpcGamePostHeaders(),
+    credentials: 'include',
+    body: buildSurpriseCubeOpenRequestBody(tier)
+  });
+
+const logCubeOpenSettled = (tag, tier, invPost, extra = {}) => {
+  console.log(`[Bestiary Automator] [cubes] ${tag}`, {
+    tier,
+    stacksAfter: getSurpriseCubeStackSnapshot(invPost),
+    remainingThisTier: getInventoryItemCount(invPost, `surpriseCube${tier}`),
+    totalSurpriseCubes: getTotalSurpriseCubeCount(invPost),
+    ...extra
+  });
+};
+
+/**
+ * @param {number} tier
+ * @param {{ suppressOpenedToast?: boolean }} [cubeOpenOptions]
+ * @returns {Promise<
+ *   | { ok: true, kind: 'server_applied' | 'local_consume_only' | 'mismatch_sync', httpTry: number, maxHttpTries: number }
+ *   | { ok: false, kind: 'failed', httpStatus?: number, message?: string }
+ * >}
+ * `httpTry` is which POST succeeded (1 on first hit), not how many cubes were opened; batch `openedSoFar` counts cubes.
+ */
+const openOneSurpriseCubeViaApi = async (tier, cubeOpenOptions = {}) => {
+  const suppressOpenedToast = cubeOpenOptions.suppressOpenedToast === true;
   automatorMakingAPICall = true;
+  const maxHttpTries = TIMING.CUBE_API_MAX_ATTEMPTS;
   try {
-    console.log('[Bestiary Automator] [cubes] API open request', { tier, name: getSurpriseCubeDisplayName(tier) });
-    const response = await fetch('https://bestiaryarena.com/api/trpc/inventory.surpriseCube?batch=1', {
-      method: 'POST',
-      headers: {
-        'accept': '*/*',
-        'content-type': 'application/json',
-        'Referer': 'https://bestiaryarena.com/game',
-        'X-Game-Version': '1'
-      },
-      credentials: 'include',
-      body: JSON.stringify({
-        '0': {
-          json: tier
-        }
-      })
+    const stacksPreRequest = getSurpriseCubeStackSnapshot(getPlayerInventory());
+    console.log('[Bestiary Automator] [cubes] API open request', {
+      tier,
+      name: getSurpriseCubeDisplayName(tier),
+      stacksPreRequest,
+      maxHttpTries
     });
-    if (!response.ok) {
-      console.log('[Bestiary Automator] [cubes] API open HTTP error', { tier, status: response.status });
-      return false;
+    let lastHttpStatus = null;
+    let lastNetworkError = null;
+    for (let httpTry = 1; httpTry <= maxHttpTries; httpTry++) {
+      if (httpTry > 1) {
+        const delayMs = TIMING.CUBE_API_RETRY_BASE_DELAY_MS * (httpTry - 1);
+        console.log('[Bestiary Automator] [cubes] API open retry wait', {
+          tier,
+          httpTry,
+          maxHttpTries,
+          delayMs,
+          lastHttpStatus,
+          lastNetworkError: lastNetworkError ? String(lastNetworkError.message || lastNetworkError) : null
+        });
+        await sleep(delayMs);
+      }
+      try {
+        const response = await postSurpriseCubeOpenHttp(tier);
+        lastHttpStatus = response.status;
+        if (!response.ok) {
+          const willRetry = isCubeApiRetriableHttpStatus(response.status) && httpTry < maxHttpTries;
+          console.log('[Bestiary Automator] [cubes] API open HTTP error', {
+            tier,
+            status: response.status,
+            httpTry,
+            maxHttpTries,
+            willRetry
+          });
+          if (willRetry) {
+            continue;
+          }
+          if (isCubeApiLocalConsumeFallbackHttpStatus(response.status)) {
+            applyLocalSurpriseCubeConsumeMismatch(tier, `HTTP ${response.status} after HTTP try ${httpTry}/${maxHttpTries}`);
+            await sleep(TIMING.CUBE_INVENTORY_SETTLE_MS);
+            logCubeOpenSettled('API open settled (mismatch fallback)', tier, getPlayerInventory(), { httpTry, maxHttpTries });
+            return { ok: true, kind: 'mismatch_sync', httpTry, maxHttpTries };
+          }
+          return { ok: false, kind: 'failed', httpStatus: response.status };
+        }
+        const result = await response.json();
+        const data = extractAPIResponseData(result);
+        let toastRewardContext = { primaryReward: null, summaryParts: [] };
+        if (data) {
+          applySurpriseCubeOpenResponse(data, tier);
+          toastRewardContext = buildCubeOpenToastRewardContext(data);
+        } else {
+          const err0 = result && result[0] && result[0].error;
+          console.log('[Bestiary Automator] [cubes] API open: no json payload (using local -1 only)', {
+            tier,
+            hasResultArray: Array.isArray(result),
+            trpcError: err0
+              ? { code: err0.data?.code, httpStatus: err0.data?.httpStatus, message: err0.json?.message ?? err0.message }
+              : null,
+            resultShape: result == null ? null : (Array.isArray(result) ? `array[${result.length}]` : typeof result)
+          });
+          applyInventoryDelta({ [`surpriseCube${tier}`]: -1 });
+        }
+        await sleep(TIMING.CUBE_INVENTORY_SETTLE_MS);
+        if (!suppressOpenedToast) {
+          showCubeOpenedToast(tier, toastRewardContext);
+        }
+        const invPost = getPlayerInventory();
+        logCubeOpenSettled('API open OK', tier, invPost, { httpTry, maxHttpTries });
+        return {
+          ok: true,
+          kind: data ? 'server_applied' : 'local_consume_only',
+          httpTry,
+          maxHttpTries
+        };
+      } catch (error) {
+        lastNetworkError = error;
+        const willRetry = httpTry < maxHttpTries;
+        console.log('[Bestiary Automator] [cubes] API open fetch/parse error', {
+          tier,
+          httpTry,
+          maxHttpTries,
+          willRetry,
+          message: error && error.message ? error.message : String(error)
+        });
+        if (willRetry) {
+          continue;
+        }
+        applyLocalSurpriseCubeConsumeMismatch(tier, 'network or parse error after retries');
+        await sleep(TIMING.CUBE_INVENTORY_SETTLE_MS);
+        logCubeOpenSettled('API open settled (mismatch fallback)', tier, getPlayerInventory(), { httpTry, maxHttpTries });
+        return { ok: true, kind: 'mismatch_sync', httpTry, maxHttpTries };
+      }
     }
-    const result = await response.json();
-    const data = extractAPIResponseData(result);
-    if (data) {
-      applySurpriseCubeOpenResponse(data, tier);
-    } else {
-      applyRewardInventoryPartial({ [`surpriseCube${tier}`]: -1 });
-    }
-    await sleep(TIMING.CUBE_INVENTORY_SETTLE_MS);
-    showCubeOpenedToast(tier);
-    console.log('[Bestiary Automator] [cubes] API open OK', { tier, remainingThisTier: getInventoryItemCount(getPlayerInventory(), `surpriseCube${tier}`), totalSurpriseCubes: getTotalSurpriseCubeCount(getPlayerInventory()) });
-    return true;
-  } catch (error) {
-    console.log('[Bestiary Automator] [cubes] openOneSurpriseCubeViaApi error:', error);
-    return false;
+    return { ok: false, kind: 'failed', message: 'max HTTP tries exhausted' };
   } finally {
     automatorMakingAPICall = false;
   }
@@ -1209,68 +1587,143 @@ const openOneSurpriseCubeViaApi = async (tier) => {
 const openAllSurpriseCubesFromInventory = async (options = {}) => {
   const silentWhenEmpty = options.silentWhenEmpty === true;
   const abortWhenAutoOpenOff = options.abortWhenAutoOpenOff === true;
+  /** When true (e.g. session auto-open), do not show custom automator toasts for failures — log only so background runs stay quiet. */
+  const suppressCubeErrorToasts = options.suppressCubeErrorToasts === true;
+  /** When true, skip per-open cube celebration toasts (same shape as error suppression for background batches). */
+  const suppressCubeOpenedToasts = options.suppressCubeOpenedToasts === true;
+  const cubeOpenUi = { suppressOpenedToast: suppressCubeOpenedToasts };
   const statusToastMs = TIMING.TOAST_AUTO_REMOVE;
-  console.log('[Bestiary Automator] [cubes] Batch start', { silentWhenEmpty, abortWhenAutoOpenOff, totalSurpriseCubes: getTotalSurpriseCubeCount(getPlayerInventory()) });
+  const inv0 = getPlayerInventory();
+  console.log('[Bestiary Automator] [cubes] Batch start', {
+    silentWhenEmpty,
+    abortWhenAutoOpenOff,
+    suppressCubeErrorToasts,
+    suppressCubeOpenedToasts,
+    stacks: getSurpriseCubeStackSnapshot(inv0),
+    totalSurpriseCubes: getTotalSurpriseCubeCount(inv0)
+  });
   if (!isGameStateAPIAvailable()) {
     console.log('[Bestiary Automator] [cubes] Batch aborted: no game state');
-    showAutomatorToastMessage(t('mods.automator.autoOpenCubesNoGameState'), statusToastMs);
+    if (!suppressCubeErrorToasts) {
+      showAutomatorToastMessage(t('mods.automator.autoOpenCubesNoGameState'), statusToastMs);
+    }
     return 'error';
   }
   let opened = 0;
   const maxOpens = 2000;
-  for (let tier = 1; tier <= 5; tier++) {
-    for (;;) {
-      if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
-        console.log('[Bestiary Automator] [cubes] Batch aborted: auto-open disabled', { opened });
-        return 'aborted';
+  /** Tier we last logged a "Tier pass" for (for debug parity with the old nested loops). */
+  let tierPassActiveLogged = null;
+  for (;;) {
+    if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
+      console.log('[Bestiary Automator] [cubes] Batch aborted: auto-open disabled', { opened });
+      return 'aborted';
+    }
+    const inv = getPlayerInventory();
+    const tier = findFirstSurpriseCubeTierWithStock(inv);
+    if (tier === 0) {
+      if (tierPassActiveLogged !== null) {
+        console.log('[Bestiary Automator] [cubes] Tier pass done (none left this tier)', {
+          tier: tierPassActiveLogged,
+          openedSoFar: opened
+        });
       }
-      const inv = getPlayerInventory();
-      // One cube per API call: always use fresh inventory before deciding to open again.
-      const key = `surpriseCube${tier}`;
-      const n = getInventoryItemCount(inv, key);
-      if (n <= 0) break;
-      if (opened >= maxOpens) {
-        console.log('[Bestiary Automator] [cubes] Batch stopped: max opens', { opened, maxOpens });
+      break;
+    }
+    if (tierPassActiveLogged !== tier) {
+      if (tierPassActiveLogged !== null) {
+        console.log('[Bestiary Automator] [cubes] Tier pass done (none left this tier)', {
+          tier: tierPassActiveLogged,
+          openedSoFar: opened
+        });
+      }
+      const nTier = getInventoryItemCount(inv, `surpriseCube${tier}`);
+      console.log('[Bestiary Automator] [cubes] Tier pass', {
+        tier,
+        countThisTier: nTier,
+        stacks: getSurpriseCubeStackSnapshot(inv)
+      });
+      tierPassActiveLogged = tier;
+    }
+    const n = getInventoryItemCount(inv, `surpriseCube${tier}`);
+    if (opened >= maxOpens) {
+      console.log('[Bestiary Automator] [cubes] Batch stopped: max opens', { opened, maxOpens });
+      if (!suppressCubeErrorToasts) {
         showAutomatorToastMessage(t('mods.automator.autoOpenCubesAborted'), statusToastMs);
-        return 'error';
       }
-      const totalLeft = getTotalSurpriseCubeCount(inv);
-      console.log('[Bestiary Automator] [cubes] Next open', { tier, countThisTier: n, totalSurpriseCubes: totalLeft, openedSoFar: opened });
-      const ok = await openOneSurpriseCubeViaApi(tier);
-      if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
-        console.log('[Bestiary Automator] [cubes] Batch aborted: auto-open disabled after request', { opened });
-        return 'aborted';
-      }
-      if (!ok) {
-        console.log('[Bestiary Automator] [cubes] Batch error: open failed', { tier, opened });
+      return 'error';
+    }
+    const totalLeft = getTotalSurpriseCubeCount(inv);
+    console.log('[Bestiary Automator] [cubes] Next open', {
+      tier,
+      countThisTier: n,
+      totalSurpriseCubes: totalLeft,
+      openedSoFar: opened,
+      stacks: getSurpriseCubeStackSnapshot(inv)
+    });
+    const openResult = await openOneSurpriseCubeViaApi(tier, cubeOpenUi);
+    if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
+      console.log('[Bestiary Automator] [cubes] Batch aborted: auto-open disabled after request', { opened });
+      return 'aborted';
+    }
+    if (!openResult.ok) {
+      console.log('[Bestiary Automator] [cubes] Batch error: open failed', {
+        tier,
+        opened,
+        suppressCubeErrorToasts,
+        openResult
+      });
+      if (!suppressCubeErrorToasts) {
         showAutomatorToastMessage(t('mods.automator.autoOpenCubesError'), statusToastMs);
-        return 'error';
       }
-      opened++;
-      await sleep(TIMING.CUBE_OPEN_DELAY);
-      if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
-        console.log('[Bestiary Automator] [cubes] Batch aborted: auto-open disabled after delay', { opened });
-        return 'aborted';
+      return 'error';
+    }
+    opened++;
+    await sleep(TIMING.CUBE_OPEN_DELAY);
+    if (abortWhenAutoOpenOff && !config.autoOpenCubes) {
+      console.log('[Bestiary Automator] [cubes] Batch aborted: auto-open disabled after delay', { opened });
+      return 'aborted';
+    }
+    if (getTotalSurpriseCubeCount(getPlayerInventory()) === 0) {
+      if (tierPassActiveLogged !== null) {
+        console.log('[Bestiary Automator] [cubes] Tier pass done (none left this tier)', {
+          tier: tierPassActiveLogged,
+          openedSoFar: opened
+        });
+        tierPassActiveLogged = null;
       }
-      if (getTotalSurpriseCubeCount(getPlayerInventory()) === 0) {
-        console.log('[Bestiary Automator] [cubes] Batch done: no surprise cubes left in inventory', { opened });
-        return 'done';
-      }
+      console.log('[Bestiary Automator] [cubes] Batch done: no surprise cubes left in inventory', {
+        opened,
+        stacks: getSurpriseCubeStackSnapshot(getPlayerInventory())
+      });
+      return 'done';
     }
   }
   if (opened === 0) {
-    console.log('[Bestiary Automator] [cubes] Batch done: none to open', { silentWhenEmpty });
+    console.log('[Bestiary Automator] [cubes] Batch done: none to open', {
+      silentWhenEmpty,
+      stacks: getSurpriseCubeStackSnapshot(getPlayerInventory())
+    });
     if (!silentWhenEmpty) {
       showAutomatorToastMessage(t('mods.automator.autoOpenCubesNone'), statusToastMs);
     }
   } else {
-    console.log('[Bestiary Automator] [cubes] Batch done', { opened });
+    console.log('[Bestiary Automator] [cubes] Batch done', {
+      opened,
+      stacks: getSurpriseCubeStackSnapshot(getPlayerInventory())
+    });
   }
   return 'done';
 };
 
 const openCubesIfEnabled = async () => {
   if (!config.autoOpenCubes || cubesOpenedThisSession) {
+    if (!config.autoOpenCubes) {
+      console.log('[Bestiary Automator] [cubes] Skipping trigger: autoOpenCubes disabled');
+    } else if (cubesOpenedThisSession) {
+      console.log('[Bestiary Automator] [cubes] Skipping trigger: already ran cube batch this session', {
+        stacks: getSurpriseCubeStackSnapshot(getPlayerInventory())
+      });
+    }
     return;
   }
   if (cubesOpenInProgress) {
@@ -1282,7 +1735,12 @@ const openCubesIfEnabled = async () => {
   }
   cubesOpenInProgress = true;
   try {
-    const outcome = await openAllSurpriseCubesFromInventory({ silentWhenEmpty: true, abortWhenAutoOpenOff: true });
+    const outcome = await openAllSurpriseCubesFromInventory({
+      silentWhenEmpty: true,
+      abortWhenAutoOpenOff: true,
+      // Keep failure toasts off in the background; still show one success toast per open (cube → reward).
+      suppressCubeErrorToasts: true
+    });
     if (outcome !== 'aborted') {
       cubesOpenedThisSession = true;
     }
