@@ -73,6 +73,14 @@ You can enable, disable, and configure mods from the mod loader interface. Each 
 == Mod Development ==
 Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the Mod Development Guide for detailed information on creating mods.
 
+=== Adding a mod that ships inside the extension ===
+Bundled mods must be registered in more than one place (browser limits: the popup and background worker cannot always share the same module graph as the content scripts). When you add or rename an official, super, OT, or database script under <code>mods/</code> or <code>database/</code>:
+# Update [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/content/mod-registry.js <code>content/mod-registry.js</code>] — add the filename to <code>DATABASE_MODS</code>, <code>OFFICIAL_MODS</code>, <code>SUPER_MODS</code>, or <code>OT_MODS</code> as appropriate (see the file header for the full checklist).
+# Update [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/background.js <code>background.js</code>] — in the <code>getModCounts</code> message handler, adjust the hardcoded <code>modCounts</code> object (comment: keep in sync with <code>content/mod-registry.js</code>) so category totals stay correct on Chromium.
+# Update [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/popup/popup.js <code>popup/popup.js</code>] — keep the static name lists in sync with <code>mod-registry.js</code> where the popup enumerates mods.
+
+For a longer explanation with examples, see [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_development_guide.md#adding-a-new-built-in-mod-to-the-extension Adding a New Built-in Mod to the Extension] in the Mod Development Guide.
+
 === Standardized UI Components ===
 The extension provides a set of UI components that match the game's style. These components ensure a consistent look and feel across all mods:
 * '''Modals''': Game-styled dialog windows
@@ -109,20 +117,24 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>icons/</code> - Icons used by the extension and mods
 ** <code>js/</code> - JavaScript libraries, including UI components
 ** <code>locales/</code> - Internationalization files
-** <code>originalassets/</code> - Original game assets for UI components
+** <code>originalassets/</code> - Original game assets for UI components (includes <code>media.txt</code> media definitions)
+** Additional folders under <code>assets/</code> (for example <code>depot/</code>, <code>equipment/</code>, <code>guild/</code>, <code>quests/</code>, <code>skills/</code>) hold mod-specific images and data; they are exposed via <code>web_accessible_resources</code> in the manifest as needed—not every folder is listed here.
 * <code>content/</code> - Content scripts that are injected into the game page
 ** <code>client.js</code> - Main client-side API and functionality
-** <code>injector.js</code> - Injects the client code into the game page
+** <code>injector.js</code> - Main content script: injects page context scripts (client, mods, databases) at <code>document_start</code>
 ** <code>mod-coordination.mjs</code> - Global mod coordination system for managing mod states, priorities, and resource control
 ** <code>local_mods.js</code> - Manages local mods
+** <code>mod-registry.js</code> - Central lists of database, official, super, and OT mod filenames (must stay in sync with <code>background.js</code> and <code>popup/popup.js</code>)
+** <code>custom-battles.js</code> - Custom battle runtime (<code>CustomBattle</code>) for configurable fights (used by mods such as Challenges)
 ** <code>ba-sandbox-utils.mjs</code> - Sandbox utility functions
 ** <code>utility_injector.js</code> - Utility injection system
-* <code>docs/</code> - Documentation for mod developers
-* <code>database/</code> - Stores persistent data and tooltips used by mods
-** <code>media.txt</code> - Media asset definitions
-** <code>inventory-database.js</code> - Inventory tooltip data
+* <code>docs/</code> - Mod developer markdown guides and [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/patch-notes.json <code>patch-notes.json</code>] (version metadata used by the extension popup patch notes UI)
+* <code>database/</code> - Static tooltip and reference data used by mods
 ** <code>creature-database.js</code> - Creature database
 ** <code>equipment-database.js</code> - Equipment database
+** <code>playereq-database.js</code> - Player equipment helpers (slot types, dynamic equipment lists)
+** <code>equipment-lua-export.js</code> - Console helpers to export equipment data in Lua/wiki-friendly form
+** <code>inventory-database.js</code> - Inventory tooltip data
 ** <code>maps-database.js</code> - Maps database
 ** <code>Welcome.js</code> - Welcome screen data
 * <code>mods/</code> - Local mod files, organized as follows:
@@ -130,10 +142,10 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>Super Mods/</code> - Advanced mods with comprehensive features, included by default (see below for details).
 ** <code>OT Mods/</code> - Community and social mods, included by default (see below for details).
 * <code>popup/</code> - Extension popup UI
-* <code>backups/</code> - Automatic backup storage for extension files
 * <code>background.js</code> - Background script for the extension
-* <code>manifest.json</code> - Extension manifest
-* <code>manifest_chromium.json</code> - Chromium-specific manifest
+* <code>manifest.json</code> - Extension manifest (Chromium store / unpacked load)
+* <code>manifest_firefox.json</code> - Firefox manifest for sideloading via <code>about:debugging</code>
+* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/privacy_policy.md <code>privacy_policy.md</code>] - Privacy policy text used for store listings and compliance
 
 == Documentation ==
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_development_guide.md Mod Development Guide] - Comprehensive guide for mod developers
@@ -141,6 +153,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/ui_components.md UI Components Documentation] - Documentation for the UI Components
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/client_api.md Client API Documentation] - Complete reference for the game's Client API
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/game_state_api.md Game State API Documentation] - Complete reference for accessing and modifying game state
+* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/patch-notes.json Patch notes (JSON)] - Machine-readable changelog consumed by the in-loader patch notes feature
 
 == Mods ==
 The extension comes with several powerful mods that demonstrate different features:

@@ -19,6 +19,7 @@ Thank you for your interest in contributing to the Bestiary Arena SuperMod Loade
   - [Building and Testing](#building-and-testing)
   - [Documentation](#documentation)
   - [Creating Mods](#creating-mods)
+    - [Bundled mods that ship with the extension](#bundled-mods-that-ship-with-the-extension)
     - [Best Practices for Mod Development](#best-practices-for-mod-development)
   - [Submitting Mods](#submitting-mods)
 
@@ -39,21 +40,20 @@ If you're new to the project, we recommend starting with:
 ### Prerequisites
 
 - Git
-- Google Chrome or compatible browser (Edge, Brave, etc.)
-- Text editor or IDE (VSCode recommended)
+- A Chromium-based browser (Chrome, Edge, Brave, etc.) and/or **Firefox** for loading the unpacked or temporary add-on
+- Text editor or IDE (VS Code recommended)
 
 ### Setting Up the Development Environment
 
 1. Fork the repository on GitHub
-2. Clone your fork to your local machine:
+2. Clone your fork to your local machine (replace `YOUR_USERNAME`):
    ```
-   git clone https://github.com/YOUR_USERNAME/BestiaryArenaSuperModLoader.git
-   cd BestiaryArenaSuperModLoader
+   git clone https://github.com/YOUR_USERNAME/BestiaryArena-SuperMod-Loader.git
+   cd BestiaryArena-SuperMod-Loader
    ```
-3. Load the extension in Chrome:
-   - Navigate to `chrome://extensions/`
-   - Enable "Developer mode"
-   - Click "Load unpacked" and select the directory containing the extension
+3. Load the extension for development:
+   - **Chromium** (Chrome, Edge, Brave, etc.): open `chrome://extensions/`, enable **Developer mode**, click **Load unpacked**, and select the repository folder (the one that contains `manifest.json`).
+   - **Firefox**: open `about:debugging`, choose **This Firefox**, click **Load Temporary Add-on**, and select `manifest_firefox.json` in the repository root. Temporary add-ons are removed when Firefox closes; load the manifest again in a new session.
 
 ### Workflow
 
@@ -62,7 +62,7 @@ If you're new to the project, we recommend starting with:
    git checkout -b feature/your-feature-name
    ```
 2. Make your changes
-3. Test your changes by reloading the extension in Chrome
+3. Test your changes by reloading the extension (Chromium: **Reload** on `chrome://extensions/`; Firefox: **Reload** on the entry in `about:debugging` or load `manifest_firefox.json` again)
 4. Commit your changes:
    ```
    git commit -m "Description of your changes"
@@ -92,7 +92,7 @@ When submitting a Pull Request:
 1. Reference any related issues
 2. Provide a clear description of the changes
 3. Include screenshots if the changes affect the UI
-4. Make sure your code passes all checks
+4. Manually verify behavior (this repository does not run automated checks on every PR): reload the extension, exercise affected UI, and test with mods on or off when relevant
 5. Keep PRs focused on a single change to facilitate review
 
 ### Code Style
@@ -100,7 +100,7 @@ When submitting a Pull Request:
 Please follow these guidelines for code style:
 
 - Use 2-space indentation
-- Follow JavaScript Standard Style
+- Match the style of surrounding files (semicolons, naming, and patterns already used in each part of the codebase)
 - Use meaningful variable and function names
 - Include comments for complex logic
 - Keep functions small and focused on a single task
@@ -110,7 +110,7 @@ Please follow these guidelines for code style:
 
 The extension doesn't require a traditional build process, but you should:
 
-1. Test your changes in Chrome by reloading the extension
+1. Test by reloading the extension in the browser(s) that matter for your change (use both Chromium and Firefox if the change could affect either)
 2. Test with different mods enabled/disabled
 3. Test on the latest version of Bestiary Arena
 4. Verify that your changes don't break existing functionality
@@ -134,6 +134,10 @@ If you want to contribute by creating mods:
 4. Test your mod thoroughly
 5. Consider internationalization support
 
+### Bundled mods that ship with the extension
+
+If you add or rename an official, Super, OT, or database script under `mods/` or `database/` so it ships inside the extension, keep **three** places in sync (browser limits on modules and service workers). Follow the checklist in [README.md — Adding a mod that ships inside the extension](README.md#adding-a-mod-that-ships-inside-the-extension) and the walkthrough [Adding a New Built-in Mod to the Extension](docs/mod_development_guide.md#adding-a-new-built-in-mod-to-the-extension) in the Mod Development Guide.
+
 ### Best Practices for Mod Development
 
 - Use ES6+ features responsibly
@@ -150,7 +154,7 @@ If you've created a mod that you'd like to share:
 1. Host your mod on GitHub Gist
 2. Test it thoroughly with different game versions
 3. Create documentation for your mod
-4. Submit an issue with the "Mod Submission" label, including:
+4. Open a GitHub issue for mod submission. Use the **Mod Submission** label if it exists on the repository; otherwise include **Mod submission** in the title so maintainers can find it. Include:
    - Gist URL
    - Description of the mod
    - Screenshots (if applicable)

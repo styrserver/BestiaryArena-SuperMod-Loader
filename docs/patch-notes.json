@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "3.6.10",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Mod Settings",
+          "text": "Hotkey improvements."
+        }
+      ]
+    },
+    {
       "version": "3.6.9",
       "changes": [
         {

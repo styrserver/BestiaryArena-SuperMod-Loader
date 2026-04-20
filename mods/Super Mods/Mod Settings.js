@@ -42,6 +42,15 @@ const defaultConfig = {
   hotkeyOpenInventory: 'i', // KeyboardEvent.key id: letter/digit, or e.g. f1, insert, home, pageup
   hotkeyOpenQuestLog: 'q',
   hotkeyOpenStore: 's',
+  hotkeyOpenTrophyRoom: 't',
+  hotkeyOpenDaycare: 'd',
+  hotkeyOpenBestiary: 'b',
+  hotkeyOpenForge: 'f',
+  hotkeyOpenHygenie: 'h',
+  hotkeyOpenMountainFortress: 'm',
+  hotkeyOpenArsenal: 'a',
+  hotkeyOpenMonstrousCauldron: 'c',
+  hotkeyOpenMonsterSqueezer: 'x',
   hotkeyReturnToMap: 'tab',
   hotkeySetupSlot1: 'f1',
   hotkeySetupSlot2: 'f2',
@@ -50,7 +59,8 @@ const defaultConfig = {
   hotkeySetupSlot5: 'f5',
   hotkeySetupSlot6: 'f6',
   hotkeySetupSlot7: 'f7',
-  hotkeySetupSlot8: 'f8'
+  hotkeySetupSlot8: 'f8',
+  enableHotkeys: false
 };
 
 // Storage key for this mod
@@ -76,8 +86,26 @@ delete config.favoriteSymbol;
 config.hotkeyOpenInventory = sanitizeStoredHotkey(config.hotkeyOpenInventory, '');
 if (config.hotkeyOpenQuestLog === undefined) config.hotkeyOpenQuestLog = 'q';
 if (config.hotkeyOpenStore === undefined) config.hotkeyOpenStore = 's';
+if (config.hotkeyOpenTrophyRoom === undefined) config.hotkeyOpenTrophyRoom = 't';
+if (config.hotkeyOpenDaycare === undefined) config.hotkeyOpenDaycare = 'd';
+if (config.hotkeyOpenBestiary === undefined) config.hotkeyOpenBestiary = 'b';
+if (config.hotkeyOpenHygenie === undefined) config.hotkeyOpenHygenie = 'h';
+if (config.hotkeyOpenForge === undefined) config.hotkeyOpenForge = 'f';
+if (config.hotkeyOpenMountainFortress === undefined) config.hotkeyOpenMountainFortress = 'm';
+if (config.hotkeyOpenArsenal === undefined) config.hotkeyOpenArsenal = 'a';
+if (config.hotkeyOpenMonstrousCauldron === undefined) config.hotkeyOpenMonstrousCauldron = 'c';
+if (config.hotkeyOpenMonsterSqueezer === undefined) config.hotkeyOpenMonsterSqueezer = 'x';
 config.hotkeyOpenQuestLog = sanitizeStoredHotkey(config.hotkeyOpenQuestLog, '');
 config.hotkeyOpenStore = sanitizeStoredHotkey(config.hotkeyOpenStore, '');
+config.hotkeyOpenTrophyRoom = sanitizeStoredHotkey(config.hotkeyOpenTrophyRoom, '');
+config.hotkeyOpenDaycare = sanitizeStoredHotkey(config.hotkeyOpenDaycare, '');
+config.hotkeyOpenBestiary = sanitizeStoredHotkey(config.hotkeyOpenBestiary, '');
+config.hotkeyOpenForge = sanitizeStoredHotkey(config.hotkeyOpenForge, '');
+config.hotkeyOpenHygenie = sanitizeStoredHotkey(config.hotkeyOpenHygenie, '');
+config.hotkeyOpenMountainFortress = sanitizeStoredHotkey(config.hotkeyOpenMountainFortress, '');
+config.hotkeyOpenArsenal = sanitizeStoredHotkey(config.hotkeyOpenArsenal, '');
+config.hotkeyOpenMonstrousCauldron = sanitizeStoredHotkey(config.hotkeyOpenMonstrousCauldron, '');
+config.hotkeyOpenMonsterSqueezer = sanitizeStoredHotkey(config.hotkeyOpenMonsterSqueezer, '');
 if (config.hotkeyReturnToMap === undefined) config.hotkeyReturnToMap = 'tab';
 config.hotkeyReturnToMap = sanitizeStoredHotkey(config.hotkeyReturnToMap, '');
 for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
@@ -85,6 +113,7 @@ for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
   if (config[setupKey] === undefined) config[setupKey] = `f${setupSlot}`;
   config[setupKey] = sanitizeStoredHotkey(config[setupKey], '');
 }
+if (config.enableHotkeys === undefined) config.enableHotkeys = false;
 
 // Last visited map feature globals
 const LAST_MAP_STORAGE_KEY = 'mod-settings-map-history';
@@ -157,6 +186,41 @@ function getNavElementsForCompactBar() {
   return [...navs];
 }
 
+/**
+ * Elements to search for header/nav buttons (inventory, Trophy Room, etc.).
+ * Layouts vary: `<nav>`, `#header-slot` only, or `<header>` with `ul.pixel-font-16.flex.items-center` (see createSettingsButton).
+ */
+function getNavButtonSearchRoots() {
+  const roots = [];
+  const seen = new Set();
+  const add = (el) => {
+    if (!el || seen.has(el)) return;
+    if (el.nodeType !== 1) return;
+    seen.add(el);
+    roots.push(el);
+  };
+  for (const nav of getNavElementsForCompactBar()) {
+    add(nav);
+  }
+  const headerSlot = document.getElementById('header-slot');
+  if (headerSlot) {
+    add(headerSlot.querySelector('ul.flex.items-center'));
+    headerSlot.querySelectorAll('ul').forEach((ul) => add(ul));
+  }
+  const headerEl = document.querySelector('header');
+  if (headerEl) {
+    add(headerEl.querySelector('ul.pixel-font-16.flex.items-center'));
+    add(headerEl.querySelector('ul.flex.items-center'));
+    headerEl.querySelectorAll('ul').forEach((ul) => add(ul));
+  }
+  add(document.querySelector('header ul.pixel-font-16.flex.items-center'));
+  const banner = document.querySelector('[role="banner"]');
+  if (banner && banner !== headerEl) {
+    banner.querySelectorAll('ul').forEach((ul) => add(ul));
+  }
+  return roots;
+}
+
 // Game constants
 const GAME_CONSTANTS = {
   MAX_STAT_VALUE: 20,
@@ -168,10 +232,10 @@ const GAME_CONSTANTS = {
 
 // Modal dimensions
 const MODAL_CONFIG = {
-  width: 530,
+  width: 600,
   height: 350,
   leftColumnWidth: 140,
-  rightColumnWidth: 320
+  rightColumnWidth: 400
 };
 
 // Experience table for level calculation
@@ -329,9 +393,8 @@ function findGameNavButtonByLabel(label) {
   const normalizedLabel = String(label || '').toLowerCase();
   if (!normalizedLabel) return null;
 
-  const navElements = getNavElementsForCompactBar();
-  for (const nav of navElements) {
-    const buttons = nav.querySelectorAll('button');
+  for (const root of getNavButtonSearchRoots()) {
+    const buttons = root.querySelectorAll('button');
     for (const button of buttons) {
       const aria = (button.getAttribute('aria-label') || '').toLowerCase();
       const title = (button.getAttribute('title') || '').toLowerCase();
@@ -383,6 +446,193 @@ function openStoreFromHotkey() {
   btn.click();
 }
 
+function findTrophyRoomNavButton() {
+  const terms = ['trophy room', 'sala de trof'];
+  let btn = findGameNavButtonBySearchTerms(terms);
+  if (btn) return btn;
+  const candidates = document.querySelectorAll('header button, #header-slot button, [role="banner"] button');
+  for (const b of candidates) {
+    const text = (b.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    for (const t of terms) {
+      if (text.includes(t)) return b;
+    }
+  }
+  return null;
+}
+
+function openTrophyRoomFromHotkey() {
+  const btn = findTrophyRoomNavButton();
+  if (!btn) {
+    console.warn('[Mod Settings] Trophy Room hotkey pressed but no matching nav button was found');
+    return;
+  }
+  btn.click();
+}
+
+/** Milliseconds to wait after opening Inventory before sub-tab slot buttons are queryable. */
+const INVENTORY_SUBTAB_HOTKEY_SETTLE_MS = 200;
+
+/**
+ * Tab in the inventory ribbon: prefer `.container-inventory-4`, then fallbacks via `querySelector` + `closest('button')`.
+ * @param {string} innerSelector - `button.querySelector` argument (comma = OR in CSS).
+ * @param {string[]} fallbackSelectors - Element selectors; first match with an ancestor `button` wins.
+ */
+function findInventorySubtabButton(innerSelector, fallbackSelectors) {
+  const container = document.querySelector('.container-inventory-4');
+  if (container) {
+    const inGrid = Array.from(container.querySelectorAll('button')).find((btn) => btn.querySelector(innerSelector));
+    if (inGrid) return inGrid;
+  }
+  for (const sel of fallbackSelectors) {
+    const el = document.querySelector(sel);
+    if (el) {
+      const btn = el.closest('button');
+      if (btn) return btn;
+    }
+  }
+  return null;
+}
+
+/**
+ * Opens an inventory sub-tab; if missing from the DOM, opens inventory first and retries after {@link INVENTORY_SUBTAB_HOTKEY_SETTLE_MS}.
+ */
+function openInventorySubtabFromHotkey(findTab, warnMessage) {
+  let tab = findTab();
+  if (tab) {
+    tab.click();
+    return;
+  }
+  openInventoryFromHotkey();
+  scheduleTimeout(() => {
+    tab = findTab();
+    if (tab) {
+      tab.click();
+      return;
+    }
+    console.warn(warnMessage);
+  }, INVENTORY_SUBTAB_HOTKEY_SETTLE_MS);
+}
+
+/** Daycare tab inside Inventory (same selector as Bestiary_Automator.js auto-daycare flow). */
+function findDaycareInventoryTabButton() {
+  return document.querySelector('button:has(img[alt="daycare"]), button:has(img[alt="Daycare"])');
+}
+
+function openDaycareFromHotkey() {
+  // Inventory must be open for the daycare icon tab to exist (see Bestiary_Automator: inventory click, then daycare click).
+  openInventorySubtabFromHotkey(
+    findDaycareInventoryTabButton,
+    '[Mod Settings] Daycare hotkey: daycare tab button not found after opening inventory'
+  );
+}
+
+/** Arsenal tab: equipment container icon (img[src*="equipment-container"] or alt "equipments"). */
+function findArsenalInventoryTabButton() {
+  return findInventorySubtabButton(
+    'img[src*="equipment-container"], img[alt="equipments"]',
+    ['img[src*="equipment-container"]', 'img[alt="equipments"]']
+  );
+}
+
+function openArsenalFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findArsenalInventoryTabButton,
+    '[Mod Settings] Arsenal hotkey: tab button not found after opening inventory'
+  );
+}
+
+/** Monstrous Cauldron tab: sprite item id 43672. */
+function findMonstrousCauldronInventoryTabButton() {
+  return findInventorySubtabButton('.sprite.item.id-43672, img[alt="43672"]', [
+    '.sprite.item.id-43672',
+    'img[alt="43672"]'
+  ]);
+}
+
+function openMonstrousCauldronFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findMonstrousCauldronInventoryTabButton,
+    '[Mod Settings] Monstrous Cauldron hotkey: tab button not found after opening inventory'
+  );
+}
+
+/** Monster Squeezer tab (img[src*="monster-squeezer-portrait-mini"] or alt "monster squeezer"). */
+function findMonsterSqueezerInventoryTabButton() {
+  return findInventorySubtabButton(
+    'img[src*="monster-squeezer-portrait-mini"], img[alt="monster squeezer"]',
+    ['img[src*="monster-squeezer-portrait-mini"]', 'img[alt="monster squeezer"]']
+  );
+}
+
+function openMonsterSqueezerFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findMonsterSqueezerInventoryTabButton,
+    '[Mod Settings] Monster Squeezer hotkey: tab button not found after opening inventory'
+  );
+}
+
+/**
+ * Bestiary tab inside Inventory: sprite item id 10327 (same as Depot Manager.getInventoryAnchorButton / Challenges.js).
+ */
+function findBestiaryInventoryTabButton() {
+  return findInventorySubtabButton('.sprite.item.id-10327, img[alt="10327"]', [
+    '.sprite.item.id-10327',
+    'img[alt="10327"]'
+  ]);
+}
+
+function openBestiaryFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findBestiaryInventoryTabButton,
+    '[Mod Settings] Bestiary hotkey: Bestiary tab button not found after opening inventory'
+  );
+}
+
+/** Forge tab inside Inventory: forge-mini icon (img[src*="forge-mini"] or alt "the forge"). */
+function findForgeInventoryTabButton() {
+  return findInventorySubtabButton('img[src*="forge-mini"], img[alt="the forge"]', [
+    'img[src*="forge-mini"]',
+    'img[alt="the forge"]'
+  ]);
+}
+
+function openForgeFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findForgeInventoryTabButton,
+    '[Mod Settings] Forge hotkey: Forge tab button not found after opening inventory'
+  );
+}
+
+/** Mountain Fortress tab inside Inventory (img[src*="mountainfortress"] or alt "mountain fortress"). */
+function findMountainFortressInventoryTabButton() {
+  return findInventorySubtabButton('img[src*="mountainfortress"], img[alt="mountain fortress"]', [
+    'img[src*="mountainfortress"]',
+    'img[alt="mountain fortress"]'
+  ]);
+}
+
+function openMountainFortressFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findMountainFortressInventoryTabButton,
+    '[Mod Settings] Mountain Fortress hotkey: tab button not found after opening inventory'
+  );
+}
+
+/** Hy'genie tab inside Inventory: sprite item id 42363 (inventory slot button with .sprite.item.id-42363). */
+function findHygenieInventoryTabButton() {
+  return findInventorySubtabButton('.sprite.item.id-42363, img[alt="42363"]', [
+    '.sprite.item.id-42363',
+    'img[alt="42363"]'
+  ]);
+}
+
+function openHygenieFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findHygenieInventoryTabButton,
+    "[Mod Settings] Hy'genie hotkey: tab button not found after opening inventory"
+  );
+}
+
 /** Same action as the Last Visited Map / Return to Map nav button (caller must gate on `showLastVisitedMapButton`). */
 function triggerReturnToMapFromHotkey() {
   try {
@@ -421,8 +671,95 @@ function clickBetterSetupSlotFromHotkey(zeroBasedSlotIndex) {
   btn.click();
 }
 
+/**
+ * General navigation hotkeys: single source for English UI order, `config` keys, modal capture button IDs, and keydown dispatch.
+ */
+const NAV_HOTKEY_ENTRIES = [
+  {
+    configKey: 'hotkeyOpenArsenal',
+    captureId: 'hotkey-open-arsenal-capture-btn',
+    resetId: 'hotkey-open-arsenal-reset-btn',
+    open: openArsenalFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenBestiary',
+    captureId: 'hotkey-open-bestiary-capture-btn',
+    resetId: 'hotkey-open-bestiary-reset-btn',
+    open: openBestiaryFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenDaycare',
+    captureId: 'hotkey-open-daycare-capture-btn',
+    resetId: 'hotkey-open-daycare-reset-btn',
+    open: openDaycareFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenForge',
+    captureId: 'hotkey-open-forge-capture-btn',
+    resetId: 'hotkey-open-forge-reset-btn',
+    open: openForgeFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenHygenie',
+    captureId: 'hotkey-open-hygenie-capture-btn',
+    resetId: 'hotkey-open-hygenie-reset-btn',
+    open: openHygenieFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenInventory',
+    captureId: 'hotkey-open-inventory-capture-btn',
+    resetId: 'hotkey-open-inventory-reset-btn',
+    open: openInventoryFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenMonsterSqueezer',
+    captureId: 'hotkey-open-monster-squeezer-capture-btn',
+    resetId: 'hotkey-open-monster-squeezer-reset-btn',
+    open: openMonsterSqueezerFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenMonstrousCauldron',
+    captureId: 'hotkey-open-monstrous-cauldron-capture-btn',
+    resetId: 'hotkey-open-monstrous-cauldron-reset-btn',
+    open: openMonstrousCauldronFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenMountainFortress',
+    captureId: 'hotkey-open-mountain-fortress-capture-btn',
+    resetId: 'hotkey-open-mountain-fortress-reset-btn',
+    open: openMountainFortressFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenQuestLog',
+    captureId: 'hotkey-open-quest-log-capture-btn',
+    resetId: 'hotkey-open-quest-log-reset-btn',
+    open: openQuestLogFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenStore',
+    captureId: 'hotkey-open-store-capture-btn',
+    resetId: 'hotkey-open-store-reset-btn',
+    open: openStoreFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenTrophyRoom',
+    captureId: 'hotkey-open-trophy-room-capture-btn',
+    resetId: 'hotkey-open-trophy-room-reset-btn',
+    open: openTrophyRoomFromHotkey
+  }
+];
+
+const NAV_HOTKEY_BINDING_KEYS = NAV_HOTKEY_ENTRIES.map((e) => e.configKey);
+const NAV_HOTKEY_UI_ROWS = NAV_HOTKEY_ENTRIES.map(({ configKey, captureId, resetId }) => ({
+  configKey,
+  captureId,
+  resetId,
+  displayFallback: ''
+}));
+
 function handleGlobalHotkeys(event) {
   if (!event || event.repeat) return;
+  if (!config.enableHotkeys) return;
   if (hotkeysState.hotkeyCaptureMode !== null) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (isTypingIntoInput(event.target)) return;
@@ -430,24 +767,13 @@ function handleGlobalHotkeys(event) {
   const pressedId = normalizeHotkeyIdentifierFromKey(event.key);
   if (!pressedId) return;
 
-  const invId = sanitizeStoredHotkey(config.hotkeyOpenInventory, '');
-  const questId = sanitizeStoredHotkey(config.hotkeyOpenQuestLog, '');
-  const storeId = sanitizeStoredHotkey(config.hotkeyOpenStore, '');
-
-  if (invId && pressedId === invId) {
-    event.preventDefault();
-    openInventoryFromHotkey();
-    return;
-  }
-  if (questId && pressedId === questId) {
-    event.preventDefault();
-    openQuestLogFromHotkey();
-    return;
-  }
-  if (storeId && pressedId === storeId) {
-    event.preventDefault();
-    openStoreFromHotkey();
-    return;
+  for (const { configKey, open } of NAV_HOTKEY_ENTRIES) {
+    const boundId = sanitizeStoredHotkey(config[configKey], '');
+    if (boundId && pressedId === boundId) {
+      event.preventDefault();
+      open();
+      return;
+    }
   }
   const returnMapId = sanitizeStoredHotkey(config.hotkeyReturnToMap, '');
   if (returnMapId && pressedId === returnMapId) {
@@ -492,29 +818,6 @@ const HOTKEY_CAPTURE_ACTIVE_CLASS =
 const HOTKEY_RESET_BUTTON_CLASS =
   'focus-style-visible hotkey-reset-btn pixel-font-14 frame-1 active:frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px] text-whiteRegular';
 
-const NAV_HOTKEY_BINDING_KEYS = ['hotkeyOpenInventory', 'hotkeyOpenQuestLog', 'hotkeyOpenStore'];
-
-const NAV_HOTKEY_UI_ROWS = [
-  {
-    configKey: 'hotkeyOpenInventory',
-    captureId: 'hotkey-open-inventory-capture-btn',
-    resetId: 'hotkey-open-inventory-reset-btn',
-    displayFallback: ''
-  },
-  {
-    configKey: 'hotkeyOpenQuestLog',
-    captureId: 'hotkey-open-quest-log-capture-btn',
-    resetId: 'hotkey-open-quest-log-reset-btn',
-    displayFallback: ''
-  },
-  {
-    configKey: 'hotkeyOpenStore',
-    captureId: 'hotkey-open-store-capture-btn',
-    resetId: 'hotkey-open-store-reset-btn',
-    displayFallback: ''
-  }
-];
-
 const MODS_HOTKEY_UI_ROWS = [
   {
     configKey: 'hotkeyReturnToMap',
@@ -553,11 +856,23 @@ function clearConflictingNavHotkeys(boundId, exceptConfigKey) {
   }
 }
 
+function clearHotkeyCaptureForcedSize(captureButton) {
+  if (!captureButton) return;
+  ['width', 'height', 'min-width', 'max-width', 'min-height', 'max-height'].forEach((prop) => {
+    captureButton.style.removeProperty(prop);
+  });
+}
+
 function sizeHotkeyCaptureToResetButton(captureButton, resetButton) {
   if (!captureButton || !resetButton) return;
   const r = resetButton.getBoundingClientRect();
-  const w = Math.max(1, Math.round(r.width));
-  const h = Math.max(1, Math.round(r.height));
+  // While #hotkeys-bindings-container is [hidden], layout is suppressed and rect is ~0; Math.max(1,0) locked 1×1px buttons.
+  if (r.width < 4 || r.height < 4) {
+    clearHotkeyCaptureForcedSize(captureButton);
+    return;
+  }
+  const w = Math.round(r.width);
+  const h = Math.round(r.height);
   const wPx = `${w}px`;
   const hPx = `${h}px`;
   captureButton.style.setProperty('width', wPx, 'important');
@@ -597,22 +912,7 @@ function bindHotkeyConfigRowInModal(captureButton, resetButton, configKey, defau
   if (!captureButton) return;
 
   const syncHotkeyCaptureSizeToReset = () => {
-    const cap = captureButton;
-    const reset = resetButton;
-    if (!cap || !reset) return;
-    const r = reset.getBoundingClientRect();
-    const w = Math.max(1, Math.round(r.width));
-    const h = Math.max(1, Math.round(r.height));
-    const wPx = `${w}px`;
-    const hPx = `${h}px`;
-    cap.style.setProperty('width', wPx, 'important');
-    cap.style.setProperty('height', hPx, 'important');
-    cap.style.setProperty('min-width', wPx, 'important');
-    cap.style.setProperty('max-width', wPx, 'important');
-    cap.style.setProperty('min-height', hPx, 'important');
-    cap.style.setProperty('max-height', hPx, 'important');
-    cap.style.setProperty('box-sizing', 'border-box', 'important');
-    cap.style.setProperty('flex-shrink', '0', 'important');
+    sizeHotkeyCaptureToResetButton(captureButton, resetButton);
   };
 
   const applyCaptureLook = (mode) => {
@@ -660,6 +960,13 @@ function bindHotkeyConfigRowInModal(captureButton, resetButton, configKey, defau
 
       if (keydownEvent.key === 'Escape') {
         applyCaptureLabel();
+        return;
+      }
+
+      if (keydownEvent.key === 'Delete' || keydownEvent.key === 'Backspace') {
+        config[configKey] = '';
+        saveConfig();
+        syncAllNavHotkeyCaptureDisplays();
         return;
       }
 
@@ -3595,7 +3902,7 @@ function showSettingsModal() {
       { id: 'creatures', label: t('mods.betterUI.menuCreatures'), selected: true },
       { id: 'depot-manager', label: t('mods.depot.title'), selected: false },
       { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
-      { id: 'hotkeys', label: 'Hotkeys', selected: false },
+      { id: 'hotkeys', label: t('mods.betterUI.menuHotkeys'), selected: false },
       { id: 'mod-coordination', label: t('mods.betterUI.menuModCoordination'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
       { id: 'backup', label: t('mods.betterUI.menuBackup'), selected: false }
@@ -3732,7 +4039,7 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="last-visited-map-toggle" style="transform: scale(1.2);">
-              <span>Show Return to Map Button</span>
+              <span>${t('mods.betterUI.showReturnToMapButton')}</span>
             </label>
           </div>
           <div style="margin-bottom: 15px;">
@@ -3789,13 +4096,13 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="advanced-stats-hover-toggle" style="transform: scale(1.2);">
-              <span>Show advanced stats on hover</span>
+              <span>${t('mods.betterUI.showAdvancedStatsOnHover')}</span>
             </label>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="ability-hover-toggle" style="transform: scale(1.2);">
-              <span>Show ability on hover</span>
+              <span>${t('mods.betterUI.showAbilityOnHover')}</span>
             </label>
           </div>
         `;
@@ -3825,22 +4132,26 @@ function showSettingsModal() {
           </div>
           <div style="margin-top: 14px;">
             <button id="depot-reset-manager-btn" class="btn btn-secondary" style="color: #dc3545;">
-              Reset Depot Manager
+              ${t('mods.betterUI.resetDepotManager')}
             </button>
           </div>
         `;
         rightColumn.appendChild(depotContent);
       } else if (categoryId === 'hotkeys') {
+        const hotkeyRowStyle =
+          'display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; width: 100%; min-width: 0; box-sizing: border-box;';
+        const hotkeyLabelStyle =
+          'color: #ccc; flex: 1 1 auto; min-width: 0; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
         const setupHotkeyRowsHtml = [1, 2, 3, 4, 5, 6, 7, 8]
           .map(
             (i) => `
-            <div class="hotkey-setup-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: ${i === 1 ? '0' : '12px'};">
-              <span style="color: #ccc; min-width: 130px;">Setup ${i}</span>
-              <button type="button" id="hotkey-setup-slot-${i}-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+            <div class="hotkey-setup-row" style="${hotkeyRowStyle} margin-top: ${i === 1 ? '0' : '12px'};">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeySetupLabel').replace('{n}', String(i))}</span>
+              <button type="button" id="hotkey-setup-slot-${i}-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
                 F${i}
               </button>
               <button type="button" id="hotkey-setup-slot-${i}-reset-btn" style="pointer-events: auto;">
-                Reset
+                ${t('mods.betterUI.hotkeyResetBinding')}
               </button>
             </div>`
           )
@@ -3848,52 +4159,141 @@ function showSettingsModal() {
         const hotkeysContent = document.createElement('div');
         hotkeysContent.innerHTML = `
           <div style="margin-bottom: 15px;">
-            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">General</h4>
-            <div class="hotkey-inventory-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <span style="color: #ccc; min-width: 130px;">Open Inventory</span>
-              <button type="button" id="hotkey-open-inventory-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="enable-hotkeys-toggle" style="transform: scale(1.2);">
+              <span style="color: #ccc;">${t('mods.betterUI.enableHotkeys')}</span>
+            </label>
+          </div>
+          <div id="hotkeys-bindings-container">
+          <div style="margin-bottom: 15px;">
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">${t('mods.betterUI.hotkeysSectionGeneral')}</h4>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle}">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelArsenal')}</span>
+              <button type="button" id="hotkey-open-arsenal-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                A
+              </button>
+              <button type="button" id="hotkey-open-arsenal-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelBestiary')}</span>
+              <button type="button" id="hotkey-open-bestiary-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                B
+              </button>
+              <button type="button" id="hotkey-open-bestiary-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelDaycare')}</span>
+              <button type="button" id="hotkey-open-daycare-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                D
+              </button>
+              <button type="button" id="hotkey-open-daycare-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelForge')}</span>
+              <button type="button" id="hotkey-open-forge-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                F
+              </button>
+              <button type="button" id="hotkey-open-forge-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelHygenie')}</span>
+              <button type="button" id="hotkey-open-hygenie-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                H
+              </button>
+              <button type="button" id="hotkey-open-hygenie-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelOpenInventory')}</span>
+              <button type="button" id="hotkey-open-inventory-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
                 I
               </button>
               <button type="button" id="hotkey-open-inventory-reset-btn" style="pointer-events: auto;">
-                Reset
+                ${t('mods.betterUI.hotkeyResetBinding')}
               </button>
             </div>
-            <div class="hotkey-inventory-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
-              <span style="color: #ccc; min-width: 130px;">Open Quest Log</span>
-              <button type="button" id="hotkey-open-quest-log-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelMonsterSqueezer')}</span>
+              <button type="button" id="hotkey-open-monster-squeezer-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                X
+              </button>
+              <button type="button" id="hotkey-open-monster-squeezer-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelMonstrousCauldron')}</span>
+              <button type="button" id="hotkey-open-monstrous-cauldron-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                C
+              </button>
+              <button type="button" id="hotkey-open-monstrous-cauldron-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelMountainFortress')}</span>
+              <button type="button" id="hotkey-open-mountain-fortress-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                M
+              </button>
+              <button type="button" id="hotkey-open-mountain-fortress-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelOpenQuestLog')}</span>
+              <button type="button" id="hotkey-open-quest-log-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
                 Q
               </button>
               <button type="button" id="hotkey-open-quest-log-reset-btn" style="pointer-events: auto;">
-                Reset
+                ${t('mods.betterUI.hotkeyResetBinding')}
               </button>
             </div>
-            <div class="hotkey-inventory-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
-              <span style="color: #ccc; min-width: 130px;">Open Store</span>
-              <button type="button" id="hotkey-open-store-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelOpenStore')}</span>
+              <button type="button" id="hotkey-open-store-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
                 S
               </button>
               <button type="button" id="hotkey-open-store-reset-btn" style="pointer-events: auto;">
-                Reset
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelTrophyRoom')}</span>
+              <button type="button" id="hotkey-open-trophy-room-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                T
+              </button>
+              <button type="button" id="hotkey-open-trophy-room-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
               </button>
             </div>
           </div>
           <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
-            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">Mods</h4>
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">${t('mods.betterUI.hotkeysSectionMods')}</h4>
             <div id="hotkeys-mods-section">
-              <div class="hotkey-inventory-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                <span style="color: #ccc; min-width: 130px;">Return to Map</span>
-                <button type="button" id="hotkey-return-to-map-capture-btn" title="Click, then press a key" style="pointer-events: auto;">
+              <div class="hotkey-inventory-row" style="${hotkeyRowStyle}">
+                <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelReturnToMap')}</span>
+                <button type="button" id="hotkey-return-to-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
                   Tab
                 </button>
                 <button type="button" id="hotkey-return-to-map-reset-btn" style="pointer-events: auto;">
-                  Reset
+                  ${t('mods.betterUI.hotkeyResetBinding')}
                 </button>
               </div>
             </div>
           </div>
           <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
-            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">Setups</h4>
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">${t('mods.betterUI.hotkeysSectionSetups')}</h4>
             <div id="hotkeys-setups-section">${setupHotkeyRowsHtml}</div>
+          </div>
           </div>
         `;
         rightColumn.appendChild(hotkeysContent);
@@ -4217,13 +4617,13 @@ function showSettingsModal() {
         depotResetButton.addEventListener('click', () => {
           if (!depotResetConfirmArmed) {
             depotResetConfirmArmed = true;
-            depotResetButton.textContent = 'Click again to confirm reset';
+            depotResetButton.textContent = t('mods.betterUI.depotResetConfirmClick');
             depotResetButton.style.borderColor = '#dc3545';
             depotResetButton.style.background = 'rgba(220, 53, 69, 0.2)';
             if (depotResetConfirmTimeout) clearTimeout(depotResetConfirmTimeout);
             depotResetConfirmTimeout = setTimeout(() => {
               depotResetConfirmArmed = false;
-              depotResetButton.textContent = 'Reset Depot Manager';
+              depotResetButton.textContent = t('mods.betterUI.resetDepotManager');
               depotResetButton.style.borderColor = '';
               depotResetButton.style.background = '';
               depotResetConfirmTimeout = null;
@@ -4236,7 +4636,7 @@ function showSettingsModal() {
             clearTimeout(depotResetConfirmTimeout);
             depotResetConfirmTimeout = null;
           }
-          depotResetButton.textContent = 'Reset Depot Manager';
+          depotResetButton.textContent = t('mods.betterUI.resetDepotManager');
           depotResetButton.style.borderColor = '';
           depotResetButton.style.background = '';
           try {
@@ -4247,7 +4647,7 @@ function showSettingsModal() {
               localStorage.removeItem('depot-manager-depot-equipment-ids-v1');
             }
             createToast({
-              message: '<span class="text-success">✅ Depot Manager reset.</span>',
+              message: `<span class="text-success">✅ ${t('mods.betterUI.depotResetToastSuccess')}</span>`,
               type: 'success',
               duration: 2500
             });
@@ -4384,11 +4784,86 @@ function showSettingsModal() {
         createSettingsDropdownHandler('inventoryBorderStyle')(inventoryBorderStyleSelector);
       }
 
+      const enableHotkeysCheckbox = content.querySelector('#enable-hotkeys-toggle');
+      const hotkeysBindingsContainer = content.querySelector('#hotkeys-bindings-container');
+      const updateHotkeysBindingsVisibility = () => {
+        if (hotkeysBindingsContainer) {
+          hotkeysBindingsContainer.hidden = !config.enableHotkeys;
+        }
+        if (config.enableHotkeys) {
+          scheduleTimeout(() => syncAllNavHotkeyCaptureDisplays(), 0);
+        }
+      };
+      if (enableHotkeysCheckbox) {
+        createSettingsCheckboxHandler(
+          'enableHotkeys',
+          updateHotkeysBindingsVisibility,
+          updateHotkeysBindingsVisibility
+        )(enableHotkeysCheckbox);
+      }
+      updateHotkeysBindingsVisibility();
+
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-arsenal-capture-btn'),
+        content.querySelector('#hotkey-open-arsenal-reset-btn'),
+        'hotkeyOpenArsenal',
+        'a',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-bestiary-capture-btn'),
+        content.querySelector('#hotkey-open-bestiary-reset-btn'),
+        'hotkeyOpenBestiary',
+        'b',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-daycare-capture-btn'),
+        content.querySelector('#hotkey-open-daycare-reset-btn'),
+        'hotkeyOpenDaycare',
+        'd',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-forge-capture-btn'),
+        content.querySelector('#hotkey-open-forge-reset-btn'),
+        'hotkeyOpenForge',
+        'f',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-hygenie-capture-btn'),
+        content.querySelector('#hotkey-open-hygenie-reset-btn'),
+        'hotkeyOpenHygenie',
+        'h',
+        ''
+      );
       bindHotkeyConfigRowInModal(
         content.querySelector('#hotkey-open-inventory-capture-btn'),
         content.querySelector('#hotkey-open-inventory-reset-btn'),
         'hotkeyOpenInventory',
         'i',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-monster-squeezer-capture-btn'),
+        content.querySelector('#hotkey-open-monster-squeezer-reset-btn'),
+        'hotkeyOpenMonsterSqueezer',
+        'x',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-monstrous-cauldron-capture-btn'),
+        content.querySelector('#hotkey-open-monstrous-cauldron-reset-btn'),
+        'hotkeyOpenMonstrousCauldron',
+        'c',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-mountain-fortress-capture-btn'),
+        content.querySelector('#hotkey-open-mountain-fortress-reset-btn'),
+        'hotkeyOpenMountainFortress',
+        'm',
         ''
       );
       bindHotkeyConfigRowInModal(
@@ -4403,6 +4878,13 @@ function showSettingsModal() {
         content.querySelector('#hotkey-open-store-reset-btn'),
         'hotkeyOpenStore',
         's',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-trophy-room-capture-btn'),
+        content.querySelector('#hotkey-open-trophy-room-reset-btn'),
+        'hotkeyOpenTrophyRoom',
+        't',
         ''
       );
       bindHotkeyConfigRowInModal(

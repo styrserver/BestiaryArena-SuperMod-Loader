@@ -82,6 +82,16 @@ You can enable, disable, and configure mods from the mod loader interface. Each 
 
 Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the [Mod Development Guide](docs/mod_development_guide.md) for detailed information on creating mods.
 
+### Adding a mod that ships inside the extension
+
+For a longer explanation with examples, see [Adding a New Built-in Mod to the Extension](docs/mod_development_guide.md#adding-a-new-built-in-mod-to-the-extension) in the Mod Development Guide.
+
+Bundled mods must be registered in more than one place (browser limits: the popup and background worker cannot always share the same module graph as the content scripts). When you add or rename an official, super, OT, or database script under `mods/` or `database/`:
+
+1. Update [`content/mod-registry.js`](content/mod-registry.js) — add the filename to `DATABASE_MODS`, `OFFICIAL_MODS`, `SUPER_MODS`, or `OT_MODS` as appropriate (see the file header for the full checklist).
+2. Update [`background.js`](background.js) — in the `getModCounts` message handler, adjust the hardcoded `modCounts` object (look for the comment *Keep these in sync with content/mod-registry.js*) so category totals stay correct on Chromium.
+3. Update [`popup/popup.js`](popup/popup.js) — keep the static name lists in sync with `mod-registry.js` where the popup enumerates mods.
+
 ### Standardized UI Components
 
 The extension provides a set of UI components that match the game's style. These components ensure a consistent look and feel across all mods:
@@ -124,20 +134,35 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `icons/` - Icons used by the extension and mods
   - `js/` - JavaScript libraries, including UI components
   - `locales/` - Internationalization files
+  - `originalassets/` - Original game assets for UI components (including `media.txt` media definitions)
+  - Additional folders under `assets/` (for example `depot/`, `equipment/`, `guild/`, `quests/`, `skills/`) hold mod-specific images and data; they are exposed via `web_accessible_resources` in the manifest as needed—not every folder is listed here.
 - `content/` - Content scripts that are injected into the game page
   - `client.js` - Main client-side API and functionality
-  - `injector.js` - Injects the client code into the game page
+  - `injector.js` - Main content script: injects page context scripts (client, mods, databases) at `document_start`
   - `mod-coordination.mjs` - Global mod coordination system for managing mod states, priorities, and resource control
   - `local_mods.js` - Manages local mods
-- `docs/` - Documentation for mod developers
-- `database/` - Stores persistent data and tooltips used by mods (e.g., `media.txt`, `inventory-database.js`, `maps-database.js`)
+  - `mod-registry.js` - Central lists of database, official, super, and OT mod filenames (must stay in sync with `background.js` and `popup/popup.js`)
+  - `custom-battles.js` - Custom battle runtime (`CustomBattle`) for configurable fights (used by mods such as Challenges)
+  - `ba-sandbox-utils.mjs` - Sandbox utility functions
+  - `utility_injector.js` - Utility injection system
+- `docs/` - Mod developer markdown guides and [`patch-notes.json`](docs/patch-notes.json) (version metadata used by the extension popup patch notes UI)
+- `database/` - Static tooltip and reference data used by mods (not `media.txt`; that file lives under `assets/originalassets/`)
+  - `creature-database.js` - Creature reference data
+  - `equipment-database.js` - Equipment reference data
+  - `playereq-database.js` - Player equipment helpers (slot types, dynamic equipment lists)
+  - `equipment-lua-export.js` - DevTools/console helpers to export equipment data in Lua/wiki-friendly form
+  - `inventory-database.js` - Inventory tooltip data
+  - `maps-database.js` - Maps reference data
+  - `Welcome.js` - Welcome screen data
 - `mods/` - Local mod files, organized as follows:
   - `Official Mods/` - Core mods that provide essential gameplay enhancements and are included by default.
   - `Super Mods/` - Advanced mods with comprehensive features, included by default (see below for details).
   - `OT Mods/` - Community and social mods, included by default (see below for details).
 - `popup/` - Extension popup UI
 - `background.js` - Background script for the extension
-- `manifest.json` - Extension manifest
+- `manifest.json` - Extension manifest (Chromium store / unpacked load)
+- `manifest_firefox.json` - Firefox manifest for sideloading via `about:debugging`
+- [`privacy_policy.md`](privacy_policy.md) - Privacy policy text used for store listings and compliance
 
 ## Documentation
 
@@ -146,6 +171,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - [UI Components Documentation](docs/ui_components.md) - Documentation for the UI Components
 - [Client API Documentation](docs/client_api.md) - Complete reference for the game's Client API
 - [Game State API Documentation](docs/game_state_api.md) - Complete reference for accessing and modifying game state
+- [Patch notes (JSON)](docs/patch-notes.json) - Machine-readable changelog consumed by the in-loader patch notes feature
 
 ## Mods
 
