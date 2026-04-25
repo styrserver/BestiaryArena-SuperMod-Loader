@@ -292,11 +292,12 @@
 
   function getDisenchantButton() {
     const now = Date.now();
-    if (domCache.disenchantButton && now - domCache.lastUpdate < 1000) {
+    if (domCache.disenchantButton && domCache.disenchantButton.isConnected && now - domCache.lastUpdate < 1000) {
       return domCache.disenchantButton;
     }
     
-    domCache.disenchantButton = document.querySelector('button[textContent="Disenchant"]') ||
+    domCache.disenchantButton = document.getElementById('better-forge-disenchant-action-btn') ||
+                                document.querySelector('button[textContent="Disenchant"]') ||
                                 document.querySelector('button[textContent="Confirm Disenchant"]') ||
                                 document.querySelector('button[textContent="Stop"]') ||
                                 document.querySelector('button[style*="border-color: #ffe066"]') ||
@@ -373,6 +374,31 @@
       console.error('[Better Forge] Error checking for high tier items:', error);
       return false;
     }
+  }
+
+  function getConfirmationDisenchantTargetLabel(equipmentButtons) {
+    const count = equipmentButtons.length;
+    if (count === 1) {
+      const equipmentName = equipmentButtons[0].getAttribute('data-equipment') || 'equipment';
+      return `1 <span style="color:#ff4444">${equipmentName}</span>`;
+    }
+    
+    const groupedNames = new Map();
+    equipmentButtons.forEach(btn => {
+      const equipmentName = btn.getAttribute('data-equipment') || 'equipment';
+      groupedNames.set(equipmentName, (groupedNames.get(equipmentName) || 0) + 1);
+    });
+    
+    const nameParts = [];
+    groupedNames.forEach((qty, name) => {
+      if (qty > 1) {
+        nameParts.push(`${qty}x ${name}`);
+      } else {
+        nameParts.push(name);
+      }
+    });
+    
+    return `<span style="color:#ff4444">${nameParts.join(', ')}</span>`;
   }
   
   // Add warning symbol to equipment button for high-tier items
@@ -4638,6 +4664,7 @@
        disenchantControls.style.cssText = 'display: flex; align-items: center; gap: 8px; height: 40px; min-width: 260px; width: 260px;';
        
        const disenchantBtn = document.createElement('button');
+      disenchantBtn.id = 'better-forge-disenchant-action-btn';
        
        disenchantBtn.style.cssText = 'background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border: 6px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 1; text-align: center; white-space: pre-line; line-height: 1.2;';
        
@@ -4704,7 +4731,8 @@
          });
          if (confirmCount > 0) {
            statusText.style.color = '#e6d7b0';
-           statusText.innerHTML = `Click <span style="color:#ff4444">Confirm Disenchant</span> to <span style="color:#ff4444">disenchant</span> ${confirmCount} equips for ${confirmDust} dust`;
+          const targetLabel = getConfirmationDisenchantTargetLabel(confirmEquipmentItems);
+          statusText.innerHTML = `Confirm to disenchant ${targetLabel} for <span style="color:#7dd3fc">${confirmDust} dust</span>`;
          } else {
            statusText.textContent = 'No equipment selected';
            statusText.style.color = '#e6d7b0';
@@ -5051,6 +5079,7 @@
    function createDisenchantEquipmentButton(equipment, sourceColumn) {
      const btn = document.createElement('button');
      btn.className = 'focus-style-visible active:opacity-70';
+    btn.setAttribute('data-equipment', equipment.name || 'equipment');
      btn.setAttribute('data-equipment-id', equipment.id);
      btn.setAttribute('data-source-column', sourceColumn);
      btn.setAttribute('data-tier', equipment.tier || 1);
@@ -5180,7 +5209,8 @@
         
         if (forgeState.isConfirmationMode) {
           statusText.style.color = '#e6d7b0';
-          statusText.innerHTML = `Click <span style="color:#ff4444">Confirm Disenchant</span> to <span style="color:#ff4444">disenchant</span> ${totalItems} equips for ${totalDust} dust`;
+          const targetLabel = getConfirmationDisenchantTargetLabel(equipmentItems);
+          statusText.innerHTML = `Confirm to disenchant ${targetLabel} for <span style="color:#7dd3fc">${totalDust} dust</span>`;
         } else {
           if (totalItems === 1) {
             statusText.textContent = `1 item selected - ${totalDust} dust`;

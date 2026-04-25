@@ -469,6 +469,10 @@ function injectHuntAnalyzerStyles() {
             --ha-button-shadow-hover: ${theme.colors.buttonShadowHover};
             --ha-button-highlight: ${theme.colors.buttonHighlight};
             --ha-button-highlight-hover: ${theme.colors.buttonHighlightHover};
+            --ha-frame-3: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
+            --ha-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+            --ha-frame-1-pressed: url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill;
+            --ha-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
         }
         
         /* Hunt Analyzer Common Styles */
@@ -477,7 +481,8 @@ function injectHuntAnalyzerStyles() {
             background-image: var(--ha-panel-bg-image);
             background-repeat: repeat;
             background-color: var(--ha-panel-bg);
-            border: 1px solid var(--ha-border);
+            border: 6px solid transparent;
+            border-image: var(--ha-frame-3);
             color: var(--ha-text);
             padding: 0;
             overflow: hidden;
@@ -486,19 +491,22 @@ function injectHuntAnalyzerStyles() {
             flex-direction: column;
             height: 100%;
             font-family: Inter, sans-serif;
-            border-radius: 7px;
+            border-radius: 6px;
             box-shadow: 0 0 15px var(--ha-panel-shadow);
         }
         
         .ha-header-container {
             display: flex;
             flex-direction: column;
-            width: 100%;
-            background-image: var(--ha-header-bg-image);
+            width: auto;
+            background-image: var(--ha-section-bg-image);
             background-repeat: repeat;
-            background-color: var(--ha-header-bg);
-            border-bottom: 1px solid var(--ha-border);
-            padding: 4px;
+            background-color: var(--ha-section-bg-fallback);
+            border: ${UI_LAYOUT.FRAME_BORDER};
+            border-image: ${UI_LAYOUT.FRAME_BORDER_IMAGE};
+            margin: ${UI_LAYOUT.SECTION_MARGIN_NO_TOP};
+            padding: ${UI_LAYOUT.SECTION_PADDING};
+            box-sizing: border-box;
             flex: 0 0 auto;
         }
         
@@ -532,44 +540,80 @@ function injectHuntAnalyzerStyles() {
         }
         
         .ha-styled-button {
-            padding: 6px 12px;
-            border: 1px solid var(--ha-border);
-            background: var(--ha-button-bg);
+            padding: 2px 10px;
+            border: 4px solid transparent;
+            border-image: var(--ha-frame-1);
+            background-image: var(--ha-header-bg-image);
+            background-repeat: repeat;
+            background-color: var(--ha-button-bg);
             color: var(--ha-text);
-            font-size: 9px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+            text-align: center;
+            white-space: nowrap;
+            box-sizing: border-box;
             cursor: pointer;
-            border-radius: 5px;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 5px var(--ha-button-shadow), inset 0 1px 0 var(--ha-button-highlight);
+            transition: color 0.2s, border-image 0.1s, filter 0.15s;
+            box-shadow: 0 2px 5px var(--ha-button-shadow);
             flex-grow: 1;
+            min-height: 24px;
+            line-height: 1.1;
         }
         
         .ha-styled-button:hover {
-            background: var(--ha-button-hover);
-            box-shadow: 0 3px 8px var(--ha-button-shadow-hover), inset 0 1px 0 var(--ha-button-highlight-hover);
-            transform: translateY(-1px);
+            color: var(--ha-text-secondary);
+            filter: brightness(1.12);
         }
         
         .ha-styled-button:active {
-            box-shadow: inset 0 2px 5px var(--ha-button-shadow);
-            transform: translateY(1px);
+            border-image: var(--ha-frame-1-pressed);
+            filter: brightness(0.95);
+        }
+
+        .button-container {
+            border: ${UI_LAYOUT.FRAME_BORDER};
+            border-image: ${UI_LAYOUT.FRAME_BORDER_IMAGE};
+            background-image: var(--ha-section-bg-image);
+            background-repeat: repeat;
+            background-color: var(--ha-section-bg-fallback);
+            box-sizing: border-box;
+            margin: ${UI_LAYOUT.SECTION_MARGIN_NO_TOP};
+            padding: ${UI_LAYOUT.SECTION_PADDING};
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .live-display-section,
+        .map-filter-container,
+        .loot-container,
+        .creature-drop-container {
+            margin: ${UI_LAYOUT.SECTION_MARGIN};
+            padding: ${UI_LAYOUT.SECTION_PADDING};
+            border: ${UI_LAYOUT.FRAME_BORDER};
+            border-image: ${UI_LAYOUT.FRAME_BORDER_IMAGE};
+            background-image: var(--ha-section-bg-image);
+            background-repeat: repeat;
+            background-color: var(--ha-section-bg-fallback);
+            box-sizing: border-box;
         }
         
         .ha-icon-button {
             background-color: var(--ha-button-icon-bg);
-            border: 1px solid var(--ha-border);
+            border: 4px solid transparent;
+            border-image: var(--ha-frame-1);
             color: var(--ha-text);
-            padding: 2px 6px;
+            padding: 0 6px;
             margin: 0;
             cursor: pointer;
-            font-size: 12px;
-            line-height: 1;
+            font-size: 11px;
+            line-height: 1.1;
             min-width: 20px;
-            min-height: 20px;
+            min-height: 18px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 3px;
             transition: all 0.2s ease;
         }
         
@@ -579,6 +623,7 @@ function injectHuntAnalyzerStyles() {
         }
         
         .ha-icon-button:active {
+            border-image: var(--ha-frame-1-pressed);
             transform: translateY(1px);
             background-color: var(--ha-border-dark);
         }
@@ -588,12 +633,13 @@ function injectHuntAnalyzerStyles() {
             flex-direction: column;
             flex: 1 1 0;
             min-height: 0;
-            margin: 0 5px 5px 5px;
+            margin: ${UI_LAYOUT.SECTION_MARGIN_NO_TOP};
             background-image: var(--ha-section-bg-image);
             background-repeat: repeat;
             background-color: var(--ha-section-bg-fallback);
-            border-radius: 6px;
-            padding: 6px;
+            border: ${UI_LAYOUT.FRAME_BORDER};
+            border-image: var(--ha-frame-4);
+            padding: ${UI_LAYOUT.SECTION_PADDING};
             overflow-y: auto;
         }
         
@@ -615,9 +661,9 @@ function injectHuntAnalyzerStyles() {
         .ha-display-content {
             width: 100%;
             padding: 4px;
-            border: 1px solid var(--ha-border);
+            border: 4px solid transparent;
+            border-image: var(--ha-frame-1);
             background-color: var(--ha-section-bg);
-            border-radius: 4px;
             overflow-y: auto;
             max-height: 200px;
         }
@@ -673,6 +719,124 @@ function getItemCategory(item) {
     }
 }
 
+function applyFramedSectionStyles(element, { noTopMargin = false } = {}) {
+    if (!element) return;
+    element.style.backgroundImage = getThemeBackground('section');
+    element.style.backgroundRepeat = 'repeat';
+    element.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+    element.style.margin = noTopMargin ? UI_LAYOUT.SECTION_MARGIN_NO_TOP : UI_LAYOUT.SECTION_MARGIN;
+    element.style.padding = UI_LAYOUT.SECTION_PADDING;
+    element.style.border = UI_LAYOUT.FRAME_BORDER;
+    element.style.borderImage = UI_LAYOUT.FRAME_BORDER_IMAGE;
+    element.style.boxSizing = 'border-box';
+}
+
+function attachInlineConfirm(button, { baseText, confirmText, onConfirm, timeoutMs = 4000 }) {
+    if (!button || typeof onConfirm !== 'function') return;
+    let confirmTimeoutId = null;
+    let outsideClickHandler = null;
+    let originalWidth = '';
+    const fixedConfirmWidth = button.dataset.fixedConfirmWidth || '';
+    const originalBackgroundImage = button.style.backgroundImage || '';
+    const originalBackgroundRepeat = button.style.backgroundRepeat || '';
+    const originalBackgroundColor = button.style.backgroundColor || '';
+    const originalColor = button.style.color || '';
+    const originalFilter = button.style.filter || '';
+
+    const resetState = () => {
+        button.dataset.confirmArmed = 'false';
+        button.textContent = baseText;
+        button.style.width = fixedConfirmWidth || originalWidth;
+        button.style.backgroundImage = originalBackgroundImage;
+        button.style.backgroundRepeat = originalBackgroundRepeat;
+        button.style.backgroundColor = originalBackgroundColor;
+        button.style.color = originalColor;
+        button.style.filter = originalFilter;
+        if (confirmTimeoutId) {
+            clearTimeout(confirmTimeoutId);
+            confirmTimeoutId = null;
+        }
+        if (outsideClickHandler) {
+            document.removeEventListener('mousedown', outsideClickHandler, true);
+            outsideClickHandler = null;
+        }
+    };
+
+    button.addEventListener('click', () => {
+        if (button.dataset.confirmArmed !== 'true') {
+            originalWidth = `${button.offsetWidth}px`;
+            button.dataset.confirmArmed = 'true';
+            button.textContent = confirmText;
+            button.style.width = fixedConfirmWidth || originalWidth;
+            button.style.backgroundImage = DEMONIC_CONFIRM_BG;
+            button.style.backgroundRepeat = 'repeat';
+            button.style.backgroundColor = '#8b0000';
+            button.style.color = '#ffffff';
+            button.style.filter = 'none';
+            if (confirmTimeoutId) clearTimeout(confirmTimeoutId);
+            confirmTimeoutId = setTimeout(resetState, timeoutMs);
+
+            outsideClickHandler = (event) => {
+                if (event.target !== button) {
+                    resetState();
+                }
+            };
+            document.addEventListener('mousedown', outsideClickHandler, true);
+            return;
+        }
+
+        resetState();
+        onConfirm();
+    });
+}
+
+function clearAnalyzerDataAndRefresh() {
+    resetHuntAnalyzerState();
+
+    const cachedLootDiv = domCache.get("mod-loot-display");
+    const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
+    if (cachedLootDiv) cachedLootDiv.innerHTML = "";
+    if (cachedCreatureDropDiv) cachedCreatureDropDiv.innerHTML = "";
+
+    renderAllSessions();
+    updateMapFilterDropdown();
+    updatePanelDisplay();
+    updateCurrentRoomDisplay();
+    updatePanelPosition();
+
+    const panel = document.getElementById(PANEL_ID);
+    showPanelFeedback(panel, t('mods.huntAnalyzer.dataReset'), true);
+}
+
+function showPanelFeedback(panel, text, isSuccess = true) {
+    if (!panel) return;
+    const feedbackMessage = document.createElement('div');
+    feedbackMessage.textContent = text;
+    feedbackMessage.style.position = 'absolute';
+    feedbackMessage.style.bottom = '10px';
+    feedbackMessage.style.left = '50%';
+    feedbackMessage.style.transform = 'translateX(-50%)';
+    feedbackMessage.style.backgroundColor = isSuccess ? '#98C379' : '#E06C75';
+    feedbackMessage.style.color = '#FFFFFF';
+    feedbackMessage.style.padding = '8px 12px';
+    feedbackMessage.style.borderRadius = '5px';
+    feedbackMessage.style.zIndex = '10001';
+    feedbackMessage.style.opacity = '0';
+    feedbackMessage.style.transition = 'opacity 0.3s ease-in-out';
+    panel.appendChild(feedbackMessage);
+
+    setTimeout(() => {
+        feedbackMessage.style.opacity = '1';
+    }, 10);
+
+    setTimeout(() => {
+        feedbackMessage.style.opacity = '0';
+        setTimeout(() => {
+            feedbackMessage.remove();
+        }, 300);
+    }, 1500);
+}
+
 // Throttling for frequent updates
 let lastUpdateLogTime = 0;
 
@@ -698,8 +862,8 @@ const LAYOUT_MODES = {
 };
 const LAYOUT_DIMENSIONS = {
     [LAYOUT_MODES.VERTICAL]: { width: 350, height: 750, minWidth: 260, maxWidth: 500, minHeight: 500, maxHeight: 850 },
-    [LAYOUT_MODES.HORIZONTAL]: { width: 300, height: 300, minWidth: 650, maxWidth: 1000, minHeight: 220, maxHeight: 400 },
-    [LAYOUT_MODES.MINIMIZED]: { width: 250, height: 250, minWidth: 250, maxWidth: 250, minHeight: 250, maxHeight: 250 }
+    [LAYOUT_MODES.HORIZONTAL]: { width: 300, height: 300, minWidth: 650, maxWidth: 1000, minHeight: 360, maxHeight: 400 },
+    [LAYOUT_MODES.MINIMIZED]: { width: 270, height: 220, minWidth: 270, maxWidth: 270, minHeight: 220, maxHeight: 220 }
 };
 
 // =======================
@@ -742,6 +906,15 @@ const CONFIG = {
     // Auto-save interval (30 seconds)
     AUTO_SAVE_INTERVAL: 30000
 };
+
+const UI_LAYOUT = {
+    SECTION_MARGIN: '2px 2px 2px 2px',
+    SECTION_MARGIN_NO_TOP: '0 2px 2px 2px',
+    SECTION_PADDING: '4px',
+    FRAME_BORDER: '6px solid transparent',
+    FRAME_BORDER_IMAGE: 'var(--ha-frame-4)'
+};
+const DEMONIC_CONFIRM_BG = 'url(/_next/static/media/background-red.21d3f4bd.png)';
 
 // =======================
 // 2.4. Centralized State Management
@@ -1147,6 +1320,22 @@ function formatPlaytime(hours) {
   return `${displayHours.toString().padStart(2, '0')}:${displayMinutes.toString().padStart(2, '0')}:${displaySeconds.toString().padStart(2, '0')}`;
 }
 
+function formatPlaytimeLabel(playtimeText) {
+  return `${t('mods.huntAnalyzer.playtime')}: ${playtimeText}`;
+}
+
+function formatWinLossLabel(wins, losses, winRate) {
+  return `${t('mods.huntAnalyzer.winLoss')}: ${wins}/${losses} (${winRate}%)`;
+}
+
+function formatTotalStaminaLabel(totalStamina) {
+  return `${t('mods.huntAnalyzer.totalStamina')}: ${totalStamina}`;
+}
+
+function formatStaminaRateLabel(staminaPerHour, netStaminaPerHour, recoveryEfficiency) {
+  return `${t('mods.huntAnalyzer.staminaPerHour')}: ${staminaPerHour} (${t('mods.huntAnalyzer.net')}: ${netStaminaPerHour > 0 ? '+' : ''}${netStaminaPerHour}/h) [${recoveryEfficiency}% ${t('mods.huntAnalyzer.recovery')}]`;
+}
+
 // =======================
 // 2.8. Performance Caching & Event Handlers
 // =======================
@@ -1283,8 +1472,7 @@ HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
 // Initialize internal clock system
 // Do not start internal clock on init; it will start on first newGame/manual or autoplay detection
 
-// Auto-reopen panel if needed
-autoReopenHuntAnalyzer();
+// Auto-reopen is handled during persistence initialization.
 
 // =======================
 // 2.10. Data Persistence System
@@ -1596,6 +1784,7 @@ function cleanSessionData(sessions) {
             message: session.message,
             roomId: session.roomId,
             roomName: session.roomName,
+            floor: typeof session.floor === 'number' ? session.floor : null,
             timestamp: session.timestamp,
             staminaSpent: session.staminaSpent,
             staminaRecovered: session.staminaRecovered,
@@ -1965,21 +2154,20 @@ function updatePanelThemeColors(panel) {
     // Update live display section background
     const liveDisplaySection = panel.querySelector('.live-display-section');
     if (liveDisplaySection) {
-        liveDisplaySection.style.backgroundImage = getThemeBackground('section');
-        liveDisplaySection.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+        applyFramedSectionStyles(liveDisplaySection, { noTopMargin: true });
     }
     
     // Update loot container
     const lootContainer = panel.querySelector('.loot-container');
     if (lootContainer) {
-        lootContainer.style.backgroundImage = getThemeBackground('section');
-        lootContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+        applyFramedSectionStyles(lootContainer, { noTopMargin: true });
     }
     
     // Update loot display div
     const lootDisplayDiv = document.getElementById('mod-loot-display');
     if (lootDisplayDiv) {
-        lootDisplayDiv.style.border = `1px solid ${getThemeColor('border')}`;
+        lootDisplayDiv.style.border = '4px solid transparent';
+        lootDisplayDiv.style.borderImage = 'var(--ha-frame-1)';
         lootDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
         lootDisplayDiv.style.color = getThemeColor('text');
     }
@@ -1994,14 +2182,14 @@ function updatePanelThemeColors(panel) {
     // Update creature drop container
     const creatureDropContainer = panel.querySelector('.creature-drop-container');
     if (creatureDropContainer) {
-        creatureDropContainer.style.backgroundImage = getThemeBackground('section');
-        creatureDropContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+        applyFramedSectionStyles(creatureDropContainer, { noTopMargin: true });
     }
     
     // Update creature drop display div
     const creatureDropDisplayDiv = document.getElementById('mod-creature-drop-display');
     if (creatureDropDisplayDiv) {
-        creatureDropDisplayDiv.style.border = `1px solid ${getThemeColor('border')}`;
+        creatureDropDisplayDiv.style.border = '4px solid transparent';
+        creatureDropDisplayDiv.style.borderImage = 'var(--ha-frame-1)';
         creatureDropDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
         creatureDropDisplayDiv.style.color = getThemeColor('text');
     }
@@ -2016,8 +2204,7 @@ function updatePanelThemeColors(panel) {
     // Update map filter container
     const mapFilterContainer = panel.querySelector('.map-filter-container');
     if (mapFilterContainer) {
-        mapFilterContainer.style.backgroundImage = getThemeBackground('section');
-        mapFilterContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+        applyFramedSectionStyles(mapFilterContainer, { noTopMargin: true });
     }
     
     // Update map filter title (if it exists as a separate element)
@@ -2030,8 +2217,7 @@ function updatePanelThemeColors(panel) {
     // Update button container
     const buttonContainer = panel.querySelector('.button-container');
     if (buttonContainer) {
-        buttonContainer.style.backgroundImage = getThemeBackground('section');
-        buttonContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+        applyFramedSectionStyles(buttonContainer, { noTopMargin: true });
     }
 }
 
@@ -3371,11 +3557,18 @@ class DataProcessor {
       }
     }
     
+    // Floor is included in rewardScreen in current game payloads.
+    // Keep null for unknown/legacy sessions so grouping stays stable.
+    const battleFloor = typeof rewardScreen.floor === 'number'
+      ? rewardScreen.floor
+      : (typeof serverResults?.floor === 'number' ? serverResults.floor : null);
+
     // Store session data
     const sessionData = {
       message: autoplayMessage,
       roomId: rewardScreen.roomId,
       roomName: readableRoomName,
+      floor: battleFloor,
       loot: Array.from(aggregatedLootForSession.values()),
       creatures: Array.from(aggregatedCreaturesForSession.values()),
       timestamp: Date.now(),
@@ -3555,6 +3748,17 @@ function updateMapFilterDropdown() {
     const mapFilterRow = domCache.get("mod-map-filter-row");
     if (!mapFilterRow) return;
 
+    // Prevent listener leaks across dropdown rebuilds.
+    if (documentClickHandler) {
+        document.removeEventListener("click", documentClickHandler);
+        documentClickHandler = null;
+    }
+    const previousDropdownButton = document.getElementById("mod-map-filter-dropdown-button");
+    if (previousDropdownButton && dropdownClickHandler) {
+        previousDropdownButton.removeEventListener("click", dropdownClickHandler);
+        dropdownClickHandler = null;
+    }
+
     // Clear existing content
     mapFilterRow.innerHTML = "";
 
@@ -3585,7 +3789,10 @@ function updateMapFilterDropdown() {
     arrow.style.fontSize = "10px";
     arrow.style.marginLeft = "8px";
 
-    dropdownButton.appendChild(document.createTextNode(HuntAnalyzerState.ui.selectedMapFilter));
+    const selectedMapLabel = HuntAnalyzerState.ui.selectedMapFilter === "ALL"
+        ? t('mods.huntAnalyzer.allMaps')
+        : HuntAnalyzerState.ui.selectedMapFilter;
+    dropdownButton.appendChild(document.createTextNode(selectedMapLabel));
     dropdownButton.appendChild(arrow);
 
     // Create dropdown menu
@@ -3674,7 +3881,8 @@ function updateMapFilterDropdown() {
 // Create a dropdown option
 function createDropdownOption(mapName) {
     const option = document.createElement("div");
-    option.textContent = mapName;
+    const optionLabel = mapName === "ALL" ? t('mods.huntAnalyzer.allMaps') : mapName;
+    option.textContent = optionLabel;
     option.style.padding = "8px 12px";
     option.style.cursor = "pointer";
     option.style.fontSize = "12px";
@@ -3708,7 +3916,7 @@ function createDropdownOption(mapName) {
         // Update dropdown button text
         const dropdownButton = document.getElementById("mod-map-filter-dropdown-button");
         if (dropdownButton) {
-            dropdownButton.childNodes[0].textContent = mapName;
+            dropdownButton.childNodes[0].textContent = optionLabel;
         }
         
         // Close dropdown
@@ -4046,7 +4254,7 @@ function processAutoplaySummary(serverResults) {
 // This is the text that will be copied to the user's clipboard.
 // Returns the formatted summary log.
 function generateSummaryLogText() {
-    let summary = `--- Hunt Analyzer Summary ---\n`;
+    let summary = `--- ${t('mods.huntAnalyzer.logSummaryTitle')} ---\n`;
 
     // Overall Stats
     const filteredTimeHours = getFilteredTimeHours();
@@ -4055,11 +4263,11 @@ function generateSummaryLogText() {
     const uniqueMaps = new Set(HuntAnalyzerState.data.sessions.map(s => s.roomName));
     let roomDisplayName;
     if (uniqueMaps.size === 0) {
-        roomDisplayName = 'N/A';
+        roomDisplayName = t('mods.huntAnalyzer.notAvailable');
     } else if (uniqueMaps.size === 1) {
         roomDisplayName = Array.from(uniqueMaps)[0];
     } else {
-        roomDisplayName = `All Maps (${uniqueMaps.size} maps)`;
+        roomDisplayName = `${t('mods.huntAnalyzer.allMaps')} (${uniqueMaps.size} ${t('mods.huntAnalyzer.maps')})`;
     }
     
     // Calculate overall rates for summary
@@ -4070,28 +4278,58 @@ function generateSummaryLogText() {
     const staminaSpentRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.staminaSpent / filteredTimeHours) : 0;
     
     // Calculate overall efficiency metrics
-    const goldPerStamina = HuntAnalyzerState.totals.staminaSpent > 0 ? (HuntAnalyzerState.totals.gold / HuntAnalyzerState.totals.staminaSpent).toFixed(2) : 'N/A';
-    const sessionsPerStamina = HuntAnalyzerState.totals.staminaSpent > 0 ? (HuntAnalyzerState.session.count / HuntAnalyzerState.totals.staminaSpent).toFixed(3) : 'N/A';
+    const goldPerStamina = HuntAnalyzerState.totals.staminaSpent > 0 ? (HuntAnalyzerState.totals.gold / HuntAnalyzerState.totals.staminaSpent).toFixed(2) : t('mods.huntAnalyzer.notAvailable');
+    const sessionsPerStamina = HuntAnalyzerState.totals.staminaSpent > 0 ? (HuntAnalyzerState.session.count / HuntAnalyzerState.totals.staminaSpent).toFixed(3) : t('mods.huntAnalyzer.notAvailable');
     const totalSessionsForWinRate = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
     const winRate = totalSessionsForWinRate > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessionsForWinRate) * 100) : 0;
     
-    summary += `Room: ${roomDisplayName}\n`;
-    summary += `Sessions: ${HuntAnalyzerState.session.count}\n`;
-    summary += `Win/Loss: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)\n`;
-    summary += `Time Elapsed: ${formatTime(filteredTimeHours * 60 * 60 * 1000)}\n`;
-    summary += `Gold: ${HuntAnalyzerState.totals.gold} | Dust: ${HuntAnalyzerState.totals.dust}\n`;
-    summary += `Equipment Drops: ${HuntAnalyzerState.totals.equipment} | Creature Drops: ${HuntAnalyzerState.totals.creatures} | Shiny Drops: ${HuntAnalyzerState.totals.shiny}\n`;
-    summary += `Total Stamina Spent: ${HuntAnalyzerState.totals.staminaSpent}\n`;
+    summary += `${t('mods.huntAnalyzer.room')}: ${roomDisplayName}\n`;
+    summary += `${t('mods.huntAnalyzer.sessions')}: ${HuntAnalyzerState.session.count}\n`;
+    const floorSessions = new Map();
+    HuntAnalyzerState.data.sessions.forEach(session => {
+        const floorLabel = Number.isInteger(session.floor)
+            ? `${t('mods.huntAnalyzer.floor')} ${session.floor}`
+            : t('mods.huntAnalyzer.floorUnknown');
+        if (!floorSessions.has(floorLabel)) {
+            floorSessions.set(floorLabel, { sessions: 0, wins: 0, losses: 0 });
+        }
+        const floorStats = floorSessions.get(floorLabel);
+        floorStats.sessions += 1;
+        if (session.victory === true) {
+            floorStats.wins += 1;
+        } else if (session.victory === false) {
+            floorStats.losses += 1;
+        }
+    });
+    if (floorSessions.size > 0) {
+        const floorBreakdown = Array.from(floorSessions.entries())
+            .sort((a, b) => {
+                const floorMatchA = a[0].match(/\d+$/);
+                const floorMatchB = b[0].match(/\d+$/);
+                if (!floorMatchA && !floorMatchB) return 0;
+                if (!floorMatchA) return 1;
+                if (!floorMatchB) return -1;
+                return Number(floorMatchA[0]) - Number(floorMatchB[0]);
+            })
+            .map(([label, stats]) => `${label}: ${stats.sessions} (${stats.wins}/${stats.losses})`)
+            .join(' | ');
+        summary += `${t('mods.huntAnalyzer.sessionsByFloor')}: ${floorBreakdown}\n`;
+    }
+    summary += `${t('mods.huntAnalyzer.winLoss')}: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)\n`;
+    summary += `${t('mods.huntAnalyzer.timeElapsed')}: ${formatTime(filteredTimeHours * 60 * 60 * 1000)}\n`;
+    summary += `${t('mods.huntAnalyzer.gold')}: ${HuntAnalyzerState.totals.gold} | ${t('mods.huntAnalyzer.dust')}: ${HuntAnalyzerState.totals.dust}\n`;
+    summary += `${t('mods.huntAnalyzer.equipmentDrops')}: ${HuntAnalyzerState.totals.equipment} | ${t('mods.huntAnalyzer.creatureDrops')}: ${HuntAnalyzerState.totals.creatures} | ${t('mods.huntAnalyzer.shinyDrops')}: ${HuntAnalyzerState.totals.shiny}\n`;
+    summary += `${t('mods.huntAnalyzer.totalStaminaSpent')}: ${HuntAnalyzerState.totals.staminaSpent}\n`;
     summary += `---------------------------\n`;
-    summary += `Overall Rates: ${autoplayRatePerHour} sessions/h | ${goldRatePerHour} gold/h | ${creatureRatePerHour} creatures/h | ${equipmentRatePerHour} equipment/h\n`;
-    summary += `Overall Efficiency: ${goldPerStamina} gold/stamina | ${sessionsPerStamina} sessions/stamina | ${staminaSpentRatePerHour} stamina/h\n`;
-    summary += `Generated: ${new Date().toLocaleString()}\n`;
+    summary += `${t('mods.huntAnalyzer.overallRates')}: ${autoplayRatePerHour} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${goldRatePerHour} ${t('mods.huntAnalyzer.goldPerHour')} | ${creatureRatePerHour} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${equipmentRatePerHour} ${t('mods.huntAnalyzer.equipmentPerHour')}\n`;
+    summary += `${t('mods.huntAnalyzer.overallEfficiency')}: ${goldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${sessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${staminaSpentRatePerHour} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
+    summary += `${t('mods.huntAnalyzer.generated')}: ${new Date().toLocaleString()}\n`;
     summary += `---------------------------\n\n`;
 
     // Map-specific Analysis
-    summary += `--- Map Analysis ---\n`;
+    summary += `--- ${t('mods.huntAnalyzer.mapAnalysis')} ---\n`;
     if (HuntAnalyzerState.data.sessions.length === 0) {
-        summary += `No sessions recorded.\n`;
+        summary += `${t('mods.huntAnalyzer.noSessionsRecorded')}\n`;
     } else {
         // Group sessions by map and calculate map-specific stats
         const mapGroups = {};
@@ -4099,7 +4337,7 @@ function generateSummaryLogText() {
         const sessionsWithTimestamps = HuntAnalyzerState.data.sessions.filter(s => s.timestamp);
         
         HuntAnalyzerState.data.sessions.forEach(session => {
-            const mapName = session.roomName || 'Unknown Map';
+            const mapName = session.roomName || t('mods.huntAnalyzer.unknownMap');
             if (!mapGroups[mapName]) {
                 mapGroups[mapName] = {
                     sessions: 0,
@@ -4203,16 +4441,16 @@ function generateSummaryLogText() {
             const mapStaminaRate = mapTimeHours > 0 ? Math.floor(mapData.totalStamina / mapTimeHours) : 0;
             
             // Calculate map-specific efficiency
-            const mapGoldPerStamina = mapData.totalStamina > 0 ? (mapData.totalGold / mapData.totalStamina).toFixed(2) : 'N/A';
-            const mapSessionsPerStamina = mapData.totalStamina > 0 ? (mapData.sessions / mapData.totalStamina).toFixed(3) : 'N/A';
+            const mapGoldPerStamina = mapData.totalStamina > 0 ? (mapData.totalGold / mapData.totalStamina).toFixed(2) : t('mods.huntAnalyzer.notAvailable');
+            const mapSessionsPerStamina = mapData.totalStamina > 0 ? (mapData.sessions / mapData.totalStamina).toFixed(3) : t('mods.huntAnalyzer.notAvailable');
             const mapWinRate = (mapData.wins + mapData.losses) > 0 ? Math.round((mapData.wins / (mapData.wins + mapData.losses)) * 100) : 0;
             
             summary += `\n${mapName}:\n`;
-            summary += `  Sessions: ${mapData.sessions} | W/L: ${mapData.wins}/${mapData.losses} (${mapWinRate}%) | Time: ${formatTime(mapData.endTime - mapData.startTime)}${mapData.hasTimestamps ? '' : ' (estimated)'}\n`;
-            summary += `  Gold: ${mapData.totalGold} | Dust: ${mapData.totalDust} | Stamina: ${mapData.totalStamina}\n`;
-            summary += `  Equipment: ${mapData.totalEquipment} | Creatures: ${mapData.totalCreatures} | Shiny: ${mapData.totalShiny}\n`;
-            summary += `  Rates: ${mapSessionRate} sessions/h | ${mapGoldRate} gold/h | ${mapCreatureRate} creatures/h | ${mapEquipmentRate} equipment/h\n`;
-            summary += `  Efficiency: ${mapGoldPerStamina} gold/stamina | ${mapSessionsPerStamina} sessions/stamina | ${mapStaminaRate} stamina/h\n`;
+            summary += `  ${t('mods.huntAnalyzer.sessions')}: ${mapData.sessions} | ${t('mods.huntAnalyzer.winLoss')}: ${mapData.wins}/${mapData.losses} (${mapWinRate}%) | ${t('mods.huntAnalyzer.time')}: ${formatTime(mapData.endTime - mapData.startTime)}${mapData.hasTimestamps ? '' : ` (${t('mods.huntAnalyzer.estimated')})`}\n`;
+            summary += `  ${t('mods.huntAnalyzer.gold')}: ${mapData.totalGold} | ${t('mods.huntAnalyzer.dust')}: ${mapData.totalDust} | ${t('mods.huntAnalyzer.stamina')}: ${mapData.totalStamina}\n`;
+            summary += `  ${t('mods.huntAnalyzer.equipment')}: ${mapData.totalEquipment} | ${t('mods.huntAnalyzer.creatures')}: ${mapData.totalCreatures} | ${t('mods.huntAnalyzer.shiny')}: ${mapData.totalShiny}\n`;
+            summary += `  ${t('mods.huntAnalyzer.rates')}: ${mapSessionRate} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${mapGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${mapCreatureRate} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${mapEquipmentRate} ${t('mods.huntAnalyzer.equipmentPerHour')}\n`;
+            summary += `  ${t('mods.huntAnalyzer.efficiency')}: ${mapGoldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${mapSessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${mapStaminaRate} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
             
             // Show all loot items using the same order as panel rendering:
             // category (Runes -> Equipment -> Everything else), then name, then rarity.
@@ -4239,7 +4477,7 @@ function generateSummaryLogText() {
             });
             
             if (sortedLoot.length > 0) {
-                summary += `  Loot:\n`;
+                summary += `  ${t('mods.huntAnalyzer.loot')}:\n`;
                 sortedLoot.forEach(item => {
                     let itemLine = `    ${item.originalName}: x${item.count}`;
                     if (item.rarity > 0) {
@@ -4278,7 +4516,7 @@ function generateSummaryLogText() {
             });
             
             if (sortedCreatures.length > 0) {
-                summary += `  Creatures:\n`;
+                summary += `  ${t('mods.huntAnalyzer.creatures')}:\n`;
                 sortedCreatures.forEach(creature => {
                     let creatureLine = `    ${creature.originalName} (${creature.tierName}): x${creature.count}`;
                     if (creature.isShiny) {
@@ -4317,22 +4555,28 @@ function updateMinimizeButtonState(minimizeBtn, isMinimized) {
     if (!minimizeBtn) return;
     if (isMinimized) {
         minimizeBtn.textContent = '+';
-        minimizeBtn.title = 'Restore Analyzer';
+        minimizeBtn.title = t('mods.huntAnalyzer.restoreAnalyzer');
     } else {
         minimizeBtn.textContent = '–';
-        minimizeBtn.title = 'Minimize Analyzer';
+        minimizeBtn.title = t('mods.huntAnalyzer.minimizeAnalyzer');
     }
 }
 
 // Helper function to update style button state
 function updateStyleButtonState(styleButton, mode) {
     if (!styleButton) return;
+    if (mode === LAYOUT_MODES.MINIMIZED) {
+        styleButton.style.display = 'none';
+        return;
+    }
+
+    styleButton.style.display = 'flex';
     if (mode === LAYOUT_MODES.VERTICAL) {
-        styleButton.textContent = 'Horizontal';
-        styleButton.title = 'Switch to horizontal layout';
+        styleButton.textContent = t('mods.huntAnalyzer.horizontal');
+        styleButton.title = t('mods.huntAnalyzer.switchToHorizontalLayout');
     } else if (mode === LAYOUT_MODES.HORIZONTAL) {
-        styleButton.textContent = 'Vertical';
-        styleButton.title = 'Switch to vertical layout';
+        styleButton.textContent = t('mods.huntAnalyzer.vertical');
+        styleButton.title = t('mods.huntAnalyzer.switchToVerticalLayout');
     }
 }
 
@@ -4395,10 +4639,9 @@ function handleMinimizeButtonClick(panel, styleButton, minimizeBtn) {
     
     // Update button states
     updateMinimizeButtonState(minimizeBtn, !wasMinimized);
-    if (!wasMinimized) {
-        // Only update style button when restoring (it's hidden when minimized)
-        updateStyleButtonState(styleButton, panelState.mode);
-    }
+    // Always sync style button visibility with current mode:
+    // minimized => hidden, otherwise => shown with correct label.
+    updateStyleButtonState(styleButton, panelState.mode);
     
     // Re-render loot and creature drops when restoring from minimized
     if (wasMinimized) {
@@ -4604,61 +4847,6 @@ function createDisplayContent(contentId, maxHeight = '200px') {
     return contentDiv;
 }
 
-// Creates a confirmation dialog
-function createConfirmationDialog(titleKey, messageKey, onConfirm, onCancel) {
-    const confirmDialog = document.createElement('div');
-    confirmDialog.style.position = 'fixed';
-    confirmDialog.style.top = '50%';
-    confirmDialog.style.left = '50%';
-    confirmDialog.style.transform = 'translate(-50%, -50%)';
-    confirmDialog.style.backgroundColor = getThemeColor('dialogBackground');
-    confirmDialog.style.border = `2px solid ${getThemeColor('dialogBorder')}`;
-    confirmDialog.style.borderRadius = '8px';
-    confirmDialog.style.padding = '20px';
-    confirmDialog.style.zIndex = '10000';
-    confirmDialog.style.color = getThemeColor('dialogText');
-    confirmDialog.style.fontFamily = 'Inter, sans-serif';
-    confirmDialog.style.boxShadow = `0 0 20px ${getThemeColor('dialogShadow')}`;
-
-    const dialogTitle = document.createElement('h3');
-    dialogTitle.textContent = t(titleKey);
-    dialogTitle.style.margin = '0 0 15px 0';
-    dialogTitle.style.color = getThemeColor('dialogTitle');
-    dialogTitle.style.fontSize = '16px';
-
-    const dialogMessage = document.createElement('p');
-    dialogMessage.textContent = t(messageKey);
-    dialogMessage.style.margin = '0 0 20px 0';
-    dialogMessage.style.fontSize = '14px';
-    dialogMessage.style.lineHeight = '1.4';
-
-    const dialogButtonContainer = document.createElement('div');
-    dialogButtonContainer.style.display = 'flex';
-    dialogButtonContainer.style.gap = '10px';
-    dialogButtonContainer.style.justifyContent = 'center';
-
-    const confirmBtn = createStyledButton(t('mods.huntAnalyzer.confirm'));
-    confirmBtn.addEventListener('click', () => {
-        onConfirm();
-        document.body.removeChild(confirmDialog);
-    });
-
-    const cancelBtn = createStyledButton("Cancel");
-    cancelBtn.addEventListener('click', () => {
-        if (onCancel) onCancel();
-        document.body.removeChild(confirmDialog);
-    });
-
-    dialogButtonContainer.appendChild(confirmBtn);
-    dialogButtonContainer.appendChild(cancelBtn);
-
-    confirmDialog.appendChild(dialogTitle);
-    confirmDialog.appendChild(dialogMessage);
-    confirmDialog.appendChild(dialogButtonContainer);
-    
-    return confirmDialog;
-}
-
 // Resets all Hunt Analyzer state data
 function resetHuntAnalyzerState() {
     HuntAnalyzerState.ui.autoplayLogText = ""; // Reset the log text
@@ -4707,23 +4895,34 @@ function resetHuntAnalyzerState() {
     // Immediately update playtime display to show 0
     const playtimeElement = document.getElementById('mod-playtime-display');
     if (playtimeElement) {
-        playtimeElement.textContent = "Playtime: 00:00:00";
+        playtimeElement.textContent = formatPlaytimeLabel("00:00:00");
     }
 }
 
 // Updates room display with current room information
+function getCurrentRoomIdForDisplay() {
+    const boardSnapshot = globalThis.state?.board?.getSnapshot?.();
+    const boardCtx = boardSnapshot?.context || {};
+    const playerCtx = globalThis.state?.player?.getSnapshot?.()?.context || {};
+
+    return (boardCtx.selectedMap && boardCtx.selectedMap.selectedRoom && boardCtx.selectedMap.selectedRoom.id)
+        || (boardCtx.selectedMap && boardCtx.selectedMap.id)
+        || (boardCtx.area && boardCtx.area.id)
+        || globalThis.state?.board?.area?.id
+        || playerCtx.currentRoomId
+        || globalThis.state?.player?.currentRoomId
+        || null;
+}
+
 function updateCurrentRoomDisplay() {
     const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
     let roomDisplayName = t('mods.huntAnalyzer.currentRoom');
-    let currentRoomId = null;
+    const currentRoomId = getCurrentRoomIdForDisplay();
     
-    if (roomNamesMap) {
-        currentRoomId = globalThis.state.board?.area?.id || globalThis.state.player?.currentRoomId;
-        if (currentRoomId && roomNamesMap[currentRoomId]) {
-            roomDisplayName = roomNamesMap[currentRoomId];
-        } else if (currentRoomId) {
-            roomDisplayName = `Room ID: ${currentRoomId}`;
-        }
+    if (currentRoomId && roomNamesMap?.[currentRoomId]) {
+        roomDisplayName = roomNamesMap[currentRoomId];
+    } else if (currentRoomId) {
+        roomDisplayName = `Room ID: ${currentRoomId}`;
     }
     
     // If map actually changed, record accumulated time for previous map and start new
@@ -4736,254 +4935,24 @@ function updateCurrentRoomDisplay() {
     }
 }
 
-// =======================
-// 5.2. Panel Section Creation Functions
-// =======================
+function scheduleInitialRoomDisplaySync(maxAttempts = 12, intervalMs = 250) {
+    let attempt = 0;
+    const sync = () => {
+        updateCurrentRoomDisplay();
+        const roomIdDisplay = domCache.get("mod-room-id-display");
+        const currentText = roomIdDisplay?.textContent || "";
+        const stillFallback = currentText === t('mods.huntAnalyzer.currentRoom');
+        const hasRoomId = !!getCurrentRoomIdForDisplay();
 
-// Creates the live display section with session stats and rates
-function createLiveDisplaySection() {
-    const liveDisplaySection = document.createElement("div");
-    liveDisplaySection.className = "live-display-section";
-    liveDisplaySection.style.display = "flex";
-    liveDisplaySection.style.flexDirection = "column";
-    liveDisplaySection.style.padding = "8px";
-    liveDisplaySection.style.backgroundImage = getThemeBackground('section');
-    liveDisplaySection.style.backgroundRepeat = 'repeat';
-    liveDisplaySection.style.backgroundColor = getThemeColor('sectionBackgroundFallback'); // Fallback
-    liveDisplaySection.style.flex = "0 0 auto"; // FIXED SIZE
-    liveDisplaySection.style.width = "100%";
-    liveDisplaySection.style.boxSizing = "border-box";
-
-    // Session Stats
-    const sessionStatsDiv = document.createElement("div");
-    sessionStatsDiv.style.display = "flex";
-    sessionStatsDiv.style.flexDirection = "column";
-    sessionStatsDiv.style.gap = "2px";
-    sessionStatsDiv.style.marginBottom = "4px";
-
-    const firstRow = document.createElement("div");
-    firstRow.style.display = "flex";
-    firstRow.style.justifyContent = "space-between";
-    firstRow.style.alignItems = "center";
-
-    const autoplayCounter = document.createElement("div");
-    autoplayCounter.id = "mod-autoplay-counter";
-    autoplayCounter.style.display = "flex";
-    autoplayCounter.style.alignItems = "center";
-    autoplayCounter.style.gap = "4px";
-    autoplayCounter.style.fontSize = "12px";
-    autoplayCounter.style.color = getThemeColor('textInfo');
-    
-    const sessionCountSpan = document.createElement("span");
-    sessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: 0 (0/h)`;
-    sessionCountSpan.id = "mod-session-count";
-    
-    autoplayCounter.appendChild(sessionCountSpan);
-
-    const playtimeElement = document.createElement("span");
-    playtimeElement.id = "mod-playtime-display";
-    playtimeElement.textContent = "Playtime: 0m";
-    playtimeElement.style.fontSize = "10px";
-    playtimeElement.style.color = getThemeColor('textInfo');
-    
-    firstRow.appendChild(autoplayCounter);
-    firstRow.appendChild(playtimeElement);
-    
-    // Second row for Stamina and W/L
-    const secondRow = document.createElement("div");
-    secondRow.style.display = "flex";
-    secondRow.style.justifyContent = "space-between";
-    secondRow.style.alignItems = "center";
-    
-    // Stamina Display
-    const staminaDisplaySpan = document.createElement("span");
-    staminaDisplaySpan.id = "mod-stamina-display";
-    staminaDisplaySpan.style.display = "none";
-    staminaDisplaySpan.style.whiteSpace = "nowrap";
-    staminaDisplaySpan.style.lineHeight = "12px";
-    staminaDisplaySpan.style.verticalAlign = "middle";
-    staminaDisplaySpan.style.fontSize = "10px";
-    staminaDisplaySpan.style.color = getThemeColor('textInfo');
-
-    // Win/Loss Display
-    const winLossElement = document.createElement("span");
-    winLossElement.id = "mod-win-loss-display";
-    winLossElement.style.fontSize = "10px";
-    winLossElement.style.color = getThemeColor('textInfo');
-    winLossElement.textContent = "W/L: 0/0 (0%)";
-    
-    secondRow.appendChild(staminaDisplaySpan);
-    secondRow.appendChild(winLossElement);
-    
-    sessionStatsDiv.appendChild(firstRow);
-    sessionStatsDiv.appendChild(secondRow);
-    liveDisplaySection.appendChild(sessionStatsDiv);
-
-    return { liveDisplaySection, autoplayCounter, sessionCountSpan, autoplayRateElement, staminaDisplaySpan, winLossElement };
-}
-
-// Creates the drop rate live feed section
-function createDropRateSection() {
-    const dropRateLiveFeedDiv = document.createElement("div");
-    dropRateLiveFeedDiv.className = "ha-border-separator";
-    dropRateLiveFeedDiv.style.fontSize = "10px";
-    dropRateLiveFeedDiv.style.color = getThemeColor('textStats');
-
-    // Left section for rates
-    const leftRatesSection = createFlexColumn();
-
-    const goldRateElement = createRateDisplay("mod-gold-rate", 'mods.huntAnalyzer.goldPerHour');
-    leftRatesSection.appendChild(goldRateElement);
-
-    const creatureRateElement = createRateDisplay("mod-creature-rate", 'mods.huntAnalyzer.creaturesPerHour');
-    leftRatesSection.appendChild(creatureRateElement);
-
-    const equipmentRateElement = createRateDisplay("mod-equipment-rate", 'mods.huntAnalyzer.equipmentPerHour');
-    leftRatesSection.appendChild(equipmentRateElement);
-
-    const runeRateElement = createRateDisplay("mod-rune-rate", 'mods.huntAnalyzer.runesPerHour');
-    leftRatesSection.appendChild(runeRateElement);
-
-    const totalStaminaSpentElement = document.createElement('span');
-    totalStaminaSpentElement.id = 'mod-total-stamina-spent';
-    totalStaminaSpentElement.className = "ha-stats-text";
-    // Calculate initial stamina efficiency with natural regen
-    const initialElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-    const initialElapsedTimeMinutes = initialElapsedTimeMs / (1000 * 60);
-    const initialElapsedTimeHours = initialElapsedTimeMs / (1000 * 60 * 60);
-    const initialNaturalStaminaRegen = Math.floor(initialElapsedTimeMinutes);
-    const initialTotalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + initialNaturalStaminaRegen;
-    const initialNetStaminaChange = initialTotalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
-    const initialNetStaminaPerHour = Math.floor(initialNetStaminaChange / initialElapsedTimeHours);
-    const initialRecoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
-        Math.round((initialTotalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
-    const initialStaminaSpentRatePerHour = initialElapsedTimeHours > 0 ? 
-        Math.floor(HuntAnalyzerState.totals.staminaSpent / initialElapsedTimeHours) : 0;
-    totalStaminaSpentElement.textContent = `Stamina/h: ${initialStaminaSpentRatePerHour} (Net: ${initialNetStaminaPerHour > 0 ? '+' : ''}${initialNetStaminaPerHour}/h) [${initialRecoveryEfficiency}% recovery]`;
-    leftRatesSection.appendChild(totalStaminaSpentElement);
-
-    // Right section for totals
-    const rightTotalsSection = createFlexColumn();
-    rightTotalsSection.style.alignItems = 'flex-end';
-
-    // Create resource displays using utility function
-    const { displayDiv: goldDisplayDiv, amountSpan: goldAmountSpan } = createResourceDisplay('/assets/icons/goldpile.png', 'Gold', 'mod-total-gold-display', 'textGold');
-    rightTotalsSection.appendChild(goldDisplayDiv);
-
-    const { displayDiv: dustDisplayDiv, amountSpan: dustAmountSpan } = createResourceDisplay('/assets/icons/dust.png', 'Dust', 'mod-total-dust-display', 'textDust');
-    rightTotalsSection.appendChild(dustDisplayDiv);
-
-    const { displayDiv: shinyDisplayDiv, amountSpan: shinyAmountSpan } = createResourceDisplay('/assets/icons/shiny.png', 'Shiny', 'mod-total-shiny-display', 'textShiny');
-    rightTotalsSection.appendChild(shinyDisplayDiv);
-
-    const { displayDiv: runesDisplayDiv, amountSpan: runesAmountSpan } = createResourceDisplay('/assets/icons/rune.png', 'Runes', 'mod-total-runes-display', 'textRunes');
-    rightTotalsSection.appendChild(runesDisplayDiv);
-
-    dropRateLiveFeedDiv.appendChild(leftRatesSection);
-    dropRateLiveFeedDiv.appendChild(rightTotalsSection);
-
-    return { 
-        dropRateLiveFeedDiv, 
-        goldRateElement, 
-        creatureRateElement, 
-        equipmentRateElement, 
-        runeRateElement, 
-        totalStaminaSpentElement,
-        goldAmountSpan,
-        dustAmountSpan,
-        shinyAmountSpan,
-        runesAmountSpan
+        attempt += 1;
+        if (stillFallback && !hasRoomId && attempt < maxAttempts) {
+            setTimeout(sync, intervalMs);
+        }
     };
+
+    sync();
 }
 
-// Creates the button container section
-function createButtonContainer() {
-    const buttonContainer = createFlexRow('5px', 'center');
-    buttonContainer.style.padding = "8px";
-    buttonContainer.style.flex = "0 0 auto";
-
-    // Clear Data Button
-    const clearDataBtn = createStyledButton(t('mods.huntAnalyzer.clearData'));
-    clearDataBtn.addEventListener('click', () => {
-        const confirmDialog = createConfirmationDialog(
-            'mods.huntAnalyzer.confirmClear',
-            'mods.huntAnalyzer.clearWarning',
-            () => {
-                resetHuntAnalyzerState();
-                // Clear the visual display divs and update counter
-                const cachedLootDiv = domCache.get("mod-loot-display");
-                const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
-                if (cachedLootDiv) cachedLootDiv.innerHTML = "";
-                if (cachedCreatureDropDiv) cachedCreatureDropDiv.innerHTML = "";
-                // Call renderAllSessions to refresh the display (which will now be empty)
-                renderAllSessions(); // Re-render to show cleared state
-                updateMapFilterDropdown(); // Update filter dropdown to show only ALL
-                updatePanelDisplay(); // Update overall rates to reflect cleared state
-                updateCurrentRoomDisplay(); // Reset the room ID display to current room name
-                updatePanelPosition(); // Re-align after clear
-            }
-        );
-        document.body.appendChild(confirmDialog);
-    });
-
-    buttonContainer.appendChild(clearDataBtn);
-
-    return buttonContainer;
-}
-
-// Creates the map filter container section
-function createMapFilterContainer() {
-    const mapFilterContainer = document.createElement("div");
-    mapFilterContainer.className = "ha-container-section";
-    mapFilterContainer.style.flex = "0 0 auto";
-
-    const { titleContainer: mapFilterTitleContainer, title: mapFilterTitle } = createSectionTitle("mod-map-filter-title", t('mods.huntAnalyzer.mapFilter'));
-
-    const mapFilterDropdown = document.createElement("select");
-    mapFilterDropdown.id = "mod-map-filter-dropdown";
-    mapFilterDropdown.style.width = "100%";
-    mapFilterDropdown.style.padding = "4px";
-    mapFilterDropdown.style.border = "1px solid #3A404A";
-    mapFilterDropdown.style.borderRadius = "4px";
-    mapFilterDropdown.style.backgroundColor = "#282C34";
-    mapFilterDropdown.style.color = "#ABB2BF";
-    mapFilterDropdown.style.fontSize = "12px";
-
-    mapFilterContainer.appendChild(mapFilterTitleContainer);
-    mapFilterContainer.appendChild(mapFilterDropdown);
-
-    return { mapFilterContainer, mapFilterDropdown };
-}
-
-// Creates the loot container section
-function createLootContainer() {
-    const lootContainer = document.createElement("div");
-    lootContainer.className = "ha-container-section";
-
-    const { titleContainer: lootTitleContainer, title: lootTitle } = createSectionTitle("mod-loot-title", t('mods.huntAnalyzer.loot'));
-
-    const lootDisplayDiv = createDisplayContent("mod-loot-display");
-
-    lootContainer.appendChild(lootTitleContainer);
-    lootContainer.appendChild(lootDisplayDiv);
-
-    return { lootContainer, lootDisplayDiv };
-}
-
-// Creates the creature drop container section
-function createCreatureDropContainer() {
-    const creatureDropContainer = document.createElement("div");
-    creatureDropContainer.className = "ha-container-section";
-
-    const { titleContainer: creatureDropTitleContainer, title: creatureDropTitle } = createSectionTitle("mod-creature-drops-title", t('mods.huntAnalyzer.creatureDrops'));
-
-    const creatureDropDisplayDiv = createDisplayContent("mod-creature-drop-display");
-
-    creatureDropContainer.appendChild(creatureDropTitleContainer);
-    creatureDropContainer.appendChild(creatureDropDisplayDiv);
-
-    return { creatureDropContainer, creatureDropDisplayDiv };
-}
 // Helper function to create a consistently styled button.
 // text - The text content of the button.
 // Returns the styled button element.
@@ -5075,22 +5044,22 @@ function createHeaderSection() {
     headerControls.className = "ha-header-controls";
 
     // Style Button (Vertical/Horizontal)
-    const styleButton = createStyledIconButton('Horizontal'); // Default to horizontal icon
+    const styleButton = createStyledIconButton(t('mods.huntAnalyzer.horizontal')); // Default to horizontal icon
     styleButton.id = "mod-style-button";
-    styleButton.title = "Switch to horizontal layout";
-    styleButton.setAttribute('aria-label', 'Switch layout style');
+    styleButton.title = t('mods.huntAnalyzer.switchToHorizontalLayout');
+    styleButton.setAttribute('aria-label', t('mods.huntAnalyzer.switchLayoutStyle'));
     styleButton.tabIndex = 0;
 
     // Minimize Button
     const minimizeBtn = createStyledIconButton('–');
     minimizeBtn.id = "mod-minimize-button";
-    minimizeBtn.title = "Minimize Analyzer";
-    minimizeBtn.setAttribute('aria-label', 'Minimize Analyzer');
+    minimizeBtn.title = t('mods.huntAnalyzer.minimizeAnalyzer');
+    minimizeBtn.setAttribute('aria-label', t('mods.huntAnalyzer.minimizeAnalyzer'));
     minimizeBtn.tabIndex = 0;
 
     // Close Button
     const closeBtn = createStyledIconButton("✕");
-    closeBtn.title = "Close Analyzer";
+    closeBtn.title = t('mods.huntAnalyzer.closeAnalyzer');
 
     // Add buttons in order: style, minimize, close
     headerControls.appendChild(styleButton);
@@ -5158,9 +5127,6 @@ function createAutoplayAnalyzerPanel() {
     // Create main panel container (this loads and applies saved settings)
     const panel = createPanelContainer();
     
-    // Sync currentLayoutMode with panelState.mode after settings are loaded
-    let currentLayoutMode = (panelState && panelState.mode) || LAYOUT_MODES.VERTICAL;
-    
     // Create header section
     const { topHeaderContainer, titleAndControlsRow, headerControls, roomIdDisplay, styleButton, minimizeBtn, closeBtn } = createHeaderSection();
     styleButton.addEventListener("click", () => handleStyleButtonClick(panel, styleButton, minimizeBtn));
@@ -5180,6 +5146,8 @@ function createAutoplayAnalyzerPanel() {
     topHeaderContainer.appendChild(titleAndControlsRow);
 
     // --- NATIVE-LIKE RESIZABLE PANEL LOGIC ---
+    // Disabled in favor of resize handles to reduce duplicate mousemove work.
+    const ENABLE_EDGE_RESIZE = false;
     const edgeSize = 8; // px, area near edge/corner to trigger resize
     let isResizing = false;
     let resizeDir = '';
@@ -5198,7 +5166,7 @@ function createAutoplayAnalyzerPanel() {
         let dir = '';
         
         // Only allow resizing when not minimized
-        if (currentLayoutMode !== LAYOUT_MODES.MINIMIZED) {
+        if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
             if (y < edgeSize) dir += 'n';
             else if (y > rect.height - edgeSize) dir += 's';
             if (x < edgeSize) dir += 'w';
@@ -5209,53 +5177,53 @@ function createAutoplayAnalyzerPanel() {
     }
 
     // Change cursor on hover
-    panel.addEventListener('mousemove', function(e) {
-        if (isResizing) return;
-        const dir = getResizeDirection(e, panel);
-        let cursor = '';
-        switch (dir) {
-            case 'n': cursor = currentLayoutMode === LAYOUT_MODES.MINIMIZED ? '' : 'ns-resize'; break;
-            case 's': cursor = currentLayoutMode === LAYOUT_MODES.MINIMIZED ? '' : 'ns-resize'; break;
-            case 'e': cursor = 'ew-resize'; break;
-            case 'w': cursor = 'ew-resize'; break;
-            case 'ne': cursor = currentLayoutMode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nesw-resize'; break;
-            case 'nw': cursor = currentLayoutMode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nwse-resize'; break;
-            case 'se': cursor = currentLayoutMode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nwse-resize'; break;
-            case 'sw': cursor = currentLayoutMode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nesw-resize'; break;
-            default: cursor = '';
-        }
-        panel.style.cursor = cursor || '';
-    });
+    if (ENABLE_EDGE_RESIZE) {
+        panel.addEventListener('mousemove', function(e) {
+            // Avoid expensive rect/cursor work while dragging.
+            if (isResizing || isDragging) return;
+            const dir = getResizeDirection(e, panel);
+            let cursor = '';
+            switch (dir) {
+                case 'n': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? '' : 'ns-resize'; break;
+                case 's': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? '' : 'ns-resize'; break;
+                case 'e': cursor = 'ew-resize'; break;
+                case 'w': cursor = 'ew-resize'; break;
+                case 'ne': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nesw-resize'; break;
+                case 'nw': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nwse-resize'; break;
+                case 'se': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nwse-resize'; break;
+                case 'sw': cursor = panelState.mode === LAYOUT_MODES.MINIMIZED ? 'ew-resize' : 'nesw-resize'; break;
+                default: cursor = '';
+            }
+            panel.style.cursor = cursor || '';
+        });
+    }
 
     // Start resizing on mousedown near edge/corner
-    panel.addEventListener('mousedown', function(e) {
-        if (currentLayoutMode === LAYOUT_MODES.MINIMIZED) {
-            const layout = LAYOUT_DIMENSIONS[LAYOUT_MODES.MINIMIZED];
-            panel.style.width = layout.width + 'px';
-            panel.style.height = layout.height + 'px';
-            panel.style.minWidth = panel.style.maxWidth = layout.width + 'px';
-            panel.style.minHeight = panel.style.maxHeight = layout.height + 'px';
-            isResizing = false;
-            return;
-        }
-        if (e.target.tagName === 'BUTTON' || e.target === titleAndControlsRow) return;
-        const dir = getResizeDirection(e, panel);
-        if (!dir) return;
-        isResizing = true;
-        resizeDir = dir;
-        resizeStartX = e.clientX;
-        resizeStartY = e.clientY;
-        const rect = panel.getBoundingClientRect();
-        startWidth = rect.width;
-        startHeight = rect.height;
-        startLeft = rect.left;
-        startTop = rect.top;
-        document.body.style.userSelect = 'none';
-        e.preventDefault();
-    });
+    if (ENABLE_EDGE_RESIZE) {
+        panel.addEventListener('mousedown', function(e) {
+            if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
+                isResizing = false;
+                return;
+            }
+            if (e.target.tagName === 'BUTTON' || e.target === titleAndControlsRow) return;
+            const dir = getResizeDirection(e, panel);
+            if (!dir) return;
+            isResizing = true;
+            resizeDir = dir;
+            resizeStartX = e.clientX;
+            resizeStartY = e.clientY;
+            const rect = panel.getBoundingClientRect();
+            startWidth = rect.width;
+            startHeight = rect.height;
+            startLeft = rect.left;
+            startTop = rect.top;
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+    }
 
     panelResizeMouseMoveHandler = function(e) {
-        if (!isResizing || currentLayoutMode === LAYOUT_MODES.MINIMIZED) return;
+        if (!isResizing || panelState.mode === LAYOUT_MODES.MINIMIZED) return;
         let dx = e.clientX - resizeStartX;
         let dy = e.clientY - resizeStartY;
         let newWidth = startWidth;
@@ -5285,7 +5253,9 @@ function createAutoplayAnalyzerPanel() {
         panel.style.top = newTop + 'px';
         panel.style.transition = 'none';
     };
-    document.addEventListener('mousemove', panelResizeMouseMoveHandler);
+    if (ENABLE_EDGE_RESIZE) {
+        document.addEventListener('mousemove', panelResizeMouseMoveHandler);
+    }
 
     panelResizeMouseUpHandler = function() {
         if (isResizing) {
@@ -5296,13 +5266,18 @@ function createAutoplayAnalyzerPanel() {
             savePanelSettings(panel);
         }
     };
-    document.addEventListener('mouseup', panelResizeMouseUpHandler);
+    if (ENABLE_EDGE_RESIZE) {
+        document.addEventListener('mouseup', panelResizeMouseUpHandler);
+    }
     // --- END NATIVE-LIKE RESIZABLE PANEL LOGIC ---
 
     // --- DRAGGABLE PANEL LOGIC ---
     let isDragging = false;
     let dragOffsetX = 0;
     let dragOffsetY = 0;
+    let pendingDragFrame = null;
+    let queuedDragLeft = 0;
+    let queuedDragTop = 0;
 
     titleAndControlsRow.addEventListener('mousedown', function(e) {
         if (e.target.tagName === 'BUTTON') return; // Don't drag if clicking a button
@@ -5321,15 +5296,27 @@ function createAutoplayAnalyzerPanel() {
         // Clamp to viewport
         newLeft = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, newLeft));
         newTop = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, newTop));
-        panel.style.left = newLeft + 'px';
-        panel.style.top = newTop + 'px';
-        panel.style.transition = 'none';
+        queuedDragLeft = newLeft;
+        queuedDragTop = newTop;
+        if (pendingDragFrame !== null) return;
+        pendingDragFrame = requestAnimationFrame(() => {
+            panel.style.left = queuedDragLeft + 'px';
+            panel.style.top = queuedDragTop + 'px';
+            panel.style.transition = 'none';
+            pendingDragFrame = null;
+        });
     };
     document.addEventListener('mousemove', panelDragMouseMoveHandler);
 
     panelDragMouseUpHandler = function() {
         if (isDragging) {
             isDragging = false;
+            if (pendingDragFrame !== null) {
+                cancelAnimationFrame(pendingDragFrame);
+                pendingDragFrame = null;
+            }
+            panel.style.left = queuedDragLeft + 'px';
+            panel.style.top = queuedDragTop + 'px';
             document.body.style.userSelect = '';
             panel.style.transition = '';
             // Save panel settings after drag
@@ -5344,13 +5331,9 @@ function createAutoplayAnalyzerPanel() {
     liveDisplaySection.className = "live-display-section";
     liveDisplaySection.style.display = "flex";
     liveDisplaySection.style.flexDirection = "column";
-    liveDisplaySection.style.padding = "8px";
-    liveDisplaySection.style.backgroundImage = getThemeBackground('section');
-    liveDisplaySection.style.backgroundRepeat = 'repeat';
-    liveDisplaySection.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+    applyFramedSectionStyles(liveDisplaySection, { noTopMargin: true });
     liveDisplaySection.style.flex = "0 0 auto"; // FIXED SIZE
-    liveDisplaySection.style.width = "100%";
-    liveDisplaySection.style.boxSizing = "border-box";
+    liveDisplaySection.style.width = "auto";
 
     // Session Stats
     const sessionStatsDiv = document.createElement("div");
@@ -5380,7 +5363,7 @@ function createAutoplayAnalyzerPanel() {
 
     const playtimeElement = document.createElement("span");
     playtimeElement.id = "mod-playtime-display";
-    playtimeElement.textContent = "Playtime: 0m";
+    playtimeElement.textContent = formatPlaytimeLabel("00:00:00");
     playtimeElement.style.fontSize = "10px";
     playtimeElement.style.color = getThemeColor('textInfo');
     
@@ -5408,7 +5391,7 @@ function createAutoplayAnalyzerPanel() {
     winLossElement.id = "mod-win-loss-display";
     winLossElement.style.fontSize = "10px";
     winLossElement.style.color = getThemeColor('textInfo');
-    winLossElement.textContent = "W/L: 0/0 (0%)";
+    winLossElement.textContent = formatWinLossLabel(0, 0, 0);
     
     secondRow.appendChild(staminaDisplaySpan);
     secondRow.appendChild(winLossElement);
@@ -5460,7 +5443,7 @@ function createAutoplayAnalyzerPanel() {
     const initialStaminaSpentRatePerHour = 0;
     const initialNetStaminaPerHour = 0;
     const initialRecoveryEfficiency = 0;
-    totalStaminaSpentElement.textContent = `Stamina/h: ${initialStaminaSpentRatePerHour} (Net: ${initialNetStaminaPerHour > 0 ? '+' : ''}${initialNetStaminaPerHour}/h) [${initialRecoveryEfficiency}% recovery]`;
+    totalStaminaSpentElement.textContent = formatStaminaRateLabel(initialStaminaSpentRatePerHour, initialNetStaminaPerHour, initialRecoveryEfficiency);
     leftRatesSection.appendChild(totalStaminaSpentElement);
 
     // Right section for totals
@@ -5576,18 +5559,13 @@ function createAutoplayAnalyzerPanel() {
     mapFilterContainer.style.display = "flex";
     mapFilterContainer.style.flexDirection = "row";
     mapFilterContainer.style.flex = "0 0 auto";
-    mapFilterContainer.style.margin = "5px";
-    mapFilterContainer.style.backgroundImage = getThemeBackground('section');
-    mapFilterContainer.style.backgroundRepeat = 'repeat';
-    mapFilterContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
-    mapFilterContainer.style.borderRadius = '6px';
-    mapFilterContainer.style.padding = '6px';
+    applyFramedSectionStyles(mapFilterContainer, { noTopMargin: true });
     mapFilterContainer.style.alignItems = "center";
     mapFilterContainer.style.justifyContent = "center";
     mapFilterContainer.style.gap = "8px";
 
     const mapFilterTitle = document.createElement("h3");
-    mapFilterTitle.textContent = "Map Filter";
+    mapFilterTitle.textContent = t('mods.huntAnalyzer.mapFilter');
     mapFilterTitle.style.margin = "0px";
     mapFilterTitle.style.fontSize = "14px";
     mapFilterTitle.style.color = getThemeColor('textAccent');
@@ -5612,12 +5590,7 @@ function createAutoplayAnalyzerPanel() {
     lootContainer.style.flexDirection = "column";
     lootContainer.style.flex = "1 1 0"; // FLEXIBLE
     lootContainer.style.minHeight = "0";
-    lootContainer.style.margin = "0px 5px 5px 5px";
-    lootContainer.style.backgroundImage = getThemeBackground('section');
-    lootContainer.style.backgroundRepeat = 'repeat';
-    lootContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
-    lootContainer.style.borderRadius = '6px';
-    lootContainer.style.padding = '6px';
+    applyFramedSectionStyles(lootContainer, { noTopMargin: true });
     lootContainer.style.overflowY = 'auto';
 
     const lootTitleContainer = document.createElement("div");
@@ -5639,11 +5612,11 @@ function createAutoplayAnalyzerPanel() {
     lootDisplayDiv.id = "mod-loot-display";
     lootDisplayDiv.style.width = "100%";
     lootDisplayDiv.style.padding = "4px";
-    lootDisplayDiv.style.border = `1px solid ${getThemeColor('border')}`;
+    lootDisplayDiv.style.border = '4px solid transparent';
+    lootDisplayDiv.style.borderImage = 'var(--ha-frame-1)';
     lootDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
     lootDisplayDiv.style.color = getThemeColor('text');
     lootDisplayDiv.style.fontSize = "11px";
-    lootDisplayDiv.style.borderRadius = "4px";
     lootDisplayDiv.style.overflowY = "scroll";
     lootDisplayDiv.style.flexGrow = "1";
     lootDisplayDiv.style.display = "flex";
@@ -5660,12 +5633,7 @@ function createAutoplayAnalyzerPanel() {
     creatureDropContainer.style.flexDirection = "column";
     creatureDropContainer.style.flex = "1 1 0"; // FLEXIBLE
     creatureDropContainer.style.minHeight = "0";
-    creatureDropContainer.style.margin = "0 5px 5px 5px";
-    creatureDropContainer.style.backgroundImage = getThemeBackground('section');
-    creatureDropContainer.style.backgroundRepeat = 'repeat';
-    creatureDropContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
-    creatureDropContainer.style.borderRadius = '6px';
-    creatureDropContainer.style.padding = '6px';
+    applyFramedSectionStyles(creatureDropContainer, { noTopMargin: true });
     creatureDropContainer.style.overflowY = 'auto';
 
     const creatureDropTitleContainer = document.createElement("div");
@@ -5687,11 +5655,11 @@ function createAutoplayAnalyzerPanel() {
     creatureDropDisplayDiv.id = "mod-creature-drop-display";
     creatureDropDisplayDiv.style.width = "100%";
     creatureDropDisplayDiv.style.padding = "4px";
-    creatureDropDisplayDiv.style.border = `1px solid ${getThemeColor('border')}`;
+    creatureDropDisplayDiv.style.border = '4px solid transparent';
+    creatureDropDisplayDiv.style.borderImage = 'var(--ha-frame-1)';
     creatureDropDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
     creatureDropDisplayDiv.style.color = getThemeColor('text');
     creatureDropDisplayDiv.style.fontSize = "11px";
-    creatureDropDisplayDiv.style.borderRadius = "4px";
     creatureDropDisplayDiv.style.overflowY = "scroll";
     creatureDropDisplayDiv.style.flexGrow = "1";
     creatureDropDisplayDiv.style.display = "flex";
@@ -5707,152 +5675,30 @@ function createAutoplayAnalyzerPanel() {
     buttonContainer.style.display = "flex";
     buttonContainer.style.justifyContent = "center";
     buttonContainer.style.gap = "8px";
-    buttonContainer.style.padding = "0px 8px 8px 8px";
-    buttonContainer.style.margin = "0";
+    buttonContainer.style.padding = UI_LAYOUT.SECTION_PADDING;
+    buttonContainer.style.margin = UI_LAYOUT.SECTION_MARGIN_NO_TOP;
     buttonContainer.style.marginTop = "0";
     buttonContainer.style.borderTop = "none";
-    buttonContainer.style.backgroundImage = getThemeBackground('section');
-    buttonContainer.style.backgroundRepeat = 'repeat';
-    buttonContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+    applyFramedSectionStyles(buttonContainer, { noTopMargin: true });
     buttonContainer.style.flex = "0 0 auto"; // FIXED SIZE
     buttonContainer.style.flexDirection = 'row';
 
     // Settings button removed - now handled by Mod Settings
 
     const clearButton = createStyledButton(t('mods.huntAnalyzer.clearAll'));
-    clearButton.addEventListener("click", () => {
-        // Create the confirmation dialog
-        const confirmDialog = document.createElement('div');
-        confirmDialog.style.position = 'fixed';
-        confirmDialog.style.top = '50%';
-        confirmDialog.style.left = '50%';
-        confirmDialog.style.transform = 'translate(-50%, -50%)';
-        confirmDialog.style.backgroundColor = '#282C34'; // Dark background
-        confirmDialog.style.border = '2px solid #E06C75'; // Accent border
-        confirmDialog.style.borderRadius = '8px';
-        confirmDialog.style.padding = '20px';
-        confirmDialog.style.zIndex = '10000'; // Above analyzer panel
-        confirmDialog.style.boxShadow = '0 5px 15px rgba(0,0,0,0.8)';
-        confirmDialog.style.display = 'flex';
-        confirmDialog.style.flexDirection = 'column';
-        confirmDialog.style.gap = '15px';
-        confirmDialog.style.fontFamily = 'Inter, sans-serif';
-        confirmDialog.style.color = '#ABB2BF';
-        confirmDialog.style.textAlign = 'center';
-        confirmDialog.style.minWidth = '250px';
-
-        const message = document.createElement('p');
-        message.textContent = "Are you sure you want to clear all data?";
-        message.style.margin = '0';
-        message.style.fontSize = '16px';
-        message.style.fontWeight = 'bold';
-        message.style.color = '#E06C75';
-
-        const dialogButtonContainer = document.createElement('div'); // Renamed to avoid conflict
-        dialogButtonContainer.style.display = 'flex';
-        dialogButtonContainer.style.justifyContent = 'center';
-        dialogButtonContainer.style.gap = '10px';
-
-        // Confirm Button
-        const confirmBtn = createStyledButton("Confirm");
-        confirmBtn.style.backgroundColor = '#E06C75'; // Red for confirmation
-        confirmBtn.style.color = '#FFFFFF';
-        confirmBtn.style.borderColor = '#C25560';
-
-        // Override hover/active for confirm button to match accent
-        confirmBtn.onmouseover = () => {
-            confirmBtn.style.background = "linear-gradient(to bottom, #FF8A96, #E06C75)";
-            confirmBtn.style.boxShadow = '0 3px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.2)';
-            confirmBtn.style.transform = 'translateY(-1px)';
-        };
-        confirmBtn.onmouseout = () => {
-            confirmBtn.style.background = "linear-gradient(to bottom, #E06C75, #C25560)";
-            confirmBtn.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
-            confirmBtn.style.transform = 'translateY(0)';
-        };
-
-
-        confirmBtn.addEventListener('click', () => {
-            // Perform comprehensive clear all action using the reset function
-            resetHuntAnalyzerState();
-            
-            // Clear the visual display divs and update counter
-            const cachedLootDiv = domCache.get("mod-loot-display");
-            const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
-            if (cachedLootDiv) cachedLootDiv.innerHTML = "";
-            if (cachedCreatureDropDiv) cachedCreatureDropDiv.innerHTML = "";
-            
-            // Call renderAllSessions to refresh the display (which will now be empty)
-            renderAllSessions(); // Re-render to show cleared state
-            updateMapFilterDropdown(); // Update filter dropdown to show only ALL
-            updatePanelDisplay(); // Update overall rates to reflect cleared state
-            // Reset the room ID display to current room name
-            const roomNamesMap = globalThis.state?.utils?.ROOM_NAME; // Changed to ROOM_NAME (singular)
-            let roomDisplayName = t('mods.huntAnalyzer.currentRoom');
-            let currentRoomId = null;
-            if (roomNamesMap) {
-                currentRoomId = globalThis.state.board?.area?.id || globalThis.state.player?.currentRoomId;
-                if (currentRoomId && roomNamesMap[currentRoomId]) {
-                    roomDisplayName = roomNamesMap[currentRoomId];
-                } else if (currentRoomId) {
-                    roomDisplayName = `Room ID: ${currentRoomId}`;
-                }
-            }
-            if (currentRoomId) {
-                updateRoomTitleDisplay(currentRoomId, roomDisplayName);
-            }
-            updatePanelPosition(); // Re-align after clear
-
-            // Remove the dialog
-            document.body.removeChild(confirmDialog);
-        });
-
-        // Cancel Button
-        const cancelBtn = createStyledButton("Cancel");
-        cancelBtn.addEventListener('click', () => {
-            // Just remove the dialog without clearing data
-            document.body.removeChild(confirmDialog);
-        });
-
-        dialogButtonContainer.appendChild(confirmBtn);
-        dialogButtonContainer.appendChild(cancelBtn);
-
-        confirmDialog.appendChild(message);
-        confirmDialog.appendChild(dialogButtonContainer);
-
-        document.body.appendChild(confirmDialog);
+    clearButton.style.width = '135px';
+    clearButton.dataset.fixedConfirmWidth = '135px';
+    attachInlineConfirm(clearButton, {
+        baseText: t('mods.huntAnalyzer.clearAll'),
+        confirmText: t('mods.huntAnalyzer.confirmReset'),
+        onConfirm: clearAnalyzerDataAndRefresh
     });
 
     const copyLogButton = createStyledButton(t('mods.huntAnalyzer.copyLog'));
     copyLogButton.addEventListener("click", () => {
         const summaryText = generateSummaryLogText();
         const success = copyToClipboard(summaryText);
-        // Provide visual feedback to the user
-        const feedbackMessage = document.createElement('div');
-        feedbackMessage.textContent = success ? 'Log copied!' : 'Failed to copy!';
-        feedbackMessage.style.position = 'absolute';
-        feedbackMessage.style.bottom = '10px';
-        feedbackMessage.style.left = '50%';
-        feedbackMessage.style.transform = 'translateX(-50%)';
-        feedbackMessage.style.backgroundColor = success ? '#98C379' : '#E06C75'; // Green for success, red for failure
-        feedbackMessage.style.color = '#FFFFFF';
-        feedbackMessage.style.padding = '8px 12px';
-        feedbackMessage.style.borderRadius = '5px';
-        feedbackMessage.style.zIndex = '10001'; // Above other elements
-        feedbackMessage.style.opacity = '0'; // Start invisible
-        feedbackMessage.style.transition = 'opacity 0.3s ease-in-out';
-        panel.appendChild(feedbackMessage);
-
-        // Fade in and then fade out
-        timeoutIds.push(setTimeout(() => {
-            feedbackMessage.style.opacity = '1';
-        }, 10));
-        timeoutIds.push(setTimeout(() => {
-            feedbackMessage.style.opacity = '0';
-            timeoutIds.push(setTimeout(() => {
-                feedbackMessage.remove();
-            }, 300)); // Remove after fade out
-        }, 1500)); // Display for 1.5 seconds
+        showPanelFeedback(panel, success ? t('mods.huntAnalyzer.logCopied') : t('mods.huntAnalyzer.logCopyFailed'), success);
     });
 
     buttonContainer.appendChild(clearButton);
@@ -5911,7 +5757,6 @@ function createAutoplayAnalyzerPanel() {
 
     // Apply saved layout mode if available
     if (panelState && panelState.mode) {
-        currentLayoutMode = panelState.mode;
         // Apply layout mode to panel (preserveSize=true to keep saved width/height)
         applyLayoutMode(panel, panelState.mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer, true);
         
@@ -5946,9 +5791,7 @@ function createAutoplayAnalyzerPanel() {
         
         // Update button states based on saved layout mode
         updateMinimizeButtonState(minimizeBtn, panelState.mode === LAYOUT_MODES.MINIMIZED);
-        if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
-            updateStyleButtonState(styleButton, panelState.mode);
-        }
+        updateStyleButtonState(styleButton, panelState.mode);
     }
 
     // Set up timer for per-hour metrics calculation (needs to update every second)
@@ -5979,6 +5822,7 @@ function createAutoplayAnalyzerPanel() {
     window.addEventListener('resize', updatePanelPosition);
 
     updatePanelDisplay();
+    scheduleInitialRoomDisplaySync();
     updateMapFilterDropdown(); // Initialize map filter dropdown
 
     // Set initial layout
@@ -6089,12 +5933,12 @@ function updatePanelDisplay() {
     if (cachedWinLossElement) {
         const totalSessions = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
         const winRate = totalSessions > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessions) * 100) : 0;
-        cachedWinLossElement.textContent = `W/L: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)`;
+        cachedWinLossElement.textContent = formatWinLossLabel(HuntAnalyzerState.totals.wins, HuntAnalyzerState.totals.losses, winRate);
     }
     
     // Update stamina display
     if (cachedStaminaDisplayElement) {
-        cachedStaminaDisplayElement.textContent = `Total Stamina: ${HuntAnalyzerState.totals.staminaSpent}`;
+        cachedStaminaDisplayElement.textContent = formatTotalStaminaLabel(HuntAnalyzerState.totals.staminaSpent);
         cachedStaminaDisplayElement.style.display = 'inline';
     }
 
@@ -6122,15 +5966,12 @@ function updatePanelDisplay() {
     if (cachedRoomIdDisplayElement) {
         const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
         let roomDisplayName = t('mods.huntAnalyzer.currentRoom');
-        let currentRoomId = null;
+        const currentRoomId = getCurrentRoomIdForDisplay();
         
-        if (roomNamesMap) {
-            currentRoomId = globalThis.state.board?.area?.id || globalThis.state.player?.currentRoomId;
-            if (currentRoomId && roomNamesMap[currentRoomId]) {
-                roomDisplayName = roomNamesMap[currentRoomId];
-            } else if (currentRoomId) {
-                roomDisplayName = `Room ID: ${currentRoomId}`;
-            }
+        if (currentRoomId && roomNamesMap?.[currentRoomId]) {
+            roomDisplayName = roomNamesMap[currentRoomId];
+        } else if (currentRoomId) {
+            roomDisplayName = `Room ID: ${currentRoomId}`;
         }
         
         if (currentRoomId) {
@@ -6157,7 +5998,7 @@ function updatePanelDisplay() {
     if (cachedPlaytimeDisplayElement) {
         const filteredTimeHours = getFilteredTimeHours();
         const playtimeText = formatPlaytime(filteredTimeHours);
-        cachedPlaytimeDisplayElement.textContent = `Playtime: ${playtimeText}`;
+        cachedPlaytimeDisplayElement.textContent = formatPlaytimeLabel(playtimeText);
     }
     // --- End Autoplay Sessions/Hour Calculation ---
 
@@ -6214,7 +6055,7 @@ function updatePanelDisplay() {
         const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
             Math.round((totalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
         
-        cachedTotalStaminaSpentElement.textContent = `Stamina/h: ${staminaSpentRatePerHour} (Net: ${netStaminaPerHour > 0 ? '+' : ''}${netStaminaPerHour}/h) [${recoveryEfficiency}% recovery]`;
+        cachedTotalStaminaSpentElement.textContent = formatStaminaRateLabel(staminaSpentRatePerHour, netStaminaPerHour, recoveryEfficiency);
     }
 }
 
@@ -6295,14 +6136,14 @@ function toggleMinimize() {
 
     // Set button text and tooltip to the CURRENT mode
     if (panelState.mode === LAYOUT_MODES.VERTICAL) {
-        minimizeBtn.textContent = 'Vertical';
-        minimizeBtn.title = 'Current layout: Vertical';
+        minimizeBtn.textContent = t('mods.huntAnalyzer.vertical');
+        minimizeBtn.title = `${t('mods.huntAnalyzer.currentLayout')}: ${t('mods.huntAnalyzer.vertical')}`;
     } else if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
-        minimizeBtn.textContent = 'Horizontal';
-        minimizeBtn.title = 'Current layout: Horizontal';
+        minimizeBtn.textContent = t('mods.huntAnalyzer.horizontal');
+        minimizeBtn.title = `${t('mods.huntAnalyzer.currentLayout')}: ${t('mods.huntAnalyzer.horizontal')}`;
     } else if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
-        minimizeBtn.textContent = 'Minimized';
-        minimizeBtn.title = 'Current layout: Minimized';
+        minimizeBtn.textContent = t('mods.huntAnalyzer.minimized');
+        minimizeBtn.title = `${t('mods.huntAnalyzer.currentLayout')}: ${t('mods.huntAnalyzer.minimized')}`;
     }
 
     // Cancel any ongoing resize if switching to minimized
@@ -6343,7 +6184,7 @@ function applyLayoutMode(panel, mode, mapFilterContainer, lootContainer, creatur
         mapFilterContainer.style.display = 'none';
         lootContainer.style.display = 'none';
         creatureDropContainer.style.display = 'none';
-        if (buttonContainer) buttonContainer.style.display = 'flex';
+        if (buttonContainer) buttonContainer.style.display = 'none';
     } else {
         mapFilterContainer.style.display = 'flex';
         mapFilterContainer.style.flexDirection = 'column';
@@ -6400,6 +6241,11 @@ function updatePanelLayout(panel) {
     if (buttonContainer) {
         buttonContainer.style.flex = "0 0 auto";
         buttonContainer.style.flexDirection = 'row';
+        // Reset minimized sizing overrides so width can follow parent layout.
+        buttonContainer.style.width = '';
+        buttonContainer.style.height = '';
+        buttonContainer.style.flexShrink = '';
+        buttonContainer.style.alignSelf = 'stretch';
     }
     // Set display and flex based on layout mode
     if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
@@ -6407,7 +6253,7 @@ function updatePanelLayout(panel) {
         if (mapFilterContainer) mapFilterContainer.style.display = 'none';
         if (lootContainer) lootContainer.style.display = 'none';
         if (creatureDropContainer) creatureDropContainer.style.display = 'none';
-        if (buttonContainer) buttonContainer.style.display = 'flex';
+        if (buttonContainer) buttonContainer.style.display = 'none';
     } else {
         // Show containers when not minimized
         if (mapFilterContainer) {
@@ -6430,18 +6276,28 @@ function updatePanelLayout(panel) {
             if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
             if (lootContainer) lootContainer.style.flex = "1 1 0";
             if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+            if (buttonContainer) {
+                buttonContainer.style.width = 'auto';
+            }
         } else {
             // In horizontal mode, all sections get their normal sizing
             if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
             if (lootContainer) lootContainer.style.flex = "1 1 0";
             if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+            if (buttonContainer) {
+                buttonContainer.style.width = '100%';
+            }
         }
     }
 
     // Use currentLayoutMode for layout
     if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
         panel.style.flexDirection = 'row';
-        // Ensure leftColumn exists and contains header, live, buttons in order
+        if (leftColumn) leftColumn.style.order = '0';
+        if (mapFilterContainer) mapFilterContainer.style.order = '';
+        if (lootContainer) lootContainer.style.order = '1';
+        if (creatureDropContainer) creatureDropContainer.style.order = '2';
+        // Ensure leftColumn exists and contains header, live, buttons, map filter in order
         if (!leftColumn) {
             // Create leftColumn if it doesn't exist
             const newLeftColumn = document.createElement('div');
@@ -6453,9 +6309,10 @@ function updatePanelLayout(panel) {
             if (leftColumn.children[0] !== topHeaderContainer) leftColumn.insertBefore(topHeaderContainer, leftColumn.firstChild);
             if (leftColumn.children[1] !== liveDisplaySection) leftColumn.insertBefore(liveDisplaySection, leftColumn.children[1] || null);
             if (leftColumn.children[2] !== buttonContainer) leftColumn.appendChild(buttonContainer);
+            if (leftColumn.children[3] !== mapFilterContainer) leftColumn.appendChild(mapFilterContainer);
         }
-        // Ensure panel order: leftColumn, mapFilter, loot, creatures
-        [leftColumn, mapFilterContainer, lootContainer, creatureDropContainer].forEach((el, idx) => {
+        // Ensure panel order: leftColumn, loot, creatures
+        [leftColumn, lootContainer, creatureDropContainer].forEach((el, idx) => {
             if (el && !panel.contains(el)) {
                 // Add element if it's not in the panel
                 panel.appendChild(el);
@@ -6465,6 +6322,10 @@ function updatePanelLayout(panel) {
         });
     } else if (panelState.mode === LAYOUT_MODES.VERTICAL) {
         panel.style.flexDirection = 'column';
+        if (leftColumn) leftColumn.style.order = '';
+        if (mapFilterContainer) mapFilterContainer.style.order = '';
+        if (lootContainer) lootContainer.style.order = '';
+        if (creatureDropContainer) creatureDropContainer.style.order = '';
         // Remove leftColumn if present (vertical mode doesn't use it)
         if (leftColumn && panel.contains(leftColumn)) {
             // Move children back to panel before removing leftColumn
@@ -6485,22 +6346,26 @@ function updatePanelLayout(panel) {
         });
     } else if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
         panel.style.flexDirection = 'column';
+        if (leftColumn) leftColumn.style.order = '';
+        if (mapFilterContainer) mapFilterContainer.style.order = '';
+        if (lootContainer) lootContainer.style.order = '';
+        if (creatureDropContainer) creatureDropContainer.style.order = '';
         // Remove leftColumn if present
         if (leftColumn && panel.contains(leftColumn)) panel.removeChild(leftColumn);
         // Always remove all six elements from the panel, then append in correct order
         [topHeaderContainer, liveDisplaySection, buttonContainer, mapFilterContainer, lootContainer, creatureDropContainer].forEach(el => {
             if (el && el.parentNode === panel) panel.removeChild(el);
         });
-        [topHeaderContainer, liveDisplaySection, buttonContainer].forEach(el => {
+        [topHeaderContainer, liveDisplaySection].forEach(el => {
             if (el) panel.appendChild(el);
         });
         // Fit all to width/height auto
         if (topHeaderContainer) {
-            topHeaderContainer.style.width = '100%';
+            topHeaderContainer.style.width = 'auto';
             topHeaderContainer.style.height = 'auto';
         }
         if (liveDisplaySection) {
-            liveDisplaySection.style.width = '100%';
+            liveDisplaySection.style.width = 'auto';
             liveDisplaySection.style.flex = '1 1 auto';
             liveDisplaySection.style.height = 'auto';
             liveDisplaySection.style.maxHeight = 'none';
@@ -6707,6 +6572,9 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
                 }
                 if (lastSelectedRoomId === null) {
                     lastSelectedRoomId = roomId;
+                    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
+                    const roomName = roomNamesMap?.[roomId] || `Room ID: ${roomId}`;
+                    updateRoomTitleDisplay(roomId, roomName);
                     console.log('[Hunt Analyzer] Map debug: initialized room tracking', { roomId, mode });
                     return;
                 }
@@ -6805,7 +6673,7 @@ const translationEventHandler = (event) => {
         // Update room display
         const roomDisplay = document.getElementById('mod-room-id-display');
         if (roomDisplay) {
-            roomDisplay.textContent = t('mods.huntAnalyzer.currentRoom');
+            updateCurrentRoomDisplay();
         }
         
         // Update session counter
@@ -6822,13 +6690,25 @@ const translationEventHandler = (event) => {
             const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
             sessionCounter.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${sessionRate}/h)`;
         }
+
+        const winLossDisplay = document.getElementById('mod-win-loss-display');
+        if (winLossDisplay) {
+            const totalSessions = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
+            const winRate = totalSessions > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessions) * 100) : 0;
+            winLossDisplay.textContent = formatWinLossLabel(HuntAnalyzerState.totals.wins, HuntAnalyzerState.totals.losses, winRate);
+        }
+
+        const staminaDisplay = document.getElementById('mod-stamina-display');
+        if (staminaDisplay) {
+            staminaDisplay.textContent = formatTotalStaminaLabel(HuntAnalyzerState.totals.staminaSpent);
+        }
         
         // Update playtime display
         const playtimeDisplay = document.getElementById('mod-playtime-display');
         if (playtimeDisplay) {
             const filteredTimeHours = getFilteredTimeHours();
             const playtimeText = formatPlaytime(filteredTimeHours);
-            playtimeDisplay.textContent = `Playtime: ${playtimeText}`;
+            playtimeDisplay.textContent = formatPlaytimeLabel(playtimeText);
         }
         
         // Update rate displays
@@ -6889,7 +6769,7 @@ const translationEventHandler = (event) => {
             const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
                 Math.round((totalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
             
-            staminaSpent.textContent = `Stamina/h: ${staminaSpentRatePerHour} (Net: ${netStaminaPerHour > 0 ? '+' : ''}${netStaminaPerHour}/h) [${recoveryEfficiency}% recovery]`;
+            staminaSpent.textContent = formatStaminaRateLabel(staminaSpentRatePerHour, netStaminaPerHour, recoveryEfficiency);
         }
         
         // Update section titles
@@ -6913,6 +6793,31 @@ const translationEventHandler = (event) => {
         if (copyLogButton) {
             copyLogButton.textContent = t('mods.huntAnalyzer.copyLog');
         }
+
+        const mapFilterTitle = panel.querySelector('.map-filter-container h3');
+        if (mapFilterTitle) {
+            mapFilterTitle.textContent = t('mods.huntAnalyzer.mapFilter');
+        }
+
+        const styleButton = panel.querySelector('#mod-style-button');
+        if (styleButton) {
+            updateStyleButtonState(styleButton, panelState.mode);
+            styleButton.setAttribute('aria-label', t('mods.huntAnalyzer.switchLayoutStyle'));
+        }
+
+        const minimizeButton = panel.querySelector('#mod-minimize-button');
+        if (minimizeButton) {
+            updateMinimizeButtonState(minimizeButton, panelState.mode === LAYOUT_MODES.MINIMIZED);
+            minimizeButton.setAttribute('aria-label', t('mods.huntAnalyzer.minimizeAnalyzer'));
+        }
+
+        const closeButton = panel.querySelector('.ha-header-controls button:last-child');
+        if (closeButton) {
+            closeButton.title = t('mods.huntAnalyzer.closeAnalyzer');
+            closeButton.setAttribute('aria-label', t('mods.huntAnalyzer.closeAnalyzer'));
+        }
+
+        updateMapFilterDropdown();
     }
 };
 
@@ -6930,10 +6835,7 @@ function savePanelSettings(panel) {
         const rect = panel.getBoundingClientRect();
         const settings = {
             width: panel.style.width || `${LAYOUT_DIMENSIONS[LAYOUT_MODES.VERTICAL].width}px`,
-            maxWidth: panel.style.maxWidth,
-            minWidth: panel.style.minWidth,
             height: panel.style.height || `${LAYOUT_DIMENSIONS[LAYOUT_MODES.VERTICAL].height}px`,
-            maxHeight: panel.style.maxHeight,
             top: rect.top + 'px',
             left: rect.left + 'px',
             layoutMode: (panelState && panelState.mode) || LAYOUT_MODES.VERTICAL,
@@ -7022,17 +6924,11 @@ function applyPanelSettings(panel, settings) {
             }
         }
         
-        // Apply min/max constraints
-        if (settings.minWidth) panel.style.minWidth = settings.minWidth;
-        if (settings.maxWidth) panel.style.maxWidth = settings.maxWidth;
-        if (settings.maxHeight) {
-            const maxH = parseInt(settings.maxHeight, 10);
-            if (!isNaN(maxH)) {
-                panel.style.maxHeight = clamp(maxH, layout.minHeight, layout.maxHeight) + 'px';
-            } else {
-                panel.style.maxHeight = settings.maxHeight;
-            }
-        }
+        // Always enforce constraints from current mode (never from persisted style values).
+        panel.style.minWidth = layout.minWidth + 'px';
+        panel.style.maxWidth = layout.maxWidth + 'px';
+        panel.style.minHeight = layout.minHeight + 'px';
+        panel.style.maxHeight = layout.maxHeight + 'px';
         
         // Apply top position (ensure panel stays within viewport)
         if (settings.top) {
@@ -7058,8 +6954,8 @@ function applyPanelSettings(panel, settings) {
             }
         }
         
-        // Apply minimized state if needed
-        if (settings.isMinimized !== undefined && settings.isMinimized !== false) {
+        // Apply minimized/restore state from saved settings
+        if (settings.isMinimized !== undefined) {
             const lootContainer = panel.querySelector('.loot-container');
             const creatureDropContainer = panel.querySelector('.creature-drop-container');
             const minimizeBtn = document.getElementById("mod-minimize-button");
@@ -7081,6 +6977,9 @@ function applyPanelSettings(panel, settings) {
                     // Re-render loot and creature drops when restoring from minimized
                     renderAllSessions();
                 }
+
+                // Ensure constraints match the resolved mode (prevents getting stuck at minimized 270x230).
+                applyLayoutDimensions(panel, panelState.mode);
             }
         }
         
@@ -7370,11 +7269,11 @@ function cleanupHuntAnalyzer() {
         
         // Remove additional tracked event listeners
         if (dropdownClickHandler) {
-            const dropdownButton = document.querySelector('[data-map-filter-dropdown]');
+            const dropdownButton = document.getElementById('mod-map-filter-dropdown-button');
             if (dropdownButton) {
                 dropdownButton.removeEventListener('click', dropdownClickHandler);
-                dropdownClickHandler = null;
             }
+            dropdownClickHandler = null;
         }
         
         if (documentClickHandler) {

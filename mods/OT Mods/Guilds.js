@@ -10779,6 +10779,80 @@ function injectEquipmentMenuItem(guildsMenuItem) {
 let accountMenuObserver = null;
 let cacheCleanupInterval = null;
 let firebase401WarningShown = false;
+let guildBackgroundSyncInterval = null;
+let guildBackgroundSyncInFlight = false;
+let playerDataBackgroundPushInterval = null;
+let playerDataBackgroundPushInFlight = false;
+const GUILD_BACKGROUND_SYNC_INTERVAL_MS = 60 * 1000; // 1 minute
+
+function startGuildBackgroundSync() {
+  if (guildBackgroundSyncInterval) return;
+
+  guildBackgroundSyncInterval = setInterval(async () => {
+    if (guildBackgroundSyncInFlight) return;
+
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) return;
+
+    guildBackgroundSyncInFlight = true;
+    try {
+      await syncGuildFromFirebase(currentPlayer);
+    } catch (error) {
+      console.error('[Guilds] Background guild sync failed:', error);
+    } finally {
+      guildBackgroundSyncInFlight = false;
+    }
+  }, GUILD_BACKGROUND_SYNC_INTERVAL_MS);
+}
+
+async function pushCurrentPlayerDataToFirebase() {
+  const currentPlayer = getCurrentPlayerName();
+  if (!currentPlayer) return;
+
+  try {
+    // Keep equipment + skill-level payloads fresh even without opening guild UI.
+    const [equippedItems, currentSkills] = await Promise.all([
+      getEquippedItems(),
+      getPlayerSkillsFromFirebase(currentPlayer)
+    ]);
+
+    const [equipmentSaved, skillsSaved] = await Promise.all([
+      saveEquippedItems(equippedItems),
+      savePlayerSkillsToFirebase(currentPlayer, currentSkills)
+    ]);
+
+    if (!equipmentSaved) {
+      console.warn('[Guilds] Background equipment push did not complete successfully');
+    }
+    if (!skillsSaved) {
+      console.warn('[Guilds] Background skills push did not complete successfully');
+    }
+
+    const playerBattleCounts = skillBattleTracker.battleCounts.get(currentPlayer);
+    if (playerBattleCounts && playerBattleCounts.size > 0) {
+      await skillBattleTracker.saveProgressToFirebase(currentPlayer);
+    }
+
+    console.log(`[Guilds] Background push OK (${currentPlayer})`);
+  } catch (error) {
+    console.error('[Guilds] Background player data push failed:', error);
+  }
+}
+
+function startPlayerDataBackgroundPush() {
+  if (playerDataBackgroundPushInterval) return;
+
+  playerDataBackgroundPushInterval = setInterval(async () => {
+    if (playerDataBackgroundPushInFlight) return;
+
+    playerDataBackgroundPushInFlight = true;
+    try {
+      await pushCurrentPlayerDataToFirebase();
+    } finally {
+      playerDataBackgroundPushInFlight = false;
+    }
+  }, GUILD_BACKGROUND_SYNC_INTERVAL_MS);
+}
 
 function startAccountMenuObserver() {
   if (accountMenuObserver) return;
@@ -10837,6 +10911,13 @@ async function initializeGuilds() {
 
   // Initialize skill battle tracking
   await initializeSkillBattleTracking();
+
+  // Keep Firebase guild references synced without requiring modal-open refresh.
+  startGuildBackgroundSync();
+  // Keep skill/equipment payloads synced periodically in the background.
+  startPlayerDataBackgroundPush();
+  // Push immediately on init (no need to wait for first 60s interval tick).
+  await pushCurrentPlayerDataToFirebase();
 
   // Start periodic cache cleanup (every 5 minutes)
   if (!cacheCleanupInterval) {
@@ -11096,6 +11177,20 @@ exports = {
         clearInterval(cacheCleanupInterval);
         cacheCleanupInterval = null;
       }
+
+      // Clear periodic guild background sync
+      if (guildBackgroundSyncInterval) {
+        clearInterval(guildBackgroundSyncInterval);
+        guildBackgroundSyncInterval = null;
+      }
+      guildBackgroundSyncInFlight = false;
+
+      // Clear periodic player data background push
+      if (playerDataBackgroundPushInterval) {
+        clearInterval(playerDataBackgroundPushInterval);
+        playerDataBackgroundPushInterval = null;
+      }
+      playerDataBackgroundPushInFlight = false;
       
       // Clear all caches
       try {
