@@ -4,12 +4,22 @@
   },
   "notes": [
     {
-      "version": "3.6.10",
+      "version": "3.6.11",
       "changes": [
         {
           "type": "changed",
-          "mod": "Mod Settings",
-          "text": "Hotkey improvements."
+          "mod": "Hunt Analyzer",
+          "text": "Various improvements."
+        },
+        {
+          "type": "fixed",
+          "mod": "Better Forge",
+          "text": "Bug fixes."
+        },
+        {
+          "type": "fixed",
+          "mod": "Guilds",
+          "text": "Minor fixes."
         }
       ]
     },
