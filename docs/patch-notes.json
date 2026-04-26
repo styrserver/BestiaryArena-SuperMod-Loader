@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "3.6.12",
+      "changes": [
+        {
+          "type": "fixed",
+          "mod": "Bestiary Automator",
+          "text": "Minor fixes"
+        },
+        {
+          "type": "fixed",
+          "mod": "Cyclopedia",
+          "text": "Minor fixes."
+        },
+        {
+          "type": "fixed",
+          "mod": "Hunt Analyzer",
+          "text": "Minor fixes."
+        },
+        {
+          "type": "fixed",
+          "mod": "Manual Runner",
+          "text": "Minor improvements."
+        },
+        {
+          "type": "fixed",
+          "mod": "Mod Settings",
+          "text": "Minor fixes."
+        }
+      ]
+    },
+    {
       "version": "3.6.11",
       "changes": [
         {

@@ -135,67 +135,91 @@ function injectManualRunnerStyles() {
   const style = document.createElement('style');
   style.id = styleId;
   style.textContent = `
+    :root {
+      --mr-frame-3: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
+      --mr-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+      --mr-frame-1-pressed: url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill;
+      --mr-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
+    }
     /* Themed container matching Hunt Analyzer */
     .manual-runner-modal {
       background-image: url(/_next/static/media/background-darker.2679c837.png);
       background-repeat: repeat;
       background-color: #282C34;
-      border: 1px solid #3A404A;
+      border: 6px solid transparent;
+      border-image: var(--mr-frame-3);
       color: #ABB2BF;
-      border-radius: 7px;
+      border-radius: 6px;
       box-shadow: 0 0 15px rgba(0,0,0,0.7);
-      padding: 10px;
+      padding: 0;
       min-width: 220px;
       max-width: 260px;
       z-index: 2147483647;
-      font-family: inherit;
+      font-family: Inter, sans-serif;
+      overflow: hidden;
+      box-sizing: border-box;
     }
     .manual-runner-modal-header {
-      background-image: url(/_next/static/media/background-dark.95edca67.png);
+      background-image: url(/_next/static/media/background-regular.b0337118.png);
       background-repeat: repeat;
-      border-bottom: 1px solid #3A404A;
+      background-color: rgba(40,44,52,0.5);
+      border: 6px solid transparent;
+      border-image: var(--mr-frame-4);
+      margin: 2px;
       padding: 4px;
       text-align: center;
-      margin: -10px -10px 8px -10px;
-      border-top-left-radius: 7px;
-      border-top-right-radius: 7px;
       color: #E06C75;
       font-weight: bold;
       font-size: 14px;
       text-shadow: 0 0 5px rgba(224, 108, 117, 0.7);
+      box-sizing: border-box;
     }
     .manual-runner-modal-body {
       background-image: url(/_next/static/media/background-regular.b0337118.png);
       background-repeat: repeat;
-      background-color: rgba(40,44,52,0.4);
-      border: 1px solid #3A404A;
-      border-radius: 4px;
-      padding: 6px;
+      background-color: rgba(40,44,52,0.5);
+      border: 6px solid transparent;
+      border-image: var(--mr-frame-4);
+      margin: 0 2px;
+      padding: 4px;
+      box-sizing: border-box;
     }
     .manual-runner-modal-footer {
       display: flex;
       justify-content: center;
-      margin-top: 10px;
+      border: 6px solid transparent;
+      border-image: var(--mr-frame-4);
+      background-image: url(/_next/static/media/background-regular.b0337118.png);
+      background-repeat: repeat;
+      background-color: rgba(40,44,52,0.5);
+      margin: 0 2px 2px 2px;
+      padding: 4px;
+      box-sizing: border-box;
     }
     .manual-runner-button {
-      padding: 6px 12px;
-      border: 1px solid #3A404A;
-      background: linear-gradient(to bottom, #4B5563, #343841);
+      padding: 2px 10px;
+      border: 4px solid transparent;
+      border-image: var(--mr-frame-1);
+      background-image: url(/_next/static/media/background-dark.95edca67.png);
+      background-repeat: repeat;
+      background-color: #4B5563;
       color: #ABB2BF;
       font-size: 11px;
+      font-weight: 700;
+      font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
       cursor: pointer;
-      border-radius: 5px;
-      transition: all 0.2s ease;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+      transition: color 0.2s, border-image 0.1s, filter 0.15s;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+      min-height: 24px;
+      line-height: 1.1;
     }
     .manual-runner-button:hover {
-      background: linear-gradient(to bottom, #6B7280, #4B5563);
-      box-shadow: 0 3px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.2);
-      transform: translateY(-1px);
+      color: #9EA7B3;
+      filter: brightness(1.12);
     }
     .manual-runner-button:active {
-      box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);
-      transform: translateY(1px);
+      border-image: var(--mr-frame-1-pressed);
+      filter: brightness(0.95);
     }
     .manual-runner-stat {
       margin-top: 6px;

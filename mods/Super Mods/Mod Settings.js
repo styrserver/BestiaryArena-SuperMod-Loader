@@ -3881,7 +3881,8 @@ function showSettingsModal() {
       flexDirection: 'column',
       gap: '8px',
       overflowY: 'auto',
-      padding: '2px'
+      padding: '2px 12px 2px 2px',
+      boxSizing: 'border-box'
     });
     
     // Helper function to apply menu item styling
@@ -3994,7 +3995,7 @@ function showSettingsModal() {
             <input type="range" id="better-highscores-opacity-slider" min="0" max="100" value="100" step="1" style="flex: 1; min-width: 150px; max-width: 300px; cursor: pointer;" onclick="event.stopPropagation();">
             <span id="better-highscores-opacity-value" style="color: #ccc; min-width: 40px; text-align: right;">100%</span>
           </div>
-          <div style="margin-bottom: 15px;">
+          <div style="margin: 0 auto 15px auto; width: 100%; max-width: 360px; box-sizing: border-box;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="better-highscores-button-toggle" style="transform: scale(1.2);">
               <span>${t('mods.betterUI.showBetterHighscoresButton')}</span>
@@ -9733,8 +9734,17 @@ function loadAndDisplayModPriorities(container) {
   
   const resetAllBtn = document.createElement('button');
   resetAllBtn.textContent = t('mods.betterUI.modCoordinationResetAll') || 'Reset All';
-  resetAllBtn.style.cssText = 'padding: 6px 12px; font-size: 12px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 4px; cursor: pointer; width: 100%;';
+  resetAllBtn.style.cssText = 'padding: 6px 12px; font-size: 12px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 4px; cursor: pointer; width: 100%; transition: transform 120ms ease, background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease;';
   resetAllBtn.title = t('mods.betterUI.modCoordinationResetAllTooltip') || 'Reset all mod priorities to their default values';
+  const resetAllDefaultText = resetAllBtn.textContent;
+  const resetAllDefaultStyle = {
+    background: '#333',
+    color: '#ccc',
+    borderColor: '#555',
+    boxShadow: 'none',
+    transform: 'translateY(0)'
+  };
+  let resetAllFeedbackTimeout = null;
   
   resetAllBtn.addEventListener('click', () => {
     if (!window.ModCoordination) return;
@@ -9778,9 +9788,41 @@ function loadAndDisplayModPriorities(container) {
     if (resetCount > 0) {
       saveModPriorities({});
       console.log(`[Mod Settings] Reset ${resetCount} mod priority(ies) to default`);
+      
+      // Visual success feedback so users know their click worked.
+      resetAllBtn.textContent = `\u2713 ${t('mods.betterUI.modCoordinationResetAll') || 'Reset All'} (${resetCount})`;
+      resetAllBtn.style.background = '#14532d';
+      resetAllBtn.style.color = '#dcfce7';
+      resetAllBtn.style.borderColor = '#22c55e';
+      resetAllBtn.style.boxShadow = '0 0 0 1px rgba(34,197,94,0.35), 0 0 10px rgba(34,197,94,0.25)';
     } else {
       console.log('[Mod Settings] No mod priorities to reset');
+      resetAllBtn.textContent = t('mods.betterUI.modCoordinationNoChanges') || 'No changes';
+      resetAllBtn.style.background = '#374151';
+      resetAllBtn.style.color = '#e5e7eb';
+      resetAllBtn.style.borderColor = '#6b7280';
+      resetAllBtn.style.boxShadow = '0 0 0 1px rgba(156,163,175,0.25)';
     }
+    
+    // Press/click animation.
+    resetAllBtn.style.transform = 'scale(0.97)';
+    scheduleTimeout(() => {
+      resetAllBtn.style.transform = 'translateY(0)';
+    }, 120);
+    
+    // Restore default button look/text after a short delay.
+    if (resetAllFeedbackTimeout) {
+      clearTimeout(resetAllFeedbackTimeout);
+    }
+    resetAllFeedbackTimeout = scheduleTimeout(() => {
+      resetAllBtn.textContent = resetAllDefaultText;
+      resetAllBtn.style.background = resetAllDefaultStyle.background;
+      resetAllBtn.style.color = resetAllDefaultStyle.color;
+      resetAllBtn.style.borderColor = resetAllDefaultStyle.borderColor;
+      resetAllBtn.style.boxShadow = resetAllDefaultStyle.boxShadow;
+      resetAllBtn.style.transform = resetAllDefaultStyle.transform;
+      resetAllFeedbackTimeout = null;
+    }, 1200);
   });
   
   resetAllContainer.appendChild(resetAllBtn);

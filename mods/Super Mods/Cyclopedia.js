@@ -4374,7 +4374,7 @@ function openCyclopediaModal(options) {
           maxWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, padding: '0', margin: '0', height: '100%',
           display: 'flex', flexDirection: 'column', borderRight: '6px solid transparent',
           borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`,
-          overflowY: 'scroll', minHeight: '0'
+          overflowY: 'hidden', minHeight: '0'
         },
         box: {
           flex: '1 1 0', minHeight: '0'
@@ -5364,7 +5364,7 @@ function openCyclopediaModal(options) {
         maxWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, height: '100%', display: 'flex',
         flexDirection: 'column', borderRight: '6px solid transparent',
         borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`,
-        overflowY: 'scroll', minHeight: '0'
+        overflowY: 'hidden', minHeight: '0'
       });
 
       leftCol.appendChild(createEquipmentBox({
@@ -5391,12 +5391,12 @@ function openCyclopediaModal(options) {
         maxWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, height: '100%', display: 'flex',
         flexDirection: 'column', borderRight: '6px solid transparent',
         borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`,
-        overflowY: 'scroll', minHeight: '0'
+        overflowY: 'hidden', minHeight: '0'
       });
 
       const sharedScrollContainer = DOMUtils.createElement('div');
       sharedScrollContainer.style.cssText = `
-        flex: 1 1 0; display: flex; flex-direction: row; height: 100%; overflow-y: auto;
+        flex: 1 1 0; display: flex; flex-direction: row; height: 100%; overflow-y: hidden;
         border-right: 6px solid transparent;
         border-image: url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch;
       `;
@@ -5454,7 +5454,7 @@ function openCyclopediaModal(options) {
         const container = DOMUtils.createElement('div');
         Object.assign(container.style, {
           display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
-          padding: '20px', boxSizing: 'border-box', overflowY: 'scroll'
+          padding: '20px', boxSizing: 'border-box', overflowY: 'auto'
         });
 
         const patched = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
@@ -15150,6 +15150,28 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) 
     appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsFloors', s ? s.floors : undefined, s ? s.floorsBracket : undefined);
 
     statsWrap.appendChild(block);
+
+    const seasonLink = document.createElement('a');
+    seasonLink.href = 'https://bestiaryarena.com/seasons';
+    seasonLink.target = '_blank';
+    seasonLink.rel = 'noopener noreferrer';
+    seasonLink.textContent = 'View full seasons leaderboard';
+    Object.assign(seasonLink.style, {
+      display: 'inline-flex',
+      alignSelf: 'center',
+      marginTop: '2px',
+      fontSize: '12px',
+      color: '#ffe066',
+      textDecoration: 'underline',
+      cursor: 'pointer'
+    });
+    seasonLink.addEventListener('mouseover', () => {
+      seasonLink.style.color = '#fff2b2';
+    });
+    seasonLink.addEventListener('mouseout', () => {
+      seasonLink.style.color = '#ffe066';
+    });
+    statsWrap.appendChild(seasonLink);
 
     div.appendChild(statsWrap);
     return div;

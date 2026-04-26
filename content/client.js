@@ -1354,8 +1354,9 @@ if (typeof browserAPI === 'undefined') {
             // Create container
             const container = document.createElement('div');
             container.className = 'relative overflow-hidden frame-pressed-1 surface-dark';
+            container.setAttribute('data-bestiary-scroll-root', '');
             const heightValue = options.height ? (typeof options.height === 'number' ? `${options.height}px` : options.height) : '300px';
-            container.style.cssText = `position: relative; height: ${heightValue}; --radix-scroll-area-corner-width: 0px; --radix-scroll-area-corner-height: 0px;`;
+            container.style.cssText = `position: relative; height: ${heightValue}; --radix-scroll-area-corner-width: 0px; --radix-scroll-area-corner-height: 0px; overflow: hidden;`;
             
             // Create scroll view with game-styled scrollbar
             const scrollView = document.createElement('div');
@@ -1406,6 +1407,16 @@ if (typeof browserAPI === 'undefined') {
             // Add scrollbar style
             const style = document.createElement('style');
             style.textContent = `
+              [data-bestiary-scroll-root] {
+                overflow: hidden !important;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+              }
+              [data-bestiary-scroll-root]::-webkit-scrollbar {
+                width: 0;
+                height: 0;
+                display: none;
+              }
               [data-radix-scroll-area-viewport] {
                 scrollbar-width: none;
                 -ms-overflow-style: none;

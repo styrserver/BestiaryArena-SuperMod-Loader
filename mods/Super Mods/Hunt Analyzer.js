@@ -1551,7 +1551,7 @@ function createInventoryStyleItemPortrait(itemData) {
     }
     
     // Fallback to image-based approach for non-sprite items
-    const containerSlot = createContainerSlot('36px');
+    const containerSlot = createContainerSlot('34px');
     
     // Rarity border
     const rarityDiv = createRarityBorder(itemData.rarity || 1);
@@ -1584,8 +1584,8 @@ function createInventoryStyleItemPortrait(itemData) {
     img.alt = itemData.originalName;
     img.style.width = '100%';
     img.style.height = '100%';
-    img.style.maxWidth = '36px';
-    img.style.maxHeight = '36px';
+    img.style.maxWidth = '34px';
+    img.style.maxHeight = '34px';
     img.style.objectFit = 'contain';
     img.style.imageRendering = 'pixelated';
     img.style.borderRadius = '3px';
@@ -2818,7 +2818,7 @@ function addStatIconsToExistingPortraits() {
 }
 function createItemSprite(itemId, tooltipKey = '', rarity = 1, stat = null) {
     // Create the main container following Cyclopedia pattern
-    const containerSlot = createContainerSlot('36px', 'container-slot surface-darker');
+    const containerSlot = createContainerSlot('34px', 'container-slot surface-darker');
     containerSlot.title = tooltipKey || `ID-${itemId}`;
     
     // Create rarity container
@@ -4541,9 +4541,55 @@ function createUnifiedGridContainer() {
     const gridContainer = document.createElement('div');
     gridContainer.style.display = 'grid';
     gridContainer.style.gridTemplateColumns = 'repeat(5, 1fr)';
-    gridContainer.style.gap = '8px';
-    gridContainer.style.padding = '4px';
+    gridContainer.style.gap = '6px';
     return gridContainer;
+}
+
+// Creates a framed drop section (used by loot and creature containers)
+function createDropSection({ containerClassName, titleId, displayId }) {
+    const container = document.createElement("div");
+    container.className = containerClassName;
+    container.style.display = "flex";
+    container.style.flexDirection = "column";
+    container.style.flex = "1 1 0";
+    container.style.minHeight = "0";
+    applyFramedSectionStyles(container, { noTopMargin: true });
+    container.style.overflowY = "auto";
+
+    const titleContainer = document.createElement("div");
+    titleContainer.style.display = "flex";
+    titleContainer.style.alignItems = "center";
+    titleContainer.style.justifyContent = "center";
+    titleContainer.style.marginBottom = "3px";
+
+    const title = document.createElement("h3");
+    title.id = titleId;
+    title.style.margin = "0px";
+    title.style.fontSize = "14px";
+    title.style.color = getThemeColor('textAccent');
+    title.style.fontWeight = "bold";
+    title.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
+    titleContainer.appendChild(title);
+
+    const displayDiv = document.createElement("div");
+    displayDiv.id = displayId;
+    displayDiv.style.width = "100%";
+    displayDiv.style.padding = "4px";
+    displayDiv.style.border = "4px solid transparent";
+    displayDiv.style.borderImage = "var(--ha-frame-1)";
+    displayDiv.style.backgroundColor = getThemeColor('sectionBackground');
+    displayDiv.style.color = getThemeColor('text');
+    displayDiv.style.fontSize = "11px";
+    displayDiv.style.overflowY = "scroll";
+    displayDiv.style.flexGrow = "1";
+    displayDiv.style.display = "flex";
+    displayDiv.style.flexDirection = "column";
+    displayDiv.style.gap = "6px";
+
+    container.appendChild(titleContainer);
+    container.appendChild(displayDiv);
+
+    return { container, titleContainer, title, displayDiv };
 }
 
 // =======================
@@ -5583,91 +5629,26 @@ function createAutoplayAnalyzerPanel() {
     mapFilterContainer.appendChild(mapFilterTitle);
     mapFilterContainer.appendChild(mapFilterRow);
 
-    // 4. Loot Section
-    const lootContainer = document.createElement("div");
-    lootContainer.className = "loot-container";
-    lootContainer.style.display = "flex";
-    lootContainer.style.flexDirection = "column";
-    lootContainer.style.flex = "1 1 0"; // FLEXIBLE
-    lootContainer.style.minHeight = "0";
-    applyFramedSectionStyles(lootContainer, { noTopMargin: true });
-    lootContainer.style.overflowY = 'auto';
+    // 4. Loot + Creature Drops Sections (shared layout/styling)
+    const {
+        container: lootContainer,
+        title: lootTitle,
+        displayDiv: lootDisplayDiv
+    } = createDropSection({
+        containerClassName: "loot-container",
+        titleId: "mod-loot-title",
+        displayId: "mod-loot-display"
+    });
 
-    const lootTitleContainer = document.createElement("div");
-    lootTitleContainer.style.display = "flex";
-    lootTitleContainer.style.alignItems = "center";
-    lootTitleContainer.style.justifyContent = "center";
-    lootTitleContainer.style.marginBottom = "3px";
-
-    const lootTitle = document.createElement("h3");
-    lootTitle.id = "mod-loot-title";
-    lootTitle.style.margin = "0px";
-    lootTitle.style.fontSize = "14px";
-    lootTitle.style.color = getThemeColor('textAccent');
-    lootTitle.style.fontWeight = "bold";
-    lootTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
-    lootTitleContainer.appendChild(lootTitle);
-
-    const lootDisplayDiv = document.createElement("div");
-    lootDisplayDiv.id = "mod-loot-display";
-    lootDisplayDiv.style.width = "100%";
-    lootDisplayDiv.style.padding = "4px";
-    lootDisplayDiv.style.border = '4px solid transparent';
-    lootDisplayDiv.style.borderImage = 'var(--ha-frame-1)';
-    lootDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
-    lootDisplayDiv.style.color = getThemeColor('text');
-    lootDisplayDiv.style.fontSize = "11px";
-    lootDisplayDiv.style.overflowY = "scroll";
-    lootDisplayDiv.style.flexGrow = "1";
-    lootDisplayDiv.style.display = "flex";
-    lootDisplayDiv.style.flexDirection = "column";
-    lootDisplayDiv.style.gap = "6px";
-
-    lootContainer.appendChild(lootTitleContainer);
-    lootContainer.appendChild(lootDisplayDiv);
-
-    // 4. Creature Drops Section
-    const creatureDropContainer = document.createElement("div");
-    creatureDropContainer.className = "creature-drop-container";
-    creatureDropContainer.style.display = "flex";
-    creatureDropContainer.style.flexDirection = "column";
-    creatureDropContainer.style.flex = "1 1 0"; // FLEXIBLE
-    creatureDropContainer.style.minHeight = "0";
-    applyFramedSectionStyles(creatureDropContainer, { noTopMargin: true });
-    creatureDropContainer.style.overflowY = 'auto';
-
-    const creatureDropTitleContainer = document.createElement("div");
-    creatureDropTitleContainer.style.display = "flex";
-    creatureDropTitleContainer.style.alignItems = "center";
-    creatureDropTitleContainer.style.justifyContent = "center";
-    creatureDropTitleContainer.style.marginBottom = "3px";
-
-    const creatureDropTitle = document.createElement("h3");
-    creatureDropTitle.id = "mod-creature-drops-title";
-    creatureDropTitle.style.margin = "0px";
-    creatureDropTitle.style.fontSize = "14px";
-    creatureDropTitle.style.color = getThemeColor('textAccent');
-    creatureDropTitle.style.fontWeight = "bold";
-    creatureDropTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
-    creatureDropTitleContainer.appendChild(creatureDropTitle);
-
-    const creatureDropDisplayDiv = document.createElement("div");
-    creatureDropDisplayDiv.id = "mod-creature-drop-display";
-    creatureDropDisplayDiv.style.width = "100%";
-    creatureDropDisplayDiv.style.padding = "4px";
-    creatureDropDisplayDiv.style.border = '4px solid transparent';
-    creatureDropDisplayDiv.style.borderImage = 'var(--ha-frame-1)';
-    creatureDropDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
-    creatureDropDisplayDiv.style.color = getThemeColor('text');
-    creatureDropDisplayDiv.style.fontSize = "11px";
-    creatureDropDisplayDiv.style.overflowY = "scroll";
-    creatureDropDisplayDiv.style.flexGrow = "1";
-    creatureDropDisplayDiv.style.display = "flex";
-    creatureDropDisplayDiv.style.flexDirection = "column";
-    creatureDropDisplayDiv.style.gap = "6px";
-
-    creatureDropContainer.appendChild(creatureDropTitleContainer);
-    creatureDropContainer.appendChild(creatureDropDisplayDiv);
+    const {
+        container: creatureDropContainer,
+        title: creatureDropTitle,
+        displayDiv: creatureDropDisplayDiv
+    } = createDropSection({
+        containerClassName: "creature-drop-container",
+        titleId: "mod-creature-drops-title",
+        displayId: "mod-creature-drop-display"
+    });
 
     // 5. Bottom Controls
     const buttonContainer = document.createElement("div");

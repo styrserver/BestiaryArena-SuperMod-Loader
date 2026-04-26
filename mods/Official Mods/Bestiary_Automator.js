@@ -1275,7 +1275,6 @@ const makeCubeToastIconForItemKey = (borderColor, itemKey) => {
     height: 32px;
     border-radius: 4px;
     border: 2px solid ${borderColor};
-    box-shadow: 0 0 8px ${borderColor};
     display: flex;
     align-items: center;
     justify-content: center;
@@ -5187,6 +5186,21 @@ context.exports = {
   // Manual rewards collection for testing
   collectRewards: takeRewardsIfAvailable,
   openSurpriseCubes: openAllSurpriseCubesFromInventory,
+  // Manual custom toast tests from console
+  testToast: (message = 'Bestiary Automator test toast', durationMs = 5000) => {
+    const safeMessage = typeof message === 'string' && message.trim() ? message.trim() : 'Bestiary Automator test toast';
+    const parsedDuration = Number(durationMs);
+    const safeDurationMs = Number.isFinite(parsedDuration) ? Math.max(1000, Math.min(30000, Math.floor(parsedDuration))) : 5000;
+    showAutomatorToastMessage(safeMessage, safeDurationMs);
+  },
+  testCubeToast: (tier = 5) => {
+    const parsedTier = Number(tier);
+    const safeTier = Number.isInteger(parsedTier) && parsedTier >= 1 && parsedTier <= 5 ? parsedTier : 5;
+    showCubeOpenedToast(safeTier, {
+      primaryReward: null,
+      summaryParts: ['Test toast preview']
+    });
+  },
   // Seashell timer management
   clearSeashellTimer: clearSeashellTimer,
   setupSeashellTimer: setupSeashellTimer,
