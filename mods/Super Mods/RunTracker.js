@@ -26,7 +26,7 @@ if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
 // 1. Configuration
 // =======================
 const RUN_STORAGE_KEY = 'ba_local_runs';
-const MAX_RUNS_PER_MAP = 5; // Keep top 5 runs per category
+const MAX_RUNS_PER_MAP = 5; // Keep top 5 runs per category (speedrun/rank only)
 const PROFILE_PAGE_DATA_TIMEOUT = 8000;
 const PROFILE_PAGE_DATA_URL = 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData';
 
@@ -300,6 +300,19 @@ function getCurrentSeasonForRunData() {
   return latestKnownSeason || 1;
 }
 
+function normalizeFloorHistory(run) {
+  if (!run) return [];
+  const raw = Array.isArray(run.floorHistory) ? run.floorHistory : [];
+  const values = raw
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (run.floor !== undefined && run.floor !== null) {
+    const floorValue = Number(run.floor);
+    if (Number.isFinite(floorValue) && floorValue > 0) values.push(floorValue);
+  }
+  return Array.from(new Set(values)).sort((a, b) => a - b);
+}
+
 // Get monster name from database ID by looking up in player's monster inventory
 function getMonsterNameFromDatabaseId(databaseId) {
   try {
@@ -511,6 +524,7 @@ async function initializeStorage() {
               run.season = 1;
               seasonMigratedCount++;
             }
+            run.floorHistory = normalizeFloorHistory(run);
           });
         }
       }
@@ -1332,32 +1346,6 @@ async function checkAndUpdateFloorRuns(runData) {
   const runSeason = Number(runData.season || 1);
   const seasonRuns = floorRuns.filter(run => Number(run?.season || 1) === runSeason);
   
-  // Check if floor is higher or equal to existing runs
-  // For same floor, prefer faster floorTicks (if available)
-  const qualifyingRuns = seasonRuns.filter(run => 
-    (run.floor < runData.floor) || 
-    (run.floor === runData.floor && run.floorTicks && runData.floorTicks && run.floorTicks >= runData.floorTicks) ||
-    (run.floor === runData.floor && !run.floorTicks && runData.floorTicks)
-  );
-  
-  if (qualifyingRuns.length === 0 && seasonRuns.length >= MAX_RUNS_PER_MAP) {
-    // Check if this run is better than the worst run
-    const sortedSeasonRuns = [...seasonRuns].sort((a, b) => {
-      if (a.floor !== b.floor) return (b.floor || 0) - (a.floor || 0);
-      if (a.floorTicks && b.floorTicks) return (a.floorTicks || Infinity) - (b.floorTicks || Infinity);
-      if (a.floorTicks && !b.floorTicks) return -1;
-      if (!a.floorTicks && b.floorTicks) return 1;
-      if (a.time && b.time) return (a.time || Infinity) - (b.time || Infinity);
-      return 0;
-    });
-    const worstRun = sortedSeasonRuns[sortedSeasonRuns.length - 1];
-    if (runData.floor < worstRun.floor || 
-        (runData.floor === worstRun.floor && runData.floorTicks && worstRun.floorTicks && runData.floorTicks >= worstRun.floorTicks)) {
-      console.log(`[RunTracker] Skipping floor run - floor ${runData.floor} not high enough for ${runData.mapName} (season ${runSeason})`);
-      return false;
-    }
-  }
-  
   // Check for same setup (more robust comparison)
   const sameSetupRun = seasonRuns.find(run => {
     if (!run.setup || !runData.setup) return false;
@@ -1376,6 +1364,15 @@ async function checkAndUpdateFloorRuns(runData) {
   });
   
   if (sameSetupRun) {
+    const existingFloorHistory = normalizeFloorHistory(sameSetupRun);
+    if (runData.floor !== undefined && runData.floor !== null) {
+      const floorValue = Number(runData.floor);
+      if (Number.isFinite(floorValue) && floorValue > 0 && !existingFloorHistory.includes(floorValue)) {
+        existingFloorHistory.push(floorValue);
+      }
+    }
+    existingFloorHistory.sort((a, b) => a - b);
+
     // Same setup found - update if new floor is higher, or same floor with better floorTicks or time
     let shouldUpdate = false;
     if (runData.floor > sameSetupRun.floor) {
@@ -1395,17 +1392,20 @@ async function checkAndUpdateFloorRuns(runData) {
     
     if (shouldUpdate) {
       const existingIndex = floorRuns.indexOf(sameSetupRun);
-      const updatedRun = { ...sameSetupRun, ...runData };
+      const updatedRun = { ...sameSetupRun, ...runData, floorHistory: existingFloorHistory };
       floorRuns[existingIndex] = updatedRun;
       
       console.log(`[RunTracker] Updated floor run for ${runData.mapName} with same setup: floor ${runData.floor} (was ${sameSetupRun.floor})${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}${!runData.floorTicks && runData.time ? `, time ${runData.time}` : ''}`);
     } else {
-      console.log(`[RunTracker] New floor run is not better than existing run for same setup`);
-      return false;
+      const existingIndex = floorRuns.indexOf(sameSetupRun);
+      floorRuns[existingIndex] = { ...sameSetupRun, floorHistory: existingFloorHistory };
+      console.log(`[RunTracker] Recorded additional floor ${runData.floor} for existing setup without replacing best run`);
+      return true;
     }
   } else {
-    // Unique setup - add to top 5 in correct order
-    floorRuns.push(runData);
+    // Unique setup - add and keep floor history for range display
+    const newRun = { ...runData, floorHistory: normalizeFloorHistory(runData) };
+    floorRuns.push(newRun);
     
     // Sort by floor (highest first), then by floorTicks (fastest first) for tiebreakers
     floorRuns.sort((a, b) => {
@@ -1424,27 +1424,6 @@ async function checkAndUpdateFloorRuns(runData) {
       }
       return 0;
     });
-    
-    // Keep only top 5 for this season; keep other seasons untouched
-    const sortedSeasonRuns = floorRuns
-      .filter(run => Number(run?.season || 1) === runSeason)
-      .sort((a, b) => {
-        if (a.floor !== b.floor) {
-          return (b.floor || 0) - (a.floor || 0);
-        }
-        if (a.floorTicks && b.floorTicks) {
-          return (a.floorTicks || Infinity) - (b.floorTicks || Infinity);
-        }
-        if (a.floorTicks && !b.floorTicks) return -1;
-        if (!a.floorTicks && b.floorTicks) return 1;
-        if (a.time && b.time) {
-          return (a.time || Infinity) - (b.time || Infinity);
-        }
-        return 0;
-      });
-    const keptSeasonRuns = sortedSeasonRuns.slice(0, MAX_RUNS_PER_MAP);
-    const otherSeasonRuns = floorRuns.filter(run => Number(run?.season || 1) !== runSeason);
-    runStorage.runs[runData.mapKey].floor = [...otherSeasonRuns, ...keptSeasonRuns];
     
     console.log(`[RunTracker] Added new floor run for ${runData.mapName} with unique setup: floor ${runData.floor}${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}`);
   }
@@ -1906,11 +1885,24 @@ if (!window.RunTrackerAPI) {
   },
   importRuns: async (importData) => {
     try {
-      if (!importData || !importData.data || !importData.data.runs) {
+      const payload = (importData && importData.data && importData.data.runs)
+        ? importData.data
+        : importData;
+      if (!payload || !payload.runs) {
         throw new Error('Invalid import data format');
       }
       
-      runStorage = importData.data;
+      runStorage = payload;
+
+      // Normalize imported floor history so grouped floor labels remain correct.
+      for (const mapKey in runStorage.runs) {
+        const mapData = runStorage.runs[mapKey];
+        if (!mapData || !Array.isArray(mapData.floor)) continue;
+        mapData.floor.forEach((run) => {
+          run.floorHistory = normalizeFloorHistory(run);
+        });
+      }
+
       await StorageManager.flushSaves();
       await StorageManager.saveStorage();
       console.log('[RunTracker] Runs imported successfully');
@@ -1956,6 +1948,102 @@ if (!window.RunTrackerAPI) {
       return true;
     } catch (error) {
       console.error('[RunTracker] Error deleting run:', error);
+      return false;
+    }
+  },
+
+  // Delete a run by matching identity fields instead of array index
+  deleteRunByIdentity: async (mapKey, category, identity = {}) => {
+    try {
+      if (!runStorage || !runStorage.runs || !runStorage.runs[mapKey]) {
+        return false;
+      }
+
+      const categoryRuns = runStorage.runs[mapKey][category];
+      if (!Array.isArray(categoryRuns) || categoryRuns.length === 0) {
+        return false;
+      }
+
+      const season = Number(identity?.season || 1);
+      let runIndex = -1;
+      const hasTimestamp = identity.timestamp !== undefined && identity.timestamp !== null;
+      const hasTime = identity.time !== undefined && identity.time !== null;
+      const hasPoints = identity.points !== undefined && identity.points !== null;
+      const hasFloor = identity.floor !== undefined && identity.floor !== null;
+
+      const getSetupSignature = (setup) => {
+        if (!setup || !Array.isArray(setup.pieces)) return null;
+        const normalized = setup.pieces
+          .map((piece) => ({
+            tile: piece?.tile,
+            monsterId: piece?.monsterId || piece?.monsterName || null,
+            equipId: piece?.equipId || piece?.equipmentName || null,
+            level: piece?.level || null
+          }))
+          .sort((a, b) => (a.tile || 0) - (b.tile || 0));
+        return JSON.stringify(normalized);
+      };
+
+      const identitySetupSignature = getSetupSignature(identity?.setup);
+
+      if (identity && identity.seed) {
+        const candidates = categoryRuns
+          .map((run, index) => ({ run, index }))
+          .filter(({ run }) => run && run.seed === identity.seed && Number(run.season || 1) === season);
+
+        if (candidates.length > 0) {
+          if (hasTimestamp) {
+            const tsMatch = candidates.find(({ run }) => Number(run.timestamp || 0) === Number(identity.timestamp || 0));
+            if (tsMatch) {
+              runIndex = tsMatch.index;
+            }
+          }
+
+          if (runIndex === -1) {
+            let narrowed = candidates;
+
+            if (category === 'speedrun' && hasTime) {
+              narrowed = narrowed.filter(({ run }) => Number(run.time || 0) === Number(identity.time || 0));
+            } else if (category === 'rank') {
+              if (hasPoints) narrowed = narrowed.filter(({ run }) => Number(run.points || 0) === Number(identity.points || 0));
+              if (hasTime) narrowed = narrowed.filter(({ run }) => Number(run.time || 0) === Number(identity.time || 0));
+            } else if (category === 'floor') {
+              if (hasFloor) narrowed = narrowed.filter(({ run }) => Number(run.floor || 0) === Number(identity.floor || 0));
+              if (hasTime) narrowed = narrowed.filter(({ run }) => Number(run.time || 0) === Number(identity.time || 0));
+            }
+
+            if (narrowed.length === 0) narrowed = candidates;
+
+            if (identitySetupSignature) {
+              const setupMatch = narrowed.find(({ run }) => getSetupSignature(run.setup) === identitySetupSignature);
+              if (setupMatch) {
+                runIndex = setupMatch.index;
+              }
+            }
+
+            if (runIndex === -1 && narrowed.length === 1) {
+              runIndex = narrowed[0].index;
+            }
+          }
+        }
+      }
+
+      if (runIndex === -1) {
+        return false;
+      }
+
+      categoryRuns.splice(runIndex, 1);
+
+      runStorage.lastUpdated = Date.now();
+      runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
+        return total + map.speedrun.length + map.rank.length + (map.floor?.length || 0);
+      }, 0);
+
+      await StorageManager.saveStorage();
+      console.log(`[RunTracker] Deleted ${category} run by identity for ${mapKey}`);
+      return true;
+    } catch (error) {
+      console.error('[RunTracker] Error deleting run by identity:', error);
       return false;
     }
   },

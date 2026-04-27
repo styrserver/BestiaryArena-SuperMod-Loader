@@ -86,6 +86,8 @@ const MAPS_WITHOUT_BOOSTED_EQUIPMENT = [
     'Shore Camp',
     'Orcsmith Orcshop',
     'Mine Hub',
+    'Sewers',
+    'Wheat Field',
     'Emperor Kruzak\'s Treasure Room',
     'Mad Technomancer\'s Lab',
     'Eclipse',

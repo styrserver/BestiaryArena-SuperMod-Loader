@@ -140,6 +140,63 @@ function isRaid(mapId) {
   return map ? map.raid === true : false;
 }
 
+// Static raid list (maps outside this list but marked raid are treated as dynamic event maps)
+const STATIC_RAID_EVENTS = [
+  'Rat Plague',
+  'Buzzing Madness',
+  'Monastery Catacombs',
+  'Ghostlands Boneyard',
+  'Permafrosted Hole',
+  'Jammed Mailbox',
+  'Frosted Bunker',
+  'Hedge Maze Trap',
+  'Tower of Whitewatch (Shield)',
+  'Tower of Whitewatch (Helmet)',
+  'Tower of Whitewatch (Armor)',
+  'Orcish Barricade',
+  'Poacher Cave (Bear)',
+  'Poacher Cave (Wolf)',
+  'Dwarven Bank Heist',
+  'An Arcanist Ritual'
+];
+
+// Static event-name to room-id mapping for backward compatibility fallbacks.
+const EVENT_TO_ROOM_MAPPING = {
+  'Rat Plague': 'rkcent',
+  'Buzzing Madness': 'crwasp',
+  'Monastery Catacombs': 'crcat',
+  'Ghostlands Boneyard': 'crghst4',
+  'Permafrosted Hole': 'fhole',
+  'Jammed Mailbox': 'fbox',
+  'Frosted Bunker': 'fscave',
+  'Hedge Maze Trap': 'abmazet',
+  'Tower of Whitewatch (Shield)': 'aborca',
+  'Tower of Whitewatch (Helmet)': 'aborcb',
+  'Tower of Whitewatch (Armor)': 'aborcc',
+  'Orcish Barricade': 'ofbar',
+  'Poacher Cave (Bear)': 'kpob',
+  'Poacher Cave (Wolf)': 'kpow',
+  'Dwarven Bank Heist': 'vbank',
+  'An Arcanist Ritual': 'vdhar'
+};
+
+/**
+ * Check if a map is a dynamic event map.
+ * Dynamic event maps are raids not present in the static raid list.
+ * @param {string} mapId - The map ID to check
+ * @returns {boolean} True if the map is a dynamic event map
+ */
+function isDynamicEventMap(mapId) {
+  if (!mapId) return false;
+  if (!isRaid(mapId)) return false;
+
+  const state = globalThis.state || window.state;
+  const mapName = state?.utils?.ROOM_NAME?.[mapId];
+  if (!mapName) return false;
+
+  return !STATIC_RAID_EVENTS.includes(mapName);
+}
+
 // Build the database dynamically
 const mapsDatabase = buildMapsDatabase();
 
@@ -152,6 +209,9 @@ mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
 mapsDatabase.getRaidMaps = getRaidMaps;
 mapsDatabase.getNonRaidMaps = getNonRaidMaps;
 mapsDatabase.isRaid = isRaid;
+mapsDatabase.isDynamicEventMap = isDynamicEventMap;
+mapsDatabase.STATIC_RAID_EVENTS = STATIC_RAID_EVENTS.slice();
+mapsDatabase.EVENT_TO_ROOM_MAPPING = { ...EVENT_TO_ROOM_MAPPING };
 
 // Export for use in other mods
 const globalWindow = globalThis.window || window || (typeof window !== 'undefined' ? window : null);

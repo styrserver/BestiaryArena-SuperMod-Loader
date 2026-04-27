@@ -1807,6 +1807,11 @@ function cleanRunForUpload(bestRun, contextRegionName, baseFields) {
     cleanRun.floorTicks = bestRun.floorTicks;
   }
   
+  // Preserve grouped floor coverage for floor exports when available.
+  if (Array.isArray(bestRun.floorHistory) && bestRun.floorHistory.length > 0) {
+    cleanRun.floorHistory = [...bestRun.floorHistory];
+  }
+  
   return cleanRun;
 }
 
@@ -3445,7 +3450,7 @@ async function importConfiguration(modal) {
           // Import run data if available
           if (importData.runData) {
             if (window.RunTrackerAPI) {
-              await window.RunTrackerAPI.importRuns(importData);
+              await window.RunTrackerAPI.importRuns(importData.runData);
             } else if (window.browserAPI.storage.local) {
               await new Promise(resolve => {
                 window.browserAPI.storage.local.set({ ba_local_runs: importData.runData }, resolve);

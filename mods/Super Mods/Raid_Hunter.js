@@ -584,46 +584,12 @@ function skipInvalidRaidAndRetry(reason, allowInterrupt = false) {
 const HALLOWEEN_MANSION_RAID = 'Halloween Mansion';
 const JOLLY_AXEMAN_RAIDS = ['Jolly Axeman Tavern', 'Dog Raceway', "Ruprecht's Hut", 'White Wave Cellar'];
 
-// Static raid list (dynamic events are detected automatically from active raids not in this list)
-const EVENT_TEXTS = [
-    'Rat Plague',
-    'Buzzing Madness', 
-    'Monastery Catacombs',
-    'Ghostlands Boneyard',
-    'Permafrosted Hole',
-    'Jammed Mailbox',
-    'Frosted Bunker',
-    'Hedge Maze Trap',
-    'Tower of Whitewatch (Shield)',
-    'Tower of Whitewatch (Helmet)',
-    'Tower of Whitewatch (Armor)',
-    'Orcish Barricade',
-    'Poacher Cave (Bear)',
-    'Poacher Cave (Wolf)',
-    'Dwarven Bank Heist',
-    'An Arcanist Ritual'
-];
-
-// Event to room ID mapping (FALLBACK ONLY - game state API is used first)
-// Kept for backward compatibility if game state API is unavailable
-const EVENT_TO_ROOM_MAPPING = {
-    'Rat Plague': 'rkcent',
-    'Buzzing Madness': 'crwasp',
-    'Monastery Catacombs': 'crcat',
-    'Ghostlands Boneyard': 'crghst4',
-    'Permafrosted Hole': 'fhole',
-    'Jammed Mailbox': 'fbox',
-    'Frosted Bunker': 'fscave',
-    'Hedge Maze Trap': 'abmazet',
-    'Tower of Whitewatch (Shield)': 'aborca',
-    'Tower of Whitewatch (Helmet)': 'aborcb',
-    'Tower of Whitewatch (Armor)': 'aborcc',
-    'Orcish Barricade': 'ofbar',
-    'Poacher Cave (Bear)': 'kpob',
-    'Poacher Cave (Wolf)': 'kpow',
-    'Dwarven Bank Heist': 'vbank',
-    'An Arcanist Ritual': 'vdhar'
-};
+// Centralized static raid/event definitions from maps-database.js.
+const EVENT_TEXTS = globalThis.mapsDatabase?.STATIC_RAID_EVENTS || [];
+const EVENT_TO_ROOM_MAPPING = globalThis.mapsDatabase?.EVENT_TO_ROOM_MAPPING || {};
+if (!EVENT_TEXTS.length) {
+    console.warn('[Raid Hunter] mapsDatabase static raid definitions unavailable; event lists are empty.');
+}
 
 // ============================================================================
 // 1.1. STAMINA MONITORING FUNCTIONS

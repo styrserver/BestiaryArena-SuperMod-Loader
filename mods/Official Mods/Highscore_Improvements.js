@@ -49,6 +49,19 @@ async function fetchTRPC(method) {
   }
 }
 
+// Event maps (dynamic raids) should not count in time/rank improvement stats.
+function isCountedRoomForImprovements(roomCode) {
+  try {
+    const isDynamicEventMap = globalThis.mapsDatabase?.isDynamicEventMap;
+    if (typeof isDynamicEventMap === 'function' && isDynamicEventMap(roomCode)) {
+      return false;
+    }
+  } catch (error) {
+    console.warn('[Highscore Improvements] Failed to classify room:', roomCode, error);
+  }
+  return true;
+}
+
 // Helper function to create an item sprite element
 function createItemSprite(itemId) {
   // Create the sprite container
@@ -279,8 +292,10 @@ async function showImprovementsModal() {
       fetchTRPC('game.getRoomsHighscores')
     ]);
     
+    const countedRoomsEntries = Object.entries(rooms).filter(([code]) => isCountedRoomForImprovements(code));
+
     // Process tick opportunities
-    const tickOpportunities = Object.entries(rooms).flatMap(([code, r]) => {
+    const tickOpportunities = countedRoomsEntries.flatMap(([code, r]) => {
       const b = best[code];
       if (!b) return [];
       const d = r.ticks - b.ticks;
@@ -297,13 +312,13 @@ async function showImprovementsModal() {
     }).sort((a, b) => b.diff - a.diff);
     
     // Calculate tick totals
-    const total = Object.values(rooms).reduce((s, r) => s + r.ticks, 0);
-    const minTheo = Object.entries(rooms).reduce((s, [c, r]) => 
+    const total = countedRoomsEntries.reduce((s, [, r]) => s + r.ticks, 0);
+    const minTheo = countedRoomsEntries.reduce((s, [c, r]) =>
       s + (best[c] ? Math.min(r.ticks, best[c].ticks) : r.ticks), 0);
     const gain = total - minTheo;
     
     // Process rank opportunities
-    const rankOpportunities = Object.entries(rooms).flatMap(([code, r]) => {
+    const rankOpportunities = countedRoomsEntries.flatMap(([code, r]) => {
       // Skip if no rank data for this room or room has no rank property
       if (!r.rank) return [];
       

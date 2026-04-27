@@ -4,6 +4,51 @@
   },
   "notes": [
     {
+      "version": "3.6.13",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Cyclopedia",
+          "text": "Raid/event classification now uses shared maps database logic."
+        },
+        {
+          "type": "changed",
+          "mod": "Cyclopedia",
+          "text": "Maps top tables now support sticky headers, compact layout, and floor range grouping."
+        },
+        {
+          "type": "changed",
+          "mod": "Maps Database",
+          "text": "Centralized static raid list and event-to-room mapping exports."
+        },
+        {
+          "type": "changed",
+          "mod": "Raid Hunter",
+          "text": "Uses centralized raid/event definitions from maps database."
+        },
+        {
+          "type": "changed",
+          "mod": "RunTracker",
+          "text": "Floor runs now keep all setups and track grouped floor history per setup."
+        },
+        {
+          "type": "fixed",
+          "mod": "Better Boosted Maps",
+          "text": "Minor fixes."
+        },
+        {
+          "type": "fixed",
+          "mod": "Cyclopedia",
+          "text": "Fixed floor run deletion when list order differs from storage order."
+        },
+        {
+          "type": "fixed",
+          "mod": "Highscore Improvements",
+          "text": "Event maps are excluded from time and rank improvement calculations."
+        }
+      ]
+    },
+    {
       "version": "3.6.12",
       "changes": [
         {

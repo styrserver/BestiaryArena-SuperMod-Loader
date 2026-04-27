@@ -3380,45 +3380,18 @@ function isMapRaid(mapId) {
   return false;
 }
 
-// Static raid list from Raid_Hunter.js (maps that should be included in statistics)
-// Dynamic events (raids not in this list) should be excluded from statistics
-const STATIC_RAID_EVENTS = [
-  'Rat Plague',
-  'Buzzing Madness', 
-  'Monastery Catacombs',
-  'Ghostlands Boneyard',
-  'Permafrosted Hole',
-  'Jammed Mailbox',
-  'Frosted Bunker',
-  'Hedge Maze Trap',
-  'Tower of Whitewatch (Shield)',
-  'Tower of Whitewatch (Helmet)',
-  'Tower of Whitewatch (Armor)',
-  'Orcish Barricade',
-  'Poacher Cave (Bear)',
-  'Poacher Cave (Wolf)',
-  'Dwarven Bank Heist',
-  'An Arcanist Ritual'
-];
-
-// Helper function to check if a map is a dynamic event (raid but not in static list)
-// Dynamic events should be excluded from statistics
+// Helper function to check if a map is a dynamic event.
+// Uses mapsDatabase as the single source of truth for event classification.
 function isDynamicEventMap(mapId) {
-  if (!mapId) return false;
-  
-  // First check if it's a raid
-  if (!isMapRaid(mapId)) {
-    return false;
+  try {
+    const classify = globalThis.mapsDatabase?.isDynamicEventMap;
+    if (typeof classify === 'function') {
+      return classify(mapId);
+    }
+  } catch (error) {
+    console.warn('[Cyclopedia] Error checking dynamic event map:', error);
   }
-  
-  // Get the map name
-  const mapName = globalThis.state?.utils?.ROOM_NAME?.[mapId];
-  if (!mapName) {
-    return false;
-  }
-  
-  // If it's a raid but NOT in the static list, it's a dynamic event
-  return !STATIC_RAID_EVENTS.includes(mapName);
+  return false;
 }
 
 function createBox({
@@ -5871,25 +5844,39 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           let allRankings = [...rankings];
           let currentSortColumn = 'level';
           let currentSortDirection = 'desc';
+          const rankingsPanelFrame = 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill';
+          const rankingsSectionFrame = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+          const rankingsCellFrame = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
           
           const rankingsGridColumns = '48px 120px 53px 53px 40px 48px 40px 40px 40px 40px 40px 40px 40px';
           
           const containerDiv = document.createElement('div');
           Object.assign(containerDiv.style, {
             display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
-            padding: '20px', boxSizing: 'border-box'
+            padding: '10px 0', boxSizing: 'border-box'
           });
 
           const contentContainer = document.createElement('div');
-          contentContainer.style.cssText = `flex: 1; padding: 10px; overflow-y: auto; position: relative; height: 100%;`;
+          contentContainer.style.cssText = `
+            flex: 1;
+            padding: 0;
+            overflow-y: auto;
+            position: relative;
+            height: 100%;
+            background: rgba(20, 20, 20, 0.7);
+            box-sizing: border-box;
+          `;
 
           const currentPlayerRank = rankings.find(r => r.name.toLowerCase() === playerState.name.toLowerCase());
 
           const tableContainer = document.createElement('div');
           tableContainer.className = 'pixel-font-14';
           tableContainer.style.cssText = `
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
+            background: rgba(34, 34, 34, 0.9);
+            border: 6px solid transparent;
+            border-image: ${rankingsPanelFrame};
+            border-radius: 6px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.45);
             overflow: hidden;
             font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
             font-size: 10px;
@@ -5897,6 +5884,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             height: 100%;
             display: flex;
             flex-direction: column;
+            width: fit-content;
+            max-width: 100%;
+            min-width: fit-content;
+            margin: 0 auto;
           `;
 
           const headerRow = document.createElement('div');
@@ -5904,11 +5895,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             display: grid;
             grid-template-columns: ${rankingsGridColumns};
             gap: 1px;
-            background: rgba(255, 224, 102, 0.2);
+            background: rgba(255, 224, 102, 0.08);
+            border-bottom: 6px solid transparent;
+            border-image: ${rankingsSectionFrame};
             position: sticky;
             top: 0;
             z-index: 10;
-            width: 100%;
+            width: fit-content;
           `;
 
           const headerData = [
@@ -5935,7 +5928,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               color: ${COLOR_CONSTANTS.PRIMARY};
               font-weight: bold;
               text-align: center;
-              border-right: 1px solid rgba(255, 255, 255, 0.1);
+              border: 4px solid transparent;
+              border-image: ${rankingsCellFrame};
+              background: rgba(0, 0, 0, 0.2);
               display: flex;
               align-items: center;
               justify-content: center;
@@ -6059,6 +6054,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             flex: 1;
             display: flex;
             flex-direction: column;
+            contain: layout paint style;
           `;
           
           const dataRowsContainer = document.createElement('div');
@@ -6068,12 +6064,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             gap: 1px;
             min-height: fit-content;
             flex: 1;
+            width: fit-content;
           `;
 
           allRankings.sort((a, b) => b.level - a.level);
           
           function renderRankingsTable() {
             dataRowsContainer.innerHTML = '';
+            const fragment = document.createDocumentFragment();
             
             allRankings.forEach((ranking, index) => {
             const isCurrentPlayer = ranking.name.toLowerCase() === playerState.name.toLowerCase();
@@ -6081,13 +6079,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             
             let rowBackground;
             if (isSearchedPlayer) {
-              rowBackground = 'url("https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png")';
+              rowBackground = 'rgba(66, 165, 245, 0.22)';
             } else if (isCurrentPlayer) {
-              rowBackground = 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")';
+              rowBackground = 'rgba(67, 160, 71, 0.22)';
             } else {
-              rowBackground = index % 2 === 0 ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 255, 255, 0.02)';
+              rowBackground = index % 2 === 0 ? 'rgba(255, 255, 255, 0.09)' : 'rgba(255, 255, 255, 0.045)';
             }
-            const rowBorder = 'none';
+            const rowBorder = isCurrentPlayer || isSearchedPlayer ? '1px solid rgba(255, 224, 102, 0.45)' : '1px solid rgba(255, 255, 255, 0.06)';
 
             let rankIcon = '🥉';
             if (ranking.rank === 1) rankIcon = '🥇';
@@ -6119,7 +6117,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 color: #fff;
                 font-weight: ${isCurrentPlayer || isSearchedPlayer ? 'bold' : 'normal'};
                 text-align: ${cellIndex === 0 ? 'left' : cellIndex === 1 ? 'left' : 'center'};
-                border-right: 1px solid rgba(255, 255, 255, 0.1);
+                border-right: 1px solid rgba(255, 255, 255, 0.08);
                 display: flex;
                 align-items: center;
                 justify-content: ${cellIndex === 0 ? 'flex-start' : cellIndex === 1 ? 'flex-start' : 'center'};
@@ -6136,9 +6134,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               }
               
               cell.textContent = text;
-              dataRowsContainer.appendChild(cell);
+              fragment.appendChild(cell);
             });
           });
+            dataRowsContainer.appendChild(fragment);
           }
           
           function updateHeaderHighlighting() {
@@ -6181,8 +6180,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const infoContainer = document.createElement('div');
           infoContainer.style.cssText = `
             position: absolute;
-            top: 10px;
-            right: 10px;
+            top: 8px;
+            right: -3px;
             z-index: 20;
           `;
 
@@ -6207,7 +6206,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             right: 0;
             width: 280px;
             background: rgba(35, 35, 35, 0.95);
-            border: 2px solid ${COLOR_CONSTANTS.PRIMARY};
+            border: 6px solid transparent;
+            border-image: ${rankingsSectionFrame};
             border-radius: 8px;
             padding: 12px;
             color: #fff;
@@ -6271,7 +6271,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           infoContainer.appendChild(infoIcon);
           infoContainer.appendChild(tooltip);
-          contentContainer.appendChild(infoContainer);
+          tableContainer.appendChild(infoContainer);
 
           containerDiv.appendChild(contentContainer);
 
@@ -9793,6 +9793,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       row2.style.height = '180px';
       row2.style.display = 'flex';
       row2.style.flexDirection = 'row';
+      row2.style.alignItems = 'center';
+      row2.style.justifyContent = 'center';
       
       // Left column: Top 5 Speedruns
       const speedrunTableCol = document.createElement('div');
@@ -9801,7 +9803,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       speedrunTableCol.style.maxWidth = '160px';
       speedrunTableCol.style.display = 'flex';
       speedrunTableCol.style.flexDirection = 'column';
-      speedrunTableCol.style.padding = '10px';
+      speedrunTableCol.style.padding = '2px';
       speedrunTableCol.style.borderRight = '3px solid transparent';
       speedrunTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
       
@@ -9815,18 +9817,26 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       speedrunTableCol.appendChild(speedrunTableTitle);
       
       const speedrunTable = DOMUtils.createStyledElement('div', {
-        border: '1px solid #444',
-        borderRadius: '4px',
+        border: '6px solid transparent',
+        borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
+        borderRadius: '0',
         overflow: 'hidden',
-        backgroundColor: 'rgba(255, 255, 255, 0.02)'
+        overflowY: 'auto',
+        boxSizing: 'border-box',
+        height: '130px',
+        maxHeight: '130px',
+        background: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat'
       });
       
       // Table header
       const speedrunHeader = DOMUtils.createStyledElement('div', {
         display: 'grid',
         gridTemplateColumns: '1fr 20px 20px',
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat',
         borderBottom: '1px solid #444',
+        position: 'sticky',
+        top: '0',
+        zIndex: '2',
         fontWeight: 'bold',
         fontSize: '11px',
         fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
@@ -10242,9 +10252,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   // User confirmed deletion
                   
                   // Remove from local storage
-                  if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
+                  if (window.RunTrackerAPI && (window.RunTrackerAPI.deleteRunByIdentity || window.RunTrackerAPI.deleteRun)) {
+                    const identity = {
+                      seed: run.seed,
+                      timestamp: run.timestamp,
+                      season: run.season,
+                      time: run.time,
+                      setup: run.setup
+                    };
+                    const deletionPromise = window.RunTrackerAPI.deleteRunByIdentity
+                      ? window.RunTrackerAPI.deleteRunByIdentity(mapKey, 'speedrun', identity)
+                      : window.RunTrackerAPI.deleteRun(mapKey, 'speedrun', i);
                     
-                    window.RunTrackerAPI.deleteRun(mapKey, 'speedrun', i).then(success => {
+                    deletionPromise.then(success => {
                       
                       if (success) {
                         // Update status bar
@@ -10323,14 +10343,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       speedrunTableCol.appendChild(speedrunTable);
       
-      // Right column: Top 5 Floors
+      // Right column: Floors
       const floorsTableCol = document.createElement('div');
       floorsTableCol.setAttribute('data-table-type', 'floors');
       floorsTableCol.style.flex = '1 1 0';
       floorsTableCol.style.maxWidth = '180px';
       floorsTableCol.style.display = 'flex';
       floorsTableCol.style.flexDirection = 'column';
-      floorsTableCol.style.padding = '10px';
+      floorsTableCol.style.padding = '2px';
       floorsTableCol.style.borderLeft = '3px solid transparent';
       floorsTableCol.style.borderRight = 'none';
       floorsTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
@@ -10341,22 +10361,30 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       floorsTableTitle.style.color = COLOR_CONSTANTS.TEXT;
       floorsTableTitle.style.marginBottom = '10px';
       floorsTableTitle.style.textAlign = 'center';
-      floorsTableTitle.textContent = 'Top 5 Floors';
+      floorsTableTitle.textContent = 'Top Floors';
       floorsTableCol.appendChild(floorsTableTitle);
       
       const floorsTable = DOMUtils.createStyledElement('div', {
-        border: '1px solid #444',
-        borderRadius: '4px',
+        border: '6px solid transparent',
+        borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
+        borderRadius: '0',
         overflow: 'hidden',
-        backgroundColor: 'rgba(255, 255, 255, 0.02)'
+        overflowY: 'auto',
+        boxSizing: 'border-box',
+        height: '130px',
+        maxHeight: '130px',
+        background: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat'
       });
       
       // Table header
       const floorsHeader = DOMUtils.createStyledElement('div', {
         display: 'grid',
         gridTemplateColumns: '1fr 50px 20px 20px',
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat',
         borderBottom: '1px solid #444',
+        position: 'sticky',
+        top: '0',
+        zIndex: '2',
         fontWeight: 'bold',
         fontSize: '11px',
         fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
@@ -10380,6 +10408,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Function to populate floors table with local data
       async function populateFloorsTable() {
         try {
+          // Clear previously rendered data rows, keep sticky header as first child.
+          while (floorsTable.children.length > 1) {
+            floorsTable.removeChild(floorsTable.lastChild);
+          }
           
           // Resolve the map name to ensure consistency with RunTracker
           const resolvedMapName = resolveMapName(selectedMap);
@@ -10395,6 +10427,35 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             currentYourRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
           }
           
+          const getFloorCoverageLabel = (run) => {
+            const history = Array.isArray(run?.floorHistory) ? run.floorHistory : [];
+            const numericFloors = history
+              .map((value) => Number(value))
+              .filter((value) => Number.isFinite(value) && value > 0);
+            if (run?.floor !== undefined && run?.floor !== null) {
+              const floorValue = Number(run.floor);
+              if (Number.isFinite(floorValue) && floorValue > 0) numericFloors.push(floorValue);
+            }
+            const uniqueSorted = Array.from(new Set(numericFloors)).sort((a, b) => a - b);
+            if (uniqueSorted.length === 0) return 'N/A';
+            if (uniqueSorted.length === 1) return String(uniqueSorted[0]);
+            const segments = [];
+            let start = uniqueSorted[0];
+            let previous = uniqueSorted[0];
+            for (let idx = 1; idx < uniqueSorted.length; idx++) {
+              const current = uniqueSorted[idx];
+              if (current === previous + 1) {
+                previous = current;
+                continue;
+              }
+              segments.push(start === previous ? String(start) : `${start}-${previous}`);
+              start = current;
+              previous = current;
+            }
+            segments.push(start === previous ? String(start) : `${start}-${previous}`);
+            return segments.join(',');
+          };
+
           // Sort floor data: 1. Floor (descending), 2. FloorTicks (ascending), 3. Date (newest first)
           if (localRuns && localRuns.length > 0) {
             localRuns.sort((a, b) => {
@@ -10457,12 +10518,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             return;
           }
           
-          // Populate with actual data
-          for (let i = 0; i < 5; i++) {
+          // Populate with actual data (show all saved runs, keep at least 5 rows for consistent table height)
+          const rowCount = Math.max(localRuns.length, 5);
+          for (let i = 0; i < rowCount; i++) {
             const row = document.createElement('div');
             row.style.display = 'grid';
             row.style.gridTemplateColumns = '1fr 50px 20px 20px';
-            row.style.borderBottom = i < 4 ? '1px solid #333' : 'none';
+            row.style.borderBottom = i < rowCount - 1 ? '1px solid #333' : 'none';
             row.style.fontSize = '10px';
             row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
             
@@ -10524,7 +10586,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             
             if (run.floor !== undefined && run.floor !== null) {
               const floorText = document.createElement('span');
-              floorText.textContent = run.floor;
+              floorText.textContent = getFloorCoverageLabel(run);
+              if (Array.isArray(run.floorHistory) && run.floorHistory.length > 1) {
+                floorText.title = `Floors cleared with this setup: ${getFloorCoverageLabel(run)}`;
+              }
               
               
               if (hasLevel1Creature || hasEmptyPieces) {
@@ -10755,8 +10820,20 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   
                   
                   // Call RunTracker API to delete the run
-                  if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
-                    window.RunTrackerAPI.deleteRun(mapKey, 'floor', i).then(success => {
+                  if (window.RunTrackerAPI && (window.RunTrackerAPI.deleteRunByIdentity || window.RunTrackerAPI.deleteRun)) {
+                    const identity = {
+                      seed: run.seed,
+                      timestamp: run.timestamp,
+                      season: run.season,
+                      time: run.time,
+                      floor: run.floor,
+                      setup: run.setup
+                    };
+                    const deletionPromise = window.RunTrackerAPI.deleteRunByIdentity
+                      ? window.RunTrackerAPI.deleteRunByIdentity(mapKey, 'floor', identity)
+                      : window.RunTrackerAPI.deleteRun(mapKey, 'floor', i);
+
+                    deletionPromise.then(success => {
                       if (success) {
                         
                         // Refresh the table
@@ -10842,7 +10919,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       ranksTableCol.style.maxWidth = '160px';
       ranksTableCol.style.display = 'flex';
       ranksTableCol.style.flexDirection = 'column';
-      ranksTableCol.style.padding = '10px';
+      ranksTableCol.style.padding = '2px';
       ranksTableCol.style.borderLeft = '3px solid transparent';
       ranksTableCol.style.borderRight = '3px solid transparent';
       ranksTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
@@ -10857,17 +10934,25 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       ranksTableCol.appendChild(ranksTableTitle);
       
       const ranksTable = document.createElement('div');
-      ranksTable.style.border = '1px solid #444';
-      ranksTable.style.borderRadius = '4px';
+      ranksTable.style.border = '6px solid transparent';
+      ranksTable.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+      ranksTable.style.borderRadius = '0';
       ranksTable.style.overflow = 'hidden';
-      ranksTable.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+      ranksTable.style.overflowY = 'auto';
+      ranksTable.style.boxSizing = 'border-box';
+      ranksTable.style.height = '130px';
+      ranksTable.style.maxHeight = '130px';
+      ranksTable.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat';
       
       // Table header
       const ranksHeader = document.createElement('div');
       ranksHeader.style.display = 'grid';
       ranksHeader.style.gridTemplateColumns = '1fr 50px 20px 20px';
-      ranksHeader.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+      ranksHeader.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat';
       ranksHeader.style.borderBottom = '1px solid #444';
+      ranksHeader.style.position = 'sticky';
+      ranksHeader.style.top = '0';
+      ranksHeader.style.zIndex = '2';
       ranksHeader.style.fontWeight = 'bold';
       ranksHeader.style.fontSize = '11px';
       ranksHeader.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
@@ -11318,9 +11403,20 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   // User confirmed deletion
                   
                   // Remove from local storage
-                  if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
+                  if (window.RunTrackerAPI && (window.RunTrackerAPI.deleteRunByIdentity || window.RunTrackerAPI.deleteRun)) {
+                    const identity = {
+                      seed: run.seed,
+                      timestamp: run.timestamp,
+                      season: run.season,
+                      time: run.time,
+                      points: run.points,
+                      setup: run.setup
+                    };
+                    const deletionPromise = window.RunTrackerAPI.deleteRunByIdentity
+                      ? window.RunTrackerAPI.deleteRunByIdentity(mapKey, 'rank', identity)
+                      : window.RunTrackerAPI.deleteRun(mapKey, 'rank', i);
                     
-                    window.RunTrackerAPI.deleteRun(mapKey, 'rank', i).then(success => {
+                    deletionPromise.then(success => {
                       
                       if (success) {
                         // Update status bar
