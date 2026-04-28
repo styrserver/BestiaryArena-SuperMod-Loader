@@ -5369,7 +5369,7 @@ function openCyclopediaModal(options) {
 
       const sharedScrollContainer = DOMUtils.createElement('div');
       sharedScrollContainer.style.cssText = `
-        flex: 1 1 0; display: flex; flex-direction: row; height: 100%; overflow-y: hidden;
+        flex: 1 1 0; display: flex; flex-direction: row; height: 100%; overflow-y: auto;
         border-right: 6px solid transparent;
         border-image: url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch;
       `;
@@ -12253,6 +12253,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
     // Helper function to create region maps section (shows all maps in a region)
     function createRegionMapsSection(mapsInRegion, regionId, onMapSelect) {
+      function addSoftHyphensToLongWords(text) {
+        if (!text) return text;
+        return String(text).replace(/[A-Za-zÀ-ÿ']{12,}/g, (word) => {
+          const chunks = word.match(/.{1,8}/g);
+          return chunks ? chunks.join('\u00AD') : word;
+        });
+      }
+
       const regionMapsDiv = document.createElement('div');
       regionMapsDiv.style.padding = '0 20px 20px 20px';
       regionMapsDiv.style.color = COLOR_CONSTANTS.TEXT;
@@ -12318,9 +12326,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           // Map name (Column 2)
           const mapName = document.createElement('div');
-          mapName.textContent = map.name;
+          mapName.textContent = addSoftHyphensToLongWords(map.name);
           mapName.style.fontSize = '14px';
           mapName.style.fontWeight = 'bold';
+          mapName.style.hyphens = 'auto';
+          mapName.style.wordBreak = 'break-word';
+          mapName.style.overflowWrap = 'anywhere';
           mapItem.appendChild(mapName);
           
           // Get map data
@@ -12334,6 +12345,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             mapData,
             leaderboardData
           );
+          speedrunCol.style.minWidth = '60px';
+          speedrunCol.style.maxWidth = '60px';
           mapItem.appendChild(speedrunCol);
           
           // Rank Points column (Column 4)
@@ -12344,6 +12357,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             mapData,
             leaderboardData
           );
+          rankPointsCol.style.minWidth = '60px';
+          rankPointsCol.style.maxWidth = '60px';
           mapItem.appendChild(rankPointsCol);
           
           // Floors column (Column 5)
@@ -12405,15 +12420,22 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           mapItem.appendChild(thumbnail);
           
           const mapName = document.createElement('div');
-          mapName.textContent = map.name;
+          mapName.textContent = addSoftHyphensToLongWords(map.name);
           mapName.style.fontSize = '14px';
           mapName.style.fontWeight = 'bold';
+          mapName.style.hyphens = 'auto';
+          mapName.style.wordBreak = 'break-word';
+          mapName.style.overflowWrap = 'anywhere';
           mapItem.appendChild(mapName);
           
           const mapData = isExplored ? playerRooms[map.id] : null;
           const speedrunCol = createCompactStatColumn('https://bestiaryarena.com/assets/icons/speed.png', 'Speed', map.id, mapData, null);
           const rankPointsCol = createCompactStatColumn('https://bestiaryarena.com/assets/icons/grade.png', 'Grade', map.id, mapData, null);
           const floorsCol = createCompactStatColumn('https://bestiaryarena.com/assets/icons/floors.png', 'Floors', map.id, mapData, null);
+          speedrunCol.style.minWidth = '60px';
+          speedrunCol.style.maxWidth = '60px';
+          rankPointsCol.style.minWidth = '60px';
+          rankPointsCol.style.maxWidth = '60px';
           mapItem.appendChild(speedrunCol);
           mapItem.appendChild(rankPointsCol);
           mapItem.appendChild(floorsCol);
@@ -13093,7 +13115,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           // col3 = Map Information (large, right)
           Object.assign(col3.style, {
-            flex: '1 1 0', width: 'auto', minWidth: '0', maxWidth: 'none'
+            flex: '0 0 490px', width: '490px', minWidth: '490px', maxWidth: '490px'
           });
           col3TitleP.textContent = getMapsTabMapInfoHeading();
         } else {
