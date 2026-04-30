@@ -75,7 +75,7 @@ let gameTimerUnsubscribe = null;
 let originalFetch = null;
 let originalConsoleLog = null;
 let retryInterval = null;
-let latestKnownSeason = 1;
+let latestKnownSeason = 2;
 let seasonLastFetchedAt = 0;
 let seasonFetchPromise = null;
 
@@ -297,7 +297,8 @@ function getCurrentSeasonForRunData() {
   if (!seasonLastFetchedAt || now - seasonLastFetchedAt > 5 * 60 * 1000) {
     fetchLatestProfileSeason();
   }
-  return latestKnownSeason || 1;
+  // During rollout, default unknown season to 2 for newly saved runs.
+  return latestKnownSeason || 2;
 }
 
 function normalizeFloorHistory(run) {
@@ -873,6 +874,8 @@ function parseServerResults(serverResults) {
     const gameState = globalThis.state?.player?.getSnapshot()?.context;
     if (gameState?.playerName) {
       runData.player = gameState.playerName;
+    } else if (gameState?.name) {
+      runData.player = gameState.name;
     } else {
       runData.player = 'You'; // Fallback
     }
@@ -962,11 +965,13 @@ function parseReplayData(replayMessage) {
     
     // Create replay data structure
     const parsedReplay = {
-      timestamp: Date.now(),
+      timestamp: (Number.isFinite(Number(replayData.timestamp)) && Number(replayData.timestamp) > 0) ? Number(replayData.timestamp) : Date.now(),
       date: new Date().toISOString().split('T')[0],
       seed: replayData.seed,
       region: replayData.region,
       map: replayData.map,
+      credits: (typeof replayData.credits === 'string' && replayData.credits.trim()) ? replayData.credits.trim() : undefined,
+      comments: (typeof replayData.comments === 'string' && replayData.comments.trim()) ? replayData.comments.trim() : undefined,
       board: replayData.board || [],
       isReplay: true
     };

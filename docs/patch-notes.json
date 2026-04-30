@@ -4,6 +4,61 @@
   },
   "notes": [
     {
+      "version": "3.7.1",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Hero Editor",
+          "text": "Awakened toggle changes."
+        },
+        {
+          "type": "fixed",
+          "mod": "Autoseller",
+          "text": "Fixed sealed auto-sell checkbox so checked creatures follow the sell filter and gene range."
+        },
+        {
+          "type": "fixed",
+          "mod": "Cyclopedia",
+          "text": "Fixed Season 2 records not showing."
+        }
+      ]
+    },
+    {
+      "version": "3.7.0",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Autoseller",
+          "text": "Updated Sealed creature handling: tier 5 is kept by default, with sell/squeeze override via right-click context menu and visual star indicator."
+        },
+        {
+          "type": "changed",
+          "mod": "Better Cauldron",
+          "text": "Creature sorting now prioritizes shiny first, then Sealed (tier 5), then higher tier."
+        },
+        {
+          "type": "changed",
+          "mod": "Cyclopedia",
+          "text": "Replay copy now includes username credits, optional floor-history comments, and timestamp; run warnings now also flag times faster than world record; Maps defeat-count overlay readability and creature info link underline were improved."
+        },
+        {
+          "type": "changed",
+          "mod": "Hero Editor",
+          "text": "Added per-creature awakened toggles; awakened apply now preserves custom piece awaken flags and star tier so awakened abilities work correctly."
+        },
+        {
+          "type": "changed",
+          "mod": "Mod Settings",
+          "text": "Local and Firebase text exports now include replay username credits, optional comments, and timestamp."
+        },
+        {
+          "type": "changed",
+          "mod": "RunTracker",
+          "text": "Replay parser now preserves credits, comments, and timestamp fields."
+        }
+      ]
+    },
+    {
       "version": "3.6.14",
       "changes": [
         {

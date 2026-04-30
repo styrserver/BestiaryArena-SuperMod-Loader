@@ -689,6 +689,37 @@ globalThis.state.clientConfig.trigger.setState({
   fn: (prev) => ({ ...prev, plantMonsterFilter: undefined }),
 });
 
+The `monster` argument commonly includes:
+
+```javascript
+{
+  id, gameId, createdAt, exp, tier, shiny, hundo, locked, hidden, level,
+  genes: { hp, ad, ap, armor, magicResist },
+  totalGenes, rarityLevel, isExpCapped,
+  metadata: {
+    name, roles, queryTags, lookType, spriteId, corpseId,
+    portraitTranslate, bloodColor, baseStats, skill
+  }
+}
+```
+
+To always keep Sealed creatures (tier 5):
+
+```javascript
+globalThis.state.clientConfig.trigger.setState({
+  fn: (prev) => ({
+    ...prev,
+    plantMonsterFilter: (monster) => {
+      // Keep Sealed creatures
+      if (monster.tier === 5) return false;
+
+      // Sell/devour everything else
+      return true;
+    },
+  }),
+});
+```
+
 ### Customizing Autoplay Delay
 
 You can customize the delay between autoplay actions:

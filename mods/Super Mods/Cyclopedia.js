@@ -1242,9 +1242,11 @@ const cyclopediaState = {
   observer: null, modalOpen: false, currentModal: null,
   profileData: null, lastFetch: 0, fetchInProgress: false,
   /** 1 or 2 — filters profilePageData season stats and season-scoped rooms/highscores in Cyclopedia. */
-  profileSeason: 1,
+  profileSeason: 2,
   /** Latest raw JSON from serverSide.profilePageData (start page) for season-scoped leaderboard rows. */
   lastStartupProfileData: null,
+  /** Last selected map/region in Maps tab; prevents empty first render. */
+  mapsLastSelectedMapId: null, mapsLastSelectedRegionId: null,
   monsterNameMap: null, monsterNameMapBuilt: false, monsterLocationCache: new Map(),
   /** When true, creature detail shows awakened ability text until toggled off. */
   creatureDetailShowAwakenedAbility: false,
@@ -1366,10 +1368,10 @@ function unwrapProfilePageJson(profileData) {
   return profileData.json !== undefined ? profileData.json : profileData;
 }
 
-function getLatestProfileSeason(profileData, fallbackSeason = 1) {
+function getLatestProfileSeason(profileData, fallbackSeason = 2) {
   const pd = unwrapProfilePageJson(profileData);
   const list = Array.isArray(pd?.seasons) ? pd.seasons : [];
-  let latest = Number(fallbackSeason) || 1;
+  let latest = Number(fallbackSeason) || 2;
   list.forEach((entry) => {
     const sn = Number(entry?.season);
     if (Number.isFinite(sn) && sn > latest) latest = sn;
@@ -1393,8 +1395,13 @@ function getMapsTabMapInfoHeading() {
 
 function filterProfileArrayBySeason(arr, seasonNum) {
   if (!Array.isArray(arr)) return [];
+  const hasSeasonTaggedEntries = arr.some(
+    (item) => item && item.season !== undefined && item.season !== null
+  );
   return arr.filter((item) => {
-    if (!item || item.season === undefined || item.season === null) return Number(seasonNum) === 1;
+    // Some payloads omit `season` on all rows (current-season-only snapshots).
+    // In that case, allow untagged rows for the selected season instead of hiding them.
+    if (!item || item.season === undefined || item.season === null) return !hasSeasonTaggedEntries || Number(seasonNum) === 1;
     return Number(item.season) === Number(seasonNum);
   });
 }
@@ -1425,22 +1432,21 @@ function patchProfileDataForActiveSeason(profileData, seasonNum) {
     if (s.floorsBracket !== undefined && s.floorsBracket !== null && s.floorsBracket !== '') {
       next.floorsPosition = String(s.floorsBracket);
     }
-  } else {
-    next.rankPoints = undefined;
-    next.ticks = undefined;
-    next.floors = undefined;
   }
   return next;
 }
 
 function filterRoomsMapBySeason(rooms, seasonNum) {
   if (!rooms || typeof rooms !== 'object') return {};
+  const hasSeasonTaggedRooms = Object.values(rooms).some(
+    (roomData) => roomData && typeof roomData === 'object' && roomData.season !== undefined && roomData.season !== null
+  );
   const out = {};
   for (const [roomId, roomData] of Object.entries(rooms)) {
     if (!roomData || typeof roomData !== 'object') continue;
     if (roomData.season !== undefined && roomData.season !== null) {
       if (Number(roomData.season) === Number(seasonNum)) out[roomId] = roomData;
-    } else if (Number(seasonNum) === 1) {
+    } else if (!hasSeasonTaggedRooms || Number(seasonNum) === 1) {
       out[roomId] = roomData;
     }
   }
@@ -1748,7 +1754,7 @@ const DOMUtils = {
     return scrollContainer;
   },
   
-  createListItem: function(text, className = FONT_CONSTANTS.SIZES.BODY, isOwned = true, isPerfect = false, isT5 = false, hasShiny = false) {
+  createListItem: function(text, className = FONT_CONSTANTS.SIZES.BODY, isOwned = true, isPerfect = false, isT5 = false, hasShiny = false, hasAwakened = false) {
     const item = document.createElement('div');
     item.className = className;
     
@@ -1768,6 +1774,18 @@ const DOMUtils = {
       shinyIcon.style.height = '10px';
       shinyIcon.style.flexShrink = '0';
       contentContainer.appendChild(shinyIcon);
+    }
+
+    // Add awakened icon if user has awakened creature
+    if (hasAwakened) {
+      const awakenedIcon = document.createElement('img');
+      awakenedIcon.src = 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png';
+      awakenedIcon.alt = 'awakened';
+      awakenedIcon.title = 'Has awakened creature';
+      awakenedIcon.style.width = '10px';
+      awakenedIcon.style.height = '10px';
+      awakenedIcon.style.flexShrink = '0';
+      contentContainer.appendChild(awakenedIcon);
     }
     
     // Add text content
@@ -1809,7 +1827,7 @@ const DOMUtils = {
 function getCreatureStatus(creatureName) {
   try {
     if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
-      return { owned: false, shiny: false, perfect: false };
+      return { owned: false, shiny: false, perfect: false, awakened: false };
     }
     
     const playerContext = globalThis.state.player.getSnapshot().context;
@@ -1835,11 +1853,20 @@ function getCreatureStatus(creatureName) {
     const matchingMonsters = ownedMonsters.filter(monster => monster.gameId === creatureGameId);
     
     if (matchingMonsters.length === 0) {
-      return { owned: false, shiny: false, perfect: false };
+      return { owned: false, shiny: false, perfect: false, awakened: false };
     }
     
     // Check for shiny variants
     const hasShiny = matchingMonsters.some(monster => monster.shiny === true);
+
+    // Check for awakened creatures
+    const hasAwakened = matchingMonsters.some(monster =>
+      monster.awaken === true ||
+      monster.awakened === true ||
+      monster.isAwakened === true ||
+      Number(monster.starTier) >= 6 ||
+      Number(monster.tier) >= 6
+    );
     
     // Check for perfect creatures (level 50 with 100 total genes)
     const isPerfect = matchingMonsters.some(monster => {
@@ -1862,11 +1889,12 @@ function getCreatureStatus(creatureName) {
     return {
       owned: true,
       shiny: hasShiny,
-      perfect: isPerfect
+      perfect: isPerfect,
+      awakened: hasAwakened
     };
   } catch (error) {
     console.warn('[Cyclopedia] Error checking creature status:', error);
-    return { owned: false, shiny: false, perfect: false };
+    return { owned: false, shiny: false, perfect: false, awakened: false };
   }
 }
 
@@ -1878,6 +1906,11 @@ function isCreatureOwned(creatureName) {
 // Function to check if user has any shiny variants of a creature
 function hasShinyCreature(creatureName) {
   return getCreatureStatus(creatureName).shiny;
+}
+
+// Function to check if user has any awakened variants of a creature
+function hasAwakenedCreature(creatureName) {
+  return getCreatureStatus(creatureName).awakened;
 }
 
 // Function to check if user has a perfect creature (level 50 with 100 total genes)
@@ -3423,6 +3456,7 @@ function createBox({
       let isT5 = false;
       
       let hasShiny = false;
+      let hasAwakened = false;
       
       if (type === 'creature') {
         // Check if this is an unobtainable creature - if so, keep default styling
@@ -3431,6 +3465,7 @@ function createBox({
           isOwned = isCreatureOwned(name);
           isPerfect = isCreaturePerfect(name);
           hasShiny = hasShinyCreature(name);
+          hasAwakened = hasAwakenedCreature(name);
         }
       } else if (type === 'equipment') {
         isOwned = isEquipmentOwned(name);
@@ -3459,7 +3494,7 @@ function createBox({
         }
       }
       
-      const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5, hasShiny);
+      const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5, hasShiny, hasAwakened);
       
       // Add raid icon for static raids, or event icon for dynamic event maps
       if (type === 'map') {
@@ -4102,7 +4137,7 @@ function createStartPageManager() {
         const data = await this.fetchProfileData(playerState.name);
         const profileData = Array.isArray(data) && data[0]?.result?.data?.json 
           ? data[0].result.data.json : data;
-        cyclopediaState.profileSeason = getLatestProfileSeason(profileData, 1);
+        cyclopediaState.profileSeason = getLatestProfileSeason(profileData, 2);
         
         this.renderLayout(playerState.name, profileData);
         this.setupTimers();
@@ -4963,7 +4998,7 @@ function openCyclopediaModal(options) {
                   nameSpan.textContent = name;
                   nameSpan.style.cursor = 'pointer';
                   nameSpan.style.textDecoration = 'underline';
-                  nameSpan.style.textDecorationStyle = 'dotted';
+                  nameSpan.style.textDecorationStyle = 'solid';
                   nameSpan.style.color = 'rgb(170, 170, 170)';
                   nameSpan.title = `Open ${name} in Bestiary`;
                   nameSpan.addEventListener('click', (e) => {
@@ -9854,8 +9889,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       speedrunTable.appendChild(speedrunHeader);
       
-      // Store yourRooms data for warning icon comparisons
+      // Store yourRooms and WR data for warning icon comparisons
       let currentYourRooms = null;
+      let currentWorldRecordTicks = 0;
       
       // Function to populate speedrun table with local data
       async function populateSpeedrunTable() {
@@ -9992,9 +10028,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const timeText = document.createElement('span');
               
               
-              // Check if this run is invalid (lower than "Your Best" OR has level 1 creatures OR has empty pieces)
+              // Warning validation is only reliable for Season 2.
+              const showRunWarnings = Number(cyclopediaState.profileSeason || 1) === 2;
+              // Check if this run is invalid (faster than your best/WR OR has level 1 creatures OR has empty pieces)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
+              const wrTicks = currentWorldRecordTicks || 0;
               const isTimeInvalid = yourTicks > 0 && run.time < yourTicks;
+              const isWorldRecordInvalid = wrTicks > 0 && run.time < wrTicks;
               
               // Check if any creature in the setup has level 1
               const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
@@ -10002,12 +10042,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               // Check if run has setup but no pieces (invalid run)
               const hasEmptyPieces = run.setup && run.setup.pieces && run.setup.pieces.length === 0;
               
-              if (isTimeInvalid || hasLevel1Creature || hasEmptyPieces) {
+              if (showRunWarnings && (isTimeInvalid || isWorldRecordInvalid || hasLevel1Creature || hasEmptyPieces)) {
                 // Create warning icon separately for left alignment
                 const warningIcon = document.createElement('span');
                 warningIcon.innerHTML = '⚠️';
                 const reasons = [];
                 if (isTimeInvalid) reasons.push('faster than your best time');
+                if (isWorldRecordInvalid) reasons.push('faster than world record');
                 if (hasLevel1Creature) reasons.push('has level 1 creatures');
                 if (hasEmptyPieces) reasons.push('no board pieces');
                 warningIcon.title = `This run might be invalid (${reasons.join(', ')})`;
@@ -10121,6 +10162,36 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Always add floor (default to 0 if not available)
                 replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
+                const replayTimestamp = Number(run?.timestamp);
+                if (Number.isFinite(replayTimestamp) && replayTimestamp > 0) {
+                  replayData.timestamp = replayTimestamp;
+                } else {
+                  replayData.timestamp = Date.now();
+                }
+                const replayCredits = (
+                  (typeof run.credits === 'string' && run.credits.trim())
+                  || (typeof run.player === 'string' && run.player.trim() && !/^you$/i.test(run.player.trim()) && run.player.trim())
+                  || (typeof run.userName === 'string' && run.userName.trim())
+                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.playerName === 'string' && globalThis.state.player.getSnapshot().context.playerName.trim())
+                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.name === 'string' && globalThis.state.player.getSnapshot().context.name.trim())
+                );
+                if (replayCredits) replayData.credits = replayCredits;
+                if (typeof run.comments === 'string' && run.comments.trim()) {
+                  replayData.comments = run.comments.trim();
+                } else {
+                  const floorHistoryValues = Array.isArray(run?.floorHistory) ? run.floorHistory : [];
+                  const normalizedFloors = floorHistoryValues
+                    .map((value) => Number(value))
+                    .filter((value) => Number.isFinite(value) && value > 0);
+                  const runFloorValue = Number(run?.floor);
+                  if (Number.isFinite(runFloorValue) && runFloorValue > 0) {
+                    normalizedFloors.push(runFloorValue);
+                  }
+                  const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
+                  if (uniqueFloors.length > 1) {
+                    replayData.comments = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+                  }
+                }
                 
                 
                 // Check if we have stored board setup data
@@ -10578,6 +10649,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             floorCell.style.gap = '4px';
             floorCell.style.position = 'relative';
             
+            const showRunWarnings = Number(cyclopediaState.profileSeason || 1) === 2;
             // Check if any creature in the setup has level 1
             const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
             
@@ -10592,7 +10664,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               }
               
               
-              if (hasLevel1Creature || hasEmptyPieces) {
+              if (showRunWarnings && (hasLevel1Creature || hasEmptyPieces)) {
                 // Create warning icon separately for left alignment
                 const warningIcon = document.createElement('span');
                 warningIcon.innerHTML = '⚠️';
@@ -10724,6 +10796,36 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Always add floor (default to 0 if not available)
                 replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
+                const replayTimestamp = Number(run?.timestamp);
+                if (Number.isFinite(replayTimestamp) && replayTimestamp > 0) {
+                  replayData.timestamp = replayTimestamp;
+                } else {
+                  replayData.timestamp = Date.now();
+                }
+                const replayCredits = (
+                  (typeof run.credits === 'string' && run.credits.trim())
+                  || (typeof run.player === 'string' && run.player.trim() && !/^you$/i.test(run.player.trim()) && run.player.trim())
+                  || (typeof run.userName === 'string' && run.userName.trim())
+                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.playerName === 'string' && globalThis.state.player.getSnapshot().context.playerName.trim())
+                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.name === 'string' && globalThis.state.player.getSnapshot().context.name.trim())
+                );
+                if (replayCredits) replayData.credits = replayCredits;
+                if (typeof run.comments === 'string' && run.comments.trim()) {
+                  replayData.comments = run.comments.trim();
+                } else {
+                  const floorHistoryValues = Array.isArray(run?.floorHistory) ? run.floorHistory : [];
+                  const normalizedFloors = floorHistoryValues
+                    .map((value) => Number(value))
+                    .filter((value) => Number.isFinite(value) && value > 0);
+                  const runFloorValue = Number(run?.floor);
+                  if (Number.isFinite(runFloorValue) && runFloorValue > 0) {
+                    normalizedFloors.push(runFloorValue);
+                  }
+                  const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
+                  if (uniqueFloors.length > 1) {
+                    replayData.comments = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+                  }
+                }
                 
                 
                 // Check if we have stored board setup data
@@ -11162,10 +11264,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const timeText = document.createElement('span');
               
               
-              // Check if this run is invalid (either faster than your best time OR worse rank than your best OR has level 1 creatures OR has empty pieces)
+              // Warning validation is only reliable for Season 2.
+              const showRunWarnings = Number(cyclopediaState.profileSeason || 1) === 2;
+              // Check if this run is invalid (faster than your best/WR OR worse rank than your best OR has level 1 creatures OR has empty pieces)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
               const yourBestRank = currentYourRooms?.[selectedMap]?.rank || 0;
+              const wrTicks = currentWorldRecordTicks || 0;
               const isTimeInvalid = yourTicks > 0 && run.time < yourTicks;
+              const isWorldRecordInvalid = wrTicks > 0 && run.time < wrTicks;
               const isRankInvalid = yourBestRank > 0 && run.points > yourBestRank;
               
               // Check if any creature in the setup has level 1
@@ -11174,12 +11280,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               // Check if run has setup but no pieces (invalid run)
               const hasEmptyPieces = run.setup && run.setup.pieces && run.setup.pieces.length === 0;
               
-              if (isTimeInvalid || isRankInvalid || hasLevel1Creature || hasEmptyPieces) {
+              if (showRunWarnings && (isTimeInvalid || isWorldRecordInvalid || isRankInvalid || hasLevel1Creature || hasEmptyPieces)) {
                 // Create warning icon separately for left alignment
                 const warningIcon = document.createElement('span');
                 warningIcon.innerHTML = '⚠️';
                 const reasons = [];
                 if (isTimeInvalid) reasons.push('faster than your best time');
+                if (isWorldRecordInvalid) reasons.push('faster than world record');
                 if (isRankInvalid) reasons.push('worse rank than your best');
                 if (hasLevel1Creature) reasons.push('has level 1 creatures');
                 if (hasEmptyPieces) reasons.push('no board pieces');
@@ -11296,6 +11403,36 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Always add floor (default to 0 if not available)
                 replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
+                const replayTimestamp = Number(run?.timestamp);
+                if (Number.isFinite(replayTimestamp) && replayTimestamp > 0) {
+                  replayData.timestamp = replayTimestamp;
+                } else {
+                  replayData.timestamp = Date.now();
+                }
+                const replayCredits = (
+                  (typeof run.credits === 'string' && run.credits.trim())
+                  || (typeof run.player === 'string' && run.player.trim() && !/^you$/i.test(run.player.trim()) && run.player.trim())
+                  || (typeof run.userName === 'string' && run.userName.trim())
+                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.playerName === 'string' && globalThis.state.player.getSnapshot().context.playerName.trim())
+                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.name === 'string' && globalThis.state.player.getSnapshot().context.name.trim())
+                );
+                if (replayCredits) replayData.credits = replayCredits;
+                if (typeof run.comments === 'string' && run.comments.trim()) {
+                  replayData.comments = run.comments.trim();
+                } else {
+                  const floorHistoryValues = Array.isArray(run?.floorHistory) ? run.floorHistory : [];
+                  const normalizedFloors = floorHistoryValues
+                    .map((value) => Number(value))
+                    .filter((value) => Number.isFinite(value) && value > 0);
+                  const runFloorValue = Number(run?.floor);
+                  if (Number.isFinite(runFloorValue) && runFloorValue > 0) {
+                    normalizedFloors.push(runFloorValue);
+                  }
+                  const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
+                  if (uniqueFloors.length > 1) {
+                    replayData.comments = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+                  }
+                }
                 
                 
                 // Check if we have stored board setup data
@@ -11605,8 +11742,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           const { best, roomsHighscores } = data;
           const activeSeason = Number(cyclopediaState.profileSeason || 1);
-          // TRPC leaderboard payload is global (not season-scoped), so only trust it for season 1.
-          const allowGlobalWorldRecords = activeSeason === 1;
+          // Temporary Season 2 rollout behavior: enable WR only for Season 2.
+          const allowGlobalWorldRecords = activeSeason === 2;
           console.log(
             '[Cyclopedia] Leaderboard data for map',
             selectedMap,
@@ -11627,6 +11764,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           // Store yourRooms data for warning icon comparisons (season-scoped when profile is loaded)
           currentYourRooms = yourRooms;
+          currentWorldRecordTicks = allowGlobalWorldRecords ? (best?.[selectedMap]?.ticks || 0) : 0;
+          // Re-render tables so warning icons can use fetched WR data.
+          speedrunTable.innerHTML = '';
+          speedrunTable.appendChild(speedrunHeader);
+          populateSpeedrunTable();
+          ranksTable.innerHTML = '';
+          ranksTable.appendChild(ranksHeader);
+          populateRankPointsTable();
           
           // Update speedrun content
           const yourTicks = yourRooms?.[selectedMap]?.ticks || 0;
@@ -11657,8 +11802,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           speedrunContent.innerHTML = speedrunHtml;
           
           // Update rank points content
-          const yourRankPoints = yourRooms?.[selectedMap]?.rank || 0;
-          const yourRankTicks = yourRooms?.[selectedMap]?.rankTicks;
+          const yourRankRoom = yourRooms?.[selectedMap];
+          const yourRankPoints = yourRankRoom?.rank || 0;
+          const yourRankTicks = yourRankRoom?.rankTicks;
+          const hasYourRankData = !!yourRankRoom && (
+            yourRankRoom.rank !== undefined ||
+            yourRankRoom.rankTicks !== undefined
+          );
           const bestRankPoints = roomsHighscores?.rank?.[selectedMap]?.rank || 0;
           const bestRankTicks = roomsHighscores?.rank?.[selectedMap]?.ticks;
           const bestRankPlayer = roomsHighscores?.rank?.[selectedMap]?.userName || 'Unknown';
@@ -11670,13 +11820,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestRankPoints.toLocaleString()}${bestRankTicks !== undefined && bestRankTicks !== null ? ` <i style="color: #aaa;">(${bestRankTicks} ticks)</i>` : ' (null)'}</div>
               <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestRankPlayer}</div>
             `;
-            if (yourRankPoints > 0) {
+            if (hasYourRankData) {
               rankPointsHtml += `
                 <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
                 <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ' (null)'}</div>
               `;
             }
-          } else if (yourRankPoints > 0) {
+          } else if (hasYourRankData) {
             rankPointsHtml = `
               <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
               <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ''}</div>
@@ -11846,7 +11996,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               text-align: center;
               cursor: pointer;
               text-decoration: underline;
-              text-decoration-style: dotted;
+              text-decoration-style: solid;
             `;
             nameElement.title = `Open ${creatureName} in Bestiary`;
             nameElement.addEventListener('click', () => {
@@ -12092,7 +12242,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       const isRankPoints = iconAlt === 'Grade';
       const isFloors = iconAlt === 'Floors';
       const activeSeason = Number(cyclopediaState.profileSeason || 1);
-      const allowGlobalWorldRecords = activeSeason === 1;
+      const allowGlobalWorldRecords = activeSeason === 2;
       
       if (isSpeedrun) {
         const yourTicks = mapData?.ticks || 0;
@@ -12467,7 +12617,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Get player state
       const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
       const activeSeason = Number(cyclopediaState.profileSeason || 1);
-      const allowGlobalWorldRecords = activeSeason === 1;
+      const allowGlobalWorldRecords = activeSeason === 2;
       const playerRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
       const roomsArray = globalThis.state?.utils?.ROOMS || [];
       
@@ -12568,7 +12718,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         maxRaidFloors += 15;
       });
       
-      // Fetch leaderboard data to calculate WR total ticks (season 1 only).
+      // Fetch leaderboard data to calculate WR total ticks (season 2 only).
       if (allowGlobalWorldRecords) {
         fetchMapsLeaderboardData().then(leaderboardData => {
           // Calculate WR total ticks for non-raid maps
@@ -12595,7 +12745,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           updateSpeedrunDisplay();
         });
       } else {
-        // Season-scoped mode: global WR payload is not season-safe, keep denominator unset.
+        // WR display disabled for non-Season-2 modes.
         updateSpeedrunDisplay();
       }
       
@@ -12854,19 +13004,28 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           countOverlay.style.bottom = '8px';
           countOverlay.style.left = '8px';
           countOverlay.style.right = '8px';
-          countOverlay.style.backgroundImage = 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")';
-          countOverlay.style.backgroundSize = 'cover';
+          countOverlay.style.backgroundImage = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
+          countOverlay.style.backgroundRepeat = 'repeat';
           countOverlay.style.backgroundPosition = 'center';
-          countOverlay.style.color = '#ffffff';
-          countOverlay.style.fontSize = '10px';
+          countOverlay.style.color = '#fff7da';
+          countOverlay.style.fontSize = '11px';
           countOverlay.style.fontWeight = 'bold';
           countOverlay.style.fontFamily = 'Arial, Helvetica, sans-serif';
           countOverlay.style.textAlign = 'center';
-          countOverlay.style.padding = '4px 6px';
+          countOverlay.style.display = 'flex';
+          countOverlay.style.alignItems = 'center';
+          countOverlay.style.justifyContent = 'center';
+          countOverlay.style.gap = '4px';
+          countOverlay.style.letterSpacing = '0';
+          countOverlay.style.wordSpacing = 'normal';
+          countOverlay.style.lineHeight = '1.2';
+          countOverlay.style.textShadow = '0 1px 1px #000';
+          countOverlay.style.padding = '5px 6px';
           countOverlay.style.borderRadius = '4px';
           countOverlay.style.border = '3px solid transparent';
           countOverlay.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 3 fill';
-          countOverlay.textContent = `Defeated ${defeatCount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} times`;
+          const formattedDefeatCount = defeatCount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+          countOverlay.innerHTML = `<span>Defeated</span><span>${formattedDefeatCount}</span><span>times</span>`;
           thumbnailContainer.appendChild(countOverlay);
         }
       } catch (error) {
@@ -12886,8 +13045,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       d.style.justifyContent = 'center';
       d.style.gap = '0';
 
+      // Fresh tab instance: reset Maps DOM diff state so first paint cannot be skipped.
+      MapsTabDOMOptimizer.currentState.selectedMap = null;
+      MapsTabDOMOptimizer.currentState.selectedCategory = null;
+      MapsTabDOMOptimizer.currentState.roomData = null;
+      MapsTabDOMOptimizer.currentState.roomName = null;
+      MapsTabDOMOptimizer.currentState.season = null;
+
       let selectedCategory = '';
-      let selectedMap = null;
+      let selectedMap = cyclopediaState.mapsLastSelectedMapId || null;
 
       const leftCol = document.createElement('div');
       leftCol.style.width = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
@@ -12925,6 +13091,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             }
           }
           
+          // Always keep a valid map selection to avoid empty first render.
+          if (mapsInRegion.length > 0) {
+            const currentMapInRegion = mapsInRegion.find(map => map.id === selectedMap);
+            const rememberedMapInRegion = mapsInRegion.find(map => map.id === cyclopediaState.mapsLastSelectedMapId);
+            if (!currentMapInRegion) {
+              selectedMap = (rememberedMapInRegion || mapsInRegion[0]).id;
+            }
+          } else {
+            selectedMap = null;
+          }
+
           // Find the map name for selectedMap (if selectedMap is an ID, convert to name)
           let selectedMapName = null;
           if (selectedMap) {
@@ -12945,6 +13122,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             setSelectedInventory: (mapName) => {
               const mapData = mapsInRegion.find(map => map.name === mapName);
               selectedMap = mapData ? mapData.id : mapName;
+              cyclopediaState.mapsLastSelectedMapId = selectedMap;
+              cyclopediaState.mapsLastSelectedRegionId = selectedCategory || null;
               
               updateRightCol();
             },
@@ -12985,9 +13164,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         regions = globalThis.state.utils.REGIONS.map(region => region.id);
       }
       
-      // Set default selected region to first available region
+      // Set default selected region to remembered region (fallback: first region).
       if (regions.length > 0 && !selectedCategory) {
-        selectedCategory = regions[0];
+        const rememberedRegion = cyclopediaState.mapsLastSelectedRegionId;
+        selectedCategory = regions.includes(rememberedRegion) ? rememberedRegion : regions[0];
       }
 
       const topBox = createBox({
@@ -13004,6 +13184,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           // Find the region ID from the display name
           const regionId = regions.find(regionId => GAME_DATA.REGION_NAME_MAP[regionId] === cat) || cat;
           selectedCategory = regionId;
+          cyclopediaState.mapsLastSelectedRegionId = selectedCategory || null;
           selectedMap = null;
           updateBottomBox();
           updateRightCol();
@@ -13181,6 +13362,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               
               const regionMapsDiv = createRegionMapsSection(mapsInRegion, selectedCategory, (mapId) => {
                 selectedMap = mapId;
+                cyclopediaState.mapsLastSelectedMapId = selectedMap;
+                cyclopediaState.mapsLastSelectedRegionId = selectedCategory || null;
                 updateBottomBox();
                 updateRightCol();
               });
@@ -15072,7 +15255,17 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
 function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) {
   try {
     const activeSeason = cyclopediaState.profileSeason || 1;
-    const s = findProfileSeasonEntry(profileData, activeSeason);
+    const pd = unwrapProfilePageJson(profileData) || {};
+    const s = findProfileSeasonEntry(pd, activeSeason);
+    const seasonStats = {
+      // For current season, profile payload can expose live aggregates only at top level.
+      ticks: s?.ticks ?? pd.ticks,
+      rank: s?.rank ?? pd.rankPoints,
+      floors: s?.floors ?? pd.floors,
+      ticksBracket: s?.ticksBracket,
+      rankBracket: s?.rankBracket,
+      floorsBracket: s?.floorsBracket
+    };
 
     const div = document.createElement('div');
     div.style.flex = '0 1 auto';
@@ -15263,9 +15456,9 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) 
     sn.appendChild(snText);
     block.appendChild(sn);
 
-    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsTicks', s ? s.ticks : undefined, s ? s.ticksBracket : undefined);
-    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsRank', s ? s.rank : undefined, s ? s.rankBracket : undefined);
-    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsFloors', s ? s.floors : undefined, s ? s.floorsBracket : undefined);
+    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsTicks', seasonStats.ticks, seasonStats.ticksBracket);
+    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsRank', seasonStats.rank, seasonStats.rankBracket);
+    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsFloors', seasonStats.floors, seasonStats.floorsBracket);
 
     statsWrap.appendChild(block);
 

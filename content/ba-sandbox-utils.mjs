@@ -360,6 +360,15 @@
 					
 					// Get the level from monster data if available, otherwise use default
 					const monsterLevel = monster.level || 50;
+					const monsterTier = piece.tier || monster.tier || 4;
+					const monsterAwakened =
+						monster.awaken === true ||
+						monster.awakened === true ||
+						monster.isAwakened === true ||
+						Number(monster.starTier) >= 6;
+					const monsterStarTier = monsterAwakened
+						? 6
+						: (piece.starTier || monster.starTier || undefined);
 					console.log(`configureBoard - Processing monster ${index} with level: ${monsterLevel}`);
 					
 					const pieceConfig = {
@@ -367,7 +376,11 @@
 						nickname: null,
 						tileIndex: piece.tile,
 						gameId: monsterGameId,
-						tier: 4,
+						tier: monsterTier,
+						awaken: monsterAwakened,
+						awakened: monsterAwakened,
+						isAwakened: monsterAwakened,
+						starTier: monsterStarTier,
 						level: monsterLevel, // Use the monster's level from data
 						genes: {
 							hp: monster.hp,
@@ -381,7 +394,9 @@
 						direction: 'south',
 					};
 					
-					console.log(`configureBoard - Created pieceConfig with level: ${pieceConfig.level}`);
+					console.log(
+						`configureBoard - Created pieceConfig level=${pieceConfig.level} tier=${pieceConfig.tier} awaken=${pieceConfig.awaken} starTier=${pieceConfig.starTier ?? 'null'}`
+					);
 					
 					const equip = piece.equipment;
 					if (equip) {

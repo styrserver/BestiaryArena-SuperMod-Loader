@@ -213,6 +213,8 @@
         autoplantKeepGenesEnabled: true,
         autoplantAlwaysDevourBelow: 49,
         autoplantAlwaysDevourEnabled: false,
+        protectSealedTier5: true,
+        sealedTier5SellAllowList: [],
         // Per-creature gene ranges to keep (prevents selling/devouring)
         creatureKeepRanges: {} // { "CreatureName": { min: number, max: number } }
     };
@@ -319,6 +321,9 @@
         try {
             const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
             const settings = { ...DEFAULT_SETTINGS, ...stored };
+            if (!('protectSealedTier5' in stored)) {
+                settings.protectSealedTier5 = true;
+            }
             
             // Migration: Convert old autoplantChecked/autosellChecked to autoMode
             // Only migrate if autoMode was never set (not if it's explicitly null)
@@ -423,6 +428,38 @@
         const ranges = { ...(settings.creatureKeepRanges || {}) };
         delete ranges[creatureName];
         setSettings({ creatureKeepRanges: ranges });
+    }
+
+    /**
+     * Check if a creature is explicitly allowed to be sold/devoured when Sealed (tier 5)
+     * @param {string} creatureName - Name of the creature
+     * @returns {boolean} True if allowed to sell/devour when sealed
+     */
+    function isSealedTier5SellAllowed(creatureName) {
+        if (!creatureName) return false;
+        const settings = getSettings();
+        const allowList = settings.sealedTier5SellAllowList || [];
+        return allowList.includes(creatureName);
+    }
+
+    /**
+     * Set sealed tier 5 sell/devour override for a specific creature
+     * @param {string} creatureName - Name of the creature
+     * @param {boolean} isAllowed - True to allow selling/devouring sealed creatures of this type
+     */
+    function setSealedTier5SellAllowed(creatureName, isAllowed) {
+        if (!creatureName) return;
+        const settings = getSettings();
+        const allowList = [...(settings.sealedTier5SellAllowList || [])];
+        const idx = allowList.indexOf(creatureName);
+
+        if (isAllowed && idx === -1) {
+            allowList.push(creatureName);
+        } else if (!isAllowed && idx !== -1) {
+            allowList.splice(idx, 1);
+        }
+
+        setSettings({ sealedTier5SellAllowList: allowList });
     }
     
     /**
@@ -639,6 +676,40 @@
         
         return inventorySnapshot.filter(invMonster => {
             return rewardMonsterIds.has(invMonster.id);
+        });
+    }
+
+    /**
+     * Debug log creature drops for floor 11+ (Sealed can drop from floor 11)
+     * @param {Array} battleRewardMonsters - Monster drops extracted from server results
+     * @param {number|string} floor - Current floor number
+     */
+    function logCreatureDropsForFloor11Plus(battleRewardMonsters, floor) {
+        const floorNum = Number(floor);
+        if (!Number.isFinite(floorNum) || floorNum < 11) return;
+        if (!Array.isArray(battleRewardMonsters) || battleRewardMonsters.length === 0) {
+            console.log(`[Autoseller][DropDebug] Floor ${floorNum}: no creature drops in serverResults`);
+            return;
+        }
+
+        battleRewardMonsters.forEach((drop, index) => {
+            const monster = drop?.monster || drop || {};
+            const hp = Number(monster.hp ?? 0);
+            const ad = Number(monster.ad ?? 0);
+            const ap = Number(monster.ap ?? 0);
+            const armor = Number(monster.armor ?? 0);
+            const magicResist = Number(monster.magicResist ?? 0);
+            const genes = hp + ad + ap + armor + magicResist;
+            const tier = monster.tier ?? monster.metadata?.tier ?? 'unknown';
+            const serverId = monster.id || monster.databaseId || drop?.monsterId || 'unknown';
+            const gameId = monster.gameId ?? monster.metadata?.id ?? 'unknown';
+            const name = monster.name || monster.metadata?.name || `gameId:${gameId}`;
+
+            console.log(
+                `[Autoseller][DropDebug] Floor ${floorNum} drop #${index + 1}: ` +
+                `name=${name} id=${serverId} gameId=${gameId} tier=${tier} genes=${genes} ` +
+                `(hp=${hp} ad=${ad} ap=${ap} armor=${armor} mr=${magicResist}) exp=${monster.exp ?? 0}`
+            );
         });
     }
     
@@ -917,6 +988,7 @@
         const squeezeMinCount = settings.autosqueezeMinCount ?? 1;
         const maxExpThreshold = settings.autosellMaxExp ?? 52251;
         const squeezeIgnoreList = settings.autosqueezeIgnoreList || [];
+        const protectSealedTier5 = settings.protectSealedTier5 === true;
         
         const toSqueeze = [];
         const toSell = [];
@@ -932,8 +1004,12 @@
         
         for (let i = 0; i < monsterCount; i++) {
             const monster = monsters[i];
+            const monsterName = monster?.metadata?.name || monster?.name;
             
             if (monster.locked) {
+                continue;
+            }
+            if (isSealedTierFiveCreature(monster) && !isSealedTier5SellAllowed(monsterName)) {
                 continue;
             }
             
@@ -1088,6 +1164,17 @@
         // Additional check: if monster has metadata, check there too
         if (monster.metadata && monster.metadata.shiny === true) return true;
         return false;
+    }
+
+    /**
+     * Detect Sealed creatures by tier (Tier 5)
+     * @param {Object} monster - Monster object to check
+     * @returns {boolean} - true if monster is tier 5, false otherwise
+     */
+    function isSealedTierFiveCreature(monster) {
+        if (!monster) return false;
+        const tier = monster.tier ?? monster.metadata?.tier;
+        return Number(tier) === 5;
     }
     
     async function apiRequest(url, options = {}, retries = API_CONSTANTS.RETRY_ATTEMPTS) {
@@ -2536,7 +2623,7 @@
     }
 
     // Helper function to create creature boxes for Autoplant
-    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false, showKeepRangeLock = false, contextMenuType = 'creature', showAutodusterIndicator = false}) {
+    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false, showKeepRangeLock = false, contextMenuType = 'creature', showAutodusterIndicator = false, sealedActionVerb = 'Sell', contextDefaultRangeMin = 0, contextDefaultRangeMax = 100}) {
         const box = document.createElement('div');
         box.style.display = 'flex';
         box.style.flexDirection = 'column';
@@ -2619,6 +2706,24 @@
                     }
                     item.appendChild(indicator);
                 }
+            }
+
+            // Show tier-5 star indicator when sealed sell/squeeze override is enabled for this creature
+            if (isSealedTier5SellAllowed(name)) {
+                const sealedIndicator = document.createElement('img');
+                sealedIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
+                sealedIndicator.alt = 'Sealed override';
+                sealedIndicator.title = isIgnoreList
+                    ? 'Sealed sell/squeeze override (inactive in Keep list)'
+                    : 'Sealed sell/squeeze override (active)';
+                sealedIndicator.style.width = '12px';
+                sealedIndicator.style.height = '12px';
+                sealedIndicator.style.flexShrink = '0';
+                if (isIgnoreList) {
+                    sealedIndicator.style.opacity = '0.5';
+                    sealedIndicator.style.filter = 'grayscale(100%)';
+                }
+                item.appendChild(sealedIndicator);
             }
             
             // Add visual indicator if autoduster has custom stat settings for this equipment
@@ -2724,7 +2829,7 @@
                                 });
                                 columnsContainer.dispatchEvent(refreshEvent);
                             }
-                        });
+                        }, sealedActionVerb, contextDefaultRangeMin, contextDefaultRangeMax);
                     }
                 };
                 
@@ -2746,14 +2851,14 @@
      * @param {Function} onClose - Callback when menu is closed
      * @returns {HTMLElement} The context menu element
      */
-    function createCreatureContextMenu(creatureName, x, y, onClose) {
+    function createCreatureContextMenu(creatureName, x, y, onClose, sealedActionVerb = 'Sell', defaultRangeMin = 0, defaultRangeMax = 100) {
         // Close any existing context menu before opening a new one
         if (openContextMenu && openContextMenu.closeMenu) {
             openContextMenu.closeMenu();
         }
         
-        const settings = getSettings();
         const currentRange = getCreatureKeepRange(creatureName);
+        const sealedSellAllowed = isSealedTier5SellAllowed(creatureName);
         
         // Create overlay to close menu on outside click
         const overlay = document.createElement('div');
@@ -2815,7 +2920,7 @@
         minInput.min = '0';
         minInput.max = '100';
         minInput.step = '1';
-        minInput.value = currentRange ? currentRange.min : '0';
+        minInput.value = currentRange ? currentRange.min : String(defaultRangeMin);
         minInput.className = 'pixel-font-14';
         Object.assign(minInput.style, {
             width: '50px',
@@ -2841,7 +2946,7 @@
         maxInput.min = '0';
         maxInput.max = '100';
         maxInput.step = '1';
-        maxInput.value = currentRange ? currentRange.max : '100';
+        maxInput.value = currentRange ? currentRange.max : String(defaultRangeMax);
         maxInput.className = 'pixel-font-14';
         Object.assign(maxInput.style, {
             width: '50px',
@@ -2866,6 +2971,37 @@
         inputContainer.appendChild(maxInput);
         inputContainer.appendChild(percentText);
         menu.appendChild(inputContainer);
+
+        const sealedToggleRow = document.createElement('div');
+        sealedToggleRow.style.display = 'flex';
+        sealedToggleRow.style.alignItems = 'center';
+        sealedToggleRow.style.justifyContent = 'flex-start';
+        sealedToggleRow.style.gap = '6px';
+        sealedToggleRow.style.marginBottom = '12px';
+
+        const sealedToggle = document.createElement('input');
+        sealedToggle.type = 'checkbox';
+        sealedToggle.checked = sealedSellAllowed;
+        sealedToggle.style.cursor = 'pointer';
+
+        const sealedToggleLabel = document.createElement('label');
+        sealedToggleLabel.className = 'pixel-font-14';
+        const squeezeActionTitle = String(t('mods.autoseller.actionTitleSqueeze') || 'Squeeze').toLowerCase();
+        const normalizedSealedActionVerb = String(sealedActionVerb || '').trim().toLowerCase();
+        sealedToggleLabel.textContent = normalizedSealedActionVerb === squeezeActionTitle
+            ? t('mods.autoseller.autoSqueezeSealedCreatures') || 'Auto-squeeze sealed creatures'
+            : t('mods.autoseller.autoSellSealedCreatures') || 'Auto-sell sealed creatures';
+        sealedToggleLabel.style.fontSize = '12px';
+        sealedToggleLabel.style.color = '#ffe066';
+        sealedToggleLabel.style.cursor = 'pointer';
+
+        sealedToggleLabel.addEventListener('click', () => {
+            sealedToggle.checked = !sealedToggle.checked;
+        });
+
+        sealedToggleRow.appendChild(sealedToggle);
+        sealedToggleRow.appendChild(sealedToggleLabel);
+        menu.appendChild(sealedToggleRow);
         
         // Button container
         const buttonContainer = document.createElement('div');
@@ -2899,8 +3035,16 @@
             // Ensure min <= max
             const finalMin = Math.min(min, max);
             const finalMax = Math.max(min, max);
-            
-            setCreatureKeepRange(creatureName, finalMin, finalMax);
+
+            // Don't create a keep-range lock for the default full range unless it already existed.
+            // This allows "sealed sell/squeeze" to be toggled without also showing a lock icon.
+            const isDefaultFullRange = finalMin === 0 && finalMax === 100;
+            if (isDefaultFullRange && !currentRange) {
+                clearCreatureKeepRange(creatureName);
+            } else {
+                setCreatureKeepRange(creatureName, finalMin, finalMax);
+            }
+            setSealedTier5SellAllowed(creatureName, sealedToggle.checked);
             closeMenu();
         });
         
@@ -2928,6 +3072,7 @@
         
         clearButton.addEventListener('click', () => {
             clearCreatureKeepRange(creatureName);
+            setSealedTier5SellAllowed(creatureName, false);
             closeMenu();
         });
         
@@ -3487,6 +3632,9 @@
         const { keepList, sellList, sellListKey } = loadAndMigrateFilterLists(settingKey, allCreatures);
         let selectedCreatures = [...keepList];
         let availableCreatures = [...sellList];
+        const isSqueezeContext = settingKey === 'autosqueezeIgnoreList';
+        const contextDefaultRangeMin = isSqueezeContext ? 80 : 0;
+        const contextDefaultRangeMax = 100;
         
         // Function to save both lists to settings
         function saveIgnoreList() {
@@ -3537,6 +3685,9 @@
                 isIgnoreList: false,
                 enableContextMenu: enableContextMenu,
                 showKeepRangeLock: showKeepRangeLock,
+                sealedActionVerb: actionTitle,
+                contextDefaultRangeMin,
+                contextDefaultRangeMax,
                 onSelectCreature: (creatureName) => {
                     console.log(`[Autoseller] Added to ignore list (${settingKey}):`, creatureName);
                     availableCreatures = availableCreatures.filter(c => c !== creatureName);
@@ -3558,6 +3709,9 @@
                 isIgnoreList: true,
                 enableContextMenu: enableContextMenu,
                 showKeepRangeLock: showKeepRangeLock,
+                sealedActionVerb: actionTitle,
+                contextDefaultRangeMin,
+                contextDefaultRangeMax,
                 onSelectCreature: (creatureName) => {
                     console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, creatureName);
                     selectedCreatures = selectedCreatures.filter(c => c !== creatureName);
@@ -3727,11 +3881,26 @@
             return;
         }
         
+        /*
+         * Reference shape for plantMonsterFilter(monster) payloads:
+         * {
+         *   id, gameId, createdAt, exp, tier, shiny, hundo, locked, hidden, level,
+         *   genes: { hp, ad, ap, armor, magicResist },
+         *   totalGenes, rarityLevel, isExpCapped,
+         *   metadata: { name, roles, queryTags, lookType, spriteId, corpseId, portraitTranslate, bloodColor, baseStats, skill }
+         * }
+         *
+         * Notes:
+         * - Some flows use flat stats (hp/ad/ap/armor/magicResist), others use genes.*.
+         * - Tier-5 ("Sealed") checks should read monster.tier (fallbacks handled in helpers).
+         */
+        
         const settings = getSettings();
         const minGenes = settings.autoplantGenesMin !== undefined ? settings.autoplantGenesMin : 80;
         const keepGenesEnabled = true; // Always enabled - autosqueezer handles 80%+ creatures
         const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow !== undefined ? settings.autoplantAlwaysDevourBelow : 49;
         const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
+        const protectSealedTier5 = settings.protectSealedTier5 === true;
         
         try {
             globalThis.state.clientConfig.trigger.setState({
@@ -3743,6 +3912,9 @@
                             
                             // FAILSAFE: NEVER autoplant shiny creatures
                             if (isShinyCreature(monster)) {
+                                return false;
+                            }
+                            if (isSealedTierFiveCreature(monster) && !isSealedTier5SellAllowed(monsterName)) {
                                 return false;
                             }
                             
@@ -4107,6 +4279,7 @@
                     settingKey: ignoreListKey,
                     insertBefore: statusArea,
                     actionTitle: t('mods.autoseller.actionTitleSqueeze'),
+                    enableContextMenu: true, // Enable right-click context menu for autosqueeze creatures
                     showKeepRangeLock: false, // Don't show lock for autosqueeze
                     onUpdate: () => {
                         // Ignore list is applied during processing
@@ -4626,11 +4799,19 @@
             if (type === 'sell' && settings.autoMode === 'autosell') {
                 // For autosell mode, monsters are already filtered by battle rewards matching
                 // FAILSAFE: Filter out any shiny creatures that might have slipped through
-                toSell = monsters.filter(m => !stateManager.isProcessed(m.id) && !isShinyCreature(m));
+                toSell = monsters.filter(m =>
+                    !stateManager.isProcessed(m.id) &&
+                    !isShinyCreature(m) &&
+                    !isSealedTierFiveCreature(m)
+                );
             } else if (type === 'squeeze' && settings.autosqueezeChecked) {
                 // For autosqueeze mode, monsters are already filtered by battle rewards matching
                 // FAILSAFE: Filter out any shiny creatures that might have slipped through
-                toSqueeze = monsters.filter(m => !stateManager.isProcessed(m.id) && !isShinyCreature(m));
+                toSqueeze = monsters.filter(m =>
+                    !stateManager.isProcessed(m.id) &&
+                    !isShinyCreature(m) &&
+                    !isSealedTierFiveCreature(m)
+                );
             } else {
                 // For legacy/other modes, use getEligibleMonsters
                 const result = await getEligibleMonsters(settings, monsters);
@@ -6369,9 +6550,12 @@
         const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow ?? 49;
         const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
         const ignoreList = settings.autoplantIgnoreList || [];
+        const protectSealedTier5 = settings.protectSealedTier5 === true;
         
         const filteredMonsters = matchedMonsters.filter(invMonster => {
             if (isShinyCreature(invMonster)) return false;
+            const creatureName = getCreatureNameFromMonster(invMonster);
+            if (isSealedTierFiveCreature(invMonster) && !isSealedTier5SellAllowed(creatureName)) return false;
             
             const totalGenes = calculateTotalGenes(invMonster);
             
@@ -6386,8 +6570,6 @@
             }
             
             // Get creature name for keep range and ignore list check
-            const creatureName = getCreatureNameFromMonster(invMonster);
-            
             if (creatureName && ignoreList.includes(creatureName)) {
                 // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
                 const keepRange = getCreatureKeepRange(creatureName);
@@ -6414,6 +6596,7 @@
         const squeezeMinGenes = settings.autosqueezeGenesMin ?? 80;
         const squeezeMaxGenes = settings.autosqueezeGenesMax ?? 100;
         const ignoreList = settings.autosqueezeIgnoreList || [];
+        const protectSealedTier5 = settings.protectSealedTier5 === true;
         const hasDaycare = hasDaycareIconInInventory();
         let daycareMonsterIds = [];
         
@@ -6440,12 +6623,15 @@
                 filterStats.shiny++;
                 return false;
             }
+            const creatureName = getCreatureNameFromMonster(invMonster);
+            if (isSealedTierFiveCreature(invMonster) && !isSealedTier5SellAllowed(creatureName)) {
+                return false;
+            }
             if (hasDaycare && daycareMonsterIds.includes(invMonster.id)) {
                 filterStats.inDaycare++;
                 return false;
             }
             
-            const creatureName = getCreatureNameFromMonster(invMonster);
             if (creatureName && ignoreList.includes(creatureName)) {
                 filterStats.inIgnoreList++;
                 return false;
@@ -6519,8 +6705,14 @@
                         }
                         
                         // Extract creatures and equipment from serverResults
-                        const { rewardMonsterIds } = extractMonstersFromServerResults(serverResults);
+                        const { battleRewardMonsters, rewardMonsterIds } = extractMonstersFromServerResults(serverResults);
                         const { rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
+                        
+                        // Debug all creature drops on floor 11+ (Sealed starts dropping here)
+                        const floorFromServerResults = serverResults?.floor ?? serverResults?.rewardScreen?.floor;
+                        const floorFromBoardState = boardState?.context?.floor ?? boardState?.context?.room?.floor;
+                        const currentFloor = floorFromServerResults ?? floorFromBoardState;
+                        logCreatureDropsForFloor11Plus(battleRewardMonsters, currentFloor);
                         
                         // Fetch inventory at game end (when it's actually updated)
                         const inventorySnapshot = await fetchServerMonsters();

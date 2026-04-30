@@ -443,12 +443,17 @@ function showHeroEditorModal() {
       const heroCard = document.createElement('div');
       heroCard.className = 'frame-pressed-1 surface-dark p-2 mb-3';
       
-      // Header with monster portrait and name
+      // Header with monster portrait/name on the left and awaken button on the right
       const headerContainer = document.createElement('div');
       headerContainer.style.display = 'flex';
       headerContainer.style.alignItems = 'center';
-      headerContainer.style.gap = '10px';
+      headerContainer.style.justifyContent = 'space-between';
       headerContainer.style.marginBottom = '10px';
+
+      const headerLeftContainer = document.createElement('div');
+      headerLeftContainer.style.display = 'flex';
+      headerLeftContainer.style.alignItems = 'center';
+      headerLeftContainer.style.gap = '10px';
       
       // Create monster portrait if we have the ID
       if (monsterGameId) {
@@ -458,7 +463,7 @@ function showHeroEditorModal() {
             level: monsterLevel,
             tier: 1
           });
-          headerContainer.appendChild(monsterPortrait);
+          headerLeftContainer.appendChild(monsterPortrait);
         } catch (e) {
           console.error('Error creating monster portrait:', e);
         }
@@ -468,8 +473,70 @@ function showHeroEditorModal() {
       nameElement.textContent = toTitleCase(monsterName);
       nameElement.className = 'pixel-font-16 text-whiteRegular';
       
-      headerContainer.appendChild(nameElement);
+      headerLeftContainer.appendChild(nameElement);
+      
+      // Per-creature awakened toggle
+      const initialAwakenEnabled = hero.monster.awaken === true ||
+        hero.monster.awakened === true ||
+        hero.monster.isAwakened === true;
+      let awakenEnabled = initialAwakenEnabled;
+      
+      const awakenButton = document.createElement('button');
+      awakenButton.className = 'widget-top widget-top-text pixel-font-16';
+      awakenButton.type = 'button';
+      awakenButton.style.margin = '0';
+      awakenButton.style.padding = '2px 8px';
+      awakenButton.style.textAlign = 'center';
+      awakenButton.style.color = '#fff';
+      awakenButton.style.cursor = 'pointer';
+      awakenButton.style.width = '15%';
+      awakenButton.style.flex = '0 0 15%';
+      awakenButton.style.display = 'flex';
+      awakenButton.style.alignItems = 'center';
+      awakenButton.style.justifyContent = 'center';
+      awakenButton.style.height = '23px';
+      awakenButton.style.outline = 'none';
+      awakenButton.style.flexShrink = '0';
+      const GREEN_BUTTON_BG = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+      const REGULAR_BUTTON_BG = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+
+      const awakenIcon = document.createElement('img');
+      awakenIcon.src = '/assets/icons/star-tier-awaken.png';
+      awakenIcon.alt = 'Awakened Ability';
+      awakenIcon.style.width = '10px';
+      awakenIcon.style.height = '10px';
+      awakenButton.appendChild(awakenIcon);
+      
+      const refreshAwakenButton = () => {
+        awakenButton.title = awakenEnabled ? 'Awakened Mode' : 'Normal Mode';
+        awakenButton.style.background = awakenEnabled ? GREEN_BUTTON_BG : REGULAR_BUTTON_BG;
+        awakenButton.style.backgroundSize = 'auto';
+        awakenButton.style.border = awakenEnabled ? '1px solid #4CAF50' : '1px solid #666';
+        awakenButton.style.filter = awakenEnabled ? 'none' : 'grayscale(100%) brightness(0.9)';
+      };
+      
+      awakenButton.addEventListener('click', () => {
+        awakenEnabled = !awakenEnabled;
+        refreshAwakenButton();
+      });
+      
+      refreshAwakenButton();
+      headerContainer.appendChild(headerLeftContainer);
+      headerContainer.appendChild(awakenButton);
       heroCard.appendChild(headerContainer);
+      
+      controls.push({
+        index,
+        hero,
+        type: 'awaken',
+        button: awakenButton,
+        getValue: () => awakenEnabled,
+        setValue: (value) => {
+          awakenEnabled = Boolean(value);
+          refreshAwakenButton();
+        },
+        initial: initialAwakenEnabled
+      });
       
       // Stats grid
       const statsContainer = document.createElement('div');
@@ -946,6 +1013,9 @@ function showHeroEditorModal() {
             controls.forEach(control => {
               if (control.input) control.input.value = control.initial;
               if (control.select) control.select.value = control.initial;
+              if (control.type === 'awaken' && control.setValue) {
+                control.setValue(control.initial);
+              }
               
               // Reset portraits to match initial values
               if (control.type === 'equipName' && control.portraitContainer) {
@@ -1043,9 +1113,34 @@ function showHeroEditorModal() {
               });
               
               // Make sure all monster names are lowercase to avoid errors
-              updatedBoardData.board.forEach(piece => {
+              updatedBoardData.board.forEach((piece, pieceIndex) => {
                 if (piece.monster && piece.monster.name) {
                   piece.monster.name = piece.monster.name.toLowerCase();
+                }
+                
+                if (piece.monster) {
+                  const awakenControl = controls.find(c => c.type === 'awaken' && c.index === pieceIndex);
+                  const awakenEnabled = awakenControl && awakenControl.getValue ? awakenControl.getValue() : false;
+                  const previousTier = piece.tier;
+                  const monsterName = piece.monster.name || 'unknown';
+                  
+                  // Set all known awaken flags for compatibility across serializers/readers
+                  piece.monster.awaken = awakenEnabled;
+                  piece.monster.awakened = awakenEnabled;
+                  piece.monster.isAwakened = awakenEnabled;
+                  
+                  // Awakened creatures should be tier 5, otherwise default to tier 4
+                  piece.tier = awakenEnabled ? 5 : 4;
+                  
+                  if (awakenEnabled) {
+                    console.log(
+                      `[Hero Editor] Converting creature to awakened: tile=${piece.tile}, name=${monsterName}, previousTier=${previousTier ?? 'null'}, newTier=${piece.tier}`
+                    );
+                  } else {
+                    console.log(
+                      `[Hero Editor] Converting creature to normal: tile=${piece.tile}, name=${monsterName}, previousTier=${previousTier ?? 'null'}, newTier=${piece.tier}`
+                    );
+                  }
                 }
                 
                 // Convert level to experience if it's different from original
@@ -1062,6 +1157,18 @@ function showHeroEditorModal() {
               console.log('DETAILED BOARD DATA:');
               updatedBoardData.board.forEach((piece, index) => {
                                   console.log(`Piece ${index}:`, JSON.stringify(piece));
+              });
+              
+              console.log('[Hero Editor] Awaken payload summary before configureBoard:');
+              updatedBoardData.board.forEach((piece, index) => {
+                const awakenState = piece.monster ? (
+                  piece.monster.awaken === true ||
+                  piece.monster.awakened === true ||
+                  piece.monster.isAwakened === true
+                ) : false;
+                console.log(
+                  `[Hero Editor] payload piece ${index} tile=${piece.tile} name=${piece.monster?.name || 'unknown'} tier=${piece.tier ?? 'null'} level=${piece.monster?.level ?? 'null'} awaken=${awakenState}`
+                );
               });
               
               console.log('Updated board data:', updatedBoardData);
@@ -1094,9 +1201,34 @@ function showHeroEditorModal() {
                   return piece;
                 })
               };
+              
+              console.log('[Hero Editor] Final testData board sent to configureBoard:');
+              testData.board.forEach((piece, index) => {
+                const awakenState = piece.monster ? (
+                  piece.monster.awaken === true ||
+                  piece.monster.awakened === true ||
+                  piece.monster.isAwakened === true
+                ) : false;
+                console.log(
+                  `[Hero Editor] testData piece ${index} tile=${piece.tile} name=${piece.monster?.name || 'unknown'} tier=${piece.tier ?? 'null'} level=${piece.monster?.level ?? 'null'} awaken=${awakenState}`
+                );
+              });
 
               console.log('Modified board data for testing:', testData);
               const success = configureBoard(testData);
+              
+              try {
+                const liveBoard = getBoardSnapshot().boardConfig || [];
+                console.log('[Hero Editor] Live boardConfig after configureBoard:');
+                liveBoard.forEach((piece, index) => {
+                  if (piece.type !== 'player' && piece.type !== 'custom') return;
+                  console.log(
+                    `[Hero Editor] live piece ${index} type=${piece.type} tile=${piece.tileIndex} gameId=${piece.gameId ?? 'null'} databaseId=${piece.databaseId ?? 'null'} tier=${piece.tier ?? 'null'} level=${piece.level ?? 'null'} starTier=${piece.starTier ?? 'null'} awaken=${piece.awaken ?? piece.awakened ?? piece.isAwakened ?? 'null'}`
+                  );
+                });
+              } catch (liveBoardError) {
+                console.warn('[Hero Editor] Failed reading live boardConfig after configureBoard:', liveBoardError);
+              }
               
               if (success) {
                 // Show success message

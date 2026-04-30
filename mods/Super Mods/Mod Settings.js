@@ -1766,14 +1766,82 @@ function extractSeedFromReplayLink(replayLink) {
   }
 }
 
+function enrichReplayLinkForExport(replayLink, runData = {}, fallbackCredits = '') {
+  if (!replayLink || typeof replayLink !== 'string') return replayLink;
+  try {
+    const match = replayLink.match(/\$replay\((\{.*\})\)/);
+    if (!match || !match[1]) return replayLink;
+    const replayJson = JSON.parse(match[1]);
+
+    const resolvedCredits = (
+      (typeof replayJson.credits === 'string' && replayJson.credits.trim())
+      || (typeof runData.credits === 'string' && runData.credits.trim())
+      || (typeof runData.player === 'string' && runData.player.trim() && !/^you$/i.test(runData.player.trim()) && runData.player.trim())
+      || (typeof runData.userName === 'string' && runData.userName.trim())
+      || (typeof fallbackCredits === 'string' && fallbackCredits.trim() && !/^local$/i.test(fallbackCredits.trim()) && fallbackCredits.trim())
+    );
+    const creditsValue = resolvedCredits || undefined;
+
+    let commentsValue = (typeof replayJson.comments === 'string' && replayJson.comments.trim())
+      ? replayJson.comments.trim()
+      : undefined;
+    if (!commentsValue) {
+      if (typeof runData.comments === 'string' && runData.comments.trim()) {
+        commentsValue = runData.comments.trim();
+      } else {
+        const floorHistoryValues = Array.isArray(runData.floorHistory) ? runData.floorHistory : [];
+        const normalizedFloors = floorHistoryValues
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0);
+        const runFloorValue = Number(runData.floor);
+        if (Number.isFinite(runFloorValue) && runFloorValue > 0) normalizedFloors.push(runFloorValue);
+        const replayFloorValue = Number(replayJson.floor);
+        if (Number.isFinite(replayFloorValue) && replayFloorValue > 0) normalizedFloors.push(replayFloorValue);
+        const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
+        if (uniqueFloors.length > 1) {
+          commentsValue = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+        }
+      }
+    }
+
+    // Keep replay key order aligned with Cyclopedia exports.
+    const orderedReplay = {};
+    if (replayJson.region !== undefined && replayJson.region !== null) orderedReplay.region = replayJson.region;
+    if (replayJson.map !== undefined && replayJson.map !== null) orderedReplay.map = replayJson.map;
+    orderedReplay.floor = replayJson.floor !== undefined && replayJson.floor !== null ? replayJson.floor : 0;
+    orderedReplay.season = String(getRunSeasonValue({
+      ...runData,
+      season: replayJson.season,
+      timestamp: replayJson.timestamp !== undefined ? replayJson.timestamp : runData.timestamp,
+      date: replayJson.date !== undefined ? replayJson.date : runData.date
+    }));
+    if (creditsValue) orderedReplay.credits = creditsValue;
+    if (commentsValue) orderedReplay.comments = commentsValue;
+    const replayTimestamp = Number(replayJson.timestamp);
+    orderedReplay.timestamp = Number.isFinite(replayTimestamp) && replayTimestamp > 0 ? replayTimestamp : Date.now();
+    orderedReplay.board = Array.isArray(replayJson.board) ? replayJson.board : [];
+    orderedReplay.seed = replayJson.seed;
+
+    return `$replay(${JSON.stringify(orderedReplay)})`;
+  } catch (error) {
+    return replayLink;
+  }
+}
+
 // Helper function to build temp run object for replayLink generation
 function buildTempRunForReplayLink(run, contextRegionName) {
   return {
     seed: run.seed,
+    timestamp: run.timestamp,
     mapName: run.mapName,
     mapId: run.mapId,
     regionName: contextRegionName || run.regionName,
     floor: run.floor !== undefined && run.floor !== null ? run.floor : 0,
+    credits: run.credits,
+    comments: run.comments,
+    player: run.player,
+    userName: run.userName,
+    floorHistory: Array.isArray(run.floorHistory) ? [...run.floorHistory] : undefined,
     setup: run.setup ? {
       pieces: (run.setup.pieces || []).map(piece => ({
         tile: piece.tile,
@@ -1797,6 +1865,7 @@ function cleanRunForUpload(bestRun, contextRegionName, baseFields) {
   
   const cleanRun = {
     ...baseFields,
+    season: getRunSeasonValue(bestRun),
     date: bestRun.date,
     mapName: bestRun.mapName,
     replayLink: replayLink
@@ -1813,6 +1882,57 @@ function cleanRunForUpload(bestRun, contextRegionName, baseFields) {
   }
   
   return cleanRun;
+}
+
+const SEASON_2_START_UTC_MS = Date.UTC(2026, 3, 30, 12, 0, 0); // 2026-04-30 12:00:00 UTC
+
+function getRunSeasonValue(run) {
+  const timestamp = Number(run?.timestamp);
+  if (Number.isFinite(timestamp) && timestamp > 0) {
+    return timestamp >= SEASON_2_START_UTC_MS ? 2 : 1;
+  }
+
+  const season = Number(run?.season);
+  if (Number.isFinite(season) && season > 0) {
+    return season;
+  }
+
+  // Fallback when only date (YYYY-MM-DD) exists; no time granularity for cutoff day.
+  const runDate = typeof run?.date === 'string' ? run.date.trim() : '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(runDate)) {
+    const parsedDate = Date.parse(`${runDate}T00:00:00Z`);
+    if (Number.isFinite(parsedDate)) {
+      return parsedDate >= SEASON_2_START_UTC_MS ? 2 : 1;
+    }
+  }
+
+  return 1;
+}
+
+function detectCurrentSeasonFromRuns(allRuns) {
+  let latestSeason = 1;
+  try {
+    for (const mapData of Object.values(allRuns?.runs || {})) {
+      const categories = [mapData?.speedrun, mapData?.rank, mapData?.floor];
+      for (const runs of categories) {
+        if (!Array.isArray(runs)) continue;
+        for (const run of runs) {
+          const season = getRunSeasonValue(run);
+          if (season > latestSeason) {
+            latestSeason = season;
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('[Mod Settings] Failed to detect current season, using season 1:', error);
+  }
+  return latestSeason;
+}
+
+function getRunsForSeason(runs, targetSeason) {
+  if (!Array.isArray(runs)) return [];
+  return runs.filter(run => getRunSeasonValue(run) === targetSeason);
 }
 
 // Helper function to update Firebase status display
@@ -1863,7 +1983,7 @@ function generateReplayLink(runData) {
       });
     }
     
-    // Build replayData in the correct order: region, map, floor, board, seed
+    // Build replayData in the correct order: region, map, floor, season, board, seed
     const replayData = {};
     
     // Add region if available
@@ -1880,14 +2000,50 @@ function generateReplayLink(runData) {
     } else {
       replayData.floor = 0; // Default to 0 if floor not specified
     }
-    
-    // Add board
-    replayData.board = board;
-    
-    // Add seed (last)
-    replayData.seed = runData.seed;
-    
-    return `$replay(${JSON.stringify(replayData)})`;
+    replayData.season = String(getRunSeasonValue(runData));
+    const replayTimestamp = Number(runData.timestamp);
+    replayData.timestamp = Number.isFinite(replayTimestamp) && replayTimestamp > 0 ? replayTimestamp : Date.now();
+
+    // Preserve run credits if available.
+    const replayCredits = (
+      (typeof runData.credits === 'string' && runData.credits.trim())
+      || (typeof runData.player === 'string' && runData.player.trim() && !/^you$/i.test(runData.player.trim()) && runData.player.trim())
+      || (typeof runData.userName === 'string' && runData.userName.trim())
+    );
+    const creditsValue = replayCredits || undefined;
+
+    // Add floor-history comment when this setup has multiple cleared floors.
+    let commentsValue;
+    if (typeof runData.comments === 'string' && runData.comments.trim()) {
+      commentsValue = runData.comments.trim();
+    } else {
+      const floorHistoryValues = Array.isArray(runData.floorHistory) ? runData.floorHistory : [];
+      const normalizedFloors = floorHistoryValues
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0);
+      const runFloorValue = Number(runData.floor);
+      if (Number.isFinite(runFloorValue) && runFloorValue > 0) {
+        normalizedFloors.push(runFloorValue);
+      }
+      const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
+      if (uniqueFloors.length > 1) {
+        commentsValue = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+      }
+    }
+
+    // Keep replay key order aligned with Cyclopedia exports.
+    const orderedReplayData = {};
+    if (replayData.region !== undefined && replayData.region !== null) orderedReplayData.region = replayData.region;
+    orderedReplayData.map = replayData.map;
+    orderedReplayData.floor = replayData.floor;
+    orderedReplayData.season = replayData.season;
+    if (creditsValue) orderedReplayData.credits = creditsValue;
+    if (commentsValue) orderedReplayData.comments = commentsValue;
+    orderedReplayData.timestamp = replayData.timestamp;
+    orderedReplayData.board = board;
+    orderedReplayData.seed = runData.seed;
+
+    return `$replay(${JSON.stringify(orderedReplayData)})`;
   } catch (error) {
     console.error('[Mod Settings] Error generating replay link:', error);
     return null;
@@ -1909,6 +2065,12 @@ function formatEUDateTime(timestamp) {
 function formatRunsAsText(runsData) {
   try {
     const playerName = runsData.playerName || 'Unknown Player';
+    const currentPlayerName = getCurrentPlayerName();
+    const exportCreditsFallback = (
+      (typeof currentPlayerName === 'string' && currentPlayerName.trim() && currentPlayerName.trim())
+      || (typeof runsData.playerName === 'string' && runsData.playerName.trim() && !/^local$/i.test(runsData.playerName.trim()) && runsData.playerName.trim())
+      || ''
+    );
     const timestamp = formatEUDateTime(Date.now());
     
     let text = `========================================\n`;
@@ -2165,12 +2327,13 @@ function formatRunsAsText(runsData) {
       // Speedrun category
       if (mapData.speedrun && mapData.speedrun.length > 0) {
         const bestSpeedrun = mapData.speedrun[0];
+        const speedrunReplayLink = enrichReplayLinkForExport(bestSpeedrun.replayLink, bestSpeedrun, exportCreditsFallback);
         text += `SPEEDRUN:\n`;
         text += `  Time: ${bestSpeedrun.time || 'N/A'} ticks\n`;
-        text += `  Seed: ${extractSeedFromReplayLink(bestSpeedrun.replayLink)}\n`;
+        text += `  Seed: ${extractSeedFromReplayLink(speedrunReplayLink)}\n`;
         text += `  Date: ${bestSpeedrun.date || 'N/A'}\n`;
-        if (bestSpeedrun.replayLink) {
-          text += `  ${bestSpeedrun.replayLink}\n`;
+        if (speedrunReplayLink) {
+          text += `  ${speedrunReplayLink}\n`;
         }
         text += `\n`;
       }
@@ -2178,13 +2341,14 @@ function formatRunsAsText(runsData) {
       // Rank category
       if (mapData.rank && mapData.rank.length > 0) {
         const bestRank = mapData.rank[0];
+        const rankReplayLink = enrichReplayLinkForExport(bestRank.replayLink, bestRank, exportCreditsFallback);
         text += `RANK:\n`;
         text += `  Points: ${bestRank.points || 'N/A'}\n`;
         text += `  Time: ${bestRank.time || 'N/A'} ticks\n`;
-        text += `  Seed: ${extractSeedFromReplayLink(bestRank.replayLink)}\n`;
+        text += `  Seed: ${extractSeedFromReplayLink(rankReplayLink)}\n`;
         text += `  Date: ${bestRank.date || 'N/A'}\n`;
-        if (bestRank.replayLink) {
-          text += `  ${bestRank.replayLink}\n`;
+        if (rankReplayLink) {
+          text += `  ${rankReplayLink}\n`;
         }
         text += `\n`;
       }
@@ -2192,15 +2356,16 @@ function formatRunsAsText(runsData) {
       // Floor category
       if (mapData.floor && mapData.floor.length > 0) {
         const bestFloor = mapData.floor[0];
+        const floorReplayLink = enrichReplayLinkForExport(bestFloor.replayLink, bestFloor, exportCreditsFallback);
         text += `FLOOR:\n`;
         text += `  Floor: ${bestFloor.floor || 'N/A'}\n`;
         if (bestFloor.floorTicks) {
           text += `  Floor Ticks: ${bestFloor.floorTicks} ticks\n`;
         }
-        text += `  Seed: ${extractSeedFromReplayLink(bestFloor.replayLink)}\n`;
+        text += `  Seed: ${extractSeedFromReplayLink(floorReplayLink)}\n`;
         text += `  Date: ${bestFloor.date || 'N/A'}\n`;
-        if (bestFloor.replayLink) {
-          text += `  ${bestFloor.replayLink}\n`;
+        if (floorReplayLink) {
+          text += `  ${floorReplayLink}\n`;
         }
         text += `\n`;
       }
@@ -2250,12 +2415,16 @@ async function uploadBestRuns() {
     
     // Get all runs from RunTracker
     const allRuns = window.RunTrackerAPI.getAllRuns();
+    const currentSeason = detectCurrentSeasonFromRuns(allRuns);
     
     // Filter to best runs only (top run per map/category)
     // Sort by region and map order before storing
     const bestRuns = {
       runs: {},
-      metadata: allRuns.metadata || {},
+      metadata: {
+        ...(allRuns.metadata || {}),
+        season: currentSeason
+      },
       playerName: playerName,
       uploadedAt: Date.now()
     };
@@ -2411,8 +2580,9 @@ async function uploadBestRuns() {
       };
       
       // Clean speedrun runs - simplified: generate replayLink and store only essentials
-      if (mapData.speedrun && mapData.speedrun.length > 0) {
-        const bestSpeedrun = mapData.speedrun[0];
+      const currentSeasonSpeedruns = getRunsForSeason(mapData.speedrun, currentSeason);
+      if (currentSeasonSpeedruns.length > 0) {
+        const bestSpeedrun = currentSeasonSpeedruns[0];
         const cleanSpeedrun = cleanRunForUpload(bestSpeedrun, contextRegionName, {
           time: bestSpeedrun.time
         });
@@ -2420,8 +2590,9 @@ async function uploadBestRuns() {
       }
       
       // Clean rank runs - simplified: generate replayLink and store only essentials
-      if (mapData.rank && mapData.rank.length > 0) {
-        const bestRank = mapData.rank[0];
+      const currentSeasonRankRuns = getRunsForSeason(mapData.rank, currentSeason);
+      if (currentSeasonRankRuns.length > 0) {
+        const bestRank = currentSeasonRankRuns[0];
         const cleanRank = cleanRunForUpload(bestRank, contextRegionName, {
           points: bestRank.points,
           time: bestRank.time
@@ -2430,8 +2601,9 @@ async function uploadBestRuns() {
       }
       
       // Clean floor runs - simplified: generate replayLink and store only essentials
-      if (mapData.floor && mapData.floor.length > 0) {
-        const bestFloor = mapData.floor[0];
+      const currentSeasonFloorRuns = getRunsForSeason(mapData.floor, currentSeason);
+      if (currentSeasonFloorRuns.length > 0) {
+        const bestFloor = currentSeasonFloorRuns[0];
         const cleanFloor = cleanRunForUpload(bestFloor, contextRegionName, {
           floor: bestFloor.floor,
           floorTicks: bestFloor.floorTicks
@@ -2582,11 +2754,15 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         return { success: false, error: 'RunTracker not available' };
       }
       const allRuns = window.RunTrackerAPI.getAllRuns();
+      const currentSeason = detectCurrentSeasonFromRuns(allRuns);
       
       // Filter to best runs only (top run per map/category) - same logic as upload
       const bestRuns = {
         runs: {},
-        metadata: allRuns.metadata || {},
+        metadata: {
+          ...(allRuns.metadata || {}),
+          season: currentSeason
+        },
         playerName: 'local', // Use 'local' for local downloads since it's the user's own data
         uploadedAt: Date.now()
       };
@@ -2670,8 +2846,9 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         const contextRegionName = mapKeyToRegionName[mapKey] || null;
         
         // Get best speedrun (first in sorted array) - clean it like upload does
-        if (mapData.speedrun && mapData.speedrun.length > 0) {
-          const bestSpeedrun = mapData.speedrun[0];
+        const currentSeasonSpeedruns = getRunsForSeason(mapData.speedrun, currentSeason);
+        if (currentSeasonSpeedruns.length > 0) {
+          const bestSpeedrun = currentSeasonSpeedruns[0];
           // Ensure required fields are present
           if (bestSpeedrun.time !== undefined && bestSpeedrun.time !== null) {
             const cleanSpeedrun = cleanRunForUpload(bestSpeedrun, contextRegionName, {
@@ -2682,8 +2859,9 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         }
         
         // Get best rank (first in sorted array) - clean it like upload does
-        if (mapData.rank && mapData.rank.length > 0) {
-          const bestRank = mapData.rank[0];
+        const currentSeasonRankRuns = getRunsForSeason(mapData.rank, currentSeason);
+        if (currentSeasonRankRuns.length > 0) {
+          const bestRank = currentSeasonRankRuns[0];
           // Ensure required fields are present
           if (bestRank.points !== undefined && bestRank.points !== null) {
             const cleanRank = cleanRunForUpload(bestRank, contextRegionName, {
@@ -2695,8 +2873,9 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         }
         
         // Get best floor (first in sorted array) - clean it like upload does
-        if (mapData.floor && mapData.floor.length > 0) {
-          const bestFloor = mapData.floor[0];
+        const currentSeasonFloorRuns = getRunsForSeason(mapData.floor, currentSeason);
+        if (currentSeasonFloorRuns.length > 0) {
+          const bestFloor = currentSeasonFloorRuns[0];
           // Ensure required fields are present
           if (bestFloor.floor !== undefined && bestFloor.floor !== null && bestFloor.floor > 0) {
             const cleanFloor = cleanRunForUpload(bestFloor, contextRegionName, {

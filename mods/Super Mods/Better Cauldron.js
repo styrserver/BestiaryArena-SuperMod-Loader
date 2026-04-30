@@ -387,9 +387,10 @@
         const filterValue = filterSelect.value;
         const rows = Array.from(tbody.querySelectorAll('tr'));
 
-        // Creatures: sort by shiny then tier when showing all
+        // Creatures: prioritize shiny, then sealed (tier 5), then tier when showing all
         if (type === 'creatures' && filterValue === 'all') {
             rows.sort((a, b) => {
+                const isSealed = (row) => (parseInt(getRowTier(row, 'creatures')) || 1) === 5 ? 1 : 0;
                 const isShiny = (row) => {
                     const img = row.querySelector('img');
                     return img && img.src.includes('-shiny.png') ? 1 : 0;
@@ -397,6 +398,8 @@
                 const getRarity = (row) => parseInt(getRowTier(row, 'creatures')) || 1;
                 const shinyDiff = isShiny(b) - isShiny(a);
                 if (shinyDiff !== 0) return shinyDiff;
+                const sealedDiff = isSealed(b) - isSealed(a);
+                if (sealedDiff !== 0) return sealedDiff;
                 return getRarity(b) - getRarity(a);
             });
             rows.forEach(row => tbody.appendChild(row));
