@@ -362,6 +362,8 @@
 					const monsterLevel = monster.level || 50;
 					const monsterTier = piece.tier || monster.tier || 4;
 					const monsterAwakened =
+						piece.awakened === true ||
+						(monster.level != null && Number(monster.level) > 50) ||
 						monster.awaken === true ||
 						monster.awakened === true ||
 						monster.isAwakened === true ||
@@ -376,7 +378,7 @@
 						nickname: null,
 						tileIndex: piece.tile,
 						gameId: monsterGameId,
-						tier: monsterTier,
+						tier: monsterAwakened ? 6 : monsterTier,
 						awaken: monsterAwakened,
 						awakened: monsterAwakened,
 						isAwakened: monsterAwakened,
@@ -519,7 +521,8 @@
 					tile: tile,
 					monster: {
 						name: monsterName,
-						level: monsterLevel,
+						level: monsterLevel ?? 50,
+						awakened: monster.tier === 6 || Number(monster.starTier) >= 6,
 						// Match the in-game UI order.
 						hp: monster.hp,
 						ad: monster.ad,
@@ -590,13 +593,14 @@
 				const monsterName = monsterGameIdsToNames.get(piece.gameId);
 				
 				// Get monster level - use piece.level directly if available
-				const monsterLevel = piece.level || 50;
+				const monsterLevel = piece.level ?? 50;
 
 				const serialized = {
 					tile: piece.tileIndex,
 					monster: {
 						name: monsterName,
 						level: monsterLevel,
+						awakened: piece.tier === 6 || Number(piece.starTier) >= 6,
 						// Match the in-game UI order.
 						hp: piece.genes?.hp || 20,
 						ad: piece.genes?.ad || 20,
@@ -605,9 +609,6 @@
 						magicResist: piece.genes?.magicResist || 20,
 					}
 				};
-				if (monsterLevel === 50) {
-					delete serialized.monster.level;
-				}
 				
 				// Add equipment if available
 				if (piece.equip && piece.equip.gameId) {

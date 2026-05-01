@@ -845,6 +845,7 @@ let lastKnownSessionCount = 0;
 let lastKnownGold = 0;
 let lastKnownDust = 0;
 let lastKnownShiny = 0;
+let lastKnownSealed = 0;
 
 // Throttling for board subscription to avoid interfering with animations
 let lastBoardSubscriptionTime = 0;
@@ -855,6 +856,7 @@ let lastBoardSubscriptionTime = 0;
 const PANEL_ID = "mod-autoplay-analyzer-panel";
 const BUTTON_ID = "mod-autoplay-button";
 const DUST_ICON_SRC = '/assets/icons/dust.png';
+const SEALED_ICON_SRC = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
 const LAYOUT_MODES = {
     VERTICAL: 'vertical',
     HORIZONTAL: 'horizontal',
@@ -933,6 +935,7 @@ const HuntAnalyzerState = {
     runes: 0,
     dust: 0,
     shiny: 0,
+    sealed: 0,
     staminaSpent: 0,
     staminaRecovered: 0,
     wins: 0,
@@ -1481,30 +1484,36 @@ HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
 // Function to create inventory-style creature portrait like the game does
 function createInventoryStyleCreaturePortrait(creatureData) {
     const containerSlot = createContainerSlot('34px');
+    containerSlot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
     
-    // Rarity border
-    const rarityDiv = createRarityBorder(creatureData.tierLevel || 1);
+    // Rarity/sealed border
+    const rarityDiv = creatureData.isSealed
+        ? (() => {
+            const sealedBorder = document.createElement('div');
+            sealedBorder.className = 'rarity-sealed absolute inset-0 z-1 opacity-80';
+            sealedBorder.setAttribute('role', 'none');
+            return sealedBorder;
+        })()
+        : createRarityBorder(creatureData.tierLevel || 1);
     
     // Creature image
     const img = document.createElement('img');
     img.src = `/assets/portraits/${creatureData.gameId}.png`;
     img.alt = creatureData.originalName;
-    img.style.width = '100%';
-    img.style.height = '100%';
-    img.style.maxWidth = '34px';
-    img.style.maxHeight = '34px';
+    img.className = 'pixelated ml-auto';
+    img.style.width = '32px';
+    img.style.height = '32px';
     img.style.objectFit = 'contain';
     
     // Level count
     const levelSpan = document.createElement('span');
-    levelSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+    levelSpan.className = 'pixel-font-16 absolute bottom-0 left-0 z-1 flex size-full items-end pl-0.5 text-whiteExp';
     levelSpan.style.position = 'absolute';
     levelSpan.style.bottom = '0px';
-    levelSpan.style.left = '2px';
+    levelSpan.style.left = '0px';
     levelSpan.style.color = 'white';
     levelSpan.style.fontSize = '14px';
-    levelSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-    levelSpan.style.padding = '0px 2px';
+    levelSpan.style.background = 'radial-gradient(circle at left bottom, rgba(0, 0, 0, 0.5) 6px, transparent 24px)';
     levelSpan.textContent = creatureData.count || 1;
     
     containerSlot.appendChild(rarityDiv);
@@ -1525,6 +1534,18 @@ function createInventoryStyleCreaturePortrait(creatureData) {
         shinyIcon.style.imageRendering = 'pixelated';
         shinyIcon.style.zIndex = '10';
         containerSlot.appendChild(shinyIcon);
+    }
+
+    if (creatureData.isSealed) {
+        const sealedIcon = document.createElement('img');
+        sealedIcon.src = SEALED_ICON_SRC;
+        sealedIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+        sealedIcon.alt = 'Sealed';
+        sealedIcon.title = 'Sealed';
+        sealedIcon.style.width = '9px';
+        sealedIcon.style.height = '10px';
+        sealedIcon.style.filter = 'drop-shadow(black 0px 0px 1px)';
+        containerSlot.appendChild(sealedIcon);
     }
     
     return containerSlot;
@@ -2114,6 +2135,9 @@ function updatePanelThemeColors(panel) {
     
     const shinyAmountSpan = document.getElementById('mod-total-shiny-display');
     if (shinyAmountSpan) shinyAmountSpan.style.color = getThemeColor('textShiny');
+
+    const sealedAmountSpan = document.getElementById('mod-total-sealed-display');
+    if (sealedAmountSpan) sealedAmountSpan.style.color = getThemeColor('textShiny');
     
     const runesAmountSpan = document.getElementById('mod-total-runes-display');
     if (runesAmountSpan) runesAmountSpan.style.color = getThemeColor('textRunes');
@@ -3046,8 +3070,11 @@ function getCreatureDetails(monsterDrop) {
     if (friendlyName) name = friendlyName;
     name = formatNameToTitleCase(name);
     
-    // Check if creature is shiny
+    const { totalStats, tierName, tierLevel } = getCreatureTierDetails(monsterDrop.genes);
+
+    // Check if creature is shiny/sealed
     const isShiny = monsterDrop.shiny === true;
+    const isSealed = Number(monsterDrop.tier ?? monsterDrop.metadata?.tier ?? tierLevel) === 5;
     
     // Create container for creature visual with potential shiny overlay
     const visualContainer = document.createElement('div');
@@ -3083,9 +3110,23 @@ function getCreatureDetails(monsterDrop) {
         shinyIcon.style.pointerEvents = 'none';
         visualContainer.appendChild(shinyIcon);
     }
+
+    if (isSealed) {
+        const sealedIcon = document.createElement('img');
+        sealedIcon.src = SEALED_ICON_SRC;
+        sealedIcon.alt = 'sealed';
+        sealedIcon.title = 'Sealed';
+        sealedIcon.style.position = 'absolute';
+        sealedIcon.style.top = '2px';
+        sealedIcon.style.right = '2px';
+        sealedIcon.style.width = '8px';
+        sealedIcon.style.height = '8px';
+        sealedIcon.style.zIndex = '10';
+        sealedIcon.style.pointerEvents = 'none';
+        visualContainer.appendChild(sealedIcon);
+    }
     
-    const { totalStats, tierName, tierLevel } = getCreatureTierDetails(monsterDrop.genes);
-    return { name, visual: visualContainer, rarity: tierLevel, totalStats, tierName, tierLevel, gameId: monsterDrop.gameId, isShiny };
+    return { name, visual: visualContainer, rarity: tierLevel, totalStats, tierName, tierLevel, gameId: monsterDrop.gameId, isShiny, isSealed };
 }
 function copyToClipboard(text) {
     const textarea = document.createElement('textarea');
@@ -3460,7 +3501,7 @@ class DataProcessor {
 
     // Process Creature Drop
     if (rewardScreen.monsterDrop) {
-      const { name: creatureName, totalStats, tierName, tierLevel, gameId: creatureGameId, isShiny } = 
+      const { name: creatureName, totalStats, tierName, tierLevel, gameId: creatureGameId, isShiny, isSealed } = 
         getCreatureDetails(rewardScreen.monsterDrop);
 
       if (!creatureName.toLowerCase().includes('monster squeezer')) {
@@ -3468,9 +3509,12 @@ class DataProcessor {
         if (isShiny) {
           HuntAnalyzerState.totals.shiny += 1;
         }
+        if (isSealed) {
+          HuntAnalyzerState.totals.sealed += 1;
+        }
         
-        // Include shiny status in map key to separate shiny and normal creatures
-        const mapKey = `${creatureGameId}_${tierLevel}_${isShiny ? 'shiny' : 'normal'}`;
+        // Include shiny/sealed status in map key to separate creature variants
+        const mapKey = `${creatureGameId}_${tierLevel}_${isShiny ? 'shiny' : 'normal'}_${isSealed ? 'sealed' : 'unsealed'}`;
         if (aggregatedCreaturesForSession.has(mapKey)) {
           const existing = aggregatedCreaturesForSession.get(mapKey);
           existing.count += 1;
@@ -3487,7 +3531,8 @@ class DataProcessor {
             originalName: creatureName,
             tierLevel: tierLevel,
             count: 1,
-            isShiny: isShiny
+            isShiny: isShiny,
+            isSealed: isSealed
           };
           const creatureVisual = createInventoryStyleCreaturePortrait(creatureData);
           
@@ -3503,7 +3548,8 @@ class DataProcessor {
             tierLevel,
             rarityBorderColor: getRarityBorderColor(tierLevel),
             gameId: creatureGameId,
-            isShiny: isShiny
+            isShiny: isShiny,
+            isSealed: isSealed
           });
         }
       }
@@ -3610,6 +3656,7 @@ class DataProcessor {
     HuntAnalyzerState.totals.runes = 0;
     HuntAnalyzerState.totals.dust = 0;
     HuntAnalyzerState.totals.shiny = 0;
+    HuntAnalyzerState.totals.sealed = 0;
     HuntAnalyzerState.totals.staminaSpent = 0;
     HuntAnalyzerState.totals.staminaRecovered = 0;
     HuntAnalyzerState.totals.wins = 0;
@@ -3675,7 +3722,7 @@ class DataProcessor {
         });
 
         sessionData.creatures.forEach(creature => {
-            const mapKey = `${creature.gameId}_${creature.tierLevel}_${creature.isShiny ? 'shiny' : 'normal'}`;
+            const mapKey = `${creature.gameId}_${creature.tierLevel}_${creature.isShiny ? 'shiny' : 'normal'}_${creature.isSealed ? 'sealed' : 'unsealed'}`;
         if (this.state.data.aggregatedCreatures.has(mapKey)) {
           const existing = this.state.data.aggregatedCreatures.get(mapKey);
                 existing.count += creature.count;
@@ -3696,6 +3743,9 @@ class DataProcessor {
             // Count shiny drops for display
             if (creature.isShiny) {
           HuntAnalyzerState.totals.shiny += creature.count;
+            }
+            if (creature.isSealed) {
+          HuntAnalyzerState.totals.sealed += creature.count;
             }
         });
     });
@@ -3955,6 +4005,7 @@ function renderAllSessions() {
     const cachedTotalGoldDisplayElement = domCache.get("mod-total-gold-display");
     const cachedTotalDustDisplayElement = domCache.get("mod-total-dust-display");
     const cachedTotalShinyDisplayElement = domCache.get("mod-total-shiny-display");
+    const cachedTotalSealedDisplayElement = domCache.get("mod-total-sealed-display");
     
     if (!cachedLootDiv || !cachedCreatureDropDiv || !cachedTotalGoldDisplayElement || !cachedTotalDustDisplayElement) {
         console.warn("[Hunt Analyzer] Render target divs or gold/dust display elements not available. Panel might not be open.");
@@ -3980,6 +4031,9 @@ function renderAllSessions() {
     }
     if (cachedTotalShinyDisplayElement) {
         cachedTotalShinyDisplayElement.textContent = HuntAnalyzerState.totals.shiny;
+    }
+    if (cachedTotalSealedDisplayElement) {
+        cachedTotalSealedDisplayElement.textContent = HuntAnalyzerState.totals.sealed;
     }
 
     // Get all loot items (Gold and Dust are already excluded from aggregatedLoot)
@@ -4145,16 +4199,21 @@ function renderAllSessions() {
     const sortedOverallCreatures = Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()).sort((a, b) => {
         // First priority: shiny creatures first
         if (a.isShiny !== b.isShiny) {
-            return b.isShiny ? 1 : -1; // Shiny first
+            return a.isShiny ? -1 : 1;
+        }
+
+        // Second priority: sealed creatures after shiny creatures
+        if (!!a.isSealed !== !!b.isSealed) {
+            return a.isSealed ? -1 : 1;
         }
         
-        // Second priority: name (alphabetical)
+        // Third priority: name (alphabetical)
         const nameCompare = a.originalName.localeCompare(b.originalName);
         if (nameCompare !== 0) {
             return nameCompare;
         }
         
-        // Third priority: rarity (highest tier level first)
+        // Fourth priority: rarity (highest tier level first)
         if (a.tierLevel !== b.tierLevel) {
             return b.tierLevel - a.tierLevel; // Higher tier level first (descending)
         }
@@ -4318,7 +4377,7 @@ function generateSummaryLogText() {
     summary += `${t('mods.huntAnalyzer.winLoss')}: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)\n`;
     summary += `${t('mods.huntAnalyzer.timeElapsed')}: ${formatTime(filteredTimeHours * 60 * 60 * 1000)}\n`;
     summary += `${t('mods.huntAnalyzer.gold')}: ${HuntAnalyzerState.totals.gold} | ${t('mods.huntAnalyzer.dust')}: ${HuntAnalyzerState.totals.dust}\n`;
-    summary += `${t('mods.huntAnalyzer.equipmentDrops')}: ${HuntAnalyzerState.totals.equipment} | ${t('mods.huntAnalyzer.creatureDrops')}: ${HuntAnalyzerState.totals.creatures} | ${t('mods.huntAnalyzer.shinyDrops')}: ${HuntAnalyzerState.totals.shiny}\n`;
+    summary += `${t('mods.huntAnalyzer.equipmentDrops')}: ${HuntAnalyzerState.totals.equipment} | ${t('mods.huntAnalyzer.creatureDrops')}: ${HuntAnalyzerState.totals.creatures} | ${t('mods.huntAnalyzer.shinyDrops')}: ${HuntAnalyzerState.totals.shiny} | ${t('mods.huntAnalyzer.sealedDrops')}: ${HuntAnalyzerState.totals.sealed}\n`;
     summary += `${t('mods.huntAnalyzer.totalStaminaSpent')}: ${HuntAnalyzerState.totals.staminaSpent}\n`;
     summary += `---------------------------\n`;
     summary += `${t('mods.huntAnalyzer.overallRates')}: ${autoplayRatePerHour} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${goldRatePerHour} ${t('mods.huntAnalyzer.goldPerHour')} | ${creatureRatePerHour} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${equipmentRatePerHour} ${t('mods.huntAnalyzer.equipmentPerHour')}\n`;
@@ -4351,6 +4410,7 @@ function generateSummaryLogText() {
                     totalEquipment: 0,
                     totalCreatures: 0,
                     totalShiny: 0,
+                    totalSealed: 0,
                     startTime: session.timestamp || overallStartTime,
                     endTime: session.timestamp || overallStartTime,
                     hasTimestamps: false
@@ -4410,7 +4470,7 @@ function generateSummaryLogText() {
             
             // Aggregate creatures for this map
             session.creatures.forEach(creature => {
-                const mapKey = `${creature.gameId}_${creature.tierLevel}_${creature.isShiny ? 'shiny' : 'normal'}`;
+                const mapKey = `${creature.gameId}_${creature.tierLevel}_${creature.isShiny ? 'shiny' : 'normal'}_${creature.isSealed ? 'sealed' : 'unsealed'}`;
                 if (mapGroups[mapName].creatures.has(mapKey)) {
                     const existing = mapGroups[mapName].creatures.get(mapKey);
                     existing.count += creature.count;
@@ -4422,6 +4482,9 @@ function generateSummaryLogText() {
                 mapGroups[mapName].totalCreatures += creature.count;
                 if (creature.isShiny) {
                     mapGroups[mapName].totalShiny += creature.count;
+                }
+                if (creature.isSealed) {
+                    mapGroups[mapName].totalSealed += creature.count;
                 }
             });
         });
@@ -4448,7 +4511,7 @@ function generateSummaryLogText() {
             summary += `\n${mapName}:\n`;
             summary += `  ${t('mods.huntAnalyzer.sessions')}: ${mapData.sessions} | ${t('mods.huntAnalyzer.winLoss')}: ${mapData.wins}/${mapData.losses} (${mapWinRate}%) | ${t('mods.huntAnalyzer.time')}: ${formatTime(mapData.endTime - mapData.startTime)}${mapData.hasTimestamps ? '' : ` (${t('mods.huntAnalyzer.estimated')})`}\n`;
             summary += `  ${t('mods.huntAnalyzer.gold')}: ${mapData.totalGold} | ${t('mods.huntAnalyzer.dust')}: ${mapData.totalDust} | ${t('mods.huntAnalyzer.stamina')}: ${mapData.totalStamina}\n`;
-            summary += `  ${t('mods.huntAnalyzer.equipment')}: ${mapData.totalEquipment} | ${t('mods.huntAnalyzer.creatures')}: ${mapData.totalCreatures} | ${t('mods.huntAnalyzer.shiny')}: ${mapData.totalShiny}\n`;
+            summary += `  ${t('mods.huntAnalyzer.equipment')}: ${mapData.totalEquipment} | ${t('mods.huntAnalyzer.creatures')}: ${mapData.totalCreatures} | ${t('mods.huntAnalyzer.shiny')}: ${mapData.totalShiny} | ${t('mods.huntAnalyzer.sealed')}: ${mapData.totalSealed}\n`;
             summary += `  ${t('mods.huntAnalyzer.rates')}: ${mapSessionRate} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${mapGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${mapCreatureRate} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${mapEquipmentRate} ${t('mods.huntAnalyzer.equipmentPerHour')}\n`;
             summary += `  ${t('mods.huntAnalyzer.efficiency')}: ${mapGoldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${mapSessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${mapStaminaRate} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
             
@@ -4497,7 +4560,11 @@ function generateSummaryLogText() {
             // shiny first, then name, then tier (high->low), then gameId.
             const sortedCreatures = Array.from(mapData.creatures.values()).sort((a, b) => {
                 if (a.isShiny !== b.isShiny) {
-                    return b.isShiny ? 1 : -1;
+                    return a.isShiny ? -1 : 1;
+                }
+
+                if (!!a.isSealed !== !!b.isSealed) {
+                    return a.isSealed ? -1 : 1;
                 }
 
                 const nameCompare = (a.originalName || '').localeCompare(b.originalName || '');
@@ -4521,6 +4588,9 @@ function generateSummaryLogText() {
                     let creatureLine = `    ${creature.originalName} (${creature.tierName}): x${creature.count}`;
                     if (creature.isShiny) {
                         creatureLine = `    ✨ ${creatureLine}`;
+                    }
+                    if (creature.isSealed) {
+                        creatureLine = `    ⭐ ${creatureLine}`;
                     }
                     summary += `${creatureLine}\n`;
                 });
@@ -4905,6 +4975,7 @@ function resetHuntAnalyzerState() {
     HuntAnalyzerState.totals.runes = 0;
     HuntAnalyzerState.totals.dust = 0;
     HuntAnalyzerState.totals.shiny = 0;
+    HuntAnalyzerState.totals.sealed = 0;
     HuntAnalyzerState.totals.staminaSpent = 0;
     HuntAnalyzerState.totals.staminaRecovered = 0;
     HuntAnalyzerState.totals.wins = 0;
@@ -5140,6 +5211,7 @@ function createAutoplayAnalyzerPanel() {
         HuntAnalyzerState.totals.runes = 0;
         HuntAnalyzerState.totals.dust = 0;
         HuntAnalyzerState.totals.shiny = 0;
+        HuntAnalyzerState.totals.sealed = 0;
         HuntAnalyzerState.totals.staminaSpent = 0;
         HuntAnalyzerState.totals.staminaRecovered = 0;
         HuntAnalyzerState.totals.wins = 0;
@@ -5571,6 +5643,30 @@ function createAutoplayAnalyzerPanel() {
     shinyDisplayDiv.appendChild(shinyIcon);
     rightTotalsSection.appendChild(shinyDisplayDiv);
 
+    // Sealed Display
+    const sealedDisplayDiv = document.createElement('div');
+    sealedDisplayDiv.style.display = 'flex';
+    sealedDisplayDiv.style.alignItems = 'center';
+    sealedDisplayDiv.style.gap = '4px';
+
+    const sealedIcon = document.createElement('img');
+    sealedIcon.style.width = '12px';
+    sealedIcon.style.height = '12px';
+    sealedIcon.style.imageRendering = 'pixelated';
+    sealedIcon.src = SEALED_ICON_SRC;
+    sealedIcon.alt = 'Sealed';
+
+    const sealedAmountSpan = document.createElement('span');
+    sealedAmountSpan.id = 'mod-total-sealed-display';
+    sealedAmountSpan.style.color = getThemeColor('textShiny');
+    sealedAmountSpan.style.fontSize = '12px';
+    sealedAmountSpan.style.fontWeight = 'bold';
+    sealedAmountSpan.textContent = '0';
+
+    sealedDisplayDiv.appendChild(sealedAmountSpan);
+    sealedDisplayDiv.appendChild(sealedIcon);
+    rightTotalsSection.appendChild(sealedDisplayDiv);
+
     // Runes Display
     const runesDisplayDiv = document.createElement('div');
     runesDisplayDiv.style.display = 'flex';
@@ -5722,6 +5818,7 @@ function createAutoplayAnalyzerPanel() {
     domCache.set("mod-total-gold-display", goldAmountSpan);
     domCache.set("mod-total-dust-display", dustAmountSpan);
     domCache.set("mod-total-shiny-display", shinyAmountSpan);
+    domCache.set("mod-total-sealed-display", sealedAmountSpan);
     domCache.set("mod-total-runes-display", runesAmountSpan);
     domCache.set("mod-total-stamina-spent", totalStaminaSpentElement);
 
@@ -5873,6 +5970,7 @@ function updatePanelDisplay() {
     lastKnownGold = HuntAnalyzerState.totals.gold;
     lastKnownDust = HuntAnalyzerState.totals.dust;
     lastKnownShiny = HuntAnalyzerState.totals.shiny;
+    lastKnownSealed = HuntAnalyzerState.totals.sealed;
     
     // Get cached DOM elements
     const cachedLootDiv = domCache.get("mod-loot-display");
@@ -5890,6 +5988,7 @@ function updatePanelDisplay() {
     const cachedTotalGoldDisplayElement = domCache.get("mod-total-gold-display");
     const cachedTotalDustDisplayElement = domCache.get("mod-total-dust-display");
     const cachedTotalShinyDisplayElement = domCache.get("mod-total-shiny-display");
+    const cachedTotalSealedDisplayElement = domCache.get("mod-total-sealed-display");
     const cachedTotalRunesDisplayElement = domCache.get("mod-total-runes-display");
     const cachedTotalStaminaSpentElement = domCache.get("mod-total-stamina-spent");
 
@@ -5936,6 +6035,11 @@ function updatePanelDisplay() {
     // Update shiny display
     if (cachedTotalShinyDisplayElement) {
         cachedTotalShinyDisplayElement.textContent = HuntAnalyzerState.totals.shiny;
+    }
+
+    // Update sealed display
+    if (cachedTotalSealedDisplayElement) {
+        cachedTotalSealedDisplayElement.textContent = HuntAnalyzerState.totals.sealed;
     }
 
     // Update runes display

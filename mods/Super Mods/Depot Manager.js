@@ -374,7 +374,13 @@ function upsertDepotCreatureMeta(uniqueId, partialMeta) {
     ap: Number.isFinite(partialMeta.ap) ? partialMeta.ap : Number(prev.ap || 0),
     armor: Number.isFinite(partialMeta.armor) ? partialMeta.armor : Number(prev.armor || 0),
     magicResist: Number.isFinite(partialMeta.magicResist) ? partialMeta.magicResist : Number(prev.magicResist || 0),
-    tier: Number.isFinite(partialMeta.tier) ? partialMeta.tier : (Number.isFinite(prev.tier) ? prev.tier : null)
+    tier: Number.isFinite(partialMeta.tier) ? partialMeta.tier : (Number.isFinite(prev.tier) ? prev.tier : null),
+    rowBucketKey: typeof partialMeta.rowBucketKey === 'string'
+      ? partialMeta.rowBucketKey
+      : (typeof prev.rowBucketKey === 'string' ? prev.rowBucketKey : null),
+    rowBucketIndex: Number.isFinite(partialMeta.rowBucketIndex)
+      ? Number(partialMeta.rowBucketIndex)
+      : (Number.isFinite(prev.rowBucketIndex) ? Number(prev.rowBucketIndex) : null)
   };
   depotCreatureState.metaById.set(sid, next);
 }
@@ -1097,6 +1103,7 @@ function attachDepotCreatureStatTooltip(targetEl, row) {
   if (!targetEl || !row) return;
   let tooltipEl = null;
   let showTimeout = null;
+  let globalHideEventsAttached = false;
 
   const buildTooltip = () => {
     const tooltip = document.createElement('div');
@@ -1119,6 +1126,10 @@ function attachDepotCreatureStatTooltip(targetEl, row) {
 
   const updatePosition = () => {
     if (!tooltipEl) return;
+    if (!targetEl.isConnected) {
+      hide();
+      return;
+    }
     const rect = targetEl.getBoundingClientRect();
     const tipRect = tooltipEl.getBoundingClientRect();
     let left = rect.right + 10;
@@ -1133,6 +1144,14 @@ function attachDepotCreatureStatTooltip(targetEl, row) {
   const show = () => {
     if (showTimeout) clearTimeout(showTimeout);
     showTimeout = setTimeout(() => {
+      showTimeout = null;
+      if (!targetEl.isConnected || !targetEl.matches(':hover')) return;
+      if (!globalHideEventsAttached) {
+        window.addEventListener('blur', hide, true);
+        window.addEventListener('scroll', hide, true);
+        document.addEventListener('visibilitychange', hide, true);
+        globalHideEventsAttached = true;
+      }
       if (!tooltipEl) tooltipEl = buildTooltip();
       tooltipEl.style.display = 'block';
       updatePosition();
@@ -1147,6 +1166,12 @@ function attachDepotCreatureStatTooltip(targetEl, row) {
     if (tooltipEl) {
       tooltipEl.remove();
       tooltipEl = null;
+    }
+    if (globalHideEventsAttached) {
+      window.removeEventListener('blur', hide, true);
+      window.removeEventListener('scroll', hide, true);
+      document.removeEventListener('visibilitychange', hide, true);
+      globalHideEventsAttached = false;
     }
   };
 
@@ -1856,6 +1881,17 @@ function getBestiarySlotVisualRow(slot, domIndex) {
   };
 }
 
+function getDepotVisualBucketKey(row) {
+  if (!row) return '';
+  return [
+    String(row.gameId || ''),
+    String(row.displayedLevel ?? ''),
+    row.isShiny ? '1' : '0',
+    row.wantsElite ? '1' : '0',
+    Number.isFinite(row.rarity) ? String(row.rarity) : 'x'
+  ].join('|');
+}
+
 /**
  * Returns a score if this grid row could be that monster instance; null if ruled out.
  * Uses game species + shiny + level + rarity/elite — not portrait order heuristics.
@@ -1885,11 +1921,34 @@ function depotVisualScoreForMonster(row, m) {
  */
 function collectBestiaryVisualRowsFromSlotElements(slotElements) {
   const rows = [];
+  const bucketCounts = new Map();
   for (let i = 0; i < slotElements.length; i++) {
     const row = getBestiarySlotVisualRow(slotElements[i], i);
-    if (row) rows.push(row);
+    if (!row) continue;
+    const bucketKey = getDepotVisualBucketKey(row);
+    const bucketIndex = bucketCounts.get(bucketKey) || 0;
+    bucketCounts.set(bucketKey, bucketIndex + 1);
+    row.bucketKey = bucketKey;
+    row.bucketIndex = bucketIndex;
+    rows.push(row);
   }
   return rows;
+}
+
+function getDepotVisualSignatureFromImg(creatureImg) {
+  const slot = getMonsterInventorySlotFromImg(creatureImg);
+  if (!slot) return null;
+  const slotElements = getMonsterGridCreatureSlotElements();
+  if (!Array.isArray(slotElements) || slotElements.length === 0) return null;
+  const domIndex = slotElements.indexOf(slot);
+  if (domIndex < 0) return null;
+  const rows = collectBestiaryVisualRowsFromSlotElements(slotElements);
+  const row = rows.find((r) => r.slot === slot);
+  if (!row) return null;
+  return {
+    rowBucketKey: row.bucketKey || getDepotVisualBucketKey(row),
+    rowBucketIndex: Number.isFinite(row.bucketIndex) ? row.bucketIndex : null
+  };
 }
 
 function buildDepotHideSlotPairsFromVisualMatch(slotElements) {
@@ -1897,15 +1956,50 @@ function buildDepotHideSlotPairsFromVisualMatch(slotElements) {
   const byId = new Map(monsters.map((m) => [String(m.id), m]));
 
   const rows = collectBestiaryVisualRowsFromSlotElements(slotElements);
+  for (const row of rows) {
+    row.resolvedUniqueId = resolveCreatureUniqueIdFromReactFiber(row.img);
+  }
 
   const usedSlots = new Set();
   /** @type {Array<{ slot: Element, id: string }>} */
   const pairs = [];
+  const remainingById = new Map();
+  for (const rawSid of depotCreatureState.ids) {
+    const sid = String(rawSid);
+    remainingById.set(sid, (remainingById.get(sid) || 0) + 1);
+  }
+
+  // Zeroth pass: exact id match from React fiber state (most reliable across rerenders/tabs).
+  for (const row of rows) {
+    const exactSid = String(row.resolvedUniqueId || '').trim();
+    if (!exactSid) continue;
+    if ((remainingById.get(exactSid) || 0) <= 0) continue;
+    usedSlots.add(row.slot);
+    pairs.push({ slot: row.slot, id: exactSid });
+    remainingById.set(exactSid, (remainingById.get(exactSid) || 0) - 1);
+  }
+
+  // First pass: keep user-tagged slots attached to their exact creature id.
+  // This prevents same-visual duplicates from stealing the clicked slot due to depot list order.
+  for (const row of rows) {
+    if (usedSlots.has(row.slot)) continue;
+    const taggedSid = String(row.slot.getAttribute(DATA_DEPOT_SLOT_ID) || '').trim();
+    if (!taggedSid) continue;
+    if ((remainingById.get(taggedSid) || 0) <= 0) continue;
+    const taggedMonster = byId.get(taggedSid);
+    if (!taggedMonster) continue;
+    if (depotVisualScoreForMonster(row, taggedMonster) == null) continue;
+    usedSlots.add(row.slot);
+    pairs.push({ slot: row.slot, id: taggedSid });
+    remainingById.set(taggedSid, (remainingById.get(taggedSid) || 0) - 1);
+  }
 
   for (const rawSid of depotCreatureState.ids) {
     const sid = String(rawSid);
+    if ((remainingById.get(sid) || 0) <= 0) continue;
     const m = byId.get(sid);
     if (!m) continue;
+    const meta = depotCreatureState.metaById.get(sid) || null;
 
     let bestRow = null;
     let bestAdjusted = -Infinity;
@@ -1915,7 +2009,13 @@ function buildDepotHideSlotPairsFromVisualMatch(slotElements) {
       const sc = depotVisualScoreForMonster(row, m);
       if (sc == null) continue;
       const tag = String(row.slot.getAttribute(DATA_DEPOT_SLOT_ID) || '').trim();
-      const adjusted = sc + (tag === sid ? 1e9 : 0);
+      let adjusted = sc + (tag === sid ? 1e9 : 0);
+      if (meta?.rowBucketKey && row.bucketKey === meta.rowBucketKey) {
+        adjusted += 5e5;
+        if (Number.isFinite(meta.rowBucketIndex) && Number.isFinite(row.bucketIndex)) {
+          adjusted += Math.max(0, 1e4 - (Math.abs(meta.rowBucketIndex - row.bucketIndex) * 100));
+        }
+      }
       if (adjusted > bestAdjusted || (adjusted === bestAdjusted && row.domIndex < bestDomIdx)) {
         bestAdjusted = adjusted;
         bestRow = row;
@@ -1925,6 +2025,7 @@ function buildDepotHideSlotPairsFromVisualMatch(slotElements) {
     if (bestRow) {
       usedSlots.add(bestRow.slot);
       pairs.push({ slot: bestRow.slot, id: sid });
+      remainingById.set(sid, (remainingById.get(sid) || 0) - 1);
     }
   }
 
@@ -2067,13 +2168,20 @@ function validateDepotContextMenu(menuElem) {
 
 function injectDepotMenuItems(menuElem) {
   if (!validateDepotContextMenu(menuElem)) {
-    // Expected when right-clicking equipment: keep creature debug output clean.
-    if (parseEquipmentMenuMeta(menuElem)) return false;
+    // Expected/noisy paths: already-processed menu passes and non-creature/equipment menus.
+    const alreadyProcessed = menuElem.hasAttribute('data-depot-processed');
+    const creatureName = getCreatureNameFromMenu(menuElem);
+    if (alreadyProcessed) return false;
+    if (!creatureName) {
+      if (parseEquipmentMenuMeta(menuElem)) return false;
+      return false;
+    }
+    // Keep only actionable validation diagnostics.
     depotDebug('injectDepotMenuItems: validate failed', {
       enableCreatureDepot: depotConfig.enableCreatureDepot,
       scrollLocked: isScrollLocked(),
-      alreadyProcessed: menuElem.hasAttribute('data-depot-processed'),
-      creatureName: getCreatureNameFromMenu(menuElem)
+      alreadyProcessed,
+      creatureName
     });
     return false;
   }
@@ -2089,9 +2197,16 @@ function injectDepotMenuItems(menuElem) {
 
   const rightClickedImg = currentRightClickedCreature?.creatureImg || null;
   const creatureData = identifyCreatureFromMenu(menuElem);
-  const uniqueId = getResolvedUniqueIdForCreatureImg(rightClickedImg) || creatureData?.uniqueId || null;
+  const menuCreatureName = getCreatureNameFromMenu(menuElem);
+  // Prefer exact right-click React instance id, then context-menu identification (%), then visual fallback.
+  const uniqueId =
+    currentRightClickedCreature?.resolvedUniqueId ||
+    creatureData?.uniqueId ||
+    getResolvedUniqueIdForCreatureImg(rightClickedImg) ||
+    null;
   if (!uniqueId) {
     depotDebug('injectDepotMenuItems: failed to resolve uniqueId', {
+      fromReact: currentRightClickedCreature?.resolvedUniqueId || null,
       fromMenu: creatureData?.uniqueId || null,
       hasRightClickedImg: !!rightClickedImg
     });
@@ -2115,7 +2230,16 @@ function injectDepotMenuItems(menuElem) {
     e.preventDefault();
     e.stopPropagation();
     const imgEl = currentRightClickedCreature?.creatureImg;
-    const liveSid = getResolvedUniqueIdForCreatureImg(imgEl) || sid;
+    // Keep the context-menu resolved id authoritative for this action; fallback only if missing.
+    const liveSid = sid || getResolvedUniqueIdForCreatureImg(imgEl);
+    const liveMonsters = getPlayerMonsters();
+    const liveMonster = liveMonsters.find((m) => String(m.id) === String(liveSid)) || null;
+    const visualSignature = getDepotVisualSignatureFromImg(imgEl);
+    const resolvedCreatureName =
+      liveMonster?.metadata?.name ||
+      menuCreatureName ||
+      creatureData?.creatureName ||
+      null;
     const liveSlot = getMonsterInventorySlotFromImg(imgEl);
     const liveInDepot = Boolean(
       liveSlot &&
@@ -2129,10 +2253,9 @@ function injectDepotMenuItems(menuElem) {
       setDepotSlotTagFromImg(imgEl, null);
     } else {
       depotCreatureState.ids.push(liveSid);
-      const monsters = getPlayerMonsters();
-      const matchedMonster = monsters.find((m) => String(m.id) === String(liveSid)) || null;
+      const matchedMonster = liveMonster;
       upsertDepotCreatureMeta(liveSid, {
-        name: matchedMonster?.metadata?.name || creatureData?.creatureName || null,
+        name: resolvedCreatureName,
         gameId: matchedMonster?.gameId ?? null,
         shiny: !!matchedMonster?.shiny,
         exp: matchedMonster?.exp ?? null,
@@ -2141,7 +2264,9 @@ function injectDepotMenuItems(menuElem) {
         ap: matchedMonster?.ap ?? 0,
         armor: matchedMonster?.armor ?? 0,
         magicResist: matchedMonster?.magicResist ?? 0,
-        tier: matchedMonster?.tier ?? null
+        tier: matchedMonster?.tier ?? null,
+        rowBucketKey: visualSignature?.rowBucketKey ?? null,
+        rowBucketIndex: visualSignature?.rowBucketIndex ?? null
       });
       // Match Favorites behavior: auto-lock creature when adding to depot.
       if (!matchedMonster?.locked) {
@@ -2162,11 +2287,16 @@ function injectDepotMenuItems(menuElem) {
     updateDepotInventoryButtonCount();
     depotDebug('depot menu action', {
       sid: liveSid,
+      creatureName: resolvedCreatureName,
       inDepot: liveInDepot,
       idsAfter: [...depotCreatureState.ids],
       totalDepotIds: depotCreatureState.ids.length
     });
-    console.info('[Depot Manager] Send to depot:', liveInDepot ? 'moved to bestiary' : 'hidden from grid', { creatureId: liveSid });
+    console.info(
+      '[Depot Manager] Send to depot:',
+      liveInDepot ? 'moved to bestiary' : 'hidden from grid',
+      { creatureId: liveSid, creatureName: resolvedCreatureName }
+    );
     currentRightClickedCreature = null;
     applyDepotLayout();
     // Avoid duplicate hide passes for duplicates in hidden-mode depot.
@@ -2181,7 +2311,7 @@ function injectDepotMenuItems(menuElem) {
   item.setAttribute('data-depot-menu-item', 'true');
 
   moveDepotMenuItemToBottom(menuElem, item);
-  depotDebug('injectDepotMenuItems: row added', { sid, inDepot, label: item.textContent });
+  depotDebug('injectDepotMenuItems: row added', { sid, creatureName: menuCreatureName || creatureData?.creatureName || null, inDepot, label: item.textContent });
   return true;
 }
 
@@ -2992,6 +3122,50 @@ function getResolvedUniqueIdForCreatureImg(creatureImg) {
   return fallback != null ? String(fallback) : null;
 }
 
+function getReactFiberNode(el) {
+  if (!el) return null;
+  const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+  return key ? el[key] : null;
+}
+
+function findMonsterIdInObject(value, seen = new Set(), depth = 0) {
+  if (!value || typeof value !== 'object' || seen.has(value) || depth > 4) return null;
+  seen.add(value);
+  if (typeof value.monsterId === 'string' || typeof value.monsterId === 'number') return value.monsterId;
+  if (typeof value.databaseId === 'string' || typeof value.databaseId === 'number') return value.databaseId;
+  if (typeof value.id === 'string' || typeof value.id === 'number') return value.id;
+  if (value.piece && (typeof value.piece.monsterId === 'string' || typeof value.piece.monsterId === 'number')) return value.piece.monsterId;
+  for (const child of Object.values(value)) {
+    const found = findMonsterIdInObject(child, seen, depth + 1);
+    if (found != null) return found;
+  }
+  return null;
+}
+
+function resolveCreatureUniqueIdFromReactFiber(creatureImg) {
+  try {
+    const button = creatureImg?.closest('button');
+    const monsters = getPlayerMonsters();
+    if (!button || !Array.isArray(monsters) || monsters.length === 0) return null;
+
+    let node = getReactFiberNode(button);
+    let hops = 0;
+    while (node && hops < 35) {
+      const props = node.memoizedProps || node.pendingProps || null;
+      const maybeId = props ? findMonsterIdInObject(props) : null;
+      if (maybeId != null) {
+        const hit = monsters.find((m) => String(m.id) === String(maybeId));
+        if (hit) return String(hit.id);
+      }
+      node = node.return || null;
+      hops += 1;
+    }
+  } catch (error) {
+    // Best-effort only; fallback resolver remains active.
+  }
+  return null;
+}
+
 function sortMonstersByVisualOrder(monsters) {
   return monsters.slice().sort((a, b) => {
     if (b.exp !== a.exp) return b.exp - a.exp;
@@ -3241,7 +3415,8 @@ function startContextMenuObserver() {
   function handleCreatureRightClick(event) {
     const creatureImg = event.target.closest('button')?.querySelector('img[alt="creature"]');
     if (creatureImg) {
-      currentRightClickedCreature = { creatureImg };
+      const resolvedUniqueId = resolveCreatureUniqueIdFromReactFiber(creatureImg);
+      currentRightClickedCreature = { creatureImg, resolvedUniqueId };
       [0, 16, 50, 100, 200].forEach((d) => scheduleTimeout(tryInjectOpenMenus, d));
     }
   }

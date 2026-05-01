@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "3.7.2",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Better Cauldron",
+          "text": "Creature sorting now prioritizes shiny, awakened, sealed, then higher tier."
+        },
+        {
+          "type": "changed",
+          "mod": "Core",
+          "text": "Fixed Board replay helpers ($configureBoard / $serializeBoard). (Thanks Mathias Bynens)."
+        },
+        {
+          "type": "fixed",
+          "mod": "Autoseller",
+          "text": "Fixed autosqueeze not running after battle rewards when serverResults came from cached board state."
+        },
+        {
+          "type": "fixed",
+          "mod": "Depot Manager",
+          "text": "Fixed duplicate creature depot targeting so the selected instance stays consistent after tab switches/reloads."
+        },
+        {
+          "type": "fixed",
+          "mod": "Hunt Analyzer",
+          "text": "Added sealed drop icon/sorting and live sealed counter."
+        }
+      ]
+    },
+    {
       "version": "3.7.1",
       "changes": [
         {

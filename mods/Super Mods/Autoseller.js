@@ -6687,8 +6687,8 @@
                         // Try to get serverResults from stored value (from board subscription) or from snapshot
                         let serverResults = latestServerResults;
                         let serverResultsSource = 'latestServerResults';
+                        const boardState = globalThis.state?.board?.getSnapshot?.();
                         if (!serverResults) {
-                            const boardState = globalThis.state?.board?.getSnapshot?.();
                             serverResults = boardState?.context?.serverResults;
                             serverResultsSource = 'boardSnapshot';
                         }
