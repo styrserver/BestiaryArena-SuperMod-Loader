@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.7.3",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Hunt Analyzer",
+          "text": "Aligned live drop-rate rows and changed sealed counter."
+        },
+        {
+          "type": "changed",
+          "mod": "Manual Runner",
+          "text": "Added floor 11+ autosell sealed-creature warning on the mod card and config toggle."
+        },
+        {
+          "type": "fixed",
+          "mod": "Mod Settings",
+          "text": "Fixed run season detection so existing Season 1 runs are no longer reclassified as Season 2 by timestamp fallback."
+        }
+      ]
+    },
+    {
       "version": "3.7.2",
       "changes": [
         {

@@ -127,6 +127,7 @@ function dispatchEsc() {
 // Track active modals
 let activeRunningModal = null;
 let activeConfigPanel = null;
+let mainButtonWarningInterval = null;
 
 // Inject Manual Runner styles (reuse Hunt Analyzer theme)
 function injectManualRunnerStyles() {
@@ -618,6 +619,25 @@ function getCurrentFloor() {
   } catch (error) {
     console.error('[Manual Runner] Error getting current floor:', error);
     return 0;
+  }
+}
+
+function updateMainButtonSealedWarning() {
+  try {
+    const button = document.getElementById(BUTTON_ID);
+    if (!button) return;
+
+    const currentFloor = getCurrentFloor();
+    const showWarning = Boolean(config.enableAutoSellCreatures) && currentFloor >= 11;
+    const baseText = t('mods.manualRunner.buttonText') || 'Manual Runner';
+
+    button.textContent = showWarning ? `${baseText} ⚠` : baseText;
+    button.style.color = showWarning ? '#e74c3c' : '#ffe066';
+    button.title = showWarning
+      ? 'Autosell is enabled on floor 11+ (sealed creatures may be sold)'
+      : (t('mods.manualRunner.buttonTooltip') || 'Run manual mode until victory (restarts on defeat)');
+  } catch (error) {
+    console.warn('[Manual Runner] Error updating main button warning:', error);
   }
 }
 
@@ -2287,7 +2307,23 @@ function createConfigPanel() {
   const sellLabel = document.createElement('label');
   sellLabel.htmlFor = sellInput.id;
   sellLabel.textContent = t('mods.manualRunner.enableAutoSell');
+  const sellWarningIcon = document.createElement('span');
+  sellWarningIcon.textContent = '⚠';
+  sellWarningIcon.title = 'Autosell on floor 11+ may sell sealed creatures';
+  sellWarningIcon.setAttribute('aria-label', 'Warning: autosell may sell sealed creatures on floor 11+');
+  sellWarningIcon.style.cssText = 'display: none; color: #f1c40f; font-weight: bold; cursor: help; margin-left: 2px;';
+
+  const updateAutoSellWarning = () => {
+    const currentFloor = getCurrentFloor();
+    const maxFloorValue = parseInt(maxFloorInput.value, 10) || 10;
+    const currentOrTargetFloor = Math.max(currentFloor, maxFloorValue);
+    const canReachFloorElevenPlus = (stopSelect.value === 'maxFloor' && maxFloorValue >= 11) || currentOrTargetFloor >= 11;
+    const showWarning = sellInput.checked && canReachFloorElevenPlus;
+    sellWarningIcon.style.display = showWarning ? 'inline-block' : 'none';
+  };
+
   sellContainer.appendChild(sellInput);
+  sellContainer.appendChild(sellWarningIcon);
   sellContainer.appendChild(sellLabel);
   content.appendChild(sellContainer);
 
@@ -2304,6 +2340,11 @@ function createConfigPanel() {
   staminaSkipContainer.appendChild(staminaSkipInput);
   staminaSkipContainer.appendChild(staminaSkipLabel);
   content.appendChild(staminaSkipContainer);
+
+  sellInput.addEventListener('change', updateAutoSellWarning);
+  maxFloorInput.addEventListener('input', updateAutoSellWarning);
+  stopSelect.addEventListener('change', updateAutoSellWarning);
+  updateAutoSellWarning();
 
   // Check if board has ally creatures
   const hasAlly = hasAllyCreaturesOnBoard();
@@ -3286,6 +3327,11 @@ function init() {
       backgroundSize: 'auto'
     }
   });
+  updateMainButtonSealedWarning();
+  if (mainButtonWarningInterval) {
+    clearInterval(mainButtonWarningInterval);
+  }
+  mainButtonWarningInterval = setInterval(updateMainButtonSealedWarning, 1000);
   
   // Create the configuration panel
   createConfigPanel();
@@ -3352,6 +3398,12 @@ function cleanupManualRunner() {
       if (gameFrame && gameFrame.style.display === 'none') {
         gameFrame.style.display = '';
       }
+    }
+    
+    // 8.5 Cleanup warning updater interval
+    if (mainButtonWarningInterval) {
+      clearInterval(mainButtonWarningInterval);
+      mainButtonWarningInterval = null;
     }
     
     // 9. Update coordination system state

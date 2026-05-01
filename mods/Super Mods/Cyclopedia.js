@@ -1511,7 +1511,9 @@ function getYourRoomsForCyclopediaSeason(liveRooms) {
   const season = cyclopediaState.profileSeason || 1;
   const cached = cyclopediaState.lastStartupProfileData;
   if (!cached) {
-    return Number(season) === 1 ? (liveRooms || {}) : {};
+    // Bootstrap fallback: first render can happen before profilePageData is cached.
+    // Show live room stats immediately, then refresh to season-scoped data once cache arrives.
+    return liveRooms || {};
   }
   const fromProfile = mergeProfileRoomsForSeason(cached, season);
   if (Object.keys(fromProfile).length > 0) return fromProfile;
@@ -2414,6 +2416,15 @@ function setCachedRankingsData(data) { cyclopediaState.setLeaderboardData('ranki
 function clearCharactersTabCache() { cyclopediaState.clearCache('all'); }
 function clearLeaderboardCache() { cyclopediaState.clearCache('leaderboardData'); }
 function clearSearchedUsername() { cyclopediaState.searchedUsername = null; }
+function refreshCyclopediaRecordsOnOpen() {
+  // Always refresh WR + personal records when Cyclopedia opens.
+  clearCharactersTabCache();
+  clearLeaderboardCache();
+  cyclopediaState.lastStartupProfileData = null;
+  if (typeof MapsDataFetcher !== 'undefined' && MapsDataFetcher && typeof MapsDataFetcher.clearCache === 'function') {
+    MapsDataFetcher.clearCache();
+  }
+}
 function truncatePlayerName(name) {
   if (!name || typeof name !== 'string') return name || '';
   return name.length > 8 ? name.substring(0, 8) + '...' : name;
@@ -4257,6 +4268,7 @@ function openCyclopediaModal(options) {
     const forceOpen = options.force === true || options.priority === true || options.fromHomeSearch === true;
     if (cyclopediaModalInProgress) return;
     if (!forceOpen && now - lastModalCall < 1000) return;
+    refreshCyclopediaRecordsOnOpen();
     
     lastModalCall = now;
     cyclopediaModalInProgress = true;

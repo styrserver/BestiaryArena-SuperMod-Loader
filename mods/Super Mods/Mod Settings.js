@@ -1887,14 +1887,15 @@ function cleanRunForUpload(bestRun, contextRegionName, baseFields) {
 const SEASON_2_START_UTC_MS = Date.UTC(2026, 3, 30, 12, 0, 0); // 2026-04-30 12:00:00 UTC
 
 function getRunSeasonValue(run) {
-  const timestamp = Number(run?.timestamp);
-  if (Number.isFinite(timestamp) && timestamp > 0) {
-    return timestamp >= SEASON_2_START_UTC_MS ? 2 : 1;
-  }
-
+  // Trust explicit season first; timestamps can be rewritten by imports/exports.
   const season = Number(run?.season);
   if (Number.isFinite(season) && season > 0) {
     return season;
+  }
+
+  const timestamp = Number(run?.timestamp);
+  if (Number.isFinite(timestamp) && timestamp > 0) {
+    return timestamp >= SEASON_2_START_UTC_MS ? 2 : 1;
   }
 
   // Fallback when only date (YYYY-MM-DD) exists; no time granularity for cutoff day.

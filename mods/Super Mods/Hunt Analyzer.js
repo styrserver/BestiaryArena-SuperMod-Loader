@@ -2137,7 +2137,7 @@ function updatePanelThemeColors(panel) {
     if (shinyAmountSpan) shinyAmountSpan.style.color = getThemeColor('textShiny');
 
     const sealedAmountSpan = document.getElementById('mod-total-sealed-display');
-    if (sealedAmountSpan) sealedAmountSpan.style.color = getThemeColor('textShiny');
+    if (sealedAmountSpan) sealedAmountSpan.style.color = '#666666';
     
     const runesAmountSpan = document.getElementById('mod-total-runes-display');
     if (runesAmountSpan) runesAmountSpan.style.color = getThemeColor('textRunes');
@@ -5534,25 +5534,34 @@ function createAutoplayAnalyzerPanel() {
     leftRatesSection.style.display = 'flex';
     leftRatesSection.style.flexDirection = 'column';
     leftRatesSection.style.gap = '2px';
+    const dropRateRowHeight = '14px';
 
     const goldRateElement = document.createElement("span");
     goldRateElement.id = "mod-gold-rate";
     goldRateElement.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: 0`;
+    goldRateElement.style.height = dropRateRowHeight;
+    goldRateElement.style.lineHeight = dropRateRowHeight;
     leftRatesSection.appendChild(goldRateElement);
 
     const creatureRateElement = document.createElement("span");
     creatureRateElement.id = "mod-creature-rate";
     creatureRateElement.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: 0`;
+    creatureRateElement.style.height = dropRateRowHeight;
+    creatureRateElement.style.lineHeight = dropRateRowHeight;
     leftRatesSection.appendChild(creatureRateElement);
 
     const equipmentRateElement = document.createElement("span");
     equipmentRateElement.id = "mod-equipment-rate";
     equipmentRateElement.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: 0`;
+    equipmentRateElement.style.height = dropRateRowHeight;
+    equipmentRateElement.style.lineHeight = dropRateRowHeight;
     leftRatesSection.appendChild(equipmentRateElement);
 
     const runeRateElement = document.createElement("span");
     runeRateElement.id = "mod-rune-rate";
     runeRateElement.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: 0`;
+    runeRateElement.style.height = dropRateRowHeight;
+    runeRateElement.style.lineHeight = dropRateRowHeight;
     leftRatesSection.appendChild(runeRateElement);
 
     const totalStaminaSpentElement = document.createElement('span');
@@ -5562,6 +5571,8 @@ function createAutoplayAnalyzerPanel() {
     const initialNetStaminaPerHour = 0;
     const initialRecoveryEfficiency = 0;
     totalStaminaSpentElement.textContent = formatStaminaRateLabel(initialStaminaSpentRatePerHour, initialNetStaminaPerHour, initialRecoveryEfficiency);
+    totalStaminaSpentElement.style.height = dropRateRowHeight;
+    totalStaminaSpentElement.style.lineHeight = dropRateRowHeight;
     leftRatesSection.appendChild(totalStaminaSpentElement);
 
     // Right section for totals
@@ -5576,6 +5587,7 @@ function createAutoplayAnalyzerPanel() {
     goldDisplayDiv.style.display = 'flex';
     goldDisplayDiv.style.alignItems = 'center';
     goldDisplayDiv.style.gap = '4px';
+    goldDisplayDiv.style.height = dropRateRowHeight;
 
     const goldIcon = document.createElement('img');
     goldIcon.style.width = '12px';
@@ -5600,6 +5612,7 @@ function createAutoplayAnalyzerPanel() {
     dustDisplayDiv.style.display = 'flex';
     dustDisplayDiv.style.alignItems = 'center';
     dustDisplayDiv.style.gap = '4px';
+    dustDisplayDiv.style.height = dropRateRowHeight;
 
     const dustIcon = document.createElement('img');
     dustIcon.style.width = '12px';
@@ -5624,6 +5637,7 @@ function createAutoplayAnalyzerPanel() {
     shinyDisplayDiv.style.display = 'flex';
     shinyDisplayDiv.style.alignItems = 'center';
     shinyDisplayDiv.style.gap = '4px';
+    shinyDisplayDiv.style.height = dropRateRowHeight;
 
     const shinyIcon = document.createElement('img');
     shinyIcon.style.width = '12px';
@@ -5648,6 +5662,7 @@ function createAutoplayAnalyzerPanel() {
     sealedDisplayDiv.style.display = 'flex';
     sealedDisplayDiv.style.alignItems = 'center';
     sealedDisplayDiv.style.gap = '4px';
+    sealedDisplayDiv.style.height = dropRateRowHeight;
 
     const sealedIcon = document.createElement('img');
     sealedIcon.style.width = '12px';
@@ -5658,7 +5673,7 @@ function createAutoplayAnalyzerPanel() {
 
     const sealedAmountSpan = document.createElement('span');
     sealedAmountSpan.id = 'mod-total-sealed-display';
-    sealedAmountSpan.style.color = getThemeColor('textShiny');
+    sealedAmountSpan.style.color = '#666666';
     sealedAmountSpan.style.fontSize = '12px';
     sealedAmountSpan.style.fontWeight = 'bold';
     sealedAmountSpan.textContent = '0';
@@ -5672,6 +5687,7 @@ function createAutoplayAnalyzerPanel() {
     runesDisplayDiv.style.display = 'flex';
     runesDisplayDiv.style.alignItems = 'center';
     runesDisplayDiv.style.gap = '4px';
+    runesDisplayDiv.style.height = dropRateRowHeight;
 
     const runesIcon = document.createElement('img');
     runesIcon.style.width = '12px';
