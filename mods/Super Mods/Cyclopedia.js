@@ -9,6 +9,16 @@ function cyclopediaT(key) {
   return (a && a.i18n && typeof a.i18n.t === 'function') ? a.i18n.t(key) : key;
 }
 
+function formatFloorsClearedReplayComment(uniqueFloors, floorSeeds) {
+  const seeds = floorSeeds && typeof floorSeeds === 'object' ? floorSeeds : {};
+  return `Floors cleared with this setup: ${uniqueFloors.map((floor) => {
+    const pct = 100 + Number(floor) * 20;
+    const raw = seeds[floor] ?? seeds[String(floor)];
+    const sn = Number(raw);
+    return Number.isFinite(sn) ? `${pct}% (${sn})` : `${pct}%`;
+  }).join(', ')}`;
+}
+
 const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDDLE: 300, RIGHT: 300 }, API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData', FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png' };
 const inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
 const inventoryDatabase = (typeof window !== 'undefined' && window.inventoryDatabase) || {};
@@ -10201,7 +10211,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   }
                   const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
                   if (uniqueFloors.length > 1) {
-                    replayData.comments = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+                    replayData.comments = formatFloorsClearedReplayComment(uniqueFloors, run.floorSeeds);
                   }
                 }
                 
@@ -10835,7 +10845,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   }
                   const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
                   if (uniqueFloors.length > 1) {
-                    replayData.comments = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+                    replayData.comments = formatFloorsClearedReplayComment(uniqueFloors, run.floorSeeds);
                   }
                 }
                 
@@ -11442,7 +11452,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   }
                   const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
                   if (uniqueFloors.length > 1) {
-                    replayData.comments = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+                    replayData.comments = formatFloorsClearedReplayComment(uniqueFloors, run.floorSeeds);
                   }
                 }
                 

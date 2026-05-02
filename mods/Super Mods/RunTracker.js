@@ -314,6 +314,29 @@ function normalizeFloorHistory(run) {
   return Array.from(new Set(values)).sort((a, b) => a - b);
 }
 
+function cloneFloorSeedMap(run) {
+  const out = {};
+  const src = run && run.floorSeeds;
+  if (src && typeof src === 'object') {
+    for (const [k, v] of Object.entries(src)) {
+      const fv = Number(k);
+      const sv = Number(v);
+      if (Number.isFinite(fv) && fv > 0 && Number.isFinite(sv)) {
+        out[fv] = sv;
+      }
+    }
+  }
+  return out;
+}
+
+function assignFloorSeed(map, floor, seed) {
+  const fv = Number(floor);
+  const sv = Number(seed);
+  if (Number.isFinite(fv) && fv > 0 && Number.isFinite(sv)) {
+    map[fv] = sv;
+  }
+}
+
 // Get monster name from database ID by looking up in player's monster inventory
 function getMonsterNameFromDatabaseId(databaseId) {
   try {
@@ -526,6 +549,9 @@ async function initializeStorage() {
               seasonMigratedCount++;
             }
             run.floorHistory = normalizeFloorHistory(run);
+            if (!run.floorSeeds || typeof run.floorSeeds !== 'object') {
+              run.floorSeeds = {};
+            }
           });
         }
       }
@@ -1378,6 +1404,9 @@ async function checkAndUpdateFloorRuns(runData) {
     }
     existingFloorHistory.sort((a, b) => a - b);
 
+    const existingFloorSeeds = cloneFloorSeedMap(sameSetupRun);
+    assignFloorSeed(existingFloorSeeds, runData.floor, runData.seed);
+
     // Same setup found - update if new floor is higher, or same floor with better floorTicks or time
     let shouldUpdate = false;
     if (runData.floor > sameSetupRun.floor) {
@@ -1397,19 +1426,21 @@ async function checkAndUpdateFloorRuns(runData) {
     
     if (shouldUpdate) {
       const existingIndex = floorRuns.indexOf(sameSetupRun);
-      const updatedRun = { ...sameSetupRun, ...runData, floorHistory: existingFloorHistory };
+      const updatedRun = { ...sameSetupRun, ...runData, floorHistory: existingFloorHistory, floorSeeds: existingFloorSeeds };
       floorRuns[existingIndex] = updatedRun;
       
       console.log(`[RunTracker] Updated floor run for ${runData.mapName} with same setup: floor ${runData.floor} (was ${sameSetupRun.floor})${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}${!runData.floorTicks && runData.time ? `, time ${runData.time}` : ''}`);
     } else {
       const existingIndex = floorRuns.indexOf(sameSetupRun);
-      floorRuns[existingIndex] = { ...sameSetupRun, floorHistory: existingFloorHistory };
+      floorRuns[existingIndex] = { ...sameSetupRun, floorHistory: existingFloorHistory, floorSeeds: existingFloorSeeds };
       console.log(`[RunTracker] Recorded additional floor ${runData.floor} for existing setup without replacing best run`);
       return true;
     }
   } else {
     // Unique setup - add and keep floor history for range display
-    const newRun = { ...runData, floorHistory: normalizeFloorHistory(runData) };
+    const initialFloorSeeds = {};
+    assignFloorSeed(initialFloorSeeds, runData.floor, runData.seed);
+    const newRun = { ...runData, floorHistory: normalizeFloorHistory(runData), floorSeeds: initialFloorSeeds };
     floorRuns.push(newRun);
     
     // Sort by floor (highest first), then by floorTicks (fastest first) for tiebreakers
@@ -1905,6 +1936,9 @@ if (!window.RunTrackerAPI) {
         if (!mapData || !Array.isArray(mapData.floor)) continue;
         mapData.floor.forEach((run) => {
           run.floorHistory = normalizeFloorHistory(run);
+          if (!run.floorSeeds || typeof run.floorSeeds !== 'object') {
+            run.floorSeeds = {};
+          }
         });
       }
 

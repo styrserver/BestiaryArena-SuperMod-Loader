@@ -1766,6 +1766,16 @@ function extractSeedFromReplayLink(replayLink) {
   }
 }
 
+function formatFloorsClearedReplayComment(uniqueFloors, floorSeeds) {
+  const seeds = floorSeeds && typeof floorSeeds === 'object' ? floorSeeds : {};
+  return `Floors cleared with this setup: ${uniqueFloors.map((floor) => {
+    const pct = 100 + Number(floor) * 20;
+    const raw = seeds[floor] ?? seeds[String(floor)];
+    const sn = Number(raw);
+    return Number.isFinite(sn) ? `${pct}% (${sn})` : `${pct}%`;
+  }).join(', ')}`;
+}
+
 function enrichReplayLinkForExport(replayLink, runData = {}, fallbackCredits = '') {
   if (!replayLink || typeof replayLink !== 'string') return replayLink;
   try {
@@ -1799,7 +1809,7 @@ function enrichReplayLinkForExport(replayLink, runData = {}, fallbackCredits = '
         if (Number.isFinite(replayFloorValue) && replayFloorValue > 0) normalizedFloors.push(replayFloorValue);
         const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
         if (uniqueFloors.length > 1) {
-          commentsValue = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+          commentsValue = formatFloorsClearedReplayComment(uniqueFloors, runData.floorSeeds);
         }
       }
     }
@@ -1842,6 +1852,7 @@ function buildTempRunForReplayLink(run, contextRegionName) {
     player: run.player,
     userName: run.userName,
     floorHistory: Array.isArray(run.floorHistory) ? [...run.floorHistory] : undefined,
+    floorSeeds: run.floorSeeds && typeof run.floorSeeds === 'object' ? { ...run.floorSeeds } : undefined,
     setup: run.setup ? {
       pieces: (run.setup.pieces || []).map(piece => ({
         tile: piece.tile,
@@ -1879,6 +1890,9 @@ function cleanRunForUpload(bestRun, contextRegionName, baseFields) {
   // Preserve grouped floor coverage for floor exports when available.
   if (Array.isArray(bestRun.floorHistory) && bestRun.floorHistory.length > 0) {
     cleanRun.floorHistory = [...bestRun.floorHistory];
+  }
+  if (bestRun.floorSeeds && typeof bestRun.floorSeeds === 'object' && Object.keys(bestRun.floorSeeds).length > 0) {
+    cleanRun.floorSeeds = { ...bestRun.floorSeeds };
   }
   
   return cleanRun;
@@ -2028,7 +2042,7 @@ function generateReplayLink(runData) {
       }
       const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
       if (uniqueFloors.length > 1) {
-        commentsValue = `Floors cleared with this setup: ${uniqueFloors.map((floor) => `${100 + (Number(floor) * 20)}%`).join(', ')}`;
+        commentsValue = formatFloorsClearedReplayComment(uniqueFloors, runData.floorSeeds);
       }
     }
 

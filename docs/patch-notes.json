@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.7.5",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Cyclopedia",
+          "text": "Multi-floor $replay copy: \"Floors cleared with this setup\" comments now append (seed) per floor when RunTracker has recorded that floor’s seed."
+        },
+        {
+          "type": "changed",
+          "mod": "Mod Settings",
+          "text": "Firebase and generated $replay exports use the same per-floor seed labels in comments when floorSeeds data is present; clean uploads include floorSeeds on floor runs."
+        },
+        {
+          "type": "changed",
+          "mod": "RunTracker",
+          "text": "Floor-category runs store floorSeeds (floor number → seed) as you clear additional floors with the same board setup, for richer replay commentary on export."
+        }
+      ]
+    },
+    {
       "version": "3.7.4",
       "changes": [
         {
