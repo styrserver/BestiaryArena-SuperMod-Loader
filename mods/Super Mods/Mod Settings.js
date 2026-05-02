@@ -2354,20 +2354,34 @@ function formatRunsAsText(runsData) {
         text += `\n`;
       }
       
-      // Floor category
+      // Floor category (all setups per map — multiple distinct clears to floor 15)
       if (mapData.floor && mapData.floor.length > 0) {
-        const bestFloor = mapData.floor[0];
-        const floorReplayLink = enrichReplayLinkForExport(bestFloor.replayLink, bestFloor, exportCreditsFallback);
-        text += `FLOOR:\n`;
-        text += `  Floor: ${bestFloor.floor || 'N/A'}\n`;
-        if (bestFloor.floorTicks) {
-          text += `  Floor Ticks: ${bestFloor.floorTicks} ticks\n`;
-        }
-        text += `  Seed: ${extractSeedFromReplayLink(floorReplayLink)}\n`;
-        text += `  Date: ${bestFloor.date || 'N/A'}\n`;
-        if (floorReplayLink) {
-          text += `  ${floorReplayLink}\n`;
-        }
+        const floorRuns = mapData.floor;
+        text += `FLOOR${floorRuns.length > 1 ? ` (${floorRuns.length} setups)` : ''}:\n`;
+        floorRuns.forEach((floorRun, floorIdx) => {
+          if (floorRuns.length > 1) {
+            text += `  --- Setup ${floorIdx + 1} ---\n`;
+          }
+          const floorReplayLink = enrichReplayLinkForExport(floorRun.replayLink, floorRun, exportCreditsFallback);
+          const hist = Array.isArray(floorRun.floorHistory)
+            ? floorRun.floorHistory.filter((n) => Number.isFinite(Number(n)) && Number(n) > 0)
+            : [];
+          const peak = floorRun.floor !== undefined && floorRun.floor !== null && Number(floorRun.floor) > 0
+            ? Number(floorRun.floor)
+            : null;
+          const floorsDisplay = hist.length > 0
+            ? [...hist].sort((a, b) => Number(b) - Number(a)).join(', ')
+            : (peak != null ? String(peak) : 'N/A');
+          text += `  Floors: ${floorsDisplay}\n`;
+          if (floorRun.floorTicks) {
+            text += `  Floor Ticks: ${floorRun.floorTicks} ticks\n`;
+          }
+          text += `  Seed: ${extractSeedFromReplayLink(floorReplayLink)}\n`;
+          text += `  Date: ${floorRun.date || 'N/A'}\n`;
+          if (floorReplayLink) {
+            text += `  ${floorReplayLink}\n`;
+          }
+        });
         text += `\n`;
       }
       
@@ -2418,7 +2432,7 @@ async function uploadBestRuns() {
     const allRuns = window.RunTrackerAPI.getAllRuns();
     const currentSeason = detectCurrentSeasonFromRuns(allRuns);
     
-    // Filter to best runs only (top run per map/category)
+    // Best speedrun + rank per map; all floor setups per map for current season (multiple clears to floor 15)
     // Sort by region and map order before storing
     const bestRuns = {
       runs: {},
@@ -2572,7 +2586,7 @@ async function uploadBestRuns() {
       }
     }
     
-    // Extract best run from each category for each map (now in sorted order)
+    // Extract best speedrun/rank per map; all floor setups for current season (now in sorted order)
     for (const { mapKey, mapData, regionName: contextRegionName } of runsWithRegion) {
       const cleanMapData = {
         speedrun: [],
@@ -2601,15 +2615,17 @@ async function uploadBestRuns() {
         cleanMapData.rank = [cleanRank];
       }
       
-      // Clean floor runs - simplified: generate replayLink and store only essentials
+      // Clean floor runs — upload every setup for this season (RunTracker keeps one row per setup)
       const currentSeasonFloorRuns = getRunsForSeason(mapData.floor, currentSeason);
       if (currentSeasonFloorRuns.length > 0) {
-        const bestFloor = currentSeasonFloorRuns[0];
-        const cleanFloor = cleanRunForUpload(bestFloor, contextRegionName, {
-          floor: bestFloor.floor,
-          floorTicks: bestFloor.floorTicks
-        });
-        cleanMapData.floor = [cleanFloor];
+        cleanMapData.floor = currentSeasonFloorRuns
+          .filter((run) => run.floor !== undefined && run.floor !== null && run.floor > 0)
+          .map((floorRun) =>
+            cleanRunForUpload(floorRun, contextRegionName, {
+              floor: floorRun.floor,
+              floorTicks: floorRun.floorTicks
+            })
+          );
       }
       
       bestRuns.runs[mapKey] = cleanMapData;
@@ -2750,14 +2766,14 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         return { success: false, error: 'Failed to fetch or decrypt runs' };
       }
     } else {
-      // Local source - filter to best runs (same as upload logic)
+      // Local source - same export rules as Firebase upload (best speedrun/rank; all floor setups)
       if (!window.RunTrackerAPI || !window.RunTrackerAPI.getAllRuns) {
         return { success: false, error: 'RunTracker not available' };
       }
       const allRuns = window.RunTrackerAPI.getAllRuns();
       const currentSeason = detectCurrentSeasonFromRuns(allRuns);
       
-      // Filter to best runs only (top run per map/category) - same logic as upload
+      // Best per map for speedrun/rank; all floor setups per map for current season
       const bestRuns = {
         runs: {},
         metadata: {
@@ -2768,7 +2784,7 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         uploadedAt: Date.now()
       };
       
-      // Extract best run from each category for each map (same logic as upload)
+      // Extract runs per map (same logic as upload)
       // First, build a map of mapKey -> regionName (same as upload logic)
       const mapKeyToRegionName = {};
       
@@ -2873,18 +2889,17 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
           }
         }
         
-        // Get best floor (first in sorted array) - clean it like upload does
+        // All floor setups for current season — same as upload
         const currentSeasonFloorRuns = getRunsForSeason(mapData.floor, currentSeason);
         if (currentSeasonFloorRuns.length > 0) {
-          const bestFloor = currentSeasonFloorRuns[0];
-          // Ensure required fields are present
-          if (bestFloor.floor !== undefined && bestFloor.floor !== null && bestFloor.floor > 0) {
-            const cleanFloor = cleanRunForUpload(bestFloor, contextRegionName, {
-              floor: bestFloor.floor,
-              floorTicks: bestFloor.floorTicks
-            });
-            cleanMapData.floor = [cleanFloor];
-          }
+          cleanMapData.floor = currentSeasonFloorRuns
+            .filter((run) => run.floor !== undefined && run.floor !== null && run.floor > 0)
+            .map((floorRun) =>
+              cleanRunForUpload(floorRun, contextRegionName, {
+                floor: floorRun.floor,
+                floorTicks: floorRun.floorTicks
+              })
+            );
         }
         
         // Only add map if it has at least one run

@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.7.4",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Mod Settings",
+          "text": "Firebase and local best-runs export now include every floor setup per map for the active season (not only the top row), so multiple distinct clears toward floor 15 are all uploaded; text export lists each setup and floor history when present."
+        },
+        {
+          "type": "fixed",
+          "mod": "Bestiary Automator",
+          "text": "Daycare coordination: always clear handlingDaycare when daycare checks finish (including skip paths), so Manual Runner and other mods no longer stall on a stuck busy signal."
+        },
+        {
+          "type": "fixed",
+          "mod": "Manual Runner",
+          "text": "After a failed game start, no longer treat stale board serverResults as this attempt's victory (avoids false stop when ticksMax is set and placeholder ticks are 0)."
+        }
+      ]
+    },
+    {
       "version": "3.7.3",
       "changes": [
         {

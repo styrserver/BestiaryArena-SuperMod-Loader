@@ -1777,11 +1777,18 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       }
 
       const runTime = performance.now() - currentRunStartTime;
-      const serverResults = await waitForServerResults();
+      // Do not read board serverResults after a failed start — context often still holds the *previous* run,
+      // which would mark this attempt as victory with ticks 0 and wrongly satisfy ticksMax stop.
+      let serverResults = null;
+      if (!result.failedToStart) {
+        serverResults = await waitForServerResults();
+      }
 
       let isVictory = result.completed;
 
-      if (serverResults && serverResults.rewardScreen) {
+      if (result.failedToStart) {
+        isVictory = false;
+      } else if (serverResults && serverResults.rewardScreen) {
         const serverVictory = serverResults.rewardScreen.victory === true;
         if (typeof serverResults.rewardScreen.victory === 'boolean') {
           isVictory = serverVictory;
@@ -1792,7 +1799,9 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       updateVictoryDefeatCounters(isVictory);
 
-      const attemptStaminaSpent = trackStaminaUsage(serverResults, attemptCount);
+      const attemptStaminaSpent = result.failedToStart
+        ? 0
+        : trackStaminaUsage(serverResults, attemptCount);
 
       let attemptSeed = null;
       if (serverResults && typeof serverResults.seed !== 'undefined') {

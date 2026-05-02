@@ -2825,17 +2825,21 @@ const handleDayCare = async () => {
   
   // Check if Board Analyzer is running - if so, skip daycare detection
   if (isBoardAnalyzerRunning()) return;
-  
-  try {
-    // Signal to other mods that we're handling daycare (for coordination)
+
+  const setHandlingDaycareCoordination = (busy) => {
     try {
       if (window.ModCoordination) {
         window.ModCoordination.updateModState('Bestiary Automator', {
-          metadata: { handlingDaycare: true }
+          metadata: { handlingDaycare: busy }
         });
       }
     } catch (_) {}
-    
+  };
+
+  try {
+    // Signal to other mods that we're handling daycare (for coordination)
+    setHandlingDaycareCoordination(true);
+
     // Single query with guarded early exit
     const blipElements = document.querySelectorAll('[data-blip="true"]');
     if (blipElements.length === 0) {
@@ -2843,14 +2847,6 @@ const handleDayCare = async () => {
       // Some UI states may have daycare creatures without visible blips.
       const anyDaycareImage = document.querySelector('img[alt="daycare"], img[alt="Daycare"]');
       if (!anyDaycareImage) {
-        // Clear the flag if no daycare to handle
-        try {
-          if (window.ModCoordination) {
-            window.ModCoordination.updateModState('Bestiary Automator', {
-              metadata: { handlingDaycare: false }
-            });
-          }
-        } catch (_) {}
         return;
       }
     }
@@ -3040,26 +3036,12 @@ const handleDayCare = async () => {
     
     // Check for scroll lock after daycare operations
     await handleScrollLock();
-    
-    // Clear the flag after daycare is complete
-    try {
-      if (window.ModCoordination) {
-        window.ModCoordination.updateModState('Bestiary Automator', {
-          metadata: { handlingDaycare: false }
-        });
-      }
-    } catch (_) {}
-    
   } catch (error) {
     console.error('[Bestiary Automator] Error handling day care:', error);
-    // Always clear the flag even on error
-    try {
-      if (window.ModCoordination) {
-        window.ModCoordination.updateModState('Bestiary Automator', {
-          metadata: { handlingDaycare: false }
-        });
-      }
-    } catch (_) {}
+  } finally {
+    // Always clear so Manual Runner and other mods never see a stuck handlingDaycare flag
+    // (early returns used to skip this and block coordination for ~10s+).
+    setHandlingDaycareCoordination(false);
   }
 };
 
