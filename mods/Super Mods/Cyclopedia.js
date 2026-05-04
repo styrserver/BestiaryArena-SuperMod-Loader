@@ -122,9 +122,9 @@ const HUNTING_MARKS_UI_SELECTORS = [
 ];
 // Monster stats configuration for display in UI
 const MONSTER_STATS_CONFIG = [
-    { key: 'hp', label: 'Hitpoints', icon: '/assets/icons/heal.png', max: 700, barColor: 'rgb(96, 192, 96)' },
-    { key: 'ad', label: 'Attack Damage', icon: '/assets/icons/attackdamage.png', max: 80, barColor: 'rgb(255, 128, 96)' },
-    { key: 'ap', label: 'Ability Power', icon: '/assets/icons/abilitypower.png', max: 60, barColor: 'rgb(128, 128, 255)' },
+    { key: 'hp', label: 'Hitpoints', icon: '/assets/icons/heal.png', max: 1000, barColor: 'rgb(96, 192, 96)' },
+    { key: 'ad', label: 'Attack Damage', icon: '/assets/icons/attackdamage.png', max: 110, barColor: 'rgb(255, 128, 96)' },
+    { key: 'ap', label: 'Ability Power', icon: '/assets/icons/abilitypower.png', max: 90, barColor: 'rgb(128, 128, 255)' },
     { key: 'armor', label: 'Armor', icon: '/assets/icons/armor.png', max: 60, barColor: 'rgb(224, 224, 128)' },
     { key: 'magicResist', label: 'Magic Resist', icon: '/assets/icons/magicresist.png', max: 60, barColor: 'rgb(192, 128, 255)' },
     { key: 'speed', label: 'Speed', icon: '/assets/icons/speed.png', max: 200, barColor: 'rgb(255, 200, 100)' }
@@ -14405,41 +14405,87 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   statsDiv.style.padding = '0';
   statsDiv.style.margin = '0';
   statsDiv.style.alignSelf = 'unset';
+  let currentStatsMonsterData = null;
+
+  const getDisplayMonsterDataForStats = (monsterData, useAwakenedScaling = false) => {
+    if (!monsterData || !monsterData.metadata?.baseStats) return monsterData;
+
+    let displayMonsterData = monsterData;
+
+    // Check if this creature has hardcoded stats (for unobtainable creatures with different map stats)
+    const creatureNameLower = monsterData?.metadata?.name?.toLowerCase();
+    if (creatureNameLower && HARDCODED_MONSTER_STATS[creatureNameLower] && monsterData?.metadata?.baseStats) {
+      // Clone only the baseStats object using spread to avoid mutating internal game state
+      const clonedBaseStats = { ...monsterData.metadata.baseStats };
+
+      // Preserve speed from original data since hardcoded stats don't include it
+      const originalSpeed = clonedBaseStats?.speed;
+
+      // Replace baseStats with hardcoded values
+      Object.assign(clonedBaseStats, HARDCODED_MONSTER_STATS[creatureNameLower].baseStats);
+
+      // Restore speed from original data
+      if (originalSpeed !== undefined) {
+        clonedBaseStats.speed = originalSpeed;
+      }
+
+      // Create a new object with cloned baseStats without cloning the entire monsterData
+      displayMonsterData = {
+        ...monsterData,
+        metadata: {
+          ...monsterData.metadata,
+          baseStats: clonedBaseStats
+        }
+      };
+    }
+
+    if (!useAwakenedScaling) return displayMonsterData;
+
+    const scaleStatFn = globalThis.state?.utils?.scaleStat;
+    const baseStats = displayMonsterData?.metadata?.baseStats;
+    if (typeof scaleStatFn !== 'function' || !baseStats || typeof baseStats !== 'object') {
+      return displayMonsterData;
+    }
+
+    const scaledBaseStats = { ...baseStats };
+    const scalableStats = new Set(['hp', 'ad', 'ap', 'armor', 'magicResist']);
+    Object.keys(scaledBaseStats).forEach((statKey) => {
+      if (!scalableStats.has(statKey)) return;
+      const baseValue = scaledBaseStats[statKey];
+      if (typeof baseValue !== 'number' || !Number.isFinite(baseValue)) return;
+
+      try {
+        scaledBaseStats[statKey] = scaleStatFn({
+          level: 99,
+          geneValue: 20,
+          stat: baseValue
+        });
+      } catch (scaleError) {
+        console.error(`[Cyclopedia] Failed to scale "${statKey}" stat:`, scaleError);
+      }
+    });
+
+    return {
+      ...displayMonsterData,
+      metadata: {
+        ...displayMonsterData.metadata,
+        baseStats: scaledBaseStats
+      }
+    };
+  };
+
+  const rerenderCreatureStats = (showAwakenedMode = false) => {
+    if (!currentStatsMonsterData) return;
+    const displayMonsterData = getDisplayMonsterDataForStats(currentStatsMonsterData, showAwakenedMode);
+    const actualStatsDiv = renderMonsterStats(displayMonsterData);
+    statsDiv.innerHTML = '';
+    statsDiv.appendChild(actualStatsDiv);
+  };
+
   if (monsterId) {
     queueMonsterDataLoad(monsterId, (monsterData) => {
-      // Create a safe copy for display without cloning non-cloneable objects
-      let displayMonsterData = monsterData;
-      
-      // Check if this creature has hardcoded stats (for unobtainable creatures with different map stats)
-      const creatureNameLower = monsterData?.metadata?.name?.toLowerCase();
-      if (creatureNameLower && HARDCODED_MONSTER_STATS[creatureNameLower] && monsterData?.metadata?.baseStats) {
-        // Clone only the baseStats object using spread to avoid mutating internal game state
-        const clonedBaseStats = { ...monsterData.metadata.baseStats };
-        
-        // Preserve speed from original data since hardcoded stats don't include it
-        const originalSpeed = clonedBaseStats?.speed;
-        
-        // Replace baseStats with hardcoded values
-        Object.assign(clonedBaseStats, HARDCODED_MONSTER_STATS[creatureNameLower].baseStats);
-        
-        // Restore speed from original data
-        if (originalSpeed !== undefined) {
-          clonedBaseStats.speed = originalSpeed;
-        }
-        
-        // Create a new object with cloned baseStats without cloning the entire monsterData
-        displayMonsterData = {
-          ...monsterData,
-          metadata: {
-            ...monsterData.metadata,
-            baseStats: clonedBaseStats
-          }
-        };
-      }
-      
-      const actualStatsDiv = renderMonsterStats(displayMonsterData);
-      statsDiv.innerHTML = '';
-      statsDiv.appendChild(actualStatsDiv);
+      currentStatsMonsterData = monsterData;
+      rerenderCreatureStats(cyclopediaState.creatureDetailShowAwakenedAbility);
     });
   } else {
     statsDiv.textContent = 'Stats not available';
@@ -14527,6 +14573,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
     cyclopediaState.creatureDetailShowAwakenedAbility = !cyclopediaState.creatureDetailShowAwakenedAbility;
     const showAwakenedAbility = cyclopediaState.creatureDetailShowAwakenedAbility;
     awakenIconButton.title = showAwakenedAbility ? 'Awakened Mode' : 'Normal Mode';
+    rerenderCreatureStats(showAwakenedAbility);
     
     // Update background and border color to show toggle state
     if (showAwakenedAbility) {
@@ -15488,7 +15535,7 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) 
     seasonLink.href = 'https://bestiaryarena.com/seasons';
     seasonLink.target = '_blank';
     seasonLink.rel = 'noopener noreferrer';
-    seasonLink.textContent = 'View full seasons leaderboard';
+    seasonLink.textContent = cyclopediaT('mods.cyclopedia.startpage.viewFullSeasonsLeaderboard');
     Object.assign(seasonLink.style, {
       display: 'inline-flex',
       alignSelf: 'center',

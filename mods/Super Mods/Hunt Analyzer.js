@@ -1327,16 +1327,31 @@ function formatPlaytimeLabel(playtimeText) {
   return `${t('mods.huntAnalyzer.playtime')}: ${playtimeText}`;
 }
 
+/** Rounds to nearest integer; values with |n| >= 1000 render as e.g. 1K, 55K (including negatives). */
+function formatCompactInt(value) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return String(value);
+  if (Math.abs(n) < 1000) return String(n);
+  return `${Math.round(n / 1000)}K`;
+}
+
 function formatWinLossLabel(wins, losses, winRate) {
   return `${t('mods.huntAnalyzer.winLoss')}: ${wins}/${losses} (${winRate}%)`;
 }
 
 function formatTotalStaminaLabel(totalStamina) {
-  return `${t('mods.huntAnalyzer.totalStamina')}: ${totalStamina}`;
+  return `${t('mods.huntAnalyzer.totalStamina')}: ${formatCompactInt(totalStamina)}`;
 }
 
 function formatStaminaRateLabel(staminaPerHour, netStaminaPerHour, recoveryEfficiency) {
-  return `${t('mods.huntAnalyzer.staminaPerHour')}: ${staminaPerHour} (${t('mods.huntAnalyzer.net')}: ${netStaminaPerHour > 0 ? '+' : ''}${netStaminaPerHour}/h) [${recoveryEfficiency}% ${t('mods.huntAnalyzer.recovery')}]`;
+  return `${t('mods.huntAnalyzer.staminaPerHour')}: ${formatCompactInt(staminaPerHour)} (${t('mods.huntAnalyzer.net')}: ${netStaminaPerHour > 0 ? '+' : ''}${formatCompactInt(netStaminaPerHour)}/h) [${recoveryEfficiency}% ${t('mods.huntAnalyzer.recovery')}]`;
+}
+
+function setStaminaRateLineElement(element, staminaPerHour, netStaminaPerHour, recoveryEfficiency) {
+  if (!element) return;
+  const full = formatStaminaRateLabel(staminaPerHour, netStaminaPerHour, recoveryEfficiency);
+  element.textContent = full;
+  element.setAttribute('title', full);
 }
 
 // =======================
@@ -4006,6 +4021,7 @@ function renderAllSessions() {
     const cachedTotalDustDisplayElement = domCache.get("mod-total-dust-display");
     const cachedTotalShinyDisplayElement = domCache.get("mod-total-shiny-display");
     const cachedTotalSealedDisplayElement = domCache.get("mod-total-sealed-display");
+    const cachedTotalRunesDisplayElement = domCache.get("mod-total-runes-display");
     
     if (!cachedLootDiv || !cachedCreatureDropDiv || !cachedTotalGoldDisplayElement || !cachedTotalDustDisplayElement) {
         console.warn("[Hunt Analyzer] Render target divs or gold/dust display elements not available. Panel might not be open.");
@@ -4024,16 +4040,19 @@ function renderAllSessions() {
 
     // Update Gold, Dust, and Shiny display next to Loot title
     if (cachedTotalGoldDisplayElement) {
-        cachedTotalGoldDisplayElement.textContent = HuntAnalyzerState.totals.gold;
+        cachedTotalGoldDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
     }
     if (cachedTotalDustDisplayElement) {
-        cachedTotalDustDisplayElement.textContent = HuntAnalyzerState.totals.dust;
+        cachedTotalDustDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
     }
     if (cachedTotalShinyDisplayElement) {
-        cachedTotalShinyDisplayElement.textContent = HuntAnalyzerState.totals.shiny;
+        cachedTotalShinyDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
     }
     if (cachedTotalSealedDisplayElement) {
-        cachedTotalSealedDisplayElement.textContent = HuntAnalyzerState.totals.sealed;
+        cachedTotalSealedDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
+    }
+    if (cachedTotalRunesDisplayElement) {
+        cachedTotalRunesDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
     }
 
     // Get all loot items (Gold and Dust are already excluded from aggregatedLoot)
@@ -5529,11 +5548,14 @@ function createAutoplayAnalyzerPanel() {
     dropRateLiveFeedDiv.style.fontSize = "10px";
     dropRateLiveFeedDiv.style.color = "#98C379";
 
-    // Left section for rates
+    // Left section for rates (shrinkable so long lines can ellipsis instead of wrapping)
     const leftRatesSection = document.createElement('div');
     leftRatesSection.style.display = 'flex';
     leftRatesSection.style.flexDirection = 'column';
     leftRatesSection.style.gap = '2px';
+    leftRatesSection.style.flex = '1';
+    leftRatesSection.style.minWidth = '0';
+    leftRatesSection.style.overflow = 'hidden';
     const dropRateRowHeight = '14px';
 
     const goldRateElement = document.createElement("span");
@@ -5570,9 +5592,14 @@ function createAutoplayAnalyzerPanel() {
     const initialStaminaSpentRatePerHour = 0;
     const initialNetStaminaPerHour = 0;
     const initialRecoveryEfficiency = 0;
-    totalStaminaSpentElement.textContent = formatStaminaRateLabel(initialStaminaSpentRatePerHour, initialNetStaminaPerHour, initialRecoveryEfficiency);
+    setStaminaRateLineElement(totalStaminaSpentElement, initialStaminaSpentRatePerHour, initialNetStaminaPerHour, initialRecoveryEfficiency);
     totalStaminaSpentElement.style.height = dropRateRowHeight;
     totalStaminaSpentElement.style.lineHeight = dropRateRowHeight;
+    totalStaminaSpentElement.style.display = 'block';
+    totalStaminaSpentElement.style.maxWidth = '100%';
+    totalStaminaSpentElement.style.whiteSpace = 'nowrap';
+    totalStaminaSpentElement.style.overflow = 'hidden';
+    totalStaminaSpentElement.style.textOverflow = 'ellipsis';
     leftRatesSection.appendChild(totalStaminaSpentElement);
 
     // Right section for totals
@@ -5581,6 +5608,7 @@ function createAutoplayAnalyzerPanel() {
     rightTotalsSection.style.flexDirection = 'column';
     rightTotalsSection.style.alignItems = 'flex-end';
     rightTotalsSection.style.gap = '2px';
+    rightTotalsSection.style.flexShrink = '0';
 
     // Gold Display
     const goldDisplayDiv = document.createElement('div');
@@ -6022,7 +6050,7 @@ function updatePanelDisplay() {
         const filteredTimeHours = getFilteredTimeHours();
         const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
         
-        cachedSessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${sessionRate}/h)`;
+        cachedSessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${formatCompactInt(sessionRate)}/h)`;
     }
     
     // Update win/loss display
@@ -6040,27 +6068,27 @@ function updatePanelDisplay() {
 
     // Update dust display
     if (cachedTotalDustDisplayElement) {
-        cachedTotalDustDisplayElement.textContent = HuntAnalyzerState.totals.dust;
+        cachedTotalDustDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
     }
 
     // Update gold display
     if (cachedTotalGoldDisplayElement) {
-        cachedTotalGoldDisplayElement.textContent = HuntAnalyzerState.totals.gold;
+        cachedTotalGoldDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
     }
 
     // Update shiny display
     if (cachedTotalShinyDisplayElement) {
-        cachedTotalShinyDisplayElement.textContent = HuntAnalyzerState.totals.shiny;
+        cachedTotalShinyDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
     }
 
     // Update sealed display
     if (cachedTotalSealedDisplayElement) {
-        cachedTotalSealedDisplayElement.textContent = HuntAnalyzerState.totals.sealed;
+        cachedTotalSealedDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
     }
 
     // Update runes display
     if (cachedTotalRunesDisplayElement) {
-        cachedTotalRunesDisplayElement.textContent = HuntAnalyzerState.totals.runes;
+        cachedTotalRunesDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
     }
 
     // Update room ID display
@@ -6125,16 +6153,16 @@ function updatePanelDisplay() {
     }
 
     if (cachedGoldRateElement) {
-        cachedGoldRateElement.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${goldRatePerHour}`;
+        cachedGoldRateElement.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${formatCompactInt(goldRatePerHour)}`;
     }
     if (cachedCreatureRateElement) {
-        cachedCreatureRateElement.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${creatureRatePerHour}`;
+        cachedCreatureRateElement.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatCompactInt(creatureRatePerHour)}`;
     }
     if (cachedEquipmentRateElement) {
-        cachedEquipmentRateElement.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${equipmentRatePerHour}`;
+        cachedEquipmentRateElement.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatCompactInt(equipmentRatePerHour)}`;
     }
     if (cachedRuneRateElement) {
-        cachedRuneRateElement.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${runeRatePerHour}`;
+        cachedRuneRateElement.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${formatCompactInt(runeRatePerHour)}`;
     }
     if (cachedTotalStaminaSpentElement) {
         // Only calculate natural regeneration if we have completed sessions
@@ -6156,7 +6184,7 @@ function updatePanelDisplay() {
         const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
             Math.round((totalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
         
-        cachedTotalStaminaSpentElement.textContent = formatStaminaRateLabel(staminaSpentRatePerHour, netStaminaPerHour, recoveryEfficiency);
+        setStaminaRateLineElement(cachedTotalStaminaSpentElement, staminaSpentRatePerHour, netStaminaPerHour, recoveryEfficiency);
     }
 }
 
@@ -6789,7 +6817,7 @@ const translationEventHandler = (event) => {
             
             const filteredTimeHours = getFilteredTimeHours();
             const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
-            sessionCounter.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${sessionRate}/h)`;
+            sessionCounter.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${formatCompactInt(sessionRate)}/h)`;
         }
 
         const winLossDisplay = document.getElementById('mod-win-loss-display');
@@ -6803,6 +6831,17 @@ const translationEventHandler = (event) => {
         if (staminaDisplay) {
             staminaDisplay.textContent = formatTotalStaminaLabel(HuntAnalyzerState.totals.staminaSpent);
         }
+
+        const tg = document.getElementById('mod-total-gold-display');
+        if (tg) tg.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
+        const td = document.getElementById('mod-total-dust-display');
+        if (td) td.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
+        const ts = document.getElementById('mod-total-shiny-display');
+        if (ts) ts.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
+        const tse = document.getElementById('mod-total-sealed-display');
+        if (tse) tse.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
+        const tr = document.getElementById('mod-total-runes-display');
+        if (tr) tr.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
         
         // Update playtime display
         const playtimeDisplay = document.getElementById('mod-playtime-display');
@@ -6818,7 +6857,7 @@ const translationEventHandler = (event) => {
             const filteredTimeHours = getFilteredTimeHours();
             const goldRatePerHour = filteredTimeHours > 0 ? 
                 getSmoothedRate(Math.floor(HuntAnalyzerState.totals.gold / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
-            goldRate.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${goldRatePerHour}`;
+            goldRate.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${formatCompactInt(goldRatePerHour)}`;
         }
         
         const creatureRate = document.getElementById('mod-creature-rate');
@@ -6826,7 +6865,7 @@ const translationEventHandler = (event) => {
             const filteredTimeHours = getFilteredTimeHours();
             const creatureRatePerHour = filteredTimeHours > 0 ? 
                 getSmoothedRate(Math.floor(HuntAnalyzerState.totals.creatures / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
-            creatureRate.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${creatureRatePerHour}`;
+            creatureRate.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatCompactInt(creatureRatePerHour)}`;
         }
         
         const equipmentRate = document.getElementById('mod-equipment-rate');
@@ -6834,7 +6873,7 @@ const translationEventHandler = (event) => {
             const filteredTimeHours = getFilteredTimeHours();
             const equipmentRatePerHour = filteredTimeHours > 0 ? 
                 getSmoothedRate(Math.round(HuntAnalyzerState.totals.equipment / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
-            equipmentRate.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${equipmentRatePerHour}`;
+            equipmentRate.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatCompactInt(equipmentRatePerHour)}`;
         }
         
         const runeRate = document.getElementById('mod-rune-rate');
@@ -6842,7 +6881,7 @@ const translationEventHandler = (event) => {
             const filteredTimeHours = getFilteredTimeHours();
             const runeRatePerHour = filteredTimeHours > 0 ? 
                 getSmoothedRate(Math.round(HuntAnalyzerState.totals.runes / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
-            runeRate.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${runeRatePerHour}`;
+            runeRate.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${formatCompactInt(runeRatePerHour)}`;
         }
         
         const staminaSpent = document.getElementById('mod-total-stamina-spent');
@@ -6870,7 +6909,7 @@ const translationEventHandler = (event) => {
             const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
                 Math.round((totalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
             
-            staminaSpent.textContent = formatStaminaRateLabel(staminaSpentRatePerHour, netStaminaPerHour, recoveryEfficiency);
+            setStaminaRateLineElement(staminaSpent, staminaSpentRatePerHour, netStaminaPerHour, recoveryEfficiency);
         }
         
         // Update section titles

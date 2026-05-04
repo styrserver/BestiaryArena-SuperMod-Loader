@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "3.7.6",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Cyclopedia",
+          "text": "Awaken toggle now re-renders creature stats using state.utils.scaleStat with level 99 and geneValue 20."
+        },
+        {
+          "type": "changed",
+          "mod": "Hunt Analyzer",
+          "text": "Live panel shows large totals and rates as rounded K when |n| ≥ 1000 (gold, dust, shiny, sealed, runes, stamina, sessions/h, and per-hour lines)."
+        },
+        {
+          "type": "changed",
+          "mod": "Manual Runner",
+          "text": "Stop when: added Endless run (keeps looping until you stop; rank/tick auto-stop disabled)."
+        },
+        {
+          "type": "fixed",
+          "mod": "Hunt Analyzer",
+          "text": "Stamina/h label stays one line: ellipsis when the row is too narrow, full text on hover; rates column flex layout avoids a second wrapped row growing panel height."
+        },
+        {
+          "type": "fixed",
+          "mod": "Manual Runner",
+          "text": "After auto-skip during the reward wait, merge ticks/grade/rank from serverResults so victory is not paired with placeholder ticks 0; tick-target stop now requires ticks > 0 (avoids false stop when stopWhenTicksReached is low)."
+        }
+      ]
+    },
+    {
       "version": "3.7.5",
       "changes": [
         {

@@ -8,7 +8,7 @@ console.log('[Manual Runner] initializing...');
 // Configuration with defaults
 const defaultConfig = {
   hideGameBoard: false,
-  stopCondition: 'max', // 'max' = Maximum Rank, 'any' = Any Victory, 'maxFloor' = Maximum Floor
+  stopCondition: 'max', // 'max' = Maximum Rank, 'any' = Any Victory, 'maxFloor' = Maximum Floor, 'endless' = never auto-stop (manual stop only)
   enableAutoRefillStamina: false,
   enableAutoSellCreatures: false,
   stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
@@ -1535,6 +1535,31 @@ async function waitForServerResults(maxWaitTime = 2000) {
   return serverResults;
 }
 
+/**
+ * After waitForGameCompletion, the skip path returns placeholder ticks/grade/rank (0, F, 0) while
+ * serverResults still holds the real outcome. Victory is later taken from the server, so without this
+ * merge, tick-based stop wrongly treats ticks 0 as ≤ stopWhenTicksReached.
+ */
+function applyRewardScreenToRunResult(result, serverResults) {
+  if (!result || !serverResults?.rewardScreen) return;
+  const rs = serverResults.rewardScreen;
+  if (typeof rs.gameTicks === 'number') {
+    result.ticks = rs.gameTicks;
+  }
+  if (typeof rs.rank === 'number') {
+    result.rankPoints = rs.rank;
+  }
+  if (rs.grade && typeof rs.grade === 'string' && rs.grade !== '') {
+    result.grade = rs.grade;
+  } else if (typeof result.rankPoints === 'number') {
+    const maxTeamSize = getMaxTeamSize(serverResults);
+    result.grade = calculateGradeFromRankPoints(result.rankPoints, maxTeamSize);
+  }
+  if (typeof rs.victory === 'boolean') {
+    result.completed = rs.victory;
+  }
+}
+
 function updateVictoryDefeatCounters(isVictory) {
   if (isVictory) {
     victoriesCount++;
@@ -1782,6 +1807,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       let serverResults = null;
       if (!result.failedToStart) {
         serverResults = await waitForServerResults();
+        applyRewardScreenToRunResult(result, serverResults);
       }
 
       let isVictory = result.completed;
@@ -1903,17 +1929,19 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         }
       }
 
-      const victoryConditionMet = isVictory && (
-        config.stopCondition === 'any' ||
-        targetRankPoints == null ||
-        (typeof result.rankPoints === 'number' && result.rankPoints >= targetRankPoints)
-      );
+      const victoryConditionMet =
+        isVictory &&
+        config.stopCondition !== 'endless' &&
+        (config.stopCondition === 'any' ||
+          targetRankPoints == null ||
+          (typeof result.rankPoints === 'number' && result.rankPoints >= targetRankPoints));
 
       let victoryContinueDueToTicks = false;
 
       if (victoryConditionMet) {
         if (config.stopWhenTicksReached > 0) {
-          if (result.ticks <= config.stopWhenTicksReached) {
+          // ticks === 0 is never a real fast win here (skip stub / stale read); require a positive count.
+          if (result.ticks > 0 && result.ticks <= config.stopWhenTicksReached) {
             const totalTime = performance.now() - startTime;
             const rankSuffix = targetRankPoints != null ? `rank ${result.rankPoints} (S+${targetRankPoints})` : `rank ${result.rankPoints}`;
             console.log(`[Manual Runner] ✓ Stop: victory, ${rankSuffix}, ticks ${result.ticks} ≤ ${config.stopWhenTicksReached} — ${formatMilliseconds(totalTime)} (${attemptCount} attempts)`);
@@ -1935,7 +1963,11 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
             return returnValue;
           } else {
             victoryContinueDueToTicks = true;
-            console.log(`[Manual Runner] ✓ Victory but ticks ${result.ticks} > ${config.stopWhenTicksReached} — searching for better run`);
+            if (result.ticks === 0) {
+              console.warn(`[Manual Runner] ✓ Victory but ticks still 0 after server merge — cannot evaluate tick target; retrying`);
+            } else {
+              console.log(`[Manual Runner] ✓ Victory but ticks ${result.ticks} > ${config.stopWhenTicksReached} — searching for better run`);
+            }
           }
         } else {
           const totalTime = performance.now() - startTime;
@@ -2216,9 +2248,14 @@ function createConfigPanel() {
   const optMaxFloor = document.createElement('option');
   optMaxFloor.value = 'maxFloor';
   optMaxFloor.textContent = t('mods.manualRunner.stopWhenMaxFloor') || 'Maximum Floor';
+  const optEndless = document.createElement('option');
+  optEndless.value = 'endless';
+  optEndless.textContent = t('mods.manualRunner.stopWhenEndless') || 'Endless run';
+  optEndless.style.color = '#E06C75';
   stopSelect.appendChild(optAny);
   stopSelect.appendChild(optMax);
   stopSelect.appendChild(optMaxFloor);
+  stopSelect.appendChild(optEndless);
   stopSelect.value = config.stopCondition || 'max';
   stopContainer.appendChild(stopLabel);
   stopContainer.appendChild(stopSelect);
@@ -2228,7 +2265,8 @@ function createConfigPanel() {
   const stopWhenTicksContainer = document.createElement('div');
   stopWhenTicksContainer.id = `${CONFIG_PANEL_ID}-stop-when-ticks-container`;
   stopWhenTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
-  stopWhenTicksContainer.style.display = config.stopCondition === 'maxFloor' ? 'none' : 'flex';
+  stopWhenTicksContainer.style.display =
+    config.stopCondition === 'maxFloor' || config.stopCondition === 'endless' ? 'none' : 'flex';
   
   const stopWhenTicksLabel = document.createElement('label');
   stopWhenTicksLabel.textContent = t('mods.manualRunner.stopWhenTicksReachedLabel');
@@ -2240,7 +2278,8 @@ function createConfigPanel() {
   stopWhenTicksInput.max = '3840'; // 4 minutes (240,000ms / 62.5ms per tick = 3,840 ticks)
   stopWhenTicksInput.value = config.stopWhenTicksReached || 0;
   stopWhenTicksInput.style.cssText = 'width: 80px; text-align: center; background-color: #333; color: #fff; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;';
-  stopWhenTicksInput.disabled = config.stopCondition === 'maxFloor';
+  stopWhenTicksInput.disabled =
+    config.stopCondition === 'maxFloor' || config.stopCondition === 'endless';
   
   stopWhenTicksContainer.appendChild(stopWhenTicksLabel);
   stopWhenTicksContainer.appendChild(stopWhenTicksInput);
@@ -2270,9 +2309,10 @@ function createConfigPanel() {
   // Show/hide max floor input and stop when ticks input based on stop condition selection
   stopSelect.addEventListener('change', () => {
     const isMaxFloor = stopSelect.value === 'maxFloor';
+    const isEndless = stopSelect.value === 'endless';
     maxFloorContainer.style.display = isMaxFloor ? 'flex' : 'none';
-    stopWhenTicksContainer.style.display = isMaxFloor ? 'none' : 'flex';
-    stopWhenTicksInput.disabled = isMaxFloor;
+    stopWhenTicksContainer.style.display = isMaxFloor || isEndless ? 'none' : 'flex';
+    stopWhenTicksInput.disabled = isMaxFloor || isEndless;
   });
 
   // Hide game board checkbox
@@ -2518,13 +2558,20 @@ function showRunningAnalysisModal(
   const content = document.createElement('div');
   content.style.cssText = 'text-align: center;';
   
+  const endlessText = t('mods.manualRunner.endlessRunLabel') || 'Endless run';
   const message = createTextElement('p', {
     id: 'manual-runner-target',
-    text: config.stopCondition === 'maxFloor' && maxFloor != null
-      ? (t('mods.manualRunner.runningUntilMaxFloor') ? t('mods.manualRunner.runningUntilMaxFloor').replace('{floor}', maxFloor) : `Running until floor ${maxFloor}`)
-      : targetRankPoints != null
-      ? t('mods.manualRunner.runningUntilTarget').replace('{points}', targetRankPoints)
-      : t('mods.manualRunner.runningUntilVictory')
+    text:
+      config.stopCondition === 'endless'
+        ? endlessText
+        : config.stopCondition === 'maxFloor' && maxFloor != null
+          ? (t('mods.manualRunner.runningUntilMaxFloor')
+              ? t('mods.manualRunner.runningUntilMaxFloor').replace('{floor}', maxFloor)
+              : `Running until floor ${maxFloor}`)
+          : targetRankPoints != null
+            ? t('mods.manualRunner.runningUntilTarget').replace('{points}', targetRankPoints)
+            : t('mods.manualRunner.runningUntilVictory'),
+    style: config.stopCondition === 'endless' ? 'color: #E06C75; font-weight: 500;' : undefined
   });
   content.appendChild(message);
   
@@ -3197,7 +3244,7 @@ async function runAnalysis() {
     }
     // Compute target S+ rank points based on current setup and stop condition
     let targetRankPoints = null;
-    if (config.stopCondition !== 'any') {
+    if (config.stopCondition !== 'any' && config.stopCondition !== 'endless') {
       const maxTeamSize = getMaxTeamSize(null);
       const playerTeamSize = getPlayerTeamSize();
       targetRankPoints = Math.max(0, (2 * maxTeamSize) - playerTeamSize);
@@ -3223,7 +3270,7 @@ async function runAnalysis() {
       0,
       0,
       targetRankPoints,
-      config.stopWhenTicksReached > 0,
+      config.stopWhenTicksReached > 0 && config.stopCondition !== 'endless',
       config.stopCondition === 'maxFloor' ? initialFloor : null,
       config.stopCondition === 'maxFloor' ? config.maxFloor : null
     );
@@ -3239,6 +3286,14 @@ async function runAnalysis() {
           if (floorElement) {
             floorElement.textContent = t('mods.manualRunner.currentFloor') ? t('mods.manualRunner.currentFloor').replace('{floor}', status.floor).replace('{max}', config.maxFloor) : `Floor ${status.floor}/${config.maxFloor}`;
           }
+        }
+      } else if (config.stopCondition === 'endless') {
+        const el = document.getElementById('manual-runner-target');
+        const endlessLabel = t('mods.manualRunner.endlessRunLabel') || 'Endless run';
+        if (el) {
+          el.textContent = endlessLabel;
+          el.style.color = '#E06C75';
+          el.style.fontWeight = '500';
         }
       } else if (typeof targetRankPoints === 'number') {
         updateTextContent('manual-runner-target', t('mods.manualRunner.runningUntilTarget').replace('{points}', targetRankPoints));
