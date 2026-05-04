@@ -12,12 +12,16 @@ const defaultConfig = {
   hideGameBoard: true,
   enableTurboAutomatically: true,
   stopOnSPlus: false,
+  stopOnAnyVictory: false,
   stopAfterTicks: 0, // 0 means no limit
   stopWhenTicksReached: 0 // Stop when finding a run with this number of ticks or less
 };
 
 // Initialize with saved config or defaults
 const config = Object.assign({}, defaultConfig, context.config);
+if (config.stopOnSPlus && config.stopOnAnyVictory) {
+  config.stopOnAnyVictory = false;
+}
 
 // Constants
 const MOD_ID = 'board-analyzer';
@@ -2243,6 +2247,11 @@ function processRunResults(result, runIndex, statsCalculator, bestRuns) {
       }
     }
   }
+
+  if (config.stopOnAnyVictory && completed) {
+    console.log('Victory achieved, stopping analysis early');
+    return true;
+  }
   
   if (grade === 'S+') {
     // If stopOnSPlus is enabled, we might want to exit early
@@ -2632,6 +2641,34 @@ function createConfigPanel(startAnalysisCallback) {
   stopSPlusContainer.appendChild(stopSPlusLabel);
   content.appendChild(stopSPlusContainer);
 
+  // Stop on any victory checkbox
+  const stopVictoryContainer = document.createElement('div');
+  stopVictoryContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+  const stopVictoryInput = document.createElement('input');
+  stopVictoryInput.type = 'checkbox';
+  stopVictoryInput.id = 'stop-victory-input';
+  stopVictoryInput.checked = config.stopOnAnyVictory;
+
+  const stopVictoryLabel = document.createElement('label');
+  stopVictoryLabel.htmlFor = 'stop-victory-input';
+  stopVictoryLabel.textContent = t('mods.boardAnalyzer.stopOnAnyVictoryLabel');
+
+  stopVictoryContainer.appendChild(stopVictoryInput);
+  stopVictoryContainer.appendChild(stopVictoryLabel);
+  content.appendChild(stopVictoryContainer);
+
+  stopSPlusInput.addEventListener('change', () => {
+    if (stopSPlusInput.checked) {
+      stopVictoryInput.checked = false;
+    }
+  });
+  stopVictoryInput.addEventListener('change', () => {
+    if (stopVictoryInput.checked) {
+      stopSPlusInput.checked = false;
+    }
+  });
+
   // Stop after ticks input
   const stopTicksContainer = document.createElement('div');
   stopTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
@@ -2739,7 +2776,16 @@ function createConfigPanel(startAnalysisCallback) {
     config.speedupFactor = parseInt(document.getElementById('speed-input').value, 10);
     config.hideGameBoard = document.getElementById('hide-input').checked;
     config.enableTurboAutomatically = document.getElementById('turbo-input').checked;
-    config.stopOnSPlus = document.getElementById('stop-splus-input').checked;
+    const stopSPlusEl = document.getElementById('stop-splus-input');
+    const stopVictoryEl = document.getElementById('stop-victory-input');
+    let stopOnSPlus = stopSPlusEl.checked;
+    let stopOnAnyVictory = stopVictoryEl.checked;
+    if (stopOnSPlus && stopOnAnyVictory) {
+      stopOnAnyVictory = false;
+      stopVictoryEl.checked = false;
+    }
+    config.stopOnSPlus = stopOnSPlus;
+    config.stopOnAnyVictory = stopOnAnyVictory;
     config.stopAfterTicks = parseInt(document.getElementById('stop-ticks-input').value, 10);
     config.stopWhenTicksReached = parseInt(document.getElementById('stop-when-ticks-input').value, 10);
     

@@ -1704,6 +1704,15 @@ function updateTextContent(id, text) {
   }
 }
 
+/** Win share and W/L string; wins+losses must be finished runs (same meaning as results modal). */
+function formatWinratePercentWL(wins, losses) {
+  const w = Math.max(0, Number(wins) || 0);
+  const l = Math.max(0, Number(losses) || 0);
+  const total = w + l;
+  const pct = total > 0 ? String(Math.round((w / total) * 100)) : '0';
+  return `${pct}% (${w}/${l})`;
+}
+
 // Main function to run until victory
 async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
   const thisAnalysisId = analysisState.start();
@@ -2548,7 +2557,6 @@ function showRunningAnalysisModal(
   victories = 0,
   staminaSpent = 0,
   targetRankPoints = null,
-  showVictories = false,
   currentFloor = null,
   maxFloor = null
 ) {
@@ -2591,24 +2599,15 @@ function showRunningAnalysisModal(
     style: 'margin-top: 12px;'
   });
   content.appendChild(progress);
-  
-  // Add victories count only when tracking ticks threshold
-  if (showVictories) {
-    const victoriesElement = createTextElement('p', {
-      id: 'manual-runner-victories',
-      text: t('mods.manualRunner.victories').replace('{n}', victories),
+
+  const winLossLine = `${t('mods.manualRunner.winLoss')} ${formatWinratePercentWL(victories, defeats)}`;
+  content.appendChild(
+    createTextElement('p', {
+      id: 'manual-runner-win-loss',
+      text: winLossLine,
       style: 'margin-top: 8px; color: #2ecc71;'
-    });
-    content.appendChild(victoriesElement);
-  }
-  
-  // Add defeats count
-  const defeatsElement = createTextElement('p', {
-    id: 'manual-runner-defeats',
-    text: t('mods.manualRunner.defeats').replace('{n}', defeats),
-    style: 'margin-top: 8px; color: #e74c3c;'
-  });
-  content.appendChild(defeatsElement);
+    })
+  );
   
   // Add stamina usage
   const staminaElement = createTextElement('p', {
@@ -2843,7 +2842,8 @@ async function showResultsModal(results) {
     
     appendStatRow(statsContainer, t('mods.manualRunner.totalAttempts'), stats.totalAttempts.toString());
 
-    appendStatRow(statsContainer, t('mods.manualRunner.completionRate'), `${stats.completionRate}% (${stats.completedAttempts}/${stats.totalAttempts})`, {
+    const lossAttempts = Math.max(0, stats.totalAttempts - stats.completedAttempts);
+    appendStatRow(statsContainer, t('mods.manualRunner.winLoss'), formatWinratePercentWL(stats.completedAttempts, lossAttempts), {
       valueStyle: 'text-align: right; color: #2ecc71; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
     });
 
@@ -3270,7 +3270,6 @@ async function runAnalysis() {
       0,
       0,
       targetRankPoints,
-      config.stopWhenTicksReached > 0 && config.stopCondition !== 'endless',
       config.stopCondition === 'maxFloor' ? initialFloor : null,
       config.stopCondition === 'maxFloor' ? config.maxFloor : null
     );
@@ -3301,13 +3300,12 @@ async function runAnalysis() {
         updateTextContent('manual-runner-target', t('mods.manualRunner.runningUntilVictory'));
       }
 
-      if (status.victories !== undefined) {
-        updateTextContent('manual-runner-victories', t('mods.manualRunner.victories').replace('{n}', status.victories));
-      }
-
-      if (status.defeats !== undefined) {
-        updateTextContent('manual-runner-defeats', t('mods.manualRunner.defeats').replace('{n}', status.defeats));
-      }
+      const v = status.victories !== undefined ? status.victories : 0;
+      const d = status.defeats !== undefined ? status.defeats : 0;
+      updateTextContent(
+        'manual-runner-win-loss',
+        `${t('mods.manualRunner.winLoss')} ${formatWinratePercentWL(v, d)}`
+      );
 
       if (status.staminaSpent !== undefined) {
         updateTextContent('manual-runner-stamina', t('mods.manualRunner.staminaSpent').replace('{n}', status.staminaSpent));

@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.7.7",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Board Analyzer",
+          "text": "Added Stop after any victory (end analysis on first win); mutually exclusive with Stop when reaching S+ grade."
+        },
+        {
+          "type": "changed",
+          "mod": "Hunt Analyzer",
+          "text": "K-style numbers use two fraction digits; live stats tooltips show exact values; sealed total uses theme color textSealed."
+        },
+        {
+          "type": "changed",
+          "mod": "Manual Runner",
+          "text": "Running and results modals show Win/Loss as whole-number percent with wins/losses counts instead of separate defeats (and optional victories) vs completion-style totals."
+        }
+      ]
+    },
+    {
       "version": "3.7.6",
       "changes": [
         {

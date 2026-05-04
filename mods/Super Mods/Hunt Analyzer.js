@@ -33,6 +33,7 @@ const HUNT_ANALYZER_THEMES = {
       textGold: '#E5C07B',    // Gold color
       textDust: '#61AFEF',    // Dust color
       textShiny: '#C678DD',   // Shiny color 
+      textSealed: '#666666', // Sealed total / muted tier accent
       textRunes: '#98C379',   // Runes color
       
       // Button colors
@@ -107,6 +108,7 @@ const HUNT_ANALYZER_THEMES = {
       textGold: '#ffcc80',    // Warm amber for gold (contrast)
       textDust: '#80d8ff',    // Ice blue for dust
       textShiny: '#b3e5fc',   // Light cyan for shiny
+      textSealed: '#90a4ae',  // Muted blue-gray (sealed)
       textRunes: '#42a5f5',   // Sky blue for runes
       
       // Button colors - Cool blue gradients
@@ -182,6 +184,7 @@ const HUNT_ANALYZER_THEMES = {
       textGold: '#ffd54f',    // Amber for gold (contrast)
       textDust: '#81c784',    // Light green for dust
       textShiny: '#66bb6a',   // Bright green for shiny
+      textSealed: '#78909c',  // Muted slate (sealed)
       textRunes: '#4caf50',   // Medium green for runes
       
       // Button colors - Green gradients
@@ -257,6 +260,7 @@ const HUNT_ANALYZER_THEMES = {
       textGold: '#ffaa00',    // Amber for gold
       textDust: '#ff6666',    // Light red for dust
       textShiny: '#ff1744',   // Bright red for shiny
+      textSealed: '#bcaaa4',  // Warm gray (sealed)
       textRunes: '#ff4444',   // Red for runes
       
       // Button colors - Red gradients
@@ -332,6 +336,7 @@ const HUNT_ANALYZER_THEMES = {
       textGold: '#ffaa00',    // Amber for gold (contrast)
       textDust: '#ba68c8',    // Medium purple for dust
       textShiny: '#ab47bc',   // Bright purple for shiny
+      textSealed: '#b0bec5', // Cool gray (sealed)
       textRunes: '#9575cd',   // Light purple for runes
       
       // Button colors - Purple gradients
@@ -1327,12 +1332,22 @@ function formatPlaytimeLabel(playtimeText) {
   return `${t('mods.huntAnalyzer.playtime')}: ${playtimeText}`;
 }
 
-/** Rounds to nearest integer; values with |n| >= 1000 render as e.g. 1K, 55K (including negatives). */
+/** Rounds to nearest integer; |n| >= 1000 renders as K with two fraction digits (locale-aware), e.g. 1,84K or 1.84K. */
 function formatCompactInt(value) {
   const n = Math.round(Number(value));
   if (!Number.isFinite(n)) return String(value);
   if (Math.abs(n) < 1000) return String(n);
-  return `${Math.round(n / 1000)}K`;
+  const sign = n < 0 ? '-' : '';
+  const kVal = Math.abs(n) / 1000;
+  const kStr = kVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${sign}${kStr}K`;
+}
+
+/** Full integer for tooltips (locale-formatted, no K suffix). */
+function formatExactInt(value) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return String(value);
+  return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
 function formatWinLossLabel(wins, losses, winRate) {
@@ -1347,11 +1362,14 @@ function formatStaminaRateLabel(staminaPerHour, netStaminaPerHour, recoveryEffic
   return `${t('mods.huntAnalyzer.staminaPerHour')}: ${formatCompactInt(staminaPerHour)} (${t('mods.huntAnalyzer.net')}: ${netStaminaPerHour > 0 ? '+' : ''}${formatCompactInt(netStaminaPerHour)}/h) [${recoveryEfficiency}% ${t('mods.huntAnalyzer.recovery')}]`;
 }
 
+function formatStaminaRateTooltip(staminaPerHour, netStaminaPerHour, recoveryEfficiency) {
+  return `${t('mods.huntAnalyzer.staminaPerHour')}: ${formatExactInt(staminaPerHour)} (${t('mods.huntAnalyzer.net')}: ${netStaminaPerHour > 0 ? '+' : ''}${formatExactInt(netStaminaPerHour)}/h) [${recoveryEfficiency}% ${t('mods.huntAnalyzer.recovery')}]`;
+}
+
 function setStaminaRateLineElement(element, staminaPerHour, netStaminaPerHour, recoveryEfficiency) {
   if (!element) return;
-  const full = formatStaminaRateLabel(staminaPerHour, netStaminaPerHour, recoveryEfficiency);
-  element.textContent = full;
-  element.setAttribute('title', full);
+  element.textContent = formatStaminaRateLabel(staminaPerHour, netStaminaPerHour, recoveryEfficiency);
+  element.setAttribute('title', formatStaminaRateTooltip(staminaPerHour, netStaminaPerHour, recoveryEfficiency));
 }
 
 // =======================
@@ -2152,7 +2170,7 @@ function updatePanelThemeColors(panel) {
     if (shinyAmountSpan) shinyAmountSpan.style.color = getThemeColor('textShiny');
 
     const sealedAmountSpan = document.getElementById('mod-total-sealed-display');
-    if (sealedAmountSpan) sealedAmountSpan.style.color = '#666666';
+    if (sealedAmountSpan) sealedAmountSpan.style.color = getThemeColor('textSealed');
     
     const runesAmountSpan = document.getElementById('mod-total-runes-display');
     if (runesAmountSpan) runesAmountSpan.style.color = getThemeColor('textRunes');
@@ -4041,18 +4059,23 @@ function renderAllSessions() {
     // Update Gold, Dust, and Shiny display next to Loot title
     if (cachedTotalGoldDisplayElement) {
         cachedTotalGoldDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
+        cachedTotalGoldDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.gold));
     }
     if (cachedTotalDustDisplayElement) {
         cachedTotalDustDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
+        cachedTotalDustDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.dust));
     }
     if (cachedTotalShinyDisplayElement) {
         cachedTotalShinyDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
+        cachedTotalShinyDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.shiny));
     }
     if (cachedTotalSealedDisplayElement) {
         cachedTotalSealedDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
+        cachedTotalSealedDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.sealed));
     }
     if (cachedTotalRunesDisplayElement) {
         cachedTotalRunesDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
+        cachedTotalRunesDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.runes));
     }
 
     // Get all loot items (Gold and Dust are already excluded from aggregatedLoot)
@@ -5701,7 +5724,7 @@ function createAutoplayAnalyzerPanel() {
 
     const sealedAmountSpan = document.createElement('span');
     sealedAmountSpan.id = 'mod-total-sealed-display';
-    sealedAmountSpan.style.color = '#666666';
+    sealedAmountSpan.style.color = getThemeColor('textSealed');
     sealedAmountSpan.style.fontSize = '12px';
     sealedAmountSpan.style.fontWeight = 'bold';
     sealedAmountSpan.textContent = '0';
@@ -6051,6 +6074,7 @@ function updatePanelDisplay() {
         const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
         
         cachedSessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${formatCompactInt(sessionRate)}/h)`;
+        cachedSessionCountSpan.setAttribute('title', `${t('mods.huntAnalyzer.sessions')}: ${formatExactInt(filteredSessionCount)} (${formatExactInt(sessionRate)}/h)`);
     }
     
     // Update win/loss display
@@ -6064,31 +6088,37 @@ function updatePanelDisplay() {
     if (cachedStaminaDisplayElement) {
         cachedStaminaDisplayElement.textContent = formatTotalStaminaLabel(HuntAnalyzerState.totals.staminaSpent);
         cachedStaminaDisplayElement.style.display = 'inline';
+        cachedStaminaDisplayElement.setAttribute('title', `${t('mods.huntAnalyzer.totalStamina')}: ${formatExactInt(HuntAnalyzerState.totals.staminaSpent)}`);
     }
 
     // Update dust display
     if (cachedTotalDustDisplayElement) {
         cachedTotalDustDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
+        cachedTotalDustDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.dust));
     }
 
     // Update gold display
     if (cachedTotalGoldDisplayElement) {
         cachedTotalGoldDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
+        cachedTotalGoldDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.gold));
     }
 
     // Update shiny display
     if (cachedTotalShinyDisplayElement) {
         cachedTotalShinyDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
+        cachedTotalShinyDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.shiny));
     }
 
     // Update sealed display
     if (cachedTotalSealedDisplayElement) {
         cachedTotalSealedDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
+        cachedTotalSealedDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.sealed));
     }
 
     // Update runes display
     if (cachedTotalRunesDisplayElement) {
         cachedTotalRunesDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
+        cachedTotalRunesDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.runes));
     }
 
     // Update room ID display
@@ -6154,15 +6184,19 @@ function updatePanelDisplay() {
 
     if (cachedGoldRateElement) {
         cachedGoldRateElement.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${formatCompactInt(goldRatePerHour)}`;
+        cachedGoldRateElement.setAttribute('title', `${t('mods.huntAnalyzer.goldPerHour')}: ${formatExactInt(goldRatePerHour)}`);
     }
     if (cachedCreatureRateElement) {
         cachedCreatureRateElement.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatCompactInt(creatureRatePerHour)}`;
+        cachedCreatureRateElement.setAttribute('title', `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatExactInt(creatureRatePerHour)}`);
     }
     if (cachedEquipmentRateElement) {
         cachedEquipmentRateElement.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatCompactInt(equipmentRatePerHour)}`;
+        cachedEquipmentRateElement.setAttribute('title', `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatExactInt(equipmentRatePerHour)}`);
     }
     if (cachedRuneRateElement) {
         cachedRuneRateElement.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${formatCompactInt(runeRatePerHour)}`;
+        cachedRuneRateElement.setAttribute('title', `${t('mods.huntAnalyzer.runesPerHour')}: ${formatExactInt(runeRatePerHour)}`);
     }
     if (cachedTotalStaminaSpentElement) {
         // Only calculate natural regeneration if we have completed sessions
@@ -6818,6 +6852,7 @@ const translationEventHandler = (event) => {
             const filteredTimeHours = getFilteredTimeHours();
             const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
             sessionCounter.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${formatCompactInt(sessionRate)}/h)`;
+            sessionCounter.setAttribute('title', `${t('mods.huntAnalyzer.sessions')}: ${formatExactInt(filteredSessionCount)} (${formatExactInt(sessionRate)}/h)`);
         }
 
         const winLossDisplay = document.getElementById('mod-win-loss-display');
@@ -6830,18 +6865,34 @@ const translationEventHandler = (event) => {
         const staminaDisplay = document.getElementById('mod-stamina-display');
         if (staminaDisplay) {
             staminaDisplay.textContent = formatTotalStaminaLabel(HuntAnalyzerState.totals.staminaSpent);
+            staminaDisplay.setAttribute('title', `${t('mods.huntAnalyzer.totalStamina')}: ${formatExactInt(HuntAnalyzerState.totals.staminaSpent)}`);
         }
 
         const tg = document.getElementById('mod-total-gold-display');
-        if (tg) tg.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
+        if (tg) {
+            tg.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
+            tg.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.gold));
+        }
         const td = document.getElementById('mod-total-dust-display');
-        if (td) td.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
+        if (td) {
+            td.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
+            td.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.dust));
+        }
         const ts = document.getElementById('mod-total-shiny-display');
-        if (ts) ts.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
+        if (ts) {
+            ts.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
+            ts.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.shiny));
+        }
         const tse = document.getElementById('mod-total-sealed-display');
-        if (tse) tse.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
+        if (tse) {
+            tse.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
+            tse.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.sealed));
+        }
         const tr = document.getElementById('mod-total-runes-display');
-        if (tr) tr.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
+        if (tr) {
+            tr.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
+            tr.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.runes));
+        }
         
         // Update playtime display
         const playtimeDisplay = document.getElementById('mod-playtime-display');
@@ -6858,6 +6909,7 @@ const translationEventHandler = (event) => {
             const goldRatePerHour = filteredTimeHours > 0 ? 
                 getSmoothedRate(Math.floor(HuntAnalyzerState.totals.gold / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
             goldRate.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${formatCompactInt(goldRatePerHour)}`;
+            goldRate.setAttribute('title', `${t('mods.huntAnalyzer.goldPerHour')}: ${formatExactInt(goldRatePerHour)}`);
         }
         
         const creatureRate = document.getElementById('mod-creature-rate');
@@ -6866,6 +6918,7 @@ const translationEventHandler = (event) => {
             const creatureRatePerHour = filteredTimeHours > 0 ? 
                 getSmoothedRate(Math.floor(HuntAnalyzerState.totals.creatures / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
             creatureRate.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatCompactInt(creatureRatePerHour)}`;
+            creatureRate.setAttribute('title', `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatExactInt(creatureRatePerHour)}`);
         }
         
         const equipmentRate = document.getElementById('mod-equipment-rate');
@@ -6874,6 +6927,7 @@ const translationEventHandler = (event) => {
             const equipmentRatePerHour = filteredTimeHours > 0 ? 
                 getSmoothedRate(Math.round(HuntAnalyzerState.totals.equipment / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
             equipmentRate.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatCompactInt(equipmentRatePerHour)}`;
+            equipmentRate.setAttribute('title', `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatExactInt(equipmentRatePerHour)}`);
         }
         
         const runeRate = document.getElementById('mod-rune-rate');
@@ -6882,6 +6936,7 @@ const translationEventHandler = (event) => {
             const runeRatePerHour = filteredTimeHours > 0 ? 
                 getSmoothedRate(Math.round(HuntAnalyzerState.totals.runes / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
             runeRate.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${formatCompactInt(runeRatePerHour)}`;
+            runeRate.setAttribute('title', `${t('mods.huntAnalyzer.runesPerHour')}: ${formatExactInt(runeRatePerHour)}`);
         }
         
         const staminaSpent = document.getElementById('mod-total-stamina-spent');
