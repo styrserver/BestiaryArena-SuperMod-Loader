@@ -230,6 +230,44 @@ function injectManualRunnerStyles() {
     }
     .manual-runner-stat.warn { color: #E06C75; }
     .manual-runner-stat.info { color: #61AFEF; }
+    .manual-runner-live-section {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin: 0;
+      color: #61AFEF;
+      font-size: 11px;
+      line-height: 15px;
+      font-family: Inter, sans-serif;
+    }
+    .manual-runner-live-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 15px;
+    }
+    .manual-runner-live-label {
+      color: #ABB2BF;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .manual-runner-live-value {
+      color: #61AFEF;
+      text-align: right;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .manual-runner-live-value-endless {
+      color: #E06C75;
+      font-weight: 600;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -2564,58 +2602,68 @@ function showRunningAnalysisModal(
   forceCloseAllModals();
   
   const content = document.createElement('div');
-  content.style.cssText = 'text-align: center;';
+  content.className = 'manual-runner-live-section';
+
+  const createLiveRow = (labelText, valueText, valueId) => {
+    const row = document.createElement('div');
+    row.className = 'manual-runner-live-row';
+
+    const label = createTextElement('span', {
+      text: labelText,
+      className: 'manual-runner-live-label'
+    });
+    const value = createTextElement('span', {
+      id: valueId,
+      text: valueText,
+      className: 'manual-runner-live-value'
+    });
+
+    row.appendChild(label);
+    row.appendChild(value);
+    content.appendChild(row);
+    return value;
+  };
   
   const endlessText = t('mods.manualRunner.endlessRunLabel') || 'Endless run';
-  const message = createTextElement('p', {
-    id: 'manual-runner-target',
-    text:
-      config.stopCondition === 'endless'
-        ? endlessText
-        : config.stopCondition === 'maxFloor' && maxFloor != null
-          ? (t('mods.manualRunner.runningUntilMaxFloor')
-              ? t('mods.manualRunner.runningUntilMaxFloor').replace('{floor}', maxFloor)
-              : `Running until floor ${maxFloor}`)
-          : targetRankPoints != null
-            ? t('mods.manualRunner.runningUntilTarget').replace('{points}', targetRankPoints)
-            : t('mods.manualRunner.runningUntilVictory'),
-    style: config.stopCondition === 'endless' ? 'color: #E06C75; font-weight: 500;' : undefined
-  });
-  content.appendChild(message);
-  
-  // Add floor display when in maxFloor mode
-  if (config.stopCondition === 'maxFloor' && currentFloor != null) {
-    const floorElement = createTextElement('p', {
-      id: 'manual-runner-floor',
-      text: t('mods.manualRunner.currentFloor') ? t('mods.manualRunner.currentFloor').replace('{floor}', currentFloor).replace('{max}', maxFloor || config.maxFloor || 10) : `Floor ${currentFloor}/${maxFloor || config.maxFloor || 10}`,
-      style: 'margin-top: 8px; color: #61AFEF;'
-    });
-    content.appendChild(floorElement);
+  const initialTargetFloor = maxFloor || config.maxFloor || 10;
+  const initialCurrentFloor = currentFloor != null ? currentFloor : initialTargetFloor;
+  const targetValue = createLiveRow(
+    config.stopCondition === 'maxFloor' ? 'Floor' : 'Target',
+    config.stopCondition === 'endless'
+      ? endlessText
+      : config.stopCondition === 'maxFloor' && maxFloor != null
+        ? `${initialCurrentFloor}/${initialTargetFloor}`
+        : targetRankPoints != null
+          ? String(targetRankPoints)
+          : 'Victory',
+    'manual-runner-target'
+  );
+  if (config.stopCondition === 'endless') {
+    targetValue.classList.add('manual-runner-live-value-endless');
   }
 
-  const progress = createTextElement('p', {
-    id: 'manual-runner-progress',
-    text: t('mods.manualRunner.attempt').replace('{n}', attempts),
-    style: 'margin-top: 12px;'
-  });
-  content.appendChild(progress);
-
-  const winLossLine = `${t('mods.manualRunner.winLoss')} ${formatWinratePercentWL(victories, defeats)}`;
-  content.appendChild(
-    createTextElement('p', {
-      id: 'manual-runner-win-loss',
-      text: winLossLine,
-      style: 'margin-top: 8px; color: #2ecc71;'
-    })
+  createLiveRow(
+    'Attempts',
+    String(attempts),
+    'manual-runner-progress'
   );
+
+  const winLossLine = formatWinratePercentWL(victories, defeats);
+  const winLossValue = createLiveRow(
+    'W/L',
+    winLossLine,
+    'manual-runner-win-loss'
+  );
+  if (winLossValue) {
+    winLossValue.style.color = '#98C379';
+  }
   
   // Add stamina usage
-  const staminaElement = createTextElement('p', {
-    id: 'manual-runner-stamina',
-    text: t('mods.manualRunner.staminaSpent').replace('{n}', staminaSpent),
-    style: 'margin-top: 8px; color: #3498db;'
-  });
-  content.appendChild(staminaElement);
+  createLiveRow(
+    'Stamina',
+    String(staminaSpent),
+    'manual-runner-stamina'
+  );
   
   // Create self-contained HTML modal to avoid conflicts with other modals
   injectManualRunnerStyles();
@@ -3276,16 +3324,12 @@ async function runAnalysis() {
     activeRunningModal = runningModal;
     
     const results = await runUntilVictory(targetRankPoints, (status) => {
-      updateTextContent('manual-runner-progress', t('mods.manualRunner.attempt').replace('{n}', status.attempts));
+      updateTextContent('manual-runner-progress', String(status.attempts || 0));
 
       if (config.stopCondition === 'maxFloor') {
-        updateTextContent('manual-runner-target', t('mods.manualRunner.runningUntilMaxFloor') ? t('mods.manualRunner.runningUntilMaxFloor').replace('{floor}', config.maxFloor) : `Running until floor ${config.maxFloor}`);
-        if (status.floor !== undefined) {
-          const floorElement = document.getElementById('manual-runner-floor');
-          if (floorElement) {
-            floorElement.textContent = t('mods.manualRunner.currentFloor') ? t('mods.manualRunner.currentFloor').replace('{floor}', status.floor).replace('{max}', config.maxFloor) : `Floor ${status.floor}/${config.maxFloor}`;
-          }
-        }
+        const targetFloor = config.maxFloor || 10;
+        const currentFloor = status.floor !== undefined ? status.floor : targetFloor;
+        updateTextContent('manual-runner-target', `${currentFloor}/${targetFloor}`);
       } else if (config.stopCondition === 'endless') {
         const el = document.getElementById('manual-runner-target');
         const endlessLabel = t('mods.manualRunner.endlessRunLabel') || 'Endless run';
@@ -3295,20 +3339,20 @@ async function runAnalysis() {
           el.style.fontWeight = '500';
         }
       } else if (typeof targetRankPoints === 'number') {
-        updateTextContent('manual-runner-target', t('mods.manualRunner.runningUntilTarget').replace('{points}', targetRankPoints));
+        updateTextContent('manual-runner-target', String(targetRankPoints));
       } else {
-        updateTextContent('manual-runner-target', t('mods.manualRunner.runningUntilVictory'));
+        updateTextContent('manual-runner-target', 'Victory');
       }
 
       const v = status.victories !== undefined ? status.victories : 0;
       const d = status.defeats !== undefined ? status.defeats : 0;
       updateTextContent(
         'manual-runner-win-loss',
-        `${t('mods.manualRunner.winLoss')} ${formatWinratePercentWL(v, d)}`
+        formatWinratePercentWL(v, d)
       );
 
       if (status.staminaSpent !== undefined) {
-        updateTextContent('manual-runner-stamina', t('mods.manualRunner.staminaSpent').replace('{n}', status.staminaSpent));
+        updateTextContent('manual-runner-stamina', String(status.staminaSpent));
       }
     });
     

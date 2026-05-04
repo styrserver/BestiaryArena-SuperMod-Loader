@@ -3216,6 +3216,31 @@ function generateConfigSummary(data, isImport = false) {
   return summary;
 }
 
+// Ask Hunt Analyzer to flush in-memory state into localStorage before export.
+async function flushHuntAnalyzerBeforeExport() {
+  const saveCandidates = [
+    window.saveHuntAnalyzerData,
+    window.HuntAnalyzerAPI?.saveData,
+    window.HuntAnalyzerState?.saveData
+  ];
+  
+  for (const candidate of saveCandidates) {
+    if (typeof candidate !== 'function') continue;
+    try {
+      const maybePromise = candidate();
+      if (maybePromise && typeof maybePromise.then === 'function') {
+        await maybePromise;
+      }
+      console.log('[Mod Settings] Hunt Analyzer data flush completed before export');
+      return true;
+    } catch (error) {
+      console.warn('[Mod Settings] Hunt Analyzer flush attempt failed:', error);
+    }
+  }
+  
+  return false;
+}
+
 // Export configuration function
 async function exportConfiguration(modal) {
   try {
@@ -3383,6 +3408,9 @@ async function exportConfiguration(modal) {
     
     if (huntAnalyzerCheckbox && huntAnalyzerCheckbox.checked) {
       try {
+        // Force a persistence flush first (if Hunt Analyzer exposes a save entrypoint).
+        await flushHuntAnalyzerBeforeExport();
+        
         const huntData = localStorage.getItem('huntAnalyzerData');
         const huntState = localStorage.getItem('huntAnalyzerState');
         const huntSettings = localStorage.getItem('huntAnalyzerSettings');

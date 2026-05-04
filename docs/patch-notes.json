@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.7.8",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Manual Runner",
+          "text": "Running live section now matches Hunt Analyzer styling."
+        },
+        {
+          "type": "fixed",
+          "mod": "Hunt Analyzer",
+          "text": "Sealed (Tier 5) creature drops now stack by creature identity (and shiny state) regardless of genes/tier roll."
+        },
+        {
+          "type": "fixed",
+          "mod": "Mod Settings",
+          "text": "Export Configuration now saves Hunt Analyzer data first, so exports include the latest progress."
+        }
+      ]
+    },
+    {
       "version": "3.7.7",
       "changes": [
         {

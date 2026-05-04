@@ -3161,6 +3161,17 @@ function getCreatureDetails(monsterDrop) {
     
     return { name, visual: visualContainer, rarity: tierLevel, totalStats, tierName, tierLevel, gameId: monsterDrop.gameId, isShiny, isSealed };
 }
+
+function buildCreatureAggregateKey(creature) {
+    const isSealed = !!creature.isSealed;
+    const shinyPart = creature.isShiny ? 'shiny' : 'normal';
+    // Sealed creatures should stack regardless of genes/tier roll.
+    if (isSealed) {
+        return `${creature.gameId}_sealed_${shinyPart}`;
+    }
+    return `${creature.gameId}_${creature.tierLevel}_${shinyPart}_unsealed`;
+}
+
 function copyToClipboard(text) {
     const textarea = document.createElement('textarea');
     textarea.value = text;
@@ -3546,8 +3557,13 @@ class DataProcessor {
           HuntAnalyzerState.totals.sealed += 1;
         }
         
-        // Include shiny/sealed status in map key to separate creature variants
-        const mapKey = `${creatureGameId}_${tierLevel}_${isShiny ? 'shiny' : 'normal'}_${isSealed ? 'sealed' : 'unsealed'}`;
+        // Include shiny/sealed status in map key to separate creature variants.
+        const mapKey = buildCreatureAggregateKey({
+          gameId: creatureGameId,
+          tierLevel,
+          isShiny,
+          isSealed
+        });
         if (aggregatedCreaturesForSession.has(mapKey)) {
           const existing = aggregatedCreaturesForSession.get(mapKey);
           existing.count += 1;
@@ -3755,7 +3771,7 @@ class DataProcessor {
         });
 
         sessionData.creatures.forEach(creature => {
-            const mapKey = `${creature.gameId}_${creature.tierLevel}_${creature.isShiny ? 'shiny' : 'normal'}_${creature.isSealed ? 'sealed' : 'unsealed'}`;
+            const mapKey = buildCreatureAggregateKey(creature);
         if (this.state.data.aggregatedCreatures.has(mapKey)) {
           const existing = this.state.data.aggregatedCreatures.get(mapKey);
                 existing.count += creature.count;
@@ -4512,7 +4528,7 @@ function generateSummaryLogText() {
             
             // Aggregate creatures for this map
             session.creatures.forEach(creature => {
-                const mapKey = `${creature.gameId}_${creature.tierLevel}_${creature.isShiny ? 'shiny' : 'normal'}_${creature.isSealed ? 'sealed' : 'unsealed'}`;
+                const mapKey = buildCreatureAggregateKey(creature);
                 if (mapGroups[mapName].creatures.has(mapKey)) {
                     const existing = mapGroups[mapName].creatures.get(mapKey);
                     existing.count += creature.count;
