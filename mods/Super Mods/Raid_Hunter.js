@@ -5251,18 +5251,22 @@ function createRaidMapSelection() {
     helpIcon.textContent = '?';
     helpIcon.className = 'pixel-font-16';
     helpIcon.style.cssText = `
-        width: 20px;
-        height: 20px;
+        width: 22px;
+        height: 22px;
         border-radius: 50%;
-        background: rgba(255, 224, 102, 0.2);
+        background: radial-gradient(circle at 30% 30%, rgba(255, 224, 102, 0.35), rgba(255, 224, 102, 0.12));
         color: ${COLOR_ACCENT};
-        border: 1px solid ${COLOR_ACCENT};
+        border: 1px solid rgba(255, 224, 102, 0.8);
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: help;
-        font-size: 14px;
-        font-weight: bold;
+        font-size: 15px;
+        font-weight: 900;
+        font-family: "Segoe UI", Arial, sans-serif;
+        line-height: 1;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 3px rgba(0, 0, 0, 0.35);
         position: relative;
         flex-shrink: 0;
     `;
@@ -6337,6 +6341,7 @@ function loadSettings() {
 function autoSaveSettings() {
     try {
         const settings = {};
+        const currentSettings = loadSettings();
         const inputs = document.querySelectorAll('input, select');
         
         inputs.forEach(input => {
@@ -6364,7 +6369,6 @@ function autoSaveSettings() {
         
         // Process raid map selections (static raids + event raids)
         // Load current settings first to preserve event raid states that aren't currently visible
-        const currentSettings = loadSettings();
         const previouslySavedMaps = currentSettings.enabledRaidMaps || [];
         const enabledRaidMaps = [];
         
@@ -6465,6 +6469,10 @@ function autoSaveSettings() {
         });
         
         settings.raidFloors = raidFloors;
+        
+        // Preserve per-raid context menu settings (autoRefillStamina/setupMethod).
+        // autoSaveSettings() does not edit these values directly, so keep the latest saved copy.
+        settings.raidSettings = currentSettings.raidSettings || {};
         
         // Validate and sanitize settings before saving
         const sanitizedSettings = sanitizeSettings(settings);

@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "3.7.10",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Better Tasker",
+          "text": "Added right-click creature context menu with per-creature map, autostamina, setup, and floor overrides."
+        },
+        {
+          "type": "changed",
+          "mod": "Depot Manager",
+          "text": "Favorite icons now render at 12x12 for a tighter UI."
+        },
+        {
+          "type": "fixed",
+          "mod": "Better Tasker",
+          "text": "Creature map list now filters by creature gameId and context menu closes reliably on outside click."
+        },
+        {
+          "type": "fixed",
+          "mod": "Manual Runner",
+          "text": "While running, Manual Runner now locks play mode to manual and reverts external floor changes until the run ends."
+        },
+        {
+          "type": "fixed",
+          "mod": "Raid Hunter",
+          "text": "Fixed per-raid context menu settings being overwritten by auto-save, so setup method and floor choices persist after reopening."
+        }
+      ]
+    },
+    {
       "version": "3.7.9",
       "changes": [
         {

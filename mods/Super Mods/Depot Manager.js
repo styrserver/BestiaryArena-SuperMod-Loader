@@ -2705,8 +2705,8 @@ function createFavoriteSubmenu(uniqueId, currentSymbol) {
     let iconElement = '';
     if (!symbol.isNone) {
       iconElement = symbolKey === 'heart'
-        ? `<span style="font-size: 14px; line-height: 1;">${symbol.icon}</span>`
-        : `<img src="${symbol.icon}" width="14" height="14" style="image-rendering: pixelated;" alt="${symbol.name}">`;
+        ? `<span style="font-size: 12px; line-height: 1;">${symbol.icon}</span>`
+        : `<img src="${symbol.icon}" width="12" height="12" style="image-rendering: pixelated;" alt="${symbol.name}">`;
     }
 
     symbolItem.innerHTML = `${iconElement}${symbol.name}${isCurrentSymbol ? ' ✓' : ''}`;
@@ -2870,16 +2870,16 @@ function updateSingleFavoriteHeart(targetUniqueId, slotEntries) {
 function createFavoriteHeartElement(symbolKey, symbol) {
   const heart = document.createElement('div');
   heart.className = 'favorite-heart pixelated';
-  heart.style.cssText = 'position: absolute; bottom: 1px; right: 0; z-index: 3; width: 16px; height: 16px; pointer-events: none;';
+  heart.style.cssText = 'position: absolute; bottom: 1px; right: 0; z-index: 3; width: 12px; height: 12px; pointer-events: none;';
   if (symbolKey === 'heart') {
     heart.innerHTML = symbol.icon;
-    heart.style.fontSize = '16px';
+    heart.style.fontSize = '12px';
     heart.style.display = 'flex';
     heart.style.alignItems = 'center';
     heart.style.justifyContent = 'center';
     heart.style.lineHeight = '1';
   } else {
-    heart.innerHTML = `<img src="${symbol.icon}" width="16" height="16" style="image-rendering: pixelated;" alt="${symbol.name}">`;
+    heart.innerHTML = `<img src="${symbol.icon}" width="12" height="12" style="image-rendering: pixelated;" alt="${symbol.name}">`;
   }
   return heart;
 }

@@ -35,14 +35,19 @@ const DEFAULT_TASK_START_DELAY = 3;
 
 // Creatures that cannot appear in tasker tasks
 const UNSELECTABLE_CREATURES = [
+    'Chubby Gazer',
     'Dwarf Merrymancer',
     'Firestarter',
     'Goblin Gumslinger',
     'Goblin Saboteur',
     'Grynch Clan Commander',
     'Gummy Raider',
+    'Mystic Gazer',
     'Polar Bear',
+    'Psychic Gazer',
     'Reindeer',
+    'Spiky Gazer',
+    'Sturdy Gazer',
     'Swamp Troll',
     'The Percht Queen',
     'Tortoise',
@@ -266,6 +271,107 @@ function attachSettingsListRowHover(rowEl, isDimmed) {
     });
 }
 
+function getCreatureSettingsKey(creatureName) {
+    if (!creatureName) return '';
+    return `creature-${String(creatureName).replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
+}
+
+function getCreatureGameIdByName(creatureName) {
+    try {
+        if (!creatureName) return null;
+        const target = String(creatureName).trim().toLowerCase();
+
+        if (typeof window.creatureDatabase?.findMonsterByName === 'function') {
+            const monster = window.creatureDatabase.findMonsterByName(creatureName);
+            const gameId = Number(monster?.gameId);
+            if (Number.isFinite(gameId)) return gameId;
+        }
+
+        const getMonster = globalThis.state?.utils?.getMonster;
+        if (typeof getMonster === 'function') {
+            for (let gameId = 1; gameId < 1000; gameId++) {
+                let monster = null;
+                try {
+                    monster = getMonster(gameId);
+                } catch (_) {
+                    break;
+                }
+                const name = String(monster?.metadata?.name || '').trim().toLowerCase();
+                if (name && name === target) {
+                    return gameId;
+                }
+            }
+        }
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function getAllMapOptions(creatureName = null) {
+    try {
+        const roomNameMap = globalThis.state?.utils?.ROOM_NAME;
+        if (!roomNameMap || typeof roomNameMap !== 'object') return [];
+        const mapsDb = window.mapsDatabase;
+        let rows = Object.entries(roomNameMap)
+            .map(([id, name]) => ({ id: String(id), name: String(name || '').trim() }))
+            .filter((entry) => entry.id && entry.name)
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        // Exclude raid + dynamic event maps from task creature overrides.
+        rows = rows.filter((row) => {
+            try {
+                if (mapsDb && typeof mapsDb.isRaid === 'function' && mapsDb.isRaid(row.id)) {
+                    return false;
+                }
+                if (mapsDb && typeof mapsDb.isDynamicEventMap === 'function' && mapsDb.isDynamicEventMap(row.id)) {
+                    return false;
+                }
+                // Fallback if mapsDatabase is unavailable or incomplete.
+                const room = typeof mapsDb?.getMapById === 'function'
+                    ? mapsDb.getMapById(row.id)
+                    : (globalThis.state?.utils?.ROOMS || []).find((r) => String(r?.id) === row.id);
+                if (room?.raid === true) return false;
+                return true;
+            } catch (_) {
+                return true;
+            }
+        });
+
+        const creatureGameId = getCreatureGameIdByName(creatureName);
+        const getBoardMonstersFromRoomId = globalThis.state?.utils?.getBoardMonstersFromRoomId;
+        if (creatureGameId != null && typeof getBoardMonstersFromRoomId === 'function') {
+            rows = rows.filter((row) => {
+                try {
+                    const board = getBoardMonstersFromRoomId(row.id);
+                    if (!board) return false;
+                    const pieces = Array.isArray(board) ? board : Object.values(board);
+                    return pieces.some((piece) => Number(piece?.gameId) === creatureGameId);
+                } catch (_) {
+                    return false;
+                }
+            });
+        }
+        return rows;
+    } catch (error) {
+        console.error('[Better Tasker] Error getting map options:', error);
+        return [];
+    }
+}
+
+let betterTaskerOpenCreatureContextMenu = null;
+
+function getCreatureOverrides(creatureName) {
+    try {
+        if (!creatureName) return null;
+        const settings = loadSettings();
+        const key = getCreatureSettingsKey(creatureName);
+        return settings.creatureOverrides?.[key] || settings.creatureOverrides?.[creatureName] || null;
+    } catch (_) {
+        return null;
+    }
+}
+
 function createDropdownSetting(id, label, description, value = 'Auto-setup', options = ['Auto-setup']) {
     const settingDiv = document.createElement('div');
     settingDiv.style.cssText = `
@@ -330,6 +436,244 @@ function createDropdownSetting(id, label, description, value = 'Auto-setup', opt
     settingDiv.appendChild(descElement);
     
     return settingDiv;
+}
+
+function closeCreatureContextMenu() {
+    if (betterTaskerOpenCreatureContextMenu?.closeMenu) {
+        betterTaskerOpenCreatureContextMenu.closeMenu();
+    }
+}
+
+function createCreatureContextMenu(creatureName, x, y, onClose) {
+    closeCreatureContextMenu();
+
+    const settings = loadSettings();
+    const creatureKey = getCreatureSettingsKey(creatureName);
+    const existing = settings.creatureOverrides?.[creatureKey] || {};
+    const mapOptions = getAllMapOptions(creatureName);
+    const setupOptions = getAvailableSetupOptions();
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position: fixed; inset: 0; z-index: 9998; background: transparent;';
+
+    const menu = document.createElement('div');
+    menu.style.cssText = `
+        position: fixed;
+        left: ${x}px;
+        top: ${y}px;
+        width: min(250px, 94vw);
+        min-width: min(250px, 94vw);
+        max-width: min(250px, 94vw);
+        height: min(270px, 82vh);
+        min-height: min(270px, 82vh);
+        max-height: min(270px, 82vh);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: 5px;
+        border: 1px solid #444;
+        background: url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;
+        color: #fff;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+        box-sizing: border-box;
+    `;
+
+    const shell = document.createElement('div');
+    shell.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        padding: 10px;
+        box-sizing: border-box;
+        gap: 10px;
+        min-height: 0;
+    `;
+
+    const title = document.createElement('h3');
+    title.className = 'pixel-font-16';
+    title.textContent = creatureName;
+    title.style.cssText = `
+        margin: 0;
+        color: #ffe066;
+        font-weight: bold;
+        text-align: center;
+        flex-shrink: 0;
+    `;
+
+    const contentPanel = document.createElement('div');
+    contentPanel.style.cssText = `
+        flex: 1 1 0%;
+        min-height: 0;
+        overflow: hidden;
+        border: 1px solid #444;
+        border-radius: 5px;
+        background: rgba(0, 0, 0, 0.2);
+        padding: 10px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    `;
+
+    const sectionLabel = document.createElement('div');
+    sectionLabel.className = 'pixel-font-14';
+    sectionLabel.textContent = t('mods.betterTasker.defaultForCreature');
+    sectionLabel.style.cssText = 'color:#ffe066; font-size:12px; font-weight:bold; margin:0 0 2px 0;';
+
+    const mapSelect = document.createElement('select');
+    mapSelect.className = 'pixel-font-14';
+    mapSelect.style.cssText = 'width:100%; padding:6px; border:1px solid #ffe066; border-radius:3px; background:#2a2a2a; color:#fff; box-sizing:border-box;';
+
+    const refillWrap = document.createElement('label');
+    refillWrap.className = 'pixel-font-14';
+    refillWrap.style.cssText = 'display:flex; align-items:center; gap:8px; color:#fff; margin:2px 0;';
+    const refillCheckbox = document.createElement('input');
+    refillCheckbox.type = 'checkbox';
+    refillCheckbox.style.cssText = 'width:16px; height:16px; accent-color:#ffe066; cursor:pointer;';
+    refillCheckbox.checked = existing.autoRefillStamina !== undefined ? !!existing.autoRefillStamina : !!settings.autoRefillStamina;
+    refillWrap.appendChild(refillCheckbox);
+    refillWrap.appendChild(document.createTextNode(t('mods.betterTasker.autoRefillStamina')));
+
+    const floorSelect = document.createElement('select');
+    floorSelect.className = 'pixel-font-14';
+    floorSelect.style.cssText = mapSelect.style.cssText;
+    for (let i = 0; i <= 15; i++) {
+        const optionElement = document.createElement('option');
+        optionElement.value = String(i);
+        optionElement.textContent = `Floor ${i}`;
+        floorSelect.appendChild(optionElement);
+    }
+    floorSelect.value = String(existing.floor != null ? Math.max(0, Math.min(15, Number(existing.floor) || 0)) : 0);
+
+    const setupSelect = document.createElement('select');
+    setupSelect.className = 'pixel-font-14';
+    setupSelect.style.cssText = mapSelect.style.cssText;
+    setupOptions.forEach((option) => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option;
+        optionElement.textContent = option;
+        setupSelect.appendChild(optionElement);
+    });
+    setupSelect.value = setupOptions.includes(existing.setupMethod) ? existing.setupMethod : (settings.setupMethod || setupOptions[0]);
+
+    const rebuildMapOptions = () => {
+        const selectedBefore = mapSelect.value;
+        mapSelect.innerHTML = '';
+        const autoOption = document.createElement('option');
+        autoOption.value = '';
+        autoOption.textContent = t('mods.betterTasker.useSuggestedMap');
+        mapSelect.appendChild(autoOption);
+
+        mapOptions.forEach((mapOption) => {
+            const optionElement = document.createElement('option');
+            optionElement.value = mapOption.id;
+            optionElement.textContent = mapOption.name;
+            mapSelect.appendChild(optionElement);
+        });
+
+        const initialMapId = existing.mapId != null ? String(existing.mapId) : '';
+        const hasSelected = [...mapSelect.options].some((o) => o.value === selectedBefore);
+        const hasInitial = [...mapSelect.options].some((o) => o.value === initialMapId);
+        mapSelect.value = hasSelected ? selectedBefore : (hasInitial ? initialMapId : '');
+        mapSelect.size = 1;
+    };
+    rebuildMapOptions();
+
+    const persist = () => {
+        const latest = loadSettings();
+        if (!latest.creatureOverrides || typeof latest.creatureOverrides !== 'object') {
+            latest.creatureOverrides = {};
+        }
+        latest.creatureOverrides[creatureKey] = {
+            mapId: mapSelect.value || null,
+            floor: Math.max(0, Math.min(15, Number(floorSelect.value) || 0)),
+            setupMethod: setupSelect.value || latest.setupMethod || 'Auto-setup',
+            autoRefillStamina: !!refillCheckbox.checked
+        };
+        localStorage.setItem('betterTaskerSettings', JSON.stringify(latest));
+    };
+
+    [mapSelect, floorSelect, setupSelect, refillCheckbox].forEach((el) => el.addEventListener('change', persist));
+
+    const resetBtn = createStyledButton('bt-reset-creature-ctx', t('mods.betterTasker.reset'), 'red', () => {
+        const latest = loadSettings();
+        if (latest.creatureOverrides?.[creatureKey]) {
+            delete latest.creatureOverrides[creatureKey];
+            localStorage.setItem('betterTaskerSettings', JSON.stringify(latest));
+        }
+        rebuildMapOptions();
+        mapSelect.value = '';
+        floorSelect.value = '0';
+        const fallbackSetup = latest.setupMethod || setupOptions[0] || 'Auto-setup';
+        setupSelect.value = setupOptions.includes(fallbackSetup) ? fallbackSetup : (setupOptions[0] || 'Auto-setup');
+        refillCheckbox.checked = !!latest.autoRefillStamina;
+    });
+    const closeBtn = createStyledButton('bt-close-creature-ctx', t('mods.betterTasker.close'), 'green', () => closeMenu());
+    resetBtn.style.flex = '1';
+    closeBtn.style.flex = '1';
+
+    const controls = document.createElement('div');
+    controls.style.cssText = `
+        display:flex;
+        flex-direction:column;
+        gap:8px;
+        border: 1px solid #555;
+        border-radius: 3px;
+        background: rgba(0,0,0,0.3);
+        padding: 8px;
+        box-sizing: border-box;
+        overflow-y: auto;
+        min-height: 0;
+        flex: 1 1 auto;
+    `;
+    controls.appendChild(sectionLabel);
+    controls.appendChild(mapSelect);
+    controls.appendChild(refillWrap);
+    controls.appendChild(floorSelect);
+    controls.appendChild(setupSelect);
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'display:flex; gap:8px; justify-content:center; flex-shrink:0;';
+    footer.appendChild(resetBtn);
+    footer.appendChild(closeBtn);
+
+    const handleDocPointerDown = (e) => {
+        if (!menu.contains(e.target)) {
+            closeMenu();
+        }
+    };
+
+    function closeMenu() {
+        document.removeEventListener('mousedown', handleDocPointerDown, true);
+        overlay.remove();
+        menu.remove();
+        if (betterTaskerOpenCreatureContextMenu?.overlay === overlay) {
+            betterTaskerOpenCreatureContextMenu = null;
+        }
+        if (typeof onClose === 'function') onClose();
+    }
+
+    overlay.addEventListener('mousedown', closeMenu);
+    menu.addEventListener('mousedown', (e) => e.stopPropagation());
+    document.addEventListener('mousedown', handleDocPointerDown, true);
+
+    contentPanel.appendChild(controls);
+    shell.appendChild(title);
+    shell.appendChild(contentPanel);
+    shell.appendChild(footer);
+    menu.appendChild(shell);
+    document.body.appendChild(overlay);
+    document.body.appendChild(menu);
+
+    const rect = menu.getBoundingClientRect();
+    const maxLeft = Math.max(8, window.innerWidth - rect.width - 8);
+    const maxTop = Math.max(8, window.innerHeight - rect.height - 8);
+    menu.style.left = `${Math.min(Math.max(8, x), maxLeft)}px`;
+    menu.style.top = `${Math.min(Math.max(8, y), maxTop)}px`;
+
+    betterTaskerOpenCreatureContextMenu = { overlay, menu, closeMenu };
 }
 
 // Sleep function for delays
@@ -2659,7 +3003,7 @@ function modifyQuestButtonForTasking() {
         
         // Change text to "Tasking"
         if (span) {
-            span.textContent = 'Tasking';
+            span.textContent = t('mods.betterTasker.tasking');
             // Add shimmer effect to the text
             span.style.background = 'linear-gradient(45deg, #22c55e, #16a34a, #22c55e, #16a34a)';
             span.style.backgroundSize = '400% 400%';
@@ -3498,7 +3842,7 @@ function createGeneralSettings() {
     // Setup method selection
     const setupMethodDiv = createDropdownSetting(
         'setupMethod',
-        'Setup Method', // Not in translations yet, keeping as-is
+        t('mods.betterTasker.setupMethod'),
         '',
         loadSettings().setupMethod || t('mods.betterTasker.autoSetup'),
         getAvailableSetupOptions()
@@ -3585,7 +3929,7 @@ function createMonsterSelectionSettings() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = 'Monster Selection'; // Not in translations yet, keeping as-is
+    title.textContent = t('mods.betterTasker.monsterSelectionTitle');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 15px 0;
@@ -3594,16 +3938,6 @@ function createMonsterSelectionSettings() {
         text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
     `;
     section.appendChild(title);
-    
-    const description = document.createElement('div');
-    description.textContent = t('mods.betterTasker.creatureSelection');
-    description.className = 'pixel-font-16';
-    description.style.cssText = `
-        margin-bottom: 15px;
-        color: #888;
-        font-style: italic;
-    `;
-    section.appendChild(description);
     
     // Add warning about active tasks
     const warning = document.createElement('div');
@@ -3626,7 +3960,7 @@ function createMonsterSelectionSettings() {
         flex-direction: column;
         gap: 8px;
         flex: 1;
-        max-height: 190px;
+        max-height: 215px;
         overflow-y: auto;
         border: 1px solid #555;
         border-radius: 3px;
@@ -3636,6 +3970,7 @@ function createMonsterSelectionSettings() {
     
     // Get creatures from the creature database
     const creatures = window.creatureDatabase?.ALL_CREATURES || [];
+    const settings = loadSettings();
     
     if (creatures.length === 0) {
         const noCreaturesDiv = document.createElement('div');
@@ -3652,6 +3987,7 @@ function createMonsterSelectionSettings() {
         // Create checkboxes for each creature
         creatures.forEach(creatureName => {
             const isUnselectable = UNSELECTABLE_CREATURES.includes(creatureName);
+            const creatureKey = getCreatureSettingsKey(creatureName);
             
             const creatureDiv = document.createElement('div');
             creatureDiv.style.cssText = `
@@ -3721,10 +4057,35 @@ function createMonsterSelectionSettings() {
                 addTrackedListener(checkbox, 'change', updateWarningVisibility);
             }
             
+            const customIndicator = document.createElement('span');
+            customIndicator.className = 'pixel-font-14';
+            customIndicator.textContent = '⚙';
+            customIndicator.title = isUnselectable
+                ? ''
+                : 'Right-click to set map, stamina, floor, and setup for this creature';
+            customIndicator.style.cssText = `
+                opacity: ${settings.creatureOverrides?.[creatureKey] ? '1' : '0.2'};
+                color: #ff6b6b;
+                margin-left: auto;
+                margin-right: 4px;
+                font-size: 12px;
+                cursor: ${isUnselectable ? 'not-allowed' : 'help'};
+            `;
+
             creatureDiv.appendChild(checkbox);
             creatureDiv.appendChild(warningSymbol);
             creatureDiv.appendChild(label);
+            creatureDiv.appendChild(customIndicator);
             attachSettingsListRowHover(creatureDiv, isUnselectable);
+            if (!isUnselectable) {
+                creatureDiv.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    createCreatureContextMenu(creatureName, e.clientX, e.clientY, () => {
+                        customIndicator.style.opacity = getCreatureOverrides(creatureName) ? '1' : '0.2';
+                    });
+                });
+            }
             monsterContainer.appendChild(creatureDiv);
         });
     }
@@ -3813,6 +4174,7 @@ function loadSettings() {
         fasterAutoplay: false,
         enableDragonPlant: false,
         setupMethod: 'Auto-setup',  // Default to Auto-setup (translation applied at display time)
+        creatureOverrides: {},
         // Default all creatures to enabled, except unselectable ones
         ...Object.fromEntries(
             (window.creatureDatabase?.ALL_CREATURES || []).map(creature => 
@@ -3837,7 +4199,7 @@ function loadSettings() {
 // Auto-save settings when changed
 function autoSaveSettings() {
     try {
-        const settings = {};
+        const settings = loadSettings();
         const inputs = document.querySelectorAll('input, select');
         
         inputs.forEach(input => {
@@ -3968,8 +4330,8 @@ function loadAndApplySettings() {
 // ============================================================================
 
 // Enable Bestiary Automator settings with retry logic
-function enableBestiaryAutomatorSettings(returnSuccess = false) {
-    const settings = loadSettings();
+function enableBestiaryAutomatorSettings(returnSuccess = false, settingsOverride = null) {
+    const settings = settingsOverride || loadSettings();
     let anySuccess = false;
     
     if (settings.autoRefillStamina) {
@@ -3987,6 +4349,8 @@ function enableBestiaryAutomatorSettings(returnSuccess = false) {
                 }, BESTIARY_RETRY_DELAY);
             }
         }, BESTIARY_INTEGRATION_DELAY);
+    } else {
+        disableBestiaryAutomatorStaminaRefill();
     }
     
     if (settings.fasterAutoplay) {
@@ -4004,6 +4368,8 @@ function enableBestiaryAutomatorSettings(returnSuccess = false) {
                 }, BESTIARY_RETRY_DELAY);
             }
         }, BESTIARY_INTEGRATION_DELAY);
+    } else {
+        disableBestiaryAutomatorFasterAutoplay();
     }
     
     if (settings.enableDragonPlant) {
@@ -4018,7 +4384,7 @@ function enableBestiaryAutomatorSettings(returnSuccess = false) {
 }
 
 // Handle quest log state - close quest log first, then navigate to suggested map
-async function handleQuestLogState(roomId) {
+async function handleQuestLogState(roomId, targetFloor = 0) {
     // First, close the quest log with ESC key presses (like Raid Hunter)
     console.log('[Better Tasker] Closing quest log before navigation...');
     await clearModalsWithEsc(3);
@@ -4028,16 +4394,17 @@ async function handleQuestLogState(roomId) {
     console.log('[Better Tasker] Quest log closed with ESC presses');
     
     // Now navigate to the suggested map
-    console.log('[Better Tasker] Navigating to suggested map via API...');
+    console.log('[Better Tasker] Navigating to selected map via API...');
     globalThis.state.board.send({
         type: 'selectRoomById',
         roomId: roomId
     });
     await sleep(NAVIGATION_DELAY);
     
-    // Set floor to 0 (default)
-    console.log('[Better Tasker] Setting floor to 0');
-    globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: 0 }) });
+    // Set floor from override (default 0)
+    const resolvedFloor = Math.max(0, Math.min(15, Number(targetFloor) || 0));
+    console.log(`[Better Tasker] Setting floor to ${resolvedFloor}`);
+    globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: resolvedFloor }) });
     await sleep(100);
     
     // Wait for map to load
@@ -4097,8 +4464,23 @@ function isQuestBlipAvailable() {
     }
 }
 
+function getActiveTaskCreatureNameFromGameState() {
+    try {
+        const taskGameId = globalThis.state?.player?.get?.()?.context?.questLog?.task?.gameId;
+        if (taskGameId == null) return null;
+        const monster = globalThis.state?.utils?.getMonster?.(Number(taskGameId));
+        const name = String(monster?.metadata?.name || '').trim();
+        if (!name) return null;
+        console.log(`[Better Tasker] Resolved task creature from questLog.gameId ${taskGameId}: ${name}`);
+        return name;
+    } catch (error) {
+        console.error('[Better Tasker] Error resolving task creature from game state:', error);
+        return null;
+    }
+}
+
 // Navigate to suggested map and start autoplay using API
-async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null) {
+async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null, preferredCreatureName = null) {
     try {
         // CRITICAL: Check if Raid Hunter is actively raiding BEFORE doing anything (HIGH priority raids take precedence)
         if (isRaidHunterRaiding()) {
@@ -4106,6 +4488,29 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             return false;
         }
         
+        const settings = loadSettings();
+        const activeCreatureName = preferredCreatureName || getActiveTaskCreatureNameFromGameState() || extractCreatureFromTask();
+        const creatureOverride = getCreatureOverrides(activeCreatureName);
+        const resolvedSetupMethod = creatureOverride?.setupMethod || settings.setupMethod || 'Auto-setup';
+        const resolvedFloor = creatureOverride?.floor != null ? creatureOverride.floor : 0;
+        const resolvedAutoRefillStamina = creatureOverride?.autoRefillStamina !== undefined
+            ? !!creatureOverride.autoRefillStamina
+            : !!settings.autoRefillStamina;
+        const runtimeSettings = {
+            ...settings,
+            setupMethod: resolvedSetupMethod,
+            autoRefillStamina: resolvedAutoRefillStamina
+        };
+        console.log('[Better Tasker] Per-creature override resolution:', {
+            preferredCreatureName,
+            activeCreatureName,
+            hasOverride: !!creatureOverride,
+            overrideMapId: creatureOverride?.mapId ?? null,
+            resolvedSetupMethod,
+            resolvedFloor,
+            resolvedAutoRefillStamina
+        });
+
         // First, ensure quest log is open
         const questLogOpened = await openQuestLogDirectly();
         if (!questLogOpened) {
@@ -4114,20 +4519,24 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             // If quest log cannot be opened (e.g., during autoplay), try to use stored taskingMapId
             if (taskingMapId) {
                 console.log(`[Better Tasker] Using stored tasking map ID: ${taskingMapId}`);
-                const roomId = taskingMapId;
+                const roomId = (creatureOverride?.mapId != null ? String(creatureOverride.mapId) : null) || taskingMapId;
+                console.log('[Better Tasker] Stored-map navigation target:', {
+                    overrideMapId: creatureOverride?.mapId ?? null,
+                    taskingMapId,
+                    selectedRoomId: roomId
+                });
                 
                 // Show toast notification
                 showToast('Starting Better Tasker');
                 
                 // Handle quest log state and navigation
-                const navigationCompleted = await handleQuestLogState(roomId);
+                const navigationCompleted = await handleQuestLogState(roomId, resolvedFloor);
                 
                 // Set the tasking map ID for future validation (already set, but ensure it's preserved)
                 taskingMapId = roomId;
                 
                 // Continue with setup...
-                const settings = loadSettings();
-                const setupMethod = settings.setupMethod || 'Auto-setup';
+                const setupMethod = runtimeSettings.setupMethod || 'Auto-setup';
                 
                 // Find and click the appropriate setup button
                 console.log(`[Better Tasker] Looking for ${setupMethod} button...`);
@@ -4152,7 +4561,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 }
 
                 // Enable Bestiary Automator settings if configured (moved outside autoplay condition)
-                enableBestiaryAutomatorSettings();
+                enableBestiaryAutomatorSettings(false, runtimeSettings);
 
                 // Wait for Bestiary Automator to initialize
                 console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
@@ -4312,20 +4721,30 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     }
                 }
             }
+            const overrideMapId = creatureOverride?.mapId != null ? String(creatureOverride.mapId) : null;
+            if (overrideMapId) {
+                roomId = overrideMapId;
+                console.log(`[Better Tasker] Using per-creature override map ID for "${activeCreatureName}": ${roomId}`);
+            }
+            console.log('[Better Tasker] Suggested-map navigation target:', {
+                suggestedMapName: mapName,
+                suggestedRoomId: roomId,
+                overrideMapId,
+                activeCreatureName
+            });
             
             if (roomId) {
                 // Show toast notification
                 showToast('Starting Better Tasker');
                 
                 // Handle quest log state and navigation
-                const navigationCompleted = await handleQuestLogState(roomId);
+                const navigationCompleted = await handleQuestLogState(roomId, resolvedFloor);
                 
                 // Set the tasking map ID for future validation
                 taskingMapId = roomId;
                 
                 // Get user's selected setup method
-                const settings = loadSettings();
-                const setupMethod = settings.setupMethod || 'Auto-setup';
+                const setupMethod = runtimeSettings.setupMethod || 'Auto-setup';
                 
                 // Find and click the appropriate setup button
                 console.log(`[Better Tasker] Looking for ${setupMethod} button...`);
@@ -4350,7 +4769,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 }
                 
                 // Enable Bestiary Automator settings if configured (moved outside autoplay condition)
-                enableBestiaryAutomatorSettings();
+                enableBestiaryAutomatorSettings(false, runtimeSettings);
                 
                 // CRITICAL FIX: Wait for Bestiary Automator to initialize (standardized timing)
                 console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
@@ -6285,7 +6704,7 @@ async function handleTaskFinishing() {
                                 return;
                             }
                             console.log('[Better Tasker] Suggested map found, navigating...');
-                            await navigateToSuggestedMapAndStartAutoplay(suggestedMapElement);
+                            await navigateToSuggestedMapAndStartAutoplay(suggestedMapElement, creatureName);
                         } else {
                             console.log('[Better Tasker] No suggested map found in Paw and Fur Society section');
                         }
@@ -6748,6 +7167,13 @@ function extractCreatureFromTask() {
                         return creatureName;
                     }
                 }
+
+                // Fallback: resolve directly from game state's monster metadata
+                const monsterName = globalThis.state?.utils?.getMonster?.(Number(creatureId))?.metadata?.name;
+                if (monsterName) {
+                    console.log('[Better Tasker] Mapped creature ID via state.utils.getMonster:', monsterName);
+                    return monsterName;
+                }
                 
                 // Fallback: try to extract from task description
                 const taskDescription = document.querySelector('.pixel-font-14');
@@ -6809,6 +7235,13 @@ function extractCreatureFromSection(section) {
                         console.log('[Better Tasker] Mapped creature ID to name:', creatureName);
                         return creatureName;
                     }
+                }
+
+                // Fallback: resolve directly from game state's monster metadata
+                const monsterName = globalThis.state?.utils?.getMonster?.(Number(creatureId))?.metadata?.name;
+                if (monsterName) {
+                    console.log('[Better Tasker] Mapped creature ID via state.utils.getMonster:', monsterName);
+                    return monsterName;
                 }
                 
                 // Fallback: try to extract from task description within the section

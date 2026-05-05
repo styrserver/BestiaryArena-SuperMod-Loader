@@ -645,6 +645,54 @@ function ensureManualMode() {
   }
 }
 
+let lastManualModeEnforceAt = 0;
+let lockedFloorDuringRun = null;
+let lastFloorEnforceAt = 0;
+
+function enforceManualModeLock(currentMode = null) {
+  if (!analysisState.isRunning()) return false;
+  try {
+    const mode = currentMode ?? globalThis.state?.board?.getSnapshot?.()?.context?.mode;
+    if (mode === 'manual' || typeof mode === 'undefined') return false;
+
+    const now = Date.now();
+    if (now - lastManualModeEnforceAt < 250) return false;
+    lastManualModeEnforceAt = now;
+
+    console.log(`[Manual Runner] Mode lock: forcing ${mode} → manual`);
+    globalThis.state?.board?.send?.({ type: 'setPlayMode', mode: 'manual' });
+    return true;
+  } catch (error) {
+    console.warn('[Manual Runner] Error enforcing manual mode lock:', error);
+    return false;
+  }
+}
+
+function setLockedFloorDuringRun(floor = null) {
+  if (typeof floor === 'number' && floor >= 0 && floor <= 15) {
+    lockedFloorDuringRun = floor;
+    return;
+  }
+  lockedFloorDuringRun = null;
+}
+
+function enforceFloorLock(currentFloor = null) {
+  if (!analysisState.isRunning()) return false;
+  if (typeof lockedFloorDuringRun !== 'number') return false;
+  if (typeof currentFloor !== 'number') return false;
+  if (currentFloor === lockedFloorDuringRun) return false;
+
+  const now = Date.now();
+  if (now - lastFloorEnforceAt < 250) return false;
+  lastFloorEnforceAt = now;
+
+  console.log(`[Manual Runner] Floor lock: forcing ${currentFloor} → ${lockedFloorDuringRun}`);
+  globalThis.state?.board?.trigger?.setState?.({
+    fn: (prev) => ({ ...prev, floor: lockedFloorDuringRun })
+  });
+  return true;
+}
+
 // Get current floor (0-15)
 function getCurrentFloor() {
   try {
@@ -689,6 +737,7 @@ function advanceToNextFloor() {
     }
     
     const nextFloor = currentFloor + 1;
+    setLockedFloorDuringRun(nextFloor);
     console.log(`[Manual Runner] Advancing from floor ${currentFloor} to floor ${nextFloor}`);
     
     globalThis.state.board.trigger.setState({ 
@@ -1001,6 +1050,9 @@ function setupBoardSubscription() {
   
   if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
     boardSubscription = globalThis.state.board.subscribe(({ context }) => {
+      enforceManualModeLock(context?.mode);
+      enforceFloorLock(context?.floor);
+
       const serverResults = context.serverResults;
       if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') {
         return; // No valid server results yet
@@ -1775,6 +1827,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     // Ensure manual mode
     ensureManualMode();
     await sleep(100);
+    setLockedFloorDuringRun(getCurrentFloor());
     
     // Hide game board if configured
     if (config.hideGameBoard) {
@@ -2084,6 +2137,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       allAttempts: allAttempts
     };
   } finally {
+    setLockedFloorDuringRun(null);
     analysisState.reset();
     
     // Cleanup board subscription

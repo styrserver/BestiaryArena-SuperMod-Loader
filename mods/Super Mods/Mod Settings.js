@@ -5210,7 +5210,7 @@ function showSettingsModal() {
             <label style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; cursor: pointer;">
               <input type="checkbox" id="autoplay-refresh-toggle" checked="" style="transform: scale(1.2);">
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.autoplayRefreshWarning')}">⚠️</span>
-              <select id="autoplay-refresh-timer-mode" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;" title="${t('mods.betterUI.autoplayRefreshTimerModeWarning')}" onclick="event.stopPropagation();">
+              <select id="autoplay-refresh-timer-mode" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 30px 4px 10px; border-radius: 4px; pointer-events: auto;" title="${t('mods.betterUI.autoplayRefreshTimerModeWarning')}" onclick="event.stopPropagation();">
                 <option value="autoplay">${t('mods.betterUI.autoplaySessionText')}</option>
                 <option value="internal">${t('mods.betterUI.internalTimer')}</option>
                 <option value="both">${t('mods.betterUI.bothTimers')}</option>
