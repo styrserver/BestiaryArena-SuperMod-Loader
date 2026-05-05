@@ -1154,7 +1154,14 @@
       "suggestedMap": "Suggested map:",
       "settingsAutoSave": "✓ Settings auto-save when changed",
       "creatureCannotAppearTooltip": "This creature cannot appear in tasker tasks",
-      "warningUnselectedCreatures": "⚠️ Warning: Unselected creatures will cause active tasks to be removed! ({selectedCount}/{totalCreatures} selected creatures)"
+      "warningUnselectedCreatures": "⚠️ Warning: Unselected creatures will cause active tasks to be removed! ({selectedCount}/{totalCreatures} selected creatures)",
+      "defaultForCreature": "Default for this creature:",
+      "useSuggestedMap": "(Use suggested map)",
+      "reset": "Reset",
+      "close": "Close",
+      "tasking": "Tasking",
+      "setupMethod": "Setup Method",
+      "monsterSelectionTitle": "Monster Selection"
     },
     "betterBoostedMaps": {
       "modalTitle": "Better Boosted Maps Settings",

@@ -1155,7 +1155,14 @@
       "suggestedMap": "Mapa sugerido:",
       "settingsAutoSave": "✓ Configurações são salvas automaticamente quando alteradas",
       "creatureCannotAppearTooltip": "Esta criatura não pode aparecer nas tarefas",
-      "warningUnselectedCreatures": "⚠️ Aviso: Criaturas não selecionadas causarão remoção de tasks ativas! ({selectedCount}/{totalCreatures} criaturas selecionadas)"
+      "warningUnselectedCreatures": "⚠️ Aviso: Criaturas não selecionadas causarão remoção de tasks ativas! ({selectedCount}/{totalCreatures} criaturas selecionadas)",
+      "defaultForCreature": "Padrão para esta criatura:",
+      "useSuggestedMap": "(Usar mapa sugerido)",
+      "reset": "Redefinir",
+      "close": "Fechar",
+      "tasking": "Em tarefa",
+      "setupMethod": "Método de configuração",
+      "monsterSelectionTitle": "Seleção de Monstros"
     },
     "betterBoostedMaps": {
       "modalTitle": "Configurações do Better Boosted Maps",
