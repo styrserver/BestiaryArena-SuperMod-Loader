@@ -1601,6 +1601,27 @@
     return (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0);
   }
 
+  // Chubby/Spiky/Psychic/Sturdy/Mystic Gazer gameIds
+  const PROTECTED_GAZER_GAME_IDS = new Set([93, 94, 95, 96, 97]);
+
+  function isSealedCreature(monster) {
+    if (!monster) return false;
+    const tier = Number(monster.tierLevel ?? monster.tier ?? monster.starTier);
+    return monster.sealed === true || tier === 5;
+  }
+
+  function isAwakenedCreature(monster) {
+    if (!monster) return false;
+    const tier = Number(monster.tierLevel ?? monster.tier ?? monster.starTier);
+    return (
+      monster.awaken === true ||
+      monster.awakened === true ||
+      monster.isAwakened === true ||
+      tier >= 6 ||
+      Number(monster.level) > 50
+    );
+  }
+
   /**
    * Check if a monster should be sold (not in selected creatures list)
    * @param {Object} monster - Monster object from summon result
@@ -1625,8 +1646,13 @@
       return { action: 'keep' };
     }
     
-    // Keep if shiny - never autosell or autosqueeze shiny creatures
-    if (monster.shiny === true) {
+    // Keep protected creature types - never autosell or autosqueeze these
+    if (
+      monster.shiny === true ||
+      isSealedCreature(monster) ||
+      isAwakenedCreature(monster) ||
+      PROTECTED_GAZER_GAME_IDS.has(Number(monster.gameId))
+    ) {
       return { action: 'keep' };
     }
     
@@ -2611,12 +2637,22 @@
         
         const autosellLabel = document.createElement('label');
         autosellLabel.htmlFor = 'autosell-checkbox';
-        autosellLabel.textContent = 'Autosell and autosqueeze non-selected (ignores shiny)';
+        autosellLabel.textContent = 'Late-game scroller';
         StyleUtils.applyLabelStyles(autosellLabel);
         autosellLabel.style.cursor = 'pointer';
+        autosellLabel.style.color = '#ffcc66';
+        
+        const autosellWarningIcon = document.createElement('span');
+        autosellWarningIcon.textContent = '⚠';
+        autosellWarningIcon.title = 'Sells/squeezes everything non-selected except shiny, sealed, awakened, and gazers.';
+        autosellWarningIcon.setAttribute('aria-label', 'Warning: sells/squeezes everything non-selected except shiny, sealed, awakened, and gazers.');
+        autosellWarningIcon.style.cursor = 'help';
+        autosellWarningIcon.style.color = '#ffcc66';
+        autosellWarningIcon.style.fontSize = '12px';
         
         autosellDiv.appendChild(autosellCheckbox);
         autosellDiv.appendChild(autosellLabel);
+        autosellDiv.appendChild(autosellWarningIcon);
         div.appendChild(autosellDiv);
         
         // Add event listener for autosell checkbox
@@ -2932,7 +2968,7 @@
         
         const autoscrollBtn = document.createElement('button');
         autoscrollBtn.className = 'autoscroller-btn';
-        autoscrollBtn.style.width = '140px'; // Increased width to accommodate "Shiny hunt"
+        autoscrollBtn.style.width = '140px'; // Compact width for short hunt label
         autoscrollBtn.style.setProperty('padding', '6px 8px', 'important');
         autoscrollBtn.style.margin = '0 4px';
         autoscrollBtn.style.boxSizing = 'border-box';
@@ -2962,10 +2998,12 @@
         // Function to update button appearance based on conditions
         const updateButtonAppearance = () => {
           if (isShinyHuntMode()) {
-            // Create shiny hunt button with star icons
+            // Create late-game hunt button with protected-creature icons
             autoscrollBtn.innerHTML = `
               <img src="https://bestiaryarena.com/assets/icons/shiny-star.png" style="width: 10px; height: 10px; vertical-align: middle; margin-right: 4px;" alt="⭐">
-              Shiny hunt
+              <img src="https://bestiaryarena.com/assets/icons/star-tier-5.png" style="width: 10px; height: 10px; vertical-align: middle; margin-right: 4px;" alt="Tier 5">
+              Hunt
+              <img src="https://bestiaryarena.com/assets/icons/star-tier-6.png" style="width: 10px; height: 10px; vertical-align: middle; margin-left: 4px;" alt="Tier 6">
               <img src="https://bestiaryarena.com/assets/icons/shiny-star.png" style="width: 10px; height: 10px; vertical-align: middle; margin-left: 4px;" alt="⭐">
             `;
             autoscrollBtn.style.removeProperty('background');
@@ -3291,6 +3329,7 @@
   let observerDebounceTimeout = null;
   let lastObserverCheck = 0;
   let buttonRetryTimeout = null;
+  let reinjectEventHandler = null;
   const BUTTON_RETRY_MAX = 3;
   const BUTTON_RETRY_DELAY = 250;
   const BUTTON_CHECK_INTERVAL = 1000;
@@ -3407,6 +3446,14 @@
         clearCachesAndAddButton(retry + 1);
       }, BUTTON_RETRY_DELAY);
     }
+  }
+
+  function requestAutoscrollerButtonReinject(source = 'unknown') {
+    const hadButton = Boolean(document.querySelector('.autoscroller-inventory-button'));
+    clearCachesAndAddButton();
+    const hasButtonNow = Boolean(document.querySelector('.autoscroller-inventory-button'));
+    console.log('[Autoscroller] Reinjection request processed', { source, hadButton, hasButtonNow });
+    return hasButtonNow;
   }
   
   function addAutoscrollerButton() {
@@ -3568,6 +3615,15 @@
       clearTimeout(observerDebounceTimeout);
       observerDebounceTimeout = null;
     }
+
+    if (reinjectEventHandler) {
+      try {
+        window.removeEventListener('autoscroller:reinject-button', reinjectEventHandler);
+      } catch (e) {
+        console.warn('[Autoscroller] Error removing reinject listener:', e);
+      }
+      reinjectEventHandler = null;
+    }
     
     failedAttempts = 0;
     hasLoggedInventoryNotFound = false;
@@ -3605,6 +3661,9 @@
     
     if (window.AutoscrollerRenderSelectedCreatures) {
       delete window.AutoscrollerRenderSelectedCreatures;
+    }
+    if (window.Autoscroller?.reinjectButton) {
+      delete window.Autoscroller.reinjectButton;
     }
     
     // Clear all caches
@@ -3663,6 +3722,10 @@
     
     if (config.enabled) {
       observeInventory();
+      if (!reinjectEventHandler) {
+        reinjectEventHandler = () => requestAutoscrollerButtonReinject('custom-event');
+        window.addEventListener('autoscroller:reinject-button', reinjectEventHandler);
+      }
           // Initialization complete
   } else {
     // Disabled in configuration
@@ -3679,6 +3742,7 @@
   if (typeof window !== 'undefined') {
     window.Autoscroller = window.Autoscroller || {};
     window.Autoscroller.cleanup = cleanup;
+    window.Autoscroller.reinjectButton = requestAutoscrollerButtonReinject;
   }
   
   exports = {};

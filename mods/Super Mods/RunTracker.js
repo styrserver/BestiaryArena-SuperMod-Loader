@@ -1806,6 +1806,48 @@ function initializeMod() {
 }
 
 // =======================
+// 8.5. Firebase upload config hashing (floor runs only — dedupe by replay payload)
+// =======================
+
+async function sha256Hex(text) {
+  const encoder = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(text));
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/** Replay fields that are not part of the in-game setup (strip before hashing for upload dedupe). */
+async function hashReplayPayload(config) {
+  const copy = structuredClone(config);
+  delete copy.seed;
+  delete copy.credits;
+  delete copy.comment;
+  delete copy.comments;
+  delete copy.timestamp;
+
+  if (Array.isArray(copy.board)) {
+    for (const piece of copy.board) {
+      const monster = piece && piece.monster;
+      if (monster) {
+        const isAwakened = monster.awakened === true || monster.level > 50;
+        if (isAwakened && monster.level !== 50 && monster.level !== 99) {
+          delete monster.level;
+          delete monster.hp;
+          delete monster.ad;
+          delete monster.ap;
+          delete monster.armor;
+          delete monster.magicResist;
+        }
+      }
+    }
+  }
+
+  const digest = await sha256Hex(JSON.stringify(copy));
+  return digest.slice(0, 8);
+}
+
+// =======================
 // 9. Public API
 // =======================
 // Make RunTracker API available globally immediately
@@ -1886,6 +1928,19 @@ if (!window.RunTrackerAPI) {
     } catch (error) {
       console.error('[RunTracker] Error getting run stats:', error);
       return { totalRuns: 0, totalMaps: 0, totalReplays: 0, lastUpdated: 0, maps: {} };
+    }
+  },
+
+  hashReplayPayload,
+  hashReplayLinkForUpload: async (replayLink) => {
+    if (!replayLink || typeof replayLink !== 'string') return null;
+    const match = replayLink.match(/\$replay\((\{.*\})\)/);
+    if (!match || !match[1]) return null;
+    try {
+      const cfg = JSON.parse(match[1]);
+      return await hashReplayPayload(cfg);
+    } catch {
+      return null;
     }
   },
   clearAllRuns: async () => {

@@ -11,7 +11,9 @@ const defaultConfig = {
   showStaminaTimer: false,
   showSettingsButton: true,
   enableMaxCreatures: false,
+  enableSealed: false,
   maxCreaturesColor: 'prismatic',
+  sealedCreaturesColor: 'prismatic',
   enableMaxShinies: false,
   maxShiniesColor: 'prismatic',
   showAdvancedStatsOnHover: false,
@@ -31,6 +33,7 @@ const defaultConfig = {
   enablePlayercount: true,
   includeRunDataByDefault: true,
   includeHuntDataByDefault: true,
+  defaultInventorySticky: false,
   inventoryBorderStyle: 'Original',
   vipListInterface: 'modal', // 'modal' or 'panel'
   enableVipListChat: false, // Enable messaging/chat feature in VIP List (controls both VIP List chat and Global Chat)
@@ -51,7 +54,12 @@ const defaultConfig = {
   hotkeyOpenArsenal: 'a',
   hotkeyOpenMonstrousCauldron: 'c',
   hotkeyOpenMonsterSqueezer: 'x',
-  hotkeyReturnToMap: 'tab',
+  hotkeyReturnToMap: 'g',
+  hotkeyFloorUp: 'pageup',
+  hotkeyFloorDown: 'pagedown',
+  hotkeyCycleBestiaryEquipmentTab: 'tab',
+  hotkeyResetCurrentMapDefault: 'r',
+  hotkeyCycleBattleStyle: 'v',
   hotkeySetupSlot1: 'f1',
   hotkeySetupSlot2: 'f2',
   hotkeySetupSlot3: 'f3',
@@ -106,14 +114,25 @@ config.hotkeyOpenMountainFortress = sanitizeStoredHotkey(config.hotkeyOpenMounta
 config.hotkeyOpenArsenal = sanitizeStoredHotkey(config.hotkeyOpenArsenal, '');
 config.hotkeyOpenMonstrousCauldron = sanitizeStoredHotkey(config.hotkeyOpenMonstrousCauldron, '');
 config.hotkeyOpenMonsterSqueezer = sanitizeStoredHotkey(config.hotkeyOpenMonsterSqueezer, '');
-if (config.hotkeyReturnToMap === undefined) config.hotkeyReturnToMap = 'tab';
+if (config.hotkeyReturnToMap === undefined) config.hotkeyReturnToMap = 'g';
 config.hotkeyReturnToMap = sanitizeStoredHotkey(config.hotkeyReturnToMap, '');
+if (config.hotkeyFloorUp === undefined) config.hotkeyFloorUp = 'pageup';
+if (config.hotkeyFloorDown === undefined) config.hotkeyFloorDown = 'pagedown';
+if (config.hotkeyCycleBestiaryEquipmentTab === undefined) config.hotkeyCycleBestiaryEquipmentTab = 'tab';
+if (config.hotkeyResetCurrentMapDefault === undefined) config.hotkeyResetCurrentMapDefault = 'r';
+if (config.hotkeyCycleBattleStyle === undefined) config.hotkeyCycleBattleStyle = 'v';
+config.hotkeyFloorUp = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
+config.hotkeyFloorDown = sanitizeStoredHotkey(config.hotkeyFloorDown, '');
+config.hotkeyCycleBestiaryEquipmentTab = sanitizeStoredHotkey(config.hotkeyCycleBestiaryEquipmentTab, '');
+config.hotkeyResetCurrentMapDefault = sanitizeStoredHotkey(config.hotkeyResetCurrentMapDefault, '');
+config.hotkeyCycleBattleStyle = sanitizeStoredHotkey(config.hotkeyCycleBattleStyle, '');
 for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
   const setupKey = `hotkeySetupSlot${setupSlot}`;
   if (config[setupKey] === undefined) config[setupKey] = `f${setupSlot}`;
   config[setupKey] = sanitizeStoredHotkey(config[setupKey], '');
 }
 if (config.enableHotkeys === undefined) config.enableHotkeys = false;
+if (config.defaultInventorySticky === undefined) config.defaultInventorySticky = false;
 
 // Last visited map feature globals
 const LAST_MAP_STORAGE_KEY = 'mod-settings-map-history';
@@ -312,7 +331,8 @@ const observers = {
   creature: null,
   setupLabels: null,
   scrollLock: null,
-  compactNavBar: null
+  compactNavBar: null,
+  inventoryModButtons: null
 };
 
 // Timer state
@@ -326,6 +346,27 @@ const timerState = {
 // UI state
 const uiState = {
   settingsButton: null
+};
+
+const stickyInventoryState = {
+  started: false,
+  done: false
+};
+
+const EXPECTED_INVENTORY_MOD_BUTTON_CLASSES = [
+  'auto-inventory-button',
+  'autoscroller-inventory-button',
+  'better-forge-inventory-button',
+  'better-rune-recycler-inventory-button',
+  'depot-manager-inventory-button',
+  'challenges-inventory-button'
+];
+
+const inventoryModButtonsState = {
+  knownClasses: new Set(),
+  verifyDebounceTimeout: null,
+  lastRecoveryAt: 0,
+  missingRetryCount: new Map()
 };
 
 // Hotkeys state
@@ -642,6 +683,168 @@ function triggerReturnToMapFromHotkey() {
   }
 }
 
+function getCurrentRoomIdForHotkey() {
+  try {
+    const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+    const selectedRoom = boardContext?.selectedMap?.selectedRoom;
+    const roomId = selectedRoom?.id;
+    return typeof roomId === 'string' && roomId.length > 0 ? roomId : null;
+  } catch (error) {
+    console.warn('[Mod Settings] Could not read current room id for hotkey:', error);
+    return null;
+  }
+}
+
+function resetCurrentMapToDefaultFromHotkey() {
+  const roomId = getCurrentRoomIdForHotkey();
+  if (!roomId) {
+    console.warn('[Mod Settings] Reset current map hotkey: current room id not found');
+    return;
+  }
+  try {
+    globalThis.state?.board?.send?.({
+      type: 'selectRoomById',
+      roomId
+    });
+  } catch (error) {
+    console.warn('[Mod Settings] Reset current map hotkey failed:', error);
+  }
+}
+
+function getCurrentBoardFloorForHotkey() {
+  try {
+    const floor = Number(globalThis.state?.board?.get?.()?.context?.floor);
+    if (!Number.isFinite(floor)) return null;
+    return Math.max(0, Math.min(15, Math.floor(floor)));
+  } catch (error) {
+    console.warn('[Mod Settings] Could not read current floor for hotkey:', error);
+    return null;
+  }
+}
+
+function setBoardFloorFromHotkey(nextFloor) {
+  try {
+    globalThis.state?.board?.trigger?.setState?.({
+      fn: (prev) => ({ ...prev, floor: nextFloor })
+    });
+    return true;
+  } catch (error) {
+    console.warn('[Mod Settings] Could not set floor for hotkey:', error);
+    return false;
+  }
+}
+
+function changeFloorFromHotkey(delta) {
+  const currentFloor = getCurrentBoardFloorForHotkey();
+  if (currentFloor === null) return;
+  const boundedFloor = Math.max(0, Math.min(15, currentFloor + delta));
+  if (boundedFloor === currentFloor) return;
+  setBoardFloorFromHotkey(boundedFloor);
+}
+
+function isInventorySubtabButtonActive(button) {
+  if (!button) return false;
+  if (button.getAttribute('aria-selected') === 'true') return true;
+  if (button.getAttribute('aria-pressed') === 'true') return true;
+  if (button.getAttribute('data-state') === 'open' || button.getAttribute('data-state') === 'active') return true;
+  const className = typeof button.className === 'string' ? button.className : String(button.className || '');
+  return className.includes('frame-pressed') || className.includes('surface-pressed');
+}
+
+function isElementVisibleForHotkey(element) {
+  if (!element) return false;
+  if (element.hidden) return false;
+  const style = window.getComputedStyle(element);
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+  if (element.getClientRects().length === 0) return false;
+  return true;
+}
+
+function findBestiaryEquipmentTabsForCycling() {
+  const tabLists = Array.from(document.querySelectorAll('[role="tablist"]'))
+    .filter((tabList) => isElementVisibleForHotkey(tabList));
+
+  for (const tabList of tabLists) {
+    const tabs = Array.from(tabList.querySelectorAll('button[role="tab"]'));
+    const bestiaryTab =
+      tabs.find((btn) => /-trigger-monster$/.test(btn.id || '')) ||
+      tabs.find((btn) => (btn.textContent || '').trim().toLowerCase().includes('bestiary'));
+    const equipmentTab =
+      tabs.find((btn) => /-trigger-equip$/.test(btn.id || '')) ||
+      tabs.find((btn) => {
+        const label = (btn.textContent || '').trim().toLowerCase();
+        return label.includes('arsenal') || label.includes('equipment');
+      });
+    if (!bestiaryTab || !equipmentTab) continue;
+    if (!isElementVisibleForHotkey(bestiaryTab) || !isElementVisibleForHotkey(equipmentTab)) continue;
+    return { bestiaryTab, equipmentTab };
+  }
+
+  return { bestiaryTab: null, equipmentTab: null };
+}
+
+function cycleBestiaryEquipmentTabFromHotkey() {
+  const { bestiaryTab, equipmentTab } = findBestiaryEquipmentTabsForCycling();
+  const bestiaryButton = bestiaryTab;
+  const equipmentButton = equipmentTab;
+  if (!bestiaryButton && !equipmentButton) {
+    console.warn('[Mod Settings] Cycle Bestiary/Equipment hotkey: visible Bestiary/Arsenal tab pair not found');
+    return;
+  }
+  const bestiaryActive = isInventorySubtabButtonActive(bestiaryButton);
+  const equipmentActive = isInventorySubtabButtonActive(equipmentButton);
+  const activeButton = bestiaryActive ? bestiaryButton : equipmentActive ? equipmentButton : bestiaryButton;
+  const nextButton = activeButton === bestiaryButton ? equipmentButton : bestiaryButton;
+  if (!nextButton) {
+    console.warn('[Mod Settings] Cycle Bestiary/Equipment hotkey: next tab button missing');
+    return;
+  }
+  activateTabButtonFromHotkey(nextButton);
+}
+
+function activateTabButtonFromHotkey(button) {
+  if (!button) return;
+  try {
+    button.focus?.({ preventScroll: true });
+  } catch (error) {
+    // Focus is best effort only.
+  }
+
+  const pointerPayload = { bubbles: true, cancelable: true, composed: true };
+  const mousePayload = { bubbles: true, cancelable: true, composed: true, button: 0 };
+
+  // Some tab implementations react to pointer/mouse down rather than plain click.
+  button.dispatchEvent(new PointerEvent('pointerdown', pointerPayload));
+  button.dispatchEvent(new MouseEvent('mousedown', mousePayload));
+  button.dispatchEvent(new PointerEvent('pointerup', pointerPayload));
+  button.dispatchEvent(new MouseEvent('mouseup', mousePayload));
+  button.dispatchEvent(new MouseEvent('click', mousePayload));
+
+  if (button.getAttribute('aria-selected') === 'true') return;
+
+  // Keyboard fallback for tab widgets that only switch on key interaction.
+  button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  button.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, cancelable: true }));
+  if (button.getAttribute('aria-selected') === 'true') return;
+
+  button.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true }));
+  button.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true, cancelable: true }));
+}
+
+const BATTLE_MODE_CYCLE_ORDER = ['manual', 'autoplay', 'sandbox'];
+
+function cycleBattleStyleFromHotkey() {
+  try {
+    const board = globalThis.state?.board;
+    const currentMode = board?.getSnapshot?.()?.context?.mode;
+    const currentIdx = BATTLE_MODE_CYCLE_ORDER.indexOf(currentMode);
+    const nextMode = BATTLE_MODE_CYCLE_ORDER[(currentIdx + 1) % BATTLE_MODE_CYCLE_ORDER.length];
+    board?.send?.({ type: 'setPlayMode', mode: nextMode });
+  } catch (error) {
+    console.warn('[Mod Settings] Cycle battle style hotkey failed:', error);
+  }
+}
+
 /**
  * Ordered Setup/Save buttons from the stored-setups bar (same detection as Better Setups.js).
  * @returns {HTMLButtonElement[]}
@@ -782,6 +985,36 @@ function handleGlobalHotkeys(event) {
     triggerReturnToMapFromHotkey();
     return;
   }
+  const floorUpId = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
+  if (floorUpId && pressedId === floorUpId) {
+    event.preventDefault();
+    changeFloorFromHotkey(1);
+    return;
+  }
+  const floorDownId = sanitizeStoredHotkey(config.hotkeyFloorDown, '');
+  if (floorDownId && pressedId === floorDownId) {
+    event.preventDefault();
+    changeFloorFromHotkey(-1);
+    return;
+  }
+  const cycleBestiaryEquipmentId = sanitizeStoredHotkey(config.hotkeyCycleBestiaryEquipmentTab, '');
+  if (cycleBestiaryEquipmentId && pressedId === cycleBestiaryEquipmentId) {
+    event.preventDefault();
+    cycleBestiaryEquipmentTabFromHotkey();
+    return;
+  }
+  const resetCurrentMapId = sanitizeStoredHotkey(config.hotkeyResetCurrentMapDefault, '');
+  if (resetCurrentMapId && pressedId === resetCurrentMapId) {
+    event.preventDefault();
+    resetCurrentMapToDefaultFromHotkey();
+    return;
+  }
+  const cycleBattleStyleId = sanitizeStoredHotkey(config.hotkeyCycleBattleStyle, '');
+  if (cycleBattleStyleId && pressedId === cycleBattleStyleId) {
+    event.preventDefault();
+    cycleBattleStyleFromHotkey();
+    return;
+  }
   for (let i = 0; i < 8; i++) {
     const setupCfgKey = `hotkeySetupSlot${i + 1}`;
     const setupKeyId = sanitizeStoredHotkey(config[setupCfgKey], '');
@@ -823,6 +1056,36 @@ const MODS_HOTKEY_UI_ROWS = [
     configKey: 'hotkeyReturnToMap',
     captureId: 'hotkey-return-to-map-capture-btn',
     resetId: 'hotkey-return-to-map-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyFloorUp',
+    captureId: 'hotkey-floor-up-capture-btn',
+    resetId: 'hotkey-floor-up-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyFloorDown',
+    captureId: 'hotkey-floor-down-capture-btn',
+    resetId: 'hotkey-floor-down-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyCycleBestiaryEquipmentTab',
+    captureId: 'hotkey-cycle-bestiary-equipment-capture-btn',
+    resetId: 'hotkey-cycle-bestiary-equipment-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyResetCurrentMapDefault',
+    captureId: 'hotkey-reset-current-map-capture-btn',
+    resetId: 'hotkey-reset-current-map-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyCycleBattleStyle',
+    captureId: 'hotkey-cycle-battle-style-capture-btn',
+    resetId: 'hotkey-cycle-battle-style-reset-btn',
     displayFallback: ''
   }
 ];
@@ -1299,11 +1562,172 @@ function getInventoryBorderStyle(borderStyleName) {
     `box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15`
   ].join('; ');
   
-  return `<div class="has-rarity absolute inset-0 z-1 opacity-80" data-rarity="5" data-max-shinies="true" data-max-shinies-color="${colorKey}" style="${borderStyle}"></div>`;
+  return `<div class="has-rarity absolute inset-0 z-1 opacity-80 pointer-events-none" data-rarity="5" data-max-shinies="true" data-max-shinies-color="${colorKey}" data-mod-inventory-border="true" style="${borderStyle}"></div>`;
 }
 
 // Expose globally for other mods
 window.getInventoryBorderStyle = getInventoryBorderStyle;
+
+function refreshInventoryModButtonBorderStyle() {
+  const borderHtml = getInventoryBorderStyle(config.inventoryBorderStyle);
+  document.querySelectorAll('[data-mod-inventory-border="true"]').forEach((node) => node.remove());
+
+  const inventoryModButtons = Array.from(document.querySelectorAll('button')).filter((button) => {
+    if (!(button instanceof HTMLElement)) return false;
+    return Array.from(button.classList).some((className) => className.endsWith('-inventory-button'));
+  });
+
+  inventoryModButtons.forEach((button) => {
+    const slot = button.querySelector(':scope > .container-slot');
+    if (!slot) return;
+    slot.style.position = 'relative';
+    slot.style.overflow = 'hidden';
+    if (!borderHtml) return;
+    slot.insertAdjacentHTML('beforeend', borderHtml);
+  });
+}
+
+function getInventoryModButtonClassesInDom() {
+  const classes = new Set();
+  document.querySelectorAll('button').forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    button.classList.forEach((className) => {
+      if (className.endsWith('-inventory-button')) {
+        classes.add(className);
+      }
+    });
+  });
+  return classes;
+}
+
+function trackInventoryModButtons() {
+  const classesInDom = getInventoryModButtonClassesInDom();
+  classesInDom.forEach((className) => inventoryModButtonsState.knownClasses.add(className));
+  return classesInDom;
+}
+
+function findMissingInventoryModButtons() {
+  const classesInDom = trackInventoryModButtons();
+  return Array.from(inventoryModButtonsState.knownClasses).filter((className) => !classesInDom.has(className));
+}
+
+function triggerInventoryModButtonsRecovery() {
+  const inventoryContainer = document.querySelector('.container-inventory-4');
+  if (!inventoryContainer) return false;
+
+  // Use a hidden button-shaped probe so mods that specifically watch for
+  // "button.focus-style-visible" insertions (like Autoscroller) are nudged.
+  const probe = document.createElement('button');
+  probe.type = 'button';
+  probe.className = 'focus-style-visible active:opacity-70';
+  probe.setAttribute('data-mod-settings-inventory-refresh', 'true');
+  probe.tabIndex = -1;
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'display:none !important; width:0; height:0; padding:0; margin:0; border:0;';
+  inventoryContainer.appendChild(probe);
+  scheduleTimeout(() => probe.remove(), 0);
+  return true;
+}
+
+function verifyInventoryModButtonsIntegrity(source = 'unknown') {
+  if (!config.defaultInventorySticky) return;
+  if (!stickyInventoryState.started && !stickyInventoryState.done && isInventoryWidgetPinned() !== true) return;
+
+  const classesInDom = trackInventoryModButtons();
+  const baselineClasses = Array.from(inventoryModButtonsState.knownClasses).filter((className) =>
+    EXPECTED_INVENTORY_MOD_BUTTON_CLASSES.includes(className)
+  );
+  const missingClasses = baselineClasses.filter((className) => !classesInDom.has(className));
+  if (missingClasses.length === 0) {
+    inventoryModButtonsState.missingRetryCount.clear();
+    return;
+  }
+
+  const recoverableMissingClasses = missingClasses.filter((className) => {
+    const retries = inventoryModButtonsState.missingRetryCount.get(className) || 0;
+    return retries < 4;
+  });
+  if (recoverableMissingClasses.length === 0) return;
+
+  if (recoverableMissingClasses.includes('autoscroller-inventory-button')) {
+    try {
+      window.Autoscroller?.reinjectButton?.('mod-settings-missing-check');
+      window.dispatchEvent(new CustomEvent('autoscroller:reinject-button'));
+    } catch (error) {
+      console.warn('[Mod Settings] Sticky inventory: autoscroller reinject hook failed', error);
+    }
+  }
+
+  if (recoverableMissingClasses.includes('auto-inventory-button')) {
+    try {
+      window.DiceRoller?.reinjectButton?.('mod-settings-missing-check');
+      window.dispatchEvent(new CustomEvent('dice-roller:reinject-button'));
+    } catch (error) {
+      console.warn('[Mod Settings] Sticky inventory: dice roller reinject hook failed', error);
+    }
+  }
+
+  if (recoverableMissingClasses.includes('better-forge-inventory-button')) {
+    try {
+      window.BetterForge?.reinjectButton?.('mod-settings-missing-check');
+      window.dispatchEvent(new CustomEvent('better-forge:reinject-button'));
+    } catch (error) {
+      console.warn('[Mod Settings] Sticky inventory: better forge reinject hook failed', error);
+    }
+  }
+
+  const now = Date.now();
+  if (now - inventoryModButtonsState.lastRecoveryAt < 1500) return;
+  inventoryModButtonsState.lastRecoveryAt = now;
+
+  console.log('[Mod Settings] Sticky inventory: missing mod inventory buttons, forcing refresh', {
+    source,
+    missingClasses: recoverableMissingClasses
+  });
+
+  const triggered = triggerInventoryModButtonsRecovery();
+  if (!triggered) return;
+
+  recoverableMissingClasses.forEach((className) => {
+    const retries = inventoryModButtonsState.missingRetryCount.get(className) || 0;
+    inventoryModButtonsState.missingRetryCount.set(className, retries + 1);
+  });
+
+  scheduleTimeout(() => {
+    refreshInventoryModButtonBorderStyle();
+    const updatedClasses = trackInventoryModButtons();
+    recoverableMissingClasses.forEach((className) => {
+      if (updatedClasses.has(className)) {
+        inventoryModButtonsState.missingRetryCount.delete(className);
+      }
+    });
+  }, 120);
+}
+
+function startInventoryModButtonsObserver() {
+  if (observers.inventoryModButtons) return observers.inventoryModButtons;
+
+  const observer = new MutationObserver(() => {
+    if (inventoryModButtonsState.verifyDebounceTimeout) {
+      clearTimeout(inventoryModButtonsState.verifyDebounceTimeout);
+      activeTimeouts.delete(inventoryModButtonsState.verifyDebounceTimeout);
+    }
+
+    inventoryModButtonsState.verifyDebounceTimeout = scheduleTimeout(() => {
+      inventoryModButtonsState.verifyDebounceTimeout = null;
+      verifyInventoryModButtonsIntegrity('mutation-observer');
+    }, 120);
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  trackInventoryModButtons();
+  scheduleTimeout(() => verifyInventoryModButtonsIntegrity('observer-start'), 250);
+  return observer;
+}
 
 // Parse stamina values from DOM elements
 function parseStaminaValues(parentSpan) {
@@ -1753,6 +2177,79 @@ async function deleteRunsFromFirebase(playerName) {
     console.error('[Mod Settings] Error deleting runs from Firebase:', error);
     return false;
   }
+}
+
+async function hideNonShinyAndNonAwakenedMonsters(onProgress = null) {
+  const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters;
+  if (!Array.isArray(monsters)) {
+    throw new Error('Player monsters not available');
+  }
+
+  const monstersToHide = monsters.filter((monster) => {
+    const isAwakened = Number(monster?.tier) === 6;
+    const isShiny = monster?.shiny === true;
+    const isAlreadyHidden = monster?.hidden === true;
+    return !isAwakened && !isShiny && !isAlreadyHidden;
+  });
+
+  let hiddenCount = 0;
+  const totalToHide = monstersToHide.length;
+  if (typeof onProgress === 'function') {
+    onProgress({
+      hiddenCount: 0,
+      totalToHide,
+      currentMonsterId: null
+    });
+  }
+
+  for (const monster of monstersToHide) {
+    if (typeof onProgress === 'function') {
+      onProgress({
+        hiddenCount,
+        totalToHide,
+        currentMonsterId: monster.id
+      });
+    }
+
+    const response = await fetch('https://bestiaryarena.com/api/trpc/game.hideMonster?batch=1', {
+      method: 'POST',
+      mode: 'cors',
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json',
+        'x-game-version': '1'
+      },
+      body: JSON.stringify({
+        0: {
+          json: {
+            hidden: true,
+            monsterId: monster.id
+          }
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Hide request failed (${response.status})`);
+    }
+
+    hiddenCount++;
+    if (typeof onProgress === 'function') {
+      onProgress({
+        hiddenCount,
+        totalToHide,
+        currentMonsterId: monster.id
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  return {
+    hiddenCount,
+    totalToHide,
+    skippedCount: monsters.length - totalToHide,
+    totalCount: monsters.length
+  };
 }
 
 // Extract seed from replayLink string
@@ -2447,7 +2944,23 @@ async function uploadBestRuns() {
     const currentSeason = detectCurrentSeasonFromRuns(allRuns);
     
     // Best speedrun + rank per map; all floor setups per map for current season (multiple clears to floor 15)
-    // Sort by region and map order before storing
+    // Sort by region and map order before storing. Floor runs: dedupe by replay hash within this upload only
+    // (full Firebase PUT must include each setup every time; cross-upload Set would drop them on re-upload).
+    const pendingFloorReplayConfigHashes = new Set();
+    const isDuplicateFloorReplayUpload = async (replayLink) => {
+      const hashReplay = window.RunTrackerAPI?.hashReplayLinkForUpload;
+      if (typeof hashReplay !== 'function') {
+        return false;
+      }
+      const h = await hashReplay(replayLink);
+      if (!h) return false;
+      if (pendingFloorReplayConfigHashes.has(h)) {
+        return true;
+      }
+      pendingFloorReplayConfigHashes.add(h);
+      return false;
+    };
+
     const bestRuns = {
       runs: {},
       metadata: {
@@ -2632,14 +3145,20 @@ async function uploadBestRuns() {
       // Clean floor runs — upload every setup for this season (RunTracker keeps one row per setup)
       const currentSeasonFloorRuns = getRunsForSeason(mapData.floor, currentSeason);
       if (currentSeasonFloorRuns.length > 0) {
-        cleanMapData.floor = currentSeasonFloorRuns
-          .filter((run) => run.floor !== undefined && run.floor !== null && run.floor > 0)
-          .map((floorRun) =>
-            cleanRunForUpload(floorRun, contextRegionName, {
-              floor: floorRun.floor,
-              floorTicks: floorRun.floorTicks
-            })
-          );
+        cleanMapData.floor = [];
+        const floorCandidates = currentSeasonFloorRuns.filter(
+          (run) => run.floor !== undefined && run.floor !== null && run.floor > 0
+        );
+        for (const floorRun of floorCandidates) {
+          const cleanFloor = cleanRunForUpload(floorRun, contextRegionName, {
+            floor: floorRun.floor,
+            floorTicks: floorRun.floorTicks
+          });
+          if (await isDuplicateFloorReplayUpload(cleanFloor.replayLink)) {
+            continue;
+          }
+          cleanMapData.floor.push(cleanFloor);
+        }
       }
       
       bestRuns.runs[mapKey] = cleanMapData;
@@ -4139,6 +4658,68 @@ function showSettingsModal() {
         element.style.backgroundColor = 'transparent';
       }
     }
+
+    function applyAdvancedActionButtonStyle(button, options = {}) {
+      if (!button) return;
+      const { fullWidth = false, variant = 'gray' } = options;
+      const variantClassMap = {
+        gray: ['frame-1', 'surface-regular', 'text-whiteRegular'],
+        blue: ['frame-1-blue', 'surface-blue', 'text-whiteHighlight'],
+        green: ['frame-1-green', 'surface-green', 'text-whiteHighlight'],
+        red: ['frame-1-red', 'surface-red', 'text-whiteHighlight']
+      };
+
+      button.classList.add(
+        'focus-style-visible',
+        'pixel-font-16',
+        'flex',
+        'items-center',
+        'justify-center',
+        'tracking-wide'
+      );
+      (variantClassMap[variant] || variantClassMap.gray).forEach((className) => button.classList.add(className));
+
+      Object.assign(button.style, {
+        pointerEvents: 'auto',
+        borderRadius: '2px',
+        border: 'none',
+        borderImage: '',
+        background: '',
+        color: '',
+        fontSize: '13px',
+        lineHeight: '1.2',
+        padding: '2px 6px 3px 6px',
+        minHeight: '24px',
+        filter: 'none',
+        transition: 'filter 0.15s ease, opacity 0.15s ease',
+        fontFamily: '"Yalla", "Trebuchet MS", Arial, sans-serif',
+        fontWeight: 'normal',
+        textAlign: 'center'
+      });
+
+      if (fullWidth) {
+        button.style.width = '100%';
+      }
+
+      if (button.dataset.advancedFramedStyleBound === 'true') return;
+      button.dataset.advancedFramedStyleBound = 'true';
+
+      button.addEventListener('mouseenter', () => {
+        if (button.disabled) return;
+        button.style.filter = 'brightness(1.15)';
+      });
+      button.addEventListener('mouseleave', () => {
+        button.style.filter = 'none';
+      });
+      button.addEventListener('mousedown', () => {
+        if (button.disabled) return;
+        button.style.filter = 'brightness(0.95)';
+      });
+      button.addEventListener('mouseup', () => {
+        if (button.disabled) return;
+        button.style.filter = 'brightness(1.15)';
+      });
+    }
     
     // Create menu items for left column
     let menuItems = [
@@ -4237,7 +4818,7 @@ function showSettingsModal() {
             <input type="range" id="better-highscores-opacity-slider" min="0" max="100" value="100" step="1" style="flex: 1; min-width: 150px; max-width: 300px; cursor: pointer;" onclick="event.stopPropagation();">
             <span id="better-highscores-opacity-value" style="color: #ccc; min-width: 40px; text-align: right;">100%</span>
           </div>
-          <div style="margin: 0 auto 15px auto; width: 100%; max-width: 360px; box-sizing: border-box;">
+          <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="better-highscores-button-toggle" style="transform: scale(1.2);">
               <span>${t('mods.betterUI.showBetterHighscoresButton')}</span>
@@ -4253,6 +4834,12 @@ function showSettingsModal() {
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="remove-footer-toggle" style="transform: scale(1.2);">
               <span>${t('mods.betterUI.hideWebsiteFooter')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="default-inventory-sticky-toggle" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.stickyInventory')}</span>
             </label>
           </div>
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
@@ -4307,6 +4894,23 @@ function showSettingsModal() {
             <select id="color-picker" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
               <option value="prismatic">Prismatic</option>
               <option value="demon" selected="">Demonic</option>
+              <option value="ice">Frosty</option>
+              <option value="poison">Venomous</option>
+              <option value="gold">Divine</option>
+              <option value="undead">Undead</option>
+            </select>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="sealed-toggle" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.enableSealed')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">${t('common.color')}</span>
+            <select id="sealed-color-picker" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+              <option value="prismatic">Prismatic</option>
+              <option value="demon">Demonic</option>
               <option value="ice">Frosty</option>
               <option value="poison">Venomous</option>
               <option value="gold">Divine</option>
@@ -4518,6 +5122,51 @@ function showSettingsModal() {
                 ${t('mods.betterUI.hotkeyResetBinding')}
               </button>
             </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">Floor up</span>
+              <button type="button" id="hotkey-floor-up-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                PageUp
+              </button>
+              <button type="button" id="hotkey-floor-up-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">Floor down</span>
+              <button type="button" id="hotkey-floor-down-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                PageDown
+              </button>
+              <button type="button" id="hotkey-floor-down-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">Cycle Bestiary/Equipment tab</span>
+              <button type="button" id="hotkey-cycle-bestiary-equipment-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                Tab
+              </button>
+              <button type="button" id="hotkey-cycle-bestiary-equipment-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">Cycle battle style</span>
+              <button type="button" id="hotkey-cycle-battle-style-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                V
+              </button>
+              <button type="button" id="hotkey-cycle-battle-style-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelResetCurrentMapDefault')}</span>
+              <button type="button" id="hotkey-reset-current-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                R
+              </button>
+              <button type="button" id="hotkey-reset-current-map-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
           </div>
           <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">${t('mods.betterUI.hotkeysSectionMods')}</h4>
@@ -4525,7 +5174,7 @@ function showSettingsModal() {
               <div class="hotkey-inventory-row" style="${hotkeyRowStyle}">
                 <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelReturnToMap')}</span>
                 <button type="button" id="hotkey-return-to-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                  Tab
+                  G
                 </button>
                 <button type="button" id="hotkey-return-to-map-reset-btn" style="pointer-events: auto;">
                   ${t('mods.betterUI.hotkeyResetBinding')}
@@ -4601,6 +5250,11 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableRunTrackerWarning')}">${t('mods.betterUI.disableRunTracker')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <button id="hide-non-shiny-awakened-monsters-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto;" onclick="event.stopPropagation();">
+              ${t('mods.betterUI.hideNonShinyNonAwakenedMonstersButton')}
+            </button>
+          </div>
           <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
             <div style="margin-bottom: 15px; text-align: center;">
               <h4 style="margin: 0 0 15px 0; color: #ffaa00; font-size: 14px; cursor: help;" title="${t('mods.betterUI.firebaseBestRunsUploadTooltip')}">${t('mods.betterUI.firebaseBestRunsUploadTitle')}</h4>
@@ -4624,13 +5278,13 @@ function showSettingsModal() {
               </label>
             </div>
             <div style="margin-bottom: 15px; display: flex; gap: 8px; flex-wrap: nowrap;">
-              <button id="upload-runs-btn" class="btn btn-primary" style="flex: 1; min-width: 0; pointer-events: auto; opacity: 0.5; cursor: not-allowed; padding: 8px 12px; background: #4a90e2; border: 1px solid #4a90e2; border-radius: 4px; color: #fff; font-weight: 500; transition: all 0.2s ease; font-size: 13px;" disabled onclick="event.stopPropagation();">
+              <button id="upload-runs-btn" class="btn btn-primary" style="flex: 1; min-width: 0; pointer-events: auto; opacity: 0.5; cursor: not-allowed;" disabled onclick="event.stopPropagation();">
                 ${t('mods.betterUI.firebaseRunsUploadButton')}
               </button>
-              <button id="download-runs-btn" class="btn btn-secondary" style="flex: 1; min-width: 0; pointer-events: auto; padding: 8px 12px; background: #28a745; border: 1px solid #28a745; border-radius: 4px; color: #fff; font-weight: 500; transition: all 0.2s ease; font-size: 13px;" onmouseover="this.style.background='#218838'; this.style.borderColor='#218838';" onmouseout="this.style.background='#28a745'; this.style.borderColor='#28a745';" onclick="event.stopPropagation();">
+              <button id="download-runs-btn" class="btn btn-secondary" style="flex: 1; min-width: 0; pointer-events: auto;" onclick="event.stopPropagation();">
                 ${t('mods.betterUI.firebaseRunsDownloadButton')}
               </button>
-              <button id="delete-runs-btn" class="btn btn-secondary" style="flex: 1; min-width: 0; pointer-events: auto; padding: 8px 12px; background: #dc3545; border: 1px solid #dc3545; border-radius: 4px; color: #fff; font-weight: 500; transition: all 0.2s ease; font-size: 13px;" onmouseover="this.style.background='#c82333'; this.style.borderColor='#c82333';" onmouseout="this.style.background='#dc3545'; this.style.borderColor='#dc3545';" onclick="event.stopPropagation();">
+              <button id="delete-runs-btn" class="btn btn-secondary" style="flex: 1; min-width: 0; pointer-events: auto;" onclick="event.stopPropagation();">
                 ${t('mods.betterUI.firebaseRunsDeleteButton')}
               </button>
             </div>
@@ -4904,6 +5558,18 @@ function showSettingsModal() {
       if (rainbowCheckbox) {
         createSettingsCheckboxHandler('enableMaxCreatures', applyMaxCreatures, removeMaxCreatures)(rainbowCheckbox);
       }
+
+      const sealedCheckbox = content.querySelector('#sealed-toggle');
+      if (sealedCheckbox) {
+        createSettingsCheckboxHandler('enableSealed', applySealedCreatures, removeSealedCreatures)(sealedCheckbox);
+      }
+
+      const sealedColorPicker = content.querySelector('#sealed-color-picker');
+      if (sealedColorPicker) {
+        createSettingsDropdownHandler('sealedCreaturesColor', () => {
+          if (config.enableSealed) applySealedCreatures();
+        })(sealedColorPicker);
+      }
       
       const colorPicker = content.querySelector('#color-picker');
       if (colorPicker) {
@@ -5021,10 +5687,19 @@ function showSettingsModal() {
           showWebsiteFooter
         )(removeFooterCheckbox);
       }
+
+      const defaultInventoryStickyCheckbox = content.querySelector('#default-inventory-sticky-toggle');
+      if (defaultInventoryStickyCheckbox) {
+        createSettingsCheckboxHandler(
+          'defaultInventorySticky',
+          () => applyDefaultInventorySticky(),
+          () => {}
+        )(defaultInventoryStickyCheckbox);
+      }
       
       const inventoryBorderStyleSelector = content.querySelector('#inventory-border-style-selector');
       if (inventoryBorderStyleSelector) {
-        createSettingsDropdownHandler('inventoryBorderStyle')(inventoryBorderStyleSelector);
+        createSettingsDropdownHandler('inventoryBorderStyle', refreshInventoryModButtonBorderStyle)(inventoryBorderStyleSelector);
       }
 
       const enableHotkeysCheckbox = content.querySelector('#enable-hotkeys-toggle');
@@ -5134,7 +5809,42 @@ function showSettingsModal() {
         content.querySelector('#hotkey-return-to-map-capture-btn'),
         content.querySelector('#hotkey-return-to-map-reset-btn'),
         'hotkeyReturnToMap',
+        'g',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-floor-up-capture-btn'),
+        content.querySelector('#hotkey-floor-up-reset-btn'),
+        'hotkeyFloorUp',
+        'pageup',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-floor-down-capture-btn'),
+        content.querySelector('#hotkey-floor-down-reset-btn'),
+        'hotkeyFloorDown',
+        'pagedown',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-cycle-bestiary-equipment-capture-btn'),
+        content.querySelector('#hotkey-cycle-bestiary-equipment-reset-btn'),
+        'hotkeyCycleBestiaryEquipmentTab',
         'tab',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-reset-current-map-capture-btn'),
+        content.querySelector('#hotkey-reset-current-map-reset-btn'),
+        'hotkeyResetCurrentMapDefault',
+        'r',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-cycle-battle-style-capture-btn'),
+        content.querySelector('#hotkey-cycle-battle-style-reset-btn'),
+        'hotkeyCycleBattleStyle',
+        'v',
         ''
       );
       for (let slot = 1; slot <= 8; slot++) {
@@ -5432,6 +6142,49 @@ function showSettingsModal() {
           }
         });
       }
+
+      const hideMonstersButton = content.querySelector('#hide-non-shiny-awakened-monsters-btn');
+      if (hideMonstersButton) {
+        applyAdvancedActionButtonStyle(hideMonstersButton, { fullWidth: true, variant: 'gray' });
+        hideMonstersButton.addEventListener('click', async () => {
+          const defaultLabel = t('mods.betterUI.hideNonShinyNonAwakenedMonstersButton');
+          hideMonstersButton.disabled = true;
+          hideMonstersButton.style.opacity = '0.65';
+          hideMonstersButton.style.cursor = 'not-allowed';
+          hideMonstersButton.textContent = t('mods.betterUI.hideMonstersPreparing');
+
+          try {
+            const result = await hideNonShinyAndNonAwakenedMonsters((progress) => {
+              if (!progress || progress.totalToHide === 0) {
+                hideMonstersButton.textContent = t('mods.betterUI.hideMonstersNoTargets');
+                return;
+              }
+              const current = Math.min(progress.hiddenCount + 1, progress.totalToHide);
+              hideMonstersButton.textContent = tReplace('mods.betterUI.hideMonstersProgress', {
+                current,
+                total: progress.totalToHide
+              });
+            });
+            console.log('[Mod Settings] Hide monsters completed', result);
+            hideMonstersButton.textContent = result.totalToHide === 0
+              ? t('mods.betterUI.hideMonstersDoneNothing')
+              : tReplace('mods.betterUI.hideMonstersDoneProgress', {
+                hidden: result.hiddenCount,
+                total: result.totalToHide
+              });
+          } catch (error) {
+            console.error('[Mod Settings] Hide monsters failed:', error);
+            hideMonstersButton.textContent = t('mods.betterUI.hideMonstersFailedCheckConsole');
+          } finally {
+            scheduleTimeout(() => {
+              hideMonstersButton.disabled = false;
+              hideMonstersButton.style.opacity = '';
+              hideMonstersButton.style.cursor = '';
+              hideMonstersButton.textContent = defaultLabel;
+            }, 2200);
+          }
+        });
+      }
       
       // Firebase Best Runs Upload handlers
       const firebaseRunsUploadToggle = content.querySelector('#firebase-runs-upload-toggle');
@@ -5472,6 +6225,11 @@ function showSettingsModal() {
       
       const firebaseRunsPasswordInput = content.querySelector('#firebase-runs-password');
       const uploadRunsBtn = content.querySelector('#upload-runs-btn');
+      if (uploadRunsBtn) applyAdvancedActionButtonStyle(uploadRunsBtn, { variant: 'blue' });
+      const downloadRunsBtn = content.querySelector('#download-runs-btn');
+      if (downloadRunsBtn) applyAdvancedActionButtonStyle(downloadRunsBtn, { variant: 'green' });
+      const deleteRunsBtn = content.querySelector('#delete-runs-btn');
+      if (deleteRunsBtn) applyAdvancedActionButtonStyle(deleteRunsBtn, { variant: 'red' });
       const statusDiv = content.querySelector('#firebase-runs-status');
       
       // Function to update upload button and checkbox states
@@ -5482,14 +6240,8 @@ function showSettingsModal() {
           uploadRunsBtn.disabled = !hasPassword;
           uploadRunsBtn.style.opacity = hasPassword ? '1' : '0.5';
           uploadRunsBtn.style.cursor = hasPassword ? 'pointer' : 'not-allowed';
+          uploadRunsBtn.style.filter = 'none';
           uploadRunsBtn.title = hasPassword ? '' : t('mods.betterUI.firebaseRunsPasswordRequiredTooltip');
-          if (hasPassword) {
-            uploadRunsBtn.onmouseover = function() { this.style.background = '#357abd'; this.style.borderColor = '#357abd'; };
-            uploadRunsBtn.onmouseout = function() { this.style.background = '#4a90e2'; this.style.borderColor = '#4a90e2'; };
-          } else {
-            uploadRunsBtn.onmouseover = null;
-            uploadRunsBtn.onmouseout = null;
-          }
         }
         
         // Update checkbox states
@@ -5645,7 +6397,7 @@ function showSettingsModal() {
         });
       }
       
-      const downloadRunsBtn = content.querySelector('#download-runs-btn');
+      // downloadRunsBtn is already defined above, just add the click handler
       if (downloadRunsBtn) {
         downloadRunsBtn.addEventListener('click', async (e) => {
           e.preventDefault();
@@ -5699,7 +6451,7 @@ function showSettingsModal() {
         });
       }
       
-      const deleteRunsBtn = content.querySelector('#delete-runs-btn');
+      // deleteRunsBtn is already defined above, just add the click handler
       if (deleteRunsBtn) {
         deleteRunsBtn.addEventListener('click', async (e) => {
           e.preventDefault();
@@ -6316,6 +7068,76 @@ function injectMaxCreaturesCSS(colorOption, colorKey) {
   // Generate CSS using template system
   const css = generateMaxCreaturesCSS(colorOption, colorKey);
   style.textContent = css;
+}
+
+function filterEligibleSealedCreatures(visibleCreatures) {
+  if (isScrollLocked()) return [];
+  const eligibleCreatures = [];
+
+  visibleCreatures.forEach((imgEl) => {
+    const containerSlot = imgEl.closest('.container-slot');
+    if (!containerSlot) return;
+    const sealedOverlay = containerSlot.querySelector('.rarity-sealed');
+    if (!sealedOverlay) return;
+    if (config.enableMaxShinies && isShinyCreature(imgEl)) return;
+    eligibleCreatures.push({ imgEl, sealedOverlay });
+  });
+
+  return eligibleCreatures;
+}
+
+function applySealedStyling(sealedCreature, colorKey) {
+  const { sealedOverlay } = sealedCreature;
+  applyDataAttributes(
+    { sealedOverlay },
+    'sealed-creatures',
+    colorKey
+  );
+}
+
+function injectSealedCreaturesCSS(colorOption, colorKey) {
+  Object.keys(COLOR_OPTIONS).forEach((color) => {
+    const existingStyle = document.getElementById(`sealed-creatures-${color}-style`);
+    if (existingStyle) existingStyle.remove();
+  });
+
+  const styleId = `sealed-creatures-${colorKey}-style`;
+  const style = document.createElement('style');
+  style.id = styleId;
+  style.textContent = `
+    .rarity-sealed[data-sealed-creatures="true"][data-sealed-creatures-color="${colorKey}"] {
+      border: 2px solid;
+      border-image: ${colorOption.borderGradient} 1;
+      background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
+      opacity: 0.8;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function applySealedCreatures() {
+  if (isBlockedByAnalysisMods()) return;
+
+  applySpecialStyling({
+    name: 'sealed creatures',
+    configColorKey: 'sealedCreaturesColor',
+    getEligibleFn: filterEligibleSealedCreatures,
+    applyStylingFn: applySealedStyling,
+    injectCSSFn: injectSealedCreaturesCSS,
+    removeFn: removeSealedCreatures
+  });
+}
+
+function removeSealedCreatures() {
+  try {
+    document.querySelectorAll('.rarity-sealed[data-sealed-creatures="true"]').forEach((sealedOverlay) => {
+      sealedOverlay.removeAttribute('data-sealed-creatures');
+      sealedOverlay.removeAttribute('data-sealed-creatures-color');
+    });
+  } catch (error) {
+    console.error('[Mod Settings] Error removing sealed creatures styling:', error);
+  }
 }
 
 function applyMaxCreatures() {
@@ -8384,6 +9206,115 @@ function applyCompactNavBar() {
   console.log('[Mod Settings] Compact nav bar applied - text hidden');
 }
 
+function isInventoryWidgetPinned() {
+  const pinButton = getInventoryWidgetPinButton();
+  if (!pinButton) return null;
+  const icon = pinButton.querySelector('svg');
+  if (!icon) return null;
+  if (icon.classList.contains('lucide-pin-off')) return true;
+  if (icon.classList.contains('lucide-pin')) return false;
+  return null;
+}
+
+function getInventoryWidgetPinButton() {
+  const inventoryHeaders = Array.from(
+    document.querySelectorAll(
+      '#game-sidebar-id h2.widget-top-text, #game-sidebar-id .widget-top.widget-top-text, [role="dialog"] h2.widget-top-text, [role="dialog"] .widget-top.widget-top-text, h2.widget-top-text, .widget-top.widget-top-text'
+    )
+  );
+  for (const header of inventoryHeaders) {
+    const labelText = (header.textContent || '').toLowerCase();
+    if (!labelText.includes('inventory')) continue;
+    const pinBtn = header.querySelector('button[aria-label="Pin widget"]');
+    if (pinBtn) return pinBtn;
+  }
+  return (
+    document.querySelector('[role="dialog"] button[aria-label="Pin widget"]') ||
+    document.querySelector('#game-sidebar-id button[aria-label="Pin widget"]') ||
+    document.querySelector('button[aria-label="Pin widget"]')
+  );
+}
+
+function ensureInventoryWidgetPinned() {
+  if (stickyInventoryState.done) return true;
+  const pinButton = getInventoryWidgetPinButton();
+  if (!pinButton) {
+    console.log('[Mod Settings] Sticky inventory: pin button not found');
+    return false;
+  }
+  const pinned = isInventoryWidgetPinned();
+  const iconClassBefore = pinButton.querySelector('svg')?.className?.baseVal || pinButton.querySelector('svg')?.className || '';
+  console.log('[Mod Settings] Sticky inventory: pin state before click', { pinned, iconClassBefore });
+  if (pinned === true) {
+    stickyInventoryState.done = true;
+    console.log('[Mod Settings] Sticky inventory: already pinned');
+    return true;
+  }
+  if (pinned === false) {
+    triggerWidgetPinButton(pinButton);
+    scheduleTimeout(() => {
+      const postPinned = isInventoryWidgetPinned();
+      const iconClassAfter = pinButton.querySelector('svg')?.className?.baseVal || pinButton.querySelector('svg')?.className || '';
+      if (postPinned === true) stickyInventoryState.done = true;
+      console.log('[Mod Settings] Sticky inventory: pin state after click', { postPinned, iconClassAfter });
+    }, 50);
+    return true;
+  }
+  console.log('[Mod Settings] Sticky inventory: unknown pin state, skipping click');
+  return false;
+}
+
+function triggerWidgetPinButton(button) {
+  if (!button) return;
+  const pointerPayload = { bubbles: true, cancelable: true, composed: true };
+  const mousePayload = { bubbles: true, cancelable: true, composed: true, button: 0 };
+  try {
+    button.focus?.({ preventScroll: true });
+  } catch (error) {
+    // Focus is best effort only.
+  }
+  button.dispatchEvent(new PointerEvent('pointerdown', pointerPayload));
+  button.dispatchEvent(new MouseEvent('mousedown', mousePayload));
+  button.dispatchEvent(new PointerEvent('pointerup', pointerPayload));
+  button.dispatchEvent(new MouseEvent('mouseup', mousePayload));
+  button.dispatchEvent(new MouseEvent('click', mousePayload));
+}
+
+function openInventoryThenPinWidget() {
+  if (stickyInventoryState.done || isInventoryWidgetPinned() === true) {
+    stickyInventoryState.done = true;
+    return;
+  }
+  // Sticky pin button only exists/reliably updates when inventory widget is open.
+  console.log('[Mod Settings] Sticky inventory: opening inventory before pin');
+  openInventoryFromHotkey();
+  const retryDelays = [200, 400, 600];
+  retryDelays.forEach((delay, idx) => {
+    scheduleTimeout(() => {
+      if (stickyInventoryState.done) return;
+      console.log('[Mod Settings] Sticky inventory: pin attempt', { attempt: idx + 1, delay });
+      ensureInventoryWidgetPinned();
+    }, delay);
+  });
+}
+
+function applyDefaultInventorySticky() {
+  if (!config.defaultInventorySticky) return;
+  if (stickyInventoryState.done || isInventoryWidgetPinned() === true) {
+    stickyInventoryState.done = true;
+    return;
+  }
+  if (stickyInventoryState.started) return;
+  stickyInventoryState.started = true;
+  const attemptDelays = [0, 250, 800, 1500, 2500, 4000];
+  for (const delay of attemptDelays) {
+    scheduleTimeout(() => {
+      if (!config.defaultInventorySticky || stickyInventoryState.done) return;
+      openInventoryThenPinWidget();
+    }, delay);
+  }
+}
+
 // Remove compact nav bar (show text again)
 function removeCompactNavBar() {
   document.querySelectorAll('[data-compact-nav-hidden="true"]').forEach(span => {
@@ -8611,6 +9542,14 @@ function initTabObserver() {
             } else {
               console.log('[Mod Settings] Max creatures disabled, skipping');
             }
+            if (config.enableSealed) {
+              console.log('[Mod Settings] Reapplying sealed creatures');
+              scheduleTimeout(() => {
+                applySealedCreatures();
+              }, TIMEOUT_DELAYS.TAB_REAPPLY);
+            } else {
+              console.log('[Mod Settings] Sealed creatures disabled, skipping');
+            }
             if (config.enableMaxShinies) {
               console.log('[Mod Settings] Reapplying max shinies');
               scheduleTimeout(() => {
@@ -8713,6 +9652,10 @@ function startCreatureContainerObserver() {
           if (config.enableMaxCreatures) {
             applyMaxCreatures();
           }
+
+          if (config.enableSealed) {
+            applySealedCreatures();
+          }
           
           // Re-apply max shinies styling if enabled
           if (config.enableMaxShinies) {
@@ -8769,6 +9712,7 @@ function scheduleInventoryCosmeticsAfterBestiarySearch() {
     bestiarySearchStylePendingTimeout = null;
     if (isBlockedByAnalysisMods()) return;
     if (config.enableMaxCreatures) applyMaxCreatures();
+    if (config.enableSealed) applySealedCreatures();
     if (config.enableMaxShinies) applyMaxShinies();
     if (isCreatureHoverTooltipEnabled()) applyAdvancedStatsOnHover();
   }, TIMEOUT_DELAYS.CONTAINER_DEBOUNCE);
@@ -8831,6 +9775,10 @@ function initScrollLockObserver() {
             // Re-apply all enabled features
             if (config.enableMaxCreatures) {
               applyMaxCreatures();
+            }
+
+            if (config.enableSealed) {
+              applySealedCreatures();
             }
             
             if (config.enableMaxShinies) {
@@ -10122,6 +11070,11 @@ function initBetterUI() {
       console.log('[Mod Settings] Applying max creatures');
       applyMaxCreatures();
     }
+
+    if (config.enableSealed) {
+      console.log('[Mod Settings] Applying sealed creatures');
+      applySealedCreatures();
+    }
     
     if (config.enableMaxShinies) {
       console.log('[Mod Settings] Applying max shinies');
@@ -10212,6 +11165,9 @@ function initBetterUI() {
       }, 1000); // Delay to ensure DOM is ready
     }
 
+    applyDefaultInventorySticky();
+    observers.inventoryModButtons = startInventoryModButtonsObserver();
+
     initHotkeys();
     
     console.log('[Mod Settings] Initialization completed');
@@ -10280,6 +11236,9 @@ function cleanupBetterUI() {
     observers.setupLabels = disconnectObserver(observers.setupLabels, 'Setup labels');
     observers.scrollLock = disconnectObserver(observers.scrollLock, 'Scroll lock');
     observers.compactNavBar = disconnectObserver(observers.compactNavBar, 'Compact nav bar');
+    observers.inventoryModButtons = disconnectObserver(observers.inventoryModButtons, 'Inventory mod buttons');
+    inventoryModButtonsState.missingRetryCount.clear();
+    inventoryModButtonsState.knownClasses.clear();
     stopMonsterBestiarySearchCosmeticsListener();
     battleBoardObserver = disconnectObserver(battleBoardObserver, 'Battle board');
     
@@ -10373,6 +11332,20 @@ function cleanupBetterUI() {
       console.log('[Mod Settings] Max creatures styles removed');
     } catch (error) {
       console.warn('[Mod Settings] Error cleaning up max creatures:', error);
+    }
+    
+    try {
+      removeSealedCreatures();
+      
+      Object.keys(COLOR_OPTIONS).forEach(color => {
+        const style = document.getElementById(`sealed-creatures-${color}-style`);
+        if (style && style.parentNode) {
+          style.parentNode.removeChild(style);
+        }
+      });
+      console.log('[Mod Settings] Sealed creatures styles removed');
+    } catch (error) {
+      console.warn('[Mod Settings] Error cleaning up sealed creatures:', error);
     }
     
     try {

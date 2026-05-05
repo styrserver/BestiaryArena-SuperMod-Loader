@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "3.7.9",
+      "changes": [
+        {
+          "type": "changed",
+          "mod": "Mod Settings",
+          "text": "Firebase best-runs upload dedupes floor setups with a normalized replay hash (RunTracker); speedrun and rank are always uploaded."
+        },
+        {
+          "type": "fixed",
+          "mod": "Autoscroller",
+          "text": "Late-game Hunt now protects shiny, gazer, sealed (tier 5), and awakened (tier 6) creatures from auto-sell/squeeze."
+        },
+        {
+          "type": "fixed",
+          "mod": "Better Tasker",
+          "text": "Task hunting now pauses autoplay on the final planned run to prevent one surplus run before task completion."
+        },
+        {
+          "type": "fixed",
+          "mod": "Dice Roller",
+          "text": "Creature picker now also hides sealed and awakened creatures."
+        },
+        {
+          "type": "fixed",
+          "mod": "Mod Settings",
+          "text": "Added new hotkeys, Sticky inventory and other functions."
+        }
+      ]
+    },
+    {
       "version": "3.7.8",
       "changes": [
         {

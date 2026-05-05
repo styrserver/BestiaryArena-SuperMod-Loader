@@ -78,6 +78,9 @@ const TASK_START_DELAY = 200;
 // Stamina constants
 const DEFAULT_STAMINA_COST = 30;
 
+// Paw and Fur-style tasks: default kill quota when API does not expose a goal field
+const DEFAULT_TASK_KILL_TARGET = 60;
+
 // ============================================================================
 // 1.1. DOM UTILITY FUNCTIONS
 // ============================================================================
@@ -487,7 +490,6 @@ function getCurrentStamina() {
         }
         
         const stamina = Number(staminaElement.textContent);
-        console.log('[Better Tasker] Current stamina from DOM:', stamina);
         return stamina;
     } catch (error) {
         console.error('[Better Tasker] Error reading stamina:', error);
@@ -550,21 +552,26 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
         stopStaminaTooltipMonitoring();
     }
     
-    console.log('[Better Tasker] Starting stamina recovery monitoring...');
-    
     staminaRecoveryCallback = onRecovered;
-    let hasStaminaIssue = true;
+    const staminaTooltipSel =
+        '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]';
+    // Only treat "recovered" after we have actually seen insufficient stamina (tooltip or API).
+    // Default true caused false recoveries when stamina was already fine (no tooltip) → bogus Start click + navigation reset.
+    let hasStaminaIssue = hasInsufficientStamina().insufficient || !!document.querySelector(staminaTooltipSel);
     
     // PRIMARY METHOD: Interval-based API checking for progress tracking (every 5 seconds)
     const staminaCheckInterval = setInterval(() => {
         const currentStamina = getCurrentStamina();
         
-        // Also check if tooltip disappeared (double-check)
-        const tooltipStillExists = document.querySelector(
-            '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
-        );
+        const tooltipStillExists = !!document.querySelector(staminaTooltipSel);
         
-        if (!tooltipStillExists && hasStaminaIssue) {
+        if (tooltipStillExists) {
+            hasStaminaIssue = true;
+            if (requiredStamina) {
+                const timeRemaining = Math.max(0, requiredStamina - currentStamina);
+                console.log(`[Better Tasker] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
+            }
+        } else if (hasStaminaIssue) {
             console.log(`[Better Tasker] ✅ STAMINA RECOVERED (tooltip gone) - current: ${currentStamina}`);
             hasStaminaIssue = false;
             
@@ -578,19 +585,20 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
             if (typeof callback === 'function') {
                 callback();
             }
-        } else if (tooltipStillExists && requiredStamina) {
-            // Show progress if we know required stamina
-            const timeRemaining = Math.max(0, requiredStamina - currentStamina);
-            console.log(`[Better Tasker] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
         }
     }, 15000); // Check every 15 seconds (stamina regenerates 1 per minute)
     
     // Store interval for cleanup
     window.betterTaskerStaminaInterval = staminaCheckInterval;
     
-    // BACKUP METHOD: MutationObserver for tooltip removal (instant detection)
+    // BACKUP METHOD: MutationObserver for tooltip removal (instant detection) + appearance (arm recovery)
     staminaTooltipObserver = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE && node.querySelector?.(staminaTooltipSel)) {
+                    hasStaminaIssue = true;
+                }
+            });
             mutation.removedNodes.forEach((node) => {
                 if (node.nodeType === Node.ELEMENT_NODE) {
                     const wasStaminaTooltip = 
@@ -623,7 +631,6 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
         subtree: true
     });
     
-    console.log('[Better Tasker] Stamina monitoring active (tooltip watching + API progress)');
 }
 
 /**
@@ -744,6 +751,262 @@ function hasActiveTask() {
     }
 }
 
+function parseTaskKillProgressFromDom() {
+    try {
+        const section = findPawAndFurSection();
+        if (!section) {
+            return null;
+        }
+        const span = section.querySelector('span[data-completed]');
+        if (!span || !span.textContent) {
+            return null;
+        }
+        const m = span.textContent.trim().match(/^(\d+)\s*\/\s*(\d+)$/);
+        if (!m) {
+            return null;
+        }
+        return {
+            current: parseInt(m[1], 10),
+            target: parseInt(m[2], 10)
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
+function getTaskKillProgress() {
+    try {
+        const task = globalThis.state?.player?.getSnapshot()?.context?.questLog?.task;
+        const dom = parseTaskKillProgressFromDom();
+
+        if (!(task && task.gameId != null) && !dom) {
+            return null;
+        }
+
+        let target = DEFAULT_TASK_KILL_TARGET;
+        let current = null;
+        const sourceBits = [];
+
+        if (task && task.gameId != null) {
+            const kc = Number(task.killCount);
+            if (Number.isFinite(kc)) {
+                current = kc;
+                sourceBits.push('api');
+            }
+            for (const key of ['killGoal', 'targetKills', 'requiredKills', 'goal', 'maxKills', 'killTarget']) {
+                const v = task[key];
+                if (Number.isFinite(v) && v > 0) {
+                    target = v;
+                    sourceBits.push(key);
+                    break;
+                }
+            }
+        }
+
+        if (dom) {
+            current = dom.current;
+            target = dom.target;
+            sourceBits.unshift('dom');
+        }
+
+        if (current === null || !Number.isFinite(current)) {
+            return null;
+        }
+
+        return { current, target, source: sourceBits.join('+') };
+    } catch (e) {
+        console.log('[Better Tasker] [runs-budget] getTaskKillProgress error', e);
+        return null;
+    }
+}
+
+/**
+ * Villains on the room default board matching task gameId; killsPerRun is at least 1 for math safety.
+ * @returns {{ killsPerRun: number, villainMatches: number }}
+ */
+function getTaskKillsPerRunFromRoom(roomId, taskGameId) {
+    const fallback = { killsPerRun: 1, villainMatches: 0 };
+    try {
+        if (!roomId || taskGameId == null || !globalThis.state?.utils?.getBoardMonstersFromRoomId) {
+            console.log('[Better Tasker] [runs-budget] board scan skipped — kpr=1', { roomId, taskGameId });
+            return fallback;
+        }
+        const board = globalThis.state.utils.getBoardMonstersFromRoomId(roomId);
+        if (!Array.isArray(board)) {
+            console.log('[Better Tasker] [runs-budget] board scan invalid — kpr=1', { roomId });
+            return fallback;
+        }
+        const tid = Number(taskGameId);
+        let villainMatches = 0;
+        for (const piece of board) {
+            if (!piece || piece.villain !== true) {
+                continue;
+            }
+            if (Number(piece.gameId) === tid) {
+                villainMatches++;
+            }
+        }
+        return { killsPerRun: Math.max(1, villainMatches), villainMatches };
+    } catch (e) {
+        console.log('[Better Tasker] [runs-budget] board scan error — kpr=1', e);
+        return fallback;
+    }
+}
+
+function refreshTaskHuntingRunsBudget(reason) {
+    const prog = getTaskKillProgress();
+    if (!prog) {
+        console.log('[Better Tasker] [runs-budget] refresh skipped (no progress)', reason);
+        taskHuntingRunsBudget = null;
+        skipRunsBudgetTickOnNextNewGame = false;
+        runsBudgetLastKillCountSnap = null;
+        finalRunPauseIssued = false;
+        return;
+    }
+    const roomId = taskingMapId || getCurrentRoomId();
+    const task = globalThis.state?.player?.getSnapshot()?.context?.questLog?.task;
+    const taskGameId = task?.gameId ?? null;
+    const { killsPerRun, villainMatches } = getTaskKillsPerRunFromRoom(roomId, taskGameId);
+    const remainingKills = Math.max(0, prog.target - prog.current);
+    taskHuntingRunsBudget = Math.ceil(remainingKills / killsPerRun);
+    console.log(
+        '[Better Tasker] [runs-budget] ' +
+            reason +
+            ': runsLeft=' +
+            taskHuntingRunsBudget +
+            ' | kill ' +
+            prog.current +
+            '/' +
+            prog.target +
+            ' (+' +
+            remainingKills +
+            ' left) ÷ kpr=' +
+            killsPerRun +
+            ' (villains ' +
+            villainMatches +
+            ') | map=' +
+            roomId +
+            ' | ' +
+            prog.source
+    );
+    if (taskHuntingRunsBudget === 0) {
+        console.log('[Better Tasker] [runs-budget] quota already met — pausing autoplay');
+        finalRunPauseIssued = false;
+        void pauseAutoplay();
+    } else {
+        skipRunsBudgetTickOnNextNewGame = true;
+        runsBudgetLastKillCountSnap = null;
+        finalRunPauseIssued = false;
+    }
+}
+
+function onTaskHuntingAutoplayGameEnded() {
+    if (!taskHuntingOngoing) {
+        return;
+    }
+
+    const prog = getTaskKillProgress();
+    if (prog && runsBudgetLastKillCountSnap !== null && prog.current === runsBudgetLastKillCountSnap) {
+        return;
+    }
+
+    const roomId = taskingMapId || getCurrentRoomId();
+    const taskSnap = globalThis.state?.player?.getSnapshot()?.context?.questLog?.task;
+    const taskGameId = taskSnap?.gameId ?? null;
+    const { killsPerRun, villainMatches } = getTaskKillsPerRunFromRoom(roomId, taskGameId);
+    let remainingKills = null;
+    let gamesRemainingByProgress = null;
+    if (prog) {
+        remainingKills = Math.max(0, prog.target - prog.current);
+        gamesRemainingByProgress = Math.ceil(remainingKills / killsPerRun);
+    }
+
+    const counterBefore = taskHuntingRunsBudget;
+    if (taskHuntingRunsBudget !== null) {
+        taskHuntingRunsBudget = Math.max(0, taskHuntingRunsBudget - 1);
+    }
+
+    let tightened = false;
+    if (gamesRemainingByProgress !== null && taskHuntingRunsBudget !== null && gamesRemainingByProgress < taskHuntingRunsBudget) {
+        taskHuntingRunsBudget = gamesRemainingByProgress;
+        tightened = true;
+    }
+
+    const pauseNow =
+        (remainingKills !== null && remainingKills <= 0) ||
+        (gamesRemainingByProgress !== null && gamesRemainingByProgress <= 0) ||
+        (taskHuntingRunsBudget !== null && taskHuntingRunsBudget <= 0);
+
+    if (pauseNow) {
+        const counterAfter = taskHuntingRunsBudget;
+        console.log(
+            '[Better Tasker] [runs-budget] end game → pause | killsLeft=' +
+                remainingKills +
+                ' gamesByKills=' +
+                gamesRemainingByProgress +
+                ' counter ' +
+                counterBefore +
+                '→' +
+                counterAfter +
+                ' tight=' +
+                tightened +
+                ' kpr=' +
+                killsPerRun +
+                '/v' +
+                villainMatches
+        );
+        taskHuntingRunsBudget = null;
+        finalRunPauseIssued = false;
+        if (prog) {
+            runsBudgetLastKillCountSnap = prog.current;
+        }
+        void pauseAutoplay();
+    } else {
+        const progStr = prog ? prog.current + '/' + prog.target + ' ' + prog.source : 'no API';
+        console.log(
+            '[Better Tasker] [runs-budget] end game → continue | runsLeft=' +
+                taskHuntingRunsBudget +
+                ' | ' +
+                progStr +
+                ' killsLeft=' +
+                remainingKills +
+                ' gamesByKills=' +
+                gamesRemainingByProgress +
+                ' kpr=' +
+                killsPerRun +
+                '/v' +
+                villainMatches +
+                (tightened ? ' | tightened' : '')
+        );
+        if (prog) {
+            runsBudgetLastKillCountSnap = prog.current;
+        }
+    }
+}
+
+function onTaskHuntingEmitNewGameGuard() {
+    if (!taskHuntingOngoing || taskHuntingRunsBudget === null) {
+        return;
+    }
+
+    const prog = getTaskKillProgress();
+    const apiDone = prog && prog.current >= prog.target;
+    const countdownDone = taskHuntingRunsBudget <= 0;
+
+    if (apiDone || countdownDone) {
+        console.log(
+            '[Better Tasker] [runs-budget] newGame guard → pause | apiDone=' +
+                apiDone +
+                ' countdownDone=' +
+                countdownDone +
+                ' counter=' +
+                taskHuntingRunsBudget
+        );
+        taskHuntingRunsBudget = null;
+        void pauseAutoplay();
+    }
+}
+
 // Create continuous stamina monitoring callback
 function createStaminaMonitoringCallback(logPrefix, successMessage) {
     return () => {
@@ -788,6 +1051,7 @@ function createStaminaMonitoringCallback(logPrefix, successMessage) {
             }
 
             console.log('[Better Tasker] Clicking Start button after stamina recovery...');
+            refreshTaskHuntingRunsBudget('stamina-recovery-restart');
             startButton.click();
 
             // Show success toast if message provided
@@ -978,6 +1242,14 @@ let trackedListeners = new Map();
 // Automation State
 let taskerState = TASKER_STATES.DISABLED;
 let taskHuntingOngoing = false;
+/** Remaining autoplay games estimated to finish kill quota (synced on each game end). Null when not tracking. */
+let taskHuntingRunsBudget = null;
+/** After refresh, skip one newGame tick — that event starts the first match, not a completed one. */
+let skipRunsBudgetTickOnNextNewGame = false;
+/** Last quest killCount applied in onTaskHuntingAutoplayGameEnded (dedupe duplicate newGame). */
+let runsBudgetLastKillCountSnap = null;
+/** Prevent duplicate pause requests when pausing during final run (runsLeft === 1). */
+let finalRunPauseIssued = false;
 let taskNavigationCompleted = false;
 let autoplayPausedByTasker = false;
 let pendingTaskCompletion = false;
@@ -988,6 +1260,9 @@ let lastQuestBlipTrigger = 0;
 
 // Session State
 let lastGameStateChange = 0;
+/** Separate debounce for newGame vs emitEndGame so faster autoplay does not drop end-game (runs-budget) handling. */
+let lastNewGameDebounceAt = 0;
+let lastEndGameDebounceAt = 0;
 let lastNoTaskCheck = 0;
 
 // Loop detection and auto-refresh
@@ -1059,6 +1334,10 @@ function resetState(resetType = 'full') {
         
         const resetTaskHunting = () => {
             taskHuntingOngoing = false;
+            taskHuntingRunsBudget = null;
+            skipRunsBudgetTickOnNextNewGame = false;
+            runsBudgetLastKillCountSnap = null;
+            finalRunPauseIssued = false;
             // Clear saved tasking map ID only when task hunting actually stops
             taskingMapId = null;
             // Reset quest button modification flag
@@ -1779,7 +2058,6 @@ function findQuestLogContainer() {
         const container = document.querySelector(selector);
         
         if (container) {
-            console.log(`[Better Tasker] Found potential quest log container with selector ${i + 1}: ${selector}`);
             return container;
         }
     }
@@ -1834,7 +2112,6 @@ function insertButtons() {
         return false; // Failed - section not found
     }
     
-    console.log('[Better Tasker] Found Paw and Fur Society section, inserting buttons');
     
     // Find the title element and its parent container
     const titleElement = pawAndFurSection.querySelector('p.text-whiteHighlight');
@@ -1864,7 +2141,6 @@ function insertButtons() {
             // Update toggle button state
             updateToggleButton();
             
-            console.log('[Better Tasker] Buttons inserted next to title successfully');
             return true; // Success - buttons inserted
         } else {
             console.log('[Better Tasker] Could not find title container for buttons');
@@ -2301,7 +2577,6 @@ function findQuestButton() {
     // First, try to find by quest icon (normal state) - check both selected and unselected
     const questIconButton = document.querySelector('button img[src*="quest.png"]')?.closest('button');
     if (questIconButton) {
-        console.log('[Better Tasker] Found quest button by quest icon');
         return questIconButton;
     }
     
@@ -2337,11 +2612,7 @@ function findQuestButton() {
 
 // Function to modify quest button appearance when tasking is active
 function modifyQuestButtonForTasking() {
-    console.log('[Better Tasker] Attempting to modify quest button for tasking...');
-    
     return withControl(window.QuestButtonManager, 'Better Tasker', () => {
-        console.log('[Better Tasker] Quest button control granted, finding quest button...');
-        
         // Find the quest button in the header navigation
         const questButton = findQuestButton();
         
@@ -2349,8 +2620,6 @@ function modifyQuestButtonForTasking() {
             console.log('[Better Tasker] Quest button not found for modification');
             return false;
         }
-        
-        console.log('[Better Tasker] Quest button found, proceeding with modification...');
         
         // Store original state if not already stored AND quest button is in original state
         if (!window.QuestButtonManager.originalState) {
@@ -2372,7 +2641,6 @@ function modifyQuestButtonForTasking() {
                     spanText: span ? span.textContent : null,
                     buttonColor: questButton.style.color || ''
                 };
-                console.log('[Better Tasker] Stored original quest button state');
             } else {
                 console.log('[Better Tasker] Quest button not in original state - not storing originalState');
             }
@@ -2418,7 +2686,6 @@ function modifyQuestButtonForTasking() {
         // Set green color for the button
         questButton.style.color = '#22c55e'; // Green color
         
-        console.log('[Better Tasker] Quest button modified for tasking state');
         return true;
     }, 'modify quest button');
 }
@@ -2506,8 +2773,6 @@ function startQuestButtonValidation() {
     if (!taskOperationInProgress && !taskHuntingOngoing) {
         return;
     }
-    
-    console.log('[Better Tasker] Starting real-time quest button validation monitoring');
     
     try {
         // Subscribe to board state changes for immediate map change detection
@@ -2602,8 +2867,6 @@ function startQuestButtonValidation() {
                 console.error('[Better Tasker] Error in board state subscription:', error);
             }
         });
-        
-        console.log('[Better Tasker] Real-time board state monitoring active');
         
     } catch (error) {
         console.error('[Better Tasker] Error setting up board state subscription:', error);
@@ -2805,7 +3068,6 @@ function handleQuestLogDetection(mutations) {
     
     // Handle quest log detection - insert buttons immediately
     if (hasQuestLogContent || hasPawAndFurContent) {
-        console.log('[Better Tasker] Quest log content detected!');
         
         // Insert buttons immediately if they don't exist
         if (!document.getElementById(TASKER_BUTTON_ID) || !document.getElementById(TASKER_TOGGLE_ID)) {
@@ -3804,21 +4066,12 @@ function isGameActive() {
 // Check if new task is available based on resetAt timestamp
 function isQuestBlipAvailable() {
     try {
-        console.log('[Better Tasker] isQuestBlipAvailable: Checking via game state API...');
         const task = globalThis.state.player.get().context.questLog.task;
         
         if (!task) {
             console.log('[Better Tasker] isQuestBlipAvailable: No task object found');
             return false;
         }
-        
-        console.log('[Better Tasker] isQuestBlipAvailable: Task data:', {
-            gameId: task.gameId,
-            ready: task.ready,
-            resetAt: task.resetAt,
-            resetAtDate: task.resetAt ? new Date(task.resetAt).toLocaleString() : 'null',
-            killCount: task.killCount
-        });
         
         // If resetAt is null, a new task is available
         if (!task.resetAt) {
@@ -3853,10 +4106,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             return false;
         }
         
-        console.log('[Better Tasker] Looking for suggested map link...');
-        
         // First, ensure quest log is open
-        console.log('[Better Tasker] Ensuring quest log is open...');
         const questLogOpened = await openQuestLogDirectly();
         if (!questLogOpened) {
             console.log('[Better Tasker] Failed to open quest log - checking if we can use stored map ID...');
@@ -3874,7 +4124,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Set the tasking map ID for future validation (already set, but ensure it's preserved)
                 taskingMapId = roomId;
-                console.log(`[Better Tasker] Tasking map ID preserved: ${taskingMapId}`);
                 
                 // Continue with setup...
                 const settings = loadSettings();
@@ -3910,7 +4159,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 await sleep(BESTIARY_INIT_WAIT);
                 
                 // Post-navigation settings validation
-                console.log('[Better Tasker] Validating settings after navigation...');
                 validateSettingsAfterNavigation();
                 
                 // Set flag BEFORE checking stamina to prevent rechecking during ongoing task
@@ -3918,7 +4166,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 console.log('[Better Tasker] Task navigation flag set - will not repeat quest log navigation during ongoing task');
                 
                 // Check stamina before clicking Start button
-                console.log('[Better Tasker] Checking stamina status...');
                 const staminaCheck = hasInsufficientStamina();
                 
                 if (staminaCheck.insufficient) {
@@ -3936,20 +4183,17 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 }
                 
                 // Stamina is sufficient - proceed with Start button
-                console.log('[Better Tasker] Stamina sufficient - finding Start button...');
                 const startButton = findButtonByText('Start');
                 if (!startButton) {
                     console.log('[Better Tasker] Start button not found');
                     return false;
                 }
                 
-                console.log('[Better Tasker] Clicking Start button...');
-                startButton.click();
-                
-                // Set task hunting flag to prevent further automation
                 taskHuntingOngoing = true;
                 updateExposedState();
                 console.log('[Better Tasker] Task hunting flag set - automation disabled until task completion');
+                refreshTaskHuntingRunsBudget('navigate-stored-map-initial');
+                startButton.click();
                 
                 // Modify quest button appearance to show tasking state
                 modifyQuestButtonForTasking();
@@ -3998,6 +4242,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                         }
                         
                         console.log('[Better Tasker] Clicking Start button after stamina recovery...');
+                        refreshTaskHuntingRunsBudget('navigate-stored-map-stamina-recovery');
                         startButton.click();
                         
                         // Continue monitoring for stamina depletion
@@ -4021,17 +4266,14 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
         let suggestedMapLink = suggestedMapElement;
         if (!suggestedMapLink) {
             // Look for the suggested map link only within Paw and Fur Society section
-            console.log('[Better Tasker] No specific element provided, searching within Paw and Fur Society section...');
             const pawAndFurSection = findPawAndFurSection();
             if (pawAndFurSection) {
-                console.log('[Better Tasker] Paw and Fur Society section found, looking for suggested map...');
                 // Look for suggested map text within this section
                 const allParagraphs = pawAndFurSection.querySelectorAll('p.pixel-font-14');
                 const suggestedMapText = t('mods.betterTasker.suggestedMap');
                 for (const p of allParagraphs) {
                     if (p.textContent && p.textContent.includes(suggestedMapText)) {
                         suggestedMapLink = p.querySelector('span.action-link');
-                        console.log('[Better Tasker] Suggested map found within Paw and Fur Society section');
                         break;
                     }
                 }
@@ -4044,12 +4286,8 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 console.log('[Better Tasker] No suggested map found in Paw and Fur Society section');
                 return false;
             }
-        } else {
-            console.log('[Better Tasker] Using provided suggested map element (already validated)');
         }
         if (suggestedMapLink) {
-            console.log('[Better Tasker] Suggested map link found, extracting map info...');
-            console.log('[Better Tasker] Attempting to extract room ID from suggested map...');
             
             // Debug: Log all attributes of the suggested map element
             console.log('[Better Tasker] Suggested map element attributes:', {
@@ -4062,7 +4300,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             
             // Extract map name from text content
             const mapName = suggestedMapLink.textContent.trim();
-            console.log('[Better Tasker] Extracted map name:', mapName);
             
             // Try to find room ID using game state API
             let roomId = null;
@@ -4077,8 +4314,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             }
             
             if (roomId) {
-                console.log('[Better Tasker] Found room ID for map:', mapName, '->', roomId);
-                
                 // Show toast notification
                 showToast('Starting Better Tasker');
                 
@@ -4087,7 +4322,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Set the tasking map ID for future validation
                 taskingMapId = roomId;
-                console.log(`[Better Tasker] Tasking map ID set to: ${taskingMapId}`);
                 
                 // Get user's selected setup method
                 const settings = loadSettings();
@@ -4123,7 +4357,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 await sleep(BESTIARY_INIT_WAIT);
                 
                 // Post-navigation settings validation
-                console.log('[Better Tasker] Validating settings after navigation...');
                 validateSettingsAfterNavigation();
                 
                 // Set flag BEFORE checking stamina to prevent rechecking during ongoing task
@@ -4131,7 +4364,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 console.log('[Better Tasker] Task navigation flag set - will not repeat quest log navigation during ongoing task');
                 
                 // Check stamina before clicking Start button
-                console.log('[Better Tasker] Checking stamina status...');
                 const staminaCheck = hasInsufficientStamina();
                 
                 if (staminaCheck.insufficient) {
@@ -4149,14 +4381,16 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 }
                 
                 // Stamina is sufficient - proceed with Start button
-                console.log('[Better Tasker] Stamina sufficient - finding Start button...');
                 const startButton = findButtonByText('Start');
                 if (!startButton) {
                     console.log('[Better Tasker] Start button not found');
                     return;
                 }
                 
-                console.log('[Better Tasker] Clicking Start button...');
+                taskHuntingOngoing = true;
+                updateExposedState();
+                console.log('[Better Tasker] Task hunting flag set - automation disabled until task completion');
+                refreshTaskHuntingRunsBudget('navigate-suggested-map-initial');
                 startButton.click();
                 
                 // Save the current map ID for tasking validation
@@ -4167,13 +4401,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 } else {
                     console.log('[Better Tasker] Could not save tasking map ID - map validation may not work properly');
                 }
-                
-                // Set task hunting flag to prevent further automation
-                taskHuntingOngoing = true;
-                // Keep task in progress flag true - task is still active until completed
-                // taskInProgress remains true to indicate an active task
-                updateExposedState(); // Update exposed state for other mods
-                console.log('[Better Tasker] Task hunting flag set - automation disabled until task completion');
                 
                 // Reset failure counter on successful task start
                 resetFailureCounter();
@@ -4225,6 +4452,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                         }
                         
                         console.log('[Better Tasker] Clicking Start button after stamina recovery...');
+                        refreshTaskHuntingRunsBudget('navigate-suggested-map-stamina-recovery');
                         startButton.click();
                         
                         // Continue monitoring for stamina depletion
@@ -4235,8 +4463,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                 
                 await sleep(TASK_START_DELAY);
-                
-                console.log('[Better Tasker] Navigation and setup completed');
                 
                 return true; // Navigation successful
             } else {
@@ -4395,7 +4621,6 @@ function clickAllCloseButtons() {
 function findBestiaryAutomator() {
     // Method 1: Check if Bestiary Automator is available in global scope
     if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-        console.log('[Better Tasker] Found Bestiary Automator via global window object');
         return window.bestiaryAutomator;
     }
     // Method 2: Check if it's available in context exports
@@ -4593,7 +4818,6 @@ function enableAutosellerDragonPlant() {
         // Method 1: Check window scope
         if (window.autoseller && window.autoseller.enableDragonPlant) {
             autoseller = window.autoseller;
-            console.log('[Better Tasker] Found Autoseller via window object');
         }
         // Method 2: Check context exports
         else if (typeof context !== 'undefined' && context.exports && context.exports.enableDragonPlant) {
@@ -5046,8 +5270,6 @@ async function openQuestLogDirectly() {
             return false;
         }
         
-        console.log('[Better Tasker] Opening quest log directly...');
-        
         // FIRST: Try to find and click quest blip (most reliable for task completion)
         const questBlipSelectors = [
             '#header-slot img[src*="quest-blip.png"]',
@@ -5077,7 +5299,6 @@ async function openQuestLogDirectly() {
                     );
                     
                     if (backButton && isElementVisible(backButton)) {
-                        console.log('[Better Tasker] Detected sub-view (e.g., Halloween Quests) - clicking Back button');
                         backButton.click();
                         await sleep(500); // Wait for transition back to main quest log
                     }
@@ -5104,7 +5325,6 @@ async function openQuestLogDirectly() {
         for (const selector of questSelectors) {
             questButton = document.querySelector(selector);
             if (questButton) {
-                console.log(`[Better Tasker] Found quest button with selector: ${selector}`);
                 break;
             }
         }
@@ -5116,7 +5336,6 @@ async function openQuestLogDirectly() {
             // Validate that quest log actually opened
             const questLogContainer = document.querySelector('[class*="quest"], [class*="modal"], [class*="dialog"]');
             if (questLogContainer) {
-                console.log('[Better Tasker] Quest log opened directly and validated');
                 
                 // Check if we're in a sub-view (like Halloween Quests) and need to go back
                 const backButton = Array.from(document.querySelectorAll('button')).find(btn => 
@@ -5124,7 +5343,6 @@ async function openQuestLogDirectly() {
                 );
                 
                 if (backButton && isElementVisible(backButton)) {
-                    console.log('[Better Tasker] Detected sub-view (e.g., Halloween Quests) - clicking Back button');
                     backButton.click();
                     await sleep(500); // Wait for transition back to main quest log
                 }
@@ -5160,7 +5378,6 @@ async function openQuestLogDirectly() {
                     );
                     
                     if (backButton && isElementVisible(backButton)) {
-                        console.log('[Better Tasker] Detected sub-view (e.g., Halloween Quests) - clicking Back button');
                         backButton.click();
                         await sleep(500); // Wait for transition back to main quest log
                     }
@@ -5643,23 +5860,13 @@ async function handleTaskFinishing() {
                     return;
                 }
             } else {
-                console.log('[Better Tasker] Active task found:', {
-                    gameId: task.gameId,
-                    killCount: task.killCount,
-                    ready: task.ready,
-                    points: task.points
-                });
-                
                 // If we have an active task (gameId exists), we should proceed to check quest log
                 // The task might need to be activated even if killCount is 0
-                console.log('[Better Tasker] Active task detected, proceeding to quest log check...');
                 
                 // Apply task start delay if configured (only for active tasks)
                 const taskStartDelay = settings.taskStartDelay || DEFAULT_TASK_START_DELAY;
                 
                 if (taskStartDelay > 0) {
-                    console.log(`[Better Tasker] Applying task start delay: ${taskStartDelay} seconds`);
-                    
                     // Wait for the specified delay before proceeding
                     await new Promise(resolve => setTimeout(resolve, taskStartDelay * 1000));
                     
@@ -5680,8 +5887,6 @@ async function handleTaskFinishing() {
                         console.log('[Better Tasker] Tasker disabled during task start delay');
                         return;
                     }
-                    
-                    console.log('[Better Tasker] Task start delay completed, proceeding...');
                 }
             }
             
@@ -5771,12 +5976,10 @@ async function handleTaskFinishing() {
             } else if (task.gameId && !task.ready) {
                 // Active task that's not ready yet - check if we need to navigate to the task map
                 if (!taskNavigationCompleted) {
-                    console.log('[Better Tasker] Active task in progress (not ready) - checking if already on correct map...');
                     
                     // First check if we're already on the correct map
                     const currentRoomId = getCurrentRoomId();
                     if (currentRoomId && taskingMapId && currentRoomId === taskingMapId) {
-                        console.log(`[Better Tasker] Already on correct task map (${currentRoomId}) - skipping navigation`);
                         taskNavigationCompleted = true;
                         updateExposedState();
                         return;
@@ -5791,9 +5994,7 @@ async function handleTaskFinishing() {
                         }
                         console.log(`[Better Tasker] No tasking map ID stored (current: ${currentRoomId}) - opening quest log to get suggested map information...`);
                         const navigationResult = await navigateToSuggestedMapAndStartAutoplay();
-                        if (navigationResult) {
-                            console.log('[Better Tasker] Navigation successful - tasking map ID should now be set');
-                        } else {
+                        if (!navigationResult) {
                             console.log('[Better Tasker] Navigation failed - will retry on next check');
                         }
                         return;
@@ -6168,10 +6369,11 @@ function subscribeToGameState() {
                 }
                 
                 const now = Date.now();
-                if (now - lastGameStateChange < GAME_STATE_DEBOUNCE_MS) {
+                if (now - lastNewGameDebounceAt < GAME_STATE_DEBOUNCE_MS) {
                     console.log('[Better Tasker] Ignoring rapid new game event (debounced)');
                     return;
                 }
+                lastNewGameDebounceAt = now;
                 lastGameStateChange = now;
                 
                 // Skip session reset during raids to avoid quest button control conflicts
@@ -6182,24 +6384,34 @@ function subscribeToGameState() {
                 }
                 
                 console.log('[Better Tasker] New game detected via game state API, resetting session flags');
-                console.log('[Better Tasker] New game event details:', event);
                 resetState('session');
                 // Don't reset taskNavigationCompleted - it should persist until user manually stops automation
+
+                // Runs budget: emitEndGame is often missing under fast autoplay; tick when a NEW match starts
+                // (meaning the previous one finished). Skip once right after refresh — that newGame is the first match, not a completion.
+                if (taskHuntingOngoing && taskHuntingRunsBudget !== null) {
+                    if (skipRunsBudgetTickOnNextNewGame) {
+                        skipRunsBudgetTickOnNextNewGame = false;
+                    } else {
+                        onTaskHuntingAutoplayGameEnded();
+                    }
+                }
+
+                // Final-run guard: once runsLeft reaches 1, pause autoplay now so no surplus run chains after this game.
+                if (taskHuntingOngoing && taskHuntingRunsBudget === 1 && !finalRunPauseIssued) {
+                    finalRunPauseIssued = true;
+                    console.log('[Better Tasker] [runs-budget] final run armed (runsLeft=1) — pausing autoplay now');
+                    void pauseAutoplay();
+                }
                 
                 // Log current task status when new game starts
                 try {
-                    if (globalThis.state?.player) {
-                        const playerContext = globalThis.state.player.getSnapshot().context;
-                        const task = playerContext?.questLog?.task;
-                        
-                        if (task && task.killCount !== undefined) {
-                            console.log(`[Better Tasker] Progress: ${task.killCount} creatures killed`);
-                            
-                            // If 60+ creatures killed, assume task is finished (max quest requirement)
-                            if (task.killCount >= 60) {
-                                await triggerFailsafe('60+ creatures killed');
-                                return;
-                            }
+                    const progNew = getTaskKillProgress();
+                    if (progNew) {
+                        console.log(`[Better Tasker] Progress: ${progNew.current}/${progNew.target} (${progNew.source})`);
+                        if (progNew.current >= progNew.target) {
+                            await triggerFailsafe(`${progNew.current}/${progNew.target} task kills (new game)`);
+                            return;
                         }
                     }
                 } catch (error) {
@@ -6221,29 +6433,26 @@ function subscribeToGameState() {
                 }
                 
                 const now = Date.now();
-                if (now - lastGameStateChange < GAME_STATE_DEBOUNCE_MS) {
+                if (now - lastEndGameDebounceAt < GAME_STATE_DEBOUNCE_MS) {
                     console.log('[Better Tasker] Ignoring rapid end game event (debounced)');
                     return;
                 }
+                lastEndGameDebounceAt = now;
                 lastGameStateChange = now;
                 
                 // Check for task completion after every game ends (autoplay or manual)
                 console.log('[Better Tasker] Game ended, checking for task completion...');
+
+                // Runs budget is driven from newGame (previous game finished) because emitEndGame is unreliable in fast autoplay.
                 
                 // Log current task status and progress
                 try {
-                    if (globalThis.state?.player) {
-                        const playerContext = globalThis.state.player.getSnapshot().context;
-                        const task = playerContext?.questLog?.task;
-                        
-                        if (task && task.killCount !== undefined) {
-                            console.log(`[Better Tasker] Progress: ${task.killCount} creatures killed`);
-                            
-                            // If 60+ creatures killed, assume task is finished (max quest requirement)
-                            if (task.killCount >= 60) {
-                                await triggerFailsafe('60+ creatures killed');
-                                return;
-                            }
+                    const progEnd = getTaskKillProgress();
+                    if (progEnd) {
+                        console.log(`[Better Tasker] Progress: ${progEnd.current}/${progEnd.target} (${progEnd.source})`);
+                        if (progEnd.current >= progEnd.target) {
+                            await triggerFailsafe(`${progEnd.current}/${progEnd.target} task kills (end game)`);
+                            return;
                         }
                     }
                 } catch (error) {
@@ -6280,6 +6489,11 @@ function subscribeToGameState() {
             const endGameUnsub = globalThis.state.board.on('emitEndGame', handleEndGame);
             if (typeof endGameUnsub === 'function') {
                 gameStateUnsubscribers.push(endGameUnsub);
+            }
+
+            const emitNewGameGuardUnsub = globalThis.state.board.on('emitNewGame', onTaskHuntingEmitNewGameGuard);
+            if (typeof emitNewGameGuardUnsub === 'function') {
+                gameStateUnsubscribers.push(emitNewGameGuardUnsub);
             }
         }
         
@@ -6492,7 +6706,6 @@ function runAutomationTasks() {
         
         // Don't run automation if task hunting is ongoing
         if (taskHuntingOngoing) {
-            console.log('[Better Tasker] Task hunting ongoing, skipping automation');
             return;
         }
         
@@ -6700,12 +6913,9 @@ async function openQuestLogForTaskRemoval() {
 // Remove current task if creature is not allowed
 async function removeCurrentTaskIfNotAllowed() {
     try {
-        console.log('[Better Tasker] Checking if current task should be removed...');
-        
         // Get current active task
         const activeTask = globalThis.state?.player?.activeTask;
         if (!activeTask) {
-            console.log('[Better Tasker] No active task found');
             return false;
         }
         
@@ -6923,47 +7133,35 @@ function isCreatureAllowed(creatureName) {
 // Schedule next task check based on resetAt timestamp (max 10 minutes between checks)
 function scheduleTaskCheck() {
     try {
-        console.log('[Better Tasker] === SCHEDULER CHECK START ===');
-        
         // Clear any existing timeout
         if (taskCheckTimeout) {
-            console.log('[Better Tasker] Clearing existing task check timeout');
             clearTimeout(taskCheckTimeout);
             taskCheckTimeout = null;
         }
         
         // Only schedule if tasker is enabled OR in New Task+ mode
         if (taskerState !== TASKER_STATES.ENABLED && taskerState !== TASKER_STATES.NEW_TASK_ONLY) {
-            console.log('[Better Tasker] Scheduler: Tasker not in active mode (disabled), exiting');
             return;
         }
-        console.log('[Better Tasker] Scheduler: Tasker is active (mode:', taskerState, ') ✓');
         
         // Don't schedule if task hunting is ongoing
         if (taskHuntingOngoing) {
-            console.log('[Better Tasker] Scheduler: Task hunting ongoing, exiting');
             return;
         }
-        console.log('[Better Tasker] Scheduler: Not task hunting ✓');
         
         // Check if a task operation is already in progress
         if (taskOperationInProgress) {
-            console.log('[Better Tasker] Scheduler: Task operation already in progress, skipping to prevent concurrent calls');
             return;
         }
-        console.log('[Better Tasker] Scheduler: No task operation in progress ✓');
         
         // Check if game is active
         if (!isGameActive()) {
-            console.log('[Better Tasker] Scheduler: Game not active, exiting');
             return;
         }
-        console.log('[Better Tasker] Scheduler: Game is active ✓');
         
         // Get task info from game state
         const playerContext = globalThis.state.player.getSnapshot().context;
         if (!playerContext.questLog || !playerContext.questLog.task) {
-            console.log('[Better Tasker] Scheduler: No task info available - retrying in 10 minutes');
             taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), 600000);
             return;
         }
@@ -6974,25 +7172,14 @@ function scheduleTaskCheck() {
         const activeTask = globalThis.state?.player?.activeTask;
         const hasActiveTask = task.gameId || activeTask;
         
-        console.log('[Better Tasker] Scheduler: Task state:', {
-            gameId: task.gameId,
-            ready: task.ready,
-            resetAt: task.resetAt,
-            resetAtDate: task.resetAt ? new Date(task.resetAt).toLocaleString() : 'null',
-            activeTask: !!activeTask,
-            hasActiveTask: hasActiveTask
-        });
-        
         // Only check if there's no active task
         if (hasActiveTask) {
-            console.log('[Better Tasker] Scheduler: Active task detected (gameId:', task.gameId, ', activeTask:', !!activeTask, ') - no need to schedule new task check');
             return;
         }
-        console.log('[Better Tasker] Scheduler: No active task (gameId is null/undefined) ✓');
         
         // Check if new task is available now
         if (!task.resetAt) {
-            console.log('[Better Tasker] Scheduler: New task available NOW (resetAt is null) - accepting immediately');
+            console.log('[Better Tasker] Scheduler: new task available now - accepting');
             // openQuestLogAndAcceptTask() handles raids internally - accepts tasks but blocks navigation
             openQuestLogAndAcceptTask();
             return;
@@ -7000,10 +7187,9 @@ function scheduleTaskCheck() {
         
         // Calculate time until task is available
         const timeRemaining = task.resetAt - Date.now();
-        console.log('[Better Tasker] Scheduler: Time remaining until task available:', Math.ceil(timeRemaining / 1000), 'seconds');
         
         if (timeRemaining <= 0) {
-            console.log('[Better Tasker] Scheduler: Task cooldown EXPIRED - accepting task now');
+            console.log('[Better Tasker] Scheduler: task cooldown expired - accepting now');
             // openQuestLogAndAcceptTask() handles raids internally - accepts tasks but blocks navigation
             openQuestLogAndAcceptTask();
             return;
@@ -7011,14 +7197,8 @@ function scheduleTaskCheck() {
         
         // Cap delay at 10 minutes (600000ms)
         const delay = Math.min(timeRemaining, 600000);
-        const delaySeconds = Math.ceil(delay / 1000);
-        
-        console.log(`[Better Tasker] Scheduler: Next task check scheduled in ${delaySeconds}s (total remaining: ${Math.ceil(timeRemaining / 1000)}s)`);
-        console.log('[Better Tasker] === SCHEDULER CHECK END (scheduled) ===');
-        
         // Schedule next check
         taskCheckTimeout = setTimeout(() => {
-            console.log('[Better Tasker] Scheduler: Timeout fired, rechecking...');
             scheduleTaskCheck(); // Rechain
         }, delay);
         

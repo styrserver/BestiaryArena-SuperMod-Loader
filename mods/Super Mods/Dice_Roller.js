@@ -591,6 +591,30 @@
     return creature.shiny === true;
   }
 
+  // Helper function to check if creature is sealed (tier 5)
+  function isSealedCreature(creature) {
+    const resolvedTier = Number(creature.tier ?? creature.metadata?.tier ?? creature.starTier ?? creature.tierLevel);
+    return creature.sealed === true || resolvedTier === 5;
+  }
+
+  // Helper function to check if creature is awakened (flagged or tier/level based)
+  function isAwakenedCreature(creature) {
+    const resolvedTier = Number(creature.tier ?? creature.metadata?.tier ?? creature.starTier ?? creature.tierLevel);
+    const resolvedLevel = Number(creature.level ?? getLevelFromExp(creature.exp));
+    return (
+      creature.awaken === true ||
+      creature.awakened === true ||
+      creature.isAwakened === true ||
+      resolvedTier >= 6 ||
+      resolvedLevel > 50
+    );
+  }
+
+  // Unified hidden-creature rule for creature picker
+  function shouldHideCreature(creature) {
+    return isShinyCreature(creature) || isSealedCreature(creature) || isAwakenedCreature(creature);
+  }
+
   // Helper function to sort creatures based on search type
   function sortCreatures(creatures, searchTerm) {
     return creatures.sort((a, b) => {
@@ -1546,10 +1570,10 @@
     // Add scrollArea to wrapper
     scrollFlexWrapper.appendChild(scrollArea);
     
-    // Render initial creature list (filter out shiny creatures)
+    // Render initial creature list (filter out shiny, sealed, and awakened creatures)
     try {
       const allMonsters = safeGetMonsters();
-      const filteredMonsters = allMonsters.filter(monster => !isShinyCreature(monster));
+      const filteredMonsters = allMonsters.filter(monster => !shouldHideCreature(monster));
       renderCreatureList(scrollArea, filteredMonsters, onSelect, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
     } catch (e) {
       scrollArea.innerHTML = '<div style="color:#f66;text-align:center;padding:16px;grid-column: span 5;">Error loading creatures.</div>';
@@ -1661,9 +1685,9 @@
     
     // Listen for search cleared events to restore full list
     addTrackedEventListener(scrollArea, 'searchCleared', () => {
-      // Re-render the full creature list (filter out shiny creatures)
+      // Re-render the full creature list (filter out shiny, sealed, and awakened creatures)
       const allMonsters = safeGetMonsters();
-      const monsters = allMonsters.filter(monster => !isShinyCreature(monster));
+      const monsters = allMonsters.filter(monster => !shouldHideCreature(monster));
       if (!monsters.length) {
         scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">No creatures found.</div>';
         return;
@@ -1765,8 +1789,8 @@
               .filter(monster => {
                 const searchMatch = SearchMatcher.matchesSearch(monster, searchTerm);
                 const filterMatch = matchesTierFilter(monster, filterValue);
-                const isNotShiny = !isShinyCreature(monster);
-                const overallMatch = searchMatch && filterMatch && isNotShiny;
+                const isVisibleCreature = !shouldHideCreature(monster);
+                const overallMatch = searchMatch && filterMatch && isVisibleCreature;
 
                 return overallMatch;
               }),
@@ -1844,8 +1868,8 @@
             .filter(monster => {
               const searchMatch = SearchMatcher.matchesSearch(monster, searchTerm);
               const filterMatch = matchesTierFilter(monster, filterValue);
-              const isNotShiny = !isShinyCreature(monster);
-              const overallMatch = searchMatch && filterMatch && isNotShiny;
+              const isVisibleCreature = !shouldHideCreature(monster);
+              const overallMatch = searchMatch && filterMatch && isVisibleCreature;
 
               return overallMatch;
             }),
@@ -4690,6 +4714,7 @@
   let lastButtonCheck = 0;
   let failedAttempts = 0;
   let hasLoggedInventoryNotFound = false;
+  let reinjectEventHandler = null;
   const BUTTON_CHECK_INTERVAL = 1000;
   const BUTTON_CHECK_TIMEOUT = 10000;
   const LOG_AFTER_ATTEMPTS = 3;
@@ -4852,6 +4877,16 @@
       console.error('[Dice Roller] Error adding button:', error);
     }
   }
+
+  function requestDiceRollerButtonReinject(source = 'unknown') {
+    const hadButton = Boolean(document.querySelector('.auto-inventory-button'));
+    DOMCache.clearSelector('.container-inventory-4');
+    DOMCache.clearSelector('button.focus-style-visible');
+    addAutoDiceButton();
+    const hasButtonNow = Boolean(document.querySelector('.auto-inventory-button'));
+    console.log('[Dice Roller] Reinjection request processed', { source, hadButton, hasButtonNow });
+    return hasButtonNow;
+  }
   
   function cleanup() {
     try {
@@ -4890,6 +4925,15 @@
       if (statusUpdateTimeout) {
         clearTimeout(statusUpdateTimeout);
         statusUpdateTimeout = null;
+      }
+
+      if (reinjectEventHandler) {
+        try {
+          window.removeEventListener('dice-roller:reinject-button', reinjectEventHandler);
+        } catch (e) {
+          console.warn('[Dice Roller] Error removing reinject listener:', e);
+        }
+        reinjectEventHandler = null;
       }
       
       // Disconnect tracked observers
@@ -4980,6 +5024,7 @@
           // Clean up DiceRoller namespace
           if (window.DiceRoller) {
             delete window.DiceRoller.cleanup;
+            delete window.DiceRoller.reinjectButton;
             delete window.DiceRoller;
           }
         } catch (e) {
@@ -5021,6 +5066,10 @@
   
   if (config.enabled) {
     observeInventory();
+    if (!reinjectEventHandler) {
+      reinjectEventHandler = () => requestDiceRollerButtonReinject('custom-event');
+      window.addEventListener('dice-roller:reinject-button', reinjectEventHandler);
+    }
   }
   
   // Listen for mod disable events
@@ -5042,6 +5091,7 @@
   if (typeof window !== 'undefined') {
     window.DiceRoller = window.DiceRoller || {};
     window.DiceRoller.cleanup = cleanup;
+    window.DiceRoller.reinjectButton = requestDiceRollerButtonReinject;
   }
   exports = {};
   

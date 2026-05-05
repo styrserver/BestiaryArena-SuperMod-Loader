@@ -5611,6 +5611,7 @@
   let lastButtonCheck = 0;
   let failedAttempts = 0;
   let hasLoggedInventoryNotFound = false;
+  let reinjectEventHandler = null;
   
   function observeInventory() {
     try {
@@ -5781,6 +5782,14 @@
       handleError(error, 'addBetterForgeButton', false);
     }
   }
+
+  function requestBetterForgeButtonReinject(source = 'unknown') {
+    const hadButton = Boolean(document.querySelector('.better-forge-inventory-button'));
+    addBetterForgeButton();
+    const hasButtonNow = Boolean(document.querySelector('.better-forge-inventory-button'));
+    console.log('[Better Forge] Reinjection request processed', { source, hadButton, hasButtonNow });
+    return hasButtonNow;
+  }
   
   function cleanup() {
     try {
@@ -5806,6 +5815,15 @@
       if (searchTimeout) {
         clearTimeout(searchTimeout);
         searchTimeout = null;
+      }
+
+      if (reinjectEventHandler) {
+        try {
+          window.removeEventListener('better-forge:reinject-button', reinjectEventHandler);
+        } catch (e) {
+          console.warn('[Better Forge] Error removing reinject listener:', e);
+        }
+        reinjectEventHandler = null;
       }
       
       forgeState.isDisenchanting = false;
@@ -5878,6 +5896,7 @@
        try {
          if (window.BetterForge) {
            delete window.BetterForge.cleanup;
+           delete window.BetterForge.reinjectButton;
            delete window.BetterForge;
          }
        } catch (e) {
@@ -5959,6 +5978,10 @@
     try {
       // Wait a bit for the game to fully load, then attempt initialization
       setTimeout(attemptInitialization, 1000);
+      if (!reinjectEventHandler) {
+        reinjectEventHandler = () => requestBetterForgeButtonReinject('custom-event');
+        window.addEventListener('better-forge:reinject-button', reinjectEventHandler);
+      }
     } catch (error) {
       handleError(error, 'initialization', false);
     }
@@ -5973,6 +5996,7 @@
     window.BetterForge = window.BetterForge || {};
     window.BetterForge.cleanup = cleanup;
     window.BetterForge.showModal = showBetterForgeModal;
+    window.BetterForge.reinjectButton = requestBetterForgeButtonReinject;
   }
   
 })();
