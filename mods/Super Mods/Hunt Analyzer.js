@@ -1405,6 +1405,9 @@ let optionMouseLeaveHandler = null;
 let optionClickHandler = null;
 let beforeUnloadHandler = null;
 let storageEventHandler = null;
+let visibilityChangeHandler = null;
+let pageHideHandler = null;
+let persistenceSaveDebounceTimeoutId = null;
 
 // =======================
 // 2.9. Panel Management Class
@@ -1986,8 +1989,8 @@ function loadHuntAnalyzerData() {
     try {
         // Check if persistence is enabled before loading
         if (!HuntAnalyzerState.settings.persistData) {
-            // Clear localStorage if persistence is disabled
-            localStorage.removeItem(HUNT_ANALYZER_STORAGE_KEY);
+            // Keep existing persisted data intact when persistence is disabled.
+            // This prevents accidental data loss on refresh if settings fail to load.
             return false;
         }
         
@@ -2085,6 +2088,22 @@ function loadHuntAnalyzerData() {
         logPersistenceOperation('Data load', false);
     }
     return false;
+}
+
+function flushPersistenceIfEnabled() {
+    if (!HuntAnalyzerState.settings.persistData) return;
+    saveHuntAnalyzerData();
+    saveHuntAnalyzerState();
+}
+
+function debouncedPersistenceFlush(delayMs = 150) {
+    if (persistenceSaveDebounceTimeoutId) {
+        clearTimeout(persistenceSaveDebounceTimeoutId);
+    }
+    persistenceSaveDebounceTimeoutId = setTimeout(() => {
+        persistenceSaveDebounceTimeoutId = null;
+        flushPersistenceIfEnabled();
+    }, delayMs);
 }
 
 // Save Hunt Analyzer UI state
@@ -7509,6 +7528,18 @@ function cleanupHuntAnalyzer() {
             window.removeEventListener('storage', storageEventHandler);
             storageEventHandler = null;
         }
+        if (visibilityChangeHandler) {
+            document.removeEventListener('visibilitychange', visibilityChangeHandler);
+            visibilityChangeHandler = null;
+        }
+        if (pageHideHandler) {
+            window.removeEventListener('pagehide', pageHideHandler);
+            pageHideHandler = null;
+        }
+        if (persistenceSaveDebounceTimeoutId) {
+            clearTimeout(persistenceSaveDebounceTimeoutId);
+            persistenceSaveDebounceTimeoutId = null;
+        }
         
         // 3. Unsubscribe from subscriptions
         if (boardSubscription) {
@@ -7607,6 +7638,18 @@ function cleanupHuntAnalyzer() {
                 window.removeEventListener('storage', storageEventHandler);
                 storageEventHandler = null;
             }
+            if (visibilityChangeHandler) {
+                document.removeEventListener('visibilitychange', visibilityChangeHandler);
+                visibilityChangeHandler = null;
+            }
+            if (pageHideHandler) {
+                window.removeEventListener('pagehide', pageHideHandler);
+                pageHideHandler = null;
+            }
+            if (persistenceSaveDebounceTimeoutId) {
+                clearTimeout(persistenceSaveDebounceTimeoutId);
+                persistenceSaveDebounceTimeoutId = null;
+            }
         } catch (forceCleanupError) {
             console.error('[Hunt Analyzer] Error during force cleanup:', forceCleanupError);
         }
@@ -7633,12 +7676,22 @@ console.log('[Hunt Analyzer] Message listener added');
 
 // Save data before page unload
 beforeUnloadHandler = () => {
-    if (HuntAnalyzerState.settings.persistData) {
-        saveHuntAnalyzerData();
-        saveHuntAnalyzerState();
-    }
+    flushPersistenceIfEnabled();
 };
 window.addEventListener('beforeunload', beforeUnloadHandler);
+
+// Save when page is being hidden/unloaded, debounced to avoid duplicate writes
+visibilityChangeHandler = () => {
+    if (document.visibilityState === 'hidden') {
+        debouncedPersistenceFlush();
+    }
+};
+document.addEventListener('visibilitychange', visibilityChangeHandler);
+
+pageHideHandler = () => {
+    debouncedPersistenceFlush();
+};
+window.addEventListener('pagehide', pageHideHandler);
 
 // Export functionality and expose state globally for Mod Settings integration
 window.HuntAnalyzerState = HuntAnalyzerState;

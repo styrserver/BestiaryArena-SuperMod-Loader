@@ -640,9 +640,15 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
     footer.appendChild(closeBtn);
 
     const handleDocPointerDown = (e) => {
-        if (!menu.contains(e.target)) {
+        if (menu.contains(e.target)) return;
+        // Native <select> dropdowns often report mousedown targets outside the menu DOM,
+        // which would remove the menu before 'change' runs — so the map never persisted.
+        setTimeout(() => {
+            if (!document.body.contains(menu)) return;
+            const active = document.activeElement;
+            if (active && menu.contains(active)) return;
             closeMenu();
-        }
+        }, 0);
     };
 
     function closeMenu() {
@@ -5556,8 +5562,8 @@ async function pauseAutoplay() {
                 
                 if (!verified) {
                     console.warn('[Better Tasker] Pause button clicked but game still running after 3s - continuing anyway');
-                    autoplayPausedByTasker = true;
-                    return true; // Don't reload, just continue
+                    autoplayPausedByTasker = false;
+                    return false;
                 }
             } else {
                 console.warn('[Better Tasker] Pause button not found - game may still be running');
@@ -5570,6 +5576,32 @@ async function pauseAutoplay() {
     } finally {
         // Release control after operation
         window.AutoplayManager.releaseControl('Better Tasker');
+    }
+}
+
+async function handleFinalRunPauseWithRetry() {
+    const paused = await pauseAutoplay();
+    if (!taskHuntingOngoing) {
+        return;
+    }
+
+    const prog = getTaskKillProgress();
+    if (prog && prog.current < prog.target) {
+        console.log(
+            '[Better Tasker] [runs-budget] final run pause left task incomplete (' +
+                prog.current +
+                '/' +
+                prog.target +
+                ') — resuming autoplay to retry last kill'
+        );
+        // Re-arm final-run guard so we can pause again once the retry game ends.
+        finalRunPauseIssued = false;
+        await resumeAutoplay();
+    } else if (!paused) {
+        // If pause could not be verified and we cannot read progress, fail open by continuing autoplay.
+        console.log('[Better Tasker] [runs-budget] final run pause not verified — resuming autoplay fail-open');
+        finalRunPauseIssued = false;
+        await resumeAutoplay();
     }
 }
 
@@ -5648,11 +5680,13 @@ async function resumeAutoplay() {
         
         // Only resume if we previously paused it
         if (autoplayPausedByTasker) {
-            // Check if we still have control
+            // Re-acquire control if needed (pause releases control in finally).
             if (!window.AutoplayManager.hasControl('Better Tasker')) {
-                console.log('[Better Tasker] Cannot resume autoplay - no longer have control');
-                autoplayPausedByTasker = false;
-                return false;
+                if (!window.AutoplayManager.requestControl('Better Tasker')) {
+                    console.log('[Better Tasker] Cannot resume autoplay - control denied');
+                    autoplayPausedByTasker = false;
+                    return false;
+                }
             }
             
             // Use play button instead of switching to autoplay mode
@@ -5669,6 +5703,7 @@ async function resumeAutoplay() {
                     console.log('[Better Tasker] Already in autoplay mode - no need to resume');
                 }
             }
+            window.AutoplayManager.releaseControl('Better Tasker');
             return true;
         } else {
             console.log('[Better Tasker] Autoplay was not paused by tasker - no need to resume');
@@ -6820,7 +6855,7 @@ function subscribeToGameState() {
                 if (taskHuntingOngoing && taskHuntingRunsBudget === 1 && !finalRunPauseIssued) {
                     finalRunPauseIssued = true;
                     console.log('[Better Tasker] [runs-budget] final run armed (runsLeft=1) — pausing autoplay now');
-                    void pauseAutoplay();
+                    void handleFinalRunPauseWithRetry();
                 }
                 
                 // Log current task status when new game starts

@@ -683,14 +683,44 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 3. Sort by text
         return (a.text || '').localeCompare(b.text || '');
       });
-      sortedChanges.forEach(change => {
-        const modBadge = change.mod ? `<span class="patch-note-mod">${change.mod}</span>` : '';
-        html += `<li class="${change.type}">${modBadge}${change.text}</li>`;
+      const sanitizedVersion = String(note.version || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-');
+      sortedChanges.forEach((change, index) => {
+        const changeMod = change.mod || 'General';
+        const changeType = change.type || 'changed';
+        const changeTypeLabel = changeType.charAt(0).toUpperCase() + changeType.slice(1);
+        const changeText = change.text || '';
+        const entryId = `patch-note-${sanitizedVersion}-${index}`;
+        html += `
+          <li class="patch-note-entry ${changeType}">
+            <button class="patch-note-toggle" type="button" aria-expanded="false" aria-controls="${entryId}">
+              <span class="patch-note-summary">
+                <span class="patch-note-summary-mod">${changeMod}</span>
+                <span class="patch-note-summary-separator">|</span>
+                <span class="patch-note-summary-type">${changeTypeLabel}</span>
+              </span>
+              <span class="patch-note-chevron">▼</span>
+            </button>
+            <div id="${entryId}" class="patch-note-details" hidden>${changeText}</div>
+          </li>
+        `;
       });
       html += `</ul></div>`;
     }
 
     patchNotesContent.innerHTML = html;
+
+    const patchNoteToggles = patchNotesContent.querySelectorAll('.patch-note-toggle');
+    patchNoteToggles.forEach(toggle => {
+      toggle.addEventListener('click', () => {
+        const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+        const detailsId = toggle.getAttribute('aria-controls');
+        const detailsElement = detailsId ? document.getElementById(detailsId) : null;
+        if (!detailsElement) return;
+
+        toggle.setAttribute('aria-expanded', isExpanded ? 'false' : 'true');
+        detailsElement.hidden = isExpanded;
+      });
+    });
   }
 
   async function checkAndShowPatchNotes() {

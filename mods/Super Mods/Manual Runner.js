@@ -592,15 +592,45 @@ function getMaxTeamSize(serverResults = null) {
 
 // Find and click the start button
 function findStartButton() {
-  const buttons = document.querySelectorAll('button');
-  // Support EN and pt-BR labels
+  // Prefer board action buttons only (avoid clicking "Start" from other modals/tools).
   const startTexts = ['start', 'fight', 'iniciar', 'lutar', 'jogar', 'começar'];
-  for (const button of buttons) {
+  const candidates = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
+
+  const isBoardStartButton = (button) => {
+    if (!button || button.disabled) return false;
     const text = (button.textContent || '').trim().toLowerCase();
-    if (startTexts.some((t) => text.includes(t))) {
+    if (!startTexts.some((t) => text === t || text.includes(t))) return false;
+
+    // Board controls are rendered under a container that includes class token "sm:order-3".
+    let node = button.parentElement;
+    while (node) {
+      if (node.classList && node.classList.contains('sm:order-3')) return true;
+      node = node.parentElement;
+    }
+
+    // Fallback heuristic: board control row usually includes the Manual mode icon next to Start.
+    const container = button.parentElement;
+    if (container && container.querySelector('img[alt="Manual"]')) {
+      return true;
+    }
+
+    return false;
+  };
+
+  for (const button of candidates) {
+    if (isBoardStartButton(button)) {
       return button;
     }
   }
+
+  // Final fallback for UI variants: still require board-control context.
+  const allButtons = document.querySelectorAll('button');
+  for (const button of allButtons) {
+    if (isBoardStartButton(button)) {
+      return button;
+    }
+  }
+
   return null;
 }
 

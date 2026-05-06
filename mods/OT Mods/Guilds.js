@@ -1374,6 +1374,11 @@ function calculateFloorPoints(floors) {
   return floors || 0;
 }
 
+function toNonNegativeNumber(value) {
+  const num = Number(value) || 0;
+  return Math.max(0, num);
+}
+
 // Get equipment points for a specific player
 async function getPlayerEquipmentPoints(username) {
   try {
@@ -1423,7 +1428,7 @@ async function getPlayerEquipmentPoints(username) {
       totalPoints += skillGuildPoints;
     }
 
-    return totalPoints;
+    return toNonNegativeNumber(totalPoints);
   } catch (error) {
     console.warn(`[Guilds] Error fetching equipment points for ${username}:`, error);
     return 0;
@@ -1492,13 +1497,13 @@ function computeMemberPointsDetail(profile, equipmentPoints, worldRecordCount) {
   const exp = profile.exp || 0;
   const level = calculateLevelFromExp(exp);
   const levelPoints = calculateLevelPoints(level);
-  const rankPointsValue = profile.rankPoints || 0;
+  const rankPointsValue = toNonNegativeNumber(profile.rankPoints);
   const rankPoints = calculateRankPoints(rankPointsValue);
-  const timeSum = profile.ticks || 0;
+  const timeSum = toNonNegativeNumber(profile.ticks);
   const timeSumPenalty = calculateTimeSumPenalty(timeSum);
-  const floors = profile.floors || 0;
+  const floors = toNonNegativeNumber(profile.floors);
   const floorPoints = calculateFloorPoints(floors);
-  const eq = equipmentPoints || 0;
+  const eq = toNonNegativeNumber(equipmentPoints);
   const total = Math.max(0, Math.floor(levelPoints + rankPoints - timeSumPenalty + eq + floorPoints));
   return {
     total,
@@ -1725,11 +1730,11 @@ async function loadGuildPanelPointsData(guildId, members, handlers = {}) {
         missingProfiles++;
         continue;
       }
-      totalLevels += calculateLevelFromExp(profile.exp || 0);
-      totalRankPoints += profile.rankPoints || 0;
-      totalTimeSum += profile.ticks || 0;
-      totalFloors += profile.floors || 0;
-      totalEquipmentPoints += results[i].equipmentPoints || 0;
+      totalLevels += calculateLevelFromExp(toNonNegativeNumber(profile.exp));
+      totalRankPoints += toNonNegativeNumber(profile.rankPoints);
+      totalTimeSum += toNonNegativeNumber(profile.ticks);
+      totalFloors += toNonNegativeNumber(profile.floors);
+      totalEquipmentPoints += toNonNegativeNumber(results[i].equipmentPoints);
     }
 
     const memberUsernames = members.map(m => m.username).filter(Boolean);
@@ -1818,14 +1823,14 @@ async function calculateGuildPoints(guildId, options = {}) {
           getPlayerEquipmentPoints(member.username)
         ]);
         if (profile) {
-          totalLevels += calculateLevelFromExp(profile.exp || 0);
-          totalRankPoints += profile.rankPoints || 0;
-          totalTimeSum += profile.ticks || 0;
-          totalFloors += profile.floors || 0;
+          totalLevels += calculateLevelFromExp(toNonNegativeNumber(profile.exp));
+          totalRankPoints += toNonNegativeNumber(profile.rankPoints);
+          totalTimeSum += toNonNegativeNumber(profile.ticks);
+          totalFloors += toNonNegativeNumber(profile.floors);
         } else {
           missingProfiles++;
         }
-        totalEquipmentPoints += equipmentPoints || 0;
+        totalEquipmentPoints += toNonNegativeNumber(equipmentPoints);
         const pointsSoFar = computeGuildPointsFromTotals({
           totalLevels,
           totalRankPoints,
@@ -1867,11 +1872,11 @@ async function calculateGuildPoints(guildId, options = {}) {
         missingProfiles++;
         continue;
       }
-      totalLevels += calculateLevelFromExp(profiles[i].exp || 0);
-      totalRankPoints += profiles[i].rankPoints || 0;
-      totalTimeSum += profiles[i].ticks || 0;
-      totalEquipmentPoints += equipmentPointsArray[i] || 0;
-      totalFloors += profiles[i].floors || 0;
+      totalLevels += calculateLevelFromExp(toNonNegativeNumber(profiles[i].exp));
+      totalRankPoints += toNonNegativeNumber(profiles[i].rankPoints);
+      totalTimeSum += toNonNegativeNumber(profiles[i].ticks);
+      totalEquipmentPoints += toNonNegativeNumber(equipmentPointsArray[i]);
+      totalFloors += toNonNegativeNumber(profiles[i].floors);
     }
 
     const memberUsernames = members.map(m => m.username).filter(Boolean);

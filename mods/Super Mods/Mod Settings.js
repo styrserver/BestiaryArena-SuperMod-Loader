@@ -21,6 +21,7 @@ const defaultConfig = {
   showSetupLabels: false,
   enableShinyEnemies: false,
   enableAutoplayRefresh: false,
+  alwaysNavigateMaxFloor: false,
   autoplayRefreshMinutes: 30,
   autoplayRefreshTimerMode: 'autoplay', // 'autoplay', 'internal', or 'both'
   disableAutoReload: false,
@@ -38,6 +39,7 @@ const defaultConfig = {
   vipListInterface: 'modal', // 'modal' or 'panel'
   enableVipListChat: false, // Enable messaging/chat feature in VIP List (controls both VIP List chat and Global Chat)
   vipListMessageFilter: 'all', // 'all' or 'friends' - who can send messages
+  autoHideNonShinyNonAwakenedMonsters: false,
   betterHighscoresBackgroundOpacity: 1.0, // Opacity for Better Highscores background (0.0 to 1.0)
   enableFirebaseRunsUpload: false, // Enable uploading best runs to Firebase
   firebaseRunsPassword: '', // Encryption password for Firebase runs (stored encrypted)
@@ -60,6 +62,7 @@ const defaultConfig = {
   hotkeyCycleBestiaryEquipmentTab: 'tab',
   hotkeyResetCurrentMapDefault: 'r',
   hotkeyCycleBattleStyle: 'v',
+  hotkeyStartOrSkip: 'z',
   hotkeySetupSlot1: 'f1',
   hotkeySetupSlot2: 'f2',
   hotkeySetupSlot3: 'f3',
@@ -121,11 +124,13 @@ if (config.hotkeyFloorDown === undefined) config.hotkeyFloorDown = 'pagedown';
 if (config.hotkeyCycleBestiaryEquipmentTab === undefined) config.hotkeyCycleBestiaryEquipmentTab = 'tab';
 if (config.hotkeyResetCurrentMapDefault === undefined) config.hotkeyResetCurrentMapDefault = 'r';
 if (config.hotkeyCycleBattleStyle === undefined) config.hotkeyCycleBattleStyle = 'v';
+if (config.hotkeyStartOrSkip === undefined) config.hotkeyStartOrSkip = 'z';
 config.hotkeyFloorUp = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
 config.hotkeyFloorDown = sanitizeStoredHotkey(config.hotkeyFloorDown, '');
 config.hotkeyCycleBestiaryEquipmentTab = sanitizeStoredHotkey(config.hotkeyCycleBestiaryEquipmentTab, '');
 config.hotkeyResetCurrentMapDefault = sanitizeStoredHotkey(config.hotkeyResetCurrentMapDefault, '');
 config.hotkeyCycleBattleStyle = sanitizeStoredHotkey(config.hotkeyCycleBattleStyle, '');
+config.hotkeyStartOrSkip = sanitizeStoredHotkey(config.hotkeyStartOrSkip, '');
 for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
   const setupKey = `hotkeySetupSlot${setupSlot}`;
   if (config[setupKey] === undefined) config[setupKey] = `f${setupSlot}`;
@@ -133,6 +138,8 @@ for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
 }
 if (config.enableHotkeys === undefined) config.enableHotkeys = false;
 if (config.defaultInventorySticky === undefined) config.defaultInventorySticky = false;
+if (config.alwaysNavigateMaxFloor === undefined) config.alwaysNavigateMaxFloor = false;
+if (config.autoHideNonShinyNonAwakenedMonsters === undefined) config.autoHideNonShinyNonAwakenedMonsters = false;
 
 // Last visited map feature globals
 const LAST_MAP_STORAGE_KEY = 'mod-settings-map-history';
@@ -140,6 +147,14 @@ let mapHistory = []; // Array of {roomId, roomName} objects, most recent first
 let lastMapButton = null;
 let mapChangeUnsubscribe = null;
 let isNavigatingViaButton = false;
+let mapFloorSyncLastRoomId = null;
+let mapFloorSyncTimeoutId = null;
+let autoHideMonstersInProgress = false;
+let antiIdlePlayPromise = null;
+const initState = {
+  inProgress: false,
+  initialized: false
+};
 
 // =======================
 // 2. Helper Functions
@@ -845,6 +860,67 @@ function cycleBattleStyleFromHotkey() {
   }
 }
 
+function findBoardStartButtonFromHotkey() {
+  const startTexts = ['start', 'fight', 'iniciar', 'lutar', 'jogar', 'começar'];
+  const candidates = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
+  const isBoardStartButton = (button) => {
+    if (!button || button.disabled) return false;
+    const text = (button.textContent || '').trim().toLowerCase();
+    if (!startTexts.some((t) => text === t || text.includes(t))) return false;
+    let node = button.parentElement;
+    while (node) {
+      if (node.classList && node.classList.contains('sm:order-3')) return true;
+      node = node.parentElement;
+    }
+    const container = button.parentElement;
+    return !!(container && container.querySelector('img[alt="Manual"]'));
+  };
+  for (const button of candidates) {
+    if (isBoardStartButton(button)) return button;
+  }
+  for (const button of document.querySelectorAll('button')) {
+    if (isBoardStartButton(button)) return button;
+  }
+  return null;
+}
+
+function findBoardSkipButtonFromHotkey() {
+  const skipTexts = ['skip', 'pular'];
+  const candidates = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
+  const isBoardSkipButton = (button) => {
+    if (!button || button.disabled) return false;
+    const text = (button.textContent || '').trim().toLowerCase();
+    if (!skipTexts.some((t) => text === t || text.includes(t))) return false;
+    let node = button.parentElement;
+    while (node) {
+      if (node.classList && node.classList.contains('sm:order-3')) return true;
+      node = node.parentElement;
+    }
+    return false;
+  };
+  for (const button of candidates) {
+    if (isBoardSkipButton(button)) return button;
+  }
+  for (const button of document.querySelectorAll('button')) {
+    if (isBoardSkipButton(button)) return button;
+  }
+  return null;
+}
+
+function triggerStartOrSkipFromHotkey() {
+  const skipButton = findBoardSkipButtonFromHotkey();
+  if (skipButton) {
+    skipButton.click();
+    return;
+  }
+  const startButton = findBoardStartButtonFromHotkey();
+  if (startButton) {
+    startButton.click();
+    return;
+  }
+  console.warn('[Mod Settings] Start/Skip hotkey pressed but no matching board button was found');
+}
+
 /**
  * Ordered Setup/Save buttons from the stored-setups bar (same detection as Better Setups.js).
  * @returns {HTMLButtonElement[]}
@@ -1015,6 +1091,12 @@ function handleGlobalHotkeys(event) {
     cycleBattleStyleFromHotkey();
     return;
   }
+  const startOrSkipId = sanitizeStoredHotkey(config.hotkeyStartOrSkip, '');
+  if (startOrSkipId && pressedId === startOrSkipId) {
+    event.preventDefault();
+    triggerStartOrSkipFromHotkey();
+    return;
+  }
   for (let i = 0; i < 8; i++) {
     const setupCfgKey = `hotkeySetupSlot${i + 1}`;
     const setupKeyId = sanitizeStoredHotkey(config[setupCfgKey], '');
@@ -1086,6 +1168,12 @@ const MODS_HOTKEY_UI_ROWS = [
     configKey: 'hotkeyCycleBattleStyle',
     captureId: 'hotkey-cycle-battle-style-capture-btn',
     resetId: 'hotkey-cycle-battle-style-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyStartOrSkip',
+    captureId: 'hotkey-start-or-skip-capture-btn',
+    resetId: 'hotkey-start-or-skip-reset-btn',
     displayFallback: ''
   }
 ];
@@ -2252,6 +2340,39 @@ async function hideNonShinyAndNonAwakenedMonsters(onProgress = null) {
   };
 }
 
+async function runAutoHideNonShinyAndNonAwakenedMonsters(source = 'manual') {
+  if (autoHideMonstersInProgress) {
+    console.log('[Mod Settings] Auto-hide already in progress, skipping:', source);
+    return null;
+  }
+
+  autoHideMonstersInProgress = true;
+  try {
+    const result = await hideNonShinyAndNonAwakenedMonsters();
+    console.log('[Mod Settings] Auto-hide finished:', { source, result });
+
+    if (result && result.totalToHide > 0) {
+      createToast({
+        message: `Auto-hide complete (${result.hiddenCount}/${result.totalToHide})`,
+        type: 'success',
+        duration: 2500
+      });
+    }
+
+    return result;
+  } catch (error) {
+    console.error('[Mod Settings] Auto-hide failed:', error);
+    createToast({
+      message: 'Auto-hide failed (check console)',
+      type: 'error',
+      duration: 2500
+    });
+    return null;
+  } finally {
+    autoHideMonstersInProgress = false;
+  }
+}
+
 // Extract seed from replayLink string
 function extractSeedFromReplayLink(replayLink) {
   if (!replayLink) return 'N/A';
@@ -2326,7 +2447,13 @@ function enrichReplayLinkForExport(replayLink, runData = {}, fallbackCredits = '
     if (commentsValue) orderedReplay.comments = commentsValue;
     const replayTimestamp = Number(replayJson.timestamp);
     orderedReplay.timestamp = Number.isFinite(replayTimestamp) && replayTimestamp > 0 ? replayTimestamp : Date.now();
-    orderedReplay.board = Array.isArray(replayJson.board) ? replayJson.board : [];
+    const boardForNormalization = Array.isArray(replayJson.board) ? replayJson.board : [];
+    const normalizedReplay = (typeof window.$normalizeReplayConfig === 'function')
+      ? window.$normalizeReplayConfig({ board: boardForNormalization })
+      : null;
+    orderedReplay.board = Array.isArray(normalizedReplay?.board)
+      ? normalizedReplay.board
+      : boardForNormalization;
     orderedReplay.seed = replayJson.seed;
 
     return `$replay(${JSON.stringify(orderedReplay)})`;
@@ -2463,6 +2590,15 @@ function generateReplayLink(runData) {
     }
     
     const board = [];
+    const normalizeMonster = (monster) => {
+      if (typeof window.$normalizeReplayMonster === 'function') {
+        return window.$normalizeReplayMonster(monster);
+      }
+      if (!monster || typeof monster !== 'object') return monster;
+      const level = Number(monster.level);
+      const awakened = monster.awakened === true || (Number.isFinite(level) && level > 50);
+      return { ...monster, awakened };
+    };
     if (runData.setup && runData.setup.pieces) {
       runData.setup.pieces.forEach(piece => {
         const boardPiece = {
@@ -2471,7 +2607,7 @@ function generateReplayLink(runData) {
         
         // Add monster as object with name and stats
         const monsterName = piece.monsterName || piece.monsterId || 'unknown monster';
-        boardPiece.monster = {
+        boardPiece.monster = normalizeMonster({
           name: monsterName.toLowerCase(),
           level: piece.level || 1,
           hp: piece.monsterStats?.hp || 20,
@@ -2479,7 +2615,7 @@ function generateReplayLink(runData) {
           ap: piece.monsterStats?.ap || 20,
           armor: piece.monsterStats?.armor || 20,
           magicResist: piece.monsterStats?.magicResist || 20
-        };
+        });
         
         // Add equipment as object if available
         if (piece.equipmentName || piece.equipId) {
@@ -4942,6 +5078,12 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="auto-hide-non-shiny-awakened-monsters-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.autoHideNonShinyNonAwakenedMonstersWarning')}">⚠️ ${t('mods.betterUI.autoHideNonShinyNonAwakenedMonsters')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="advanced-stats-hover-toggle" style="transform: scale(1.2);">
               <span>${t('mods.betterUI.showAdvancedStatsOnHover')}</span>
             </label>
@@ -5012,8 +5154,8 @@ function showSettingsModal() {
             </label>
           </div>
           <div id="hotkeys-bindings-container">
-          <div style="margin-bottom: 15px;">
-            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">${t('mods.betterUI.hotkeysSectionGeneral')}</h4>
+          <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); margin-bottom: 15px;">
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionGeneral')}</h4>
             <div class="hotkey-inventory-row" style="${hotkeyRowStyle}">
               <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelArsenal')}</span>
               <button type="button" id="hotkey-open-arsenal-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
@@ -5122,6 +5264,9 @@ function showSettingsModal() {
                 ${t('mods.betterUI.hotkeyResetBinding')}
               </button>
             </div>
+            <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">Battle</h4>
+            </div>
             <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
               <span style="${hotkeyLabelStyle}">Floor up</span>
               <button type="button" id="hotkey-floor-up-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
@@ -5159,6 +5304,15 @@ function showSettingsModal() {
               </button>
             </div>
             <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">Start/Skip button</span>
+              <button type="button" id="hotkey-start-or-skip-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                Z
+              </button>
+              <button type="button" id="hotkey-start-or-skip-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
               <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelResetCurrentMapDefault')}</span>
               <button type="button" id="hotkey-reset-current-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
                 R
@@ -5169,7 +5323,7 @@ function showSettingsModal() {
             </div>
           </div>
           <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
-            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">${t('mods.betterUI.hotkeysSectionMods')}</h4>
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionMods')}</h4>
             <div id="hotkeys-mods-section">
               <div class="hotkey-inventory-row" style="${hotkeyRowStyle}">
                 <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelReturnToMap')}</span>
@@ -5183,7 +5337,7 @@ function showSettingsModal() {
             </div>
           </div>
           <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
-            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 14px; font-weight: 600;">${t('mods.betterUI.hotkeysSectionSetups')}</h4>
+            <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionSetups')}</h4>
             <div id="hotkeys-setups-section">${setupHotkeyRowsHtml}</div>
           </div>
           </div>
@@ -5251,9 +5405,10 @@ function showSettingsModal() {
             </label>
           </div>
           <div style="margin-bottom: 15px;">
-            <button id="hide-non-shiny-awakened-monsters-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto;" onclick="event.stopPropagation();">
-              ${t('mods.betterUI.hideNonShinyNonAwakenedMonstersButton')}
-            </button>
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="always-navigate-max-floor-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.alwaysNavigateMaxFloorWarning')}">⚠️ ${t('mods.betterUI.alwaysNavigateMaxFloor')}</span>
+            </label>
           </div>
           <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
             <div style="margin-bottom: 15px; text-align: center;">
@@ -5666,7 +5821,9 @@ function showSettingsModal() {
           },
           () => {
             console.log('[Mod Settings] Last visited map button disabled');
-            unsubscribeFromMapChanges();
+            if (!config.alwaysNavigateMaxFloor) {
+              unsubscribeFromMapChanges();
+            }
             removeLastMapNavButton();
           }
         )(lastVisitedMapCheckbox);
@@ -5845,6 +6002,13 @@ function showSettingsModal() {
         content.querySelector('#hotkey-cycle-battle-style-reset-btn'),
         'hotkeyCycleBattleStyle',
         'v',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-start-or-skip-capture-btn'),
+        content.querySelector('#hotkey-start-or-skip-reset-btn'),
+        'hotkeyStartOrSkip',
+        'z',
         ''
       );
       for (let slot = 1; slot <= 8; slot++) {
@@ -6143,45 +6307,34 @@ function showSettingsModal() {
         });
       }
 
-      const hideMonstersButton = content.querySelector('#hide-non-shiny-awakened-monsters-btn');
-      if (hideMonstersButton) {
-        applyAdvancedActionButtonStyle(hideMonstersButton, { fullWidth: true, variant: 'gray' });
-        hideMonstersButton.addEventListener('click', async () => {
-          const defaultLabel = t('mods.betterUI.hideNonShinyNonAwakenedMonstersButton');
-          hideMonstersButton.disabled = true;
-          hideMonstersButton.style.opacity = '0.65';
-          hideMonstersButton.style.cursor = 'not-allowed';
-          hideMonstersButton.textContent = t('mods.betterUI.hideMonstersPreparing');
+      const alwaysNavigateMaxFloorCheckbox = content.querySelector('#always-navigate-max-floor-toggle');
+      if (alwaysNavigateMaxFloorCheckbox) {
+        alwaysNavigateMaxFloorCheckbox.checked = !!config.alwaysNavigateMaxFloor;
 
-          try {
-            const result = await hideNonShinyAndNonAwakenedMonsters((progress) => {
-              if (!progress || progress.totalToHide === 0) {
-                hideMonstersButton.textContent = t('mods.betterUI.hideMonstersNoTargets');
-                return;
-              }
-              const current = Math.min(progress.hiddenCount + 1, progress.totalToHide);
-              hideMonstersButton.textContent = tReplace('mods.betterUI.hideMonstersProgress', {
-                current,
-                total: progress.totalToHide
-              });
-            });
-            console.log('[Mod Settings] Hide monsters completed', result);
-            hideMonstersButton.textContent = result.totalToHide === 0
-              ? t('mods.betterUI.hideMonstersDoneNothing')
-              : tReplace('mods.betterUI.hideMonstersDoneProgress', {
-                hidden: result.hiddenCount,
-                total: result.totalToHide
-              });
-          } catch (error) {
-            console.error('[Mod Settings] Hide monsters failed:', error);
-            hideMonstersButton.textContent = t('mods.betterUI.hideMonstersFailedCheckConsole');
-          } finally {
-            scheduleTimeout(() => {
-              hideMonstersButton.disabled = false;
-              hideMonstersButton.style.opacity = '';
-              hideMonstersButton.style.cursor = '';
-              hideMonstersButton.textContent = defaultLabel;
-            }, 2200);
+        alwaysNavigateMaxFloorCheckbox.addEventListener('change', () => {
+          config.alwaysNavigateMaxFloor = alwaysNavigateMaxFloorCheckbox.checked;
+          saveConfig();
+
+          if (config.alwaysNavigateMaxFloor || config.showLastVisitedMapButton) {
+            subscribeToMapChanges();
+          } else {
+            unsubscribeFromMapChanges();
+          }
+
+          if (config.alwaysNavigateMaxFloor) {
+            applyBestCompletedFloorForCurrentMap('settings-toggle');
+          }
+        });
+      }
+
+      const autoHideMonstersCheckbox = content.querySelector('#auto-hide-non-shiny-awakened-monsters-toggle');
+      if (autoHideMonstersCheckbox) {
+        autoHideMonstersCheckbox.checked = !!config.autoHideNonShinyNonAwakenedMonsters;
+        autoHideMonstersCheckbox.addEventListener('change', () => {
+          config.autoHideNonShinyNonAwakenedMonsters = autoHideMonstersCheckbox.checked;
+          saveConfig();
+          if (config.autoHideNonShinyNonAwakenedMonsters) {
+            runAutoHideNonShinyAndNonAwakenedMonsters('settings-toggle');
           }
         });
       }
@@ -10525,9 +10678,24 @@ function enableAntiIdleSounds() {
     el.loop = true;
     el.src = '/swoosh.mp3';
     
-    el.play().catch(error => {
-      console.warn('[Mod Settings] Anti-idle sounds play failed (may require user interaction):', error);
-    });
+    const playPromise = el.play();
+    antiIdlePlayPromise = playPromise;
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise
+        .catch((error) => {
+          // Expected when quickly re-initializing and pausing/removing the element.
+          if (error?.name === 'AbortError') {
+            console.log('[Mod Settings] Anti-idle sounds play interrupted during lifecycle change');
+            return;
+          }
+          console.warn('[Mod Settings] Anti-idle sounds play failed (may require user interaction):', error);
+        })
+        .finally(() => {
+          if (antiIdlePlayPromise === playPromise) {
+            antiIdlePlayPromise = null;
+          }
+        });
+    }
     
     antiIdleAudioElement = el;
     console.log('[Mod Settings] Anti-idle sounds enabled - tab should show speaker icon');
@@ -10547,6 +10715,7 @@ function disableAntiIdleSounds() {
       antiIdleAudioElement = null;
       console.log('[Mod Settings] Anti-idle sounds disabled');
     }
+    antiIdlePlayPromise = null;
   } catch (error) {
     console.error('[Mod Settings] Error disabling anti-idle sounds:', error);
   }
@@ -11049,6 +11218,16 @@ function updatePriorityStatus(statusSpan, mod, currentPriority) {
 // =======================
 
 function initBetterUI() {
+  if (initState.inProgress) {
+    console.log('[Mod Settings] Initialization already in progress, skipping duplicate call');
+    return;
+  }
+  if (initState.initialized) {
+    console.log('[Mod Settings] Already initialized, skipping duplicate call');
+    return;
+  }
+
+  initState.inProgress = true;
   try {
     console.log('[Mod Settings] Starting initialization');
     
@@ -11105,6 +11284,12 @@ function initBetterUI() {
     } else {
       console.log('[Mod Settings] Anti-idle sounds disabled in config');
     }
+
+    if (config.autoHideNonShinyNonAwakenedMonsters) {
+      scheduleTimeout(() => {
+        runAutoHideNonShinyAndNonAwakenedMonsters('init');
+      }, 1200);
+    }
     
     if (config.enablePlayercount) {
       console.log('[Mod Settings] Playercount enabled in config, initializing');
@@ -11134,13 +11319,18 @@ function initBetterUI() {
       }, 1500); // Delay to ensure Autoseller button is loaded
     }
 
-    // Add Last Visited Map nav button if enabled
-    if (config.showLastVisitedMapButton) {
+    // Subscribe once for map-dependent features
+    if (config.showLastVisitedMapButton || config.alwaysNavigateMaxFloor) {
       scheduleTimeout(() => {
-        loadLastVisitedMap();
         subscribeToMapChanges();
-        addLastMapNavButton();
-        console.log('[Mod Settings] Last visited map button enabled');
+        if (config.showLastVisitedMapButton) {
+          loadLastVisitedMap();
+          addLastMapNavButton();
+          console.log('[Mod Settings] Last visited map button enabled');
+        }
+        if (config.alwaysNavigateMaxFloor) {
+          applyBestCompletedFloorForCurrentMap('init');
+        }
       }, 2000); // Delay to ensure navigation bar is loaded
     }
     
@@ -11176,8 +11366,11 @@ function initBetterUI() {
     scheduleTimeout(() => {
       checkAndOpenHuntAnalyzer();
     }, 500); // Small delay to ensure all mods are loaded
+    initState.initialized = true;
   } catch (error) {
     console.error('[Mod Settings] Initialization error:', error);
+  } finally {
+    initState.inProgress = false;
   }
 }
 
@@ -11255,6 +11448,8 @@ function cleanupBetterUI() {
     
     stopAutoplayRefreshMonitor();
     disableAntiIdleSounds();
+    unsubscribeFromMapChanges();
+    removeLastMapNavButton();
     cleanupHotkeys();
     
     // Cleanup playercount
@@ -11433,16 +11628,75 @@ function cleanupBetterUI() {
       delete window.betterUIConfig;
       console.log('[Mod Settings] Global config reference removed');
     }
+    initState.initialized = false;
+    initState.inProgress = false;
     
     console.log('[Mod Settings] Cleanup completed');
   } catch (error) {
     console.error('[Mod Settings] Cleanup error:', error);
+    initState.inProgress = false;
   }
 }
 
 // =======================
 // Last Visited Map Functions
 // =======================
+
+function clampAscensionFloor(floor) {
+  if (typeof floor !== 'number' || Number.isNaN(floor)) return 0;
+  if (floor < 0) return 0;
+  if (floor > 15) return 15;
+  return Math.floor(floor);
+}
+
+function getBestCompletedFloorForRoom(roomId) {
+  try {
+    if (!roomId) return 0;
+    const playerRooms = globalThis.state?.player?.getSnapshot?.()?.context?.rooms;
+    const roomStats = playerRooms?.[roomId];
+    return clampAscensionFloor(roomStats?.floor);
+  } catch (error) {
+    console.error('[Mod Settings] Error reading best completed floor:', error);
+    return 0;
+  }
+}
+
+function applyBestCompletedFloorForRoom(roomId, source = 'unknown') {
+  try {
+    if (!roomId) return;
+
+    const targetFloor = getBestCompletedFloorForRoom(roomId);
+    const currentFloor = clampAscensionFloor(globalThis.state?.board?.getSnapshot?.()?.context?.floor);
+    if (currentFloor === targetFloor) return;
+
+    if (mapFloorSyncTimeoutId) {
+      clearTimeout(mapFloorSyncTimeoutId);
+      mapFloorSyncTimeoutId = null;
+    }
+
+    mapFloorSyncTimeoutId = setTimeout(() => {
+      mapFloorSyncTimeoutId = null;
+      try {
+        globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: targetFloor }) });
+        console.log(`[Mod Settings] Applied max floor ${targetFloor} for ${roomId} (${source})`);
+      } catch (error) {
+        console.error('[Mod Settings] Failed applying max floor:', error);
+      }
+    }, 120);
+  } catch (error) {
+    console.error('[Mod Settings] Error applying max floor for room:', error);
+  }
+}
+
+function applyBestCompletedFloorForCurrentMap(source = 'unknown') {
+  try {
+    const roomId = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom?.id;
+    if (!roomId) return;
+    applyBestCompletedFloorForRoom(roomId, source);
+  } catch (error) {
+    console.error('[Mod Settings] Error applying max floor for current map:', error);
+  }
+}
 
 // Load map history from localStorage
 const loadLastVisitedMap = () => {
@@ -11746,6 +12000,7 @@ const removeLastMapNavButton = () => {
 const subscribeToMapChanges = () => {
   try {
     if (globalThis.state && globalThis.state.board) {
+      if (typeof mapChangeUnsubscribe === 'function') return;
       const handleBoardChange = (state) => {
         try {
           const boardContext = state.context;
@@ -11753,26 +12008,32 @@ const subscribeToMapChanges = () => {
 
           if (selectedMap && selectedMap.selectedRoom) {
             const roomId = selectedMap.selectedRoom.id;
+            const roomChanged = roomId && roomId !== mapFloorSyncLastRoomId;
+            if (roomChanged) {
+              mapFloorSyncLastRoomId = roomId;
+              if (config.alwaysNavigateMaxFloor) {
+                applyBestCompletedFloorForRoom(roomId, 'map-navigation');
+              }
+            }
 
             // Skip saving if we're navigating via the button
             if (isNavigatingViaButton) {
               console.log('[Mod Settings] Skipping map save - navigating via button');
-              return;
-            }
+            } else {
+              // Get room name from utils if not in selectedRoom
+              let roomName = selectedMap.selectedRoom.name;
+              if (!roomName) {
+                const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+                roomName = roomNames[roomId] || roomId;
+              }
 
-            // Get room name from utils if not in selectedRoom
-            let roomName = selectedMap.selectedRoom.name;
-            if (!roomName) {
-              const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
-              roomName = roomNames[roomId] || roomId;
-            }
-
-            // Skip sewers (default map) and save any other map
-            if (roomId && roomId !== 'rkswrs') {
-              // Only save if it's not already the most recent in history
-              if (mapHistory.length === 0 || mapHistory[0].roomId !== roomId) {
-                console.log('[Mod Settings] Saving new map:', roomId, roomName);
-                saveLastVisitedMap(roomId, roomName);
+              // Skip sewers (default map) and save any other map
+              if (roomId && roomId !== 'rkswrs') {
+                // Only save if it's not already the most recent in history
+                if (mapHistory.length === 0 || mapHistory[0].roomId !== roomId) {
+                  console.log('[Mod Settings] Saving new map:', roomId, roomName);
+                  saveLastVisitedMap(roomId, roomName);
+                }
               }
             }
           }
@@ -11796,6 +12057,11 @@ const unsubscribeFromMapChanges = () => {
     mapChangeUnsubscribe();
     mapChangeUnsubscribe = null;
     console.log('[Mod Settings] Unsubscribed from map changes');
+  }
+  mapFloorSyncLastRoomId = null;
+  if (mapFloorSyncTimeoutId) {
+    clearTimeout(mapFloorSyncTimeoutId);
+    mapFloorSyncTimeoutId = null;
   }
 };
 

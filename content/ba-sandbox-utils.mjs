@@ -38,6 +38,34 @@
 			return path.split('.').reduce((acc, part) => acc && acc[part], obj);
 		};
 
+		// Replay schema source of truth: derive awakened from explicit flag or level.
+		const normalizeReplayMonster = (monster) => {
+			if (!monster || typeof monster !== 'object') return monster;
+			const level = Number(monster.level);
+			const awakened = monster.awakened === true || (Number.isFinite(level) && level > 50);
+			return {
+				...monster,
+				awakened,
+			};
+		};
+
+		const normalizeReplayConfig = (config) => {
+			if (!config || typeof config !== 'object') return config;
+			const board = Array.isArray(config.board)
+				? config.board.map((piece) => {
+					if (!piece || typeof piece !== 'object') return piece;
+					return {
+						...piece,
+						monster: normalizeReplayMonster(piece.monster),
+					};
+				})
+				: config.board;
+			return {
+				...config,
+				board,
+			};
+		};
+
 		// Helper function to check if game state is ready
 		const isStateReady = () => {
 			return safeAccess(globalThis, 'state.utils') && 
@@ -255,6 +283,7 @@
 				if (!config) {
 					throw new Error('No config provided.');
 				}
+				config = normalizeReplayConfig(config);
 				
 				// Check if maps are initialized
 				if (mapNamesToIds.size === 0 || monsterNamesToGameIds.size === 0 || equipmentNamesToGameIds.size === 0) {
@@ -353,37 +382,15 @@
 				// Set up the pieces.
 				const playerTeamConfig = config.board.map((piece, index) => {
 					const monster = piece.monster;
-					const monsterGameId = monsterNamesToGameIds.get(monster.name);
-					if (!monsterGameId) {
-						console.warn(`Unknown monster name: ${monster.name}`);
-					}
-					
-					// Get the level from monster data if available, otherwise use default
-					const monsterLevel = monster.level || 50;
-					const monsterTier = piece.tier || monster.tier || 4;
-					const monsterAwakened =
-						piece.awakened === true ||
-						(monster.level != null && Number(monster.level) > 50) ||
-						monster.awaken === true ||
-						monster.awakened === true ||
-						monster.isAwakened === true ||
-						Number(monster.starTier) >= 6;
-					const monsterStarTier = monsterAwakened
-						? 6
-						: (piece.starTier || monster.starTier || undefined);
-					console.log(`configureBoard - Processing monster ${index} with level: ${monsterLevel}`);
+					const isAwakened = monster.awakened || monster.level > 50;
 					
 					const pieceConfig = {
 						type: 'custom',
 						nickname: null,
 						tileIndex: piece.tile,
-						gameId: monsterGameId,
-						tier: monsterAwakened ? 6 : monsterTier,
-						awaken: monsterAwakened,
-						awakened: monsterAwakened,
-						isAwakened: monsterAwakened,
-						starTier: monsterStarTier,
-						level: monsterLevel, // Use the monster's level from data
+						gameId: monsterNamesToGameIds.get(monster.name),
+						tier: isAwakened ? 6 : 4,
+						level: monster.level ?? 50,
 						genes: {
 							hp: monster.hp,
 							ad: monster.ad,
@@ -395,10 +402,6 @@
 						key: `fake-monster-${index}`,
 						direction: 'south',
 					};
-					
-					console.log(
-						`configureBoard - Created pieceConfig level=${pieceConfig.level} tier=${pieceConfig.tier} awaken=${pieceConfig.awaken} starTier=${pieceConfig.starTier ?? 'null'}`
-					);
 					
 					const equip = piece.equipment;
 					if (equip) {
@@ -794,6 +797,8 @@
 			configureBoard,
 			initializeMaps,
 			getCurrentMapInfo,
+			normalizeReplayMonster,
+			normalizeReplayConfig,
 			maps
 		};
 
@@ -805,6 +810,8 @@
 		window.$configureBoard = configureBoard;
 		window.$initializeMaps = initializeMaps; // Add this for manual reinitialization
 		window.$getCurrentMapInfo = getCurrentMapInfo; // Add this for getting current map info
+		window.$normalizeReplayMonster = normalizeReplayMonster;
+		window.$normalizeReplayConfig = normalizeReplayConfig;
 
 		// Expose the maps to window for backward compatibility
 		window.regionNamesToIds = regionNamesToIds;
@@ -827,7 +834,7 @@
 		window.postMessage({
 			from: 'BA_SANDBOX_UTILS',
 			type: 'UTILITY_FUNCTIONS_LOADED',
-			functions: ['$serializeBoard', '$replay', '$forceSeed', '$removeSeed', '$configureBoard', '$initializeMaps', '$getCurrentMapInfo']
+			functions: ['$serializeBoard', '$replay', '$forceSeed', '$removeSeed', '$configureBoard', '$initializeMaps', '$getCurrentMapInfo', '$normalizeReplayMonster', '$normalizeReplayConfig']
 		}, '*');
 
 		// Notify that the utility functions are loaded

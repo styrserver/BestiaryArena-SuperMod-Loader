@@ -4,6 +4,51 @@
   },
   "notes": [
     {
+      "version": "3.7.11",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Added a configurable Start/Skip hotkey (default Z), reorganized Hotkeys with a new Battle section, and added \"Always navigate max floor\" plus auto-hide non-shiny/non-awakened monsters."
+        },
+        {
+          "mod": "BA Sandbox Utils",
+          "type": "fixed",
+          "text": "$replay() now derives awakened only from monster.awakened or level > 50, with tier 6 when awakened and 4 otherwise."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Improved creature overrides, final-run retry handling, and related localization."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Refresh persistence is more robust: startup no longer clears existing data, and debounced saves run on visibility/pagehide."
+        },
+        {
+          "mod": "Guilds",
+          "type": "fixed",
+          "text": "Member point contributions are now clamped to 0, so negative player values no longer reduce guild totals."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Start detection now targets the board Start/Iniciar control to avoid triggering other mod/analyzer Start buttons during retries."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Firebase/local best-runs replay exports now include explicit monster.awakened and use shared replay normalization from BA Sandbox Utils."
+        },
+        {
+          "mod": "Popup",
+          "type": "fixed",
+          "text": "Patch Notes entries are now clickable collapsible rows with aligned Mod/Type columns and color-coded change types."
+        }
+      ]
+    },
+    {
       "version": "3.7.10",
       "changes": [
         {
