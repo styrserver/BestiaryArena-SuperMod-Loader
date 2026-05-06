@@ -5606,28 +5606,75 @@ async function pauseAutoplay() {
 }
 
 async function handleFinalRunPauseWithRetry() {
-    const paused = await pauseAutoplay();
-    if (!taskHuntingOngoing) {
-        return;
-    }
+    try {
+        const paused = await pauseAutoplay();
+        if (!taskHuntingOngoing) {
+            return;
+        }
 
-    const prog = getTaskKillProgress();
-    if (prog && prog.current < prog.target) {
-        console.log(
-            '[Better Tasker] [runs-budget] final run pause left task incomplete (' +
-                prog.current +
-                '/' +
-                prog.target +
-                ') — resuming autoplay to retry last kill'
-        );
-        // Re-arm final-run guard so we can pause again once the retry game ends.
-        finalRunPauseIssued = false;
-        await resumeAutoplay();
-    } else if (!paused) {
-        // If pause could not be verified and we cannot read progress, fail open by continuing autoplay.
-        console.log('[Better Tasker] [runs-budget] final run pause not verified — resuming autoplay fail-open');
-        finalRunPauseIssued = false;
-        await resumeAutoplay();
+        // Important: wait for the current game to fully end before checking task progress.
+        // The final kill is often applied after pause is requested, so checking too early can
+        // incorrectly resume autoplay and skip task completion flow.
+        const gameEndedAfterPause = await waitForGameToEnd();
+        if (!gameEndedAfterPause) {
+            console.log('[Better Tasker] [runs-budget] final run wait timed out — continuing with best-effort task check');
+        }
+
+        await sleep(300);
+
+        const prog = getTaskKillProgress();
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        const task = playerContext?.questLog?.task;
+        const quotaReached = !!(prog && prog.current >= prog.target);
+        const taskReady = !!(task && task.ready);
+
+        if (quotaReached || taskReady) {
+            console.log(
+                '[Better Tasker] [runs-budget] final run complete (' +
+                    (prog ? prog.current + '/' + prog.target : 'no API progress') +
+                    ') — opening quest log to finish or verify task state'
+            );
+            await handlePostGameTaskCompletion();
+            return;
+        }
+
+        if (prog && prog.current < prog.target) {
+            console.log(
+                '[Better Tasker] [runs-budget] final run pause left task incomplete (' +
+                    prog.current +
+                    '/' +
+                    prog.target +
+                    ') — resuming autoplay to retry last kill'
+            );
+            // Re-arm final-run guard so we can pause again once the retry game ends.
+            finalRunPauseIssued = false;
+            await resumeAutoplay();
+            return;
+        }
+
+        if (!paused) {
+            // If pause could not be verified and we cannot read progress, fail open by continuing autoplay.
+            console.log('[Better Tasker] [runs-budget] final run pause not verified — resuming autoplay fail-open');
+            finalRunPauseIssued = false;
+            await resumeAutoplay();
+            return;
+        }
+
+        // Last-resort fallback: paused, but no reliable progress/ready state could be read.
+        // Refresh to recover from stale/partial state and avoid getting stuck.
+        console.warn('[Better Tasker] [runs-budget] final run state unresolved after pause — refreshing browser fallback');
+        if (isSafeToReload()) {
+            location.reload();
+        } else {
+            cleanupTaskCompletionFailure('final run unresolved state after pause');
+        }
+    } catch (error) {
+        console.error('[Better Tasker] [runs-budget] final run handler failed - refreshing fallback', error);
+        if (isSafeToReload()) {
+            location.reload();
+        } else {
+            cleanupTaskCompletionFailure('final run handler error');
+        }
     }
 }
 

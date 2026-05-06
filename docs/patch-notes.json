@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.7.13",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Inject success toast now uses in-game stat icons for gains (including AP/MR) and armor label is shortened to ARM."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Final-run pause now waits for game end before deciding completion vs retry, and if task state cannot be resolved it falls back to a browser refresh."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Start button handling is now more robust with retry/re-check + coordination waits, and fixed max-floor progress display flicker where the running widget could briefly jump to target floor (for example 10/10) between attempts."
+        }
+      ]
+    },
+    {
       "version": "3.7.12",
       "changes": [
         {

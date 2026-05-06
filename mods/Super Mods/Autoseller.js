@@ -351,7 +351,14 @@
             textLeft.className = 'text-left';
             const paragraph = document.createElement('p');
             paragraph.style.cssText = 'margin: 0; max-width: 28rem; white-space: pre-wrap;';
-            paragraph.textContent = message;
+            if (typeof message === 'string') {
+                paragraph.textContent = message;
+            } else if (message instanceof Node) {
+                paragraph.style.whiteSpace = 'normal';
+                paragraph.appendChild(message);
+            } else {
+                paragraph.textContent = String(message ?? '');
+            }
 
             textLeft.appendChild(paragraph);
             widgetBottom.appendChild(textLeft);
@@ -1562,29 +1569,35 @@
                     hp: 'HP',
                     ad: 'AD',
                     ap: 'AP',
-                    armor: 'Armor',
+                    armor: 'ARM',
                     magicResist: 'MR'
+                };
+                const statIconMap = {
+                    hp: '/assets/icons/heal.png',
+                    ad: '/assets/icons/attackdamage.png',
+                    ap: '/assets/icons/abilitypower.png',
+                    armor: '/assets/icons/armor.png',
+                    magicResist: '/assets/icons/magicresist.png'
                 };
                 const statKeys = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
 
                 const gains = statKeys
                     .map(key => ({ key, diff: targetAfterStats[key] - targetBeforeStats[key] }))
-                    .filter(item => item.diff > 0)
-                    .map(item => `+${item.diff} ${statLabelMap[item.key]}`);
+                    .filter(item => item.diff > 0);
 
                 const inferredGains = statKeys
                     .map(key => ({ key, diff: Math.max(0, candidateStats[key] - targetBeforeStats[key]) }))
-                    .filter(item => item.diff > 0)
-                    .map(item => `+${item.diff} ${statLabelMap[item.key]}`);
+                    .filter(item => item.diff > 0);
+                const gainsTextList = gains.map(item => `+${item.diff} ${statLabelMap[item.key]}`);
+                const inferredGainsTextList = inferredGains.map(item => `+${item.diff} ${statLabelMap[item.key]}`);
 
                 console.log(
                     `[Autoseller][Inject][Applied] ${awakenedTargetName} (${awakenedTarget.id}): ` +
-                    `${inferredGains.length > 0 ? inferredGains.join(', ') : 'no gain'}`
+                    `${inferredGainsTextList.length > 0 ? inferredGainsTextList.join(', ') : 'no gain'}`
                 );
-
-                const gainsText = gains.length > 0
-                    ? ` | ${gains.join(', ')}`
-                    : (inferredGains.length > 0 ? ` | ${inferredGains.join(', ')}` : '');
+                const gainsForToast = gains.length > 0
+                    ? gains
+                    : inferredGains;
                 if (gains.length === 0) {
                     console.log(
                         `[Autoseller][Inject] No target stat delta detected yet for ${awakenedTargetName} (${awakenedTarget.id}) ` +
@@ -1592,7 +1605,52 @@
                         `after hp=${targetAfterStats.hp} ad=${targetAfterStats.ad} ap=${targetAfterStats.ap} armor=${targetAfterStats.armor} mr=${targetAfterStats.magicResist})`
                     );
                 }
-                showAutosellerToast(`Injected ${creatureName || 'creature'} into ${awakenedTargetName} (${goldDiff}g)${gainsText}`, 5000);
+                const toastContent = document.createElement('span');
+                toastContent.style.display = 'inline-flex';
+                toastContent.style.alignItems = 'center';
+                toastContent.style.flexWrap = 'wrap';
+                toastContent.style.gap = '4px';
+
+                const introText = document.createElement('span');
+                introText.textContent = `Injected ${creatureName || 'creature'} into ${awakenedTargetName} (${goldDiff}g)`;
+                toastContent.appendChild(introText);
+
+                if (gainsForToast.length > 0) {
+                    const divider = document.createElement('span');
+                    divider.textContent = '|';
+                    divider.style.margin = '0 2px';
+                    toastContent.appendChild(divider);
+
+                    gainsForToast.forEach((gain, index) => {
+                        const gainStat = gain.key;
+                        const gainBadge = document.createElement('span');
+                        gainBadge.style.display = 'inline-flex';
+                        gainBadge.style.alignItems = 'center';
+                        gainBadge.style.gap = '3px';
+
+                        const gainValue = document.createElement('span');
+                        gainValue.textContent = `+${gain.diff}`;
+                        gainBadge.appendChild(gainValue);
+
+                        const statIcon = document.createElement('img');
+                        statIcon.src = statIconMap[gainStat];
+                        statIcon.alt = statLabelMap[gainStat];
+                        statIcon.style.width = '12px';
+                        statIcon.style.height = '12px';
+                        statIcon.style.verticalAlign = 'middle';
+                        gainBadge.appendChild(statIcon);
+
+                        toastContent.appendChild(gainBadge);
+
+                        if (index < gainsForToast.length - 1) {
+                            const comma = document.createElement('span');
+                            comma.textContent = ',';
+                            toastContent.appendChild(comma);
+                        }
+                    });
+                }
+
+                showAutosellerToast(toastContent, 5000);
                 consumedServerIds.add(monster.id);
                 const removalResult = await removeMonstersFromLocalInventory([monster.id]);
                 if (removalResult.success) {
@@ -2967,7 +3025,7 @@
         globalInjectWarningIcon.textContent = '⚠️';
         globalInjectWarningIcon.style.fontSize = '11px';
         globalInjectWarningIcon.style.cursor = 'help';
-        globalInjectWarningIcon.title = t('mods.autoseller.autoInjectWarningTooltip') || 'Auto-inject runs before auto-sell. It consumes sealed creatures into same-creature awakened targets and costs gold.';
+        globalInjectWarningIcon.title = t('mods.autoseller.autoInjectWarningTooltip') || 'Auto-inject first tries sealed creatures into awakened same-creature targets (costs gold), then auto-sell/devour only if genes do not increase the awakened creature.';
         sealedGlobalInjectRow.container.insertBefore(globalInjectWarningIcon, sealedGlobalInjectRow.label);
         genesMainContainer.appendChild(sealedGlobalInjectRow.container);
         placeholder.appendChild(genesMainContainer);
@@ -3220,7 +3278,7 @@
                 ? ` ${(t('mods.autoseller.tooltipHumanKeepRange') || 'Keep range')}: ${keepRange.min}-${keepRange.max}%.`
                 : '';
             const sealedStatus = `${t('mods.autoseller.tooltipHumanSealedStatusPrefix') || 'Sealed'}: ${(t('mods.autoseller.tooltipHumanSellLabel') || 'sell/devour')} ${sellEnabled ? onText : offText}${sellBlocked ? ` (${blockedText})` : ''}, ${(t('mods.autoseller.tooltipHumanInjectLabel') || 'inject')} ${injectEnabled ? onText : offText}.`;
-            const priorityText = t('mods.autoseller.tooltipInjectPriority') || 'Inject runs before sell/devour.';
+            const priorityText = t('mods.autoseller.tooltipInjectPriority') || 'Priority: auto-inject runs first, then sell/devour only if genes do not improve the awakened target.';
             return `${actionSummary}${keepRangeText} ${sealedStatus} ${priorityText}`.replace(/\s+/g, ' ').trim();
         }
         

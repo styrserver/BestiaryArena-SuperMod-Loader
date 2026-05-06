@@ -656,6 +656,52 @@ function clickStartButton() {
   return false;
 }
 
+/**
+ * Robust start click for transient UI states.
+ * Retries for a short window with ESC nudge + coordination wait before giving up.
+ */
+async function clickStartButtonRobust(options = {}) {
+  const maxWaitMs = Math.max(200, Number(options.maxWaitMs) || 2500);
+  const recheckDelayMs = Math.max(40, Number(options.recheckDelayMs) || 140);
+  const startTs = performance.now();
+  const deadline = startTs + maxWaitMs;
+  let attempts = 0;
+
+  while (performance.now() < deadline) {
+    attempts++;
+    if (clickStartButton()) {
+      if (attempts > 1) {
+        const elapsed = Math.round(performance.now() - startTs);
+        console.log(`[Manual Runner] Start button recovered after ${attempts} checks (${elapsed}ms)`);
+      }
+      return true;
+    }
+
+    // Close transient overlays/modals that may block board controls.
+    dispatchEsc();
+
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) {
+      break;
+    }
+
+    // Respect Bestiary Automator coordination while we re-check board controls.
+    await waitForModCoordinationTasks({
+      maxWaitMs: Math.min(350, Math.max(120, remaining)),
+      delayMs: 120,
+      context: 'start-button recovery'
+    });
+
+    if (performance.now() >= deadline) {
+      break;
+    }
+    await sleep(Math.min(recheckDelayMs, Math.max(40, deadline - performance.now())));
+  }
+
+  console.error(`[Manual Runner] Failed to find start button after ${attempts} checks (${Math.round(performance.now() - startTs)}ms)`);
+  return false;
+}
+
 // Ensure the game is in manual mode
 function ensureManualMode() {
   try {
@@ -1895,8 +1941,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       await waitForModCoordinationTasks({ context: `pre-start attempt ${attemptCount}` });
       prepareAttemptState(attemptCount + 1);
 
-      if (!clickStartButton()) {
-        console.error('[Manual Runner] Failed to find start button');
+      if (!await clickStartButtonRobust({ maxWaitMs: 2500, recheckDelayMs: 140 })) {
         break;
       }
 
@@ -2001,7 +2046,8 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
           defeats: defeatsCount,
           victories: victoriesCount,
           staminaSpent: totalStaminaSpent,
-          status: 'running'
+          status: 'running',
+          floor: getCurrentFloor()
         });
       }
 
@@ -3394,6 +3440,7 @@ async function runAnalysis() {
     
     // Get initial floor for display
     const initialFloor = getCurrentFloor();
+    let lastDisplayedFloor = initialFloor;
     
     // Show running modal with target info
     runningModal = showRunningAnalysisModal(
@@ -3412,7 +3459,10 @@ async function runAnalysis() {
 
       if (config.stopCondition === 'maxFloor') {
         const targetFloor = config.maxFloor || 10;
-        const currentFloor = status.floor !== undefined ? status.floor : targetFloor;
+        if (typeof status.floor === 'number') {
+          lastDisplayedFloor = status.floor;
+        }
+        const currentFloor = lastDisplayedFloor;
         updateTextContent('manual-runner-target', `${currentFloor}/${targetFloor}`);
       } else if (config.stopCondition === 'endless') {
         const el = document.getElementById('manual-runner-target');
