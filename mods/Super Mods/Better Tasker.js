@@ -574,34 +574,56 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
         });
 
         const initialMapId = existing.mapId != null ? String(existing.mapId) : '';
-        const hasSelected = [...mapSelect.options].some((o) => o.value === selectedBefore);
+        const hasSelected = !!selectedBefore && [...mapSelect.options].some((o) => o.value === selectedBefore);
         const hasInitial = [...mapSelect.options].some((o) => o.value === initialMapId);
         mapSelect.value = hasSelected ? selectedBefore : (hasInitial ? initialMapId : '');
+        console.log('[Better Tasker] Creature context map select initialized:', {
+            creatureName,
+            creatureKey,
+            selectedBefore,
+            initialMapId,
+            hasSelected,
+            hasInitial,
+            resolvedValue: mapSelect.value
+        });
         mapSelect.size = 1;
     };
     rebuildMapOptions();
 
-    const persist = () => {
+    const persist = (reason = 'unknown') => {
         const latest = loadSettings();
         if (!latest.creatureOverrides || typeof latest.creatureOverrides !== 'object') {
             latest.creatureOverrides = {};
         }
-        latest.creatureOverrides[creatureKey] = {
+        const nextOverride = {
             mapId: mapSelect.value || null,
             floor: Math.max(0, Math.min(15, Number(floorSelect.value) || 0)),
             setupMethod: setupSelect.value || latest.setupMethod || 'Auto-setup',
             autoRefillStamina: !!refillCheckbox.checked
         };
+        latest.creatureOverrides[creatureKey] = nextOverride;
         localStorage.setItem('betterTaskerSettings', JSON.stringify(latest));
+        console.log('[Better Tasker] Creature context persisted:', {
+            reason,
+            creatureName,
+            creatureKey,
+            override: nextOverride
+        });
     };
 
-    [mapSelect, floorSelect, setupSelect, refillCheckbox].forEach((el) => el.addEventListener('change', persist));
+    [mapSelect, floorSelect, setupSelect, refillCheckbox].forEach((el) => {
+        el.addEventListener('change', () => persist('change'));
+        // Some environments close custom menus before <select> emits 'change'.
+        // Persisting on 'input' improves reliability for map selection.
+        el.addEventListener('input', () => persist('input'));
+    });
 
     const resetBtn = createStyledButton('bt-reset-creature-ctx', t('mods.betterTasker.reset'), 'red', () => {
         const latest = loadSettings();
         if (latest.creatureOverrides?.[creatureKey]) {
             delete latest.creatureOverrides[creatureKey];
             localStorage.setItem('betterTaskerSettings', JSON.stringify(latest));
+            console.log('[Better Tasker] Creature context reset:', { creatureName, creatureKey });
         }
         rebuildMapOptions();
         mapSelect.value = '';
@@ -652,6 +674,10 @@ function createCreatureContextMenu(creatureName, x, y, onClose) {
     };
 
     function closeMenu() {
+        // Always persist on close so selected creature overrides are not lost
+        // when the menu closes before a native <select> change event fires.
+        persist('close-menu');
+        console.log('[Better Tasker] Creature context menu closed:', { creatureName, creatureKey });
         document.removeEventListener('mousedown', handleDocPointerDown, true);
         overlay.remove();
         menu.remove();

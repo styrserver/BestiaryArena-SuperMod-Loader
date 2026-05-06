@@ -213,8 +213,12 @@
         autoplantKeepGenesEnabled: true,
         autoplantAlwaysDevourBelow: 49,
         autoplantAlwaysDevourEnabled: false,
+        autoSellSealedCreaturesGlobal: false,
+        autoInjectSealedCreaturesGlobal: false,
         protectSealedTier5: true,
         sealedTier5SellAllowList: [],
+        sealedTier5SellDenyList: [],
+        sealedTier5InjectDenyList: [],
         // Per-creature gene ranges to keep (prevents selling/devouring)
         creatureKeepRanges: {} // { "CreatureName": { min: number, max: number } }
     };
@@ -315,6 +319,61 @@
     
     function queryAllElements(selector, context = document) {
         return context.querySelectorAll(selector);
+    }
+
+    function showAutosellerToast(message, durationMs = 3500) {
+        try {
+            let mainContainer = document.getElementById('autoseller-toast-container');
+            if (!mainContainer) {
+                mainContainer = document.createElement('div');
+                mainContainer.id = 'autoseller-toast-container';
+                mainContainer.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
+                document.body.appendChild(mainContainer);
+            }
+
+            const existingToasts = mainContainer.querySelectorAll('.autoseller-toast-item');
+            const stackOffset = existingToasts.length * 44;
+
+            const flexContainer = document.createElement('div');
+            flexContainer.className = 'autoseller-toast-item';
+            flexContainer.style.cssText = `left:0;right:0;display:flex;position:absolute;transition:230ms cubic-bezier(0.21, 1.02, 0.73, 1);transform:translateY(-${stackOffset}px);bottom:0;justify-content:flex-end;`;
+
+            const toast = document.createElement('button');
+            toast.type = 'button';
+            toast.style.pointerEvents = 'auto';
+            toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+
+            const widgetTop = document.createElement('div');
+            widgetTop.className = 'widget-top h-2.5';
+            const widgetBottom = document.createElement('div');
+            widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+            const textLeft = document.createElement('div');
+            textLeft.className = 'text-left';
+            const paragraph = document.createElement('p');
+            paragraph.style.cssText = 'margin: 0; max-width: 28rem; white-space: pre-wrap;';
+            paragraph.textContent = message;
+
+            textLeft.appendChild(paragraph);
+            widgetBottom.appendChild(textLeft);
+            toast.appendChild(widgetTop);
+            toast.appendChild(widgetBottom);
+            flexContainer.appendChild(toast);
+            mainContainer.appendChild(flexContainer);
+
+            const remove = () => {
+                if (flexContainer && flexContainer.parentNode) {
+                    flexContainer.parentNode.removeChild(flexContainer);
+                    const toasts = mainContainer.querySelectorAll('.autoseller-toast-item');
+                    toasts.forEach((el, index) => {
+                        el.style.transform = `translateY(-${index * 44}px)`;
+                    });
+                }
+            };
+            toast.addEventListener('click', remove);
+            setTimeout(remove, Math.max(1000, durationMs));
+        } catch (error) {
+            console.warn('[Autoseller] Failed to show toast:', error);
+        }
     }
     
     function getSettings() {
@@ -436,8 +495,13 @@
      * @returns {boolean} True if allowed to sell/devour when sealed
      */
     function isSealedTier5SellAllowed(creatureName) {
-        if (!creatureName) return false;
         const settings = getSettings();
+        if (creatureName) {
+            const denyList = settings.sealedTier5SellDenyList || [];
+            if (denyList.includes(creatureName)) return false;
+        }
+        if (settings.autoSellSealedCreaturesGlobal === true) return true;
+        if (!creatureName) return false;
         const allowList = settings.sealedTier5SellAllowList || [];
         return allowList.includes(creatureName);
     }
@@ -460,6 +524,73 @@
         }
 
         setSettings({ sealedTier5SellAllowList: allowList });
+    }
+
+    function hasPerCreatureSealedTier5SellOverride(creatureName) {
+        if (!creatureName) return false;
+        const settings = getSettings();
+        const allowList = settings.sealedTier5SellAllowList || [];
+        return allowList.includes(creatureName);
+    }
+
+    function isSealedTier5SellBlocked(creatureName) {
+        if (!creatureName) return false;
+        const settings = getSettings();
+        const denyList = settings.sealedTier5SellDenyList || [];
+        return denyList.includes(creatureName);
+    }
+
+    function setSealedTier5SellBlocked(creatureName, isBlocked) {
+        if (!creatureName) return;
+        const settings = getSettings();
+        const denyList = [...(settings.sealedTier5SellDenyList || [])];
+        const idx = denyList.indexOf(creatureName);
+        if (isBlocked && idx === -1) {
+            denyList.push(creatureName);
+        } else if (!isBlocked && idx !== -1) {
+            denyList.splice(idx, 1);
+        }
+        setSettings({ sealedTier5SellDenyList: denyList });
+    }
+
+    function isSealedTier5SqueezeAllowed(creatureName) {
+        if (!creatureName) return false;
+        const settings = getSettings();
+        const allowList = settings.sealedTier5SellAllowList || [];
+        return allowList.includes(creatureName);
+    }
+
+    /**
+     * Check if a creature is explicitly allowed to be auto-injected when Sealed (tier 5)
+     * @param {string} creatureName - Name of the creature
+     * @returns {boolean} True if allowed to auto-inject when sealed
+     */
+    function isSealedTier5InjectAllowed(creatureName) {
+        const settings = getSettings();
+        if (settings.autoInjectSealedCreaturesGlobal !== true) return false;
+        if (!creatureName) return true;
+        const denyList = settings.sealedTier5InjectDenyList || [];
+        return !denyList.includes(creatureName);
+    }
+
+    /**
+     * Set sealed tier 5 auto-inject override for a specific creature
+     * @param {string} creatureName - Name of the creature
+     * @param {boolean} isAllowed - True to allow auto-injecting sealed creatures of this type
+     */
+    function setSealedTier5InjectAllowed(creatureName, isAllowed) {
+        if (!creatureName) return;
+        const settings = getSettings();
+        const denyList = [...(settings.sealedTier5InjectDenyList || [])];
+        const idx = denyList.indexOf(creatureName);
+
+        if (!isAllowed && idx === -1) {
+            denyList.push(creatureName);
+        } else if (isAllowed && idx !== -1) {
+            denyList.splice(idx, 1);
+        }
+
+        setSettings({ sealedTier5InjectDenyList: denyList });
     }
     
     /**
@@ -1009,8 +1140,15 @@
             if (monster.locked) {
                 continue;
             }
-            if (isSealedTierFiveCreature(monster) && !isSealedTier5SellAllowed(monsterName)) {
-                continue;
+            if (isSealedTierFiveCreature(monster)) {
+                // Keep sell and squeeze sealed logic fully independent.
+                if (squeezeEnabled) {
+                    if (!isSealedTier5SqueezeAllowed(monsterName)) continue;
+                } else if (sellEnabled) {
+                    if (!isSealedTier5SellAllowed(monsterName)) continue;
+                } else {
+                    continue;
+                }
             }
             
             const hp = monster.hp || 0;
@@ -1175,6 +1313,313 @@
         if (!monster) return false;
         const tier = monster.tier ?? monster.metadata?.tier;
         return Number(tier) === 5;
+    }
+
+    /**
+     * Detect awakened creatures by flags/tier/level
+     * @param {Object} monster - Monster object to check
+     * @returns {boolean}
+     */
+    function isAwakenedCreature(monster) {
+        if (!monster) return false;
+        const tier = Number(monster.tier ?? monster.metadata?.tier);
+        if (tier === 6) return true;
+        // Keep flag fallbacks for compatibility with payload variants
+        return monster.awaken === true || monster.awakened === true || monster.isAwakened === true;
+    }
+
+    /**
+     * Check if candidate creature has any higher gene stat than target.
+     * @param {Object} candidate - Sealed creature candidate
+     * @param {Object} target - Awakened target creature
+     * @returns {boolean}
+     */
+    function hasAnyHigherGeneStat(candidate, target) {
+        if (!candidate || !target) return false;
+        const candidateStats = getMonsterGeneStats(candidate);
+        const targetStats = getMonsterGeneStats(target);
+        return (
+            candidateStats.hp > targetStats.hp ||
+            candidateStats.ad > targetStats.ad ||
+            candidateStats.ap > targetStats.ap ||
+            candidateStats.armor > targetStats.armor ||
+            candidateStats.magicResist > targetStats.magicResist
+        );
+    }
+
+    /**
+     * Normalize gene stats from mixed monster payload shapes.
+     * Supports flat stats, nested genes/stats objects and mr alias.
+     * @param {Object} monster
+     * @returns {{hp:number, ad:number, ap:number, armor:number, magicResist:number}}
+     */
+    function getMonsterGeneStats(monster) {
+        if (!monster || typeof monster !== 'object') {
+            return { hp: 0, ad: 0, ap: 0, armor: 0, magicResist: 0 };
+        }
+        const genes = monster.genes || monster.stats || {};
+        const hp = Number(monster.hp ?? genes.hp ?? 0);
+        const ad = Number(monster.ad ?? genes.ad ?? 0);
+        const ap = Number(monster.ap ?? genes.ap ?? 0);
+        const armor = Number(monster.armor ?? genes.armor ?? 0);
+        const magicResist = Number(monster.magicResist ?? monster.mr ?? genes.magicResist ?? genes.mr ?? 0);
+        return { hp, ad, ap, armor, magicResist };
+    }
+
+    function syncInjectedAwakenedStatsLocally(awakenedMonsterId, targetBeforeStats, candidateStats) {
+        try {
+            const player = globalThis.state?.player;
+            if (!player || typeof player.send !== 'function') return false;
+
+            const expectedAfter = {
+                hp: Math.max(targetBeforeStats.hp, candidateStats.hp),
+                ad: Math.max(targetBeforeStats.ad, candidateStats.ad),
+                ap: Math.max(targetBeforeStats.ap, candidateStats.ap),
+                armor: Math.max(targetBeforeStats.armor, candidateStats.armor),
+                magicResist: Math.max(targetBeforeStats.magicResist, candidateStats.magicResist)
+            };
+
+            player.send({
+                type: 'setState',
+                fn: (prev) => {
+                    if (!prev || !Array.isArray(prev.monsters)) return prev;
+                    let changed = false;
+                    const nextMonsters = prev.monsters.map(monster => {
+                        if (String(monster?.id) !== String(awakenedMonsterId)) return monster;
+                        changed = true;
+                        const nextMonster = { ...monster };
+                        nextMonster.hp = Math.max(Number(monster?.hp) || 0, expectedAfter.hp);
+                        nextMonster.ad = Math.max(Number(monster?.ad) || 0, expectedAfter.ad);
+                        nextMonster.ap = Math.max(Number(monster?.ap) || 0, expectedAfter.ap);
+                        nextMonster.armor = Math.max(Number(monster?.armor) || 0, expectedAfter.armor);
+                        nextMonster.magicResist = Math.max(Number(monster?.magicResist) || 0, expectedAfter.magicResist);
+
+                        if (nextMonster.genes && typeof nextMonster.genes === 'object') {
+                            nextMonster.genes = {
+                                ...nextMonster.genes,
+                                hp: Math.max(Number(nextMonster.genes.hp) || 0, expectedAfter.hp),
+                                ad: Math.max(Number(nextMonster.genes.ad) || 0, expectedAfter.ad),
+                                ap: Math.max(Number(nextMonster.genes.ap) || 0, expectedAfter.ap),
+                                armor: Math.max(Number(nextMonster.genes.armor) || 0, expectedAfter.armor),
+                                magicResist: Math.max(Number(nextMonster.genes.magicResist) || 0, expectedAfter.magicResist)
+                            };
+                        }
+                        return nextMonster;
+                    });
+                    return changed ? { ...prev, monsters: nextMonsters } : prev;
+                }
+            });
+            return true;
+        } catch (error) {
+            console.warn(`[${modName}][WARN][syncInjectedAwakenedStatsLocally] Failed local awakened stat sync`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Check if a battle is currently running.
+     * @returns {boolean}
+     */
+    function isGameCurrentlyRunning() {
+        const gameState = globalThis.state?.gameTimer?.getSnapshot?.()?.context?.state;
+        return gameState === 'playing';
+    }
+
+    /**
+     * Check if a monster database ID is currently on the board.
+     * @param {string|number} monsterId
+     * @returns {boolean}
+     */
+    function isMonsterCurrentlyOnBoard(monsterId) {
+        if (!monsterId) return false;
+        const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+        if (!boardContext) return false;
+
+        const possiblePieceArrays = [
+            boardContext.boardConfig,
+            boardContext.board,
+            boardContext.pieces
+        ];
+
+        for (const pieceArray of possiblePieceArrays) {
+            if (!Array.isArray(pieceArray)) continue;
+            const found = pieceArray.some(piece => {
+                if (!piece || piece.type !== 'player') return false;
+                const pieceMonsterId = piece.databaseId ?? piece.monsterId ?? piece.id;
+                return String(pieceMonsterId) === String(monsterId);
+            });
+            if (found) return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Attempt to inject sealed creatures into an awakened creature.
+     * @param {Array} monsters - Candidate monsters from current processing pass
+     * @returns {Promise<Set<string|number>>} Server IDs consumed via doctor
+     */
+    async function autoInjectEligibleSealedCreatures(monsters) {
+        const consumedServerIds = new Set();
+        const settings = getSettings();
+        const keepList = settings.autoplantIgnoreList || [];
+        if (!Array.isArray(monsters) || monsters.length === 0) {
+            console.log('[Autoseller][Inject] Skip: no monsters provided');
+            return consumedServerIds;
+        }
+
+        const localMonsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [];
+        if (!Array.isArray(localMonsters) || localMonsters.length === 0) {
+            console.log('[Autoseller][Inject] Skip: local inventory unavailable');
+            return consumedServerIds;
+        }
+
+        const awakenedCandidates = localMonsters.filter(m => m && m.id && isAwakenedCreature(m) && !isSealedTierFiveCreature(m));
+        if (awakenedCandidates.length === 0) {
+            console.log('[Autoseller][Inject] Skip: no awakened targets in inventory');
+            return consumedServerIds;
+        }
+
+        for (const monster of monsters) {
+            if (!monster || !monster.id) continue;
+            if (isShinyCreature(monster) || !isSealedTierFiveCreature(monster)) continue;
+            const creatureName = monster?.metadata?.name || monster?.name || getCreatureNameFromMonster(monster);
+            if (creatureName && keepList.includes(creatureName)) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: in Keep list`);
+                continue;
+            }
+            if (!isSealedTier5InjectAllowed(creatureName)) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: inject not enabled`);
+                continue;
+            }
+            const sealedGameId = Number(monster?.gameId ?? monster?.metadata?.id);
+            const matchingAwakenedTargets = awakenedCandidates.filter(candidate => {
+                const candidateGameId = Number(candidate?.gameId ?? candidate?.metadata?.id);
+                return Number.isFinite(candidateGameId) && Number.isFinite(sealedGameId) && candidateGameId === sealedGameId;
+            });
+            const awakenedTarget = matchingAwakenedTargets[0];
+            if (!awakenedTarget?.id) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: no awakened target with same gameId (${sealedGameId})`);
+                continue;
+            }
+            const awakenedTargetName = awakenedTarget?.metadata?.name || awakenedTarget?.name || getCreatureNameFromMonster(awakenedTarget) || 'unknown';
+
+            if (String(monster.id) === String(awakenedTarget.id)) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: same as target`);
+                continue;
+            }
+            if (!hasAnyHigherGeneStat(monster, awakenedTarget)) {
+                const c = getMonsterGeneStats(monster);
+                const t = getMonsterGeneStats(awakenedTarget);
+                console.log(
+                    `[Autoseller][Inject][Skip] ${creatureName || monster.id}: no higher gene than target ` +
+                    `(candidate hp=${c.hp} ad=${c.ad} ap=${c.ap} armor=${c.armor} mr=${c.magicResist} | ` +
+                    `target hp=${t.hp} ad=${t.ad} ap=${t.ap} armor=${t.armor} mr=${t.magicResist})`
+                );
+                continue;
+            }
+
+            if (isGameCurrentlyRunning() && isMonsterCurrentlyOnBoard(awakenedTarget.id)) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: matching awakened target ${awakenedTargetName} (${awakenedTarget.id}) is on board during active battle`);
+                continue;
+            }
+
+            console.log(`[Autoseller][Inject] Target selected: ${awakenedTargetName} (${awakenedTarget.id}) for drop ${creatureName || monster.id} (gameId=${sealedGameId})`);
+
+            await apiRateLimiter.waitForSlot();
+            apiRateLimiter.recordRequest();
+
+            const result = await apiRequest('https://bestiaryarena.com/api/trpc/inventory.useDoctor?batch=1', {
+                method: 'POST',
+                body: { "0": { json: { awakenMonsterId: awakenedTarget.id, consumingMonsterId: monster.id } } }
+            });
+
+            const goldDiff = result?.data?.[0]?.result?.data?.json?.goldDiff;
+            if (result.success && goldDiff !== undefined && goldDiff !== null) {
+                const candidateStats = getMonsterGeneStats(monster);
+                const targetBeforeStats = getMonsterGeneStats(awakenedTarget);
+                console.log(`[Autoseller][Inject][Success] ${creatureName || monster.id} (${monster.id}) -> ${awakenedTargetName} (${awakenedTarget.id}), goldDiff=${goldDiff}`);
+                syncInjectedAwakenedStatsLocally(awakenedTarget.id, targetBeforeStats, candidateStats);
+
+                let targetAfterStats = targetBeforeStats;
+                // Player state can lag briefly behind useDoctor success; poll shortly for updated target stats.
+                for (let attempt = 0; attempt < 10; attempt++) {
+                    await new Promise(resolve => setTimeout(resolve, 120));
+                    const refreshedTarget = (globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [])
+                        .find(m => String(m?.id) === String(awakenedTarget.id));
+                    targetAfterStats = getMonsterGeneStats(refreshedTarget || awakenedTarget);
+
+                    const hasAnyDelta =
+                        targetAfterStats.hp !== targetBeforeStats.hp ||
+                        targetAfterStats.ad !== targetBeforeStats.ad ||
+                        targetAfterStats.ap !== targetBeforeStats.ap ||
+                        targetAfterStats.armor !== targetBeforeStats.armor ||
+                        targetAfterStats.magicResist !== targetBeforeStats.magicResist;
+                    if (hasAnyDelta) break;
+                }
+
+                const statLabelMap = {
+                    hp: 'HP',
+                    ad: 'AD',
+                    ap: 'AP',
+                    armor: 'Armor',
+                    magicResist: 'MR'
+                };
+                const statKeys = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+
+                const gains = statKeys
+                    .map(key => ({ key, diff: targetAfterStats[key] - targetBeforeStats[key] }))
+                    .filter(item => item.diff > 0)
+                    .map(item => `+${item.diff} ${statLabelMap[item.key]}`);
+
+                const inferredGains = statKeys
+                    .map(key => ({ key, diff: Math.max(0, candidateStats[key] - targetBeforeStats[key]) }))
+                    .filter(item => item.diff > 0)
+                    .map(item => `+${item.diff} ${statLabelMap[item.key]}`);
+
+                console.log(
+                    `[Autoseller][Inject][Applied] ${awakenedTargetName} (${awakenedTarget.id}): ` +
+                    `${inferredGains.length > 0 ? inferredGains.join(', ') : 'no gain'}`
+                );
+
+                const gainsText = gains.length > 0
+                    ? ` | ${gains.join(', ')}`
+                    : (inferredGains.length > 0 ? ` | ${inferredGains.join(', ')}` : '');
+                if (gains.length === 0) {
+                    console.log(
+                        `[Autoseller][Inject] No target stat delta detected yet for ${awakenedTargetName} (${awakenedTarget.id}) ` +
+                        `(before hp=${targetBeforeStats.hp} ad=${targetBeforeStats.ad} ap=${targetBeforeStats.ap} armor=${targetBeforeStats.armor} mr=${targetBeforeStats.magicResist} | ` +
+                        `after hp=${targetAfterStats.hp} ad=${targetAfterStats.ad} ap=${targetAfterStats.ap} armor=${targetAfterStats.armor} mr=${targetAfterStats.magicResist})`
+                    );
+                }
+                showAutosellerToast(`Injected ${creatureName || 'creature'} into ${awakenedTargetName} (${goldDiff}g)${gainsText}`, 5000);
+                consumedServerIds.add(monster.id);
+                const removalResult = await removeMonstersFromLocalInventory([monster.id]);
+                if (removalResult.success) {
+                    stateManager.markProcessed([monster.id]);
+                    // Keep server cache fresh after successful doctor consume.
+                    serverMonsterCache.clear();
+                } else {
+                    console.warn(`[${modName}][WARN][autoInjectEligibleSealedCreatures] Inject succeeded but local inventory removal failed for ${monster.id}.`);
+                }
+            } else if (!result.success && result.status === 429) {
+                console.log(`[Autoseller][Inject][Retry] ${creatureName || monster.id}: rate limited (429)`);
+                await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
+            } else if (!result.success && result.status === 400) {
+                console.warn(
+                    `[${modName}][WARN][autoInjectEligibleSealedCreatures] useDoctor failed for ${monster.id}: HTTP 400 ` +
+                    `(awakenMonsterId=${awakenedTarget.id}, consumingMonsterId=${monster.id})`,
+                    result?.data
+                );
+            } else if (!result.success && result.status !== 404) {
+                console.warn(`[${modName}][WARN][autoInjectEligibleSealedCreatures] useDoctor failed for ${monster.id}: HTTP ${result.status}`);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
+            if (isCleaningUp) return consumedServerIds;
+        }
+
+        return consumedServerIds;
     }
     
     async function apiRequest(url, options = {}, retries = API_CONSTANTS.RETRY_ATTEMPTS) {
@@ -1438,25 +1883,27 @@
             
             postCount = postState.context.monsters.length;
             removedCount = preCount - postCount;
+            const remainingIds = new Set(postState.context.monsters.map(m => String(m?.id)));
+            const allIdsGone = idsToRemove.every(id => !remainingIds.has(String(id)));
             
             // If removal wasn't successful and we haven't exceeded verification retries, retry with increasing delays
-            if (removedCount === 0 && verificationRetryCount < MAX_VERIFICATION_RETRIES) {
+            if (!allIdsGone && removedCount === 0 && verificationRetryCount < MAX_VERIFICATION_RETRIES) {
                 const delay = VERIFICATION_RETRY_DELAYS[verificationRetryCount] || VERIFICATION_RETRY_DELAYS[VERIFICATION_RETRY_DELAYS.length - 1];
                 console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Verification failed, retrying verification after ${delay}ms (attempt ${verificationRetryCount + 1}/${MAX_VERIFICATION_RETRIES})...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return removeMonstersFromLocalInventory(idsToRemove, retryCount, verificationRetryCount + 1);
             }
             
-            if (removedCount > 0) {
+            if (allIdsGone || removedCount > 0) {
                 // Removed verbose success log - inventory updates are implicit in action logs
-                inventoryUpdateTracker.recordSuccess(removedCount);
+                inventoryUpdateTracker.recordSuccess(Math.max(removedCount, idsToRemove.length));
             } else if (verificationRetryCount >= MAX_VERIFICATION_RETRIES) {
                 console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Verification failed after ${MAX_VERIFICATION_RETRIES} retries. Inventory count unchanged: ${preCount}`);
                 inventoryUpdateTracker.recordFailure();
             }
             
             return { 
-                success: removedCount > 0, 
+                success: allIdsGone || removedCount > 0, 
                 removed: idsToRemove,
                 preCount,
                 postCount
@@ -2496,6 +2943,33 @@
         });
 
         genesMainContainer.appendChild(devourGreyCreaturesRow.container);
+
+        const sealedGlobalSellRow = createCheckboxLabelInputRow({
+            checkboxId: 'autoplant-sealed-global-sell-checkbox',
+            labelText: t('mods.autoseller.autoSellSealedCreatures') || 'Sell or devour sealed creatures',
+            checked: autoplantSettings.autoSellSealedCreaturesGlobal === true,
+            onCheckboxChange: () => {
+                setSettings({ autoSellSealedCreaturesGlobal: sealedGlobalSellRow.checkbox.checked });
+                updatePlantMonsterFilter(selectedCreatures);
+            }
+        });
+        genesMainContainer.appendChild(sealedGlobalSellRow.container);
+
+        const sealedGlobalInjectRow = createCheckboxLabelInputRow({
+            checkboxId: 'autoplant-sealed-global-inject-checkbox',
+            labelText: t('mods.autoseller.autoInjectSealedCreatures') || 'Auto-inject sealed creatures',
+            checked: autoplantSettings.autoInjectSealedCreaturesGlobal === true,
+            onCheckboxChange: () => {
+                setSettings({ autoInjectSealedCreaturesGlobal: sealedGlobalInjectRow.checkbox.checked });
+            }
+        });
+        const globalInjectWarningIcon = document.createElement('span');
+        globalInjectWarningIcon.textContent = '⚠️';
+        globalInjectWarningIcon.style.fontSize = '11px';
+        globalInjectWarningIcon.style.cursor = 'help';
+        globalInjectWarningIcon.title = t('mods.autoseller.autoInjectWarningTooltip') || 'Auto-inject runs before auto-sell. It consumes sealed creatures into same-creature awakened targets and costs gold.';
+        sealedGlobalInjectRow.container.insertBefore(globalInjectWarningIcon, sealedGlobalInjectRow.label);
+        genesMainContainer.appendChild(sealedGlobalInjectRow.container);
         placeholder.appendChild(genesMainContainer);
 
         // Add status bar under the columns (create first so we can insert columns before it)
@@ -2672,6 +3146,83 @@
         scrollContainer.style.minHeight = '0';
         scrollContainer.style.overflowY = 'auto';
         scrollContainer.style.padding = '4px';
+        let activeHoverTooltip = null;
+        let hoverTooltipTimer = null;
+        let hoverTooltipCleanupBound = false;
+
+        function hideHoverTooltip() {
+            if (hoverTooltipTimer) {
+                clearTimeout(hoverTooltipTimer);
+                hoverTooltipTimer = null;
+            }
+            if (activeHoverTooltip && activeHoverTooltip.parentNode) {
+                activeHoverTooltip.parentNode.removeChild(activeHoverTooltip);
+            }
+            activeHoverTooltip = null;
+        }
+
+        function bindHoverTooltipCleanupHandlers() {
+            if (hoverTooltipCleanupBound) return;
+            hoverTooltipCleanupBound = true;
+
+            const dismiss = () => hideHoverTooltip();
+            document.addEventListener('mousedown', dismiss, true);
+            document.addEventListener('scroll', dismiss, true);
+            window.addEventListener('blur', dismiss);
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') dismiss();
+            });
+        }
+
+        function showHoverTooltip(text, x, y) {
+            bindHoverTooltipCleanupHandlers();
+            hideHoverTooltip();
+            const tooltip = document.createElement('div');
+            tooltip.className = 'pixel-font-14';
+            tooltip.textContent = text;
+            tooltip.style.position = 'fixed';
+            tooltip.style.left = `${x + 12}px`;
+            tooltip.style.top = `${y + 12}px`;
+            tooltip.style.zIndex = '10020';
+            tooltip.style.maxWidth = '250px';
+            tooltip.style.padding = '8px';
+            tooltip.style.borderRadius = '4px';
+            tooltip.style.border = '1px solid #ffe066';
+            tooltip.style.background = 'rgba(20, 20, 20, 0.95)';
+            tooltip.style.color = '#e6d7b0';
+            tooltip.style.fontSize = '12px';
+            tooltip.style.lineHeight = '1.35';
+            tooltip.style.whiteSpace = 'normal';
+            tooltip.style.pointerEvents = 'none';
+            tooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.45)';
+            document.body.appendChild(tooltip);
+            activeHoverTooltip = tooltip;
+        }
+
+        function buildCreatureBehaviorTooltip(creatureName, isSqueezeContextForList) {
+            const settings = getSettings();
+            const inKeep = isIgnoreList === true;
+            const keepRange = getCreatureKeepRange(creatureName);
+
+            // Sealed-specific summary (uses global + per-creature rules)
+            const sellBlocked = isSealedTier5SellBlocked(creatureName);
+            const sellEnabled = isSealedTier5SellAllowed(creatureName);
+            const injectEnabled = isSealedTier5InjectAllowed(creatureName);
+            const onText = t('mods.autoseller.tooltipStateOn') || 'ON';
+            const offText = t('mods.autoseller.tooltipStateOff') || 'OFF';
+            const blockedText = t('mods.autoseller.tooltipBlockedForCreature') || 'blocked for this creature';
+            const actionSummary = inKeep
+                ? (t('mods.autoseller.tooltipHumanKeep') || 'In Keep, this creature is left alone.')
+                : (isSqueezeContextForList
+                    ? (t('mods.autoseller.tooltipHumanSqueeze') || 'This creature can be auto-squeezed if your squeeze rules match.')
+                    : (t('mods.autoseller.tooltipHumanSell') || 'This creature can be sold/devoured if your sell rules match.'));
+            const keepRangeText = keepRange
+                ? ` ${(t('mods.autoseller.tooltipHumanKeepRange') || 'Keep range')}: ${keepRange.min}-${keepRange.max}%.`
+                : '';
+            const sealedStatus = `${t('mods.autoseller.tooltipHumanSealedStatusPrefix') || 'Sealed'}: ${(t('mods.autoseller.tooltipHumanSellLabel') || 'sell/devour')} ${sellEnabled ? onText : offText}${sellBlocked ? ` (${blockedText})` : ''}, ${(t('mods.autoseller.tooltipHumanInjectLabel') || 'inject')} ${injectEnabled ? onText : offText}.`;
+            const priorityText = t('mods.autoseller.tooltipInjectPriority') || 'Inject runs before sell/devour.';
+            return `${actionSummary}${keepRangeText} ${sealedStatus} ${priorityText}`.replace(/\s+/g, ' ').trim();
+        }
         
         items.forEach(name => {
             const item = document.createElement('div');
@@ -2708,8 +3259,10 @@
                 }
             }
 
-            // Show tier-5 star indicator when sealed sell/squeeze override is enabled for this creature
-            if (isSealedTier5SellAllowed(name)) {
+            // Show tier-5 star indicator only in squeeze context where per-creature sealed behavior is used.
+            const squeezeActionTitleForList = String(t('mods.autoseller.actionTitleSqueeze') || 'Squeeze').toLowerCase();
+            const isSqueezeContextForList = String(sealedActionVerb || '').trim().toLowerCase() === squeezeActionTitleForList;
+            if (isSqueezeContextForList && hasPerCreatureSealedTier5SellOverride(name)) {
                 const sealedIndicator = document.createElement('img');
                 sealedIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
                 sealedIndicator.alt = 'Sealed override';
@@ -2724,6 +3277,42 @@
                     sealedIndicator.style.filter = 'grayscale(100%)';
                 }
                 item.appendChild(sealedIndicator);
+            }
+
+            // Show tier-5 star indicator whenever creature is excluded by per-creature "Don't sell/devour sealed creature".
+            if (!isSqueezeContextForList && isSealedTier5SellBlocked(name)) {
+                const sealedSellDenyIndicator = document.createElement('img');
+                sealedSellDenyIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
+                sealedSellDenyIndicator.alt = 'Sealed sell/devour ignore';
+                sealedSellDenyIndicator.title = isIgnoreList
+                    ? 'Sell/devour ignored for this creature (inactive in Keep list)'
+                    : 'Sell/devour ignored for this creature';
+                sealedSellDenyIndicator.style.width = '12px';
+                sealedSellDenyIndicator.style.height = '12px';
+                sealedSellDenyIndicator.style.flexShrink = '0';
+                if (isIgnoreList) {
+                    sealedSellDenyIndicator.style.opacity = '0.5';
+                    sealedSellDenyIndicator.style.filter = 'grayscale(100%)';
+                }
+                item.appendChild(sealedSellDenyIndicator);
+            }
+
+            // Show tier-6 star indicator when global inject is ON and creature is excluded from auto-inject
+            if (getSettings().autoInjectSealedCreaturesGlobal === true && !isSealedTier5InjectAllowed(name)) {
+                const injectIndicator = document.createElement('img');
+                injectIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-6.png';
+                injectIndicator.alt = 'Sealed inject ignore';
+                injectIndicator.title = isIgnoreList
+                    ? 'Auto-inject ignored for this creature (inactive in Keep list)'
+                    : 'Auto-inject ignored for this creature';
+                injectIndicator.style.width = '12px';
+                injectIndicator.style.height = '12px';
+                injectIndicator.style.flexShrink = '0';
+                if (isIgnoreList) {
+                    injectIndicator.style.opacity = '0.5';
+                    injectIndicator.style.filter = 'grayscale(100%)';
+                }
+                item.appendChild(injectIndicator);
             }
             
             // Add visual indicator if autoduster has custom stat settings for this equipment
@@ -2749,13 +3338,25 @@
             const nameText = document.createElement('span');
             nameText.textContent = name;
             item.appendChild(nameText);
-            
+
             const handleMouseEnter = () => {
                 item.style.background = 'rgba(255,255,255,0.08)';
+                if (contextMenuType === 'creature') {
+                    const rect = item.getBoundingClientRect();
+                    const tooltipText = buildCreatureBehaviorTooltip(name, isSqueezeContextForList);
+                    if (hoverTooltipTimer) {
+                        clearTimeout(hoverTooltipTimer);
+                    }
+                    hoverTooltipTimer = setTimeout(() => {
+                        showHoverTooltip(tooltipText, rect.right, rect.top);
+                        hoverTooltipTimer = null;
+                    }, 320);
+                }
             };
             
             const handleMouseLeave = () => {
                 item.style.background = 'none';
+                hideHoverTooltip();
             };
             
             const handleMouseDown = () => {
@@ -2778,6 +3379,12 @@
             item.addEventListener('mousedown', handleMouseDown);
             item.addEventListener('mouseup', handleMouseUp);
             item.addEventListener('click', handleClick);
+            item.addEventListener('mousemove', (e) => {
+                if (activeHoverTooltip) {
+                    activeHoverTooltip.style.left = `${e.clientX + 12}px`;
+                    activeHoverTooltip.style.top = `${e.clientY + 12}px`;
+                }
+            });
             
             // Add context menu based on type (creature for autoseller, autoduster for equipment)
             if (enableContextMenu) {
@@ -2858,7 +3465,8 @@
         }
         
         const currentRange = getCreatureKeepRange(creatureName);
-        const sealedSellAllowed = isSealedTier5SellAllowed(creatureName);
+        const sealedSellBlocked = isSealedTier5SellBlocked(creatureName);
+        const sealedInjectAllowed = isSealedTier5InjectAllowed(creatureName);
         
         // Create overlay to close menu on outside click
         const overlay = document.createElement('div');
@@ -2981,16 +3589,21 @@
 
         const sealedToggle = document.createElement('input');
         sealedToggle.type = 'checkbox';
-        sealedToggle.checked = sealedSellAllowed;
         sealedToggle.style.cursor = 'pointer';
 
         const sealedToggleLabel = document.createElement('label');
         sealedToggleLabel.className = 'pixel-font-14';
         const squeezeActionTitle = String(t('mods.autoseller.actionTitleSqueeze') || 'Squeeze').toLowerCase();
         const normalizedSealedActionVerb = String(sealedActionVerb || '').trim().toLowerCase();
+        const isSqueezeContext = normalizedSealedActionVerb === squeezeActionTitle;
+        const sealedSellAllowed = isSqueezeContext
+            ? isSealedTier5SqueezeAllowed(creatureName)
+            : isSealedTier5SellAllowed(creatureName);
+        sealedToggle.checked = sealedSellAllowed;
+        let sealedInjectToggle = null;
         sealedToggleLabel.textContent = normalizedSealedActionVerb === squeezeActionTitle
             ? t('mods.autoseller.autoSqueezeSealedCreatures') || 'Auto-squeeze sealed creatures'
-            : t('mods.autoseller.autoSellSealedCreatures') || 'Auto-sell sealed creatures';
+            : t('mods.autoseller.autoSellSealedCreatures') || 'Sell or devour sealed creatures';
         sealedToggleLabel.style.fontSize = '12px';
         sealedToggleLabel.style.color = '#ffe066';
         sealedToggleLabel.style.cursor = 'pointer';
@@ -2999,9 +3612,69 @@
             sealedToggle.checked = !sealedToggle.checked;
         });
 
-        sealedToggleRow.appendChild(sealedToggle);
-        sealedToggleRow.appendChild(sealedToggleLabel);
-        menu.appendChild(sealedToggleRow);
+        if (isSqueezeContext) {
+            sealedToggleRow.appendChild(sealedToggle);
+            sealedToggleRow.appendChild(sealedToggleLabel);
+            menu.appendChild(sealedToggleRow);
+        }
+
+        let sealedSellDenyToggle = null;
+        if (!isSqueezeContext) {
+            const sealedSellDenyRow = document.createElement('div');
+            sealedSellDenyRow.style.display = 'flex';
+            sealedSellDenyRow.style.alignItems = 'center';
+            sealedSellDenyRow.style.justifyContent = 'flex-start';
+            sealedSellDenyRow.style.gap = '6px';
+            sealedSellDenyRow.style.marginBottom = '12px';
+
+            sealedSellDenyToggle = document.createElement('input');
+            sealedSellDenyToggle.type = 'checkbox';
+            sealedSellDenyToggle.checked = sealedSellBlocked;
+            sealedSellDenyToggle.style.cursor = 'pointer';
+
+            const sealedSellDenyLabel = document.createElement('label');
+            sealedSellDenyLabel.className = 'pixel-font-14';
+            sealedSellDenyLabel.textContent = t('mods.autoseller.dontAutoSellSealedCreature') || "Don't sell or devour sealed creature";
+            sealedSellDenyLabel.style.fontSize = '12px';
+            sealedSellDenyLabel.style.color = '#ffe066';
+            sealedSellDenyLabel.style.cursor = 'pointer';
+            sealedSellDenyLabel.addEventListener('click', () => {
+                sealedSellDenyToggle.checked = !sealedSellDenyToggle.checked;
+            });
+
+            sealedSellDenyRow.appendChild(sealedSellDenyToggle);
+            sealedSellDenyRow.appendChild(sealedSellDenyLabel);
+            menu.appendChild(sealedSellDenyRow);
+        }
+
+        if (!isSqueezeContext) {
+            const sealedInjectToggleRow = document.createElement('div');
+            sealedInjectToggleRow.style.display = 'flex';
+            sealedInjectToggleRow.style.alignItems = 'center';
+            sealedInjectToggleRow.style.justifyContent = 'flex-start';
+            sealedInjectToggleRow.style.gap = '6px';
+            sealedInjectToggleRow.style.marginBottom = '12px';
+
+            sealedInjectToggle = document.createElement('input');
+            sealedInjectToggle.type = 'checkbox';
+            sealedInjectToggle.checked = !sealedInjectAllowed;
+            sealedInjectToggle.style.cursor = 'pointer';
+
+            const sealedInjectToggleLabel = document.createElement('label');
+            sealedInjectToggleLabel.className = 'pixel-font-14';
+            sealedInjectToggleLabel.textContent = t('mods.autoseller.dontAutoInjectCreature') || "Don't auto-inject creature";
+            sealedInjectToggleLabel.style.fontSize = '12px';
+            sealedInjectToggleLabel.style.color = '#ffe066';
+            sealedInjectToggleLabel.style.cursor = 'pointer';
+
+            sealedInjectToggleLabel.addEventListener('click', () => {
+                sealedInjectToggle.checked = !sealedInjectToggle.checked;
+            });
+
+            sealedInjectToggleRow.appendChild(sealedInjectToggle);
+            sealedInjectToggleRow.appendChild(sealedInjectToggleLabel);
+            menu.appendChild(sealedInjectToggleRow);
+        }
         
         // Button container
         const buttonContainer = document.createElement('div');
@@ -3044,7 +3717,14 @@
             } else {
                 setCreatureKeepRange(creatureName, finalMin, finalMax);
             }
-            setSealedTier5SellAllowed(creatureName, sealedToggle.checked);
+            const finalSealedInjectAllowed = sealedInjectToggle ? !sealedInjectToggle.checked : sealedInjectAllowed;
+            const finalSealedSellAllowed = sealedToggle.checked;
+            if (isSqueezeContext) {
+                setSealedTier5SellAllowed(creatureName, finalSealedSellAllowed);
+            } else if (sealedSellDenyToggle) {
+                setSealedTier5SellBlocked(creatureName, sealedSellDenyToggle.checked);
+            }
+            setSealedTier5InjectAllowed(creatureName, finalSealedInjectAllowed);
             closeMenu();
         });
         
@@ -3073,7 +3753,40 @@
         clearButton.addEventListener('click', () => {
             clearCreatureKeepRange(creatureName);
             setSealedTier5SellAllowed(creatureName, false);
+            setSealedTier5SellBlocked(creatureName, false);
+            setSealedTier5InjectAllowed(creatureName, true);
             closeMenu();
+        });
+
+        // Reset button (resets fields to defaults without saving immediately)
+        const resetButton = document.createElement('button');
+        resetButton.className = 'pixel-font-14';
+        resetButton.textContent = t('mods.autoseller.reset') || 'Reset';
+        applyButtonStyles(resetButton, false, 'red', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        resetButton.addEventListener('mouseenter', () => {
+            resetButton.style.backgroundColor = '#2a2a2a';
+            resetButton.style.color = '#ff6b6b';
+            resetButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.RED;
+        });
+        resetButton.addEventListener('mouseleave', () => {
+            resetButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            resetButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            resetButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        resetButton.addEventListener('click', () => {
+            minInput.value = String(defaultRangeMin);
+            maxInput.value = String(defaultRangeMax);
+            if (isSqueezeContext) {
+                // Default: no per-creature sealed override in squeeze context.
+                sealedToggle.checked = false;
+            } else {
+                if (sealedSellDenyToggle) sealedSellDenyToggle.checked = false;
+                if (sealedInjectToggle) sealedInjectToggle.checked = false;
+            }
         });
         
         // Cancel button
@@ -3104,6 +3817,7 @@
         if (currentRange) {
             buttonContainer.appendChild(clearButton);
         }
+        buttonContainer.appendChild(resetButton);
         buttonContainer.appendChild(cancelButton);
         menu.appendChild(buttonContainer);
         
@@ -4799,11 +5513,15 @@
             if (type === 'sell' && settings.autoMode === 'autosell') {
                 // For autosell mode, monsters are already filtered by battle rewards matching
                 // FAILSAFE: Filter out any shiny creatures that might have slipped through
-                toSell = monsters.filter(m =>
-                    !stateManager.isProcessed(m.id) &&
-                    !isShinyCreature(m) &&
-                    !isSealedTierFiveCreature(m)
-                );
+                toSell = monsters.filter(m => {
+                    if (stateManager.isProcessed(m.id) || isShinyCreature(m)) return false;
+                    if (!isSealedTierFiveCreature(m)) return true;
+                    const creatureName = m?.metadata?.name || m?.name || getCreatureNameFromMonster(m);
+                    // Allow sealed sell when explicitly enabled for this creature.
+                    // If inject is also enabled, inject pass runs first and removes successful ones;
+                    // remaining sealed creatures then fall back to sell.
+                    return isSealedTier5SellAllowed(creatureName);
+                });
             } else if (type === 'squeeze' && settings.autosqueezeChecked) {
                 // For autosqueeze mode, monsters are already filtered by battle rewards matching
                 // FAILSAFE: Filter out any shiny creatures that might have slipped through
@@ -4824,7 +5542,15 @@
             }
             
             if (type === 'sell') {
+                const consumedByInjection = await autoInjectEligibleSealedCreatures(monsters);
+                if (consumedByInjection.size > 0) {
+                    toSell = toSell.filter(monster => !consumedByInjection.has(monster?.id));
+                }
+
                 if (!toSell.length) {
+                    if (consumedByInjection.size === 0) {
+                        return;
+                    }
                     return;
                 }
                 
@@ -5840,6 +6566,10 @@
         
         const isDisenchantingEverything = settings.autodusterChecked &&
             Array.isArray(settings.autodusterIgnoreList) && settings.autodusterIgnoreList.length === 0;
+
+        const isSealedRiskWarning =
+            settings.autoSellSealedCreaturesGlobal === true ||
+            settings.autoInjectSealedCreaturesGlobal === true;
         
         // Apply rainbow animation if all three conditions are met
         const shouldRainbow = isSellingEverything && isSqueezingEverything && isDisenchantingEverything;
@@ -5848,12 +6578,29 @@
             span.classList.contains('hidden') && span.classList.contains('sm:inline')
         );
         
-        if (shouldRainbow) {
+        if (isSealedRiskWarning) {
+            // Safety warning takes priority over rainbow/normal state coloring.
+            if (textSpan) {
+                textSpan.classList.remove('autoseller-rainbow-text');
+            }
+            btn.classList.remove('autoseller-rainbow-active');
+            btn.style.color = '#ff6b6b';
+            btn.style.textShadow = '0 0 4px rgba(255, 70, 70, 0.9), 0 0 8px rgba(255, 70, 70, 0.7)';
+            const icon = btn.querySelector('img');
+            if (icon) {
+                icon.style.filter = 'drop-shadow(0 0 4px rgba(255, 70, 70, 0.9))';
+            }
+        } else if (shouldRainbow) {
             // Add rainbow animation class
             if (textSpan) {
                 textSpan.classList.add('autoseller-rainbow-text');
             }
             btn.classList.add('autoseller-rainbow-active');
+            btn.style.textShadow = 'none';
+            const icon = btn.querySelector('img');
+            if (icon) {
+                icon.style.filter = '';
+            }
         } else {
             // Remove rainbow animation class
             if (textSpan) {
@@ -5861,6 +6608,11 @@
             }
             btn.classList.remove('autoseller-rainbow-active');
             btn.style.color = isActive ? '#22c55e' : '#ef4444';
+            btn.style.textShadow = 'none';
+            const icon = btn.querySelector('img');
+            if (icon) {
+                icon.style.filter = '';
+            }
         }
     }
 
@@ -6115,6 +6867,7 @@
         
         // Insert widget at the end of the container (after Enable Dragon Plant checkbox)
         autoplayContainer.appendChild(widget);
+
     }
 
 
@@ -6131,7 +6884,6 @@
         
         const currentValues = stateManager.getSessionStats();
         const settings = getSettings();
-        
         // Update autosell/autoplant stats (only if enabled)
         if (enabledTabs.autosell || enabledTabs.autoplant) {
             const isShowingDevoured = enabledTabs.autoplant;
@@ -6555,7 +7307,13 @@
         const filteredMonsters = matchedMonsters.filter(invMonster => {
             if (isShinyCreature(invMonster)) return false;
             const creatureName = getCreatureNameFromMonster(invMonster);
-            if (isSealedTierFiveCreature(invMonster) && !isSealedTier5SellAllowed(creatureName)) return false;
+            if (isSealedTierFiveCreature(invMonster)) {
+                const sealedSellAllowed = isSealedTier5SellAllowed(creatureName);
+                const sealedInjectAllowed = isSealedTier5InjectAllowed(creatureName);
+                // Keep sealed creatures in the pipeline when inject is enabled for them,
+                // so autoInjectEligibleSealedCreatures can process them before sell logic.
+                if (!sealedSellAllowed && !sealedInjectAllowed) return false;
+            }
             
             const totalGenes = calculateTotalGenes(invMonster);
             
@@ -6624,7 +7382,7 @@
                 return false;
             }
             const creatureName = getCreatureNameFromMonster(invMonster);
-            if (isSealedTierFiveCreature(invMonster) && !isSealedTier5SellAllowed(creatureName)) {
+            if (isSealedTierFiveCreature(invMonster) && !isSealedTier5SqueezeAllowed(creatureName)) {
                 return false;
             }
             if (hasDaycare && daycareMonsterIds.includes(invMonster.id)) {
@@ -6721,14 +7479,47 @@
                         if (rewardMonsterIds.size > 0) {
                             // Match inventory monsters ONLY by exact server ID match (NOT gameId)
                             const matchedMonsters = filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds);
+                            const sealedMatchedMonsters = matchedMonsters.filter(invMonster => isSealedTierFiveCreature(invMonster));
+                            const keepList = settings.autoplantIgnoreList || [];
+                            const sealedCandidateCount = matchedMonsters.filter(invMonster => {
+                                const creatureName = getCreatureNameFromMonster(invMonster);
+                                return isSealedTierFiveCreature(invMonster) &&
+                                    isSealedTier5InjectAllowed(creatureName) &&
+                                    !(creatureName && keepList.includes(creatureName));
+                            }).length;
+                            console.log(`[Autoseller][Inject] sealed candidates from rewards: ${sealedCandidateCount}`);
+                            console.log(`[Autoseller][Inject] mode=${settings.autoMode || 'off'} matchedMonsters=${matchedMonsters.length}`);
+                            sealedMatchedMonsters.forEach(invMonster => {
+                                const stats = getMonsterGeneStats(invMonster);
+                                const invName = getCreatureNameFromMonster(invMonster) || invMonster?.name || `gameId:${invMonster?.gameId ?? 'unknown'}`;
+                                const totalGenes = stats.hp + stats.ad + stats.ap + stats.armor + stats.magicResist;
+                                console.log(
+                                    `[Autoseller][Inject][InventoryStats] name=${invName} id=${invMonster?.id ?? 'unknown'} ` +
+                                    `tier=${invMonster?.tier ?? invMonster?.metadata?.tier ?? 'unknown'} genes=${totalGenes} ` +
+                                    `(hp=${stats.hp} ad=${stats.ad} ap=${stats.ap} armor=${stats.armor} mr=${stats.magicResist})`
+                                );
+                            });
                             
                             if (matchedMonsters.length > 0) {
+                                // Run inject pass directly when autosell mode is OFF but inject candidates exist.
+                                // This keeps auto-inject usable as a standalone sealed action.
+                                if (settings.autoMode !== 'autosell' && sealedCandidateCount > 0) {
+                                    console.log('[Autoseller][Inject] Running standalone inject pass (autosell mode is OFF)');
+                                    await autoInjectEligibleSealedCreatures(matchedMonsters);
+                                }
+
                                 // Process autosell
                                 if (settings.autoMode === 'autosell') {
                                     const monstersToSell = filterMonstersForAutosell(matchedMonsters, settings);
-                                    if (monstersToSell.length > 0) {
+                                    const injectCandidates = matchedMonsters.filter(invMonster => {
+                                        const creatureName = getCreatureNameFromMonster(invMonster);
+                                        return isSealedTierFiveCreature(invMonster) &&
+                                            isSealedTier5InjectAllowed(creatureName) &&
+                                            !(creatureName && keepList.includes(creatureName));
+                                    });
+                                    if (monstersToSell.length > 0 || injectCandidates.length > 0) {
                                         console.log('[Autoseller] Processing autosell for', monstersToSell.length, 'monsters');
-                                        await processEligibleMonsters(monstersToSell, 'sell');
+                                        await processEligibleMonsters(matchedMonsters, 'sell');
                                     }
                                 }
                                 

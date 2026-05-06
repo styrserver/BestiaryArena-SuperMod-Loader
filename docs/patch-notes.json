@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "3.7.12",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Added sealed auto-inject (inventory.useDoctor) with same-creature tier 5 -> tier 6 matching, inject-before-sell priority, global sealed sell toggle, per-creature \"Don't auto-inject\" rule, warning tooltip, and success toasts with gene gain details."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Added a new Mods hotkey to toggle Turbo Mode (default: Y)."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Hardened leaderboard section DOM updates during autoplay with connectivity/ownership guards to prevent removeChild client-side exceptions."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Fixed per-creature task map override readback in the right-click context menu so saved map selections persist after reopening."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Fixed hotkey conflicts so Bestiary/Arsenal cycle no longer triggers Start/Skip."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Start/Skip hotkey now also clicks Stop when available (Sandbox)."
+        }
+      ]
+    },
+    {
       "version": "3.7.11",
       "changes": [
         {

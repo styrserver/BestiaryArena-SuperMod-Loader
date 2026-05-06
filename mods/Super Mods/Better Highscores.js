@@ -855,13 +855,13 @@
 
   // Function to update existing leaderboard display with new data (no flickering)
   function updateLeaderboardData(tickData, rankData, floorData) {
-    if (!leaderboardContainer) {
+    if (!leaderboardContainer || !leaderboardContainer.isConnected) {
       return false; // No container to update
     }
     
     const contentDiv = leaderboardContainer._contentDiv || 
                        leaderboardContainer.querySelector('div[style*="position: relative"]');
-    if (!contentDiv) {
+    if (!contentDiv || !contentDiv.isConnected) {
       return false; // Can't find content container
     }
     
@@ -884,9 +884,18 @@
     
     // Helper to update a section
     const updateSection = (section, data, config, maxValue, currentValue, tickDataForFallback) => {
+      if (!section || !section.isConnected) {
+        return;
+      }
+
       // Clear existing content except structure markers
+      // Guard against concurrent DOM ownership changes (Next/React + mod updates)
       while (section.firstChild) {
-        section.removeChild(section.firstChild);
+        const child = section.firstChild;
+        if (!child || child.parentNode !== section) {
+          break;
+        }
+        section.removeChild(child);
       }
       
       if (data && data.length > 0) {

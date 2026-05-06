@@ -63,6 +63,7 @@ const defaultConfig = {
   hotkeyResetCurrentMapDefault: 'r',
   hotkeyCycleBattleStyle: 'v',
   hotkeyStartOrSkip: 'z',
+  hotkeyToggleTurboMode: 'y',
   hotkeySetupSlot1: 'f1',
   hotkeySetupSlot2: 'f2',
   hotkeySetupSlot3: 'f3',
@@ -125,12 +126,14 @@ if (config.hotkeyCycleBestiaryEquipmentTab === undefined) config.hotkeyCycleBest
 if (config.hotkeyResetCurrentMapDefault === undefined) config.hotkeyResetCurrentMapDefault = 'r';
 if (config.hotkeyCycleBattleStyle === undefined) config.hotkeyCycleBattleStyle = 'v';
 if (config.hotkeyStartOrSkip === undefined) config.hotkeyStartOrSkip = 'z';
+if (config.hotkeyToggleTurboMode === undefined) config.hotkeyToggleTurboMode = 'y';
 config.hotkeyFloorUp = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
 config.hotkeyFloorDown = sanitizeStoredHotkey(config.hotkeyFloorDown, '');
 config.hotkeyCycleBestiaryEquipmentTab = sanitizeStoredHotkey(config.hotkeyCycleBestiaryEquipmentTab, '');
 config.hotkeyResetCurrentMapDefault = sanitizeStoredHotkey(config.hotkeyResetCurrentMapDefault, '');
 config.hotkeyCycleBattleStyle = sanitizeStoredHotkey(config.hotkeyCycleBattleStyle, '');
 config.hotkeyStartOrSkip = sanitizeStoredHotkey(config.hotkeyStartOrSkip, '');
+config.hotkeyToggleTurboMode = sanitizeStoredHotkey(config.hotkeyToggleTurboMode, '');
 for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
   const setupKey = `hotkeySetupSlot${setupSlot}`;
   if (config[setupKey] === undefined) config[setupKey] = `f${setupSlot}`;
@@ -838,12 +841,13 @@ function activateTabButtonFromHotkey(button) {
   if (button.getAttribute('aria-selected') === 'true') return;
 
   // Keyboard fallback for tab widgets that only switch on key interaction.
-  button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-  button.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, cancelable: true }));
+  // Keep events non-bubbling so global game hotkeys don't react to synthetic keys.
+  button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: false, cancelable: true }));
+  button.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: false, cancelable: true }));
   if (button.getAttribute('aria-selected') === 'true') return;
 
-  button.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true }));
-  button.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true, cancelable: true }));
+  button.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: false, cancelable: true }));
+  button.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: false, cancelable: true }));
 }
 
 const BATTLE_MODE_CYCLE_ORDER = ['manual', 'autoplay', 'sandbox'];
@@ -907,7 +911,35 @@ function findBoardSkipButtonFromHotkey() {
   return null;
 }
 
+function findBoardStopButtonFromHotkey() {
+  const stopTexts = ['stop', 'parar'];
+  const candidates = document.querySelectorAll('button[data-state="closed"]');
+  const isBoardStopButton = (button) => {
+    if (!button || button.disabled) return false;
+    const text = (button.textContent || '').trim().toLowerCase();
+    if (!stopTexts.some((t) => text === t || text.includes(t))) return false;
+    let node = button.parentElement;
+    while (node) {
+      if (node.classList && node.classList.contains('sm:order-3')) return true;
+      node = node.parentElement;
+    }
+    return false;
+  };
+  for (const button of candidates) {
+    if (isBoardStopButton(button)) return button;
+  }
+  for (const button of document.querySelectorAll('button')) {
+    if (isBoardStopButton(button)) return button;
+  }
+  return null;
+}
+
 function triggerStartOrSkipFromHotkey() {
+  const stopButton = findBoardStopButtonFromHotkey();
+  if (stopButton) {
+    stopButton.click();
+    return;
+  }
   const skipButton = findBoardSkipButtonFromHotkey();
   if (skipButton) {
     skipButton.click();
@@ -919,6 +951,35 @@ function triggerStartOrSkipFromHotkey() {
     return;
   }
   console.warn('[Mod Settings] Start/Skip hotkey pressed but no matching board button was found');
+}
+
+function triggerToggleTurboModeFromHotkey() {
+  const turboButton = document.getElementById('turbo-mod-button');
+  if (turboButton && typeof turboButton.click === 'function' && !turboButton.disabled) {
+    turboButton.click();
+    return;
+  }
+
+  const turboModName = 'Official Mods/Turbo Mode.js';
+  const turboMod = Array.isArray(window.localMods)
+    ? window.localMods.find((mod) => mod && mod.name === turboModName)
+    : null;
+  if (!turboMod) {
+    console.warn('[Mod Settings] Turbo Mode toggle hotkey: mod not found in localMods');
+    return;
+  }
+  const nextEnabledState = !turboMod.enabled;
+  turboMod.enabled = nextEnabledState;
+  const messageId = `toggleTurboMode_${Date.now()}_${Math.random()}`;
+  window.postMessage({
+    from: 'BESTIARY_CLIENT',
+    id: messageId,
+    message: {
+      action: 'toggleLocalMod',
+      name: turboModName,
+      enabled: nextEnabledState
+    }
+  }, '*');
 }
 
 /**
@@ -1038,6 +1099,9 @@ const NAV_HOTKEY_UI_ROWS = NAV_HOTKEY_ENTRIES.map(({ configKey, captureId, reset
 
 function handleGlobalHotkeys(event) {
   if (!event || event.repeat) return;
+  // Ignore synthetic keyboard events dispatched by mods/scripts.
+  // This prevents tab-activation fallback key events from re-triggering global hotkeys.
+  if (event.isTrusted === false) return;
   if (!config.enableHotkeys) return;
   if (hotkeysState.hotkeyCaptureMode !== null) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -1050,6 +1114,7 @@ function handleGlobalHotkeys(event) {
     const boundId = sanitizeStoredHotkey(config[configKey], '');
     if (boundId && pressedId === boundId) {
       event.preventDefault();
+      event.stopPropagation();
       open();
       return;
     }
@@ -1058,43 +1123,57 @@ function handleGlobalHotkeys(event) {
   if (returnMapId && pressedId === returnMapId) {
     if (!config.showLastVisitedMapButton) return;
     event.preventDefault();
+    event.stopPropagation();
     triggerReturnToMapFromHotkey();
     return;
   }
   const floorUpId = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
   if (floorUpId && pressedId === floorUpId) {
     event.preventDefault();
+    event.stopPropagation();
     changeFloorFromHotkey(1);
     return;
   }
   const floorDownId = sanitizeStoredHotkey(config.hotkeyFloorDown, '');
   if (floorDownId && pressedId === floorDownId) {
     event.preventDefault();
+    event.stopPropagation();
     changeFloorFromHotkey(-1);
     return;
   }
   const cycleBestiaryEquipmentId = sanitizeStoredHotkey(config.hotkeyCycleBestiaryEquipmentTab, '');
   if (cycleBestiaryEquipmentId && pressedId === cycleBestiaryEquipmentId) {
     event.preventDefault();
+    event.stopPropagation();
     cycleBestiaryEquipmentTabFromHotkey();
     return;
   }
   const resetCurrentMapId = sanitizeStoredHotkey(config.hotkeyResetCurrentMapDefault, '');
   if (resetCurrentMapId && pressedId === resetCurrentMapId) {
     event.preventDefault();
+    event.stopPropagation();
     resetCurrentMapToDefaultFromHotkey();
     return;
   }
   const cycleBattleStyleId = sanitizeStoredHotkey(config.hotkeyCycleBattleStyle, '');
   if (cycleBattleStyleId && pressedId === cycleBattleStyleId) {
     event.preventDefault();
+    event.stopPropagation();
     cycleBattleStyleFromHotkey();
     return;
   }
   const startOrSkipId = sanitizeStoredHotkey(config.hotkeyStartOrSkip, '');
   if (startOrSkipId && pressedId === startOrSkipId) {
     event.preventDefault();
+    event.stopPropagation();
     triggerStartOrSkipFromHotkey();
+    return;
+  }
+  const toggleTurboModeId = sanitizeStoredHotkey(config.hotkeyToggleTurboMode, '');
+  if (toggleTurboModeId && pressedId === toggleTurboModeId) {
+    event.preventDefault();
+    event.stopPropagation();
+    triggerToggleTurboModeFromHotkey();
     return;
   }
   for (let i = 0; i < 8; i++) {
@@ -1102,6 +1181,7 @@ function handleGlobalHotkeys(event) {
     const setupKeyId = sanitizeStoredHotkey(config[setupCfgKey], '');
     if (setupKeyId && pressedId === setupKeyId) {
       event.preventDefault();
+      event.stopPropagation();
       clickBetterSetupSlotFromHotkey(i);
       return;
     }
@@ -1174,6 +1254,12 @@ const MODS_HOTKEY_UI_ROWS = [
     configKey: 'hotkeyStartOrSkip',
     captureId: 'hotkey-start-or-skip-capture-btn',
     resetId: 'hotkey-start-or-skip-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyToggleTurboMode',
+    captureId: 'hotkey-toggle-turbo-mode-capture-btn',
+    resetId: 'hotkey-toggle-turbo-mode-reset-btn',
     displayFallback: ''
   }
 ];
@@ -5334,6 +5420,15 @@ function showSettingsModal() {
                   ${t('mods.betterUI.hotkeyResetBinding')}
                 </button>
               </div>
+              <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+                <span style="${hotkeyLabelStyle}">Toggle Turbo Mode</span>
+                <button type="button" id="hotkey-toggle-turbo-mode-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                  Y
+                </button>
+                <button type="button" id="hotkey-toggle-turbo-mode-reset-btn" style="pointer-events: auto;">
+                  ${t('mods.betterUI.hotkeyResetBinding')}
+                </button>
+              </div>
             </div>
           </div>
           <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
@@ -6009,6 +6104,13 @@ function showSettingsModal() {
         content.querySelector('#hotkey-start-or-skip-reset-btn'),
         'hotkeyStartOrSkip',
         'z',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-toggle-turbo-mode-capture-btn'),
+        content.querySelector('#hotkey-toggle-turbo-mode-reset-btn'),
+        'hotkeyToggleTurboMode',
+        'y',
         ''
       );
       for (let slot = 1; slot <= 8; slot++) {
