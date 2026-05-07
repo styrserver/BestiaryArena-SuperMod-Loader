@@ -1598,6 +1598,8 @@
                 const gainsForToast = gains.length > 0
                     ? gains
                     : inferredGains;
+                const beforeTotalGenes = targetBeforeStats.hp + targetBeforeStats.ad + targetBeforeStats.ap + targetBeforeStats.armor + targetBeforeStats.magicResist;
+                const afterTotalGenes = targetAfterStats.hp + targetAfterStats.ad + targetAfterStats.ap + targetAfterStats.armor + targetAfterStats.magicResist;
                 if (gains.length === 0) {
                     console.log(
                         `[Autoseller][Inject] No target stat delta detected yet for ${awakenedTargetName} (${awakenedTarget.id}) ` +
@@ -1612,16 +1614,47 @@
                 toastContent.style.gap = '4px';
 
                 const introText = document.createElement('span');
-                introText.textContent = `Injected ${creatureName || 'creature'} into ${awakenedTargetName} (${goldDiff}g)`;
+                introText.textContent = `Injected ${creatureName || 'creature'}`;
                 toastContent.appendChild(introText);
 
-                if (gainsForToast.length > 0) {
-                    const divider = document.createElement('span');
-                    divider.textContent = '|';
-                    divider.style.margin = '0 2px';
-                    toastContent.appendChild(divider);
+                const numericGoldDiff = Number(goldDiff);
+                const hasGoldDiff = Number.isFinite(numericGoldDiff) && numericGoldDiff !== 0;
+                const hasTotalGenesTransition = Number.isFinite(beforeTotalGenes) && Number.isFinite(afterTotalGenes);
+                if (hasGoldDiff || gainsForToast.length > 0 || hasTotalGenesTransition) {
+                    const spacer = document.createElement('span');
+                    spacer.textContent = ' ';
+                    toastContent.appendChild(spacer);
 
-                    gainsForToast.forEach((gain, index) => {
+                    let badgeIndex = 0;
+                    const totalBadges = gainsForToast.length + (hasGoldDiff ? 1 : 0) + (hasTotalGenesTransition ? 1 : 0);
+                    if (hasGoldDiff) {
+                        const goldBadge = document.createElement('span');
+                        goldBadge.style.display = 'inline-flex';
+                        goldBadge.style.alignItems = 'center';
+                        goldBadge.style.gap = '3px';
+
+                        const goldValue = document.createElement('span');
+                        goldValue.textContent = numericGoldDiff > 0 ? `+${numericGoldDiff}` : `${numericGoldDiff}`;
+                        goldBadge.appendChild(goldValue);
+
+                        const goldIcon = document.createElement('img');
+                        goldIcon.src = 'https://bestiaryarena.com/assets/icons/goldpile.png';
+                        goldIcon.alt = 'Gold';
+                        goldIcon.style.width = '12px';
+                        goldIcon.style.height = '12px';
+                        goldIcon.style.verticalAlign = 'middle';
+                        goldBadge.appendChild(goldIcon);
+
+                        toastContent.appendChild(goldBadge);
+                        badgeIndex += 1;
+                        if (badgeIndex < totalBadges) {
+                            const comma = document.createElement('span');
+                            comma.textContent = ',';
+                            toastContent.appendChild(comma);
+                        }
+                    }
+
+                    gainsForToast.forEach((gain) => {
                         const gainStat = gain.key;
                         const gainBadge = document.createElement('span');
                         gainBadge.style.display = 'inline-flex';
@@ -1641,13 +1674,19 @@
                         gainBadge.appendChild(statIcon);
 
                         toastContent.appendChild(gainBadge);
-
-                        if (index < gainsForToast.length - 1) {
+                        badgeIndex += 1;
+                        if (badgeIndex < totalBadges) {
                             const comma = document.createElement('span');
                             comma.textContent = ',';
                             toastContent.appendChild(comma);
                         }
                     });
+
+                    if (hasTotalGenesTransition) {
+                        const totalGenesBadge = document.createElement('span');
+                        totalGenesBadge.textContent = `${beforeTotalGenes}% -> ${afterTotalGenes}%`;
+                        toastContent.appendChild(totalGenesBadge);
+                    }
                 }
 
                 showAutosellerToast(toastContent, 5000);

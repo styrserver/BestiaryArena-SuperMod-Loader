@@ -383,13 +383,21 @@
 				const playerTeamConfig = config.board.map((piece, index) => {
 					const monster = piece.monster;
 					const isAwakened = monster.awakened || monster.level > 50;
+					const monsterName = String(monster.name ?? '').trim().toLowerCase();
+					const monsterGameId = monsterNamesToGameIds.get(monsterName);
+					if (!monsterGameId) {
+						console.warn(`Unknown monster name: ${monster.name}`);
+					}
 					
 					const pieceConfig = {
 						type: 'custom',
 						nickname: null,
 						tileIndex: piece.tile,
-						gameId: monsterNamesToGameIds.get(monster.name),
+						gameId: monsterGameId,
 						tier: isAwakened ? 6 : 4,
+						starTier: isAwakened ? 6 : 4,
+						awakened: isAwakened,
+						awaken: isAwakened,
 						level: monster.level ?? 50,
 						genes: {
 							hp: monster.hp,

@@ -8,10 +8,11 @@ console.log('[Manual Runner] initializing...');
 // Configuration with defaults
 const defaultConfig = {
   hideGameBoard: false,
-  stopCondition: 'max', // 'max' = Maximum Rank, 'any' = Any Victory, 'maxFloor' = Maximum Floor, 'endless' = never auto-stop (manual stop only)
+  stopCondition: 'max', // 'max' = Maximum Rank, 'any' = Any Victory, 'maxFloor' = Maximum Floor
   enableAutoRefillStamina: false,
   enableAutoSellCreatures: false,
   stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
+  stopAfterRounds: 0, // Stop after X rounds; 0 = endless (manual stop only)
   maxFloor: 10, // Maximum floor to reach (0-15)
   /** When true, auto-click Skip when it shows a stamina cost. Default off; normal free skips still auto-click regardless. */
   enableStaminaSkip: false
@@ -31,7 +32,12 @@ function loadConfig(options = {}) {
       if (!silent) {
         console.log('[Manual Runner] Loaded config from localStorage:', parsed);
       }
-      return Object.assign({}, defaultConfig, parsed);
+      const merged = Object.assign({}, defaultConfig, parsed);
+      const validStopConditions = new Set(['any', 'max', 'maxFloor', 'rounds']);
+      if (!validStopConditions.has(merged.stopCondition)) {
+        merged.stopCondition = defaultConfig.stopCondition;
+      }
+      return merged;
     }
   } catch (error) {
     console.error('[Manual Runner] Error loading config from localStorage:', error);
@@ -58,6 +64,7 @@ function logConfigSummary(prefix) {
   console.log(`[Manual Runner] ${prefix}`, {
     stop: config.stopCondition,
     ticksMax: config.stopWhenTicksReached,
+    roundsMax: config.stopAfterRounds,
     maxFloor: config.maxFloor,
     refill: config.enableAutoRefillStamina,
     autoSell: config.enableAutoSellCreatures,
@@ -1879,6 +1886,12 @@ function formatWinratePercentWL(wins, losses) {
   return `${pct}% (${w}/${l})`;
 }
 
+function formatRoundsProgress(roundsPlayed, roundsLimit) {
+  const played = Math.max(0, Number(roundsPlayed) || 0);
+  const limit = Math.max(0, Number(roundsLimit) || 0);
+  return limit > 0 ? `${played}/${limit}` : `${played}/∞`;
+}
+
 // Main function to run until victory
 async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
   const thisAnalysisId = analysisState.start();
@@ -2040,6 +2053,23 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         break;
       }
 
+      if (config.stopCondition === 'rounds' && config.stopAfterRounds > 0 && attemptCount >= config.stopAfterRounds) {
+        const totalTime = performance.now() - startTime;
+        console.log(`[Manual Runner] ✓ Stop: reached round limit ${attemptCount}/${config.stopAfterRounds} — ${formatMilliseconds(totalTime)}`);
+        return {
+          success: true,
+          attempts: attemptCount,
+          finalResult: {
+            ...result,
+            completed: result.completed,
+            victory: isVictory,
+            stoppedByRoundLimit: true
+          },
+          totalTimeMs: totalTime,
+          allAttempts
+        };
+      }
+
       if (statusCallback) {
         statusCallback({
           attempts: attemptCount,
@@ -2107,7 +2137,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       const victoryConditionMet =
         isVictory &&
-        config.stopCondition !== 'endless' &&
+        config.stopCondition !== 'rounds' &&
         (config.stopCondition === 'any' ||
           targetRankPoints == null ||
           (typeof result.rankPoints === 'number' && result.rankPoints >= targetRankPoints));
@@ -2425,14 +2455,13 @@ function createConfigPanel() {
   const optMaxFloor = document.createElement('option');
   optMaxFloor.value = 'maxFloor';
   optMaxFloor.textContent = t('mods.manualRunner.stopWhenMaxFloor') || 'Maximum Floor';
-  const optEndless = document.createElement('option');
-  optEndless.value = 'endless';
-  optEndless.textContent = t('mods.manualRunner.stopWhenEndless') || 'Endless run';
-  optEndless.style.color = '#E06C75';
+  const optRounds = document.createElement('option');
+  optRounds.value = 'rounds';
+  optRounds.textContent = t('mods.manualRunner.stopWhenRounds') || 'After X rounds';
   stopSelect.appendChild(optAny);
   stopSelect.appendChild(optMax);
   stopSelect.appendChild(optMaxFloor);
-  stopSelect.appendChild(optEndless);
+  stopSelect.appendChild(optRounds);
   stopSelect.value = config.stopCondition || 'max';
   stopContainer.appendChild(stopLabel);
   stopContainer.appendChild(stopSelect);
@@ -2443,7 +2472,7 @@ function createConfigPanel() {
   stopWhenTicksContainer.id = `${CONFIG_PANEL_ID}-stop-when-ticks-container`;
   stopWhenTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
   stopWhenTicksContainer.style.display =
-    config.stopCondition === 'maxFloor' || config.stopCondition === 'endless' ? 'none' : 'flex';
+    (config.stopCondition === 'maxFloor' || config.stopCondition === 'rounds') ? 'none' : 'flex';
   
   const stopWhenTicksLabel = document.createElement('label');
   stopWhenTicksLabel.textContent = t('mods.manualRunner.stopWhenTicksReachedLabel');
@@ -2456,7 +2485,7 @@ function createConfigPanel() {
   stopWhenTicksInput.value = config.stopWhenTicksReached || 0;
   stopWhenTicksInput.style.cssText = 'width: 80px; text-align: center; background-color: #333; color: #fff; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;';
   stopWhenTicksInput.disabled =
-    config.stopCondition === 'maxFloor' || config.stopCondition === 'endless';
+    (config.stopCondition === 'maxFloor' || config.stopCondition === 'rounds');
   
   stopWhenTicksContainer.appendChild(stopWhenTicksLabel);
   stopWhenTicksContainer.appendChild(stopWhenTicksInput);
@@ -2483,13 +2512,35 @@ function createConfigPanel() {
   maxFloorContainer.appendChild(maxFloorInput);
   content.appendChild(maxFloorContainer);
 
+  // Stop after rounds input (0 = endless)
+  const roundsContainer = document.createElement('div');
+  roundsContainer.id = `${CONFIG_PANEL_ID}-rounds-container`;
+  roundsContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+  roundsContainer.style.display = config.stopCondition === 'rounds' ? 'flex' : 'none';
+
+  const roundsLabel = document.createElement('label');
+  roundsLabel.textContent = t('mods.manualRunner.stopAfterRoundsLabel') || 'Stop after rounds (0 = endless):';
+
+  const roundsInput = document.createElement('input');
+  roundsInput.type = 'number';
+  roundsInput.id = `${CONFIG_PANEL_ID}-rounds-input`;
+  roundsInput.min = '0';
+  roundsInput.max = '9999';
+  roundsInput.value = config.stopAfterRounds || 0;
+  roundsInput.style.cssText = 'width: 80px; text-align: center; background-color: #333; color: #fff; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;';
+
+  roundsContainer.appendChild(roundsLabel);
+  roundsContainer.appendChild(roundsInput);
+  content.appendChild(roundsContainer);
+
   // Show/hide max floor input and stop when ticks input based on stop condition selection
   stopSelect.addEventListener('change', () => {
     const isMaxFloor = stopSelect.value === 'maxFloor';
-    const isEndless = stopSelect.value === 'endless';
+    const isRounds = stopSelect.value === 'rounds';
     maxFloorContainer.style.display = isMaxFloor ? 'flex' : 'none';
-    stopWhenTicksContainer.style.display = isMaxFloor || isEndless ? 'none' : 'flex';
-    stopWhenTicksInput.disabled = isMaxFloor || isEndless;
+    roundsContainer.style.display = isRounds ? 'flex' : 'none';
+    stopWhenTicksContainer.style.display = (isMaxFloor || isRounds) ? 'none' : 'flex';
+    stopWhenTicksInput.disabled = (isMaxFloor || isRounds);
   });
 
   // Hide game board checkbox
@@ -2618,10 +2669,13 @@ function createConfigPanel() {
         config.enableAutoSellCreatures = sellInput.checked;
         config.enableStaminaSkip = staminaSkipInput.checked;
         config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
+        config.stopAfterRounds = parseInt(roundsInput.value, 10) || 0;
         config.maxFloor = parseInt(maxFloorInput.value, 10) || 10;
         // Clamp maxFloor to valid range
         if (config.maxFloor < 0) config.maxFloor = 0;
         if (config.maxFloor > 15) config.maxFloor = 15;
+        if (config.stopAfterRounds < 0) config.stopAfterRounds = 0;
+        if (config.stopAfterRounds > 9999) config.stopAfterRounds = 9999;
         saveConfig({ silent: true });
         api.service.updateScriptConfig(context.hash, {
           hideGameBoard: config.hideGameBoard,
@@ -2630,6 +2684,7 @@ function createConfigPanel() {
           enableAutoSellCreatures: config.enableAutoSellCreatures,
           enableStaminaSkip: config.enableStaminaSkip,
           stopWhenTicksReached: config.stopWhenTicksReached,
+          stopAfterRounds: config.stopAfterRounds,
           maxFloor: config.maxFloor
         });
         logConfigSummary('Start');
@@ -2659,10 +2714,13 @@ function createConfigPanel() {
         config.enableAutoSellCreatures = sellInput.checked;
         config.enableStaminaSkip = staminaSkipInput.checked;
         config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
+        config.stopAfterRounds = parseInt(roundsInput.value, 10) || 0;
         config.maxFloor = parseInt(maxFloorInput.value, 10) || 10;
         // Clamp maxFloor to valid range
         if (config.maxFloor < 0) config.maxFloor = 0;
         if (config.maxFloor > 15) config.maxFloor = 15;
+        if (config.stopAfterRounds < 0) config.stopAfterRounds = 0;
+        if (config.stopAfterRounds > 9999) config.stopAfterRounds = 9999;
         saveConfig({ silent: true });
         api.service.updateScriptConfig(context.hash, {
           hideGameBoard: config.hideGameBoard,
@@ -2671,6 +2729,7 @@ function createConfigPanel() {
           enableAutoSellCreatures: config.enableAutoSellCreatures,
           enableStaminaSkip: config.enableStaminaSkip,
           stopWhenTicksReached: config.stopWhenTicksReached,
+          stopAfterRounds: config.stopAfterRounds,
           maxFloor: config.maxFloor
         });
         logConfigSummary('Config saved');
@@ -2754,27 +2813,23 @@ function showRunningAnalysisModal(
     return value;
   };
   
-  const endlessText = t('mods.manualRunner.endlessRunLabel') || 'Endless run';
   const initialTargetFloor = maxFloor || config.maxFloor || 10;
   const initialCurrentFloor = currentFloor != null ? currentFloor : initialTargetFloor;
-  const targetValue = createLiveRow(
-    config.stopCondition === 'maxFloor' ? 'Floor' : 'Target',
-    config.stopCondition === 'endless'
-      ? endlessText
-      : config.stopCondition === 'maxFloor' && maxFloor != null
+  if (config.stopCondition !== 'rounds') {
+    createLiveRow(
+      config.stopCondition === 'maxFloor' ? 'Floor' : 'Target',
+      config.stopCondition === 'maxFloor' && maxFloor != null
         ? `${initialCurrentFloor}/${initialTargetFloor}`
         : targetRankPoints != null
           ? String(targetRankPoints)
           : 'Victory',
-    'manual-runner-target'
-  );
-  if (config.stopCondition === 'endless') {
-    targetValue.classList.add('manual-runner-live-value-endless');
+      'manual-runner-target'
+    );
   }
 
   createLiveRow(
-    'Attempts',
-    String(attempts),
+    t('mods.manualRunner.roundsLabel') || 'Rounds',
+    formatRoundsProgress(attempts, config.stopCondition === 'rounds' ? config.stopAfterRounds : 0),
     'manual-runner-progress'
   );
 
@@ -3422,7 +3477,7 @@ async function runAnalysis() {
     }
     // Compute target S+ rank points based on current setup and stop condition
     let targetRankPoints = null;
-    if (config.stopCondition !== 'any' && config.stopCondition !== 'endless') {
+    if (config.stopCondition === 'max') {
       const maxTeamSize = getMaxTeamSize(null);
       const playerTeamSize = getPlayerTeamSize();
       targetRankPoints = Math.max(0, (2 * maxTeamSize) - playerTeamSize);
@@ -3455,7 +3510,10 @@ async function runAnalysis() {
     activeRunningModal = runningModal;
     
     const results = await runUntilVictory(targetRankPoints, (status) => {
-      updateTextContent('manual-runner-progress', String(status.attempts || 0));
+      updateTextContent(
+        'manual-runner-progress',
+        formatRoundsProgress(status.attempts || 0, config.stopCondition === 'rounds' ? config.stopAfterRounds : 0)
+      );
 
       if (config.stopCondition === 'maxFloor') {
         const targetFloor = config.maxFloor || 10;
@@ -3464,14 +3522,6 @@ async function runAnalysis() {
         }
         const currentFloor = lastDisplayedFloor;
         updateTextContent('manual-runner-target', `${currentFloor}/${targetFloor}`);
-      } else if (config.stopCondition === 'endless') {
-        const el = document.getElementById('manual-runner-target');
-        const endlessLabel = t('mods.manualRunner.endlessRunLabel') || 'Endless run';
-        if (el) {
-          el.textContent = endlessLabel;
-          el.style.color = '#E06C75';
-          el.style.fontWeight = '500';
-        }
       } else if (typeof targetRankPoints === 'number') {
         updateTextContent('manual-runner-target', String(targetRankPoints));
       } else {

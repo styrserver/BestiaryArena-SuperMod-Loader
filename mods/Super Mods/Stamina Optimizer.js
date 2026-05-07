@@ -368,6 +368,45 @@ async function findSetupButton(setupLabel, maxAttempts = 5) {
     return null;
 }
 
+// Find auto-setup button with retry logic
+async function findAutoSetupButton(maxAttempts = 5) {
+    const autoSetupTexts = [
+        t('mods.betterTasker.autoSetup'),
+        t('mods.betterBoostedMaps.autoSetup'),
+        t('mods.raidHunter.autoSetup'),
+        'Auto-setup',
+        'Auto setup',
+        'Autosetup',
+        'Autoconfigurar'
+    ]
+        .filter(text => typeof text === 'string' && text.trim() && !text.includes('.'))
+        .map(text => text.trim().toLowerCase());
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const setupButtons = document.querySelectorAll('button');
+        console.log(`[Stamina Optimizer] Attempt ${attempt}/${maxAttempts} - Searching for Auto-setup in ${setupButtons.length} buttons`);
+
+        for (const button of setupButtons) {
+            const buttonText = button.textContent.trim();
+            const normalizedText = buttonText.toLowerCase();
+            const hasAutoSetupText = autoSetupTexts.some(candidate => normalizedText.includes(candidate));
+            const hasWandIcon = !!button.querySelector('svg.lucide-wand-sparkles');
+
+            if (hasAutoSetupText || (hasWandIcon && normalizedText.includes('auto'))) {
+                console.log(`[Stamina Optimizer] ✅ Found auto-setup button: "${buttonText}"`);
+                return button;
+            }
+        }
+
+        if (attempt < maxAttempts) {
+            await sleep(200);
+        }
+    }
+
+    console.log(`[Stamina Optimizer] ❌ Auto-setup button not found after ${maxAttempts} attempts`);
+    return null;
+}
+
 // Load a setup from Better Setups
 async function loadSetup(setupLabel, mapId) {
     try {
@@ -412,6 +451,26 @@ async function loadSetup(setupLabel, mapId) {
         }
     } catch (error) {
         console.error('[Stamina Optimizer] Error loading setup:', error);
+        return false;
+    }
+}
+
+// Load map auto-setup
+async function loadAutoSetup() {
+    try {
+        console.log('[Stamina Optimizer] Loading map auto-setup');
+        const autoSetupButton = await findAutoSetupButton();
+
+        if (!autoSetupButton) {
+            return false;
+        }
+
+        autoSetupButton.click();
+        console.log('[Stamina Optimizer] Auto-setup button clicked, waiting for load...');
+        await sleep(500);
+        return true;
+    } catch (error) {
+        console.error('[Stamina Optimizer] Error loading auto-setup:', error);
         return false;
     }
 }
@@ -1058,10 +1117,18 @@ async function startSpecificMapPlay() {
         } else if (setupLabel) {
             console.log(`[Stamina Optimizer] No setup found for ${setupLabel}-${mapId}, continuing without setup`);
         } else {
-            // No setup specified, wait a bit and check if there are creatures
-            await sleep(500);
+            // No custom setup selected - use map auto-setup
+            const autoSetupLoaded = await loadAutoSetup();
+            if (autoSetupLoaded) {
+                console.log('[Stamina Optimizer] Waiting for auto-setup to load...');
+                await sleep(1200);
+            } else {
+                // Fallback behavior if auto-setup button is unavailable
+                await sleep(500);
+            }
+
             if (!hasCreaturesOnBoard()) {
-                console.warn('[Stamina Optimizer] No creatures on board and no setup specified!');
+                console.warn('[Stamina Optimizer] No creatures on board after auto-setup fallback flow!');
             }
         }
         
@@ -2039,7 +2106,11 @@ function createSettingsContent() {
             // Setup selector
             const setupLabels = getAvailableSetupLabels();
             const setupOptions = setupLabels.map(label => ({ value: label, label: label }));
-            setupOptions.unshift({ value: '', label: '-- No Setup --' });
+            const autoSetupLabel = t('mods.betterTasker.autoSetup');
+            const safeAutoSetupLabel = typeof autoSetupLabel === 'string' && !autoSetupLabel.includes('.')
+                ? autoSetupLabel
+                : 'Auto-setup';
+            setupOptions.unshift({ value: '', label: safeAutoSetupLabel });
             
             const setupSetting = createDropdownSetting(
                 'setupLabel',

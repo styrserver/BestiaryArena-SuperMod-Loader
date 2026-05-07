@@ -4,6 +4,61 @@
   },
   "notes": [
     {
+      "version": "3.7.14",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Inject success toast is now compact: shows injected creature name, gold cost with gold icon, per-stat gains with stat icons, and total genes transition (old% -> new%)."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Renamed autoplay recovery to Seamless autoplay with info tooltip (defeat + network issues), and split Autocollect Rewards into separate Daily Seashell and level-up reward toggles."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Added a live next-task cooldown timer next to Paw and Fur Society with clock icon styling and dynamic m/h suffix formatting."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Added Battle hotkeys for Previous map and Next map cycling in maps database order, with default bindings P and N."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Added a new \"After X rounds\" run condition (0 = endless), removed the separate Endless option, and updated the live runner widget to show consolidated rounds progress as current/limit (or current/∞)."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "changed",
+          "text": "Auto-10/Auto-15 now stay on max floor after a win, and the auto-floor tooltip now reflects max-floor hold behavior."
+        },
+        {
+          "mod": "BA Sandbox Utils",
+          "type": "fixed",
+          "text": "$replay() now sets tier/starTier plus awaken/awakened flags for awakened monsters, and normalizes replay monster names to lowercase for reliable gameId lookup."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Creature settings cog is now grey and subdued (0.3 opacity) when unedited, and turns green after per-creature overrides are configured."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Task coordination state now marks hasActiveTask as false when a task is already complete (ready or killCount >= target), so other mods are no longer blocked."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "fixed",
+          "text": "Specific Map setup now defaults to Auto-setup (instead of no action), with localization-aware auto-setup button detection including PT-BR Autoconfigurar."
+        }
+      ]
+    },
+    {
       "version": "3.7.13",
       "changes": [
         {

@@ -8,6 +8,7 @@ console.log('[Better Tasker] initializing...');
 const MOD_ID = 'better-tasker';
 const TASKER_BUTTON_ID = `${MOD_ID}-settings-button`;
 const TASKER_TOGGLE_ID = `${MOD_ID}-toggle-button`;
+const TASKER_NEXT_TASK_TIMER_ID = `${MOD_ID}-next-task-timer`;
 
 // Translation helper
 const t = (key) => {
@@ -1578,6 +1579,7 @@ function findSetupButton(option) {
 
 // UI/Observer State
 let questLogObserver = null;
+let nextTaskTimerInterval = null;
 
 // ============================================================================
 // 2.1. CONTROL MANAGER ACCESS
@@ -2450,12 +2452,126 @@ function findPawAndFurSection() {
     const sections = questLogContainer.querySelectorAll('.frame-1.surface-regular');
     for (const section of sections) {
         const titleElement = section.querySelector('p.text-whiteHighlight');
-        if (titleElement && titleElement.textContent === 'Paw and Fur Society') {
+        if (titleElement && titleElement.textContent?.includes('Paw and Fur Society')) {
             return section;
         }
     }
     
     return null;
+}
+
+function formatTaskCooldownTime(msRemaining) {
+    const totalSeconds = Math.max(0, Math.ceil(msRemaining / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}h`;
+    }
+
+    return `${minutes}:${String(seconds).padStart(2, '0')}m`;
+}
+
+function getTaskCooldownRemainingMs() {
+    try {
+        const resetAt = globalThis.state?.player?.get?.()?.context?.questLog?.task?.resetAt;
+        if (!resetAt) return 0;
+        return Math.max(0, Number(resetAt) - Date.now());
+    } catch (error) {
+        console.warn('[Better Tasker] Failed to read task cooldown timer:', error);
+        return 0;
+    }
+}
+
+function updateNextTaskTimerDisplay() {
+    const timerContainer = document.getElementById(TASKER_NEXT_TASK_TIMER_ID);
+    if (!timerContainer) return;
+    const timerElement = timerContainer.querySelector('.raid-timer');
+    if (!timerElement) return;
+
+    const msRemaining = getTaskCooldownRemainingMs();
+    if (msRemaining <= 0) {
+        timerElement.textContent = 'Ready';
+        timerElement.style.color = 'rgb(96, 192, 96)';
+        return;
+    }
+
+    timerElement.textContent = formatTaskCooldownTime(msRemaining);
+    timerElement.style.color = 'rgb(255, 255, 255)';
+}
+
+function startNextTaskTimerUpdates() {
+    if (nextTaskTimerInterval) return;
+    updateNextTaskTimerDisplay();
+    nextTaskTimerInterval = setInterval(updateNextTaskTimerDisplay, 1000);
+}
+
+function stopNextTaskTimerUpdates() {
+    if (nextTaskTimerInterval) {
+        clearInterval(nextTaskTimerInterval);
+        nextTaskTimerInterval = null;
+    }
+}
+
+function removeNextTaskTimer() {
+    const timerContainer = document.getElementById(TASKER_NEXT_TASK_TIMER_ID);
+    if (timerContainer) {
+        timerContainer.remove();
+    }
+    stopNextTaskTimerUpdates();
+}
+
+function hasBuiltInTaskTimer(pawAndFurSection) {
+    if (!pawAndFurSection) return false;
+    const clockIcons = pawAndFurSection.querySelectorAll('svg.lucide-clock');
+    for (const icon of clockIcons) {
+        if (!icon.closest(`#${TASKER_NEXT_TASK_TIMER_ID}`)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function ensureNextTaskTimer(titleElement, pawAndFurSection) {
+    if (!titleElement) return null;
+
+    // Never show a custom title timer if the game is already rendering a timer.
+    if (hasBuiltInTaskTimer(pawAndFurSection)) {
+        removeNextTaskTimer();
+        return null;
+    }
+
+    titleElement.style.display = 'flex';
+    titleElement.style.alignItems = 'center';
+    titleElement.style.justifyContent = 'space-between';
+    titleElement.style.gap = '8px';
+    titleElement.style.width = '100%';
+
+    let timerContainer = document.getElementById(TASKER_NEXT_TASK_TIMER_ID);
+    if (!timerContainer) {
+        timerContainer = document.createElement('div');
+        timerContainer.id = TASKER_NEXT_TASK_TIMER_ID;
+        timerContainer.className = 'flex items-center';
+        timerContainer.style.cssText = `
+            margin-left: auto;
+            white-space: nowrap;
+            color: rgb(255, 255, 255);
+            font-size: 12px;
+        `;
+        timerContainer.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clock mr-1 inline-block size-2 -translate-y-px">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span class="raid-timer" style="color: rgb(255, 255, 255);">0:00m</span>
+        `;
+        titleElement.appendChild(timerContainer);
+    }
+
+    updateNextTaskTimerDisplay();
+    startNextTaskTimerUpdates();
+    return timerContainer;
 }
 
 // Create the settings button
@@ -2476,13 +2592,22 @@ function createToggleButton() {
 
 // Insert buttons into Paw and Fur Society section
 function insertButtons() {
-    // Check if buttons already exist
-    if (document.getElementById(TASKER_BUTTON_ID) && document.getElementById(TASKER_TOGGLE_ID)) {
+    const pawAndFurSection = findPawAndFurSection();
+    if (hasBuiltInTaskTimer(pawAndFurSection)) {
+        removeNextTaskTimer();
+    }
+
+    const hasSettingsButton = !!document.getElementById(TASKER_BUTTON_ID);
+    const hasToggleButton = !!document.getElementById(TASKER_TOGGLE_ID);
+    const hasTimer = !!document.getElementById(TASKER_NEXT_TASK_TIMER_ID);
+
+    // Check if buttons and timer already exist
+    if (hasSettingsButton && hasToggleButton && hasTimer) {
         console.log('[Better Tasker] Buttons already exist, skipping');
+        startNextTaskTimerUpdates();
         return true; // Success - buttons already exist
     }
     
-    const pawAndFurSection = findPawAndFurSection();
     if (!pawAndFurSection) {
         console.log('[Better Tasker] Paw and Fur Society section not found');
         return false; // Failed - section not found
@@ -2491,7 +2616,13 @@ function insertButtons() {
     
     // Find the title element and its parent container
     const titleElement = pawAndFurSection.querySelector('p.text-whiteHighlight');
-    if (titleElement && titleElement.textContent === 'Paw and Fur Society') {
+    if (titleElement && titleElement.textContent?.includes('Paw and Fur Society')) {
+        ensureNextTaskTimer(titleElement, pawAndFurSection);
+
+        if (hasSettingsButton && hasToggleButton) {
+            return true;
+        }
+
         // Find the parent container that holds the title
         const titleContainer = titleElement.parentElement;
         
@@ -4096,11 +4227,13 @@ function createMonsterSelectionSettings() {
                 ? ''
                 : 'Right-click to set map, stamina, floor, and setup for this creature';
             customIndicator.style.cssText = `
-                opacity: ${settings.creatureOverrides?.[creatureKey] ? '1' : '0.2'};
-                color: #ff6b6b;
+                opacity: ${settings.creatureOverrides?.[creatureKey] ? '1' : '0.3'};
+                color: ${settings.creatureOverrides?.[creatureKey] ? '#6ee07a' : '#8a8f98'};
                 margin-left: auto;
                 margin-right: 4px;
-                font-size: 12px;
+                font-size: 14px;
+                font-weight: 700;
+                text-shadow: 0 0 2px rgba(0, 0, 0, 0.75);
                 cursor: ${isUnselectable ? 'not-allowed' : 'help'};
             `;
 
@@ -4114,7 +4247,9 @@ function createMonsterSelectionSettings() {
                     e.preventDefault();
                     e.stopPropagation();
                     createCreatureContextMenu(creatureName, e.clientX, e.clientY, () => {
-                        customIndicator.style.opacity = getCreatureOverrides(creatureName) ? '1' : '0.2';
+                        const hasOverrides = Boolean(getCreatureOverrides(creatureName));
+                        customIndicator.style.opacity = hasOverrides ? '1' : '0.3';
+                        customIndicator.style.color = hasOverrides ? '#6ee07a' : '#8a8f98';
                     });
                 });
             }
@@ -5996,7 +6131,7 @@ async function findFinishButton(pollInterval = 1000, maxAttempts = 3, useFallbac
             const parentSection = btn.closest('.frame-1.surface-regular');
             if (parentSection) {
                 const sectionTitle = parentSection.querySelector('p.text-whiteHighlight');
-                if (sectionTitle && sectionTitle.textContent === 'Paw and Fur Society') {
+                if (sectionTitle && sectionTitle.textContent?.includes('Paw and Fur Society')) {
                     return true;
                 }
             }
@@ -8176,6 +8311,8 @@ init();
 // Cleanup function for when mod is disabled
 function cleanupBetterTasker() {
     try {
+        stopNextTaskTimerUpdates();
+
         // Stop automation
         stopAutomation();
         
@@ -8319,12 +8456,25 @@ function cleanupBetterTasker() {
 // Expose state for other mods to check (like Raid Hunter coordination)
 function exposeTaskerState() {
     if (typeof window !== 'undefined') {
-        // Check if we have an active task (even if in cooldown)
+        // Check if we have an active (incomplete) task so other mods can coordinate correctly
         let hasActiveTask = false;
         try {
             const playerContext = globalThis.state?.player?.getSnapshot()?.context;
             const task = playerContext?.questLog?.task;
-            hasActiveTask = !!(task && task.gameId);
+            if (task && task.gameId) {
+                const isReady = task.ready === true;
+                let killTarget = DEFAULT_TASK_KILL_TARGET;
+                for (const key of ['killGoal', 'targetKills', 'requiredKills', 'goal', 'maxKills', 'killTarget']) {
+                    const value = Number(task[key]);
+                    if (Number.isFinite(value) && value > 0) {
+                        killTarget = value;
+                        break;
+                    }
+                }
+                const killCount = Number(task.killCount);
+                const isCompleteByCount = Number.isFinite(killCount) && killCount >= killTarget;
+                hasActiveTask = !isReady && !isCompleteByCount;
+            }
         } catch (error) {
             // Ignore errors, hasActiveTask remains false
         }

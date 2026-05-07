@@ -18,7 +18,8 @@ const defaultConfig = {
   enabled: false,
   autoRefillStamina: false,
   minimumStaminaWithoutRefill: 15,
-  autoCollectRewards: false,
+  autoCollectSeashell: false,
+  autoCollectLevelUpRewards: false,
   autoOpenCubes: false,
   autoDayCare: false,
   autoPlayAfterDefeat: false,
@@ -57,6 +58,11 @@ const loadConfig = () => {
     if (savedData) {
       const savedConfig = JSON.parse(savedData);
       const loadedConfig = Object.assign({}, defaultConfig, savedConfig);
+      // Backward compatibility: legacy "autoCollectRewards" now maps to both reward toggles
+      if (typeof savedConfig.autoCollectRewards === 'boolean') {
+        loadedConfig.autoCollectSeashell = savedConfig.autoCollectRewards;
+        loadedConfig.autoCollectLevelUpRewards = savedConfig.autoCollectRewards;
+      }
       
       return loadedConfig;
     }
@@ -2434,7 +2440,9 @@ const setupStaminaPotionErrorHandler = () => {
 
 // Take rewards if available - only check at game start
 const takeRewardsIfAvailable = async () => {
-  if (!config.autoCollectRewards || rewardsCollectedThisSession) {
+  const shouldCollectLevelUpRewards = config.autoCollectLevelUpRewards && !rewardsCollectedThisSession;
+  const shouldCollectSeashell = config.autoCollectSeashell;
+  if (!shouldCollectLevelUpRewards && !shouldCollectSeashell) {
     return;
   }
   
@@ -2444,19 +2452,12 @@ const takeRewardsIfAvailable = async () => {
       return;
     }
     
-    // Check if player has reached the target level for rewards
-    const playerContext = globalThis.state.player.getSnapshot().context;
-    const currentExp = playerContext.exp;
-    
-    // Calculate current level from experience
-    const currentLevel = globalThis.state.utils.expToCurrentLevel(currentExp);
-    
     // Check if there are rewards available by looking for the ping animation
     const available = document.querySelector('button[aria-haspopup="menu"]:has(.animate-ping)');
     
-    if (!available) {
-      // Check for seashell collection even if no regular rewards (but only if no timer is set)
-      if (!seashellTimer) {
+    if (!available || !shouldCollectLevelUpRewards) {
+      // Check for seashell collection even if no regular rewards (but only if enabled and no timer is set)
+      if (shouldCollectSeashell && !seashellTimer) {
         await collectSeashellIfReady();
       }
       return;
@@ -2487,8 +2488,8 @@ const takeRewardsIfAvailable = async () => {
     clickAllCloseButtons();
     await sleep(TIMING.REWARDS_COLLECT_DELAY);
     
-    // Check for seashell collection (but only if no timer is set)
-    if (!seashellTimer) {
+    // Check for seashell collection (but only if enabled and no timer is set)
+    if (shouldCollectSeashell && !seashellTimer) {
       await collectSeashellIfReady();
     }
     
@@ -4119,6 +4120,11 @@ const autoSaveConfig = (propertyPath, value) => {
       }
     }
     
+    // Stop pending seashell timer immediately when seashell autocollect is disabled
+    if (propertyPath === 'autoCollectSeashell' && !config.autoCollectSeashell) {
+      clearSeashellTimer();
+    }
+    
     // Only update button styling if configuration actually changed
     updateAutomatorButton();
     
@@ -4206,13 +4212,26 @@ const createConfigPanel = () => {
   // Minimum stamina input
   const staminaContainer = createNumberInputContainer('min-stamina-input', t('mods.automator.minimumStaminaLabel'), config.minimumStaminaWithoutRefill, 1, 360);
   
-  // Auto collect rewards checkbox with info icon
-  const rewardsContainer = createCheckboxContainerWithInfo('auto-rewards-checkbox', t('mods.automator.autoCollectRewards'), config.autoCollectRewards, 
-    t('mods.automator.autoCollectRewardsTooltip'));
+  // Auto collect seashell checkbox with info icon
+  const autoCollectSeashellContainer = createCheckboxContainerWithInfo(
+    'auto-collect-seashell-checkbox',
+    t('mods.automator.autoCollectSeashell'),
+    config.autoCollectSeashell,
+    t('mods.automator.autoCollectSeashellTooltip')
+  );
+  
+  // Auto collect level-up rewards checkbox with info icon
+  const autoCollectLevelUpRewardsContainer = createCheckboxContainerWithInfo(
+    'auto-collect-levelup-rewards-checkbox',
+    t('mods.automator.autoCollectLevelUpRewards'),
+    config.autoCollectLevelUpRewards,
+    t('mods.automator.autoCollectLevelUpRewardsTooltip')
+  );
   
   const rewardsSection = document.createElement('div');
   rewardsSection.style.cssText = `display: flex; flex-direction: column; gap: ${rowGap};`;
-  rewardsSection.appendChild(rewardsContainer);
+  rewardsSection.appendChild(autoCollectSeashellContainer);
+  rewardsSection.appendChild(autoCollectLevelUpRewardsContainer);
   
   const autoOpenCubesContainer = createCheckboxContainerWithInfo('auto-open-cubes-checkbox', t('mods.automator.autoOpenCubes'), config.autoOpenCubes,
     t('mods.automator.autoOpenCubesTooltip'));
@@ -4222,8 +4241,13 @@ const createConfigPanel = () => {
   const dayCareContainer = createCheckboxContainer('auto-daycare-checkbox', t('mods.automator.autoDayCare'), config.autoDayCare);
   
   
-  // Auto play after defeat checkbox
-  const autoPlayContainer = createCheckboxContainer('auto-play-defeat-checkbox', t('mods.automator.autoPlayAfterDefeat'), config.autoPlayAfterDefeat);
+  // Seamless autoplay checkbox with info icon
+  const autoPlayContainer = createCheckboxContainerWithInfo(
+    'auto-play-defeat-checkbox',
+    t('mods.automator.seamlessAutoplay'),
+    config.autoPlayAfterDefeat,
+    t('mods.automator.seamlessAutoplayTooltip')
+  );
   
   // Faster autoplay checkbox with warning
   const fasterAutoplayWarningText = t('mods.automator.fasterAutoplayWarning');
@@ -4355,7 +4379,8 @@ const createConfigPanel = () => {
   setTimeout(() => {
     // Setup checkboxes with auto-save
     setupCheckboxAutoSave(document.getElementById('auto-refill-checkbox'), 'autoRefillStamina', updatePotionWarning);
-    setupCheckboxAutoSave(document.getElementById('auto-rewards-checkbox'), 'autoCollectRewards');
+    setupCheckboxAutoSave(document.getElementById('auto-collect-seashell-checkbox'), 'autoCollectSeashell');
+    setupCheckboxAutoSave(document.getElementById('auto-collect-levelup-rewards-checkbox'), 'autoCollectLevelUpRewards');
     setupCheckboxAutoSave(document.getElementById('auto-open-cubes-checkbox'), 'autoOpenCubes');
     setupCheckboxAutoSave(document.getElementById('auto-daycare-checkbox'), 'autoDayCare');
     setupCheckboxAutoSave(document.getElementById('auto-play-defeat-checkbox'), 'autoPlayAfterDefeat');
@@ -4756,7 +4781,8 @@ const applyButtonStyling = (btn) => {
   {
     console.log('[Bestiary Automator] Applying button styling:');
     console.log('  - autoRefillStamina:', config.autoRefillStamina);
-    console.log('  - autoCollectRewards:', config.autoCollectRewards);
+    console.log('  - autoCollectSeashell:', config.autoCollectSeashell);
+    console.log('  - autoCollectLevelUpRewards:', config.autoCollectLevelUpRewards);
     console.log('  - autoOpenCubes:', config.autoOpenCubes);
     console.log('  - autoDayCare:', config.autoDayCare);
     console.log('  - autoPlayAfterDefeat:', config.autoPlayAfterDefeat);
@@ -4781,7 +4807,7 @@ const applyButtonStyling = (btn) => {
     console.log('[Bestiary Automator] Applying BLUE background for fasterAutoplayRunning');
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
-  } else if (config.autoCollectRewards || config.autoOpenCubes || config.autoDayCare || config.autoPlayAfterDefeat) {
+  } else if (config.autoCollectSeashell || config.autoCollectLevelUpRewards || config.autoOpenCubes || config.autoDayCare || config.autoPlayAfterDefeat) {
     // Priority 3: Blue background for other auto features
     console.log('[Bestiary Automator] Applying BLUE background for other features');
     btn.style.background = `url('${blueBgUrl}') repeat`;
@@ -4853,7 +4879,8 @@ init();
 // Track button state to prevent unnecessary updates
 let lastButtonState = {
   autoRefillStamina: config.autoRefillStamina,
-  autoCollectRewards: config.autoCollectRewards,
+  autoCollectSeashell: config.autoCollectSeashell,
+  autoCollectLevelUpRewards: config.autoCollectLevelUpRewards,
   autoOpenCubes: config.autoOpenCubes,
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
@@ -4865,7 +4892,8 @@ let lastButtonState = {
 // Initialize lastButtonState with current config values to prevent unnecessary updates
 lastButtonState = {
   autoRefillStamina: config.autoRefillStamina,
-  autoCollectRewards: config.autoCollectRewards,
+  autoCollectSeashell: config.autoCollectSeashell,
+  autoCollectLevelUpRewards: config.autoCollectLevelUpRewards,
   autoOpenCubes: config.autoOpenCubes,
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
@@ -4879,7 +4907,8 @@ function updateAutomatorButton() {
   // Check current state
   const currentButtonState = {
     autoRefillStamina: config.autoRefillStamina,
-    autoCollectRewards: config.autoCollectRewards,
+    autoCollectSeashell: config.autoCollectSeashell,
+    autoCollectLevelUpRewards: config.autoCollectLevelUpRewards,
     autoOpenCubes: config.autoOpenCubes,
     autoDayCare: config.autoDayCare,
     autoPlayAfterDefeat: config.autoPlayAfterDefeat,
@@ -4948,8 +4977,10 @@ function updateSettingsModalUI() {
                           document.querySelector('input[type="checkbox"][id*="refill"]') ||
                           document.querySelector('input[type="checkbox"]:has(+ label:contains("Autorefill Stamina"))');
     
-    const rewardsCheckbox = document.getElementById('auto-rewards-checkbox') || 
-                           document.querySelector('input[type="checkbox"][id*="rewards"]');
+    const autoCollectSeashellCheckbox = document.getElementById('auto-collect-seashell-checkbox') || 
+                                        document.querySelector('input[type="checkbox"][id*="seashell"]');
+    const autoCollectLevelUpRewardsCheckbox = document.getElementById('auto-collect-levelup-rewards-checkbox') || 
+                                              document.querySelector('input[type="checkbox"][id*="levelup-rewards"]');
     
     const dayCareCheckbox = document.getElementById('auto-daycare-checkbox') || 
                            document.querySelector('input[type="checkbox"][id*="daycare"]');
@@ -4966,7 +4997,8 @@ function updateSettingsModalUI() {
     
     console.log('[Bestiary Automator] Found elements:');
     console.log('  - refillCheckbox:', !!refillCheckbox);
-    console.log('  - rewardsCheckbox:', !!rewardsCheckbox);
+    console.log('  - autoCollectSeashellCheckbox:', !!autoCollectSeashellCheckbox);
+    console.log('  - autoCollectLevelUpRewardsCheckbox:', !!autoCollectLevelUpRewardsCheckbox);
     console.log('  - autoOpenCubesCheckbox:', !!document.getElementById('auto-open-cubes-checkbox'));
     console.log('  - dayCareCheckbox:', !!dayCareCheckbox);
     console.log('  - autoPlayCheckbox:', !!autoPlayCheckbox);
@@ -4990,10 +5022,16 @@ function updateSettingsModalUI() {
       console.log('[Bestiary Automator] Autorefill stamina checkbox not found!');
     }
     
-    if (rewardsCheckbox && !rewardsCheckbox.hasAttribute('data-listener-added')) {
-      rewardsCheckbox.checked = config.autoCollectRewards;
-      setupCheckboxAutoSave(rewardsCheckbox, 'autoCollectRewards');
-      rewardsCheckbox.setAttribute('data-listener-added', 'true');
+    if (autoCollectSeashellCheckbox && !autoCollectSeashellCheckbox.hasAttribute('data-listener-added')) {
+      autoCollectSeashellCheckbox.checked = config.autoCollectSeashell;
+      setupCheckboxAutoSave(autoCollectSeashellCheckbox, 'autoCollectSeashell');
+      autoCollectSeashellCheckbox.setAttribute('data-listener-added', 'true');
+    }
+    
+    if (autoCollectLevelUpRewardsCheckbox && !autoCollectLevelUpRewardsCheckbox.hasAttribute('data-listener-added')) {
+      autoCollectLevelUpRewardsCheckbox.checked = config.autoCollectLevelUpRewards;
+      setupCheckboxAutoSave(autoCollectLevelUpRewardsCheckbox, 'autoCollectLevelUpRewards');
+      autoCollectLevelUpRewardsCheckbox.setAttribute('data-listener-added', 'true');
     }
     
     const autoOpenCubesCheckbox = document.getElementById('auto-open-cubes-checkbox');

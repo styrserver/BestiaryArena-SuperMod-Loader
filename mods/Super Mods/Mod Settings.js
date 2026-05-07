@@ -62,6 +62,8 @@ const defaultConfig = {
   hotkeyCycleBestiaryEquipmentTab: 'tab',
   hotkeyResetCurrentMapDefault: 'r',
   hotkeyCycleBattleStyle: 'v',
+  hotkeyPreviousMap: 'j',
+  hotkeyNextMap: 'k',
   hotkeyStartOrSkip: 'z',
   hotkeyToggleTurboMode: 'y',
   hotkeySetupSlot1: 'f1',
@@ -125,6 +127,8 @@ if (config.hotkeyFloorDown === undefined) config.hotkeyFloorDown = 'pagedown';
 if (config.hotkeyCycleBestiaryEquipmentTab === undefined) config.hotkeyCycleBestiaryEquipmentTab = 'tab';
 if (config.hotkeyResetCurrentMapDefault === undefined) config.hotkeyResetCurrentMapDefault = 'r';
 if (config.hotkeyCycleBattleStyle === undefined) config.hotkeyCycleBattleStyle = 'v';
+if (config.hotkeyPreviousMap === undefined) config.hotkeyPreviousMap = 'j';
+if (config.hotkeyNextMap === undefined) config.hotkeyNextMap = 'k';
 if (config.hotkeyStartOrSkip === undefined) config.hotkeyStartOrSkip = 'z';
 if (config.hotkeyToggleTurboMode === undefined) config.hotkeyToggleTurboMode = 'y';
 config.hotkeyFloorUp = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
@@ -132,6 +136,8 @@ config.hotkeyFloorDown = sanitizeStoredHotkey(config.hotkeyFloorDown, '');
 config.hotkeyCycleBestiaryEquipmentTab = sanitizeStoredHotkey(config.hotkeyCycleBestiaryEquipmentTab, '');
 config.hotkeyResetCurrentMapDefault = sanitizeStoredHotkey(config.hotkeyResetCurrentMapDefault, '');
 config.hotkeyCycleBattleStyle = sanitizeStoredHotkey(config.hotkeyCycleBattleStyle, '');
+config.hotkeyPreviousMap = sanitizeStoredHotkey(config.hotkeyPreviousMap, '');
+config.hotkeyNextMap = sanitizeStoredHotkey(config.hotkeyNextMap, '');
 config.hotkeyStartOrSkip = sanitizeStoredHotkey(config.hotkeyStartOrSkip, '');
 config.hotkeyToggleTurboMode = sanitizeStoredHotkey(config.hotkeyToggleTurboMode, '');
 for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
@@ -864,6 +870,58 @@ function cycleBattleStyleFromHotkey() {
   }
 }
 
+function getMapCycleRoomIdsForHotkey() {
+  try {
+    const roomsFromDatabase = globalThis.mapsDatabase?.getAllMaps?.();
+    const roomsFromState = globalThis.state?.utils?.ROOMS;
+    const rooms = Array.isArray(roomsFromDatabase) ? roomsFromDatabase : (Array.isArray(roomsFromState) ? roomsFromState : []);
+    return rooms
+      .map((room) => room?.id)
+      .filter((roomId) => typeof roomId === 'string' && roomId.length > 0);
+  } catch (error) {
+    console.warn('[Mod Settings] Could not build ordered map list for hotkeys:', error);
+    return [];
+  }
+}
+
+function cycleMapFromHotkey(direction) {
+  const roomIds = getMapCycleRoomIdsForHotkey();
+  if (roomIds.length === 0) {
+    console.warn('[Mod Settings] Map cycle hotkey: no maps available');
+    return;
+  }
+  const currentRoomId = getCurrentRoomIdForHotkey();
+  if (!currentRoomId) {
+    console.warn('[Mod Settings] Map cycle hotkey: current room id not found');
+    return;
+  }
+  const currentIndex = roomIds.indexOf(currentRoomId);
+  if (currentIndex === -1) {
+    console.warn('[Mod Settings] Map cycle hotkey: current room is not in ordered map list:', currentRoomId);
+    return;
+  }
+  const step = direction === 'previous' ? -1 : 1;
+  const targetIndex = (currentIndex + step + roomIds.length) % roomIds.length;
+  const targetRoomId = roomIds[targetIndex];
+  if (!targetRoomId || targetRoomId === currentRoomId) return;
+  try {
+    globalThis.state?.board?.send?.({
+      type: 'selectRoomById',
+      roomId: targetRoomId
+    });
+  } catch (error) {
+    console.warn(`[Mod Settings] ${direction === 'previous' ? 'Previous' : 'Next'} map hotkey failed:`, error);
+  }
+}
+
+function goToPreviousMapFromHotkey() {
+  cycleMapFromHotkey('previous');
+}
+
+function goToNextMapFromHotkey() {
+  cycleMapFromHotkey('next');
+}
+
 function findBoardStartButtonFromHotkey() {
   const startTexts = ['start', 'fight', 'iniciar', 'lutar', 'jogar', 'começar'];
   const candidates = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
@@ -1162,6 +1220,20 @@ function handleGlobalHotkeys(event) {
     cycleBattleStyleFromHotkey();
     return;
   }
+  const previousMapId = sanitizeStoredHotkey(config.hotkeyPreviousMap, '');
+  if (previousMapId && pressedId === previousMapId) {
+    event.preventDefault();
+    event.stopPropagation();
+    goToPreviousMapFromHotkey();
+    return;
+  }
+  const nextMapId = sanitizeStoredHotkey(config.hotkeyNextMap, '');
+  if (nextMapId && pressedId === nextMapId) {
+    event.preventDefault();
+    event.stopPropagation();
+    goToNextMapFromHotkey();
+    return;
+  }
   const startOrSkipId = sanitizeStoredHotkey(config.hotkeyStartOrSkip, '');
   if (startOrSkipId && pressedId === startOrSkipId) {
     event.preventDefault();
@@ -1248,6 +1320,18 @@ const MODS_HOTKEY_UI_ROWS = [
     configKey: 'hotkeyCycleBattleStyle',
     captureId: 'hotkey-cycle-battle-style-capture-btn',
     resetId: 'hotkey-cycle-battle-style-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyPreviousMap',
+    captureId: 'hotkey-previous-map-capture-btn',
+    resetId: 'hotkey-previous-map-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyNextMap',
+    captureId: 'hotkey-next-map-capture-btn',
+    resetId: 'hotkey-next-map-reset-btn',
     displayFallback: ''
   },
   {
@@ -5390,6 +5474,24 @@ function showSettingsModal() {
               </button>
             </div>
             <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">Previous map</span>
+              <button type="button" id="hotkey-previous-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                J
+              </button>
+              <button type="button" id="hotkey-previous-map-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+              <span style="${hotkeyLabelStyle}">Next map</span>
+              <button type="button" id="hotkey-next-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                K
+              </button>
+              <button type="button" id="hotkey-next-map-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>
+            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
               <span style="${hotkeyLabelStyle}">Start/Skip button</span>
               <button type="button" id="hotkey-start-or-skip-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
                 Z
@@ -6097,6 +6199,20 @@ function showSettingsModal() {
         content.querySelector('#hotkey-cycle-battle-style-reset-btn'),
         'hotkeyCycleBattleStyle',
         'v',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-previous-map-capture-btn'),
+        content.querySelector('#hotkey-previous-map-reset-btn'),
+        'hotkeyPreviousMap',
+        'j',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-next-map-capture-btn'),
+        content.querySelector('#hotkey-next-map-reset-btn'),
+        'hotkeyNextMap',
+        'k',
         ''
       );
       bindHotkeyConfigRowInModal(

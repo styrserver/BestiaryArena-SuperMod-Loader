@@ -3513,16 +3513,19 @@ async function stopAutoplayOnRaidEnd() {
                         });
                         console.log(`[Raid Hunter] → Floor ${nextFloor}`);
                     } else if (currentFloor === maxFloor) {
-                        // Victory on max floor: set floor to 0 and continue farming
-                        autoState.currentFloor = 0;
-                        // Update settings to floor 0 (exit auto mode)
+                        // Victory on max floor: lock to numeric max floor and exit auto mode
+                        autoState.currentFloor = maxFloor;
+                        globalThis.state.board.trigger.setState({
+                            fn: (prev) => ({ ...prev, floor: maxFloor })
+                        });
+                        // Update settings to numeric max floor (10/15) so this raid no longer uses auto mode
                         const updatedSettings = loadSettings();
                         if (!updatedSettings.raidFloors) {
                             updatedSettings.raidFloors = {};
                         }
-                        updatedSettings.raidFloors[raidName] = 0;
+                        updatedSettings.raidFloors[raidName] = maxFloor;
                         localStorage.setItem('raidHunterSettings', JSON.stringify(updatedSettings));
-                        console.log(`[Raid Hunter] → Floor 0 (victory on floor ${maxFloor})`);
+                        console.log(`[Raid Hunter] → Floor ${maxFloor} (victory on max floor, auto mode completed)`);
                     }
                 } else {
                     // Defeat: increment consecutive defeat counter
@@ -7434,19 +7437,19 @@ function setupAutoFloorGameEndMonitoring() {
                                         });
                                         console.log(`[Raid Hunter] → Floor ${nextFloor}`);
                                     } else if (currentFloor === maxFloor) {
-                                        // Victory on max floor: set floor to 0 and continue farming
-                                        autoState.currentFloor = 0;
+                                        // Victory on max floor: lock to numeric max floor and exit auto mode
+                                        autoState.currentFloor = maxFloor;
                                         globalThis.state.board.trigger.setState({ 
-                                            fn: (prev) => ({ ...prev, floor: 0 }) 
+                                            fn: (prev) => ({ ...prev, floor: maxFloor }) 
                                         });
-                                        // Update settings to floor 0 (exit auto mode)
+                                        // Update settings to numeric max floor (10/15) so this raid no longer uses auto mode
                                         const updatedSettings = loadSettings();
                                         if (!updatedSettings.raidFloors) {
                                             updatedSettings.raidFloors = {};
                                         }
-                                        updatedSettings.raidFloors[raidName] = 0;
+                                        updatedSettings.raidFloors[raidName] = maxFloor;
                                         localStorage.setItem('raidHunterSettings', JSON.stringify(updatedSettings));
-                                        console.log(`[Raid Hunter] → Floor 0 (victory on floor ${maxFloor})`);
+                                        console.log(`[Raid Hunter] → Floor ${maxFloor} (victory on max floor, auto mode completed)`);
                                     }
                                 } else {
                                     // Defeat: increment consecutive defeat counter
