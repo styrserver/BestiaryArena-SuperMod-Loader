@@ -158,6 +158,9 @@ let mapChangeUnsubscribe = null;
 let isNavigatingViaButton = false;
 let mapFloorSyncLastRoomId = null;
 let mapFloorSyncTimeoutId = null;
+const REPLAY_MAX_FLOOR_GUARD_MS = 5000;
+let replayMaxFloorGuardUntil = 0;
+let replayFloorGuardHookInstalled = false;
 let autoHideMonstersInProgress = false;
 let antiIdlePlayPromise = null;
 const initState = {
@@ -6534,6 +6537,7 @@ function showSettingsModal() {
           saveConfig();
 
           if (config.alwaysNavigateMaxFloor || config.showLastVisitedMapButton) {
+            installReplayFloorGuardHook();
             subscribeToMapChanges();
           } else {
             unsubscribeFromMapChanges();
@@ -11540,6 +11544,7 @@ function initBetterUI() {
     // Subscribe once for map-dependent features
     if (config.showLastVisitedMapButton || config.alwaysNavigateMaxFloor) {
       scheduleTimeout(() => {
+        installReplayFloorGuardHook();
         subscribeToMapChanges();
         if (config.showLastVisitedMapButton) {
           loadLastVisitedMap();
@@ -11867,6 +11872,49 @@ function clampAscensionFloor(floor) {
   return Math.floor(floor);
 }
 
+function markReplayFloorGuard(replayConfig) {
+  try {
+    if (!replayConfig || typeof replayConfig !== 'object') return;
+    if (!Object.prototype.hasOwnProperty.call(replayConfig, 'floor')) return;
+    replayMaxFloorGuardUntil = Date.now() + REPLAY_MAX_FLOOR_GUARD_MS;
+  } catch (error) {
+    console.warn('[Mod Settings] Could not mark replay floor guard:', error);
+  }
+}
+
+function shouldSkipMaxFloorSync(source = 'unknown') {
+  if (Date.now() <= replayMaxFloorGuardUntil) {
+    console.log(`[Mod Settings] Skipping max-floor sync during replay (${source})`);
+    return true;
+  }
+  return false;
+}
+
+function installReplayFloorGuardHook() {
+  try {
+    if (replayFloorGuardHookInstalled) return;
+    replayFloorGuardHookInstalled = true;
+
+    const wrapReplayFn = (target, key) => {
+      if (!target || typeof target[key] !== 'function' || target[key].__modSettingsReplayGuardWrapped) return;
+      const original = target[key];
+      const wrapped = function wrappedReplayWithFloorGuard(config) {
+        markReplayFloorGuard(config);
+        return original.apply(this, arguments);
+      };
+      wrapped.__modSettingsReplayGuardWrapped = true;
+      target[key] = wrapped;
+    };
+
+    wrapReplayFn(window, '$replay');
+    if (window.BestiaryModAPI?.utility) {
+      wrapReplayFn(window.BestiaryModAPI.utility, 'replay');
+    }
+  } catch (error) {
+    console.warn('[Mod Settings] Could not install replay floor guard hook:', error);
+  }
+}
+
 function getBestCompletedFloorForRoom(roomId) {
   try {
     if (!roomId) return 0;
@@ -11882,6 +11930,7 @@ function getBestCompletedFloorForRoom(roomId) {
 function applyBestCompletedFloorForRoom(roomId, source = 'unknown') {
   try {
     if (!roomId) return;
+    if (shouldSkipMaxFloorSync(source)) return;
 
     const targetFloor = getBestCompletedFloorForRoom(roomId);
     const currentFloor = clampAscensionFloor(globalThis.state?.board?.getSnapshot?.()?.context?.floor);

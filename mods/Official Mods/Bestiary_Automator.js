@@ -58,8 +58,13 @@ const loadConfig = () => {
     if (savedData) {
       const savedConfig = JSON.parse(savedData);
       const loadedConfig = Object.assign({}, defaultConfig, savedConfig);
-      // Backward compatibility: legacy "autoCollectRewards" now maps to both reward toggles
-      if (typeof savedConfig.autoCollectRewards === 'boolean') {
+      // Backward compatibility: only use legacy "autoCollectRewards" when new keys are missing.
+      // This avoids overwriting explicit per-toggle user settings on refresh.
+      if (
+        typeof savedConfig.autoCollectRewards === 'boolean' &&
+        typeof savedConfig.autoCollectSeashell !== 'boolean' &&
+        typeof savedConfig.autoCollectLevelUpRewards !== 'boolean'
+      ) {
         loadedConfig.autoCollectSeashell = savedConfig.autoCollectRewards;
         loadedConfig.autoCollectLevelUpRewards = savedConfig.autoCollectRewards;
       }
@@ -4097,6 +4102,10 @@ const autoSaveConfig = (propertyPath, value) => {
     
     // Merge with current config to ensure all properties are present
     savedConfig = Object.assign({}, defaultConfig, savedConfig, config);
+    
+    // Do not persist deprecated combined rewards toggle.
+    // Keeping this key can override separate toggles on future loads.
+    delete savedConfig.autoCollectRewards;
     
     // Update only the changed property in the saved config
     setNestedProperty(savedConfig, propertyPath, value);

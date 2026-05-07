@@ -668,8 +668,8 @@ function clickStartButton() {
  * Retries for a short window with ESC nudge + coordination wait before giving up.
  */
 async function clickStartButtonRobust(options = {}) {
-  const maxWaitMs = Math.max(200, Number(options.maxWaitMs) || 2500);
-  const recheckDelayMs = Math.max(40, Number(options.recheckDelayMs) || 140);
+  const maxWaitMs = Math.max(200, Number(options.maxWaitMs) || 10000);
+  const recheckDelayMs = Math.max(40, Number(options.recheckDelayMs) || 1000);
   const startTs = performance.now();
   const deadline = startTs + maxWaitMs;
   let attempts = 0;
@@ -1037,7 +1037,8 @@ async function waitForGameCompletion(analysisId) {
         grade: persistentLastGrade || 'F',
         rankPoints: persistentLastRankPoints || 0,
         completed: false,
-        forceStopped: true
+        forceStopped: false,
+        timedOut: true
       };
     }
   }
@@ -1896,6 +1897,7 @@ function formatRoundsProgress(roundsPlayed, roundsLimit) {
 async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
   const thisAnalysisId = analysisState.start();
   let startTime = null;
+  let userForceStopped = false;
   
   try {
     // Reset attempts array and tracking variables
@@ -1931,6 +1933,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     
     while (true) {
       if (shouldAbortAnalysisLoop(thisAnalysisId)) {
+        userForceStopped = true;
         break;
       }
 
@@ -1954,7 +1957,8 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       await waitForModCoordinationTasks({ context: `pre-start attempt ${attemptCount}` });
       prepareAttemptState(attemptCount + 1);
 
-      if (!await clickStartButtonRobust({ maxWaitMs: 2500, recheckDelayMs: 140 })) {
+      if (!await clickStartButtonRobust({ maxWaitMs: 10000, recheckDelayMs: 1000 })) {
+        console.warn('[Manual Runner] Stopping run: Start button unavailable (not a user stop)');
         break;
       }
 
@@ -1985,6 +1989,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       await waitForModCoordinationTasks({ context: `post-attempt cleanup ${attemptCount}` });
 
       if (result.forceStopped) {
+        userForceStopped = true;
         console.log('[Manual Runner] Analysis stopped');
         break;
       }
@@ -2227,7 +2232,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     return {
       success: false,
       attempts: attemptCount,
-      forceStopped: true,
+      forceStopped: userForceStopped,
       totalTimeMs: totalTime,
       allAttempts: allAttempts
     };

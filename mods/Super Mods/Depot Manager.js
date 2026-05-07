@@ -2773,7 +2773,33 @@ function injectFavoriteButton(menuElem) {
   menuElem.setAttribute('data-favorite-processed', 'true');
 
   const creatureData = identifyCreatureFromMenu(menuElem);
-  const uniqueId = creatureData?.uniqueId || null;
+  const menuCreatureName = getCreatureNameFromMenu(menuElem);
+  const rightClickedImg = currentRightClickedCreature?.creatureImg || null;
+  // Keep favorite ID resolution aligned with depot menu logic:
+  // React fiber context is most reliable, then menu parse fallback, then visual map.
+  const uniqueIdFromReact = currentRightClickedCreature?.resolvedUniqueId || null;
+  const uniqueIdFromMenu = creatureData?.uniqueId || null;
+  const uniqueIdFromVisual = getResolvedUniqueIdForCreatureImg(rightClickedImg) || null;
+  const uniqueId =
+    uniqueIdFromReact ||
+    uniqueIdFromMenu ||
+    uniqueIdFromVisual ||
+    null;
+  const resolvedSource = uniqueIdFromReact
+    ? 'react'
+    : uniqueIdFromMenu
+      ? 'menu'
+      : uniqueIdFromVisual
+        ? 'visual'
+        : 'none';
+  depotDebug('injectFavoriteButton: resolved uniqueId', {
+    creatureName: menuCreatureName || creatureData?.creatureName || null,
+    uniqueId,
+    source: resolvedSource,
+    fromReact: uniqueIdFromReact,
+    fromMenu: uniqueIdFromMenu,
+    fromVisual: uniqueIdFromVisual
+  });
   const currentSymbol = uniqueId ? favoritesState.creatures.get(uniqueId) : null;
 
   const favoriteMainItem = createFavoriteMainMenuItem();

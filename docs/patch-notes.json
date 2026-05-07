@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "3.7.15",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Season 2 stats panel now uses official bracket icons with top-tier fallback from placement (top 20 = Challenger; then Diamond/Platinum/Gold/Silver by percentile), renamed rows to Speedrun/Rank Points/Difficulty, and added hover tooltips showing placement and bracket."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "Autocollect Daily Seashell and Autocollect Level-Up Rewards now persist correctly after refresh; legacy combined reward-toggle migration only applies when new per-toggle settings are missing and no longer overwrites saved checkbox states."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Foreground recovery now rechecks task progress/readiness when the page becomes visible, preventing final-run stalls (for example stuck at 58/60 after backgrounding) and resuming task completion flow when state has already advanced."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "fixed",
+          "text": "Favorite context-menu ID resolution now matches depot resolution (React context -> menu parse -> visual fallback), fixing cases where some creatures showed Send to depot but could not be favorited."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Stop reason classification now differentiates internal failures from manual user stop, so Start-button recovery failure no longer reports \"stopped by user\"; Start-button recovery now retries for up to 10 seconds with wider re-check intervals (about 1 second) for higher resilience during transient UI/mod coordination delays."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "\"Always navigate max floor\" now skips max-floor sync while loading $replay setups, so replay floor values (for example floor 0) are preserved."
+        }
+      ]
+    },
+    {
       "version": "3.7.14",
       "changes": [
         {

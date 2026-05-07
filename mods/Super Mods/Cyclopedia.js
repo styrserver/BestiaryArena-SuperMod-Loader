@@ -1359,6 +1359,8 @@ const CYCLOPEDIA_PROFILE_SEASONS = [1, 2];
 
 const CYCLOPEDIA_ASSETS = {
   seasonIcon: 'https://bestiaryarena.com/assets/icons/season.png',
+  bracketSilver: 'https://bestiaryarena.com/assets/icons/bracket-silver.png',
+  bracketGold: 'https://bestiaryarena.com/assets/icons/bracket-gold.png',
   bracketPlatinum: 'https://bestiaryarena.com/assets/icons/bracket-platinum.png',
   bracketDiamond: 'https://bestiaryarena.com/assets/icons/bracket-diamond.png',
   bracketChallenger: 'https://bestiaryarena.com/assets/icons/bracket-challenger.png'
@@ -1370,7 +1372,78 @@ function cyclopediaBracketIconUrl(bracketName) {
   if (u.includes('CHALLENGER')) return CYCLOPEDIA_ASSETS.bracketChallenger;
   if (u.includes('DIAMOND')) return CYCLOPEDIA_ASSETS.bracketDiamond;
   if (u.includes('PLATINUM')) return CYCLOPEDIA_ASSETS.bracketPlatinum;
+  if (u.includes('GOLD')) return CYCLOPEDIA_ASSETS.bracketGold;
+  if (u.includes('SILVER')) return CYCLOPEDIA_ASSETS.bracketSilver;
   return null;
+}
+
+function getSeason2RankBracketFromPosition(positionRaw, totalRaw) {
+  const rankPos = Number(positionRaw);
+  if (!Number.isFinite(rankPos) || rankPos <= 0) return null;
+  if (rankPos <= 20) return 'CHALLENGER';
+
+  const totalPlayers = Number(totalRaw);
+  if (!Number.isFinite(totalPlayers) || totalPlayers <= 0) return null;
+
+  const percentile = (rankPos / totalPlayers) * 100;
+  if (percentile <= 5) return 'DIAMOND';
+  if (percentile <= 15) return 'PLATINUM';
+  if (percentile <= 30) return 'GOLD';
+  if (percentile <= 60) return 'SILVER';
+  return null;
+}
+
+function getSeason2RankBracket(profileData, seasonEntry, seasonNum) {
+  if (Number(seasonNum) !== 2) return null;
+  const explicit = seasonEntry?.rankBracket;
+  if (explicit !== undefined && explicit !== null && String(explicit).trim() !== '') {
+    return String(explicit).trim().toUpperCase();
+  }
+
+  const rankPosCandidate = seasonEntry?.rankPosition
+    ?? seasonEntry?.position
+    ?? seasonEntry?.rankPos
+    ?? profileData?.rankPointsPosition
+    ?? profileData?.rankPosition
+    ?? profileData?.position;
+
+  const totalPlayersCandidate = seasonEntry?.totalPlayers
+    ?? seasonEntry?.playersCount
+    ?? seasonEntry?.playerCount
+    ?? profileData?.totalPlayers
+    ?? profileData?.playersCount
+    ?? profileData?.playerCount;
+
+  return getSeason2RankBracketFromPosition(rankPosCandidate, totalPlayersCandidate);
+}
+
+function getSeason2MetricBracket(profileData, seasonEntry, seasonNum, metricKey) {
+  if (Number(seasonNum) !== 2) return null;
+  const metric = String(metricKey || '').trim().toLowerCase();
+  if (!metric) return null;
+
+  const explicitBracket = seasonEntry?.[`${metric}Bracket`];
+  if (explicitBracket !== undefined && explicitBracket !== null && String(explicitBracket).trim() !== '') {
+    return String(explicitBracket).trim().toUpperCase();
+  }
+
+  const positionCandidate = seasonEntry?.[`${metric}Position`]
+    ?? seasonEntry?.[`${metric}Pos`]
+    ?? (metric === 'rank'
+      ? (seasonEntry?.rankPosition ?? seasonEntry?.position)
+      : undefined)
+    ?? (metric === 'rank'
+      ? (profileData?.rankPointsPosition ?? profileData?.rankPosition ?? profileData?.position)
+      : (profileData?.[`${metric}Position`] ?? profileData?.[`${metric}Pos`]));
+
+  const totalPlayersCandidate = seasonEntry?.totalPlayers
+    ?? seasonEntry?.playersCount
+    ?? seasonEntry?.playerCount
+    ?? profileData?.totalPlayers
+    ?? profileData?.playersCount
+    ?? profileData?.playerCount;
+
+  return getSeason2RankBracketFromPosition(positionCandidate, totalPlayersCandidate);
 }
 
 function unwrapProfilePageJson(profileData) {
@@ -1433,13 +1506,22 @@ function patchProfileDataForActiveSeason(profileData, seasonNum) {
     next.rankPoints = s.rank;
     next.ticks = s.ticks;
     next.floors = s.floors;
-    if (s.rankBracket !== undefined && s.rankBracket !== null && s.rankBracket !== '') {
+    const season2RankBracket = getSeason2MetricBracket(pd, s, seasonNum, 'rank');
+    const season2TicksBracket = getSeason2MetricBracket(pd, s, seasonNum, 'ticks');
+    const season2FloorsBracket = getSeason2MetricBracket(pd, s, seasonNum, 'floors');
+    if (season2RankBracket) {
+      next.rankPointsPosition = season2RankBracket;
+    } else if (s.rankBracket !== undefined && s.rankBracket !== null && s.rankBracket !== '') {
       next.rankPointsPosition = String(s.rankBracket);
     }
-    if (s.ticksBracket !== undefined && s.ticksBracket !== null && s.ticksBracket !== '') {
+    if (season2TicksBracket) {
+      next.ticksPosition = season2TicksBracket;
+    } else if (s.ticksBracket !== undefined && s.ticksBracket !== null && s.ticksBracket !== '') {
       next.ticksPosition = String(s.ticksBracket);
     }
-    if (s.floorsBracket !== undefined && s.floorsBracket !== null && s.floorsBracket !== '') {
+    if (season2FloorsBracket) {
+      next.floorsPosition = season2FloorsBracket;
+    } else if (s.floorsBracket !== undefined && s.floorsBracket !== null && s.floorsBracket !== '') {
       next.floorsPosition = String(s.floorsBracket);
     }
   }
@@ -15326,14 +15408,27 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) 
     const activeSeason = cyclopediaState.profileSeason || 1;
     const pd = unwrapProfilePageJson(profileData) || {};
     const s = findProfileSeasonEntry(pd, activeSeason);
+    const season2RankBracket = getSeason2MetricBracket(pd, s, activeSeason, 'rank');
+    const season2TicksBracket = getSeason2MetricBracket(pd, s, activeSeason, 'ticks');
+    const season2FloorsBracket = getSeason2MetricBracket(pd, s, activeSeason, 'floors');
+    const pickPlacement = (...candidates) => {
+      for (const c of candidates) {
+        const n = Number(c);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return null;
+    };
     const seasonStats = {
       // For current season, profile payload can expose live aggregates only at top level.
       ticks: s?.ticks ?? pd.ticks,
       rank: s?.rank ?? pd.rankPoints,
       floors: s?.floors ?? pd.floors,
-      ticksBracket: s?.ticksBracket,
-      rankBracket: s?.rankBracket,
-      floorsBracket: s?.floorsBracket
+      ticksPlacement: pickPlacement(s?.ticksPosition, s?.ticksPos, pd?.ticksPosition, pd?.ticksPos),
+      rankPlacement: pickPlacement(s?.rankPosition, s?.position, s?.rankPos, pd?.rankPosition, pd?.position, pd?.rankPointsPosition),
+      floorsPlacement: pickPlacement(s?.floorsPosition, s?.floorsPos, pd?.floorsPosition, pd?.floorsPos),
+      ticksBracket: season2TicksBracket || s?.ticksBracket,
+      rankBracket: season2RankBracket || s?.rankBracket,
+      floorsBracket: season2FloorsBracket || s?.floorsBracket
     };
 
     const div = document.createElement('div');
@@ -15427,7 +15522,7 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) 
     title.appendChild(titleLabel);
     statsWrap.appendChild(title);
 
-    const appendStatRow = (parent, labelKey, rawValue, bracket) => {
+    const appendStatRow = (parent, labelKey, rawValue, bracket, placement) => {
       const na = cyclopediaSeasonNA();
       const row = document.createElement('div');
       row.style.display = 'flex';
@@ -15440,9 +15535,15 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) 
       row.style.minHeight = '20px';
       row.style.maxHeight = '20px';
       row.style.boxSizing = 'border-box';
+      const tooltipParts = [];
+      if (placement != null) tooltipParts.push(`Placement: #${FormatUtils.number(placement)}`);
+      if (bracket != null && bracket !== '') tooltipParts.push(`Bracket: ${String(bracket)}`);
+      if (tooltipParts.length > 0) row.title = tooltipParts.join(' | ');
       const lab = document.createElement('span');
       lab.style.flexShrink = '0';
-      lab.textContent = cyclopediaT(labelKey);
+      lab.textContent = (typeof labelKey === 'string' && labelKey.startsWith('mods.'))
+        ? cyclopediaT(labelKey)
+        : String(labelKey);
       const val = document.createElement('span');
       val.style.display = 'flex';
       val.style.flex = '1 1 auto';
@@ -15525,9 +15626,9 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) 
     sn.appendChild(snText);
     block.appendChild(sn);
 
-    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsTicks', seasonStats.ticks, seasonStats.ticksBracket);
-    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsRank', seasonStats.rank, seasonStats.rankBracket);
-    appendStatRow(block, 'mods.cyclopedia.startpage.seasonStatsFloors', seasonStats.floors, seasonStats.floorsBracket);
+    appendStatRow(block, 'Speedrun', seasonStats.ticks, seasonStats.ticksBracket, seasonStats.ticksPlacement);
+    appendStatRow(block, 'Rank Points', seasonStats.rank, seasonStats.rankBracket, seasonStats.rankPlacement);
+    appendStatRow(block, 'Difficulty', seasonStats.floors, seasonStats.floorsBracket, seasonStats.floorsPlacement);
 
     statsWrap.appendChild(block);
 

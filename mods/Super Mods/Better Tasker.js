@@ -1612,6 +1612,7 @@ let lastModalCall = 0;
 let escKeyListener = null;
 let pageVisibilityHandler = null;
 let lastPageVisibilityChange = 0;
+let lastForegroundTaskRecheck = 0;
 
 // Timeout tracking for cleanup
 let safetyTimeouts = [];
@@ -2153,11 +2154,70 @@ function handlePageVisibilityChange() {
             // If we were paused due to Raid Hunter but it's no longer active, don't resume here
             // Let the coordination interval handle resumption (with proper delay)
             // This prevents race conditions where Raid Hunter might be temporarily undetected
+            void scheduleForegroundTaskRecheck();
         } else {
             console.log('[Better Tasker] Page became hidden - maintaining task automation state');
         }
     } catch (error) {
         console.error('[Better Tasker] Error handling page visibility change:', error);
+    }
+}
+
+async function scheduleForegroundTaskRecheck() {
+    try {
+        const now = Date.now();
+        // Prevent rapid duplicate checks from tab focus/visibility bursts.
+        if (now - lastForegroundTaskRecheck < 3000) {
+            return;
+        }
+        lastForegroundTaskRecheck = now;
+
+        if (taskerState !== TASKER_STATES.ENABLED) {
+            return;
+        }
+
+        // Only run foreground recovery if we are in a task-critical state.
+        if (!taskHuntingOngoing && !pendingTaskCompletion && !finalRunPauseIssued) {
+            return;
+        }
+
+        // Give game state stores one beat to resync after tab returns to foreground.
+        await sleep(600);
+
+        const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+        const gameTimerContext = globalThis.state?.gameTimer?.getSnapshot?.()?.context;
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        const task = playerContext?.questLog?.task;
+        const progress = getTaskKillProgress();
+        const isGameRunning = !!(boardContext?.gameStarted && gameTimerContext?.state === 'initial');
+        const quotaReached = !!(progress && progress.current >= progress.target);
+        const taskReady = !!(task && task.ready);
+
+        console.log('[Better Tasker] Foreground task recheck snapshot:', {
+            isGameRunning,
+            taskHuntingOngoing,
+            pendingTaskCompletion,
+            finalRunPauseIssued,
+            progress: progress ? `${progress.current}/${progress.target}` : 'n/a',
+            taskReady
+        });
+
+        if (taskOperationInProgress) {
+            return;
+        }
+
+        if (!isGameRunning && (pendingTaskCompletion || taskReady || quotaReached)) {
+            console.log('[Better Tasker] Foreground recheck detected completable task state - running post-game completion');
+            await handlePostGameTaskCompletion();
+            return;
+        }
+
+        if (!isGameRunning && taskHuntingOngoing) {
+            console.log('[Better Tasker] Foreground recheck while task hunting - running task finishing check');
+            await handleTaskFinishing();
+        }
+    } catch (error) {
+        console.error('[Better Tasker] Error during foreground task recheck:', error);
     }
 }
 
