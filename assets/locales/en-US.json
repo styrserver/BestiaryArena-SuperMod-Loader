@@ -374,7 +374,7 @@
       "autoCollectRewardsTooltip": "Level-up rewards and Daily Seashell when ready.",
       "autoCollectSeashell": "Autocollect Daily Seashell",
       "autoCollectSeashellTooltip": "Automatically collects Daily Seashell rewards when they are ready.",
-      "autoCollectLevelUpRewards": "Autocollect level-up rewards",
+      "autoCollectLevelUpRewards": "Autocollect Level-Up Rewards",
       "autoCollectLevelUpRewardsTooltip": "Automatically collects level-up rewards from the rewards menu.",
       "seamlessAutoplay": "Seamless autoplay",
       "seamlessAutoplayTooltip": "Automatically restarts autoplay after defeat and network issues.",
