@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.7.16",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Return to Map hotkey now supports forward map navigation with Shift + hotkey and includes an info icon tooltip in Hotkeys settings; hotkeys are also blocked during active manual/autoplay battles with a focused allowlist (General navigation, Cycle Bestiary/Equipment tab, and Start/Skip), while sandbox runs are excluded from this battle-time block."
+        },
+        {
+          "mod": "Guilds",
+          "type": "fixed",
+          "text": "Skill progression is now season-scoped (Season 2 uses separate Firebase paths), legacy player-equipment/skill-progress data is auto-deleted, baseline reset handling ensures level-10/0 fresh starts begin from clean skill progress and total-skill-increase counters, and a reset-loop bug was fixed so fresh Season 2 progress no longer gets repeatedly cleared."
+        }
+      ]
+    },
+    {
       "version": "3.7.15",
       "changes": [
         {

@@ -419,6 +419,18 @@ function sanitizeStoredHotkey(raw, fallback = 'i') {
   return s.length === 1 ? s.toLowerCase() : s.toLowerCase();
 }
 
+function isBattleActiveForHotkeys() {
+  try {
+    const boardContext = globalThis.state?.board?.getSnapshot?.().context;
+    const gameStarted = boardContext?.gameStarted === true;
+    const mode = typeof boardContext?.mode === 'string' ? boardContext.mode.toLowerCase() : '';
+    const isSupportedMode = mode === 'manual' || mode === 'autoplay';
+    return gameStarted && isSupportedMode;
+  } catch {
+    return false;
+  }
+}
+
 /** Short label for the hotkey button (syncs visually with Reset-sized control). */
 function formatHotkeyForDisplay(id, fallbackWhenEmpty = 'i') {
   const safe = sanitizeStoredHotkey(id, fallbackWhenEmpty);
@@ -1151,12 +1163,26 @@ const NAV_HOTKEY_ENTRIES = [
 ];
 
 const NAV_HOTKEY_BINDING_KEYS = NAV_HOTKEY_ENTRIES.map((e) => e.configKey);
+const HOTKEY_ALLOWLIST_DURING_BATTLE_KEYS = [
+  ...NAV_HOTKEY_BINDING_KEYS,
+  'hotkeyCycleBestiaryEquipmentTab',
+  'hotkeyStartOrSkip'
+];
 const NAV_HOTKEY_UI_ROWS = NAV_HOTKEY_ENTRIES.map(({ configKey, captureId, resetId }) => ({
   configKey,
   captureId,
   resetId,
   displayFallback: ''
 }));
+
+function isHotkeyAllowlistedDuringBattle(pressedId) {
+  if (!pressedId) return false;
+  for (const configKey of HOTKEY_ALLOWLIST_DURING_BATTLE_KEYS) {
+    const boundId = sanitizeStoredHotkey(config[configKey], '');
+    if (boundId && pressedId === boundId) return true;
+  }
+  return false;
+}
 
 function handleGlobalHotkeys(event) {
   if (!event || event.repeat) return;
@@ -1170,6 +1196,7 @@ function handleGlobalHotkeys(event) {
 
   const pressedId = normalizeHotkeyIdentifierFromKey(event.key);
   if (!pressedId) return;
+  if (isBattleActiveForHotkeys() && !isHotkeyAllowlistedDuringBattle(pressedId)) return;
 
   for (const { configKey, open } of NAV_HOTKEY_ENTRIES) {
     const boundId = sanitizeStoredHotkey(config[configKey], '');
@@ -1185,7 +1212,11 @@ function handleGlobalHotkeys(event) {
     if (!config.showLastVisitedMapButton) return;
     event.preventDefault();
     event.stopPropagation();
-    triggerReturnToMapFromHotkey();
+    if (event.shiftKey) {
+      goToNextMapFromHotkey();
+    } else {
+      triggerReturnToMapFromHotkey();
+    }
     return;
   }
   const floorUpId = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
@@ -5327,7 +5358,7 @@ function showSettingsModal() {
             </label>
           </div>
           <div id="hotkeys-bindings-container">
-          <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); margin-bottom: 15px;">
+          <div id="hotkeys-general-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); margin-bottom: 15px;">
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionGeneral')}</h4>
             <div class="hotkey-inventory-row" style="${hotkeyRowStyle}">
               <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelArsenal')}</span>
@@ -5437,7 +5468,9 @@ function showSettingsModal() {
                 ${t('mods.betterUI.hotkeyResetBinding')}
               </button>
             </div>
-            <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
+          </div>
+          <div id="hotkeys-battle-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); margin-bottom: 15px;">
+            <div>
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">Battle</h4>
             </div>
             <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
@@ -5513,11 +5546,14 @@ function showSettingsModal() {
               </button>
             </div>
           </div>
-          <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
+          <div id="hotkeys-mods-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionMods')}</h4>
             <div id="hotkeys-mods-section">
               <div class="hotkey-inventory-row" style="${hotkeyRowStyle}">
-                <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelReturnToMap')}</span>
+                <span style="${hotkeyLabelStyle}">
+                  ${t('mods.betterUI.hotkeyLabelReturnToMap')}
+                  <span style="cursor: help; margin-left: 6px; color: #ffffff; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; border: 1px solid #ffffff; border-radius: 50%; line-height: 1;" title="Shift + hotkey goes forward in map history">i</span>
+                </span>
                 <button type="button" id="hotkey-return-to-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
                   G
                 </button>
@@ -5536,7 +5572,7 @@ function showSettingsModal() {
               </div>
             </div>
           </div>
-          <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
+          <div id="hotkeys-setups-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionSetups')}</h4>
             <div id="hotkeys-setups-section">${setupHotkeyRowsHtml}</div>
           </div>

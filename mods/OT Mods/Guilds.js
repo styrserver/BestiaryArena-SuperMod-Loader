@@ -23,8 +23,73 @@ const GUILD_CONFIG = {
   maxMessageLength: 1000,
   maxGuildNameLength: 20,
   maxGuildDescriptionLength: 200,
-  maxMembers: 50
+  maxMembers: 50,
+  skillSeason: 's2'
 };
+
+const SKILL_SEASON_STORAGE_KEY = 'guilds-skill-season';
+const LEGACY_SKILLS_CLEANUP_DONE = new Set();
+const LEGACY_SKILL_PROGRESS_CLEANUP_DONE = new Set();
+
+function getCurrentSkillSeasonKey() {
+  try {
+    const fromStorage = typeof localStorage !== 'undefined'
+      ? localStorage.getItem(SKILL_SEASON_STORAGE_KEY)
+      : null;
+    const rawKey = (fromStorage || GUILD_CONFIG.skillSeason || 's2').toString().trim().toLowerCase();
+    const sanitized = rawKey.replace(/[^a-z0-9_-]/g, '');
+    return sanitized || 's2';
+  } catch (error) {
+    console.warn('[Guilds] Failed to resolve skill season key, using s2:', error);
+    return 's2';
+  }
+}
+
+function getSeasonalSkillProgressPath(normalizedName) {
+  const seasonKey = getCurrentSkillSeasonKey();
+  return `${GUILD_CONFIG.firebaseUrl}/skill-progress/${seasonKey}/${normalizedName}.json`;
+}
+
+function getSeasonalPlayerSkillsPath(normalizedName) {
+  const seasonKey = getCurrentSkillSeasonKey();
+  return `${GUILD_CONFIG.firebaseUrl}/player-skills/${seasonKey}/${normalizedName}.json`;
+}
+
+async function deleteLegacyPlayerEquipmentSkills(normalizedName) {
+  try {
+    if (!normalizedName || LEGACY_SKILLS_CLEANUP_DONE.has(normalizedName)) return;
+
+    const legacyPath = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/skills.json`;
+    const response = await fetch(legacyPath, { method: 'DELETE' });
+    if (!response.ok) {
+      console.warn('[Guilds] Failed deleting legacy player-equipment skills:', response.status);
+      return;
+    }
+
+    LEGACY_SKILLS_CLEANUP_DONE.add(normalizedName);
+    console.log('[Guilds] Deleted legacy player-equipment skills for player:', normalizedName);
+  } catch (error) {
+    console.error('[Guilds] Error deleting legacy player-equipment skills:', error);
+  }
+}
+
+async function deleteLegacySkillProgress(normalizedName) {
+  try {
+    if (!normalizedName || LEGACY_SKILL_PROGRESS_CLEANUP_DONE.has(normalizedName)) return;
+
+    const legacyPath = `${GUILD_CONFIG.firebaseUrl}/skill-progress/${normalizedName}.json`;
+    const response = await fetch(legacyPath, { method: 'DELETE' });
+    if (!response.ok) {
+      console.warn('[Guilds] Failed deleting legacy skill-progress data:', response.status);
+      return;
+    }
+
+    LEGACY_SKILL_PROGRESS_CLEANUP_DONE.add(normalizedName);
+    console.log('[Guilds] Deleted legacy skill-progress data for player:', normalizedName);
+  } catch (error) {
+    console.error('[Guilds] Error deleting legacy skill-progress data:', error);
+  }
+}
 
 const POINTS_CONFIG = {
   LEVELS_PER_POINT: 100,
@@ -289,7 +354,8 @@ const skillBattleTracker = {
   async loadProgressFromFirebase(playerName) {
     try {
       const normalizedName = sanitizeFirebaseKey(playerName);
-      const path = `${GUILD_CONFIG.firebaseUrl}/skill-progress/${normalizedName}.json`;
+      await deleteLegacySkillProgress(normalizedName);
+      const path = getSeasonalSkillProgressPath(normalizedName);
 
       const response = await fetch(path);
       if (response.ok) {
@@ -322,7 +388,7 @@ const skillBattleTracker = {
       });
 
       const normalizedName = sanitizeFirebaseKey(playerName);
-      const path = `${GUILD_CONFIG.firebaseUrl}/skill-progress/${normalizedName}.json`;
+      const path = getSeasonalSkillProgressPath(normalizedName);
 
       const response = await fetch(path, {
         method: 'PUT',
@@ -397,7 +463,8 @@ async function processSkillIncreases() {
     console.log('[Guilds] Skill affecting equipment found:', skillEquipment.length, 'items');
 
     // Get current skills
-    const currentSkills = await getPlayerSkillsFromFirebase(playerName);
+    let currentSkills = await getPlayerSkillsFromFirebase(playerName);
+    currentSkills = await resetSeasonProgressIfAtBaseline(playerName, currentSkills);
 
     // Track which skills were increased
     const increasedSkills = [];
@@ -531,7 +598,8 @@ async function processFishingSkillIncrease(playerName) {
     await skillBattleTracker.loadProgressFromFirebase(playerName);
 
     // Get current skills
-    const currentSkills = await getPlayerSkillsFromFirebase(playerName);
+    let currentSkills = await getPlayerSkillsFromFirebase(playerName);
+    currentSkills = await resetSeasonProgressIfAtBaseline(playerName, currentSkills);
     const skillType = 'fishing';
     const currentLevel = currentSkills[skillType] || 10; // Fishing starts at level 10
 
@@ -4559,13 +4627,61 @@ function getDefaultSkills() {
   };
 }
 
+// Detect season reset (all tracked skills back at baseline) and clear stale progression state
+async function resetSeasonProgressIfAtBaseline(playerName, currentSkills) {
+  try {
+    if (!playerName || !currentSkills) return currentSkills;
+
+    const defaultSkills = getDefaultSkills();
+    const trackedSkills = Object.keys(defaultSkills).filter(key => key !== 'totalSkillIncreases');
+    const isAtBaseline = trackedSkills.every(skill => {
+      const currentValue = Number(currentSkills[skill]);
+      const baseValue = Number(defaultSkills[skill]);
+      return Number.isFinite(currentValue) && currentValue === baseValue;
+    });
+
+    if (!isAtBaseline) return currentSkills;
+
+    const hasStoredProgress = trackedSkills.some(skill => skillBattleTracker.getBattleCount(playerName, skill) > 0);
+    const hasSkillIncreaseHistory = (currentSkills.totalSkillIncreases || 0) > 0;
+
+    // Do not reset fresh season progression while levels are still baseline (10/0).
+    // Only reset when there is persisted increase history from previous progression.
+    if (!hasSkillIncreaseHistory) return currentSkills;
+
+    console.log(`[Guilds] Season baseline detected for ${playerName}; resetting tracked progression state`);
+
+    if (hasStoredProgress) {
+      // Keep an empty map so Firebase write clears previous counters
+      skillBattleTracker.battleCounts.set(playerName, new Map());
+      await skillBattleTracker.saveProgressToFirebase(playerName);
+    }
+
+    if (hasSkillIncreaseHistory) {
+      const resetSkills = { ...currentSkills, totalSkillIncreases: 0 };
+      const saved = await savePlayerSkillsToFirebase(playerName, resetSkills);
+      if (saved) {
+        return resetSkills;
+      }
+      console.warn('[Guilds] Failed to persist season progression reset; using in-memory reset only');
+      return resetSkills;
+    }
+
+    return currentSkills;
+  } catch (error) {
+    console.error('[Guilds] Error while resetting season progression state:', error);
+    return currentSkills;
+  }
+}
+
 // Get player skills from Firebase
 async function getPlayerSkillsFromFirebase(playerName) {
   try {
     if (!playerName) return getDefaultSkills();
 
     const normalizedName = sanitizeFirebaseKey(playerName);
-    const path = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/skills.json`;
+    await deleteLegacyPlayerEquipmentSkills(normalizedName);
+    const path = getSeasonalPlayerSkillsPath(normalizedName);
 
     const response = await fetch(path);
     if (!response.ok) {
@@ -4624,7 +4740,7 @@ async function savePlayerSkillsToFirebase(playerName, skillsData) {
     if (!playerName || !skillsData) return false;
 
     const normalizedName = sanitizeFirebaseKey(playerName);
-    const path = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/skills.json`;
+    const path = getSeasonalPlayerSkillsPath(normalizedName);
 
     const response = await fetch(path, {
       method: 'PUT',
