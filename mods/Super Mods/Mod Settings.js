@@ -1175,11 +1175,54 @@ const NAV_HOTKEY_UI_ROWS = NAV_HOTKEY_ENTRIES.map(({ configKey, captureId, reset
   displayFallback: ''
 }));
 
+const MODAL_HOTKEY_WHITELIST = Object.freeze([
+  {
+    modPath: 'mods/Super Mods/Better Analytics.js',
+    isActive: () => {
+      // Better Analytics piggybacks on the Impact Analyzer open panel.
+      return Boolean(document.querySelector('div[data-state="open"] button[aria-controls*="ally"]'));
+    }
+  }
+]);
+
 function isHotkeyAllowlistedDuringBattle(pressedId) {
   if (!pressedId) return false;
   for (const configKey of HOTKEY_ALLOWLIST_DURING_BATTLE_KEYS) {
     const boundId = sanitizeStoredHotkey(config[configKey], '');
     if (boundId && pressedId === boundId) return true;
+  }
+  return false;
+}
+
+function isAnyModalOpenForHotkeyBlocking() {
+  const candidates = document.querySelectorAll(
+    [
+      '[role="dialog"][data-state="open"]',
+      '[role="alertdialog"][data-state="open"]',
+      '.modal[data-state="open"]',
+      '.modal-overlay',
+      '.modal-bg'
+    ].join(', ')
+  );
+  for (const node of candidates) {
+    if (!node || !(node instanceof Element)) continue;
+    const style = window.getComputedStyle(node);
+    if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isWhitelistedModalContextActive() {
+  for (const entry of MODAL_HOTKEY_WHITELIST) {
+    try {
+      if (typeof entry?.isActive === 'function' && entry.isActive() === true) {
+        return true;
+      }
+    } catch (error) {
+      console.warn('[Mod Settings] Modal whitelist check failed for', entry?.modPath || 'unknown mod', error);
+    }
   }
   return false;
 }
@@ -1193,6 +1236,7 @@ function handleGlobalHotkeys(event) {
   if (hotkeysState.hotkeyCaptureMode !== null) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (isTypingIntoInput(event.target)) return;
+  if (isAnyModalOpenForHotkeyBlocking() && !isWhitelistedModalContextActive()) return;
 
   const pressedId = normalizeHotkeyIdentifierFromKey(event.key);
   if (!pressedId) return;

@@ -1662,7 +1662,7 @@ function bbmClampRuleFloor(n) {
     return Math.max(0, Math.min(15, x));
 }
 
-function getEffectiveMapAutomationSettings(roomId, settings, equipId, equipStatHint) {
+function getMatchingEquipmentRuleAutomationSettings(roomId, settings, equipId, equipStatHint) {
     const s = settings || loadSettings();
     const ov = (s.mapSettings && s.mapSettings[roomId]) || {};
     const mapFloors = s.mapFloors || {};
@@ -1725,11 +1725,40 @@ function getEffectiveMapAutomationSettings(roomId, settings, equipId, equipStatH
             `(setup: "${ov.setupMethod || s.setupMethod || t('mods.betterBoostedMaps.autoSetup')}", floor: ${defaultFloor})`
         );
     }
+    return null;
+}
+
+function getEffectiveMapAutomationSettings(roomId, settings, equipId, equipStatHint) {
+    const s = settings || loadSettings();
+    const ov = (s.mapSettings && s.mapSettings[roomId]) || {};
+    const mapFloors = s.mapFloors || {};
+    const defaultFloor = mapFloors[roomId] !== undefined ? bbmClampRuleFloor(mapFloors[roomId]) : 0;
+    const matchedEquipmentRule = getMatchingEquipmentRuleAutomationSettings(roomId, s, equipId, equipStatHint);
+    if (matchedEquipmentRule) {
+        return matchedEquipmentRule;
+    }
     const setupMethod = ov.setupMethod || s.setupMethod || t('mods.betterBoostedMaps.autoSetup');
     const autoRefillStamina = ov.hasOwnProperty('autoRefillStamina')
         ? ov.autoRefillStamina
         : !!s.autoRefillStamina;
     return { setupMethod, autoRefillStamina, floor: defaultFloor };
+}
+
+function getEquipmentRuleAutomationSettingsForBoostedMap(roomId) {
+    try {
+        const boostedData = getBoostedMapData();
+        if (!boostedData) return null;
+        if (String(boostedData.roomId) !== String(roomId)) return null;
+        return getMatchingEquipmentRuleAutomationSettings(
+            String(roomId),
+            loadSettings(),
+            boostedData.equipId,
+            boostedData.equipStat
+        );
+    } catch (error) {
+        console.error('[Better Boosted Maps] Error resolving boosted-map equipment rule settings:', error);
+        return null;
+    }
 }
 
 function hasMapCustomSettings(mapId) {
@@ -4987,11 +5016,13 @@ exposeBoostedMapsState();
 // Expose checkAndStartBoostedMapFarming on window for other mods to access
 if (typeof window !== 'undefined') {
     window.checkAndStartBoostedMapFarming = checkAndStartBoostedMapFarming;
+    window.betterBoostedMapsResolveEquipmentRuleSettings = getEquipmentRuleAutomationSettingsForBoostedMap;
 }
 
 context.exports = {
     toggle: toggleBoostedMaps,
     checkAndStartBoostedMapFarming: checkAndStartBoostedMapFarming,
+    getEquipmentRuleAutomationSettingsForBoostedMap: getEquipmentRuleAutomationSettingsForBoostedMap,
     cleanup: () => {
         console.log('[Better Boosted Maps] Cleaning up...');
         
@@ -5034,6 +5065,9 @@ context.exports = {
         // Clean up exposed function
         if (window.checkAndStartBoostedMapFarming) {
             delete window.checkAndStartBoostedMapFarming;
+        }
+        if (window.betterBoostedMapsResolveEquipmentRuleSettings) {
+            delete window.betterBoostedMapsResolveEquipmentRuleSettings;
         }
         
         console.log('[Better Boosted Maps] Cleanup completed');

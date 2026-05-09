@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "3.7.17",
+      "changes": [
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "When navigating to the current daily boosted map, Better Tasker now prioritizes matching Better Boosted Maps equipment-rule custom settings (setup and floor) when available; otherwise it keeps Tasker defaults unchanged."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Cyclopedia received a broader Bestiary/Equipment UX update: in-panel search with Name/Usage toggles, usage-based sorting with percentages, no-results messaging, better selection/reset behavior, and Player usage panels sourced from board configs (creatures use map-based percentage; equipment remains config-entry based)."
+        },
+        {
+          "mod": "Highscore Improvements",
+          "type": "changed",
+          "text": "Improvement Opportunities modal now includes a Floor Improvements tab with fixed 500x500 sizing, own-WR filtering, same-floor rows listed below floor gains, and Cyclopedia-aligned floor tick normalization (floorTicks, then ticks) for comparisons."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Hotkeys are now globally blocked while any modal/dialog is open, with a modal-context whitelist that allows hotkeys during Better Analytics Impact Analyzer usage."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Final-run recovery now consistently retries incomplete task progress after any terminal runs-budget pause (not only runsLeft=1), and forced resume is debounced to avoid rapid retry spam during brief UI unresponsiveness."
+        }
+      ]
+    },
+    {
       "version": "3.7.16",
       "changes": [
         {

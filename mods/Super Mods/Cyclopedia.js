@@ -3551,6 +3551,14 @@ function createBox({
     fallback.style.color = 'red';
     return fallback;
   }
+
+  const getListItemBaseName = (el) => {
+    const labeledSpan = el?.querySelector?.('span[data-base-label]');
+    if (labeledSpan?.dataset?.baseLabel) return labeledSpan.dataset.baseLabel;
+    const plainSpan = el?.querySelector?.('span');
+    const raw = String((plainSpan?.textContent || el?.textContent || '')).trim();
+    return raw.replace(/^\d+%\s+/, '');
+  };
   
     items.forEach(name => {
       // Check item status based on type
@@ -3647,7 +3655,7 @@ function createBox({
             el.classList.remove('cyclopedia-selected');
             el.style.background = 'none';
             // Check item status and restore appropriate styling
-            const itemName = el.textContent;
+            const itemName = getListItemBaseName(el);
             if (type === 'creature') {
               const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === itemName.toLowerCase());
               if (!isUnobtainable) {
@@ -4515,7 +4523,56 @@ function openCyclopediaModal(options) {
       
       const leftCol = DOMUtils.createElement('div');
       Object.assign(leftCol.style, LAYOUT_STYLES.leftCol);
-      
+      function createCyclopediaSearchBar(placeholder) {
+        const searchContainer = document.createElement('div');
+        searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box;';
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.placeholder = placeholder;
+        searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1; font-family: inherit; outline: none; box-sizing: border-box;';
+
+        searchInput.addEventListener('focus', () => {
+          searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+        });
+
+        searchInput.addEventListener('blur', () => {
+          searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+        });
+
+        const filterBtn = document.createElement('button');
+        filterBtn.textContent = 'Name';
+        filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px;';
+        filterBtn.addEventListener('mouseenter', () => {
+          filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+          filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+        });
+        filterBtn.addEventListener('mouseleave', () => {
+          filterBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+          filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+        });
+
+        searchContainer.appendChild(searchInput);
+        searchContainer.appendChild(filterBtn);
+        return { searchContainer, searchInput, filterBtn };
+      }
+
+      function createNoResultsMessage(text) {
+        const msg = document.createElement('div');
+        msg.className = FONT_CONSTANTS.SIZES.SMALL;
+        msg.textContent = text;
+        msg.style.cssText = 'display:none; text-align:center; color:#aaa; font-style:italic; padding:6px 4px;';
+        return msg;
+      }
+
+      function mountNoResultsInsideList(box, noResultsEl) {
+        const listGrid = box.querySelector('div[data-nopadding="true"]');
+        if (listGrid) {
+          listGrid.appendChild(noResultsEl);
+          return;
+        }
+        box.appendChild(noResultsEl);
+      }
       
       // Create boxes with common configuration
       const createCreatureBox = (title, items) => {
@@ -4614,33 +4671,92 @@ function openCyclopediaModal(options) {
         
         return box;
       };
-      
+
+      const { searchContainer: bestiarySearchContainer, searchInput: bestiarySearchInput, filterBtn: bestiaryFilterBtn } = createCyclopediaSearchBar('Search creatures');
+      let bestiaryFilterMode = 'name';
       const creaturesBox = createCreatureBox('Creatures', GAME_DATA.ALL_CREATURES);
       const unobtainableBox = createCreatureBox('Unobtainable', GAME_DATA.UNOBTAINABLE_CREATURES);
-      
+
+      const creatureUsageByMapStats = (() => {
+        const usageMap = new Map();
+        let totalMaps = 0;
+        try {
+          const playerContext = globalThis.state?.player?.getSnapshot?.().context;
+          const monsters = Array.isArray(playerContext?.monsters) ? playerContext.monsters : [];
+          const boardConfigs = playerContext?.boardConfigs && typeof playerContext.boardConfigs === 'object'
+            ? playerContext.boardConfigs
+            : {};
+          const monsterLookup = new Map(monsters.map((m) => [m.id, m.gameId]));
+
+          Object.values(boardConfigs).forEach((cfgs) => {
+            if (!Array.isArray(cfgs)) return;
+            totalMaps++;
+            const seenOnMap = new Set();
+            cfgs.forEach((cfg) => {
+              const monsterId = cfg?.monsterId;
+              if (monsterId == null) return;
+              const gid = monsterLookup.get(monsterId);
+              if (gid == null) return;
+              seenOnMap.add(gid);
+            });
+            seenOnMap.forEach((gid) => {
+              usageMap.set(gid, (usageMap.get(gid) || 0) + 1);
+            });
+          });
+        } catch (e) {
+          console.warn('[Cyclopedia] Failed building creature usage map:', e);
+        }
+        return { usageMap, totalMaps };
+      })();
+
+      const getCreatureUsageCountByName = (creatureName) => {
+        const normalized = String(creatureName || '').trim().toLowerCase();
+        if (!normalized) return 0;
+        const maps = window.BestiaryModAPI?.utility?.maps;
+        let gameId = maps?.monsterNamesToGameIds?.get(normalized);
+        if (gameId == null) {
+          const entry = cyclopediaState.monsterNameMap?.get?.(normalized);
+          gameId = entry?.monster?.gameId ?? entry?.index;
+        }
+        if (gameId == null) return 0;
+        return creatureUsageByMapStats.usageMap.get(gameId) || 0;
+      };
+
       // Set custom flex values for height proportions: Creatures 60%, Unobtainable 40%
       creaturesBox.style.flex = '3 1 0';      // 3/5 = 60%
       unobtainableBox.style.flex = '2 1 0';   // 2/5 = 40%
-      
+
       // Shared selection clearing
+      const getBestiaryListItemBaseName = (el) => {
+        const labeledSpan = el?.querySelector?.('span[data-base-label]');
+        if (labeledSpan?.dataset?.baseLabel) return labeledSpan.dataset.baseLabel;
+        const plainSpan = el?.querySelector?.('span');
+        const raw = String((plainSpan?.textContent || el?.textContent || '')).trim();
+        return raw.replace(/^\d+%\s+/, '');
+      };
+
       const clearAllBestiarySelections = () => {
         [creaturesBox, unobtainableBox].forEach(box => {
           box.querySelectorAll('.cyclopedia-selected').forEach(el => {
-          el.classList.remove('cyclopedia-selected');
-          el.style.background = 'none';
-          // Check creature status and restore appropriate styling
-          const creatureName = el.textContent;
-          if (box === creaturesBox) {
-            const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
-            if (!isUnobtainable) {
-              const isPerfect = isCreaturePerfect(creatureName);
-              const isOwned = isCreatureOwned(creatureName);
-              if (isPerfect) {
-                el.style.color = COLOR_CONSTANTS.PERFECT;
-                el.style.filter = 'none';
-              } else if (!isOwned) {
-                el.style.color = COLOR_CONSTANTS.UNOWNED;
-                el.style.filter = 'grayscale(0.7)';
+            el.classList.remove('cyclopedia-selected');
+            el.style.background = 'none';
+            // Check creature status and restore appropriate styling
+            const creatureName = getBestiaryListItemBaseName(el);
+            if (box === creaturesBox) {
+              const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
+              if (!isUnobtainable) {
+                const isPerfect = isCreaturePerfect(creatureName);
+                const isOwned = isCreatureOwned(creatureName);
+                if (isPerfect) {
+                  el.style.color = COLOR_CONSTANTS.PERFECT;
+                  el.style.filter = 'none';
+                } else if (!isOwned) {
+                  el.style.color = COLOR_CONSTANTS.UNOWNED;
+                  el.style.filter = 'grayscale(0.7)';
+                } else {
+                  el.style.color = COLOR_CONSTANTS.TEXT;
+                  el.style.filter = 'none';
+                }
               } else {
                 el.style.color = COLOR_CONSTANTS.TEXT;
                 el.style.filter = 'none';
@@ -4649,17 +4765,100 @@ function openCyclopediaModal(options) {
               el.style.color = COLOR_CONSTANTS.TEXT;
               el.style.filter = 'none';
             }
-          } else {
-            el.style.color = COLOR_CONSTANTS.TEXT;
-            el.style.filter = 'none';
-          }
-        });
+          });
         });
       };
-      
+
       creaturesBox.clearAllSelections = clearAllBestiarySelections;
       unobtainableBox.clearAllSelections = clearAllBestiarySelections;
-      
+
+      function filterBoxItems(box, searchTerm, mode = 'name') {
+        const q = (searchTerm || '').toLowerCase();
+        const rows = Array.from(box.querySelectorAll('div.pixel-font-16'))
+          .filter((el) => !!el.querySelector('span'));
+        const rowMeta = rows.map((row, idx) => {
+          if (!row.dataset.originalOrder) {
+            row.dataset.originalOrder = String(idx);
+          }
+          const span = row.querySelector('span');
+          if (span && !span.dataset.baseLabel) {
+            span.dataset.baseLabel = (span.textContent || '').trim();
+          }
+          const label = (span?.dataset.baseLabel || span?.textContent || row.textContent || '').trim();
+          return {
+            row,
+            idx,
+            span,
+            label,
+            labelNorm: label.toLowerCase(),
+            usageCount: getCreatureUsageCountByName(label)
+          };
+        });
+
+        const listGrid = box.querySelector('div[data-nopadding="true"]');
+        if (mode === 'usage' && listGrid) {
+          rowMeta
+            .slice()
+            .sort((a, b) => {
+              if (b.usageCount !== a.usageCount) return b.usageCount - a.usageCount;
+              return a.labelNorm.localeCompare(b.labelNorm);
+            })
+            .forEach((m) => listGrid.appendChild(m.row));
+        } else if (mode === 'name' && listGrid) {
+          rowMeta
+            .slice()
+            .sort((a, b) => Number(a.row.dataset.originalOrder) - Number(b.row.dataset.originalOrder))
+            .forEach((m) => listGrid.appendChild(m.row));
+        }
+
+        let visibleCount = 0;
+        rowMeta.forEach((meta) => {
+          if (meta.span) {
+            const pct = creatureUsageByMapStats.totalMaps > 0 ? Math.floor((meta.usageCount / creatureUsageByMapStats.totalMaps) * 100) : 0;
+            meta.span.textContent = mode === 'usage' ? `${pct}% ${meta.label}` : meta.label;
+          }
+          const nameMatch = !q || meta.labelNorm.includes(q);
+          const usageMatch = true;
+          const isVisible = nameMatch && usageMatch;
+          meta.row.style.display = isVisible ? '' : 'none';
+          if (isVisible) visibleCount++;
+        });
+        return visibleCount;
+      }
+
+      const noResultsCreatures = createNoResultsMessage('No results in Creatures');
+      const noResultsUnobtainable = createNoResultsMessage('No results in Unobtainable');
+      mountNoResultsInsideList(creaturesBox, noResultsCreatures);
+      mountNoResultsInsideList(unobtainableBox, noResultsUnobtainable);
+
+      const applyBestiarySearch = () => {
+        const searchTerm = (bestiarySearchInput.value || '').trim();
+        const creaturesVisible = filterBoxItems(creaturesBox, searchTerm, bestiaryFilterMode);
+        // Unobtainable creatures do not have setup usage data; keep name-mode behavior only.
+        const unobtainableVisible = filterBoxItems(unobtainableBox, searchTerm, 'name');
+        const showNoResults = !!searchTerm;
+        noResultsCreatures.style.display = showNoResults && creaturesVisible === 0 ? 'block' : 'none';
+        noResultsUnobtainable.style.display = showNoResults && unobtainableVisible === 0 ? 'block' : 'none';
+      };
+      bestiarySearchInput.addEventListener('input', applyBestiarySearch);
+      bestiaryFilterBtn.addEventListener('click', () => {
+        bestiaryFilterMode = bestiaryFilterMode === 'name' ? 'usage' : 'name';
+        bestiaryFilterBtn.textContent = bestiaryFilterMode === 'name' ? 'Name' : 'Usage';
+        applyBestiarySearch();
+      });
+
+      const creaturesTitle = creaturesBox.querySelector('h2.widget-top');
+      if (creaturesTitle && creaturesTitle.parentNode) {
+        const titleHost = creaturesTitle.parentElement;
+        if (titleHost && titleHost !== creaturesBox) {
+          titleHost.insertAdjacentElement('afterend', bestiarySearchContainer);
+        } else {
+          creaturesTitle.insertAdjacentElement('afterend', bestiarySearchContainer);
+        }
+      } else {
+        creaturesBox.prepend(bestiarySearchContainer);
+      }
+
       leftCol.appendChild(creaturesBox);
       leftCol.appendChild(unobtainableBox);
       d.appendChild(leftCol);
@@ -4721,7 +4920,7 @@ function openCyclopediaModal(options) {
       // Create top section for equipment details
       const equipDetailsTop = document.createElement('div');
       Object.assign(equipDetailsTop.style, {
-        flex: '0 0 30%', minHeight: '0', width: '100%', display: 'flex',
+        flex: '0 0 calc(30% + 10px)', minHeight: '0', width: '100%', display: 'flex',
         flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start'
       });
 
@@ -4898,6 +5097,94 @@ function openCyclopediaModal(options) {
         return usageData;
       }
 
+      function resolveConfigEquipmentGameId(cfg, equipLookup, equipGameIdSet) {
+        if (!cfg || typeof cfg !== 'object') return null;
+        const rawCandidates = [
+          cfg.equipId,
+          cfg.equipmentId,
+          cfg.itemId,
+          cfg?.piece?.equipId,
+          cfg?.piece?.equipmentId,
+          cfg?.piece?.itemId
+        ].filter((v) => v != null);
+
+        for (const raw of rawCandidates) {
+          if (equipLookup.has(raw)) return equipLookup.get(raw);
+          const rawStr = String(raw);
+          for (const [equipKey, gameId] of equipLookup.entries()) {
+            if (String(equipKey) === rawStr) return gameId;
+          }
+          // Some payloads may already carry gameId directly
+          if (equipGameIdSet.has(raw)) return raw;
+          if (equipGameIdSet.has(rawStr)) {
+            for (const gid of equipGameIdSet) {
+              if (String(gid) === rawStr) return gid;
+            }
+          }
+        }
+        return null;
+      }
+
+      function getBoardConfigUsageStatsForEquipment(equipGameId) {
+        const emptyStats = {
+          itemCount: 0,
+          totalUsage: 0,
+          percentage: 0,
+          statUsage: { ad: 0, ap: 0, hp: 0 },
+          mostUsedStat: 'ad'
+        };
+
+        try {
+          const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+          const equips = Array.isArray(playerContext?.equips) ? playerContext.equips : [];
+          const boardConfigs = playerContext?.boardConfigs && typeof playerContext.boardConfigs === 'object'
+            ? playerContext.boardConfigs
+            : {};
+
+          if (!equips.length) return emptyStats;
+
+          const equipLookup = new Map(equips.map((e) => [e.id, e.gameId]));
+          const equipById = new Map(equips.map((e) => [e.id, e]));
+          const equipByIdStr = new Map(equips.map((e) => [String(e.id), e]));
+          const equipGameIdSet = new Set(equips.map((e) => e.gameId));
+
+          let totalUsage = 0;
+          let itemCount = 0;
+          const statUsage = { ad: 0, ap: 0, hp: 0 };
+
+          Object.values(boardConfigs).forEach((cfgs) => {
+            if (!Array.isArray(cfgs)) return;
+            cfgs.forEach((cfg) => {
+              const gameId = resolveConfigEquipmentGameId(cfg, equipLookup, equipGameIdSet);
+              if (gameId == null) return;
+
+              totalUsage++;
+              if (gameId !== equipGameId) return;
+
+              itemCount++;
+              const rawEquipId = cfg?.equipId ?? cfg?.equipmentId ?? cfg?.itemId ?? cfg?.piece?.equipId ?? cfg?.piece?.equipmentId ?? cfg?.piece?.itemId;
+              const equip = equipById.get(rawEquipId) || equipByIdStr.get(String(rawEquipId));
+              const stat = equip?.stat;
+              if (stat === 'ad' || stat === 'ap' || stat === 'hp') {
+                statUsage[stat]++;
+              }
+            });
+          });
+
+          const percentage = totalUsage > 0 ? Math.floor((itemCount / totalUsage) * 100) : 0;
+          const mostUsedStat = [
+            { stat: 'ad', count: statUsage.ad },
+            { stat: 'ap', count: statUsage.ap },
+            { stat: 'hp', count: statUsage.hp }
+          ].sort((a, b) => b.count - a.count)[0].stat;
+
+          return { itemCount, totalUsage, percentage, statUsage, mostUsedStat };
+        } catch (error) {
+          console.warn('[Cyclopedia] Error reading board config usage stats:', error);
+          return emptyStats;
+        }
+      }
+
       function updateRightCol() {
         equipDetailsTop.innerHTML = '';
         equipDetailsTop.appendChild(equipDetailsTitle);
@@ -4923,9 +5210,9 @@ function openCyclopediaModal(options) {
         
         if (!currentSelectedEquipment) {
           equipDetailsTitleP.textContent = 'Equipment Details';
-          equipDetailsTop.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view details</div>';
+          equipDetailsTop.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment item to view details</div>';
           creatureUsageTitleP.textContent = 'Found in:';
-          equipDetailsBottom.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view locations</div>';
+          equipDetailsBottom.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment item to view locations</div>';
         } else {
           equipDetailsTitleP.textContent = currentSelectedEquipment;
           creatureUsageTitleP.textContent = 'Found in:';
@@ -4956,19 +5243,17 @@ function openCyclopediaModal(options) {
           }
 
           if (equipId == null) {
-            equipDetailsTop.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Equipment not found</div>';
-            equipDetailsBottom.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Equipment not found</div>';
+            equipDetailsTop.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Equipment item not found</div>';
+            equipDetailsBottom.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Equipment item not found</div>';
           } else {
             const equipData = globalThis.state.utils.getEquipment(equipId);
             
-            // Equipment details section
-            const wrap = document.createElement('div');
-            wrap.style.display = 'flex';
-            wrap.style.flexDirection = 'column';
-            wrap.style.alignItems = 'center';
-            wrap.style.justifyContent = 'center';
-            wrap.style.width = '100%';
-            wrap.style.maxWidth = '100%';
+            // Equipment details + usage stats section (split top area in two columns)
+            const topRow = document.createElement('div');
+            topRow.style.cssText = 'display:flex; flex-direction:row; gap:8px; width:100%; max-width:100%; align-items:stretch; min-height:0; flex:1 1 auto; box-sizing:border-box;';
+
+            const detailsWrap = document.createElement('div');
+            detailsWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; justify-content:center; width:50%; min-width:0;';
 
             let portrait = api.ui.components.createItemPortrait({
               itemId: equipData?.metadata?.spriteId,
@@ -5004,9 +5289,76 @@ function openCyclopediaModal(options) {
               tooltipDiv.textContent = 'No description available.';
             }
 
-            wrap.appendChild(portrait);
-            wrap.appendChild(tooltipDiv);
-            equipDetailsTop.appendChild(wrap);
+            detailsWrap.appendChild(portrait);
+            detailsWrap.appendChild(tooltipDiv);
+
+            const usageWrap = document.createElement('div');
+            usageWrap.className = FONT_CONSTANTS.SIZES.SMALL;
+            usageWrap.style.cssText = 'width:50%; min-width:0; text-align:left; color:#e6d7b0; display:flex; flex-direction:column; justify-content:flex-start; border-left:1px solid #444; padding-left:8px; box-sizing:border-box; overflow-y:auto; max-height:130px; line-height:1.15;';
+
+            const usage = getBoardConfigUsageStatsForEquipment(equipId);
+            const usageTitle = document.createElement('div');
+            usageTitle.className = 'pixel-font-14';
+            usageTitle.style.cssText = 'font-weight:700; margin-bottom:4px; color:#ffe066; letter-spacing:0.02em;';
+            usageTitle.textContent = 'Player usage';
+            usageWrap.appendChild(usageTitle);
+
+            const usageSeparator = document.createElement('div');
+            usageSeparator.className = 'separator my-2.5';
+            usageSeparator.setAttribute('role', 'none');
+            usageSeparator.style.margin = '0 0 4px 0';
+            usageWrap.appendChild(usageSeparator);
+
+            if (usage.totalUsage <= 0) {
+              const noData = document.createElement('div');
+              noData.textContent = 'No saved configurations found.';
+              noData.style.fontStyle = 'italic';
+              noData.style.color = '#aaa';
+              noData.style.fontSize = '12px';
+              usageWrap.appendChild(noData);
+            } else {
+              const usageCount = document.createElement('div');
+              usageCount.textContent = `Used ${usage.itemCount} times`;
+              usageCount.style.marginBottom = '1px';
+              usageWrap.appendChild(usageCount);
+
+              const usagePct = document.createElement('div');
+              usagePct.textContent = `Usage percentage: ${usage.percentage}%`;
+              usagePct.style.marginBottom = '3px';
+              usageWrap.appendChild(usagePct);
+
+              const usageDist = document.createElement('div');
+              usageDist.textContent = 'Stats distribution:';
+              usageDist.style.marginTop = '1px';
+              usageDist.style.marginBottom = '1px';
+              usageWrap.appendChild(usageDist);
+
+              const statRows = document.createElement('div');
+              statRows.style.cssText = 'display:flex; flex-direction:row; gap:10px; margin-top:1px; align-items:center; flex-wrap:wrap;';
+
+              const makeStatRow = (iconPath, label, count) => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex; align-items:center; gap:6px;';
+                const icon = document.createElement('img');
+                icon.src = iconPath;
+                icon.alt = label;
+                icon.style.cssText = 'width:14px; height:14px; image-rendering:pixelated; flex:0 0 auto;';
+                const text = document.createElement('span');
+                text.textContent = `${count}`;
+                row.appendChild(icon);
+                row.appendChild(text);
+                return row;
+              };
+
+              statRows.appendChild(makeStatRow('/assets/icons/attackdamage.png', 'Attack Damage', usage.statUsage.ad));
+              statRows.appendChild(makeStatRow('/assets/icons/abilitypower.png', 'Ability Power', usage.statUsage.ap));
+              statRows.appendChild(makeStatRow('/assets/icons/heal.png', 'Health Points', usage.statUsage.hp));
+              usageWrap.appendChild(statRows);
+            }
+
+            topRow.appendChild(detailsWrap);
+            topRow.appendChild(usageWrap);
+            equipDetailsTop.appendChild(topRow);
 
             const foundInRow = document.createElement('div');
             foundInRow.style.cssText =
@@ -5278,7 +5630,7 @@ function openCyclopediaModal(options) {
 
         if (!currentSelectedEquipment) {
           ownedEquipTitleP.textContent = 'Owned Equipment';
-          ownedEquipCol.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view owned</div>';
+          ownedEquipCol.innerHTML += '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="text-align:center;">Select equipment item to view owned</div>';
         } else {
           let equipId = null;
 
@@ -5315,7 +5667,7 @@ function openCyclopediaModal(options) {
           if (owned.length === 0) {
             const noEquipmentDiv = document.createElement('div');
             noEquipmentDiv.className = FONT_CONSTANTS.SIZES.BODY;
-            noEquipmentDiv.textContent = 'You do not own this equipment.';
+            noEquipmentDiv.textContent = 'You do not own this equipment item.';
             // Center the text both horizontally and vertically
             noEquipmentDiv.style.textAlign = 'center';
             noEquipmentDiv.style.padding = '20px';
@@ -5479,10 +5831,191 @@ function openCyclopediaModal(options) {
         overflowY: 'hidden', minHeight: '0'
       });
 
-      leftCol.appendChild(createEquipmentBox({
+      const createEquipmentSearchBar = () => {
+        const searchContainer = document.createElement('div');
+        searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box;';
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.placeholder = 'Search equipment...';
+        searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1; font-family: inherit; outline: none; box-sizing: border-box;';
+
+        searchInput.addEventListener('focus', () => {
+          searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+        });
+
+        searchInput.addEventListener('blur', () => {
+          searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+        });
+
+        const filterBtn = document.createElement('button');
+        filterBtn.textContent = 'Name';
+        filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px;';
+        filterBtn.addEventListener('mouseenter', () => {
+          filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+          filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+        });
+        filterBtn.addEventListener('mouseleave', () => {
+          filterBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+          filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+        });
+
+        searchContainer.appendChild(searchInput);
+        searchContainer.appendChild(filterBtn);
+        return { searchContainer, searchInput, filterBtn };
+      };
+
+      const createNoResultsMessage = (text) => {
+        const msg = document.createElement('div');
+        msg.className = FONT_CONSTANTS.SIZES.SMALL;
+        msg.textContent = text;
+        msg.style.cssText = 'display:none; text-align:center; color:#aaa; font-style:italic; padding:6px 4px;';
+        return msg;
+      };
+
+      const mountNoResultsInsideList = (box, noResultsEl) => {
+        const listGrid = box.querySelector('div[data-nopadding="true"]');
+        if (listGrid) {
+          listGrid.appendChild(noResultsEl);
+          return;
+        }
+        box.appendChild(noResultsEl);
+      };
+
+      const { searchContainer: equipmentSearchContainer, searchInput: equipmentSearchInput, filterBtn: equipmentFilterBtn } = createEquipmentSearchBar();
+      let equipmentFilterMode = 'name';
+
+      const getEquipmentUsageSnapshot = () => {
+        const byGameId = new Map();
+        const byName = new Map();
+        let total = 0;
+        try {
+          const playerContext = globalThis.state?.player?.getSnapshot?.().context;
+          const equips = Array.isArray(playerContext?.equips) ? playerContext.equips : [];
+          const boardConfigs = playerContext?.boardConfigs && typeof playerContext.boardConfigs === 'object'
+            ? playerContext.boardConfigs
+            : {};
+          const equipLookup = new Map(equips.map((e) => [e.id, e.gameId]));
+          const equipGameIdSet = new Set(equips.map((e) => e.gameId));
+          Object.values(boardConfigs).forEach((cfgs) => {
+            if (!Array.isArray(cfgs)) return;
+            cfgs.forEach((cfg) => {
+              const gid = resolveConfigEquipmentGameId(cfg, equipLookup, equipGameIdSet);
+              if (gid == null) return;
+              byGameId.set(gid, (byGameId.get(gid) || 0) + 1);
+              total++;
+            });
+          });
+          byGameId.forEach((count, gameId) => {
+            try {
+              const equipData = globalThis.state?.utils?.getEquipment?.(gameId);
+              const name = String(equipData?.metadata?.name || '').trim().toLowerCase();
+              if (!name) return;
+              byName.set(name, (byName.get(name) || 0) + count);
+            } catch (e) {
+              // Ignore invalid ids from partial payloads
+            }
+          });
+        } catch (e) {
+          console.warn('[Cyclopedia] Failed building equipment usage map:', e);
+        }
+        return { byGameId, byName, total };
+      };
+
+      const getEquipmentUsageCountByName = (equipmentName, usageSnapshot) => {
+        const normalized = String(equipmentName || '').trim().toLowerCase();
+        if (!normalized) return 0;
+        if (usageSnapshot?.byName?.has(normalized)) {
+          return usageSnapshot.byName.get(normalized) || 0;
+        }
+        const maps = window.BestiaryModAPI?.utility?.maps;
+        const gid = maps?.equipmentNamesToGameIds?.get(normalized);
+        if (gid == null) return 0;
+        return usageSnapshot?.byGameId?.get(gid) || 0;
+      };
+
+      const equipmentBox = createEquipmentBox({
         title: 'Equipment',
         items: allEquipment
-      }));
+      });
+      const equipmentTitle = equipmentBox.querySelector('h2.widget-top');
+      if (equipmentTitle && equipmentTitle.parentNode) {
+        equipmentTitle.insertAdjacentElement('afterend', equipmentSearchContainer);
+      } else {
+        equipmentBox.prepend(equipmentSearchContainer);
+      }
+
+      function filterEquipmentBoxItems(searchTerm, mode = 'name') {
+        const q = (searchTerm || '').toLowerCase();
+        const usageSnapshot = getEquipmentUsageSnapshot();
+        const rows = Array.from(equipmentBox.querySelectorAll('div.pixel-font-16'))
+          .filter((el) => !!el.querySelector('span'));
+        const rowMeta = rows.map((row, idx) => {
+          if (!row.dataset.originalOrder) {
+            row.dataset.originalOrder = String(idx);
+          }
+          const span = row.querySelector('span');
+          if (span && !span.dataset.baseLabel) {
+            span.dataset.baseLabel = (span.textContent || '').trim();
+          }
+          const label = (span?.dataset.baseLabel || span?.textContent || row.textContent || '').trim();
+          return {
+            row,
+            idx,
+            span,
+            label,
+            labelNorm: label.toLowerCase(),
+            usageCount: getEquipmentUsageCountByName(label, usageSnapshot)
+          };
+        });
+
+        const listGrid = equipmentBox.querySelector('div[data-nopadding="true"]');
+        if (mode === 'usage' && listGrid) {
+          rowMeta
+            .slice()
+            .sort((a, b) => {
+              if (b.usageCount !== a.usageCount) return b.usageCount - a.usageCount;
+              return a.labelNorm.localeCompare(b.labelNorm);
+            })
+            .forEach((m) => listGrid.appendChild(m.row));
+        } else if (mode === 'name' && listGrid) {
+          rowMeta
+            .slice()
+            .sort((a, b) => Number(a.row.dataset.originalOrder) - Number(b.row.dataset.originalOrder))
+            .forEach((m) => listGrid.appendChild(m.row));
+        }
+
+        let visibleCount = 0;
+        rowMeta.forEach((meta) => {
+          if (meta.span) {
+            const pct = usageSnapshot.total > 0 ? Math.floor((meta.usageCount / usageSnapshot.total) * 100) : 0;
+            meta.span.textContent = mode === 'usage' ? `${pct}% ${meta.label}` : meta.label;
+          }
+          const nameMatch = !q || meta.labelNorm.includes(q);
+          const usageMatch = true;
+          const isVisible = nameMatch && usageMatch;
+          meta.row.style.display = isVisible ? '' : 'none';
+          if (isVisible) visibleCount++;
+        });
+        return visibleCount;
+      }
+
+      const noResultsEquipment = createNoResultsMessage('No results in Equipment');
+      mountNoResultsInsideList(equipmentBox, noResultsEquipment);
+
+      const applyEquipmentSearch = () => {
+        const searchTerm = (equipmentSearchInput.value || '').trim();
+        const visibleCount = filterEquipmentBoxItems(searchTerm, equipmentFilterMode);
+        noResultsEquipment.style.display = searchTerm && visibleCount === 0 ? 'block' : 'none';
+      };
+      equipmentSearchInput.addEventListener('input', applyEquipmentSearch);
+      equipmentFilterBtn.addEventListener('click', () => {
+        equipmentFilterMode = equipmentFilterMode === 'name' ? 'usage' : 'name';
+        equipmentFilterBtn.textContent = equipmentFilterMode === 'name' ? 'Name' : 'Usage';
+        applyEquipmentSearch();
+      });
+
+      leftCol.appendChild(equipmentBox);
 
       d.appendChild(leftCol);
       d.appendChild(equipDetailsCol);
@@ -13698,7 +14231,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       (() => createCharactersTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))()
     ];
 
-    const tabNames = ['Home', 'Bestiary', 'Equipment', 'Inventory', 'Maps', 'Characters'];
+    const tabNames = ['Home', 'Bestiary', 'Arsenal', 'Inventory', 'Maps', 'Characters'];
     const tabButtons = [];
     const tabNav = document.createElement('nav');
     tabNav.className = 'cyclopedia-subnav';
@@ -14891,6 +15424,46 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   dropsSection.style.flexDirection = 'column';
   dropsSection.className = FONT_CONSTANTS.SIZES.SMALL;
 
+  const usageSection = document.createElement('div');
+  usageSection.style.display = 'flex';
+  usageSection.style.flexDirection = 'column';
+  usageSection.style.flex = '0 0 auto';
+
+  const usageTitle = document.createElement('h2');
+  usageTitle.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
+  usageTitle.style.margin = '0';
+  usageTitle.style.padding = '2px 0';
+  usageTitle.style.textAlign = 'center';
+  usageTitle.style.color = COLOR_CONSTANTS.TEXT;
+  usageTitle.style.width = '100%';
+  usageTitle.style.boxSizing = 'border-box';
+  const usageTitleP = document.createElement('p');
+  usageTitleP.textContent = 'Player usage';
+  usageTitleP.className = FONT_CONSTANTS.SIZES.TITLE;
+  usageTitleP.style.margin = '0';
+  usageTitleP.style.padding = '0';
+  usageTitleP.style.textAlign = 'center';
+  usageTitleP.style.color = COLOR_CONSTANTS.TEXT;
+  usageTitle.appendChild(usageTitleP);
+
+  const usageContent = document.createElement('div');
+  usageContent.className = FONT_CONSTANTS.SIZES.SMALL;
+  usageContent.style.cssText = 'padding: 6px 8px 8px 8px; color:#e6d7b0; display:flex; flex-direction:column; gap:2px; line-height:1.15;';
+  const usageStats = getBoardConfigUsageStatsForCreature(monsterId);
+  const usedRow = document.createElement('div');
+  usedRow.textContent = `Used ${usageStats.count} times`;
+  const pctRow = document.createElement('div');
+  pctRow.textContent = `Usage percentage: ${usageStats.percentage}%`;
+  usageContent.appendChild(usedRow);
+  usageContent.appendChild(pctRow);
+  usageSection.appendChild(usageTitle);
+  usageSection.appendChild(usageContent);
+
+  const usageSeparator = document.createElement('div');
+  usageSeparator.className = 'separator my-2.5';
+  usageSeparator.setAttribute('role', 'none');
+  usageSeparator.style.margin = '2px 0';
+
   const dropsTitle = document.createElement('h2');
   dropsTitle.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
   dropsTitle.style.margin = '0';
@@ -14915,6 +15488,8 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   dropsTitleP.style.textAlign = 'center';
   dropsTitleP.style.color = COLOR_CONSTANTS.TEXT;
   dropsTitle.appendChild(dropsTitleP);
+  dropsSection.appendChild(usageSection);
+  dropsSection.appendChild(usageSeparator);
   dropsSection.appendChild(dropsTitle);
   const dropsList = document.createElement('div');
   dropsList.style.padding = '8px 10px 8px 10px';
@@ -15144,6 +15719,44 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   col3.style.overflowX = 'hidden';
   col3.style.overflowY = 'auto';
 
+  function getBoardConfigUsageStatsForCreature(targetMonsterGameId) {
+    const emptyStats = { count: 0, total: 0, percentage: 0 };
+    try {
+      const playerContext = globalThis.state?.player?.getSnapshot?.().context;
+      const monsters = Array.isArray(playerContext?.monsters) ? playerContext.monsters : [];
+      const boardConfigs = playerContext?.boardConfigs && typeof playerContext.boardConfigs === 'object'
+        ? playerContext.boardConfigs
+        : {};
+      if (!monsters.length) return emptyStats;
+
+      const monsterLookup = new Map(monsters.map((m) => [m.id, m.gameId]));
+      let total = 0; // total maps with config arrays
+      let count = 0;
+      Object.values(boardConfigs).forEach((cfgs) => {
+        if (!Array.isArray(cfgs)) return;
+        total++;
+        let foundOnMap = false;
+        cfgs.forEach((cfg) => {
+          const monsterId = cfg?.monsterId;
+          if (monsterId == null) return;
+          const gid = monsterLookup.get(monsterId);
+          if (gid == null) return;
+          if (gid === targetMonsterGameId) foundOnMap = true;
+        });
+        if (foundOnMap) count++;
+      });
+
+      return {
+        count,
+        total,
+        percentage: total > 0 ? Math.floor((count / total) * 100) : 0
+      };
+    } catch (e) {
+      console.warn('[Cyclopedia] Error calculating creature config usage:', e);
+      return emptyStats;
+    }
+  }
+
   let ownedMonsters = [];
   try {
     const playerContext = globalThis.state?.player?.getSnapshot?.().context;
@@ -15192,6 +15805,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   col3TitleP.style.textAlign = 'center';
   col3TitleP.style.color = COLOR_CONSTANTS.TEXT;
   col3Title.appendChild(col3TitleP);
+
   const col3Content = document.createElement('div');
   col3Content.style.display = 'flex';
   col3Content.style.flexDirection = 'column';

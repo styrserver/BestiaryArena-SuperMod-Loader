@@ -192,6 +192,63 @@ function createRankContent(opportunities) {
   statsContainer.innerHTML = `
     <div>Rooms with score improvement: ${opportunities.length}</div>
     <div>Total rank points to gain: ${opportunities.reduce((sum, o) => sum + o.diff, 0)}</div>
+    <div style="visibility: hidden;">.</div>
+  `;
+  
+  return {
+    scrollContainer,
+    statsContainer
+  };
+}
+
+// Helper function to create HTML content for floor improvements
+function createFloorContent(opportunities) {
+  const scrollContainer = api.ui.components.createScrollContainer({
+    height: 264,
+    padding: true,
+    content: ''
+  });
+  
+  if (opportunities.length > 0) {
+    opportunities.forEach(o => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'frame-1 surface-regular flex items-center gap-2 p-1';
+      itemEl.innerHTML = `
+        <div class="frame-pressed-1 shrink-0 cursor-pointer" style="width: 48px; height: 48px;">
+          <img 
+            alt="${o.name}" 
+            class="pixelated size-full object-cover" 
+            src="/assets/room-thumbnails/${o.code}.png" 
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" />
+        </div>
+        <div class="grid w-full gap-1">
+          <div 
+            class="text-whiteExp cursor-pointer"
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" >
+              ${o.name}
+            </div>
+          <div class="pixel-font-14">Your ${o.yourFloor}${o.yourFloorTicks !== null ? ` (${o.yourFloorTicks})` : ''} → Top ${o.bestFloor}${o.bestFloorTicks !== null ? ` (${o.bestFloorTicks})` : ''}</div>
+          <div class="pixel-font-14" style="color: #8f8;">${o.improvementText}</div>
+          <div class="pixel-font-14" style="font-size: 11px; color: #ccc;">by ${o.player}</div>
+        </div>
+      `;
+      scrollContainer.addContent(itemEl);
+    });
+  } else {
+    const emptyEl = document.createElement('div');
+    emptyEl.style.cssText = 'text-align: center; color: #eee; padding: 20px;';
+    emptyEl.textContent = 'You already have the best floor clear in all rooms!';
+    scrollContainer.addContent(emptyEl);
+  }
+  
+  const statsContainer = document.createElement('div');
+  statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
+  const floorGain = opportunities.reduce((sum, o) => sum + o.floorDiff, 0);
+  const tickGain = opportunities.reduce((sum, o) => sum + Math.max(0, Number(o.tickDiff) || 0), 0);
+  statsContainer.innerHTML = `
+    <div>Rooms with floor improvement: ${opportunities.length}</div>
+    <div>Total floor gain: +${floorGain}</div>
+    <div>Same-floor tick gain: ${tickGain} ticks</div>
   `;
   
   return {
@@ -201,9 +258,11 @@ function createRankContent(opportunities) {
 }
 
 // Function to create tabs
-function createTabs(tickContent, rankContent) {
+function createTabs(tickContent, rankContent, floorContent) {
   const container = document.createElement('div');
   container.className = 'flex flex-col';
+  container.style.height = '100%';
+  container.style.minHeight = '0';
   
   // Create tab buttons
   const tabButtons = document.createElement('div');
@@ -217,13 +276,20 @@ function createTabs(tickContent, rankContent) {
   rankTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
   rankTabButton.textContent = 'Rank Improvements';
   
+  const floorTabButton = document.createElement('button');
+  floorTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
+  floorTabButton.textContent = 'Floor Improvements';
+  
   tabButtons.appendChild(tickTabButton);
   tabButtons.appendChild(rankTabButton);
+  tabButtons.appendChild(floorTabButton);
   
   // Create content containers
   const tickTab = document.createElement('div');
   tickTab.style.display = 'flex';
   tickTab.style.flexDirection = 'column';
+  tickTab.style.flex = '1 1 0';
+  tickTab.style.minHeight = '0';
   tickTab.appendChild(tickContent.scrollContainer.element);
   
   const separator1 = document.createElement('div');
@@ -235,6 +301,8 @@ function createTabs(tickContent, rankContent) {
   const rankTab = document.createElement('div');
   rankTab.style.display = 'none';
   rankTab.style.flexDirection = 'column';
+  rankTab.style.flex = '1 1 0';
+  rankTab.style.minHeight = '0';
   rankTab.appendChild(rankContent.scrollContainer.element);
   
   const separator2 = document.createElement('div');
@@ -243,27 +311,92 @@ function createTabs(tickContent, rankContent) {
   rankTab.appendChild(separator2);
   rankTab.appendChild(rankContent.statsContainer);
   
+  const floorTab = document.createElement('div');
+  floorTab.style.display = 'none';
+  floorTab.style.flexDirection = 'column';
+  floorTab.style.flex = '1 1 0';
+  floorTab.style.minHeight = '0';
+  floorTab.appendChild(floorContent.scrollContainer.element);
+  
+  const separator3 = document.createElement('div');
+  separator3.setAttribute('role', 'none');
+  separator3.className = 'separator my-2.5';
+  floorTab.appendChild(separator3);
+  floorTab.appendChild(floorContent.statsContainer);
+  
   // Add event listeners to tab buttons
   tickTabButton.addEventListener('click', () => {
     tickTabButton.className = 'frame-pressed-1 surface-regular px-4 py-1 flex-1 tab-active';
     rankTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
+    floorTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
     tickTab.style.display = 'flex';
     rankTab.style.display = 'none';
+    floorTab.style.display = 'none';
   });
   
   rankTabButton.addEventListener('click', () => {
     tickTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
     rankTabButton.className = 'frame-pressed-1 surface-regular px-4 py-1 flex-1 tab-active';
+    floorTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
     tickTab.style.display = 'none';
     rankTab.style.display = 'flex';
+    floorTab.style.display = 'none';
+  });
+  
+  floorTabButton.addEventListener('click', () => {
+    tickTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
+    rankTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
+    floorTabButton.className = 'frame-pressed-1 surface-regular px-4 py-1 flex-1 tab-active';
+    tickTab.style.display = 'none';
+    rankTab.style.display = 'none';
+    floorTab.style.display = 'flex';
   });
   
   // Add everything to the container
   container.appendChild(tabButtons);
   container.appendChild(tickTab);
   container.appendChild(rankTab);
+  container.appendChild(floorTab);
   
   return container;
+}
+
+// Expand the improvements modal size to fit 3 tabs comfortably.
+function expandImprovementsModal(widthPx = 500, heightPx = 500) {
+  setTimeout(() => {
+    try {
+      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+      if (!dialog) return;
+      
+      const width = `${widthPx}px`;
+      const height = `${heightPx}px`;
+      dialog.style.width = width;
+      dialog.style.minWidth = width;
+      dialog.style.maxWidth = width;
+      dialog.style.height = height;
+      dialog.style.minHeight = height;
+      dialog.style.maxHeight = height;
+      dialog.classList.remove('max-w-[300px]');
+      
+      // Keep inner modal wrappers at full height so tab changes do not resize visual layout.
+      const rootWrapper = dialog.querySelector(':scope > div');
+      if (rootWrapper) {
+        rootWrapper.style.height = '100%';
+        rootWrapper.style.display = 'flex';
+        rootWrapper.style.flexDirection = 'column';
+      }
+      
+      const widgetBottom = dialog.querySelector('.widget-bottom');
+      if (widgetBottom) {
+        widgetBottom.style.display = 'flex';
+        widgetBottom.style.flexDirection = 'column';
+        widgetBottom.style.flex = '1 1 0';
+        widgetBottom.style.minHeight = '0';
+      }
+    } catch (error) {
+      console.warn('[Highscore Improvements] Failed to expand modal width:', error);
+    }
+  }, 50);
 }
 
 // Function to show improvement opportunities modal
@@ -284,6 +417,7 @@ async function showImprovementsModal() {
     const ctx = globalThis.state.player.getSnapshot().context;
     const rooms = ctx.rooms;
     const you = ctx.userId;
+    const yourName = (ctx.name || '').trim().toLowerCase();
     
     // Fetch data from API
     const [best, lbs, roomsHighscores] = await Promise.all([
@@ -336,15 +470,128 @@ async function showImprovementsModal() {
       }];
     }).sort((a, b) => b.diff - a.diff);
     
+    console.log('[Highscore Improvements][Floor Debug] Starting floor opportunity processing');
+    console.log('[Highscore Improvements][Floor Debug] roomsHighscores.floor keys:', Object.keys(roomsHighscores?.floor || {}).length);
+    
+    // Process floor opportunities (higher floor is better; same-floor entries are always shown)
+    const floorOpportunities = countedRoomsEntries.flatMap(([code, r]) => {
+      const topFloor = roomsHighscores?.floor?.[code];
+      if (!topFloor) {
+        console.log('[Highscore Improvements][Floor Debug] Skipping room (no public floor WR):', code);
+        return [];
+      }
+      const topFloorName = (topFloor.userName || '').trim().toLowerCase();
+      const isOwnFloorWR =
+        (topFloor.userId !== undefined && topFloor.userId !== null && topFloor.userId === you) ||
+        (topFloorName && yourName && topFloorName === yourName);
+      if (isOwnFloorWR) {
+        console.log('[Highscore Improvements][Floor Debug] Skipping room (you own floor WR):', code, {
+          yourUserId: you,
+          topFloorUserId: topFloor.userId,
+          yourName: ctx.name,
+          topFloorUserName: topFloor.userName
+        });
+        return [];
+      }
+      
+      const yourFloor = Number.isFinite(Number(r.floor)) ? Number(r.floor) : 0;
+      const bestFloor = Number.isFinite(Number(topFloor.floor)) ? Number(topFloor.floor) : 0;
+      
+      // Match Cyclopedia normalization: floorTicks first, then ticks.
+      const yourFloorTicks = Number.isFinite(Number(r.floorTicks))
+        ? Number(r.floorTicks)
+        : (Number.isFinite(Number(r.ticks)) ? Number(r.ticks) : null);
+      const bestFloorTicks = Number.isFinite(Number(topFloor.floorTicks))
+        ? Number(topFloor.floorTicks)
+        : (Number.isFinite(Number(topFloor.ticks)) ? Number(topFloor.ticks) : null);
+      
+      const floorDiff = bestFloor - yourFloor;
+      const sameFloorTickDelta = (
+        floorDiff === 0 &&
+        bestFloorTicks !== null &&
+        yourFloorTicks !== null
+      ) ? (yourFloorTicks - bestFloorTicks) : null;
+      const sameFloorTickGain = sameFloorTickDelta !== null && sameFloorTickDelta > 0
+        ? sameFloorTickDelta
+        : 0;
+      
+      if (floorDiff < 0) {
+        console.log('[Highscore Improvements][Floor Debug] Skipping room (your floor higher than WR floor):', code, {
+          yourFloor,
+          bestFloor
+        });
+        return [];
+      }
+      
+      if (floorDiff === 0) {
+        console.log('[Highscore Improvements][Floor Debug] Same-floor room:', code, {
+          yourFloor,
+          bestFloor,
+          yourFloorTicks,
+          bestFloorTicks,
+          sameFloorTickDelta,
+          userRoomRaw: {
+            floor: r.floor,
+            floorTicks: r.floorTicks,
+            ticks: r.ticks
+          },
+          topFloorRaw: {
+            floor: topFloor.floor,
+            floorTicks: topFloor.floorTicks
+          },
+          tickWRRaw: best[code] ? {
+            ticks: best[code].ticks,
+            userName: best[code].userName
+          } : null
+        });
+      }
+      
+      let improvementText;
+      if (floorDiff > 0) {
+        improvementText = `+${floorDiff} floor${floorDiff > 1 ? 's' : ''}`;
+      } else if (sameFloorTickDelta === null) {
+        improvementText = 'Ticks unavailable';
+      } else if (sameFloorTickDelta > 0) {
+        improvementText = `${sameFloorTickDelta} ticks`;
+      } else if (sameFloorTickDelta < 0) {
+        improvementText = `${Math.abs(sameFloorTickDelta)} ticks ahead`;
+      } else {
+        improvementText = 'Tied ticks';
+      }
+      
+      return [{
+        code,
+        name: ROOM_NAMES[code] || code,
+        yourFloor,
+        yourFloorTicks,
+        bestFloor,
+        bestFloorTicks,
+        floorDiff,
+        tickDiff: sameFloorTickGain,
+        improvementText,
+        player: topFloor.userName
+      }];
+    }).sort((a, b) => {
+      if (b.floorDiff !== a.floorDiff) return b.floorDiff - a.floorDiff;
+      return b.tickDiff - a.tickDiff;
+    });
+    
+    console.log('[Highscore Improvements][Floor Debug] Final floor opportunities:', floorOpportunities.length);
+    console.log(
+      '[Highscore Improvements][Floor Debug] Same-floor entries:',
+      floorOpportunities.filter(o => o.floorDiff === 0).length
+    );
+    
     // Close loading modal
     loadingModal();
     
-    // Create content for both tabs
+    // Create content for all tabs
     const tickContent = createTickContent(tickOpportunities, total, minTheo, gain);
     const rankContent = createRankContent(rankOpportunities);
+    const floorContent = createFloorContent(floorOpportunities);
     
     // Create tabbed interface
-    const tabbedContent = createTabs(tickContent, rankContent);
+    const tabbedContent = createTabs(tickContent, rankContent, floorContent);
     
     // Show the new modal
     api.showModal({
@@ -357,6 +604,8 @@ async function showImprovementsModal() {
         }
       ]
     });
+    
+    expandImprovementsModal(500, 500);
     
     if (window.DEBUG) console.log('Improvement opportunities modal displayed successfully');
   } catch (error) {

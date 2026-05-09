@@ -1333,11 +1333,14 @@ function onTaskHuntingAutoplayGameEnded() {
                 villainMatches
         );
         taskHuntingRunsBudget = null;
-        finalRunPauseIssued = false;
         if (prog) {
             runsBudgetLastKillCountSnap = prog.current;
         }
-        void pauseAutoplay();
+        // Always use final-run handler here so incomplete progress (e.g. 59/60) resumes reliably.
+        if (!finalRunPauseIssued) {
+            finalRunPauseIssued = true;
+            void handleFinalRunPauseWithRetry();
+        }
     } else {
         const progStr = prog ? prog.current + '/' + prog.target + ' ' + prog.source : 'no API';
         console.log(
@@ -1380,7 +1383,11 @@ function onTaskHuntingEmitNewGameGuard() {
                 taskHuntingRunsBudget
         );
         taskHuntingRunsBudget = null;
-        void pauseAutoplay();
+        // Use final-run handler for all terminal countdown pauses, not only runsLeft===1 path.
+        if (!finalRunPauseIssued) {
+            finalRunPauseIssued = true;
+            void handleFinalRunPauseWithRetry();
+        }
     }
 }
 
@@ -1629,6 +1636,9 @@ let skipRunsBudgetTickOnNextNewGame = false;
 let runsBudgetLastKillCountSnap = null;
 /** Prevent duplicate pause requests when pausing during final run (runsLeft === 1). */
 let finalRunPauseIssued = false;
+/** Debounce forced resume calls when UI is briefly unresponsive. */
+let lastForcedResumeAt = 0;
+const FORCED_RESUME_COOLDOWN_MS = 2500;
 let taskNavigationCompleted = false;
 let autoplayPausedByTasker = false;
 let pendingTaskCompletion = false;
@@ -1698,6 +1708,7 @@ function resetState(resetType = 'full') {
         // Common reset groups to eliminate duplication
         const resetCommonFlags = () => {
             autoplayPausedByTasker = false;
+            lastForcedResumeAt = 0;
             pendingTaskCompletion = false;
             taskOperationInProgress = false;
             lastNoTaskCheck = 0;
@@ -1717,6 +1728,7 @@ function resetState(resetType = 'full') {
             skipRunsBudgetTickOnNextNewGame = false;
             runsBudgetLastKillCountSnap = null;
             finalRunPauseIssued = false;
+            lastForcedResumeAt = 0;
             // Clear saved tasking map ID only when task hunting actually stops
             taskingMapId = null;
             // Reset quest button modification flag
@@ -4706,6 +4718,53 @@ function getActiveTaskCreatureNameFromGameState() {
     }
 }
 
+function resolveBoostedMapsEquipmentRuleSettings(roomId) {
+    if (!roomId) return null;
+    try {
+        if (typeof window.betterBoostedMapsResolveEquipmentRuleSettings === 'function') {
+            return window.betterBoostedMapsResolveEquipmentRuleSettings(String(roomId));
+        }
+    } catch (error) {
+        console.error('[Better Tasker] Error using Better Boosted Maps equipment-rule resolver:', error);
+    }
+    return null;
+}
+
+function resolveTaskerAutomationSettingsForRoom(roomId, baseSettings, baseFloor) {
+    const fallbackSetupMethod = baseSettings?.setupMethod || 'Auto-setup';
+    const fallbackAutoRefill = baseSettings?.autoRefillStamina !== undefined
+        ? !!baseSettings.autoRefillStamina
+        : false;
+    const fallbackFloor = Math.max(0, Math.min(15, Number(baseFloor) || 0));
+
+    const equipmentRuleOverride = resolveBoostedMapsEquipmentRuleSettings(roomId);
+    if (!equipmentRuleOverride) {
+        return {
+            setupMethod: fallbackSetupMethod,
+            autoRefillStamina: fallbackAutoRefill,
+            floor: fallbackFloor,
+            source: 'tasker-default'
+        };
+    }
+
+    const resolved = {
+        setupMethod: equipmentRuleOverride.setupMethod || fallbackSetupMethod,
+        // Keep Better Tasker stamina behavior unchanged (no BBM stamina override).
+        autoRefillStamina: fallbackAutoRefill,
+        floor: equipmentRuleOverride.floor != null
+            ? Math.max(0, Math.min(15, Number(equipmentRuleOverride.floor) || 0))
+            : fallbackFloor,
+        source: 'better-boosted-maps-equipment-rule'
+    };
+    console.log('[Better Tasker] Using Better Boosted Maps equipment-rule settings for current boosted map:', {
+        roomId: String(roomId),
+        setupMethod: resolved.setupMethod,
+        autoRefillStamina: resolved.autoRefillStamina,
+        floor: resolved.floor
+    });
+    return resolved;
+}
+
 // Navigate to suggested map and start autoplay using API
 async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null, preferredCreatureName = null) {
     try {
@@ -4723,7 +4782,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
         const resolvedAutoRefillStamina = creatureOverride?.autoRefillStamina !== undefined
             ? !!creatureOverride.autoRefillStamina
             : !!settings.autoRefillStamina;
-        const runtimeSettings = {
+        let runtimeSettings = {
             ...settings,
             setupMethod: resolvedSetupMethod,
             autoRefillStamina: resolvedAutoRefillStamina
@@ -4752,18 +4811,24 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     taskingMapId,
                     selectedRoomId: roomId
                 });
+                const roomAutomation = resolveTaskerAutomationSettingsForRoom(roomId, runtimeSettings, resolvedFloor);
+                runtimeSettings = {
+                    ...runtimeSettings,
+                    setupMethod: roomAutomation.setupMethod,
+                    autoRefillStamina: roomAutomation.autoRefillStamina
+                };
                 
                 // Show toast notification
                 showToast('Starting Better Tasker');
                 
                 // Handle quest log state and navigation
-                const navigationCompleted = await handleQuestLogState(roomId, resolvedFloor);
+                const navigationCompleted = await handleQuestLogState(roomId, roomAutomation.floor);
                 
                 // Set the tasking map ID for future validation (already set, but ensure it's preserved)
                 taskingMapId = roomId;
                 
                 // Continue with setup...
-                const setupMethod = runtimeSettings.setupMethod || 'Auto-setup';
+                const setupMethod = roomAutomation.setupMethod || runtimeSettings.setupMethod || 'Auto-setup';
                 
                 // Find and click the appropriate setup button
                 console.log(`[Better Tasker] Looking for ${setupMethod} button...`);
@@ -4961,17 +5026,23 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             });
             
             if (roomId) {
+                const roomAutomation = resolveTaskerAutomationSettingsForRoom(roomId, runtimeSettings, resolvedFloor);
+                runtimeSettings = {
+                    ...runtimeSettings,
+                    setupMethod: roomAutomation.setupMethod,
+                    autoRefillStamina: roomAutomation.autoRefillStamina
+                };
                 // Show toast notification
                 showToast('Starting Better Tasker');
                 
                 // Handle quest log state and navigation
-                const navigationCompleted = await handleQuestLogState(roomId, resolvedFloor);
+                const navigationCompleted = await handleQuestLogState(roomId, roomAutomation.floor);
                 
                 // Set the tasking map ID for future validation
                 taskingMapId = roomId;
                 
                 // Get user's selected setup method
-                const setupMethod = runtimeSettings.setupMethod || 'Auto-setup';
+                const setupMethod = roomAutomation.setupMethod || runtimeSettings.setupMethod || 'Auto-setup';
                 
                 // Find and click the appropriate setup button
                 console.log(`[Better Tasker] Looking for ${setupMethod} button...`);
@@ -5843,7 +5914,7 @@ async function handleFinalRunPauseWithRetry() {
             );
             // Re-arm final-run guard so we can pause again once the retry game ends.
             finalRunPauseIssued = false;
-            await resumeAutoplay();
+            await resumeAutoplay({ force: true, reason: 'final-run-incomplete' });
             return;
         }
 
@@ -5851,7 +5922,7 @@ async function handleFinalRunPauseWithRetry() {
             // If pause could not be verified and we cannot read progress, fail open by continuing autoplay.
             console.log('[Better Tasker] [runs-budget] final run pause not verified — resuming autoplay fail-open');
             finalRunPauseIssued = false;
-            await resumeAutoplay();
+            await resumeAutoplay({ force: true, reason: 'final-run-pause-not-verified' });
             return;
         }
 
@@ -5942,12 +6013,28 @@ async function verifyTaskCompletion() {
 }
 
 // Resume autoplay using game state API with coordination
-async function resumeAutoplay() {
+async function resumeAutoplay(options = {}) {
     try {
         console.log('[Better Tasker] Resuming autoplay using state API...');
+        const forceResume = !!options.force;
+        const forceReason = options.reason || 'unspecified';
+        if (forceResume) {
+            const now = Date.now();
+            const elapsed = now - lastForcedResumeAt;
+            if (elapsed < FORCED_RESUME_COOLDOWN_MS) {
+                console.log(
+                    `[Better Tasker] Forced resume cooldown active (${FORCED_RESUME_COOLDOWN_MS - elapsed}ms left) - skipping retry (${forceReason})`
+                );
+                return false;
+            }
+            lastForcedResumeAt = now;
+        }
         
-        // Only resume if we previously paused it
-        if (autoplayPausedByTasker) {
+        // Only resume if we previously paused it, unless forced by a guarded recovery path.
+        if (autoplayPausedByTasker || forceResume) {
+            if (forceResume && !autoplayPausedByTasker) {
+                console.log(`[Better Tasker] Forcing autoplay resume despite unverified pause (${forceReason})`);
+            }
             // Re-acquire control if needed (pause releases control in finally).
             if (!window.AutoplayManager.hasControl('Better Tasker')) {
                 if (!window.AutoplayManager.requestControl('Better Tasker')) {
