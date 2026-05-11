@@ -1502,7 +1502,9 @@ function cleanup() {
   
   const notificationContainer = document.getElementById('setup-manager-notification-container');
   if (notificationContainer) {
-    document.body.removeChild(notificationContainer);
+    if (notificationContainer.parentNode) {
+      notificationContainer.parentNode.removeChild(notificationContainer);
+    }
   }
 }
 

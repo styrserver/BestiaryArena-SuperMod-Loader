@@ -3282,7 +3282,9 @@ function copyToClipboard(text) {
     textarea.select();
     let success = false;
     try { success = document.execCommand('copy'); } catch (err) { console.error("[Hunt Analyzer] Failed to copy to clipboard:", err); } // Added prefix
-    document.body.removeChild(textarea);
+    if (textarea.parentNode) {
+        textarea.parentNode.removeChild(textarea);
+    }
     return success;
 }
 

@@ -1277,7 +1277,7 @@ if (typeof browserAPI === 'undefined') {
               panel.parentNode.removeChild(panel);
             }
             if (overlay.parentNode) {
-              document.body.removeChild(overlay);
+              overlay.parentNode.removeChild(overlay);
             }
           }
         };

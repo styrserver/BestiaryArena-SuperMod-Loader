@@ -624,7 +624,7 @@ function showErrorNotification(message) {
     // Remove after 5 seconds
     setTimeout(() => {
       if (notification.parentNode) {
-        document.body.removeChild(notification);
+        notification.parentNode.removeChild(notification);
       }
     }, 5000);
   } catch (error) {

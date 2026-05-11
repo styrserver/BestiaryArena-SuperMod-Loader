@@ -82,7 +82,9 @@ function copyToClipboard(text) {
     console.error(LOG_PREFIX, 'Failed to copy text:', err);
   }
   
-  document.body.removeChild(textarea);
+  if (textarea.parentNode) {
+    textarea.parentNode.removeChild(textarea);
+  }
   return success;
 }
 

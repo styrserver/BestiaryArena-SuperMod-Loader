@@ -225,7 +225,9 @@
     } catch (err) { 
       console.error("[Better Exaltation Chest] Failed to copy to clipboard:", err); 
     }
-    document.body.removeChild(textarea);
+    if (textarea.parentNode) {
+      textarea.parentNode.removeChild(textarea);
+    }
     return success;
   }
   

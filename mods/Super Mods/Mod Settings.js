@@ -286,18 +286,6 @@ const MODAL_CONFIG = {
   rightColumnWidth: 400
 };
 
-// Experience table for level calculation
-const EXP_TABLE = [
-  [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
-  [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750],
-  [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750],
-  [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500],
-  [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000],
-  [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500],
-  [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
-  [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
-];
-
 // Timer element styles
 const TIMER_STYLES = {
   opacity: '0.7',
@@ -1762,9 +1750,12 @@ const COLOR_OPTIONS = {
 
 // Calculate level from experience points
 function getLevelFromExp(exp) {
-  if (typeof exp !== 'number' || exp < EXP_TABLE[0][1]) return 1;
-  for (let i = EXP_TABLE.length - 1; i >= 0; i--) {
-    if (exp >= EXP_TABLE[i][1]) return EXP_TABLE[i][0];
+  const expValue = Number(exp);
+  if (!Number.isFinite(expValue) || expValue <= 0) return 1;
+  const expToCurrentLevel = globalThis.state?.utils?.expToCurrentLevel;
+  if (typeof expToCurrentLevel === 'function') {
+    const level = Number(expToCurrentLevel(expValue));
+    if (Number.isFinite(level) && level > 0) return Math.floor(level);
   }
   return 1;
 }
@@ -3936,7 +3927,9 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
     a.download = `best-runs-${safePlayerName}-${Date.now()}.txt`;
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
+    if (a.parentNode) {
+      a.parentNode.removeChild(a);
+    }
     URL.revokeObjectURL(url);
     
     console.log('[Mod Settings] Successfully downloaded runs as .txt');
@@ -4458,7 +4451,9 @@ async function exportConfiguration(modal) {
     a.download = `bestiary-arena-config-${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
+    if (a.parentNode) {
+      a.parentNode.removeChild(a);
+    }
     URL.revokeObjectURL(url);
     
     // Create user-friendly export summary
@@ -4810,7 +4805,9 @@ async function importConfiguration(modal) {
       }
      
       // Clean up
-      document.body.removeChild(input);
+      if (input.parentNode) {
+        input.parentNode.removeChild(input);
+      }
     };
     
     document.body.appendChild(input);

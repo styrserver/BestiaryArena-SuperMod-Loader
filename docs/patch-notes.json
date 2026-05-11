@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "3.7.19",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Bestiary creature status styling was refined: text colors now prioritize max-awakened (purple) > awakened (orange) > max non-awakened (yellow), max-awakened uses star-tier-shiny icon replacement, and Owned-panel borders now distinguish max-awakened (rarity-shiny) from awakened (rarity-awaken)."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Added missing map-action translation keys (Clear Map, Go to map, Failed to navigate to map, Map reset) for en-US and pt-BR to remove i18n key-not-found warnings."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Hardened modal/overlay DOM cleanup to remove nodes from their actual parent (with guards) across core UI and multiple mods, preventing removeChild parent-mismatch crashes during reward-screen close/autoplay transitions."
+        },
+        {
+          "mod": "Multiple Mods",
+          "type": "fixed",
+          "text": "Cyclopedia, Mod Settings, Depot Manager, and Dice Roller removed hardcoded EXP-table level conversion and now use runtime expToCurrentLevel so level detection remains correct for current caps (including level 99)."
+        }
+      ]
+    },
+    {
       "version": "3.7.18",
       "changes": [
         {

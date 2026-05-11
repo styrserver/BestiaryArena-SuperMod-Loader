@@ -2368,7 +2368,9 @@ function copyToClipboard(text) {
     console.error('[Manual Runner] Failed to copy text:', err);
   }
   
-  document.body.removeChild(textarea);
+  if (textarea.parentNode) {
+    textarea.parentNode.removeChild(textarea);
+  }
   return success;
 }
 

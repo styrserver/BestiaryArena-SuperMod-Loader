@@ -4857,9 +4857,7 @@ function copyToClipboard(text) {
   }
   
   // Safely remove textarea if it's still a child of body
-  if (textarea.parentNode === document.body) {
-    document.body.removeChild(textarea);
-  } else if (textarea.parentNode) {
+  if (textarea.parentNode) {
     textarea.parentNode.removeChild(textarea);
   }
   return success;

@@ -2499,7 +2499,9 @@ function copyToClipboard(text) {
     console.error('Failed to copy text:', err);
   }
   
-  document.body.removeChild(textarea);
+  if (textarea.parentNode) {
+    textarea.parentNode.removeChild(textarea);
+  }
   return success;
 }
 

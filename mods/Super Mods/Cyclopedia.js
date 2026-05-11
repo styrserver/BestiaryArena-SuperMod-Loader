@@ -44,6 +44,8 @@ const COLOR_CONSTANTS = {
   ERROR: '#ff6b6b',
   WARNING: '#888',
   PERFECT: '#FFD700',
+  MAX_AWAKENED: '#D8B4FF',
+  AWAKENED: '#FFB347',
   UNOWNED: '#666',
   HOVER: '#888'
 };
@@ -162,17 +164,6 @@ const GAME_KEYS = {
   CURRENCY: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
   UPGRADE: ['babyDragonPlant', 'dailyBoostedMap', 'daycare', 'dungeonAscension', 'dragonPlant', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
 };
-
-const EXP_TABLE = [
-  [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
-  [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750],
-  [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750],
-  [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500],
-  [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000],
-  [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500],
-  [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
-  [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
-];
 
 const MAP_INTERACTION_CONFIG = {
   cursor: 'pointer',
@@ -295,7 +286,6 @@ const GAME_DATA = {
   CURRENCY_KEYS: GAME_KEYS.CURRENCY,
   UPGRADE_KEYS: GAME_KEYS.UPGRADE,
   RARITY_COLORS: inventoryDatabase.rarityColors || {},
-  EXP_TABLE,
   REGION_NAME_MAP
 };
 
@@ -1894,7 +1884,19 @@ const DOMUtils = {
     
     // Apply styling based on item status
     const baseStyle = { cursor: 'pointer', padding: '2px 4px', borderRadius: '2px', textAlign: 'left' };
-    if (isPerfect) {
+    if (hasShinyTier) {
+      // Light purple for max awakened creatures (level 99 + max genes).
+      Object.assign(item.style, {
+        ...baseStyle,
+        color: COLOR_CONSTANTS.MAX_AWAKENED
+      });
+    } else if (hasAwakened) {
+      // Orange for awakened creatures that are not max awakened.
+      Object.assign(item.style, {
+        ...baseStyle,
+        color: COLOR_CONSTANTS.AWAKENED
+      });
+    } else if (isPerfect) {
       // Gold color for perfect creatures - clean and distinct
       Object.assign(item.style, { 
         ...baseStyle, 
@@ -3237,10 +3239,14 @@ function findMonsterLocations(monsterName) {
 }
 
 function getLevelFromExp(exp) {
-  const expTable = GAME_DATA.EXP_TABLE;
-  if (typeof exp !== 'number' || exp < expTable[0][1]) return 1;
-  for (let i = expTable.length - 1; i >= 0; i--) {
-    if (exp >= expTable[i][1]) return expTable[i][0];
+  const expValue = Number(exp);
+  if (!Number.isFinite(expValue) || expValue <= 0) return 1;
+
+  // Use live game conversion so newer level caps (e.g. 99) stay accurate.
+  const expToCurrentLevel = globalThis.state?.utils?.expToCurrentLevel;
+  if (typeof expToCurrentLevel === 'function') {
+    const liveLevel = Number(expToCurrentLevel(expValue));
+    if (Number.isFinite(liveLevel) && liveLevel > 0) return Math.floor(liveLevel);
   }
   return 1;
 }
@@ -3254,7 +3260,7 @@ function injectCyclopediaButtonStyles() { if (!DOMCache.get('#cyclopedia-btn-css
 const CYCLOPEDIA_BOX_CSS = `.cyclopedia-box { display: flex; flex-direction: column; border: none; background: none; margin-bottom: 16px; min-height: 120px; box-sizing: border-box; } .cyclopedia-box-title { border: 6px solid transparent; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame-top.b7a55115.png') 6 6 0 6 stretch; border-bottom: none; background: #232323; color: #ffe066; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; font-size: 15px; font-weight: bold; padding: 4px 12px; text-align: left; letter-spacing: 1px; } .cyclopedia-box-content { flex: 1 1 0; overflow-y: auto; background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat; padding: 8px 12px; color: #e6d7b0; font-size: 14px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; min-height: 0; max-height: none; scrollbar-width: thin !important; scrollbar-color: #444 #222 !important; } .cyclopedia-box-content::-webkit-scrollbar { width: 12px !important; background: transparent !important; } .cyclopedia-box-content::-webkit-scrollbar-thumb { background: url('https://bestiaryarena.com/_next/static/media/scrollbar-handle-vertical.962972d4.png') repeat-y !important; border-radius: 4px !important; } .cyclopedia-box-content::-webkit-scrollbar-corner { background: transparent !important; }`;
 function injectCyclopediaBoxStyles() { if (!DOMCache.get('#cyclopedia-box-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-box-css'; style.textContent = CYCLOPEDIA_BOX_CSS; document.head.appendChild(style); } }
 
-const CYCLOPEDIA_SELECTED_CSS = `.cyclopedia-selected { background: rgba(255,255,255,0.18) !important; color: #ffe066 !important; } .cyclopedia-box .equipment-portrait .absolute { background: none !important; } .cyclopedia-box .equipment-portrait[data-highlighted="true"] .absolute { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="background: radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="rgba(0, 0, 0, 0.5)"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute.bottom-0.left-0 { background: none !important; }`;
+const CYCLOPEDIA_SELECTED_CSS = `.cyclopedia-selected { background: rgba(255,255,255,0.18) !important; color: inherit !important; } .cyclopedia-box .equipment-portrait .absolute { background: none !important; } .cyclopedia-box .equipment-portrait[data-highlighted="true"] .absolute { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="background: radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="rgba(0, 0, 0, 0.5)"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute.bottom-0.left-0 { background: none !important; }`;
 function injectCyclopediaSelectedCss() { if (!DOMCache.get('#cyclopedia-selected-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-selected-css'; style.textContent = CYCLOPEDIA_SELECTED_CSS; document.head.appendChild(style); } }
 
 function removeCyclopediaFromMenus() {
@@ -3464,7 +3470,9 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
   
   // Add event listeners
   const closeModal = () => {
-    document.body.removeChild(overlay);
+    if (overlay?.parentNode) {
+      overlay.parentNode.removeChild(overlay);
+    }
   };
   
   cancelButton.addEventListener('click', closeModal);
@@ -3689,9 +3697,17 @@ function createBox({
             if (type === 'creature') {
               const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === itemName.toLowerCase());
               if (!isUnobtainable) {
+                const hasShinyTier = hasShinyTierCreature(itemName);
+                const hasAwakened = hasAwakenedCreature(itemName);
                 const isPerfect = isCreaturePerfect(itemName);
                 const isOwned = isCreatureOwned(itemName);
-                if (isPerfect) {
+                if (hasShinyTier) {
+                  el.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+                  el.style.filter = 'none';
+                } else if (hasAwakened) {
+                  el.style.color = COLOR_CONSTANTS.AWAKENED;
+                  el.style.filter = 'none';
+                } else if (isPerfect) {
                   el.style.color = COLOR_CONSTANTS.PERFECT;
                   el.style.filter = 'none';
                 } else if (!isOwned) {
@@ -3759,7 +3775,13 @@ function createBox({
         
         item.classList.add('cyclopedia-selected');
         item.style.background = 'rgba(255,255,255,0.18)';
-        if (isPerfect) {
+        if (hasShinyTier) {
+          item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+          item.style.filter = 'none';
+        } else if (hasAwakened) {
+          item.style.color = COLOR_CONSTANTS.AWAKENED;
+          item.style.filter = 'none';
+        } else if (isPerfect) {
           item.style.color = COLOR_CONSTANTS.PERFECT;
           item.style.filter = 'none';
         } else if (isT5) {
@@ -3794,7 +3816,13 @@ function createBox({
       const mouseEnterHandler = () => { 
         item.style.background = 'rgba(255,255,255,0.08)';
         // Maintain styling based on item status on hover
-        if (isPerfect) {
+        if (hasShinyTier) {
+          item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+          item.style.filter = 'none';
+        } else if (hasAwakened) {
+          item.style.color = COLOR_CONSTANTS.AWAKENED;
+          item.style.filter = 'none';
+        } else if (isPerfect) {
           item.style.color = COLOR_CONSTANTS.PERFECT;
           item.style.filter = 'none';
         } else if (isT5) {
@@ -3808,7 +3836,13 @@ function createBox({
       const mouseLeaveHandler = () => {
         if (!item.classList.contains('cyclopedia-selected')) item.style.background = 'none';
         // Restore original styling based on item status
-        if (isPerfect) {
+        if (hasShinyTier) {
+          item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+          item.style.filter = 'none';
+        } else if (hasAwakened) {
+          item.style.color = COLOR_CONSTANTS.AWAKENED;
+          item.style.filter = 'none';
+        } else if (isPerfect) {
           item.style.color = COLOR_CONSTANTS.PERFECT;
           item.style.filter = 'none';
         } else if (isT5) {
@@ -3822,7 +3856,13 @@ function createBox({
       const mouseDownHandler = () => { 
         item.style.background = 'rgba(255,255,255,0.18)';
         // Maintain styling based on item status on click
-        if (isPerfect) {
+        if (hasShinyTier) {
+          item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+          item.style.filter = 'none';
+        } else if (hasAwakened) {
+          item.style.color = COLOR_CONSTANTS.AWAKENED;
+          item.style.filter = 'none';
+        } else if (isPerfect) {
           item.style.color = COLOR_CONSTANTS.PERFECT;
           item.style.filter = 'none';
         } else if (isT5) {
@@ -3836,7 +3876,13 @@ function createBox({
       const mouseUpHandler = () => {
         if (!item.classList.contains('cyclopedia-selected')) item.style.background = 'rgba(255,255,255,0.08)';
         // Restore original styling based on item status
-        if (isPerfect) {
+        if (hasShinyTier) {
+          item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+          item.style.filter = 'none';
+        } else if (hasAwakened) {
+          item.style.color = COLOR_CONSTANTS.AWAKENED;
+          item.style.filter = 'none';
+        } else if (isPerfect) {
           item.style.color = COLOR_CONSTANTS.PERFECT;
           item.style.filter = 'none';
         } else if (isT5) {
@@ -4775,9 +4821,17 @@ function openCyclopediaModal(options) {
             if (box === creaturesBox) {
               const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
               if (!isUnobtainable) {
+                const hasShinyTier = hasShinyTierCreature(creatureName);
+                const hasAwakened = hasAwakenedCreature(creatureName);
                 const isPerfect = isCreaturePerfect(creatureName);
                 const isOwned = isCreatureOwned(creatureName);
-                if (isPerfect) {
+                if (hasShinyTier) {
+                  el.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+                  el.style.filter = 'none';
+                } else if (hasAwakened) {
+                  el.style.color = COLOR_CONSTANTS.AWAKENED;
+                  el.style.filter = 'none';
+                } else if (isPerfect) {
                   el.style.color = COLOR_CONSTANTS.PERFECT;
                   el.style.filter = 'none';
                 } else if (!isOwned) {
@@ -15887,11 +15941,16 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
       row.style.height = '82px';
       row.style.margin = '8px 20px 0 20px';
 
+      const level = getLevelFromExp(monster.exp);
+      const totalGenes = (Number(monster.hp) || 0) + (Number(monster.ad) || 0) + (Number(monster.ap) || 0) + (Number(monster.armor) || 0) + (Number(monster.magicResist) || 0);
+      const isAwakened = monster.awaken === true || monster.awakened === true || monster.isAwakened === true || Number(monster.tier) >= 6 || Number(monster.starTier) >= 6 || level > 50;
+      const isMaxAwakened = level >= 99 && totalGenes >= 100;
+
       const portrait = api.ui.components.createFullMonster({
         monsterId: monster.gameId || monster.id,
         tier: 1,
         starTier: monster.tier ?? 0,
-        level: getLevelFromExp(monster.exp),
+        level,
         size: 'small'
       });
       portrait.style.margin = '0';
@@ -15917,6 +15976,16 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
         shinyIcon.style.pointerEvents = 'none';
         shinyIcon.style.zIndex = '10';
         portrait.appendChild(shinyIcon);
+      }
+
+      if (isMaxAwakened) {
+        // Replace existing awakened/star-tier icon instead of stacking another icon.
+        const starTierIcon = portrait.querySelector('img[alt="star tier"]');
+        if (starTierIcon) {
+          starTierIcon.src = 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png';
+          starTierIcon.alt = 'shiny-tier';
+          starTierIcon.title = 'Has level 99 max-genes creature';
+        }
       }
 
       const levelBadge = portrait.querySelector('span.pixel-font-16');
@@ -15966,7 +16035,6 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
         cell.appendChild(num);
         return cell;
       }
-      const level = getLevelFromExp(monster.exp);
       statsGrid.appendChild(statCell('Lv.', level, true));
       statsGrid.appendChild(statCell('/assets/icons/abilitypower.png', monster.ap));
       statsGrid.appendChild(statCell('/assets/icons/heal.png', monster.hp));
@@ -15986,9 +16054,18 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
 
       // Use requestAnimationFrame for smoother DOM updates
       requestAnimationFrame(() => {
-        const borderElem = portrait.querySelector('.has-rarity');
+        const borderElem = portrait.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny');
         if (borderElem) {
-          borderElem.setAttribute('data-rarity', rarity);
+          if (isMaxAwakened) {
+            borderElem.className = 'absolute inset-0 z-2 opacity-80 rarity-shiny';
+            borderElem.removeAttribute('data-rarity');
+          } else if (isAwakened) {
+            borderElem.className = 'absolute inset-0 z-2 opacity-80 rarity-awaken';
+            borderElem.removeAttribute('data-rarity');
+          } else {
+            borderElem.className = 'has-rarity absolute inset-0 z-2';
+            borderElem.setAttribute('data-rarity', rarity);
+          }
         }
       });
     });
