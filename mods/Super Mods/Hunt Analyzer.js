@@ -741,6 +741,7 @@ function attachInlineConfirm(button, { baseText, confirmText, onConfirm, timeout
     let confirmTimeoutId = null;
     let outsideClickHandler = null;
     let originalWidth = '';
+    const resolveBaseText = typeof baseText === 'function' ? baseText : () => baseText;
     const fixedConfirmWidth = button.dataset.fixedConfirmWidth || '';
     const originalBackgroundImage = button.style.backgroundImage || '';
     const originalBackgroundRepeat = button.style.backgroundRepeat || '';
@@ -750,7 +751,7 @@ function attachInlineConfirm(button, { baseText, confirmText, onConfirm, timeout
 
     const resetState = () => {
         button.dataset.confirmArmed = 'false';
-        button.textContent = baseText;
+        button.textContent = resolveBaseText();
         button.style.width = fixedConfirmWidth || originalWidth;
         button.style.backgroundImage = originalBackgroundImage;
         button.style.backgroundRepeat = originalBackgroundRepeat;
@@ -795,8 +796,89 @@ function attachInlineConfirm(button, { baseText, confirmText, onConfirm, timeout
     });
 }
 
+function getClearButtonLabel() {
+    if (HuntAnalyzerState.ui.selectedMapFilter === 'ALL') {
+        return t('mods.huntAnalyzer.clearAll');
+    }
+    const localizedClearMap = t('mods.huntAnalyzer.clearMap');
+    return localizedClearMap === 'mods.huntAnalyzer.clearMap' ? 'Clear Map' : localizedClearMap;
+}
+
+function getGoToMapLabel() {
+    const localizedGoToMap = t('mods.huntAnalyzer.goToMap');
+    return localizedGoToMap === 'mods.huntAnalyzer.goToMap' ? 'Go to map' : localizedGoToMap;
+}
+
+function getFailedToNavigateMapLabel() {
+    const localizedFailed = t('mods.huntAnalyzer.failedToNavigateMap');
+    return localizedFailed === 'mods.huntAnalyzer.failedToNavigateMap' ? 'Failed to navigate to map' : localizedFailed;
+}
+
+function getMapResetLabel() {
+    const localizedMapReset = t('mods.huntAnalyzer.mapReset');
+    return localizedMapReset === 'mods.huntAnalyzer.mapReset' ? 'Map reset' : localizedMapReset;
+}
+
+function refreshClearButtonLabel() {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) return;
+
+    const clearButton = panel.querySelector('.button-container button:first-child');
+    if (!clearButton || clearButton.dataset.confirmArmed === 'true') return;
+    clearButton.textContent = getClearButtonLabel();
+}
+
+function getRoomIdByMapName(mapName) {
+    const roomNames = globalThis.state?.utils?.ROOM_NAME;
+    if (!roomNames || !mapName || mapName === 'ALL') return null;
+
+    for (const [roomId, displayName] of Object.entries(roomNames)) {
+        if (displayName === mapName) {
+            return roomId;
+        }
+    }
+    return null;
+}
+
+function navigateToSelectedMapFilter() {
+    const selectedMap = HuntAnalyzerState.ui.selectedMapFilter;
+    if (!selectedMap || selectedMap === 'ALL') return false;
+
+    const roomId = getRoomIdByMapName(selectedMap);
+    if (!roomId || !globalThis.state?.board?.send) return false;
+
+    globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId
+    });
+    return true;
+}
+
 function clearAnalyzerDataAndRefresh() {
-    resetHuntAnalyzerState();
+    const selectedMapFilter = HuntAnalyzerState.ui.selectedMapFilter;
+    let resetFeedbackText = t('mods.huntAnalyzer.dataReset');
+    if (selectedMapFilter === 'ALL') {
+        resetHuntAnalyzerState();
+    } else {
+        const selectedMapRoomId = getRoomIdByMapName(selectedMapFilter);
+        HuntAnalyzerState.data.sessions = HuntAnalyzerState.data.sessions.filter(
+            session => (
+                session.roomName !== selectedMapFilter &&
+                (selectedMapRoomId === null || String(session.roomId) !== String(selectedMapRoomId))
+            )
+        );
+        HuntAnalyzerState.timeTracking.mapTimeMs.delete(selectedMapFilter);
+        if (HuntAnalyzerState.timeTracking.currentMap === selectedMapFilter) {
+            HuntAnalyzerState.timeTracking.currentMap = null;
+            HuntAnalyzerState.timeTracking.mapStartTime = 0;
+        }
+
+        // Always return the filter to ALL after a scoped clear.
+        HuntAnalyzerState.ui.selectedMapFilter = "ALL";
+        dataProcessor.aggregateData();
+        flushPersistenceIfEnabled();
+        resetFeedbackText = getMapResetLabel();
+    }
 
     const cachedLootDiv = domCache.get("mod-loot-display");
     const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
@@ -810,7 +892,7 @@ function clearAnalyzerDataAndRefresh() {
     updatePanelPosition();
 
     const panel = document.getElementById(PANEL_ID);
-    showPanelFeedback(panel, t('mods.huntAnalyzer.dataReset'), true);
+    showPanelFeedback(panel, resetFeedbackText, true);
 }
 
 function showPanelFeedback(panel, text, isSuccess = true) {
@@ -3879,9 +3961,14 @@ function updateMapFilterDropdown() {
 
     // Clear existing content
     mapFilterRow.innerHTML = "";
+    mapFilterRow.style.display = "grid";
+    mapFilterRow.style.gridTemplateColumns = "1fr auto 1fr";
+    mapFilterRow.style.alignItems = "center";
+    mapFilterRow.style.width = "100%";
 
     // Create dropdown container
     const dropdownContainer = document.createElement("div");
+    dropdownContainer.style.gridColumn = "2";
     dropdownContainer.style.position = "relative";
     dropdownContainer.style.display = "inline-block";
 
@@ -3994,6 +4081,29 @@ function updateMapFilterDropdown() {
     dropdownContainer.appendChild(dropdownButton);
     dropdownContainer.appendChild(dropdownMenu);
     mapFilterRow.appendChild(dropdownContainer);
+
+    const navigateButton = createStyledButton('→');
+    navigateButton.id = 'mod-map-filter-navigate-button';
+    navigateButton.style.gridColumn = '3';
+    navigateButton.style.justifySelf = 'center';
+    navigateButton.style.width = '24px';
+    navigateButton.style.minWidth = '24px';
+    navigateButton.style.padding = '2px 0';
+    navigateButton.style.fontSize = '13px';
+    navigateButton.style.lineHeight = '1';
+    navigateButton.style.display = HuntAnalyzerState.ui.selectedMapFilter === 'ALL' ? 'none' : 'inline-flex';
+    navigateButton.style.alignItems = 'center';
+    navigateButton.style.justifyContent = 'center';
+    navigateButton.title = getGoToMapLabel();
+    navigateButton.setAttribute('aria-label', getGoToMapLabel());
+    navigateButton.addEventListener('click', () => {
+        const navigated = navigateToSelectedMapFilter();
+        if (!navigated) {
+            const panel = document.getElementById(PANEL_ID);
+            showPanelFeedback(panel, getFailedToNavigateMapLabel(), false);
+        }
+    });
+    mapFilterRow.appendChild(navigateButton);
 }
 
 // Create a dropdown option
@@ -4052,6 +4162,11 @@ function createDropdownOption(mapName) {
         // Refresh data and display
         dataProcessor.aggregateData();
         renderAllSessions();
+        refreshClearButtonLabel();
+        const navigateButton = document.getElementById('mod-map-filter-navigate-button');
+        if (navigateButton) {
+            navigateButton.style.display = mapName === 'ALL' ? 'none' : 'inline-flex';
+        }
     });
 
     return option;
@@ -5864,11 +5979,11 @@ function createAutoplayAnalyzerPanel() {
 
     // Settings button removed - now handled by Mod Settings
 
-    const clearButton = createStyledButton(t('mods.huntAnalyzer.clearAll'));
+    const clearButton = createStyledButton(getClearButtonLabel());
     clearButton.style.width = '135px';
     clearButton.dataset.fixedConfirmWidth = '135px';
     attachInlineConfirm(clearButton, {
-        baseText: t('mods.huntAnalyzer.clearAll'),
+        baseText: getClearButtonLabel,
         confirmText: t('mods.huntAnalyzer.confirmReset'),
         onConfirm: clearAnalyzerDataAndRefresh
     });
@@ -7016,7 +7131,7 @@ const translationEventHandler = (event) => {
         // Update button text
         const clearButton = panel.querySelector('.button-container button:first-child');
         if (clearButton) {
-            clearButton.textContent = t('mods.huntAnalyzer.clearAll');
+            clearButton.textContent = getClearButtonLabel();
         }
         
         const copyLogButton = panel.querySelector('.button-container button:last-child');

@@ -64,6 +64,9 @@ const TASKER_STATES = {
 };
 const DEFAULT_TASKER_STATE = TASKER_STATES.DISABLED;
 
+/** Vanilla quest nav icon (fallback when originalState was never captured). */
+const DEFAULT_QUEST_ICON_SRC = 'https://bestiaryarena.com/assets/icons/quest.png';
+
 // Timing constants - Standardized across all mods
 const NAVIGATION_DELAY = 500;           // Reduced from 200ms for consistency
 const AUTO_SETUP_DELAY = 800;          // Reduced from 1000ms for faster response
@@ -3269,57 +3272,44 @@ function modifyQuestButtonForTasking() {
     }, 'modify quest button');
 }
 
-// Function to restore quest button to original appearance
-function restoreQuestButtonAppearance() {
-    return withControlCheck(window.QuestButtonManager, 'Better Tasker', () => {
-        // Find the quest button - try multiple selectors to find it regardless of current state
-        const questButton = findQuestButton();
-        
-        if (!questButton) {
-            console.log('[Better Tasker] Quest button not found for restoration');
-            return false;
-        }
-        
-        if (!window.QuestButtonManager.originalState) {
-            console.log('[Better Tasker] Original quest button state not found for restoration');
-            return false;
-        }
-        
-        // Restore original appearance
-        const img = questButton.querySelector('img');
-        const span = questButton.querySelector('span');
-        
-        // Show the icon again
+// DOM-only restore (caller must hold Quest Button control via QuestButtonManager).
+function applyQuestButtonRestoreDom() {
+    const questButton = findQuestButton();
+
+    if (!questButton) {
+        console.log('[Better Tasker] Quest button not found for restoration');
+        return false;
+    }
+
+    const img = questButton.querySelector('img');
+    const span = questButton.querySelector('span');
+    const state = window.QuestButtonManager.originalState;
+
+    if (state) {
         if (img) {
             img.style.display = '';
-            // Restore original source and properties
-            if (window.QuestButtonManager.originalState.imgSrc) {
-                img.src = window.QuestButtonManager.originalState.imgSrc;
-                img.alt = window.QuestButtonManager.originalState.imgAlt;
+            if (state.imgSrc) {
+                img.src = state.imgSrc;
+                img.alt = state.imgAlt;
             }
-            // Restore original dimensions
-            if (window.QuestButtonManager.originalState.imgWidth) {
-                img.width = window.QuestButtonManager.originalState.imgWidth;
+            if (state.imgWidth) {
+                img.width = state.imgWidth;
             }
-            if (window.QuestButtonManager.originalState.imgHeight) {
-                img.height = window.QuestButtonManager.originalState.imgHeight;
+            if (state.imgHeight) {
+                img.height = state.imgHeight;
             }
-            // Restore original CSS styles
-            if (window.QuestButtonManager.originalState.imgStyle) {
-                img.style.cssText = window.QuestButtonManager.originalState.imgStyle;
+            if (state.imgStyle) {
+                img.style.cssText = state.imgStyle;
             }
-            // Restore original class list
-            if (window.QuestButtonManager.originalState.imgClassList) {
-                img.className = window.QuestButtonManager.originalState.imgClassList;
+            if (state.imgClassList) {
+                img.className = state.imgClassList;
             }
         }
-        
-        // Restore original text and clear shimmer effect
+
         if (span) {
-            if (window.QuestButtonManager.originalState.spanText) {
-                span.textContent = window.QuestButtonManager.originalState.spanText;
+            if (state.spanText) {
+                span.textContent = state.spanText;
             }
-            // Clear shimmer effect
             span.style.background = '';
             span.style.backgroundSize = '';
             span.style.backgroundClip = '';
@@ -3327,13 +3317,45 @@ function restoreQuestButtonAppearance() {
             span.style.webkitTextFillColor = '';
             span.style.animation = '';
         }
-        
-        // Restore original color
-        questButton.style.color = window.QuestButtonManager.originalState.buttonColor;
-        
-        console.log('[Better Tasker] Quest button appearance restored');
-        return true;
-    }, 'restore quest button');
+
+        questButton.style.color = state.buttonColor || '';
+    } else {
+        console.log('[Better Tasker] No stored original state — resetting quest button to default Quests appearance');
+        if (img) {
+            img.style.display = '';
+            img.src = DEFAULT_QUEST_ICON_SRC;
+            img.alt = 'Quests';
+        }
+        if (span) {
+            span.textContent = 'Quests';
+            span.style.background = '';
+            span.style.backgroundSize = '';
+            span.style.backgroundClip = '';
+            span.style.webkitBackgroundClip = '';
+            span.style.webkitTextFillColor = '';
+            span.style.animation = '';
+        }
+        questButton.style.color = '';
+    }
+
+    console.log('[Better Tasker] Quest button appearance restored');
+    return true;
+}
+
+// Restores quest button; acquires Quest Button control so cleanup runs after task/handovers.
+function restoreQuestButtonAppearance() {
+    if (!window.QuestButtonManager?.requestControl?.('Better Tasker')) {
+        console.log('[Better Tasker] Cannot restore quest button — could not acquire quest button control');
+        return false;
+    }
+    try {
+        return applyQuestButtonRestoreDom();
+    } catch (error) {
+        console.error('[Better Tasker] Error restoring quest button:', error);
+        return false;
+    } finally {
+        window.QuestButtonManager.releaseControl('Better Tasker');
+    }
 }
 
 // Function to start monitoring quest button validation using real-time board state subscription
@@ -3373,66 +3395,7 @@ function startQuestButtonValidation() {
                     
                     // Request control to restore quest button (don't just check for it)
                     withControl(window.QuestButtonManager, 'Better Tasker', () => {
-                        const questButton = findQuestButton();
-                        
-                        if (!questButton) {
-                            console.log('[Better Tasker] Quest button not found for restoration');
-                            return false;
-                        }
-                        
-                        if (!window.QuestButtonManager.originalState) {
-                            console.log('[Better Tasker] Original quest button state not found for restoration');
-                            return false;
-                        }
-                        
-                        // Restore original appearance
-                        const img = questButton.querySelector('img');
-                        const span = questButton.querySelector('span');
-                        
-                        // Show the icon again
-                        if (img) {
-                            img.style.display = '';
-                            // Restore original source and properties
-                            if (window.QuestButtonManager.originalState.imgSrc) {
-                                img.src = window.QuestButtonManager.originalState.imgSrc;
-                                img.alt = window.QuestButtonManager.originalState.imgAlt;
-                            }
-                            // Restore original dimensions
-                            if (window.QuestButtonManager.originalState.imgWidth) {
-                                img.width = window.QuestButtonManager.originalState.imgWidth;
-                            }
-                            if (window.QuestButtonManager.originalState.imgHeight) {
-                                img.height = window.QuestButtonManager.originalState.imgHeight;
-                            }
-                            // Restore original CSS styles
-                            if (window.QuestButtonManager.originalState.imgStyle) {
-                                img.style.cssText = window.QuestButtonManager.originalState.imgStyle;
-                            }
-                            // Restore original class list
-                            if (window.QuestButtonManager.originalState.imgClassList) {
-                                img.className = window.QuestButtonManager.originalState.imgClassList;
-                            }
-                        }
-                        
-                        // Restore original text and clear shimmer effect
-                        if (span) {
-                            if (window.QuestButtonManager.originalState.spanText) {
-                                span.textContent = window.QuestButtonManager.originalState.spanText;
-                            }
-                            // Clear shimmer effect
-                            span.style.background = '';
-                            span.style.backgroundSize = '';
-                            span.style.backgroundClip = '';
-                            span.style.webkitBackgroundClip = '';
-                            span.style.webkitTextFillColor = '';
-                            span.style.animation = '';
-                        }
-                        
-                        // Restore original color
-                        questButton.style.color = window.QuestButtonManager.originalState.buttonColor;
-                        
-                        console.log('[Better Tasker] Quest button appearance restored after map navigation');
-                        return true;
+                        return applyQuestButtonRestoreDom();
                     }, 'restore quest button on map change');
                     
                     // Clear the saved tasking map ID since user switched maps
@@ -3485,66 +3448,7 @@ function startQuestButtonValidationPolling() {
                 
                 // Request control to restore quest button (don't just check for it)
                 withControl(window.QuestButtonManager, 'Better Tasker', () => {
-                    const questButton = findQuestButton();
-                    
-                    if (!questButton) {
-                        console.log('[Better Tasker] Quest button not found for restoration');
-                        return false;
-                    }
-                    
-                    if (!window.QuestButtonManager.originalState) {
-                        console.log('[Better Tasker] Original quest button state not found for restoration');
-                        return false;
-                    }
-                    
-                    // Restore original appearance
-                    const img = questButton.querySelector('img');
-                    const span = questButton.querySelector('span');
-                    
-                    // Show the icon again
-                    if (img) {
-                        img.style.display = '';
-                        // Restore original source and properties
-                        if (window.QuestButtonManager.originalState.imgSrc) {
-                            img.src = window.QuestButtonManager.originalState.imgSrc;
-                            img.alt = window.QuestButtonManager.originalState.imgAlt;
-                        }
-                        // Restore original dimensions
-                        if (window.QuestButtonManager.originalState.imgWidth) {
-                            img.width = window.QuestButtonManager.originalState.imgWidth;
-                        }
-                        if (window.QuestButtonManager.originalState.imgHeight) {
-                            img.height = window.QuestButtonManager.originalState.imgHeight;
-                        }
-                        // Restore original CSS styles
-                        if (window.QuestButtonManager.originalState.imgStyle) {
-                            img.style.cssText = window.QuestButtonManager.originalState.imgStyle;
-                        }
-                        // Restore original class list
-                        if (window.QuestButtonManager.originalState.imgClassList) {
-                            img.className = window.QuestButtonManager.originalState.imgClassList;
-                        }
-                    }
-                    
-                    // Restore original text and clear shimmer effect
-                    if (span) {
-                        if (window.QuestButtonManager.originalState.spanText) {
-                            span.textContent = window.QuestButtonManager.originalState.spanText;
-                        }
-                        // Clear shimmer effect
-                        span.style.background = '';
-                        span.style.backgroundSize = '';
-                        span.style.backgroundClip = '';
-                        span.style.webkitBackgroundClip = '';
-                        span.style.webkitTextFillColor = '';
-                        span.style.animation = '';
-                    }
-                    
-                    // Restore original color
-                    questButton.style.color = window.QuestButtonManager.originalState.buttonColor;
-                    
-                    console.log('[Better Tasker] Quest button appearance restored after map navigation');
-                    return true;
+                    return applyQuestButtonRestoreDom();
                 }, 'restore quest button on map change');
                 
                 // Clear the saved tasking map ID since user switched maps

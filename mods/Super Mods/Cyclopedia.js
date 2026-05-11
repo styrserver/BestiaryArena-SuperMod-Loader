@@ -1848,7 +1848,7 @@ const DOMUtils = {
     return scrollContainer;
   },
   
-  createListItem: function(text, className = FONT_CONSTANTS.SIZES.BODY, isOwned = true, isPerfect = false, isT5 = false, hasShiny = false, hasAwakened = false) {
+  createListItem: function(text, className = FONT_CONSTANTS.SIZES.BODY, isOwned = true, isPerfect = false, isT5 = false, hasShiny = false, hasAwakened = false, hasShinyTier = false) {
     const item = document.createElement('div');
     item.className = className;
     
@@ -1870,12 +1870,15 @@ const DOMUtils = {
       contentContainer.appendChild(shinyIcon);
     }
 
-    // Add awakened icon if user has awakened creature
-    if (hasAwakened) {
+    // Add awakened / shiny-tier icon.
+    // Shiny-tier has higher priority when both statuses are present.
+    if (hasAwakened || hasShinyTier) {
       const awakenedIcon = document.createElement('img');
-      awakenedIcon.src = 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png';
-      awakenedIcon.alt = 'awakened';
-      awakenedIcon.title = 'Has awakened creature';
+      awakenedIcon.src = hasShinyTier
+        ? 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png'
+        : 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png';
+      awakenedIcon.alt = hasShinyTier ? 'shiny-tier' : 'awakened';
+      awakenedIcon.title = hasShinyTier ? 'Has level 99 max-genes creature' : 'Has awakened creature';
       awakenedIcon.style.width = '10px';
       awakenedIcon.style.height = '10px';
       awakenedIcon.style.flexShrink = '0';
@@ -1921,7 +1924,7 @@ const DOMUtils = {
 function getCreatureStatus(creatureName) {
   try {
     if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
-      return { owned: false, shiny: false, perfect: false, awakened: false };
+      return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false };
     }
     
     const playerContext = globalThis.state.player.getSnapshot().context;
@@ -1947,8 +1950,23 @@ function getCreatureStatus(creatureName) {
     const matchingMonsters = ownedMonsters.filter(monster => monster.gameId === creatureGameId);
     
     if (matchingMonsters.length === 0) {
-      return { owned: false, shiny: false, perfect: false, awakened: false };
+      return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false };
     }
+
+    const getMonsterLevel = (monster) => {
+      if (globalThis.state?.utils?.expToCurrentLevel && monster.exp) {
+        return globalThis.state.utils.expToCurrentLevel(monster.exp);
+      }
+      return Number(monster.level) || 1;
+    };
+
+    const getGeneValues = (monster) => ([
+      Number(monster.hp) || 0,
+      Number(monster.ad) || 0,
+      Number(monster.ap) || 0,
+      Number(monster.armor) || 0,
+      Number(monster.magicResist) || 0
+    ]);
     
     // Check for shiny variants
     const hasShiny = matchingMonsters.some(monster => monster.shiny === true);
@@ -1961,16 +1979,20 @@ function getCreatureStatus(creatureName) {
       Number(monster.starTier) >= 6 ||
       Number(monster.tier) >= 6
     );
+
+    // Level 99 + max genes (100 total) should display shiny-tier icon.
+    const hasShinyTier = matchingMonsters.some(monster => {
+      const level = getMonsterLevel(monster);
+      const totalGenes = getGeneValues(monster).reduce((sum, value) => sum + value, 0);
+      return level >= 99 && totalGenes >= 100;
+    });
     
     // Check for perfect creatures (level 50 with 100 total genes)
     const isPerfect = matchingMonsters.some(monster => {
-      const totalGenes = (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0);
+      const totalGenes = getGeneValues(monster).reduce((sum, value) => sum + value, 0);
       
       // Calculate level from experience using the game's utility function
-      let level = 1;
-      if (globalThis.state?.utils?.expToCurrentLevel && monster.exp) {
-        level = globalThis.state.utils.expToCurrentLevel(monster.exp);
-      }
+      const level = getMonsterLevel(monster);
       
       // Debug logging for troubleshooting
       if (totalGenes >= 90) { // Log creatures close to perfect for debugging
@@ -1984,11 +2006,12 @@ function getCreatureStatus(creatureName) {
       owned: true,
       shiny: hasShiny,
       perfect: isPerfect,
-      awakened: hasAwakened
+      awakened: hasAwakened,
+      shinyTier: hasShinyTier
     };
   } catch (error) {
     console.warn('[Cyclopedia] Error checking creature status:', error);
-    return { owned: false, shiny: false, perfect: false, awakened: false };
+    return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false };
   }
 }
 
@@ -2005,6 +2028,11 @@ function hasShinyCreature(creatureName) {
 // Function to check if user has any awakened variants of a creature
 function hasAwakenedCreature(creatureName) {
   return getCreatureStatus(creatureName).awakened;
+}
+
+// Function to check if user has any level 99 max-gene variants of a creature
+function hasShinyTierCreature(creatureName) {
+  return getCreatureStatus(creatureName).shinyTier;
 }
 
 // Function to check if user has a perfect creature (level 50 with 100 total genes)
@@ -3568,6 +3596,7 @@ function createBox({
       
       let hasShiny = false;
       let hasAwakened = false;
+      let hasShinyTier = false;
       
       if (type === 'creature') {
         // Check if this is an unobtainable creature - if so, keep default styling
@@ -3577,6 +3606,7 @@ function createBox({
           isPerfect = isCreaturePerfect(name);
           hasShiny = hasShinyCreature(name);
           hasAwakened = hasAwakenedCreature(name);
+          hasShinyTier = hasShinyTierCreature(name);
         }
       } else if (type === 'equipment') {
         isOwned = isEquipmentOwned(name);
@@ -3605,7 +3635,7 @@ function createBox({
         }
       }
       
-      const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5, hasShiny, hasAwakened);
+      const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5, hasShiny, hasAwakened, hasShinyTier);
       
       // Add raid icon for static raids, or event icon for dynamic event maps
       if (type === 'map') {
@@ -4525,12 +4555,12 @@ function openCyclopediaModal(options) {
       Object.assign(leftCol.style, LAYOUT_STYLES.leftCol);
       function createCyclopediaSearchBar(placeholder) {
         const searchContainer = document.createElement('div');
-        searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box;';
+        searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; min-width: 0;';
 
         const searchInput = document.createElement('input');
         searchInput.type = 'text';
         searchInput.placeholder = placeholder;
-        searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1; font-family: inherit; outline: none; box-sizing: border-box;';
+        searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1 1 0%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box;';
 
         searchInput.addEventListener('focus', () => {
           searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
@@ -4542,7 +4572,7 @@ function openCyclopediaModal(options) {
 
         const filterBtn = document.createElement('button');
         filterBtn.textContent = 'Name';
-        filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px;';
+        filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px; flex-shrink: 0;';
         filterBtn.addEventListener('mouseenter', () => {
           filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
           filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
@@ -5833,12 +5863,12 @@ function openCyclopediaModal(options) {
 
       const createEquipmentSearchBar = () => {
         const searchContainer = document.createElement('div');
-        searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box;';
+        searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; min-width: 0;';
 
         const searchInput = document.createElement('input');
         searchInput.type = 'text';
         searchInput.placeholder = 'Search equipment...';
-        searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1; font-family: inherit; outline: none; box-sizing: border-box;';
+        searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1 1 0%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box;';
 
         searchInput.addEventListener('focus', () => {
           searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
@@ -5850,7 +5880,7 @@ function openCyclopediaModal(options) {
 
         const filterBtn = document.createElement('button');
         filterBtn.textContent = 'Name';
-        filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px;';
+        filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px; flex-shrink: 0;';
         filterBtn.addEventListener('mouseenter', () => {
           filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
           filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';

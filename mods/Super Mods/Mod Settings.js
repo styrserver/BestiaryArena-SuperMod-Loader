@@ -190,8 +190,8 @@ const SELECTORS = {
   HEADER_SLOT: '#header-slot',
   CURRENCY_CONTAINER: '#header-slot > div > div:first-child',
   CREATURE_IMG: 'img[alt="creature"]',
-  STAR_TIER_4: 'img[src*="star-tier-4.png"]',
-  RARITY_DIV: '.has-rarity',
+  STAR_TIER_4: 'img[src*="star-tier-4.png"], img[src*="star-tier-shiny.png"], img.tier-stars[alt="star tier"]',
+  RARITY_DIV: '.has-rarity, .rarity-shiny',
   RARITY_TEXT: '.has-rarity-text',
   LEVEL_SPAN: '.pixel-font-16.text-whiteExp span'
 };
@@ -271,6 +271,8 @@ function getNavButtonSearchRoots() {
 const GAME_CONSTANTS = {
   MAX_STAT_VALUE: 20,
   MAX_LEVEL: 50,
+  AWAKENED_MAX_LEVEL: 99,
+  MAX_TOTAL_GENES: 100,
   MAX_TIER: 4,
   ELITE_RARITY_LEVEL: 6,
   STAMINA_REGEN_MINUTES: 1
@@ -1026,33 +1028,32 @@ function triggerStartOrSkipFromHotkey() {
   console.warn('[Mod Settings] Start/Skip hotkey pressed but no matching board button was found');
 }
 
+const TURBO_MODE_MOD_NAME = 'Official Mods/Turbo Mode.js';
+
+function getTurboModeLocalMod() {
+  return Array.isArray(window.localMods)
+    ? window.localMods.find((mod) => mod && mod.name === TURBO_MODE_MOD_NAME)
+    : null;
+}
+
+function isTurboModeModEnabled() {
+  const turboMod = getTurboModeLocalMod();
+  return turboMod?.enabled === true || !!document.getElementById('turbo-mod-button');
+}
+
 function triggerToggleTurboModeFromHotkey() {
+  if (!isTurboModeModEnabled()) {
+    console.warn('[Mod Settings] Turbo Mode toggle hotkey pressed but Turbo Mode mod is disabled');
+    return;
+  }
+
   const turboButton = document.getElementById('turbo-mod-button');
   if (turboButton && typeof turboButton.click === 'function' && !turboButton.disabled) {
     turboButton.click();
     return;
   }
 
-  const turboModName = 'Official Mods/Turbo Mode.js';
-  const turboMod = Array.isArray(window.localMods)
-    ? window.localMods.find((mod) => mod && mod.name === turboModName)
-    : null;
-  if (!turboMod) {
-    console.warn('[Mod Settings] Turbo Mode toggle hotkey: mod not found in localMods');
-    return;
-  }
-  const nextEnabledState = !turboMod.enabled;
-  turboMod.enabled = nextEnabledState;
-  const messageId = `toggleTurboMode_${Date.now()}_${Math.random()}`;
-  window.postMessage({
-    from: 'BESTIARY_CLIENT',
-    id: messageId,
-    message: {
-      action: 'toggleLocalMod',
-      name: turboModName,
-      enabled: nextEnabledState
-    }
-  }, '*');
+  console.warn('[Mod Settings] Turbo Mode toggle hotkey pressed but Turbo Mode button was not available');
 }
 
 /**
@@ -1362,6 +1363,10 @@ const HOTKEY_CAPTURE_ACTIVE_CLASS =
   'focus-style-visible hotkey-capture-btn pixel-font-14 flex shrink-0 cursor-pointer items-center justify-center tracking-wide text-whiteExp frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px]';
 const HOTKEY_RESET_BUTTON_CLASS =
   'focus-style-visible hotkey-reset-btn pixel-font-14 frame-1 active:frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px] text-whiteRegular';
+const RETURN_TO_MAP_HOTKEY_DISABLED_TITLE =
+  'Enable "Show Return to Map Button" in Interface for this hotkey to work.';
+const TURBO_MODE_HOTKEY_DISABLED_TITLE =
+  'Enable the Turbo Mode mod for this hotkey to work.';
 
 const MODS_HOTKEY_UI_ROWS = [
   {
@@ -1484,6 +1489,76 @@ function sizeHotkeyCaptureToResetButton(captureButton, resetButton) {
   captureButton.style.setProperty('flex-shrink', '0', 'important');
 }
 
+function updateReturnToMapHotkeyAvailability() {
+  const label = document.getElementById('hotkey-return-to-map-label');
+  const warning = document.getElementById('hotkey-return-to-map-unavailable-warning');
+  const captureButton = document.getElementById('hotkey-return-to-map-capture-btn');
+  const resetButton = document.getElementById('hotkey-return-to-map-reset-btn');
+  const disabled = !config.showLastVisitedMapButton;
+
+  if (label) {
+    label.style.color = disabled ? '#888' : '#ccc';
+    label.title = disabled ? RETURN_TO_MAP_HOTKEY_DISABLED_TITLE : '';
+  }
+  if (warning) {
+    warning.hidden = !disabled;
+    warning.title = RETURN_TO_MAP_HOTKEY_DISABLED_TITLE;
+    warning.style.display = disabled ? 'inline-flex' : 'none';
+    warning.style.color = '#f0c36d';
+    warning.style.opacity = '1';
+    warning.style.filter = 'none';
+  }
+  if (captureButton) {
+    captureButton.disabled = false;
+    captureButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    captureButton.title = disabled ? RETURN_TO_MAP_HOTKEY_DISABLED_TITLE : t('mods.betterUI.hotkeyCaptureTitle');
+    captureButton.style.cursor = disabled ? 'not-allowed' : '';
+    captureButton.style.opacity = disabled ? '0.65' : '';
+  }
+  if (resetButton) {
+    resetButton.disabled = false;
+    resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    resetButton.title = disabled ? RETURN_TO_MAP_HOTKEY_DISABLED_TITLE : '';
+    resetButton.style.cursor = disabled ? 'not-allowed' : '';
+    resetButton.style.opacity = disabled ? '0.65' : '';
+  }
+}
+
+function updateTurboModeHotkeyAvailability() {
+  const label = document.getElementById('hotkey-toggle-turbo-mode-label');
+  const warning = document.getElementById('hotkey-toggle-turbo-mode-unavailable-warning');
+  const captureButton = document.getElementById('hotkey-toggle-turbo-mode-capture-btn');
+  const resetButton = document.getElementById('hotkey-toggle-turbo-mode-reset-btn');
+  const disabled = !isTurboModeModEnabled();
+
+  if (label) {
+    label.style.color = disabled ? '#888' : '#ccc';
+    label.title = disabled ? TURBO_MODE_HOTKEY_DISABLED_TITLE : '';
+  }
+  if (warning) {
+    warning.hidden = !disabled;
+    warning.title = TURBO_MODE_HOTKEY_DISABLED_TITLE;
+    warning.style.display = disabled ? 'inline-flex' : 'none';
+    warning.style.color = '#f0c36d';
+    warning.style.opacity = '1';
+    warning.style.filter = 'none';
+  }
+  if (captureButton) {
+    captureButton.disabled = false;
+    captureButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    captureButton.title = disabled ? TURBO_MODE_HOTKEY_DISABLED_TITLE : t('mods.betterUI.hotkeyCaptureTitle');
+    captureButton.style.cursor = disabled ? 'not-allowed' : '';
+    captureButton.style.opacity = disabled ? '0.65' : '';
+  }
+  if (resetButton) {
+    resetButton.disabled = false;
+    resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    resetButton.title = disabled ? TURBO_MODE_HOTKEY_DISABLED_TITLE : '';
+    resetButton.style.cursor = disabled ? 'not-allowed' : '';
+    resetButton.style.opacity = disabled ? '0.65' : '';
+  }
+}
+
 function syncAllNavHotkeyCaptureDisplays() {
   for (const row of ALL_HOTKEY_UI_ROWS) {
     const cap = document.getElementById(row.captureId);
@@ -1495,12 +1570,16 @@ function syncAllNavHotkeyCaptureDisplays() {
     if (res) res.className = HOTKEY_RESET_BUTTON_CLASS;
     if (cap && res) sizeHotkeyCaptureToResetButton(cap, res);
   }
+  updateReturnToMapHotkeyAvailability();
+  updateTurboModeHotkeyAvailability();
   scheduleTimeout(() => {
     for (const row of ALL_HOTKEY_UI_ROWS) {
       const cap = document.getElementById(row.captureId);
       const res = document.getElementById(row.resetId);
       if (cap && res) sizeHotkeyCaptureToResetButton(cap, res);
     }
+    updateReturnToMapHotkeyAvailability();
+    updateTurboModeHotkeyAvailability();
   }, 0);
 }
 
@@ -1537,6 +1616,7 @@ function bindHotkeyConfigRowInModal(captureButton, resetButton, configKey, defau
   captureButton.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (captureButton.getAttribute('aria-disabled') === 'true') return;
     if (hotkeysState.hotkeyCaptureMode !== null) return;
 
     hotkeysState.hotkeyCaptureMode = configKey;
@@ -1597,6 +1677,7 @@ function bindHotkeyConfigRowInModal(captureButton, resetButton, configKey, defau
   if (resetButton) {
     resetButton.addEventListener('click', (event) => {
       event.preventDefault();
+      if (resetButton.getAttribute('aria-disabled') === 'true') return;
       if (typeof hotkeysState.detachHotkeyCapture === 'function') {
         hotkeysState.detachHotkeyCapture();
       }
@@ -1829,6 +1910,11 @@ const CSS_TEMPLATES = {
       background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
       box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
     }
+    .rarity-shiny[data-max-creatures="true"][data-max-creatures-color="${colorKey}"] {
+      border: 2px solid;
+      border-image: ${colorOption.borderGradient} 1;
+      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
+    }
     .has-rarity-text[data-rarity="${GAME_CONSTANTS.ELITE_RARITY_LEVEL}"][data-max-creatures="true"][data-max-creatures-color="${colorKey}"] {
       --tw-text-opacity: 1;
       color: ${colorOption.textColor};
@@ -1847,6 +1933,11 @@ const CSS_TEMPLATES = {
       border: 2px solid;
       border-image: ${colorOption.borderGradient} 1;
       background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
+    }
+    .rarity-shiny[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
+      border: 2px solid;
+      border-image: ${colorOption.borderGradient} 1;
       box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
     }
     .has-rarity-text[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
@@ -4929,6 +5020,8 @@ function createSettingsCheckboxHandler(configKey, onEnable, onDisable) {
   return (checkbox) => {
     // Set initial state from config
     checkbox.checked = config[configKey];
+    if (checkbox.dataset.modSettingsBound === 'true') return;
+    checkbox.dataset.modSettingsBound = 'true';
     
     checkbox.addEventListener('change', () => {
       config[configKey] = checkbox.checked;
@@ -4938,6 +5031,12 @@ function createSettingsCheckboxHandler(configKey, onEnable, onDisable) {
         onEnable?.();
       } else {
         onDisable?.();
+      }
+
+      // Keep border priority consistent immediately after toggles:
+      // Maxed > Shiny > Sealed.
+      if (configKey === 'enableMaxCreatures' || configKey === 'enableMaxShinies' || configKey === 'enableSealed') {
+        reapplyCreatureCosmeticPriority();
       }
       
       console.log('[Mod Settings] Setting updated:', { [configKey]: config[configKey] });
@@ -5593,8 +5692,9 @@ function showSettingsModal() {
           <div id="hotkeys-mods-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionMods')}</h4>
             <div id="hotkeys-mods-section">
-              <div class="hotkey-inventory-row" style="${hotkeyRowStyle}">
-                <span style="${hotkeyLabelStyle}">
+              <div id="hotkey-return-to-map-row" class="hotkey-inventory-row" style="${hotkeyRowStyle}">
+                <span id="hotkey-return-to-map-label" style="${hotkeyLabelStyle}">
+                  <span id="hotkey-return-to-map-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
                   ${t('mods.betterUI.hotkeyLabelReturnToMap')}
                   <span style="cursor: help; margin-left: 6px; color: #ffffff; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; border: 1px solid #ffffff; border-radius: 50%; line-height: 1;" title="Shift + hotkey goes forward in map history">i</span>
                 </span>
@@ -5605,8 +5705,11 @@ function showSettingsModal() {
                   ${t('mods.betterUI.hotkeyResetBinding')}
                 </button>
               </div>
-              <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-                <span style="${hotkeyLabelStyle}">Toggle Turbo Mode</span>
+              <div id="hotkey-toggle-turbo-mode-row" class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+                <span id="hotkey-toggle-turbo-mode-label" style="${hotkeyLabelStyle}">
+                  <span id="hotkey-toggle-turbo-mode-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
+                  Toggle Turbo Mode
+                </span>
                 <button type="button" id="hotkey-toggle-turbo-mode-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
                   Y
                 </button>
@@ -6098,6 +6201,7 @@ function showSettingsModal() {
             loadLastVisitedMap();
             subscribeToMapChanges();
             addLastMapNavButton();
+            updateReturnToMapHotkeyAvailability();
           },
           () => {
             console.log('[Mod Settings] Last visited map button disabled');
@@ -6105,6 +6209,7 @@ function showSettingsModal() {
               unsubscribeFromMapChanges();
             }
             removeLastMapNavButton();
+            updateReturnToMapHotkeyAvailability();
           }
         )(lastVisitedMapCheckbox);
       }
@@ -6321,6 +6426,8 @@ function showSettingsModal() {
           ''
         );
       }
+      updateReturnToMapHotkeyAvailability();
+      updateTurboModeHotkeyAvailability();
 
       const betterHighscoresOpacitySlider = content.querySelector('#better-highscores-opacity-slider');
       const betterHighscoresOpacityValue = content.querySelector('#better-highscores-opacity-value');
@@ -7429,6 +7536,16 @@ function applySpecialStyling(options) {
   }
 }
 
+function reapplyCreatureCosmeticPriority() {
+  if (isBlockedByAnalysisMods()) return;
+  removeMaxCreatures();
+  removeMaxShinies();
+  removeSealedCreatures();
+  if (config.enableMaxCreatures) applyMaxCreatures();
+  if (config.enableMaxShinies) applyMaxShinies();
+  if (config.enableSealed) applySealedCreatures();
+}
+
 // Apply max creatures styling to elite monsters
 // Helper functions for applyMaxCreatures
 function filterEligibleCreatures(visibleCreatures) {
@@ -7450,6 +7567,19 @@ function filterEligibleCreatures(visibleCreatures) {
 
     const button = imgEl.closest('button');
     if (!button) return;
+    const elements = getCreatureElements(imgEl.parentElement);
+    const hasMaxAwakenedStar = typeof elements.starImg?.src === 'string' && elements.starImg.src.includes('star-tier-shiny.png');
+
+    // User-requested simple rule: star-tier-shiny means max awakened.
+    if (hasMaxAwakenedStar && elements.starImg && elements.rarityDiv) {
+      eligibleCreatures.push({
+        imgEl,
+        gameId,
+        monster: null,
+        elements
+      });
+      return;
+    }
 
     let monster = null;
     if (button.closest('#monster-scroll') && depotIdMap) {
@@ -7461,18 +7591,41 @@ function filterEligibleCreatures(visibleCreatures) {
     }
 
     if (!monster || monster.tier !== GAME_CONSTANTS.MAX_TIER) return;
-
-    // Skip shinies if max shinies is enabled (shinies take priority)
-    if (config.enableMaxShinies && isShinyCreature(imgEl)) {
-      return;
+    const levelText = getCreatureLevel(elements.levelEl);
+    let level = Number(monster.level);
+    if (!Number.isFinite(level)) {
+      level = getLevelFromExp(monster.exp || 0);
+    }
+    if (!Number.isFinite(level)) {
+      level = Number(levelText);
     }
 
-    const elements = getCreatureElements(imgEl.parentElement);
-    const levelText = getCreatureLevel(elements.levelEl);
-    const isLevel50 = isMaxLevel(levelText);
-    const hasAllMaxStats = isEliteMonster(monster);
+    let totalGenes = Number(monster.totalgenes ?? monster.totalGenes ?? monster.genesTotal);
+    if (!Number.isFinite(totalGenes) && monster.genes && typeof monster.genes === 'object') {
+      totalGenes = Number(monster.genes.hp || 0) +
+        Number(monster.genes.ad || 0) +
+        Number(monster.genes.ap || 0) +
+        Number(monster.genes.armor || 0) +
+        Number(monster.genes.magicResist || 0);
+    }
+    if (!Number.isFinite(totalGenes)) {
+      totalGenes = Number(monster.hp || 0) +
+        Number(monster.ad || 0) +
+        Number(monster.ap || 0) +
+        Number(monster.armor || 0) +
+        Number(monster.magicResist || 0);
+    }
+    const awakened = monster.awakened === true || (Number.isFinite(level) && level > GAME_CONSTANTS.MAX_LEVEL);
+    const isMaxCreature =
+      Number.isFinite(level) &&
+      Number.isFinite(totalGenes) &&
+      totalGenes === GAME_CONSTANTS.MAX_TOTAL_GENES &&
+      (
+        (level === GAME_CONSTANTS.MAX_LEVEL && awakened === false) ||
+        (level === GAME_CONSTANTS.AWAKENED_MAX_LEVEL && awakened === true)
+      );
 
-    if (isLevel50 && hasAllMaxStats && elements.starImg && elements.rarityDiv) {
+    if (isMaxCreature && elements.starImg && elements.rarityDiv) {
       eligibleCreatures.push({
         imgEl,
         gameId,
@@ -7534,6 +7687,7 @@ function filterEligibleSealedCreatures(visibleCreatures) {
     if (!containerSlot) return;
     const sealedOverlay = containerSlot.querySelector('.rarity-sealed');
     if (!sealedOverlay) return;
+    if (config.enableMaxCreatures && containerSlot.querySelector('[data-max-creatures="true"]')) return;
     if (config.enableMaxShinies && isShinyCreature(imgEl)) return;
     eligibleCreatures.push({ imgEl, sealedOverlay });
   });
@@ -7630,9 +7784,13 @@ function removeMaxCreatures() {
       }
     });
 
-    // Reset all max creatures borders
-    document.querySelectorAll('.has-rarity[data-max-creatures="true"]').forEach((rarityDiv) => {
-      rarityDiv.setAttribute('data-rarity', '5');
+    // Reset all max creatures borders (regular + shiny overlays)
+    document.querySelectorAll('.has-rarity[data-max-creatures="true"], .rarity-shiny[data-max-creatures="true"]').forEach((rarityDiv) => {
+      if (rarityDiv.classList.contains('has-rarity')) {
+        rarityDiv.setAttribute('data-rarity', '5');
+      } else {
+        rarityDiv.removeAttribute('data-rarity');
+      }
       rarityDiv.removeAttribute('data-max-creatures');
       rarityDiv.removeAttribute('data-max-creatures-color');
     });
@@ -7661,6 +7819,11 @@ function filterEligibleShinies(visibleCreatures) {
   
   visibleCreatures.forEach((imgEl) => {
     if (!isShinyCreature(imgEl)) return;
+    const containerSlot = imgEl.closest('.container-slot');
+    const starImg = containerSlot?.querySelector('img[alt="star tier"]');
+    const hasMaxAwakenedStar = typeof starImg?.src === 'string' && starImg.src.includes('star-tier-shiny.png');
+    const alreadyMaxStyled = Boolean(containerSlot?.querySelector('[data-max-creatures="true"]'));
+    if (config.enableMaxCreatures && (hasMaxAwakenedStar || alreadyMaxStyled)) return;
     
     const elements = getCreatureElements(imgEl.parentElement);
     
@@ -7743,8 +7906,8 @@ function removeMaxShinies() {
       img.removeAttribute('data-max-shinies-color');
     });
     
-    // Reset all shiny borders
-    document.querySelectorAll('.has-rarity[data-max-shinies="true"]').forEach((rarityDiv) => {
+    // Reset all shiny borders (regular + shiny overlays)
+    document.querySelectorAll('.has-rarity[data-max-shinies="true"], .rarity-shiny[data-max-shinies="true"]').forEach((rarityDiv) => {
       // If this was dynamically created, remove it completely
       if (rarityDiv.hasAttribute('data-dynamic-created')) {
         rarityDiv.remove();
@@ -7752,8 +7915,12 @@ function removeMaxShinies() {
       }
       
       // Otherwise, restore original state
-      const originalRarity = rarityDiv.getAttribute('data-original-rarity') || '5';
-      rarityDiv.setAttribute('data-rarity', originalRarity);
+      if (rarityDiv.classList.contains('has-rarity')) {
+        const originalRarity = rarityDiv.getAttribute('data-original-rarity') || '5';
+        rarityDiv.setAttribute('data-rarity', originalRarity);
+      } else {
+        rarityDiv.removeAttribute('data-rarity');
+      }
       rarityDiv.removeAttribute('data-max-shinies');
       rarityDiv.removeAttribute('data-max-shinies-color');
       rarityDiv.removeAttribute('data-original-rarity');
@@ -11547,19 +11714,9 @@ function initBetterUI() {
       }
     });
     
-    if (config.enableMaxCreatures) {
-      console.log('[Mod Settings] Applying max creatures');
-      applyMaxCreatures();
-    }
-
-    if (config.enableSealed) {
-      console.log('[Mod Settings] Applying sealed creatures');
-      applySealedCreatures();
-    }
-    
-    if (config.enableMaxShinies) {
-      console.log('[Mod Settings] Applying max shinies');
-      applyMaxShinies();
+    if (config.enableMaxCreatures || config.enableMaxShinies || config.enableSealed) {
+      console.log('[Mod Settings] Applying creature cosmetic borders by priority');
+      reapplyCreatureCosmeticPriority();
     }
     
     if (config.enableShinyEnemies) {

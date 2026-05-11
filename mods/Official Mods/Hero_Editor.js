@@ -479,9 +479,19 @@ function showHeroEditorModal() {
       const initialAwakenEnabled = hero.monster.awaken === true ||
         hero.monster.awakened === true ||
         hero.monster.isAwakened === true;
+      const initialMaxGenesEnabled = monsterLevel === 99 &&
+        Number(hero.monster.hp || 1) === 20 &&
+        Number(hero.monster.ad || 1) === 20 &&
+        Number(hero.monster.ap || 1) === 20 &&
+        Number(hero.monster.armor || 1) === 20 &&
+        Number(hero.monster.magicResist || 1) === 20;
       let awakenEnabled = initialAwakenEnabled;
+      let activeTopMode = initialMaxGenesEnabled ? 'maxGenes' : (initialAwakenEnabled ? 'awaken' : 'normal');
+      if (initialMaxGenesEnabled) awakenEnabled = true;
+      const statInputs = {};
       
       const awakenButton = document.createElement('button');
+      const TOP_BUTTON_SIZE = '23px';
       awakenButton.className = 'widget-top widget-top-text pixel-font-16';
       awakenButton.type = 'button';
       awakenButton.style.margin = '0';
@@ -489,12 +499,12 @@ function showHeroEditorModal() {
       awakenButton.style.textAlign = 'center';
       awakenButton.style.color = '#fff';
       awakenButton.style.cursor = 'pointer';
-      awakenButton.style.width = '15%';
-      awakenButton.style.flex = '0 0 15%';
+      awakenButton.style.width = TOP_BUTTON_SIZE;
+      awakenButton.style.flex = `0 0 ${TOP_BUTTON_SIZE}`;
       awakenButton.style.display = 'flex';
       awakenButton.style.alignItems = 'center';
       awakenButton.style.justifyContent = 'center';
-      awakenButton.style.height = '23px';
+      awakenButton.style.height = TOP_BUTTON_SIZE;
       awakenButton.style.outline = 'none';
       awakenButton.style.flexShrink = '0';
       const GREEN_BUTTON_BG = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
@@ -507,22 +517,94 @@ function showHeroEditorModal() {
       awakenIcon.style.height = '10px';
       awakenButton.appendChild(awakenIcon);
       
-      const refreshAwakenButton = () => {
+      const refreshTopButtons = () => {
+        const awakenActive = activeTopMode === 'awaken';
+        const maxGenesActive = activeTopMode === 'maxGenes';
         awakenButton.title = awakenEnabled ? 'Awakened Mode' : 'Normal Mode';
-        awakenButton.style.background = awakenEnabled ? GREEN_BUTTON_BG : REGULAR_BUTTON_BG;
+        awakenButton.style.background = awakenActive ? GREEN_BUTTON_BG : REGULAR_BUTTON_BG;
         awakenButton.style.backgroundSize = 'auto';
-        awakenButton.style.border = awakenEnabled ? '1px solid #4CAF50' : '1px solid #666';
-        awakenButton.style.filter = awakenEnabled ? 'none' : 'grayscale(100%) brightness(0.9)';
+        awakenButton.style.border = awakenActive ? '1px solid #4CAF50' : '1px solid #666';
+        awakenButton.style.filter = awakenActive ? 'none' : 'grayscale(100%) brightness(0.9)';
+        maxGenesButton.style.background = maxGenesActive ? GREEN_BUTTON_BG : REGULAR_BUTTON_BG;
+        maxGenesButton.style.backgroundSize = 'auto';
+        maxGenesButton.style.border = maxGenesActive ? '1px solid #4CAF50' : '1px solid #666';
+        maxGenesButton.style.filter = maxGenesActive ? 'none' : 'grayscale(100%) brightness(0.9)';
+      };
+
+      const isMaxGenesPreset = () => {
+        return Number(statInputs.level?.value || 0) === 99 &&
+          Number(statInputs.hp?.value || 0) === 20 &&
+          Number(statInputs.ad?.value || 0) === 20 &&
+          Number(statInputs.ap?.value || 0) === 20 &&
+          Number(statInputs.armor?.value || 0) === 20 &&
+          Number(statInputs.magicResist?.value || 0) === 20;
+      };
+
+      const syncTopModeFromStats = () => {
+        if (isMaxGenesPreset()) {
+          activeTopMode = 'maxGenes';
+        } else {
+          activeTopMode = 'awaken';
+        }
+        awakenEnabled = true;
+        refreshTopButtons();
       };
       
       awakenButton.addEventListener('click', () => {
-        awakenEnabled = !awakenEnabled;
-        refreshAwakenButton();
+        const willActivate = activeTopMode !== 'awaken';
+        activeTopMode = willActivate ? 'awaken' : 'normal';
+        awakenEnabled = willActivate;
+        refreshTopButtons();
+      });
+
+      const maxGenesButton = document.createElement('button');
+      maxGenesButton.className = 'widget-top widget-top-text pixel-font-16';
+      maxGenesButton.type = 'button';
+      maxGenesButton.style.margin = '0';
+      maxGenesButton.style.padding = '2px 8px';
+      maxGenesButton.style.textAlign = 'center';
+      maxGenesButton.style.color = '#fff';
+      maxGenesButton.style.cursor = 'pointer';
+      maxGenesButton.style.width = TOP_BUTTON_SIZE;
+      maxGenesButton.style.flex = `0 0 ${TOP_BUTTON_SIZE}`;
+      maxGenesButton.style.display = 'flex';
+      maxGenesButton.style.alignItems = 'center';
+      maxGenesButton.style.justifyContent = 'center';
+      maxGenesButton.style.height = TOP_BUTTON_SIZE;
+      maxGenesButton.style.outline = 'none';
+      maxGenesButton.style.flexShrink = '0';
+      maxGenesButton.title = 'Max Awakened Mode';
+
+      const maxGenesIcon = document.createElement('img');
+      maxGenesIcon.src = '/assets/icons/star-tier-shiny.png';
+      maxGenesIcon.alt = 'Max Genes Preset';
+      maxGenesIcon.style.width = '10px';
+      maxGenesIcon.style.height = '10px';
+      maxGenesButton.appendChild(maxGenesIcon);
+
+      maxGenesButton.addEventListener('click', () => {
+        const willActivate = activeTopMode !== 'maxGenes';
+        activeTopMode = willActivate ? 'maxGenes' : 'normal';
+        awakenEnabled = willActivate;
+
+        if (willActivate) {
+          if (statInputs.level) statInputs.level.value = '99';
+          ['hp', 'ad', 'ap', 'armor', 'magicResist'].forEach((statKey) => {
+            if (statInputs[statKey]) statInputs[statKey].value = '20';
+          });
+        }
+        syncTopModeFromStats();
       });
       
-      refreshAwakenButton();
+      refreshTopButtons();
       headerContainer.appendChild(headerLeftContainer);
-      headerContainer.appendChild(awakenButton);
+      const headerRightContainer = document.createElement('div');
+      headerRightContainer.style.display = 'flex';
+      headerRightContainer.style.alignItems = 'center';
+      headerRightContainer.style.gap = '6px';
+      headerRightContainer.appendChild(maxGenesButton);
+      headerRightContainer.appendChild(awakenButton);
+      headerContainer.appendChild(headerRightContainer);
       heroCard.appendChild(headerContainer);
       
       controls.push({
@@ -533,7 +615,12 @@ function showHeroEditorModal() {
         getValue: () => awakenEnabled,
         setValue: (value) => {
           awakenEnabled = Boolean(value);
-          refreshAwakenButton();
+          if (awakenEnabled) {
+            syncTopModeFromStats();
+          } else {
+            activeTopMode = 'normal';
+            refreshTopButtons();
+          }
         },
         initial: initialAwakenEnabled
       });
@@ -613,6 +700,8 @@ function showHeroEditorModal() {
           input: inputElement, 
           initial: inputElement.value 
         });
+        statInputs[stat.key] = inputElement;
+        inputElement.addEventListener('input', syncTopModeFromStats);
         
         statsContainer.appendChild(statContainer);
       });

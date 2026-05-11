@@ -79,6 +79,9 @@ const COLOR_BORDER_DARK = '#555';
 const COLOR_LINK = '#666';
 const COLOR_SUCCESS = '#4ade80';
 
+/** Vanilla quest nav icon (fallback when originalState was never captured). */
+const DEFAULT_QUEST_ICON_SRC = 'https://bestiaryarena.com/assets/icons/quest.png';
+
 // Helper function for automation state checks
 function isAutomationActive() {
     return isAutomationEnabled === AUTOMATION_ENABLED;
@@ -6934,58 +6937,44 @@ function modifyQuestButtonForRaiding() {
     // NOTE: Do NOT release control here - we keep it during the raid
 }
 
-// Function to restore quest button to original appearance
-function restoreQuestButtonAppearance() {
-    return withControlCheck(window.QuestButtonManager, 'Raid Hunter', () => {
-        
-        // Find the quest button - try multiple selectors to find it regardless of current state
-        const questButton = findQuestButton();
-        
-        if (!questButton) {
-            console.log('[Raid Hunter] Quest button not found for restoration');
-            return false;
-        }
-        
-        if (!window.QuestButtonManager.originalState) {
-            console.log('[Raid Hunter] Quest button state not found');
-            return false;
-        }
-        
-        // Restore original appearance
-        const img = questButton.querySelector('img');
-        const span = questButton.querySelector('span');
-        
-        // Show the icon again
+// DOM-only restore (caller must hold Quest Button control via QuestButtonManager).
+function applyQuestButtonRestoreDom() {
+    const questButton = findQuestButton();
+    
+    if (!questButton) {
+        console.log('[Raid Hunter] Quest button not found for restoration');
+        return false;
+    }
+    
+    const img = questButton.querySelector('img');
+    const span = questButton.querySelector('span');
+    const state = window.QuestButtonManager.originalState;
+    
+    if (state) {
         if (img) {
             img.style.display = '';
-            // Restore original source and properties
-            if (window.QuestButtonManager.originalState.imgSrc) {
-                img.src = window.QuestButtonManager.originalState.imgSrc;
-                img.alt = window.QuestButtonManager.originalState.imgAlt;
+            if (state.imgSrc) {
+                img.src = state.imgSrc;
+                img.alt = state.imgAlt;
             }
-            // Restore original dimensions
-            if (window.QuestButtonManager.originalState.imgWidth) {
-                img.width = window.QuestButtonManager.originalState.imgWidth;
+            if (state.imgWidth) {
+                img.width = state.imgWidth;
             }
-            if (window.QuestButtonManager.originalState.imgHeight) {
-                img.height = window.QuestButtonManager.originalState.imgHeight;
+            if (state.imgHeight) {
+                img.height = state.imgHeight;
             }
-            // Restore original CSS styles
-            if (window.QuestButtonManager.originalState.imgStyle) {
-                img.style.cssText = window.QuestButtonManager.originalState.imgStyle;
+            if (state.imgStyle) {
+                img.style.cssText = state.imgStyle;
             }
-            // Restore original class list
-            if (window.QuestButtonManager.originalState.imgClassList) {
-                img.className = window.QuestButtonManager.originalState.imgClassList;
+            if (state.imgClassList) {
+                img.className = state.imgClassList;
             }
         }
         
-        // Restore original text and clear shimmer effect
         if (span) {
-            if (window.QuestButtonManager.originalState.spanText) {
-                span.textContent = window.QuestButtonManager.originalState.spanText;
+            if (state.spanText) {
+                span.textContent = state.spanText;
             }
-            // Clear shimmer effect
             span.style.background = '';
             span.style.backgroundSize = '';
             span.style.backgroundClip = '';
@@ -6994,19 +6983,49 @@ function restoreQuestButtonAppearance() {
             span.style.animation = '';
         }
         
-        // Restore original color
-        questButton.style.color = window.QuestButtonManager.originalState.buttonColor;
-        
-        // Reset logging flag when restoring
-        window.QuestButtonManager._raidingStateLogged = false;
-        
-        // Only log restoration once per session
-        if (!window.QuestButtonManager._restoreLogged) {
-            console.log('[Raid Hunter] Quest button appearance restored');
-            window.QuestButtonManager._restoreLogged = true;
+        questButton.style.color = state.buttonColor || '';
+    } else {
+        console.log('[Raid Hunter] No stored original state — resetting quest button to default Quests appearance');
+        if (img) {
+            img.style.display = '';
+            img.src = DEFAULT_QUEST_ICON_SRC;
+            img.alt = 'Quests';
         }
-        return true;
-    }, 'restore quest button appearance');
+        if (span) {
+            span.textContent = 'Quests';
+            span.style.background = '';
+            span.style.backgroundSize = '';
+            span.style.backgroundClip = '';
+            span.style.webkitBackgroundClip = '';
+            span.style.webkitTextFillColor = '';
+            span.style.animation = '';
+        }
+        questButton.style.color = '';
+    }
+    
+    window.QuestButtonManager._raidingStateLogged = false;
+    
+    if (!window.QuestButtonManager._restoreLogged) {
+        console.log('[Raid Hunter] Quest button appearance restored');
+        window.QuestButtonManager._restoreLogged = true;
+    }
+    return true;
+}
+
+// Restores quest button; acquires Quest Button control so cleanup runs after Raid Hunter / other mods released it.
+function restoreQuestButtonAppearance() {
+    if (!window.QuestButtonManager?.requestControl?.('Raid Hunter')) {
+        console.log('[Raid Hunter] Cannot restore quest button — could not acquire quest button control');
+        return false;
+    }
+    try {
+        return applyQuestButtonRestoreDom();
+    } catch (error) {
+        console.error('[Raid Hunter] Error restoring quest button:', error);
+        return false;
+    } finally {
+        window.QuestButtonManager.releaseControl('Raid Hunter');
+    }
 }
 
 // Function to start monitoring autoplay state changes
@@ -7097,13 +7116,7 @@ function startAutoplayStateMonitoring() {
                         // Autoplay paused but raid still active - restore quest button
                         console.log('[Raid Hunter] Autoplay paused - restoring quest button');
                         
-                        // Force take control to restore quest button (we need to restore it regardless of current owner)
-                        if (window.QuestButtonManager.requestControl('Raid Hunter')) {
-                            restoreQuestButtonAppearance();
-                            window.QuestButtonManager.releaseControl('Raid Hunter');
-                        } else {
-                            console.log('[Raid Hunter] Could not get quest button control to restore - another mod may be using it');
-                        }
+                        restoreQuestButtonAppearance();
                     }, 2000); // 2 second delay to avoid false positives during navigation
                 } else if (isAutoplay && !isOnCorrectRaidMap()) {
                     // Autoplay on wrong map - restore quest button
@@ -7111,13 +7124,7 @@ function startAutoplayStateMonitoring() {
                     isCurrentlyRaiding = false;
                     currentRaidInfo = null;
                     
-                    // Force take control to restore quest button (we need to restore it regardless of current owner)
-                    if (window.QuestButtonManager.requestControl('Raid Hunter')) {
-                        restoreQuestButtonAppearance();
-                        window.QuestButtonManager.releaseControl('Raid Hunter');
-                    } else {
-                        console.log('[Raid Hunter] Could not get quest button control to restore - another mod may be using it');
-                    }
+                    restoreQuestButtonAppearance();
                     
                     stopAutoplayStateMonitoring();
                 }

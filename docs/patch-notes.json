@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "3.7.18",
+      "changes": [
+        {
+          "mod": "Hero Editor",
+          "type": "changed",
+          "text": "Added a square Max Awakened Mode button (star-tier-shiny) next to Awakened Mode; it auto-selects when LVL is 99 and genes are maxed (HP/AD/AP/ARM/MR = 20), and reverts to Awakened Mode if any value is lowered."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Map Filter now has map-aware controls: Clear button switches between Clear All and Clear Map, Clear Map removes that map from sessions/filter and resets filter to ALL, and a compact Go-to-map arrow appears for non-ALL selections."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Return to Map hotkey now greys out when Show Return to Map Button is disabled and shows a yellow warning icon explaining the required Interface setting."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Quest nav label no longer sticks on \"Tasking\" when cleanup could not read stored original styling: restore now re-acquires the quest button when needed and falls back to the default Quests icon/text if originalState was never saved."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Fixed Firefox-only overflow in Bestiary and Arsenal filter bars by updating flex sizing so search inputs shrink correctly beside the Name button, and updated the creature status icon to show star-tier-shiny (instead of awaken) when a creature is level 99 with max genes (100 total genes)."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Creature border cosmetics were stabilized with explicit priority (Maxed > Shiny > Sealed), proper cleanup for .rarity-shiny overlays when toggles are disabled, and immediate re-layering after toggle changes so shiny borders correctly take over when maxed is turned off."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Quest nav label no longer sticks on \"Raiding\" after disabling automation or leaving a raid when cleanup lacked prior captured styling or quest-button ownership: restore now acquires control when needed and falls back to default Quests appearance."
+        }
+      ]
+    },
+    {
       "version": "3.7.17",
       "changes": [
         {

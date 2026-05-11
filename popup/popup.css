@@ -116,7 +116,7 @@ header {
 
 .patch-notes-content {
   padding: 16px;
-  max-height: 300px;
+  max-height: 250px;
   overflow-y: auto;
 }
 
