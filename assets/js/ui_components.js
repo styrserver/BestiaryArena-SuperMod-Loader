@@ -253,13 +253,13 @@ const DEBUG = false; // Set to true for development
       element: modal,
       close: () => {
         try {
-          if (modal.parentNode === document.body) {
-            document.body.removeChild(modal);
+          if (modal.parentNode) {
+            modal.parentNode.removeChild(modal);
           }
         } catch (e) { /* ignore removeChild errors */ }
         try {
-          if (overlay.parentNode === document.body) {
-            document.body.removeChild(overlay);
+          if (overlay.parentNode) {
+            overlay.parentNode.removeChild(overlay);
           }
         } catch (e) { /* ignore removeChild errors */ }
       }
