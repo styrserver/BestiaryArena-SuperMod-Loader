@@ -1025,6 +1025,7 @@ const HuntAnalyzerState = {
     sealed: 0,
     staminaSpent: 0,
     staminaRecovered: 0,
+    experience: 0,
     wins: 0,
     losses: 0
   },
@@ -1042,7 +1043,24 @@ const HuntAnalyzerState = {
   settings: (() => {
     const settings = {
       theme: 'original',
-      persistData: false
+      persistData: false,
+      visibility: {
+        sessions: true,
+        playtime: true,
+        stamina: true,
+        winLoss: true,
+        goldRate: true,
+        creatureRate: true,
+        equipmentRate: true,
+        runeRate: true,
+        expRate: true,
+        staminaRate: true,
+        goldTotal: true,
+        dustTotal: true,
+        shinyTotal: true,
+        sealedTotal: true,
+        runesTotal: true
+      }
     };
     let isApplyingTheme = false; // Flag to prevent recursion when applyTheme sets the property
     // Wrap settings with Proxy to watch for theme changes (event-driven, no polling needed)
@@ -1383,20 +1401,40 @@ function trackMapChange(roomName) {
   }
 }
 
+// Wall-clock span from session timestamps for one map (used when per-map clock ms is missing).
+function getMapSessionWallClockSpanMs(roomName) {
+  const list = HuntAnalyzerState.data.sessions.filter(s => s.roomName === roomName);
+  const ts = list.map(s => s.timestamp).filter(t => typeof t === 'number' && t > 0);
+  if (ts.length < 2) return 0;
+  return Math.max(0, Math.max(...ts) - Math.min(...ts));
+}
+
 // Get filtered time for rate calculations
 function getFilteredTimeHours() {
   const liveMs = getLiveSessionMs();
+  const allTrackedMs = HuntAnalyzerState.timeTracking.accumulatedTimeMs + liveMs;
   if (HuntAnalyzerState.ui.selectedMapFilter === "ALL") {
-    return (HuntAnalyzerState.timeTracking.accumulatedTimeMs + liveMs) / (1000 * 60 * 60);
-  } else {
-    // Return time for selected map plus current session if on that map
-    const mapTimeMs = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.ui.selectedMapFilter) || 0;
-    let totalTimeMs = mapTimeMs;
-    if (HuntAnalyzerState.timeTracking.currentMap === HuntAnalyzerState.ui.selectedMapFilter) {
-      totalTimeMs += liveMs;
-    }
-    return totalTimeMs / (1000 * 60 * 60);
+    return allTrackedMs / (1000 * 60 * 60);
   }
+  const filter = HuntAnalyzerState.ui.selectedMapFilter;
+  // Primary: per-map clock + live segment when currently on that map
+  let totalTimeMs = HuntAnalyzerState.timeTracking.mapTimeMs.get(filter) || 0;
+  if (HuntAnalyzerState.timeTracking.currentMap === filter) {
+    totalTimeMs += liveMs;
+  }
+  if (totalTimeMs <= 0) {
+    // Reload / key mismatch / clock never split by map: estimate from session timestamps on this map
+    totalTimeMs = getMapSessionWallClockSpanMs(filter);
+  }
+  if (totalTimeMs <= 0) {
+    // Last resort: assume this map’s sessions used a fair share of total tracked playtime
+    const mapSessions = HuntAnalyzerState.data.sessions.filter(s => s.roomName === filter).length;
+    const totalSessions = HuntAnalyzerState.data.sessions.length;
+    if (mapSessions > 0 && totalSessions > 0 && allTrackedMs > 0) {
+      totalTimeMs = allTrackedMs * (mapSessions / totalSessions);
+    }
+  }
+  return totalTimeMs / (1000 * 60 * 60);
 }
 
 // Format playtime for display
@@ -1423,6 +1461,42 @@ function formatCompactInt(value) {
   const kVal = Math.abs(n) / 1000;
   const kStr = kVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return `${sign}${kStr}K`;
+}
+
+/** Format experience values: <1K raw, >=1K as K, >=1KK (1,000,000) as KK. */
+function formatExpValue(value) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return String(value);
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  if (abs < 1000) return String(n);
+  if (abs < 1000000) {
+    const kVal = abs / 1000;
+    const kStr = kVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `${sign}${kStr}K`;
+  }
+  const kkVal = abs / 1000000;
+  const kkStr = kkVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${sign}${kkStr}KK`;
+}
+
+/**
+ * Battle EXP from serverResults (number or numeric string). Some builds only set rewardScreen;
+ * others may mirror under next. Invalid values return 0.
+ */
+function parseBattleExpReward(rewardScreen, serverResults) {
+  const raw = rewardScreen?.expReward ?? serverResults?.next?.expReward;
+  if (raw === undefined || raw === null || raw === '') return 0;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
+/** Sum a session's stored experience without string-concat bugs from legacy saves. */
+function sessionStoredExperience(session) {
+  const n = Number(session?.experience);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
 }
 
 /** Full integer for tooltips (locale-formatted, no K suffix). */
@@ -1927,7 +2001,10 @@ function cleanSessionData(sessions) {
             timestamp: session.timestamp,
             staminaSpent: session.staminaSpent,
             staminaRecovered: session.staminaRecovered,
+            experience: sessionStoredExperience(session),
             victory: session.victory,
+            gold: Math.max(0, Math.floor(Number(session.gold) || 0)),
+            dust: Math.max(0, Math.floor(Number(session.dust) || 0)),
             loot: (session.loot || []).map(item => {
                 const cleanItem = { ...item };
                 delete cleanItem.visual; // Remove visual - will be regenerated on load
@@ -2223,6 +2300,11 @@ function saveHuntAnalyzerSettings() {
 function loadHuntAnalyzerSettings() {
     const parsedSettings = loadFromStorage(HUNT_ANALYZER_SETTINGS_KEY);
     if (parsedSettings) {
+        // Deep-merge visibility so new keys added later keep their defaults
+        if (parsedSettings.visibility) {
+            Object.assign(HuntAnalyzerState.settings.visibility, parsedSettings.visibility);
+            delete parsedSettings.visibility;
+        }
         Object.assign(HuntAnalyzerState.settings, parsedSettings);
         // Apply theme after loading settings
         applyTheme(HuntAnalyzerState.settings.theme || 'original', false);
@@ -3712,6 +3794,12 @@ class DataProcessor {
       HuntAnalyzerState.totals.staminaSpent += serverResults.next.playerExpDiff;
     }
 
+    // Track experience gained from the battle
+    const battleExp = parseBattleExpReward(rewardScreen, serverResults);
+    if (battleExp > 0) {
+      HuntAnalyzerState.totals.experience += battleExp;
+    }
+
     // Calculate stamina recovered for this session
     let sessionStaminaRecovered = 0;
     for (const item of allLootItems) {
@@ -3772,6 +3860,7 @@ class DataProcessor {
       timestamp: Date.now(),
       staminaSpent: serverResults.next?.playerExpDiff || 0,
       staminaRecovered: sessionStaminaRecovered,
+      experience: battleExp,
       victory: rewardScreen.victory,
       gold: sessionGold,
       dust: sessionDust
@@ -3784,6 +3873,7 @@ class DataProcessor {
       result: autoplayMessage,
       room: readableRoomName,
       gold: rewardScreen.loot?.goldAmount || 0,
+      experience: sessionData.experience,
       lootItems: aggregatedLootForSession.size,
       creatures: aggregatedCreaturesForSession.size,
       staminaSpent: sessionData.staminaSpent,
@@ -3811,6 +3901,7 @@ class DataProcessor {
     HuntAnalyzerState.totals.sealed = 0;
     HuntAnalyzerState.totals.staminaSpent = 0;
     HuntAnalyzerState.totals.staminaRecovered = 0;
+    HuntAnalyzerState.totals.experience = 0;
     HuntAnalyzerState.totals.wins = 0;
     HuntAnalyzerState.totals.losses = 0;
 
@@ -3834,6 +3925,9 @@ class DataProcessor {
         // Aggregate stamina data
         HuntAnalyzerState.totals.staminaSpent += sessionData.staminaSpent || 0;
         HuntAnalyzerState.totals.staminaRecovered += sessionData.staminaRecovered || 0;
+        
+        // Aggregate experience (Number() avoids string-concat bugs from legacy persisted data)
+        HuntAnalyzerState.totals.experience += sessionStoredExperience(sessionData);
         
         sessionData.loot.forEach(item => {
             // Handle special items (Gold, Dust) that should only appear in totals
@@ -4528,6 +4622,7 @@ function generateSummaryLogText() {
     const goldRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.gold / filteredTimeHours) : 0;
     const creatureRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.creatures / filteredTimeHours) : 0;
     const equipmentRatePerHour = filteredTimeHours > 0 ? Math.round(HuntAnalyzerState.totals.equipment / filteredTimeHours) : 0;
+    const expRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.experience / filteredTimeHours) : 0;
     const staminaSpentRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.staminaSpent / filteredTimeHours) : 0;
     
     // Calculate overall efficiency metrics
@@ -4573,8 +4668,9 @@ function generateSummaryLogText() {
     summary += `${t('mods.huntAnalyzer.gold')}: ${HuntAnalyzerState.totals.gold} | ${t('mods.huntAnalyzer.dust')}: ${HuntAnalyzerState.totals.dust}\n`;
     summary += `${t('mods.huntAnalyzer.equipmentDrops')}: ${HuntAnalyzerState.totals.equipment} | ${t('mods.huntAnalyzer.creatureDrops')}: ${HuntAnalyzerState.totals.creatures} | ${t('mods.huntAnalyzer.shinyDrops')}: ${HuntAnalyzerState.totals.shiny} | ${t('mods.huntAnalyzer.sealedDrops')}: ${HuntAnalyzerState.totals.sealed}\n`;
     summary += `${t('mods.huntAnalyzer.totalStaminaSpent')}: ${HuntAnalyzerState.totals.staminaSpent}\n`;
+    summary += `${t('mods.huntAnalyzer.experience')}: ${formatExpValue(HuntAnalyzerState.totals.experience)}\n`;
     summary += `---------------------------\n`;
-    summary += `${t('mods.huntAnalyzer.overallRates')}: ${autoplayRatePerHour} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${goldRatePerHour} ${t('mods.huntAnalyzer.goldPerHour')} | ${creatureRatePerHour} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${equipmentRatePerHour} ${t('mods.huntAnalyzer.equipmentPerHour')}\n`;
+    summary += `${t('mods.huntAnalyzer.overallRates')}: ${autoplayRatePerHour} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${goldRatePerHour} ${t('mods.huntAnalyzer.goldPerHour')} | ${creatureRatePerHour} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${equipmentRatePerHour} ${t('mods.huntAnalyzer.equipmentPerHour')} | ${formatExpValue(expRatePerHour)} ${t('mods.huntAnalyzer.expPerHour')}\n`;
     summary += `${t('mods.huntAnalyzer.overallEfficiency')}: ${goldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${sessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${staminaSpentRatePerHour} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
     summary += `${t('mods.huntAnalyzer.generated')}: ${new Date().toLocaleString()}\n`;
     summary += `---------------------------\n\n`;
@@ -4601,6 +4697,7 @@ function generateSummaryLogText() {
                     totalGold: 0,
                     totalDust: 0,
                     totalStamina: 0,
+                    totalExperience: 0,
                     totalEquipment: 0,
                     totalCreatures: 0,
                     totalShiny: 0,
@@ -4633,6 +4730,7 @@ function generateSummaryLogText() {
             mapGroups[mapName].totalGold += sessionGold;
             mapGroups[mapName].totalDust += sessionDust;
             mapGroups[mapName].totalStamina += session.staminaSpent || 0;
+            mapGroups[mapName].totalExperience += sessionStoredExperience(session);
             
             // Track time range for this map
             if (session.timestamp) {
@@ -4695,6 +4793,7 @@ function generateSummaryLogText() {
             const mapGoldRate = mapTimeHours > 0 ? Math.floor(mapData.totalGold / mapTimeHours) : 0;
             const mapCreatureRate = mapTimeHours > 0 ? Math.floor(mapData.totalCreatures / mapTimeHours) : 0;
             const mapEquipmentRate = mapTimeHours > 0 ? Math.round(mapData.totalEquipment / mapTimeHours) : 0;
+            const mapExpRate = mapTimeHours > 0 ? Math.floor(mapData.totalExperience / mapTimeHours) : 0;
             const mapStaminaRate = mapTimeHours > 0 ? Math.floor(mapData.totalStamina / mapTimeHours) : 0;
             
             // Calculate map-specific efficiency
@@ -4704,9 +4803,9 @@ function generateSummaryLogText() {
             
             summary += `\n${mapName}:\n`;
             summary += `  ${t('mods.huntAnalyzer.sessions')}: ${mapData.sessions} | ${t('mods.huntAnalyzer.winLoss')}: ${mapData.wins}/${mapData.losses} (${mapWinRate}%) | ${t('mods.huntAnalyzer.time')}: ${formatTime(mapData.endTime - mapData.startTime)}${mapData.hasTimestamps ? '' : ` (${t('mods.huntAnalyzer.estimated')})`}\n`;
-            summary += `  ${t('mods.huntAnalyzer.gold')}: ${mapData.totalGold} | ${t('mods.huntAnalyzer.dust')}: ${mapData.totalDust} | ${t('mods.huntAnalyzer.stamina')}: ${mapData.totalStamina}\n`;
+            summary += `  ${t('mods.huntAnalyzer.gold')}: ${mapData.totalGold} | ${t('mods.huntAnalyzer.dust')}: ${mapData.totalDust} | ${t('mods.huntAnalyzer.stamina')}: ${mapData.totalStamina} | ${t('mods.huntAnalyzer.experience')}: ${formatExpValue(mapData.totalExperience)}\n`;
             summary += `  ${t('mods.huntAnalyzer.equipment')}: ${mapData.totalEquipment} | ${t('mods.huntAnalyzer.creatures')}: ${mapData.totalCreatures} | ${t('mods.huntAnalyzer.shiny')}: ${mapData.totalShiny} | ${t('mods.huntAnalyzer.sealed')}: ${mapData.totalSealed}\n`;
-            summary += `  ${t('mods.huntAnalyzer.rates')}: ${mapSessionRate} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${mapGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${mapCreatureRate} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${mapEquipmentRate} ${t('mods.huntAnalyzer.equipmentPerHour')}\n`;
+            summary += `  ${t('mods.huntAnalyzer.rates')}: ${mapSessionRate} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${mapGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${mapCreatureRate} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${mapEquipmentRate} ${t('mods.huntAnalyzer.equipmentPerHour')} | ${formatExpValue(mapExpRate)} ${t('mods.huntAnalyzer.expPerHour')}\n`;
             summary += `  ${t('mods.huntAnalyzer.efficiency')}: ${mapGoldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${mapSessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${mapStaminaRate} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
             
             // Show all loot items using the same order as panel rendering:
@@ -5172,6 +5271,7 @@ function resetHuntAnalyzerState() {
     HuntAnalyzerState.totals.sealed = 0;
     HuntAnalyzerState.totals.staminaSpent = 0;
     HuntAnalyzerState.totals.staminaRecovered = 0;
+    HuntAnalyzerState.totals.experience = 0;
     HuntAnalyzerState.totals.wins = 0;
     HuntAnalyzerState.totals.losses = 0;
     HuntAnalyzerState.session.startTime = Date.now();
@@ -5408,6 +5508,7 @@ function createAutoplayAnalyzerPanel() {
         HuntAnalyzerState.totals.sealed = 0;
         HuntAnalyzerState.totals.staminaSpent = 0;
         HuntAnalyzerState.totals.staminaRecovered = 0;
+        HuntAnalyzerState.totals.experience = 0;
         HuntAnalyzerState.totals.wins = 0;
         HuntAnalyzerState.totals.losses = 0;
         HuntAnalyzerState.session.startTime = Date.now();
@@ -5761,6 +5862,25 @@ function createAutoplayAnalyzerPanel() {
     runeRateElement.style.lineHeight = dropRateRowHeight;
     leftRatesSection.appendChild(runeRateElement);
 
+    const expRateElement = document.createElement("span");
+    expRateElement.id = "mod-exp-rate";
+    expRateElement.textContent = `${t('mods.huntAnalyzer.exp')}: ${formatExpValue(0)} | ${formatExpValue(0)}/h | ${formatExpValue(0)}/${t('mods.huntAnalyzer.expSessionAbbr')}`;
+    expRateElement.style.height = dropRateRowHeight;
+    expRateElement.style.lineHeight = dropRateRowHeight;
+    expRateElement.style.display = 'block';
+    expRateElement.style.maxWidth = '100%';
+    expRateElement.style.whiteSpace = 'nowrap';
+    expRateElement.style.overflow = 'hidden';
+    expRateElement.style.textOverflow = 'ellipsis';
+    expRateElement.addEventListener('mouseenter', () => {
+        expRateElement.dataset.haExpTooltipHover = '1';
+    });
+    expRateElement.addEventListener('mouseleave', () => {
+        delete expRateElement.dataset.haExpTooltipHover;
+        updateModExpRateDisplay(expRateElement);
+    });
+    leftRatesSection.appendChild(expRateElement);
+
     const totalStaminaSpentElement = document.createElement('span');
     totalStaminaSpentElement.id = 'mod-total-stamina-spent';
     // Calculate initial stamina efficiency - show zeros until first session completes
@@ -6033,6 +6153,7 @@ function createAutoplayAnalyzerPanel() {
     domCache.set("mod-creature-rate", creatureRateElement);
     domCache.set("mod-equipment-rate", equipmentRateElement);
     domCache.set("mod-rune-rate", runeRateElement);
+    domCache.set("mod-exp-rate", expRateElement);
     domCache.set("mod-room-id-display", roomIdDisplay);
     domCache.set("mod-total-gold-display", goldAmountSpan);
     domCache.set("mod-total-dust-display", dustAmountSpan);
@@ -6119,6 +6240,7 @@ function createAutoplayAnalyzerPanel() {
     window.addEventListener('resize', updatePanelPosition);
 
     updatePanelDisplay();
+    applyVisibilitySettings();
     scheduleInitialRoomDisplaySync();
     updateMapFilterDropdown(); // Initialize map filter dropdown
 
@@ -6170,6 +6292,82 @@ function getSmoothedRate(actualRate, elapsedTimeMs) {
     return actualRate;
 }
 
+const VISIBILITY_ELEMENT_MAP = {
+    sessions:      'mod-session-count',
+    playtime:      'mod-playtime-display',
+    stamina:       'mod-stamina-display',
+    winLoss:       'mod-win-loss-display',
+    goldRate:      'mod-gold-rate',
+    creatureRate:  'mod-creature-rate',
+    equipmentRate: 'mod-equipment-rate',
+    runeRate:      'mod-rune-rate',
+    expRate:       'mod-exp-rate',
+    staminaRate:   'mod-total-stamina-spent',
+    goldTotal:     'mod-total-gold-display',
+    dustTotal:     'mod-total-dust-display',
+    shinyTotal:    'mod-total-shiny-display',
+    sealedTotal:   'mod-total-sealed-display',
+    runesTotal:    'mod-total-runes-display'
+};
+
+const TOTAL_DISPLAY_IDS = new Set([
+    'mod-total-gold-display', 'mod-total-dust-display',
+    'mod-total-shiny-display', 'mod-total-sealed-display',
+    'mod-total-runes-display'
+]);
+
+function applyVisibilitySettings() {
+    const vis = HuntAnalyzerState.settings.visibility;
+    if (!vis) return;
+
+    for (const [key, elementId] of Object.entries(VISIBILITY_ELEMENT_MAP)) {
+        const show = vis[key] !== false;
+        const el = domCache.get(elementId) || document.getElementById(elementId);
+        if (!el) continue;
+
+        if (TOTAL_DISPLAY_IDS.has(elementId)) {
+            const wrapper = el.parentElement;
+            if (wrapper) wrapper.style.display = show ? 'flex' : 'none';
+        } else {
+            el.style.display = show ? '' : 'none';
+        }
+    }
+}
+
+/** Live exp row: total (filtered) | smoothed exp/h | avg exp per session. */
+function updateModExpRateDisplay(targetEl) {
+    if (!targetEl) return;
+    const filteredTimeHours = getFilteredTimeHours();
+    const totalExp = Math.max(0, Math.floor(Number(HuntAnalyzerState.totals.experience) || 0));
+    let expRatePerHour = 0;
+    if (filteredTimeHours > 0) {
+        const actualExpRate = Math.floor(totalExp / filteredTimeHours);
+        expRatePerHour = getSmoothedRate(actualExpRate, filteredTimeHours * 60 * 60 * 1000);
+    }
+    let sessionCountForExp = HuntAnalyzerState.session.count;
+    if (HuntAnalyzerState.ui.selectedMapFilter !== "ALL") {
+        sessionCountForExp = HuntAnalyzerState.data.sessions.filter(
+            session => session.roomName === HuntAnalyzerState.ui.selectedMapFilter
+        ).length;
+    }
+    const expPerSession = sessionCountForExp > 0 ? Math.floor(totalExp / sessionCountForExp) : 0;
+    const expLabel = t('mods.huntAnalyzer.exp');
+    const sessAbbr = t('mods.huntAnalyzer.expSessionAbbr');
+    const nextText = `${expLabel}: ${formatExpValue(totalExp)} | ${formatExpValue(expRatePerHour)}/h | ${formatExpValue(expPerSession)}/${sessAbbr}`;
+    const nextTitle = `${expLabel}: ${formatExactInt(totalExp)} | ${t('mods.huntAnalyzer.expPerHour')}: ${formatExactInt(expRatePerHour)} | ${t('mods.huntAnalyzer.expPerSession')}: ${formatExactInt(expPerSession)}`;
+    if (targetEl.textContent !== nextText) {
+        targetEl.textContent = nextText;
+    }
+    // Do not rewrite `title` while hovered: exp/h ticks every second so the string always changes,
+    // which re-triggers native tooltips. Title refreshes on mouseleave via listener.
+    if (targetEl.dataset.haExpTooltipHover === '1') {
+        return;
+    }
+    if (targetEl.getAttribute('title') !== nextTitle) {
+        targetEl.setAttribute('title', nextTitle);
+    }
+}
+
 // Updates the display in the Hunt Analyzer Mod panel with the current loot, creature drops,
 // autoplay session count, and live drop rates.
 function updatePanelDisplay() {
@@ -6203,6 +6401,7 @@ function updatePanelDisplay() {
     const cachedCreatureRateElement = domCache.get("mod-creature-rate");
     const cachedEquipmentRateElement = domCache.get("mod-equipment-rate");
     const cachedRuneRateElement = domCache.get("mod-rune-rate");
+    const cachedExpRateElement = domCache.get("mod-exp-rate");
     const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
     const cachedTotalGoldDisplayElement = domCache.get("mod-total-gold-display");
     const cachedTotalDustDisplayElement = domCache.get("mod-total-dust-display");
@@ -6239,7 +6438,9 @@ function updatePanelDisplay() {
     // Update stamina display
     if (cachedStaminaDisplayElement) {
         cachedStaminaDisplayElement.textContent = formatTotalStaminaLabel(HuntAnalyzerState.totals.staminaSpent);
-        cachedStaminaDisplayElement.style.display = 'inline';
+        if (HuntAnalyzerState.settings.visibility?.stamina !== false) {
+            cachedStaminaDisplayElement.style.display = 'inline';
+        }
         cachedStaminaDisplayElement.setAttribute('title', `${t('mods.huntAnalyzer.totalStamina')}: ${formatExactInt(HuntAnalyzerState.totals.staminaSpent)}`);
     }
 
@@ -6349,6 +6550,9 @@ function updatePanelDisplay() {
     if (cachedRuneRateElement) {
         cachedRuneRateElement.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${formatCompactInt(runeRatePerHour)}`;
         cachedRuneRateElement.setAttribute('title', `${t('mods.huntAnalyzer.runesPerHour')}: ${formatExactInt(runeRatePerHour)}`);
+    }
+    if (cachedExpRateElement) {
+        updateModExpRateDisplay(cachedExpRateElement);
     }
     if (cachedTotalStaminaSpentElement) {
         // Only calculate natural regeneration if we have completed sessions
@@ -7091,6 +7295,11 @@ const translationEventHandler = (event) => {
             runeRate.setAttribute('title', `${t('mods.huntAnalyzer.runesPerHour')}: ${formatExactInt(runeRatePerHour)}`);
         }
         
+        const expRate = document.getElementById('mod-exp-rate');
+        if (expRate) {
+            updateModExpRateDisplay(expRate);
+        }
+        
         const staminaSpent = document.getElementById('mod-total-stamina-spent');
         if (staminaSpent) {
             const filteredTimeHours = getFilteredTimeHours();
@@ -7815,6 +8024,9 @@ window.HuntAnalyzerState = HuntAnalyzerState;
 
 // Expose applyTheme function for Mod Settings integration
 window.applyHuntAnalyzerTheme = applyTheme;
+
+// Expose visibility function for Mod Settings integration
+window.applyHuntAnalyzerVisibility = applyVisibilitySettings;
 
 // Expose themes object for Mod Settings to dynamically list available themes
 window.HUNT_ANALYZER_THEMES = HUNT_ANALYZER_THEMES;

@@ -456,6 +456,39 @@ const levelForExp = globalThis.state.utils.expToCurrentLevel(440425);
 console.log(levelForExp); // 25
 ```
 
+#### Experience After Battle Formula
+
+Below is the experience after battle formula provided by [Xandjiji](https://github.com/xandjiji):
+
+```javascript
+const xpValue = defeatedLevelSum * 562.5
+const rngMultiplier = (rollD20() - 10) / 100
+
+const expDrop = Math.round(xpValue * (1 + rngMultiplier))
+```
+
+#### Level Formula
+
+Below is the level formula in TypeScript provided by [Xandjiji](https://github.com/xandjiji):
+
+```typescript
+export const ENEMY_XP_DROP_PER_LVL = 56.25; // arbitrary
+const XP_RATE = 10; // higher = faster xp rate
+export const ROOM_XP_DROP_PER_LEVEL = ENEMY_XP_DROP_PER_LVL * XP_RATE;
+
+const getLevelSteepness = (level: number) =>
+  0.00970941 * Math.pow(1.14111, level) + 1;
+
+export const expAtLevel = (level: number) => {
+  const steepness = level * getLevelSteepness(level);
+
+  const xpRequired = (level - 1) * ROOM_XP_DROP_PER_LEVEL;
+
+  const result = Math.round(steepness * xpRequired);
+  return result - (result % 250);
+};
+```
+
 ### Player Flags
 
 The game uses a bitwise flag system for tracking player abilities and achievements:
@@ -578,6 +611,49 @@ console.log(rat.metadata.baseStats); // HP, AD, AP, etc.
 const boots = globalThis.state.utils.getEquipment(1);
 console.log(boots.metadata.name); // "Boots of Haste"
 ```
+
+### Monster Drop System
+
+Below is the internal monster drop logic provided by [Xandjiji](https://github.com/xandjiji). It handles normal drops, shiny rolls, and sealed monster drops based on floor depth:
+
+```typescript
+function tryForMonsterDrop({
+  roomId,
+  floor,
+  isBoosted,
+  isRaid,
+}: {
+  roomId: string;
+  floor: number;
+  isBoosted: boolean;
+  isRaid: boolean;
+}) {
+  const monsterDropPool = getMonsterDropPool(roomId);
+  if (!monsterDropPool.length) return;
+
+  const shiny = rollForShinyMonster(isRaid ? "raidDrop" : "normalDrop", floor);
+
+  if (floor < BASE_RED_FLOORS || shiny) {
+    const m = rollForMonsterDrop(monsterDropPool, isBoosted);
+    if (shiny) mutateShiny(m);
+    return m;
+  }
+
+  return rollForSealedMonsterDrop({
+    monsterDropPool,
+    floor,
+    boostedOrRaid: isBoosted || isRaid,
+  });
+}
+```
+
+**Related internal functions:**
+- `getMonsterDropPool(roomId)` — returns the list of possible monster drops for a room
+- `rollForShinyMonster(type, floor)` — rolls for a shiny based on drop type and floor
+- `rollForMonsterDrop(pool, isBoosted)` — picks a monster from the pool (boost increases odds)
+- `mutateShiny(monster)` — converts a monster into its shiny variant
+- `rollForSealedMonsterDrop({ monsterDropPool, floor, boostedOrRaid })` — rolls a sealed monster drop on higher floors
+- `BASE_RED_FLOORS` — floor threshold where sealed drops replace normal drops
 
 ## Events and Listeners
 

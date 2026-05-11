@@ -4187,7 +4187,7 @@ function generateConfigSummary(data, isImport = false) {
     const sessionCount = huntData.sessions ? huntData.sessions.length : 0;
     if (sessionCount > 0) {
       const estimatedSizeKB = Math.round((sessionCount * 864) / 1024);
-      summary.push(`Hunt Analyzer: ${sessionCount} sessions (~${formatStorageSize(estimatedSizeKB)})`);
+      summary.push(`Hunt Analyzer: ${sessionCount} battles (~${formatStorageSize(estimatedSizeKB)})`);
     }
   }
   
@@ -5854,6 +5854,89 @@ function showSettingsModal() {
               })()}
             </select>
           </div>
+
+          <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; margin-top: 5px;">
+            <span style="color: #fff; font-size: 14px; font-weight: bold;">${t('mods.betterUI.huntVisibilityTitle')}</span>
+            <p style="color: #7f8fa4; font-size: 12px; margin: 4px 0 10px 0;">${t('mods.betterUI.huntVisibilityDesc')}</p>
+            
+            <div style="margin-bottom: 10px;">
+              <span style="color: #aaa; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">${t('mods.betterUI.huntVisInfoSection')}</span>
+              <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="sessions" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisSessions')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="playtime" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisPlaytime')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="stamina" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisStamina')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="winLoss" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisWinLoss')}</span>
+                </label>
+              </div>
+            </div>
+
+            <div style="margin-bottom: 10px;">
+              <span style="color: #aaa; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">${t('mods.betterUI.huntVisRatesSection')}</span>
+              <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="goldRate" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisGoldRate')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="creatureRate" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisCreatureRate')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="equipmentRate" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisEquipmentRate')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="runeRate" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisRuneRate')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="expRate" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisExpRate')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="staminaRate" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisStaminaRate')}</span>
+                </label>
+              </div>
+            </div>
+
+            <div style="margin-bottom: 10px;">
+              <span style="color: #aaa; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">${t('mods.betterUI.huntVisTotalsSection')}</span>
+              <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="goldTotal" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisGoldTotal')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="dustTotal" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisDustTotal')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="shinyTotal" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisShinyTotal')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="sealedTotal" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisSealedTotal')}</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" class="ha-visibility-toggle" data-vis-key="runesTotal" checked style="cursor: pointer;">
+                  <span style="font-size: 13px;">${t('mods.betterUI.huntVisRunesTotal')}</span>
+                </label>
+              </div>
+            </div>
+          </div>
         `;
         rightColumn.appendChild(huntAnalyzerContent);
       } else if (categoryId === 'vip-list') {
@@ -7196,6 +7279,53 @@ function showSettingsModal() {
               console.log('[Mod Settings] Applied Hunt Analyzer theme immediately');
             }
           }
+        });
+      }
+      
+      // Hunt Analyzer visibility toggles
+      const visibilityToggles = content.querySelectorAll('.ha-visibility-toggle');
+      if (visibilityToggles.length > 0) {
+        // Load current visibility settings from localStorage
+        let currentVisibility = {};
+        try {
+          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+          const parsed = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+          currentVisibility = parsed.visibility || {};
+        } catch (e) {
+          console.error('[Mod Settings] Error reading Hunt Analyzer visibility settings:', e);
+        }
+
+        visibilityToggles.forEach(toggle => {
+          const visKey = toggle.getAttribute('data-vis-key');
+          if (!visKey) return;
+
+          // Set initial checked state (default true if not explicitly set to false)
+          toggle.checked = currentVisibility[visKey] !== false;
+
+          toggle.addEventListener('change', () => {
+            try {
+              const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+              const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+              if (!settings.visibility) settings.visibility = {};
+              settings.visibility[visKey] = toggle.checked;
+              localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
+            } catch (e) {
+              console.error('[Mod Settings] Error saving visibility setting:', e);
+            }
+
+            // Update runtime state if Hunt Analyzer is loaded
+            if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
+              if (!window.HuntAnalyzerState.settings.visibility) {
+                window.HuntAnalyzerState.settings.visibility = {};
+              }
+              window.HuntAnalyzerState.settings.visibility[visKey] = toggle.checked;
+            }
+
+            // Apply immediately if the function is exposed
+            if (typeof window.applyHuntAnalyzerVisibility === 'function') {
+              window.applyHuntAnalyzerVisibility();
+            }
+          });
         });
       }
       

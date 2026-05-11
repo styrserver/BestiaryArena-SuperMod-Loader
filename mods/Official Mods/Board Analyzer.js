@@ -14,7 +14,8 @@ const defaultConfig = {
   stopOnSPlus: false,
   stopOnAnyVictory: false,
   stopAfterTicks: 0, // 0 means no limit
-  stopWhenTicksReached: 0 // Stop when finding a run with this number of ticks or less
+  stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
+  estimateExperience: false
 };
 
 // Initialize with saved config or defaults
@@ -1401,6 +1402,8 @@ class StatisticsCalculator {
     this.ticksArray = [];
     this.runTimes = [];
     this.runTimesSum = 0;
+    this.totalEstimatedExp = 0;
+    this.expCount = 0;
   }
   
   addRun(result, runTime) {
@@ -1430,6 +1433,12 @@ class StatisticsCalculator {
       if (result.ticks > this.maxDefeatTicks) {
         this.maxDefeatTicks = result.ticks;
       }
+    }
+    
+    // Update estimated experience stats
+    if (result.estimatedExp != null) {
+      this.totalEstimatedExp += result.estimatedExp;
+      this.expCount++;
     }
     
     // Update S+ stats
@@ -1467,7 +1476,10 @@ class StatisticsCalculator {
       maxRankPoints: this.maxRankPoints,
       averageRunTime,
       fastestRunTime: this.runTimes.length > 0 ? Math.min(...this.runTimes) : 0,
-      slowestRunTime: this.runTimes.length > 0 ? Math.max(...this.runTimes) : 0
+      slowestRunTime: this.runTimes.length > 0 ? Math.max(...this.runTimes) : 0,
+      totalEstimatedExp: this.totalEstimatedExp,
+      averageEstimatedExp: this.expCount > 0 ? Math.round(this.totalEstimatedExp / this.expCount) : 0,
+      expCount: this.expCount
     };
   }
   
@@ -1882,6 +1894,11 @@ async function runSingleAnalysis(i, thisAnalysisId, statusCallback, statsCalcula
     // Add seed to result
     result.seed = runSeed;
     
+    // Estimate experience if enabled
+    if (config.estimateExperience) {
+      result.estimatedExp = estimateRunExperience(result.completed);
+    }
+    
     const { ticks, grade, rankPoints, completed } = result;
     
     // Use statistics calculator to track stats efficiently
@@ -2066,6 +2083,41 @@ function captureMapInformation() {
   }
 }
 
+// Estimate experience gained from a run based on the experience formula.
+// For victories all enemies are defeated; for defeats a random subset is used.
+function estimateRunExperience(completed) {
+  try {
+    if (!currentRoomId) return null;
+
+    const enemies = globalThis.state.utils.getBoardMonstersFromRoomId(currentRoomId);
+    if (!enemies || enemies.length === 0) return null;
+
+    const enemyLevels = enemies
+      .filter(e => e && e.villain !== false)
+      .map(e => e.level || 1);
+
+    if (enemyLevels.length === 0) return null;
+
+    let defeatedLevelSum;
+    if (completed) {
+      defeatedLevelSum = enemyLevels.reduce((sum, lvl) => sum + lvl, 0);
+    } else {
+      const killCount = Math.floor(Math.random() * enemyLevels.length);
+      const shuffled = [...enemyLevels].sort(() => Math.random() - 0.5);
+      defeatedLevelSum = shuffled.slice(0, killCount).reduce((sum, lvl) => sum + lvl, 0);
+    }
+
+    if (defeatedLevelSum === 0) return 0;
+
+    const xpValue = defeatedLevelSum * 562.5;
+    const rngMultiplier = (Math.floor(Math.random() * 20) + 1 - 10) / 100;
+    return Math.round(xpValue * (1 + rngMultiplier));
+  } catch (error) {
+    console.warn('[Board Analyzer] Error estimating experience:', error);
+    return null;
+  }
+}
+
 // Helper function to run the main analysis loop
 async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback) {
   const results = [];
@@ -2185,6 +2237,11 @@ async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestR
     
     // Add seed to result
     result.seed = runSeed;
+    
+    // Estimate experience if enabled
+    if (config.estimateExperience) {
+      result.estimatedExp = estimateRunExperience(result.completed);
+    }
     
     const { ticks, grade, rankPoints, completed } = result;
     
@@ -2414,7 +2471,9 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         averageRunTimeMs: stats.averageRunTime,
         averageRunTimeFormatted: formatMilliseconds(stats.averageRunTime),
         fastestRunTimeMs: stats.fastestRunTime,
-        slowestRunTimeMs: stats.slowestRunTime
+        slowestRunTimeMs: stats.slowestRunTime,
+        totalEstimatedExp: stats.totalEstimatedExp,
+        averageEstimatedExp: stats.averageEstimatedExp
       }
     };
     
@@ -2626,6 +2685,23 @@ function createConfigPanel(startAnalysisCallback) {
   turboContainer.appendChild(turboLabel);
   content.appendChild(turboContainer);
 
+  // Estimate experience checkbox
+  const estimateExpContainer = document.createElement('div');
+  estimateExpContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+  const estimateExpInput = document.createElement('input');
+  estimateExpInput.type = 'checkbox';
+  estimateExpInput.id = 'estimate-exp-input';
+  estimateExpInput.checked = config.estimateExperience;
+
+  const estimateExpLabel = document.createElement('label');
+  estimateExpLabel.htmlFor = 'estimate-exp-input';
+  estimateExpLabel.textContent = t('mods.boardAnalyzer.estimateExperienceLabel');
+
+  estimateExpContainer.appendChild(estimateExpInput);
+  estimateExpContainer.appendChild(estimateExpLabel);
+  content.appendChild(estimateExpContainer);
+
   // Stop on S+ checkbox
   const stopSPlusContainer = document.createElement('div');
   stopSPlusContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
@@ -2790,6 +2866,7 @@ function createConfigPanel(startAnalysisCallback) {
     config.stopOnAnyVictory = stopOnAnyVictory;
     config.stopAfterTicks = parseInt(document.getElementById('stop-ticks-input').value, 10);
     config.stopWhenTicksReached = parseInt(document.getElementById('stop-when-ticks-input').value, 10);
+    config.estimateExperience = document.getElementById('estimate-exp-input').checked;
     
     // Save configuration
     api.service.updateScriptConfig(context.hash, config);
@@ -3112,6 +3189,72 @@ function showResultsModal(results) {
     statsContainer.appendChild(maxTimeValue);
     statsContainer.appendChild(medianTimeLabel);
     statsContainer.appendChild(medianTimeValue);
+    
+    // Estimated Experience (only if enabled)
+    if (config.estimateExperience && results.summary.averageEstimatedExp > 0) {
+      const avgExpLabel = document.createElement('div');
+      avgExpLabel.textContent = t('mods.boardAnalyzer.avgEstimatedExpLabel');
+      avgExpLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+
+      const avgExpValue = document.createElement('div');
+      avgExpValue.textContent = results.summary.averageEstimatedExp.toLocaleString() + ' XP';
+      avgExpValue.style.cssText = 'text-align: right; color: #9b59b6;';
+
+      const totalExpLabel = document.createElement('div');
+      totalExpLabel.textContent = t('mods.boardAnalyzer.totalEstimatedExpLabel');
+      totalExpLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+
+      const totalExpValue = document.createElement('div');
+      totalExpValue.textContent = results.summary.totalEstimatedExp.toLocaleString() + ' XP';
+      totalExpValue.style.cssText = 'text-align: right; color: #9b59b6; cursor: help; text-decoration: underline solid; text-underline-offset: 3px;';
+
+      // Build level-up tooltip for ally creatures
+      try {
+        const expToLevel = globalThis.state.utils.expToCurrentLevel;
+        if (typeof expToLevel === 'function') {
+          const boardContext = globalThis.state.board.getSnapshot().context;
+          const playerMonsters = globalThis.state.player.getSnapshot().context.monsters;
+          const pieces = boardContext.boardConfig || [];
+          const totalXP = results.summary.totalEstimatedExp;
+
+          const lines = [t('mods.boardAnalyzer.levelUpTooltipHeader')];
+          for (const piece of pieces) {
+            if (piece.type !== 'player') continue;
+            const mon = playerMonsters.find(m => m.id === piece.databaseId);
+            if (!mon) continue;
+            let name = monsterGameIdsToNames.get(mon.gameId);
+            if (!name) {
+              try {
+                const monData = globalThis.state.utils.getMonster(mon.gameId);
+                name = monData?.metadata?.name;
+              } catch (_) {}
+            }
+            if (!name) name = `Monster #${mon.gameId}`;
+            const currentExp = mon.exp || 0;
+            const currentLvl = expToLevel(currentExp);
+            const newLvl = expToLevel(currentExp + totalXP);
+            const gained = newLvl - currentLvl;
+            lines.push(
+              t('mods.boardAnalyzer.levelUpTooltipLine')
+                .replace('{name}', name)
+                .replace('{currentLvl}', currentLvl)
+                .replace('{newLvl}', newLvl)
+                .replace('{gained}', gained)
+            );
+          }
+          if (lines.length > 1) {
+            totalExpValue.title = lines.join('\n');
+          }
+        }
+      } catch (e) {
+        console.warn('[Board Analyzer] Error building level-up tooltip:', e);
+      }
+
+      statsContainer.appendChild(avgExpLabel);
+      statsContainer.appendChild(avgExpValue);
+      statsContainer.appendChild(totalExpLabel);
+      statsContainer.appendChild(totalExpValue);
+    }
     
     // Add timing stats
     statsContainer.appendChild(document.createElement('hr'));

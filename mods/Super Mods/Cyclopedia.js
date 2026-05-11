@@ -13774,7 +13774,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       MapsTabDOMOptimizer.currentState.season = null;
 
       let selectedCategory = '';
-      let selectedMap = cyclopediaState.mapsLastSelectedMapId || null;
+      let selectedMap = null;
 
       const leftCol = document.createElement('div');
       leftCol.style.width = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
@@ -13812,12 +13812,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             }
           }
           
-          // Always keep a valid map selection to avoid empty first render.
+          // Keep existing map only if it belongs to the currently selected region.
           if (mapsInRegion.length > 0) {
             const currentMapInRegion = mapsInRegion.find(map => map.id === selectedMap);
-            const rememberedMapInRegion = mapsInRegion.find(map => map.id === cyclopediaState.mapsLastSelectedMapId);
             if (!currentMapInRegion) {
-              selectedMap = (rememberedMapInRegion || mapsInRegion[0]).id;
+              selectedMap = null;
             }
           } else {
             selectedMap = null;
@@ -13885,10 +13884,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         regions = globalThis.state.utils.REGIONS.map(region => region.id);
       }
       
-      // Set default selected region to remembered region (fallback: first region).
+      // Prefer Rookgaard when opening Maps tab (fallback: remembered region, then first region).
       if (regions.length > 0 && !selectedCategory) {
+        const rookgaardRegion = regions.find((regionId) => {
+          const id = String(regionId).toLowerCase();
+          const displayName = String(GAME_DATA.REGION_NAME_MAP?.[regionId] || regionId).toLowerCase();
+          return id === 'rook' || id === 'rookgaard' || displayName === 'rookgaard';
+        });
         const rememberedRegion = cyclopediaState.mapsLastSelectedRegionId;
-        selectedCategory = regions.includes(rememberedRegion) ? rememberedRegion : regions[0];
+        selectedCategory = rookgaardRegion || (regions.includes(rememberedRegion) ? rememberedRegion : regions[0]);
       }
 
       const topBox = createBox({

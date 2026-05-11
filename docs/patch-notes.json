@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.7.20",
+      "changes": [
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Optional 'Estimate experience gained' setting estimates XP per run using the game's experience formula, with randomized enemy kill counts for defeats. Results show average and total estimated XP, and hovering total XP displays projected level gains for each ally creature on the board."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Tracks battle EXP from rewardScreen.expReward (stored per battle when persistence is on) with K/KK-style formatting; live line shows total Exp, Exp/h, and Exp/battle; copy log lists EXP and Exp/h overall and per map; Mod Settings adds Live Display Visibility toggles per live row. UI uses Battles/Battles/h/Exp/battle (en-US & pt-BR). Fixes: experience in persisted saves, numeric-string expReward parsing, map-filter rate time fallbacks when per-map clock is empty, stamina visibility preserved on refresh, Exp tooltips no longer flicker on the 1s panel refresh (hover-aware title updates)."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Maps tab now defaults to Rookgaard region on open, and switching regions no longer auto-selects the first map so region summaries remain visible until a map is explicitly selected."
+        }
+      ]
+    },
+    {
       "version": "3.7.19",
       "changes": [
         {
