@@ -6710,9 +6710,10 @@
         const isDisenchantingEverything = settings.autodusterChecked &&
             Array.isArray(settings.autodusterIgnoreList) && settings.autodusterIgnoreList.length === 0;
 
-        const isSealedRiskWarning =
+        const hasAutosellActive = settings.autoMode === 'autosell' || settings.autoMode === 'autoplant';
+        const isSealedRiskWarning = hasAutosellActive && (
             settings.autoSellSealedCreaturesGlobal === true ||
-            settings.autoInjectSealedCreaturesGlobal === true;
+            settings.autoInjectSealedCreaturesGlobal === true);
         
         // Apply rainbow animation if all three conditions are met
         const shouldRainbow = isSellingEverything && isSqueezingEverything && isDisenchantingEverything;
@@ -6727,11 +6728,11 @@
                 textSpan.classList.remove('autoseller-rainbow-text');
             }
             btn.classList.remove('autoseller-rainbow-active');
-            btn.style.color = '#ff6b6b';
-            btn.style.textShadow = '0 0 4px rgba(255, 70, 70, 0.9), 0 0 8px rgba(255, 70, 70, 0.7)';
+            btn.style.color = '#c678dd';
+            btn.style.textShadow = 'none';
             const icon = btn.querySelector('img');
             if (icon) {
-                icon.style.filter = 'drop-shadow(0 0 4px rgba(255, 70, 70, 0.9))';
+                icon.style.filter = '';
             }
         } else if (shouldRainbow) {
             // Add rainbow animation class

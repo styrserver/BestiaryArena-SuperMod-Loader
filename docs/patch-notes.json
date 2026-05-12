@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "3.8.1",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Nav button sealed-warning glow changed from red to light purple to better distinguish it from the inactive/error state."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Overview filter now correctly hides/shows creature rows, and capped status only applies to awakened creatures (non-awakened monsters with all stats at 20 were falsely marked as capped)."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Added Perfect badge (awakened + all stats 20 + level 99) using star-tier-shiny icon; level is resolved from exp via expToCurrentLevel. Non-awakened creatures show '?' for stats in Overview."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Persistence safeguards: pre-flight payload size check with progressive session pruning to stay under localStorage budget, load-failure guard that blocks auto-save from overwriting recoverable data, and user-visible panel warnings on save failures or quota-triggered pruning."
+        }
+      ]
+    },
+    {
       "version": "3.8.0",
       "changes": [
         {

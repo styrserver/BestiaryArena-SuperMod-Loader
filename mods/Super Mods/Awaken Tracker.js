@@ -1100,8 +1100,8 @@
                 background: rgba(59,64,72,0.5);
             }
             #${PANEL_ID} .awaken-overview-row {
-                display: flex !important;
-                flex-direction: row !important;
+                display: flex;
+                flex-direction: row;
                 align-items: center;
                 gap: 8px;
                 padding: 6px 8px;
@@ -1282,7 +1282,7 @@
             ['missing-awaken', 'Missing awaken'],
             ['awakened', 'Awakened (any monster)'],
             ['awakened-not-capped', 'Awakened, not capped'],
-            ['perfect', 'Awakened + Capped (same monster)'],
+            ['perfect', 'Perfect (awakened + capped + lvl 99)'],
             ['missing-cap', 'Missing cap'],
             ['capped', 'Capped (any monster)'],
             ['needs-both', 'Missing awaken AND cap']
@@ -1390,6 +1390,8 @@
                     if (v !== CAP_VALUE) allCapped = false;
                 }
                 const tier = Number(m.tier ?? 0);
+                const expToLevel = globalThis.state?.utils?.expToCurrentLevel;
+                const level = Number(m.level ?? (typeof expToLevel === 'function' && m.exp ? Math.floor(expToLevel(Number(m.exp))) : 0)) || 0;
                 const awakened = tier === AWAKEN_TIER;
 
                 let group = byGameId.get(m.gameId);
@@ -1397,19 +1399,20 @@
                     group = {
                         gameId: m.gameId, monsters: [],
                         anyAwakened: false, anyCapped: false,
-                        anyAwakenedAndCapped: false, anyShiny: false, best: null
+                        anyPerfect: false, anyShiny: false, best: null
                     };
                     byGameId.set(m.gameId, group);
                 }
-                const mon = { id: m.id, tier, stats, sum, awakened, capped: allCapped, shiny: m.shiny === true };
+                const mon = { id: m.id, tier, level, stats, sum, awakened, capped: allCapped, shiny: m.shiny === true };
                 group.monsters.push(mon);
                 if (mon.awakened) group.anyAwakened = true;
-                if (mon.capped) group.anyCapped = true;
-                if (mon.awakened && mon.capped) group.anyAwakenedAndCapped = true;
+                if (mon.awakened && mon.capped) group.anyCapped = true;
+                if (mon.awakened && mon.capped && mon.level >= 99) group.anyPerfect = true;
                 if (mon.shiny) group.anyShiny = true;
 
                 const rank = (i) =>
-                    (i.awakened && i.capped ? 1_000_000 : 0)
+                    (i.awakened && i.capped && i.level >= 99 ? 10_000_000 : 0)
+                    + (i.awakened && i.capped ? 1_000_000 : 0)
                     + (i.awakened ? 100_000 : 0)
                     + i.sum * 100
                     + (i.shiny ? 10 : 0)
@@ -1429,9 +1432,9 @@
             }
 
             const categoryRank = (g) => {
-                if (g.anyAwakenedAndCapped) return 0;
-                if (g.anyAwakened) return 1;
-                if (g.anyCapped) return 2;
+                if (g.anyPerfect) return 0;
+                if (g.anyCapped) return 1;
+                if (g.anyAwakened) return 2;
                 return 3;
             };
             groups.sort((a, b) => {
@@ -1449,8 +1452,8 @@
                 monsters: totalMonstersObtainable,
                 awakened: groups.filter(g => g.anyAwakened).length,
                 capped: groups.filter(g => g.anyCapped).length,
-                perfect: groups.filter(g => g.anyAwakenedAndCapped).length,
-                awakenedNotCapped: groups.filter(g => g.anyAwakened && !g.anyAwakenedAndCapped).length,
+                perfect: groups.filter(g => g.anyPerfect).length,
+                awakenedNotCapped: groups.filter(g => g.anyAwakened && !g.anyPerfect).length,
                 missingAwaken: groups.filter(g => !g.anyAwakened).length,
                 missingCap: groups.filter(g => !g.anyCapped).length
             };
@@ -1463,7 +1466,7 @@
             overviewSummary.innerHTML =
                 `<div>${smIcon(BADGE_ICONS.awakened)} Awakened: <b>${counts.awakened}</b> · missing <b style="color:#d87d7d;">${counts.missingAwaken}</b></div>` +
                 `<div>${smIcon(BADGE_ICONS.capped)} Capped: <b>${counts.capped}</b> · missing <b style="color:#d87d7d;">${counts.missingCap}</b></div>` +
-                `<div style="color:#cfe9cf;margin-top:2px;">${smIcon(BADGE_ICONS.perfect)} Perfect (same monster): <b>${counts.perfect}</b> · Awakened, needs cap: <b>${counts.awakenedNotCapped}</b></div>` +
+                `<div style="color:#cfe9cf;margin-top:2px;">${smIcon(BADGE_ICONS.perfect)} Perfect (awakened + capped + lvl 99): <b>${counts.perfect}</b> · Awakened, not perfect: <b>${counts.awakenedNotCapped}</b></div>` +
                 `<div style="color:#888;margin-top:2px;">${counts.total} awakenable creatures · ${counts.monsters} monsters${skippedParts ? ` · skipped: ${skippedParts}` : ''}</div>`;
 
             overviewGrid.innerHTML = groups.map(renderOverviewCard).join('');
@@ -1481,23 +1484,29 @@
 
         function renderOverviewCard(g) {
             const portraitUrl = `/assets/portraits/${g.gameId}${g.best.shiny ? '-shiny' : ''}.png`;
+            const awakeBest = g.monsters.find(m => m.awakened);
             const statsHtml = STATS.map(s => {
-                const v = g.best.stats[s];
+                if (!awakeBest) {
+                    return `<span title="${STAT_LABELS[s]}" style="color:#666;display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtmlOverview(s, 13)}?</span>`;
+                }
+                const v = awakeBest.stats[s];
                 const color = v === CAP_VALUE ? '#7dd87d' : '#d87d7d';
                 return `<span title="${STAT_LABELS[s]}" style="color:${color};display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtmlOverview(s, 13)}${v}</span>`;
             }).join('<span style="color:#444;margin:0 4px;">·</span>');
 
             const awakenBadge = badgeImg(BADGE_ICONS.awakened, g.anyAwakened ? 'Awakened (tier 6)' : 'Not awakened', g.anyAwakened);
             const capBadge = badgeImg(BADGE_ICONS.capped, g.anyCapped ? 'All stats at 20' : 'Not capped', g.anyCapped);
+            const perfectBadge = badgeImg(BADGE_ICONS.perfect, g.anyPerfect ? 'Perfect (awakened + capped + lvl 99)' : 'Not perfect', g.anyPerfect);
             const shinyMark = g.anyShiny ? badgeImg(BADGE_ICONS.shiny, 'Has shiny', true, 12) : '';
-            const nameColor = g.anyAwakenedAndCapped ? '#f0e080'
+            const nameColor = g.anyPerfect ? '#f0e080'
+                : g.anyCapped ? '#cfe9cf'
                 : g.anyAwakened ? '#f0c060'
-                : g.anyCapped ? '#cfe9cf' : '#e8e8e8';
-            return `<div class="awaken-overview-row" data-gameid="${g.gameId}" data-name="${g.name.toLowerCase().replace(/"/g, '&quot;')}" data-awakened="${g.anyAwakened}" data-capped="${g.anyCapped}" data-perfect="${g.anyAwakenedAndCapped}">` +
+                : '#e8e8e8';
+            return `<div class="awaken-overview-row" data-gameid="${g.gameId}" data-name="${g.name.toLowerCase().replace(/"/g, '&quot;')}" data-awakened="${g.anyAwakened}" data-capped="${g.anyCapped}" data-perfect="${g.anyPerfect}">` +
                 `<img src="${portraitUrl}" alt="" style="width:34px;height:34px;image-rendering:pixelated;flex-shrink:0;" onerror="this.style.visibility='hidden'" />` +
                 `<div style="flex:1;min-width:0;">` +
                     `<div style="color:${nameColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">` +
-                        `${awakenBadge} ${capBadge} ${g.name} ${shinyMark} <span style="color:#666;font-size:10px;">×${g.monsters.length}</span>` +
+                        `${awakenBadge} ${capBadge} ${perfectBadge} ${g.name} ${shinyMark}` +
                     `</div>` +
                     `<div style="font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:0.5px;">` +
                         `${statsHtml}` +

@@ -1072,7 +1072,6 @@ const HuntAnalyzerState = {
         if (property === 'theme' && value !== oldValue && !isApplyingTheme && typeof applyTheme === 'function') {
           // Use setTimeout to avoid issues if applyTheme is called during initialization
           setTimeout(() => {
-            console.log('[Hunt Analyzer] Theme changed via direct property update:', value);
             isApplyingTheme = true;
             applyTheme(value, true);
             isApplyingTheme = false;
@@ -1174,6 +1173,15 @@ const HUNT_ANALYZER_SETTINGS_KEY = 'huntAnalyzerSettings';
 
 // Maximum number of sessions to keep in storage (to prevent quota exceeded errors)
 const MAX_SESSIONS_TO_KEEP = 10000;
+
+// localStorage budget: stay under 4.5 MB to leave headroom for other keys
+const STORAGE_BUDGET_BYTES = 4.5 * 1024 * 1024;
+
+// Guard flag: if a load fails (corrupt JSON, etc.), block auto-save from overwriting
+let _persistenceLoadFailed = false;
+
+// Track consecutive save failures so we can warn the user
+let _consecutiveSaveFailures = 0;
 
 // =======================
 // 2.5. Autoplay Time Tracking Functions
@@ -1280,7 +1288,6 @@ function startInternalClock(reason) {
     clearInterval(HuntAnalyzerState.timeTracking.clockIntervalId);
   }
   
-  console.log('[Hunt Analyzer] Internal clock: starting interval (1s)', reason ? `reason: ${reason}` : '');
   HuntAnalyzerState.timeTracking.clockIntervalId = setInterval(() => {
     updateInternalClock();
   }, 1000); // Update every second
@@ -1291,7 +1298,6 @@ function stopInternalClock() {
   if (HuntAnalyzerState.timeTracking.clockIntervalId) {
     clearInterval(HuntAnalyzerState.timeTracking.clockIntervalId);
     HuntAnalyzerState.timeTracking.clockIntervalId = null;
-    console.log('[Hunt Analyzer] Internal clock: stopped');
   }
 }
 
@@ -1317,7 +1323,6 @@ function updateInternalClock() {
       if (manualRunnerRunning) {
         HuntAnalyzerState.timeTracking.manualActive = true;
         HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-        console.log('[Hunt Analyzer] Manual timing: started due to Manual Runner (event-driven)');
       }
     } catch (_) {}
   }
@@ -1336,7 +1341,6 @@ function updateInternalClock() {
       HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
       // Start autoplay session from its current value (baseline 0 so we count full autoplay session)
       HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
-      console.log('[Hunt Analyzer] Internal clock: switched to autoplay, manual elapsed accumulated (ms):', elapsedManualMs);
     }
   }
   
@@ -1345,7 +1349,6 @@ function updateInternalClock() {
     if (HuntAnalyzerState.timeTracking.suppressNextAutoplayReset) {
       // We already snapshotted this segment on a recent map/mode change; skip double-counting
       HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = false;
-      console.log('[Hunt Analyzer] Internal clock: autoplay reset detected but suppressed to avoid double count');
     } else {
       // Validate: ensure lastAutoplayTime is positive before calculating
       if (HuntAnalyzerState.timeTracking.lastAutoplayTime > 0) {
@@ -1361,7 +1364,6 @@ function updateInternalClock() {
             const currentMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
             HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, currentMapTime + timeToAccumulate);
           }
-          console.log('[Hunt Analyzer] Internal clock: autoplay reset detected, accumulated previous autoplay (ms):', timeToAccumulate);
         }
       }
     }
@@ -1374,7 +1376,6 @@ function updateInternalClock() {
   // Only when actually in autoplay mode, detect transition from >0 → 0 and reset baseline
   if (mode === 'autoplay' && prevAutoplayTime > 0 && currentAutoplayTime === 0) {
     HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
-    console.log('[Hunt Analyzer] Internal clock: autoplay baseline reset to 0');
   }
 }
 
@@ -1382,13 +1383,6 @@ function updateInternalClock() {
 function trackMapChange(roomName) {
   // If we're switching maps, just update context. Accumulation is handled by snapshotIntoTotals() upstream.
   const mapChanged = HuntAnalyzerState.timeTracking.currentMap && HuntAnalyzerState.timeTracking.currentMap !== roomName;
-  if (mapChanged) {
-    console.log('[Hunt Analyzer] Map change:', {
-      from: HuntAnalyzerState.timeTracking.currentMap,
-      to: roomName,
-      accumulatedMs: 0
-    });
-  }
 
   // Set new current map
   HuntAnalyzerState.timeTracking.currentMap = roomName;
@@ -1397,7 +1391,6 @@ function trackMapChange(roomName) {
   // If in manual mode and map actually changed, start a new manual session window from now
   if (mapChanged && HuntAnalyzerState.timeTracking.manualActive) {
     HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-    console.log('[Hunt Analyzer] Manual timing: new session window started due to map change');
   }
 }
 
@@ -1647,7 +1640,6 @@ function getPlayerMaxStamina() {
 CONFIG.STAMINA_RECOVERY[5] = getPlayerMaxStamina();
 
 // Debug log to verify max stamina initialization
-console.log('[Hunt Analyzer] Initialized max stamina for tier 5 potions:', CONFIG.STAMINA_RECOVERY[5]);
 
 // Initialize persistence system
 // Inject styles after state is defined (needed for theme system)
@@ -1658,7 +1650,6 @@ loadHuntAnalyzerState();
 
 // Ensure map filter is set to "ALL" on initialization
 HuntAnalyzerState.ui.selectedMapFilter = "ALL";
-console.log('[Hunt Analyzer] Map filter initialized to:', HuntAnalyzerState.ui.selectedMapFilter);
 
 // Do not resume manual timing after reload; require a fresh newGame or autoplay
 HuntAnalyzerState.timeTracking.manualActive = false;
@@ -1820,12 +1811,6 @@ function regenerateAllVisuals() {
         return;
     }
     
-    // Consolidated visual regeneration log
-    console.log('[Hunt Analyzer] Regenerating visual elements:', {
-        gameAPI: !!globalThis.state?.utils,
-        getEquipment: !!globalThis.state?.utils?.getEquipment,
-        getMonster: !!globalThis.state?.utils?.getMonster
-    });
     
     let regeneratedCount = 0;
     
@@ -1906,7 +1891,6 @@ function regenerateAllVisuals() {
                         
                         // Fallback to sprite system if API component failed
                         if (!visualElement) {
-                            console.log('[Hunt Analyzer] API component failed, falling back to sprite system for:', value.originalName);
                             const spriteDiv = createItemSprite(equipmentSpriteId, value.originalName, value.rarity || 1);
                             
                             // Add count overlay to sprite (bottom left like creatures)
@@ -1916,7 +1900,6 @@ function regenerateAllVisuals() {
                             spriteDiv.style.position = 'relative';
                             spriteDiv.appendChild(countSpan);
                             visualElement = spriteDiv;
-                            console.log('[Hunt Analyzer] Fallback sprite created:', visualElement);
                         }
                     }
                 } catch (e) { 
@@ -1972,20 +1955,13 @@ function regenerateAllVisuals() {
         }
     });
     
-    // Consolidated visual regeneration summary
-    if (regeneratedCount > 0) {
-        console.log(`[Hunt Analyzer] Visual regeneration completed: ${regeneratedCount} elements processed`);
-    }
     
     // Re-render the display with updated visuals
     renderAllSessions();
 }
 
-// Consolidated persistence logging
 function logPersistenceOperation(operation, success = true) {
-    if (success) {
-        console.log(`[Hunt Analyzer] Persistence: ${operation} completed`);
-    } else {
+    if (!success) {
         console.error(`[Hunt Analyzer] Persistence: ${operation} failed`);
     }
 }
@@ -2038,41 +2014,39 @@ function pruneOldSessions() {
 
 // Save Hunt Analyzer data to localStorage
 function saveHuntAnalyzerData() {
-    try {
-        // Snapshot any live time (manual or autoplay) before persisting
-        snapshotIntoTotals();
+    if (_persistenceLoadFailed) {
+        console.warn('[Hunt Analyzer] Skipping save — previous load failed. This prevents overwriting recoverable data.');
+        return;
+    }
 
-        // Prune old sessions if we exceed the limit
+    try {
+        snapshotIntoTotals();
         pruneOldSessions();
 
-        // Clean aggregated data by removing visual elements (they can be regenerated)
         const cleanAggregatedLoot = new Map();
         HuntAnalyzerState.data.aggregatedLoot.forEach((value, key) => {
             const cleanValue = { ...value };
-            delete cleanValue.visual; // Remove visual element - will be regenerated on load
+            delete cleanValue.visual;
             cleanAggregatedLoot.set(key, cleanValue);
         });
         
         const cleanAggregatedCreatures = new Map();
         HuntAnalyzerState.data.aggregatedCreatures.forEach((value, key) => {
             const cleanValue = { ...value };
-            delete cleanValue.visual; // Remove visual element - will be regenerated on load
+            delete cleanValue.visual;
             cleanAggregatedCreatures.set(key, cleanValue);
         });
         
-        // Clean session data by removing visual elements
         const cleanSessions = cleanSessionData(HuntAnalyzerState.data.sessions);
         
-        // Snapshot current manual session time into saved totals (without continuing after reload)
-        // Convert Map to array for timeTracking persistence (already includes snapshot)
         const mapTimeSnapshot = new Map(HuntAnalyzerState.timeTracking.mapTimeMs);
         const mapTimeMsArray = Array.from(mapTimeSnapshot.entries());
         
-        const dataToSave = {
-            sessions: cleanSessions,
+        const buildPayload = (sessions, loot, creatures) => ({
+            sessions,
             totals: HuntAnalyzerState.totals,
-            aggregatedLoot: Array.from(cleanAggregatedLoot.entries()),
-            aggregatedCreatures: Array.from(cleanAggregatedCreatures.entries()),
+            aggregatedLoot: loot,
+            aggregatedCreatures: creatures,
             session: HuntAnalyzerState.session,
             timeTracking: {
                 currentMap: HuntAnalyzerState.timeTracking.currentMap,
@@ -2080,67 +2054,99 @@ function saveHuntAnalyzerData() {
                 accumulatedTimeMs: HuntAnalyzerState.timeTracking.accumulatedTimeMs,
                 mapTimeMs: mapTimeMsArray,
                 lastAutoplayTime: HuntAnalyzerState.timeTracking.lastAutoplayTime,
-                // Do not resume ticking on reload; snapshot only
                 manualActive: false,
                 manualSessionStartMs: 0,
                 autoplayBaselineMinutes: HuntAnalyzerState.timeTracking.autoplayBaselineMinutes
             }
-        };
-        
+        });
+
+        let json = JSON.stringify(buildPayload(
+            cleanSessions,
+            Array.from(cleanAggregatedLoot.entries()),
+            Array.from(cleanAggregatedCreatures.entries())
+        ));
+
+        // Pre-flight size check: progressively reduce sessions until we fit
+        let sessionsToSave = cleanSessions;
+        let prunedForSize = false;
+        if (json.length > STORAGE_BUDGET_BYTES) {
+            console.warn(`[Hunt Analyzer] Payload too large (${(json.length / 1024 / 1024).toFixed(2)} MB), pruning sessions to fit...`);
+            const sortedSessions = [...cleanSessions].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+            // Binary search for the largest session count that fits
+            let lo = 0, hi = sortedSessions.length;
+            while (lo < hi) {
+                const mid = Math.ceil((lo + hi) / 2);
+                const testJson = JSON.stringify(buildPayload(
+                    sortedSessions.slice(0, mid),
+                    Array.from(cleanAggregatedLoot.entries()),
+                    Array.from(cleanAggregatedCreatures.entries())
+                ));
+                if (testJson.length <= STORAGE_BUDGET_BYTES) {
+                    lo = mid;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+
+            if (lo === 0) {
+                // Even 0 sessions with full aggregated data is too large; drop aggregated data too
+                json = JSON.stringify(buildPayload([], [], []));
+                sessionsToSave = [];
+                console.warn('[Hunt Analyzer] Dropped aggregated data and sessions to fit in storage. Totals preserved.');
+            } else {
+                sessionsToSave = sortedSessions.slice(0, lo);
+                json = JSON.stringify(buildPayload(
+                    sessionsToSave,
+                    Array.from(cleanAggregatedLoot.entries()),
+                    Array.from(cleanAggregatedCreatures.entries())
+                ));
+                console.warn(`[Hunt Analyzer] Pruned sessions from ${cleanSessions.length} to ${lo} to fit storage budget`);
+            }
+            prunedForSize = true;
+        }
+
         try {
-            localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(dataToSave));
+            localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, json);
+            _consecutiveSaveFailures = 0;
             logPersistenceOperation('Data save');
+            if (prunedForSize) {
+                showSaveWarning(`Storage full: kept ${sessionsToSave.length} of ${cleanSessions.length} sessions. Totals are safe.`);
+            }
         } catch (quotaError) {
-            // If quota exceeded, try aggressive pruning and retry
             if (quotaError.name === 'QuotaExceededError' || quotaError.message?.includes('quota')) {
-                console.warn('[Hunt Analyzer] Quota exceeded, attempting aggressive cleanup...');
-                
-                // Reduce max sessions by half and prune again
-                const originalMax = MAX_SESSIONS_TO_KEEP;
-                const aggressiveMax = Math.floor(MAX_SESSIONS_TO_KEEP / 2);
-                
-                // Temporarily reduce sessions to half
-                HuntAnalyzerState.data.sessions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-                HuntAnalyzerState.data.sessions = HuntAnalyzerState.data.sessions.slice(0, aggressiveMax);
-                
-                // Re-clean and try again
-                const retryCleanSessions = cleanSessionData(HuntAnalyzerState.data.sessions);
-                dataToSave.sessions = retryCleanSessions;
-                
+                console.warn('[Hunt Analyzer] Quota exceeded despite pre-flight check, saving totals only...');
+                const minimalData = buildPayload([], [], []);
                 try {
-                    localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(dataToSave));
-                    console.log(`[Hunt Analyzer] Successfully saved after aggressive pruning (kept ${aggressiveMax} sessions)`);
-                    logPersistenceOperation('Data save');
-                } catch (retryError) {
-                    console.error('[Hunt Analyzer] Still failed after aggressive cleanup:', retryError);
-                    // Last resort: clear all sessions and save totals only
-                    console.warn('[Hunt Analyzer] Last resort: clearing all session data to save totals');
-                    const minimalData = {
-                        sessions: [],
-                        totals: HuntAnalyzerState.totals,
-                        aggregatedLoot: [],
-                        aggregatedCreatures: [],
-                        session: HuntAnalyzerState.session,
-                        timeTracking: dataToSave.timeTracking
-                    };
-                    try {
-                        localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(minimalData));
-                        console.warn('[Hunt Analyzer] Saved minimal data (sessions cleared due to storage quota)');
-                        logPersistenceOperation('Data save (minimal)');
-                    } catch (finalError) {
-                        console.error('[Hunt Analyzer] Complete save failure:', finalError);
-                        logPersistenceOperation('Data save', false);
-                        throw finalError;
-                    }
+                    localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(minimalData));
+                    logPersistenceOperation('Data save (minimal — totals only)');
+                    showSaveWarning('Storage quota exceeded. Session details dropped but totals are preserved.');
+                } catch (finalError) {
+                    _consecutiveSaveFailures++;
+                    console.error('[Hunt Analyzer] Complete save failure:', finalError);
+                    logPersistenceOperation('Data save', false);
+                    showSaveWarning('Save failed! Data may be lost on refresh. Use "Copy Log" to back up.');
                 }
             } else {
                 throw quotaError;
             }
         }
     } catch (error) {
+        _consecutiveSaveFailures++;
         console.error('[Hunt Analyzer] Error saving data:', error);
         logPersistenceOperation('Data save', false);
+        if (_consecutiveSaveFailures >= 3) {
+            showSaveWarning('Multiple save failures detected. Use "Copy Log" to back up your data.');
+        }
     }
+}
+
+function showSaveWarning(message) {
+    const panel = document.getElementById(PANEL_ID);
+    if (panel) {
+        showPanelFeedback(panel, message, false);
+    }
+    console.warn(`[Hunt Analyzer] ⚠ ${message}`);
 }
 
 // Load Hunt Analyzer data from localStorage
@@ -2214,7 +2220,6 @@ function loadHuntAnalyzerData() {
                         // DOM is ready, sync immediately
                         HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = immediateAutoplayTime;
                         HuntAnalyzerState.timeTracking.lastAutoplayTime = immediateAutoplayTime;
-                        console.log('[Hunt Analyzer] Reload: Synced autoplay tracking immediately:', immediateAutoplayTime, 'minutes');
                     } else {
                         // DOM not ready yet, wait a bit then sync
                         setTimeout(() => {
@@ -2223,7 +2228,6 @@ function loadHuntAnalyzerData() {
                                 // Sync baseline and lastAutoplayTime to current DOM timer
                                 HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
                                 HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
-                                console.log('[Hunt Analyzer] Reload: Synced autoplay tracking after delay:', currentAutoplayTime, 'minutes');
                             } else {
                                 // If DOM timer still not available, reset everything to 0 (fresh start)
                                 HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
@@ -2245,6 +2249,9 @@ function loadHuntAnalyzerData() {
     } catch (error) {
         console.error('[Hunt Analyzer] Error loading data:', error);
         logPersistenceOperation('Data load', false);
+        // Block auto-save from overwriting the (possibly recoverable) localStorage entry
+        _persistenceLoadFailed = true;
+        console.warn('[Hunt Analyzer] Load failed — auto-save is BLOCKED to protect existing localStorage data.');
     }
     return false;
 }
@@ -2335,7 +2342,6 @@ function applyTheme(themeName, updateExistingPanel = true) {
         }
     }
     
-    console.log(`[Hunt Analyzer] Theme applied: ${themeName}`);
 }
 
 // Update theme colors for existing panel elements
@@ -2464,16 +2470,10 @@ function updatePanelThemeColors(panel) {
 // Check if panel should be reopened after page refresh
 function shouldReopenHuntAnalyzer() {
     if (!HuntAnalyzerState.settings.persistData) {
-        console.log('[Hunt Analyzer] Persistence disabled, not auto-reopening');
         return false;
     }
     
     const savedState = loadHuntAnalyzerState();
-    console.log('[Hunt Analyzer] Checking auto-reopen conditions:', {
-        savedState,
-        persistData: HuntAnalyzerState.settings.persistData,
-        hasData: HuntAnalyzerState.data.sessions.length > 0
-    });
     
     // Auto-reopen if:
     // 1. Persistence is enabled AND
@@ -2495,11 +2495,6 @@ function autoReopenHuntAnalyzer() {
             createAutoplayAnalyzerPanel();
         }, 2000); // Wait 2 seconds for page to fully load
     } else {
-        console.log('[Hunt Analyzer] Not auto-reopening panel:', {
-            persistData: HuntAnalyzerState.settings.persistData,
-            hasData: HuntAnalyzerState.data.sessions.length > 0,
-            savedState: loadHuntAnalyzerState()
-        });
     }
 }
 
@@ -3527,7 +3522,6 @@ class DataProcessor {
       const staminaRecovery = getStaminaRecoveryAmount(itemName, item);
       if (staminaRecovery > 0) {
         HuntAnalyzerState.totals.staminaRecovered += staminaRecovery;
-        console.log(`[Hunt Analyzer] Stamina potion dropped: ${itemName} (+${staminaRecovery} stamina)`);
       }
     }
 
@@ -3670,10 +3664,8 @@ class DataProcessor {
 
       // Handle dust items - add to session but will be filtered out in aggregation
       if (resolvedItemName === 'Dust') {
-        console.log('[Hunt Analyzer] Processing dust item:', { amount: item.amount, totalBefore: HuntAnalyzerState.totals.dust });
         HuntAnalyzerState.totals.dust += item.amount || 1;
         currentLootItemsLog.push(`Dust (x${item.amount || 1})`);
-        console.log('[Hunt Analyzer] Dust total after processing:', HuntAnalyzerState.totals.dust);
         // Continue processing to add dust to session loot (will be filtered out later)
       }
 
@@ -5303,6 +5295,10 @@ function resetHuntAnalyzerState() {
         console.error('[Hunt Analyzer] Error clearing localStorage:', error);
     }
     
+    // User explicitly cleared data, so re-enable saving
+    _persistenceLoadFailed = false;
+    _consecutiveSaveFailures = 0;
+    
     // Immediately update playtime display to show 0
     const playtimeElement = document.getElementById('mod-playtime-display');
     if (playtimeElement) {
@@ -5489,11 +5485,9 @@ function createHeaderSection() {
 function createAutoplayAnalyzerPanel() {
     // Check if the panel already exists to prevent duplicates.
     if (document.getElementById(PANEL_ID)) {
-        console.log('[Hunt Analyzer] Panel already exists, skipping creation');
         return;
     }
     
-    console.log('[Hunt Analyzer] Creating new analyzer panel...');
 
     // Only reset data if we don't have persisted data
     if (HuntAnalyzerState.data.sessions.length === 0) {
@@ -6226,7 +6220,6 @@ function createAutoplayAnalyzerPanel() {
         autoSaveIntervalId = setInterval(() => {
             if (HuntAnalyzerState.data.sessions.length > 0) {
                 saveHuntAnalyzerData();
-                console.log('[Hunt Analyzer] Periodic auto-save completed');
             }
         }, CONFIG.AUTO_SAVE_INTERVAL);
         console.log('[Hunt Analyzer] Periodic auto-save enabled (30s interval)');
@@ -6378,7 +6371,6 @@ function updatePanelDisplay() {
     lastBoardSubscriptionTime = now;
     
     if (shouldLog) {
-        console.log('[Hunt Analyzer] updatePanelDisplay called');
         lastUpdateLogTime = now;
     }
     
@@ -6911,7 +6903,6 @@ function updatePanelLayout(panel) {
 
 // Listen for game start and end events using the game's global API.
 if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.on) {
-    console.log('[Hunt Analyzer] Setting up board event listeners...');
     
     globalThis.state.board.on('newGame', (event) => {
         // Only process if the panel is open
@@ -6931,12 +6922,6 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
         HuntAnalyzerState.session.isActive = true;
         HuntAnalyzerState.session.sessionStartTime = Date.now();
         
-        // Consolidated session lifecycle log
-        console.log('[Hunt Analyzer] New session started:', {
-            count: HuntAnalyzerState.session.count,
-            isActive: HuntAnalyzerState.session.isActive,
-            sessionStartTime: HuntAnalyzerState.session.sessionStartTime
-        });
         
         // Defer display update to avoid interfering with animations
         timeoutIds.push(setTimeout(() => {
@@ -6948,7 +6933,6 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
         const mode = getCurrentMode();
         if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
             startInternalClock('newGame');
-            console.log('[Hunt Analyzer] Clock: start on newGame (mode:', mode, ')');
         }
         if (mode === 'manual') {
             if (!HuntAnalyzerState.timeTracking.manualActive || HuntAnalyzerState.timeTracking.manualSessionStartMs === 0) {
@@ -6965,7 +6949,6 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
     });
 
     if (globalThis.state.board.subscribe) {
-        console.log('[Hunt Analyzer] Setting up board subscription...');
         boardSubscription = globalThis.state.board.subscribe(({ context }) => {
             // Only process if the panel is open
             if (!document.getElementById(PANEL_ID)) {
@@ -6993,12 +6976,6 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
             // Only process when we have valid server results and a new seed
             HuntAnalyzerState.ui.lastSeed = seed;
             
-            // Consolidated server results processing log
-            console.log(`[Hunt Analyzer] Processing server results:`, {
-                seed: seed,
-                hasRewardScreen: !!serverResults.rewardScreen,
-                hasNext: !!serverResults.next
-            });
             
             // Use setTimeout to defer processing and avoid blocking animations
             timeoutIds.push(setTimeout(() => {
@@ -7011,7 +6988,6 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
                     const modeNow = getCurrentMode();
                     if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
                         startInternalClock('serverResults');
-                        console.log('[Hunt Analyzer] Clock: start on serverResults (mode:', modeNow, ')');
                     }
                     if (modeNow === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
                         HuntAnalyzerState.timeTracking.manualActive = true;
@@ -7094,13 +7070,11 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
                     const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
                     const roomName = roomNamesMap?.[roomId] || `Room ID: ${roomId}`;
                     updateRoomTitleDisplay(roomId, roomName);
-                    console.log('[Hunt Analyzer] Map debug: initialized room tracking', { roomId, mode });
                     return;
                 }
                 if (roomId !== lastSelectedRoomId) {
                     const preHadClock = !!HuntAnalyzerState.timeTracking.clockIntervalId;
                     const preMode = getCurrentMode();
-                    console.log('[Hunt Analyzer] Map change detected:', { from: lastSelectedRoomId, to: roomId, preHadClock, preMode });
                     // On map change:
                     // 1) Snapshot any live time
                     const snapMs = snapshotIntoTotals();
@@ -7117,13 +7091,6 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
                     HuntAnalyzerState.timeTracking.manualActive = false;
                     HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
                     HuntAnalyzerState.timeTracking.waitingForManualStart = true;
-                    console.log('[Hunt Analyzer] Manual timing paused on map change; waiting for next newGame');
-                    const postHadClock = !!HuntAnalyzerState.timeTracking.clockIntervalId;
-                    const postMode = getCurrentMode();
-                    if (!preHadClock && postHadClock) {
-                        console.log('[Hunt Analyzer] WARNING: Clock started during map change! Investigate callers.');
-                    }
-                    console.log('[Hunt Analyzer] Map change handled:', { postHadClock, postMode });
                     updateRoomTitleDisplay(roomId, roomName);
                 }
             });
@@ -7143,7 +7110,6 @@ function createHuntAnalyzerButton() {
                 createAutoplayAnalyzerPanel();
             }
         });
-        console.log('[Hunt Analyzer] UI button created successfully');
     }
 }
 
@@ -7153,7 +7119,6 @@ createHuntAnalyzerButton();
 // Initialize persistence - load settings and data when mod loads
 function initializeHuntAnalyzerPersistence() {
     if (typeof api !== 'undefined' && api) {
-        console.log('[Hunt Analyzer] Initializing persistence...');
 
         // Load settings first
         loadHuntAnalyzerSettings();
@@ -7164,7 +7129,6 @@ function initializeHuntAnalyzerPersistence() {
         // Auto-reopen panel if conditions are met
         autoReopenHuntAnalyzer();
 
-        console.log('[Hunt Analyzer] Persistence initialization complete');
     } else {
         // Retry if API not ready yet
         console.log('[Hunt Analyzer] API not ready, retrying persistence initialization...');
@@ -7177,7 +7141,6 @@ initializeHuntAnalyzerPersistence();
 
 // Translation event handler
 const translationEventHandler = (event) => {
-    console.log('[Hunt Analyzer] Translations loaded, updating UI elements...', event.detail);
     
     // Update button text if it exists
     const button = document.querySelector(`[data-mod-id="${BUTTON_ID}"]`);
@@ -7406,7 +7369,6 @@ function savePanelSettings(panel) {
         
         // Also save to localStorage (like VIP List.js) so it persists across config exports/imports
         localStorage.setItem(HUNT_ANALYZER_PANEL_SETTINGS_KEY, JSON.stringify(settings));
-        console.log('[Hunt Analyzer] Panel settings saved:', settings);
     } catch (error) {
         console.error('[Hunt Analyzer] Error saving panel settings:', error);
     }
@@ -7420,7 +7382,6 @@ function loadPanelSettings() {
             const settings = JSON.parse(saved);
             // Validate that settings have required properties
             if (settings && (settings.top || settings.left || settings.width || settings.height)) {
-                console.log('[Hunt Analyzer] Panel settings loaded:', settings);
                 // Also update config object for consistency
                 config.panelSettings = settings;
                 return settings;
@@ -7542,7 +7503,6 @@ function applyPanelSettings(panel, settings) {
         // Note: updatePanelLayout will be called after panel structure is built
         // This ensures all elements exist before layout is applied
         
-        console.log('[Hunt Analyzer] Panel settings applied:', settings);
     } catch (error) {
         console.error('[Hunt Analyzer] Error applying panel settings:', error);
     }
@@ -7772,7 +7732,6 @@ const panelState = {
 // Comprehensive cleanup function for memory leak prevention
 // Follows mod development guide best practices for cleanup
 function cleanupHuntAnalyzer() {
-    console.log('[Hunt Analyzer] Starting cleanup...');
     
     try {
         // 1. Clear intervals and timeouts
@@ -7932,7 +7891,6 @@ function cleanupHuntAnalyzer() {
         HuntAnalyzerState.data.aggregatedLoot.clear();
         HuntAnalyzerState.data.aggregatedCreatures.clear();
         
-        console.log('[Hunt Analyzer] Cleanup completed');
         
     } catch (error) {
         console.error('[Hunt Analyzer] Error during cleanup:', error);
@@ -7989,16 +7947,12 @@ windowMessageHandler = function(event) {
         const modName = event.data.message.name;
         const enabled = event.data.message.enabled;
         
-        console.log('[Hunt Analyzer] Mod state update:', { modName, enabled });
-        
         if (modName === 'Super Mods/Hunt Analyzer.js' && !enabled) {
-            console.log('[Hunt Analyzer] Mod disabled, running cleanup...');
             cleanupHuntAnalyzer();
         }
     }
 };
 window.addEventListener('message', windowMessageHandler);
-console.log('[Hunt Analyzer] Message listener added');
 
 // Save data before page unload
 beforeUnloadHandler = () => {
@@ -8037,7 +7991,6 @@ storageEventHandler = (e) => {
         try {
             const newSettings = JSON.parse(e.newValue);
             if (newSettings.theme && newSettings.theme !== HuntAnalyzerState.settings.theme) {
-                console.log('[Hunt Analyzer] Theme changed via storage event:', newSettings.theme);
                 applyTheme(newSettings.theme, true);
             }
         } catch (error) {
