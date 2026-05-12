@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.8.0",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "added",
+          "text": "New Super Mod: draggable floating panel with two tabs. Tracker tab shows per-map awaken gene progress for every enemy creature with live stat deltas, inject/skip event logs, collapse/expand per slot, drag-to-reorder, and optional pause-on-cap. Overview tab scans your full inventory showing awaken/cap status per creature with game icons, filterable by status, plus a Farm Maps panel that ranks maps by target density. Game-native UI using the same pixel-art border frames and tiling background textures as Hunt Analyzer."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Autoseller now emits CustomEvents (autoseller:inject:skip, autoseller:inject:success, autoseller:inject:applied) during sealed-creature injection so external mods like Awaken Tracker can listen and react."
+        },
+        {
+          "mod": "Autoscroller",
+          "type": "changed",
+          "text": "All settings (selected creatures, scroll tier, stop conditions, autosell, speed, scroll limit) now persist across page refreshes. Added a Reset button that clears all settings back to defaults; switches to Stop while autoscrolling is active."
+        }
+      ]
+    },
+    {
       "version": "3.7.20",
       "changes": [
         {

@@ -179,7 +179,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 23 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 24 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -188,6 +188,14 @@ Automates summon scroll usage to collect specific creatures:
 - Set stopping conditions (total creatures or tier-based targets)
 - Configurable autoscroll speed with rate-limit protection
 - Real-time tracking of found creatures and scroll usage
+
+#### Awaken Tracker
+Tracks per-map awaken gene progress for every enemy creature (by [tinhozin](https://bestiaryarena.com/profile/tinhozin)):
+- Draggable, resizable floating panel showing all enemy creatures on the current map
+- Live stat deltas comparing current awaken genes against session baseline
+- Inject/skip event log per creature with timestamped entries from Autoseller
+- Collapse/expand and drag-to-reorder slots with persistent order per map
+- Optional pause-on-cap: pauses autoplay when all marked creatures reach 20 in every stat
 
 #### Autoseller
 Automatically sells or squeezes creatures based on gene thresholds and user settings:

@@ -69,7 +69,8 @@ export const SUPER_MODS = [
   'Raid_Hunter.js',
   'Manual Runner.js',
   'RunTracker.js',
-  'Stamina Optimizer.js'
+  'Stamina Optimizer.js',
+  'Awaken Tracker.js'
 ];
 
 // OT mods - community/social mods

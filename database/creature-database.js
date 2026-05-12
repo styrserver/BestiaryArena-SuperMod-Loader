@@ -40,6 +40,7 @@ function buildCreatureDatabase() {
     
     const allCreatureNames = allMonsters.map(m => m.metadata.name);
     const hardcodedUnobtainable = ['Black Knight', 'Beer Barrel', 'Dharalion', 'Dead Tree', 'Dwarf Henchman', 'Earth Crystal', 'Energy Crystal', 'Grynch Clan Commander', 'Grynch Clan Mastermind', 'Lavahole', 'Magma Crystal', 'Monster Cauldron', 'Old Giant Spider', 'Orc', 'Regeneration Tank', 'Sweaty Cyclops', 'Tentugly', 'Willi Wasp', 'The Percht Queen'];
+    const hardcodedNonAwakenable = ['Dwarf Merrymancer', 'Goblin Gumslinger', 'Goblin Saboteur', 'Gummy Raider', 'Reindeer', 'Unionized Goblin'];
     
     const unobtainableFromMonsters = allMonsters
       .filter(m => hardcodedUnobtainable.includes(m.metadata.name))
@@ -48,19 +49,28 @@ function buildCreatureDatabase() {
     const unobtainableCreatures = [...new Set([...hardcodedUnobtainable, ...unobtainableFromMonsters])]
       .sort((a, b) => a.localeCompare(b));
     
+    const nonAwakenableCreatures = [...new Set([
+      ...hardcodedNonAwakenable,
+      ...allMonsters
+        .filter(m => m.metadata.name.toLowerCase().includes('gazer'))
+        .map(m => m.metadata.name)
+    ])].sort((a, b) => a.localeCompare(b));
+
     const obtainableCreatures = allCreatureNames
       .filter(name => !hardcodedUnobtainable.includes(name))
       .sort((a, b) => a.localeCompare(b));
     
     return {
       ALL_CREATURES: obtainableCreatures,
-      UNOBTAINABLE_CREATURES: unobtainableCreatures
+      UNOBTAINABLE_CREATURES: unobtainableCreatures,
+      NON_AWAKENABLE_CREATURES: nonAwakenableCreatures
     };
   } catch (error) {
     console.error('[creature-database.js] Error building database:', error);
     return {
       ALL_CREATURES: [],
-      UNOBTAINABLE_CREATURES: []
+      UNOBTAINABLE_CREATURES: [],
+      NON_AWAKENABLE_CREATURES: []
     };
   }
 }
@@ -136,6 +146,7 @@ function initializeDatabase() {
 const placeholderDatabase = {
   ALL_CREATURES: [],
   UNOBTAINABLE_CREATURES: [],
+  NON_AWAKENABLE_CREATURES: [],
   getMonsterPortraitUrl: getMonsterPortraitUrl,
   getMonsterPortraitUrls: getMonsterPortraitUrls,
   findMonsterByGameId: function(gameId) {
@@ -179,6 +190,7 @@ waitForGameState(() => {
     Object.assign(globalWindow.creatureDatabase, creatureDatabase);
     globalWindow.creatureDatabase.ALL_CREATURES = creatureDatabase.ALL_CREATURES;
     globalWindow.creatureDatabase.UNOBTAINABLE_CREATURES = creatureDatabase.UNOBTAINABLE_CREATURES;
+    globalWindow.creatureDatabase.NON_AWAKENABLE_CREATURES = creatureDatabase.NON_AWAKENABLE_CREATURES;
     globalWindow.creatureDatabase.findMonsterByGameId = findMonsterByGameId;
     globalWindow.creatureDatabase.findMonsterByName = findMonsterByName;
     globalWindow.creatureDatabase.getAllMonstersWithPortraits = getAllMonsters;

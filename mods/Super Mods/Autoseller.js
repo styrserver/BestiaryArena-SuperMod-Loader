@@ -224,6 +224,17 @@
     };
     
     // =======================
+    // 1.X Event Emission (Autoseller -> external listeners)
+    // =======================
+    function emitAutosellerEvent(type, detail) {
+        try {
+            window.dispatchEvent(new CustomEvent(`autoseller:${type}`, { detail }));
+        } catch (e) {
+            // never break Autoseller flow because of a listener error
+        }
+    }
+
+    // =======================
     // 2. DOM Utilities & Settings
     // =======================
     
@@ -1493,10 +1504,12 @@
             const creatureName = monster?.metadata?.name || monster?.name || getCreatureNameFromMonster(monster);
             if (creatureName && keepList.includes(creatureName)) {
                 console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: in Keep list`);
+                emitAutosellerEvent('inject:skip', { reason: 'keep-list', creatureName, gameId: Number(monster?.gameId ?? monster?.metadata?.id), candidate: { stats: getMonsterGeneStats(monster) } });
                 continue;
             }
             if (!isSealedTier5InjectAllowed(creatureName)) {
                 console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: inject not enabled`);
+                emitAutosellerEvent('inject:skip', { reason: 'disabled', creatureName, gameId: Number(monster?.gameId ?? monster?.metadata?.id), candidate: { stats: getMonsterGeneStats(monster) } });
                 continue;
             }
             const sealedGameId = Number(monster?.gameId ?? monster?.metadata?.id);
@@ -1507,12 +1520,14 @@
             const awakenedTarget = matchingAwakenedTargets[0];
             if (!awakenedTarget?.id) {
                 console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: no awakened target with same gameId (${sealedGameId})`);
+                emitAutosellerEvent('inject:skip', { reason: 'no-target', creatureName, gameId: sealedGameId, candidate: { stats: getMonsterGeneStats(monster) } });
                 continue;
             }
             const awakenedTargetName = awakenedTarget?.metadata?.name || awakenedTarget?.name || getCreatureNameFromMonster(awakenedTarget) || 'unknown';
 
             if (String(monster.id) === String(awakenedTarget.id)) {
                 console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: same as target`);
+                emitAutosellerEvent('inject:skip', { reason: 'same-id', creatureName, gameId: sealedGameId, candidate: { stats: getMonsterGeneStats(monster) } });
                 continue;
             }
             if (!hasAnyHigherGeneStat(monster, awakenedTarget)) {
@@ -1523,11 +1538,25 @@
                     `(candidate hp=${c.hp} ad=${c.ad} ap=${c.ap} armor=${c.armor} mr=${c.magicResist} | ` +
                     `target hp=${t.hp} ad=${t.ad} ap=${t.ap} armor=${t.armor} mr=${t.magicResist})`
                 );
+                emitAutosellerEvent('inject:skip', {
+                    reason: 'no-higher-gene',
+                    creatureName,
+                    gameId: sealedGameId,
+                    candidate: { stats: c },
+                    target: { id: awakenedTarget.id, name: awakenedTargetName, stats: t }
+                });
                 continue;
             }
 
             if (isGameCurrentlyRunning() && isMonsterCurrentlyOnBoard(awakenedTarget.id)) {
                 console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: matching awakened target ${awakenedTargetName} (${awakenedTarget.id}) is on board during active battle`);
+                emitAutosellerEvent('inject:skip', {
+                    reason: 'on-board',
+                    creatureName,
+                    gameId: sealedGameId,
+                    target: { id: awakenedTarget.id, name: awakenedTargetName },
+                    candidate: { stats: getMonsterGeneStats(monster) }
+                });
                 continue;
             }
 
@@ -1546,6 +1575,12 @@
                 const candidateStats = getMonsterGeneStats(monster);
                 const targetBeforeStats = getMonsterGeneStats(awakenedTarget);
                 console.log(`[Autoseller][Inject][Success] ${creatureName || monster.id} (${monster.id}) -> ${awakenedTargetName} (${awakenedTarget.id}), goldDiff=${goldDiff}`);
+                emitAutosellerEvent('inject:success', {
+                    creatureName,
+                    gameId: Number(monster?.gameId ?? monster?.metadata?.id),
+                    target: { id: awakenedTarget.id, name: awakenedTargetName },
+                    goldDiff
+                });
                 syncInjectedAwakenedStatsLocally(awakenedTarget.id, targetBeforeStats, candidateStats);
 
                 let targetAfterStats = targetBeforeStats;
@@ -1595,6 +1630,17 @@
                     `[Autoseller][Inject][Applied] ${awakenedTargetName} (${awakenedTarget.id}): ` +
                     `${inferredGainsTextList.length > 0 ? inferredGainsTextList.join(', ') : 'no gain'}`
                 );
+                const gainsObject = { hp: 0, ad: 0, ap: 0, armor: 0, magicResist: 0 };
+                (gains.length > 0 ? gains : inferredGains).forEach(g => { gainsObject[g.key] = g.diff; });
+                emitAutosellerEvent('inject:applied', {
+                    creatureName,
+                    gameId: Number(monster?.gameId ?? monster?.metadata?.id),
+                    target: { id: awakenedTarget.id, name: awakenedTargetName },
+                    before: targetBeforeStats,
+                    after: targetAfterStats,
+                    gains: gainsObject,
+                    candidate: candidateStats
+                });
                 const gainsForToast = gains.length > 0
                     ? gains
                     : inferredGains;

@@ -1044,6 +1044,7 @@ const modDescriptions = {
   'Raid Hunter': 'Raid automation: detect and join raids, setup, autoplay, stamina, and queues.',
   'Manual Runner': 'Repeats manual runs until victory, target S+ rank, or max floor; stats and replay copy.',
   'Stamina Optimizer': 'Starts or stops gameplay at min/max stamina; coordinates with other farming mods.',
+  'Awaken Tracker': 'Tracks per-map awaken gene progress with live stat deltas, event logs, and pause-on-cap.',
   'Quests': 'Quest tracking, NPC dialogs, quest items, and Firebase-backed progress.',
   'VIP List': 'Track favorite players with profiles, sortable stats, and Cyclopedia links.'
 };
@@ -1072,7 +1073,8 @@ const superModNames = [
   'Raid_Hunter.js',
   'Manual Runner.js',
   'RunTracker.js',
-  'Stamina Optimizer.js'
+  'Stamina Optimizer.js',
+  'Awaken Tracker.js'
 ];
 
 // OT Mods list - kept in sync with mod-registry.js

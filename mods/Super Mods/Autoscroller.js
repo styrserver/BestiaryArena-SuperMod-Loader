@@ -1229,7 +1229,8 @@
         autosellGenesMin,
         autosellGenesMax,
         autosqueezeGenesMin,
-        autosqueezeGenesMax
+        autosqueezeGenesMax,
+        scrollLimit
       };
       localStorage.setItem('autoscroller_state', JSON.stringify(stateToSave));
     } catch (error) {
@@ -1257,6 +1258,7 @@
         if (state.autosellGenesMax !== undefined) autosellGenesMax = state.autosellGenesMax;
         if (state.autosqueezeGenesMin !== undefined) autosqueezeGenesMin = state.autosqueezeGenesMin;
         if (state.autosqueezeGenesMax !== undefined) autosqueezeGenesMax = state.autosqueezeGenesMax;
+        if (state.scrollLimit !== undefined) scrollLimit = state.scrollLimit;
       }
     } catch (error) {
       console.warn('[Autoscroller] Failed to load state:', error);
@@ -1977,14 +1979,14 @@
     
     if (autoscrollBtn) {
       autoscrollBtn.style.display = 'block';
-      // Update button appearance based on current conditions
       if (window.updateAutoscrollButtonAppearance) {
         window.updateAutoscrollButtonAppearance();
       }
     }
     
     if (stopBtn) {
-      stopBtn.style.display = 'none';
+      stopBtn.textContent = 'Reset';
+      stopBtn.style.display = 'block';
     }
     
     // Maintain scroll tier border
@@ -2383,6 +2385,7 @@
             selectedCreatures.sort(); // Keep alphabetical order
             selectedGameId = null;
             render();
+            saveStateToStorage();
             // Update selected creatures display
             if (window.AutoscrollerRenderSelectedCreatures) {
               window.AutoscrollerRenderSelectedCreatures();
@@ -2408,6 +2411,7 @@
             availableCreatures.push(creatureName);
             availableCreatures.sort(); // Keep alphabetical order
             render();
+            saveStateToStorage();
             // Update selected creatures display
             if (window.AutoscrollerRenderSelectedCreatures) {
               window.AutoscrollerRenderSelectedCreatures();
@@ -2575,17 +2579,16 @@
             tierCheckbox.checked = false;
             totalInput.disabled = false;
             tierInputs.forEach(input => input.disabled = true);
-            // Update stop conditions
             stopConditions.useTotalCreatures = true;
             stopConditions.useTierSystem = false;
           } else {
-            // Prevent unchecking if the other checkbox is also unchecked
             if (!tierCheckbox.checked) {
               totalCheckbox.checked = true;
               return;
             }
             totalInput.disabled = true;
           }
+          saveStateToStorage();
         });
         
         tierCheckbox.addEventListener('change', () => {
@@ -2602,10 +2605,12 @@
             }
             tierInputs.forEach(input => input.disabled = true);
           }
+          saveStateToStorage();
         });
         
         totalInput.addEventListener('change', () => {
           stopConditions.totalCreaturesTarget = parseInt(totalInput.value) || 15;
+          saveStateToStorage();
           if (window.AutoscrollerRenderSelectedCreatures) {
             window.AutoscrollerRenderSelectedCreatures();
           }
@@ -2614,6 +2619,7 @@
         tierInputs.forEach((input, index) => {
           input.addEventListener('change', () => {
             stopConditions.tierTargets[index] = parseInt(input.value) || 0;
+            saveStateToStorage();
             if (window.AutoscrollerRenderSelectedCreatures) {
               window.AutoscrollerRenderSelectedCreatures();
             }
@@ -2658,8 +2664,7 @@
         // Add event listener for autosell checkbox
         autosellCheckbox.addEventListener('change', () => {
           autosellNonSelected = autosellCheckbox.checked;
-          // Autosell setting updated
-          // Update button appearance when autosell setting changes
+          saveStateToStorage();
           if (window.updateAutoscrollButtonAppearance) {
             window.updateAutoscrollButtonAppearance();
           }
@@ -2693,8 +2698,8 @@
         speedInput.onchange = () => {
           userDefinedSpeed = Math.max(100, Math.min(2000, parseInt(speedInput.value) || 400));
           speedInput.value = userDefinedSpeed;
+          saveStateToStorage();
           
-          // Update text color based on speed
           if (userDefinedSpeed < 400) {
             speedInput.style.color = '#ff6b6b';
           } else {
@@ -2747,6 +2752,7 @@
         scrollLimitInput.onchange = () => {
           scrollLimit = Math.max(0, Math.min(999, parseInt(scrollLimitInput.value) || 0));
           scrollLimitInput.value = scrollLimit;
+          saveStateToStorage();
         };
         scrollLimitWrapper.appendChild(scrollLimitInput);
         
@@ -3032,7 +3038,7 @@
         buttonWrapper.appendChild(autoscrollBtn);
         
         const stopBtn = document.createElement('button');
-        stopBtn.textContent = 'Stop';
+        stopBtn.textContent = 'Reset';
         stopBtn.className = 'autoscroller-btn';
         stopBtn.style.setProperty('width', '60px', 'important');
         stopBtn.style.setProperty('min-width', '60px', 'important');
@@ -3041,7 +3047,6 @@
         stopBtn.style.margin = '0 4px';
         stopBtn.style.boxSizing = 'border-box';
         stopBtn.style.setProperty('font-size', '12px', 'important');
-        stopBtn.style.display = 'none'; // Hidden initially
         buttonWrapper.appendChild(stopBtn);
         
         const handleAutoscrollClick = async () => {
@@ -3081,8 +3086,9 @@
             
             autoscrolling = true;
             autoscrollBtn.textContent = 'Autoscrolling...';
-            stopBtn.style.display = 'block';
+            stopBtn.textContent = 'Stop';
             autoscrollBtn.style.display = 'none';
+            stopBtn.style.display = 'block';
             
             // Maintain scroll tier border
             updateSelectedScrollTierBorder();
@@ -3098,6 +3104,23 @@
               rateLimitedInterval = null;
             }
             stopAutoscroll();
+          } else {
+            resetAutoscrollState();
+            localStorage.removeItem('autoscroller_state');
+            availableCreatures = [...getAllCreatures()].filter(c => {
+              const lower = c.toLowerCase();
+              return lower !== 'gummy raider' && lower !== 'yeti';
+            });
+            selectedGameId = null;
+            lastStatusMessage = '';
+            render();
+            if (window.AutoscrollerRenderSelectedCreatures) {
+              window.AutoscrollerRenderSelectedCreatures();
+            }
+            if (window.updateAutoscrollButtonAppearance) {
+              window.updateAutoscrollButtonAppearance();
+            }
+            updateSelectedScrollTierBorder();
           }
         };
         
@@ -3168,6 +3191,7 @@
             // Set this button as selected
             btn.setAttribute('data-state', 'selected');
             selectedScrollTier = i;
+            saveStateToStorage();
             
             const slot = btn.querySelector('.container-slot');
             if (slot) {
