@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.8.2",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Overview creature name colors now use more distinct palette (purple/yellow/blue/grey), filter dropdown reordered from highest to lowest achievement, and Farm Maps panel now sorts by game default region/room order."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "\"Awakened, not capped\" filter now correctly shows only creatures missing max genes (was incorrectly using perfect check which also required lvl 99)."
+        }
+      ]
+    },
+    {
       "version": "3.8.1",
       "changes": [
         {

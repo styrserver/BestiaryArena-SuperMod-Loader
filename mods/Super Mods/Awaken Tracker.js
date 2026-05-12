@@ -1279,12 +1279,12 @@
         overviewViewSelect.className = 'at-input';
         const viewOptions = [
             ['all', 'All'],
-            ['missing-awaken', 'Missing awaken'],
+            ['perfect', 'Perfect (awakened + capped + lvl 99)'],
             ['awakened', 'Awakened (any monster)'],
             ['awakened-not-capped', 'Awakened, not capped'],
-            ['perfect', 'Perfect (awakened + capped + lvl 99)'],
-            ['missing-cap', 'Missing cap'],
             ['capped', 'Capped (any monster)'],
+            ['missing-awaken', 'Missing awaken'],
+            ['missing-cap', 'Missing cap'],
             ['needs-both', 'Missing awaken AND cap']
         ];
         for (const [val, label] of viewOptions) {
@@ -1453,7 +1453,7 @@
                 awakened: groups.filter(g => g.anyAwakened).length,
                 capped: groups.filter(g => g.anyCapped).length,
                 perfect: groups.filter(g => g.anyPerfect).length,
-                awakenedNotCapped: groups.filter(g => g.anyAwakened && !g.anyPerfect).length,
+                awakenedNotCapped: groups.filter(g => g.anyAwakened && !g.anyCapped).length,
                 missingAwaken: groups.filter(g => !g.anyAwakened).length,
                 missingCap: groups.filter(g => !g.anyCapped).length
             };
@@ -1466,7 +1466,7 @@
             overviewSummary.innerHTML =
                 `<div>${smIcon(BADGE_ICONS.awakened)} Awakened: <b>${counts.awakened}</b> · missing <b style="color:#d87d7d;">${counts.missingAwaken}</b></div>` +
                 `<div>${smIcon(BADGE_ICONS.capped)} Capped: <b>${counts.capped}</b> · missing <b style="color:#d87d7d;">${counts.missingCap}</b></div>` +
-                `<div style="color:#cfe9cf;margin-top:2px;">${smIcon(BADGE_ICONS.perfect)} Perfect (awakened + capped + lvl 99): <b>${counts.perfect}</b> · Awakened, not perfect: <b>${counts.awakenedNotCapped}</b></div>` +
+                `<div style="color:#c084fc;margin-top:2px;">${smIcon(BADGE_ICONS.perfect)} Perfect (awakened + capped + lvl 99): <b>${counts.perfect}</b> · Awakened, not capped: <b>${counts.awakenedNotCapped}</b></div>` +
                 `<div style="color:#888;margin-top:2px;">${counts.total} awakenable creatures · ${counts.monsters} monsters${skippedParts ? ` · skipped: ${skippedParts}` : ''}</div>`;
 
             overviewGrid.innerHTML = groups.map(renderOverviewCard).join('');
@@ -1498,10 +1498,10 @@
             const capBadge = badgeImg(BADGE_ICONS.capped, g.anyCapped ? 'All stats at 20' : 'Not capped', g.anyCapped);
             const perfectBadge = badgeImg(BADGE_ICONS.perfect, g.anyPerfect ? 'Perfect (awakened + capped + lvl 99)' : 'Not perfect', g.anyPerfect);
             const shinyMark = g.anyShiny ? badgeImg(BADGE_ICONS.shiny, 'Has shiny', true, 12) : '';
-            const nameColor = g.anyPerfect ? '#f0e080'
-                : g.anyCapped ? '#cfe9cf'
-                : g.anyAwakened ? '#f0c060'
-                : '#e8e8e8';
+            const nameColor = g.anyPerfect ? '#c084fc'
+                : g.anyCapped ? '#facc15'
+                : g.anyAwakened ? '#60a5fa'
+                : '#9ca3af';
             return `<div class="awaken-overview-row" data-gameid="${g.gameId}" data-name="${g.name.toLowerCase().replace(/"/g, '&quot;')}" data-awakened="${g.anyAwakened}" data-capped="${g.anyCapped}" data-perfect="${g.anyPerfect}">` +
                 `<img src="${portraitUrl}" alt="" style="width:34px;height:34px;image-rendering:pixelated;flex-shrink:0;" onerror="this.style.visibility='hidden'" />` +
                 `<div style="flex:1;min-width:0;">` +
@@ -1533,7 +1533,7 @@
                 else if (view === 'capped') show = show && isCap;
                 else if (view === 'missing-cap') show = show && !isCap;
                 else if (view === 'perfect') show = show && isPerfect;
-                else if (view === 'awakened-not-capped') show = show && isAwk && !isPerfect;
+                else if (view === 'awakened-not-capped') show = show && isAwk && !isCap;
                 else if (view === 'needs-both') show = show && !isAwk && !isCap;
                 row.style.display = show ? '' : 'none';
                 if (show) visible++;
@@ -1591,6 +1591,7 @@
             const regionIdsToNames = utils.regionIdsToNames || {};
 
             const results = [];
+            let orderIdx = 0;
             for (const region of utils.REGIONS) {
                 if (!region?.id) continue;
                 const regionName = regionIdsToNames[region.id] || region.id;
@@ -1623,7 +1624,7 @@
                     results.push({
                         roomId: room.id, mapName: ROOM_NAME[room.id] || room.id,
                         regionName, stamina, totalVillains, wantedTotal, uniqueWanted,
-                        density, wantedPerStamina,
+                        density, wantedPerStamina, defaultOrder: orderIdx++,
                         wantedDetails: Array.from(wantedByCreature.entries()).map(([id, info]) => ({
                             id, name: wantedNamesById.get(id) || `#${id}`,
                             count: info.count, avgLevel: info.totalLevel / info.count
@@ -1632,13 +1633,7 @@
                 }
             }
 
-            results.sort((a, b) =>
-                b.uniqueWanted - a.uniqueWanted
-                || b.wantedPerStamina - a.wantedPerStamina
-                || b.density - a.density
-                || a.stamina - b.stamina
-                || a.mapName.localeCompare(b.mapName)
-            );
+            results.sort((a, b) => a.defaultOrder - b.defaultOrder);
 
             const wantedSummary = Array.from(wantedNamesById.values()).slice(0, 8).join(', ')
                 + (wantedNamesById.size > 8 ? ` … +${wantedNamesById.size - 8}` : '');
@@ -1646,7 +1641,7 @@
             farmSummaryEl.innerHTML =
                 `<div>Searching for <b style="color:#88c8ff;">${wantedIds.size}</b> creatures across <b style="color:#88c8ff;">${results.length}</b> maps.</div>` +
                 `<div style="color:#777;margin-top:2px;">Targets: ${wantedSummary}</div>` +
-                `<div style="color:#777;margin-top:2px;">Ranking: distinct creatures → wanted per ⚡ → density → stamina ↑ · Click a map to navigate.</div>`;
+                `<div style="color:#777;margin-top:2px;">Sorted by game map order · Click a map to navigate.</div>`;
 
             if (results.length === 0) {
                 farmListEl.innerHTML = '<div style="grid-column:1/-1;padding:16px;color:#888;text-align:center;">No map contains the filtered creatures.</div>';
