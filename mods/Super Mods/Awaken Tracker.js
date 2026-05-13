@@ -42,8 +42,22 @@
 
     const AWAKEN_TIER = 6;
     const STATS = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+    /** Larger than max gene-sum term (100 * 100) so shiny awakened always ranks above non-shiny awakened. */
+    const OVERVIEW_SHINY_AWAKENED_RANK_BOOST = 50_000;
 
-    const PANEL_DEFAULTS = { left: 100, top: 100, width: 380, height: 500, isOpen: false, activeTab: 'tracker' };
+    function overviewMonsterRank(i) {
+        return (
+            (i.awakened && i.capped && i.level >= 99 ? 10_000_000 : 0)
+            + (i.awakened && i.capped ? 1_000_000 : 0)
+            + (i.awakened ? 100_000 : 0)
+            + (i.awakened && i.shiny ? OVERVIEW_SHINY_AWAKENED_RANK_BOOST : 0)
+            + i.sum * 100
+            + (i.shiny ? 10 : 0)
+            + i.tier
+        );
+    }
+
+    const PANEL_DEFAULTS = { left: 100, top: 100, width: 380, height: 500, isOpen: false, activeTab: 'tracker', hideRaids: false };
 
     const STAT_LABELS = { hp: 'HP', ad: 'AD', ap: 'AP', armor: 'ARM', magicResist: 'MR' };
     const STAT_ICON_URLS = {
@@ -56,7 +70,10 @@
     const BADGE_ICONS = {
         awakened: 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png',
         capped: 'https://bestiaryarena.com/assets/icons/star-tier-5.png',
+        // Shiny perfect: awakened + capped + lvl 99 AND shiny.
         perfect: 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png',
+        // Hundo perfect: awakened + capped + lvl 99 AND NOT shiny.
+        perfectHundo: 'https://bestiaryarena.com/assets/icons/star-tier-hundo.png',
         shiny: 'https://bestiaryarena.com/assets/icons/shiny-star.png'
     };
     const SKIP_REASON_LABELS = {
@@ -73,13 +90,28 @@
     // =======================
     const state = {
         byMap: new Map(),          // roomId -> Map<gameId, entry>
-        baselineStats: new Map(),  // String(monsterId) -> stats
+        baselineStats: new Map(),  // String(monsterId) -> stats (global fallback, used for pre-capped detection)
+        baselineByMap: new Map(),  // roomId -> Map<String(monsterId), stats> (per-map baseline for +N delta display)
         currentMapEnemies: [],     // [{ gameId, name }]
         currentRoomId: null,
-        pauseOnCap: new Set(),     // Set<gameId>
+        pauseOnCapByMap: new Map(), // roomId -> Set<gameId> (pause-on-cap marks, scoped per map)
         collapsedOverrides: new Map(), // gameId -> boolean (user override of auto-collapse)
         orderByMap: new Map()      // roomId -> Array<gameId> (custom order per map)
     };
+
+    function getPauseSetForMap(roomId) {
+        if (!roomId) return null;
+        if (!state.pauseOnCapByMap.has(roomId)) {
+            state.pauseOnCapByMap.set(roomId, new Set());
+        }
+        return state.pauseOnCapByMap.get(roomId);
+    }
+
+    function isPausedOnCapInCurrentMap(gameId) {
+        const set = state.currentRoomId ? state.pauseOnCapByMap.get(state.currentRoomId) : null;
+        return set ? set.has(Number(gameId)) : false;
+    }
+
     let renderDebounceId = null;
     let boardSubscription = null;
     let lastSeenRoomId = null;
@@ -129,9 +161,22 @@
         })[0];
     }
 
+    const nameCache = new Map();
+    function resolveName(gameId) {
+        if (nameCache.has(gameId)) return nameCache.get(gameId);
+        let name = `#${gameId}`;
+        try {
+            name = globalThis.state?.utils?.getMonster?.(gameId)?.metadata?.name
+                || window.creatureDatabase?.findMonsterByGameId?.(gameId)?.name
+                || name;
+        } catch (_) {}
+        nameCache.set(gameId, name);
+        return name;
+    }
+
     function isAwakenedCappedStats(stats) {
         if (!stats || typeof stats !== 'object') return false;
-        return ['hp', 'ad', 'ap', 'armor', 'magicResist'].every(k => Number(stats[k]) >= CAP_VALUE);
+        return STATS.every(k => Number(stats[k]) >= CAP_VALUE);
     }
 
     // 'pre-capped' = veio capado do baseline (não foi mérito da run)
@@ -214,12 +259,21 @@
                 rid,
                 inner instanceof Map ? Array.from(inner.entries()) : []
             ]);
+            const serializedBaselineByMap = Array.from(state.baselineByMap.entries()).map(([rid, inner]) => [
+                rid,
+                inner instanceof Map ? Array.from(inner.entries()) : []
+            ]);
+            const serializedPauseByMap = Array.from(state.pauseOnCapByMap.entries()).map(([rid, set]) => [
+                rid,
+                set instanceof Set ? Array.from(set) : []
+            ]);
             const payload = {
                 byMap: serializedByMap,
                 baselineStats: Array.from(state.baselineStats.entries()),
+                baselineByMap: serializedBaselineByMap,
                 currentMapEnemies: state.currentMapEnemies,
                 currentRoomId: state.currentRoomId,
-                pauseOnCap: Array.from(state.pauseOnCap),
+                pauseOnCapByMap: serializedPauseByMap,
                 collapsedOverrides: Array.from(state.collapsedOverrides.entries()),
                 orderByMap: Array.from(state.orderByMap.entries())
             };
@@ -243,14 +297,27 @@
             if (Array.isArray(parsed.baselineStats)) {
                 state.baselineStats = new Map(parsed.baselineStats);
             }
+            if (Array.isArray(parsed.baselineByMap)) {
+                state.baselineByMap = new Map();
+                for (const [rid, innerArr] of parsed.baselineByMap) {
+                    state.baselineByMap.set(rid, new Map(Array.isArray(innerArr) ? innerArr : []));
+                }
+            }
             if (Array.isArray(parsed.currentMapEnemies)) {
                 state.currentMapEnemies = parsed.currentMapEnemies;
             }
             if (typeof parsed.currentRoomId === 'string' || parsed.currentRoomId === null) {
                 state.currentRoomId = parsed.currentRoomId;
             }
-            if (Array.isArray(parsed.pauseOnCap)) {
-                state.pauseOnCap = new Set(parsed.pauseOnCap);
+            if (Array.isArray(parsed.pauseOnCapByMap)) {
+                state.pauseOnCapByMap = new Map();
+                for (const [rid, arr] of parsed.pauseOnCapByMap) {
+                    state.pauseOnCapByMap.set(rid, new Set(Array.isArray(arr) ? arr.map(Number) : []));
+                }
+            } else if (Array.isArray(parsed.pauseOnCap) && typeof parsed.currentRoomId === 'string') {
+                // Legacy migration: old global marks → marks for the map the user was on
+                const set = new Set(parsed.pauseOnCap.map(Number));
+                if (set.size > 0) state.pauseOnCapByMap.set(parsed.currentRoomId, set);
             }
             if (Array.isArray(parsed.collapsedOverrides)) {
                 state.collapsedOverrides = new Map(parsed.collapsedOverrides);
@@ -283,7 +350,8 @@
                 width: Number.isFinite(Number(p.width)) ? Number(p.width) : PANEL_DEFAULTS.width,
                 height: Number.isFinite(Number(p.height)) ? Number(p.height) : PANEL_DEFAULTS.height,
                 isOpen: p.isOpen === true,
-                activeTab: (p.activeTab === 'overview') ? 'overview' : 'tracker'
+                activeTab: (p.activeTab === 'overview') ? 'overview' : 'tracker',
+                hideRaids: p.hideRaids === true
             };
         } catch (e) {
             return { ...PANEL_DEFAULTS };
@@ -313,6 +381,42 @@
         } catch (e) {
             console.warn('[Awaken Tracker] snapshotBaseline failed:', e);
         }
+    }
+
+    // Per-map baseline: captures awaken stats for monsters matching current map enemies,
+    // only on first visit to the map (or after Clear). Used for +N delta display per map.
+    function ensureMapBaseline(roomId) {
+        if (!roomId) return;
+        if (state.baselineByMap.has(roomId)) return;
+        try {
+            const enemyIds = new Set((state.currentMapEnemies || [])
+                .map(e => Number(e?.gameId))
+                .filter(Number.isFinite));
+            if (enemyIds.size === 0) return;
+            const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [];
+            const inner = new Map();
+            for (const m of monsters) {
+                if (!m || !m.id || !isAwakenedCreatureLocal(m)) continue;
+                const gid = Number(m?.gameId ?? m?.metadata?.id);
+                if (!enemyIds.has(gid)) continue;
+                inner.set(String(m.id), getMonsterGeneStatsLocal(m));
+            }
+            state.baselineByMap.set(roomId, inner);
+            scheduleSave();
+        } catch (e) {
+            console.warn('[Awaken Tracker] ensureMapBaseline failed:', e);
+        }
+    }
+
+    function getBaselineForCurrentMap(monsterId) {
+        const rid = state.currentRoomId;
+        if (rid) {
+            const mapBaseline = state.baselineByMap.get(rid);
+            if (mapBaseline && mapBaseline.has(String(monsterId))) {
+                return mapBaseline.get(String(monsterId));
+            }
+        }
+        return state.baselineStats.get(String(monsterId)) || null;
     }
 
     // =======================
@@ -434,14 +538,13 @@
                 const gameId = Number(piece.gameId);
                 if (!Number.isFinite(gameId)) continue;
                 if (!dedup.has(gameId)) {
-                    const name = globalThis.state?.utils?.getMonster?.(gameId)?.metadata?.name
-                        || window.creatureDatabase?.findMonsterByGameId?.(gameId)?.name
-                        || `#${gameId}`;
+                    const name = resolveName(gameId);
                     if (getUnobtainableNames().has(String(name).toLowerCase())) continue;
                     dedup.set(gameId, { gameId, name });
                 }
             }
             state.currentMapEnemies = Array.from(dedup.values());
+            ensureMapBaseline(roomId);
             scheduleRender();
             scheduleSave();
         } catch (e) {
@@ -541,16 +644,17 @@
 
     function checkAndPauseIfCapped(gameId, statsFromEvent) {
         try {
-            if (state.pauseOnCap.size === 0) return;
+            const mapSet = state.currentRoomId ? state.pauseOnCapByMap.get(state.currentRoomId) : null;
+            if (!mapSet || mapSet.size === 0) return;
             const triggeredId = Number(gameId);
-            if (!state.pauseOnCap.has(triggeredId)) return;
+            if (!mapSet.has(triggeredId)) return;
             const triggeredAwaken = findAwakenedTargetForGameId(triggeredId);
             const triggeredStats = triggeredAwaken ? getMonsterGeneStatsLocal(triggeredAwaken) : (statsFromEvent || null);
             if (!isAwakenedCappedStats(triggeredStats)) return;
 
             const markedOnMap = (state.currentMapEnemies || [])
                 .map(e => Number(e?.gameId))
-                .filter(g => Number.isFinite(g) && state.pauseOnCap.has(g));
+                .filter(g => Number.isFinite(g) && mapSet.has(g));
             if (markedOnMap.length === 0) return;
 
             const allCapped = markedOnMap.every(g => {
@@ -572,8 +676,13 @@
     // =======================
     // 9. UI — slot rendering
     // =======================
-    function renderStatIconHtml(key, size = 12) {
-        return `<img src="${STAT_ICON_URLS[key]}" alt="${STAT_LABELS[key]}" title="${STAT_LABELS[key]}" style="width:${size}px;height:${size}px;vertical-align:middle;image-rendering:pixelated;" />`;
+    function renderStatIconHtml(key, size = 12, verticalAlign = 'middle') {
+        return `<img src="${STAT_ICON_URLS[key]}" alt="${STAT_LABELS[key]}" title="${STAT_LABELS[key]}" style="width:${size}px;height:${size}px;vertical-align:${verticalAlign};image-rendering:pixelated;" />`;
+    }
+
+    function badgeImg(src, alt, active, size = 14) {
+        const opacity = active ? '1' : '0.2';
+        return `<img src="${src}" alt="${alt}" title="${alt}" style="display:inline !important;width:${size}px;height:${size}px;image-rendering:pixelated;vertical-align:-2px;opacity:${opacity};" />`;
     }
 
     // Badge minimalista: apenas contador X/5 + sufixo ⏸ N quando aguardando peers
@@ -584,7 +693,7 @@
             badge.textContent = '—/5';
             return badge;
         }
-        const cappedCount = ['hp','ad','ap','armor','magicResist'].filter(k => Number(stats[k]) >= CAP_VALUE).length;
+        const cappedCount = STATS.filter(k => Number(stats[k]) >= CAP_VALUE).length;
         const isFullyCapped = cappedCount === 5;
         const color  = isFullyCapped ? '#7fde7f' : '#ddd';
         const bg     = isFullyCapped ? 'rgba(127,222,127,0.10)' : 'rgba(255,255,255,0.04)';
@@ -621,7 +730,7 @@
     }
 
     function buildCapToggleLabel(gameId, awakened, alreadyCapped) {
-        const isMarked = state.pauseOnCap.has(Number(gameId));
+        const isMarked = isPausedOnCapInCurrentMap(gameId);
         const capToggleLabel = document.createElement('label');
         capToggleLabel.style.cssText = 'display:inline-flex;align-items:center;gap:3px;font-size:11px;flex:0 0 auto;';
         const capToggleInput = document.createElement('input');
@@ -647,8 +756,10 @@
             capToggleInput.style.cursor = 'pointer';
             capToggleInput.addEventListener('change', (e) => {
                 const k = Number(gameId);
-                if (e.target.checked) state.pauseOnCap.add(k);
-                else state.pauseOnCap.delete(k);
+                const set = getPauseSetForMap(state.currentRoomId);
+                if (!set) return;
+                if (e.target.checked) set.add(k);
+                else set.delete(k);
                 capToggleLabel.style.opacity = e.target.checked ? '1' : '0.6';
                 scheduleSave();
             });
@@ -704,7 +815,7 @@
         const collapsed = isSlotCollapsed(gameId, creatureState);
 
         const slot = document.createElement('div');
-        slot.className = `awaken-tracker-slot state-${creatureState} ${collapsed ? 'collapsed' : 'expanded'}`;
+        slot.className = `at-row awaken-tracker-slot state-${creatureState} ${collapsed ? 'collapsed' : 'expanded'}`;
         slot.dataset.gameId = String(gameId);
         attachDragDropToSlot(slot, gameId);
 
@@ -747,7 +858,7 @@
             return slot;
         }
 
-        const baseline = state.baselineStats.get(String(awakened.id)) || null;
+        const baseline = getBaselineForCurrentMap(awakened.id);
 
         const renderStatPair = (key) => {
             const cur = stats[key];
@@ -758,7 +869,7 @@
 
         const statsLine = document.createElement('div');
         statsLine.style.cssText = 'font-family:monospace;font-size:12px;display:flex;flex-wrap:wrap;column-gap:10px;row-gap:2px;padding:2px 0;';
-        statsLine.innerHTML = ['hp', 'ad', 'ap', 'armor', 'magicResist'].map(renderStatPair).join('');
+        statsLine.innerHTML = STATS.map(renderStatPair).join('');
         slot.appendChild(statsLine);
 
         const entry = (state.currentRoomId && state.byMap.get(state.currentRoomId)?.get(Number(gameId))) || null;
@@ -776,7 +887,7 @@
                 return `<span style="display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtml(key, 11)}<span style="color:${valueColor};${weight}">${v}</span></span>`;
             };
             const candidateLine = hasStats
-                ? ['hp', 'ad', 'ap', 'armor', 'magicResist'].map(renderCandidateStat).filter(Boolean).join(' ')
+                ? STATS.map(renderCandidateStat).filter(Boolean).join(' ')
                 : '<span style="opacity:0.6;">(stats unavailable)</span>';
 
             const lastLine = document.createElement('div');
@@ -829,7 +940,7 @@
                 const cs = logEv.candidateStats || {};
                 const hasStats = Number.isFinite(Number(cs.hp));
                 const sealedHtml = hasStats
-                    ? ['hp', 'ad', 'ap', 'armor', 'magicResist'].map(k => renderLogStat(k, cs[k])).join(' ')
+                    ? STATS.map(k => renderLogStat(k, cs[k])).join(' ')
                     : '<span style="opacity:0.5;">(no stats)</span>';
 
                 if (logEv.type === 'applied') {
@@ -869,7 +980,7 @@
                 --at-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
                 --at-frame-1-pressed: url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill;
                 --at-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
-                --at-bg-panel: url(/_next/static/media/background-darker.2679c837.png);
+                --at-bg-panel: url(/_next/static/media/background-dark.95edca67.png);
                 --at-bg-header: url(/_next/static/media/background-dark.95edca67.png);
                 --at-bg-section: url(/_next/static/media/background-regular.b0337118.png);
                 --at-panel-bg: #282C34;
@@ -1028,9 +1139,9 @@
                 flex: 1 1 auto;
                 overflow-y: auto;
                 padding: 6px;
-                background-image: var(--at-bg-section);
+                background-image: var(--at-bg-panel);
                 background-repeat: repeat;
-                background-color: var(--at-section-bg);
+                background-color: var(--at-panel-bg);
                 border: 6px solid transparent;
                 border-image: var(--at-frame-4);
                 margin: 0 2px;
@@ -1083,46 +1194,36 @@
             #${PANEL_ID} .at-input:focus {
                 border-color: var(--at-text-gold);
             }
+            #${PANEL_ID} .at-row {
+                padding: 6px 8px;
+                background: var(--at-entry-bg);
+                border: 4px solid transparent;
+                border-image: var(--at-frame-1);
+                transition: background 0.15s;
+            }
+            #${PANEL_ID} .at-row:hover {
+                background: rgba(59,64,72,0.5);
+            }
             #${PANEL_ID} .awaken-tracker-slot {
                 display: flex;
                 flex-direction: column;
                 gap: 4px;
                 padding: 6px;
-                border: 1px solid var(--at-border);
-                border-radius: 4px;
-                background: var(--at-entry-bg);
-                transition: background 0.15s;
             }
             #${PANEL_ID} .awaken-tracker-slot.collapsed {
                 padding: 4px 6px;
-            }
-            #${PANEL_ID} .awaken-tracker-slot:hover {
-                background: rgba(59,64,72,0.5);
             }
             #${PANEL_ID} .awaken-overview-row {
                 display: flex;
                 flex-direction: row;
                 align-items: center;
                 gap: 8px;
-                padding: 6px 8px;
-                background: var(--at-entry-bg);
-                border: 1px solid var(--at-border);
-                border-radius: 4px;
-                transition: background 0.15s;
-            }
-            #${PANEL_ID} .awaken-overview-row:hover {
-                background: rgba(59,64,72,0.5);
             }
             #${PANEL_ID} .awaken-farm-row {
-                padding: 6px 8px;
-                background: var(--at-entry-bg);
-                border: 1px solid var(--at-border);
-                border-radius: 4px;
                 cursor: pointer;
-                transition: background 0.15s;
             }
-            #${PANEL_ID} .awaken-farm-row:hover {
-                background: rgba(59,64,72,0.5);
+            #${PANEL_ID} .awaken-farm-row.is-raid {
+                box-shadow: inset 3px 0 0 #7a1f1f;
             }
         `;
         document.head.appendChild(style);
@@ -1192,9 +1293,11 @@
         const toolbar = document.createElement('div');
         toolbar.className = 'at-toolbar';
 
-        const clearMapBtn = makeConfirmButton('Clear Map', 'Confirm clear map', 'Clear this map only (preserves other maps and 🎯 marks)', () => {
+        const clearMapBtn = makeConfirmButton('Clear Map', 'Confirm clear map', 'Clear this map only and rebaseline its stats (preserves other maps and 🎯 marks)', () => {
             if (!state.currentRoomId) return;
             state.byMap.delete(state.currentRoomId);
+            state.baselineByMap.delete(state.currentRoomId);
+            ensureMapBaseline(state.currentRoomId);
             render();
             scheduleSave();
         });
@@ -1202,7 +1305,9 @@
 
         const clearAllBtn = makeConfirmButton('Clear All', 'Confirm clear all', 'Clear ALL maps and rebaseline stats (preserves 🎯 marks)', () => {
             state.byMap.clear();
+            state.baselineByMap.clear();
             snapshotBaseline();
+            if (state.currentRoomId) ensureMapBaseline(state.currentRoomId);
             render();
             scheduleSave();
         });
@@ -1312,8 +1417,27 @@
 
         const farmHeader = document.createElement('div');
         farmHeader.className = 'at-section';
-        farmHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
+        farmHeader.style.cssText = 'display:flex;align-items:center;gap:6px;';
         farmHeader.innerHTML = '<strong style="color:var(--at-text-gold);font-size:12px;">🎯 Farm Maps</strong>';
+
+        const hideRaidsLabel = document.createElement('label');
+        hideRaidsLabel.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#b8b8b8;cursor:pointer;margin-left:auto;';
+        hideRaidsLabel.title = 'Hide maps that are raids (variable spawn times)';
+        const hideRaidsInput = document.createElement('input');
+        hideRaidsInput.type = 'checkbox';
+        hideRaidsInput.checked = s.hideRaids === true;
+        hideRaidsInput.style.cssText = 'margin:0;cursor:pointer;';
+        const hideRaidsText = document.createElement('span');
+        hideRaidsText.textContent = 'Hide raids';
+        hideRaidsLabel.appendChild(hideRaidsInput);
+        hideRaidsLabel.appendChild(hideRaidsText);
+        farmHeader.appendChild(hideRaidsLabel);
+
+        hideRaidsInput.addEventListener('change', () => {
+            savePanelSettings({ hideRaids: hideRaidsInput.checked });
+            if (farmSection.style.display !== 'none') renderFarmMaps();
+        });
+
         const farmCloseBtn = document.createElement('button');
         farmCloseBtn.textContent = '×';
         farmCloseBtn.title = 'Close farm panel';
@@ -1335,11 +1459,13 @@
         overviewGridWrapper.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;';
 
         const overviewVisibleCounter = document.createElement('div');
-        overviewVisibleCounter.style.cssText = 'color:var(--at-text-info);font-weight:bold;';
+        overviewVisibleCounter.className = 'at-section';
+        overviewVisibleCounter.style.cssText = 'font-size:11px;color:var(--at-text-info);font-weight:bold;text-align:right;';
 
         const overviewGrid = document.createElement('div');
         overviewGrid.style.cssText = 'flex:1;overflow-y:auto;padding:6px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:6px;align-content:start;';
 
+        overviewGridWrapper.appendChild(overviewVisibleCounter);
         overviewGridWrapper.appendChild(overviewGrid);
         overviewMainArea.appendChild(farmSection);
         overviewMainArea.appendChild(overviewGridWrapper);
@@ -1348,21 +1474,6 @@
         overviewBody.appendChild(overviewFilterBar);
         overviewBody.appendChild(overviewMainArea);
         panel.appendChild(overviewBody);
-
-        // =======================
-        // Overview: name resolution cache
-        // =======================
-        const nameCache = new Map();
-        function resolveName(gameId) {
-            if (nameCache.has(gameId)) return nameCache.get(gameId);
-            let name = `#${gameId}`;
-            try {
-                const m = globalThis.state?.utils?.getMonster?.(gameId);
-                if (m?.metadata?.name) name = m.metadata.name;
-            } catch (_) {}
-            nameCache.set(gameId, name);
-            return name;
-        }
 
         // =======================
         // Overview: render inventory scan
@@ -1398,26 +1509,24 @@
                 if (!group) {
                     group = {
                         gameId: m.gameId, monsters: [],
-                        anyAwakened: false, anyCapped: false,
-                        anyPerfect: false, anyShiny: false, best: null
+                        anyAwakened: false, anyAwakenedShiny: false, anyCapped: false,
+                        anyPerfect: false, anyPerfectShiny: false,
+                        anyShiny: false, best: null
                     };
                     byGameId.set(m.gameId, group);
                 }
                 const mon = { id: m.id, tier, level, stats, sum, awakened, capped: allCapped, shiny: m.shiny === true };
                 group.monsters.push(mon);
                 if (mon.awakened) group.anyAwakened = true;
+                if (mon.awakened && mon.shiny) group.anyAwakenedShiny = true;
                 if (mon.awakened && mon.capped) group.anyCapped = true;
-                if (mon.awakened && mon.capped && mon.level >= 99) group.anyPerfect = true;
+                if (mon.awakened && mon.capped && mon.level >= 99) {
+                    group.anyPerfect = true;
+                    if (mon.shiny) group.anyPerfectShiny = true;
+                }
                 if (mon.shiny) group.anyShiny = true;
 
-                const rank = (i) =>
-                    (i.awakened && i.capped && i.level >= 99 ? 10_000_000 : 0)
-                    + (i.awakened && i.capped ? 1_000_000 : 0)
-                    + (i.awakened ? 100_000 : 0)
-                    + i.sum * 100
-                    + (i.shiny ? 10 : 0)
-                    + i.tier;
-                if (!group.best || rank(mon) > rank(group.best)) group.best = mon;
+                if (!group.best || overviewMonsterRank(mon) > overviewMonsterRank(group.best)) group.best = mon;
             }
 
             const groups = [];
@@ -1440,7 +1549,14 @@
             groups.sort((a, b) => {
                 const ca = categoryRank(a), cb = categoryRank(b);
                 if (ca !== cb) return ca - cb;
-                if (a.best.sum !== b.best.sum) return b.best.sum - a.best.sum;
+                if (a.anyAwakened && b.anyAwakened) {
+                    const pa = a.anyAwakenedShiny ? 0 : 1;
+                    const pb = b.anyAwakenedShiny ? 0 : 1;
+                    if (pa !== pb) return pa - pb;
+                }
+                const ra = a.best ? overviewMonsterRank(a.best) : 0;
+                const rb = b.best ? overviewMonsterRank(b.best) : 0;
+                if (rb !== ra) return rb - ra;
                 return a.name.localeCompare(b.name);
             });
 
@@ -1473,36 +1589,38 @@
             applyOverviewFilter();
         }
 
-        function renderStatIconHtmlOverview(key, size) {
-            return `<img src="${STAT_ICON_URLS[key]}" alt="${STAT_LABELS[key]}" title="${STAT_LABELS[key]}" style="width:${size}px;height:${size}px;image-rendering:pixelated;vertical-align:-2px;" />`;
-        }
 
-        function badgeImg(src, alt, active, size = 14) {
-            const opacity = active ? '1' : '0.2';
-            return `<img src="${src}" alt="${alt}" title="${alt}" style="display:inline !important;width:${size}px;height:${size}px;image-rendering:pixelated;vertical-align:-2px;opacity:${opacity};" />`;
-        }
 
         function renderOverviewCard(g) {
             const portraitUrl = `/assets/portraits/${g.gameId}${g.best.shiny ? '-shiny' : ''}.png`;
             const awakeBest = g.monsters.find(m => m.awakened);
             const statsHtml = STATS.map(s => {
                 if (!awakeBest) {
-                    return `<span title="${STAT_LABELS[s]}" style="color:#666;display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtmlOverview(s, 13)}?</span>`;
+                    return `<span title="${STAT_LABELS[s]}" style="color:#666;display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtml(s, 13, '-2px')}?</span>`;
                 }
                 const v = awakeBest.stats[s];
                 const color = v === CAP_VALUE ? '#7dd87d' : '#d87d7d';
-                return `<span title="${STAT_LABELS[s]}" style="color:${color};display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtmlOverview(s, 13)}${v}</span>`;
+                return `<span title="${STAT_LABELS[s]}" style="color:${color};display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtml(s, 13, '-2px')}${v}</span>`;
             }).join('<span style="color:#444;margin:0 4px;">·</span>');
 
             const awakenBadge = badgeImg(BADGE_ICONS.awakened, g.anyAwakened ? 'Awakened (tier 6)' : 'Not awakened', g.anyAwakened);
             const capBadge = badgeImg(BADGE_ICONS.capped, g.anyCapped ? 'All stats at 20' : 'Not capped', g.anyCapped);
-            const perfectBadge = badgeImg(BADGE_ICONS.perfect, g.anyPerfect ? 'Perfect (awakened + capped + lvl 99)' : 'Not perfect', g.anyPerfect);
+            // Pick perfect icon based on shiny status of the perfect creature.
+            // Shiny perfect -> star-tier-shiny.png (purple), Hundo perfect (non-shiny) -> star-tier-hundo.png (light blue).
+            const perfectIconSrc = g.anyPerfectShiny ? BADGE_ICONS.perfect : BADGE_ICONS.perfectHundo;
+            const perfectTitle = !g.anyPerfect
+                ? 'Not perfect'
+                : g.anyPerfectShiny
+                    ? 'Perfect shiny (awakened + capped + lvl 99 + shiny)'
+                    : 'Perfect hundo (awakened + capped + lvl 99)';
+            const perfectBadge = badgeImg(perfectIconSrc, perfectTitle, g.anyPerfect);
             const shinyMark = g.anyShiny ? badgeImg(BADGE_ICONS.shiny, 'Has shiny', true, 12) : '';
-            const nameColor = g.anyPerfect ? '#c084fc'
+            const nameColor = g.anyPerfectShiny ? '#c084fc'
+                : g.anyPerfect ? '#A4D8FF'
                 : g.anyCapped ? '#facc15'
                 : g.anyAwakened ? '#60a5fa'
                 : '#9ca3af';
-            return `<div class="awaken-overview-row" data-gameid="${g.gameId}" data-name="${g.name.toLowerCase().replace(/"/g, '&quot;')}" data-awakened="${g.anyAwakened}" data-capped="${g.anyCapped}" data-perfect="${g.anyPerfect}">` +
+            return `<div class="at-row awaken-overview-row" data-gameid="${g.gameId}" data-name="${g.name.toLowerCase().replace(/"/g, '&quot;')}" data-awakened="${g.anyAwakened}" data-capped="${g.anyCapped}" data-perfect="${g.anyPerfect}">` +
                 `<img src="${portraitUrl}" alt="" style="width:34px;height:34px;image-rendering:pixelated;flex-shrink:0;" onerror="this.style.visibility='hidden'" />` +
                 `<div style="flex:1;min-width:0;">` +
                     `<div style="color:${nameColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">` +
@@ -1538,8 +1656,11 @@
                 row.style.display = show ? '' : 'none';
                 if (show) visible++;
             });
-            const label = (view === 'all' && !q) ? 'Total' : 'Visible';
-            overviewVisibleCounter.textContent = `${label}: ${visible}`;
+            const total = overviewGrid.querySelectorAll('.awaken-overview-row').length;
+            const isFiltered = !(view === 'all' && !q);
+            overviewVisibleCounter.textContent = isFiltered
+                ? `Visible: ${visible} / ${total}`
+                : `Total: ${total}`;
             if (farmSection.style.display !== 'none') renderFarmMaps();
         }
 
@@ -1604,13 +1725,21 @@
                     if (!villains.length) continue;
 
                     const wantedByCreature = new Map();
+                    const otherByCreature = new Map();
                     for (const v of villains) {
                         const id = Number(v.gameId);
-                        if (!wantedIds.has(id)) continue;
-                        const entry = wantedByCreature.get(id) || { count: 0, totalLevel: 0 };
-                        entry.count += 1;
-                        entry.totalLevel += Number(v.level || 0);
-                        wantedByCreature.set(id, entry);
+                        if (!Number.isFinite(id)) continue;
+                        if (wantedIds.has(id)) {
+                            const entry = wantedByCreature.get(id) || { count: 0, totalLevel: 0 };
+                            entry.count += 1;
+                            entry.totalLevel += Number(v.level || 0);
+                            wantedByCreature.set(id, entry);
+                        } else {
+                            const entry = otherByCreature.get(id) || { count: 0, totalLevel: 0 };
+                            entry.count += 1;
+                            entry.totalLevel += Number(v.level || 0);
+                            otherByCreature.set(id, entry);
+                        }
                     }
                     if (wantedByCreature.size === 0) continue;
 
@@ -1621,45 +1750,82 @@
                     const stamina = Number(room.staminaCost ?? 0);
                     const wantedPerStamina = stamina > 0 ? wantedTotal / stamina : wantedTotal;
 
+                    const isRaidRoom = (() => {
+                        try {
+                            if (typeof window.mapsDatabase?.isRaid === 'function') {
+                                return window.mapsDatabase.isRaid(room.id) === true;
+                            }
+                        } catch (_) {}
+                        return room.raid === true;
+                    })();
+
                     results.push({
                         roomId: room.id, mapName: ROOM_NAME[room.id] || room.id,
                         regionName, stamina, totalVillains, wantedTotal, uniqueWanted,
                         density, wantedPerStamina, defaultOrder: orderIdx++,
+                        isRaid: isRaidRoom,
                         wantedDetails: Array.from(wantedByCreature.entries()).map(([id, info]) => ({
                             id, name: wantedNamesById.get(id) || `#${id}`,
+                            count: info.count, avgLevel: info.totalLevel / info.count
+                        })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+                        otherDetails: Array.from(otherByCreature.entries()).map(([id, info]) => ({
+                            id, name: resolveName(id),
                             count: info.count, avgLevel: info.totalLevel / info.count
                         })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
                     });
                 }
             }
 
-            results.sort((a, b) => a.defaultOrder - b.defaultOrder);
+            results.sort((a, b) =>
+                b.uniqueWanted - a.uniqueWanted
+                || b.wantedPerStamina - a.wantedPerStamina
+                || a.defaultOrder - b.defaultOrder
+            );
+
+            const hideRaids = hideRaidsInput.checked;
+            const raidCount = results.filter(r => r.isRaid).length;
+            const visibleResults = hideRaids ? results.filter(r => !r.isRaid) : results;
 
             const wantedSummary = Array.from(wantedNamesById.values()).slice(0, 8).join(', ')
                 + (wantedNamesById.size > 8 ? ` … +${wantedNamesById.size - 8}` : '');
 
-            farmSummaryEl.innerHTML =
-                `<div>Searching for <b style="color:#88c8ff;">${wantedIds.size}</b> creatures across <b style="color:#88c8ff;">${results.length}</b> maps.</div>` +
-                `<div style="color:#777;margin-top:2px;">Targets: ${wantedSummary}</div>` +
-                `<div style="color:#777;margin-top:2px;">Sorted by game map order · Click a map to navigate.</div>`;
+            const raidNote = raidCount > 0
+                ? (hideRaids
+                    ? ` · <span style="color:#d87d7d;">${raidCount} raid${raidCount > 1 ? 's' : ''} hidden</span>`
+                    : ` · <span style="color:#d87d7d;">${raidCount} raid${raidCount > 1 ? 's' : ''}</span>`)
+                : '';
 
-            if (results.length === 0) {
+            farmSummaryEl.innerHTML =
+                `<div>Searching for <b style="color:#88c8ff;">${wantedIds.size}</b> creatures across <b style="color:#88c8ff;">${visibleResults.length}</b> maps.${raidNote}</div>` +
+                `<div style="color:#777;margin-top:2px;">Targets: ${wantedSummary}</div>` +
+                `<div style="color:#777;margin-top:2px;">Sorted by variety → stamina efficiency · Click a map to navigate.</div>`;
+
+            if (visibleResults.length === 0) {
                 farmListEl.innerHTML = '<div style="grid-column:1/-1;padding:16px;color:#888;text-align:center;">No map contains the filtered creatures.</div>';
                 return;
             }
 
-            farmListEl.innerHTML = results.slice(0, 60).map((r, idx) => {
+            farmListEl.innerHTML = visibleResults.slice(0, 60).map((r, idx) => {
                 const details = r.wantedDetails.map(d =>
-                    `<span style="color:#88c8ff;">${d.name}</span><span style="color:#888;">×${d.count} (lvl ${Math.round(d.avgLevel)})</span>`
+                    `<span style="color:#88c8ff;font-weight:bold;">${d.name}</span><span style="color:#888;">×${d.count} (lvl ${Math.round(d.avgLevel)})</span>`
+                ).join(' · ');
+                const otherDetails = (r.otherDetails || []).map(d =>
+                    `<span style="color:#888;">${d.name}×${d.count}</span>`
                 ).join(' · ');
                 const densityPct = Math.round(r.density * 100);
                 const densityColor = densityPct >= 70 ? '#7dd87d' : densityPct >= 40 ? '#e0c060' : '#d87d7d';
                 const effStr = r.wantedPerStamina.toFixed(2);
-                return `<div class="awaken-farm-row" data-room-id="${r.roomId}" title="Click to navigate to ${r.mapName}">` +
+                const raidBadge = r.isRaid
+                    ? ` <span style="display:inline-block;background:#7a1f1f;color:#ffd6d6;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:3px;letter-spacing:0.5px;vertical-align:1px;" title="This map is a raid — variable spawn time">RAID</span>`
+                    : '';
+                const titleAttr = r.isRaid
+                    ? `${r.mapName} (RAID — appears at variable times)`
+                    : `Click to navigate to ${r.mapName}`;
+                return `<div class="at-row awaken-farm-row${r.isRaid ? ' is-raid' : ''}" data-room-id="${r.roomId}" title="${titleAttr}">` +
                     `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">` +
                         `<div style="flex:1;min-width:0;">` +
                             `<span style="color:#777;font-size:10px;">#${idx + 1}</span> ` +
-                            `<b style="color:#f0c060;text-decoration:underline;text-decoration-color:#5a4a2a;">${r.mapName}</b> ` +
+                            `<b style="color:#f0c060;text-decoration:underline;text-decoration-color:#5a4a2a;">${r.mapName}</b>${raidBadge} ` +
                             `<span style="color:#666;font-size:10px;">· ${r.regionName}</span>` +
                         `</div>` +
                         `<div style="font-size:10px;color:#999;white-space:nowrap;">` +
@@ -1668,6 +1834,7 @@
                         `</div>` +
                     `</div>` +
                     `<div style="font-size:10px;margin-top:2px;line-height:1.5;">${details}</div>` +
+                    (otherDetails ? `<div style="font-size:9px;margin-top:1px;line-height:1.4;color:#666;">also: ${otherDetails}</div>` : '') +
                 `</div>`;
             }).join('');
 
@@ -1679,6 +1846,22 @@
             });
         }
 
+        let farmExpandedFrom = null;
+
+        function closeFarmPanel() {
+            farmSection.style.display = 'none';
+            farmToggleBtn.style.filter = '';
+            if (farmExpandedFrom) {
+                panel.style.width = farmExpandedFrom.width + 'px';
+                panel.style.left = farmExpandedFrom.left + 'px';
+                savePanelSettings({
+                    width: farmExpandedFrom.width,
+                    left: farmExpandedFrom.left
+                });
+                farmExpandedFrom = null;
+            }
+        }
+
         function toggleFarmPanel() {
             const isHidden = farmSection.style.display === 'none' || !farmSection.style.display;
             if (isHidden) {
@@ -1686,26 +1869,31 @@
                 const desiredMin = 880;
                 const currentWidth = panel.offsetWidth;
                 if (currentWidth < desiredMin) {
+                    const rectBefore = panel.getBoundingClientRect();
+                    farmExpandedFrom = {
+                        width: currentWidth,
+                        left: parseInt(panel.style.left, 10) || rectBefore.left
+                    };
                     panel.style.width = Math.min(desiredMin, window.innerWidth - 40) + 'px';
                     const rect = panel.getBoundingClientRect();
                     const overflow = rect.right - window.innerWidth + 10;
                     if (overflow > 0) {
                         panel.style.left = Math.max(10, rect.left - overflow) + 'px';
                     }
+                    savePanelSettings({
+                        width: parseInt(panel.style.width, 10),
+                        left: parseInt(panel.style.left, 10)
+                    });
                 }
                 farmToggleBtn.style.filter = 'brightness(1.15)';
                 renderFarmMaps();
             } else {
-                farmSection.style.display = 'none';
-                farmToggleBtn.style.filter = '';
+                closeFarmPanel();
             }
         }
 
         farmToggleBtn.addEventListener('click', toggleFarmPanel);
-        farmCloseBtn.addEventListener('click', () => {
-            farmSection.style.display = 'none';
-            farmToggleBtn.style.filter = '';
-        });
+        farmCloseBtn.addEventListener('click', closeFarmPanel);
 
         // Set initial tab from persisted settings
         switchTab(s.activeTab || 'tracker');
@@ -1925,7 +2113,9 @@
         exports.cleanup = cleanup;
         exports.resetData = () => {
             state.byMap.clear();
+            state.baselineByMap.clear();
             snapshotBaseline();
+            if (state.currentRoomId) ensureMapBaseline(state.currentRoomId);
             render();
             scheduleSave();
         };

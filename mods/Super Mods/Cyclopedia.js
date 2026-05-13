@@ -45,6 +45,7 @@ const COLOR_CONSTANTS = {
   WARNING: '#888',
   PERFECT: '#FFD700',
   MAX_AWAKENED: '#D8B4FF',
+  HUNDO: '#A4D8FF',
   AWAKENED: '#FFB347',
   UNOWNED: '#666',
   HOVER: '#888'
@@ -1838,7 +1839,7 @@ const DOMUtils = {
     return scrollContainer;
   },
   
-  createListItem: function(text, className = FONT_CONSTANTS.SIZES.BODY, isOwned = true, isPerfect = false, isT5 = false, hasShiny = false, hasAwakened = false, hasShinyTier = false) {
+  createListItem: function(text, className = FONT_CONSTANTS.SIZES.BODY, isOwned = true, isPerfect = false, isT5 = false, hasShiny = false, hasAwakened = false, hasShinyTier = false, hasHundoTier = false) {
     const item = document.createElement('div');
     item.className = className;
     
@@ -1860,15 +1861,23 @@ const DOMUtils = {
       contentContainer.appendChild(shinyIcon);
     }
 
-    // Add awakened / shiny-tier icon.
-    // Shiny-tier has higher priority when both statuses are present.
-    if (hasAwakened || hasShinyTier) {
+    // Add awakened / hundo / shiny-tier icon.
+    // Priority: shiny-tier > hundo-tier > awakened when multiple are present.
+    if (hasAwakened || hasShinyTier || hasHundoTier) {
       const awakenedIcon = document.createElement('img');
-      awakenedIcon.src = hasShinyTier
-        ? 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png'
-        : 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png';
-      awakenedIcon.alt = hasShinyTier ? 'shiny-tier' : 'awakened';
-      awakenedIcon.title = hasShinyTier ? 'Has level 99 max-genes creature' : 'Has awakened creature';
+      if (hasShinyTier) {
+        awakenedIcon.src = 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png';
+        awakenedIcon.alt = 'shiny-tier';
+        awakenedIcon.title = 'Has level 99 max-genes shiny creature';
+      } else if (hasHundoTier) {
+        awakenedIcon.src = 'https://bestiaryarena.com/assets/icons/star-tier-hundo.png';
+        awakenedIcon.alt = 'hundo-tier';
+        awakenedIcon.title = 'Has level 99 max-genes creature';
+      } else {
+        awakenedIcon.src = 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png';
+        awakenedIcon.alt = 'awakened';
+        awakenedIcon.title = 'Has awakened creature';
+      }
       awakenedIcon.style.width = '10px';
       awakenedIcon.style.height = '10px';
       awakenedIcon.style.flexShrink = '0';
@@ -1885,10 +1894,16 @@ const DOMUtils = {
     // Apply styling based on item status
     const baseStyle = { cursor: 'pointer', padding: '2px 4px', borderRadius: '2px', textAlign: 'left' };
     if (hasShinyTier) {
-      // Light purple for max awakened creatures (level 99 + max genes).
+      // Light purple for max awakened shiny creatures (level 99 + max genes + shiny).
       Object.assign(item.style, {
         ...baseStyle,
         color: COLOR_CONSTANTS.MAX_AWAKENED
+      });
+    } else if (hasHundoTier) {
+      // Light blue for non-shiny hundo creatures (level 99 + max genes, no shiny).
+      Object.assign(item.style, {
+        ...baseStyle,
+        color: COLOR_CONSTANTS.HUNDO
       });
     } else if (hasAwakened) {
       // Orange for awakened creatures that are not max awakened.
@@ -1926,7 +1941,7 @@ const DOMUtils = {
 function getCreatureStatus(creatureName) {
   try {
     if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
-      return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false };
+      return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false, hundoTier: false };
     }
     
     const playerContext = globalThis.state.player.getSnapshot().context;
@@ -1952,7 +1967,7 @@ function getCreatureStatus(creatureName) {
     const matchingMonsters = ownedMonsters.filter(monster => monster.gameId === creatureGameId);
     
     if (matchingMonsters.length === 0) {
-      return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false };
+      return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false, hundoTier: false };
     }
 
     const getMonsterLevel = (monster) => {
@@ -1982,8 +1997,17 @@ function getCreatureStatus(creatureName) {
       Number(monster.tier) >= 6
     );
 
-    // Level 99 + max genes (100 total) should display shiny-tier icon.
+    // Shiny tier: a SHINY creature at level 99 with max genes (100 total).
     const hasShinyTier = matchingMonsters.some(monster => {
+      if (monster.shiny !== true) return false;
+      const level = getMonsterLevel(monster);
+      const totalGenes = getGeneValues(monster).reduce((sum, value) => sum + value, 0);
+      return level >= 99 && totalGenes >= 100;
+    });
+
+    // Hundo tier: a NON-shiny creature at level 99 with max genes (100 total).
+    const hasHundoTier = matchingMonsters.some(monster => {
+      if (monster.shiny === true) return false;
       const level = getMonsterLevel(monster);
       const totalGenes = getGeneValues(monster).reduce((sum, value) => sum + value, 0);
       return level >= 99 && totalGenes >= 100;
@@ -2009,11 +2033,12 @@ function getCreatureStatus(creatureName) {
       shiny: hasShiny,
       perfect: isPerfect,
       awakened: hasAwakened,
-      shinyTier: hasShinyTier
+      shinyTier: hasShinyTier,
+      hundoTier: hasHundoTier
     };
   } catch (error) {
     console.warn('[Cyclopedia] Error checking creature status:', error);
-    return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false };
+    return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false, hundoTier: false };
   }
 }
 
@@ -2032,14 +2057,120 @@ function hasAwakenedCreature(creatureName) {
   return getCreatureStatus(creatureName).awakened;
 }
 
-// Function to check if user has any level 99 max-gene variants of a creature
+// Function to check if user has any level 99 max-gene SHINY variants of a creature
 function hasShinyTierCreature(creatureName) {
   return getCreatureStatus(creatureName).shinyTier;
+}
+
+// Function to check if user has any level 99 max-gene NON-shiny variants of a creature
+function hasHundoTierCreature(creatureName) {
+  return getCreatureStatus(creatureName).hundoTier;
 }
 
 // Function to check if user has a perfect creature (level 50 with 100 total genes)
 function isCreaturePerfect(creatureName) {
   return getCreatureStatus(creatureName).perfect;
+}
+
+/** Same ordering signals as Awaken Tracker overview (`renderOverview` groups.sort + per-monster rank). */
+const AWAKEN_TRACKER_SORT_TIER = 6;
+const AWAKEN_TRACKER_SORT_CAP = 20;
+const AWAKEN_TRACKER_SORT_STATS = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+/** Larger than max sum*100 (10_000): shiny awakened always ranks above non-shiny awakened (matches Awaken Tracker). */
+const AWAKEN_TRACKER_SHINY_AWAKENED_RANK_BOOST = 50_000;
+
+function getAwakenTrackerBestiarySortKey(creatureName) {
+  const empty = {
+    categoryRank: 3,
+    anyAwakened: false,
+    anyAwakenedShiny: false,
+    bestSum: 0,
+    bestRank: 0,
+    topTierGenePct: 0,
+    topTierLevel: 0
+  };
+  try {
+    if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) return empty;
+    const ownedMonsters = globalThis.state.player.getSnapshot().context.monsters || [];
+    const norm = String(creatureName || '').trim().toLowerCase();
+    if (!norm) return empty;
+
+    let creatureGameId = null;
+    if (cyclopediaState.monsterNameMap) {
+      const entry = cyclopediaState.monsterNameMap.get(norm);
+      if (entry) creatureGameId = entry.index;
+    }
+    if (creatureGameId == null && window.BestiaryModAPI?.utility?.maps) {
+      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(norm);
+    }
+    if (creatureGameId == null) return empty;
+
+    const matching = ownedMonsters.filter((m) => m && m.gameId === creatureGameId);
+    if (matching.length === 0) return empty;
+
+    const expToLevel = globalThis.state?.utils?.expToCurrentLevel;
+    const monsterLevel = (m) => {
+      if (typeof expToLevel === 'function' && m.exp) {
+        const lv = Number(expToLevel(m.exp));
+        return Number.isFinite(lv) ? lv : 0;
+      }
+      return Number(m.level) || 0;
+    };
+
+    const rankMon = (i) =>
+      (i.awakened && i.capped && i.level >= 99 ? 10_000_000 : 0)
+      + (i.awakened && i.capped ? 1_000_000 : 0)
+      + (i.awakened ? 100_000 : 0)
+      + (i.awakened && i.shiny ? AWAKEN_TRACKER_SHINY_AWAKENED_RANK_BOOST : 0)
+      + i.sum * 100
+      + (i.shiny ? 10 : 0)
+      + i.tier;
+
+    let anyAwakened = false;
+    let anyAwakenedShiny = false;
+    let anyCapped = false;
+    let anyPerfect = false;
+    let best = null;
+
+    for (const m of matching) {
+      let sum = 0;
+      let allCapped = true;
+      for (const s of AWAKEN_TRACKER_SORT_STATS) {
+        const v = Number(m[s] ?? 0);
+        sum += v;
+        if (v !== AWAKEN_TRACKER_SORT_CAP) allCapped = false;
+      }
+      const tier = Number(m.tier ?? 0);
+      const level = monsterLevel(m);
+      const awakened = tier === AWAKEN_TRACKER_SORT_TIER;
+      const mon = { tier, level, sum, awakened, capped: allCapped, shiny: m.shiny === true };
+
+      if (mon.awakened) anyAwakened = true;
+      if (mon.awakened && mon.shiny) anyAwakenedShiny = true;
+      if (mon.awakened && mon.capped) anyCapped = true;
+      if (mon.awakened && mon.capped && mon.level >= 99) anyPerfect = true;
+
+      if (!best || rankMon(mon) > rankMon(best)) best = mon;
+    }
+
+    let categoryRank = 3;
+    if (anyPerfect) categoryRank = 0;
+    else if (anyCapped) categoryRank = 1;
+    else if (anyAwakened) categoryRank = 2;
+
+    return {
+      categoryRank,
+      anyAwakened,
+      anyAwakenedShiny,
+      bestSum: best ? best.sum : 0,
+      bestRank: best ? rankMon(best) : 0,
+      topTierGenePct: best ? Math.min(100, Math.max(0, Math.floor(best.sum))) : 0,
+      topTierLevel: best ? best.level : 0
+    };
+  } catch (e) {
+    console.warn('[Cyclopedia] getAwakenTrackerBestiarySortKey:', e);
+    return empty;
+  }
 }
 
 // Unified function to get all equipment status information
@@ -3605,6 +3736,7 @@ function createBox({
       let hasShiny = false;
       let hasAwakened = false;
       let hasShinyTier = false;
+      let hasHundoTier = false;
       
       if (type === 'creature') {
         // Check if this is an unobtainable creature - if so, keep default styling
@@ -3615,6 +3747,7 @@ function createBox({
           hasShiny = hasShinyCreature(name);
           hasAwakened = hasAwakenedCreature(name);
           hasShinyTier = hasShinyTierCreature(name);
+          hasHundoTier = hasHundoTierCreature(name);
         }
       } else if (type === 'equipment') {
         isOwned = isEquipmentOwned(name);
@@ -3643,7 +3776,7 @@ function createBox({
         }
       }
       
-      const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5, hasShiny, hasAwakened, hasShinyTier);
+      const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5, hasShiny, hasAwakened, hasShinyTier, hasHundoTier);
       
       // Add raid icon for static raids, or event icon for dynamic event maps
       if (type === 'map') {
@@ -3698,11 +3831,15 @@ function createBox({
               const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === itemName.toLowerCase());
               if (!isUnobtainable) {
                 const hasShinyTier = hasShinyTierCreature(itemName);
+                const hasHundoTier = hasHundoTierCreature(itemName);
                 const hasAwakened = hasAwakenedCreature(itemName);
                 const isPerfect = isCreaturePerfect(itemName);
                 const isOwned = isCreatureOwned(itemName);
                 if (hasShinyTier) {
                   el.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+                  el.style.filter = 'none';
+                } else if (hasHundoTier) {
+                  el.style.color = COLOR_CONSTANTS.HUNDO;
                   el.style.filter = 'none';
                 } else if (hasAwakened) {
                   el.style.color = COLOR_CONSTANTS.AWAKENED;
@@ -3778,6 +3915,9 @@ function createBox({
         if (hasShinyTier) {
           item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
           item.style.filter = 'none';
+        } else if (hasHundoTier) {
+          item.style.color = COLOR_CONSTANTS.HUNDO;
+          item.style.filter = 'none';
         } else if (hasAwakened) {
           item.style.color = COLOR_CONSTANTS.AWAKENED;
           item.style.filter = 'none';
@@ -3819,6 +3959,9 @@ function createBox({
         if (hasShinyTier) {
           item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
           item.style.filter = 'none';
+        } else if (hasHundoTier) {
+          item.style.color = COLOR_CONSTANTS.HUNDO;
+          item.style.filter = 'none';
         } else if (hasAwakened) {
           item.style.color = COLOR_CONSTANTS.AWAKENED;
           item.style.filter = 'none';
@@ -3838,6 +3981,9 @@ function createBox({
         // Restore original styling based on item status
         if (hasShinyTier) {
           item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+          item.style.filter = 'none';
+        } else if (hasHundoTier) {
+          item.style.color = COLOR_CONSTANTS.HUNDO;
           item.style.filter = 'none';
         } else if (hasAwakened) {
           item.style.color = COLOR_CONSTANTS.AWAKENED;
@@ -3859,6 +4005,9 @@ function createBox({
         if (hasShinyTier) {
           item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
           item.style.filter = 'none';
+        } else if (hasHundoTier) {
+          item.style.color = COLOR_CONSTANTS.HUNDO;
+          item.style.filter = 'none';
         } else if (hasAwakened) {
           item.style.color = COLOR_CONSTANTS.AWAKENED;
           item.style.filter = 'none';
@@ -3878,6 +4027,9 @@ function createBox({
         // Restore original styling based on item status
         if (hasShinyTier) {
           item.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+          item.style.filter = 'none';
+        } else if (hasHundoTier) {
+          item.style.color = COLOR_CONSTANTS.HUNDO;
           item.style.filter = 'none';
         } else if (hasAwakened) {
           item.style.color = COLOR_CONSTANTS.AWAKENED;
@@ -4822,11 +4974,15 @@ function openCyclopediaModal(options) {
               const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
               if (!isUnobtainable) {
                 const hasShinyTier = hasShinyTierCreature(creatureName);
+                const hasHundoTier = hasHundoTierCreature(creatureName);
                 const hasAwakened = hasAwakenedCreature(creatureName);
                 const isPerfect = isCreaturePerfect(creatureName);
                 const isOwned = isCreatureOwned(creatureName);
                 if (hasShinyTier) {
                   el.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
+                  el.style.filter = 'none';
+                } else if (hasHundoTier) {
+                  el.style.color = COLOR_CONSTANTS.HUNDO;
                   el.style.filter = 'none';
                 } else if (hasAwakened) {
                   el.style.color = COLOR_CONSTANTS.AWAKENED;
@@ -4866,16 +5022,21 @@ function openCyclopediaModal(options) {
           }
           const span = row.querySelector('span');
           if (span && !span.dataset.baseLabel) {
-            span.dataset.baseLabel = (span.textContent || '').trim();
+            const raw = (span.textContent || '').trim();
+            span.dataset.baseLabel = raw.replace(/^\d+%\s+/, '');
           }
           const label = (span?.dataset.baseLabel || span?.textContent || row.textContent || '').trim();
+          const labelClean = label.replace(/^\d+%\s+/, '');
+          const awakenKey = getAwakenTrackerBestiarySortKey(labelClean);
           return {
             row,
             idx,
             span,
-            label,
-            labelNorm: label.toLowerCase(),
-            usageCount: getCreatureUsageCountByName(label)
+            label: labelClean,
+            labelNorm: labelClean.toLowerCase(),
+            usageCount: getCreatureUsageCountByName(labelClean),
+            genePct: awakenKey.topTierGenePct,
+            awakenKey
           };
         });
 
@@ -4884,6 +5045,39 @@ function openCyclopediaModal(options) {
           rowMeta
             .slice()
             .sort((a, b) => {
+              if (b.usageCount !== a.usageCount) return b.usageCount - a.usageCount;
+              const ka = a.awakenKey;
+              const kb = b.awakenKey;
+              if (ka.categoryRank !== kb.categoryRank) return ka.categoryRank - kb.categoryRank;
+              if (ka.anyAwakened && kb.anyAwakened) {
+                const pa = ka.anyAwakenedShiny ? 0 : 1;
+                const pb = kb.anyAwakenedShiny ? 0 : 1;
+                if (pa !== pb) return pa - pb;
+              }
+              if (kb.bestSum !== ka.bestSum) return kb.bestSum - ka.bestSum;
+              if (kb.bestRank !== ka.bestRank) return kb.bestRank - ka.bestRank;
+              return a.labelNorm.localeCompare(b.labelNorm);
+            })
+            .forEach((m) => listGrid.appendChild(m.row));
+        } else if (mode === 'tier' && listGrid) {
+          rowMeta
+            .slice()
+            .sort((a, b) => {
+              const ka = a.awakenKey;
+              const kb = b.awakenKey;
+              if (ka.categoryRank !== kb.categoryRank) return ka.categoryRank - kb.categoryRank;
+              if (ka.anyAwakened && kb.anyAwakened) {
+                const pa = ka.anyAwakenedShiny ? 0 : 1;
+                const pb = kb.anyAwakenedShiny ? 0 : 1;
+                if (pa !== pb) return pa - pb;
+              }
+              if (b.genePct !== a.genePct) return b.genePct - a.genePct;
+              if (a.genePct === 100) {
+                if (kb.bestRank !== ka.bestRank) return kb.bestRank - ka.bestRank;
+                if (kb.topTierLevel !== ka.topTierLevel) return kb.topTierLevel - ka.topTierLevel;
+              } else if (kb.bestRank !== ka.bestRank) {
+                return kb.bestRank - ka.bestRank;
+              }
               if (b.usageCount !== a.usageCount) return b.usageCount - a.usageCount;
               return a.labelNorm.localeCompare(b.labelNorm);
             })
@@ -4899,7 +5093,13 @@ function openCyclopediaModal(options) {
         rowMeta.forEach((meta) => {
           if (meta.span) {
             const pct = creatureUsageByMapStats.totalMaps > 0 ? Math.floor((meta.usageCount / creatureUsageByMapStats.totalMaps) * 100) : 0;
-            meta.span.textContent = mode === 'usage' ? `${pct}% ${meta.label}` : meta.label;
+            if (mode === 'usage') {
+              meta.span.textContent = `${pct}% ${meta.label}`;
+            } else if (mode === 'tier') {
+              meta.span.textContent = `${meta.genePct}% ${meta.label}`;
+            } else {
+              meta.span.textContent = meta.label;
+            }
           }
           const nameMatch = !q || meta.labelNorm.includes(q);
           const usageMatch = true;
@@ -4926,8 +5126,8 @@ function openCyclopediaModal(options) {
       };
       bestiarySearchInput.addEventListener('input', applyBestiarySearch);
       bestiaryFilterBtn.addEventListener('click', () => {
-        bestiaryFilterMode = bestiaryFilterMode === 'name' ? 'usage' : 'name';
-        bestiaryFilterBtn.textContent = bestiaryFilterMode === 'name' ? 'Name' : 'Usage';
+        bestiaryFilterMode = bestiaryFilterMode === 'name' ? 'tier' : bestiaryFilterMode === 'tier' ? 'usage' : 'name';
+        bestiaryFilterBtn.textContent = bestiaryFilterMode === 'name' ? 'Name' : bestiaryFilterMode === 'tier' ? 'Tier' : 'Usage';
         applyBestiarySearch();
       });
 

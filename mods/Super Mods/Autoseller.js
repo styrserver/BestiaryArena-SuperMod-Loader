@@ -55,6 +55,9 @@
         SQUEEZE_GENE_MAX: 100,
         SELL_GENE_MIN: 5,
         SELL_GENE_MAX: 79,
+        /** When sell/devour sealed is allowed, tier-5 sealed use this band (cannot rely on squeeze 80–100). */
+        SEALED_SELL_GENE_MIN: 5,
+        SEALED_SELL_GENE_MAX: 100,
         MAX_EXP_DEFAULT: 52251,
         // Button colors
         BUTTON_COLORS: {
@@ -1159,23 +1162,47 @@
                 continue;
             }
             if (isSealedTierFiveCreature(monster)) {
-                // Keep sell and squeeze sealed logic fully independent.
-                if (squeezeEnabled) {
-                    if (!isSealedTier5SqueezeAllowed(monsterName)) continue;
-                } else if (sellEnabled) {
-                    if (!isSealedTier5SellAllowed(monsterName)) continue;
-                } else {
-                    continue;
+                const sellAllowedForSealed = isSealedTier5SellAllowed(monsterName);
+                const squeezeAllowedForSealed = isSealedTier5SqueezeAllowed(monsterName);
+                const mayProcessSealed =
+                    (sellEnabled && sellAllowedForSealed) ||
+                    (squeezeEnabled && squeezeAllowedForSealed);
+                if (!mayProcessSealed) continue;
+
+                const hp = monster.hp || 0;
+                const ad = monster.ad || 0;
+                const ap = monster.ap || 0;
+                const armor = monster.armor || 0;
+                const magicResist = monster.magicResist || 0;
+                const genes = hp + ad + ap + armor + magicResist;
+
+                // Sealed tier-5 cannot be autosqueezed (in-game squeeze does not apply). When sell/devour
+                // is allowed, use the full 5–100% band so 80–100% sealed are cleared instead of wrongly
+                // matching only the normal autosell cap (e.g. 79) or the squeeze queue.
+                if (sellEnabled && sellAllowedForSealed) {
+                    const sealedMin = UI_CONSTANTS.SEALED_SELL_GENE_MIN;
+                    const sealedMax = UI_CONSTANTS.SEALED_SELL_GENE_MAX;
+                    if (genes >= sealedMin && genes <= sealedMax) {
+                        if (!isShinyCreature(monster)) {
+                            const exp = monster.exp || 0;
+                            if (exp < maxExpThreshold) {
+                                if (!hasDaycare || !daycareMonsterIds.includes(monster.id)) {
+                                    toSell.push(monster);
+                                }
+                            }
+                        }
+                    }
                 }
+                continue;
             }
-            
+
             const hp = monster.hp || 0;
             const ad = monster.ad || 0;
             const ap = monster.ap || 0;
             const armor = monster.armor || 0;
             const magicResist = monster.magicResist || 0;
             const genes = hp + ad + ap + armor + magicResist;
-            
+
             if (squeezeEnabled) {
                 if (genes >= squeezeMinGenes && genes <= squeezeMaxGenes) {
                     // FAILSAFE: NEVER autosqueeze shiny creatures
@@ -1185,13 +1212,13 @@
                     if (hasDaycare && daycareMonsterIds.includes(monster.id)) {
                         continue;
                     }
-                    
+
                     // Check ignore list
                     const creatureName = monster.name || (monster.gameId && globalThis.state?.utils?.getMonster?.(monster.gameId)?.metadata?.name);
                     if (creatureName && squeezeIgnoreList.includes(creatureName)) {
                         continue;
                     }
-                    
+
                     toSqueeze.push(monster);
                 }
             }
@@ -1200,7 +1227,7 @@
                 if (isShinyCreature(monster)) {
                     continue;
                 }
-                
+
                 const exp = monster.exp || 0;
                 if (exp < maxExpThreshold) {
                     if (!hasDaycare || !daycareMonsterIds.includes(monster.id)) {
@@ -7468,9 +7495,16 @@
             
             // Keep creatures with minGenes or higher (if enabled) - OVERRIDES ignore list
             if (keepGenesEnabled && totalGenes >= minGenes) {
-                return false;
+                const sealedSellableInFullBand =
+                    isSealedTierFiveCreature(invMonster) &&
+                    isSealedTier5SellAllowed(creatureName) &&
+                    totalGenes >= UI_CONSTANTS.SEALED_SELL_GENE_MIN &&
+                    totalGenes <= UI_CONSTANTS.SEALED_SELL_GENE_MAX;
+                if (!sealedSellableInFullBand) {
+                    return false;
+                }
             }
-            
+
             // Get creature name for keep range and ignore list check
             if (creatureName && ignoreList.includes(creatureName)) {
                 // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
@@ -7526,7 +7560,7 @@
                 return false;
             }
             const creatureName = getCreatureNameFromMonster(invMonster);
-            if (isSealedTierFiveCreature(invMonster) && !isSealedTier5SqueezeAllowed(creatureName)) {
+            if (isSealedTierFiveCreature(invMonster)) {
                 return false;
             }
             if (hasDaycare && daycareMonsterIds.includes(invMonster.id)) {

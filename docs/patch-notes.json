@@ -1,8 +1,38 @@
 {
   "_meta": {
-    "_comment": "Sort patch notes by: 1. Type, 2. mod, 3. text. Keep patch notes simple and concise."
+    "_comment": "Sort patch notes by: 1. Type, 2. mod, 3. text. Keep patch notes simple and concise. Do not have duplicate mod+type entries — merge them into one."
   },
   "notes": [
+    {
+      "version": "3.8.3",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "added",
+          "text": "Farm Maps panel now flags raid maps with a red RAID badge and a left-edge raid stripe, and provides a 'Hide raids' toggle (persisted per-user) to filter them out of suggestions."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Tracker tab now shares the same background and game-asset pixel-art borders as the Overview tab (on all row elements, including its own panel body). Stat (+1/+2) delta marks and 🎯 pause-on-cap marks are now scoped per-map instead of globally — baseline snapshots when first entering each map and marks persist independently per room (legacy global marks migrate to the room you were last on). Farm Maps panel now sorts by variety (count of wanted creatures) → stamina efficiency → game order, shows other creatures on each map in an 'also' line, and restores both its original width and left position when the panel closes. Internal refactor: deduplicated stat icon renderer, name resolution cache, badge utilities, CSS row styles, and shared STATS constant. Overview Perfect badge now distinguishes shiny perfect (star-tier-shiny icon, purple name) from non-shiny hundo perfect (star-tier-hundo icon, light blue name). Within the same overview category, species with any shiny+awakened copy sort before species that are awakened only on non-shiny copies (then full rank, then name)."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Bestiary list now distinguishes non-shiny hundo creatures (level 99 + max genes, no shiny) with a new star-tier-hundo icon and light blue text, while shiny hundos keep the existing star-tier-shiny icon and purple text. Priority: shiny tier > hundo tier > awakened across all hover/select/click states. Bestiary sort button cycles Name → Tier → Usage (repeat): Tier sorts by Awaken Tracker category (perfect → capped → awakened → rest), then among awakened species any shiny+awakened before awakened-only non-shiny, then by total genes on the rank-winning “top-tier” copy (NN% prefix uses that copy only); at 100% genes, ties use full rank (shiny/awakened progression) then higher level on that copy, then map usage, then name; below 100%, ties use rank then map usage then name. Usage is map-usage % first, then the same category + shiny-awakened-before-non-shiny rule, then best gene sum, full rank (includes tier), name."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Sealed (tier-5) only: with sell/devour sealed allowed, sealed use genes 5–100% for sell/devour (80–100% no longer stuck under the normal autosell max or squeeze queue). Sealed are excluded from autosqueeze; post-battle autosell no longer drops high-gene sealed on the autoplant 80%+ keeper rule."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Overview tab now actually displays the total/filter counter ('Total: N' when unfiltered, 'Visible: X / Y' when filtered) — the counter element was previously created but never inserted into the DOM."
+        }
+      ]
+    },
     {
       "version": "3.8.2",
       "changes": [
