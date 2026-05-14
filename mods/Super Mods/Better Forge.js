@@ -1329,12 +1329,29 @@
     }
   }
 
+  /** Grid inside the Better Forge modal (left Arsenal column). */
+  function getBetterForgeModalArsenalGrid() {
+    return document.getElementById('better-forge-modal-arsenal-grid');
+  }
+
+  /** Vanilla game Arsenal grid — any 6×34px equipment grid that is not the modal copy. */
+  function getNativeArsenalEquipmentGrid() {
+    const modalGrid = getBetterForgeModalArsenalGrid();
+    const candidates = document.querySelectorAll('div[style*="grid-template-columns: repeat(6, 34px)"]');
+    for (let i = 0; i < candidates.length; i++) {
+      const el = candidates[i];
+      if (el === modalGrid) continue;
+      return el;
+    }
+    return null;
+  }
+
   function addEquipmentToArsenal(equipment) {
     try {
       console.log(`[Better Forge] 🖥️ Adding equipment to Arsenal: ${equipment.id} (${equipment.tier})`);
       
       // Find the Arsenal scroll area
-      const arsenalScrollArea = document.querySelector('div[style*="grid-template-columns: repeat(6, 34px)"]');
+      const arsenalScrollArea = getNativeArsenalEquipmentGrid();
       if (!arsenalScrollArea) {
         console.warn('[Better Forge] Arsenal scroll area not found');
         return;
@@ -2281,7 +2298,9 @@
   
   function removeEquipmentFromArsenal(equipmentId) {
     try {
-      const arsenalButtons = document.querySelectorAll('button[data-equipment-id]');
+      const nativeGrid = getNativeArsenalEquipmentGrid();
+      if (!nativeGrid) return;
+      const arsenalButtons = nativeGrid.querySelectorAll('button[data-equipment-id]');
       for (const btn of arsenalButtons) {
         if (btn.getAttribute('data-equipment-id') === equipmentId) {
           btn.remove();
@@ -2295,7 +2314,9 @@
   
   function restoreEquipmentToArsenalById(equipmentId) {
     try {
-      const arsenalButtons = document.querySelectorAll('button[data-equipment-id]');
+      const modalGrid = getBetterForgeModalArsenalGrid();
+      if (!modalGrid) return;
+      const arsenalButtons = modalGrid.querySelectorAll('button[data-equipment-id]');
       for (const btn of arsenalButtons) {
         if (btn.getAttribute('data-equipment-id') === equipmentId) {
           btn.style.display = 'flex';
@@ -4072,6 +4093,7 @@
                    div.appendChild(searchContainer);
                    
                    const scrollArea = document.createElement('div');
+                   scrollArea.id = 'better-forge-modal-arsenal-grid';
                    scrollArea.style.cssText = 'flex: 1 1 0; height: calc(100% - 40px); min-height: 0; width: 100%; max-width: 100%; overflow-y: auto; display: grid; grid-template-columns: repeat(6, 34px); grid-auto-rows: 34px; gap: 0; padding: 5px; background: rgba(40,40,40,0.96); box-sizing: border-box; justify-content: center;';
                    
                    let currentFilter = forgeState.globalTierFilter || 'all';
@@ -5303,7 +5325,9 @@
 
    function hideEquipmentFromArsenal(equipment) {
      try {
-       const arsenalButtons = document.querySelectorAll('button[data-equipment]');
+       const modalGrid = getBetterForgeModalArsenalGrid();
+       if (!modalGrid) return;
+       const arsenalButtons = modalGrid.querySelectorAll('button[data-equipment]');
        for (const btn of arsenalButtons) {
          if (btn.getAttribute('data-equipment') === equipment.name && 
              btn.getAttribute('data-equipment-id') === equipment.id) {
@@ -5318,7 +5342,9 @@
 
    function showEquipmentInArsenal(equipment) {
      try {
-       const arsenalButtons = document.querySelectorAll('button[data-equipment]');
+       const modalGrid = getBetterForgeModalArsenalGrid();
+       if (!modalGrid) return;
+       const arsenalButtons = modalGrid.querySelectorAll('button[data-equipment]');
        for (const btn of arsenalButtons) {
          if (btn.getAttribute('data-equipment') === equipment.name && 
              btn.getAttribute('data-equipment-id') === equipment.id) {
@@ -5339,7 +5365,7 @@
       const selectedEquipmentIds = Array.from(col2.querySelectorAll('button[data-equipment-id]'))
         .map(btn => btn.getAttribute('data-equipment-id'));
       
-      const arsenalScrollArea = document.querySelector('div[style*="grid-template-columns: repeat(6, 34px)"]');
+      const arsenalScrollArea = getBetterForgeModalArsenalGrid();
       if (!arsenalScrollArea) return;
       
       selectedEquipmentIds.forEach(equipmentId => {
@@ -5455,11 +5481,13 @@
       
       const disenchantButtons = col2.querySelectorAll('button[data-equipment-id]');
       
+      const modalArsenalGrid = getBetterForgeModalArsenalGrid();
       disenchantButtons.forEach(btn => {
         const equipmentId = btn.getAttribute('data-equipment-id');
         const equipmentName = btn.getAttribute('data-equipment');
         
-        const arsenalButtons = document.querySelectorAll('button[data-equipment]');
+        if (!modalArsenalGrid) return;
+        const arsenalButtons = modalArsenalGrid.querySelectorAll('button[data-equipment]');
         for (const arsenalBtn of arsenalButtons) {
           if (arsenalBtn.getAttribute('data-equipment') === equipmentName && 
               arsenalBtn.getAttribute('data-equipment-id') === equipmentId) {
@@ -5471,12 +5499,14 @@
       
       setTimeout(() => {
         try {
-          const hiddenArsenalButtons = document.querySelectorAll('button[data-equipment][style*="display: none"]');
-          hiddenArsenalButtons.forEach(btn => {
-            btn.style.display = 'flex';
-          });
+          if (modalArsenalGrid) {
+            const hiddenArsenalButtons = modalArsenalGrid.querySelectorAll('button[data-equipment][style*="display: none"]');
+            hiddenArsenalButtons.forEach(btn => {
+              btn.style.display = 'flex';
+            });
+          }
           
-          const arsenalScrollArea = document.querySelector('div[style*="grid-template-columns: repeat(6, 34px)"]');
+          const arsenalScrollArea = getNativeArsenalEquipmentGrid();
           if (arsenalScrollArea) {
             arsenalScrollArea.style.opacity = '0.99';
             setTimeout(() => {

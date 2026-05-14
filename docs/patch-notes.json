@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.8.4",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Creature detail 'Owned' rows: level-99 max-gene non-shiny copies now show the hundo star icon (star-tier-hundo) and hundo slot border (rarity-hundo) like the base game, instead of always using the shiny max star and shiny border."
+        },
+        {
+          "mod": "Better Forge",
+          "type": "fixed",
+          "text": "Disenchant staging no longer hides or strips items from the main Arsenal sidebar: hide/show, search sync, add/remove, and restore paths now scope to the modal Arsenal grid (#better-forge-modal-arsenal-grid) vs the vanilla equipment grid, instead of matching the first duplicate button on the whole page."
+        }
+      ]
+    },
+    {
       "version": "3.8.3",
       "changes": [
         {

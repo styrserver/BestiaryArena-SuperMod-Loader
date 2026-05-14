@@ -16184,11 +16184,18 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
 
       if (isMaxAwakened) {
         // Replace existing awakened/star-tier icon instead of stacking another icon.
+        // Match getCreatureStatus: shiny max → shiny star; non-shiny max → hundo star.
         const starTierIcon = portrait.querySelector('img[alt="star tier"]');
         if (starTierIcon) {
-          starTierIcon.src = 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png';
-          starTierIcon.alt = 'shiny-tier';
-          starTierIcon.title = 'Has level 99 max-genes creature';
+          if (monster.shiny === true) {
+            starTierIcon.src = 'https://bestiaryarena.com/assets/icons/star-tier-shiny.png';
+            starTierIcon.alt = 'shiny-tier';
+            starTierIcon.title = 'Has level 99 max-genes shiny creature';
+          } else {
+            starTierIcon.src = 'https://bestiaryarena.com/assets/icons/star-tier-hundo.png';
+            starTierIcon.alt = 'hundo-tier';
+            starTierIcon.title = 'Has level 99 max-genes creature';
+          }
         }
       }
 
@@ -16258,10 +16265,13 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
 
       // Use requestAnimationFrame for smoother DOM updates
       requestAnimationFrame(() => {
-        const borderElem = portrait.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny');
+        const borderElem = portrait.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny, .rarity-hundo');
         if (borderElem) {
-          if (isMaxAwakened) {
+          if (isMaxAwakened && monster.shiny === true) {
             borderElem.className = 'absolute inset-0 z-2 opacity-80 rarity-shiny';
+            borderElem.removeAttribute('data-rarity');
+          } else if (isMaxAwakened) {
+            borderElem.className = 'absolute inset-0 z-1 opacity-80 rarity-hundo';
             borderElem.removeAttribute('data-rarity');
           } else if (isAwakened) {
             borderElem.className = 'absolute inset-0 z-2 opacity-80 rarity-awaken';
