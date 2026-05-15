@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.8.5",
+      "changes": [
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Persistence v2: slimmer per-battle loot/creature rows in game localStorage, aggregate loot/creature maps no longer duplicated in the JSON (rebuilt from sessions after load; older saves still load). Storage-full / quota / repeated-save panel warnings use i18n (mods.huntAnalyzer.storageResetDismissHint with {clearAll} + clearAll) so the reset guidance matches locale."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Autoplant plantMonsterFilter now matches autosell sealed handling: gene thresholds use calculateTotalGenes (same mixed flat/genes stats as inventory), and sealed tier-5 creatures with sell/devour allowed use the 5–100% sealed band so the 80%+ keeper rule no longer blocks devour on that path."
+        }
+      ]
+    },
+    {
       "version": "3.8.4",
       "changes": [
         {

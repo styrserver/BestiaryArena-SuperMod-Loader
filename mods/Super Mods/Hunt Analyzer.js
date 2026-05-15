@@ -1177,11 +1177,82 @@ const MAX_SESSIONS_TO_KEEP = 10000;
 // localStorage budget: stay under 4.5 MB to leave headroom for other keys
 const STORAGE_BUDGET_BYTES = 4.5 * 1024 * 1024;
 
+/** v2+: slim session loot/creatures; aggregate maps omitted and rebuilt from sessions on load. */
+const HUNT_ANALYZER_PERSIST_FORMAT_VERSION = 2;
+
+let _needsAggregateFromSessions = false;
+
+function huntAnalyzerPersistUsesDerivedAggregates(version) {
+    return typeof version === 'number' && version >= 2;
+}
+
+function isNumericHuntSpriteId(spriteId) {
+    return spriteId != null && (typeof spriteId === 'number' || /^\d+$/.test(String(spriteId)));
+}
+
+// Strip UI-only / recomputable fields so JSON stays small (runtime state unchanged).
+function slimLootItemForPersistence(item) {
+    if (!item || typeof item !== 'object') return item;
+    const out = {
+        count: item.count,
+        originalName: item.originalName,
+        rarity: item.rarity,
+        spriteId: item.spriteId,
+        isEquipment: !!item.isEquipment,
+        gameId: item.gameId != null ? item.gameId : null,
+        stat: item.stat != null ? item.stat : null
+    };
+    if (item._descriptiveRarity) out._descriptiveRarity = item._descriptiveRarity;
+    if (!isNumericHuntSpriteId(item.spriteId)) {
+        const src = item.src || item.spriteSrc;
+        if (src) out.src = src;
+    }
+    return out;
+}
+
+function slimCreatureForPersistence(creature) {
+    if (!creature || typeof creature !== 'object') return creature;
+    return {
+        count: creature.count,
+        originalName: creature.originalName,
+        tierLevel: creature.tierLevel,
+        tierName: creature.tierName,
+        totalStats: creature.totalStats,
+        gameId: creature.gameId,
+        isShiny: !!creature.isShiny,
+        isSealed: !!creature.isSealed
+    };
+}
+
 // Guard flag: if a load fails (corrupt JSON, etc.), block auto-save from overwriting
 let _persistenceLoadFailed = false;
 
 // Track consecutive save failures so we can warn the user
 let _consecutiveSaveFailures = 0;
+
+/** Localized via mods.huntAnalyzer.storageResetDismissHint ({clearAll}) and clearAll. */
+function getHuntAnalyzerStorageResetDismissHint() {
+    let clearLabel = 'Clear All';
+    try {
+        if (typeof api !== 'undefined' && api?.i18n?.t) {
+            const lbl = api.i18n.t('mods.huntAnalyzer.clearAll');
+            if (lbl && typeof lbl === 'string' && lbl !== 'mods.huntAnalyzer.clearAll') {
+                clearLabel = lbl;
+            }
+        }
+    } catch (_e) { /* keep default */ }
+
+    try {
+        if (typeof api !== 'undefined' && api?.i18n?.t) {
+            const hintT = api.i18n.t('mods.huntAnalyzer.storageResetDismissHint');
+            if (hintT && hintT !== 'mods.huntAnalyzer.storageResetDismissHint') {
+                return ' ' + hintT.replace(/\{clearAll\}/g, clearLabel);
+            }
+        }
+    } catch (_e) { /* fall through */ }
+
+    return ` Use ${clearLabel} to reset the analyzer—the warning stops once storage has room.`;
+}
 
 // =======================
 // 2.5. Autoplay Time Tracking Functions
@@ -1966,10 +2037,10 @@ function logPersistenceOperation(operation, success = true) {
     }
 }
 
-// Clean session data by removing visual elements and unnecessary fields
+// Clean session data for persistence: drop DOM visuals and nonessential fields (see slim* helpers).
 function cleanSessionData(sessions) {
     return sessions.map(session => {
-        const cleanSession = {
+        return {
             message: session.message,
             roomId: session.roomId,
             roomName: session.roomName,
@@ -1981,18 +2052,9 @@ function cleanSessionData(sessions) {
             victory: session.victory,
             gold: Math.max(0, Math.floor(Number(session.gold) || 0)),
             dust: Math.max(0, Math.floor(Number(session.dust) || 0)),
-            loot: (session.loot || []).map(item => {
-                const cleanItem = { ...item };
-                delete cleanItem.visual; // Remove visual - will be regenerated on load
-                return cleanItem;
-            }),
-            creatures: (session.creatures || []).map(creature => {
-                const cleanCreature = { ...creature };
-                delete cleanCreature.visual; // Remove visual - will be regenerated on load
-                return cleanCreature;
-            })
+            loot: (session.loot || []).map(slimLootItemForPersistence),
+            creatures: (session.creatures || []).map(slimCreatureForPersistence)
         };
-        return cleanSession;
     });
 }
 
@@ -2012,6 +2074,25 @@ function pruneOldSessions() {
     return prunedCount;
 }
 
+/** Only known counter fields — avoids persisting stray props (e.g. legacy render-only `loot`). */
+function getTotalsSnapshotForPersistence() {
+    const s = HuntAnalyzerState.totals;
+    return {
+        gold: s.gold,
+        creatures: s.creatures,
+        equipment: s.equipment,
+        runes: s.runes,
+        dust: s.dust,
+        shiny: s.shiny,
+        sealed: s.sealed,
+        staminaSpent: s.staminaSpent,
+        staminaRecovered: s.staminaRecovered,
+        experience: s.experience,
+        wins: s.wins,
+        losses: s.losses
+    };
+}
+
 // Save Hunt Analyzer data to localStorage
 function saveHuntAnalyzerData() {
     if (_persistenceLoadFailed) {
@@ -2023,30 +2104,17 @@ function saveHuntAnalyzerData() {
         snapshotIntoTotals();
         pruneOldSessions();
 
-        const cleanAggregatedLoot = new Map();
-        HuntAnalyzerState.data.aggregatedLoot.forEach((value, key) => {
-            const cleanValue = { ...value };
-            delete cleanValue.visual;
-            cleanAggregatedLoot.set(key, cleanValue);
-        });
-        
-        const cleanAggregatedCreatures = new Map();
-        HuntAnalyzerState.data.aggregatedCreatures.forEach((value, key) => {
-            const cleanValue = { ...value };
-            delete cleanValue.visual;
-            cleanAggregatedCreatures.set(key, cleanValue);
-        });
-        
         const cleanSessions = cleanSessionData(HuntAnalyzerState.data.sessions);
-        
+
         const mapTimeSnapshot = new Map(HuntAnalyzerState.timeTracking.mapTimeMs);
         const mapTimeMsArray = Array.from(mapTimeSnapshot.entries());
-        
-        const buildPayload = (sessions, loot, creatures) => ({
+
+        const buildPayload = (sessions) => ({
+            v: HUNT_ANALYZER_PERSIST_FORMAT_VERSION,
             sessions,
-            totals: HuntAnalyzerState.totals,
-            aggregatedLoot: loot,
-            aggregatedCreatures: creatures,
+            totals: getTotalsSnapshotForPersistence(),
+            aggregatedLoot: [],
+            aggregatedCreatures: [],
             session: HuntAnalyzerState.session,
             timeTracking: {
                 currentMap: HuntAnalyzerState.timeTracking.currentMap,
@@ -2060,11 +2128,7 @@ function saveHuntAnalyzerData() {
             }
         });
 
-        let json = JSON.stringify(buildPayload(
-            cleanSessions,
-            Array.from(cleanAggregatedLoot.entries()),
-            Array.from(cleanAggregatedCreatures.entries())
-        ));
+        let json = JSON.stringify(buildPayload(cleanSessions));
 
         // Pre-flight size check: progressively reduce sessions until we fit
         let sessionsToSave = cleanSessions;
@@ -2077,11 +2141,7 @@ function saveHuntAnalyzerData() {
             let lo = 0, hi = sortedSessions.length;
             while (lo < hi) {
                 const mid = Math.ceil((lo + hi) / 2);
-                const testJson = JSON.stringify(buildPayload(
-                    sortedSessions.slice(0, mid),
-                    Array.from(cleanAggregatedLoot.entries()),
-                    Array.from(cleanAggregatedCreatures.entries())
-                ));
+                const testJson = JSON.stringify(buildPayload(sortedSessions.slice(0, mid)));
                 if (testJson.length <= STORAGE_BUDGET_BYTES) {
                     lo = mid;
                 } else {
@@ -2090,17 +2150,12 @@ function saveHuntAnalyzerData() {
             }
 
             if (lo === 0) {
-                // Even 0 sessions with full aggregated data is too large; drop aggregated data too
-                json = JSON.stringify(buildPayload([], [], []));
+                json = JSON.stringify(buildPayload([]));
                 sessionsToSave = [];
-                console.warn('[Hunt Analyzer] Dropped aggregated data and sessions to fit in storage. Totals preserved.');
+                console.warn('[Hunt Analyzer] Dropped sessions to fit in storage. Totals preserved.');
             } else {
                 sessionsToSave = sortedSessions.slice(0, lo);
-                json = JSON.stringify(buildPayload(
-                    sessionsToSave,
-                    Array.from(cleanAggregatedLoot.entries()),
-                    Array.from(cleanAggregatedCreatures.entries())
-                ));
+                json = JSON.stringify(buildPayload(sessionsToSave));
                 console.warn(`[Hunt Analyzer] Pruned sessions from ${cleanSessions.length} to ${lo} to fit storage budget`);
             }
             prunedForSize = true;
@@ -2111,21 +2166,21 @@ function saveHuntAnalyzerData() {
             _consecutiveSaveFailures = 0;
             logPersistenceOperation('Data save');
             if (prunedForSize) {
-                showSaveWarning(`Storage full: kept ${sessionsToSave.length} of ${cleanSessions.length} sessions. Totals are safe.`);
+                showSaveWarning(`Storage full: kept ${sessionsToSave.length} of ${cleanSessions.length} sessions. Totals are safe.${getHuntAnalyzerStorageResetDismissHint()}`);
             }
         } catch (quotaError) {
             if (quotaError.name === 'QuotaExceededError' || quotaError.message?.includes('quota')) {
                 console.warn('[Hunt Analyzer] Quota exceeded despite pre-flight check, saving totals only...');
-                const minimalData = buildPayload([], [], []);
+                const minimalData = buildPayload([]);
                 try {
                     localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(minimalData));
                     logPersistenceOperation('Data save (minimal — totals only)');
-                    showSaveWarning('Storage quota exceeded. Session details dropped but totals are preserved.');
+                    showSaveWarning(`Storage quota exceeded. Session details dropped but totals are preserved.${getHuntAnalyzerStorageResetDismissHint()}`);
                 } catch (finalError) {
                     _consecutiveSaveFailures++;
                     console.error('[Hunt Analyzer] Complete save failure:', finalError);
                     logPersistenceOperation('Data save', false);
-                    showSaveWarning('Save failed! Data may be lost on refresh. Use "Copy Log" to back up.');
+                    showSaveWarning(`Save failed! Data may be lost on refresh. Use "Copy Log" to back up.${getHuntAnalyzerStorageResetDismissHint()}`);
                 }
             } else {
                 throw quotaError;
@@ -2136,7 +2191,7 @@ function saveHuntAnalyzerData() {
         console.error('[Hunt Analyzer] Error saving data:', error);
         logPersistenceOperation('Data save', false);
         if (_consecutiveSaveFailures >= 3) {
-            showSaveWarning('Multiple save failures detected. Use "Copy Log" to back up your data.');
+            showSaveWarning(`Multiple save failures detected. Use "Copy Log" to back up your data.${getHuntAnalyzerStorageResetDismissHint()}`);
         }
     }
 }
@@ -2162,7 +2217,9 @@ function loadHuntAnalyzerData() {
         const savedData = localStorage.getItem(HUNT_ANALYZER_STORAGE_KEY);
         if (savedData) {
             const parsedData = JSON.parse(savedData);
-            
+            const persistV = typeof parsedData.v === 'number' ? parsedData.v : 1;
+            const useDerivedAggregates = huntAnalyzerPersistUsesDerivedAggregates(persistV);
+
             // Restore sessions
             if (parsedData.sessions) {
                 HuntAnalyzerState.data.sessions = parsedData.sessions;
@@ -2172,20 +2229,29 @@ function loadHuntAnalyzerData() {
                     pruneOldSessions();
                 }
             }
-            
+
             // Restore totals
             if (parsedData.totals) {
                 Object.assign(HuntAnalyzerState.totals, parsedData.totals);
+                delete HuntAnalyzerState.totals.loot;
             }
-            
-            // Restore aggregated data (convert arrays back to Maps, visuals will be regenerated later)
-            if (parsedData.aggregatedLoot) {
-                HuntAnalyzerState.data.aggregatedLoot = new Map(parsedData.aggregatedLoot);
+
+            if (useDerivedAggregates) {
+                HuntAnalyzerState.data.aggregatedLoot = new Map();
+                HuntAnalyzerState.data.aggregatedCreatures = new Map();
+                if (HuntAnalyzerState.data.sessions.length > 0) {
+                    _needsAggregateFromSessions = true;
+                }
+            } else {
+                // Restore aggregated data (convert arrays back to Maps, visuals will be regenerated later)
+                if (parsedData.aggregatedLoot) {
+                    HuntAnalyzerState.data.aggregatedLoot = new Map(parsedData.aggregatedLoot);
+                }
+                if (parsedData.aggregatedCreatures) {
+                    HuntAnalyzerState.data.aggregatedCreatures = new Map(parsedData.aggregatedCreatures);
+                }
             }
-            if (parsedData.aggregatedCreatures) {
-                HuntAnalyzerState.data.aggregatedCreatures = new Map(parsedData.aggregatedCreatures);
-            }
-            
+
             // Restore session state
             if (parsedData.session) {
                 Object.assign(HuntAnalyzerState.session, parsedData.session);
@@ -3340,6 +3406,24 @@ function getCreatureDetails(monsterDrop) {
     return { name, visual: visualContainer, rarity: tierLevel, totalStats, tierName, tierLevel, gameId: monsterDrop.gameId, isShiny, isSealed };
 }
 
+/**
+ * Stable merge key for loot across sessions and persist/load (null vs missing src/stat, src vs spriteSrc).
+ */
+function buildLootAggregateKey(item) {
+    if (!item || typeof item !== 'object') return '';
+    const name = item.originalName ?? '';
+    const rarity = item.rarity ?? '';
+    const spriteId = item.spriteId != null && item.spriteId !== '' ? item.spriteId : '';
+    const srcRaw = (item.src != null && item.src !== '')
+        ? item.src
+        : (item.spriteSrc != null && item.spriteSrc !== '' ? item.spriteSrc : '');
+    const src = srcRaw === '' || srcRaw == null ? '' : String(srcRaw);
+    const statRaw = item.stat != null && item.stat !== '' ? item.stat : '';
+    const stat = statRaw === '' || statRaw == null ? '' : String(statRaw);
+    const eq = item.isEquipment ? 1 : 0;
+    return `${name}_${rarity}_${spriteId}_${src}_${eq}_${stat}`;
+}
+
 function buildCreatureAggregateKey(creature) {
     const isSealed = !!creature.isSealed;
     const shinyPart = creature.isShiny ? 'shiny' : 'normal';
@@ -3675,7 +3759,15 @@ class DataProcessor {
         HuntAnalyzerState.totals.runes += item.amount || 1;
       }
 
-      const mapKey = `${resolvedItemName}_${rarity}_${item.spriteId}_${item.spriteSrc}_${isEquipment}_${item.stat}`;
+      const mapKey = buildLootAggregateKey({
+        originalName: resolvedItemName,
+        rarity,
+        spriteId: item.spriteId || item.gameId,
+        src: item.spriteSrc,
+        spriteSrc: item.spriteSrc,
+        isEquipment,
+        stat: item.stat || equipmentStat || null
+      });
       const currentQuantity = item.amount || 1;
 
       if (aggregatedLootForSession.has(mapKey)) {
@@ -3933,7 +4025,7 @@ class DataProcessor {
                 return; // Skip adding to aggregatedLoot
             }
 
-            const mapKey = `${item.originalName}_${item.rarity}_${item.spriteId}_${item.src}_${item.isEquipment}_${item.stat}`;
+            const mapKey = buildLootAggregateKey(item);
             if (this.state.data.aggregatedLoot.has(mapKey)) {
                 const existing = this.state.data.aggregatedLoot.get(mapKey);
                 existing.count += item.count;
@@ -3985,6 +4077,7 @@ class DataProcessor {
             if (creature.isSealed) {
           HuntAnalyzerState.totals.sealed += creature.count;
             }
+            HuntAnalyzerState.totals.creatures += creature.count || 0;
         });
     });
   }
@@ -3992,6 +4085,19 @@ class DataProcessor {
 
 // Initialize data processor
 const dataProcessor = new DataProcessor();
+
+function finalizeAggregatesAfterLoadIfNeeded() {
+    if (!_needsAggregateFromSessions || !HuntAnalyzerState.data.sessions.length) {
+        return;
+    }
+    _needsAggregateFromSessions = false;
+    try {
+        dataProcessor.aggregateData();
+    } catch (e) {
+        console.error('[Hunt Analyzer] Failed to rebuild aggregates from persisted sessions:', e);
+    }
+}
+finalizeAggregatesAfterLoadIfNeeded();
 
 // =======================
 // 3.2. Room Display Enhancement Functions
@@ -4466,7 +4572,6 @@ function renderAllSessions() {
         lootEntryDiv.appendChild(iconWrapper);
 
         lootGridContainer.appendChild(lootEntryDiv);
-        HuntAnalyzerState.totals.loot += data.count; // Accumulate for overall rate
     });
     
     // Append grid container to loot display
@@ -4563,7 +4668,6 @@ function renderAllSessions() {
         creatureEntryDiv.appendChild(iconWrapper);
 
         gridContainer.appendChild(creatureEntryDiv);
-        HuntAnalyzerState.totals.creatures += data.count; // Accumulate for overall rate
     });
     
     // Append grid container to creature display
@@ -4737,7 +4841,7 @@ function generateSummaryLogText() {
             
             // Aggregate loot for this map
             session.loot.forEach(item => {
-                const mapKey = `${item.originalName}_${item.rarity}_${item.spriteId}_${item.src}_${item.isEquipment}_${item.stat}`;
+                const mapKey = buildLootAggregateKey(item);
                 if (mapGroups[mapName].loot.has(mapKey)) {
                     const existing = mapGroups[mapName].loot.get(mapKey);
                     existing.count += item.count;
@@ -7125,6 +7229,7 @@ function initializeHuntAnalyzerPersistence() {
 
         // Load persisted data
         loadHuntAnalyzerData();
+        finalizeAggregatesAfterLoadIfNeeded();
 
         // Auto-reopen panel if conditions are met
         autoReopenHuntAnalyzer();

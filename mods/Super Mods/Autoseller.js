@@ -4793,6 +4793,7 @@
                         ...prev,
                         plantMonsterFilter: (monster) => {
                             const monsterName = monster?.metadata?.name || monster?.name;
+                            const totalGenes = calculateTotalGenes(monster);
                             
                             // FAILSAFE: NEVER autoplant shiny creatures
                             if (isShinyCreature(monster)) {
@@ -4803,13 +4804,20 @@
                             }
                             
                             // Always devour creatures below absolute threshold (OVERRIDES keep range and ignore list) - only if enabled
-                            if (alwaysDevourEnabled && monster.totalGenes <= alwaysDevourBelow) {
+                            if (alwaysDevourEnabled && totalGenes <= alwaysDevourBelow) {
                                 return true;
                             }
                             
                             // Keep creatures with minGenes or higher - only if enabled
-                            if (keepGenesEnabled && monster.totalGenes >= minGenes) {
-                                return false;
+                            if (keepGenesEnabled && totalGenes >= minGenes) {
+                                const sealedSellableInFullBand =
+                                    isSealedTierFiveCreature(monster) &&
+                                    isSealedTier5SellAllowed(monsterName) &&
+                                    totalGenes >= UI_CONSTANTS.SEALED_SELL_GENE_MIN &&
+                                    totalGenes <= UI_CONSTANTS.SEALED_SELL_GENE_MAX;
+                                if (!sealedSellableInFullBand) {
+                                    return false;
+                                }
                             }
                             
                             // For creatures between thresholds (or all if keep genes disabled), check ignore list
@@ -4818,7 +4826,7 @@
                                 const keepRange = getCreatureKeepRange(monsterName);
                                 if (keepRange) {
                                     // If creature has a keep range, only keep if within range, otherwise devour
-                                    if (shouldKeepCreatureByRange(monsterName, monster.totalGenes)) {
+                                    if (shouldKeepCreatureByRange(monsterName, totalGenes)) {
                                         return false; // Keep - within range
                                     }
                                     return true; // Devour - outside range
@@ -7454,12 +7462,8 @@
     
     // Helper function to calculate total genes from monster stats
     function calculateTotalGenes(invMonster) {
-        const hp = invMonster.hp || 0;
-        const ad = invMonster.ad || 0;
-        const ap = invMonster.ap || 0;
-        const armor = invMonster.armor || 0;
-        const magicResist = invMonster.magicResist || 0;
-        return hp + ad + ap + armor + magicResist;
+        const s = getMonsterGeneStats(invMonster);
+        return s.hp + s.ad + s.ap + s.armor + s.magicResist;
     }
     
     // Helper function to filter monsters for autosell
