@@ -717,6 +717,7 @@
       "allMaps": "ALL",
       "maps": "maps",
       "clearAll": "Clear All",
+      "storageResetDismissHint": "Use {clearAll} to reset the analyzer—the warning stops once storage has room.",
       "clearMap": "Clear Map",
       "goToMap": "Go to map",
       "failedToNavigateMap": "Failed to navigate to map",

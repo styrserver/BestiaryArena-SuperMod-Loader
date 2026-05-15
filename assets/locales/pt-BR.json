@@ -716,6 +716,7 @@
       "allMaps": "TODOS",
       "maps": "mapas",
       "clearAll": "Limpar Tudo",
+      "storageResetDismissHint": "Use {clearAll} para reiniciar o analisador — o aviso some quando houver espaço de armazenamento.",
       "clearMap": "Limpar mapa",
       "goToMap": "Ir para o mapa",
       "failedToNavigateMap": "Falha ao navegar para o mapa",
