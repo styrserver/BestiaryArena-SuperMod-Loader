@@ -12,7 +12,7 @@ const defaultConfig = {
   hideGameBoard: true,
   enableTurboAutomatically: true,
   stopOnSPlus: false,
-  stopOnAnyVictory: false,
+  stopOnOutcome: false, // false | 'victory' | 'defeat'
   stopAfterTicks: 0, // 0 means no limit
   stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
   estimateExperience: false
@@ -20,8 +20,11 @@ const defaultConfig = {
 
 // Initialize with saved config or defaults
 const config = Object.assign({}, defaultConfig, context.config);
-if (config.stopOnSPlus && config.stopOnAnyVictory) {
-  config.stopOnAnyVictory = false;
+if (config.stopOnAnyVictory && !config.stopOnOutcome) {
+  config.stopOnOutcome = 'victory';
+}
+if (config.stopOnSPlus && config.stopOnOutcome) {
+  config.stopOnOutcome = false;
 }
 
 // Constants
@@ -647,7 +650,9 @@ class ChartRenderer {
   }
   
   createTooltipText(result) {
-    let tooltipText = `Run ${result.originalIndex + 1}: ${result.ticks} ticks, Grade: `;
+    let tooltipText = t('mods.boardAnalyzer.tooltipRunPrefix')
+      .replace('{index}', result.originalIndex + 1)
+      .replace('{ticks}', result.ticks);
     
     if (result.grade === 'S+' && result.rankPoints) {
       tooltipText += `S+${result.rankPoints}`;
@@ -655,12 +660,12 @@ class ChartRenderer {
       tooltipText += result.grade;
     }
     
-    tooltipText += `, ${result.completed ? 'Completed' : 'Failed'}`;
+    tooltipText += `, ${result.completed ? t('mods.boardAnalyzer.tooltipCompleted') : t('mods.boardAnalyzer.tooltipFailed')}`;
     if (currentFloor !== null && currentFloor !== undefined) {
-      tooltipText += `, Floor: ${currentFloor}`;
+      tooltipText += `, ${t('mods.boardAnalyzer.tooltipFloor').replace('{floor}', currentFloor)}`;
     }
     if (result.seed) {
-      tooltipText += `, Seed: ${result.seed}`;
+      tooltipText += `, ${t('mods.boardAnalyzer.tooltipSeed').replace('{seed}', result.seed)}`;
     }
     tooltipText += `\n${t('mods.boardAnalyzer.clickToCopyReplay')}`;
     
@@ -675,7 +680,7 @@ class ChartRenderer {
   
   showChartError() {
     const errorMessage = document.createElement('div');
-    errorMessage.textContent = 'Error creating chart. Please check console for details.';
+    errorMessage.textContent = t('mods.boardAnalyzer.chartErrorMessage');
     errorMessage.style.cssText = 'text-align: center; color: #e74c3c; margin-top: 15px; padding: 10px; border: 1px solid #e74c3c; border-radius: 4px;';
     this.container.appendChild(errorMessage);
   }
@@ -1745,7 +1750,7 @@ function setupAnalysisEnvironment() {
   // Disable Turbo Mode button during analysis
   if (window.turboButton) {
     window.turboButton.disabled = true;
-    window.turboButton.title = 'Turbo Mode disabled during Board Analysis';
+    window.turboButton.title = t('mods.boardAnalyzer.turboDisabledTooltip');
     console.log('[Board Analyzer] Turbo Mode button disabled');
   }
   
@@ -1953,7 +1958,7 @@ function initializeAnalysisEnvironment() {
   // Disable Turbo Mode button during analysis
   if (window.turboButton) {
     window.turboButton.disabled = true;
-    window.turboButton.title = 'Turbo Mode disabled during Board Analysis';
+    window.turboButton.title = t('mods.boardAnalyzer.turboDisabledTooltip');
     console.log('[Board Analyzer] Turbo Mode button disabled');
   }
   
@@ -2305,8 +2310,12 @@ function processRunResults(result, runIndex, statsCalculator, bestRuns) {
     }
   }
 
-  if (config.stopOnAnyVictory && completed) {
+  if (config.stopOnOutcome === 'victory' && completed) {
     console.log('Victory achieved, stopping analysis early');
+    return true;
+  }
+  if (config.stopOnOutcome === 'defeat' && !completed) {
+    console.log('Defeat encountered, stopping analysis early');
     return true;
   }
   
@@ -2398,7 +2407,7 @@ function cleanupAnalysisResources(thisAnalysisId) {
   if (window.turboButton && window.__turboState) {
     // Only restore if turbo is actually inactive (not re-enabled by user)
     if (!window.__turboState.active) {
-      window.turboButton.textContent = 'Enable Turbo';
+      window.turboButton.textContent = t('mods.boardAnalyzer.enableTurboLabel');
       window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
       window.turboButton.style.color = "#ffe066";
       console.log('[Board Analyzer] Turbo Mode button style restored');
@@ -2719,29 +2728,62 @@ function createConfigPanel(startAnalysisCallback) {
   stopSPlusContainer.appendChild(stopSPlusLabel);
   content.appendChild(stopSPlusContainer);
 
-  // Stop on any victory checkbox
+  // Stop on any victory/defeat checkbox
   const stopVictoryContainer = document.createElement('div');
   stopVictoryContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
 
   const stopVictoryInput = document.createElement('input');
   stopVictoryInput.type = 'checkbox';
   stopVictoryInput.id = 'stop-victory-input';
-  stopVictoryInput.checked = config.stopOnAnyVictory;
+  stopVictoryInput.checked = !!config.stopOnOutcome;
 
   const stopVictoryLabel = document.createElement('label');
   stopVictoryLabel.htmlFor = 'stop-victory-input';
-  stopVictoryLabel.textContent = t('mods.boardAnalyzer.stopOnAnyVictoryLabel');
+  stopVictoryLabel.textContent = t('mods.boardAnalyzer.stopOnAnyOutcomeLabel');
+
+  const stopOutcomeToggle = document.createElement('button');
+  stopOutcomeToggle.type = 'button';
+  stopOutcomeToggle.id = 'stop-outcome-toggle';
+
+  function applyStopOutcomeToggle(outcome, enabled) {
+    const isVictory = outcome !== 'defeat';
+    stopOutcomeToggle.dataset.outcome = isVictory ? 'victory' : 'defeat';
+    stopOutcomeToggle.textContent = t(isVictory ? 'mods.boardAnalyzer.stopOutcomeVictory' : 'mods.boardAnalyzer.stopOutcomeDefeat');
+    stopOutcomeToggle.disabled = !enabled;
+    const base = 'padding: 4px 14px; border-radius: 4px; border: 1px solid; font-weight: 600; min-width: 72px; text-transform: capitalize;';
+    if (!enabled) {
+      stopOutcomeToggle.style.cssText = `${base} background-color: #555; border-color: #666; color: #aaa; cursor: not-allowed; opacity: 0.6;`;
+    } else if (isVictory) {
+      stopOutcomeToggle.style.cssText = `${base} background-color: #2ecc71; border-color: #27ae60; color: #fff; cursor: pointer;`;
+    } else {
+      stopOutcomeToggle.style.cssText = `${base} background-color: #e74c3c; border-color: #c0392b; color: #fff; cursor: pointer;`;
+    }
+  }
+
+  applyStopOutcomeToggle(
+    config.stopOnOutcome === 'defeat' ? 'defeat' : 'victory',
+    stopVictoryInput.checked
+  );
+
+  stopOutcomeToggle.addEventListener('click', () => {
+    if (stopOutcomeToggle.disabled) return;
+    const next = stopOutcomeToggle.dataset.outcome === 'victory' ? 'defeat' : 'victory';
+    applyStopOutcomeToggle(next, true);
+  });
 
   stopVictoryContainer.appendChild(stopVictoryInput);
   stopVictoryContainer.appendChild(stopVictoryLabel);
+  stopVictoryContainer.appendChild(stopOutcomeToggle);
   content.appendChild(stopVictoryContainer);
 
   stopSPlusInput.addEventListener('change', () => {
     if (stopSPlusInput.checked) {
       stopVictoryInput.checked = false;
+      applyStopOutcomeToggle(stopOutcomeToggle.dataset.outcome, false);
     }
   });
   stopVictoryInput.addEventListener('change', () => {
+    applyStopOutcomeToggle(stopOutcomeToggle.dataset.outcome, stopVictoryInput.checked);
     if (stopVictoryInput.checked) {
       stopSPlusInput.checked = false;
     }
@@ -2803,9 +2845,9 @@ function createConfigPanel(startAnalysisCallback) {
         // Prevent starting if there are no ally creatures on board
         if (!hasAllyCreaturesOnBoard()) {
           api.ui.components.createModal({
-            title: 'Cannot Start',
-            content: 'Please place at least one ally creature on the board before starting.',
-            buttons: [{ text: 'OK', primary: true }]
+            title: t('mods.boardAnalyzer.cannotStartTitle'),
+            content: t('mods.boardAnalyzer.noAllyWarning'),
+            buttons: [{ text: t('controls.ok'), primary: true }]
           });
           return;
         }
@@ -2856,14 +2898,16 @@ function createConfigPanel(startAnalysisCallback) {
     config.enableTurboAutomatically = document.getElementById('turbo-input').checked;
     const stopSPlusEl = document.getElementById('stop-splus-input');
     const stopVictoryEl = document.getElementById('stop-victory-input');
+    const stopOutcomeEl = document.getElementById('stop-outcome-toggle');
     let stopOnSPlus = stopSPlusEl.checked;
-    let stopOnAnyVictory = stopVictoryEl.checked;
-    if (stopOnSPlus && stopOnAnyVictory) {
-      stopOnAnyVictory = false;
+    let stopOnOutcome = stopVictoryEl.checked ? stopOutcomeEl.dataset.outcome : false;
+    if (stopOnSPlus && stopOnOutcome) {
+      stopOnOutcome = false;
       stopVictoryEl.checked = false;
+      applyStopOutcomeToggle(stopOutcomeEl.dataset.outcome, false);
     }
     config.stopOnSPlus = stopOnSPlus;
-    config.stopOnAnyVictory = stopOnAnyVictory;
+    config.stopOnOutcome = stopOnOutcome;
     config.stopAfterTicks = parseInt(document.getElementById('stop-ticks-input').value, 10);
     config.stopWhenTicksReached = parseInt(document.getElementById('stop-when-ticks-input').value, 10);
     config.estimateExperience = document.getElementById('estimate-exp-input').checked;
@@ -2982,14 +3026,14 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
           // Update UI
           const progressEl = document.getElementById('analysis-progress');
           if (progressEl) {
-            progressEl.textContent += ' - Stopping...';
+            progressEl.textContent += t('mods.boardAnalyzer.stoppingProgressSuffix');
             progressEl.style.color = '#e74c3c';
           }
           
           const stopButton = event.target;
           if (stopButton) {
             stopButton.disabled = true;
-            stopButton.textContent = 'Stopping...';
+            stopButton.textContent = t('mods.boardAnalyzer.stoppingLabel');
           }
           
           console.log('Stop Analysis clicked - analysis will stop immediately');
@@ -3155,7 +3199,7 @@ function showResultsModal(results) {
     
     // Total time
     const totalTimeLabel = document.createElement('div');
-    totalTimeLabel.textContent = t('mods.boardAnalyzer.totalTimeLabel') || 'Total Time:';
+    totalTimeLabel.textContent = t('mods.boardAnalyzer.totalTimeLabel');
     totalTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const totalTimeValue = document.createElement('div');
@@ -3164,7 +3208,7 @@ function showResultsModal(results) {
     
     // Average run time
     const avgRunTimeLabel = document.createElement('div');
-    avgRunTimeLabel.textContent = t('mods.boardAnalyzer.avgRunTimeLabel') || 'Avg Run Time:';
+    avgRunTimeLabel.textContent = t('mods.boardAnalyzer.avgRunTimeLabel');
     avgRunTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const avgRunTimeValue = document.createElement('div');
@@ -3347,14 +3391,14 @@ function showResultsModal(results) {
         
         // Fallback: Show error message
         const errorMessage = document.createElement('div');
-        errorMessage.textContent = 'Error creating chart. Please check console for details.';
+        errorMessage.textContent = t('mods.boardAnalyzer.chartErrorMessage');
         errorMessage.style.cssText = 'text-align: center; color: #e74c3c; margin-top: 15px; padding: 10px; border: 1px solid #e74c3c; border-radius: 4px;';
         content.appendChild(errorMessage);
       }
     } else {
       // Show a message if no results
       const noResultsMessage = document.createElement('p');
-      noResultsMessage.textContent = 'No runs completed yet.';
+      noResultsMessage.textContent = t('mods.boardAnalyzer.noRunsMessage');
       noResultsMessage.style.cssText = 'text-align: center; color: #777; margin-top: 15px;';
       content.appendChild(noResultsMessage);
     }
@@ -3406,7 +3450,7 @@ function showResultsModal(results) {
     // Show the results modal with a callback to clean up when closed
     let modalTitle = t('mods.boardAnalyzer.resultTitle');
     if (currentFloor !== null && currentFloor !== undefined) {
-      modalTitle += ` (Floor ${currentFloor})`;
+      modalTitle += ` ${t('mods.boardAnalyzer.resultTitleFloorSuffix').replace('{floor}', currentFloor)}`;
     }
     const resultsModal = api.ui.components.createModal({
       title: modalTitle,
@@ -3641,7 +3685,7 @@ async function runAnalysis() {
     
     // Update the Turbo Mode button to show as inactive
     if (window.turboButton) {
-      window.turboButton.textContent = 'Enable Turbo';
+      window.turboButton.textContent = t('mods.boardAnalyzer.enableTurboLabel');
       window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
       window.turboButton.style.color = "#ffe066";
     }
@@ -3753,6 +3797,12 @@ async function runAnalysis() {
     restoreBoardState();
     runningModal = null;
     activeRunningModal = null;
+    
+    api.ui.components.createModal({
+      title: t('mods.boardAnalyzer.errorTitle'),
+      content: t('mods.boardAnalyzer.errorText'),
+      buttons: [{ text: t('mods.boardAnalyzer.closeButton'), primary: true }]
+    });
     
     console.log('[Board Analyzer] Error cleanup completed - all modals closed');
   }

@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.8.6",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Bug fixes."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "'Stop after any' early-stop setting: green victory / red defeat toggle (click to switch); saved on Save or Start Analysis. Still mutually exclusive with Stop when reaching S+ grade."
+        }
+      ]
+    },
+    {
       "version": "3.8.5",
       "changes": [
         {

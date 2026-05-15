@@ -668,6 +668,11 @@
             lastPauseAttemptMs = now;
             console.log('[Awaken Tracker] All marked creatures on map are capped — pausing. Marked:', markedOnMap);
             tryPauseGameAutoplay();
+            // Consome os marks já cumpridos: a criatura está capada e a pausa foi entregue.
+            // Sem isso, todo evento subsequente do autoseller re-dispara a pausa (loop infinito).
+            // Marks de criaturas que não estão no mapa atual são preservados (ainda não cumpridos).
+            markedOnMap.forEach(g => mapSet.delete(g));
+            scheduleSave();
         } catch (e) {
             console.warn('[Awaken Tracker] checkAndPauseIfCapped failed:', e);
         }
@@ -744,6 +749,13 @@
             capToggleLabel.style.cursor = 'not-allowed';
             capToggleInput.style.cursor = 'not-allowed';
         } else if (alreadyCapped) {
+            // Criatura já 5/5: pause-on-cap não faz mais sentido. Remove automaticamente
+            // qualquer mark obsoleto e mantém o checkbox desabilitado e desmarcado.
+            if (isMarked) {
+                const set = state.currentRoomId ? state.pauseOnCapByMap.get(state.currentRoomId) : null;
+                if (set && set.delete(Number(gameId))) scheduleSave();
+            }
+            capToggleInput.checked = false;
             capToggleInput.disabled = true;
             capToggleLabel.title = 'Already fully capped — pause-on-cap has no effect';
             capToggleLabel.style.opacity = '0.4';
@@ -886,8 +898,12 @@
                 const weight = isHigher ? 'font-weight:bold;' : '';
                 return `<span style="display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtml(key, 11)}<span style="color:${valueColor};${weight}">${v}</span></span>`;
             };
+            const candidateTotal = hasStats
+                ? STATS.reduce((sum, k) => sum + (Number(cs[k]) || 0), 0)
+                : 0;
             const candidateLine = hasStats
-                ? STATS.map(renderCandidateStat).filter(Boolean).join(' ')
+                ? STATS.map(renderCandidateStat).filter(Boolean).join(' ') +
+                  ` <span style="color:#cfcfcf;font-weight:600;">(${candidateTotal}%)</span>`
                 : '<span style="opacity:0.6;">(stats unavailable)</span>';
 
             const lastLine = document.createElement('div');
@@ -939,9 +955,13 @@
                 const ss = String(time.getSeconds()).padStart(2, '0');
                 const cs = logEv.candidateStats || {};
                 const hasStats = Number.isFinite(Number(cs.hp));
+                const sealedTotal = hasStats
+                    ? STATS.reduce((sum, k) => sum + (Number(cs[k]) || 0), 0)
+                    : 0;
                 const sealedHtml = hasStats
-                    ? STATS.map(k => renderLogStat(k, cs[k])).join(' ')
-                    : '<span style="opacity:0.5;">(no stats)</span>';
+                    ? STATS.map(k => renderLogStat(k, cs[k])).join(' ') +
+                      ` <span style="color:#cfcfcf;font-weight:600;">(${sealedTotal}%)</span>`
+                    : '<span style="opacity:0.6;">(no stats)</span>';
 
                 if (logEv.type === 'applied') {
                     const gainPairs = Object.entries(logEv.gains || {}).filter(([, v]) => v > 0)
@@ -1293,19 +1313,21 @@
         const toolbar = document.createElement('div');
         toolbar.className = 'at-toolbar';
 
-        const clearMapBtn = makeConfirmButton('Clear Map', 'Confirm clear map', 'Clear this map only and rebaseline its stats (preserves other maps and 🎯 marks)', () => {
+        const clearMapBtn = makeConfirmButton('Clear Map', 'Confirm clear map', 'Clear this map only, rebaseline its stats and clear its 🎯 marks (preserves other maps)', () => {
             if (!state.currentRoomId) return;
             state.byMap.delete(state.currentRoomId);
             state.baselineByMap.delete(state.currentRoomId);
+            state.pauseOnCapByMap.delete(state.currentRoomId);
             ensureMapBaseline(state.currentRoomId);
             render();
             scheduleSave();
         });
         toolbar.appendChild(clearMapBtn);
 
-        const clearAllBtn = makeConfirmButton('Clear All', 'Confirm clear all', 'Clear ALL maps and rebaseline stats (preserves 🎯 marks)', () => {
+        const clearAllBtn = makeConfirmButton('Clear All', 'Confirm clear all', 'Clear ALL maps, rebaseline stats and clear ALL 🎯 marks', () => {
             state.byMap.clear();
             state.baselineByMap.clear();
+            state.pauseOnCapByMap.clear();
             snapshotBaseline();
             if (state.currentRoomId) ensureMapBaseline(state.currentRoomId);
             render();
