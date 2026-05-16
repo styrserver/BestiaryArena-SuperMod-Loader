@@ -179,10 +179,10 @@
         return STATS.every(k => Number(stats[k]) >= CAP_VALUE);
     }
 
-    // 'pre-capped' = veio capado do baseline (não foi mérito da run)
-    // 'capped'     = stats atuais capados, mas baseline não estava (capou nesta run)
-    // 'active'     = stats atuais não estão capados
-    // 'no-awaken'  = criatura ainda não foi despertada
+    // 'pre-capped' = came capped from the baseline (not earned in this run)
+    // 'capped'     = current stats are capped, but the baseline was not (capped in this run)
+    // 'active'     = current stats are not capped
+    // 'no-awaken'  = creature has not been awakened yet
     function getCreatureState(awakened) {
         if (!awakened) return 'no-awaken';
         const stats = getMonsterGeneStatsLocal(awakened);
@@ -195,7 +195,7 @@
     function isSlotCollapsed(gameId, creatureState) {
         const override = state.collapsedOverrides.get(Number(gameId));
         if (override !== undefined) return override === true;
-        // Auto-collapse para pre-capped e capped; expanded para active/no-awaken
+        // Auto-collapse for pre-capped and capped; expanded for active/no-awaken
         return creatureState === 'pre-capped' || creatureState === 'capped';
     }
 
@@ -668,9 +668,9 @@
             lastPauseAttemptMs = now;
             console.log('[Awaken Tracker] All marked creatures on map are capped — pausing. Marked:', markedOnMap);
             tryPauseGameAutoplay();
-            // Consome os marks já cumpridos: a criatura está capada e a pausa foi entregue.
-            // Sem isso, todo evento subsequente do autoseller re-dispara a pausa (loop infinito).
-            // Marks de criaturas que não estão no mapa atual são preservados (ainda não cumpridos).
+            // Consume the fulfilled marks: the creature is capped and the pause was delivered.
+            // Without this, every subsequent autoseller event re-triggers the pause (infinite loop).
+            // Marks for creatures not on the current map are preserved (not yet fulfilled).
             markedOnMap.forEach(g => mapSet.delete(g));
             scheduleSave();
         } catch (e) {
@@ -681,6 +681,27 @@
     // =======================
     // 9. UI — slot rendering
     // =======================
+    // Color by total gene-sum range (0-100), same tier scale as Hunt Analyzer.
+    // 80+ Legendary, 70+ Epic, 60+ Rare, 50+ Uncommon, 5+ Common.
+    // Palette is tuned for this dark panel: blue/purple are brighter than the
+    // One Dark defaults so they stay readable as text on a darker background.
+    function getStatTotalColor(total) {
+        const t = Number(total) || 0;
+        let tierLevel;
+        if (t >= 80) tierLevel = 5;
+        else if (t >= 70) tierLevel = 4;
+        else if (t >= 60) tierLevel = 3;
+        else if (t >= 50) tierLevel = 2;
+        else tierLevel = 1; // Common (readable gray) also covers total < 5
+        switch (tierLevel) {
+            case 5: return '#E5C07B'; // Legendary - gold
+            case 4: return '#C77DFF'; // Epic - bright violet
+            case 3: return '#54B9FF'; // Rare - bright sky blue
+            case 2: return '#98C379'; // Uncommon - green
+            default: return '#ABB2BF'; // Common - light gray
+        }
+    }
+
     function renderStatIconHtml(key, size = 12, verticalAlign = 'middle') {
         return `<img src="${STAT_ICON_URLS[key]}" alt="${STAT_LABELS[key]}" title="${STAT_LABELS[key]}" style="width:${size}px;height:${size}px;vertical-align:${verticalAlign};image-rendering:pixelated;" />`;
     }
@@ -690,7 +711,7 @@
         return `<img src="${src}" alt="${alt}" title="${alt}" style="display:inline !important;width:${size}px;height:${size}px;image-rendering:pixelated;vertical-align:-2px;opacity:${opacity};" />`;
     }
 
-    // Badge minimalista: apenas contador X/5 + sufixo ⏸ N quando aguardando peers
+    // Minimal badge: just an X/5 counter + ⏸ N suffix when waiting for peers
     function buildStateBadge(gameId, stats) {
         const badge = document.createElement('span');
         if (!stats) {
@@ -749,8 +770,8 @@
             capToggleLabel.style.cursor = 'not-allowed';
             capToggleInput.style.cursor = 'not-allowed';
         } else if (alreadyCapped) {
-            // Criatura já 5/5: pause-on-cap não faz mais sentido. Remove automaticamente
-            // qualquer mark obsoleto e mantém o checkbox desabilitado e desmarcado.
+            // Creature already 5/5: pause-on-cap no longer makes sense. Automatically
+            // remove any stale mark and keep the checkbox disabled and unchecked.
             if (isMarked) {
                 const set = state.currentRoomId ? state.pauseOnCapByMap.get(state.currentRoomId) : null;
                 if (set && set.delete(Number(gameId))) scheduleSave();
@@ -789,7 +810,7 @@
             e.dataTransfer.setData('text/plain', String(gameId));
             isDraggingSlot = true;
             slot.style.opacity = '0.4';
-            // setTimeout para que o "ghost" do drag (snapshot do browser) seja capturado antes da classe ser aplicada
+            // setTimeout so the drag "ghost" (browser snapshot) is captured before the class is applied
             setTimeout(() => slot.classList.add('dragging'), 0);
         });
         slot.addEventListener('dragend', () => {
@@ -810,7 +831,7 @@
             const middleY = rect.top + rect.height / 2;
             const shouldGoBefore = e.clientY < middleY;
             const targetNext = shouldGoBefore ? slot : slot.nextSibling;
-            // Evita reordenar quando o item arrastado já está na posição alvo
+            // Avoid reordering when the dragged item is already at the target position
             if (dragging.nextSibling === targetNext) return;
             flipReorder(grid, () => grid.insertBefore(dragging, targetNext));
         });
@@ -856,7 +877,7 @@
 
         slot.appendChild(header);
 
-        // ===== Modo colapsado: para aqui =====
+        // ===== Collapsed mode: stop here =====
         if (collapsed) {
             return slot;
         }
@@ -903,7 +924,7 @@
                 : 0;
             const candidateLine = hasStats
                 ? STATS.map(renderCandidateStat).filter(Boolean).join(' ') +
-                  ` <span style="color:#cfcfcf;font-weight:600;">(${candidateTotal}%)</span>`
+                  ` <span style="color:${getStatTotalColor(candidateTotal)};font-weight:600;">(${candidateTotal}%)</span>`
                 : '<span style="opacity:0.6;">(stats unavailable)</span>';
 
             const lastLine = document.createElement('div');
@@ -960,7 +981,7 @@
                     : 0;
                 const sealedHtml = hasStats
                     ? STATS.map(k => renderLogStat(k, cs[k])).join(' ') +
-                      ` <span style="color:#cfcfcf;font-weight:600;">(${sealedTotal}%)</span>`
+                      ` <span style="color:${getStatTotalColor(sealedTotal)};font-weight:600;">(${sealedTotal}%)</span>`
                     : '<span style="opacity:0.6;">(no stats)</span>';
 
                 if (logEv.type === 'applied') {
@@ -1025,7 +1046,10 @@
                 color: var(--at-text);
                 padding: 0;
                 overflow: hidden;
-                z-index: 100;
+                /* Above the game UI (floor slider/bestiary tooltip use z-1),
+                   but below other mod panels (Hunt Analyzer/Raid Hunter/etc. use 9999+)
+                   so this panel never covers them. */
+                z-index: 3;
                 display: flex;
                 flex-direction: column;
                 font-family: Inter, sans-serif;
@@ -2015,7 +2039,7 @@
     window.toggleAwakenTracker = togglePanel;
 
     function render() {
-        if (isDraggingSlot) return; // não re-renderizar durante drag (preservaria ordem do DOM ao vivo)
+        if (isDraggingSlot) return; // don't re-render during drag (would preserve the live DOM order)
         const grid = document.getElementById(GRID_ID);
         const title = document.getElementById(TITLE_ID);
         if (!grid || !title) return;

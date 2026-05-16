@@ -940,10 +940,8 @@ function parseServerResults(serverResults) {
       runData.floorTicks = serverResults.floorTicks;
     }
     
-    // Extract additional info
-    if (serverResults.rewardScreen.victory !== undefined) {
-      runData.victory = serverResults.rewardScreen.victory;
-    }
+    // Same field Hunt Analyzer uses (board context serverResults.rewardScreen.victory).
+    runData.victory = serverResults.rewardScreen.victory;
     if (serverResults.rewardScreen.defeatedEnemies !== undefined) {
       runData.defeatedEnemies = serverResults.rewardScreen.defeatedEnemies;
     }
@@ -1182,10 +1180,10 @@ async function addRun(runData) {
     let rankUpdated = false;
     let floorUpdated = false;
     
-    // Skip failed runs entirely - only track victories
-    // Check both victory flag and points (0 points = defeat)
-    if (runData.victory === false || runData.points === 0) {
-      console.log(`[RunTracker] Skipping failed run for ${runData.mapName} (victory: ${runData.victory}, points: ${runData.points})`);
+    // Match Hunt Analyzer / in-game messaging: only truthy rewardScreen.victory counts as a win.
+    // Missing or false => defeat (same as Hunt Analyzer wins vs losses bookkeeping).
+    if (!runData.victory) {
+      console.log(`[RunTracker] Skipping non-victory run for ${runData.mapName} (victory: ${runData.victory})`);
       return false;
     }
     
@@ -1195,23 +1193,17 @@ async function addRun(runData) {
     }
     
     // Check rank category independently - same run can be in both categories
-    // Skip runs with 0 rank points as they represent defeats
     if (runData.points !== undefined && runData.points !== null && runData.points > 0) {
       rankUpdated = await checkAndUpdateRankRuns(runData);
     } else if (runData.points === 0) {
-      console.log(`[RunTracker] Skipping defeated run with 0 rank points for ${runData.mapName}`);
+      console.log(`[RunTracker] Skipping rank category for ${runData.mapName} (rank points: 0)`);
     }
     
-    // Check floor category independently - tracks highest floor reached
-    // Only track floor runs if floor > 0 and run was victorious (floor: 0 is just a fallback for missing data)
-    if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0 && runData.victory !== false) {
+    // Check floor category independently - tracks highest floor reached (wins only; non-wins return early above)
+    if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0) {
       floorUpdated = await checkAndUpdateFloorRuns(runData);
     } else {
-      if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0) {
-        console.log(`[RunTracker] Skipping floor tracking for ${runData.mapName} - floor is ${runData.floor} but run was not victorious`);
-      } else {
-        console.log(`[RunTracker] Skipping floor tracking for ${runData.mapName} - floor is ${runData.floor} (must be > 0 to track)`);
-      }
+      console.log(`[RunTracker] Skipping floor tracking for ${runData.mapName} - floor is ${runData.floor} (must be > 0 to track)`);
     }
     
     // Update metadata only if there were changes
@@ -1294,9 +1286,8 @@ async function checkAndUpdateSpeedruns(runData) {
 
 // Check and update rank points category
 async function checkAndUpdateRankRuns(runData) {
-  // Additional safety check: skip defeated runs with 0 rank points
   if (runData.points === 0) {
-    console.log(`[RunTracker] Skipping defeated run with 0 rank points for ${runData.mapName}`);
+    console.log(`[RunTracker] Skipping rank category for ${runData.mapName} (rank points: 0)`);
     return false;
   }
   

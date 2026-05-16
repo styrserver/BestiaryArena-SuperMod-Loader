@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.8.7",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Bug fixes."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "changed",
+          "text": "Win/loss matches Hunt Analyzer: only truthy rewardScreen.victory saves local runs (victory always taken from rewardScreen). Removed global skip on rank/points === 0 so wins with rank 0 still update speedrun; rank category still requires rank points > 0. Floor tracking unchanged (floor > 0 only)."
+        }
+      ]
+    },
+    {
       "version": "3.8.6",
       "changes": [
         {
