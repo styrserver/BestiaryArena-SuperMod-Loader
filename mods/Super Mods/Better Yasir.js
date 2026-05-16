@@ -739,6 +739,25 @@
           return {};
         }
       }
+
+      /** Per-rune gold from daily yasir.recycleCost (same source the game uses for Yasir recycle pricing). */
+      function getYasirRecycleRuneUnitGoldFromState() {
+        const recycleCost = getYasirShopData()?.recycleCost;
+        if (!Number.isFinite(recycleCost) || recycleCost <= 0) {
+          return null;
+        }
+        return recycleCost;
+      }
+
+      /** Yasir fields included in PO console logs (mirrors daily state, not a filtered subset). */
+      function formatYasirPoLogSnapshot(yasirSnap) {
+        const y = yasirSnap && typeof yasirSnap === 'object' ? yasirSnap : getYasirShopData();
+        return {
+          location: y.location ?? null,
+          diceCost: y.diceCost ?? null,
+          recycleCost: y.recycleCost ?? null
+        };
+      }
       
       function getInventoryState() {
         try {
@@ -843,11 +862,8 @@
             return 150;
           }
           
-          // For recycle rune, we need to check if it's available and get its price
           if (itemKey === 'recycleRune') {
-            // Check if recycle rune is available in the API data
-            // For now, return a default price or check if it's in stock
-            return null; // Will fall back to DOM method
+            return getYasirRecycleRuneUnitGoldFromState();
           }
           
           return null; // Will fall back to DOM method
@@ -1065,10 +1081,12 @@
         }
       };
       
-      // Get item price from the shop row
+      // Get item price from the shop row (original Yasir button, not Better Yasir qty total button)
       function getItemPrice(shopRow) {
         return safeExecute(() => {
-          const priceButton = shopRow.querySelector('button');
+          const priceButton =
+            shopRow.querySelector('button:not(.better-yasir-action-button)') ||
+            shopRow.querySelector('button');
           if (priceButton && !priceUtils.isOutOfStock(priceButton)) {
             return priceUtils.extractPriceFromText(priceButton.textContent);
           }
@@ -2281,6 +2299,37 @@
                 dustBatchCost = itemPrice;
               }
               buyPreflight = { resourceType, totalCost, itemPrice, batchGoldCost, dustBatchCost };
+
+              const poCapRaw = actionOptions.listingGoldCap;
+              if (poCapRaw != null && poCapRaw !== '') {
+                const poCap = parseInt(String(poCapRaw), 10);
+                if (
+                  Number.isFinite(poCap) &&
+                  (itemKey === 'recycleRune' || (itemKey && itemKey.startsWith('diceManipulator')))
+                ) {
+                  const unitGold = itemKey.startsWith('diceManipulator')
+                    ? batchGoldCost ??
+                      (Number.isFinite(itemPrice) && itemPrice > 0 ? itemPrice : null)
+                    : Number.isFinite(itemPrice) && itemPrice > 0
+                      ? itemPrice
+                      : null;
+                  if (unitGold == null) {
+                    handleError(new Error('Cannot verify purchase order price without live shop price'), {
+                      itemKey,
+                      cap: poCap
+                    });
+                    return false;
+                  }
+                  if (unitGold > poCap) {
+                    handleError(new Error('Shop price exceeds purchase order cap'), {
+                      itemKey,
+                      unitGold,
+                      cap: poCap
+                    });
+                    return false;
+                  }
+                }
+              }
               
               if (playerResource < totalCost) {
                 handleError(new Error(`Insufficient ${resourceType} for purchase`), { requested: totalCost, available: playerResource });
@@ -3776,7 +3825,10 @@
         }
         if (itemKey === 'recycleRune') {
           const p = getItemPrice(row);
-          return p > 0 ? p : null;
+          if (p > 0) {
+            return p;
+          }
+          return getYasirRecycleRuneUnitGoldFromState();
         }
         return null;
       }
@@ -3801,8 +3853,8 @@
         return per * Math.ceil(qty / rule.bundle);
       }
       
-      /** Per-listing gold when Yasir table is not in the DOM (dice via daily diceCost, recycle rune via safe listing cap). */
-      function getYasirCurrentShopBuyUnitGoldHeadless(itemKey, recycleRuneListingCapRaw) {
+      /** Per-listing gold when Yasir table is not in the DOM (dice via diceCost, recycle via recycleCost). */
+      function getYasirCurrentShopBuyUnitGoldHeadless(itemKey) {
         if (!itemKey) {
           return null;
         }
@@ -3820,13 +3872,7 @@
           return diceCost * minQ;
         }
         if (itemKey === 'recycleRune') {
-          const bounds = getYasirPoPriceBounds(itemKey);
-          const cap = parseInt(String(recycleRuneListingCapRaw), 10);
-          if (!bounds || !Number.isFinite(cap) || cap < bounds.min || cap > bounds.max) {
-            return null;
-          }
-          // Headless mode uses the user cap as a strict per-listing safety ceiling.
-          return cap;
+          return getYasirRecycleRuneUnitGoldFromState();
         }
         return null;
       }
@@ -3836,7 +3882,7 @@
         if (!rule || rule.currency === 'dust') {
           return null;
         }
-        const per = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey, rec.listingGold);
+        const per = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
         if (per == null) {
           return null;
         }
@@ -3948,7 +3994,7 @@
       
       /**
        * Validates a PO using only globalThis.state + fixed rules (no Yasir DOM).
-       * Supports dice manipulators, Recycle Rune (via safe listing cap), and Exaltation Chest (dust).
+       * Supports dice manipulators, Recycle Rune (daily recycleCost), and Exaltation Chest (dust).
        */
       function validateYasirPurchaseOrderHeadless(rec) {
         if (!rec?.itemKey || !globalThis.state?.player?.getSnapshot) {
@@ -3993,7 +4039,7 @@
         if (!Number.isFinite(cap)) {
           return { ok: false, reason: 'no_cap' };
         }
-        const perListing = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey, rec.listingGold);
+        const perListing = getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
         if (perListing == null) {
           return { ok: false, reason: 'no_price' };
         }
@@ -4028,7 +4074,7 @@
           const per =
             modalOrNull != null
               ? getYasirCurrentShopBuyUnitGold(modalOrNull, rec.itemKey)
-              : getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey, rec.listingGold);
+              : getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
           if (per != null) {
             goldBatch = Math.round(per);
           }
@@ -4036,7 +4082,7 @@
           const per =
             modalOrNull != null
               ? getYasirCurrentShopBuyUnitGold(modalOrNull, rec.itemKey)
-              : getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey, rec.listingGold);
+              : getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
           if (per != null) {
             goldBatch = Math.round(per);
           }
@@ -4088,10 +4134,7 @@
             listingGoldCap: o.listingGold != null && o.listingGold !== '' ? o.listingGold : null
           })),
           orderCount: initialQueue.length,
-          yasir: {
-            location: yasirSnap?.location ?? null,
-            diceCost: yasirSnap?.diceCost ?? null
-          },
+          yasir: formatYasirPoLogSnapshot(yasirSnap),
           playerSnapshot: {
             gold: getPlayerGold(),
             dust: getPlayerDust()
@@ -4110,6 +4153,10 @@
           for (const rec of orders) {
             const gate = validate(rec);
             if (!gate.ok) {
+              const currentListingGold =
+                modalOrNull != null
+                  ? getYasirCurrentShopBuyUnitGold(modalOrNull, rec.itemKey)
+                  : getYasirCurrentShopBuyUnitGoldHeadless(rec.itemKey);
               betterYasirPoConsoleLog('order skipped (validation)', {
                 mode,
                 order: {
@@ -4117,9 +4164,10 @@
                   qty: rec.qty,
                   listingGoldCap: rec.listingGold != null && rec.listingGold !== '' ? rec.listingGold : null
                 },
+                currentListingGold: currentListingGold ?? null,
                 reasonCode: gate.reason,
                 reason: BETTER_YASIR_PO_LOG_REASONS[gate.reason] || gate.reason,
-                yasirLocation: globalThis.state?.daily?.getSnapshot?.()?.context?.yasir?.location ?? null
+                yasir: formatYasirPoLogSnapshot()
               });
               continue;
             }
@@ -4131,7 +4179,11 @@
                 listingGoldCap: rec.listingGold != null && rec.listingGold !== '' ? rec.listingGold : null,
                 yasirLocation: globalThis.state?.daily?.getSnapshot?.()?.context?.yasir?.location ?? null
               });
-              const actionOpts = { suppressDefaultSuccessUi: true };
+              const actionOpts = {
+                suppressDefaultSuccessUi: true,
+                listingGoldCap:
+                  rec.listingGold != null && rec.listingGold !== '' ? rec.listingGold : undefined
+              };
               const ok = await performAction(rec.itemKey, rec.qty, 'buy', actionOpts);
               if (ok === true) {
                 betterYasirPoConsoleLog('purchase SUCCESS — removed from queue and recorded in history', {
@@ -4299,12 +4351,11 @@
         if (!y || typeof y !== 'object') {
           return '';
         }
-        return `${y.location ?? ''}|${y.diceCost ?? ''}`;
+        return `${y.location ?? ''}|${y.diceCost ?? ''}|${y.recycleCost ?? ''}`;
       }
       
       /**
-       * When daily Yasir data changes or on init, run PO fulfillment: modal path when shop is open, else headless
-       * for dice + Exaltation Chest (Recycle Rune still needs the shop once for live gold/stock).
+       * When daily Yasir data changes or on init, run PO fulfillment: modal path when shop is open, else headless.
        */
       function maybeSchedulePoFulfillmentFromDailyUpdate(reason) {
         if (!loadYasirPoOrdersFromStorage().length) {
@@ -4313,13 +4364,13 @@
         const modal = domUtils.findYasirModal();
         if (modal) {
           betterYasirPoConsoleLog(`scheduling PO fulfillment (${reason})`, {
-            yasir: getYasirShopData(),
+            yasir: formatYasirPoLogSnapshot(),
             queuedCount: loadYasirPoOrdersFromStorage().length
           });
           scheduleYasirPurchaseOrderFulfillment(modal);
         } else {
           betterYasirPoConsoleLog(`scheduling headless PO fulfillment (${reason})`, {
-            yasir: getYasirShopData(),
+            yasir: formatYasirPoLogSnapshot(),
             queuedCount: loadYasirPoOrdersFromStorage().length
           });
           scheduleHeadlessYasirPurchaseOrderFulfillment();

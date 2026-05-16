@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.8.8",
+      "changes": [
+        {
+          "mod": "Better Yasir",
+          "type": "fixed",
+          "text": "Recycle Rune purchase orders: headless fulfillment now uses daily yasir.recycleCost for price-cap checks (was treating your max price as the shop price and could buy above cap). Cap is enforced again in performAction before buy; PO logs include recycleCost and currentListingGold; modal price reads from the original Yasir button, not the quantity total button."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "fixed",
+          "text": "Speedrun category is floor 0 only: wins above floor 0 skip speedrun and save to floor tracking only (higher-floor times are not comparable to floor 0). On load, existing speedrun entries with floor > 0 are removed."
+        }
+      ]
+    },
+    {
       "version": "3.8.7",
       "changes": [
         {

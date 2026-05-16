@@ -314,6 +314,12 @@ function normalizeFloorHistory(run) {
   return Array.from(new Set(values)).sort((a, b) => a - b);
 }
 
+// Speedrun times are only comparable at floor 0; higher floors use the floor category.
+function qualifiesForSpeedrunCategory(runData) {
+  const floor = Number(runData?.floor ?? 0);
+  return Number.isFinite(floor) && floor <= 0;
+}
+
 function cloneFloorSeedMap(run) {
   const out = {};
   const src = run && run.floorSeeds;
@@ -561,6 +567,24 @@ async function initializeStorage() {
     }
     if (seasonMigratedCount > 0) {
       console.log(`[RunTracker] Migrated ${seasonMigratedCount} runs to add season: 1 fallback`);
+    }
+
+    // Remove speedrun entries above floor 0 (times are not comparable across floors)
+    let speedrunFloorPurgeCount = 0;
+    for (const mapKey in runStorage.runs) {
+      const mapData = runStorage.runs[mapKey];
+      if (mapData && Array.isArray(mapData.speedrun)) {
+        const before = mapData.speedrun.length;
+        mapData.speedrun = mapData.speedrun.filter(qualifiesForSpeedrunCategory);
+        speedrunFloorPurgeCount += before - mapData.speedrun.length;
+      }
+    }
+    if (speedrunFloorPurgeCount > 0) {
+      console.log(`[RunTracker] Removed ${speedrunFloorPurgeCount} speedrun entries above floor 0`);
+      runStorage.lastUpdated = Date.now();
+      runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
+        return total + map.speedrun.length + map.rank.length + (map.floor?.length || 0);
+      }, 0);
     }
     
     // Save the properly structured storage
@@ -1187,9 +1211,13 @@ async function addRun(runData) {
       return false;
     }
     
-    // Check both categories independently - a run can qualify for both speedrun and rank
+    // Check speedrun only at floor 0 (higher floors belong in the floor category)
     if (runData.time !== undefined && runData.time !== null) {
-      speedrunUpdated = await checkAndUpdateSpeedruns(runData);
+      if (qualifiesForSpeedrunCategory(runData)) {
+        speedrunUpdated = await checkAndUpdateSpeedruns(runData);
+      } else {
+        console.log(`[RunTracker] Skipping speedrun category for ${runData.mapName} (floor: ${runData.floor}, only floor 0 qualifies)`);
+      }
     }
     
     // Check rank category independently - same run can be in both categories
@@ -1226,6 +1254,10 @@ async function addRun(runData) {
 
 // Check and update speedrun category
 async function checkAndUpdateSpeedruns(runData) {
+  if (!qualifiesForSpeedrunCategory(runData)) {
+    return false;
+  }
+
   const speedrunRuns = runStorage.runs[runData.mapKey].speedrun;
   const runSeason = Number(runData.season || 1);
   const seasonRuns = speedrunRuns.filter(run => Number(run?.season || 1) === runSeason);
