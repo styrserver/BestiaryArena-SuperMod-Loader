@@ -562,6 +562,8 @@
       "hideGameBoardDuringRuns": "Hide game board during runs",
       "enableAutoRefill": "Enable auto-refill stamina (via Automator)",
       "enableAutoSell": "Autosell ALL creature drops",
+      "enableAutoInjectSealed": "Auto-inject sealed creatures",
+      "autoInjectWarningTooltip": "Injects sealed drops into matching awakened creatures (costs gold). When autosell is also enabled, inject runs first, then sell/devour.",
       "enableStaminaSkip": "Auto-skip when skip costs stamina",
       "start": "Start",
       "save": "Save",

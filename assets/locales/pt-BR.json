@@ -562,6 +562,8 @@
       "hideGameBoardDuringRuns": "Ocultar tabuleiro durante as execuções",
       "enableAutoRefill": "Ativar auto-reabastecimento de stamina (via Automator)",
       "enableAutoSell": "Vender TODOS os drops de criaturas automaticamente",
+      "enableAutoInjectSealed": "Autoinjetar criaturas seladas",
+      "autoInjectWarningTooltip": "Injeta drops selados em criaturas despertas correspondentes (custa ouro). Com autosell ativo, injeta primeiro e depois vende/devora.",
       "enableStaminaSkip": "Pular automaticamente quando o pulo custa stamina",
       "start": "Iniciar",
       "save": "Salvar",
