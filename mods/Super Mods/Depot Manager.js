@@ -506,7 +506,16 @@ function getDepotCreatureRows() {
     else if (genesTotal >= 60) rarity = 3;
     else if (genesTotal >= 50) rarity = 2;
     const tier = monster?.tier ?? savedMeta?.tier ?? null;
-    return { id: sid, name, portrait, shiny, level, gameId, hp, ad, ap, armor, magicResist, genesTotal, rarity, tier };
+    const resolvedTier = Number(tier);
+    const sealed = monster?.sealed === true || resolvedTier === 5;
+    const awakened = (
+      monster?.awaken === true ||
+      monster?.awakened === true ||
+      monster?.isAwakened === true ||
+      resolvedTier >= 6 ||
+      (level != null && level > GAME_CONSTANTS.MAX_LEVEL)
+    );
+    return { id: sid, name, portrait, shiny, sealed, awakened, level, gameId, hp, ad, ap, armor, magicResist, genesTotal, rarity, tier };
   });
 }
 
@@ -1040,8 +1049,9 @@ const DEPOT_CREATURE_SEARCH_TOOLTIP = `Search Syntaxes:
 • Stat search: /HP 20, /AD >15, /AP <=10, /ARM >=5, /MR <8
 • Any stat: /20 (any stat equals 20), />15 (any stat > 15)
 • Count stats: /3x20, />3x20, /<2x>15
+• Variant filters: shiny, sealed, awakened
 • Exact match: "Spider"
-• Combined: dragon AND /HP >15, /AD 20 OR /AP 20
+• Combined: dragon AND shiny, sealed AND /HP >15, /AD 20 OR /AP 20
 • Operators: AND, OR (case insensitive)`;
 
 const DEPOT_EQUIPMENT_SEARCH_TOOLTIP = `Search Syntaxes (Better Forge style):
@@ -1210,6 +1220,31 @@ function compareDepotStatValue(statValue, operator, targetValue) {
   }
 }
 
+function isDepotRowShiny(row) {
+  return row?.shiny === true;
+}
+
+function isDepotRowSealed(row) {
+  if (row?.sealed === true) return true;
+  return Number(row?.tier) === 5;
+}
+
+function isDepotRowAwakened(row) {
+  if (row?.awakened === true) return true;
+  if (Number(row?.tier) >= 6) return true;
+  const level = Number(row?.level);
+  return Number.isFinite(level) && level > GAME_CONSTANTS.MAX_LEVEL;
+}
+
+function matchesDepotVariantFilter(row, condition) {
+  switch (condition) {
+    case 'shiny': return isDepotRowShiny(row);
+    case 'sealed': return isDepotRowSealed(row);
+    case 'awakened': return isDepotRowAwakened(row);
+    default: return null;
+  }
+}
+
 function extractDepotQuotedString(condition) {
   if ((condition.startsWith('"') && condition.endsWith('"')) || (condition.startsWith('\'') && condition.endsWith('\''))) {
     return { isExact: true, value: condition.slice(1, -1).toLowerCase() };
@@ -1266,6 +1301,8 @@ function matchesDepotSearchExpression(row, expression) {
   if (normalized.startsWith('/')) {
     return matchesDepotStatsSearch(row, normalized);
   }
+  const variantMatch = matchesDepotVariantFilter(row, normalized);
+  if (variantMatch !== null) return variantMatch;
   const name = String(row.name || '').toLowerCase();
   const { isExact, value } = extractDepotQuotedString(normalized);
   return isExact ? name === value : name.includes(value);

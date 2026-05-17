@@ -1,5 +1,5 @@
 // Awaken Tracker — Standalone mod for Bestiary Arena
-// Listens to CustomEvents emitted by Autoseller (`autoseller:inject:skip` / `autoseller:inject:applied`)
+// Listens to inject CustomEvents from Autoseller and Manual Runner (`autoseller:inject:skip` / `autoseller:inject:applied`)
 // and shows a draggable, resizable floating panel with per-map awaken progress, event log,
 // and optional pause-on-cap behavior.
 

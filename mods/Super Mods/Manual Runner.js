@@ -11,6 +11,7 @@ const defaultConfig = {
   stopCondition: 'max', // 'max' = Maximum Rank, 'any' = Any Victory, 'maxFloor' = Maximum Floor
   enableAutoRefillStamina: false,
   enableAutoSellCreatures: false,
+  enableAutoInjectSealedCreatures: false,
   stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
   stopAfterRounds: 0, // Stop after X rounds; 0 = endless (manual stop only)
   maxFloor: 10, // Maximum floor to reach (0-15)
@@ -68,6 +69,7 @@ function logConfigSummary(prefix) {
     maxFloor: config.maxFloor,
     refill: config.enableAutoRefillStamina,
     autoSell: config.enableAutoSellCreatures,
+    autoInject: config.enableAutoInjectSealedCreatures,
     hideBoard: config.hideGameBoard,
     staminaSkip: config.enableStaminaSkip
   });
@@ -456,6 +458,7 @@ let currentRunStartTime = null;
 let allAttempts = []; // Store all attempt data including serverResults
 let boardSubscription = null; // Subscription to board state for serverResults
 let pendingServerResults = new Map(); // Map of seed -> serverResults for matching to attempts
+let lastInjectProcessedSeed = null; // Avoid double-inject on the same reward
 let defeatsCount = 0; // Track number of defeats
 let victoriesCount = 0; // Track number of victories
 let totalStaminaSpent = 0; // Track total stamina spent
@@ -797,13 +800,13 @@ function updateMainButtonSealedWarning() {
     if (!button) return;
 
     const currentFloor = getCurrentFloor();
-    const showWarning = Boolean(config.enableAutoSellCreatures) && currentFloor >= 11;
+    const showWarning = (Boolean(config.enableAutoSellCreatures) || Boolean(config.enableAutoInjectSealedCreatures)) && currentFloor >= 11;
     const baseText = t('mods.manualRunner.buttonText') || 'Manual Runner';
 
     button.textContent = showWarning ? `${baseText} ⚠` : baseText;
     button.style.color = showWarning ? '#e74c3c' : '#ffe066';
     button.title = showWarning
-      ? 'Autosell is enabled on floor 11+ (sealed creatures may be sold)'
+      ? 'Autosell or auto-inject is enabled on floor 11+ (sealed creatures may be affected)'
       : (t('mods.manualRunner.buttonTooltip') || 'Run manual mode until victory (restarts on defeat)');
   } catch (error) {
     console.warn('[Manual Runner] Error updating main button warning:', error);
@@ -1292,12 +1295,16 @@ async function handleSkipButton() {
       console.log('[Manual Runner] Skip:', skipButton.textContent.trim());
       skipButton.click();
       await sleep(500); // Wait for skip to process
-      
-      // Close loot summary window after a short delay
-      setTimeout(() => {
-        closeRewardScreen();
-      }, 1000);
-      
+
+      // Let ensureRewardScreenHandled inject/sell on the loot screen when enabled
+      const deferClose =
+        config.enableAutoInjectSealedCreatures === true || config.enableAutoSellCreatures === true;
+      if (!deferClose) {
+        setTimeout(() => {
+          closeRewardScreen();
+        }, 1000);
+      }
+
       return true;
     }
     return false;
@@ -1580,29 +1587,737 @@ async function ensureGameStopped(maxChecks = 5, delayMs = 80) {
   }
 }
 
-// Function to auto-sell creatures from reward screen
-async function autoSellCreatures() {
-  // Wait a bit for reward screen to fully render
-  await sleep(300);
-  
-  // Find Sell or Squeeze button
-  // Check for both English and Portuguese text
-  const sellButtonTexts = ['Sell', 'Vender', 'Squeeze', 'Espremer'];
-  const allButtons = document.querySelectorAll('button');
-  let sellButton = null;
-  
-  for (const button of allButtons) {
-    const buttonText = button.textContent.trim();
-    const hasSellImg = button.querySelector('img[alt="Bag with gold"]');
-    
-    if (sellButtonTexts.includes(buttonText) || hasSellImg) {
-      sellButton = button;
-      break;
+// =======================
+// Auto-inject sealed creatures (manual mode — standalone, not Autoseller)
+// =======================
+
+const INJECT_API_RETRY_ATTEMPTS = 2;
+const INJECT_DELAY_BETWEEN_MS = 400;
+
+/** Same event names/detail shape as Autoseller — consumed by Awaken Tracker. */
+function emitInjectTrackerEvent(type, detail) {
+  try {
+    window.dispatchEvent(new CustomEvent(`autoseller:inject:${type}`, { detail }));
+  } catch (_) {}
+}
+
+function emitInjectSkip(gameId, reason, candidateStats) {
+  emitInjectTrackerEvent('skip', {
+    reason,
+    gameId: Number(gameId),
+    candidate: { stats: candidateStats || {} }
+  });
+}
+
+function peekServerResultsForCurrentReward() {
+  try {
+    const contextServerResults = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults;
+    if (contextServerResults?.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
+      return JSON.parse(JSON.stringify(contextServerResults));
+    }
+  } catch (_) {}
+
+  if (pendingServerResults.size > 0) {
+    const lastSeed = Array.from(pendingServerResults.keys()).pop();
+    return pendingServerResults.get(lastSeed) || null;
+  }
+  return null;
+}
+
+function isSealedTierFiveCreature(monster) {
+  if (!monster) return false;
+  const tier = monster.tier ?? monster.metadata?.tier;
+  return Number(tier) === 5;
+}
+
+function isAwakenedCreature(monster) {
+  if (!monster) return false;
+  const tier = Number(monster.tier ?? monster.metadata?.tier);
+  if (tier === 6) return true;
+  return monster.awaken === true || monster.awakened === true || monster.isAwakened === true;
+}
+
+function isShinyCreature(monster) {
+  if (!monster) return false;
+  return monster.shiny === true || monster.isShiny === true;
+}
+
+function getMonsterGeneStats(monster) {
+  if (!monster || typeof monster !== 'object') {
+    return { hp: 0, ad: 0, ap: 0, armor: 0, magicResist: 0 };
+  }
+  const genes = monster.genes || monster.stats || {};
+  return {
+    hp: Number(monster.hp ?? genes.hp ?? 0),
+    ad: Number(monster.ad ?? genes.ad ?? 0),
+    ap: Number(monster.ap ?? genes.ap ?? 0),
+    armor: Number(monster.armor ?? genes.armor ?? 0),
+    magicResist: Number(monster.magicResist ?? monster.mr ?? genes.magicResist ?? genes.mr ?? 0)
+  };
+}
+
+function hasAnyHigherGeneStat(candidate, target) {
+  if (!candidate || !target) return false;
+  const c = getMonsterGeneStats(candidate);
+  const t = getMonsterGeneStats(target);
+  return c.hp > t.hp || c.ad > t.ad || c.ap > t.ap || c.armor > t.armor || c.magicResist > t.magicResist;
+}
+
+function getCreatureNameFromMonster(monster) {
+  if (!monster) return '';
+  const name = monster.metadata?.name || monster.name;
+  if (name) return name;
+  const gameId = monster.gameId ?? monster.metadata?.id;
+  if (gameId && globalThis.creatureDatabase?.getMonsterName) {
+    return globalThis.creatureDatabase.getMonsterName(gameId) || '';
+  }
+  return gameId ? `gameId:${gameId}` : '';
+}
+
+function isGameCurrentlyRunning() {
+  const gameState = globalThis.state?.gameTimer?.getSnapshot?.()?.context?.state;
+  return gameState === 'playing';
+}
+
+function isMonsterCurrentlyOnBoard(monsterId) {
+  if (!monsterId) return false;
+  const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+  if (!boardContext) return false;
+  const pieceArrays = [boardContext.boardConfig, boardContext.board, boardContext.pieces];
+  for (const pieceArray of pieceArrays) {
+    if (!Array.isArray(pieceArray)) continue;
+    const found = pieceArray.some(piece => {
+      if (!piece || piece.type !== 'player') return false;
+      const pieceMonsterId = piece.databaseId ?? piece.monsterId ?? piece.id;
+      return String(pieceMonsterId) === String(monsterId);
+    });
+    if (found) return true;
+  }
+  return false;
+}
+
+/**
+ * Extract creature drops from manual-mode serverResults (paths differ from autoplay).
+ * @returns {{ battleRewardMonsters: Array, rewardMonsterIds: Set<string|number> }}
+ */
+function extractManualRunnerRewardMonsters(serverResults) {
+  let battleRewardMonsters = [];
+  const rewardMonsterIds = new Set();
+  const pathsUsed = [];
+
+  if (!serverResults) {
+    return { battleRewardMonsters, rewardMonsterIds };
+  }
+
+  const rs = serverResults.rewardScreen;
+  if (rs?.monsterDrop) {
+    const drop = rs.monsterDrop;
+    battleRewardMonsters = Array.isArray(drop) ? drop : [drop];
+    pathsUsed.push('rewardScreen.monsterDrop');
+  }
+  if (battleRewardMonsters.length === 0 && rs?.loot) {
+    const loot = rs.loot;
+    const lootItems = Array.isArray(loot) ? loot : [loot];
+    battleRewardMonsters = lootItems.filter(item => item && (item.type === 'monster' || item.monster || item.id));
+    if (battleRewardMonsters.length > 0) pathsUsed.push('rewardScreen.loot');
+  }
+  if (battleRewardMonsters.length === 0 && rs?.monsters) {
+    battleRewardMonsters = Array.isArray(rs.monsters) ? rs.monsters : [rs.monsters];
+    pathsUsed.push('rewardScreen.monsters');
+  }
+  if (battleRewardMonsters.length === 0 && serverResults.monsters) {
+    battleRewardMonsters = Array.isArray(serverResults.monsters) ? serverResults.monsters : [serverResults.monsters];
+    pathsUsed.push('serverResults.monsters');
+  }
+  if (battleRewardMonsters.length === 0 && serverResults.rewards?.monsters) {
+    const m = serverResults.rewards.monsters;
+    battleRewardMonsters = Array.isArray(m) ? m : [m];
+    pathsUsed.push('serverResults.rewards.monsters');
+  }
+  if (battleRewardMonsters.length === 0 && serverResults.next?.monsterDrop) {
+    const drop = serverResults.next.monsterDrop;
+    battleRewardMonsters = Array.isArray(drop) ? drop : [drop];
+    pathsUsed.push('next.monsterDrop');
+  }
+
+  if (battleRewardMonsters.length > 0) {
+    console.log(
+      `[Manual Runner][Inject] extract: paths=${pathsUsed.join(', ')} ` +
+      `drops=${battleRewardMonsters.length} seed=${serverResults.seed ?? 'unknown'}`
+    );
+  }
+
+  for (const entry of battleRewardMonsters) {
+    if (!entry || typeof entry !== 'object') continue;
+    const monster = entry.monster || entry;
+    const serverId = monster.id || monster.databaseId || entry.monsterId;
+    if (serverId) rewardMonsterIds.add(serverId);
+  }
+
+  return { battleRewardMonsters, rewardMonsterIds };
+}
+
+function serverResultsHasCreatureDrop(serverResults) {
+  if (!serverResults) return false;
+  const rs = serverResults.rewardScreen;
+  if (rs?.monsterDrop) return true;
+  if (rs?.monsters) return true;
+  if (serverResults.monsters) return true;
+  if (serverResults.rewards?.monsters) return true;
+  if (serverResults.next?.monsterDrop) return true;
+  if (rs?.loot) {
+    const lootItems = Array.isArray(rs.loot) ? rs.loot : [rs.loot];
+    return lootItems.some(item => item && (item.type === 'monster' || item.monster || item.id));
+  }
+  return false;
+}
+
+async function waitForServerResultsForReward(maxWaitMs = 3000) {
+  const start = performance.now();
+  while (performance.now() - start < maxWaitMs) {
+    const serverResults = peekServerResultsForCurrentReward();
+    if (serverResults) return serverResults;
+    await sleep(50);
+  }
+  return peekServerResultsForCurrentReward();
+}
+
+async function waitForRewardScreenReady(maxWaitMs = 8000) {
+  if (getOpenRewardsStateWithFallback()) return true;
+  const start = performance.now();
+  while (performance.now() - start < maxWaitMs) {
+    await sleep(100);
+    if (getOpenRewardsStateWithFallback()) return true;
+  }
+  return getOpenRewardsStateWithFallback();
+}
+
+function filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds) {
+  if (!rewardMonsterIds?.size) return [];
+  return inventorySnapshot.filter(inv => rewardMonsterIds.has(inv.id));
+}
+
+function logManualRunnerDropsForFloor11Plus(battleRewardMonsters, floor) {
+  const floorNum = Number(floor);
+  if (!Number.isFinite(floorNum) || floorNum < 11 || !battleRewardMonsters.length) return;
+  battleRewardMonsters.forEach((drop, index) => {
+    const monster = drop?.monster || drop || {};
+    const stats = getMonsterGeneStats(monster);
+    const genes = stats.hp + stats.ad + stats.ap + stats.armor + stats.magicResist;
+    const tier = monster.tier ?? monster.metadata?.tier ?? 'unknown';
+    const serverId = monster.id || monster.databaseId || drop?.monsterId || 'unknown';
+    const gameId = monster.gameId ?? monster.metadata?.id ?? 'unknown';
+    const name = getCreatureNameFromMonster(monster) || `gameId:${gameId}`;
+    console.log(
+      `[Manual Runner][Inject][DropDebug] Floor ${floorNum} drop #${index + 1}: ` +
+      `name=${name} id=${serverId} gameId=${gameId} tier=${tier} genes=${genes} ` +
+      `(hp=${stats.hp} ad=${stats.ad} ap=${stats.ap} armor=${stats.armor} mr=${stats.magicResist})`
+    );
+  });
+}
+
+async function manualRunnerApiRequest(url, options = {}, retries = INJECT_API_RETRY_ATTEMPTS) {
+  const { method = 'GET', body, headers = {} } = options;
+  const baseHeaders = { 'content-type': 'application/json', 'X-Game-Version': '1' };
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const resp = await fetch(url, {
+        method,
+        credentials: 'include',
+        headers: { ...baseHeaders, ...headers },
+        ...(body && { body: JSON.stringify(body) })
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok) {
+        if (resp.status >= 500 && attempt < retries) {
+          await sleep(300 * (attempt + 1));
+          continue;
+        }
+        return { success: false, status: resp.status, data };
+      }
+      return { success: true, status: resp.status, data };
+    } catch (error) {
+      if (attempt === retries) return { success: false, error, data: null };
+      await sleep(300 * (attempt + 1));
     }
   }
-  
+  return { success: false, data: null };
+}
+
+async function fetchManualRunnerInventory() {
+  const localMonsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters;
+  if (Array.isArray(localMonsters) && localMonsters.length > 0) {
+    return localMonsters;
+  }
+
+  const myName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
+  if (!myName) {
+    return [];
+  }
+  const url = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=${encodeURIComponent(JSON.stringify({ '0': { json: myName } }))}`;
+  const result = await manualRunnerApiRequest(url);
+  if (!result.success) {
+    console.warn(`[Manual Runner][Inject] fetch inventory failed: HTTP ${result.status ?? 'unknown'}`);
+    return Array.isArray(localMonsters) ? localMonsters : [];
+  }
+  return result.data?.[0]?.result?.data?.json?.monsters || [];
+}
+
+function syncInjectedAwakenedStatsLocally(awakenedMonsterId, targetBeforeStats, candidateStats) {
+  try {
+    const player = globalThis.state?.player;
+    if (!player || typeof player.send !== 'function') return false;
+    const expectedAfter = {
+      hp: Math.max(targetBeforeStats.hp, candidateStats.hp),
+      ad: Math.max(targetBeforeStats.ad, candidateStats.ad),
+      ap: Math.max(targetBeforeStats.ap, candidateStats.ap),
+      armor: Math.max(targetBeforeStats.armor, candidateStats.armor),
+      magicResist: Math.max(targetBeforeStats.magicResist, candidateStats.magicResist)
+    };
+    player.send({
+      type: 'setState',
+      fn: (prev) => {
+        if (!prev || !Array.isArray(prev.monsters)) return prev;
+        let changed = false;
+        const nextMonsters = prev.monsters.map(monster => {
+          if (String(monster?.id) !== String(awakenedMonsterId)) return monster;
+          changed = true;
+          const next = { ...monster };
+          next.hp = Math.max(Number(monster?.hp) || 0, expectedAfter.hp);
+          next.ad = Math.max(Number(monster?.ad) || 0, expectedAfter.ad);
+          next.ap = Math.max(Number(monster?.ap) || 0, expectedAfter.ap);
+          next.armor = Math.max(Number(monster?.armor) || 0, expectedAfter.armor);
+          next.magicResist = Math.max(Number(monster?.magicResist) || 0, expectedAfter.magicResist);
+          if (next.genes && typeof next.genes === 'object') {
+            next.genes = {
+              ...next.genes,
+              hp: Math.max(Number(next.genes.hp) || 0, expectedAfter.hp),
+              ad: Math.max(Number(next.genes.ad) || 0, expectedAfter.ad),
+              ap: Math.max(Number(next.genes.ap) || 0, expectedAfter.ap),
+              armor: Math.max(Number(next.genes.armor) || 0, expectedAfter.armor),
+              magicResist: Math.max(Number(next.genes.magicResist) || 0, expectedAfter.magicResist)
+            };
+          }
+          return next;
+        });
+        return changed ? { ...prev, monsters: nextMonsters } : prev;
+      }
+    });
+    return true;
+  } catch (error) {
+    console.warn('[Manual Runner][Inject] syncInjectedAwakenedStatsLocally failed:', error);
+    return false;
+  }
+}
+
+function removeMonsterFromLocalInventory(monsterId) {
+  try {
+    const player = globalThis.state?.player;
+    if (!player?.send) return false;
+    player.send({
+      type: 'setState',
+      fn: (prev) => {
+        if (!prev || !Array.isArray(prev.monsters)) return prev;
+        return {
+          ...prev,
+          monsters: prev.monsters.filter(m => String(m?.id) !== String(monsterId))
+        };
+      }
+    });
+    return true;
+  } catch (error) {
+    console.warn('[Manual Runner][Inject] removeMonsterFromLocalInventory failed:', error);
+    return false;
+  }
+}
+
+function showManualRunnerInjectToast(message, durationMs = 5000) {
+  try {
+    let mainContainer = document.getElementById('manual-runner-inject-toast-container');
+    if (!mainContainer) {
+      mainContainer = document.createElement('div');
+      mainContainer.id = 'manual-runner-inject-toast-container';
+      mainContainer.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
+      document.body.appendChild(mainContainer);
+    }
+
+    const existingToasts = mainContainer.querySelectorAll('.manual-runner-inject-toast-item');
+    const stackOffset = existingToasts.length * 44;
+
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'manual-runner-inject-toast-item';
+    flexContainer.style.cssText = `left:0;right:0;display:flex;position:absolute;transition:230ms cubic-bezier(0.21, 1.02, 0.73, 1);transform:translateY(-${stackOffset}px);bottom:0;justify-content:flex-end;`;
+
+    const toast = document.createElement('button');
+    toast.type = 'button';
+    toast.style.pointerEvents = 'auto';
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+    const textLeft = document.createElement('div');
+    textLeft.className = 'text-left';
+    const paragraph = document.createElement('p');
+    paragraph.style.cssText = 'margin: 0; max-width: 28rem; white-space: pre-wrap;';
+    if (typeof message === 'string') {
+      paragraph.textContent = message;
+    } else if (message instanceof Node) {
+      paragraph.style.whiteSpace = 'normal';
+      paragraph.appendChild(message);
+    } else {
+      paragraph.textContent = String(message ?? '');
+    }
+
+    textLeft.appendChild(paragraph);
+    widgetBottom.appendChild(textLeft);
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    mainContainer.appendChild(flexContainer);
+
+    const remove = () => {
+      if (flexContainer?.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        const toasts = mainContainer.querySelectorAll('.manual-runner-inject-toast-item');
+        toasts.forEach((el, index) => {
+          el.style.transform = `translateY(-${index * 44}px)`;
+        });
+      }
+    };
+    toast.addEventListener('click', remove);
+    setTimeout(remove, Math.max(1000, durationMs));
+  } catch (error) {
+    console.warn('[Manual Runner][Inject] Failed to show toast:', error);
+  }
+}
+
+async function pollTargetStatsAfterInject(awakenedTargetId, targetBeforeStats, awakenedTarget) {
+  let targetAfterStats = targetBeforeStats;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await sleep(120);
+    const refreshedTarget = (globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [])
+      .find(m => String(m?.id) === String(awakenedTargetId));
+    targetAfterStats = getMonsterGeneStats(refreshedTarget || awakenedTarget);
+    const hasAnyDelta =
+      targetAfterStats.hp !== targetBeforeStats.hp ||
+      targetAfterStats.ad !== targetBeforeStats.ad ||
+      targetAfterStats.ap !== targetBeforeStats.ap ||
+      targetAfterStats.armor !== targetBeforeStats.armor ||
+      targetAfterStats.magicResist !== targetBeforeStats.magicResist;
+    if (hasAnyDelta) break;
+  }
+  return targetAfterStats;
+}
+
+function showInjectSuccessToast({
+  gameId,
+  creatureName,
+  goldDiff,
+  candidateStats,
+  targetBeforeStats,
+  targetAfterStats,
+  awakenedTargetName,
+  awakenedTargetId
+}) {
+  const statLabelMap = { hp: 'HP', ad: 'AD', ap: 'AP', armor: 'ARM', magicResist: 'MR' };
+  const statIconMap = {
+    hp: 'https://bestiaryarena.com/assets/icons/heal.png',
+    ad: 'https://bestiaryarena.com/assets/icons/attackdamage.png',
+    ap: 'https://bestiaryarena.com/assets/icons/abilitypower.png',
+    armor: 'https://bestiaryarena.com/assets/icons/armor.png',
+    magicResist: 'https://bestiaryarena.com/assets/icons/magicresist.png'
+  };
+  const statKeys = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+
+  const gains = statKeys
+    .map(key => ({ key, diff: targetAfterStats[key] - targetBeforeStats[key] }))
+    .filter(item => item.diff > 0);
+  const inferredGains = statKeys
+    .map(key => ({ key, diff: Math.max(0, candidateStats[key] - targetBeforeStats[key]) }))
+    .filter(item => item.diff > 0);
+  const gainsForToast = gains.length > 0 ? gains : inferredGains;
+  const inferredGainsTextList = inferredGains.map(item => `+${item.diff} ${statLabelMap[item.key]}`);
+
+  const gainsObject = { hp: 0, ad: 0, ap: 0, armor: 0, magicResist: 0 };
+  (gains.length > 0 ? gains : inferredGains).forEach(g => { gainsObject[g.key] = g.diff; });
+
+  console.log(
+    `[Manual Runner][Inject][Applied] ${awakenedTargetName} (${awakenedTargetId}): ` +
+    `${inferredGainsTextList.length > 0 ? inferredGainsTextList.join(', ') : 'no gain'}`
+  );
+
+  emitInjectTrackerEvent('applied', {
+    gameId: Number(gameId),
+    gains: gainsObject,
+    candidate: candidateStats,
+    before: targetBeforeStats,
+    after: targetAfterStats
+  });
+
+  const beforeTotalGenes =
+    targetBeforeStats.hp + targetBeforeStats.ad + targetBeforeStats.ap + targetBeforeStats.armor + targetBeforeStats.magicResist;
+  const afterTotalGenes =
+    targetAfterStats.hp + targetAfterStats.ad + targetAfterStats.ap + targetAfterStats.armor + targetAfterStats.magicResist;
+
+  const toastContent = document.createElement('span');
+  toastContent.style.display = 'inline-flex';
+  toastContent.style.alignItems = 'center';
+  toastContent.style.flexWrap = 'wrap';
+  toastContent.style.gap = '4px';
+
+  const introText = document.createElement('span');
+  introText.textContent = `Injected ${creatureName || 'creature'}`;
+  toastContent.appendChild(introText);
+
+  const numericGoldDiff = Number(goldDiff);
+  const hasGoldDiff = Number.isFinite(numericGoldDiff) && numericGoldDiff !== 0;
+  const hasTotalGenesTransition = Number.isFinite(beforeTotalGenes) && Number.isFinite(afterTotalGenes);
+  if (hasGoldDiff || gainsForToast.length > 0 || hasTotalGenesTransition) {
+    const spacer = document.createElement('span');
+    spacer.textContent = ' ';
+    toastContent.appendChild(spacer);
+
+    let badgeIndex = 0;
+    const totalBadges = gainsForToast.length + (hasGoldDiff ? 1 : 0) + (hasTotalGenesTransition ? 1 : 0);
+
+    if (hasGoldDiff) {
+      const goldBadge = document.createElement('span');
+      goldBadge.style.display = 'inline-flex';
+      goldBadge.style.alignItems = 'center';
+      goldBadge.style.gap = '3px';
+      const goldValue = document.createElement('span');
+      goldValue.textContent = numericGoldDiff > 0 ? `+${numericGoldDiff}` : `${numericGoldDiff}`;
+      goldBadge.appendChild(goldValue);
+      const goldIcon = document.createElement('img');
+      goldIcon.src = 'https://bestiaryarena.com/assets/icons/goldpile.png';
+      goldIcon.alt = 'Gold';
+      goldIcon.style.width = '12px';
+      goldIcon.style.height = '12px';
+      goldIcon.style.verticalAlign = 'middle';
+      goldBadge.appendChild(goldIcon);
+      toastContent.appendChild(goldBadge);
+      badgeIndex += 1;
+      if (badgeIndex < totalBadges) {
+        const comma = document.createElement('span');
+        comma.textContent = ',';
+        toastContent.appendChild(comma);
+      }
+    }
+
+    gainsForToast.forEach((gain) => {
+      const gainBadge = document.createElement('span');
+      gainBadge.style.display = 'inline-flex';
+      gainBadge.style.alignItems = 'center';
+      gainBadge.style.gap = '3px';
+      const gainValue = document.createElement('span');
+      gainValue.textContent = `+${gain.diff}`;
+      gainBadge.appendChild(gainValue);
+      const statIcon = document.createElement('img');
+      statIcon.src = statIconMap[gain.key];
+      statIcon.alt = statLabelMap[gain.key];
+      statIcon.style.width = '12px';
+      statIcon.style.height = '12px';
+      statIcon.style.verticalAlign = 'middle';
+      gainBadge.appendChild(statIcon);
+      toastContent.appendChild(gainBadge);
+      badgeIndex += 1;
+      if (badgeIndex < totalBadges) {
+        const comma = document.createElement('span');
+        comma.textContent = ',';
+        toastContent.appendChild(comma);
+      }
+    });
+
+    if (hasTotalGenesTransition) {
+      const totalGenesBadge = document.createElement('span');
+      totalGenesBadge.textContent = `${beforeTotalGenes}% -> ${afterTotalGenes}%`;
+      toastContent.appendChild(totalGenesBadge);
+    }
+  }
+
+  showManualRunnerInjectToast(toastContent, 5000);
+}
+
+/**
+ * Inject sealed tier-5 drops into matching awakened creatures (manual-mode reward flow).
+ * @param {Object} serverResults
+ * @returns {Promise<Set<string|number>>} Consumed sealed monster server IDs
+ */
+async function manualRunnerAutoInjectSealedCreatures(serverResults) {
+  const consumedServerIds = new Set();
+  if (!config.enableAutoInjectSealedCreatures) {
+    return consumedServerIds;
+  }
+
+  const seed = serverResults?.seed;
+  if (seed !== undefined && seed !== null && seed === lastInjectProcessedSeed) {
+    return consumedServerIds;
+  }
+
+  const { battleRewardMonsters, rewardMonsterIds } = extractManualRunnerRewardMonsters(serverResults);
+  const floor =
+    serverResults?.floor ??
+    serverResults?.rewardScreen?.floor ??
+    globalThis.state?.board?.getSnapshot?.()?.context?.floor;
+  logManualRunnerDropsForFloor11Plus(battleRewardMonsters, floor);
+
+  if (rewardMonsterIds.size === 0) {
+    if (seed !== undefined && seed !== null) lastInjectProcessedSeed = seed;
+    return consumedServerIds;
+  }
+
+  await sleep(200);
+  const inventorySnapshot = await fetchManualRunnerInventory();
+  const matchedMonsters = filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds);
+  const sealedCandidates = matchedMonsters.filter(m => isSealedTierFiveCreature(m) && !isShinyCreature(m));
+
+  if (sealedCandidates.length > 0) {
+    console.log(
+      `[Manual Runner][Inject] matched=${matchedMonsters.length} sealedCandidates=${sealedCandidates.length}`
+    );
+  }
+
+  if (sealedCandidates.length === 0) {
+    if (seed !== undefined && seed !== null) lastInjectProcessedSeed = seed;
+    return consumedServerIds;
+  }
+
+  const localMonsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || inventorySnapshot || [];
+  const awakenedCandidates = localMonsters.filter(m => m?.id && isAwakenedCreature(m) && !isSealedTierFiveCreature(m));
+  if (awakenedCandidates.length === 0) {
+    console.log('[Manual Runner][Inject] Skip: no awakened targets in inventory');
+    if (seed !== undefined && seed !== null) lastInjectProcessedSeed = seed;
+    return consumedServerIds;
+  }
+
+  for (const monster of sealedCandidates) {
+    if (!monster?.id) continue;
+    const creatureName = getCreatureNameFromMonster(monster);
+
+    const sealedGameId = Number(monster?.gameId ?? monster?.metadata?.id);
+    const matchingAwakened = awakenedCandidates.filter(candidate => {
+      const candidateGameId = Number(candidate?.gameId ?? candidate?.metadata?.id);
+      return Number.isFinite(candidateGameId) && Number.isFinite(sealedGameId) && candidateGameId === sealedGameId;
+    });
+    const awakenedTarget = matchingAwakened[0];
+    const awakenedTargetName = getCreatureNameFromMonster(awakenedTarget) || 'unknown';
+
+    if (!awakenedTarget?.id) {
+      const c = getMonsterGeneStats(monster);
+      console.log(`[Manual Runner][Inject][Skip] ${creatureName || monster.id}: no awakened target (gameId=${sealedGameId})`);
+      emitInjectSkip(sealedGameId, 'no-target', c);
+      continue;
+    }
+    if (String(monster.id) === String(awakenedTarget.id)) {
+      console.log(`[Manual Runner][Inject][Skip] ${creatureName || monster.id}: same as target`);
+      emitInjectSkip(sealedGameId, 'same-id', getMonsterGeneStats(monster));
+      continue;
+    }
+    if (!hasAnyHigherGeneStat(monster, awakenedTarget)) {
+      const c = getMonsterGeneStats(monster);
+      const t = getMonsterGeneStats(awakenedTarget);
+      console.log(
+        `[Manual Runner][Inject][Skip] ${creatureName || monster.id}: no higher gene than ${awakenedTargetName} ` +
+        `(candidate hp=${c.hp} ad=${c.ad} ap=${c.ap} armor=${c.armor} mr=${c.magicResist} | ` +
+        `target hp=${t.hp} ad=${t.ad} ap=${t.ap} armor=${t.armor} mr=${t.magicResist})`
+      );
+      emitInjectSkip(sealedGameId, 'no-higher-gene', c);
+      continue;
+    }
+    if (isGameCurrentlyRunning() && isMonsterCurrentlyOnBoard(awakenedTarget.id)) {
+      console.log(`[Manual Runner][Inject][Skip] ${creatureName || monster.id}: target ${awakenedTargetName} on board during battle`);
+      emitInjectSkip(sealedGameId, 'on-board', getMonsterGeneStats(monster));
+      continue;
+    }
+
+    console.log(
+      `[Manual Runner][Inject] Injecting ${creatureName || monster.id} (${monster.id}) ` +
+      `-> ${awakenedTargetName} (${awakenedTarget.id}) gameId=${sealedGameId}`
+    );
+
+    const result = await manualRunnerApiRequest('https://bestiaryarena.com/api/trpc/inventory.useDoctor?batch=1', {
+      method: 'POST',
+      body: { '0': { json: { awakenMonsterId: awakenedTarget.id, consumingMonsterId: monster.id } } }
+    });
+
+    const goldDiff = result?.data?.[0]?.result?.data?.json?.goldDiff;
+    if (result.success && goldDiff !== undefined && goldDiff !== null) {
+      const candidateStats = getMonsterGeneStats(monster);
+      const targetBeforeStats = getMonsterGeneStats(awakenedTarget);
+      console.log(
+        `[Manual Runner][Inject][Success] ${creatureName || monster.id} -> ${awakenedTargetName}, goldDiff=${goldDiff}`
+      );
+      syncInjectedAwakenedStatsLocally(awakenedTarget.id, targetBeforeStats, candidateStats);
+      const targetAfterStats = await pollTargetStatsAfterInject(awakenedTarget.id, targetBeforeStats, awakenedTarget);
+      showInjectSuccessToast({
+        gameId: sealedGameId,
+        creatureName,
+        goldDiff,
+        candidateStats,
+        targetBeforeStats,
+        targetAfterStats,
+        awakenedTargetName,
+        awakenedTargetId: awakenedTarget.id
+      });
+      removeMonsterFromLocalInventory(monster.id);
+      consumedServerIds.add(monster.id);
+    } else if (!result.success && result.status === 429) {
+      console.log(`[Manual Runner][Inject][Retry] ${creatureName || monster.id}: rate limited (429)`);
+      await sleep(800);
+    } else if (!result.success && result.status === 400) {
+      console.warn(
+        `[Manual Runner][Inject] useDoctor HTTP 400 for ${monster.id} ` +
+        `(awaken=${awakenedTarget.id}, consume=${monster.id})`,
+        result?.data
+      );
+    } else if (!result.success) {
+      console.warn(`[Manual Runner][Inject] useDoctor failed for ${monster.id}: HTTP ${result.status ?? 'unknown'}`);
+    }
+
+    await sleep(INJECT_DELAY_BETWEEN_MS);
+  }
+
+  if (seed !== undefined && seed !== null) lastInjectProcessedSeed = seed;
+  if (consumedServerIds.size > 0) {
+    console.log(`[Manual Runner][Inject] Done: consumed=${consumedServerIds.size}`);
+  }
+  return consumedServerIds;
+}
+
+// Function to auto-sell creatures from reward screen (requires loot UI to stay open)
+async function autoSellCreatures() {
+  if (!getOpenRewardsStateWithFallback()) {
+    console.warn('[Manual Runner] Autosell skipped: reward screen is not open');
+    return false;
+  }
+
+  const sellButtonTexts = ['Sell', 'Vender', 'Squeeze', 'Espremer'];
+  let sellButton = null;
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (!getOpenRewardsStateWithFallback()) {
+      console.warn('[Manual Runner] Autosell aborted: reward screen closed while waiting for Sell button');
+      return false;
+    }
+
+    const allButtons = document.querySelectorAll('button');
+    for (const button of allButtons) {
+      const buttonText = button.textContent.trim();
+      const hasSellImg = button.querySelector('img[alt="Bag with gold"]');
+      if (sellButtonTexts.includes(buttonText) || hasSellImg) {
+        sellButton = button;
+        break;
+      }
+    }
+
+    if (sellButton) break;
+    await sleep(200);
+  }
+
   if (!sellButton) {
-    console.warn('[Manual Runner] Could not find Sell/Squeeze button');
+    console.warn('[Manual Runner] Could not find Sell/Squeeze button (reward screen may have closed too early)');
     return false;
   }
   
@@ -1623,27 +2338,44 @@ async function autoSellCreatures() {
 }
 
 async function ensureRewardScreenHandled() {
-  let isRewardScreenOpen = false;
-  try {
-    const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
-    isRewardScreenOpen = openRewards.getSnapshot();
-  } catch (e) {
-    isRewardScreenOpen = rewardScreenOpen;
-  }
-
-  if (!isRewardScreenOpen) {
+  const wantsInject = config.enableAutoInjectSealedCreatures === true;
+  const wantsSell = config.enableAutoSellCreatures === true;
+  if (!wantsInject && !wantsSell) {
+    if (!getOpenRewardsStateWithFallback()) return;
+    closeRewardScreen();
+    await sleep(200);
+    await waitForRewardScreenToClose(2500);
     return;
   }
 
-  await waitForModCoordinationTasks({ context: 'reward screen handling' });
-
-  // Auto-sell creatures if enabled
-  let autoSellSuccess = false;
-  if (config.enableAutoSellCreatures) {
-    autoSellSuccess = await autoSellCreatures();
+  // Act on the loot screen while it is still open — do NOT wait for Automator first (it can take seconds).
+  const screenReady = await waitForRewardScreenReady(8000);
+  if (!screenReady) {
+    console.warn('[Manual Runner] Reward screen not open; inject may still use API, autosell needs the loot UI');
   }
 
-  // If auto-sell didn't succeed or wasn't enabled, close reward screen normally
+  await sleep(300);
+  const serverResults = await waitForServerResultsForReward(3000);
+  const hasCreatureDrop = serverResults ? serverResultsHasCreatureDrop(serverResults) : false;
+
+  if (wantsInject && serverResults) {
+    await manualRunnerAutoInjectSealedCreatures(serverResults);
+    if (wantsSell && hasCreatureDrop) {
+      await sleep(300);
+    }
+  } else if (wantsInject && !serverResults) {
+    console.warn('[Manual Runner][Inject] No serverResults at reward screen');
+  }
+
+  let autoSellSuccess = false;
+  if (wantsSell && hasCreatureDrop) {
+    if (!getOpenRewardsStateWithFallback()) {
+      console.warn('[Manual Runner] Autosell skipped: reward screen already closed before sell');
+    } else {
+      autoSellSuccess = await autoSellCreatures();
+    }
+  }
+
   if (!autoSellSuccess) {
     const closeStart = performance.now();
     closeRewardScreen();
@@ -1671,7 +2403,7 @@ async function ensureRewardScreenHandled() {
       console.log(`[Manual Runner] Reward screen closed in ${closeElapsed}ms`);
     }
   } else {
-    // Auto-sell handled closing, just verify it's closed
+    // Autosell handled closing — verify it closed
     await sleep(300);
     try {
       const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
@@ -2604,12 +3336,45 @@ function createConfigPanel() {
     const canReachFloorElevenPlus = (stopSelect.value === 'maxFloor' && maxFloorValue >= 11) || currentOrTargetFloor >= 11;
     const showWarning = sellInput.checked && canReachFloorElevenPlus;
     sellWarningIcon.style.display = showWarning ? 'inline-block' : 'none';
+    updateAutoInjectWarning();
   };
 
   sellContainer.appendChild(sellInput);
   sellContainer.appendChild(sellWarningIcon);
   sellContainer.appendChild(sellLabel);
   content.appendChild(sellContainer);
+
+  // Auto-inject sealed creatures (manual-mode drops via serverResults)
+  const injectContainer = document.createElement('div');
+  injectContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  const injectInput = document.createElement('input');
+  injectInput.type = 'checkbox';
+  injectInput.id = `${CONFIG_PANEL_ID}-inject-input`;
+  injectInput.checked = Boolean(config.enableAutoInjectSealedCreatures);
+  const injectLabel = document.createElement('label');
+  injectLabel.htmlFor = injectInput.id;
+  injectLabel.textContent = t('mods.manualRunner.enableAutoInjectSealed') || 'Auto-inject sealed creatures';
+  const injectWarningIcon = document.createElement('span');
+  injectWarningIcon.textContent = '⚠';
+  injectWarningIcon.title =
+    t('mods.manualRunner.autoInjectWarningTooltip') ||
+    'Injects sealed drops into matching awakened creatures (costs gold). Runs before autosell when both are enabled.';
+  injectWarningIcon.setAttribute('aria-label', 'Warning: auto-inject affects sealed creatures on floor 11+');
+  injectWarningIcon.style.cssText = 'display: none; color: #f1c40f; font-weight: bold; cursor: help; margin-left: 2px;';
+
+  const updateAutoInjectWarning = () => {
+    const currentFloor = getCurrentFloor();
+    const maxFloorValue = parseInt(maxFloorInput.value, 10) || 10;
+    const currentOrTargetFloor = Math.max(currentFloor, maxFloorValue);
+    const canReachFloorElevenPlus =
+      (stopSelect.value === 'maxFloor' && maxFloorValue >= 11) || currentOrTargetFloor >= 11;
+    injectWarningIcon.style.display = injectInput.checked && canReachFloorElevenPlus ? 'inline-block' : 'none';
+  };
+
+  injectContainer.appendChild(injectInput);
+  injectContainer.appendChild(injectWarningIcon);
+  injectContainer.appendChild(injectLabel);
+  content.appendChild(injectContainer);
 
   // Auto-skip when skip costs stamina (toggleable; normal free skips are always auto-clicked)
   const staminaSkipContainer = document.createElement('div');
@@ -2626,9 +3391,11 @@ function createConfigPanel() {
   content.appendChild(staminaSkipContainer);
 
   sellInput.addEventListener('change', updateAutoSellWarning);
+  injectInput.addEventListener('change', updateAutoInjectWarning);
   maxFloorInput.addEventListener('input', updateAutoSellWarning);
   stopSelect.addEventListener('change', updateAutoSellWarning);
   updateAutoSellWarning();
+  updateAutoInjectWarning();
 
   // Check if board has ally creatures
   const hasAlly = hasAllyCreaturesOnBoard();
@@ -2674,6 +3441,7 @@ function createConfigPanel() {
         config.stopCondition = stopSelect.value;
         config.enableAutoRefillStamina = refillInput.checked;
         config.enableAutoSellCreatures = sellInput.checked;
+        config.enableAutoInjectSealedCreatures = injectInput.checked;
         config.enableStaminaSkip = staminaSkipInput.checked;
         config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
         config.stopAfterRounds = parseInt(roundsInput.value, 10) || 0;
@@ -2689,6 +3457,7 @@ function createConfigPanel() {
           stopCondition: config.stopCondition,
           enableAutoRefillStamina: config.enableAutoRefillStamina,
           enableAutoSellCreatures: config.enableAutoSellCreatures,
+          enableAutoInjectSealedCreatures: config.enableAutoInjectSealedCreatures,
           enableStaminaSkip: config.enableStaminaSkip,
           stopWhenTicksReached: config.stopWhenTicksReached,
           stopAfterRounds: config.stopAfterRounds,
@@ -2719,6 +3488,7 @@ function createConfigPanel() {
         config.stopCondition = stopSelect.value;
         config.enableAutoRefillStamina = refillInput.checked;
         config.enableAutoSellCreatures = sellInput.checked;
+        config.enableAutoInjectSealedCreatures = injectInput.checked;
         config.enableStaminaSkip = staminaSkipInput.checked;
         config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
         config.stopAfterRounds = parseInt(roundsInput.value, 10) || 0;
@@ -2734,6 +3504,7 @@ function createConfigPanel() {
           stopCondition: config.stopCondition,
           enableAutoRefillStamina: config.enableAutoRefillStamina,
           enableAutoSellCreatures: config.enableAutoSellCreatures,
+          enableAutoInjectSealedCreatures: config.enableAutoInjectSealedCreatures,
           enableStaminaSkip: config.enableStaminaSkip,
           stopWhenTicksReached: config.stopWhenTicksReached,
           stopAfterRounds: config.stopAfterRounds,
@@ -3676,6 +4447,7 @@ function cleanupManualRunner() {
     currentRunStartTime = null;
     allAttempts = [];
     pendingServerResults.clear();
+    lastInjectProcessedSeed = null;
     defeatsCount = 0;
     victoriesCount = 0;
     totalStaminaSpent = 0;

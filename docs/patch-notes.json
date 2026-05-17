@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "3.8.9",
+      "changes": [
+        {
+          "mod": "Depot Manager",
+          "type": "changed",
+          "text": "Depot creature search: shiny, sealed, and awakened filters (combine with name/stat search via AND/OR, e.g. dragon AND shiny, sealed AND /HP >15)."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Session inject counters (✓ / skipped) now update from Manual Runner auto-inject via the same inject events as Autoseller."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Added \"Auto-inject sealed creatures\" (config toggle): injects tier-5 drops into matching awakened creatures when genes improve the target (costs gold), with Autoseller-style success toast and Awaken Tracker inject events. When autosell is also enabled, inject runs first, then sell/devour on the reward screen."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Reward handling no longer waits for Automator before inject/autosell; skip defers closing the loot screen when those options are on. Autosell only runs when serverResults includes a creature drop and retries the Sell button while the reward UI stays open. Reduced noisy inject/reward console logging."
+        }
+      ]
+    },
+    {
       "version": "3.8.8",
       "changes": [
         {
