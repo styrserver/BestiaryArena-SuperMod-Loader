@@ -86,6 +86,8 @@ const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 // Timing constants
 const UI_UPDATE_DELAY_MS = 600;
 const GAME_RESTART_DELAY_MS = 400;
+const BOARD_IDLE_MAX_WAIT_MS = 10000;
+const BOARD_IDLE_RECHECK_DELAY_MS = 100;
 const NOTIFICATION_DISPLAY_MS = 3000;
 
 // Analysis state constants
@@ -1566,25 +1568,58 @@ async function waitForGameStartAfterClick(analysisId) {
   return 'failed';
 }
 
-async function ensureGameStopped(maxChecks = 5, delayMs = 80) {
-  const startTime = performance.now();
-  let stopWaitCount = 0;
-  while (stopWaitCount < maxChecks) {
-    const boardContext = globalThis.state.board.getSnapshot().context;
-    if (!boardContext.gameStarted) {
-      const elapsed = Math.round(performance.now() - startTime);
-      if (elapsed > 50 || stopWaitCount > 0) {
-        console.log(`[Manual Runner] Game stopped after ${elapsed}ms (${stopWaitCount} checks)`);
+/**
+ * Wait until board reports no active run (gameStarted false).
+ * Same 10s window as clickStartButtonRobust; ESC + Automator coordination while waiting.
+ * @returns {Promise<boolean>} true when idle, false if still running after timeout
+ */
+async function ensureGameStopped(options = {}) {
+  const maxWaitMs = Math.max(200, Number(options.maxWaitMs) || BOARD_IDLE_MAX_WAIT_MS);
+  const recheckDelayMs = Math.max(40, Number(options.recheckDelayMs) || BOARD_IDLE_RECHECK_DELAY_MS);
+  const contextSuffix = options.context ? ` [${options.context}]` : '';
+  const startTs = performance.now();
+  const deadline = startTs + maxWaitMs;
+  let checks = 0;
+  let lastEscNudgeAt = 0;
+
+  while (performance.now() < deadline) {
+    checks++;
+    if (!isBoardGameRunning()) {
+      const elapsed = Math.round(performance.now() - startTs);
+      if (elapsed > 50 || checks > 1) {
+        console.log(`[Manual Runner] Game stopped after ${elapsed}ms (${checks} checks)${contextSuffix}`);
       }
+      return true;
+    }
+
+    const elapsed = performance.now() - startTs;
+    if (elapsed - lastEscNudgeAt >= 1000) {
+      dispatchEsc();
+      lastEscNudgeAt = elapsed;
+    }
+
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) {
       break;
     }
-    await sleep(delayMs);
-    stopWaitCount++;
+
+    await waitForModCoordinationTasks({
+      maxWaitMs: Math.min(350, Math.max(120, remaining)),
+      delayMs: 120,
+      context: options.context ? `board-idle ${options.context}` : 'board-idle wait'
+    });
+
+    if (performance.now() >= deadline) {
+      break;
+    }
+    await sleep(Math.min(recheckDelayMs, Math.max(40, deadline - performance.now())));
   }
-  
-  if (stopWaitCount >= maxChecks) {
-    console.warn(`[Manual Runner] gameStarted still true after ${stopWaitCount * delayMs}ms, continuing`);
-  }
+
+  const elapsed = Math.round(performance.now() - startTs);
+  console.warn(
+    `[Manual Runner] gameStarted still true after ${elapsed}ms (${checks} checks)${contextSuffix}`
+  );
+  return false;
 }
 
 // =======================
@@ -1663,14 +1698,26 @@ function hasAnyHigherGeneStat(candidate, target) {
   return c.hp > t.hp || c.ad > t.ad || c.ap > t.ap || c.armor > t.armor || c.magicResist > t.magicResist;
 }
 
+function getCreatureNameFromGameId(gameId) {
+  if (gameId === undefined || gameId === null || gameId === '') return '';
+  try {
+    const fromDb = globalThis.creatureDatabase?.findMonsterByGameId?.(gameId);
+    if (fromDb?.metadata?.name) return fromDb.metadata.name;
+  } catch (_) { /* ignore */ }
+  try {
+    const fromState = globalThis.state?.utils?.getMonster?.(gameId);
+    if (fromState?.metadata?.name) return fromState.metadata.name;
+  } catch (_) { /* ignore */ }
+  return '';
+}
+
 function getCreatureNameFromMonster(monster) {
   if (!monster) return '';
   const name = monster.metadata?.name || monster.name;
   if (name) return name;
   const gameId = monster.gameId ?? monster.metadata?.id;
-  if (gameId && globalThis.creatureDatabase?.getMonsterName) {
-    return globalThis.creatureDatabase.getMonsterName(gameId) || '';
-  }
+  const resolved = getCreatureNameFromGameId(gameId);
+  if (resolved) return resolved;
   return gameId ? `gameId:${gameId}` : '';
 }
 
@@ -2067,8 +2114,13 @@ function showInjectSuccessToast({
   toastContent.style.flexWrap = 'wrap';
   toastContent.style.gap = '4px';
 
+  const displayName =
+    (creatureName && !/^gameId:\d+$/i.test(creatureName) ? creatureName : '') ||
+    getCreatureNameFromGameId(gameId) ||
+    (awakenedTargetName && !/^gameId:\d+$/i.test(awakenedTargetName) ? awakenedTargetName : '') ||
+    'creature';
   const introText = document.createElement('span');
-  introText.textContent = `Injected ${creatureName || 'creature'}`;
+  introText.textContent = `Injected ${displayName}`;
   toastContent.appendChild(introText);
 
   const numericGoldDiff = Number(goldDiff);
@@ -2849,7 +2901,10 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
           // Continue loop to next attempt on new floor
           const cleanupStart = performance.now();
           
-          await ensureGameStopped();
+          if (!await ensureGameStopped({ context: `post-victory cleanup ${attemptCount}` })) {
+            console.warn('[Manual Runner] Stopping run: board still busy after idle wait (not a user stop)');
+            break;
+          }
           
           if (rewardScreenOpen) {
             closeRewardScreen();
@@ -2941,7 +2996,10 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       const cleanupStart = performance.now();
       
-      await ensureGameStopped();
+      if (!await ensureGameStopped({ context: `post-attempt cleanup ${attemptCount}` })) {
+        console.warn('[Manual Runner] Stopping run: board still busy after idle wait (not a user stop)');
+        break;
+      }
 
       if (rewardScreenOpen) {
         closeRewardScreen();

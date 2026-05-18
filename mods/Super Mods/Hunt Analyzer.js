@@ -1115,7 +1115,31 @@ function getCurrentMode() {
   }
 }
 
+function huntAnalyzerHasRecordedBattles() {
+  return HuntAnalyzerState.data.sessions.length > 0;
+}
+
+// After the first completed hunt, align baselines so pre-battle idle time is not counted.
+function syncTimeTrackingAfterFirstRecordedBattle() {
+  if (HuntAnalyzerState.data.sessions.length !== 1) return;
+  const mode = getCurrentMode();
+  if (mode === 'autoplay') {
+    const currentAutoplayTime = getAutoplaySessionTime();
+    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime || 0;
+    HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime || 0;
+    HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
+    HuntAnalyzerState.timeTracking.manualActive = false;
+    HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+  } else if (mode === 'manual') {
+    HuntAnalyzerState.timeTracking.manualActive = true;
+    HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+  }
+}
+
 function getLiveSessionMs() {
+  if (!huntAnalyzerHasRecordedBattles()) {
+    return 0;
+  }
   const mode = getCurrentMode();
   if (mode === 'autoplay') {
     const currentAutoplayTime = getAutoplaySessionTime(); // minutes
@@ -1139,6 +1163,9 @@ function getLiveSessionMs() {
 }
 
 function snapshotIntoTotals() {
+  if (!huntAnalyzerHasRecordedBattles()) {
+    return 0;
+  }
   const liveMs = getLiveSessionMs();
   if (liveMs > 0) {
     HuntAnalyzerState.timeTracking.accumulatedTimeMs += liveMs;
@@ -1381,6 +1408,10 @@ function stopInternalClock() {
 // Update the internal clock by watching DOM autoplay timer
 function updateInternalClock() {
   const currentAutoplayTime = getAutoplaySessionTime();
+  if (!huntAnalyzerHasRecordedBattles()) {
+    HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
+    return;
+  }
   const nowMs = Date.now();
   const mode = getCurrentMode();
   const isAutoplayRunning = mode === 'autoplay' && currentAutoplayTime && currentAutoplayTime > 0;
@@ -3951,6 +3982,9 @@ class DataProcessor {
     };
     
     this.state.data.sessions.push(sessionData);
+    if (this.state.data.sessions.length === 1) {
+      syncTimeTrackingAfterFirstRecordedBattle();
+    }
     
     // Consolidated session processing summary
     console.log('[Hunt Analyzer] Session processed:', {

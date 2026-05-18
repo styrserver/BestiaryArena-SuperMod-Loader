@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.8.10",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Bestiary Tier sort: when tier, genes, and rank match, creatures now tiebreak by name instead of map usage."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Playtime stays at 00:00:00 until the first completed hunt is recorded; idle time before that (autoplay timer, manual mode, map changes) is no longer counted."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Auto-inject success toast and console logs now show creature names (via creature database / game API) instead of gameId:N placeholders. Post-attempt cleanup waits up to 10s for the board to go idle (gameStarted) before the next run — same window as start-button recovery — and stops the run if it stays busy instead of failing with \"start button unavailable\"."
+        }
+      ]
+    },
+    {
       "version": "3.8.9",
       "changes": [
         {

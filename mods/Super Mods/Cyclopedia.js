@@ -5078,7 +5078,6 @@ function openCyclopediaModal(options) {
               } else if (kb.bestRank !== ka.bestRank) {
                 return kb.bestRank - ka.bestRank;
               }
-              if (b.usageCount !== a.usageCount) return b.usageCount - a.usageCount;
               return a.labelNorm.localeCompare(b.labelNorm);
             })
             .forEach((m) => listGrid.appendChild(m.row));
