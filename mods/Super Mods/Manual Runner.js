@@ -457,7 +457,7 @@ const analysisState = new AnalysisState();
 // Global variables to track game data
 let attemptCount = 0;
 let currentRunStartTime = null;
-let allAttempts = []; // Store all attempt data including serverResults
+let allAttempts = []; // Slim per-attempt stats (no full serverResults — keeps long runs from ballooning memory)
 let boardSubscription = null; // Subscription to board state for serverResults
 let pendingServerResults = new Map(); // Map of seed -> serverResults for matching to attempts
 let lastInjectProcessedSeed = null; // Avoid double-inject on the same reward
@@ -476,6 +476,39 @@ let persistentLastTick = 0;
 let persistentLastGrade = 'F';
 let persistentLastRankPoints = 0;
 let gameTimerUnsubscribe = null; // Unsubscribe function for gameTimer
+
+/** Log [Perf] every N attempts + batch start/end (Chrome: heap via performance.memory). */
+const PERF_LOG_EVERY_N_ATTEMPTS = 25;
+
+function getManualRunnerPerfSnapshot() {
+  const heapMb =
+    typeof performance !== 'undefined' && performance.memory?.usedJSHeapSize
+      ? Math.round(performance.memory.usedJSHeapSize / 1048576)
+      : null;
+  return {
+    stored: allAttempts.length,
+    pending: pendingServerResults.size,
+    boardSub: !!boardSubscription,
+    rewardsSub: !!openRewardsSubscription,
+    timerSub: !!gameTimerUnsubscribe,
+    trackerListeners: gameStateTracker?.listeners?.size ?? 0,
+    modals: modalManager?.activeModals?.size ?? 0,
+    heapMb
+  };
+}
+
+function formatManualRunnerPerfSnapshot(s) {
+  const heap = s.heapMb != null ? ` heap=${s.heapMb}MB` : '';
+  return `stored=${s.stored} pending=${s.pending} subs=${s.boardSub ? 1 : 0}/${s.rewardsSub ? 1 : 0}/${s.timerSub ? 1 : 0} listeners=${s.trackerListeners} modals=${s.modals}${heap}`;
+}
+
+function logManualRunnerPerfCheckpoint(attemptNumber, attemptMs) {
+  if (PERF_LOG_EVERY_N_ATTEMPTS <= 0) return;
+  if (attemptNumber !== 1 && attemptNumber % PERF_LOG_EVERY_N_ATTEMPTS !== 0) return;
+  console.log(
+    `[Manual Runner][Perf] attempt=${attemptNumber} attemptMs=${Math.round(attemptMs)} ${formatManualRunnerPerfSnapshot(getManualRunnerPerfSnapshot())}`
+  );
+}
 
 // =======================
 // 3. Utility Functions
@@ -1171,9 +1204,9 @@ function setupBoardSubscription() {
       
       lastProcessedSeed = seed;
       
-      // Store serverResults by seed for later matching with attempts
-      // Make a deep copy to avoid mutation
-      pendingServerResults.set(seed, JSON.parse(JSON.stringify(serverResults)));
+      // One pending entry per run (avoids map growth); single clone at capture
+      pendingServerResults.clear();
+      pendingServerResults.set(seed, cloneServerResults(serverResults));
       
       console.log('[Manual Runner] ServerResults captured, seed:', seed, 'victory:', serverResults.rewardScreen.victory, 'ticks:', serverResults.rewardScreen.gameTicks);
     });
@@ -1336,17 +1369,32 @@ async function quickSkipScan(totalMs = 5000, stepMs = 400) {
   return false;
 }
 
+// Read openRewards from board snapshot (avoids creating a new board.select() per poll)
+function getBoardOpenRewardsSnapshot() {
+  try {
+    const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+    if (ctx && typeof ctx.openRewards === 'boolean') {
+      return ctx.openRewards;
+    }
+    if (ctx && ctx.openRewards != null) {
+      return !!ctx.openRewards;
+    }
+  } catch (_) { /* board unavailable */ }
+  return rewardScreenOpen;
+}
+
+function cloneServerResults(serverResults) {
+  if (!serverResults) return null;
+  try {
+    return JSON.parse(JSON.stringify(serverResults));
+  } catch (_) {
+    return serverResults;
+  }
+}
+
 // Function to wait for reward screen to close
 async function waitForRewardScreenToClose(maxWaitMs = 2500) {
-  // Check actual state first, not just the flag
-  let isCurrentlyOpen = false;
-  try {
-    const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
-    isCurrentlyOpen = openRewards.getSnapshot();
-  } catch (e) {
-    // Fallback to flag
-    isCurrentlyOpen = rewardScreenOpen;
-  }
+  let isCurrentlyOpen = rewardScreenOpen || getBoardOpenRewardsSnapshot();
   
   if (!isCurrentlyOpen) {
     rewardScreenOpen = false; // Sync the flag
@@ -1371,8 +1419,7 @@ async function waitForRewardScreenToClose(maxWaitMs = 2500) {
     let pollLogAt = 0;
     const checkInterval = setInterval(() => {
       try {
-        const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
-        const isOpen = openRewards.getSnapshot();
+        const isOpen = rewardScreenOpen || getBoardOpenRewardsSnapshot();
         
         if (!isOpen) {
           console.log('[Manual Runner] Reward screen closed (polling)');
@@ -1645,17 +1692,16 @@ function emitInjectSkip(gameId, reason, candidateStats) {
 }
 
 function peekServerResultsForCurrentReward() {
-  try {
-    const contextServerResults = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults;
-    if (contextServerResults?.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
-      return JSON.parse(JSON.stringify(contextServerResults));
-    }
-  } catch (_) {}
-
   if (pendingServerResults.size > 0) {
     const lastSeed = Array.from(pendingServerResults.keys()).pop();
     return pendingServerResults.get(lastSeed) || null;
   }
+  try {
+    const contextServerResults = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults;
+    if (contextServerResults?.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
+      return contextServerResults;
+    }
+  } catch (_) {}
   return null;
 }
 
@@ -2440,16 +2486,10 @@ async function ensureRewardScreenHandled() {
       console.warn(`[Manual Runner] Reward screen did not close within timeout (${closeElapsed}ms), trying ESC key...`);
       dispatchEsc();
       await sleep(1000);
-      try {
-        const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
-        const isOpen = openRewards.getSnapshot();
-        if (isOpen) {
-          console.error('[Manual Runner] Reward screen still open after ESC key - this may cause issues');
-        } else {
-          rewardScreenOpen = false;
-        }
-      } catch (e) {
-        /* openRewards unavailable */
+      if (getBoardOpenRewardsSnapshot()) {
+        console.error('[Manual Runner] Reward screen still open after ESC key - this may cause issues');
+      } else {
+        rewardScreenOpen = false;
       }
     } else {
       console.log(`[Manual Runner] Reward screen closed in ${closeElapsed}ms`);
@@ -2457,14 +2497,8 @@ async function ensureRewardScreenHandled() {
   } else {
     // Autosell handled closing — verify it closed
     await sleep(300);
-    try {
-      const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
-      const isOpen = openRewards.getSnapshot();
-      if (!isOpen) {
-        rewardScreenOpen = false;
-      }
-    } catch (e) {
-      // openRewards may be unavailable briefly after ESC; subscription still tracks rewardScreenOpen
+    if (!getBoardOpenRewardsSnapshot()) {
+      rewardScreenOpen = false;
     }
   }
 }
@@ -2474,16 +2508,16 @@ async function waitForServerResults(maxWaitTime = 2000) {
   const waitStart = performance.now();
 
   while (!serverResults && (performance.now() - waitStart) < maxWaitTime) {
-    const contextServerResults = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults;
-    if (contextServerResults && contextServerResults.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
-      serverResults = JSON.parse(JSON.stringify(contextServerResults));
-      break;
-    }
-
     if (pendingServerResults.size > 0) {
       const lastSeed = Array.from(pendingServerResults.keys()).pop();
       serverResults = pendingServerResults.get(lastSeed);
       pendingServerResults.delete(lastSeed);
+      break;
+    }
+
+    const contextServerResults = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults;
+    if (contextServerResults && contextServerResults.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
+      serverResults = contextServerResults;
       break;
     }
 
@@ -2548,7 +2582,7 @@ function createAttemptData({ attemptNumber, result, runTime, serverResults, atte
     runTimeMs: runTime,
     staminaSpent: attemptStaminaSpent,
     seed: attemptSeed,
-    serverResults,
+    roomId: serverResults?.rewardScreen?.roomId ?? null,
     skipped: !!result.skipped,
     floor: floor !== undefined ? floor : null
   };
@@ -2575,12 +2609,7 @@ function createSkipResult() {
 }
 
 function getOpenRewardsStateWithFallback() {
-  try {
-    const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
-    return openRewards.getSnapshot();
-  } catch (e) {
-    return rewardScreenOpen;
-  }
+  return rewardScreenOpen || getBoardOpenRewardsSnapshot();
 }
 
 function serverSignalsSkipEnabled() {
@@ -2714,6 +2743,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     
     attemptCount = 0;
     startTime = performance.now();
+    console.log(`[Manual Runner][Perf] batch start ${formatManualRunnerPerfSnapshot(getManualRunnerPerfSnapshot())}`);
     
     while (true) {
       if (shouldAbortAnalysisLoop(thisAnalysisId)) {
@@ -2835,6 +2865,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         staminaThis: attemptStaminaSpent,
         staminaTotal: totalStaminaSpent
       });
+      logManualRunnerPerfCheckpoint(attemptCount, runTime);
       
       // Check if stop was requested during this run (after recording attempt data)
       if (!analysisState.isRunning()) {
@@ -3040,12 +3071,11 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
   } finally {
     setLockedFloorDuringRun(null);
     analysisState.reset();
-    
-    // Cleanup board subscription
-    cleanupBoardSubscription();
-    
-    // Cleanup gameTimer subscription
-    cleanupGameTimerSubscription();
+    teardownManualRunnerSubscriptions();
+    resetManualRunnerTransientState();
+    console.log(
+      `[Manual Runner][Perf] batch end attempts=${attemptCount} ${formatManualRunnerPerfSnapshot(getManualRunnerPerfSnapshot())}`
+    );
     
     // Restore game board visibility
     if (config.hideGameBoard) {
@@ -3053,12 +3083,6 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       if (gameFrame && gameFrame.style.display === 'none') {
         gameFrame.style.display = '';
       }
-    }
-    
-    // Clean up game state tracker if no more listeners
-    if (gameStateTracker && gameStateTracker.listeners.size === 0) {
-      gameStateTracker.stopSubscription();
-      gameStateTracker = null;
     }
   }
 }
@@ -3114,11 +3138,7 @@ function createReplayDataForAttempt(attempt) {
     } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
       boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
     } else {
-      // Fallback: use serverResults if available (contains board info)
-      if (attempt.serverResults && attempt.serverResults.rewardScreen) {
-        // ServerResults doesn't have full board setup, so we need to serialize current board
-        boardData = serializeBoard();
-      }
+      boardData = serializeBoard();
     }
     
     if (!boardData) {
@@ -3723,10 +3743,8 @@ function showRunningAnalysisModal(
           window.ModCoordination.updateModState('Manual Runner', { active: false });
         }
         
-        // Cleanup all subscriptions
-        cleanupBoardSubscription();
-        cleanupRewardsScreenSubscription();
-        cleanupGameTimerSubscription();
+        teardownManualRunnerSubscriptions();
+        resetManualRunnerTransientState();
         
         // Close modal immediately
         if (activeRunningModal && activeRunningModal.close) {
@@ -4469,77 +4487,78 @@ function init() {
 // 7. Cleanup System
 // =======================
 
+/** Reward-screen flags, pending results, skip debounce — reset between runs and on mod unload. */
+function resetManualRunnerTransientState() {
+  pendingServerResults.clear();
+  rewardScreenOpen = false;
+  rewardScreenOpenedCallback = null;
+  rewardScreenClosedCallback = null;
+  skipInProgress = false;
+  persistentLastTick = 0;
+  persistentLastGrade = 'F';
+  persistentLastRankPoints = 0;
+}
+
+/** Unsubscribe board, openRewards, and gameTimer; tear down shared tracker. */
+function teardownManualRunnerSubscriptions() {
+  cleanupBoardSubscription();
+  cleanupGameTimerSubscription();
+  if (gameStateTracker) {
+    if (gameStateTracker.listeners?.size > 0) {
+      console.warn(
+        `[Manual Runner] gameStateTracker still has ${gameStateTracker.listeners.size} listener(s) during teardown`
+      );
+    }
+    gameStateTracker.stopSubscription();
+    gameStateTracker = null;
+  }
+}
+
 function cleanupManualRunner() {
   console.log('[Manual Runner] Starting cleanup...');
   
   try {
-    // 1. Stop any running analysis
     if (analysisState.isRunning()) {
       console.log('[Manual Runner] Stopping running analysis during cleanup');
       analysisState.stop();
     }
     
-    // 2. Close all modals (also removes event listeners via DOM removal)
-    console.log('[Manual Runner] Closing all modals...');
     forceCloseAllModals();
-    
-    // 3. Cleanup all subscriptions
-    console.log('[Manual Runner] Cleaning up subscriptions...');
-    cleanupBoardSubscription();
-    cleanupRewardsScreenSubscription();
-    
-    // 4. Cleanup game state tracker
-    if (gameStateTracker) {
-      console.log('[Manual Runner] Cleaning up game state tracker...');
-      gameStateTracker.stopSubscription();
-      gameStateTracker = null;
-    }
-    
-    // 5. Reset analysis state
-    console.log('[Manual Runner] Resetting analysis state...');
+    teardownManualRunnerSubscriptions();
+    resetManualRunnerTransientState();
     analysisState.reset();
     
-    // 6. Clear global state variables
-    console.log('[Manual Runner] Clearing global state...');
     attemptCount = 0;
     currentRunStartTime = null;
     allAttempts = [];
-    pendingServerResults.clear();
     lastInjectProcessedSeed = null;
     defeatsCount = 0;
     victoriesCount = 0;
     totalStaminaSpent = 0;
     skipCount = 0;
-    skipInProgress = false;
-    rewardScreenOpen = false;
-    rewardScreenClosedCallback = null;
-    
-    // 7. Clear active modals references
     activeRunningModal = null;
     activeConfigPanel = null;
     
-    // 8. Restore game board visibility if hidden
     if (config.hideGameBoard) {
-      console.log('[Manual Runner] Restoring game board visibility...');
       const gameFrame = document.querySelector('main .frame-4');
       if (gameFrame && gameFrame.style.display === 'none') {
         gameFrame.style.display = '';
       }
     }
     
-    // 8.5 Cleanup warning updater interval
     if (mainButtonWarningInterval) {
       clearInterval(mainButtonWarningInterval);
       mainButtonWarningInterval = null;
     }
     
-    // 9. Update coordination system state
     if (window.ModCoordination) {
       window.ModCoordination.updateModState('Manual Runner', { active: false });
       window.ModCoordination.unregisterMod('Manual Runner');
     }
     
-    console.log('[Manual Runner] Cleanup completed successfully');
+    console.log(
+      `[Manual Runner] Cleanup completed — ${formatManualRunnerPerfSnapshot(getManualRunnerPerfSnapshot())}`
+    );
   } catch (error) {
     console.error('[Manual Runner] Error during cleanup:', error);
   }

@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.8.11",
+      "changes": [
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Long-run performance (250+ attempts): slimmer per-attempt history (no full serverResults stored), fewer JSON clones, single pending serverResults entry, reward-screen checks via board snapshot and openRewards subscription instead of repeated board.select() polling."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Cleanup and force-stop now tear down gameTimer, clear reward-screen callbacks, and reset transient state consistently; [Perf] console checkpoints every 25 attempts (attempt time, subscription counts, Chrome heap) to spot slowdown during long sessions."
+        }
+      ]
+    },
+    {
       "version": "3.8.10",
       "changes": [
         {
