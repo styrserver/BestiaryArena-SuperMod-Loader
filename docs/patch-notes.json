@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.8.12",
+      "changes": [
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Settings: compact 300px modal, side-by-side fields, info icons for descriptions, red inline validation on max/min inputs. Map list uses in-game order and Cyclopedia region names; skips navigation when already on the target map; Better Setups labels (disabled Save = setup already on board). Logs each stamina check."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Creature Drops header total now matches per-icon stack counts; portraits are rebuilt from aggregated data instead of reusing stale DOM overlays."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "fixed",
+          "text": "Specific-map mode resumes after pause when stamina refills; setup load no longer reports success when the Setup button is missing; cleanup clears duplicate intervals/timers and blocks callbacks after unload."
+        }
+      ]
+    },
+    {
       "version": "3.8.11",
       "changes": [
         {

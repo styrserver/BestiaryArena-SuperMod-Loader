@@ -131,6 +131,19 @@ let lastMissingFunctionLog = 0;
 let functionRetryAttempts = 0;
 const MAX_FUNCTION_RETRY_ATTEMPTS = 3;
 const FUNCTION_RETRY_DELAY = 2000; // 2 seconds
+let isLifecycleActive = true;
+
+// Schedule a timeout tracked for cleanup; no-op after cleanupStaminaOptimizer()
+function scheduleTrackedTimeout(callback, ms) {
+    const timeout = setTimeout(() => {
+        const index = otherTimeouts.indexOf(timeout);
+        if (index > -1) otherTimeouts.splice(index, 1);
+        if (!isLifecycleActive) return;
+        callback();
+    }, ms);
+    otherTimeouts.push(timeout);
+    return timeout;
+}
 
 // ============================================================================
 // 3. STAMINA MONITORING FUNCTIONS
@@ -167,8 +180,13 @@ function wasBestiaryRefillRecent() {
 // Monitor Bestiary Automator for stamina refills by detecting increases > 1 in 5 seconds (natural regen is 1/min)
 function setupBestiaryRefillMonitoring() {
     try {
+        if (window.staminaOptimizerRefillInterval) {
+            clearInterval(window.staminaOptimizerRefillInterval);
+            window.staminaOptimizerRefillInterval = null;
+        }
         let lastStamina = getCurrentStamina();
         const refillCheckInterval = setInterval(() => {
+            if (!isLifecycleActive) return;
             try {
                 const currentStamina = getCurrentStamina();
                 const automator = findBestiaryAutomator();
@@ -216,37 +234,79 @@ function findBestiaryAutomator() {
 // 4. MAP, SETUP AND FLOOR MANAGEMENT
 // ============================================================================
 
-// Get region name with proper formatting
+// Display names for region ids (aligned with Cyclopedia.js REGION_NAME_MAP)
+const REGION_NAME_MAP = {
+    rook: 'Rookgaard',
+    carlin: 'Carlin',
+    folda: 'Folda',
+    abdendriel: 'Ab\'Dendriel',
+    kazordoon: 'Kazordoon',
+    venore: 'Venore'
+};
+
+// Get region display name from region id (same logic as Cyclopedia getRegionDisplayName)
 function getRealRegionName(region) {
     if (!region) return 'Unknown Region';
-    
-    // Use region name if available, otherwise use ID
-    const regionId = region.name || region.id || 'unknown';
-    
-    // Capitalize first letter of each word
-    return regionId.split(' ').map(word => 
-        word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-    ).join(' ');
+    const regionId = region.id || region.name || 'unknown';
+    const mapped = REGION_NAME_MAP[String(regionId).toLowerCase()];
+    if (mapped) return mapped;
+    return String(regionId).replace(/\w\S*/g, (txt) =>
+        txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
+    );
 }
 
-// Organize maps by region for better UI
+// Build room-id → index map from maps-database / state.utils.ROOMS order
+function getMapsRoomOrderIndex() {
+    const rooms = globalThis.mapsDatabase?.getAllMaps?.()
+        || globalThis.state?.utils?.ROOMS
+        || [];
+    const orderMap = new Map();
+    if (!Array.isArray(rooms)) return orderMap;
+    rooms.forEach((room, index) => {
+        if (room?.id) orderMap.set(room.id, index);
+    });
+    return orderMap;
+}
+
+// Sort maps by maps-database order (fallback to name for unknown ids)
+function sortMapsByDatabaseOrder(maps) {
+    const orderMap = getMapsRoomOrderIndex();
+    return [...maps].sort((a, b) => {
+        const orderA = orderMap.has(a.id) ? orderMap.get(a.id) : Number.MAX_SAFE_INTEGER;
+        const orderB = orderMap.has(b.id) ? orderMap.get(b.id) : Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.name.localeCompare(b.name);
+    });
+}
+
+// All maps in maps-database order (used when region data is unavailable)
+function getAllMapsInDatabaseOrder(roomNames) {
+    const rooms = globalThis.mapsDatabase?.getAllMaps?.()
+        || globalThis.state?.utils?.ROOMS
+        || [];
+    if (Array.isArray(rooms) && rooms.length > 0) {
+        return rooms
+            .filter(room => room?.id && roomNames[room.id])
+            .map(room => ({ id: room.id, name: roomNames[room.id] }));
+    }
+    return sortMapsByDatabaseOrder(
+        Object.entries(roomNames).map(([id, name]) => ({ id, name }))
+    );
+}
+
+// Organize maps by region for better UI (region + room order from game data)
 function organizeMapsByRegion() {
     try {
         const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
         const regions = globalThis.state?.utils?.REGIONS || [];
         
         if (!regions || regions.length === 0) {
-            // No region data - return all maps in single group
-            return {
-                'All Maps': Object.entries(roomNames)
-                    .map(([id, name]) => ({ id, name }))
-                    .sort((a, b) => a.name.localeCompare(b.name))
-            };
+            return { 'All Maps': getAllMapsInDatabaseOrder(roomNames) };
         }
         
         const organizedMaps = {};
         
-        // Organize maps by region
+        // Organize maps by region (preserve region.rooms order)
         regions.forEach(region => {
             if (!region.rooms || !Array.isArray(region.rooms)) return;
             
@@ -263,23 +323,22 @@ function organizeMapsByRegion() {
             });
             
             if (regionMaps.length > 0) {
-                // Sort maps alphabetically within region
-                regionMaps.sort((a, b) => a.name.localeCompare(b.name));
                 const regionName = getRealRegionName(region);
                 organizedMaps[regionName] = regionMaps;
             }
         });
         
-        // Add any remaining maps not in a region
+        // Add any remaining maps not in a region (maps-database order)
         const processedRoomCodes = new Set();
         Object.values(organizedMaps).forEach(regionMaps => {
             regionMaps.forEach(map => processedRoomCodes.add(map.id));
         });
         
-        const remainingMaps = Object.entries(roomNames)
-            .filter(([id]) => !processedRoomCodes.has(id))
-            .map(([id, name]) => ({ id, name }))
-            .sort((a, b) => a.name.localeCompare(b.name));
+        const remainingMaps = sortMapsByDatabaseOrder(
+            Object.entries(roomNames)
+                .filter(([id]) => !processedRoomCodes.has(id))
+                .map(([id, name]) => ({ id, name }))
+        );
         
         if (remainingMaps.length > 0) {
             organizedMaps['Other Maps'] = remainingMaps;
@@ -288,13 +347,8 @@ function organizeMapsByRegion() {
         return organizedMaps;
     } catch (error) {
         console.error('[Stamina Optimizer] Error organizing maps by region:', error);
-        // Fallback to simple list
         const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
-        return {
-            'All Maps': Object.entries(roomNames)
-                .map(([id, name]) => ({ id, name }))
-                .sort((a, b) => a.name.localeCompare(b.name))
-        };
+        return { 'All Maps': getAllMapsInDatabaseOrder(roomNames) };
     }
 }
 
@@ -343,27 +397,105 @@ function hasSetupForMap(setupLabel, mapId) {
     }
 }
 
+// Parse label from Better Setups "Setup (Label)" / "Save (Label)" button text
+function parseBetterSetupsButtonLabel(buttonText) {
+    const match = buttonText.trim().match(/^(?:Setup|Save)\s*\((.+)\)$/i);
+    return match ? match[1].trim() : null;
+}
+
+// Green Better Setups buttons have saved data (same heuristic as Raid Hunter)
+function hasBetterSetupsSavedData(button) {
+    return button.classList.contains('frame-1-green')
+        || button.classList.contains('surface-green')
+        || button.style.backgroundImage?.includes('background-green');
+}
+
+// Stored-setups feature (game UI) — enabled via localStorage; Better Setups mod only manages labels
+function isStoredSetupsFeatureEnabled() {
+    try {
+        return window.localStorage.getItem('stored-setups') === 'true'
+            && window.localStorage.getItem('stored-setup-labels') != null;
+    } catch (error) {
+        console.error('[Stamina Optimizer] Error checking stored-setups feature:', error);
+        return false;
+    }
+}
+
+function isBetterSetupsMainActionButton(button) {
+    const label = button.textContent.trim();
+    if (button.classList.contains('edit-label-btn')) return false;
+    return label.startsWith('Setup (') || label.startsWith('Save (');
+}
+
+// Main action buttons from the stored-setups bar (game UI; same with Better Setups mod on or off)
+function getBetterSetupsMainActionButtons() {
+    const setupContainer = document.querySelector('.mb-2.flex.items-center.gap-2');
+    if (setupContainer) {
+        const fromBar = Array.from(setupContainer.querySelectorAll('button')).filter(isBetterSetupsMainActionButton);
+        if (fromBar.length > 0) return fromBar;
+    }
+    // Fallback: scan document (bar layout can differ when Better Setups mod is disabled)
+    return Array.from(document.querySelectorAll('button')).filter(isBetterSetupsMainActionButton);
+}
+
+/**
+ * Resolve how to apply a Better Setups label for the current map.
+ * - setup: green "Setup (label)" — click to load
+ * - already-applied: disabled "Save (label)" — board already matches saved setup
+ * - null: not available
+ */
+function resolveBetterSetupsAction(setupLabel) {
+    const wanted = String(setupLabel || '').trim();
+    if (!wanted) return null;
+    if (!isStoredSetupsFeatureEnabled()) {
+        return null;
+    }
+
+    const buttons = getBetterSetupsMainActionButtons();
+    let setupButton = null;
+    let saveButton = null;
+
+    for (const button of buttons) {
+        const parsed = parseBetterSetupsButtonLabel(button.textContent);
+        if (!parsed || parsed.toLowerCase() !== wanted.toLowerCase()) continue;
+        const text = button.textContent.trim();
+        if (text.startsWith('Setup (')) setupButton = button;
+        else if (text.startsWith('Save (')) saveButton = button;
+    }
+
+    if (setupButton && hasBetterSetupsSavedData(setupButton)) {
+        return { type: 'setup', button: setupButton };
+    }
+    if (saveButton && saveButton.disabled) {
+        return { type: 'already-applied', button: saveButton };
+    }
+    if (setupButton) {
+        return { type: 'setup', button: setupButton };
+    }
+    return null;
+}
+
 // Find setup button with retry logic
 async function findSetupButton(setupLabel, maxAttempts = 5) {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const setupButtons = document.querySelectorAll('button');
-        
-        console.log(`[Stamina Optimizer] Attempt ${attempt}/${maxAttempts} - Found ${setupButtons.length} buttons`);
-        
-        for (const button of setupButtons) {
-            const buttonText = button.textContent.trim();
-            if (buttonText.includes('Setup (') && buttonText.includes(setupLabel)) {
-                console.log(`[Stamina Optimizer] ✅ Found setup button: "${buttonText}"`);
-                return button;
-            }
+        const action = resolveBetterSetupsAction(setupLabel);
+        if (action?.type === 'setup') {
+            console.log(`[Stamina Optimizer] ✅ Found setup button: "${action.button.textContent.trim()}"`);
+            return action.button;
         }
-        
+        if (action?.type === 'already-applied') {
+            console.log(`[Stamina Optimizer] Setup "${setupLabel}" already on board (Save button disabled) — skip load`);
+            return 'already-applied';
+        }
+
+        const buttonCount = document.querySelectorAll('button').length;
+        console.log(`[Stamina Optimizer] Attempt ${attempt}/${maxAttempts} - Found ${buttonCount} buttons`);
         if (attempt < maxAttempts) {
-            console.log(`[Stamina Optimizer] Setup button not found yet, waiting...`);
+            console.log('[Stamina Optimizer] Setup button not found yet, waiting...');
             await sleep(200);
         }
     }
-    
+
     console.log(`[Stamina Optimizer] ❌ Setup button not found after ${maxAttempts} attempts`);
     return null;
 }
@@ -419,16 +551,24 @@ async function loadSetup(setupLabel, mapId) {
             console.log(`[Stamina Optimizer] ❌ No setup data found in localStorage for key: ${setupKey}`);
             return false;
         }
+
+        if (!isStoredSetupsFeatureEnabled()) {
+            console.log('[Stamina Optimizer] Stored-setups feature is off — enable Better Setups (or stored-setups in game) for labeled setups');
+            return false;
+        }
         
-        console.log(`[Stamina Optimizer] ✅ Setup data exists in localStorage`);
+        console.log('[Stamina Optimizer] ✅ Setup data exists in localStorage');
         
-        // Find the setup button in the UI (with retry logic)
         const setupButton = await findSetupButton(setupLabel);
-        
+
+        if (setupButton === 'already-applied') {
+            return true;
+        }
+
         if (setupButton) {
             console.log(`[Stamina Optimizer] Clicking setup button for: ${setupLabel}`);
             setupButton.click();
-            console.log(`[Stamina Optimizer] Setup button clicked, waiting for load...`);
+            console.log('[Stamina Optimizer] Setup button clicked, waiting for load...');
             await sleep(500);
             return true;
         } else {
@@ -475,15 +615,21 @@ async function loadAutoSetup() {
     }
 }
 
-// Navigate to a specific map
+// Navigate to a specific map (no-op when already on that map)
 async function navigateToSpecificMap(mapId) {
     try {
         if (!mapId) {
             console.log('[Stamina Optimizer] No map ID provided');
             return false;
         }
+
+        const currentMapId = getCurrentMapId();
+        if (currentMapId === mapId) {
+            console.log(`[Stamina Optimizer] Already on map: ${mapId} - skipping navigation`);
+            return true;
+        }
         
-        console.log(`[Stamina Optimizer] Navigating to map: ${mapId}`);
+        console.log(`[Stamina Optimizer] Navigating to map: ${mapId} (from ${currentMapId || 'unknown'})`);
         
         globalThis.state.board.send({
             type: 'selectRoomById',
@@ -764,6 +910,32 @@ function requestControlAndSetActive() {
     return true;
 }
 
+// True when an autoplay session is actively running (not paused/idle in autoplay mode)
+function isAutoplaySessionActive() {
+    try {
+        const pauseSelectors = [
+            'button:has(svg.lucide-pause)',
+            'button.frame-1-red:has(svg.lucide-pause)',
+            'button[class*="surface-red"]:has(svg.lucide-pause)'
+        ];
+        if (pauseSelectors.some(selector => document.querySelector(selector))) {
+            return true;
+        }
+        const resumeTexts = getBothLanguages('Resume');
+        for (const text of resumeTexts) {
+            if (findButtonByText(text)) return false;
+        }
+        const startTexts = getBothLanguages('Start');
+        for (const text of startTexts) {
+            if (findButtonByText(text)) return false;
+        }
+        return false;
+    } catch (error) {
+        console.error('[Stamina Optimizer] Error checking autoplay session state:', error);
+        return false;
+    }
+}
+
 // Check if autoplay was initiated by the player (not by this mod) - Returns: True if player-initiated (boolean)
 function isPlayerInitiatedAutoplay() {
     try {
@@ -771,8 +943,12 @@ function isPlayerInitiatedAutoplay() {
         if (!boardContext) {
             return false;
         }
-        const isAutoplayRunning = boardContext.mode === 'autoplay';
-        if (!isAutoplayRunning) {
+        const isAutoplayMode = boardContext.mode === 'autoplay';
+        if (!isAutoplayMode) {
+            return false;
+        }
+        // Paused/idle in autoplay mode (e.g. after mod clicked Pause) is not player-initiated blocking
+        if (!isAutoplaySessionActive()) {
             return false;
         }
         const hasControl = window.AutoplayManager?.hasControl('Stamina Optimizer');
@@ -1083,7 +1259,7 @@ async function startSpecificMapPlay() {
         
         console.log(`[Stamina Optimizer] Starting specific map play: ${mapId}, setup: ${setupLabel}, floor: ${floor}`);
         
-        // Navigate to map
+        const alreadyOnMap = getCurrentMapId() === mapId;
         const navigated = await navigateToSpecificMap(mapId);
         if (!navigated) {
             console.error('[Stamina Optimizer] Failed to navigate to map');
@@ -1091,8 +1267,8 @@ async function startSpecificMapPlay() {
             return false;
         }
         
-        // Wait for map to load
-        await sleep(800);
+        // Shorter wait when already on the correct map
+        await sleep(alreadyOnMap ? 150 : 800);
         
         // Set floor
         await setFloor(floor);
@@ -1101,19 +1277,23 @@ async function startSpecificMapPlay() {
         // Load setup if specified
         if (setupLabel && hasSetupForMap(setupLabel, mapId)) {
             console.log(`[Stamina Optimizer] Loading setup: ${setupLabel} for map: ${mapId}`);
-            await loadSetup(setupLabel, mapId);
-            
-            // Wait longer after loading setup for board to update
+            const setupLoaded = await loadSetup(setupLabel, mapId);
+
+            if (!setupLoaded) {
+                console.error(`[Stamina Optimizer] Failed to load setup "${setupLabel}" for map ${mapId}`);
+                releaseControlAndResetState();
+                return false;
+            }
+
             console.log('[Stamina Optimizer] Waiting for setup to load...');
             await sleep(1200);
-            
-            // Verify creatures are on board
+
             if (!hasCreaturesOnBoard()) {
                 console.error('[Stamina Optimizer] No creatures on board after loading setup!');
                 releaseControlAndResetState();
                 return false;
             }
-            console.log('[Stamina Optimizer] Setup loaded successfully, creatures on board');
+            console.log('[Stamina Optimizer] Setup ready, creatures on board');
         } else if (setupLabel) {
             console.log(`[Stamina Optimizer] No setup found for ${setupLabel}-${mapId}, continuing without setup`);
         } else {
@@ -1286,7 +1466,7 @@ function startBoostedMapFarming() {
         }
         try {
             const boardContext = globalThis.state?.board?.getSnapshot()?.context;
-            if (boardContext?.mode === 'autoplay' && !isCurrentlyActive) {
+            if (boardContext?.mode === 'autoplay' && isAutoplaySessionActive() && !isCurrentlyActive) {
                 console.log('[Stamina Optimizer] Autoplay is already running (likely player-initiated) - not starting boosted map farming');
                 return;
             }
@@ -1375,7 +1555,7 @@ async function executeAction() {
 
 // Monitor stamina and execute actions based on thresholds
 async function monitorStamina() {
-    if (!isAutomationEnabled) {
+    if (!isLifecycleActive || !isAutomationEnabled) {
         return;
     }
     
@@ -1401,10 +1581,17 @@ async function monitorStamina() {
     const minStamina = settings.minStamina || DEFAULT_MIN_STAMINA;
     
     const currentStamina = getCurrentStamina();
+    const runningTag = isCurrentlyActive
+        ? (wasInitiatedByMod ? ', running (mod)' : ', running')
+        : '';
+    console.log(
+        `[Stamina Optimizer] Checking stamina: ${currentStamina} (min: ${minStamina}, max: ${maxStamina}${runningTag})`
+    );
     updateButton();
     if (currentStamina >= maxStamina) {
         if (!isCurrentlyActive) {
             if (isPlayerInitiatedAutoplay()) {
+                console.log('[Stamina Optimizer] Stamina high but player autoplay active — not starting');
                 return;
             }
             if (!wasBestiaryRefillRecent()) {
@@ -1451,6 +1638,7 @@ function startStaminaMonitoring() {
     }
     
     staminaCheckInterval = setInterval(() => {
+        if (!isLifecycleActive) return;
         monitorStamina();
     }, STAMINA_CHECK_INTERVAL);
     
@@ -1473,6 +1661,7 @@ function stopStaminaMonitoring() {
 
 // Monitor autoplay state changes to detect when player manually stops/starts
 function startAutoplayStateMonitoring() {
+    if (!isLifecycleActive) return;
     if (boardStateUnsubscribe && typeof boardStateUnsubscribe === 'function') {
         boardStateUnsubscribe();
         boardStateUnsubscribe = null;
@@ -1481,16 +1670,11 @@ function startAutoplayStateMonitoring() {
         // Check if game state is available before subscribing
         if (!globalThis.state || !globalThis.state.board) {
             console.log('[Stamina Optimizer] ⏳ Game state not ready, retrying autoplay monitoring...');
-            // Retry after a delay
-            const retryTimeout = setTimeout(() => {
-                const index = otherTimeouts.indexOf(retryTimeout);
-                if (index > -1) otherTimeouts.splice(index, 1);
-                startAutoplayStateMonitoring();
-            }, 2000);
-            otherTimeouts.push(retryTimeout);
+            scheduleTrackedTimeout(() => startAutoplayStateMonitoring(), 2000);
             return;
         }
         boardStateUnsubscribe = globalThis.state.board.subscribe((state) => {
+            if (!isLifecycleActive) return;
             try {
                 const isAutoplay = state.context.mode === 'autoplay';
                 if (!isAutoplay && isCurrentlyActive && wasInitiatedByMod && !isStoppingAutoplay && !isStartingAutoplay) {
@@ -1507,7 +1691,7 @@ function startAutoplayStateMonitoring() {
                                 console.log('[Stamina Optimizer] Autoplay stopped by player - releasing control');
                                 releaseControlAndResetState();
                                 if (isAutomationEnabled) {
-                                    setTimeout(() => monitorStamina(), 500);
+                                    scheduleTrackedTimeout(() => monitorStamina(), 500);
                                 }
                             }
                             autoplayStopCheckTimeout = null;
@@ -1521,7 +1705,7 @@ function startAutoplayStateMonitoring() {
                     // Reset detection flag when autoplay stops
                     hasLoggedAutoplayDetection = false;
                     if (isAutomationEnabled) {
-                        setTimeout(() => monitorStamina(), 500);
+                        scheduleTrackedTimeout(() => monitorStamina(), 500);
                     }
                 }
                 if (hasAutoplayControl('Raid Hunter') && isCurrentlyActive && wasInitiatedByMod) {
@@ -1535,7 +1719,7 @@ function startAutoplayStateMonitoring() {
                         wasInitiatedByMod = true;
                         updateButton();
                     }
-                } else if (isAutoplay && !isCurrentlyActive && !wasInitiatedByMod && !isStartingAutoplay) {
+                } else if (isAutoplay && isAutoplaySessionActive() && !isCurrentlyActive && !wasInitiatedByMod && !isStartingAutoplay) {
                     const timeSinceTrigger = Date.now() - (window.staminaOptimizerLastBoostedMapsTrigger || 0);
                     if (timeSinceTrigger < BOOSTED_MAPS_TRIGGER_WINDOW) {
                         if (!hasAutoplayControl('Raid Hunter') && requestControlAndSetActive()) {
@@ -1672,7 +1856,7 @@ let lastModalCall = 0;
 let modalCleanupObserver = null;
 
 const MODAL_WIDTH = 450;
-const MODAL_HEIGHT = 600;
+const MODAL_HEIGHT = 300;
 
 // Create styled input element
 function createStyledInput(type, id, value, style, attributes = {}) {
@@ -1687,6 +1871,62 @@ function createStyledInput(type, id, value, style, attributes = {}) {
     });
     
     return input;
+}
+
+function createSettingInfoIcon(description) {
+    if (!description) return null;
+    const info = document.createElement('button');
+    info.type = 'button';
+    info.textContent = 'i';
+    info.title = description;
+    info.setAttribute('aria-label', description);
+    info.style.cssText = `
+        flex-shrink: 0;
+        width: 14px;
+        height: 14px;
+        padding: 0;
+        margin: 0;
+        border: 1px solid ${COLOR_ACCENT};
+        border-radius: 50%;
+        background: ${COLOR_DARK_GRAY};
+        color: ${COLOR_ACCENT};
+        font-size: 10px;
+        font-weight: bold;
+        font-style: italic;
+        font-family: serif;
+        line-height: 1;
+        cursor: help;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    info.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+    return info;
+}
+
+function createSettingLabel(labelText, description, forId) {
+    const row = document.createElement('div');
+    row.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-bottom: 4px;
+    `;
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    label.className = 'pixel-font-16';
+    label.style.cssText = `
+        font-weight: bold;
+        color: ${COLOR_WHITE};
+    `;
+    if (forId) label.setAttribute('for', forId);
+    const info = createSettingInfoIcon(description);
+    if (info) row.appendChild(info);
+    row.appendChild(label);
+    return row;
 }
 
 // Create checkbox setting
@@ -1724,24 +1964,67 @@ function createCheckboxSetting(id, labelText, description, checked = false) {
         cursor: pointer;
     `;
     label.setAttribute('for', id);
+    const info = createSettingInfoIcon(description);
+    if (info) checkboxLabelContainer.appendChild(info);
     checkboxLabelContainer.appendChild(label);
     
     settingDiv.appendChild(checkboxLabelContainer);
     
-    if (description) {
-        const desc = document.createElement('div');
-        desc.textContent = description;
-        desc.className = 'pixel-font-16';
-        desc.style.cssText = `
-            font-size: 11px;
-            color: ${COLOR_GRAY};
-            font-style: italic;
-            margin-top: 2px;
-        `;
-        settingDiv.appendChild(desc);
-    }
-    
     return settingDiv;
+}
+
+function getStaminaInputStyle(isInvalid) {
+    if (isInvalid) {
+        return `
+            width: 100%;
+            padding: 6px;
+            background: rgba(255, 107, 107, 0.12);
+            border: 1px solid ${COLOR_RED};
+            color: ${COLOR_WHITE};
+            border-radius: 3px;
+            box-sizing: border-box;
+            font-size: 14px;
+        `;
+    }
+    return `
+        width: 100%;
+        padding: 6px;
+        background: ${COLOR_DARK_GRAY};
+        border: 1px solid ${COLOR_ACCENT};
+        color: ${COLOR_WHITE};
+        border-radius: 3px;
+        box-sizing: border-box;
+        font-size: 14px;
+    `;
+}
+
+// Highlight max/min inputs when invalid; returns true if values can be saved
+function updateStaminaThresholdValidation() {
+    const maxInput = document.getElementById('maxStamina');
+    const minInput = document.getElementById('minStamina');
+    if (!maxInput || !minInput) return true;
+
+    const max = parseInt(maxInput.value, 10);
+    const min = parseInt(minInput.value, 10);
+    const maxRangeInvalid = isNaN(max) || max < 1 || max > 1000;
+    const minRangeInvalid = isNaN(min) || min < 1 || min > 1000;
+    const orderInvalid = !maxRangeInvalid && !minRangeInvalid && max <= min;
+
+    maxInput.style.cssText = getStaminaInputStyle(maxRangeInvalid || orderInvalid);
+    minInput.style.cssText = getStaminaInputStyle(minRangeInvalid || orderInvalid);
+
+    return !maxRangeInvalid && !minRangeInvalid && !orderInvalid;
+}
+
+function bindStaminaValidationInputs() {
+    ['maxStamina', 'minStamina'].forEach((id) => {
+        const input = document.getElementById(id);
+        if (!input) return;
+        input.addEventListener('input', () => {
+            updateStaminaThresholdValidation();
+            autoSaveSettings();
+        });
+    });
 }
 
 // Create number input setting
@@ -1754,46 +2037,15 @@ function createNumberSetting(id, labelText, description, value, min, max) {
         gap: 6px;
     `;
     
-    const label = document.createElement('label');
-    label.textContent = labelText;
-    label.className = 'pixel-font-16';
-    label.setAttribute('for', id);
-    label.style.cssText = `
-        font-weight: bold;
-        color: ${COLOR_WHITE};
-        margin-bottom: 4px;
-    `;
-    settingDiv.appendChild(label);
+    settingDiv.appendChild(createSettingLabel(labelText, description, id));
     
-    const input = createStyledInput('number', id, value, `
-        width: 100%;
-        padding: 6px;
-        background: ${COLOR_DARK_GRAY};
-        border: 1px solid ${COLOR_ACCENT};
-        color: ${COLOR_WHITE};
-        border-radius: 3px;
-        box-sizing: border-box;
-        font-size: 14px;
-    `, {
+    const input = createStyledInput('number', id, value, getStaminaInputStyle(false), {
         min,
         max,
         className: 'pixel-font-16'
     });
     input.addEventListener('change', autoSaveSettings);
     settingDiv.appendChild(input);
-    
-    if (description) {
-        const desc = document.createElement('div');
-        desc.textContent = description;
-        desc.className = 'pixel-font-16';
-        desc.style.cssText = `
-            font-size: 11px;
-            color: ${COLOR_GRAY};
-            font-style: italic;
-            margin-top: 2px;
-        `;
-        settingDiv.appendChild(desc);
-    }
     
     return settingDiv;
 }
@@ -1808,16 +2060,7 @@ function createDropdownSetting(id, label, description, value, options = []) {
         gap: 6px;
     `;
     
-    const labelElement = document.createElement('label');
-    labelElement.textContent = label;
-    labelElement.className = 'pixel-font-16';
-    labelElement.setAttribute('for', id);
-    labelElement.style.cssText = `
-        font-weight: bold;
-        color: ${COLOR_WHITE};
-        margin-bottom: 4px;
-    `;
-    settingDiv.appendChild(labelElement);
+    settingDiv.appendChild(createSettingLabel(label, description, id));
     
     const selectElement = document.createElement('select');
     selectElement.id = id;
@@ -1855,19 +2098,6 @@ function createDropdownSetting(id, label, description, value, options = []) {
     selectElement.addEventListener('change', autoSaveSettings);
     settingDiv.appendChild(selectElement);
     
-    if (description) {
-        const descElement = document.createElement('div');
-        descElement.textContent = description;
-        descElement.className = 'pixel-font-16';
-        descElement.style.cssText = `
-            font-size: 11px;
-            color: ${COLOR_GRAY};
-            font-style: italic;
-            margin-top: 2px;
-        `;
-        settingDiv.appendChild(descElement);
-    }
-    
     return settingDiv;
 }
 
@@ -1881,16 +2111,7 @@ function createGroupedMapDropdown(id, label, description, value) {
         gap: 6px;
     `;
     
-    const labelElement = document.createElement('label');
-    labelElement.textContent = label;
-    labelElement.className = 'pixel-font-16';
-    labelElement.setAttribute('for', id);
-    labelElement.style.cssText = `
-        font-weight: bold;
-        color: ${COLOR_WHITE};
-        margin-bottom: 4px;
-    `;
-    settingDiv.appendChild(labelElement);
+    settingDiv.appendChild(createSettingLabel(label, description, id));
     
     const selectElement = document.createElement('select');
     selectElement.id = id;
@@ -1949,20 +2170,27 @@ function createGroupedMapDropdown(id, label, description, value) {
     selectElement.addEventListener('change', autoSaveSettings);
     settingDiv.appendChild(selectElement);
     
-    if (description) {
-        const descElement = document.createElement('div');
-        descElement.textContent = description;
-        descElement.className = 'pixel-font-16';
-        descElement.style.cssText = `
-            font-size: 11px;
-            color: ${COLOR_GRAY};
-            font-style: italic;
-            margin-top: 2px;
-        `;
-        settingDiv.appendChild(descElement);
-    }
-    
     return settingDiv;
+}
+
+// Place two settings side by side (single child uses full row width)
+function createSettingsRow(leftSetting, rightSetting = null) {
+    const row = document.createElement('div');
+    row.style.cssText = `
+        display: flex;
+        gap: 10px;
+        margin-bottom: 8px;
+        align-items: flex-start;
+        width: 100%;
+    `;
+    const children = rightSetting ? [leftSetting, rightSetting] : [leftSetting];
+    children.forEach(child => {
+        child.style.flex = '1 1 0';
+        child.style.minWidth = '0';
+        child.style.marginBottom = '0';
+        row.appendChild(child);
+    });
+    return row;
 }
 
 // Create settings content
@@ -1972,7 +2200,7 @@ function createSettingsContent() {
         display: flex;
         flex-direction: column;
         width: 420px;
-        height: 580px;
+        height: 300px;
         box-sizing: border-box;
         overflow-y: auto;
         background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
@@ -2058,8 +2286,6 @@ function createSettingsContent() {
         1,
         1000
     );
-    mainContainer.appendChild(maxStaminaSetting);
-    
     const minStaminaSetting = createNumberSetting(
         'minStamina',
         t('mods.staminaOptimizer.minStaminaLabel'),
@@ -2068,42 +2294,51 @@ function createSettingsContent() {
         1,
         1000
     );
-    mainContainer.appendChild(minStaminaSetting);
+    mainContainer.appendChild(createSettingsRow(maxStaminaSetting, minStaminaSetting));
+    bindStaminaValidationInputs();
+    updateStaminaThresholdValidation();
     
     const actionSetting = createDropdownSetting(
         'action',
-        'Action',
-        'What action to perform when stamina is high',
+        t('mods.staminaOptimizer.actionLabel'),
+        t('mods.staminaOptimizer.actionDescription'),
         settings.action || DEFAULT_ACTION,
         [
             { value: 'boosted-maps', label: 'Better Boosted Maps' },
             { value: 'specific-map', label: 'Specific Map' }
         ]
     );
-    mainContainer.appendChild(actionSetting);
+    const mapSettingSlot = document.createElement('div');
+    mapSettingSlot.id = 'stamina-optimizer-map-slot';
+    mapSettingSlot.style.cssText = 'display: flex; flex-direction: column; flex: 1 1 0; min-width: 0;';
+    const setupFloorRowSlot = document.createElement('div');
+    setupFloorRowSlot.id = 'stamina-optimizer-setup-floor-row';
+    mainContainer.appendChild(createSettingsRow(actionSetting, mapSettingSlot));
+    mainContainer.appendChild(setupFloorRowSlot);
     
-    // Container for conditional settings
-    const conditionalSettingsContainer = document.createElement('div');
-    conditionalSettingsContainer.id = 'conditional-settings';
-    mainContainer.appendChild(conditionalSettingsContainer);
+    function attachConditionalAutoSave(root) {
+        root.querySelectorAll('input, select').forEach(input => {
+            input.addEventListener('change', autoSaveSettings);
+        });
+    }
     
     // Function to update conditional settings based on action
     function updateConditionalSettings() {
         const actionSelect = document.getElementById('action');
         const action = actionSelect ? actionSelect.value : settings.action || DEFAULT_ACTION;
-        conditionalSettingsContainer.innerHTML = '';
+        mapSettingSlot.innerHTML = '';
+        setupFloorRowSlot.innerHTML = '';
         
         if (action === 'specific-map') {
-            // Map selector with grouped regions
             const mapSetting = createGroupedMapDropdown(
                 'mapId',
-                'Map',
-                'Select the map to farm (grouped by region)',
+                t('mods.staminaOptimizer.mapLabel'),
+                t('mods.staminaOptimizer.mapDescription'),
                 settings.mapId || DEFAULT_MAP_ID
             );
-            conditionalSettingsContainer.appendChild(mapSetting);
+            mapSetting.style.marginBottom = '0';
+            mapSettingSlot.appendChild(mapSetting);
             
-            // Setup selector
             const setupLabels = getAvailableSetupLabels();
             const setupOptions = setupLabels.map(label => ({ value: label, label: label }));
             const autoSetupLabel = t('mods.betterTasker.autoSetup');
@@ -2114,33 +2349,30 @@ function createSettingsContent() {
             
             const setupSetting = createDropdownSetting(
                 'setupLabel',
-                'Setup Label',
-                'Select a setup from Better Setups (optional)',
+                t('mods.staminaOptimizer.setupLabelField'),
+                t('mods.staminaOptimizer.setupDescription'),
                 settings.setupLabel || DEFAULT_SETUP_LABEL,
                 setupOptions
             );
-            conditionalSettingsContainer.appendChild(setupSetting);
             
-            // Floor selector (0-15 for maps with higher difficulties)
             const floorOptions = [];
             for (let i = 0; i <= 15; i++) {
                 floorOptions.push({ value: i, label: `Floor ${i}` });
             }
-            
             const floorSetting = createDropdownSetting(
                 'floor',
-                'Floor',
-                'Select the difficulty floor (0-15)',
+                t('mods.staminaOptimizer.floorLabel'),
+                t('mods.staminaOptimizer.floorDescription'),
                 settings.floor !== undefined ? settings.floor : DEFAULT_FLOOR,
                 floorOptions
             );
-            conditionalSettingsContainer.appendChild(floorSetting);
+            setupFloorRowSlot.appendChild(createSettingsRow(setupSetting, floorSetting));
+            mapSettingSlot.style.display = 'flex';
+            attachConditionalAutoSave(mapSettingSlot);
+            attachConditionalAutoSave(setupFloorRowSlot);
+        } else {
+            mapSettingSlot.style.display = 'none';
         }
-        
-        // Re-attach event listeners to new fields
-        conditionalSettingsContainer.querySelectorAll('input, select').forEach(input => {
-            input.addEventListener('change', autoSaveSettings);
-        });
     }
     
     // Initial update
@@ -2154,20 +2386,6 @@ function createSettingsContent() {
             autoSaveSettings();
         });
     }
-    
-    const validationDiv = document.createElement('div');
-    validationDiv.id = `${MOD_ID}-validation`;
-    validationDiv.style.cssText = `
-        margin-top: 10px;
-        padding: 8px;
-        background: rgba(255, 107, 107, 0.1);
-        border: 1px solid ${COLOR_RED};
-        border-radius: 3px;
-        color: ${COLOR_RED};
-        font-size: 12px;
-        display: none;
-    `;
-    mainContainer.appendChild(validationDiv);
     
     const autoSaveIndicator = document.createElement('div');
     autoSaveIndicator.textContent = t('mods.staminaOptimizer.settingsAutoSave');
@@ -2354,28 +2572,14 @@ function autoSaveSettings() {
         const setupLabelSelect = document.getElementById('setupLabel');
         const floorSelect = document.getElementById('floor');
         
+        if (!updateStaminaThresholdValidation()) {
+            return;
+        }
         if (maxStaminaInput) {
-            const maxStamina = parseInt(maxStaminaInput.value);
-            if (isNaN(maxStamina) || maxStamina < 1 || maxStamina > 1000) {
-                showValidationMessage('Max stamina must be between 1 and 1000');
-                return;
-            }
-            settings.maxStamina = maxStamina;
+            settings.maxStamina = parseInt(maxStaminaInput.value, 10);
         }
-        
         if (minStaminaInput) {
-            const minStamina = parseInt(minStaminaInput.value);
-            if (isNaN(minStamina) || minStamina < 1 || minStamina > 1000) {
-                showValidationMessage('Min stamina must be between 1 and 1000');
-                return;
-            }
-            settings.minStamina = minStamina;
-        }
-        if (settings.maxStamina && settings.minStamina) {
-            if (settings.maxStamina <= settings.minStamina) {
-                showValidationMessage('Max stamina must be greater than min stamina');
-                return;
-            }
+            settings.minStamina = parseInt(minStaminaInput.value, 10);
         }
         
         if (actionSelect) {
@@ -2396,7 +2600,6 @@ function autoSaveSettings() {
         }
         
         saveSettings(settings);
-        hideValidationMessage();
     } catch (error) {
         console.error('[Stamina Optimizer] Error auto-saving settings:', error);
     }
@@ -2438,25 +2641,9 @@ function loadAndApplySettings() {
         if (floorSelect) {
             floorSelect.value = settings.floor !== undefined ? settings.floor : DEFAULT_FLOOR;
         }
+        updateStaminaThresholdValidation();
     } catch (error) {
         console.error('[Stamina Optimizer] Error loading and applying settings:', error);
-    }
-}
-
-// Show validation message
-function showValidationMessage(message) {
-    const validationDiv = document.getElementById(`${MOD_ID}-validation`);
-    if (validationDiv) {
-        validationDiv.textContent = message;
-        validationDiv.style.display = 'block';
-    }
-}
-
-// Hide validation message
-function hideValidationMessage() {
-    const validationDiv = document.getElementById(`${MOD_ID}-validation`);
-    if (validationDiv) {
-        validationDiv.style.display = 'none';
     }
 }
 
@@ -2597,41 +2784,57 @@ init();
 // 15. CLEANUP & EXPORTS
 // ============================================================================
 
-// Cleanup function
+// Cleanup function — clears intervals, subscriptions, timers, and listeners
 function cleanupStaminaOptimizer() {
     try {
+        isLifecycleActive = false;
+
         stopStaminaMonitoring();
         stopAutoplayStateMonitoring();
+
         stateFlagTimeouts.forEach(timeout => clearTimeout(timeout));
         stateFlagTimeouts = [];
         modalTimeouts.forEach(timeout => clearTimeout(timeout));
         modalTimeouts = [];
         otherTimeouts.forEach(timeout => clearTimeout(timeout));
         otherTimeouts = [];
+
         if (autoplayStopCheckTimeout) {
             clearTimeout(autoplayStopCheckTimeout);
             autoplayStopCheckTimeout = null;
         }
-        if (isCurrentlyActive && wasInitiatedByMod) {
-            stopAutoplay();
-        }
+
         if (window.staminaOptimizerRefillInterval) {
             clearInterval(window.staminaOptimizerRefillInterval);
             window.staminaOptimizerRefillInterval = null;
         }
+
+        if (isCurrentlyActive && wasInitiatedByMod) {
+            stopAutoplay();
+        } else if (window.AutoplayManager?.hasControl('Stamina Optimizer')) {
+            releaseControlAndResetState();
+        }
+
         cleanupModal();
+
         if (windowMessageHandler) {
             window.removeEventListener('message', windowMessageHandler);
             windowMessageHandler = null;
         }
+
+        isStartingAutoplay = false;
+        isStoppingAutoplay = false;
+        functionRetryAttempts = 0;
+
         delete window.__staminaOptimizerLoaded;
         delete window.staminaOptimizerLastBoostedMapsTrigger;
         delete window.staminaOptimizerIsActive;
         delete window.staminaOptimizerAutoSaveIndicator;
+
         if (api && api.ui && api.ui.removeButton) {
             api.ui.removeButton(BUTTON_ID);
         }
-        
+
         console.log('[Stamina Optimizer] Cleanup completed');
     } catch (error) {
         console.error('[Stamina Optimizer] Error during cleanup:', error);
@@ -2649,4 +2852,4 @@ if (typeof context !== 'undefined') {
     };
 }
 
-window.staminaOptimizerIsActive = () => isCurrentlyActive;
+window.staminaOptimizerIsActive = () => isLifecycleActive && isCurrentlyActive;

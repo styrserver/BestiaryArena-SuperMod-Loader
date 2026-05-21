@@ -4675,21 +4675,16 @@ function renderAllSessions() {
         iconWrapper.style.justifyContent = 'center';
         iconWrapper.style.alignItems = 'center';
 
-        // Regenerate visual element from creature data instead of using saved visual
-        // This fixes the "[object Object]" issue when loading from persistence
+        // Always build portrait from data.count so header totals match stack numbers
         let visualElement;
-        if (data.visual instanceof HTMLElement) {
-            // Use existing visual if it's a proper HTMLElement (fresh data)
+        if (data.gameId) {
+            visualElement = createInventoryStyleCreaturePortrait(data);
+        } else if (data.visual instanceof HTMLElement) {
             visualElement = data.visual;
+            const countSpan = visualElement.querySelector('.pixel-font-16');
+            if (countSpan) countSpan.textContent = data.count || 1;
         } else {
-            // Regenerate visual from creature data (loaded from persistence)
-            if (data.gameId) {
-                // Create inventory-style creature portrait like the game does
-                visualElement = createInventoryStyleCreaturePortrait(data);
-            } else {
-                // Fallback emoji
-                visualElement = '👾';
-            }
+            visualElement = '👾';
         }
         
         if (visualElement instanceof HTMLElement) {
