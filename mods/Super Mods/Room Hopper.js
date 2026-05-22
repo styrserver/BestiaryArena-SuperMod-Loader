@@ -67,6 +67,7 @@ function cleanupRoomHopper() {
             api.ui.removeButton(BUTTON_ID);
         }
         delete window.__roomHopperLoaded;
+        delete window.__roomHopperOpen;
         delete window.__roomHopperIndex;
         console.log('[Room Hopper] Cleanup completed');
     } catch (e) {
@@ -704,13 +705,23 @@ function openModal() {
             recompute();
         });
     });
+
+    const focusSearchInput = () => {
+        try {
+            searchInput.focus({ preventScroll: true });
+        } catch (_) {}
+    };
+    requestAnimationFrame(() => requestAnimationFrame(focusSearchInput));
 }
 
 // Boot the button after the API is ready
 createOpenButton();
 
+window.__roomHopperOpen = openModal;
+
 if (typeof context !== 'undefined') {
     context.exports = {
-        cleanup: cleanupRoomHopper
+        cleanup: cleanupRoomHopper,
+        open: openModal
     };
 }

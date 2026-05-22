@@ -5449,6 +5449,8 @@ function stopContextMenuObserver() {
 let activeCyclopediaModal = null;
 let cyclopediaModalInProgress = false;
 let lastModalCall = 0;
+/** Set when opening on Home tab; cleared after start-page search input is focused or modal closes. */
+let cyclopediaPendingHomeSearchFocus = false;
 
 function createStartPageManager() {
   const HTML_TEMPLATES = {
@@ -5547,6 +5549,7 @@ function createStartPageManager() {
     }
 
     showError(message, retryFunction) {
+      cyclopediaPendingHomeSearchFocus = false;
       this.container.innerHTML = HTML_TEMPLATES.error(message);
       const retryButton = this.container.querySelector('#retry-profile-load');
       if (retryButton && retryFunction) retryButton.addEventListener('click', retryFunction);
@@ -5602,6 +5605,11 @@ function createStartPageManager() {
       mainFlexRow.appendChild(searchCol);
         
         this.container.appendChild(mainFlexRow);
+
+        if (cyclopediaPendingHomeSearchFocus) {
+          cyclopediaPendingHomeSearchFocus = false;
+          focusCyclopediaHomeSearchInput();
+        }
     }
 
     setupTimers() {
@@ -14925,6 +14933,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       thumbnail.src = `/assets/room-thumbnails/${selectedMap}.png`;
       
       thumbnailContainer.appendChild(thumbnail);
+      appendCyclopediaBoostedEquipmentOverlay(thumbnailContainer, selectedMap, roomName, {
+        paddingPx: 6
+      });
       mapInfoDiv.appendChild(thumbnailContainer);
       
       // Add map name with click interaction
@@ -15829,6 +15840,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       TimerManager.addTimeout(modalCleanupTimeout, 'modalCleanup');
       
       setActiveTab(activeTab);
+      cyclopediaPendingHomeSearchFocus = activeTab === 0;
       
     } catch (modalError) {
       console.error('[Cyclopedia] Error creating modal with API:', modalError);
@@ -17797,6 +17809,24 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange, 
   }
 }
 
+const CYCLOPEDIA_HOME_SEARCH_INPUT_ID = 'cyclopedia-home-search-input';
+
+function focusCyclopediaHomeSearchInput() {
+  const attemptFocus = (triesLeft) => {
+    const input = document.getElementById(CYCLOPEDIA_HOME_SEARCH_INPUT_ID);
+    if (input && input.isConnected && !input.disabled) {
+      try {
+        input.focus({ preventScroll: true });
+      } catch (_) {}
+      return;
+    }
+    if (triesLeft > 0) {
+      setTimeout(() => attemptFocus(triesLeft - 1), 50);
+    }
+  };
+  requestAnimationFrame(() => requestAnimationFrame(() => attemptFocus(24)));
+}
+
 const CYCLOPEDIA_HOME_SEARCH_FILTER_CONTROL_CLASS = 'pixel-font-14 bg-grayDark text-whiteHighlight';
 const CYCLOPEDIA_HOME_SEARCH_FILTER_INPUT_STYLE =
   'flex: 1; min-width: 0; padding: 4px 8px; border: none; border-radius: 3px; outline: none;';
@@ -17983,6 +18013,29 @@ function cyclopediaStripCreaturePortraitChrome(el) {
   el.querySelector?.('img[alt="star tier"]')?.remove();
 }
 
+/** Remove stat icon only (keeps frame and rarity border). */
+function cyclopediaStripEquipmentPortraitStat(root) {
+  if (!root) return;
+  const portrait = root.classList?.contains('equipment-portrait')
+    ? root
+    : root.querySelector?.('.equipment-portrait');
+  if (!portrait) return;
+  portrait.querySelector?.('img[alt="stat type"]')?.parentElement?.remove();
+}
+
+/** Remove rarity overlay and stat icon (keeps equipment frame). */
+function cyclopediaStripEquipmentPortraitRarityAndStat(root) {
+  if (!root) return;
+  cyclopediaStripEquipmentPortraitStat(root);
+  root.querySelectorAll?.('.has-rarity, [data-rarity]').forEach((el) => el.remove());
+  const portrait = root.classList?.contains('equipment-portrait')
+    ? root
+    : root.querySelector?.('.equipment-portrait');
+  if (!portrait) return;
+  portrait.querySelector?.('.has-rarity')?.remove();
+  portrait.querySelector?.('[data-rarity]')?.remove();
+}
+
 /** Remove stat, rarity bg, frame/slot chrome from createItemPortrait (home search). */
 function cyclopediaStripEquipmentPortraitChrome(root) {
   if (!root) return;
@@ -17992,14 +18045,11 @@ function cyclopediaStripEquipmentPortraitChrome(root) {
     el.style.border = 'none';
     el.style.borderImage = 'none';
   });
-  root.querySelectorAll?.('.has-rarity, [data-rarity]').forEach((el) => el.remove());
+  cyclopediaStripEquipmentPortraitRarityAndStat(root);
   const portrait = root.classList?.contains('equipment-portrait')
     ? root
     : root.querySelector?.('.equipment-portrait');
   if (!portrait) return;
-  portrait.querySelector?.('img[alt="stat type"]')?.parentElement?.remove();
-  portrait.querySelector?.('.has-rarity')?.remove();
-  portrait.querySelector?.('[data-rarity]')?.remove();
   portrait.classList.remove('frame-pressed-1', 'surface-darker');
   portrait.style.background = 'none';
   portrait.style.border = 'none';
@@ -18091,6 +18141,49 @@ function cyclopediaCreateEquipmentPortrait(equipmentName, sizePx = CYCLOPEDIA_HO
   return portrait;
 }
 
+/** Equipment-portrait for boosted-map overlays (32×32, tier-5 rarity border, no stat). */
+function cyclopediaCreateBoostedMapEquipmentPortrait(
+  equipmentName,
+  sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX
+) {
+  const spriteId = resolveCyclopediaEquipmentSpriteId(equipmentName);
+  if (spriteId == null) return null;
+
+  const portrait = cyclopediaCreateItemPortrait(spriteId, { stat: 'ad', tier: 5, sizePx });
+  if (!portrait) return null;
+
+  cyclopediaStripEquipmentPortraitStat(portrait);
+
+  const equipmentPortrait = portrait.classList?.contains('equipment-portrait')
+    ? portrait
+    : portrait.querySelector?.('.equipment-portrait');
+
+  if (equipmentPortrait) {
+    equipmentPortrait.setAttribute('data-highlighted', 'true');
+    equipmentPortrait.setAttribute('data-alive', 'false');
+    equipmentPortrait.setAttribute('data-noframes', 'false');
+    const px = `${sizePx}px`;
+    Object.assign(equipmentPortrait.style, {
+      width: px,
+      height: px,
+      maxWidth: px,
+      maxHeight: px,
+      display: 'block',
+      margin: '0'
+    });
+
+    let rarityEl = equipmentPortrait.querySelector('.has-rarity, [data-rarity]');
+    if (!rarityEl) {
+      rarityEl = document.createElement('div');
+      rarityEl.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+      equipmentPortrait.insertBefore(rarityEl, equipmentPortrait.firstChild);
+    }
+    rarityEl.setAttribute('data-rarity', '5');
+  }
+
+  return portrait;
+}
+
 /** Inventory in home search — createItemPortrait (Inventory tab), minus stat/frame/rarity/slot. */
 function cyclopediaCreateInventoryPortrait(itemKey, sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX) {
   const icon = getCyclopediaInventoryIconUrl(itemKey);
@@ -18137,6 +18230,146 @@ function cyclopediaCreateMapThumbnail(mapId, alt = '', sizePx = CYCLOPEDIA_HOME_
   img.style.cssText = `width: ${px}; height: ${px}; object-fit: cover; flex-shrink: 0;`;
   img.onerror = () => { img.style.visibility = 'hidden'; };
   return img;
+}
+
+let _cyclopediaBoostedMapToEquipment = null;
+
+function getCyclopediaBoostedMapToEquipmentIndex() {
+  if (_cyclopediaBoostedMapToEquipment) return _cyclopediaBoostedMapToEquipment;
+
+  const byRoomId = new Map();
+  const byMapName = new Map();
+  const roomNameMap = globalThis.state?.utils?.ROOM_NAME || {};
+  const nameToRoomId = new Map();
+  Object.entries(roomNameMap).forEach(([roomId, mapName]) => {
+    if (!nameToRoomId.has(mapName)) nameToRoomId.set(mapName, roomId);
+  });
+
+  for (const [equipmentName, wiki] of Object.entries(HARDCODED_BOOSTED_MAP)) {
+    if (wiki === false || typeof wiki !== 'string' || !wiki.trim()) continue;
+    wiki
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((mapName) => {
+        if (!byMapName.has(mapName)) byMapName.set(mapName, []);
+        const byNameList = byMapName.get(mapName);
+        if (!byNameList.includes(equipmentName)) byNameList.push(equipmentName);
+
+        const roomId = nameToRoomId.get(mapName);
+        if (roomId) {
+          if (!byRoomId.has(roomId)) byRoomId.set(roomId, []);
+          const byRoomList = byRoomId.get(roomId);
+          if (!byRoomList.includes(equipmentName)) byRoomList.push(equipmentName);
+        }
+      });
+  }
+
+  for (const list of byMapName.values()) list.sort((a, b) => a.localeCompare(b));
+  for (const list of byRoomId.values()) list.sort((a, b) => a.localeCompare(b));
+
+  _cyclopediaBoostedMapToEquipment = { byRoomId, byMapName };
+  return _cyclopediaBoostedMapToEquipment;
+}
+
+function getBoostedEquipmentForRoom(roomId, roomName) {
+  const idx = getCyclopediaBoostedMapToEquipmentIndex();
+  if (roomId && idx.byRoomId.has(roomId)) return idx.byRoomId.get(roomId);
+  if (roomName && idx.byMapName.has(roomName)) return idx.byMapName.get(roomName);
+  return [];
+}
+
+function cyclopediaNavigateToEquipmentPage(equipmentName) {
+  const name = String(equipmentName || '').trim();
+  if (!name) return;
+  if (typeof window !== 'undefined') {
+    window.cyclopediaSelectedEquipment = name;
+    if (typeof window.cyclopediaHomeSearchNavigate === 'function') {
+      window.cyclopediaHomeSearchNavigate({ type: 'equipment', name });
+      return;
+    }
+    if (typeof window.__cyclopediaOpen === 'function') {
+      window.__cyclopediaOpen({ equipment: name });
+    }
+  }
+}
+
+function appendCyclopediaBoostedEquipmentOverlay(
+  thumbnailContainer,
+  roomId,
+  roomName,
+  { iconSizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX, gapPx = 2, paddingPx = 4 } = {}
+) {
+  const equipmentNames = getBoostedEquipmentForRoom(roomId, roomName);
+  if (!equipmentNames.length || !thumbnailContainer) return;
+
+  const px = `${iconSizePx}px`;
+  const overlay = document.createElement('div');
+  overlay.className = 'cyclopedia-boosted-map-overlay';
+  overlay.style.cssText = `
+    position: absolute;
+    top: ${paddingPx}px;
+    right: ${paddingPx}px;
+    display: flex;
+    flex-wrap: wrap;
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+    align-items: flex-start;
+    gap: ${gapPx}px;
+    max-width: calc(100% - ${paddingPx * 2}px);
+    z-index: 2;
+    pointer-events: none;
+  `;
+
+  equipmentNames.forEach((equipmentName) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.title = `Boosted map item: ${equipmentName}`;
+    btn.style.cssText = `
+      pointer-events: auto;
+      padding: 0;
+      margin: 0;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      line-height: 0;
+      width: ${px};
+      height: ${px};
+      min-width: ${px};
+      min-height: ${px};
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: transform 0.1s;
+    `;
+
+    const portrait = cyclopediaCreateBoostedMapEquipmentPortrait(equipmentName, iconSizePx);
+    if (portrait) {
+      btn.appendChild(portrait);
+    } else {
+      btn.textContent = '?';
+      btn.style.fontSize = '10px';
+      btn.style.color = '#ffe066';
+      btn.style.background = 'rgba(0, 0, 0, 0.65)';
+      btn.style.border = '1px solid #555';
+      btn.style.borderRadius = '2px';
+    }
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cyclopediaNavigateToEquipmentPage(equipmentName);
+    });
+    btn.addEventListener('mouseenter', () => {
+      btn.style.transform = 'scale(1.08)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.transform = '';
+    });
+    overlay.appendChild(btn);
+  });
+
+  thumbnailContainer.appendChild(overlay);
 }
 
 function cyclopediaMountSearchEntryPortrait(iconSlot, result) {
@@ -18221,6 +18454,7 @@ function renderCyclopediaSearchColumn() {
   filterBar.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;';
 
   const searchInput = document.createElement('input');
+  searchInput.id = CYCLOPEDIA_HOME_SEARCH_INPUT_ID;
   searchInput.type = 'text';
   searchInput.placeholder = cyclopediaT('mods.cyclopedia.startpage.searchPlaceholder');
   searchInput.title = cyclopediaT('mods.cyclopedia.startpage.searchTooltip');
@@ -19278,6 +19512,7 @@ function cleanupAbilityTooltips() {
 }
 
 function cleanupCyclopediaModal() {
+  cyclopediaPendingHomeSearchFocus = false;
   // Note: This function is safe to call multiple times (idempotent)
   // Only clean up modal-specific resources, preserve global context menu observer
   
@@ -19433,6 +19668,7 @@ exports = {
         window.cyclopediaSelectedEquipment = null;
         window.cyclopediaMenuObserver = null;
         window.cyclopediaGlobalObserver = null;
+        delete window.__cyclopediaOpen;
       }
       
       // Clear all caches
@@ -19471,6 +19707,7 @@ exports = {
 
 // Legacy window object for backward compatibility
 if (typeof window !== 'undefined') {
+  window.__cyclopediaOpen = (options) => openCyclopediaModal({ fromHeader: true, ...(options || {}) });
   window.Cyclopedia = {
     init: exports.init,
     cleanup: exports.cleanup,

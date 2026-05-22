@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.9.1",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Hotkeys tab (Mods section): configurable keys to open Room Hopper (default P) and Cyclopedia (default C); warnings when those mods are disabled. Monstrous Cauldron default hotkey moved from C to O so C can open Cyclopedia (existing saves still on C for the cauldron are migrated to O on first load)."
+        },
+        {
+          "mod": "Room Hopper",
+          "type": "changed",
+          "text": "Search field is focused automatically when the modal opens so you can type immediately."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Start page home search is focused automatically once the Home tab finishes loading (after profile data), so you can type immediately. Maps tab Map Information (Season 1/2): boosted-map equipment icons on the selected map thumbnail (wiki reverse lookup from HARDCODED_BOOSTED_MAP); 32×32 item portraits with tier-5 rarity border (no stat icon); click opens that equipment in Arsenal. Region map list summary rows do not show these icons."
+        }
+      ]
+    },
+    {
       "version": "3.9.0",
       "changes": [
         {
