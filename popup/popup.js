@@ -1043,6 +1043,7 @@ const modDescriptions = {
   'Hunt Analyzer': 'Autoplay session stats: gold, dust, drops, summaries, and export.',
   'Raid Hunter': 'Raid automation: detect and join raids, setup, autoplay, stamina, and queues.',
   'Manual Runner': 'Repeats manual runs until victory, target S+ rank, or max floor; stats and replay copy.',
+  'Room Hopper': 'Searchable map list with creature/equip filters, XP per stamina, and one-click teleport.',
   'Stamina Optimizer': 'Starts or stops gameplay at min/max stamina; coordinates with other farming mods.',
   'Awaken Tracker': 'Tracks per-map awaken gene progress with live stat deltas, event logs, and pause-on-cap.',
   'Quests': 'Quest tracking, NPC dialogs, quest items, and Firebase-backed progress.',
@@ -1072,6 +1073,7 @@ const superModNames = [
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
+  'Room Hopper.js',
   'RunTracker.js',
   'Stamina Optimizer.js',
   'Awaken Tracker.js'

@@ -2088,39 +2088,224 @@ function captureMapInformation() {
   }
 }
 
+// Post-battle XP uses combat levels capped at 50 (room templates may store higher values, e.g. 500).
+const XP_DROP_PER_LEVEL = 562.5;
+const XP_COMBAT_LEVEL_CAP = 50;
+// Props / summons that can be killed but do not contribute to expReward (e.g. Orcsmith Orcshop).
+const XP_EXCLUDED_CREATURE_NAMES = new Set(['Orc', 'Sweaty Cyclops']);
+
+function capLevelForXpEstimate(rawLevel) {
+  const level = Math.max(1, Math.floor(Number(rawLevel) || 1));
+  return Math.min(level, XP_COMBAT_LEVEL_CAP);
+}
+
+function resolveCreatureName(gameId) {
+  if (gameId == null) return null;
+  let name = monsterGameIdsToNames.get(gameId);
+  if (!name) {
+    try {
+      const monData = globalThis.state?.utils?.getMonster?.(gameId);
+      name = monData?.metadata?.name;
+    } catch (_) {}
+  }
+  return name || null;
+}
+
+function isCreatureExcludedFromXp(name) {
+  return name != null && XP_EXCLUDED_CREATURE_NAMES.has(name);
+}
+
+function collectVillainXpLevels() {
+  const eligible = [];
+  const excluded = [];
+
+  const consider = (gameId, rawLevel, source) => {
+    const name = resolveCreatureName(gameId);
+    const raw = rawLevel || 1;
+    if (isCreatureExcludedFromXp(name)) {
+      excluded.push({ name: name || `gameId:${gameId}`, raw, source });
+      return;
+    }
+    eligible.push({
+      name: name || `gameId:${gameId}`,
+      raw,
+      capped: capLevelForXpEstimate(raw),
+      source
+    });
+  };
+
+  try {
+    const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+    if (Array.isArray(boardConfig)) {
+      for (const piece of boardConfig) {
+        if (!piece || piece.villain === false || piece.type === 'player') continue;
+        consider(piece.gameId, piece.level, 'board');
+      }
+    }
+  } catch (_) {}
+
+  if (eligible.length === 0 && excluded.length === 0 && currentRoomId && globalThis.state?.utils?.getBoardMonstersFromRoomId) {
+    const enemies = globalThis.state.utils.getBoardMonstersFromRoomId(currentRoomId);
+    if (Array.isArray(enemies)) {
+      for (const enemy of enemies) {
+        if (!enemy || enemy.villain === false) continue;
+        consider(enemy.gameId, enemy.level, 'room');
+      }
+    }
+  }
+
+  return { eligible, excluded };
+}
+
 // Estimate experience gained from a run based on the experience formula.
 // For victories all enemies are defeated; for defeats a random subset is used.
 function estimateRunExperience(completed) {
   try {
-    if (!currentRoomId) return null;
+    if (!currentRoomId) {
+      console.log('[Board Analyzer][XP] Skipped: no currentRoomId');
+      return null;
+    }
 
-    const enemies = globalThis.state.utils.getBoardMonstersFromRoomId(currentRoomId);
-    if (!enemies || enemies.length === 0) return null;
+    const { eligible, excluded } = collectVillainXpLevels();
+    if (eligible.length === 0) {
+      console.log('[Board Analyzer][XP] Skipped: no XP-eligible villains', {
+        roomId: currentRoomId,
+        excluded
+      });
+      return excluded.length > 0 ? 0 : null;
+    }
 
-    const enemyLevels = enemies
-      .filter(e => e && e.villain !== false)
-      .map(e => e.level || 1);
-
-    if (enemyLevels.length === 0) return null;
+    const cappedLevels = eligible.map(e => e.capped);
+    const rawLevels = eligible.map(e => e.raw);
+    const names = eligible.map(e => e.name);
+    const levelSource = eligible[0]?.source || 'unknown';
 
     let defeatedLevelSum;
     if (completed) {
-      defeatedLevelSum = enemyLevels.reduce((sum, lvl) => sum + lvl, 0);
+      defeatedLevelSum = cappedLevels.reduce((sum, lvl) => sum + lvl, 0);
+      console.log('[Board Analyzer][XP] Victory:', {
+        roomId: currentRoomId,
+        floor: currentFloor,
+        levelSource,
+        names,
+        rawLevels,
+        cappedLevels,
+        excluded,
+        defeatedLevelSum
+      });
     } else {
-      const killCount = Math.floor(Math.random() * enemyLevels.length);
-      const shuffled = [...enemyLevels].sort(() => Math.random() - 0.5);
-      defeatedLevelSum = shuffled.slice(0, killCount).reduce((sum, lvl) => sum + lvl, 0);
+      const killCount = Math.floor(Math.random() * cappedLevels.length);
+      const shuffled = [...eligible].sort(() => Math.random() - 0.5);
+      const defeated = shuffled.slice(0, killCount);
+      defeatedLevelSum = defeated.reduce((sum, e) => sum + e.capped, 0);
+      console.log('[Board Analyzer][XP] Defeat:', {
+        roomId: currentRoomId,
+        floor: currentFloor,
+        levelSource,
+        names,
+        rawLevels,
+        cappedLevels,
+        excluded,
+        killCount,
+        defeatedNames: defeated.map(e => e.name),
+        defeatedLevels: defeated.map(e => e.capped),
+        defeatedLevelSum
+      });
     }
 
-    if (defeatedLevelSum === 0) return 0;
+    if (defeatedLevelSum === 0) {
+      console.log('[Board Analyzer][XP] Result: 0 (no defeated enemies)');
+      return 0;
+    }
 
-    const xpValue = defeatedLevelSum * 562.5;
-    const rngMultiplier = (Math.floor(Math.random() * 20) + 1 - 10) / 100;
-    return Math.round(xpValue * (1 + rngMultiplier));
+    const d20Roll = Math.floor(Math.random() * 20) + 1;
+    const xpValue = defeatedLevelSum * XP_DROP_PER_LEVEL;
+    const rngMultiplier = (d20Roll - 10) / 100;
+    const estimatedExp = Math.round(xpValue * (1 + rngMultiplier));
+    console.log('[Board Analyzer][XP] Result:', {
+      defeatedLevelSum,
+      xpValue,
+      d20Roll,
+      rngMultiplier: `${(rngMultiplier * 100).toFixed(0)}%`,
+      estimatedExp
+    });
+    return estimatedExp;
   } catch (error) {
-    console.warn('[Board Analyzer] Error estimating experience:', error);
+    console.warn('[Board Analyzer][XP] Error:', error);
     return null;
   }
+}
+
+// Debug: log real battle XP from game.gameServer responses (when estimate XP is enabled).
+let xpDebugFetchInstalled = false;
+let xpDebugOriginalFetch = null;
+
+function parseGameServerJson(responseData) {
+  if (!responseData) return null;
+  if (Array.isArray(responseData) && responseData[0]?.result?.data) {
+    return responseData[0].result.data.json ?? responseData[0].result.data;
+  }
+  if (responseData.rewardScreen) return responseData;
+  return null;
+}
+
+function parseServerExpReward(serverResults) {
+  const rewardScreen = serverResults?.rewardScreen;
+  const raw = rewardScreen?.expReward ?? serverResults?.next?.expReward;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+function logServerExpReward(serverResults) {
+  if (!config.estimateExperience) return;
+
+  const rewardScreen = serverResults?.rewardScreen;
+  if (!rewardScreen) return;
+
+  const expReward = parseServerExpReward(serverResults);
+  const roomId = rewardScreen.roomId ?? serverResults?.roomId ?? null;
+
+  console.log('[Board Analyzer][XP] Server:', {
+    roomId,
+    floor: rewardScreen.floor ?? serverResults?.floor ?? null,
+    victory: rewardScreen.victory,
+    expReward: expReward ?? 0,
+    defeatedEnemies: rewardScreen.defeatedEnemies,
+    seed: serverResults?.seed,
+    analyzerRoomId: currentRoomId,
+    analyzerFloor: currentFloor,
+    analysisRunning: analysisState.isRunning()
+  });
+}
+
+function installXpDebugFetchHook() {
+  if (xpDebugFetchInstalled) return;
+  xpDebugOriginalFetch = window.fetch.bind(window);
+  window.fetch = async function(...args) {
+    const response = await xpDebugOriginalFetch.apply(this, args);
+    try {
+      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
+      if (typeof url === 'string' && url.includes('game.gameServer')) {
+        const cloned = response.clone();
+        const responseData = await cloned.json();
+        const serverResults = parseGameServerJson(responseData);
+        if (serverResults?.rewardScreen) {
+          logServerExpReward(serverResults);
+        }
+      }
+    } catch (_) {}
+    return response;
+  };
+  xpDebugFetchInstalled = true;
+}
+
+function uninstallXpDebugFetchHook() {
+  if (!xpDebugFetchInstalled || !xpDebugOriginalFetch) return;
+  window.fetch = xpDebugOriginalFetch;
+  xpDebugFetchInstalled = false;
+  xpDebugOriginalFetch = null;
 }
 
 // Helper function to run the main analysis loop
@@ -3848,6 +4033,8 @@ function init() {
   // Inject custom CSS to fix input styles
   injectCustomStyles();
   
+  installXpDebugFetchHook();
+
   console.log('Board Analyzer UI initialized');
 }
 
@@ -3863,6 +4050,7 @@ context.exports = {
   },
   // Cleanup function for modal manager
   cleanup: () => {
+    uninstallXpDebugFetchHook();
     modalManager.closeAll();
     // Unregister from coordination system
     if (window.ModCoordination) {

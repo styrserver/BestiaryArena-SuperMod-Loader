@@ -179,7 +179,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 24 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 25 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -357,6 +357,13 @@ Advanced raid automation system for Bestiary Arena:
 - Stamina monitoring and auto-refill integration with Bestiary Automator
 - Real-time raid status monitoring with countdown timers and queue system for multiple raids
 - Comprehensive settings panel for customization and raid map selection
+
+#### Room Hopper
+Searchable world map browser for quick navigation and farming research:
+- Header button opens a sortable table of every room with thumbnail, enemy creatures, and equip drops
+- Search by map name, region, creature, or equipment; filter by region and hide raids/dynamic events
+- Shows average XP and XP per stamina per room; sort by name or efficiency
+- One-click teleport to any room; blocks travel while a run is in progress
 
 #### RunTracker
 Local run data tracking and storage system:

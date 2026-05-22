@@ -1700,6 +1700,24 @@ function handlePageVisibilityChange() {
         lastPageVisibilityChange = now;
         
         if (document.visibilityState === 'visible') {
+            // Board Analyzer / Manual Runner use sandbox (no serverResults). Reclaiming autoplay here crashes the client.
+            if (window.ModCoordination?.isModActive('Board Analyzer') ||
+                window.ModCoordination?.isModActive('Manual Runner') ||
+                isBoardAnalyzerRunning) {
+                console.log('[Raid Hunter] Page visible but Board Analyzer or Manual Runner is active - skipping reclaim');
+                return;
+            }
+
+            const boardContextEarly = globalThis.state?.board?.getSnapshot?.()?.context;
+            if (boardContextEarly?.mode === 'sandbox') {
+                console.log('[Raid Hunter] Page visible but game is in sandbox mode - skipping reclaim');
+                return;
+            }
+
+            if (!canProcessRaid('page visibility')) {
+                return;
+            }
+
             console.log('[Raid Hunter] Page became visible - checking for active raids and reclaiming control if needed');
             
             // Set flag to prevent stamina callbacks from interfering during visibility transition

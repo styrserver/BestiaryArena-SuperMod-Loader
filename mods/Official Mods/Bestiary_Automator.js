@@ -120,6 +120,12 @@ const SUPER_AUTOPLAY_TIMING = {
   STATE_RESET_DELAY: 1000    // Delay before resetting state
 };
 
+const FASTER_AUTOPLAY_DELAY_MIN_MS = 10;
+const FASTER_AUTOPLAY_DELAY_MAX_MS = 180000; // 180 seconds
+
+const getFasterAutoplayDelayMs = () =>
+  Math.max(FASTER_AUTOPLAY_DELAY_MIN_MS, Math.min(FASTER_AUTOPLAY_DELAY_MAX_MS, config.fasterAutoplayMs));
+
 // Common timing constants
 const TIMING = {
   TOAST_AUTO_REMOVE: 4000,      // Auto-remove toast after 4 seconds
@@ -3810,12 +3816,12 @@ const handleFasterAutoplay = async () => {
     globalThis.state.clientConfig.trigger.setState({
       fn: (prev) => ({
         ...prev,
-        autoplayDelayMs: config.fasterAutoplayMs
+        autoplayDelayMs: getFasterAutoplayDelayMs()
       }),
     });
 
     fasterAutoplayExecutedThisSession = true;
-    console.log(`[Bestiary Automator] Faster Autoplay enabled - autoplay delay set to ${config.fasterAutoplayMs}ms`);
+    console.log(`[Bestiary Automator] Faster Autoplay enabled - autoplay delay set to ${getFasterAutoplayDelayMs()}ms`);
   } catch (error) {
     console.warn('[Bestiary Automator] Could not set autoplay delay:', error);
   }
@@ -4069,11 +4075,11 @@ const autoSaveConfig = (propertyPath, value) => {
           globalThis.state.clientConfig.trigger.setState({
             fn: (prev) => ({
               ...prev,
-              autoplayDelayMs: config.fasterAutoplayMs
+              autoplayDelayMs: getFasterAutoplayDelayMs()
             }),
           });
           
-          console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to ${config.fasterAutoplayMs}ms`);
+          console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to ${getFasterAutoplayDelayMs()}ms`);
         } else {
           // Reset autoplay delay to default 3 seconds
           globalThis.state.clientConfig.trigger.setState({
@@ -4156,18 +4162,27 @@ const setupCheckboxAutoSave = (checkbox, propertyPath, onChange = null) => {
   });
 };
 
+const clampNumberInput = (input, min, max) => {
+  const numValue = parseInt(input.value, 10);
+  if (isNaN(numValue)) return null;
+  const clamped = Math.max(min, Math.min(max, numValue));
+  if (clamped !== numValue) input.value = clamped;
+  input.style.borderColor = '#444';
+  input.title = '';
+  return clamped;
+};
+
 // Helper function to setup number input with auto-save and validation
 const setupNumberInputAutoSave = (input, propertyPath, min, max) => {
   if (!input) return;
   input.value = getNestedProperty(config, propertyPath);
   
   const validateAndSave = () => {
-    const value = parseInt(input.value, 10);
-    if (!isNaN(value) && value >= min && value <= max) {
-      autoSaveConfig(propertyPath, value);
-    }
+    const value = clampNumberInput(input, min, max);
+    if (value !== null) autoSaveConfig(propertyPath, value);
   };
-  
+
+  input.addEventListener('input', () => clampNumberInput(input, min, max));
   input.addEventListener('change', validateAndSave);
   input.addEventListener('blur', validateAndSave);
 };
@@ -4199,12 +4214,11 @@ const setupPotionThresholdAutoSave = (input, potionType) => {
   input.value = config.potionQuantityThresholds[potionType];
   
   const validateAndSave = () => {
-    const value = parseInt(input.value, 10);
-    if (!isNaN(value) && value >= 0 && value <= 1000) {
-      autoSaveConfig(`potionQuantityThresholds.${potionType}`, value);
-    }
+    const value = clampNumberInput(input, 0, 1000);
+    if (value !== null) autoSaveConfig(`potionQuantityThresholds.${potionType}`, value);
   };
-  
+
+  input.addEventListener('input', () => clampNumberInput(input, 0, 1000));
   input.addEventListener('change', validateAndSave);
   input.addEventListener('blur', validateAndSave);
 };
@@ -4350,7 +4364,7 @@ const createConfigPanel = () => {
   separator.style.cssText = 'height: 1px; background-color: #555; margin: 0; width: 100%;';
   
   // Faster autoplay delay input
-  const fasterAutoplayDelayContainer = createNumberInputContainer('faster-autoplay-input', t('mods.automator.autoplayDelay'), config.fasterAutoplayMs, 0, 3000);
+  const fasterAutoplayDelayContainer = createNumberInputContainer('faster-autoplay-input', t('mods.automator.autoplayDelay'), config.fasterAutoplayMs, FASTER_AUTOPLAY_DELAY_MIN_MS, FASTER_AUTOPLAY_DELAY_MAX_MS);
   
   // Separator and credit footer for advanced section
   const creditSeparator = document.createElement('div');
@@ -4397,7 +4411,7 @@ const createConfigPanel = () => {
     
     // Setup number inputs with auto-save
     setupNumberInputAutoSave(document.getElementById('min-stamina-input'), 'minimumStaminaWithoutRefill', 1, 360);
-    setupNumberInputAutoSave(document.getElementById('faster-autoplay-input'), 'fasterAutoplayMs', 0, 3000);
+    setupNumberInputAutoSave(document.getElementById('faster-autoplay-input'), 'fasterAutoplayMs', FASTER_AUTOPLAY_DELAY_MIN_MS, FASTER_AUTOPLAY_DELAY_MAX_MS);
     
     // Setup potion checkboxes and threshold inputs with auto-save
     const potionTypes = ['supreme', 'ultimate', 'great', 'strong', 'mini'];
@@ -4548,33 +4562,11 @@ const createConfigPanel = () => {
     input.value = Math.max(min, Math.min(max, value)); // Clamp value to valid range
     input.style.cssText = 'width: 100%; padding: 5px; background-color: #222; color: #fff; border: 1px solid #444;';
     
-    // Add input validation
-    input.addEventListener('input', () => {
-      const numValue = parseInt(input.value, 10);
-      if (isNaN(numValue) || numValue < min || numValue > max) {
-        input.style.borderColor = '#ff4444';
-        input.title = `Value must be between ${min} and ${max}%`;
-      } else {
-        input.style.borderColor = '#444';
-        input.title = '';
-      }
-    });
-    
-    // Add validation to reset to min/max values when exceeding limits
-    input.addEventListener('blur', () => {
-      const numValue = parseInt(input.value, 10);
-      if (!isNaN(numValue)) {
-        if (numValue > max) {
-          input.value = max;
-          input.style.borderColor = '#444';
-          input.title = '';
-        } else if (numValue < min) {
-          input.value = min;
-          input.style.borderColor = '#444';
-          input.title = '';
-        }
-      }
-    });
+    const clampOnInput = () => clampNumberInput(input, min, max);
+
+    input.addEventListener('input', clampOnInput);
+    input.addEventListener('change', clampOnInput);
+    input.addEventListener('blur', clampOnInput);
     
     container.appendChild(labelElement);
     container.appendChild(input);
@@ -4615,58 +4607,22 @@ const createConfigPanel = () => {
       // to avoid duplicate saves
     });
     
-    // Add input validation
-    input.addEventListener('input', () => {
-      const numValue = parseInt(input.value, 10);
-      if (isNaN(numValue) || numValue < min || numValue > max) {
-        input.style.borderColor = '#ff4444';
-        input.title = `Value must be between ${min} and ${max}`;
-      } else {
-        input.style.borderColor = '#444';
-        input.title = '';
+    const clampAndSave = () => {
+      const finalValue = clampNumberInput(input, min, max);
+      if (finalValue === null) return;
+      if (inputId.includes('threshold-input')) {
+        const potionType = inputId.replace('-threshold-input', '');
+        autoSaveConfig(`potionQuantityThresholds.${potionType}`, finalValue);
+      } else if (inputId === 'faster-autoplay-input') {
+        autoSaveConfig('fasterAutoplayMs', finalValue);
+      } else if (inputId === 'min-stamina-input') {
+        autoSaveConfig('minimumStaminaWithoutRefill', finalValue);
       }
-    });
-    
-    // Add validation to reset to min/max values when exceeding limits and auto-save
-    input.addEventListener('blur', () => {
-      const numValue = parseInt(input.value, 10);
-      if (!isNaN(numValue)) {
-        if (numValue > max) {
-          input.value = max;
-          input.style.borderColor = '#444';
-          input.title = '';
-        } else if (numValue < min) {
-          input.value = min;
-          input.style.borderColor = '#444';
-          input.title = '';
-        }
-      }
-      // Determine which property this is based on inputId
-      const finalValue = parseInt(input.value, 10);
-      if (!isNaN(finalValue) && finalValue >= min && finalValue <= max) {
-        if (inputId.includes('threshold-input')) {
-          const potionType = inputId.replace('-threshold-input', '');
-          autoSaveConfig(`potionQuantityThresholds.${potionType}`, finalValue);
-        } else if (inputId === 'faster-autoplay-input') {
-          autoSaveConfig('fasterAutoplayMs', finalValue);
-        } else if (inputId === 'min-stamina-input') {
-          autoSaveConfig('minimumStaminaWithoutRefill', finalValue);
-        }
-      }
-    });
-    input.addEventListener('change', () => {
-      const numValue = parseInt(input.value, 10);
-      if (!isNaN(numValue) && numValue >= min && numValue <= max) {
-        if (inputId.includes('threshold-input')) {
-          const potionType = inputId.replace('-threshold-input', '');
-          autoSaveConfig(`potionQuantityThresholds.${potionType}`, numValue);
-        } else if (inputId === 'faster-autoplay-input') {
-          autoSaveConfig('fasterAutoplayMs', numValue);
-        } else if (inputId === 'min-stamina-input') {
-          autoSaveConfig('minimumStaminaWithoutRefill', numValue);
-        }
-      }
-    });
+    };
+
+    input.addEventListener('input', () => clampNumberInput(input, min, max));
+    input.addEventListener('change', clampAndSave);
+    input.addEventListener('blur', clampAndSave);
     
     container.appendChild(checkbox);
     container.appendChild(labelElement);
@@ -4829,9 +4785,9 @@ const applyButtonStyling = (btn) => {
   
   // Update tooltip to show Faster Autoplay status
   if (fasterAutoplayRunning) {
-    btn.title = t('mods.automator.configButtonTooltip') + ' - Faster Autoplay Running';
+    btn.title = t('mods.automator.configButtonTooltip') + ' - Autoplay delay running';
   } else if (config.fasterAutoplay) {
-    btn.title = t('mods.automator.configButtonTooltip') + ' - Faster Autoplay Enabled';
+    btn.title = t('mods.automator.configButtonTooltip') + ' - Autoplay delay enabled';
   } else {
     btn.title = t('mods.automator.configButtonTooltip');
   }
@@ -5122,7 +5078,7 @@ function updateSettingsModalUI() {
     const fasterAutoplayInput = document.getElementById('faster-autoplay-input');
     if (fasterAutoplayInput && !fasterAutoplayInput.hasAttribute('data-listener-added')) {
       fasterAutoplayInput.value = config.fasterAutoplayMs;
-      setupNumberInputAutoSave(fasterAutoplayInput, 'fasterAutoplayMs', 0, 3000);
+      setupNumberInputAutoSave(fasterAutoplayInput, 'fasterAutoplayMs', FASTER_AUTOPLAY_DELAY_MIN_MS, FASTER_AUTOPLAY_DELAY_MAX_MS);
       fasterAutoplayInput.setAttribute('data-listener-added', 'true');
     }
     

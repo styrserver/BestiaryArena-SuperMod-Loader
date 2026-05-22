@@ -163,7 +163,7 @@ const HARDCODED_BOOSTED_MAP = window.equipmentDatabase?.HARDCODED_BOOSTED_MAP ||
 const GAME_KEYS = {
   NO_RARITY: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
   CURRENCY: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
-  UPGRADE: ['babyDragonPlant', 'dailyBoostedMap', 'daycare', 'dungeonAscension', 'dragonPlant', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
+  UPGRADE: ['babyDragonPlant', 'creatureAwakening', 'dailyBoostedMap', 'daycare', 'dungeonAscension', 'dragonPlant', 'drMephistopheles', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
 };
 
 const MAP_INTERACTION_CONFIG = {
@@ -297,6 +297,146 @@ function cyclopediaNormalizeSearchText(value) {
     .trim();
 }
 
+function cyclopediaExtractQuotedString(condition) {
+  const c = String(condition ?? '').trim();
+  if ((c.startsWith('"') && c.endsWith('"')) || (c.startsWith("'") && c.endsWith("'"))) {
+    return { isExact: true, value: cyclopediaNormalizeSearchText(c.slice(1, -1)) };
+  }
+  return { isExact: false, value: cyclopediaNormalizeSearchText(c) };
+}
+
+function cyclopediaCollectBooleanLeaves(expression) {
+  const expr = String(expression ?? '').trim();
+  if (!expr) return [];
+  if (/\s+or\s+/i.test(expr)) {
+    return expr.split(/\s+or\s+/i).flatMap((part) => cyclopediaCollectBooleanLeaves(part));
+  }
+  if (/\s+and\s+/i.test(expr)) {
+    return expr.split(/\s+and\s+/i).flatMap((part) => cyclopediaCollectBooleanLeaves(part));
+  }
+  return [expr.trim()].filter(Boolean);
+}
+
+function cyclopediaBooleanExpressionHasValidTerm(expression) {
+  const leaves = cyclopediaCollectBooleanLeaves(expression);
+  if (leaves.length === 0) return cyclopediaNormalizeSearchText(expression).length >= 2;
+  return leaves.some((leaf) => {
+    const { value } = cyclopediaExtractQuotedString(leaf);
+    return (value || '').length >= 2;
+  });
+}
+
+/** AND/OR parsing (Dice_Roller SearchMatcher-style). OR splits before AND. */
+function cyclopediaParseSearchExpression(matchCondition, expression) {
+  const expr = String(expression ?? '').trim();
+  if (!expr) return true;
+
+  const handleIncompleteOperator = (conditions, operator, isAnd) => {
+    const hasEmpty = conditions.some((c) => c === '');
+    const endsWith =
+      expr.endsWith(` ${operator}`) ||
+      expr.endsWith(` ${operator} `) ||
+      expr.toLowerCase().endsWith(` ${operator}`);
+    if (hasEmpty || endsWith) {
+      const valid = conditions.filter((c) => c !== '');
+      if (valid.length === 0) return true;
+      const check = isAnd ? valid.every.bind(valid) : valid.some.bind(valid);
+      return check((c) => !c.trim() || cyclopediaParseSearchExpression(matchCondition, c));
+    }
+    return null;
+  };
+
+  if (/\s+or\s+/i.test(expr)) {
+    const parts = expr.split(/\s+or\s+/i).map((s) => s.trim());
+    const incomplete = handleIncompleteOperator(parts, 'or', false);
+    if (incomplete !== null) return incomplete;
+    return parts.some((p) => cyclopediaParseSearchExpression(matchCondition, p));
+  }
+
+  if (/\s+and\s+/i.test(expr)) {
+    const parts = expr.split(/\s+and\s+/i).map((s) => s.trim());
+    const incomplete = handleIncompleteOperator(parts, 'and', true);
+    if (incomplete !== null) return incomplete;
+    return parts.every((p) => cyclopediaParseSearchExpression(matchCondition, p));
+  }
+
+  return matchCondition(expr);
+}
+
+function cyclopediaMatchesSingleSearchCondition(searchBlob, labelNorm, condition) {
+  if (!condition || !String(condition).trim()) return true;
+  const blob = searchBlob || '';
+  const label = labelNorm || '';
+  const { isExact, value } = cyclopediaExtractQuotedString(condition);
+  const q = isExact ? value : cyclopediaNormalizeSearchText(condition);
+  if (!q || q.length < 2) return false;
+  if (isExact) return label === q || blob === q;
+  return label.includes(q) || blob.includes(q);
+}
+
+function cyclopediaTextMatchesSearchQuery(text, parsed) {
+  const blob = cyclopediaNormalizeSearchText(text);
+  if (!blob) return false;
+  if (parsed?.isBooleanMode && parsed.booleanExpression) {
+    return cyclopediaParseSearchExpression(
+      (cond) => cyclopediaMatchesSingleSearchCondition(blob, blob, cond),
+      parsed.booleanExpression
+    );
+  }
+  if (parsed?.isExactMode && parsed.exactPhrases?.length) {
+    return parsed.exactPhrases.some((p) => blob === p);
+  }
+  const q = parsed?.qNorm || '';
+  return q.length >= 2 && blob.includes(q);
+}
+
+function cyclopediaFirstMatchingLeafForSnippet(parsed) {
+  if (parsed?.isBooleanMode) {
+    for (const leaf of cyclopediaCollectBooleanLeaves(parsed.booleanExpression)) {
+      const { value } = cyclopediaExtractQuotedString(leaf);
+      const q = cyclopediaNormalizeSearchText(value);
+      if (q.length >= 2) return q;
+    }
+    return cyclopediaNormalizeSearchText(parsed.booleanExpression);
+  }
+  return parsed?.qNorm || '';
+}
+
+/** `"goblin"` → exact phrase mode; `foo AND bar` / `foo OR bar` → boolean mode (Dice_Roller-style). */
+function parseCyclopediaHomeSearchQuery(query) {
+  const raw = String(query ?? '').trim();
+  const hasBoolean = /\s+(and|or)\s+/i.test(raw);
+
+  if (hasBoolean) {
+    return {
+      qNorm: cyclopediaNormalizeSearchText(raw),
+      booleanExpression: raw,
+      isBooleanMode: true,
+      isExactMode: false,
+      exactPhrases: [],
+      remainder: cyclopediaNormalizeSearchText(raw)
+    };
+  }
+
+  const exactPhrases = [];
+  const quotePattern = /"([^"]*)"/g;
+  let match;
+  while ((match = quotePattern.exec(raw)) !== null) {
+    const phrase = cyclopediaNormalizeSearchText(match[1]);
+    if (phrase.length >= 2) exactPhrases.push(phrase);
+  }
+  const remainder = cyclopediaNormalizeSearchText(raw.replace(quotePattern, ' ').replace(/"/g, ' '));
+  const isExactMode = exactPhrases.length > 0;
+  return {
+    qNorm: isExactMode ? exactPhrases[0] : remainder,
+    exactPhrases,
+    isExactMode,
+    isBooleanMode: false,
+    booleanExpression: '',
+    remainder
+  };
+}
+
 function cyclopediaGetInventoryDisplayName(itemKey) {
   if (!itemKey) return 'Unknown Item';
 
@@ -331,12 +471,34 @@ function cyclopediaGetInventoryObtainText(itemKey, displayName) {
 const CyclopediaHomeSearch = (() => {
   const MAX_RESULTS = 40;
   const MAX_META_CREATURES = 25;
+  const MAX_META_MAPS = 30;
+  const MAX_META_CREATURE_EQUIPS = 40;
+  const MAX_META_EQUIP_EFFECT = 20;
   const ABILITY_TEXT_CACHE_VERSION = 2;
 
   let baseEntries = null;
   let creatureEntries = null; // cached: baseEntries filtered to creatures
-  let roomCreatureIndex = null; // Map<roomId, Set<creatureName>>
+  let equipmentEntries = null; // cached: baseEntries filtered to equipment
+  let roomCreatureIndex = null; // Map<roomId, Set<creatureName>> (board index built flag)
+  let creatureToRoomIds = null; // Map<normalizedCreatureName, Set<roomId>>
+  let equipmentToRoomIds = null; // Map<normalizedEquipmentName, Set<roomId>>
+  let creatureToEquipmentNames = null; // Map<normalizedCreatureName, Set<equipmentDisplayName>>
   let creatureAbilityTextCache = null; // Map<creatureNameLower, { v: number, text: string } | string>
+  let equipmentEffectTextCache = null; // Map<normalizedEquipmentName, { v: number, text: string }>
+  const EQUIPMENT_EFFECT_TEXT_CACHE_VERSION = 3;
+  let equipmentEffectIndexState = {
+    abortToken: 0,
+    running: false,
+    done: 0,
+    total: 0,
+    queue: [],
+    listeners: new Set(),
+    tickTimer: null,
+    lastNotifyAt: 0,
+    lastNotifyDone: 0,
+    lastNotifySignature: ''
+  };
+  let equipmentEffectIndexPromise = null;
   let abilityIndexState = {
     abortToken: 0,
     running: false,
@@ -371,37 +533,124 @@ const CyclopediaHomeSearch = (() => {
     return map;
   }
 
+  /** Playable map codes only (ROOM_NAME keys). Excludes numeric ROOMS object keys. */
+  function isPlayableRoomId(roomId, roomNameMap) {
+    if (!roomId || typeof roomId !== 'string') return false;
+    if (/^\d+$/.test(roomId)) return false;
+    return !!roomNameMap?.[roomId];
+  }
+
+  function addCreatureToRoomIndex(roomId, creatureName, roomNameMap) {
+    if (!roomId || !creatureName) return;
+    if (!isPlayableRoomId(roomId, roomNameMap)) return;
+
+    let roomSet = roomCreatureIndex.get(roomId);
+    if (!roomSet) {
+      roomSet = new Set();
+      roomCreatureIndex.set(roomId, roomSet);
+    }
+    roomSet.add(creatureName);
+
+    const key = cyclopediaNormalizeSearchText(creatureName);
+    if (!key) return;
+    let roomsForCreature = creatureToRoomIds.get(key);
+    if (!roomsForCreature) {
+      roomsForCreature = new Set();
+      creatureToRoomIds.set(key, roomsForCreature);
+    }
+    roomsForCreature.add(roomId);
+  }
+
+  function addEquipmentToRoomIndex(roomId, equipmentName, roomNameMap) {
+    if (!roomId || !equipmentName) return;
+    if (!isPlayableRoomId(roomId, roomNameMap)) return;
+
+    const key = cyclopediaNormalizeSearchText(equipmentName);
+    if (!key) return;
+    let roomsForEquipment = equipmentToRoomIds.get(key);
+    if (!roomsForEquipment) {
+      roomsForEquipment = new Set();
+      equipmentToRoomIds.set(key, roomsForEquipment);
+    }
+    roomsForEquipment.add(roomId);
+  }
+
+  function addCreatureEquipmentLink(creatureName, equipmentName) {
+    if (!creatureName || !equipmentName) return;
+    const creatureKey = cyclopediaNormalizeSearchText(creatureName);
+    if (!creatureKey) return;
+    let equipSet = creatureToEquipmentNames.get(creatureKey);
+    if (!equipSet) {
+      equipSet = new Set();
+      creatureToEquipmentNames.set(creatureKey, equipSet);
+    }
+    equipSet.add(equipmentName);
+  }
+
   function ensureRoomCreatureIndex() {
     if (roomCreatureIndex) return roomCreatureIndex;
     roomCreatureIndex = new Map();
+    creatureToRoomIds = new Map();
+    equipmentToRoomIds = new Map();
+    creatureToEquipmentNames = new Map();
 
-    const rooms = globalThis.state?.utils?.ROOMS;
     const utils = globalThis.state?.utils;
-    if (!rooms || !utils?.getMonster) return roomCreatureIndex;
+    if (!utils?.getMonster) return roomCreatureIndex;
+
+    const getMonster = utils.getMonster;
+    const getEquipment = utils.getEquipment;
+    const getBoard = utils.getBoardMonstersFromRoomId;
+    const regions = safeGetRegions();
+    const roomNameMap = utils.ROOM_NAME || {};
 
     try {
-      Object.entries(rooms).forEach(([roomId, room]) => {
-        const actors = room?.file?.data?.actors;
-        if (!Array.isArray(actors) || actors.length === 0) return;
+      // Board villains on playable maps only (same source as Room Hopper; no ROOMS numeric keys)
+      if (typeof getBoard === 'function') {
+        const roomIds = regions.length > 0
+          ? regions.flatMap((region) =>
+              (Array.isArray(region.rooms) ? region.rooms : [])
+                .map((room) => room?.id)
+                .filter(Boolean)
+            )
+          : Object.keys(roomNameMap);
 
-        let set = roomCreatureIndex.get(roomId);
-        if (!set) {
-          set = new Set();
-          roomCreatureIndex.set(roomId, set);
-        }
-
-        actors.forEach((actor) => {
-          const monsterId = actor?.id;
-          if (!monsterId) return;
+        for (const roomId of roomIds) {
+          if (!isPlayableRoomId(roomId, roomNameMap)) continue;
           try {
-            const monster = utils.getMonster(monsterId);
-            const name = monster?.metadata?.name;
-            if (name) set.add(name);
+            const board = getBoard(roomId);
+            if (!Array.isArray(board)) continue;
+            board.filter((p) => p?.villain === true).forEach((v) => {
+              let creatureName = null;
+              const monsterId = v?.gameId;
+              if (monsterId) {
+                try {
+                  const monster = getMonster(monsterId);
+                  creatureName = monster?.metadata?.name || null;
+                  if (creatureName) addCreatureToRoomIndex(roomId, creatureName, roomNameMap);
+                } catch {
+                  // ignore
+                }
+              }
+
+              const equipId = Number(v?.equip?.gameId);
+              if (Number.isFinite(equipId) && typeof getEquipment === 'function') {
+                try {
+                  const eq = getEquipment(equipId);
+                  const equipName = eq?.metadata?.name;
+                  if (equipName) {
+                    addEquipmentToRoomIndex(roomId, equipName, roomNameMap);
+                    if (creatureName) addCreatureEquipmentLink(creatureName, equipName);
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+            });
           } catch {
             // ignore
           }
-        });
-      });
+        }
+      }
     } catch (error) {
       console.warn('[Cyclopedia] HomeSearch: error building room creature index:', error);
     }
@@ -558,6 +807,406 @@ const CyclopediaHomeSearch = (() => {
       return abilityIndexPromise;
     } catch {
       abilityIndexPromise = null;
+      return Promise.resolve(false);
+    }
+  }
+
+  function stripHtmlToPlainText(html) {
+    try {
+      const div = document.createElement('div');
+      div.innerHTML = String(html ?? '');
+      return div.textContent || '';
+    } catch {
+      return String(html ?? '');
+    }
+  }
+
+  function resolveEquipmentIdByName(equipmentName) {
+    try {
+      if (!equipmentName || typeof equipmentName !== 'string') return null;
+      const key = equipmentName.toLowerCase();
+      const fromApi = window.BestiaryModAPI?.utility?.maps?.equipmentNamesToGameIds?.get?.(key);
+      if (fromApi != null) return fromApi;
+
+      const getEquipment = globalThis.state?.utils?.getEquipment;
+      if (typeof getEquipment !== 'function') return null;
+      for (let i = 1; i < 1000; i++) {
+        try {
+          const eq = getEquipment(i);
+          if (eq?.metadata?.name?.toLowerCase() === key) return i;
+        } catch {
+          // ignore missing ids
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function ensureEquipmentEffectTextCache() {
+    if (!equipmentEffectTextCache) equipmentEffectTextCache = new Map();
+    return equipmentEffectTextCache;
+  }
+
+  function getEquipmentMetaByName(equipmentName) {
+    try {
+      const equipId = resolveEquipmentIdByName(equipmentName);
+      if (equipId == null) return null;
+      return globalThis.state?.utils?.getEquipment?.(equipId)?.metadata ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  function equipmentHasRenderedEffectMeta(meta) {
+    return !!(meta?.EffectComponent || meta?.skill?.TooltipContent);
+  }
+
+  function buildEquipmentEffectTextPrefix(meta) {
+    let text = '';
+    if (!meta) return text;
+    if (meta.description) {
+      text += `${stripHtmlToPlainText(meta.description)}\n`;
+    }
+    const leaves = [];
+    collectStringLeaves(meta, leaves);
+    if (leaves.length) text += `${leaves.join('\n')}\n`;
+    return text;
+  }
+
+  function isEquipmentEffectCacheEntryUpToDate(equipmentName, cached) {
+    if (
+      !cached ||
+      cached.v !== EQUIPMENT_EFFECT_TEXT_CACHE_VERSION ||
+      cached.indexed !== true ||
+      typeof cached.text !== 'string'
+    ) {
+      return false;
+    }
+    const meta = getEquipmentMetaByName(equipmentName);
+    if (equipmentHasRenderedEffectMeta(meta) && !cached.text.trim()) return false;
+    return true;
+  }
+
+  function effectTextMatchesQuery(effectText, parsedOrNorm) {
+    if (!effectText) return false;
+    if (typeof parsedOrNorm === 'object' && parsedOrNorm !== null) {
+      return cyclopediaTextMatchesSearchQuery(effectText, parsedOrNorm);
+    }
+    const qNorm = parsedOrNorm;
+    return Boolean(qNorm && effectText.includes(qNorm));
+  }
+
+  function cyclopediaEntryMatchesBoolean(entry, booleanExpression) {
+    const labelNorm = entry.labelNorm ?? cyclopediaNormalizeSearchText(entry.label);
+    const searchBlob = entry.search || labelNorm;
+    return cyclopediaParseSearchExpression(
+      (cond) => cyclopediaMatchesSingleSearchCondition(searchBlob, labelNorm, cond),
+      booleanExpression
+    );
+  }
+
+  function entryAlreadyMatchesQuery(entry, parsed) {
+    if (parsed.isBooleanMode) {
+      return cyclopediaEntryMatchesBoolean(entry, parsed.booleanExpression);
+    }
+    const q = parsed.qNorm;
+    return Boolean(q && entry.search && entry.search.includes(q));
+  }
+
+  function extractEquipmentEffectTextAsync(equipmentName, onDone) {
+    try {
+      const createUIComponent = globalThis.state?.utils?.createUIComponent;
+      const meta = getEquipmentMetaByName(equipmentName);
+      let prefixText = buildEquipmentEffectTextPrefix(meta);
+      const effectComponent = meta?.EffectComponent;
+      const skillTooltip = meta?.skill?.TooltipContent;
+
+      const mountAndRead = (UIComponent, cb) => {
+        if (!UIComponent || typeof createUIComponent !== 'function') {
+          cb('');
+          return;
+        }
+
+        const host = document.createElement('div');
+        host.style.cssText =
+          'position:fixed;left:-99999px;top:0;width:520px;max-width:520px;height:auto;overflow:visible;opacity:0;pointer-events:none;z-index:-1;';
+        const root = document.createElement('div');
+        root.classList.add('tooltip-prose');
+        root.classList.add(FONT_CONSTANTS.SIZES.SMALL);
+        root.style.width = '100%';
+        root.style.height = 'auto';
+        root.style.color = COLOR_CONSTANTS.TEXT;
+        root.style.lineHeight = '1.1';
+        host.appendChild(root);
+        document.body.appendChild(host);
+
+        let component = null;
+        try {
+          component = createUIComponent(root, UIComponent);
+          if (component && typeof component.mount === 'function') component.mount();
+        } catch {
+          try { host.remove(); } catch { /* ignore */ }
+          cb('');
+          return;
+        }
+
+        const finishRead = () => {
+          let text = '';
+          try {
+            text = root.textContent || '';
+          } catch {
+            text = '';
+          }
+          try {
+            if (component && typeof component.unmount === 'function') component.unmount();
+          } catch {
+            // ignore
+          }
+          try { host.remove(); } catch { /* ignore */ }
+          cb(text);
+        };
+
+        // EffectComponent tooltips often paint after the first frame (same as creature abilities).
+        requestAnimationFrame(() => {
+          requestAnimationFrame(finishRead);
+        });
+      };
+
+      mountAndRead(effectComponent, (effectText) => {
+        if (effectText) prefixText += `${effectText}\n`;
+        mountAndRead(skillTooltip, (skillText) => {
+          if (skillText) prefixText += `${skillText}\n`;
+          onDone(cyclopediaNormalizeSearchText(prefixText));
+        });
+      });
+    } catch {
+      onDone('');
+    }
+  }
+
+  function getEquipmentEffectText(equipmentName) {
+    const cache = ensureEquipmentEffectTextCache();
+    const key = cyclopediaNormalizeSearchText(equipmentName);
+    if (!key) return '';
+    const cached = cache.get(key);
+    if (isEquipmentEffectCacheEntryUpToDate(equipmentName, cached)) return cached.text;
+
+    const meta = getEquipmentMetaByName(equipmentName);
+    const text = cyclopediaNormalizeSearchText(buildEquipmentEffectTextPrefix(meta));
+    if (!equipmentHasRenderedEffectMeta(meta)) {
+      cache.set(key, { v: EQUIPMENT_EFFECT_TEXT_CACHE_VERSION, text, indexed: true });
+    }
+    return text;
+  }
+
+  function notifyEquipmentEffectIndexUpdate() {
+    try {
+      const progress = getEquipmentEffectIndexProgress();
+      const now = Date.now();
+      const isDone = progress.total > 0 && progress.done >= progress.total && !progress.running;
+      const signature = `${progress.running ? 1 : 0}:${progress.done}:${progress.total}`;
+      if (!isDone && signature === (equipmentEffectIndexState.lastNotifySignature || '')) return;
+
+      const timeOk = now - (equipmentEffectIndexState.lastNotifyAt || 0) >= 300;
+      const stepOk = (progress.done - (equipmentEffectIndexState.lastNotifyDone || 0)) >= 10;
+      if (!isDone && !timeOk && !stepOk) return;
+
+      equipmentEffectIndexState.lastNotifyAt = now;
+      equipmentEffectIndexState.lastNotifyDone = progress.done;
+      equipmentEffectIndexState.lastNotifySignature = signature;
+
+      equipmentEffectIndexState.listeners.forEach((fn) => {
+        try { fn(progress); } catch { /* ignore */ }
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  function getEquipmentEffectIndexProgress() {
+    return {
+      running: !!equipmentEffectIndexState.running,
+      done: Number(equipmentEffectIndexState.done) || 0,
+      total: Number(equipmentEffectIndexState.total) || 0
+    };
+  }
+
+  function abortEquipmentEffectIndexing() {
+    try {
+      equipmentEffectIndexState.abortToken = (Number(equipmentEffectIndexState.abortToken) || 0) + 1;
+      equipmentEffectIndexState.running = false;
+      equipmentEffectIndexState.queue = [];
+      if (equipmentEffectIndexState.tickTimer) clearTimeout(equipmentEffectIndexState.tickTimer);
+      equipmentEffectIndexState.tickTimer = null;
+      notifyEquipmentEffectIndexUpdate();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function isEquipmentEffectIndexReady() {
+    try {
+      if (!baseEntries) baseEntries = buildBaseEntries();
+      const list = baseEntries.filter((e) => e.kind === 'equipment');
+      for (const entry of list) {
+        const key = cyclopediaNormalizeSearchText(entry.label);
+        if (!key) continue;
+        const cached = ensureEquipmentEffectTextCache().get(key);
+        if (!isEquipmentEffectCacheEntryUpToDate(entry.label, cached)) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function startEquipmentEffectIndexing() {
+    try {
+      if (typeof globalThis.state?.utils?.createUIComponent !== 'function') return;
+      if (equipmentEffectIndexState.running) return;
+
+      if (!baseEntries) baseEntries = buildBaseEntries();
+      const list = baseEntries.filter((e) => e.kind === 'equipment');
+      const cache = ensureEquipmentEffectTextCache();
+      const missing = list
+        .map((e) => e.label)
+        .filter((name) => {
+          const key = cyclopediaNormalizeSearchText(name);
+          if (!key) return false;
+          return !isEquipmentEffectCacheEntryUpToDate(name, cache.get(key));
+        });
+
+      if (missing.length === 0) {
+        equipmentEffectIndexState.queue = [];
+        equipmentEffectIndexState.total = list.length;
+        equipmentEffectIndexState.done = list.length;
+        equipmentEffectIndexState.running = false;
+        notifyEquipmentEffectIndexUpdate();
+        return;
+      }
+
+      equipmentEffectIndexState.queue = missing;
+      equipmentEffectIndexState.total = list.length;
+      equipmentEffectIndexState.done = list.length - missing.length;
+      equipmentEffectIndexState.running = true;
+      notifyEquipmentEffectIndexUpdate();
+
+      const tick = () => {
+        if (!equipmentEffectIndexState.running) return;
+
+        const next = equipmentEffectIndexState.queue.shift();
+        if (!next) {
+          equipmentEffectIndexState.running = false;
+          equipmentEffectIndexState.done = equipmentEffectIndexState.total;
+          notifyEquipmentEffectIndexUpdate();
+          return;
+        }
+
+        const key = cyclopediaNormalizeSearchText(next);
+        if (key && isEquipmentEffectCacheEntryUpToDate(next, cache.get(key))) {
+          equipmentEffectIndexState.done++;
+          notifyEquipmentEffectIndexUpdate();
+          equipmentEffectIndexState.tickTimer = setTimeout(tick, 5);
+          return;
+        }
+
+        extractEquipmentEffectTextAsync(next, (rawText) => {
+          try {
+            if (key) {
+              const meta = getEquipmentMetaByName(next);
+              const needsRender = equipmentHasRenderedEffectMeta(meta);
+              const prefixOnly = cyclopediaNormalizeSearchText(buildEquipmentEffectTextPrefix(meta));
+              const text = rawText || prefixOnly || '';
+              const prior = cache.get(key);
+              const retries = Number(prior?.retries) || 0;
+
+              if (needsRender && !text.trim() && retries < 2) {
+                cache.set(key, {
+                  v: EQUIPMENT_EFFECT_TEXT_CACHE_VERSION,
+                  text: '',
+                  indexed: false,
+                  retries: retries + 1
+                });
+                equipmentEffectIndexState.queue.push(next);
+              } else {
+                cache.set(key, {
+                  v: EQUIPMENT_EFFECT_TEXT_CACHE_VERSION,
+                  text,
+                  indexed: true,
+                  retries
+                });
+              }
+            }
+          } catch {
+            // ignore
+          }
+          equipmentEffectIndexState.done++;
+          notifyEquipmentEffectIndexUpdate();
+          equipmentEffectIndexState.tickTimer = setTimeout(tick, 5);
+        });
+      };
+
+      equipmentEffectIndexState.tickTimer = setTimeout(tick, 5);
+    } catch {
+      // ignore
+    }
+  }
+
+  function ensureEquipmentEffectIndexReady() {
+    try {
+      if (typeof globalThis.state?.utils?.createUIComponent !== 'function') return Promise.resolve(false);
+      if (isEquipmentEffectIndexReady()) return Promise.resolve(true);
+      if (equipmentEffectIndexPromise) return equipmentEffectIndexPromise;
+
+      equipmentEffectIndexPromise = new Promise((resolve) => {
+        let resolved = false;
+        let timeoutId = null;
+        const abortTokenAtStart = Number(equipmentEffectIndexState.abortToken) || 0;
+
+        const cleanupAndResolve = (value) => {
+          if (resolved) return;
+          resolved = true;
+          equipmentEffectIndexPromise = null;
+          if (timeoutId) clearTimeout(timeoutId);
+          resolve(value);
+        };
+
+        const unsubscribe = (() => {
+          const listener = (progress) => {
+            if ((Number(equipmentEffectIndexState.abortToken) || 0) !== abortTokenAtStart) {
+              try { equipmentEffectIndexState.listeners.delete(listener); } catch { /* ignore */ }
+              cleanupAndResolve(false);
+              return;
+            }
+            const done =
+              !progress?.running &&
+              (progress?.total || 0) > 0 &&
+              (progress?.done || 0) >= (progress?.total || 0);
+            if (done || isEquipmentEffectIndexReady()) {
+              try { equipmentEffectIndexState.listeners.delete(listener); } catch { /* ignore */ }
+              cleanupAndResolve(true);
+            }
+          };
+          equipmentEffectIndexState.listeners.add(listener);
+          try { listener(getEquipmentEffectIndexProgress()); } catch { /* ignore */ }
+          return () => equipmentEffectIndexState.listeners.delete(listener);
+        })();
+
+        timeoutId = setTimeout(() => {
+          try { unsubscribe(); } catch { /* ignore */ }
+          cleanupAndResolve(false);
+        }, 20000);
+        try { TimerManager.addTimeout(timeoutId, 'homeSearchEquipEffectIndexWait'); } catch { /* ignore */ }
+
+        startEquipmentEffectIndexing();
+      });
+
+      return equipmentEffectIndexPromise;
+    } catch {
+      equipmentEffectIndexPromise = null;
       return Promise.resolve(false);
     }
   }
@@ -846,7 +1495,7 @@ const CyclopediaHomeSearch = (() => {
     const start = Math.max(0, idx - 40);
     const end = Math.min(fullText.length, idx + qNorm.length + 60);
     const raw = fullText.slice(start, end).trim();
-    return raw ? `Ability: …${raw}…` : 'Ability match';
+    return raw ? `…${raw}…` : '';
   }
 
   function buildBaseEntries() {
@@ -886,10 +1535,13 @@ const CyclopediaHomeSearch = (() => {
         statusText = '';
       }
 
+      const boostedWiki = GAME_DATA.HARDCODED_BOOSTED_MAP?.[name];
+      const boostedText = typeof boostedWiki === 'string' ? boostedWiki : '';
+
       entries.push({
         kind: 'equipment',
         label: name,
-        search: cyclopediaNormalizeSearchText(`${name} ${statusText}`),
+        search: cyclopediaNormalizeSearchText(`${name} ${statusText} ${boostedText}`),
         target: { type: 'equipment', name }
       });
     });
@@ -905,15 +1557,24 @@ const CyclopediaHomeSearch = (() => {
       });
 
       if (!Array.isArray(itemKeys)) return;
-      itemKeys.forEach((itemKey) => {
-        const displayName = cyclopediaGetInventoryDisplayName(itemKey);
-        const obtainText = cyclopediaGetInventoryObtainText(itemKey, displayName);
-        entries.push({
-          kind: 'inventoryItem',
-          label: displayName,
-          search: cyclopediaNormalizeSearchText(`${displayName} ${categoryName} ${obtainText}`),
-          subtitle: categoryName,
-          target: { type: 'inventoryItem', categoryName, itemDisplayName: displayName }
+      itemKeys.forEach((catalogLabel) => {
+        cyclopediaGetInventoryKeysForCatalogLabel(catalogLabel).forEach((itemKey) => {
+          const displayName = cyclopediaGetInventoryDisplayName(itemKey);
+          const obtainText = cyclopediaGetInventoryObtainText(itemKey, displayName);
+          entries.push({
+            kind: 'inventoryItem',
+            label: displayName,
+            itemKey,
+            search: cyclopediaNormalizeSearchText(`${displayName} ${catalogLabel} ${categoryName} ${obtainText}`),
+            subtitle: categoryName,
+            target: {
+              type: 'inventoryItem',
+              categoryName,
+              catalogLabel,
+              itemDisplayName: displayName,
+              itemKey
+            }
+          });
         });
       });
     });
@@ -929,9 +1590,10 @@ const CyclopediaHomeSearch = (() => {
 
       const regionName = getRegionDisplayName(regionId);
       entries.push({
-        kind: 'region',
+        kind: 'map',
         label: regionName,
         search: cyclopediaNormalizeSearchText(`${regionName} ${regionId} region`),
+        subtitle: 'Region',
         target: { type: 'region', regionId, regionName }
       });
 
@@ -987,11 +1649,44 @@ const CyclopediaHomeSearch = (() => {
     return entries;
   }
 
-  function scoreEntry(entry, qNorm) {
+  function scoreSingleSearchCondition(entry, condition) {
+    const labelNorm = entry.labelNorm ?? cyclopediaNormalizeSearchText(entry.label);
+    const searchBlob = entry.search || labelNorm;
+    const { isExact, value } = cyclopediaExtractQuotedString(condition);
+    const q = isExact ? value : cyclopediaNormalizeSearchText(condition);
+    if (!q || q.length < 2) return 0;
+    if (isExact) {
+      if (labelNorm === q) return 100;
+      if (searchBlob === q) return 90;
+      return 0;
+    }
+    if (labelNorm === q) return 100;
+    if (labelNorm.startsWith(q)) return 80;
+    if (labelNorm.includes(q)) return 60;
+    if (searchBlob.includes(q)) return 40;
+    return 0;
+  }
+
+  function scoreEntry(entry, qNorm, scoreOpts = null) {
     // Cache label normalization on the entry to avoid re-normalizing on every keystroke.
-    // (Label is normalized once and then re-used by scoring + ability matching.)
     const labelNorm = entry.labelNorm ?? (entry.labelNorm = cyclopediaNormalizeSearchText(entry.label));
     if (!labelNorm) return 0;
+
+    const exactPhrases = scoreOpts?.exactPhrases;
+    if (scoreOpts?.isExactMode && Array.isArray(exactPhrases) && exactPhrases.length > 0) {
+      return exactPhrases.some((phrase) => labelNorm === phrase) ? 100 : 0;
+    }
+
+    if (scoreOpts?.isBooleanMode && scoreOpts.booleanExpression) {
+      if (!cyclopediaEntryMatchesBoolean(entry, scoreOpts.booleanExpression)) return 0;
+      const leaves = cyclopediaCollectBooleanLeaves(scoreOpts.booleanExpression);
+      let best = 0;
+      for (const leaf of leaves) {
+        best = Math.max(best, scoreSingleSearchCondition(entry, leaf));
+      }
+      return best || 40;
+    }
+
     if (labelNorm === qNorm) return 100;
     if (labelNorm.startsWith(qNorm)) return 80;
     if (labelNorm.includes(qNorm)) return 60;
@@ -1002,6 +1697,7 @@ const CyclopediaHomeSearch = (() => {
   function kindLabel(kind) {
     switch (kind) {
       case 'creature': return 'Creature';
+      case 'ability': return 'Ability';
       case 'equipment': return 'Equipment';
       case 'inventoryCategory': return 'Inventory';
       case 'inventoryItem': return 'Item';
@@ -1011,14 +1707,298 @@ const CyclopediaHomeSearch = (() => {
     }
   }
 
-  function search(query) {
-    const qNorm = cyclopediaNormalizeSearchText(query);
-    if (!qNorm || qNorm.length < 2) {
-      return { query: qNorm, results: [] };
+  function appendMapResultsForMatchedSpawns(results, existingMapIds, matchedLabels, labelToRoomIds, spawnVerb) {
+    if (!matchedLabels?.size || !labelToRoomIds) return;
+
+    ensureRoomCreatureIndex();
+    const roomNameMap = globalThis.state?.utils?.ROOM_NAME || {};
+    const regions = safeGetRegions();
+    const roomIdToRegionId = buildRoomIdToRegionId(regions);
+    const mapCandidates = [];
+
+    for (const label of matchedLabels) {
+      const key = cyclopediaNormalizeSearchText(label);
+      const roomIds = labelToRoomIds.get(key);
+      if (!roomIds) continue;
+      for (const roomId of roomIds) {
+        if (!isPlayableRoomId(roomId, roomNameMap)) continue;
+        if (existingMapIds.has(roomId)) continue;
+        mapCandidates.push({ roomId, label });
+        existingMapIds.add(roomId);
+      }
     }
+
+    mapCandidates
+      .sort((a, b) => {
+        const nameA = roomNameMap[a.roomId] || a.roomId;
+        const nameB = roomNameMap[b.roomId] || b.roomId;
+        return nameA.localeCompare(nameB);
+      })
+      .slice(0, MAX_META_MAPS)
+      .forEach(({ roomId, label }) => {
+        const mapName = roomNameMap[roomId] || roomId;
+        const regionId = roomIdToRegionId.get(roomId);
+        const regionName = regionId ? getRegionDisplayName(regionId) : 'Other Maps';
+        results.push({
+          kind: 'map',
+          kindLabel: 'Map',
+          label: mapName,
+          subtitle: `${regionName} · ${spawnVerb} ${label}`,
+          target: {
+            type: 'map',
+            regionId: regionId || null,
+            regionName,
+            mapId: roomId,
+            mapName
+          }
+        });
+      });
+  }
+
+  function appendEquipmentWornByCreatures(results, matchedCreatureNames) {
+    if (!matchedCreatureNames?.size) return;
+
+    ensureRoomCreatureIndex();
+    const existingEquipKeys = new Set(
+      results
+        .filter((r) => r.kind === 'equipment')
+        .map((r) => cyclopediaNormalizeSearchText(r.label))
+    );
+    const rows = [];
+
+    for (const creatureName of matchedCreatureNames) {
+      const key = cyclopediaNormalizeSearchText(creatureName);
+      const equips = creatureToEquipmentNames?.get(key);
+      if (!equips) continue;
+      for (const equipName of equips) {
+        const equipKey = cyclopediaNormalizeSearchText(equipName);
+        if (existingEquipKeys.has(equipKey)) continue;
+        existingEquipKeys.add(equipKey);
+        rows.push({ equipName, creatureName });
+      }
+    }
+
+    rows
+      .sort((a, b) => a.equipName.localeCompare(b.equipName) || a.creatureName.localeCompare(b.creatureName))
+      .slice(0, MAX_META_CREATURE_EQUIPS)
+      .forEach(({ equipName, creatureName }) => {
+        results.push({
+          kind: 'equipment',
+          kindLabel: 'Equipment',
+          label: equipName,
+          subtitle: `On ${creatureName}`,
+          target: { type: 'equipment', name: equipName }
+        });
+      });
+  }
+
+  function buildMapNameToRoomId() {
+    const roomNameMap = globalThis.state?.utils?.ROOM_NAME || {};
+    const nameToRoomId = new Map();
+    Object.entries(roomNameMap).forEach(([roomId, mapName]) => {
+      if (!nameToRoomId.has(mapName)) nameToRoomId.set(mapName, roomId);
+    });
+    return { roomNameMap, nameToRoomId };
+  }
+
+  function getBoostedRoomEntriesForEquipment(equipmentName) {
+    const wiki = GAME_DATA.HARDCODED_BOOSTED_MAP?.[equipmentName];
+    if (wiki === false || typeof wiki !== 'string' || !wiki.trim()) return [];
+
+    const { roomNameMap, nameToRoomId } = buildMapNameToRoomId();
+    const regions = safeGetRegions();
+    const roomIdToRegionId = buildRoomIdToRegionId(regions);
+    const entries = [];
+
+    wiki
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((mapName) => {
+        const roomId = nameToRoomId.get(mapName);
+        if (!roomId || !isPlayableRoomId(roomId, roomNameMap)) return;
+        const regionId = roomIdToRegionId.get(roomId);
+        entries.push({
+          roomId,
+          mapName,
+          regionId: regionId || null,
+          regionName: regionId ? getRegionDisplayName(regionId) : 'Other Maps'
+        });
+      });
+
+    return entries;
+  }
+
+  function appendBoostedMapResultsForEquipment(results, existingMapIds, matchedEquipmentNames) {
+    if (!matchedEquipmentNames?.size) return;
+
+    const mapCandidates = [];
+    for (const equipmentName of matchedEquipmentNames) {
+      for (const entry of getBoostedRoomEntriesForEquipment(equipmentName)) {
+        if (existingMapIds.has(entry.roomId)) continue;
+        mapCandidates.push({ ...entry, equipmentName });
+        existingMapIds.add(entry.roomId);
+      }
+    }
+
+    mapCandidates
+      .sort((a, b) => a.mapName.localeCompare(b.mapName) || a.equipmentName.localeCompare(b.equipmentName))
+      .slice(0, MAX_META_MAPS)
+      .forEach(({ roomId, mapName, regionId, regionName, equipmentName }) => {
+        results.push({
+          kind: 'map',
+          kindLabel: 'Map',
+          label: mapName,
+          subtitle: `${regionName} · Boosted: ${equipmentName}`,
+          target: {
+            type: 'map',
+            regionId,
+            regionName,
+            mapId: roomId,
+            mapName
+          }
+        });
+      });
+  }
+
+  function appendEquipmentMentionedInAbilityText(results, parsed, existingEquipKeys) {
+    if (!equipmentEntries?.length) return;
+    if (parsed.isBooleanMode) {
+      if (!cyclopediaBooleanExpressionHasValidTerm(parsed.booleanExpression)) return;
+    } else if (!parsed.qNorm) {
+      return;
+    }
+
+    const abilityCreatures = results.filter((r) => r.kind === 'ability' && r.label).map((r) => r.label);
+    for (const creatureName of abilityCreatures) {
+      const abilityText = getCreatureAbilityText(creatureName);
+      if (!effectTextMatchesQuery(abilityText, parsed)) continue;
+
+      for (const eqEntry of equipmentEntries) {
+        const eqKey = eqEntry.labelNorm ?? cyclopediaNormalizeSearchText(eqEntry.label);
+        if (!eqKey || eqKey.length < 2) continue;
+        if (!abilityText.includes(eqKey)) continue;
+        if (existingEquipKeys.has(eqKey)) continue;
+
+        existingEquipKeys.add(eqKey);
+        results.push({
+          kind: 'equipment',
+          kindLabel: 'Equipment',
+          label: eqEntry.label,
+          subtitle: `Referenced in ${creatureName} ability`,
+          target: { type: 'equipment', name: eqEntry.label }
+        });
+      }
+    }
+  }
+
+  function appendEquipmentEffectSearchResults(results, parsed, existingEquipKeys) {
+    const wantsEffectPass = parsed.isBooleanMode
+      ? cyclopediaBooleanExpressionHasValidTerm(parsed.booleanExpression)
+      : (parsed.qNorm || '').length >= 3;
+    if (!wantsEffectPass) return;
+
+    const qSnippet = cyclopediaFirstMatchingLeafForSnippet(parsed);
+    const equipEffectRows = [];
+    for (const entry of equipmentEntries) {
+      if (entryAlreadyMatchesQuery(entry, parsed)) continue;
+
+      const nameKey = entry.labelNorm ?? cyclopediaNormalizeSearchText(entry.label);
+      if (existingEquipKeys.has(nameKey)) continue;
+
+      const effectText = getEquipmentEffectText(entry.label);
+      if (effectText && effectTextMatchesQuery(effectText, parsed)) {
+        equipEffectRows.push({ entry, effectText, nameKey });
+      }
+    }
+
+    equipEffectRows
+      .sort((a, b) => a.entry.label.localeCompare(b.entry.label))
+      .slice(0, MAX_META_EQUIP_EFFECT)
+      .forEach(({ entry, effectText, nameKey }) => {
+        results.push({
+          kind: 'equipment',
+          kindLabel: 'Equipment',
+          label: entry.label,
+          subtitle: snippetAroundMatch(effectText, qSnippet) || 'Effect match',
+          target: { type: 'equipment', name: entry.label }
+        });
+        existingEquipKeys.add(nameKey);
+      });
+  }
+
+  function collectMatchedEquipmentNames(results, qNorm, scoreOpts) {
+    const names = new Set();
+    for (const entry of equipmentEntries) {
+      if (scoreEntry(entry, qNorm, scoreOpts) > 0) names.add(entry.label);
+    }
+    results.forEach((r) => {
+      if (r.kind === 'equipment' && r.label) names.add(r.label);
+      if (r.target?.type === 'equipment' && r.label) names.add(r.label);
+    });
+    return names;
+  }
+
+  function resolveExactModePrimaryKind(exactPhrases) {
+    if (!Array.isArray(exactPhrases) || exactPhrases.length === 0) return null;
+    if (!equipmentEntries || !creatureEntries) {
+      if (!baseEntries) baseEntries = buildBaseEntries();
+      if (!equipmentEntries) equipmentEntries = baseEntries.filter((e) => e.kind === 'equipment');
+      if (!creatureEntries) creatureEntries = baseEntries.filter((e) => e.kind === 'creature');
+    }
+    for (const phrase of exactPhrases) {
+      if (equipmentEntries.some((e) => (e.labelNorm ?? cyclopediaNormalizeSearchText(e.label)) === phrase)) {
+        return 'equipment';
+      }
+    }
+    for (const phrase of exactPhrases) {
+      if (creatureEntries.some((e) => (e.labelNorm ?? cyclopediaNormalizeSearchText(e.label)) === phrase)) {
+        return 'creature';
+      }
+    }
+    return null;
+  }
+
+  function sortExactModeResults(results, parsed) {
+    const primaryKind = resolveExactModePrimaryKind(parsed?.exactPhrases);
+    const kindOrder =
+      primaryKind === 'equipment'
+        ? { equipment: 0, map: 1, creature: 2, ability: 3 }
+        : primaryKind === 'creature'
+          ? { creature: 0, map: 1, equipment: 2, ability: 3 }
+          : { creature: 0, map: 1, equipment: 2, ability: 3 };
+    results.sort(
+      (a, b) =>
+        (kindOrder[a.kind] ?? 9) - (kindOrder[b.kind] ?? 9) ||
+        a.label.localeCompare(b.label)
+    );
+  }
+
+  function search(query) {
+    const parsed = parseCyclopediaHomeSearchQuery(query);
+    const scoreOpts = parsed.isExactMode
+      ? { isExactMode: true, exactPhrases: parsed.exactPhrases }
+      : parsed.isBooleanMode
+        ? { isBooleanMode: true, booleanExpression: parsed.booleanExpression }
+        : null;
+
+    if (parsed.isExactMode) {
+      if (!parsed.exactPhrases.some((p) => p.length >= 2)) {
+        return { query: parsed.exactPhrases[0] || '', results: [], isExactMode: true };
+      }
+    } else if (parsed.isBooleanMode) {
+      if (!cyclopediaBooleanExpressionHasValidTerm(parsed.booleanExpression)) {
+        return { query: parsed.booleanExpression || '', results: [], isBooleanMode: true };
+      }
+    } else if (!parsed.qNorm || parsed.qNorm.length < 2) {
+      return { query: parsed.qNorm, results: [] };
+    }
+
+    const qNorm = parsed.qNorm;
 
     if (!baseEntries) baseEntries = buildBaseEntries();
     if (!creatureEntries) creatureEntries = baseEntries.filter(e => e.kind === 'creature');
+    if (!equipmentEntries) equipmentEntries = baseEntries.filter(e => e.kind === 'equipment');
 
     // Top-N selection without sorting the full scored list.
     // Heap holds the current "worst" of the best-N so we can evict quickly.
@@ -1062,7 +2042,7 @@ const CyclopediaHomeSearch = (() => {
     };
 
     for (const entry of baseEntries) {
-      const score = scoreEntry(entry, qNorm);
+      const score = scoreEntry(entry, qNorm, scoreOpts);
       if (score <= 0) continue;
 
       const item = { entry, score };
@@ -1086,22 +2066,23 @@ const CyclopediaHomeSearch = (() => {
       kindLabel: kindLabel(entry.kind),
       label: entry.label,
       subtitle: entry.subtitle || '',
+      itemKey: entry.itemKey,
       target: entry.target
     }));
 
-    // Metadata: if query matches a map/region name, also include creatures present there
-    try {
+    // Metadata: if query matches a map/region name, also include creatures present there (not in "exact" mode)
+    if (!parsed.isExactMode) try {
       const extraCreatureKeys = new Set(results.filter(r => r.kind === 'creature').map(r => cyclopediaNormalizeSearchText(r.label)));
       const roomNameMap = globalThis.state?.utils?.ROOM_NAME || {};
       const regions = safeGetRegions();
 
       const matchedRoomIds = Object.entries(roomNameMap)
-        .filter(([, name]) => cyclopediaNormalizeSearchText(name).includes(qNorm))
+        .filter(([, name]) => cyclopediaTextMatchesSearchQuery(name, parsed))
         .slice(0, 3)
         .map(([roomId]) => roomId);
 
       const matchedRegionIds = regions
-        .filter((r) => cyclopediaNormalizeSearchText(getRegionDisplayName(r.id)).includes(qNorm))
+        .filter((r) => cyclopediaTextMatchesSearchQuery(getRegionDisplayName(r.id), parsed))
         .slice(0, 2)
         .map((r) => r.id);
 
@@ -1159,50 +2140,142 @@ const CyclopediaHomeSearch = (() => {
       console.warn('[Cyclopedia] HomeSearch: metadata expansion failed:', error);
     }
 
-    // Ability-text matching (expensive): only try for longer queries
-    if (qNorm.length >= 3) {
+    // Creature / equipment query: maps where matched spawns appear (Room Hopper board data)
+    try {
+      const existingMapIds = new Set(
+        results.filter((r) => r.kind === 'map' && r.target?.mapId).map((r) => r.target.mapId)
+      );
+
+      const matchedCreatureNames = new Set();
+      for (const entry of creatureEntries) {
+        if (scoreEntry(entry, qNorm, scoreOpts) > 0) matchedCreatureNames.add(entry.label);
+      }
+      if (!parsed.isExactMode) {
+        results.forEach((r) => {
+          if (r.kind === 'ability' && r.target?.type === 'creature' && r.label) {
+            matchedCreatureNames.add(r.label);
+          }
+        });
+      }
+      appendMapResultsForMatchedSpawns(
+        results,
+        existingMapIds,
+        matchedCreatureNames,
+        creatureToRoomIds,
+        'Contains'
+      );
+
+      appendEquipmentWornByCreatures(results, matchedCreatureNames);
+    } catch (error) {
+      console.warn('[Cyclopedia] HomeSearch: spawn-to-map expansion failed:', error);
+    }
+
+    // Equipment + ability text matching (3+ chars, or boolean; skip quoted exact mode)
+    const wantsTextExpansion = !parsed.isExactMode && (
+      parsed.isBooleanMode
+        ? cyclopediaBooleanExpressionHasValidTerm(parsed.booleanExpression)
+        : (parsed.qNorm || '').length >= 3
+    );
+    if (wantsTextExpansion) {
       try {
+        const qSnippet = cyclopediaFirstMatchingLeafForSnippet(parsed);
+        const existingEquipKeys = new Set(
+          results
+            .filter((r) => r.kind === 'equipment' || r.target?.type === 'equipment')
+            .map((r) => cyclopediaNormalizeSearchText(r.label))
+        );
+
+        // Equipment tooltips first (e.g. Cranial Basher "stuns…")
+        appendEquipmentEffectSearchResults(results, parsed, existingEquipKeys);
+
         const existingCreatureKeys = new Set(
-          results.filter(r => r.target?.type === 'creature').map(r => cyclopediaNormalizeSearchText(r.label))
+          results.filter((r) => r.target?.type === 'creature').map((r) => cyclopediaNormalizeSearchText(r.label))
         );
 
         for (const entry of creatureEntries) {
           if (results.length >= MAX_RESULTS) break;
 
-          // Skip if already matched by name/role
-          if (entry.search && entry.search.includes(qNorm)) continue;
+          if (entryAlreadyMatchesQuery(entry, parsed)) continue;
 
           const nameKey = entry.labelNorm ?? cyclopediaNormalizeSearchText(entry.label);
           if (existingCreatureKeys.has(nameKey)) continue;
 
-          // Prefer cached text. If not cached yet, skip for now — background indexer will populate and UI will refresh.
           const cache = ensureCreatureAbilityTextCache();
           const cached = cache.get(nameKey);
           const abilityText = getAbilityTextFromCacheValue(cached);
-          if (abilityText && abilityText.includes(qNorm)) {
+          if (abilityText && effectTextMatchesQuery(abilityText, parsed)) {
             results.push({
-              kind: 'creature',
-              kindLabel: 'Ability',
+              kind: 'ability',
+              kindLabel: kindLabel('ability'),
               label: entry.label,
-              subtitle: snippetAroundMatch(abilityText, qNorm) || 'Ability match',
+              subtitle: snippetAroundMatch(abilityText, qSnippet),
               target: { type: 'creature', name: entry.label }
             });
             existingCreatureKeys.add(nameKey);
           }
         }
+
+        // e.g. Knight ability mentions "cranial basher" + stun
+        appendEquipmentMentionedInAbilityText(results, parsed, existingEquipKeys);
       } catch (error) {
-        console.warn('[Cyclopedia] HomeSearch: ability matching failed:', error);
+        console.warn('[Cyclopedia] HomeSearch: ability/equipment text matching failed:', error);
       }
     }
 
-    return { query: qNorm, results };
+    // Board drops + wiki boosted maps for every equipment hit (name, effect, etc.)
+    try {
+      const existingMapIds = new Set(
+        results.filter((r) => r.kind === 'map' && r.target?.mapId).map((r) => r.target.mapId)
+      );
+      const matchedEquipmentNames = collectMatchedEquipmentNames(results, qNorm, scoreOpts);
+      appendMapResultsForMatchedSpawns(
+        results,
+        existingMapIds,
+        matchedEquipmentNames,
+        equipmentToRoomIds,
+        'Has'
+      );
+      appendBoostedMapResultsForEquipment(results, existingMapIds, matchedEquipmentNames);
+    } catch (error) {
+      console.warn('[Cyclopedia] HomeSearch: equipment map expansion failed:', error);
+    }
+
+    if (parsed.isExactMode) {
+      sortExactModeResults(results, parsed);
+      if (resolveExactModePrimaryKind(parsed.exactPhrases) === 'equipment') {
+        ensureRoomCreatureIndex();
+        for (const r of results) {
+          if (r.kind !== 'equipment' || !r.label) continue;
+          if (r.subtitle) continue;
+          const boosted = getBoostedRoomEntriesForEquipment(r.label);
+          const hasCount = equipmentToRoomIds?.get(cyclopediaNormalizeSearchText(r.label))?.size || 0;
+          const parts = [];
+          if (hasCount > 0) parts.push(`${hasCount} map${hasCount === 1 ? '' : 's'} with drop`);
+          if (boosted.length > 0) parts.push(`${boosted.length} boosted map${boosted.length === 1 ? '' : 's'}`);
+          if (parts.length) r.subtitle = parts.join(' · ');
+        }
+      }
+    }
+
+    return {
+      query: parsed.isBooleanMode ? parsed.booleanExpression : qNorm,
+      results,
+      isExactMode: parsed.isExactMode,
+      isBooleanMode: parsed.isBooleanMode
+    };
   }
 
   function reset() {
     baseEntries = null;
     creatureEntries = null;
+    equipmentEntries = null;
     roomCreatureIndex = null;
+    creatureToRoomIds = null;
+    equipmentToRoomIds = null;
+    creatureToEquipmentNames = null;
     creatureAbilityTextCache = null;
+    equipmentEffectTextCache = null;
+    equipmentEffectIndexPromise = null;
     abilityIndexPromise = null;
     try {
       abilityIndexState.abortToken = (Number(abilityIndexState.abortToken) || 0) + 1;
@@ -1213,6 +2286,14 @@ const CyclopediaHomeSearch = (() => {
       if (abilityIndexState.tickTimer) clearTimeout(abilityIndexState.tickTimer);
       abilityIndexState.tickTimer = null;
       abilityIndexState.listeners.clear();
+      equipmentEffectIndexState.abortToken = (Number(equipmentEffectIndexState.abortToken) || 0) + 1;
+      equipmentEffectIndexState.running = false;
+      equipmentEffectIndexState.queue = [];
+      equipmentEffectIndexState.done = 0;
+      equipmentEffectIndexState.total = 0;
+      if (equipmentEffectIndexState.tickTimer) clearTimeout(equipmentEffectIndexState.tickTimer);
+      equipmentEffectIndexState.tickTimer = null;
+      equipmentEffectIndexState.listeners.clear();
     } catch {
       // ignore
     }
@@ -1221,10 +2302,15 @@ const CyclopediaHomeSearch = (() => {
   return {
     search,
     reset,
-    // Ability text indexing helpers (used by Home search UI)
+    // Ability / equipment effect indexing (used by Home search UI)
     ensureAbilityIndexReady,
     isAbilityIndexReady,
     abortAbilityIndexing,
+    ensureEquipmentEffectIndexReady,
+    isEquipmentEffectIndexReady,
+    abortEquipmentEffectIndexing,
+    startEquipmentEffectIndexing,
+    getEquipmentEffectIndexProgress,
     // Existing exports (kept for compatibility/debug)
     startAbilityIndexing,
     getAbilityIndexProgress,
@@ -4502,26 +5588,18 @@ function createStartPageManager() {
         
       const leftCol = DOMUtils.createColumn(
         START_PAGE_CONFIG.COLUMN_WIDTHS.LEFT,
-        renderCyclopediaWelcomeColumn(playerName, profileData, () => this.refreshLayout()),
-        { justifyContent: 'center', alignItems: 'center', minHeight: '0' }
+        renderCyclopediaProfileColumn(profileData),
+        { justifyContent: 'flex-start', alignItems: 'stretch', minHeight: '0', padding: '0 12px' }
       );
         mainFlexRow.appendChild(leftCol);
         
-      const middleCol = DOMUtils.createColumn(
-        START_PAGE_CONFIG.COLUMN_WIDTHS.MIDDLE,
+      const searchColWidth = START_PAGE_CONFIG.COLUMN_WIDTHS.MIDDLE + START_PAGE_CONFIG.COLUMN_WIDTHS.RIGHT;
+      const searchCol = DOMUtils.createColumn(
+        searchColWidth,
         renderCyclopediaSearchColumn()
       );
-      Object.assign(middleCol.style, { justifyContent: 'center', padding: '0 12px' });
-      mainFlexRow.appendChild(middleCol);
-      
-      // Move the old middle column content (Player information) into the right column
-      const patchedProfile = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
-      const rightCol = DOMUtils.createColumn(
-        START_PAGE_CONFIG.COLUMN_WIDTHS.RIGHT,
-        renderCyclopediaPlayerInfo(patchedProfile)
-      );
-      Object.assign(rightCol.style, { justifyContent: 'center', padding: '0 12px' });
-      mainFlexRow.appendChild(rightCol);
+      Object.assign(searchCol.style, { justifyContent: 'center', padding: '0 12px' });
+      mainFlexRow.appendChild(searchCol);
         
         this.container.appendChild(mainFlexRow);
     }
@@ -9966,37 +11044,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
       const inventory = getPlayerInventory();
 
-      const mainItemCategories = {
-        'Consumables': [
-          'Change Nickname',
-          'Dice Manipulators',
-          'Exaltation Chests',
-          'Nickname Creature',
-          'Outfit Bags',
-          'Stamina Potions',
-          'Stones of Insight',
-          'Summon Scrolls',
-          'Surprise Cubes'
-        ],
-        'Currency': [
-          'Beast Coins',
-          'Dust',
-          'Gold',
-          'Hunting Marks'
-        ],
-        'Upgrades': [
-          'Daily Boosted Map',
-          'Daycare',
-          'Dragon Plant',
-          'Hy\'genie',
-          'Monstrous Cauldron',
-          'Monster Squeezer',
-          'Mountain Fortress',
-          'Premium',
-          'The Sweaty Cyclop\'s Forge',
-          'Yasir\'s Trading Contract'
-        ]
-      };
+      const mainItemCategories = INVENTORY_CONFIG.categories || {};
 
       const getItemDisplayName = memoize((itemKey) => {
         if (!itemKey) return 'Unknown Item';
@@ -14653,13 +15701,24 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           setActiveTab(3);
           const inventoryTab = tabPages[3];
           const topBox = _cyclopediaFindBoxByTitle(inventoryTab, 'Inventory');
+          const catalogLabel =
+            target.catalogLabel ||
+            cyclopediaGetInventoryCatalogLabelForItemKey(target.itemKey) ||
+            target.itemDisplayName;
 
-          // Select category first (sync), then item (after DOM refresh)
           const ok = _cyclopediaClickListItem(topBox || inventoryTab, target.categoryName);
           const clickItemTimeout = setTimeout(() => {
-            // Bottom box title equals the category name
             const bottomBox = _cyclopediaFindBoxByTitle(inventoryTab, target.categoryName) || inventoryTab;
-            _cyclopediaClickListItem(bottomBox, target.itemDisplayName);
+            _cyclopediaClickListItem(bottomBox, catalogLabel);
+            const variantKeys = INVENTORY_CONFIG?.variants?.[catalogLabel];
+            if (target.itemKey && Array.isArray(variantKeys) && variantKeys.includes(target.itemKey)) {
+              const selectVariantTimeout = setTimeout(() => {
+                if (typeof window.cyclopediaSelectVariant === 'function') {
+                  window.cyclopediaSelectVariant(target.itemKey);
+                }
+              }, 100);
+              TimerManager.addTimeout(selectVariantTimeout, 'homeSearchInvVariant');
+            }
           }, 0);
           TimerManager.addTimeout(clickItemTimeout, 'homeSearchInvSelect');
           return ok;
@@ -16337,7 +17396,177 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   return container;
 }
 
-function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) {
+const CYCLOPEDIA_RANKING_ROW_KEYS = ['rankPoints', 'timeSum', 'floorsSum'];
+const CYCLOPEDIA_RANKING_POSITION_KEYS = {
+  rankPoints: 'rankPointsPosition',
+  timeSum: 'ticksPosition',
+  floorsSum: 'floorsPosition'
+};
+
+function createCyclopediaSeasonsLeaderboardLink() {
+  const seasonLink = document.createElement('a');
+  seasonLink.href = 'https://bestiaryarena.com/seasons';
+  seasonLink.target = '_blank';
+  seasonLink.rel = 'noopener noreferrer';
+  seasonLink.textContent = cyclopediaT('mods.cyclopedia.startpage.viewFullSeasonsLeaderboard');
+  Object.assign(seasonLink.style, {
+    display: 'inline-flex',
+    alignSelf: 'center',
+    marginTop: '8px',
+    marginBottom: '2px',
+    fontSize: '12px',
+    color: '#ffe066',
+    textDecoration: 'underline',
+    cursor: 'pointer',
+    flexShrink: '0'
+  });
+  seasonLink.addEventListener('mouseover', () => {
+    seasonLink.style.color = '#fff2b2';
+  });
+  seasonLink.addEventListener('mouseout', () => {
+    seasonLink.style.color = '#ffe066';
+  });
+  return seasonLink;
+}
+
+const CYCLOPEDIA_SEASON_TAB_BTN_CLASS =
+  'focus-style-visible console-frame-inactive pixel-font-16 surface-dark relative whitespace-nowrap px-3.5 text-center text-whiteRegular disabled:dithered data-[state=active]:console-frame-active data-[state=active]:surface-regular disabled:pointer-events-none disabled:text-whiteBrightest data-[state=active]:z-2 data-[state=active]:text-whiteBrightest';
+
+function setCyclopediaSeasonTabLabel(btn, seasonNum, currentSeason) {
+  btn.textContent = '';
+  btn.appendChild(document.createTextNode(`#${seasonNum} `));
+  btn.appendChild(document.createTextNode('Season'));
+  if (Number(seasonNum) === Number(currentSeason)) {
+    btn.appendChild(document.createTextNode(' '));
+    const currentTag = document.createElement('span');
+    currentTag.className = 'text-whiteDark';
+    currentTag.textContent = '(current)';
+    btn.appendChild(currentTag);
+  }
+}
+
+function syncCyclopediaSeasonToggleStyles(tablist) {
+  if (!tablist) return;
+  const activeSeason = Number(cyclopediaState.profileSeason || 1);
+  tablist.querySelectorAll('button[role="tab"]').forEach((btn) => {
+    const sn = Number(btn.dataset.cyclopediaSeason);
+    const selected = activeSeason === sn;
+    btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+    btn.dataset.state = selected ? 'active' : 'inactive';
+    btn.setAttribute('tabindex', selected ? '0' : '-1');
+  });
+}
+
+function getCyclopediaRankingRowDisplay(profileData, rankingKey) {
+  const entry = CYCLOPEDIA_TRANSLATION[rankingKey];
+  const raw = entry && typeof entry.value === 'function' ? entry.value(profileData) : profileData[rankingKey];
+  const positionKey = CYCLOPEDIA_RANKING_POSITION_KEYS[rankingKey];
+  const position = positionKey ? profileData[positionKey] : undefined;
+  return {
+    value: raw !== undefined && raw !== null ? FormatUtils.number(raw) : cyclopediaSeasonNA(),
+    title: position !== undefined && position !== null ? String(position) : undefined
+  };
+}
+
+function updateCyclopediaStartpageRankings(root, profileData) {
+  if (!root || !profileData) return;
+  const patched = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
+  const highscoreIcon = { alt: 'Highscore', src: '/assets/icons/highscore.png', width: 11, height: 11, className: 'pixelated inline-block -translate-y-0.5' };
+  CYCLOPEDIA_RANKING_ROW_KEYS.forEach((rankingKey) => {
+    const tr = root.querySelector(`tr[data-cyclopedia-ranking-row="${rankingKey}"]`);
+    if (!tr) return;
+    const td = tr.querySelector('td:last-child');
+    if (!td) return;
+    const { value, title } = getCyclopediaRankingRowDisplay(patched, rankingKey);
+    if (title) td.title = title;
+    else td.removeAttribute('title');
+    td.textContent = value;
+    const extraImg = document.createElement('img');
+    extraImg.alt = highscoreIcon.alt;
+    extraImg.src = highscoreIcon.src;
+    extraImg.width = highscoreIcon.width;
+    extraImg.height = highscoreIcon.height;
+    extraImg.className = highscoreIcon.className;
+    td.appendChild(extraImg);
+  });
+}
+
+function renderCyclopediaSeasonToggleRow(onSeasonChange) {
+  const currentSeason = getLatestProfileSeason(cyclopediaState.lastStartupProfileData, 2);
+  const tablist = document.createElement('div');
+  tablist.setAttribute('role', 'tablist');
+  tablist.setAttribute('aria-orientation', 'horizontal');
+  tablist.className = 'flex';
+  tablist.style.outline = 'none';
+  tablist.style.width = '100%';
+  tablist.style.flexShrink = '0';
+  tablist.style.marginBottom = '0';
+
+  CYCLOPEDIA_PROFILE_SEASONS.forEach((sn) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('role', 'tab');
+    btn.dataset.cyclopediaSeason = String(sn);
+    btn.className = CYCLOPEDIA_SEASON_TAB_BTN_CLASS;
+    btn.style.flex = '1 1 0';
+    btn.style.cursor = 'pointer';
+    setCyclopediaSeasonTabLabel(btn, sn, currentSeason);
+    btn.addEventListener('click', () => {
+      if (Number(cyclopediaState.profileSeason) === sn) return;
+      cyclopediaState.profileSeason = sn;
+      if (typeof document !== 'undefined') {
+        document.dispatchEvent(new CustomEvent('cyclopedia-season-changed', { detail: { season: sn } }));
+      }
+      if (typeof onSeasonChange === 'function') onSeasonChange();
+    });
+    tablist.appendChild(btn);
+  });
+  syncCyclopediaSeasonToggleStyles(tablist);
+  return tablist;
+}
+
+function renderCyclopediaProfileColumn(profileData) {
+  const wrapper = document.createElement('div');
+  wrapper.dataset.cyclopediaStartpageProfile = 'true';
+  Object.assign(wrapper.style, {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: '0',
+    width: '100%',
+    boxSizing: 'border-box',
+    gap: '0'
+  });
+
+  const handleStartpageSeasonChange = () => {
+    syncCyclopediaSeasonToggleStyles(seasonTablist);
+    updateCyclopediaStartpageRankings(wrapper, profileData);
+    refreshLeaderboardCacheYourRoomsForSeason();
+  };
+
+  const seasonTablist = renderCyclopediaSeasonToggleRow(handleStartpageSeasonChange);
+  wrapper.appendChild(seasonTablist);
+
+  const scrollArea = document.createElement('div');
+  Object.assign(scrollArea.style, {
+    flex: '1 1 0',
+    minHeight: '0',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    width: '100%',
+    marginTop: '0',
+    paddingTop: '0'
+  });
+
+  const patchedProfile = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
+  scrollArea.appendChild(renderCyclopediaPlayerInfo(patchedProfile, { compact: true }));
+  wrapper.appendChild(scrollArea);
+  wrapper.appendChild(createCyclopediaSeasonsLeaderboardLink());
+  return wrapper;
+}
+
+function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange, options = {}) {
+  const { showSeasonToggle = true } = options;
   try {
     const activeSeason = cyclopediaState.profileSeason || 1;
     const pd = unwrapProfilePageJson(profileData) || {};
@@ -16390,41 +17619,9 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) 
       : cyclopediaT('mods.cyclopedia.startpage.welcome');
     div.appendChild(headline);
 
-    const toggleRow = document.createElement('div');
-    toggleRow.style.display = 'flex';
-    toggleRow.style.flexDirection = 'row';
-    toggleRow.style.gap = '8px';
-    toggleRow.style.justifyContent = 'center';
-    toggleRow.style.width = '100%';
-    toggleRow.style.marginBottom = '10px';
-    CYCLOPEDIA_PROFILE_SEASONS.forEach((sn) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.textContent = sn === 1
-        ? cyclopediaT('mods.cyclopedia.startpage.seasonToggle1')
-        : cyclopediaT('mods.cyclopedia.startpage.seasonToggle2');
-      Object.assign(btn.style, {
-        flex: '1',
-        padding: '6px 10px',
-        cursor: 'pointer',
-        fontFamily: FONT_CONSTANTS.PRIMARY,
-        fontSize: '12px',
-        borderRadius: '4px',
-        border: Number(activeSeason) === sn ? '1px solid #ffe066' : '1px solid #555',
-        background: Number(activeSeason) === sn ? '#3a3a2a' : '#2a2a2a',
-        color: Number(activeSeason) === sn ? '#ffe066' : '#e6d7b0'
-      });
-      btn.addEventListener('click', () => {
-        if (Number(cyclopediaState.profileSeason) === sn) return;
-        cyclopediaState.profileSeason = sn;
-        if (typeof document !== 'undefined') {
-          document.dispatchEvent(new CustomEvent('cyclopedia-season-changed', { detail: { season: sn } }));
-        }
-        if (typeof onSeasonChange === 'function') onSeasonChange();
-      });
-      toggleRow.appendChild(btn);
-    });
-    div.appendChild(toggleRow);
+    if (showSeasonToggle) {
+      div.appendChild(renderCyclopediaSeasonToggleRow(onSeasonChange));
+    }
 
     const statsWrap = document.createElement('div');
     statsWrap.style.width = '100%';
@@ -16600,311 +17797,691 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange) 
   }
 }
 
+const CYCLOPEDIA_HOME_SEARCH_FILTER_CONTROL_CLASS = 'pixel-font-14 bg-grayDark text-whiteHighlight';
+const CYCLOPEDIA_HOME_SEARCH_FILTER_INPUT_STYLE =
+  'flex: 1; min-width: 0; padding: 4px 8px; border: none; border-radius: 3px; outline: none;';
+const CYCLOPEDIA_HOME_SEARCH_FILTER_SELECT_STYLE =
+  'padding: 4px 8px; border: none; border-radius: 3px; outline: none;';
+/** Fixed column widths (% of table) for start-page search table. */
+const CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS = {
+  entry: '50%',
+  type: '20%',
+  details: '30%'
+};
+
+/** Type filter options: "All types" first, then alphabetical by label. */
+const CYCLOPEDIA_HOME_SEARCH_TYPE_OPTIONS = [
+  ['', 'All types'],
+  ['ability', 'Abilities'],
+  ['creature', 'Creatures'],
+  ['equipment', 'Equipment'],
+  ['inventory', 'Inventory'],
+  ['map', 'Maps']
+];
+
+function applyCyclopediaHomeSearchFilters(results, filters = {}) {
+  const { kindFilter } = filters;
+  return (results || []).filter((r) => {
+    if (kindFilter) {
+      if (kindFilter === 'inventory') {
+        if (r.kind !== 'inventoryCategory' && r.kind !== 'inventoryItem') return false;
+      } else if (kindFilter === 'map') {
+        if (r.kind !== 'map') return false;
+      } else if (r.kind !== kindFilter) return false;
+    }
+    return true;
+  });
+}
+
+function resolveInventoryCatalogKey(catalogLabel) {
+  const keys = cyclopediaGetInventoryKeysForCatalogLabel(catalogLabel);
+  return keys[0] ?? null;
+}
+
+/** Catalog group label for an item key (e.g. summonScroll6 → "Summon Scrolls"). */
+function cyclopediaGetInventoryCatalogLabelForItemKey(itemKey) {
+  if (!itemKey) return null;
+  const variants = INVENTORY_CONFIG?.variants || {};
+  for (const [catalogLabel, keys] of Object.entries(variants)) {
+    if (Array.isArray(keys) && keys.includes(itemKey)) return catalogLabel;
+  }
+  return null;
+}
+
+/** All item keys for a category catalog label (e.g. "Summon Scrolls" → summonScroll1…6). */
+function cyclopediaGetInventoryKeysForCatalogLabel(catalogLabel) {
+  if (!catalogLabel) return [];
+  const label = String(catalogLabel).trim();
+  const variants = INVENTORY_CONFIG?.variants || {};
+  if (Array.isArray(variants[label]) && variants[label].length) {
+    return variants[label].filter(Boolean);
+  }
+  if (INVENTORY_CONFIG?.staticItems?.[label] || inventoryTooltips?.[label]) return [label];
+  return label ? [label] : [];
+}
+
+function resolveInventoryItemKeyByDisplayName(displayName) {
+  if (!displayName) return null;
+  const normalized = String(displayName).trim();
+  if (INVENTORY_CONFIG?.staticItems?.[normalized]) return normalized;
+  if (inventoryTooltips && typeof inventoryTooltips === 'object') {
+    for (const [key, meta] of Object.entries(inventoryTooltips)) {
+      if (meta?.displayName === normalized) return key;
+    }
+  }
+  const categories = INVENTORY_CONFIG?.categories || {};
+  for (const catalogLabels of Object.values(categories)) {
+    if (!Array.isArray(catalogLabels)) continue;
+    for (const catalogLabel of catalogLabels) {
+      for (const key of cyclopediaGetInventoryKeysForCatalogLabel(catalogLabel)) {
+        if (cyclopediaGetInventoryDisplayName(key) === normalized) return key;
+      }
+    }
+  }
+  for (const key of GAME_KEYS.CURRENCY) {
+    if (cyclopediaGetInventoryDisplayName(key) === normalized) return key;
+  }
+  return null;
+}
+
+function getCyclopediaInventoryIconUrl(itemKey) {
+  if (!itemKey) return null;
+  const displayName = cyclopediaGetInventoryDisplayName(itemKey);
+  let icon =
+    inventoryTooltips?.[itemKey]?.icon ||
+    inventoryTooltips?.[displayName]?.icon ||
+    INVENTORY_CONFIG?.staticItems?.[itemKey]?.icon;
+  if (!icon && CURRENCY_CONFIG?.[itemKey]?.icon) icon = CURRENCY_CONFIG[itemKey].icon;
+  return icon || null;
+}
+
+function resolveCyclopediaEquipmentSpriteId(equipmentName) {
+  if (!equipmentName) return null;
+  let gameId = window.BestiaryModAPI?.utility?.maps?.equipmentNamesToGameIds?.get?.(
+    String(equipmentName).toLowerCase()
+  );
+  if (gameId == null && globalThis.state?.utils?.getEquipment) {
+    const utils = globalThis.state.utils;
+    for (let i = 1; i < 1000; i++) {
+      try {
+        const eq = utils.getEquipment(i);
+        if (eq?.metadata?.name?.toLowerCase() === String(equipmentName).toLowerCase()) {
+          gameId = i;
+          break;
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+  if (gameId == null) return null;
+  try {
+    const eqData = globalThis.state?.utils?.getEquipment?.(gameId);
+    const spriteId = Number(eqData?.metadata?.spriteId ?? gameId);
+    return Number.isFinite(spriteId) ? spriteId : gameId;
+  } catch {
+    return gameId;
+  }
+}
+
+const CYCLOPEDIA_HOME_SEARCH_ICON_PX = 32;
+
+/** Unwrap portrait button wrappers (Equipment / Inventory tabs). */
+function cyclopediaUnwrapPortrait(el) {
+  if (!el?.nodeType) return null;
+  if (el.tagName === 'BUTTON' && el.firstChild?.nodeType) return el.firstChild;
+  return el;
+}
+
+/** Spritesheets in modals need explicit ITEM background (Equipment tab / Room Hopper). */
+function cyclopediaApplyItemSpriteBackground(root, spriteId, sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX) {
+  const id = Number(spriteId);
+  if (!root || !Number.isFinite(id)) return;
+  const spriteImg = root.querySelector?.('img.spritesheet');
+  const viewport = spriteImg?.parentElement;
+  const px = `${sizePx}px`;
+  if (viewport) {
+    viewport.style.backgroundImage = `url(/assets/ITEM/${id}.png)`;
+    viewport.style.backgroundSize = 'auto';
+    viewport.style.backgroundPosition = '0 0';
+    viewport.style.backgroundRepeat = 'no-repeat';
+    viewport.style.width = px;
+    viewport.style.height = px;
+    viewport.style.imageRendering = 'pixelated';
+    viewport.style.flexShrink = '0';
+  }
+  if (spriteImg) spriteImg.style.display = 'none';
+}
+
+function cyclopediaFitPortraitBox(el, sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX) {
+  if (!el) return;
+  const px = `${sizePx}px`;
+  Object.assign(el.style, {
+    width: px,
+    height: px,
+    minWidth: px,
+    minHeight: px,
+    maxWidth: px,
+    maxHeight: px,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: '0',
+    margin: '0'
+  });
+  const portrait = el.querySelector?.('.equipment-portrait');
+  if (portrait) {
+    ['width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight'].forEach((prop) => {
+      portrait.style[prop] = px;
+    });
+  }
+}
+
+function cyclopediaStripCreaturePortraitChrome(el) {
+  if (!el) return;
+  el.querySelector?.('span.pixel-font-16')?.remove();
+  el.querySelector?.('img[alt="star tier"]')?.remove();
+}
+
+/** Remove stat, rarity bg, frame/slot chrome from createItemPortrait (home search). */
+function cyclopediaStripEquipmentPortraitChrome(root) {
+  if (!root) return;
+  root.querySelectorAll?.('.container-slot').forEach((el) => {
+    el.classList.remove('surface-darker', 'frame-pressed-1');
+    el.style.background = 'none';
+    el.style.border = 'none';
+    el.style.borderImage = 'none';
+  });
+  root.querySelectorAll?.('.has-rarity, [data-rarity]').forEach((el) => el.remove());
+  const portrait = root.classList?.contains('equipment-portrait')
+    ? root
+    : root.querySelector?.('.equipment-portrait');
+  if (!portrait) return;
+  portrait.querySelector?.('img[alt="stat type"]')?.parentElement?.remove();
+  portrait.querySelector?.('.has-rarity')?.remove();
+  portrait.querySelector?.('[data-rarity]')?.remove();
+  portrait.classList.remove('frame-pressed-1', 'surface-darker');
+  portrait.style.background = 'none';
+  portrait.style.border = 'none';
+  portrait.style.borderImage = 'none';
+  portrait.setAttribute('data-noframes', 'true');
+}
+
+function cyclopediaResolveMonsterByName(creatureName) {
+  if (!creatureName || typeof buildCyclopediaMonsterNameMap !== 'function') return null;
+  buildCyclopediaMonsterNameMap();
+  const entry = cyclopediaState.monsterNameMap?.get?.(String(creatureName).toLowerCase());
+  if (!entry?.monster) return null;
+  const monster = entry.monster;
+  const monsterId = monster.gameId !== undefined ? monster.gameId : entry.index;
+  if (monsterId === undefined) return null;
+  return { monster, monsterId };
+}
+
+/** gameId for /assets/portraits/{gameId}.png (all creatures, incl. bosses & unobtainables). */
+function cyclopediaResolveMonsterGameId(creatureName) {
+  const resolved = cyclopediaResolveMonsterByName(creatureName);
+  if (resolved?.monsterId != null) return resolved.monsterId;
+  const fromDb = window.creatureDatabase?.findMonsterByName?.(creatureName);
+  return fromDb?.gameId ?? null;
+}
+
+/** Item sprite via createItemPortrait + metadata.spriteId (Equipment tab, item-type creatures). */
+function cyclopediaCreateItemPortrait(spriteId, options = {}) {
+  const { stat = 'ad', tier = 1, sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX } = options;
+  const id = Number(spriteId);
+  if (!Number.isFinite(id) || !api?.ui?.components?.createItemPortrait) return null;
+  try {
+    let portrait = api.ui.components.createItemPortrait({ itemId: id, stat, tier });
+    portrait = cyclopediaUnwrapPortrait(portrait);
+    if (!portrait) return null;
+    cyclopediaApplyItemSpriteBackground(portrait, id, sizePx);
+    cyclopediaFitPortraitBox(portrait, sizePx);
+    return portrait;
+  } catch {
+    return null;
+  }
+}
+
+/** Creature portrait: always /assets/portraits/{gameId}.png (game dialog / Room Hopper). */
+function cyclopediaCreateCreaturePortrait(creatureName, sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX) {
+  const gameId = cyclopediaResolveMonsterGameId(creatureName);
+  if (gameId == null) return null;
+  try {
+    const wrap = document.createElement('div');
+    const px = `${sizePx}px`;
+    wrap.style.cssText = `position: relative; width: ${px}; height: ${px}; flex: none; display: inline-block; overflow: hidden;`;
+    const img = document.createElement('img');
+    if (window.creatureDatabase?.getMonsterPortraitUrl) {
+      img.src = window.creatureDatabase.getMonsterPortraitUrl(gameId);
+    } else {
+      img.src = `/assets/portraits/${gameId}.png`;
+    }
+    img.alt = creatureName || 'creature';
+    img.title = creatureName || '';
+    img.className = 'pixelated';
+    img.width = sizePx;
+    img.height = sizePx;
+    img.style.cssText = 'width: 100%; height: 100%; display: block; object-fit: contain; image-rendering: pixelated;';
+    img.onerror = () => { img.style.visibility = 'hidden'; };
+    wrap.appendChild(img);
+    return wrap;
+  } catch {
+    return null;
+  }
+}
+
+/** Equipment in home search — same as Equipment tab (createItemPortrait), minus stat/frame/rarity. */
+function cyclopediaCreateEquipmentPortrait(equipmentName, sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX) {
+  const spriteId = resolveCyclopediaEquipmentSpriteId(equipmentName);
+  if (spriteId == null) return null;
+  let stat = 'ad';
+  try {
+    const gameId = window.BestiaryModAPI?.utility?.maps?.equipmentNamesToGameIds?.get?.(
+      String(equipmentName).toLowerCase()
+    );
+    const eqData = gameId != null ? globalThis.state?.utils?.getEquipment?.(gameId) : null;
+    if (eqData?.metadata?.stat) stat = eqData.metadata.stat;
+  } catch {
+    // ignore
+  }
+  const portrait = cyclopediaCreateItemPortrait(spriteId, { stat, tier: 1, sizePx });
+  if (!portrait) return null;
+  cyclopediaStripEquipmentPortraitChrome(portrait);
+  return portrait;
+}
+
+/** Inventory in home search — createItemPortrait (Inventory tab), minus stat/frame/rarity/slot. */
+function cyclopediaCreateInventoryPortrait(itemKey, sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX) {
+  const icon = getCyclopediaInventoryIconUrl(itemKey);
+  if (!icon) return null;
+  if (icon.startsWith('sprite://')) {
+    const spriteId = icon.replace('sprite://', '');
+    if (spriteId === '23488') {
+      const px = `${sizePx}px`;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = `width: ${px}; height: ${px}; flex: none; display: inline-flex; align-items: center; justify-content: center;`;
+      const img = document.createElement('img');
+      img.src = '/assets/ITEM/23488.png';
+      img.alt = 'Surprise Cube';
+      img.className = 'pixelated';
+      img.width = sizePx;
+      img.height = sizePx;
+      img.style.cssText = `width: ${px}; height: ${px}; image-rendering: pixelated;`;
+      wrap.appendChild(img);
+      return wrap;
+    }
+    const portrait = cyclopediaCreateItemPortrait(spriteId, { tier: 1, sizePx });
+    if (!portrait) return null;
+    cyclopediaStripEquipmentPortraitChrome(portrait);
+    return portrait;
+  }
+  const img = document.createElement('img');
+  img.src = icon;
+  img.alt = '';
+  img.className = 'pixelated';
+  const px = `${sizePx}px`;
+  img.style.cssText = `width: ${px}; height: ${px}; object-fit: contain; image-rendering: pixelated; flex-shrink: 0;`;
+  img.onerror = () => { img.style.visibility = 'hidden'; };
+  return img;
+}
+
+/** Map list thumbnails (Maps tab). */
+function cyclopediaCreateMapThumbnail(mapId, alt = '', sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX) {
+  if (!mapId) return null;
+  const img = document.createElement('img');
+  img.src = `/assets/room-thumbnails/${mapId}.png`;
+  img.alt = alt;
+  img.className = 'pixelated';
+  const px = `${sizePx}px`;
+  img.style.cssText = `width: ${px}; height: ${px}; object-fit: cover; flex-shrink: 0;`;
+  img.onerror = () => { img.style.visibility = 'hidden'; };
+  return img;
+}
+
+function cyclopediaMountSearchEntryPortrait(iconSlot, result) {
+  const sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX;
+  let portrait = null;
+  switch (result.kind) {
+    case 'map':
+      portrait = cyclopediaCreateMapThumbnail(result.target?.mapId, result.label, sizePx);
+      break;
+    case 'ability':
+    case 'creature':
+      portrait = cyclopediaCreateCreaturePortrait(result.label, sizePx);
+      break;
+    case 'equipment':
+      portrait = cyclopediaCreateEquipmentPortrait(result.label, sizePx);
+      break;
+    case 'inventoryItem': {
+      const itemKey =
+        result.itemKey ||
+        result.target?.itemKey ||
+        resolveInventoryItemKeyByDisplayName(result.label);
+      if (itemKey) portrait = cyclopediaCreateInventoryPortrait(itemKey, sizePx);
+      break;
+    }
+    case 'inventoryCategory':
+      portrait = cyclopediaCreateInventoryPortrait('outfitBag1', sizePx);
+      break;
+    default:
+      break;
+  }
+  if (portrait) iconSlot.appendChild(portrait);
+  return !!portrait;
+}
+
+function appendCyclopediaHomeSearchEntryCell(tdEntry, result) {
+  const wrap = document.createElement('span');
+  wrap.style.cssText = 'display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%;';
+  const iconSlot = document.createElement('span');
+  iconSlot.style.cssText =
+    'flex-shrink: 0; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;';
+
+  cyclopediaMountSearchEntryPortrait(iconSlot, result);
+
+  wrap.appendChild(iconSlot);
+  const nameSpan = document.createElement('span');
+  nameSpan.textContent = result.label;
+  nameSpan.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+  wrap.appendChild(nameSpan);
+  tdEntry.appendChild(wrap);
+}
+
 function renderCyclopediaSearchColumn() {
   const container = document.createElement('div');
-  container.style.flex = '1';
-  container.style.display = 'flex';
-  container.style.flexDirection = 'column';
-  container.style.justifyContent = 'center';
-  container.style.alignItems = 'stretch';
-  container.style.padding = '0';
-  container.style.width = '100%';
-  container.style.minHeight = '0';
-  container.style.height = '100%';
+  Object.assign(container.style, {
+    flex: '1',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'stretch',
+    alignItems: 'stretch',
+    padding: '0',
+    width: '100%',
+    minHeight: '0',
+    height: '100%'
+  });
 
   const title = DOMUtils.createTitle(cyclopediaT('mods.cyclopedia.startpage.searchTitle'));
   container.appendChild(title);
 
   const panel = document.createElement('div');
   panel.className = 'frame-pressed-1 surface-dark';
-  panel.style.display = 'flex';
-  panel.style.flexDirection = 'column';
-  panel.style.gap = '8px';
-  panel.style.flex = '1 1 0';
-  panel.style.minHeight = '0';
-  panel.style.padding = '10px';
-  panel.style.boxSizing = 'border-box';
-
-  const inputWrap = document.createElement('div');
-  inputWrap.style.position = 'relative';
-  inputWrap.style.width = '100%';
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = cyclopediaT('mods.cyclopedia.startpage.searchPlaceholder');
-  input.autocomplete = 'off';
-  input.spellcheck = false;
-  inputWrap.appendChild(input);
-
-  Object.assign(input.style, {
-    width: '100%',
-    padding: '6px 28px 6px 10px',
-    border: '1px solid #444',
-    borderRadius: '4px',
-    backgroundColor: COLOR_CONSTANTS.BACKGROUND,
-    color: COLOR_CONSTANTS.TEXT,
-    fontFamily: FONT_CONSTANTS.PRIMARY,
-    fontSize: '12px',
-    boxSizing: 'border-box',
-    outline: 'none'
-  });
-
-  const clearBtn = document.createElement('button');
-  clearBtn.type = 'button';
-  clearBtn.textContent = '×';
-  Object.assign(clearBtn.style, {
-    position: 'absolute',
-    right: '6px',
-    top: '50%',
-    transform: 'translateY(-50%)',
-    width: '20px',
-    height: '20px',
-    lineHeight: '18px',
-    borderRadius: '4px',
-    border: '1px solid #444',
-    background: COLOR_CONSTANTS.BACKGROUND,
-    color: COLOR_CONSTANTS.TEXT,
-    cursor: 'pointer',
-    display: 'none',
-    padding: '0',
-    fontFamily: FONT_CONSTANTS.PRIMARY
-  });
-  inputWrap.appendChild(clearBtn);
-
-  panel.appendChild(inputWrap);
-
-  const resultsTitle = document.createElement('div');
-  resultsTitle.className = FONT_CONSTANTS.SIZES.SMALL;
-  resultsTitle.textContent = cyclopediaT('mods.cyclopedia.startpage.results');
-  Object.assign(resultsTitle.style, { color: COLOR_CONSTANTS.SECONDARY, paddingLeft: '2px' });
-  panel.appendChild(resultsTitle);
-
-  const scroll = DOMUtils.createScrollContainer('100%', false);
-  const resultsEl = scroll?.element || document.createElement('div');
-  const resultsContent = scroll?.contentContainer || resultsEl;
-
-  // IMPORTANT: api.ui.components.createScrollContainer already provides a scrollable viewport.
-  // Setting overflowY: 'scroll' on the outer element causes a second (native) scrollbar.
-  Object.assign(resultsEl.style, {
-    flex: '1 1 0',
-    minHeight: '0',
-    padding: '0',
-    overflow: scroll?.element ? 'hidden' : 'auto'
-  });
-  Object.assign(resultsContent.style, {
+  Object.assign(panel.style, {
     display: 'flex',
     flexDirection: 'column',
-    gap: '4px',
-    padding: '2px'
+    gap: '8px',
+    flex: '1 1 0',
+    minHeight: '0',
+    padding: '10px',
+    boxSizing: 'border-box'
   });
 
-  function setEmptyState(text) {
-    resultsContent.innerHTML = '';
-    const msg = document.createElement('div');
-    msg.className = FONT_CONSTANTS.SIZES.BODY;
-    msg.textContent = text;
-    Object.assign(msg.style, {
-      color: '#ccc',
-      padding: '8px 6px',
-      textAlign: 'center',
-      opacity: '0.9'
-    });
-    resultsContent.appendChild(msg);
-  }
+  const filterBar = document.createElement('div');
+  filterBar.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center;';
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = cyclopediaT('mods.cyclopedia.startpage.searchPlaceholder');
+  searchInput.title = cyclopediaT('mods.cyclopedia.startpage.searchTooltip');
+  searchInput.autocomplete = 'off';
+  searchInput.autocapitalize = 'off';
+  searchInput.spellcheck = false;
+  searchInput.setAttribute('autocomplete', 'off');
+  searchInput.setAttribute('name', `cyclopedia-home-search-${Date.now()}`);
+  searchInput.className = CYCLOPEDIA_HOME_SEARCH_FILTER_CONTROL_CLASS;
+  searchInput.style.cssText = CYCLOPEDIA_HOME_SEARCH_FILTER_INPUT_STYLE;
+  filterBar.appendChild(searchInput);
+
+  const kindSelect = document.createElement('select');
+  kindSelect.className = CYCLOPEDIA_HOME_SEARCH_FILTER_CONTROL_CLASS;
+  kindSelect.style.cssText = CYCLOPEDIA_HOME_SEARCH_FILTER_SELECT_STYLE;
+  CYCLOPEDIA_HOME_SEARCH_TYPE_OPTIONS.forEach(([value, label]) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    kindSelect.appendChild(opt);
+  });
+  filterBar.appendChild(kindSelect);
+
+  panel.appendChild(filterBar);
+
+  const tableWrap = document.createElement('div');
+  tableWrap.style.cssText = `
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #555 #1a1a1a;
+  `;
+
+  const table = document.createElement('table');
+  table.className =
+    'pixel-font-16 frame-pressed-1 w-full caption-bottom border-separate border-spacing-0 text-whiteRegular';
+  Object.assign(table.style, {
+    width: '100%',
+    tableLayout: 'fixed'
+  });
+  const thClass =
+    'bg-grayDark px-1 text-whiteHighlight table-frame-bottom sticky top-0 z-10 font-normal';
+  const { entry: colEntry, type: colType, details: colDetails } = CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS;
+  table.innerHTML = `
+    <colgroup>
+      <col style="width: ${colEntry}">
+      <col style="width: ${colType}">
+      <col style="width: ${colDetails}">
+    </colgroup>
+    <thead class="pixel-font-14">
+      <tr>
+        <th class="${thClass}" style="text-align: left; width: ${colEntry};">Entry</th>
+        <th class="${thClass}" style="text-align: left; width: ${colType};">Type</th>
+        <th class="${thClass}" style="text-align: left; width: ${colDetails};">Details</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  tableWrap.appendChild(table);
+  panel.appendChild(tableWrap);
+  container.appendChild(panel);
+
+  const tbody = table.querySelector('tbody');
 
   let abilityRefreshToken = 0;
   let pendingNavigateTarget = null;
   let pendingNavigatePollId = null;
+  let searchDebounceTimer = null;
+
+  function abortBackgroundWorkForPriorityNavigation() {
+    try { abilityRefreshToken++; } catch { /* ignore */ }
+    try {
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    } catch { /* ignore */ }
+    try {
+      if (CyclopediaHomeSearch?.abortAbilityIndexing) CyclopediaHomeSearch.abortAbilityIndexing();
+      if (CyclopediaHomeSearch?.abortEquipmentEffectIndexing) CyclopediaHomeSearch.abortEquipmentEffectIndexing();
+    } catch { /* ignore */ }
+  }
+
+  function requestPriorityNavigate(target) {
+    abortBackgroundWorkForPriorityNavigation();
+    pendingNavigateTarget = target;
+    try {
+      const navNow = typeof window !== 'undefined' ? window.cyclopediaHomeSearchNavigate : null;
+      if (typeof navNow === 'function') {
+        pendingNavigateTarget = null;
+        navNow(target);
+        return;
+      }
+    } catch { /* ignore */ }
+    try { openCyclopediaModal({ fromHomeSearch: true, force: true }); } catch { /* ignore */ }
+    if (pendingNavigatePollId) return;
+    const startedAt = Date.now();
+    const poll = () => {
+      pendingNavigatePollId = null;
+      if (!pendingNavigateTarget) return;
+      let nav = null;
+      try { nav = typeof window !== 'undefined' ? window.cyclopediaHomeSearchNavigate : null; } catch { nav = null; }
+      if (typeof nav === 'function') {
+        const t = pendingNavigateTarget;
+        pendingNavigateTarget = null;
+        try { nav(t); } catch (e) { console.warn('[Cyclopedia] HomeSearch: error navigating:', e); }
+        return;
+      }
+      if (Date.now() - startedAt > 5000) {
+        pendingNavigateTarget = null;
+        return;
+      }
+      pendingNavigatePollId = setTimeout(poll, 50);
+    };
+    pendingNavigatePollId = setTimeout(poll, 50);
+  }
+
+  function setTableMessage(text) {
+    tbody.innerHTML = '';
+    const tr = document.createElement('tr');
+    tr.className =
+      'group/row odd:bg-grayBrightest even:bg-grayHighlight hover:bg-whiteDarkest hover:text-whiteBrightest';
+    const td = document.createElement('td');
+    td.colSpan = 3;
+    td.className = 'bg-grayRegular px-1 text-whiteRegular';
+    td.textContent = text;
+    td.style.textAlign = 'center';
+    td.style.padding = '16px 8px';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+
+  function renderTableRows(results) {
+    tbody.innerHTML = '';
+    if (!results || results.length === 0) {
+      setTableMessage('No results match the current filters.');
+      return;
+    }
+
+    for (const r of results) {
+      const tr = document.createElement('tr');
+      tr.dataset.homeSearchResult = 'true';
+      tr.className =
+        'group/row odd:bg-grayBrightest even:bg-grayHighlight hover:bg-whiteDarkest hover:text-whiteBrightest cursor-pointer';
+      tr.addEventListener('click', (e) => {
+        e.stopPropagation();
+        try { requestPriorityNavigate(r.target); } catch (err) {
+          console.warn('[Cyclopedia] HomeSearch: error navigating:', err);
+        }
+      });
+
+      const tdEntry = document.createElement('td');
+      tdEntry.className = 'bg-grayRegular px-1 text-whiteRegular group-hover/row:bg-grayHighlight align-middle';
+      Object.assign(tdEntry.style, {
+        width: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.entry,
+        maxWidth: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.entry,
+        overflow: 'hidden'
+      });
+      appendCyclopediaHomeSearchEntryCell(tdEntry, r);
+      tr.appendChild(tdEntry);
+
+      const tdType = document.createElement('td');
+      tdType.className =
+        'bg-grayRegular px-1 text-whiteRegular group-hover/row:bg-grayHighlight pixel-font-14 align-middle table-frame-left whitespace-nowrap';
+      Object.assign(tdType.style, {
+        width: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.type,
+        maxWidth: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.type,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis'
+      });
+      tdType.textContent = r.kindLabel || cyclopediaT('mods.cyclopedia.startpage.resultBadge');
+      tr.appendChild(tdType);
+
+      const tdDetails = document.createElement('td');
+      tdDetails.className =
+        'bg-grayRegular px-1 text-whiteRegular group-hover/row:bg-grayHighlight pixel-font-14 align-middle table-frame-left';
+      Object.assign(tdDetails.style, {
+        width: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.details,
+        maxWidth: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.details,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap'
+      });
+      tdDetails.textContent = r.subtitle || '—';
+      tdDetails.title = r.subtitle || '';
+      tr.appendChild(tdDetails);
+
+      tbody.appendChild(tr);
+    }
+  }
 
   function renderResults(query) {
-    const { results } = CyclopediaHomeSearch.search(query);
-    resultsContent.innerHTML = '';
-
     const qTrim = (query || '').trim();
-    const wantsAbilityText = qTrim.length >= 3;
-    const abilityReady = wantsAbilityText
+    const wantsEffectIndexing = qTrim.length >= 3;
+    const abilityReady = wantsEffectIndexing
       ? (typeof CyclopediaHomeSearch.isAbilityIndexReady === 'function' ? CyclopediaHomeSearch.isAbilityIndexReady() : true)
       : true;
+    const equipmentEffectReady = wantsEffectIndexing
+      ? (typeof CyclopediaHomeSearch.isEquipmentEffectIndexReady === 'function'
+          ? CyclopediaHomeSearch.isEquipmentEffectIndexReady()
+          : true)
+      : true;
 
-    // If this query might need ability-text hits and the ability index isn't ready yet:
-    // kick off indexing and refresh results ONCE when indexing completes.
-    if (wantsAbilityText && !abilityReady && typeof CyclopediaHomeSearch.ensureAbilityIndexReady === 'function') {
+    if (wantsEffectIndexing && (!abilityReady || !equipmentEffectReady)) {
       const token = ++abilityRefreshToken;
-      CyclopediaHomeSearch.ensureAbilityIndexReady().then(() => {
-        // Only refresh if this is still the latest request and the query is unchanged.
+      const waits = [];
+      if (!abilityReady && CyclopediaHomeSearch.ensureAbilityIndexReady) {
+        waits.push(CyclopediaHomeSearch.ensureAbilityIndexReady());
+      }
+      if (!equipmentEffectReady && CyclopediaHomeSearch.ensureEquipmentEffectIndexReady) {
+        waits.push(CyclopediaHomeSearch.ensureEquipmentEffectIndexReady());
+      }
+      Promise.all(waits).then(() => {
         if (token !== abilityRefreshToken) return;
-        if ((input.value || '') !== query) return;
+        if ((searchInput.value || '') !== query) return;
         renderResults(query);
       });
     }
 
     if (!query || qTrim.length < 2) {
-      setEmptyState(cyclopediaT('mods.cyclopedia.startpage.emptyStateMinChars'));
-      return;
-    }
-    if (!results || results.length === 0) {
-      if (wantsAbilityText && !abilityReady) setEmptyState(cyclopediaT('mods.cyclopedia.startpage.indexingAbility'));
-      else setEmptyState(cyclopediaT('mods.cyclopedia.startpage.noResults'));
+      setTableMessage(cyclopediaT('mods.cyclopedia.startpage.emptyStateMinChars'));
       return;
     }
 
-    results.forEach((r) => {
-      const row = document.createElement('div');
-      row.className = FONT_CONSTANTS.SIZES.BODY;
-      row.setAttribute('data-home-search-result', 'true');
-      Object.assign(row.style, {
-        cursor: 'pointer',
-        padding: '6px 8px',
-        borderRadius: '4px',
-        background: 'rgba(255,255,255,0.04)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        color: COLOR_CONSTANTS.TEXT,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2px'
-      });
-
-      const top = document.createElement('div');
-      top.style.display = 'flex';
-      top.style.justifyContent = 'space-between';
-      top.style.gap = '8px';
-
-      const left = document.createElement('div');
-      left.style.display = 'flex';
-      left.style.gap = '8px';
-      left.style.alignItems = 'baseline';
-      left.style.minWidth = '0';
-
-      const badge = document.createElement('span');
-      badge.className = FONT_CONSTANTS.SIZES.SMALL;
-      badge.textContent = r.kindLabel || cyclopediaT('mods.cyclopedia.startpage.resultBadge');
-      Object.assign(badge.style, { color: COLOR_CONSTANTS.PRIMARY, whiteSpace: 'nowrap' });
-
-      const label = document.createElement('span');
-      label.textContent = r.label;
-      Object.assign(label.style, { color: COLOR_CONSTANTS.TEXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
-
-      left.appendChild(badge);
-      left.appendChild(label);
-      top.appendChild(left);
-      row.appendChild(top);
-
-      if (r.subtitle) {
-        const sub = document.createElement('div');
-        sub.className = FONT_CONSTANTS.SIZES.SMALL;
-        sub.textContent = r.subtitle;
-        Object.assign(sub.style, { color: '#bbb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
-        row.appendChild(sub);
-      }
-
-      function abortBackgroundWorkForPriorityNavigation() {
-        try { abilityRefreshToken++; } catch { /* ignore */ }
-        try {
-          if (debounceId) clearTimeout(debounceId);
-          debounceId = null;
-        } catch { /* ignore */ }
-        try {
-          if (CyclopediaHomeSearch && typeof CyclopediaHomeSearch.abortAbilityIndexing === 'function') {
-            CyclopediaHomeSearch.abortAbilityIndexing();
-          }
-        } catch { /* ignore */ }
-      }
-
-      function requestPriorityNavigate(target) {
-        abortBackgroundWorkForPriorityNavigation();
-        pendingNavigateTarget = target;
-
-        // Fast path: if the bridge already exists, navigate immediately.
-        try {
-          const navNow = typeof window !== 'undefined' ? window.cyclopediaHomeSearchNavigate : null;
-          if (typeof navNow === 'function') {
-            pendingNavigateTarget = null;
-            navNow(target);
-            return;
-          }
-        } catch { /* ignore */ }
-
-        // Otherwise, force-open Cyclopedia (bypasses the 1s throttle) and poll briefly until ready.
-        try { openCyclopediaModal({ fromHomeSearch: true, force: true }); } catch { /* ignore */ }
-
-        if (pendingNavigatePollId) return;
-        const startedAt = Date.now();
-        const poll = () => {
-          pendingNavigatePollId = null;
-          if (!pendingNavigateTarget) return;
-
-          let nav = null;
-          try { nav = typeof window !== 'undefined' ? window.cyclopediaHomeSearchNavigate : null; } catch { nav = null; }
-          if (typeof nav === 'function') {
-            const t = pendingNavigateTarget;
-            pendingNavigateTarget = null;
-            try { nav(t); } catch (e) { console.warn('[Cyclopedia] HomeSearch: error navigating:', e); }
-            return;
-          }
-
-          if (Date.now() - startedAt > 5000) {
-            pendingNavigateTarget = null;
-            console.warn('[Cyclopedia] HomeSearch: navigation bridge still unavailable; giving up.');
-            return;
-          }
-
-          pendingNavigatePollId = setTimeout(poll, 50);
-        };
-        pendingNavigatePollId = setTimeout(poll, 50);
-      }
-
-      const onClick = () => {
-        try {
-          requestPriorityNavigate(r.target);
-        } catch (e) {
-          console.warn('[Cyclopedia] HomeSearch: error navigating:', e);
-        }
-      };
-
-      row.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
-      row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,0.08)'; });
-      row.addEventListener('mouseleave', () => { row.style.background = 'rgba(255,255,255,0.04)'; });
-
-      resultsContent.appendChild(row);
+    let { results } = CyclopediaHomeSearch.search(query);
+    results = applyCyclopediaHomeSearchFilters(results, {
+      kindFilter: kindSelect.value || null
     });
+
+    if (!results.length) {
+      if (wantsEffectIndexing && (!abilityReady || !equipmentEffectReady)) {
+        setTableMessage(cyclopediaT('mods.cyclopedia.startpage.indexingAbility'));
+      } else setTableMessage(cyclopediaT('mods.cyclopedia.startpage.noResults'));
+      return;
+    }
+
+    renderTableRows(results);
   }
 
-  let debounceId = null;
-  let lastQuery = '';
-  function scheduleRender() {
-    const value = input.value || '';
-    lastQuery = value;
-    clearBtn.style.display = value ? 'block' : 'none';
+  const recompute = () => renderResults(searchInput.value || '');
 
-    if (debounceId) clearTimeout(debounceId);
-    debounceId = setTimeout(() => renderResults(value), 120);
-  }
-
-  input.addEventListener('input', scheduleRender);
-  input.addEventListener('keydown', (e) => {
+  searchInput.addEventListener('input', () => {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(recompute, 150);
+  });
+  searchInput.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      input.value = '';
-      scheduleRender();
-      input.blur();
+      searchInput.value = '';
+      recompute();
+      searchInput.blur();
     } else if (e.key === 'Enter') {
-      // Click first result if present
-      const first = resultsContent.querySelector('[data-home-search-result="true"]');
+      const first = tbody.querySelector('tr[data-home-search-result="true"]');
       if (first) first.click();
     }
   });
+  kindSelect.addEventListener('change', recompute);
+  setTableMessage(cyclopediaT('mods.cyclopedia.startpage.emptyStateMinChars'));
 
-  clearBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    input.value = '';
-    scheduleRender();
-    input.focus();
-  });
+  try {
+    if (CyclopediaHomeSearch.startEquipmentEffectIndexing) CyclopediaHomeSearch.startEquipmentEffectIndexing();
+  } catch { /* ignore */ }
 
-  // Initial state
-  setEmptyState(cyclopediaT('mods.cyclopedia.startpage.emptyStateMinChars'));
-
-  panel.appendChild(resultsEl);
-  container.appendChild(panel);
   return container;
 }
 
@@ -17001,7 +18578,7 @@ const CYCLOPEDIA_TRANSLATION = {
 
 function renderCyclopediaPlayerInfo(profileData, options = {}) {
   try {
-    const { showShinyCreatures = true } = options;
+    const { showShinyCreatures = true, compact = false } = options;
     if (profileData && profileData.json) profileData = profileData.json;
     if (!profileData) {
       const div = document.createElement('div');
@@ -17016,9 +18593,10 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
     return profileData[key] !== undefined ? profileData[key] : '-';
   }
 
-  function addRow({ label, icon, iconConfig, value, highlight, colspan, title, extraIcon, tooltip, valueClass }) {
+  function addRow({ label, icon, iconConfig, value, highlight, colspan, title, extraIcon, tooltip, valueClass, rankingKey }) {
     const tr = document.createElement('tr');
     tr.setAttribute('data-highlight', highlight ? 'true' : 'false');
+    if (rankingKey) tr.dataset.cyclopediaRankingRow = rankingKey;
     tr.className = 'group/row odd:bg-grayBrightest even:bg-grayHighlight hover:bg-whiteDarkest hover:text-whiteBrightest data-[highlight=\'true\']:bg-whiteDarkest data-[highlight=\'true\']:text-whiteBrightest';
     if (colspan) {
       const td = document.createElement('td');
@@ -17066,10 +18644,16 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   container.style.display = 'flex';
   container.style.flexDirection = 'column';
   container.style.gap = '0';
+  container.style.width = '100%';
+  if (compact) {
+    container.style.boxSizing = 'border-box';
+    container.style.marginTop = '0';
+  }
 
   const infoBox = document.createElement('div');
   infoBox.className = 'widget-top widget-top-text flex items-center gap-1';
   infoBox.style.marginBottom = '0';
+  if (compact) infoBox.style.marginTop = '0';
   const infoIcon = document.createElement('img');
   infoIcon.alt = cyclopediaT('mods.cyclopedia.startpage.accountAlt');
   infoIcon.src = '/assets/icons/migrate.png';
@@ -17093,10 +18677,11 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   const avatarImg = document.createElement('img');
   avatarImg.src = 'https://bestiaryarena.com/assets/logo.png';
   avatarImg.alt = cyclopediaT('mods.cyclopedia.startpage.playerIconAlt');
-  avatarImg.width = 32;
-  avatarImg.height = 32;
-  avatarImg.style.width = '32px';
-  avatarImg.style.height = '32px';
+  const avatarSize = compact ? 28 : 32;
+  avatarImg.width = avatarSize;
+  avatarImg.height = avatarSize;
+  avatarImg.style.width = avatarSize + 'px';
+  avatarImg.style.height = avatarSize + 'px';
   avatarImg.style.display = 'block';
   avatarImg.style.margin = 'auto';
   avatarImg.className = 'pixelated';
@@ -17219,9 +18804,9 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   const statsTableWrap = document.createElement('div');
   statsTableWrap.className = 'widget-bottom';
   const statsTable = document.createElement('table');
-  statsTable.className = 'pixel-font-16 frame-pressed-1 w-full caption-bottom border-separate border-spacing-0 text-whiteRegular';
+  statsTable.className = (compact ? 'pixel-font-14' : 'pixel-font-16') + ' frame-pressed-1 w-full caption-bottom border-separate border-spacing-0 text-whiteRegular';
   const tbody = document.createElement('tbody');
-  tbody.className = 'whitespace-nowrap';
+  if (!compact) tbody.className = 'whitespace-nowrap';
 
   addRow({ label: cyclopediaT('mods.cyclopedia.startpage.currentTotal'), highlight: true, colspan: 2 });
   addRow({ label: cyclopediaT('mods.cyclopedia.startpage.stats.shell'), icon: '/assets/icons/shell-count.png', value: (getProfileValue('shell') !== undefined ? FormatUtils.number(getProfileValue('shell')) + 'x' : '-') });
@@ -17252,6 +18837,7 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   addRow({
     label: cyclopediaT('mods.cyclopedia.startpage.stats.rankPoints'),
     icon: '/assets/icons/star-tier.png',
+    rankingKey: 'rankPoints',
     value: (() => {
       const v = getProfileValue('rankPoints');
       return v !== undefined && v !== null ? FormatUtils.number(v) : cyclopediaSeasonNA();
@@ -17262,6 +18848,7 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   addRow({
     label: cyclopediaT('mods.cyclopedia.startpage.stats.timeSum'),
     icon: '/assets/icons/speed.png',
+    rankingKey: 'timeSum',
     value: (() => {
       const v = getProfileValue('timeSum');
       return v !== undefined && v !== null ? FormatUtils.number(v) : cyclopediaSeasonNA();
@@ -17273,6 +18860,7 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
     label: cyclopediaT('mods.cyclopedia.startpage.stats.floorsSum'),
     icon: '/assets/UI/floor-15.png',
     iconConfig: { width: 14, height: 7, className: 'pixelated -ml-px mr-0.5 inline-block -translate-y-0.5' },
+    rankingKey: 'floorsSum',
     value: (() => {
       const v = getProfileValue('floorsSum');
       return v !== undefined && v !== null ? FormatUtils.number(v) : cyclopediaSeasonNA();

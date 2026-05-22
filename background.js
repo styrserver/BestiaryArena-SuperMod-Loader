@@ -1015,7 +1015,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const modCounts = {
           database: 7,
           official: 11,
-          super: 24,
+          super: 25,
           ot: 4
         };
         
@@ -1025,7 +1025,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Ultimate fallback
         sendResponse({ 
           success: true, 
-          counts: { database: 7, official: 11, super: 23, ot: 4 } 
+          counts: { database: 7, official: 11, super: 25, ot: 4 } 
         });
       }
     })();

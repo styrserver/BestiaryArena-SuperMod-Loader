@@ -197,6 +197,25 @@ function isDynamicEventMap(mapId) {
   return !STATIC_RAID_EVENTS.includes(mapName);
 }
 
+/**
+ * Regions in game display order (state.utils.REGIONS iteration order).
+ * @returns {Array<{ id: string, name?: string }>}
+ */
+function getRegionsInOrder() {
+  const state = globalThis.state || window.state;
+  const regions = state?.utils?.REGIONS;
+  if (!Array.isArray(regions)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const region of regions) {
+    const id = region?.id;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name: region?.name });
+  }
+  return out;
+}
+
 // Build the database dynamically
 const mapsDatabase = buildMapsDatabase();
 
@@ -210,6 +229,7 @@ mapsDatabase.getRaidMaps = getRaidMaps;
 mapsDatabase.getNonRaidMaps = getNonRaidMaps;
 mapsDatabase.isRaid = isRaid;
 mapsDatabase.isDynamicEventMap = isDynamicEventMap;
+mapsDatabase.getRegionsInOrder = getRegionsInOrder;
 mapsDatabase.STATIC_RAID_EVENTS = STATIC_RAID_EVENTS.slice();
 mapsDatabase.EVENT_TO_ROOM_MAPPING = { ...EVENT_TO_ROOM_MAPPING };
 

@@ -68,6 +68,7 @@ export const SUPER_MODS = [
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
+  'Room Hopper.js',
   'RunTracker.js',
   'Stamina Optimizer.js',
   'Awaken Tracker.js'

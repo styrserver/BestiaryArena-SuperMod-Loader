@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "3.9.0",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Inventory database: Creature Awakening (65,000 gold) and Dr. Mephistopheles (66,666 gold) under Upgrades; Cyclopedia Inventory tab reads upgrade list from the database. maps-database.js: getRegionsInOrder() exposes game region order for other mods."
+        },
+        {
+          "mod": "Room Hopper",
+          "type": "added",
+          "text": "New Super Mod: header button opens a searchable room table (map thumbnail, enemy creatures, equip drops, avg XP and XP/stamina) with region filter, hide-raids toggle, sortable Room and XP/Stam columns, and one-click teleport via selectRoomById; travel is blocked while a run is in progress."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "fixed",
+          "text": "Experience estimates (optional setting) now use live board villain levels capped at 50 for the post-battle formula, and ignore Orc and Sweaty Cyclops (map props that do not pay XP). Fixes large overestimates on high template levels (e.g. Lonesome Dragon) and Orcsmith Orcshop counting spawned Orcs."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Tab foreground restore no longer switches to autoplay during Board Analyzer or Manual Runner runs (or while the board is in sandbox), preventing client crashes from missing serverResults."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Autoplay delay (renamed from Faster Autoplay): delay range 10ms–180s (was 0–3s), Advanced field labeled Delay (ms), values clamp to min/max while typing and on save; applied delay is clamped at runtime."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "When 'Estimate experience gained' is enabled, console logs under [Board Analyzer][XP] show per-run estimate breakdown (eligible vs excluded enemies, level sum, d20) and real battle expReward from game.gameServer responses for comparison."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Start page: profile and season tabs in column 1; merged search column (Room Hopper–style filter bar and results table with Entry / Type / Details). Type filter includes Abilities; maps and regions share the Maps type; region dropdown removed. Home search portraits: creatures use /assets/portraits/{gameId}; equipment and inventory use in-game item sprites without stat, rarity frame, or slot background. Inventory catalog groups (e.g. all Summon Scroll tiers) are indexed and clickable navigation opens the correct variant."
+        }
+      ]
+    },
+    {
       "version": "3.8.12",
       "changes": [
         {

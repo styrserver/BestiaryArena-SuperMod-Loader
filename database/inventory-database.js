@@ -394,6 +394,20 @@ const inventoryTooltips = {
     rarity: '4',
     obtain: 'Store (1,500 gold)'
   },
+  creatureAwakening: {
+    displayName: "Creature Awakening",
+    text: 'Awakening your creature raises its maximum level and reveals its hidden ability.\n\nCreatures must have max tier and max genes to be awakened.',
+    icon: '/assets/icons/mountainfortressAwaken.png',
+    rarity: '5',
+    obtain: 'Store (65,000 gold)'
+  },
+  drMephistopheles: {
+    displayName: "Dr. Mephistopheles",
+    text: 'Raise the genes of your awaken creatures by trading sealed creatures to Dr. Mephistopheles.\n\nDon\'t ask any questions — hand over sealed creatures and let him handle the rest.',
+    icon: 'sprite://50241',
+    rarity: '5',
+    obtain: 'Store (66,666 gold)'
+  },
   monsterRaids: {
     displayName: "Monster Raids",
     text: 'Stay alert! At any moment, a new random monster raid may begin! Raids can drop exclusive equipments and monsters.',
@@ -443,7 +457,7 @@ const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
   'Runes': ['Avarice Rune', 'Hitpoints Rune', 'Attack Damage Rune', 'Ability Power Rune', 'Armor Rune', 'Magic Resist Rune', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Conversion Rune (hp)', 'Conversion Rune (ad)', 'Conversion Rune (ap)'],
-  'Upgrades': ['Baby Dragon Plant', 'Daily Boosted Map', 'Daycare', 'Dungeon Ascension', 'Dragon Plant', 'Hy\'genie', 'Monstrous Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
+  'Upgrades': ['Baby Dragon Plant', 'Creature Awakening', 'Daily Boosted Map', 'Daycare', 'Dungeon Ascension', 'Dragon Plant', 'Dr. Mephistopheles', 'Hy\'genie', 'Monstrous Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
 const INVENTORY_VARIANTS = {
@@ -459,6 +473,8 @@ const INVENTORY_VARIANTS = {
   'Blank Rune': ['runeBlank'], 'Recycle Rune': ['runeRecycle'],
   'Kaleidoscopic Rune': ['runeKaleidoscopic'], 'Conversion Rune (hp)': ['runeConversionHp'], 'Conversion Rune (ad)': ['runeConversionAd'], 'Conversion Rune (ap)': ['runeConversionAp'],
   'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dungeon Ascension': ['dungeonAscension'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
+  'Creature Awakening': ['creatureAwakening'],
+  'Dr. Mephistopheles': ['drMephistopheles'],
   'Monstrous Cauldron': ['monsterCauldron'], 'Monster Raids': ['monsterRaids'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
   'Premium': ['premium'], 'The Sweaty Cyclop\'s Forge': ['forge'], 'Yasir\'s Trading Contract': ['yasirTradingContract']
 };
@@ -475,6 +491,8 @@ const INVENTORY_STATIC_ITEMS = {
   'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },
   'babyDragonPlant': { name: 'Baby Dragon Plant', rarity: '3' }, 'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
   'dungeonAscension': { name: 'Dungeon Ascension', rarity: '5' }, 'dragonPlant': { name: 'Dragon Plant', rarity: '4' }, 'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monstrous Cauldron', rarity: '4' },
+  'creatureAwakening': { name: 'Creature Awakening', rarity: '5' },
+  'drMephistopheles': { name: 'Dr. Mephistopheles', rarity: '5' },
   'monsterRaids': { name: 'Monster Raids', rarity: '4' }, 'monsterSqueezer': { name: 'Monster Squeezer', rarity: '3' }, 'mountainFortress': { name: 'Mountain Fortress', rarity: '4' },
   'premium': { name: 'Premium', rarity: '5' }, 'forge': { name: 'The Sweaty Cyclop\'s Forge', rarity: '5' },
   'yasirTradingContract': { name: 'Yasir\'s Trading Contract', rarity: '4' }
