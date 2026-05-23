@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.9.3",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Fast autoplay map clears no longer skip autosqueeze, autoduster, or late equipment drops. Game-end processing captures serverResults when the battle ends (not after the next fight), retries when the run cooldown blocks, and requeues when reward creatures are not in inventory yet. Skull Helmet–style equipDrop that arrives on a later board tick is queued and flushed via pending disenchant; duplicate equipment queueing is avoided. Dragon Plant devour runs after squeeze/disenchant and does not eat creatures in the autosqueeze gene band (80–100). Game-end cooldown reduced from 5s to 2s; pending dust flush uses its own short throttle."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Console debug channels [GameEnd], [EquipDrop], [Sell], [Squeeze], [Disenchant], and [Devour] for tracing fast-clear timing; squeeze filter logs show each drop’s gene total vs the configured band."
+        }
+      ]
+    },
+    {
       "version": "3.9.2",
       "changes": [
         {
