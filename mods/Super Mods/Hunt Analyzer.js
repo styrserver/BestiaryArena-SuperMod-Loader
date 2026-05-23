@@ -10,10 +10,44 @@ const t = (key) => api.i18n.t(key);
 // =======================
 // 1.0. Theme System
 // =======================
+const HUNT_ANALYZER_DEFAULT_THEME_KEY = 'original';
+
+const HUNT_ANALYZER_ASSET_BG = {
+    darker: '/_next/static/media/background-darker.2679c837.png',
+    dark: '/_next/static/media/background-dark.95edca67.png',
+    regular: '/_next/static/media/background-regular.b0337118.png',
+    blue: '/_next/static/media/background-blue.7259c4ed.png',
+    green: '/_next/static/media/background-green.be515334.png',
+    red: '/_next/static/media/background-red.21d3f4bd.png'
+};
+
+function huntAnalyzerBgUrl(assetPath) {
+    return `url(${assetPath})`;
+}
+
+function huntAnalyzerUniformBackgrounds(assetKey) {
+    const url = huntAnalyzerBgUrl(HUNT_ANALYZER_ASSET_BG[assetKey]);
+    return { panel: url, header: url, section: url };
+}
+
+function huntAnalyzerPanelBackgrounds(panelKey, headerKey, sectionKey) {
+    return {
+        panel: huntAnalyzerBgUrl(HUNT_ANALYZER_ASSET_BG[panelKey]),
+        header: huntAnalyzerBgUrl(HUNT_ANALYZER_ASSET_BG[headerKey]),
+        section: huntAnalyzerBgUrl(HUNT_ANALYZER_ASSET_BG[sectionKey])
+    };
+}
+
+function createHuntAnalyzerTheme(displayName, colors, backgrounds) {
+    return { name: displayName, colors, backgrounds };
+}
+
+function resolveHuntAnalyzerTheme(themeName) {
+    return HUNT_ANALYZER_THEMES[themeName] || HUNT_ANALYZER_THEMES[HUNT_ANALYZER_DEFAULT_THEME_KEY];
+}
+
 const HUNT_ANALYZER_THEMES = {
-    original: {
-        name: 'Original',
-    colors: {
+    original: createHuntAnalyzerTheme('Original', {
       // Panel colors
       panelBackground: '#282C34',
       headerBackground: '#1a1a1a',
@@ -79,16 +113,8 @@ const HUNT_ANALYZER_THEMES = {
       // Button highlights
       buttonHighlight: 'rgba(255,255,255,0.1)',
       buttonHighlightHover: 'rgba(255,255,255,0.2)'
-    },
-    backgrounds: {
-      panel: 'url(/_next/static/media/background-darker.2679c837.png)',
-      header: 'url(/_next/static/media/background-dark.95edca67.png)',
-      section: 'url(/_next/static/media/background-regular.b0337118.png)'
-    }
-  },
-  ice: {
-    name: 'Frosty',
-    colors: {
+    }, huntAnalyzerPanelBackgrounds('darker', 'dark', 'regular')),
+  ice: createHuntAnalyzerTheme('Frosty', {
       // Panel colors - Cool icy blue tones
       panelBackground: '#0a1419',
       headerBackground: '#050a0f',
@@ -154,17 +180,8 @@ const HUNT_ANALYZER_THEMES = {
       // Button highlights - Icy glow
       buttonHighlight: 'rgba(128, 216, 255, 0.1)',
       buttonHighlightHover: 'rgba(128, 216, 255, 0.2)'
-    },
-    backgrounds: {
-      // Use blue background textures for ice theme
-      panel: 'url(/_next/static/media/background-blue.7259c4ed.png)',
-      header: 'url(/_next/static/media/background-blue.7259c4ed.png)',
-      section: 'url(/_next/static/media/background-blue.7259c4ed.png)'
-    }
-  },
-  poison: {
-    name: 'Venomous',
-    colors: {
+    }, huntAnalyzerUniformBackgrounds('blue')),
+  poison: createHuntAnalyzerTheme('Venomous', {
       // Panel colors - Rich green/nature tones
       panelBackground: '#0f1a0f',
       headerBackground: '#050a05',
@@ -230,17 +247,8 @@ const HUNT_ANALYZER_THEMES = {
       // Button highlights - Green glow
       buttonHighlight: 'rgba(102, 187, 106, 0.1)',
       buttonHighlightHover: 'rgba(102, 187, 106, 0.2)'
-    },
-    backgrounds: {
-      // Use green background textures for poison theme
-      panel: 'url(/_next/static/media/background-green.be515334.png)',
-      header: 'url(/_next/static/media/background-green.be515334.png)',
-      section: 'url(/_next/static/media/background-green.be515334.png)'
-    }
-  },
-  fire: {
-    name: 'Demonic',
-    colors: {
+    }, huntAnalyzerUniformBackgrounds('green')),
+  fire: createHuntAnalyzerTheme('Demonic', {
       // Panel colors - Deep red/fire tones
       panelBackground: '#1a0a0a',
       headerBackground: '#0f0505',
@@ -306,17 +314,8 @@ const HUNT_ANALYZER_THEMES = {
       // Button highlights - Fiery glow
       buttonHighlight: 'rgba(255, 23, 68, 0.1)',
       buttonHighlightHover: 'rgba(255, 23, 68, 0.2)'
-    },
-    backgrounds: {
-      // Use red background textures for fire theme
-      panel: 'url(/_next/static/media/background-red.21d3f4bd.png)',
-      header: 'url(/_next/static/media/background-red.21d3f4bd.png)',
-      section: 'url(/_next/static/media/background-red.21d3f4bd.png)'
-    }
-  },
-  undead: {
-    name: 'Undead',
-    colors: {
+    }, huntAnalyzerUniformBackgrounds('red')),
+  undead: createHuntAnalyzerTheme('Undead', {
       // Panel colors - Deep purple/undead tones
       panelBackground: '#1a0f1a',
       headerBackground: '#0f050f',
@@ -382,73 +381,79 @@ const HUNT_ANALYZER_THEMES = {
       // Button highlights - Purple glow
       buttonHighlight: 'rgba(171, 71, 188, 0.1)',
       buttonHighlightHover: 'rgba(171, 71, 188, 0.2)'
-    },
-    backgrounds: {
-      // Use darker background textures for undead theme
-      panel: 'url(/_next/static/media/background-darker.2679c837.png)',
-      header: 'url(/_next/static/media/background-dark.95edca67.png)',
-      section: 'url(/_next/static/media/background-darker.2679c837.png)'
-    }
-  }
+    }, huntAnalyzerPanelBackgrounds('darker', 'dark', 'darker'))
 };
 
-// Theme utility functions
 function getCurrentTheme() {
-  // Use try-catch to safely access HuntAnalyzerState (may not be initialized yet during early CSS injection)
   try {
-    if (typeof HuntAnalyzerState !== 'undefined' && HuntAnalyzerState.settings && HuntAnalyzerState.settings.theme) {
-      const themeName = HuntAnalyzerState.settings.theme;
-      return HUNT_ANALYZER_THEMES[themeName] || HUNT_ANALYZER_THEMES.original;
+    if (typeof HuntAnalyzerState !== 'undefined' && HuntAnalyzerState.settings?.theme) {
+      return resolveHuntAnalyzerTheme(HuntAnalyzerState.settings.theme);
     }
-  } catch (e) {
-    // HuntAnalyzerState not yet defined, use default
+  } catch (_e) {
+    // HuntAnalyzerState not yet defined during early CSS injection
   }
-  return HUNT_ANALYZER_THEMES.original;
+  return HUNT_ANALYZER_THEMES[HUNT_ANALYZER_DEFAULT_THEME_KEY];
 }
 
 function getThemeColor(colorKey) {
-  const theme = getCurrentTheme();
-  return theme.colors[colorKey] || '#ABB2BF'; // Fallback to default text color
+  return getCurrentTheme().colors[colorKey]
+        || HUNT_ANALYZER_THEMES[HUNT_ANALYZER_DEFAULT_THEME_KEY].colors.text;
 }
 
 function getThemeBackground(backgroundKey) {
-  const theme = getCurrentTheme();
-  return theme.backgrounds[backgroundKey] || '';
+  return getCurrentTheme().backgrounds[backgroundKey] || '';
 }
 
-// Apply theme to an element (helper for inline styles)
-function applyThemeStyle(element, styleMap) {
+const HUNT_ANALYZER_INFO_ELEMENT_IDS = [
+  'mod-autoplay-counter',
+  'mod-playtime-display',
+  'mod-stamina-display',
+  'mod-win-loss-display'
+];
+
+function applyAccentTitleStyle(element) {
   if (!element) return;
-  const theme = getCurrentTheme();
-  Object.entries(styleMap).forEach(([property, colorKey]) => {
-    if (theme.colors[colorKey]) {
-      element.style[property] = theme.colors[colorKey];
-    } else {
-      // Fallback: use colorKey directly if it's not a theme key
-      element.style[property] = colorKey;
-    }
+  element.style.color = getThemeColor('textAccent');
+  element.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
+}
+
+function applyThemeFramedDisplaySurface(element) {
+  if (!element) return;
+  element.style.border = '4px solid transparent';
+  element.style.borderImage = 'var(--ha-frame-1)';
+  element.style.backgroundColor = getThemeColor('sectionBackground');
+  element.style.color = getThemeColor('text');
+}
+
+function applyThemeMapFilterDropdownStyles(dropdownButton, dropdownMenu) {
+  if (dropdownButton) {
+    dropdownButton.style.border = `1px solid ${getThemeColor('border')}`;
+    dropdownButton.style.backgroundColor = getThemeColor('dropdownBackground');
+    dropdownButton.style.color = getThemeColor('text');
+  }
+  if (dropdownMenu) {
+    dropdownMenu.style.backgroundColor = getThemeColor('dropdownMenuBackground');
+    dropdownMenu.style.border = `1px solid ${getThemeColor('border')}`;
+    dropdownMenu.style.boxShadow = `0 4px 8px ${getThemeColor('dropdownShadow')}`;
+  }
+}
+
+function applyThemeResourceTotalColors() {
+  HUNT_ANALYZER_PANEL_RESOURCE_TOTALS.forEach(({ amountId, colorKey }) => {
+    const el = document.getElementById(amountId);
+    if (el) el.style.color = getThemeColor(colorKey);
   });
 }
 
-// =======================
-// 1.1. CSS Styles
-// =======================
-// Inject CSS styles for common UI patterns
-function injectHuntAnalyzerStyles() {
-    const styleId = 'hunt-analyzer-styles';
-    let style = document.getElementById(styleId);
-    
-    // Remove existing style if it exists (for theme updates)
-    if (style) {
-        style.remove();
-    }
-    
-    const theme = getCurrentTheme();
-    
-    style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = `
-        /* Hunt Analyzer Theme Variables */
+function applyThemeInfoTextColors() {
+  HUNT_ANALYZER_INFO_ELEMENT_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.color = getThemeColor('textInfo');
+  });
+}
+
+function buildHuntAnalyzerCssVariableBlock(theme) {
+  return `
         :root {
             --ha-panel-bg: ${theme.colors.panelBackground};
             --ha-panel-bg-image: ${theme.backgrounds.panel};
@@ -478,7 +483,29 @@ function injectHuntAnalyzerStyles() {
             --ha-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
             --ha-frame-1-pressed: url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill;
             --ha-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
-        }
+        }`;
+}
+
+// =======================
+// 1.1. CSS Styles
+// =======================
+// Inject CSS styles for common UI patterns
+function injectHuntAnalyzerStyles() {
+    const styleId = 'hunt-analyzer-styles';
+    let style = document.getElementById(styleId);
+    
+    // Remove existing style if it exists (for theme updates)
+    if (style) {
+        style.remove();
+    }
+    
+    const theme = getCurrentTheme();
+    
+    style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+        /* Hunt Analyzer Theme Variables */
+        ${buildHuntAnalyzerCssVariableBlock(theme)}
         
         /* Hunt Analyzer Common Styles */
         .ha-panel-container {
@@ -724,6 +751,33 @@ function getItemCategory(item) {
     }
 }
 
+function compareLootEntries(a, b) {
+    const categoryA = getItemCategory(a);
+    const categoryB = getItemCategory(b);
+    if (categoryA !== categoryB) return categoryA - categoryB;
+
+    const nameCompare = (a.originalName || '').localeCompare(b.originalName || '');
+    if (nameCompare !== 0) return nameCompare;
+
+    if ((a.rarity || 0) !== (b.rarity || 0)) return (b.rarity || 0) - (a.rarity || 0);
+
+    if ((a.gameId || 0) !== (b.gameId || 0)) return (a.gameId || 0) - (b.gameId || 0);
+    return 0;
+}
+
+function compareCreatureEntries(a, b) {
+    if (a.isShiny !== b.isShiny) return a.isShiny ? -1 : 1;
+    if (!!a.isSealed !== !!b.isSealed) return a.isSealed ? -1 : 1;
+
+    const nameCompare = (a.originalName || '').localeCompare(b.originalName || '');
+    if (nameCompare !== 0) return nameCompare;
+
+    if ((a.tierLevel || 0) !== (b.tierLevel || 0)) return (b.tierLevel || 0) - (a.tierLevel || 0);
+
+    if ((a.gameId || 0) !== (b.gameId || 0)) return (a.gameId || 0) - (b.gameId || 0);
+    return 0;
+}
+
 function applyFramedSectionStyles(element, { noTopMargin = false } = {}) {
     if (!element) return;
     element.style.backgroundImage = getThemeBackground('section');
@@ -944,6 +998,13 @@ const PANEL_ID = "mod-autoplay-analyzer-panel";
 const BUTTON_ID = "mod-autoplay-button";
 const DUST_ICON_SRC = '/assets/icons/dust.png';
 const SEALED_ICON_SRC = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
+const HUNT_ANALYZER_PANEL_RESOURCE_TOTALS = [
+    { amountId: 'mod-total-gold-display', totalKey: 'gold', iconSrc: '/assets/icons/goldpile.png', iconAlt: 'Gold', colorKey: 'textGold' },
+    { amountId: 'mod-total-dust-display', totalKey: 'dust', iconSrc: DUST_ICON_SRC, iconAlt: 'Dust', colorKey: 'textDust' },
+    { amountId: 'mod-total-shiny-display', totalKey: 'shiny', iconSrc: '/assets/icons/shiny-star.png', iconAlt: 'Shiny', colorKey: 'textShiny' },
+    { amountId: 'mod-total-sealed-display', totalKey: 'sealed', iconSrc: SEALED_ICON_SRC, iconAlt: 'Sealed', colorKey: 'textSealed' },
+    { amountId: 'mod-total-runes-display', totalKey: 'runes', iconSrc: 'https://bestiaryarena.com/assets/icons/rune-blank.png', iconAlt: 'Runes', colorKey: 'textRunes' }
+];
 const LAYOUT_MODES = {
     VERTICAL: 'vertical',
     HORIZONTAL: 'horizontal',
@@ -1198,19 +1259,24 @@ const HUNT_ANALYZER_PANEL_SETTINGS_KEY = 'hunt-analyzer-panel-settings';
 const HUNT_ANALYZER_STATE_KEY = 'huntAnalyzerState';
 const HUNT_ANALYZER_SETTINGS_KEY = 'huntAnalyzerSettings';
 
-// Maximum number of sessions to keep in storage (to prevent quota exceeded errors)
-const MAX_SESSIONS_TO_KEEP = 10000;
+// Maximum number of sessions to keep (memory + IndexedDB)
+const MAX_SESSIONS_TO_KEEP = 100000;
 
-// localStorage budget: stay under 4.5 MB to leave headroom for other keys
-const STORAGE_BUDGET_BYTES = 4.5 * 1024 * 1024;
-
-/** v2+: slim session loot/creatures; aggregate maps omitted and rebuilt from sessions on load. */
-const HUNT_ANALYZER_PERSIST_FORMAT_VERSION = 2;
+const HUNT_ANALYZER_IDB_NAME = 'bestiary-hunt-analyzer';
+const HUNT_ANALYZER_IDB_VERSION = 1;
+const HUNT_ANALYZER_IDB_STORE = 'sessions';
 
 let _needsAggregateFromSessions = false;
+let _persistenceLoadComplete = false;
+let _idbAvailable = true;
+let _saveInFlight = null;
+let _saveScheduleTimeoutId = null;
 
-function huntAnalyzerPersistUsesDerivedAggregates(version) {
-    return typeof version === 'number' && version >= 2;
+function getEmbeddedSessionsFromManifest(parsedData) {
+    if (!parsedData || !Array.isArray(parsedData.sessions) || parsedData.sessions.length === 0) {
+        return [];
+    }
+    return parsedData.sessions;
 }
 
 function isNumericHuntSpriteId(spriteId) {
@@ -1256,6 +1322,101 @@ let _persistenceLoadFailed = false;
 
 // Track consecutive save failures so we can warn the user
 let _consecutiveSaveFailures = 0;
+
+/** Numeric total fields persisted and merged on load (max of stored vs session-derived). */
+const HUNT_ANALYZER_TOTAL_COUNTER_KEYS = [
+    'gold', 'creatures', 'equipment', 'runes', 'dust', 'shiny', 'sealed',
+    'staminaSpent', 'staminaRecovered', 'experience', 'wins', 'losses'
+];
+
+function normalizeTotalsCounter(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
+function getTotalsSnapshot(source = HuntAnalyzerState.totals) {
+    const snap = {};
+    for (const key of HUNT_ANALYZER_TOTAL_COUNTER_KEYS) {
+        snap[key] = normalizeTotalsCounter(source[key]);
+    }
+    return snap;
+}
+
+function applyTotalsSnapshot(snapshot, target = HuntAnalyzerState.totals) {
+    for (const key of HUNT_ANALYZER_TOTAL_COUNTER_KEYS) {
+        target[key] = normalizeTotalsCounter(snapshot[key]);
+    }
+}
+
+function resetTotalsCounters() {
+    applyTotalsSnapshot({}, HuntAnalyzerState.totals);
+}
+
+function mergeTotalsPreferHigher(persisted, derived) {
+    const merged = {};
+    for (const key of HUNT_ANALYZER_TOTAL_COUNTER_KEYS) {
+        merged[key] = Math.max(
+            normalizeTotalsCounter(persisted?.[key]),
+            normalizeTotalsCounter(derived?.[key])
+        );
+    }
+    return merged;
+}
+
+function syncSessionCountFromPersistence() {
+    const fromSessions = HuntAnalyzerState.data.sessions.length;
+    const fromWinsLosses = (HuntAnalyzerState.totals.wins || 0) + (HuntAnalyzerState.totals.losses || 0);
+    HuntAnalyzerState.session.count = Math.max(
+        HuntAnalyzerState.session.count || 0,
+        fromSessions,
+        fromWinsLosses
+    );
+}
+
+function hasPersistedAnalyzerStats() {
+    const totals = HuntAnalyzerState.totals;
+    return HuntAnalyzerState.timeTracking.accumulatedTimeMs > 0
+        || HuntAnalyzerState.session.count > 0
+        || totals.gold > 0
+        || totals.wins > 0
+        || totals.losses > 0
+        || totals.experience > 0
+        || totals.staminaSpent > 0;
+}
+
+function rebuildAggregatesFromSessionsWithMerge() {
+    const persistedTotals = getTotalsSnapshot();
+    dataProcessor.aggregateData();
+    applyTotalsSnapshot(mergeTotalsPreferHigher(persistedTotals, getTotalsSnapshot()));
+    syncSessionCountFromPersistence();
+}
+
+/** Localized via mods.huntAnalyzer.storagePrunedWarning ({kept}, {total}) and storageResetDismissHint. */
+function getStoragePrunedWarning(kept, total) {
+    try {
+        if (typeof api !== 'undefined' && api?.i18n?.t) {
+            const msg = api.i18n.t('mods.huntAnalyzer.storagePrunedWarning');
+            if (msg && msg !== 'mods.huntAnalyzer.storagePrunedWarning') {
+                return msg.replace(/\{kept\}/g, String(kept)).replace(/\{total\}/g, String(total))
+                    + getHuntAnalyzerStorageResetDismissHint();
+            }
+        }
+    } catch (_e) { /* fall through */ }
+    return `Battle history capped at ${MAX_SESSIONS_TO_KEEP.toLocaleString()}: kept ${kept} of ${total} battles. Totals and playtime are unchanged.${getHuntAnalyzerStorageResetDismissHint()}`;
+}
+
+/** Localized via mods.huntAnalyzer.storageQuotaWarning and storageResetDismissHint. */
+function getStorageQuotaWarning() {
+    try {
+        if (typeof api !== 'undefined' && api?.i18n?.t) {
+            const msg = api.i18n.t('mods.huntAnalyzer.storageQuotaWarning');
+            if (msg && msg !== 'mods.huntAnalyzer.storageQuotaWarning') {
+                return msg + getHuntAnalyzerStorageResetDismissHint();
+            }
+        }
+    } catch (_e) { /* fall through */ }
+    return `Could not save analyzer data (storage quota). Totals and playtime may be saved; use Export to back up.${getHuntAnalyzerStorageResetDismissHint()}`;
+}
 
 /** Localized via mods.huntAnalyzer.storageResetDismissHint ({clearAll}) and clearAll. */
 function getHuntAnalyzerStorageResetDismissHint() {
@@ -1532,6 +1693,35 @@ function getFilteredTimeHours() {
   return totalTimeMs / (1000 * 60 * 60);
 }
 
+function getFilteredSessionCount() {
+  if (HuntAnalyzerState.ui.selectedMapFilter === "ALL") {
+    return HuntAnalyzerState.session.count;
+  }
+  return HuntAnalyzerState.data.sessions.filter(
+    (session) => session.roomName === HuntAnalyzerState.ui.selectedMapFilter
+  ).length;
+}
+
+function getFilteredDurationMs(filteredTimeHours = getFilteredTimeHours()) {
+  return filteredTimeHours * 60 * 60 * 1000;
+}
+
+function smoothHourlyRate(numerator, filteredTimeHours, roundFn = Math.floor) {
+  if (filteredTimeHours <= 0) return 0;
+  const actualRate = roundFn(numerator / filteredTimeHours);
+  return getSmoothedRate(actualRate, getFilteredDurationMs(filteredTimeHours));
+}
+
+function calculateSmoothedPanelRates(filteredTimeHours = getFilteredTimeHours()) {
+  return {
+    gold: smoothHourlyRate(HuntAnalyzerState.totals.gold, filteredTimeHours),
+    creature: smoothHourlyRate(HuntAnalyzerState.totals.creatures, filteredTimeHours),
+    equipment: smoothHourlyRate(HuntAnalyzerState.totals.equipment, filteredTimeHours, Math.round),
+    rune: smoothHourlyRate(HuntAnalyzerState.totals.runes, filteredTimeHours, Math.round),
+    staminaSpent: smoothHourlyRate(HuntAnalyzerState.totals.staminaSpent, filteredTimeHours)
+  };
+}
+
 // Format playtime for display
 function formatPlaytime(hours) {
   const totalSeconds = Math.floor(hours * 3600);
@@ -1747,7 +1937,6 @@ CONFIG.STAMINA_RECOVERY[5] = getPlayerMaxStamina();
 // Inject styles after state is defined (needed for theme system)
 injectHuntAnalyzerStyles();
 loadHuntAnalyzerSettings();
-loadHuntAnalyzerData();
 loadHuntAnalyzerState();
 
 // Ensure map filter is set to "ALL" on initialization
@@ -1906,159 +2095,55 @@ function createInventoryStyleItemPortrait(itemData) {
     return containerSlot;
 }
 
-// Function to regenerate all visual elements when game API is available
+function extractEquipmentStatFromGameData(gameId) {
+    if (!gameId || typeof globalThis.state?.utils?.getEquipment !== 'function') return null;
+    try {
+        const equipData = globalThis.state.utils.getEquipment(gameId);
+        if (!equipData) return null;
+        if (equipData.metadata?.stat) return equipData.metadata.stat;
+        if (equipData.stats?.length > 0) return equipData.stats[0].type;
+    } catch (_e) { /* ignore */ }
+    return null;
+}
+
+function shouldRegenerateLootVisual(value) {
+    if (!(value.visual instanceof HTMLElement)) return true;
+    return !!(value.isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && value.gameId);
+}
+
+function regenerateLootAggregateVisual(value) {
+    if (!shouldRegenerateLootVisual(value)) return false;
+    if (value.isEquipment && !value.gameId && value.spriteId) {
+        value.gameId = value.spriteId;
+    }
+    if (value.isEquipment && value.gameId && !value.stat) {
+        const stat = extractEquipmentStatFromGameData(value.gameId);
+        if (stat) value.stat = stat;
+    }
+    value.visual = resolveLootGridVisual(value);
+    return value.visual instanceof HTMLElement;
+}
+
+function regenerateCreatureAggregateVisual(value) {
+    if (value.visual instanceof HTMLElement) return false;
+    value.visual = resolveCreatureGridVisual(value);
+    return true;
+}
+
+// Regenerate missing or stale portrait visuals when the game API becomes available.
 function regenerateAllVisuals() {
     if (!globalThis.state?.utils) {
         console.log('[Hunt Analyzer] Game API not available yet, skipping visual regeneration');
         return;
     }
-    
-    
-    let regeneratedCount = 0;
-    
-    // Regenerate loot visuals using API components
-    HuntAnalyzerState.data.aggregatedLoot.forEach((value, key) => {
-        // Ensure equipment items have gameId set from spriteId
-        if (value.isEquipment && !value.gameId && value.spriteId) {
-            value.gameId = value.spriteId;
-        }
-        
-        // Always regenerate equipment items to use API components, even if they already have visuals
-        const shouldRegenerate = !(value.visual instanceof HTMLElement) || 
-                                (value.isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && value.gameId);
-        
-        if (shouldRegenerate) {
-            // Only log equipment items for debugging
-            if (value.isEquipment) {
-                // Equipment processing consolidated - see summary log at end
-            }
-            
-            let visualElement;
-            
-            // Handle equipment items specially using API components
-            if (value.isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && value.gameId) {
-                try {
-                    const equipData = globalThis.state.utils.getEquipment(value.gameId);
-                    if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
-                        const equipmentSpriteId = equipData.metadata.spriteId;
-                        
-                        // Extract stat information from equipment data
-                        let equipmentStat = null;
-                        if (equipData.metadata && equipData.metadata.stat) {
-                            equipmentStat = equipData.metadata.stat;
-                        } else if (equipData.stats && equipData.stats.length > 0) {
-                            // Get the primary stat (first stat in the array)
-                            equipmentStat = equipData.stats[0].type;
-                        }
-                        
-                        // Update the stat information in the stored data
-                        if (equipmentStat && !value.stat) {
-                            value.stat = equipmentStat;
-                        }
-                        
-                        // Use API component for equipment like Cyclopedia does
-                        if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
-                            try {
-                                const equipmentPortrait = api.ui.components.createItemPortrait({
-                                    itemId: equipmentSpriteId,
-                                    tier: value.rarity || 1
-                                });
-                                
-                                // Check if we got a valid DOM element
-                                if (equipmentPortrait && equipmentPortrait.nodeType) {
-                                    // If it's a button, get the first child (the actual portrait)
-                                    if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild) {
-                                        const firstChild = equipmentPortrait.firstChild;
-                                        if (firstChild && firstChild.nodeType) {
-                                            // Add count overlay to the portrait (bottom left like creatures)
-                                            const countSpan = createCountOverlay(value.count);
-                                            
-                                            firstChild.appendChild(countSpan);
-                                            
-                                            // Add stat icon to the portrait
-                                            addStatIconToPortrait(firstChild, equipmentStat);
-                                            
-                                            visualElement = firstChild;
-                                        }
-                                    } else {
-                                        // Use the portrait directly if it's not a button
-                                        addStatIconToPortrait(equipmentPortrait, equipmentStat);
-                                        visualElement = equipmentPortrait;
-                                    }
-                                }
-                            } catch (apiError) {
-                                console.warn('[Hunt Analyzer] Error creating API equipment portrait, falling back to sprite:', apiError);
-                            }
-                        }
-                        
-                        // Fallback to sprite system if API component failed
-                        if (!visualElement) {
-                            const spriteDiv = createItemSprite(equipmentSpriteId, value.originalName, value.rarity || 1);
-                            
-                            // Add count overlay to sprite (bottom left like creatures)
-                            const countSpan = createCountOverlay(value.count);
-                            
-                            // Make sure the sprite container has relative positioning for the count overlay
-                            spriteDiv.style.position = 'relative';
-                            spriteDiv.appendChild(countSpan);
-                            visualElement = spriteDiv;
-                        }
-                    }
-                } catch (e) { 
-                    console.error("[Hunt Analyzer] Error getting equipment data:", e); 
-                }
-            }
-            
-            // For non-equipment items, use the standard approach
-            if (!visualElement) {
-                // Pass the correct data structure to createInventoryStyleItemPortrait
-                const itemData = {
-                    spriteId: value.spriteId,
-                    src: value.src,
-                    spriteSrc: value.src,
-                    originalName: value.originalName,
-                    rarity: value.rarity,
-                    count: value.count
-                };
-                visualElement = createInventoryStyleItemPortrait(itemData);
-            }
-            
-            value.visual = visualElement;
-            regeneratedCount++;
-            // Only log equipment visuals for debugging
-            if (value.isEquipment) {
-                // Equipment visual generation consolidated - see summary log at end
-            }
-        }
+
+    HuntAnalyzerState.data.aggregatedLoot.forEach((value) => {
+        regenerateLootAggregateVisual(value);
     });
-    
-    // Regenerate creature visuals using API components
-    HuntAnalyzerState.data.aggregatedCreatures.forEach((value, key) => {
-        if (!(value.visual instanceof HTMLElement)) {
-            let visualElement;
-            if (value.gameId) {
-                // Create inventory-style creature portrait like the game does
-                visualElement = createInventoryStyleCreaturePortrait(value);
-            } else {
-                // Fallback emoji
-                const span = document.createElement('span');
-                span.textContent = '👾';
-                span.style.fontSize = '24px';
-                span.style.width = '36px';
-                span.style.height = '36px';
-                span.style.display = 'flex';
-                span.style.justifyContent = 'center';
-                span.style.alignItems = 'center';
-                visualElement = span;
-            }
-            
-            value.visual = visualElement;
-            regeneratedCount++;
-        }
+    HuntAnalyzerState.data.aggregatedCreatures.forEach((value) => {
+        regenerateCreatureAggregateVisual(value);
     });
-    
-    
-    // Re-render the display with updated visuals
+
     renderAllSessions();
 }
 
@@ -2089,142 +2174,211 @@ function cleanSessionData(sessions) {
     });
 }
 
-// Prune old sessions, keeping only the most recent N sessions
-function pruneOldSessions() {
-    if (HuntAnalyzerState.data.sessions.length <= MAX_SESSIONS_TO_KEEP) {
-        return 0; // No pruning needed
+/** Only known counter fields — avoids persisting stray props (e.g. legacy render-only `loot`). */
+function getTotalsSnapshotForPersistence() {
+    return getTotalsSnapshot();
+}
+
+function buildHuntAnalyzerManifestPayload() {
+    const mapTimeMsArray = Array.from(HuntAnalyzerState.timeTracking.mapTimeMs.entries());
+    return {
+        totals: getTotalsSnapshotForPersistence(),
+        session: HuntAnalyzerState.session,
+        timeTracking: {
+            currentMap: HuntAnalyzerState.timeTracking.currentMap,
+            mapStartTime: HuntAnalyzerState.timeTracking.mapStartTime,
+            accumulatedTimeMs: HuntAnalyzerState.timeTracking.accumulatedTimeMs,
+            mapTimeMs: mapTimeMsArray,
+            lastAutoplayTime: HuntAnalyzerState.timeTracking.lastAutoplayTime,
+            manualActive: false,
+            manualSessionStartMs: 0,
+            autoplayBaselineMinutes: HuntAnalyzerState.timeTracking.autoplayBaselineMinutes
+        }
+    };
+}
+
+function openHuntAnalyzerIndexedDb() {
+    return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') {
+            reject(new Error('IndexedDB unavailable'));
+            return;
+        }
+        const request = indexedDB.open(HUNT_ANALYZER_IDB_NAME, HUNT_ANALYZER_IDB_VERSION);
+        request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(HUNT_ANALYZER_IDB_STORE)) {
+                const store = db.createObjectStore(HUNT_ANALYZER_IDB_STORE, { keyPath: 'id', autoIncrement: true });
+                store.createIndex('timestamp', 'timestamp', { unique: false });
+                store.createIndex('roomName', 'roomName', { unique: false });
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+    });
+}
+
+function sortSessionsByTimestampAsc(sessions) {
+    return [...sessions].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+}
+
+function limitSessionsNewestFirst(sessions, maxCount = MAX_SESSIONS_TO_KEEP) {
+    if (sessions.length <= maxCount) return sessions;
+    return [...sessions]
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .slice(0, maxCount);
+}
+
+/** Trim in-memory sessions to MAX_SESSIONS_TO_KEEP (newest first). Returns number removed. */
+function applySessionCapToState() {
+    const before = HuntAnalyzerState.data.sessions.length;
+    if (before <= MAX_SESSIONS_TO_KEEP) {
+        return 0;
     }
-    
-    const originalCount = HuntAnalyzerState.data.sessions.length;
-    // Sort by timestamp (newest first) and keep only the most recent ones
-    HuntAnalyzerState.data.sessions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-    HuntAnalyzerState.data.sessions = HuntAnalyzerState.data.sessions.slice(0, MAX_SESSIONS_TO_KEEP);
-    const prunedCount = originalCount - HuntAnalyzerState.data.sessions.length;
-    
+    HuntAnalyzerState.data.sessions = limitSessionsNewestFirst(HuntAnalyzerState.data.sessions);
+    const prunedCount = before - HuntAnalyzerState.data.sessions.length;
     console.log(`[Hunt Analyzer] Pruned ${prunedCount} old sessions (kept ${HuntAnalyzerState.data.sessions.length} most recent)`);
     return prunedCount;
 }
 
-/** Only known counter fields — avoids persisting stray props (e.g. legacy render-only `loot`). */
-function getTotalsSnapshotForPersistence() {
-    const s = HuntAnalyzerState.totals;
-    return {
-        gold: s.gold,
-        creatures: s.creatures,
-        equipment: s.equipment,
-        runes: s.runes,
-        dust: s.dust,
-        shiny: s.shiny,
-        sealed: s.sealed,
-        staminaSpent: s.staminaSpent,
-        staminaRecovered: s.staminaRecovered,
-        experience: s.experience,
-        wins: s.wins,
-        losses: s.losses
-    };
+async function idbReplaceAllSessions(sessions) {
+    if (!_idbAvailable) return;
+    const limited = limitSessionsNewestFirst(sessions);
+    const db = await openHuntAnalyzerIndexedDb();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction(HUNT_ANALYZER_IDB_STORE, 'readwrite');
+        const store = tx.objectStore(HUNT_ANALYZER_IDB_STORE);
+        store.clear();
+        for (const session of limited) {
+            const row = { ...session };
+            delete row.id;
+            store.add(row);
+        }
+        tx.oncomplete = () => {
+            db.close();
+            resolve();
+        };
+        tx.onerror = () => {
+            db.close();
+            reject(tx.error || new Error('IndexedDB write failed'));
+        };
+        tx.onabort = () => {
+            db.close();
+            reject(tx.error || new Error('IndexedDB transaction aborted'));
+        };
+    });
 }
 
-// Save Hunt Analyzer data to localStorage
-function saveHuntAnalyzerData() {
+async function idbLoadAllSessions() {
+    if (!_idbAvailable) return [];
+    const db = await openHuntAnalyzerIndexedDb();
+    try {
+        const rows = await new Promise((resolve, reject) => {
+            const tx = db.transaction(HUNT_ANALYZER_IDB_STORE, 'readonly');
+            const req = tx.objectStore(HUNT_ANALYZER_IDB_STORE).getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error || new Error('IndexedDB read failed'));
+            tx.onerror = () => reject(tx.error);
+        });
+        return sortSessionsByTimestampAsc(rows.map((row) => {
+            const { id, ...session } = row;
+            return session;
+        }));
+    } finally {
+        db.close();
+    }
+}
+
+async function idbClearAllSessions() {
+    if (!_idbAvailable) return;
+    const db = await openHuntAnalyzerIndexedDb();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction(HUNT_ANALYZER_IDB_STORE, 'readwrite');
+        tx.objectStore(HUNT_ANALYZER_IDB_STORE).clear();
+        tx.oncomplete = () => {
+            db.close();
+            resolve();
+        };
+        tx.onerror = () => {
+            db.close();
+            reject(tx.error);
+        };
+    });
+}
+
+async function saveHuntAnalyzerDataAsync() {
     if (_persistenceLoadFailed) {
         console.warn('[Hunt Analyzer] Skipping save — previous load failed. This prevents overwriting recoverable data.');
+        return;
+    }
+    if (!_persistenceLoadComplete) {
         return;
     }
 
     try {
         snapshotIntoTotals();
-        pruneOldSessions();
+        const beforePrune = HuntAnalyzerState.data.sessions.length;
+        const prunedInMemory = applySessionCapToState();
 
         const cleanSessions = cleanSessionData(HuntAnalyzerState.data.sessions);
+        const manifest = buildHuntAnalyzerManifestPayload();
 
-        const mapTimeSnapshot = new Map(HuntAnalyzerState.timeTracking.mapTimeMs);
-        const mapTimeMsArray = Array.from(mapTimeSnapshot.entries());
+        localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(manifest));
 
-        const buildPayload = (sessions) => ({
-            v: HUNT_ANALYZER_PERSIST_FORMAT_VERSION,
-            sessions,
-            totals: getTotalsSnapshotForPersistence(),
-            aggregatedLoot: [],
-            aggregatedCreatures: [],
-            session: HuntAnalyzerState.session,
-            timeTracking: {
-                currentMap: HuntAnalyzerState.timeTracking.currentMap,
-                mapStartTime: HuntAnalyzerState.timeTracking.mapStartTime,
-                accumulatedTimeMs: HuntAnalyzerState.timeTracking.accumulatedTimeMs,
-                mapTimeMs: mapTimeMsArray,
-                lastAutoplayTime: HuntAnalyzerState.timeTracking.lastAutoplayTime,
-                manualActive: false,
-                manualSessionStartMs: 0,
-                autoplayBaselineMinutes: HuntAnalyzerState.timeTracking.autoplayBaselineMinutes
-            }
-        });
-
-        let json = JSON.stringify(buildPayload(cleanSessions));
-
-        // Pre-flight size check: progressively reduce sessions until we fit
-        let sessionsToSave = cleanSessions;
-        let prunedForSize = false;
-        if (json.length > STORAGE_BUDGET_BYTES) {
-            console.warn(`[Hunt Analyzer] Payload too large (${(json.length / 1024 / 1024).toFixed(2)} MB), pruning sessions to fit...`);
-            const sortedSessions = [...cleanSessions].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-            // Binary search for the largest session count that fits
-            let lo = 0, hi = sortedSessions.length;
-            while (lo < hi) {
-                const mid = Math.ceil((lo + hi) / 2);
-                const testJson = JSON.stringify(buildPayload(sortedSessions.slice(0, mid)));
-                if (testJson.length <= STORAGE_BUDGET_BYTES) {
-                    lo = mid;
-                } else {
-                    hi = mid - 1;
+        if (_idbAvailable) {
+            try {
+                await idbReplaceAllSessions(cleanSessions);
+                if (prunedInMemory > 0) {
+                    showSaveWarning(getStoragePrunedWarning(
+                        HuntAnalyzerState.data.sessions.length,
+                        beforePrune
+                    ));
                 }
+            } catch (idbError) {
+                console.error('[Hunt Analyzer] IndexedDB save failed:', idbError);
+                _consecutiveSaveFailures++;
+                showSaveWarning(`Battle history could not be saved to IndexedDB. Totals and playtime were saved.${getHuntAnalyzerStorageResetDismissHint()}`);
             }
-
-            if (lo === 0) {
-                json = JSON.stringify(buildPayload([]));
-                sessionsToSave = [];
-                console.warn('[Hunt Analyzer] Dropped sessions to fit in storage. Totals preserved.');
-            } else {
-                sessionsToSave = sortedSessions.slice(0, lo);
-                json = JSON.stringify(buildPayload(sessionsToSave));
-                console.warn(`[Hunt Analyzer] Pruned sessions from ${cleanSessions.length} to ${lo} to fit storage budget`);
-            }
-            prunedForSize = true;
         }
 
-        try {
-            localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, json);
-            _consecutiveSaveFailures = 0;
-            logPersistenceOperation('Data save');
-            if (prunedForSize) {
-                showSaveWarning(`Storage full: kept ${sessionsToSave.length} of ${cleanSessions.length} sessions. Totals are safe.${getHuntAnalyzerStorageResetDismissHint()}`);
-            }
-        } catch (quotaError) {
-            if (quotaError.name === 'QuotaExceededError' || quotaError.message?.includes('quota')) {
-                console.warn('[Hunt Analyzer] Quota exceeded despite pre-flight check, saving totals only...');
-                const minimalData = buildPayload([]);
-                try {
-                    localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(minimalData));
-                    logPersistenceOperation('Data save (minimal — totals only)');
-                    showSaveWarning(`Storage quota exceeded. Session details dropped but totals are preserved.${getHuntAnalyzerStorageResetDismissHint()}`);
-                } catch (finalError) {
-                    _consecutiveSaveFailures++;
-                    console.error('[Hunt Analyzer] Complete save failure:', finalError);
-                    logPersistenceOperation('Data save', false);
-                    showSaveWarning(`Save failed! Data may be lost on refresh. Use "Copy Log" to back up.${getHuntAnalyzerStorageResetDismissHint()}`);
-                }
-            } else {
-                throw quotaError;
-            }
-        }
+        _consecutiveSaveFailures = 0;
+        logPersistenceOperation('Data save');
     } catch (error) {
         _consecutiveSaveFailures++;
         console.error('[Hunt Analyzer] Error saving data:', error);
         logPersistenceOperation('Data save', false);
-        if (_consecutiveSaveFailures >= 3) {
+        if (error.name === 'QuotaExceededError' || error.message?.includes('quota')) {
+            showSaveWarning(getStorageQuotaWarning());
+        } else if (_consecutiveSaveFailures >= 3) {
             showSaveWarning(`Multiple save failures detected. Use "Copy Log" to back up your data.${getHuntAnalyzerStorageResetDismissHint()}`);
         }
     }
+}
+
+function saveHuntAnalyzerData() {
+    if (_saveScheduleTimeoutId) {
+        clearTimeout(_saveScheduleTimeoutId);
+    }
+    _saveScheduleTimeoutId = setTimeout(() => {
+        _saveScheduleTimeoutId = null;
+        if (_saveInFlight) {
+            _saveInFlight.then(() => saveHuntAnalyzerDataAsync()).catch(() => {});
+            return;
+        }
+        _saveInFlight = saveHuntAnalyzerDataAsync().finally(() => {
+            _saveInFlight = null;
+        });
+    }, 50);
+}
+
+async function flushHuntAnalyzerDataAsync() {
+    if (_saveScheduleTimeoutId) {
+        clearTimeout(_saveScheduleTimeoutId);
+        _saveScheduleTimeoutId = null;
+    }
+    if (_saveInFlight) {
+        await _saveInFlight.catch(() => {});
+    }
+    await saveHuntAnalyzerDataAsync();
 }
 
 function showSaveWarning(message) {
@@ -2235,128 +2389,211 @@ function showSaveWarning(message) {
     console.warn(`[Hunt Analyzer] ⚠ ${message}`);
 }
 
-// Load Hunt Analyzer data from localStorage
-function loadHuntAnalyzerData() {
+function applyHuntAnalyzerManifest(parsedData) {
+    if (parsedData.totals) {
+        Object.assign(HuntAnalyzerState.totals, parsedData.totals);
+        delete HuntAnalyzerState.totals.loot;
+    }
+
+    HuntAnalyzerState.data.aggregatedLoot = new Map();
+    HuntAnalyzerState.data.aggregatedCreatures = new Map();
+
+    if (parsedData.session) {
+        Object.assign(HuntAnalyzerState.session, parsedData.session);
+    }
+
+    if (parsedData.timeTracking) {
+        HuntAnalyzerState.timeTracking.currentMap = parsedData.timeTracking.currentMap || null;
+        HuntAnalyzerState.timeTracking.mapStartTime = parsedData.timeTracking.mapStartTime || 0;
+        HuntAnalyzerState.timeTracking.accumulatedTimeMs = parsedData.timeTracking.accumulatedTimeMs || 0;
+        HuntAnalyzerState.timeTracking.lastAutoplayTime = parsedData.timeTracking.lastAutoplayTime || 0;
+        HuntAnalyzerState.timeTracking.manualActive = false;
+        HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+
+        if (parsedData.timeTracking.mapTimeMs && Array.isArray(parsedData.timeTracking.mapTimeMs)) {
+            HuntAnalyzerState.timeTracking.mapTimeMs = new Map(parsedData.timeTracking.mapTimeMs);
+        }
+
+        const mode = getCurrentMode();
+        if (mode === 'autoplay') {
+            HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
+            const immediateAutoplayTime = getAutoplaySessionTime();
+            if (immediateAutoplayTime && immediateAutoplayTime > 0) {
+                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = immediateAutoplayTime;
+                HuntAnalyzerState.timeTracking.lastAutoplayTime = immediateAutoplayTime;
+            } else {
+                setTimeout(() => {
+                    const currentAutoplayTime = getAutoplaySessionTime();
+                    if (currentAutoplayTime && currentAutoplayTime > 0) {
+                        HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
+                        HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
+                    } else {
+                        HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
+                        HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
+                        HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = false;
+                    }
+                }, 100);
+            }
+        } else {
+            HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = parsedData.timeTracking.autoplayBaselineMinutes || 0;
+            HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
+        }
+    }
+}
+
+function loadHuntAnalyzerManifestFromLocalStorage() {
+    const savedData = localStorage.getItem(HUNT_ANALYZER_STORAGE_KEY);
+    if (!savedData) return null;
+    return JSON.parse(savedData);
+}
+
+async function migrateEmbeddedSessionsToIndexedDb(embeddedSessions) {
+    if (!embeddedSessions || embeddedSessions.length === 0) return;
+    const clean = cleanSessionData(embeddedSessions);
+    await idbReplaceAllSessions(clean);
+    console.log(`[Hunt Analyzer] Migrated ${clean.length} battles from localStorage manifest to IndexedDB`);
+}
+
+async function loadSessionsIntoMemoryFromIndexedDb() {
+    if (!_idbAvailable) return;
+    HuntAnalyzerState.data.sessions = await idbLoadAllSessions();
+    if (applySessionCapToState() > 0) {
+        await idbReplaceAllSessions(cleanSessionData(HuntAnalyzerState.data.sessions));
+    }
+    if (HuntAnalyzerState.data.sessions.length > 0) {
+        _needsAggregateFromSessions = true;
+    }
+}
+
+async function completeHuntAnalyzerPersistenceLoad() {
+    if (!HuntAnalyzerState.settings.persistData) {
+        _persistenceLoadComplete = true;
+        return false;
+    }
+
     try {
-        // Check if persistence is enabled before loading
-        if (!HuntAnalyzerState.settings.persistData) {
-            // Keep existing persisted data intact when persistence is disabled.
-            // This prevents accidental data loss on refresh if settings fail to load.
+        if (typeof indexedDB === 'undefined') {
+            _idbAvailable = false;
+            console.warn('[Hunt Analyzer] IndexedDB unavailable — battle history will not persist across refresh');
+        }
+
+        const parsedData = loadHuntAnalyzerManifestFromLocalStorage();
+        if (!parsedData) {
+            _persistenceLoadComplete = true;
             return false;
         }
-        
-        const savedData = localStorage.getItem(HUNT_ANALYZER_STORAGE_KEY);
-        if (savedData) {
-            const parsedData = JSON.parse(savedData);
-            const persistV = typeof parsedData.v === 'number' ? parsedData.v : 1;
-            const useDerivedAggregates = huntAnalyzerPersistUsesDerivedAggregates(persistV);
 
-            // Restore sessions
-            if (parsedData.sessions) {
-                HuntAnalyzerState.data.sessions = parsedData.sessions;
-                // Prune old sessions if loaded data exceeds limit
-                if (HuntAnalyzerState.data.sessions.length > MAX_SESSIONS_TO_KEEP) {
-                    console.log(`[Hunt Analyzer] Loaded ${HuntAnalyzerState.data.sessions.length} sessions, pruning to ${MAX_SESSIONS_TO_KEEP} most recent`);
-                    pruneOldSessions();
-                }
-            }
+        applyHuntAnalyzerManifest(parsedData);
 
-            // Restore totals
-            if (parsedData.totals) {
-                Object.assign(HuntAnalyzerState.totals, parsedData.totals);
-                delete HuntAnalyzerState.totals.loot;
-            }
+        const embeddedSessions = getEmbeddedSessionsFromManifest(parsedData);
 
-            if (useDerivedAggregates) {
-                HuntAnalyzerState.data.aggregatedLoot = new Map();
-                HuntAnalyzerState.data.aggregatedCreatures = new Map();
-                if (HuntAnalyzerState.data.sessions.length > 0) {
-                    _needsAggregateFromSessions = true;
-                }
-            } else {
-                // Restore aggregated data (convert arrays back to Maps, visuals will be regenerated later)
-                if (parsedData.aggregatedLoot) {
-                    HuntAnalyzerState.data.aggregatedLoot = new Map(parsedData.aggregatedLoot);
-                }
-                if (parsedData.aggregatedCreatures) {
-                    HuntAnalyzerState.data.aggregatedCreatures = new Map(parsedData.aggregatedCreatures);
-                }
-            }
-
-            // Restore session state
-            if (parsedData.session) {
-                Object.assign(HuntAnalyzerState.session, parsedData.session);
-            }
-            
-            // Restore timeTracking data
-            if (parsedData.timeTracking) {
-                HuntAnalyzerState.timeTracking.currentMap = parsedData.timeTracking.currentMap || null;
-                HuntAnalyzerState.timeTracking.mapStartTime = parsedData.timeTracking.mapStartTime || 0;
-                HuntAnalyzerState.timeTracking.accumulatedTimeMs = parsedData.timeTracking.accumulatedTimeMs || 0;
-                HuntAnalyzerState.timeTracking.lastAutoplayTime = parsedData.timeTracking.lastAutoplayTime || 0;
-                // Force manual timing to false on reload (consistent with save behavior)
-                HuntAnalyzerState.timeTracking.manualActive = false;
-                HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
-                
-                // Convert array back to Map for mapTimeMs
-                if (parsedData.timeTracking.mapTimeMs && Array.isArray(parsedData.timeTracking.mapTimeMs)) {
-                    HuntAnalyzerState.timeTracking.mapTimeMs = new Map(parsedData.timeTracking.mapTimeMs);
-                }
-                
-                // Fix for reload bugs: Reset autoplay tracking state to match current DOM state
-                // This prevents counting time that passed while page was closed or incorrect accumulation
-                const mode = getCurrentMode();
-                if (mode === 'autoplay') {
-                    // Immediately suppress autoplay reset detection to prevent race condition
-                    // The mode subscription might fire before setTimeout completes
-                    HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
-                    
-                    // Try to get current DOM timer immediately (might not be ready yet)
-                    const immediateAutoplayTime = getAutoplaySessionTime();
-                    if (immediateAutoplayTime && immediateAutoplayTime > 0) {
-                        // DOM is ready, sync immediately
-                        HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = immediateAutoplayTime;
-                        HuntAnalyzerState.timeTracking.lastAutoplayTime = immediateAutoplayTime;
-                    } else {
-                        // DOM not ready yet, wait a bit then sync
-                        setTimeout(() => {
-                            const currentAutoplayTime = getAutoplaySessionTime();
-                            if (currentAutoplayTime && currentAutoplayTime > 0) {
-                                // Sync baseline and lastAutoplayTime to current DOM timer
-                                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
-                                HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
-                            } else {
-                                // If DOM timer still not available, reset everything to 0 (fresh start)
-                                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
-                                HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
-                                HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = false;
-                            }
-                        }, 100);
-                    }
-                } else {
-                    // Not in autoplay mode, restore saved baseline (will be reset when autoplay starts)
-                    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = parsedData.timeTracking.autoplayBaselineMinutes || 0;
-                    // Reset lastAutoplayTime to 0 since we're not in autoplay mode
-                    HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
-                }
-            }
-            
-            return true;
+        if (embeddedSessions.length > 0 && _idbAvailable) {
+            await migrateEmbeddedSessionsToIndexedDb(embeddedSessions);
+            localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(buildHuntAnalyzerManifestPayload()));
+            await loadSessionsIntoMemoryFromIndexedDb();
+        } else if (_idbAvailable) {
+            await loadSessionsIntoMemoryFromIndexedDb();
+        } else if (embeddedSessions.length > 0) {
+            HuntAnalyzerState.data.sessions = limitSessionsNewestFirst(embeddedSessions);
+            _needsAggregateFromSessions = true;
         }
+
+        syncSessionCountFromPersistence();
+        finalizeAggregatesAfterLoadIfNeeded();
+        _persistenceLoadComplete = true;
+        logPersistenceOperation('Data load');
+        return true;
     } catch (error) {
-        console.error('[Hunt Analyzer] Error loading data:', error);
+        console.error('[Hunt Analyzer] Error loading persisted data:', error);
         logPersistenceOperation('Data load', false);
-        // Block auto-save from overwriting the (possibly recoverable) localStorage entry
         _persistenceLoadFailed = true;
-        console.warn('[Hunt Analyzer] Load failed — auto-save is BLOCKED to protect existing localStorage data.');
+        _persistenceLoadComplete = true;
+        console.warn('[Hunt Analyzer] Load failed — auto-save is BLOCKED to protect existing data.');
+        return false;
     }
-    return false;
+}
+
+async function loadAllPersistedSessions(manifest = loadHuntAnalyzerManifestFromLocalStorage()) {
+    if (_idbAvailable) {
+        try {
+            const fromIdb = await idbLoadAllSessions();
+            if (fromIdb.length) return fromIdb;
+        } catch (e) {
+            console.warn('[Hunt Analyzer] Could not read IndexedDB sessions:', e);
+        }
+    }
+    return getEmbeddedSessionsFromManifest(manifest);
+}
+
+async function exportHuntAnalyzerDataForBackup() {
+    await flushHuntAnalyzerDataAsync();
+    const manifest = loadHuntAnalyzerManifestFromLocalStorage() || buildHuntAnalyzerManifestPayload();
+    const sessions = await loadAllPersistedSessions(manifest);
+    const data = {
+        ...buildHuntAnalyzerManifestPayload(),
+        totals: manifest.totals || getTotalsSnapshotForPersistence(),
+        session: manifest.session || HuntAnalyzerState.session,
+        timeTracking: manifest.timeTracking || buildHuntAnalyzerManifestPayload().timeTracking,
+        sessions: cleanSessionData(sessions)
+    };
+    const stateRaw = localStorage.getItem(HUNT_ANALYZER_STATE_KEY);
+    const settingsRaw = localStorage.getItem(HUNT_ANALYZER_SETTINGS_KEY);
+    return {
+        data,
+        state: stateRaw ? JSON.parse(stateRaw) : null,
+        settings: settingsRaw ? JSON.parse(settingsRaw) : null
+    };
+}
+
+async function importHuntAnalyzerDataFromBackup(huntAnalyzerData) {
+    if (!huntAnalyzerData || typeof huntAnalyzerData !== 'object') return;
+
+    if (huntAnalyzerData.settings) {
+        localStorage.setItem(HUNT_ANALYZER_SETTINGS_KEY, JSON.stringify(huntAnalyzerData.settings));
+        loadHuntAnalyzerSettings();
+    }
+    if (huntAnalyzerData.state) {
+        localStorage.setItem(HUNT_ANALYZER_STATE_KEY, JSON.stringify(huntAnalyzerData.state));
+        loadHuntAnalyzerState();
+    }
+
+    if (huntAnalyzerData.data) {
+        const incoming = huntAnalyzerData.data;
+        const sessions = Array.isArray(incoming.sessions) ? incoming.sessions : [];
+        const manifest = buildHuntAnalyzerManifestPayload();
+        if (incoming.totals) manifest.totals = incoming.totals;
+        if (incoming.session) manifest.session = incoming.session;
+        if (incoming.timeTracking) manifest.timeTracking = incoming.timeTracking;
+        localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(manifest));
+
+        if (_idbAvailable) {
+            if (sessions.length > 0) {
+                await idbReplaceAllSessions(cleanSessionData(sessions));
+            } else {
+                await idbClearAllSessions();
+            }
+        }
+
+        _persistenceLoadFailed = false;
+        _needsAggregateFromSessions = true;
+        HuntAnalyzerState.data.sessions = [];
+        applyHuntAnalyzerManifest(manifest);
+        if (_idbAvailable) {
+            await loadSessionsIntoMemoryFromIndexedDb();
+        } else {
+            HuntAnalyzerState.data.sessions = sessions;
+        }
+        syncSessionCountFromPersistence();
+        finalizeAggregatesAfterLoadIfNeeded();
+        _persistenceLoadComplete = true;
+    }
 }
 
 function flushPersistenceIfEnabled() {
     if (!HuntAnalyzerState.settings.persistData) return;
-    saveHuntAnalyzerData();
-    saveHuntAnalyzerState();
+    flushHuntAnalyzerDataAsync().then(() => saveHuntAnalyzerState()).catch((e) => {
+        console.warn('[Hunt Analyzer] flushPersistenceIfEnabled failed:', e);
+    });
 }
 
 function debouncedPersistenceFlush(delayMs = 150) {
@@ -2420,8 +2657,8 @@ function loadHuntAnalyzerSettings() {
 // Apply theme and update UI
 function applyTheme(themeName, updateExistingPanel = true) {
     if (!HUNT_ANALYZER_THEMES[themeName]) {
-        console.warn(`[Hunt Analyzer] Unknown theme: ${themeName}, using 'original'`);
-        themeName = 'original';
+        console.warn(`[Hunt Analyzer] Unknown theme: ${themeName}, using '${HUNT_ANALYZER_DEFAULT_THEME_KEY}'`);
+        themeName = HUNT_ANALYZER_DEFAULT_THEME_KEY;
     }
     
     HuntAnalyzerState.settings.theme = themeName;
@@ -2445,33 +2682,8 @@ function applyTheme(themeName, updateExistingPanel = true) {
 function updatePanelThemeColors(panel) {
     if (!panel) return;
     
-    // Update resource displays
-    const goldAmountSpan = document.getElementById('mod-total-gold-display');
-    if (goldAmountSpan) goldAmountSpan.style.color = getThemeColor('textGold');
-    
-    const dustAmountSpan = document.getElementById('mod-total-dust-display');
-    if (dustAmountSpan) dustAmountSpan.style.color = getThemeColor('textDust');
-    
-    const shinyAmountSpan = document.getElementById('mod-total-shiny-display');
-    if (shinyAmountSpan) shinyAmountSpan.style.color = getThemeColor('textShiny');
-
-    const sealedAmountSpan = document.getElementById('mod-total-sealed-display');
-    if (sealedAmountSpan) sealedAmountSpan.style.color = getThemeColor('textSealed');
-    
-    const runesAmountSpan = document.getElementById('mod-total-runes-display');
-    if (runesAmountSpan) runesAmountSpan.style.color = getThemeColor('textRunes');
-    
-    // Update info text elements
-    const infoElements = [
-        'mod-autoplay-counter',
-        'mod-playtime-display',
-        'mod-stamina-display',
-        'mod-win-loss-display'
-    ];
-    infoElements.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.style.color = getThemeColor('textInfo');
-    });
+    applyThemeResourceTotalColors();
+    applyThemeInfoTextColors();
     
     // Update stats text
     const statsElements = panel.querySelectorAll('.ha-stats-text');
@@ -2479,20 +2691,10 @@ function updatePanelThemeColors(panel) {
         el.style.color = getThemeColor('textStats');
     });
     
-    // Update dropdown
-    const dropdownButton = document.getElementById('mod-map-filter-dropdown-button');
-    if (dropdownButton) {
-        dropdownButton.style.border = `1px solid ${getThemeColor('border')}`;
-        dropdownButton.style.backgroundColor = getThemeColor('dropdownBackground');
-        dropdownButton.style.color = getThemeColor('text');
-    }
-    
-    const dropdownMenu = document.getElementById('mod-map-filter-dropdown-menu');
-    if (dropdownMenu) {
-        dropdownMenu.style.backgroundColor = getThemeColor('dropdownMenuBackground');
-        dropdownMenu.style.border = `1px solid ${getThemeColor('border')}`;
-        dropdownMenu.style.boxShadow = `0 4px 8px ${getThemeColor('dropdownShadow')}`;
-    }
+    applyThemeMapFilterDropdownStyles(
+        document.getElementById('mod-map-filter-dropdown-button'),
+        document.getElementById('mod-map-filter-dropdown-menu')
+    );
     
     // Update live display section background
     const liveDisplaySection = panel.querySelector('.live-display-section');
@@ -2506,21 +2708,8 @@ function updatePanelThemeColors(panel) {
         applyFramedSectionStyles(lootContainer, { noTopMargin: true });
     }
     
-    // Update loot display div
-    const lootDisplayDiv = document.getElementById('mod-loot-display');
-    if (lootDisplayDiv) {
-        lootDisplayDiv.style.border = '4px solid transparent';
-        lootDisplayDiv.style.borderImage = 'var(--ha-frame-1)';
-        lootDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
-        lootDisplayDiv.style.color = getThemeColor('text');
-    }
-    
-    // Update loot title
-    const lootTitle = document.getElementById('mod-loot-title');
-    if (lootTitle) {
-        lootTitle.style.color = getThemeColor('textAccent');
-        lootTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
-    }
+      applyThemeFramedDisplaySurface(document.getElementById('mod-loot-display'));
+    applyAccentTitleStyle(document.getElementById('mod-loot-title'));
     
     // Update creature drop container
     const creatureDropContainer = panel.querySelector('.creature-drop-container');
@@ -2528,21 +2717,8 @@ function updatePanelThemeColors(panel) {
         applyFramedSectionStyles(creatureDropContainer, { noTopMargin: true });
     }
     
-    // Update creature drop display div
-    const creatureDropDisplayDiv = document.getElementById('mod-creature-drop-display');
-    if (creatureDropDisplayDiv) {
-        creatureDropDisplayDiv.style.border = '4px solid transparent';
-        creatureDropDisplayDiv.style.borderImage = 'var(--ha-frame-1)';
-        creatureDropDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
-        creatureDropDisplayDiv.style.color = getThemeColor('text');
-    }
-    
-    // Update creature drop title
-    const creatureDropTitle = document.getElementById('mod-creature-drops-title');
-    if (creatureDropTitle) {
-        creatureDropTitle.style.color = getThemeColor('textAccent');
-        creatureDropTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
-    }
+    applyThemeFramedDisplaySurface(document.getElementById('mod-creature-drop-display'));
+    applyAccentTitleStyle(document.getElementById('mod-creature-drops-title'));
     
     // Update map filter container
     const mapFilterContainer = panel.querySelector('.map-filter-container');
@@ -2550,11 +2726,9 @@ function updatePanelThemeColors(panel) {
         applyFramedSectionStyles(mapFilterContainer, { noTopMargin: true });
     }
     
-    // Update map filter title (if it exists as a separate element)
     const mapFilterTitle = panel.querySelector('.map-filter-container h3');
     if (mapFilterTitle && !mapFilterTitle.id) {
-        mapFilterTitle.style.color = getThemeColor('textAccent');
-        mapFilterTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
+        applyAccentTitleStyle(mapFilterTitle);
     }
     
     // Update button container
@@ -2669,8 +2843,94 @@ const UIElements = {
 };
 
 // =======================
-// 3.0. Legacy Utility Functions (for backward compatibility)
+// 3.0. Game integration helpers
 // =======================
+
+const HUNT_ANALYZER_RUNE_LOOKUP_PATTERNS = [
+    { patterns: ['blankrune', 'blank'], key: 'runeBlank' },
+    { patterns: ['avaricerune', 'avarice'], key: 'runeAvarice' },
+    { patterns: ['recyclerune', 'recycle'], key: 'runeRecycle' },
+    { patterns: ['hitpointsrune', 'hitpoints', 'hprune'], key: 'runeHp' },
+    { patterns: ['abilitypowerrune', 'abilitypower', 'aprune'], key: 'runeAp' },
+    { patterns: ['attackdamagerune', 'attackdamage', 'adrune'], key: 'runeAd' },
+    { patterns: ['armorrune', 'armor', 'arrune'], key: 'runeAr' },
+    { patterns: ['magicresistrune', 'magicresist', 'mrrune'], key: 'runeMr' }
+];
+
+const HUNT_ANALYZER_TIERED_CONSUMABLE_RULES = [
+    { hints: ['dicemanipulator', 'dice'], keyPrefix: 'diceManipulator' },
+    { hints: ['stamina'], keyPrefix: 'stamina' },
+    { hints: ['summonscroll', 'summon'], keyPrefix: 'summonScroll' },
+    { hints: ['insightstone', 'insight'], keyPrefix: 'insightStone' }
+];
+
+const HUNT_ANALYZER_RUNE_SPRITE_KEYS = [
+    ['rune-avarice', 'runeAvarice'],
+    ['rune-recycle', 'runeRecycle'],
+    ['rune-hp', 'runeHp'],
+    ['rune-ap', 'runeAp'],
+    ['rune-ad', 'runeAd'],
+    ['rune-ar', 'runeAr'],
+    ['rune-mr', 'runeMr'],
+    ['rune-blank', 'runeBlank']
+];
+
+function matchesAnyNameHint(value, hints) {
+    if (!value) return false;
+    return hints.some((hint) => value.includes(hint));
+}
+
+function matchesConsumableRule(normalizedItemName, normalizedTooltip, hints) {
+    return matchesAnyNameHint(normalizedItemName, hints)
+        || matchesAnyNameHint(normalizedTooltip, hints);
+}
+
+function lookupTieredConsumableTooltip(inventoryDB, keyPrefix, item) {
+    const existingRarity = item?.rarityLevel || item?.tier || 0;
+    const tierKey = existingRarity >= 1 && existingRarity <= 5
+        ? `${keyPrefix}${existingRarity}`
+        : `${keyPrefix}1`;
+    const entry = inventoryDB.tooltips[tierKey];
+    return {
+        rarity: entry?.rarity || '1',
+        displayName: entry?.displayName || null
+    };
+}
+
+function resolveRuneItemInfoFromDatabase(inventoryDB, normalizedItemName, normalizedTooltip, item) {
+    for (const runePattern of HUNT_ANALYZER_RUNE_LOOKUP_PATTERNS) {
+        for (const pattern of runePattern.patterns) {
+            if (normalizedItemName?.includes(pattern) || normalizedTooltip?.includes(pattern)) {
+                return {
+                    rarity: inventoryDB.tooltips[runePattern.key]?.rarity || '1',
+                    displayName: inventoryDB.tooltips[runePattern.key]?.displayName || null
+                };
+            }
+        }
+    }
+
+    const spriteSrc = item?.spriteSrc;
+    if (spriteSrc) {
+        for (const [fragment, key] of HUNT_ANALYZER_RUNE_SPRITE_KEYS) {
+            if (spriteSrc.includes(fragment)) {
+                return {
+                    rarity: inventoryDB.tooltips[key]?.rarity || '1',
+                    displayName: inventoryDB.tooltips[key]?.displayName || null
+                };
+            }
+        }
+    }
+
+    if (inventoryDB.tooltips['runeBlank']) {
+        return {
+            rarity: inventoryDB.tooltips['runeBlank'].rarity,
+            displayName: inventoryDB.tooltips['runeBlank'].displayName
+        };
+    }
+
+    return null;
+}
+
 // Checks if the current game mode is sandbox mode.
 // Returns true if in sandbox mode, false otherwise.
 function isSandboxMode() {
@@ -2735,137 +2995,19 @@ function getItemInfoFromDatabase(itemName, tooltipKey, item) {
         }
     }
     
-    // Try to match common consumable patterns and determine variant
-    if (normalizedItemName?.includes('dicemanipulator') || normalizedItemName?.includes('dice') || 
-        normalizedTooltip?.includes('dicemanipulator') || normalizedTooltip?.includes('dice')) {
-        const existingRarity = item?.rarityLevel || item?.tier || 0;
-        if (existingRarity >= 1 && existingRarity <= 5) {
-            const result = {
-                rarity: inventoryDB.tooltips[`diceManipulator${existingRarity}`]?.rarity || '1',
-                displayName: inventoryDB.tooltips[`diceManipulator${existingRarity}`]?.displayName || null
-            };
+    for (const rule of HUNT_ANALYZER_TIERED_CONSUMABLE_RULES) {
+        if (matchesConsumableRule(normalizedItemName, normalizedTooltip, rule.hints)) {
+            const result = lookupTieredConsumableTooltip(inventoryDB, rule.keyPrefix, item);
             itemInfoCache.set(cacheKey, result);
             return result;
         }
-        const result = {
-            rarity: inventoryDB.tooltips['diceManipulator1']?.rarity || '1',
-            displayName: inventoryDB.tooltips['diceManipulator1']?.displayName || null
-        };
-        itemInfoCache.set(cacheKey, result);
-        return result;
     }
-    
-    if (normalizedItemName?.includes('stamina') || normalizedTooltip?.includes('stamina')) {
-        const existingRarity = item?.rarityLevel || item?.tier || 0;
-        if (existingRarity >= 1 && existingRarity <= 5) {
-            const result = {
-                rarity: inventoryDB.tooltips[`stamina${existingRarity}`]?.rarity || '1',
-                displayName: inventoryDB.tooltips[`stamina${existingRarity}`]?.displayName || null
-            };
-            itemInfoCache.set(cacheKey, result);
-            return result;
-        }
-        const result = {
-            rarity: inventoryDB.tooltips['stamina1']?.rarity || '1',
-            displayName: inventoryDB.tooltips['stamina1']?.displayName || null
-        };
-        itemInfoCache.set(cacheKey, result);
-        return result;
-    }
-    
-    if (normalizedItemName?.includes('summonscroll') || normalizedItemName?.includes('summon') ||
-        normalizedTooltip?.includes('summonscroll') || normalizedTooltip?.includes('summon')) {
-        const existingRarity = item?.rarityLevel || item?.tier || 0;
-        if (existingRarity >= 1 && existingRarity <= 5) {
-            const result = {
-                rarity: inventoryDB.tooltips[`summonScroll${existingRarity}`]?.rarity || '1',
-                displayName: inventoryDB.tooltips[`summonScroll${existingRarity}`]?.displayName || null
-            };
-            itemInfoCache.set(cacheKey, result);
-            return result;
-        }
-        const result = {
-            rarity: inventoryDB.tooltips['summonScroll1']?.rarity || '1',
-            displayName: inventoryDB.tooltips['summonScroll1']?.displayName || null
-        };
-        itemInfoCache.set(cacheKey, result);
-        return result;
-    }
-    
-    if (normalizedItemName?.includes('insightstone') || normalizedItemName?.includes('insight') ||
-        normalizedTooltip?.includes('insightstone') || normalizedTooltip?.includes('insight')) {
-        const existingRarity = item?.rarityLevel || item?.tier || 0;
-        if (existingRarity >= 1 && existingRarity <= 5) {
-            const result = {
-                rarity: inventoryDB.tooltips[`insightStone${existingRarity}`]?.rarity || '1',
-                displayName: inventoryDB.tooltips[`insightStone${existingRarity}`]?.displayName || null
-            };
-            itemInfoCache.set(cacheKey, result);
-            return result;
-        }
-        const result = {
-            rarity: inventoryDB.tooltips['insightStone1']?.rarity || '1',
-            displayName: inventoryDB.tooltips['insightStone1']?.displayName || null
-        };
-        itemInfoCache.set(cacheKey, result);
-        return result;
-    }
-    
-    // Try to match rune patterns
+
     if (normalizedItemName?.includes('rune') || normalizedTooltip?.includes('rune')) {
-        const runePatterns = [
-            { patterns: ['blankrune', 'blank'], key: 'runeBlank' },
-            { patterns: ['avaricerune', 'avarice'], key: 'runeAvarice' },
-            { patterns: ['recyclerune', 'recycle'], key: 'runeRecycle' },
-            { patterns: ['hitpointsrune', 'hitpoints', 'hprune'], key: 'runeHp' },
-            { patterns: ['abilitypowerrune', 'abilitypower', 'aprune'], key: 'runeAp' },
-            { patterns: ['attackdamagerune', 'attackdamage', 'adrune'], key: 'runeAd' },
-            { patterns: ['armorrune', 'armor', 'arrune'], key: 'runeAr' },
-            { patterns: ['magicresistrune', 'magicresist', 'mrrune'], key: 'runeMr' }
-        ];
-        
-        for (const runePattern of runePatterns) {
-            for (const pattern of runePattern.patterns) {
-                if (normalizedItemName?.includes(pattern) || normalizedTooltip?.includes(pattern)) {
-                    const result = {
-                        rarity: inventoryDB.tooltips[runePattern.key]?.rarity || '1',
-                        displayName: inventoryDB.tooltips[runePattern.key]?.displayName || null
-                    };
-                    itemInfoCache.set(cacheKey, result);
-                    return result;
-                }
-            }
-        }
-        
-        // If no specific rune pattern matches, try to identify by sprite source
-        const spriteSrc = item?.spriteSrc;
-        if (spriteSrc) {
-            let runeKey = null;
-            if (spriteSrc.includes('rune-avarice')) runeKey = 'runeAvarice';
-            else if (spriteSrc.includes('rune-recycle')) runeKey = 'runeRecycle';
-            else if (spriteSrc.includes('rune-hp')) runeKey = 'runeHp';
-            else if (spriteSrc.includes('rune-ap')) runeKey = 'runeAp';
-            else if (spriteSrc.includes('rune-ad')) runeKey = 'runeAd';
-            else if (spriteSrc.includes('rune-ar')) runeKey = 'runeAr';
-            else if (spriteSrc.includes('rune-mr')) runeKey = 'runeMr';
-            else if (spriteSrc.includes('rune-blank')) runeKey = 'runeBlank';
-            
-            if (runeKey) {
-                const result = {
-                    rarity: inventoryDB.tooltips[runeKey]?.rarity || '1',
-                    displayName: inventoryDB.tooltips[runeKey]?.displayName || null
-                };
-                itemInfoCache.set(cacheKey, result);
-                return result;
-            }
-        }
-        
-        // Final fallback to generic rune lookup
-        if (inventoryDB.tooltips['runeBlank']) {
-            const result = {
-                rarity: inventoryDB.tooltips['runeBlank'].rarity,
-                displayName: inventoryDB.tooltips['runeBlank'].displayName
-            };
+        const result = resolveRuneItemInfoFromDatabase(
+            inventoryDB, normalizedItemName, normalizedTooltip, item
+        );
+        if (result) {
             itemInfoCache.set(cacheKey, result);
             return result;
         }
@@ -2933,118 +3075,6 @@ function getStaminaRecoveryAmount(itemName, item) {
     }
     
     return 0;
-}
-
-function getItemDisplayNameFromDatabase(itemName, tooltipKey, item) {
-    // Try to find the item in the inventory database by name or tooltip key
-    const inventoryDB = window.inventoryDatabase;
-    if (!inventoryDB?.tooltips) return null;
-    
-    // Normalize names for matching
-    const normalizedItemName = normalizeName(itemName);
-    const normalizedTooltip = normalizeName(tooltipKey);
-    
-    // Try different variations of the item name
-    const searchTerms = [
-        normalizedItemName,
-        normalizedTooltip,
-        itemName?.toLowerCase(),
-        tooltipKey?.toLowerCase()
-    ].filter(Boolean);
-    
-    for (const term of searchTerms) {
-        // Direct match
-        if (inventoryDB.tooltips[term]) {
-            return inventoryDB.tooltips[term].displayName;
-        }
-    }
-    
-    // Try to match common consumable patterns and determine variant
-    if (normalizedItemName?.includes('dicemanipulator') || normalizedItemName?.includes('dice') || 
-        normalizedTooltip?.includes('dicemanipulator') || normalizedTooltip?.includes('dice')) {
-        // Try to determine which dice manipulator variant based on item properties
-        const existingRarity = item?.rarityLevel || item?.tier || 0;
-        if (existingRarity >= 1 && existingRarity <= 5) {
-            return inventoryDB.tooltips[`diceManipulator${existingRarity}`]?.displayName || null;
-        }
-        // Default to variant 1 if we can't determine the specific variant
-        return inventoryDB.tooltips['diceManipulator1']?.displayName || null;
-    }
-    
-    if (normalizedItemName?.includes('stamina') || normalizedTooltip?.includes('stamina')) {
-        // Try to determine which stamina variant based on item properties
-        const existingRarity = item?.rarityLevel || item?.tier || 0;
-        if (existingRarity >= 1 && existingRarity <= 5) {
-            return inventoryDB.tooltips[`stamina${existingRarity}`]?.displayName || null;
-        }
-        // Default to variant 1 if we can't determine the specific variant
-        return inventoryDB.tooltips['stamina1']?.displayName || null;
-    }
-    
-    if (normalizedItemName?.includes('summonscroll') || normalizedItemName?.includes('summon') ||
-        normalizedTooltip?.includes('summonscroll') || normalizedTooltip?.includes('summon')) {
-        // Try to determine which summon scroll variant based on item properties
-        const existingRarity = item?.rarityLevel || item?.tier || 0;
-        if (existingRarity >= 1 && existingRarity <= 5) {
-            return inventoryDB.tooltips[`summonScroll${existingRarity}`]?.displayName || null;
-        }
-        // Default to variant 1 if we can't determine the specific variant
-        return inventoryDB.tooltips['summonScroll1']?.displayName || null;
-    }
-    
-    if (normalizedItemName?.includes('insightstone') || normalizedItemName?.includes('insight') ||
-        normalizedTooltip?.includes('insightstone') || normalizedTooltip?.includes('insight')) {
-        // Try to determine which insight stone variant based on item properties
-        const existingRarity = item?.rarityLevel || item?.tier || 0;
-        if (existingRarity >= 1 && existingRarity <= 5) {
-            return inventoryDB.tooltips[`insightStone${existingRarity}`]?.displayName || null;
-        }
-        // Default to variant 1 if we can't determine the specific variant
-        return inventoryDB.tooltips['insightStone1']?.displayName || null;
-    }
-    
-    // Try to match rune patterns
-    if (normalizedItemName?.includes('rune') || normalizedTooltip?.includes('rune')) {
-        // Try to match specific rune types with more flexible patterns
-        const runePatterns = [
-            { patterns: ['blankrune', 'blank'], key: 'runeBlank' },
-            { patterns: ['avaricerune', 'avarice'], key: 'runeAvarice' },
-            { patterns: ['recyclerune', 'recycle'], key: 'runeRecycle' },
-            { patterns: ['hitpointsrune', 'hitpoints', 'hprune'], key: 'runeHp' },
-            { patterns: ['abilitypowerrune', 'abilitypower', 'aprune'], key: 'runeAp' },
-            { patterns: ['attackdamagerune', 'attackdamage', 'adrune'], key: 'runeAd' },
-            { patterns: ['armorrune', 'armor', 'arrune'], key: 'runeAr' },
-            { patterns: ['magicresistrune', 'magicresist', 'mrrune'], key: 'runeMr' }
-        ];
-        
-        for (const runePattern of runePatterns) {
-            for (const pattern of runePattern.patterns) {
-                if (normalizedItemName?.includes(pattern) || normalizedTooltip?.includes(pattern)) {
-                    return inventoryDB.tooltips[runePattern.key]?.displayName || null;
-                }
-            }
-        }
-        
-        // If no specific rune pattern matches, try to identify by sprite source
-        const spriteSrc = item?.spriteSrc;
-        if (spriteSrc) {
-            if (spriteSrc.includes('rune-avarice')) return inventoryDB.tooltips['runeAvarice']?.displayName || 'Avarice Rune';
-            if (spriteSrc.includes('rune-recycle')) return inventoryDB.tooltips['runeRecycle']?.displayName || 'Recycle Rune';
-            if (spriteSrc.includes('rune-hp')) return inventoryDB.tooltips['runeHp']?.displayName || 'Hitpoints Rune';
-            if (spriteSrc.includes('rune-ap')) return inventoryDB.tooltips['runeAp']?.displayName || 'Ability Power Rune';
-            if (spriteSrc.includes('rune-ad')) return inventoryDB.tooltips['runeAd']?.displayName || 'Attack Damage Rune';
-            if (spriteSrc.includes('rune-ar')) return inventoryDB.tooltips['runeAr']?.displayName || 'Armor Rune';
-            if (spriteSrc.includes('rune-mr')) return inventoryDB.tooltips['runeMr']?.displayName || 'Magic Resist Rune';
-            if (spriteSrc.includes('rune-blank')) return inventoryDB.tooltips['runeBlank']?.displayName || 'Blank Rune';
-        }
-        
-        // Final fallback to generic rune lookup
-        if (inventoryDB.tooltips['runeBlank']) {
-            return inventoryDB.tooltips['runeBlank'].displayName;
-        }
-    }
-    
-    return null;
 }
 
 function getRarityBorderColor(tierLevel) {
@@ -3465,6 +3495,39 @@ function buildCreatureAggregateKey(creature) {
     return `${creature.gameId}_${creature.tierLevel}_${shinyPart}_unsealed`;
 }
 
+function syncAggregateCountOverlay(aggregateEntry) {
+    if (!aggregateEntry?.visual?.querySelector) return;
+    const countSpan = aggregateEntry.visual.querySelector('.pixel-font-16');
+    if (countSpan) countSpan.textContent = aggregateEntry.count;
+}
+
+function mergeAggregateEntry(aggregateMap, key, entry, options = {}) {
+    const { updateVisual = false, onMerged } = options;
+    if (aggregateMap.has(key)) {
+        const existing = aggregateMap.get(key);
+        existing.count += entry.count;
+        if (onMerged) onMerged(existing, entry);
+        if (updateVisual) syncAggregateCountOverlay(existing);
+        aggregateMap.set(key, existing);
+        return existing;
+    }
+    const copy = { ...entry };
+    aggregateMap.set(key, copy);
+    return copy;
+}
+
+function isGoldOrDustLootItem(item) {
+    return item.originalName === 'Gold' || item.originalName === 'Dust';
+}
+
+function accumulateLootCategoryTotals(item) {
+    if (item.isEquipment) {
+        HuntAnalyzerState.totals.equipment += item.count;
+    } else if (item.originalName.includes('Rune') || item.originalName.includes('rune')) {
+        HuntAnalyzerState.totals.runes += item.count;
+    }
+}
+
 function copyToClipboard(text) {
     const textarea = document.createElement('textarea');
     textarea.value = text;
@@ -3801,45 +3864,26 @@ class DataProcessor {
       });
       const currentQuantity = item.amount || 1;
 
-      if (aggregatedLootForSession.has(mapKey)) {
-        const existing = aggregatedLootForSession.get(mapKey);
-        existing.count += currentQuantity;
-        
-        // Update the count overlay in the visual element
-        if (existing.visual && existing.visual.querySelector) {
-            const countSpan = existing.visual.querySelector('.pixel-font-16');
-            if (countSpan) {
-                countSpan.textContent = existing.count;
-            }
+      mergeAggregateEntry(aggregatedLootForSession, mapKey, {
+        count: currentQuantity,
+        visual: itemVisual,
+        originalName: resolvedItemName,
+        rarity,
+        rarityBorderColor,
+        spriteId: item.spriteId || item.gameId,
+        src: item.spriteSrc,
+        isEquipment,
+        gameId: item.gameId,
+        stat: item.stat || equipmentStat || null,
+        _descriptiveRarity: item._descriptiveRarity || null
+      }, {
+        updateVisual: true,
+        onMerged: (existing) => {
+          if (item._descriptiveRarity) existing._descriptiveRarity = item._descriptiveRarity;
+          if (item.gameId) existing.gameId = item.gameId;
+          if (equipmentStat && !existing.stat) existing.stat = equipmentStat;
         }
-        
-        // Update descriptive rarity if available
-        if (item._descriptiveRarity) {
-          existing._descriptiveRarity = item._descriptiveRarity;
-        }
-        // Update gameId and stat for equipment items
-        if (item.gameId) {
-          existing.gameId = item.gameId;
-        }
-        if (equipmentStat && !existing.stat) {
-          existing.stat = equipmentStat;
-        }
-        aggregatedLootForSession.set(mapKey, existing);
-      } else {
-        aggregatedLootForSession.set(mapKey, {
-          count: currentQuantity,
-          visual: itemVisual,
-          originalName: resolvedItemName,
-          rarity: rarity,
-          rarityBorderColor: rarityBorderColor,
-          spriteId: item.spriteId || item.gameId,
-          src: item.spriteSrc,
-          isEquipment: isEquipment,
-          gameId: item.gameId, // Add gameId for equipment items
-          stat: item.stat || equipmentStat || null,
-          _descriptiveRarity: item._descriptiveRarity || null
-        });
-      }
+      });
       currentLootItemsLog.push(`${resolvedItemName} (Rarity ${rarity}, x${currentQuantity})`);
     }
 
@@ -3864,43 +3908,28 @@ class DataProcessor {
           isShiny,
           isSealed
         });
-        if (aggregatedCreaturesForSession.has(mapKey)) {
-          const existing = aggregatedCreaturesForSession.get(mapKey);
-          existing.count += 1;
-          
-          // Update the count overlay in the visual element
-          const countSpan = existing.visual.querySelector('.pixel-font-16');
-          if (countSpan) {
-            countSpan.textContent = existing.count;
-          }
-        } else {
-          // Use the same visual creation system as the regenerative system
-          const creatureData = {
+        mergeAggregateEntry(aggregatedCreaturesForSession, mapKey, {
+          count: 1,
+          visual: createInventoryStyleCreaturePortrait({
             gameId: creatureGameId,
             originalName: creatureName,
-            tierLevel: tierLevel,
-            count: 1,
-            isShiny: isShiny,
-            isSealed: isSealed
-          };
-          const creatureVisual = createInventoryStyleCreaturePortrait(creatureData);
-          
-          aggregatedCreaturesForSession.set(mapKey, {
-            count: 1,
-            visual: creatureVisual,
-            originalName: creatureName,
-            genes: Object.entries(rewardScreen.monsterDrop.genes)
-              .map(([key, value]) => `${key.toUpperCase()}:${value}`)
-              .join(', '),
-            totalStats,
-            tierName,
             tierLevel,
-            rarityBorderColor: getRarityBorderColor(tierLevel),
-            gameId: creatureGameId,
-            isShiny: isShiny,
-            isSealed: isSealed
-          });
-        }
+            count: 1,
+            isShiny,
+            isSealed
+          }),
+          originalName: creatureName,
+          genes: Object.entries(rewardScreen.monsterDrop.genes)
+            .map(([key, value]) => `${key.toUpperCase()}:${value}`)
+            .join(', '),
+          totalStats,
+          tierName,
+          tierLevel,
+          rarityBorderColor: getRarityBorderColor(tierLevel),
+          gameId: creatureGameId,
+          isShiny,
+          isSealed
+        }, { updateVisual: true });
       }
     }
 
@@ -4047,70 +4076,30 @@ class DataProcessor {
         // Aggregate experience (Number() avoids string-concat bugs from legacy persisted data)
         HuntAnalyzerState.totals.experience += sessionStoredExperience(sessionData);
         
-        sessionData.loot.forEach(item => {
-            // Handle special items (Gold, Dust) that should only appear in totals
-            if (item.originalName === 'Gold' || item.originalName === 'Dust') {
-                // Still accumulate totals for Gold and Dust
-                if (item.originalName === 'Gold') {
-                    HuntAnalyzerState.totals.gold += item.count;
-                } else if (item.originalName === 'Dust') {
-                    HuntAnalyzerState.totals.dust += item.count;
-                }
-                return; // Skip adding to aggregatedLoot
+        sessionData.loot.forEach((item) => {
+            if (isGoldOrDustLootItem(item)) {
+                if (item.originalName === 'Gold') HuntAnalyzerState.totals.gold += item.count;
+                else HuntAnalyzerState.totals.dust += item.count;
+                return;
             }
-
-            const mapKey = buildLootAggregateKey(item);
-            if (this.state.data.aggregatedLoot.has(mapKey)) {
-                const existing = this.state.data.aggregatedLoot.get(mapKey);
-                existing.count += item.count;
-                
-                // Update the count overlay in the visual element
-                if (existing.visual && existing.visual.querySelector) {
-                    const countSpan = existing.visual.querySelector('.pixel-font-16');
-                    if (countSpan) {
-                        countSpan.textContent = existing.count;
-                    }
-                }
-                
-                this.state.data.aggregatedLoot.set(mapKey, existing);
-            } else {
-                this.state.data.aggregatedLoot.set(mapKey, { ...item });
-            }
-
-            // Accumulate global totals for Equipment and Runes based on originalName
-            if (item.isEquipment) {
-                HuntAnalyzerState.totals.equipment += item.count;
-            } else if (item.originalName.includes('Rune') || item.originalName.includes('rune')) {
-                HuntAnalyzerState.totals.runes += item.count;
-            }
+            mergeAggregateEntry(
+                this.state.data.aggregatedLoot,
+                buildLootAggregateKey(item),
+                item,
+                { updateVisual: true }
+            );
+            accumulateLootCategoryTotals(item);
         });
 
-        sessionData.creatures.forEach(creature => {
-            const mapKey = buildCreatureAggregateKey(creature);
-        if (this.state.data.aggregatedCreatures.has(mapKey)) {
-          const existing = this.state.data.aggregatedCreatures.get(mapKey);
-                existing.count += creature.count;
-                
-                // Update the count overlay in the visual element
-                if (existing.visual && existing.visual.querySelector) {
-                    const countSpan = existing.visual.querySelector('.pixel-font-16');
-                    if (countSpan) {
-                        countSpan.textContent = existing.count;
-                    }
-                }
-                
-          this.state.data.aggregatedCreatures.set(mapKey, existing);
-            } else {
-          this.state.data.aggregatedCreatures.set(mapKey, { ...creature });
-            }
-            
-            // Count shiny drops for display
-            if (creature.isShiny) {
-          HuntAnalyzerState.totals.shiny += creature.count;
-            }
-            if (creature.isSealed) {
-          HuntAnalyzerState.totals.sealed += creature.count;
-            }
+        sessionData.creatures.forEach((creature) => {
+            mergeAggregateEntry(
+                this.state.data.aggregatedCreatures,
+                buildCreatureAggregateKey(creature),
+                creature,
+                { updateVisual: true }
+            );
+            if (creature.isShiny) HuntAnalyzerState.totals.shiny += creature.count;
+            if (creature.isSealed) HuntAnalyzerState.totals.sealed += creature.count;
             HuntAnalyzerState.totals.creatures += creature.count || 0;
         });
     });
@@ -4122,16 +4111,16 @@ const dataProcessor = new DataProcessor();
 
 function finalizeAggregatesAfterLoadIfNeeded() {
     if (!_needsAggregateFromSessions || !HuntAnalyzerState.data.sessions.length) {
+        syncSessionCountFromPersistence();
         return;
     }
     _needsAggregateFromSessions = false;
     try {
-        dataProcessor.aggregateData();
+        rebuildAggregatesFromSessionsWithMerge();
     } catch (e) {
         console.error('[Hunt Analyzer] Failed to rebuild aggregates from persisted sessions:', e);
     }
 }
-finalizeAggregatesAfterLoadIfNeeded();
 
 // =======================
 // 3.2. Room Display Enhancement Functions
@@ -4204,10 +4193,7 @@ function updateMapFilterDropdown() {
     const dropdownButton = document.createElement("button");
     dropdownButton.id = "mod-map-filter-dropdown-button";
     dropdownButton.style.padding = "6px 12px";
-    dropdownButton.style.border = `1px solid ${getThemeColor('border')}`;
     dropdownButton.style.borderRadius = "4px";
-    dropdownButton.style.backgroundColor = getThemeColor('dropdownBackground');
-    dropdownButton.style.color = getThemeColor('text');
     dropdownButton.style.fontSize = "12px";
     dropdownButton.style.cursor = "pointer";
     dropdownButton.style.minWidth = "150px";
@@ -4235,10 +4221,7 @@ function updateMapFilterDropdown() {
     dropdownMenu.style.top = "100%";
     dropdownMenu.style.left = "0";
     dropdownMenu.style.right = "0";
-    dropdownMenu.style.backgroundColor = getThemeColor('dropdownMenuBackground');
-    dropdownMenu.style.border = `1px solid ${getThemeColor('border')}`;
     dropdownMenu.style.borderRadius = "4px";
-    dropdownMenu.style.boxShadow = `0 4px 8px ${getThemeColor('dropdownShadow')}`;
     dropdownMenu.style.zIndex = "10000";
     dropdownMenu.style.display = "none";
     dropdownMenu.style.maxHeight = "200px";
@@ -4305,6 +4288,8 @@ function updateMapFilterDropdown() {
         arrow.textContent = "▼";
     };
     document.addEventListener("click", documentClickHandler);
+
+    applyThemeMapFilterDropdownStyles(dropdownButton, dropdownMenu);
 
     dropdownContainer.appendChild(dropdownButton);
     dropdownContainer.appendChild(dropdownMenu);
@@ -4413,14 +4398,8 @@ function renderAllSessions() {
     
     const cachedLootDiv = domCache.get("mod-loot-display");
     const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
-    const cachedTotalGoldDisplayElement = domCache.get("mod-total-gold-display");
-    const cachedTotalDustDisplayElement = domCache.get("mod-total-dust-display");
-    const cachedTotalShinyDisplayElement = domCache.get("mod-total-shiny-display");
-    const cachedTotalSealedDisplayElement = domCache.get("mod-total-sealed-display");
-    const cachedTotalRunesDisplayElement = domCache.get("mod-total-runes-display");
-    
-    if (!cachedLootDiv || !cachedCreatureDropDiv || !cachedTotalGoldDisplayElement || !cachedTotalDustDisplayElement) {
-        console.warn("[Hunt Analyzer] Render target divs or gold/dust display elements not available. Panel might not be open.");
+    if (!cachedLootDiv || !cachedCreatureDropDiv) {
+        console.warn("[Hunt Analyzer] Render target divs not available. Panel might not be open.");
         return;
     }
 
@@ -4434,27 +4413,7 @@ function renderAllSessions() {
     cachedLootDiv.innerHTML = ''; // Clear previous content
     cachedCreatureDropDiv.innerHTML = ''; // Clear previous content
 
-    // Update Gold, Dust, and Shiny display next to Loot title
-    if (cachedTotalGoldDisplayElement) {
-        cachedTotalGoldDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
-        cachedTotalGoldDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.gold));
-    }
-    if (cachedTotalDustDisplayElement) {
-        cachedTotalDustDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
-        cachedTotalDustDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.dust));
-    }
-    if (cachedTotalShinyDisplayElement) {
-        cachedTotalShinyDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
-        cachedTotalShinyDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.shiny));
-    }
-    if (cachedTotalSealedDisplayElement) {
-        cachedTotalSealedDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
-        cachedTotalSealedDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.sealed));
-    }
-    if (cachedTotalRunesDisplayElement) {
-        cachedTotalRunesDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
-        cachedTotalRunesDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.runes));
-    }
+    updatePanelResourceTotalDisplays();
 
     // Get all loot items (Gold and Dust are already excluded from aggregatedLoot)
     const allLoot = Array.from(HuntAnalyzerState.data.aggregatedLoot.values());
@@ -4465,146 +4424,18 @@ function renderAllSessions() {
         totalLootItems += data.count;
     });
 
-    // Update loot title with total count
-    const lootTitle = document.getElementById('mod-loot-title');
-    if (lootTitle) {
-        const filterText = HuntAnalyzerState.ui.selectedMapFilter === 'ALL' ? '' : ` (${HuntAnalyzerState.ui.selectedMapFilter})`;
-        lootTitle.textContent = `${t('mods.huntAnalyzer.loot')}: ${totalLootItems}${filterText}`;
-    }
+    updateFilteredSectionTitle('mod-loot-title', 'mods.huntAnalyzer.loot', totalLootItems);
 
-    // Sort loot with new priority order: Runes → Equipment → Everything else
-    const sortedFilteredLoot = allLoot.sort((a, b) => {
-        // First priority: Category (Runes → Equipment → Everything else)
-        const categoryA = getItemCategory(a);
-        const categoryB = getItemCategory(b);
-        if (categoryA !== categoryB) {
-            return categoryA - categoryB;
-        }
-        
-        // Second priority: Name (alphabetical within each category)
-        const nameCompare = a.originalName.localeCompare(b.originalName);
-        if (nameCompare !== 0) {
-            return nameCompare;
-        }
-        
-        // Third priority: Rarity (highest rarity first)
-        if (a.rarity !== b.rarity) {
-            return b.rarity - a.rarity; // Higher rarity first (descending)
-        }
-        
-        // Within same name and rarity, sort by GameId for consistency
-        if (a.gameId !== b.gameId) {
-            return a.gameId - b.gameId; // Sort by GameId numerically
-        }
-        return 0;
-    });
+    const sortedFilteredLoot = allLoot.sort(compareLootEntries);
 
     // Create grid container for loot using unified function
     const lootGridContainer = createUnifiedGridContainer();
 
     sortedFilteredLoot.forEach((data) => {
-        const lootEntryDiv = document.createElement('div');
-        lootEntryDiv.style.display = 'flex';
-        lootEntryDiv.style.flexDirection = 'column';
-        lootEntryDiv.style.alignItems = 'center';
-        lootEntryDiv.style.justifyContent = 'center';
-        lootEntryDiv.style.padding = '4px';
-        lootEntryDiv.style.backgroundColor = getThemeColor('entryBackground');
-        lootEntryDiv.style.borderRadius = '6px';
-
-        const iconWrapper = document.createElement('div');
-        iconWrapper.style.display = 'flex';
-        iconWrapper.style.justifyContent = 'center';
-        iconWrapper.style.alignItems = 'center';
-
-        // Debug: Log equipment items only
-        if (data.isEquipment) {
-            // Equipment processing consolidated - see summary log at end
-        }
-        
-        // For equipment items, always use API components directly
-        // This ensures proper equipment portraits regardless of stored visual state
-        let visualElement;
-        
-        // Try to get gameId from spriteId if missing for equipment items
-        let equipmentGameId = data.gameId;
-        if (data.isEquipment && !equipmentGameId && data.spriteId) {
-            equipmentGameId = data.spriteId;
-        }
-        
-        if (data.isEquipment && equipmentGameId && typeof globalThis.state?.utils?.getEquipment === 'function') {
-            try {
-                const equipData = globalThis.state.utils.getEquipment(equipmentGameId);
-                if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
-                    const equipmentSpriteId = equipData.metadata.spriteId;
-                    
-                    // Use API component for equipment like Cyclopedia does
-                    if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
-                        const equipmentPortrait = api.ui.components.createItemPortrait({
-                            itemId: equipmentSpriteId,
-                            tier: data.rarity || 1
-                        });
-                        
-                        // Check if we got a valid DOM element
-                        if (equipmentPortrait && equipmentPortrait.nodeType) {
-                            // If it's a button, get the first child (the actual portrait)
-                            if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild) {
-                                const firstChild = equipmentPortrait.firstChild;
-                                if (firstChild && firstChild.nodeType) {
-                                    // Add count overlay to the portrait (bottom left like creatures)
-                                    const countSpan = createCountOverlay(data.count);
-                                    
-                                    firstChild.appendChild(countSpan);
-                                    
-                                    // Add stat icon to the portrait
-                                    addStatIconToPortrait(firstChild, data.stat);
-                                    
-                                    visualElement = firstChild;
-                                }
-                            } else {
-                                // Use the portrait directly if it's not a button
-                                addStatIconToPortrait(equipmentPortrait, data.stat);
-                                visualElement = equipmentPortrait;
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.warn('[Hunt Analyzer] Error creating equipment API component:', e);
-            }
-        }
-        
-        // Fallback to stored visual or regenerate for non-equipment items
-        if (!visualElement) {
-            visualElement = data.visual;
-            
-            // Only regenerate if visual is not a proper HTMLElement
-            if (!(visualElement instanceof HTMLElement)) {
-                // Regenerate visual from item data (loaded from persistence)
-                const itemData = {
-                    spriteId: data.spriteId,
-                    src: data.src,
-                    spriteSrc: data.src,
-                    originalName: data.originalName,
-                    rarity: data.rarity,
-                    count: data.count,
-                    isEquipment: data.isEquipment,
-                    gameId: data.gameId,
-                    stat: data.stat
-                };
-                visualElement = createInventoryStyleItemPortrait(itemData);
-            }
-        }
-        
-        if (visualElement instanceof HTMLElement) {
-            iconWrapper.appendChild(visualElement);
-        } else {
-            // Fallback for non-image visuals
-            iconWrapper.textContent = visualElement || '🎲';
-            iconWrapper.style.fontSize = '24px';
-        }
+        const lootEntryDiv = createGridEntryCell();
+        const iconWrapper = createGridIconWrapper();
+        mountGridVisual(iconWrapper, resolveLootGridVisual(data), '🎲');
         lootEntryDiv.appendChild(iconWrapper);
-
         lootGridContainer.appendChild(lootEntryDiv);
     });
     
@@ -4614,35 +4445,8 @@ function renderAllSessions() {
     // Add stat icons to any existing equipment portraits
     setTimeout(() => addStatIconsToExistingPortraits(), 100);
 
-    // Sort and render overall aggregated creatures in grid layout
-    const sortedOverallCreatures = Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()).sort((a, b) => {
-        // First priority: shiny creatures first
-        if (a.isShiny !== b.isShiny) {
-            return a.isShiny ? -1 : 1;
-        }
-
-        // Second priority: sealed creatures after shiny creatures
-        if (!!a.isSealed !== !!b.isSealed) {
-            return a.isSealed ? -1 : 1;
-        }
-        
-        // Third priority: name (alphabetical)
-        const nameCompare = a.originalName.localeCompare(b.originalName);
-        if (nameCompare !== 0) {
-            return nameCompare;
-        }
-        
-        // Fourth priority: rarity (highest tier level first)
-        if (a.tierLevel !== b.tierLevel) {
-            return b.tierLevel - a.tierLevel; // Higher tier level first (descending)
-        }
-        
-        // Within same name and tier level, sort by GameId for consistency
-        if (a.gameId !== b.gameId) {
-            return a.gameId - b.gameId; // Sort by GameId numerically
-        }
-        return 0;
-    });
+    const sortedOverallCreatures = Array.from(HuntAnalyzerState.data.aggregatedCreatures.values())
+        .sort(compareCreatureEntries);
 
     // Calculate total creature drops for current filter
     let totalCreatureDrops = 0;
@@ -4650,52 +4454,16 @@ function renderAllSessions() {
         totalCreatureDrops += data.count;
     });
 
-    // Update creature drops title with total count
-    const creatureDropTitle = document.getElementById('mod-creature-drops-title');
-    if (creatureDropTitle) {
-        const filterText = HuntAnalyzerState.ui.selectedMapFilter === 'ALL' ? '' : ` (${HuntAnalyzerState.ui.selectedMapFilter})`;
-        creatureDropTitle.textContent = `${t('mods.huntAnalyzer.creatureDrops')}: ${totalCreatureDrops}${filterText}`;
-    }
+    updateFilteredSectionTitle('mod-creature-drops-title', 'mods.huntAnalyzer.creatureDrops', totalCreatureDrops);
 
     // Create grid container for creatures using unified function
     const gridContainer = createUnifiedGridContainer();
 
     sortedOverallCreatures.forEach((data) => {
-        const creatureEntryDiv = document.createElement('div');
-        creatureEntryDiv.style.display = 'flex';
-        creatureEntryDiv.style.flexDirection = 'column';
-        creatureEntryDiv.style.alignItems = 'center';
-        creatureEntryDiv.style.justifyContent = 'center';
-        creatureEntryDiv.style.padding = '4px';
-        creatureEntryDiv.style.backgroundColor = getThemeColor('entryBackground');
-        creatureEntryDiv.style.borderRadius = '6px';
-
-        const iconWrapper = document.createElement('div');
-        iconWrapper.style.display = 'flex';
-        iconWrapper.style.justifyContent = 'center';
-        iconWrapper.style.alignItems = 'center';
-
-        // Always build portrait from data.count so header totals match stack numbers
-        let visualElement;
-        if (data.gameId) {
-            visualElement = createInventoryStyleCreaturePortrait(data);
-        } else if (data.visual instanceof HTMLElement) {
-            visualElement = data.visual;
-            const countSpan = visualElement.querySelector('.pixel-font-16');
-            if (countSpan) countSpan.textContent = data.count || 1;
-        } else {
-            visualElement = '👾';
-        }
-        
-        if (visualElement instanceof HTMLElement) {
-            iconWrapper.appendChild(visualElement);
-        } else {
-            // Fallback for non-image visuals
-            iconWrapper.textContent = visualElement || '👾';
-            iconWrapper.style.fontSize = '24px';
-        }
+        const creatureEntryDiv = createGridEntryCell();
+        const iconWrapper = createGridIconWrapper();
+        mountGridVisual(iconWrapper, resolveCreatureGridVisual(data), '👾');
         creatureEntryDiv.appendChild(iconWrapper);
-
         gridContainer.appendChild(creatureEntryDiv);
     });
     
@@ -4722,44 +4490,38 @@ function processAutoplaySummary(serverResults) {
 }
 
 
-// Generates a summarized log text of all aggregated loot and creature drops.
-// This is the text that will be copied to the user's clipboard.
-// Returns the formatted summary log.
-function generateSummaryLogText() {
-    let summary = `--- ${t('mods.huntAnalyzer.logSummaryTitle')} ---\n`;
-
-    // Overall Stats
-    const filteredTimeHours = getFilteredTimeHours();
-    
-    // Determine room name for summary header - check if multiple maps were hunted
-    const uniqueMaps = new Set(HuntAnalyzerState.data.sessions.map(s => s.roomName));
-    let roomDisplayName;
-    if (uniqueMaps.size === 0) {
-        roomDisplayName = t('mods.huntAnalyzer.notAvailable');
-    } else if (uniqueMaps.size === 1) {
-        roomDisplayName = Array.from(uniqueMaps)[0];
-    } else {
-        roomDisplayName = `${t('mods.huntAnalyzer.allMaps')} (${uniqueMaps.size} ${t('mods.huntAnalyzer.maps')})`;
+function calculateRawHourlyRates(timeHours, stats) {
+    if (timeHours <= 0) {
+        return { sessions: 0, gold: 0, creatures: 0, equipment: 0, experience: 0, staminaSpent: 0 };
     }
-    
-    // Calculate overall rates for summary
-    const autoplayRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.session.count / filteredTimeHours) : 0;
-    const goldRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.gold / filteredTimeHours) : 0;
-    const creatureRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.creatures / filteredTimeHours) : 0;
-    const equipmentRatePerHour = filteredTimeHours > 0 ? Math.round(HuntAnalyzerState.totals.equipment / filteredTimeHours) : 0;
-    const expRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.experience / filteredTimeHours) : 0;
-    const staminaSpentRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.staminaSpent / filteredTimeHours) : 0;
-    
-    // Calculate overall efficiency metrics
-    const goldPerStamina = HuntAnalyzerState.totals.staminaSpent > 0 ? (HuntAnalyzerState.totals.gold / HuntAnalyzerState.totals.staminaSpent).toFixed(2) : t('mods.huntAnalyzer.notAvailable');
-    const sessionsPerStamina = HuntAnalyzerState.totals.staminaSpent > 0 ? (HuntAnalyzerState.session.count / HuntAnalyzerState.totals.staminaSpent).toFixed(3) : t('mods.huntAnalyzer.notAvailable');
-    const totalSessionsForWinRate = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
-    const winRate = totalSessionsForWinRate > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessionsForWinRate) * 100) : 0;
-    
-    summary += `${t('mods.huntAnalyzer.room')}: ${roomDisplayName}\n`;
-    summary += `${t('mods.huntAnalyzer.sessions')}: ${HuntAnalyzerState.session.count}\n`;
+    return {
+        sessions: Math.floor(stats.sessions / timeHours),
+        gold: Math.floor(stats.gold / timeHours),
+        creatures: Math.floor(stats.creatures / timeHours),
+        equipment: Math.round(stats.equipment / timeHours),
+        experience: Math.floor(stats.experience / timeHours),
+        staminaSpent: Math.floor(stats.staminaSpent / timeHours)
+    };
+}
+
+function calculateEfficiencyMetrics(stats) {
+    const notAvailable = t('mods.huntAnalyzer.notAvailable');
+    return {
+        goldPerStamina: stats.staminaSpent > 0 ? (stats.gold / stats.staminaSpent).toFixed(2) : notAvailable,
+        sessionsPerStamina: stats.staminaSpent > 0 ? (stats.sessions / stats.staminaSpent).toFixed(3) : notAvailable
+    };
+}
+
+function getSummaryRoomDisplayName(sessions) {
+    const uniqueMaps = new Set(sessions.map((s) => s.roomName));
+    if (uniqueMaps.size === 0) return t('mods.huntAnalyzer.notAvailable');
+    if (uniqueMaps.size === 1) return Array.from(uniqueMaps)[0];
+    return `${t('mods.huntAnalyzer.allMaps')} (${uniqueMaps.size} ${t('mods.huntAnalyzer.maps')})`;
+}
+
+function formatFloorSessionBreakdown(sessions) {
     const floorSessions = new Map();
-    HuntAnalyzerState.data.sessions.forEach(session => {
+    sessions.forEach((session) => {
         const floorLabel = Number.isInteger(session.floor)
             ? `${t('mods.huntAnalyzer.floor')} ${session.floor}`
             : t('mods.huntAnalyzer.floorUnknown');
@@ -4768,26 +4530,206 @@ function generateSummaryLogText() {
         }
         const floorStats = floorSessions.get(floorLabel);
         floorStats.sessions += 1;
-        if (session.victory === true) {
-            floorStats.wins += 1;
-        } else if (session.victory === false) {
-            floorStats.losses += 1;
-        }
+        if (session.victory === true) floorStats.wins += 1;
+        else if (session.victory === false) floorStats.losses += 1;
     });
-    if (floorSessions.size > 0) {
-        const floorBreakdown = Array.from(floorSessions.entries())
-            .sort((a, b) => {
-                const floorMatchA = a[0].match(/\d+$/);
-                const floorMatchB = b[0].match(/\d+$/);
-                if (!floorMatchA && !floorMatchB) return 0;
-                if (!floorMatchA) return 1;
-                if (!floorMatchB) return -1;
-                return Number(floorMatchA[0]) - Number(floorMatchB[0]);
-            })
-            .map(([label, stats]) => `${label}: ${stats.sessions} (${stats.wins}/${stats.losses})`)
-            .join(' | ');
+    return Array.from(floorSessions.entries())
+        .sort((a, b) => {
+            const floorMatchA = a[0].match(/\d+$/);
+            const floorMatchB = b[0].match(/\d+$/);
+            if (!floorMatchA && !floorMatchB) return 0;
+            if (!floorMatchA) return 1;
+            if (!floorMatchB) return -1;
+            return Number(floorMatchA[0]) - Number(floorMatchB[0]);
+        })
+        .map(([label, stats]) => `${label}: ${stats.sessions} (${stats.wins}/${stats.losses})`)
+        .join(' | ');
+}
+
+function getSessionGoldAndDust(session) {
+    let gold = typeof session.gold === 'number' ? session.gold : 0;
+    let dust = typeof session.dust === 'number' ? session.dust : 0;
+    if ((typeof session.gold !== 'number' || typeof session.dust !== 'number') && Array.isArray(session.loot)) {
+        session.loot.forEach((item) => {
+            if (!item || typeof item.count !== 'number') return;
+            if (typeof session.gold !== 'number' && item.originalName === 'Gold') gold += item.count;
+            else if (typeof session.dust !== 'number' && item.originalName === 'Dust') dust += item.count;
+        });
+    }
+    return { gold, dust };
+}
+
+function createEmptyMapGroupStats(fallbackStartTime) {
+    return {
+        sessions: 0,
+        wins: 0,
+        losses: 0,
+        loot: new Map(),
+        creatures: new Map(),
+        totalGold: 0,
+        totalDust: 0,
+        totalStamina: 0,
+        totalExperience: 0,
+        totalEquipment: 0,
+        totalCreatures: 0,
+        totalShiny: 0,
+        totalSealed: 0,
+        startTime: fallbackStartTime,
+        endTime: fallbackStartTime,
+        hasTimestamps: false
+    };
+}
+
+function ingestSessionIntoMapGroup(group, session, overallStartTime) {
+    group.sessions += 1;
+    if (session.victory === true) group.wins += 1;
+    else if (session.victory === false) group.losses += 1;
+
+    const { gold, dust } = getSessionGoldAndDust(session);
+    group.totalGold += gold;
+    group.totalDust += dust;
+    group.totalStamina += session.staminaSpent || 0;
+    group.totalExperience += sessionStoredExperience(session);
+
+    if (session.timestamp) {
+        group.hasTimestamps = true;
+        group.startTime = Math.min(group.startTime, session.timestamp);
+        group.endTime = Math.max(group.endTime, session.timestamp);
+    } else {
+        group.startTime = Math.min(group.startTime, overallStartTime);
+        group.endTime = Math.max(group.endTime, Date.now());
+    }
+
+    (session.loot || []).forEach((item) => {
+        mergeAggregateEntry(group.loot, buildLootAggregateKey(item), item);
+        if (item.isEquipment) group.totalEquipment += item.count;
+    });
+
+    (session.creatures || []).forEach((creature) => {
+        mergeAggregateEntry(group.creatures, buildCreatureAggregateKey(creature), creature);
+        group.totalCreatures += creature.count;
+        if (creature.isShiny) group.totalShiny += creature.count;
+        if (creature.isSealed) group.totalSealed += creature.count;
+    });
+}
+
+function buildMapGroupsFromSessions(sessions) {
+    const mapGroups = {};
+    const overallStartTime = HuntAnalyzerState.session.startTime;
+    sessions.forEach((session) => {
+        const mapName = session.roomName || t('mods.huntAnalyzer.unknownMap');
+        if (!mapGroups[mapName]) {
+            mapGroups[mapName] = createEmptyMapGroupStats(session.timestamp || overallStartTime);
+        }
+        ingestSessionIntoMapGroup(mapGroups[mapName], session, overallStartTime);
+    });
+    return mapGroups;
+}
+
+function formatLootSummaryLine(item) {
+    let itemLine = `    ${item.originalName}: x${item.count}`;
+    if (item.rarity > 0) {
+        const rarityText = item._descriptiveRarity
+            || window.inventoryDatabase?.rarityText?.[item.rarity]
+            || `Rarity ${item.rarity}`;
+        itemLine += ` (${rarityText})`;
+    }
+    if (item.isEquipment && item.stat) {
+        itemLine += ` (Stat: ${item.stat.toUpperCase()})`;
+    }
+    return itemLine;
+}
+
+function formatCreatureSummaryLine(creature) {
+    let creatureLine = `    ${creature.originalName} (${creature.tierName}): x${creature.count}`;
+    if (creature.isShiny) creatureLine = `    ✨ ${creatureLine}`;
+    if (creature.isSealed) creatureLine = `    ⭐ ${creatureLine}`;
+    return creatureLine;
+}
+
+function appendMapAnalysisSection(summary, mapGroups) {
+    summary += `--- ${t('mods.huntAnalyzer.mapAnalysis')} ---\n`;
+    const mapNames = Object.keys(mapGroups);
+    if (mapNames.length === 0) {
+        summary += `${t('mods.huntAnalyzer.noSessionsRecorded')}\n`;
+        return summary;
+    }
+
+    mapNames
+        .sort((a, b) => mapGroups[b].sessions - mapGroups[a].sessions)
+        .forEach((mapName) => {
+            const mapData = mapGroups[mapName];
+            const mapTimeHours = (mapData.endTime - mapData.startTime) / (1000 * 60 * 60);
+            const mapStats = {
+                sessions: mapData.sessions,
+                gold: mapData.totalGold,
+                creatures: mapData.totalCreatures,
+                equipment: mapData.totalEquipment,
+                experience: mapData.totalExperience,
+                staminaSpent: mapData.totalStamina
+            };
+            const rates = calculateRawHourlyRates(mapTimeHours, mapStats);
+            const efficiency = calculateEfficiencyMetrics(mapStats);
+            const mapWinRate = (mapData.wins + mapData.losses) > 0
+                ? Math.round((mapData.wins / (mapData.wins + mapData.losses)) * 100)
+                : 0;
+
+            summary += `\n${mapName}:\n`;
+            summary += `  ${t('mods.huntAnalyzer.sessions')}: ${mapData.sessions} | ${t('mods.huntAnalyzer.winLoss')}: ${mapData.wins}/${mapData.losses} (${mapWinRate}%) | ${t('mods.huntAnalyzer.time')}: ${formatTime(mapData.endTime - mapData.startTime)}${mapData.hasTimestamps ? '' : ` (${t('mods.huntAnalyzer.estimated')})`}\n`;
+            summary += `  ${t('mods.huntAnalyzer.gold')}: ${mapData.totalGold} | ${t('mods.huntAnalyzer.dust')}: ${mapData.totalDust} | ${t('mods.huntAnalyzer.stamina')}: ${mapData.totalStamina} | ${t('mods.huntAnalyzer.experience')}: ${formatExpValue(mapData.totalExperience)}\n`;
+            summary += `  ${t('mods.huntAnalyzer.equipment')}: ${mapData.totalEquipment} | ${t('mods.huntAnalyzer.creatures')}: ${mapData.totalCreatures} | ${t('mods.huntAnalyzer.shiny')}: ${mapData.totalShiny} | ${t('mods.huntAnalyzer.sealed')}: ${mapData.totalSealed}\n`;
+            summary += `  ${t('mods.huntAnalyzer.rates')}: ${rates.sessions} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${rates.gold} ${t('mods.huntAnalyzer.goldPerHour')} | ${rates.creatures} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${rates.equipment} ${t('mods.huntAnalyzer.equipmentPerHour')} | ${formatExpValue(rates.experience)} ${t('mods.huntAnalyzer.expPerHour')}\n`;
+            summary += `  ${t('mods.huntAnalyzer.efficiency')}: ${efficiency.goldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${efficiency.sessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${rates.staminaSpent} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
+
+            const sortedLoot = Array.from(mapData.loot.values()).sort(compareLootEntries);
+            if (sortedLoot.length > 0) {
+                summary += `  ${t('mods.huntAnalyzer.loot')}:\n`;
+                sortedLoot.forEach((item) => {
+                    summary += `${formatLootSummaryLine(item)}\n`;
+                });
+            }
+
+            const sortedCreatures = Array.from(mapData.creatures.values()).sort(compareCreatureEntries);
+            if (sortedCreatures.length > 0) {
+                summary += `  ${t('mods.huntAnalyzer.creatures')}:\n`;
+                sortedCreatures.forEach((creature) => {
+                    summary += `${formatCreatureSummaryLine(creature)}\n`;
+                });
+            }
+        });
+
+    return summary;
+}
+
+// Generates a summarized log text of all aggregated loot and creature drops.
+// This is the text that will be copied to the user's clipboard.
+function generateSummaryLogText() {
+    const sessions = HuntAnalyzerState.data.sessions;
+    const filteredTimeHours = getFilteredTimeHours();
+    const overallStats = {
+        sessions: HuntAnalyzerState.session.count,
+        gold: HuntAnalyzerState.totals.gold,
+        creatures: HuntAnalyzerState.totals.creatures,
+        equipment: HuntAnalyzerState.totals.equipment,
+        experience: HuntAnalyzerState.totals.experience,
+        staminaSpent: HuntAnalyzerState.totals.staminaSpent
+    };
+    const overallRates = calculateRawHourlyRates(filteredTimeHours, overallStats);
+    const overallEfficiency = calculateEfficiencyMetrics(overallStats);
+    const totalSessionsForWinRate = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
+    const winRate = totalSessionsForWinRate > 0
+        ? Math.round((HuntAnalyzerState.totals.wins / totalSessionsForWinRate) * 100)
+        : 0;
+
+    let summary = `--- ${t('mods.huntAnalyzer.logSummaryTitle')} ---\n`;
+    summary += `${t('mods.huntAnalyzer.room')}: ${getSummaryRoomDisplayName(sessions)}\n`;
+    summary += `${t('mods.huntAnalyzer.sessions')}: ${HuntAnalyzerState.session.count}\n`;
+
+    const floorBreakdown = formatFloorSessionBreakdown(sessions);
+    if (floorBreakdown) {
         summary += `${t('mods.huntAnalyzer.sessionsByFloor')}: ${floorBreakdown}\n`;
     }
+
     summary += `${t('mods.huntAnalyzer.winLoss')}: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)\n`;
     summary += `${t('mods.huntAnalyzer.timeElapsed')}: ${formatTime(filteredTimeHours * 60 * 60 * 1000)}\n`;
     summary += `${t('mods.huntAnalyzer.gold')}: ${HuntAnalyzerState.totals.gold} | ${t('mods.huntAnalyzer.dust')}: ${HuntAnalyzerState.totals.dust}\n`;
@@ -4795,228 +4737,16 @@ function generateSummaryLogText() {
     summary += `${t('mods.huntAnalyzer.totalStaminaSpent')}: ${HuntAnalyzerState.totals.staminaSpent}\n`;
     summary += `${t('mods.huntAnalyzer.experience')}: ${formatExpValue(HuntAnalyzerState.totals.experience)}\n`;
     summary += `---------------------------\n`;
-    summary += `${t('mods.huntAnalyzer.overallRates')}: ${autoplayRatePerHour} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${goldRatePerHour} ${t('mods.huntAnalyzer.goldPerHour')} | ${creatureRatePerHour} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${equipmentRatePerHour} ${t('mods.huntAnalyzer.equipmentPerHour')} | ${formatExpValue(expRatePerHour)} ${t('mods.huntAnalyzer.expPerHour')}\n`;
-    summary += `${t('mods.huntAnalyzer.overallEfficiency')}: ${goldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${sessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${staminaSpentRatePerHour} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
+    summary += `${t('mods.huntAnalyzer.overallRates')}: ${overallRates.sessions} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${overallRates.gold} ${t('mods.huntAnalyzer.goldPerHour')} | ${overallRates.creatures} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${overallRates.equipment} ${t('mods.huntAnalyzer.equipmentPerHour')} | ${formatExpValue(overallRates.experience)} ${t('mods.huntAnalyzer.expPerHour')}\n`;
+    summary += `${t('mods.huntAnalyzer.overallEfficiency')}: ${overallEfficiency.goldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${overallEfficiency.sessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${overallRates.staminaSpent} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
     summary += `${t('mods.huntAnalyzer.generated')}: ${new Date().toLocaleString()}\n`;
     summary += `---------------------------\n\n`;
 
-    // Map-specific Analysis
-    summary += `--- ${t('mods.huntAnalyzer.mapAnalysis')} ---\n`;
-    if (HuntAnalyzerState.data.sessions.length === 0) {
-        summary += `${t('mods.huntAnalyzer.noSessionsRecorded')}\n`;
-    } else {
-        // Group sessions by map and calculate map-specific stats
-        const mapGroups = {};
-        const overallStartTime = HuntAnalyzerState.session.startTime;
-        const sessionsWithTimestamps = HuntAnalyzerState.data.sessions.filter(s => s.timestamp);
-        
-        HuntAnalyzerState.data.sessions.forEach(session => {
-            const mapName = session.roomName || t('mods.huntAnalyzer.unknownMap');
-            if (!mapGroups[mapName]) {
-                mapGroups[mapName] = {
-                    sessions: 0,
-                    wins: 0,
-                    losses: 0,
-                    loot: new Map(),
-                    creatures: new Map(),
-                    totalGold: 0,
-                    totalDust: 0,
-                    totalStamina: 0,
-                    totalExperience: 0,
-                    totalEquipment: 0,
-                    totalCreatures: 0,
-                    totalShiny: 0,
-                    totalSealed: 0,
-                    startTime: session.timestamp || overallStartTime,
-                    endTime: session.timestamp || overallStartTime,
-                    hasTimestamps: false
-                };
-            }
-            
-            mapGroups[mapName].sessions++;
-            if (session.victory === true) {
-                mapGroups[mapName].wins++;
-            } else if (session.victory === false) {
-                mapGroups[mapName].losses++;
-            }
-            // Prefer explicit session totals, but fall back to deriving from loot for older data.
-            let sessionGold = typeof session.gold === 'number' ? session.gold : 0;
-            let sessionDust = typeof session.dust === 'number' ? session.dust : 0;
-            if ((typeof session.gold !== 'number' || typeof session.dust !== 'number') && Array.isArray(session.loot)) {
-                session.loot.forEach(item => {
-                    if (!item || typeof item.count !== 'number') return;
-                    if (typeof session.gold !== 'number' && item.originalName === 'Gold') {
-                        sessionGold += item.count;
-                    } else if (typeof session.dust !== 'number' && item.originalName === 'Dust') {
-                        sessionDust += item.count;
-                    }
-                });
-            }
-            mapGroups[mapName].totalGold += sessionGold;
-            mapGroups[mapName].totalDust += sessionDust;
-            mapGroups[mapName].totalStamina += session.staminaSpent || 0;
-            mapGroups[mapName].totalExperience += sessionStoredExperience(session);
-            
-            // Track time range for this map
-            if (session.timestamp) {
-                mapGroups[mapName].hasTimestamps = true;
-                mapGroups[mapName].startTime = Math.min(mapGroups[mapName].startTime, session.timestamp);
-                mapGroups[mapName].endTime = Math.max(mapGroups[mapName].endTime, session.timestamp);
-            } else {
-                // For sessions without timestamps, use overall session time range
-                mapGroups[mapName].startTime = Math.min(mapGroups[mapName].startTime, overallStartTime);
-                mapGroups[mapName].endTime = Math.max(mapGroups[mapName].endTime, Date.now());
-            }
-            
-            // Aggregate loot for this map
-            session.loot.forEach(item => {
-                const mapKey = buildLootAggregateKey(item);
-                if (mapGroups[mapName].loot.has(mapKey)) {
-                    const existing = mapGroups[mapName].loot.get(mapKey);
-                    existing.count += item.count;
-                    mapGroups[mapName].loot.set(mapKey, existing);
-                } else {
-                    mapGroups[mapName].loot.set(mapKey, { ...item });
-                }
-                
-                // Count equipment (gold and dust are tracked via session.gold/dust above)
-                if (item.isEquipment) {
-                    mapGroups[mapName].totalEquipment += item.count;
-                }
-            });
-            
-            // Aggregate creatures for this map
-            session.creatures.forEach(creature => {
-                const mapKey = buildCreatureAggregateKey(creature);
-                if (mapGroups[mapName].creatures.has(mapKey)) {
-                    const existing = mapGroups[mapName].creatures.get(mapKey);
-                    existing.count += creature.count;
-                    mapGroups[mapName].creatures.set(mapKey, existing);
-                } else {
-                    mapGroups[mapName].creatures.set(mapKey, { ...creature });
-                }
-                
-                mapGroups[mapName].totalCreatures += creature.count;
-                if (creature.isShiny) {
-                    mapGroups[mapName].totalShiny += creature.count;
-                }
-                if (creature.isSealed) {
-                    mapGroups[mapName].totalSealed += creature.count;
-                }
-            });
-        });
-        
-        // Sort maps by session count (most hunted first)
-        const sortedMaps = Object.keys(mapGroups).sort((a, b) => mapGroups[b].sessions - mapGroups[a].sessions);
-        
-        sortedMaps.forEach(mapName => {
-            const mapData = mapGroups[mapName];
-            const mapTimeHours = (mapData.endTime - mapData.startTime) / (1000 * 60 * 60);
-            
-            // Calculate map-specific rates
-            const mapSessionRate = mapTimeHours > 0 ? Math.floor(mapData.sessions / mapTimeHours) : 0;
-            const mapGoldRate = mapTimeHours > 0 ? Math.floor(mapData.totalGold / mapTimeHours) : 0;
-            const mapCreatureRate = mapTimeHours > 0 ? Math.floor(mapData.totalCreatures / mapTimeHours) : 0;
-            const mapEquipmentRate = mapTimeHours > 0 ? Math.round(mapData.totalEquipment / mapTimeHours) : 0;
-            const mapExpRate = mapTimeHours > 0 ? Math.floor(mapData.totalExperience / mapTimeHours) : 0;
-            const mapStaminaRate = mapTimeHours > 0 ? Math.floor(mapData.totalStamina / mapTimeHours) : 0;
-            
-            // Calculate map-specific efficiency
-            const mapGoldPerStamina = mapData.totalStamina > 0 ? (mapData.totalGold / mapData.totalStamina).toFixed(2) : t('mods.huntAnalyzer.notAvailable');
-            const mapSessionsPerStamina = mapData.totalStamina > 0 ? (mapData.sessions / mapData.totalStamina).toFixed(3) : t('mods.huntAnalyzer.notAvailable');
-            const mapWinRate = (mapData.wins + mapData.losses) > 0 ? Math.round((mapData.wins / (mapData.wins + mapData.losses)) * 100) : 0;
-            
-            summary += `\n${mapName}:\n`;
-            summary += `  ${t('mods.huntAnalyzer.sessions')}: ${mapData.sessions} | ${t('mods.huntAnalyzer.winLoss')}: ${mapData.wins}/${mapData.losses} (${mapWinRate}%) | ${t('mods.huntAnalyzer.time')}: ${formatTime(mapData.endTime - mapData.startTime)}${mapData.hasTimestamps ? '' : ` (${t('mods.huntAnalyzer.estimated')})`}\n`;
-            summary += `  ${t('mods.huntAnalyzer.gold')}: ${mapData.totalGold} | ${t('mods.huntAnalyzer.dust')}: ${mapData.totalDust} | ${t('mods.huntAnalyzer.stamina')}: ${mapData.totalStamina} | ${t('mods.huntAnalyzer.experience')}: ${formatExpValue(mapData.totalExperience)}\n`;
-            summary += `  ${t('mods.huntAnalyzer.equipment')}: ${mapData.totalEquipment} | ${t('mods.huntAnalyzer.creatures')}: ${mapData.totalCreatures} | ${t('mods.huntAnalyzer.shiny')}: ${mapData.totalShiny} | ${t('mods.huntAnalyzer.sealed')}: ${mapData.totalSealed}\n`;
-            summary += `  ${t('mods.huntAnalyzer.rates')}: ${mapSessionRate} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${mapGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${mapCreatureRate} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${mapEquipmentRate} ${t('mods.huntAnalyzer.equipmentPerHour')} | ${formatExpValue(mapExpRate)} ${t('mods.huntAnalyzer.expPerHour')}\n`;
-            summary += `  ${t('mods.huntAnalyzer.efficiency')}: ${mapGoldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${mapSessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${mapStaminaRate} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
-            
-            // Show all loot items using the same order as panel rendering:
-            // category (Runes -> Equipment -> Everything else), then name, then rarity.
-            const sortedLoot = Array.from(mapData.loot.values()).sort((a, b) => {
-                const categoryA = getItemCategory(a);
-                const categoryB = getItemCategory(b);
-                if (categoryA !== categoryB) {
-                    return categoryA - categoryB;
-                }
-
-                const nameCompare = (a.originalName || '').localeCompare(b.originalName || '');
-                if (nameCompare !== 0) {
-                    return nameCompare;
-                }
-
-                if ((a.rarity || 0) !== (b.rarity || 0)) {
-                    return (b.rarity || 0) - (a.rarity || 0);
-                }
-
-                if ((a.gameId || 0) !== (b.gameId || 0)) {
-                    return (a.gameId || 0) - (b.gameId || 0);
-                }
-                return 0;
-            });
-            
-            if (sortedLoot.length > 0) {
-                summary += `  ${t('mods.huntAnalyzer.loot')}:\n`;
-                sortedLoot.forEach(item => {
-                    let itemLine = `    ${item.originalName}: x${item.count}`;
-                    if (item.rarity > 0) {
-                        const rarityText = item._descriptiveRarity || 
-                                          window.inventoryDatabase?.rarityText?.[item.rarity] || 
-                                          `Rarity ${item.rarity}`;
-                        itemLine += ` (${rarityText})`;
-                    }
-                    if (item.isEquipment && item.stat) {
-                        itemLine += ` (Stat: ${item.stat.toUpperCase()})`;
-                    }
-                    summary += `${itemLine}\n`;
-                });
-            }
-            
-            // Show all creatures using the same order as panel rendering:
-            // shiny first, then name, then tier (high->low), then gameId.
-            const sortedCreatures = Array.from(mapData.creatures.values()).sort((a, b) => {
-                if (a.isShiny !== b.isShiny) {
-                    return a.isShiny ? -1 : 1;
-                }
-
-                if (!!a.isSealed !== !!b.isSealed) {
-                    return a.isSealed ? -1 : 1;
-                }
-
-                const nameCompare = (a.originalName || '').localeCompare(b.originalName || '');
-                if (nameCompare !== 0) {
-                    return nameCompare;
-                }
-
-                if ((a.tierLevel || 0) !== (b.tierLevel || 0)) {
-                    return (b.tierLevel || 0) - (a.tierLevel || 0);
-                }
-
-                if ((a.gameId || 0) !== (b.gameId || 0)) {
-                    return (a.gameId || 0) - (b.gameId || 0);
-                }
-                return 0;
-            });
-            
-            if (sortedCreatures.length > 0) {
-                summary += `  ${t('mods.huntAnalyzer.creatures')}:\n`;
-                sortedCreatures.forEach(creature => {
-                    let creatureLine = `    ${creature.originalName} (${creature.tierName}): x${creature.count}`;
-                    if (creature.isShiny) {
-                        creatureLine = `    ✨ ${creatureLine}`;
-                    }
-                    if (creature.isSealed) {
-                        creatureLine = `    ⭐ ${creatureLine}`;
-                    }
-                    summary += `${creatureLine}\n`;
-                });
-            }
-        });
-    }
+    summary = appendMapAnalysisSection(
+        summary,
+        sessions.length > 0 ? buildMapGroupsFromSessions(sessions) : {}
+    );
     summary += `---------------------------\n`;
-
     return summary;
 }
 
@@ -5031,6 +4761,123 @@ function createUnifiedGridContainer() {
     gridContainer.style.gridTemplateColumns = 'repeat(5, 1fr)';
     gridContainer.style.gap = '6px';
     return gridContainer;
+}
+
+function createGridEntryCell() {
+    const cell = document.createElement('div');
+    cell.style.display = 'flex';
+    cell.style.flexDirection = 'column';
+    cell.style.alignItems = 'center';
+    cell.style.justifyContent = 'center';
+    cell.style.padding = '4px';
+    cell.style.backgroundColor = getThemeColor('entryBackground');
+    cell.style.borderRadius = '6px';
+    return cell;
+}
+
+function createGridIconWrapper() {
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flex';
+    wrapper.style.justifyContent = 'center';
+    wrapper.style.alignItems = 'center';
+    return wrapper;
+}
+
+function mountGridVisual(iconWrapper, visualElement, fallbackEmoji) {
+    if (visualElement instanceof HTMLElement) {
+        iconWrapper.appendChild(visualElement);
+        return;
+    }
+    iconWrapper.textContent = visualElement || fallbackEmoji;
+    iconWrapper.style.fontSize = '24px';
+}
+
+function updateFilteredSectionTitle(titleId, labelKey, totalCount) {
+    const title = document.getElementById(titleId);
+    if (!title) return;
+    const filterText = HuntAnalyzerState.ui.selectedMapFilter === 'ALL'
+        ? ''
+        : ` (${HuntAnalyzerState.ui.selectedMapFilter})`;
+    title.textContent = `${t(labelKey)}: ${totalCount}${filterText}`;
+}
+
+function setCompactTotalDisplay(element, value) {
+    if (!element) return;
+    element.textContent = formatCompactInt(value);
+    element.setAttribute('title', formatExactInt(value));
+}
+
+function updatePanelResourceTotalDisplays(elementById) {
+    HUNT_ANALYZER_PANEL_RESOURCE_TOTALS.forEach(({ amountId, totalKey }) => {
+        const element = elementById?.[amountId]
+            ?? domCache.get(amountId)
+            ?? document.getElementById(amountId);
+        setCompactTotalDisplay(element, HuntAnalyzerState.totals[totalKey]);
+    });
+}
+
+function resolveLootGridVisual(data) {
+    let equipmentGameId = data.gameId;
+    if (data.isEquipment && !equipmentGameId && data.spriteId) {
+        equipmentGameId = data.spriteId;
+    }
+
+    if (data.isEquipment && equipmentGameId && typeof globalThis.state?.utils?.getEquipment === 'function') {
+        try {
+            const equipData = globalThis.state.utils.getEquipment(equipmentGameId);
+            if (equipData?.metadata && typeof equipData.metadata.spriteId === 'number') {
+                const equipmentSpriteId = equipData.metadata.spriteId;
+
+                if (api?.ui?.components?.createItemPortrait) {
+                    const equipmentPortrait = api.ui.components.createItemPortrait({
+                        itemId: equipmentSpriteId,
+                        tier: data.rarity || 1
+                    });
+
+                    if (equipmentPortrait?.nodeType) {
+                        if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild?.nodeType) {
+                            const portrait = equipmentPortrait.firstChild;
+                            portrait.appendChild(createCountOverlay(data.count));
+                            addStatIconToPortrait(portrait, data.stat);
+                            return portrait;
+                        }
+                        addStatIconToPortrait(equipmentPortrait, data.stat);
+                        return equipmentPortrait;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[Hunt Analyzer] Error creating equipment API component:', e);
+        }
+    }
+
+    let visualElement = data.visual;
+    if (!(visualElement instanceof HTMLElement)) {
+        visualElement = createInventoryStyleItemPortrait({
+            spriteId: data.spriteId,
+            src: data.src,
+            spriteSrc: data.src,
+            originalName: data.originalName,
+            rarity: data.rarity,
+            count: data.count,
+            isEquipment: data.isEquipment,
+            gameId: data.gameId,
+            stat: data.stat
+        });
+    }
+    return visualElement;
+}
+
+function resolveCreatureGridVisual(data) {
+    if (data.gameId) {
+        return createInventoryStyleCreaturePortrait(data);
+    }
+    if (data.visual instanceof HTMLElement) {
+        const countSpan = data.visual.querySelector('.pixel-font-16');
+        if (countSpan) countSpan.textContent = data.count || 1;
+        return data.visual;
+    }
+    return '👾';
 }
 
 // Creates a framed drop section (used by loot and creature containers)
@@ -5054,19 +4901,15 @@ function createDropSection({ containerClassName, titleId, displayId }) {
     title.id = titleId;
     title.style.margin = "0px";
     title.style.fontSize = "14px";
-    title.style.color = getThemeColor('textAccent');
     title.style.fontWeight = "bold";
-    title.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
+    applyAccentTitleStyle(title);
     titleContainer.appendChild(title);
 
     const displayDiv = document.createElement("div");
     displayDiv.id = displayId;
     displayDiv.style.width = "100%";
     displayDiv.style.padding = "4px";
-    displayDiv.style.border = "4px solid transparent";
-    displayDiv.style.borderImage = "var(--ha-frame-1)";
-    displayDiv.style.backgroundColor = getThemeColor('sectionBackground');
-    displayDiv.style.color = getThemeColor('text');
+    applyThemeFramedDisplaySurface(displayDiv);
     displayDiv.style.fontSize = "11px";
     displayDiv.style.overflowY = "scroll";
     displayDiv.style.flexGrow = "1";
@@ -5301,11 +5144,12 @@ function handlePanelDragMouseUp(panel) {
 // =======================
 
 // Creates a display element with icon and amount
-function createResourceDisplay(iconSrc, iconAlt, amountId, colorKey = 'text') {
+function createResourceDisplay(iconSrc, iconAlt, amountId, colorKey = 'text', rowHeight) {
     const displayDiv = document.createElement('div');
     displayDiv.style.display = 'flex';
     displayDiv.style.alignItems = 'center';
     displayDiv.style.gap = '4px';
+    if (rowHeight) displayDiv.style.height = rowHeight;
 
     const icon = document.createElement('img');
     icon.style.width = '12px';
@@ -5327,13 +5171,54 @@ function createResourceDisplay(iconSrc, iconAlt, amountId, colorKey = 'text') {
     return { displayDiv, amountSpan };
 }
 
+function appendPanelResourceTotals(parent, rowHeight) {
+    const spansById = {};
+    HUNT_ANALYZER_PANEL_RESOURCE_TOTALS.forEach((spec) => {
+        const { displayDiv, amountSpan } = createResourceDisplay(
+            spec.iconSrc, spec.iconAlt, spec.amountId, spec.colorKey, rowHeight
+        );
+        parent.appendChild(displayDiv);
+        spansById[spec.amountId] = amountSpan;
+    });
+    return spansById;
+}
+
+function applyDropRateRowMetrics(element, rowHeight) {
+    element.style.height = rowHeight;
+    element.style.lineHeight = rowHeight;
+}
+
+function applyEllipsisOverflowStyles(element) {
+    element.style.display = 'block';
+    element.style.maxWidth = '100%';
+    element.style.whiteSpace = 'nowrap';
+    element.style.overflow = 'hidden';
+    element.style.textOverflow = 'ellipsis';
+}
+
 // Creates a rate display element
-function createRateDisplay(rateId, labelKey, initialValue = 0) {
+function createRateDisplay(rateId, labelKey, options = {}) {
+    const { initialValue = 0, initialText, rowHeight, ellipsis } = options;
     const rateElement = document.createElement("span");
     rateElement.id = rateId;
-    rateElement.textContent = `${t(labelKey)}: ${initialValue}`;
+    rateElement.textContent = initialText ?? `${t(labelKey)}: ${initialValue}`;
     rateElement.className = "ha-stats-text";
+    if (rowHeight) applyDropRateRowMetrics(rateElement, rowHeight);
+    if (ellipsis) applyEllipsisOverflowStyles(rateElement);
     return rateElement;
+}
+
+function createThemeInfoSpan(id, textContent, options = {}) {
+    const span = document.createElement('span');
+    span.id = id;
+    if (textContent != null) span.textContent = textContent;
+    span.style.fontSize = options.fontSize ?? '10px';
+    span.style.color = getThemeColor('textInfo');
+    if (options.display) span.style.display = options.display;
+    if (options.whiteSpace) span.style.whiteSpace = options.whiteSpace;
+    if (options.lineHeight) span.style.lineHeight = options.lineHeight;
+    if (options.verticalAlign) span.style.verticalAlign = options.verticalAlign;
+    return span;
 }
 
 // Creates a flex row container
@@ -5355,50 +5240,13 @@ function createFlexColumn(gap = '2px') {
     return column;
 }
 
-// Creates a section title
-function createSectionTitle(titleId, titleText) {
-    const titleContainer = document.createElement("div");
-    titleContainer.className = "ha-section-title";
-
-    const title = document.createElement("h3");
-    title.id = titleId;
-    title.textContent = titleText;
-    titleContainer.appendChild(title);
-
-    return { titleContainer, title };
-}
-
-// Creates a display content area
-function createDisplayContent(contentId, maxHeight = '200px') {
-    const contentDiv = document.createElement("div");
-    contentDiv.id = contentId;
-    contentDiv.className = "ha-display-content";
-    contentDiv.style.maxHeight = maxHeight;
-    // Ensure theme colors are applied
-    contentDiv.style.border = `1px solid ${getThemeColor('border')}`;
-    contentDiv.style.backgroundColor = getThemeColor('sectionBackground');
-    contentDiv.style.color = getThemeColor('text');
-    return contentDiv;
-}
-
 // Resets all Hunt Analyzer state data
 function resetHuntAnalyzerState() {
     HuntAnalyzerState.ui.autoplayLogText = ""; // Reset the log text
     HuntAnalyzerState.ui.lastSeed = null;
     HuntAnalyzerState.ui.selectedMapFilter = "ALL";
     HuntAnalyzerState.session.count = 0;
-    HuntAnalyzerState.totals.gold = 0;
-    HuntAnalyzerState.totals.creatures = 0;
-    HuntAnalyzerState.totals.equipment = 0;
-    HuntAnalyzerState.totals.runes = 0;
-    HuntAnalyzerState.totals.dust = 0;
-    HuntAnalyzerState.totals.shiny = 0;
-    HuntAnalyzerState.totals.sealed = 0;
-    HuntAnalyzerState.totals.staminaSpent = 0;
-    HuntAnalyzerState.totals.staminaRecovered = 0;
-    HuntAnalyzerState.totals.experience = 0;
-    HuntAnalyzerState.totals.wins = 0;
-    HuntAnalyzerState.totals.losses = 0;
+    resetTotalsCounters();
     HuntAnalyzerState.session.startTime = Date.now();
     HuntAnalyzerState.session.sessionStartTime = 0;
     HuntAnalyzerState.session.isActive = false;
@@ -5427,6 +5275,10 @@ function resetHuntAnalyzerState() {
     } catch (error) {
         console.error('[Hunt Analyzer] Error clearing localStorage:', error);
     }
+
+    idbClearAllSessions().catch((error) => {
+        console.error('[Hunt Analyzer] Error clearing IndexedDB:', error);
+    });
     
     // User explicitly cleared data, so re-enable saving
     _persistenceLoadFailed = false;
@@ -5622,8 +5474,8 @@ function createAutoplayAnalyzerPanel() {
     }
     
 
-    // Only reset data if we don't have persisted data
-    if (HuntAnalyzerState.data.sessions.length === 0) {
+    // Only reset when there is no persisted hunt data (sessions, totals, time, or battle count)
+    if (HuntAnalyzerState.data.sessions.length === 0 && !hasPersistedAnalyzerStats()) {
         // Reset tracking variables for a fresh panel session
         HuntAnalyzerState.session.count = 0;
         HuntAnalyzerState.totals.gold = 0;
@@ -5644,15 +5496,14 @@ function createAutoplayAnalyzerPanel() {
         HuntAnalyzerState.data.sessions = [];
         HuntAnalyzerState.data.aggregatedLoot.clear();
         HuntAnalyzerState.data.aggregatedCreatures.clear();
-    } else {
-        // Re-aggregate data from persisted sessions
-        dataProcessor.aggregateData();
+    } else if (HuntAnalyzerState.data.sessions.length > 0) {
+        rebuildAggregatesFromSessionsWithMerge();
     }
-    
+
     // Consolidated panel initialization log
     console.log('[Hunt Analyzer] Panel initialized:', {
-        hasPersistedData: HuntAnalyzerState.data.sessions.length > 0,
-        sessionCount: HuntAnalyzerState.data.sessions.length,
+        hasPersistedData: HuntAnalyzerState.data.sessions.length > 0 || hasPersistedAnalyzerStats(),
+        sessionCount: HuntAnalyzerState.session.count,
         isOpen: true
     });
     
@@ -5876,16 +5727,10 @@ function createAutoplayAnalyzerPanel() {
     liveDisplaySection.style.width = "auto";
 
     // Session Stats
-    const sessionStatsDiv = document.createElement("div");
-    sessionStatsDiv.style.display = "flex";
-    sessionStatsDiv.style.flexDirection = "column";
-    sessionStatsDiv.style.gap = "2px";
+    const sessionStatsDiv = createFlexColumn('2px');
     sessionStatsDiv.style.marginBottom = "4px";
 
-    const firstRow = document.createElement("div");
-    firstRow.style.display = "flex";
-    firstRow.style.justifyContent = "space-between";
-    firstRow.style.alignItems = "center";
+    const firstRow = createFlexRow('4px', 'space-between', 'center');
 
     const autoplayCounter = document.createElement("div");
     autoplayCounter.id = "mod-autoplay-counter";
@@ -5901,37 +5746,21 @@ function createAutoplayAnalyzerPanel() {
     
     autoplayCounter.appendChild(sessionCountSpan);
 
-    const playtimeElement = document.createElement("span");
-    playtimeElement.id = "mod-playtime-display";
-    playtimeElement.textContent = formatPlaytimeLabel("00:00:00");
-    playtimeElement.style.fontSize = "10px";
-    playtimeElement.style.color = getThemeColor('textInfo');
+    const playtimeElement = createThemeInfoSpan('mod-playtime-display', formatPlaytimeLabel("00:00:00"));
     
     firstRow.appendChild(autoplayCounter);
     firstRow.appendChild(playtimeElement);
     
-    // Second row for Stamina and W/L
-    const secondRow = document.createElement("div");
-    secondRow.style.display = "flex";
-    secondRow.style.justifyContent = "space-between";
-    secondRow.style.alignItems = "center";
-    
-    // Stamina Display
-    const staminaDisplaySpan = document.createElement("span");
-    staminaDisplaySpan.id = "mod-stamina-display";
-    staminaDisplaySpan.style.display = "none";
-    staminaDisplaySpan.style.whiteSpace = "nowrap";
-    staminaDisplaySpan.style.lineHeight = "12px";
-    staminaDisplaySpan.style.verticalAlign = "middle";
-    staminaDisplaySpan.style.fontSize = "10px";
-    staminaDisplaySpan.style.color = getThemeColor('textInfo');
+    const secondRow = createFlexRow('4px', 'space-between', 'center');
 
-    // Win/Loss Display
-    const winLossElement = document.createElement("span");
-    winLossElement.id = "mod-win-loss-display";
-    winLossElement.style.fontSize = "10px";
-    winLossElement.style.color = getThemeColor('textInfo');
-    winLossElement.textContent = formatWinLossLabel(0, 0, 0);
+    const staminaDisplaySpan = createThemeInfoSpan('mod-stamina-display', null, {
+        display: 'none',
+        whiteSpace: 'nowrap',
+        lineHeight: '12px',
+        verticalAlign: 'middle'
+    });
+
+    const winLossElement = createThemeInfoSpan('mod-win-loss-display', formatWinLossLabel(0, 0, 0));
     
     secondRow.appendChild(staminaDisplaySpan);
     secondRow.appendChild(winLossElement);
@@ -5942,63 +5771,33 @@ function createAutoplayAnalyzerPanel() {
 
     // Drop Rate Live Feed
     const dropRateLiveFeedDiv = document.createElement("div");
+    dropRateLiveFeedDiv.className = "ha-border-separator";
     dropRateLiveFeedDiv.style.display = "flex";
     dropRateLiveFeedDiv.style.justifyContent = "space-between";
-    dropRateLiveFeedDiv.style.marginTop = "6px";
-    dropRateLiveFeedDiv.style.padding = "3px 0";
-    dropRateLiveFeedDiv.style.borderTop = "1px solid #3A404A";
-    dropRateLiveFeedDiv.style.borderBottom = "1px solid #3A404A";
-    dropRateLiveFeedDiv.style.fontSize = "10px";
-    dropRateLiveFeedDiv.style.color = "#98C379";
 
-    // Left section for rates (shrinkable so long lines can ellipsis instead of wrapping)
-    const leftRatesSection = document.createElement('div');
-    leftRatesSection.style.display = 'flex';
-    leftRatesSection.style.flexDirection = 'column';
-    leftRatesSection.style.gap = '2px';
+    const leftRatesSection = createFlexColumn('2px');
     leftRatesSection.style.flex = '1';
     leftRatesSection.style.minWidth = '0';
     leftRatesSection.style.overflow = 'hidden';
     const dropRateRowHeight = '14px';
 
-    const goldRateElement = document.createElement("span");
-    goldRateElement.id = "mod-gold-rate";
-    goldRateElement.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: 0`;
-    goldRateElement.style.height = dropRateRowHeight;
-    goldRateElement.style.lineHeight = dropRateRowHeight;
+    const goldRateElement = createRateDisplay('mod-gold-rate', 'mods.huntAnalyzer.goldPerHour', { rowHeight: dropRateRowHeight });
     leftRatesSection.appendChild(goldRateElement);
 
-    const creatureRateElement = document.createElement("span");
-    creatureRateElement.id = "mod-creature-rate";
-    creatureRateElement.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: 0`;
-    creatureRateElement.style.height = dropRateRowHeight;
-    creatureRateElement.style.lineHeight = dropRateRowHeight;
+    const creatureRateElement = createRateDisplay('mod-creature-rate', 'mods.huntAnalyzer.creaturesPerHour', { rowHeight: dropRateRowHeight });
     leftRatesSection.appendChild(creatureRateElement);
 
-    const equipmentRateElement = document.createElement("span");
-    equipmentRateElement.id = "mod-equipment-rate";
-    equipmentRateElement.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: 0`;
-    equipmentRateElement.style.height = dropRateRowHeight;
-    equipmentRateElement.style.lineHeight = dropRateRowHeight;
+    const equipmentRateElement = createRateDisplay('mod-equipment-rate', 'mods.huntAnalyzer.equipmentPerHour', { rowHeight: dropRateRowHeight });
     leftRatesSection.appendChild(equipmentRateElement);
 
-    const runeRateElement = document.createElement("span");
-    runeRateElement.id = "mod-rune-rate";
-    runeRateElement.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: 0`;
-    runeRateElement.style.height = dropRateRowHeight;
-    runeRateElement.style.lineHeight = dropRateRowHeight;
+    const runeRateElement = createRateDisplay('mod-rune-rate', 'mods.huntAnalyzer.runesPerHour', { rowHeight: dropRateRowHeight });
     leftRatesSection.appendChild(runeRateElement);
 
-    const expRateElement = document.createElement("span");
-    expRateElement.id = "mod-exp-rate";
-    expRateElement.textContent = `${t('mods.huntAnalyzer.exp')}: ${formatExpValue(0)} | ${formatExpValue(0)}/h | ${formatExpValue(0)}/${t('mods.huntAnalyzer.expSessionAbbr')}`;
-    expRateElement.style.height = dropRateRowHeight;
-    expRateElement.style.lineHeight = dropRateRowHeight;
-    expRateElement.style.display = 'block';
-    expRateElement.style.maxWidth = '100%';
-    expRateElement.style.whiteSpace = 'nowrap';
-    expRateElement.style.overflow = 'hidden';
-    expRateElement.style.textOverflow = 'ellipsis';
+    const expRateElement = createRateDisplay('mod-exp-rate', null, {
+        rowHeight: dropRateRowHeight,
+        ellipsis: true,
+        initialText: `${t('mods.huntAnalyzer.exp')}: ${formatExpValue(0)} | ${formatExpValue(0)}/h | ${formatExpValue(0)}/${t('mods.huntAnalyzer.expSessionAbbr')}`
+    });
     expRateElement.addEventListener('mouseenter', () => {
         expRateElement.dataset.haExpTooltipHover = '1';
     });
@@ -6008,154 +5807,24 @@ function createAutoplayAnalyzerPanel() {
     });
     leftRatesSection.appendChild(expRateElement);
 
-    const totalStaminaSpentElement = document.createElement('span');
-    totalStaminaSpentElement.id = 'mod-total-stamina-spent';
-    // Calculate initial stamina efficiency - show zeros until first session completes
-    const initialStaminaSpentRatePerHour = 0;
-    const initialNetStaminaPerHour = 0;
-    const initialRecoveryEfficiency = 0;
-    setStaminaRateLineElement(totalStaminaSpentElement, initialStaminaSpentRatePerHour, initialNetStaminaPerHour, initialRecoveryEfficiency);
-    totalStaminaSpentElement.style.height = dropRateRowHeight;
-    totalStaminaSpentElement.style.lineHeight = dropRateRowHeight;
-    totalStaminaSpentElement.style.display = 'block';
-    totalStaminaSpentElement.style.maxWidth = '100%';
-    totalStaminaSpentElement.style.whiteSpace = 'nowrap';
-    totalStaminaSpentElement.style.overflow = 'hidden';
-    totalStaminaSpentElement.style.textOverflow = 'ellipsis';
+    const totalStaminaSpentElement = createRateDisplay('mod-total-stamina-spent', null, {
+        rowHeight: dropRateRowHeight,
+        ellipsis: true,
+        initialText: ''
+    });
+    setStaminaRateLineElement(totalStaminaSpentElement, 0, 0, 0);
     leftRatesSection.appendChild(totalStaminaSpentElement);
 
-    // Right section for totals
-    const rightTotalsSection = document.createElement('div');
-    rightTotalsSection.style.display = 'flex';
-    rightTotalsSection.style.flexDirection = 'column';
+    const rightTotalsSection = createFlexColumn('2px');
     rightTotalsSection.style.alignItems = 'flex-end';
-    rightTotalsSection.style.gap = '2px';
     rightTotalsSection.style.flexShrink = '0';
 
-    // Gold Display
-    const goldDisplayDiv = document.createElement('div');
-    goldDisplayDiv.style.display = 'flex';
-    goldDisplayDiv.style.alignItems = 'center';
-    goldDisplayDiv.style.gap = '4px';
-    goldDisplayDiv.style.height = dropRateRowHeight;
-
-    const goldIcon = document.createElement('img');
-    goldIcon.style.width = '12px';
-    goldIcon.style.height = '12px';
-    goldIcon.style.imageRendering = 'pixelated';
-    goldIcon.src = '/assets/icons/goldpile.png';
-    goldIcon.alt = 'Gold';
-
-    const goldAmountSpan = document.createElement('span');
-    goldAmountSpan.id = 'mod-total-gold-display';
-    goldAmountSpan.style.color = getThemeColor('textGold');
-    goldAmountSpan.style.fontSize = '12px';
-    goldAmountSpan.style.fontWeight = 'bold';
-    goldAmountSpan.textContent = '0';
-
-    goldDisplayDiv.appendChild(goldAmountSpan);
-    goldDisplayDiv.appendChild(goldIcon);
-    rightTotalsSection.appendChild(goldDisplayDiv);
-
-    // Dust Display
-    const dustDisplayDiv = document.createElement('div');
-    dustDisplayDiv.style.display = 'flex';
-    dustDisplayDiv.style.alignItems = 'center';
-    dustDisplayDiv.style.gap = '4px';
-    dustDisplayDiv.style.height = dropRateRowHeight;
-
-    const dustIcon = document.createElement('img');
-    dustIcon.style.width = '12px';
-    dustIcon.style.height = '12px';
-    dustIcon.style.imageRendering = 'pixelated';
-    dustIcon.src = '/assets/icons/dust.png';
-    dustIcon.alt = 'Dust';
-
-    const dustAmountSpan = document.createElement('span');
-    dustAmountSpan.id = 'mod-total-dust-display';
-    dustAmountSpan.style.color = getThemeColor('textDust');
-    dustAmountSpan.style.fontSize = '12px';
-    dustAmountSpan.style.fontWeight = 'bold';
-    dustAmountSpan.textContent = '0';
-
-    dustDisplayDiv.appendChild(dustAmountSpan);
-    dustDisplayDiv.appendChild(dustIcon);
-    rightTotalsSection.appendChild(dustDisplayDiv);
-
-    // Shiny Display
-    const shinyDisplayDiv = document.createElement('div');
-    shinyDisplayDiv.style.display = 'flex';
-    shinyDisplayDiv.style.alignItems = 'center';
-    shinyDisplayDiv.style.gap = '4px';
-    shinyDisplayDiv.style.height = dropRateRowHeight;
-
-    const shinyIcon = document.createElement('img');
-    shinyIcon.style.width = '12px';
-    shinyIcon.style.height = '12px';
-    shinyIcon.style.imageRendering = 'pixelated';
-    shinyIcon.src = '/assets/icons/shiny-star.png';
-    shinyIcon.alt = 'Shiny';
-
-    const shinyAmountSpan = document.createElement('span');
-    shinyAmountSpan.id = 'mod-total-shiny-display';
-    shinyAmountSpan.style.color = getThemeColor('textShiny');
-    shinyAmountSpan.style.fontSize = '12px';
-    shinyAmountSpan.style.fontWeight = 'bold';
-    shinyAmountSpan.textContent = '0';
-
-    shinyDisplayDiv.appendChild(shinyAmountSpan);
-    shinyDisplayDiv.appendChild(shinyIcon);
-    rightTotalsSection.appendChild(shinyDisplayDiv);
-
-    // Sealed Display
-    const sealedDisplayDiv = document.createElement('div');
-    sealedDisplayDiv.style.display = 'flex';
-    sealedDisplayDiv.style.alignItems = 'center';
-    sealedDisplayDiv.style.gap = '4px';
-    sealedDisplayDiv.style.height = dropRateRowHeight;
-
-    const sealedIcon = document.createElement('img');
-    sealedIcon.style.width = '12px';
-    sealedIcon.style.height = '12px';
-    sealedIcon.style.imageRendering = 'pixelated';
-    sealedIcon.src = SEALED_ICON_SRC;
-    sealedIcon.alt = 'Sealed';
-
-    const sealedAmountSpan = document.createElement('span');
-    sealedAmountSpan.id = 'mod-total-sealed-display';
-    sealedAmountSpan.style.color = getThemeColor('textSealed');
-    sealedAmountSpan.style.fontSize = '12px';
-    sealedAmountSpan.style.fontWeight = 'bold';
-    sealedAmountSpan.textContent = '0';
-
-    sealedDisplayDiv.appendChild(sealedAmountSpan);
-    sealedDisplayDiv.appendChild(sealedIcon);
-    rightTotalsSection.appendChild(sealedDisplayDiv);
-
-    // Runes Display
-    const runesDisplayDiv = document.createElement('div');
-    runesDisplayDiv.style.display = 'flex';
-    runesDisplayDiv.style.alignItems = 'center';
-    runesDisplayDiv.style.gap = '4px';
-    runesDisplayDiv.style.height = dropRateRowHeight;
-
-    const runesIcon = document.createElement('img');
-    runesIcon.style.width = '12px';
-    runesIcon.style.height = '12px';
-    runesIcon.style.imageRendering = 'pixelated';
-    runesIcon.src = 'https://bestiaryarena.com/assets/icons/rune-blank.png';
-    runesIcon.alt = 'Runes';
-
-    const runesAmountSpan = document.createElement('span');
-    runesAmountSpan.id = 'mod-total-runes-display';
-    runesAmountSpan.style.color = getThemeColor('textRunes');
-    runesAmountSpan.style.fontSize = '12px';
-    runesAmountSpan.style.fontWeight = 'bold';
-    runesAmountSpan.textContent = '0';
-
-    runesDisplayDiv.appendChild(runesAmountSpan);
-    runesDisplayDiv.appendChild(runesIcon);
-    rightTotalsSection.appendChild(runesDisplayDiv);
+    const resourceTotalSpans = appendPanelResourceTotals(rightTotalsSection, dropRateRowHeight);
+    const goldAmountSpan = resourceTotalSpans['mod-total-gold-display'];
+    const dustAmountSpan = resourceTotalSpans['mod-total-dust-display'];
+    const shinyAmountSpan = resourceTotalSpans['mod-total-shiny-display'];
+    const sealedAmountSpan = resourceTotalSpans['mod-total-sealed-display'];
+    const runesAmountSpan = resourceTotalSpans['mod-total-runes-display'];
 
     dropRateLiveFeedDiv.appendChild(leftRatesSection);
     dropRateLiveFeedDiv.appendChild(rightTotalsSection);
@@ -6176,10 +5845,9 @@ function createAutoplayAnalyzerPanel() {
     mapFilterTitle.textContent = t('mods.huntAnalyzer.mapFilter');
     mapFilterTitle.style.margin = "0px";
     mapFilterTitle.style.fontSize = "14px";
-    mapFilterTitle.style.color = getThemeColor('textAccent');
     mapFilterTitle.style.fontWeight = "bold";
-    mapFilterTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
     mapFilterTitle.style.flex = "0 0 auto";
+    applyAccentTitleStyle(mapFilterTitle);
 
     const mapFilterRow = document.createElement("div");
     mapFilterRow.id = "mod-map-filter-row";
@@ -6460,22 +6128,123 @@ function applyVisibilitySettings() {
     }
 }
 
+const HUNT_ANALYZER_RATE_DISPLAY_SPECS = [
+    { id: 'mod-gold-rate', labelKey: 'mods.huntAnalyzer.goldPerHour', rateKey: 'gold' },
+    { id: 'mod-creature-rate', labelKey: 'mods.huntAnalyzer.creaturesPerHour', rateKey: 'creature' },
+    { id: 'mod-equipment-rate', labelKey: 'mods.huntAnalyzer.equipmentPerHour', rateKey: 'equipment' },
+    { id: 'mod-rune-rate', labelKey: 'mods.huntAnalyzer.runesPerHour', rateKey: 'rune' }
+];
+
+function resolvePanelElement(id, elementById) {
+    return elementById?.[id] ?? domCache.get(id) ?? document.getElementById(id);
+}
+
+function setCompactRateDisplay(element, labelKey, ratePerHour) {
+    if (!element) return;
+    element.textContent = `${t(labelKey)}: ${formatCompactInt(ratePerHour)}`;
+    element.setAttribute('title', `${t(labelKey)}: ${formatExactInt(ratePerHour)}`);
+}
+
+function updateSessionCountDisplay(element, filteredTimeHours = getFilteredTimeHours()) {
+    if (!element) return;
+    const filteredSessionCount = getFilteredSessionCount();
+    const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
+    element.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${formatCompactInt(sessionRate)}/h)`;
+    element.setAttribute('title', `${t('mods.huntAnalyzer.sessions')}: ${formatExactInt(filteredSessionCount)} (${formatExactInt(sessionRate)}/h)`);
+}
+
+function updateWinLossDisplay(element) {
+    if (!element) return;
+    const totalSessions = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
+    const winRate = totalSessions > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessions) * 100) : 0;
+    element.textContent = formatWinLossLabel(HuntAnalyzerState.totals.wins, HuntAnalyzerState.totals.losses, winRate);
+}
+
+function updateStaminaSummaryDisplay(element) {
+    if (!element) return;
+    element.textContent = formatTotalStaminaLabel(HuntAnalyzerState.totals.staminaSpent);
+    if (HuntAnalyzerState.settings.visibility?.stamina !== false) {
+        element.style.display = 'inline';
+    }
+    element.setAttribute('title', `${t('mods.huntAnalyzer.totalStamina')}: ${formatExactInt(HuntAnalyzerState.totals.staminaSpent)}`);
+}
+
+function updatePlaytimeDisplay(element, filteredTimeHours = getFilteredTimeHours()) {
+    if (!element) return;
+    element.textContent = formatPlaytimeLabel(formatPlaytime(filteredTimeHours));
+}
+
+function calculateStaminaRateMetrics(filteredTimeHours = getFilteredTimeHours()) {
+    const hasCompletedSessions = HuntAnalyzerState.data.sessions.length > 0;
+    const naturalStaminaRegen = hasCompletedSessions ? Math.floor(filteredTimeHours * 60) : 0;
+    const totalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + naturalStaminaRegen;
+    const netStaminaChange = totalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
+    const actualNetStaminaRate = filteredTimeHours > 0 ? Math.floor(netStaminaChange / filteredTimeHours) : 0;
+    const durationMs = getFilteredDurationMs(filteredTimeHours);
+    return {
+        staminaSpentRatePerHour: smoothHourlyRate(HuntAnalyzerState.totals.staminaSpent, filteredTimeHours),
+        netStaminaPerHour: hasCompletedSessions
+            ? getSmoothedRate(actualNetStaminaRate, durationMs)
+            : actualNetStaminaRate,
+        recoveryEfficiency: HuntAnalyzerState.totals.staminaSpent > 0
+            ? Math.round((totalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100)
+            : 0
+    };
+}
+
+function updateStaminaRateDisplay(element, filteredTimeHours = getFilteredTimeHours()) {
+    if (!element) return;
+    const metrics = calculateStaminaRateMetrics(filteredTimeHours);
+    setStaminaRateLineElement(
+        element,
+        metrics.staminaSpentRatePerHour,
+        metrics.netStaminaPerHour,
+        metrics.recoveryEfficiency
+    );
+}
+
+function updatePanelRateDisplays(elementById, filteredTimeHours = getFilteredTimeHours()) {
+    const rates = calculateSmoothedPanelRates(filteredTimeHours);
+    HUNT_ANALYZER_RATE_DISPLAY_SPECS.forEach(({ id, labelKey, rateKey }) => {
+        setCompactRateDisplay(resolvePanelElement(id, elementById), labelKey, rates[rateKey]);
+    });
+    updateModExpRateDisplay(resolvePanelElement('mod-exp-rate', elementById));
+    updateStaminaRateDisplay(resolvePanelElement('mod-total-stamina-spent', elementById), filteredTimeHours);
+}
+
+function refreshPanelSectionTitles() {
+    let totalLootItems = 0;
+    HuntAnalyzerState.data.aggregatedLoot.forEach((data) => {
+        totalLootItems += data.count;
+    });
+    updateFilteredSectionTitle('mod-loot-title', 'mods.huntAnalyzer.loot', totalLootItems);
+
+    let totalCreatureDrops = 0;
+    HuntAnalyzerState.data.aggregatedCreatures.forEach((data) => {
+        totalCreatureDrops += data.count;
+    });
+    updateFilteredSectionTitle('mod-creature-drops-title', 'mods.huntAnalyzer.creatureDrops', totalCreatureDrops);
+}
+
+function refreshPanelLiveStats(elementById) {
+    const filteredTimeHours = getFilteredTimeHours();
+    updateSessionCountDisplay(resolvePanelElement('mod-session-count', elementById), filteredTimeHours);
+    updateWinLossDisplay(resolvePanelElement('mod-win-loss-display', elementById));
+    updateStaminaSummaryDisplay(resolvePanelElement('mod-stamina-display', elementById));
+    updatePlaytimeDisplay(resolvePanelElement('mod-playtime-display', elementById), filteredTimeHours);
+    updatePanelResourceTotalDisplays(elementById);
+    updatePanelRateDisplays(elementById, filteredTimeHours);
+}
+
 /** Live exp row: total (filtered) | smoothed exp/h | avg exp per session. */
 function updateModExpRateDisplay(targetEl) {
     if (!targetEl) return;
     const filteredTimeHours = getFilteredTimeHours();
     const totalExp = Math.max(0, Math.floor(Number(HuntAnalyzerState.totals.experience) || 0));
-    let expRatePerHour = 0;
-    if (filteredTimeHours > 0) {
-        const actualExpRate = Math.floor(totalExp / filteredTimeHours);
-        expRatePerHour = getSmoothedRate(actualExpRate, filteredTimeHours * 60 * 60 * 1000);
-    }
-    let sessionCountForExp = HuntAnalyzerState.session.count;
-    if (HuntAnalyzerState.ui.selectedMapFilter !== "ALL") {
-        sessionCountForExp = HuntAnalyzerState.data.sessions.filter(
-            session => session.roomName === HuntAnalyzerState.ui.selectedMapFilter
-        ).length;
-    }
+    const expRatePerHour = filteredTimeHours > 0
+        ? smoothHourlyRate(totalExp, filteredTimeHours)
+        : 0;
+    const sessionCountForExp = getFilteredSessionCount();
     const expPerSession = sessionCountForExp > 0 ? Math.floor(totalExp / sessionCountForExp) : 0;
     const expLabel = t('mods.huntAnalyzer.exp');
     const sessAbbr = t('mods.huntAnalyzer.expSessionAbbr');
@@ -6515,89 +6284,9 @@ function updatePanelDisplay() {
     lastKnownSealed = HuntAnalyzerState.totals.sealed;
     
     // Get cached DOM elements
-    const cachedLootDiv = domCache.get("mod-loot-display");
-    const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
-    const cachedAutoplayCounterElement = domCache.get("mod-autoplay-counter");
-    const cachedSessionCountSpan = domCache.get("mod-session-count");
-    const cachedStaminaDisplayElement = domCache.get("mod-stamina-display");
-    const cachedWinLossElement = domCache.get("mod-win-loss-display");
-    const cachedPlaytimeDisplayElement = domCache.get("mod-playtime-display");
-    const cachedGoldRateElement = domCache.get("mod-gold-rate");
-    const cachedCreatureRateElement = domCache.get("mod-creature-rate");
-    const cachedEquipmentRateElement = domCache.get("mod-equipment-rate");
-    const cachedRuneRateElement = domCache.get("mod-rune-rate");
-    const cachedExpRateElement = domCache.get("mod-exp-rate");
+    refreshPanelLiveStats();
+
     const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
-    const cachedTotalGoldDisplayElement = domCache.get("mod-total-gold-display");
-    const cachedTotalDustDisplayElement = domCache.get("mod-total-dust-display");
-    const cachedTotalShinyDisplayElement = domCache.get("mod-total-shiny-display");
-    const cachedTotalSealedDisplayElement = domCache.get("mod-total-sealed-display");
-    const cachedTotalRunesDisplayElement = domCache.get("mod-total-runes-display");
-    const cachedTotalStaminaSpentElement = domCache.get("mod-total-stamina-spent");
-
-    // Update the session counter display (filtered by selected map)
-    if (cachedSessionCountSpan) {
-        let filteredSessionCount = HuntAnalyzerState.session.count;
-        if (HuntAnalyzerState.ui.selectedMapFilter !== "ALL") {
-            // Count sessions only from the selected map
-            filteredSessionCount = HuntAnalyzerState.data.sessions.filter(session => 
-                session.roomName === HuntAnalyzerState.ui.selectedMapFilter
-            ).length;
-        }
-        
-        // Calculate session rate for display
-        const filteredTimeHours = getFilteredTimeHours();
-        const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
-        
-        cachedSessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${formatCompactInt(sessionRate)}/h)`;
-        cachedSessionCountSpan.setAttribute('title', `${t('mods.huntAnalyzer.sessions')}: ${formatExactInt(filteredSessionCount)} (${formatExactInt(sessionRate)}/h)`);
-    }
-    
-    // Update win/loss display
-    if (cachedWinLossElement) {
-        const totalSessions = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
-        const winRate = totalSessions > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessions) * 100) : 0;
-        cachedWinLossElement.textContent = formatWinLossLabel(HuntAnalyzerState.totals.wins, HuntAnalyzerState.totals.losses, winRate);
-    }
-    
-    // Update stamina display
-    if (cachedStaminaDisplayElement) {
-        cachedStaminaDisplayElement.textContent = formatTotalStaminaLabel(HuntAnalyzerState.totals.staminaSpent);
-        if (HuntAnalyzerState.settings.visibility?.stamina !== false) {
-            cachedStaminaDisplayElement.style.display = 'inline';
-        }
-        cachedStaminaDisplayElement.setAttribute('title', `${t('mods.huntAnalyzer.totalStamina')}: ${formatExactInt(HuntAnalyzerState.totals.staminaSpent)}`);
-    }
-
-    // Update dust display
-    if (cachedTotalDustDisplayElement) {
-        cachedTotalDustDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
-        cachedTotalDustDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.dust));
-    }
-
-    // Update gold display
-    if (cachedTotalGoldDisplayElement) {
-        cachedTotalGoldDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
-        cachedTotalGoldDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.gold));
-    }
-
-    // Update shiny display
-    if (cachedTotalShinyDisplayElement) {
-        cachedTotalShinyDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
-        cachedTotalShinyDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.shiny));
-    }
-
-    // Update sealed display
-    if (cachedTotalSealedDisplayElement) {
-        cachedTotalSealedDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
-        cachedTotalSealedDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.sealed));
-    }
-
-    // Update runes display
-    if (cachedTotalRunesDisplayElement) {
-        cachedTotalRunesDisplayElement.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
-        cachedTotalRunesDisplayElement.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.runes));
-    }
 
     // Update room ID display
     if (cachedRoomIdDisplayElement) {
@@ -6616,91 +6305,6 @@ function updatePanelDisplay() {
         }
     }
 
-    // --- Autoplay Sessions/Hour Calculation (filtered by selected map) ---
-    let autoplayRatePerHour = 0;
-    const filteredTimeHours = getFilteredTimeHours();
-
-    if (filteredTimeHours > 0) {
-        let sessionCountForRate = HuntAnalyzerState.session.count;
-        if (HuntAnalyzerState.ui.selectedMapFilter !== "ALL") {
-            // Count sessions only from the selected map for rate calculation
-            sessionCountForRate = HuntAnalyzerState.data.sessions.filter(session => 
-                session.roomName === HuntAnalyzerState.ui.selectedMapFilter
-            ).length;
-        }
-        const actualRate = filteredTimeHours > 0 ? Math.floor(sessionCountForRate / filteredTimeHours) : 0;
-        autoplayRatePerHour = getSmoothedRate(actualRate, filteredTimeHours * 60 * 60 * 1000);
-    }
-    // Update playtime display
-    if (cachedPlaytimeDisplayElement) {
-        const filteredTimeHours = getFilteredTimeHours();
-        const playtimeText = formatPlaytime(filteredTimeHours);
-        cachedPlaytimeDisplayElement.textContent = formatPlaytimeLabel(playtimeText);
-    }
-    // --- End Autoplay Sessions/Hour Calculation ---
-
-    // --- Rate Calculation Logic for Gold/Creatures/Equipment: Based on filtered time ---
-    let goldRatePerHour = 0;
-    let creatureRatePerHour = 0;
-    let equipmentRatePerHour = 0;
-    let runeRatePerHour = 0;
-    let staminaSpentRatePerHour = 0;
-
-    if (filteredTimeHours > 0) {
-        const actualGoldRate = Math.floor(HuntAnalyzerState.totals.gold / filteredTimeHours);
-        const actualCreatureRate = Math.floor(HuntAnalyzerState.totals.creatures / filteredTimeHours);
-        const actualEquipmentRate = Math.round(HuntAnalyzerState.totals.equipment / filteredTimeHours);
-        const actualRuneRate = Math.round(HuntAnalyzerState.totals.runes / filteredTimeHours);
-        const actualStaminaRate = Math.floor(HuntAnalyzerState.totals.staminaSpent / filteredTimeHours);
-        
-        goldRatePerHour = getSmoothedRate(actualGoldRate, filteredTimeHours * 60 * 60 * 1000);
-        creatureRatePerHour = getSmoothedRate(actualCreatureRate, filteredTimeHours * 60 * 60 * 1000);
-        equipmentRatePerHour = getSmoothedRate(actualEquipmentRate, filteredTimeHours * 60 * 60 * 1000);
-        runeRatePerHour = getSmoothedRate(actualRuneRate, filteredTimeHours * 60 * 60 * 1000);
-        staminaSpentRatePerHour = getSmoothedRate(actualStaminaRate, filteredTimeHours * 60 * 60 * 1000);
-    }
-
-    if (cachedGoldRateElement) {
-        cachedGoldRateElement.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${formatCompactInt(goldRatePerHour)}`;
-        cachedGoldRateElement.setAttribute('title', `${t('mods.huntAnalyzer.goldPerHour')}: ${formatExactInt(goldRatePerHour)}`);
-    }
-    if (cachedCreatureRateElement) {
-        cachedCreatureRateElement.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatCompactInt(creatureRatePerHour)}`;
-        cachedCreatureRateElement.setAttribute('title', `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatExactInt(creatureRatePerHour)}`);
-    }
-    if (cachedEquipmentRateElement) {
-        cachedEquipmentRateElement.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatCompactInt(equipmentRatePerHour)}`;
-        cachedEquipmentRateElement.setAttribute('title', `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatExactInt(equipmentRatePerHour)}`);
-    }
-    if (cachedRuneRateElement) {
-        cachedRuneRateElement.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${formatCompactInt(runeRatePerHour)}`;
-        cachedRuneRateElement.setAttribute('title', `${t('mods.huntAnalyzer.runesPerHour')}: ${formatExactInt(runeRatePerHour)}`);
-    }
-    if (cachedExpRateElement) {
-        updateModExpRateDisplay(cachedExpRateElement);
-    }
-    if (cachedTotalStaminaSpentElement) {
-        // Only calculate natural regeneration if we have completed sessions
-        const hasCompletedSessions = HuntAnalyzerState.data.sessions.length > 0;
-        const filteredTimeMinutes = filteredTimeHours * 60;
-        const naturalStaminaRegen = hasCompletedSessions ? Math.floor(filteredTimeMinutes) : 0;
-        
-        // Total stamina recovery = potions + natural regen (only if sessions completed)
-        const totalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + naturalStaminaRegen;
-        
-        // Net stamina change (positive = gaining, negative = losing)
-        const netStaminaChange = totalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
-        const actualNetStaminaRate = filteredTimeHours > 0 ? Math.floor(netStaminaChange / filteredTimeHours) : 0;
-        // Only apply smoothing if we have completed sessions, otherwise show actual rate
-        const netStaminaPerHour = hasCompletedSessions ? 
-            getSmoothedRate(actualNetStaminaRate, filteredTimeHours * 60 * 60 * 1000) : actualNetStaminaRate;
-        
-        // Recovery efficiency percentage (including natural regen)
-        const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
-            Math.round((totalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
-        
-        setStaminaRateLineElement(cachedTotalStaminaSpentElement, staminaSpentRatePerHour, netStaminaPerHour, recoveryEfficiency);
-    }
 }
 
 // Calculates and applies the correct position for the analyzer panel.
@@ -7250,21 +6854,12 @@ function createHuntAnalyzerButton() {
 createHuntAnalyzerButton();
 
 // Initialize persistence - load settings and data when mod loads
-function initializeHuntAnalyzerPersistence() {
+async function initializeHuntAnalyzerPersistence() {
     if (typeof api !== 'undefined' && api) {
-
-        // Load settings first
         loadHuntAnalyzerSettings();
-
-        // Load persisted data
-        loadHuntAnalyzerData();
-        finalizeAggregatesAfterLoadIfNeeded();
-
-        // Auto-reopen panel if conditions are met
+        await completeHuntAnalyzerPersistenceLoad();
         autoReopenHuntAnalyzer();
-
     } else {
-        // Retry if API not ready yet
         console.log('[Hunt Analyzer] API not ready, retrying persistence initialization...');
         setTimeout(initializeHuntAnalyzerPersistence, 100);
     }
@@ -7292,149 +6887,8 @@ const translationEventHandler = (event) => {
             updateCurrentRoomDisplay();
         }
         
-        // Update session counter
-        const sessionCounter = document.getElementById('mod-session-count');
-        if (sessionCounter) {
-            let filteredSessionCount = HuntAnalyzerState.session.count;
-            if (HuntAnalyzerState.ui.selectedMapFilter !== "ALL") {
-                filteredSessionCount = HuntAnalyzerState.data.sessions.filter(session => 
-                    session.roomName === HuntAnalyzerState.ui.selectedMapFilter
-                ).length;
-            }
-            
-            const filteredTimeHours = getFilteredTimeHours();
-            const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
-            sessionCounter.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${formatCompactInt(sessionRate)}/h)`;
-            sessionCounter.setAttribute('title', `${t('mods.huntAnalyzer.sessions')}: ${formatExactInt(filteredSessionCount)} (${formatExactInt(sessionRate)}/h)`);
-        }
-
-        const winLossDisplay = document.getElementById('mod-win-loss-display');
-        if (winLossDisplay) {
-            const totalSessions = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
-            const winRate = totalSessions > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessions) * 100) : 0;
-            winLossDisplay.textContent = formatWinLossLabel(HuntAnalyzerState.totals.wins, HuntAnalyzerState.totals.losses, winRate);
-        }
-
-        const staminaDisplay = document.getElementById('mod-stamina-display');
-        if (staminaDisplay) {
-            staminaDisplay.textContent = formatTotalStaminaLabel(HuntAnalyzerState.totals.staminaSpent);
-            staminaDisplay.setAttribute('title', `${t('mods.huntAnalyzer.totalStamina')}: ${formatExactInt(HuntAnalyzerState.totals.staminaSpent)}`);
-        }
-
-        const tg = document.getElementById('mod-total-gold-display');
-        if (tg) {
-            tg.textContent = formatCompactInt(HuntAnalyzerState.totals.gold);
-            tg.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.gold));
-        }
-        const td = document.getElementById('mod-total-dust-display');
-        if (td) {
-            td.textContent = formatCompactInt(HuntAnalyzerState.totals.dust);
-            td.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.dust));
-        }
-        const ts = document.getElementById('mod-total-shiny-display');
-        if (ts) {
-            ts.textContent = formatCompactInt(HuntAnalyzerState.totals.shiny);
-            ts.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.shiny));
-        }
-        const tse = document.getElementById('mod-total-sealed-display');
-        if (tse) {
-            tse.textContent = formatCompactInt(HuntAnalyzerState.totals.sealed);
-            tse.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.sealed));
-        }
-        const tr = document.getElementById('mod-total-runes-display');
-        if (tr) {
-            tr.textContent = formatCompactInt(HuntAnalyzerState.totals.runes);
-            tr.setAttribute('title', formatExactInt(HuntAnalyzerState.totals.runes));
-        }
-        
-        // Update playtime display
-        const playtimeDisplay = document.getElementById('mod-playtime-display');
-        if (playtimeDisplay) {
-            const filteredTimeHours = getFilteredTimeHours();
-            const playtimeText = formatPlaytime(filteredTimeHours);
-            playtimeDisplay.textContent = formatPlaytimeLabel(playtimeText);
-        }
-        
-        // Update rate displays
-        const goldRate = document.getElementById('mod-gold-rate');
-        if (goldRate) {
-            const filteredTimeHours = getFilteredTimeHours();
-            const goldRatePerHour = filteredTimeHours > 0 ? 
-                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.gold / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
-            goldRate.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${formatCompactInt(goldRatePerHour)}`;
-            goldRate.setAttribute('title', `${t('mods.huntAnalyzer.goldPerHour')}: ${formatExactInt(goldRatePerHour)}`);
-        }
-        
-        const creatureRate = document.getElementById('mod-creature-rate');
-        if (creatureRate) {
-            const filteredTimeHours = getFilteredTimeHours();
-            const creatureRatePerHour = filteredTimeHours > 0 ? 
-                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.creatures / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
-            creatureRate.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatCompactInt(creatureRatePerHour)}`;
-            creatureRate.setAttribute('title', `${t('mods.huntAnalyzer.creaturesPerHour')}: ${formatExactInt(creatureRatePerHour)}`);
-        }
-        
-        const equipmentRate = document.getElementById('mod-equipment-rate');
-        if (equipmentRate) {
-            const filteredTimeHours = getFilteredTimeHours();
-            const equipmentRatePerHour = filteredTimeHours > 0 ? 
-                getSmoothedRate(Math.round(HuntAnalyzerState.totals.equipment / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
-            equipmentRate.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatCompactInt(equipmentRatePerHour)}`;
-            equipmentRate.setAttribute('title', `${t('mods.huntAnalyzer.equipmentPerHour')}: ${formatExactInt(equipmentRatePerHour)}`);
-        }
-        
-        const runeRate = document.getElementById('mod-rune-rate');
-        if (runeRate) {
-            const filteredTimeHours = getFilteredTimeHours();
-            const runeRatePerHour = filteredTimeHours > 0 ? 
-                getSmoothedRate(Math.round(HuntAnalyzerState.totals.runes / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
-            runeRate.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${formatCompactInt(runeRatePerHour)}`;
-            runeRate.setAttribute('title', `${t('mods.huntAnalyzer.runesPerHour')}: ${formatExactInt(runeRatePerHour)}`);
-        }
-        
-        const expRate = document.getElementById('mod-exp-rate');
-        if (expRate) {
-            updateModExpRateDisplay(expRate);
-        }
-        
-        const staminaSpent = document.getElementById('mod-total-stamina-spent');
-        if (staminaSpent) {
-            const filteredTimeHours = getFilteredTimeHours();
-            const filteredTimeMinutes = filteredTimeHours * 60;
-            const staminaSpentRatePerHour = filteredTimeHours > 0 ? 
-                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.staminaSpent / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
-            
-            // Only calculate natural regeneration if we have completed sessions
-            const hasCompletedSessions = HuntAnalyzerState.data.sessions.length > 0;
-            const naturalStaminaRegen = hasCompletedSessions ? Math.floor(filteredTimeMinutes) : 0;
-            
-            // Total stamina recovery = potions + natural regen (only if sessions completed)
-            const totalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + naturalStaminaRegen;
-            
-            // Net stamina change (positive = gaining, negative = losing)
-            const netStaminaChange = totalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
-            const actualNetStaminaRate = filteredTimeHours > 0 ? Math.floor(netStaminaChange / filteredTimeHours) : 0;
-            // Only apply smoothing if we have completed sessions, otherwise show actual rate
-            const netStaminaPerHour = hasCompletedSessions ? 
-                getSmoothedRate(actualNetStaminaRate, filteredTimeHours * 60 * 60 * 1000) : actualNetStaminaRate;
-            
-            // Recovery efficiency percentage (including natural regen)
-            const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
-                Math.round((totalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
-            
-            setStaminaRateLineElement(staminaSpent, staminaSpentRatePerHour, netStaminaPerHour, recoveryEfficiency);
-        }
-        
-        // Update section titles
-        const lootTitle = panel.querySelector('.loot-container h3');
-        if (lootTitle) {
-            lootTitle.textContent = t('mods.huntAnalyzer.loot');
-        }
-        
-        const creatureDropTitle = panel.querySelector('.creature-drop-container h3');
-        if (creatureDropTitle) {
-            creatureDropTitle.textContent = t('mods.huntAnalyzer.creatureDrops');
-        }
+        refreshPanelLiveStats();
+        refreshPanelSectionTitles();
         
         // Update button text
         const clearButton = panel.querySelector('.button-container button:first-child');
@@ -7865,7 +7319,7 @@ const panelState = {
 
 // Comprehensive cleanup function for memory leak prevention
 // Follows mod development guide best practices for cleanup
-function cleanupHuntAnalyzer() {
+async function cleanupHuntAnalyzer() {
     
     try {
         // 1. Clear intervals and timeouts
@@ -7984,8 +7438,12 @@ function cleanupHuntAnalyzer() {
         HuntAnalyzerState.ui.closedManually = true;
         
         if (HuntAnalyzerState.settings.persistData) {
-            saveHuntAnalyzerData();
-            saveHuntAnalyzerState();
+            try {
+                await flushHuntAnalyzerDataAsync();
+                saveHuntAnalyzerState();
+            } catch (flushErr) {
+                console.warn('[Hunt Analyzer] cleanup save failed:', flushErr);
+            }
         }
         
         // 5. Remove panel and test button
@@ -8090,7 +7548,10 @@ window.addEventListener('message', windowMessageHandler);
 
 // Save data before page unload
 beforeUnloadHandler = () => {
-    flushPersistenceIfEnabled();
+    if (HuntAnalyzerState.settings.persistData) {
+        flushHuntAnalyzerDataAsync().catch(() => {});
+        saveHuntAnalyzerState();
+    }
 };
 window.addEventListener('beforeunload', beforeUnloadHandler);
 
@@ -8103,12 +7564,40 @@ visibilityChangeHandler = () => {
 document.addEventListener('visibilitychange', visibilityChangeHandler);
 
 pageHideHandler = () => {
-    debouncedPersistenceFlush();
+    if (HuntAnalyzerState.settings.persistData) {
+        flushHuntAnalyzerDataAsync().catch(() => {});
+        saveHuntAnalyzerState();
+    }
 };
 window.addEventListener('pagehide', pageHideHandler);
 
+function getHuntAnalyzerPublicStats() {
+    return {
+        autoplayCount: HuntAnalyzerState.session.count,
+        totalGoldQuantity: HuntAnalyzerState.totals.gold,
+        totalCreatureDrops: HuntAnalyzerState.totals.creatures,
+        totalEquipmentDrops: HuntAnalyzerState.totals.equipment,
+        totalDustQuantity: HuntAnalyzerState.totals.dust,
+        totalStaminaSpent: HuntAnalyzerState.totals.staminaSpent
+    };
+}
+
 // Export functionality and expose state globally for Mod Settings integration
 window.HuntAnalyzerState = HuntAnalyzerState;
+window.saveHuntAnalyzerData = saveHuntAnalyzerData;
+window.HuntAnalyzerAPI = {
+    saveData: flushHuntAnalyzerDataAsync,
+    loadData: completeHuntAnalyzerPersistenceLoad,
+    exportAll: exportHuntAnalyzerDataForBackup,
+    importAll: importHuntAnalyzerDataFromBackup,
+    clearPersistedStorage: async () => {
+        try {
+            localStorage.removeItem(HUNT_ANALYZER_STORAGE_KEY);
+        } catch (_e) { /* ignore */ }
+        await idbClearAllSessions();
+    },
+    getStats: getHuntAnalyzerPublicStats
+};
 
 // Expose applyTheme function for Mod Settings integration
 window.applyHuntAnalyzerTheme = applyTheme;
@@ -8139,14 +7628,7 @@ window.addEventListener('storage', storageEventHandler);
 
 exports = {
     cleanup: cleanupHuntAnalyzer,
-    getStats: () => ({
-        autoplayCount: HuntAnalyzerState.session.count,
-        totalGoldQuantity: HuntAnalyzerState.totals.gold,
-        totalCreatureDrops: HuntAnalyzerState.totals.creatures,
-        totalEquipmentDrops: HuntAnalyzerState.totals.equipment,
-        totalDustQuantity: HuntAnalyzerState.totals.dust,
-        totalStaminaSpent: HuntAnalyzerState.totals.staminaSpent
-    })
+    getStats: getHuntAnalyzerPublicStats
 };
 
 console.log('[Hunt Analyzer] Mod initialization complete');

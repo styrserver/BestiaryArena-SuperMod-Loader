@@ -18571,14 +18571,22 @@ function renderCyclopediaSearchColumn() {
     pendingNavigatePollId = setTimeout(poll, 50);
   }
 
+  const CYCLOPEDIA_HOME_SEARCH_ROW_CLASS =
+    'group/row odd:bg-grayBrightest even:bg-grayHighlight hover:bg-whiteDarkest hover:text-whiteBrightest';
+
+  function styleHomeSearchRow(tr, { clickable = false } = {}) {
+    tr.className = clickable
+      ? `${CYCLOPEDIA_HOME_SEARCH_ROW_CLASS} cursor-pointer`
+      : CYCLOPEDIA_HOME_SEARCH_ROW_CLASS;
+  }
+
   function setTableMessage(text) {
     tbody.innerHTML = '';
     const tr = document.createElement('tr');
-    tr.className =
-      'group/row odd:bg-grayBrightest even:bg-grayHighlight hover:bg-whiteDarkest hover:text-whiteBrightest';
+    styleHomeSearchRow(tr);
     const td = document.createElement('td');
     td.colSpan = 3;
-    td.className = 'bg-grayRegular px-1 text-whiteRegular';
+    td.className = 'px-1 text-whiteRegular';
     td.textContent = text;
     td.style.textAlign = 'center';
     td.style.padding = '16px 8px';
@@ -18596,8 +18604,7 @@ function renderCyclopediaSearchColumn() {
     for (const r of results) {
       const tr = document.createElement('tr');
       tr.dataset.homeSearchResult = 'true';
-      tr.className =
-        'group/row odd:bg-grayBrightest even:bg-grayHighlight hover:bg-whiteDarkest hover:text-whiteBrightest cursor-pointer';
+      styleHomeSearchRow(tr, { clickable: true });
       tr.addEventListener('click', (e) => {
         e.stopPropagation();
         try { requestPriorityNavigate(r.target); } catch (err) {
@@ -18606,7 +18613,7 @@ function renderCyclopediaSearchColumn() {
       });
 
       const tdEntry = document.createElement('td');
-      tdEntry.className = 'bg-grayRegular px-1 text-whiteRegular group-hover/row:bg-grayHighlight align-middle';
+      tdEntry.className = 'px-1 text-whiteRegular align-middle';
       Object.assign(tdEntry.style, {
         width: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.entry,
         maxWidth: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.entry,
@@ -18617,7 +18624,7 @@ function renderCyclopediaSearchColumn() {
 
       const tdType = document.createElement('td');
       tdType.className =
-        'bg-grayRegular px-1 text-whiteRegular group-hover/row:bg-grayHighlight pixel-font-14 align-middle table-frame-left whitespace-nowrap';
+        'px-1 text-whiteRegular pixel-font-14 align-middle table-frame-left whitespace-nowrap';
       Object.assign(tdType.style, {
         width: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.type,
         maxWidth: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.type,
@@ -18629,7 +18636,7 @@ function renderCyclopediaSearchColumn() {
 
       const tdDetails = document.createElement('td');
       tdDetails.className =
-        'bg-grayRegular px-1 text-whiteRegular group-hover/row:bg-grayHighlight pixel-font-14 align-middle table-frame-left';
+        'px-1 text-whiteRegular pixel-font-14 align-middle table-frame-left';
       Object.assign(tdDetails.style, {
         width: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.details,
         maxWidth: CYCLOPEDIA_HOME_SEARCH_COL_WIDTHS.details,

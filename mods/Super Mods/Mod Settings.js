@@ -4340,13 +4340,21 @@ function generateConfigSummary(data, isImport = false) {
     }
   }
   
-  // Add Hunt Analyzer data info
+  // Add Hunt Analyzer data info (stored sessions may be pruned; prefer lifetime battle count)
   if (data.huntAnalyzerData && data.huntAnalyzerData.data) {
     const huntData = data.huntAnalyzerData.data;
-    const sessionCount = huntData.sessions ? huntData.sessions.length : 0;
-    if (sessionCount > 0) {
-      const estimatedSizeKB = Math.round((sessionCount * 864) / 1024);
-      summary.push(`Hunt Analyzer: ${sessionCount} battles (~${formatStorageSize(estimatedSizeKB)})`);
+    const storedSessions = huntData.sessions ? huntData.sessions.length : 0;
+    const lifetimeBattles = Math.max(
+      storedSessions,
+      huntData.session?.count || 0,
+      (huntData.totals?.wins || 0) + (huntData.totals?.losses || 0)
+    );
+    if (lifetimeBattles > 0 || storedSessions > 0) {
+      const estimatedSizeKB = Math.round((JSON.stringify(huntData).length) / 1024);
+      const detail = storedSessions > 0 && storedSessions < lifetimeBattles
+        ? `${lifetimeBattles} battles (${storedSessions} recent in storage)`
+        : `${lifetimeBattles} battles`;
+      summary.push(`Hunt Analyzer: ${detail} (~${formatStorageSize(estimatedSizeKB)})`);
     }
   }
   
@@ -4365,26 +4373,44 @@ function generateConfigSummary(data, isImport = false) {
 // Ask Hunt Analyzer to flush in-memory state into localStorage before export.
 async function flushHuntAnalyzerBeforeExport() {
   const saveCandidates = [
-    window.saveHuntAnalyzerData,
     window.HuntAnalyzerAPI?.saveData,
+    window.saveHuntAnalyzerData,
     window.HuntAnalyzerState?.saveData
   ];
-  
+
   for (const candidate of saveCandidates) {
     if (typeof candidate !== 'function') continue;
     try {
-      const maybePromise = candidate();
-      if (maybePromise && typeof maybePromise.then === 'function') {
-        await maybePromise;
-      }
+      await candidate();
       console.log('[Mod Settings] Hunt Analyzer data flush completed before export');
       return true;
     } catch (error) {
       console.warn('[Mod Settings] Hunt Analyzer flush attempt failed:', error);
     }
   }
-  
+
   return false;
+}
+
+async function readHuntAnalyzerDataForExport() {
+  if (typeof window.HuntAnalyzerAPI?.exportAll === 'function') {
+    try {
+      return await window.HuntAnalyzerAPI.exportAll();
+    } catch (error) {
+      console.warn('[Mod Settings] Hunt Analyzer exportAll failed, falling back to localStorage:', error);
+    }
+  }
+
+  const huntData = localStorage.getItem('huntAnalyzerData');
+  const huntState = localStorage.getItem('huntAnalyzerState');
+  const huntSettings = localStorage.getItem('huntAnalyzerSettings');
+  if (!huntData && !huntState && !huntSettings) return null;
+
+  return {
+    data: huntData ? JSON.parse(huntData) : null,
+    state: huntState ? JSON.parse(huntState) : null,
+    settings: huntSettings ? JSON.parse(huntSettings) : null
+  };
 }
 
 // Export configuration function
@@ -4554,19 +4580,9 @@ async function exportConfiguration(modal) {
     
     if (huntAnalyzerCheckbox && huntAnalyzerCheckbox.checked) {
       try {
-        // Force a persistence flush first (if Hunt Analyzer exposes a save entrypoint).
         await flushHuntAnalyzerBeforeExport();
-        
-        const huntData = localStorage.getItem('huntAnalyzerData');
-        const huntState = localStorage.getItem('huntAnalyzerState');
-        const huntSettings = localStorage.getItem('huntAnalyzerSettings');
-        
-        if (huntData || huntState || huntSettings) {
-          huntAnalyzerData = {
-            data: huntData ? JSON.parse(huntData) : null,
-            state: huntState ? JSON.parse(huntState) : null,
-            settings: huntSettings ? JSON.parse(huntSettings) : null
-          };
+        huntAnalyzerData = await readHuntAnalyzerDataForExport();
+        if (huntAnalyzerData) {
           console.log('[Mod Settings] Including Hunt Analyzer data in export');
         }
       } catch (error) {
@@ -4887,14 +4903,18 @@ async function importConfiguration(modal) {
         // Import Hunt Analyzer data if available
         if (importData.huntAnalyzerData) {
           try {
-            if (importData.huntAnalyzerData.data) {
-              localStorage.setItem('huntAnalyzerData', JSON.stringify(importData.huntAnalyzerData.data));
-            }
-            if (importData.huntAnalyzerData.state) {
-              localStorage.setItem('huntAnalyzerState', JSON.stringify(importData.huntAnalyzerData.state));
-            }
-            if (importData.huntAnalyzerData.settings) {
-              localStorage.setItem('huntAnalyzerSettings', JSON.stringify(importData.huntAnalyzerData.settings));
+            if (typeof window.HuntAnalyzerAPI?.importAll === 'function') {
+              await window.HuntAnalyzerAPI.importAll(importData.huntAnalyzerData);
+            } else {
+              if (importData.huntAnalyzerData.data) {
+                localStorage.setItem('huntAnalyzerData', JSON.stringify(importData.huntAnalyzerData.data));
+              }
+              if (importData.huntAnalyzerData.state) {
+                localStorage.setItem('huntAnalyzerState', JSON.stringify(importData.huntAnalyzerData.state));
+              }
+              if (importData.huntAnalyzerData.settings) {
+                localStorage.setItem('huntAnalyzerSettings', JSON.stringify(importData.huntAnalyzerData.settings));
+              }
             }
           } catch (error) {
             console.warn('[Mod Settings] Could not import Hunt Analyzer data:', error);
@@ -7403,9 +7423,14 @@ function showSettingsModal() {
             localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
             console.log('[Mod Settings] Updated Hunt Analyzer persistData:', newValue);
             
-            // If turning OFF persistence, clear the persisted data
+            // If turning OFF persistence, clear persisted manifest and IndexedDB history
             if (!newValue) {
               localStorage.removeItem('huntAnalyzerData');
+              if (typeof window.HuntAnalyzerAPI?.clearPersistedStorage === 'function') {
+                window.HuntAnalyzerAPI.clearPersistedStorage().catch((err) => {
+                  console.warn('[Mod Settings] Could not clear Hunt Analyzer IndexedDB:', err);
+                });
+              }
             }
           } catch (error) {
             console.error('[Mod Settings] Error updating Hunt Analyzer settings:', error);
@@ -7615,12 +7640,21 @@ function showSettingsModal() {
           if (huntData) {
             try {
               const parsed = JSON.parse(huntData);
-              const sessionCount = parsed.sessions ? parsed.sessions.length : 0;
-              if (sessionCount > 0) {
-                const estimatedSizeKB = Math.round((sessionCount * 864) / 1024);
+              const storedSessions = parsed.sessions ? parsed.sessions.length : 0;
+              const lifetimeBattles = Math.max(
+                storedSessions,
+                parsed.session?.count || 0,
+                (parsed.totals?.wins || 0) + (parsed.totals?.losses || 0)
+              );
+              const hasTotals = parsed.totals && (
+                parsed.totals.gold > 0 || parsed.totals.experience > 0 || parsed.totals.staminaSpent > 0
+              );
+              const hasTime = parsed.timeTracking?.accumulatedTimeMs > 0;
+              if (lifetimeBattles > 0 || hasTotals || hasTime) {
+                const estimatedSizeKB = Math.round(huntData.length / 1024);
                 huntAnalyzerInfo.style.display = 'block';
                 huntAnalyzerInfo.textContent = tReplace('mods.betterUI.backupFoundSessions', {
-                  sessions: sessionCount,
+                  sessions: lifetimeBattles,
                   size: formatStorageSize(estimatedSizeKB)
                 });
               } else {

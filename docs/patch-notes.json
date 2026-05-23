@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.9.2",
+      "changes": [
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Fixes long hunts where playtime kept growing but battle stats reset after reload. Battle history now persists in IndexedDB; totals, playtime, and session count stay in a small localStorage manifest (no version field). Legacy saves with battles embedded in localStorage migrate on first load. Session cap 100,000; reload keeps lifetime totals when history was trimmed (max-merge persisted vs session-derived totals). HuntAnalyzerAPI (saveData, exportAll, importAll) for Mod Settings backup with flush before export. Theme changes update live rate lines and resource totals; language switch keeps loot/creature title counts. Copy log map breakdown uses the same loot/creature sort order as the panel."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Hunt Analyzer export/import includes IndexedDB battle history via HuntAnalyzerAPI (flush before export)."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Start page home search results table: alternating light grey row stripes (grayBrightest / grayHighlight) are visible again; row hover uses in-game highlight styling."
+        }
+      ]
+    },
+    {
       "version": "3.9.1",
       "changes": [
         {
