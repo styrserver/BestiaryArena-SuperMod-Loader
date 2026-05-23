@@ -725,6 +725,8 @@
       "maps": "mapas",
       "clearAll": "Limpar Tudo",
       "storageResetDismissHint": "Use {clearAll} para reiniciar o analisador — o aviso some quando houver espaço de armazenamento.",
+      "storagePrunedWarning": "Histórico limitado: mantidas {kept} de {total} batalhas. Totais e tempo de jogo não mudam.",
+      "storageQuotaWarning": "Não foi possível salvar os dados (cota de armazenamento). Totais e tempo podem ter sido salvos; use Exportar para backup.",
       "clearMap": "Limpar mapa",
       "goToMap": "Ir para o mapa",
       "failedToNavigateMap": "Falha ao navegar para o mapa",

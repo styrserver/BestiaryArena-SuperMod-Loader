@@ -726,6 +726,8 @@
       "maps": "maps",
       "clearAll": "Clear All",
       "storageResetDismissHint": "Use {clearAll} to reset the analyzer—the warning stops once storage has room.",
+      "storagePrunedWarning": "Battle history capped: kept {kept} of {total} battles. Totals and playtime are unchanged.",
+      "storageQuotaWarning": "Could not save analyzer data (storage quota). Totals and playtime may be saved; use Export to back up.",
       "clearMap": "Clear Map",
       "goToMap": "Go to map",
       "failedToNavigateMap": "Failed to navigate to map",
