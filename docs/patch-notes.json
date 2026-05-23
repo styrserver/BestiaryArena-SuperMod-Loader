@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "3.9.4",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Autosqueeze and autoduster retry when an action is skipped: incomplete squeeze (inventory not synced, API failure, or partial batch) and pending disenchant each requeue the battle up to 3 times. Autoplant no longer gives up after one inventory sync when the drop is in the autosqueeze gene band (80–100); those rewards get the full sync retry window. Dragon Plant activation is deferred while a game-end retry is pending and runs after a successful queued retry."
+        }
+      ]
+    },
+    {
       "version": "3.9.3",
       "changes": [
         {

@@ -19,6 +19,7 @@
     const PENDING_GAME_END_MAX_QUEUE_SIZE = 10;
     const PENDING_GAME_END_MAX_AGE_MS = 45000;
     const PENDING_GAME_END_MAX_SYNC_ATTEMPTS = 4;
+    const PENDING_GAME_END_MAX_ACTION_ATTEMPTS = 3;
     const MAX_OBSERVER_ATTEMPTS = 10;
     const OBSERVER_DEBOUNCE_MS = 100;
     
@@ -828,6 +829,32 @@
         }
         
         return { battleRewardMonsters, rewardMonsterIds };
+    }
+
+    function battleRewardsIncludeSqueezeBandMonsters(battleRewardMonsters, settings) {
+        if (!settings?.autosqueezeChecked || !Array.isArray(battleRewardMonsters) || battleRewardMonsters.length === 0) {
+            return false;
+        }
+        const squeezeMinGenes = settings.autosqueezeGenesMin ?? UI_CONSTANTS.SQUEEZE_GENE_MIN;
+        const squeezeMaxGenes = settings.autosqueezeGenesMax ?? UI_CONSTANTS.SQUEEZE_GENE_MAX;
+        const ignoreList = settings.autosqueezeIgnoreList || [];
+        return battleRewardMonsters.some((drop) => {
+            const monster = drop?.monster || drop;
+            if (!monster || typeof monster !== 'object') return false;
+            if (isShinyCreature(monster) || isSealedTierFiveCreature(monster)) return false;
+            const creatureName = getCreatureNameFromMonster(monster) || monster?.name;
+            if (creatureName && ignoreList.includes(creatureName)) return false;
+            const totalGenes = calculateTotalGenes(monster);
+            return totalGenes >= squeezeMinGenes && totalGenes <= squeezeMaxGenes;
+        });
+    }
+
+    function isInventorySyncRetryReason(reason) {
+        return reason === 'inventory-sync' || reason === 'canRun-blocked';
+    }
+
+    function isActionRetryReason(reason) {
+        return reason === 'squeeze-incomplete' || reason === 'duster-incomplete';
     }
     
     /**
@@ -5851,6 +5878,7 @@
     
     async function processEligibleMonsters(monsters, type) {
         const debugChannel = type === 'squeeze' ? 'Squeeze' : 'Sell';
+        const outcome = { incomplete: false, attempted: 0, succeeded: 0, skippedNoLocalMatch: 0 };
         try {
             const settings = getSettings();
             logAutosellerDebug(debugChannel, `start: ${Array.isArray(monsters) ? monsters.length : 0} input monster(s)`);
@@ -5858,11 +5886,11 @@
             // Check if the feature is enabled before processing
             if (type === 'sell' && settings.autoMode !== 'autosell') {
                 logAutosellerDebug('Sell', 'skip: autosell mode is off');
-                return;
+                return outcome;
             }
             if (type === 'squeeze' && !settings.autosqueezeChecked) {
                 logAutosellerDebug('Squeeze', 'skip: autosqueeze is disabled');
-                return;
+                return outcome;
             }
             
             // Check if Monster Squeezer is unlocked before attempting to squeeze
@@ -5873,7 +5901,7 @@
                     if (!flags.isSet("monsterSqueezer")) {
                         logAutosellerDebug('Squeeze', 'skip: Monster Squeezer not unlocked');
                         console.log('[Autoseller] ℹ️ Monster Squeezer not unlocked. Visit the store to unlock it!');
-                        return;
+                        return outcome;
                     }
                 }
             }
@@ -5883,18 +5911,19 @@
             if (type === 'sell') {
                 if (!Array.isArray(monsters) || monsters.length === 0) {
                     logAutosellerDebug('Sell', 'skip: no monsters to process');
-                    return;
+                    return outcome;
                 }
             } else if (type === 'squeeze') {
                 if (!Array.isArray(monsters) || monsters.length === 0) {
                     logAutosellerDebug('Squeeze', 'skip: no monsters to process');
-                    return;
+                    return outcome;
                 }
                 // CRITICAL SAFETY CHECK: Verify all monsters have valid server IDs
                 const invalidMonsters = monsters.filter(m => !m || !m.id);
                 if (invalidMonsters.length > 0) {
                     logAutosellerDebug('Squeeze', `skip: ${invalidMonsters.length} monster(s) missing server id`);
-                    return;
+                    outcome.incomplete = true;
+                    return outcome;
                 }
             } else {
                 // For legacy/other modes: allow fallback to fetch entire inventory
@@ -5905,7 +5934,8 @@
             
             if (!Array.isArray(monsters)) {
                 console.warn(`[${modName}][WARN][processEligibleMonsters] Could not access monster list.`);
-                return;
+                outcome.incomplete = type === 'squeeze';
+                return outcome;
             }
             
             let toSell = [];
@@ -5953,7 +5983,7 @@
                     logAutosellerDebug('Sell', consumedByInjection.size > 0
                         ? 'done: nothing left to sell after inject'
                         : 'skip: no eligible monsters after filter');
-                    return;
+                    return outcome;
                 }
 
                 logAutosellerDebug('Sell', `selling ${toSell.length} monster(s): ${toSell.map(formatMonsterForDebug).join(' | ')}`);
@@ -6053,9 +6083,10 @@
             } else if (type === 'squeeze') {
                 if (!toSqueeze.length) {
                     logAutosellerDebug('Squeeze', 'skip: no eligible monsters after filter (processed/shiny/sealed)');
-                    return;
+                    return outcome;
                 }
 
+                outcome.attempted = toSqueeze.length;
                 logAutosellerDebug('Squeeze', `squeezing ${toSqueeze.length} monster(s): ${toSqueeze.map(formatMonsterForDebug).join(' | ')}`);
                 
                 // Log will be combined with result
@@ -6108,6 +6139,8 @@
                     }
                     
                     if (!ids.length) {
+                        outcome.skippedNoLocalMatch += nonShinyBatch.length;
+                        outcome.incomplete = true;
                         logAutosellerDebug('Squeeze', `batch ${i / SELL_RATE_LIMIT.BATCH_SIZE + 1}: no local ids matched (${nonShinyBatch.length} server monster(s)) — inventory may not be synced yet`);
                         continue;
                     }
@@ -6115,14 +6148,18 @@
                     // Check if cleaning up before proceeding
                     if (isCleaningUp) {
                         logAutosellerDebug('Squeeze', 'abort mid-batch: cleanup');
-                        return;
+                        outcome.incomplete = true;
+                        return outcome;
                     }
                     
                     logAutosellerDebug('Squeeze', `API monsterSqueezer batch ${i / SELL_RATE_LIMIT.BATCH_SIZE + 1}: serverIds=[${nonShinyBatch.map(m => m.id).join(',')}] localIds=[${ids.join(',')}]`);
                     
                     // Delay before squeezing (allows UI to settle)
                     await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.UI_SETTLE_MS));
-                    if (isCleaningUp) return;
+                    if (isCleaningUp) {
+                        outcome.incomplete = true;
+                        return outcome;
+                    }
                     
                     await apiRateLimiter.waitForSlot();
                     apiRateLimiter.recordRequest();
@@ -6149,6 +6186,7 @@
                     ) {
                         const dustReceived = apiResponse[0].result.data.json.dustDiff;
                         const squeezedCount = Math.floor(dustReceived / API_CONSTANTS.DUST_PER_CREATURE);
+                        outcome.succeeded += squeezedCount;
                         
                         logAutosellerDebug('Squeeze', `success: ${squeezedCount} monster(s) → ${dustReceived} dust`);
                         if (dustReceived > 0) {
@@ -6166,6 +6204,7 @@
                                 // Only mark as processed after successful removal verification
                                 stateManager.markProcessed(serverIds);
                             } else {
+                                outcome.incomplete = true;
                                 logAutosellerDebug('Squeeze', `local inventory remove failed after squeeze (${ids.length} id(s))`);
                                 // Removal failed - log warning but don't mark as processed so it can be retried
                                 console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove ${ids.length} monsters from local inventory after squeezing. Will retry on next batch.`);
@@ -6192,27 +6231,36 @@
                             stateManager.markProcessed(serverIds);
                         }
                     } else if (!result.success) {
+                        outcome.incomplete = true;
                         logAutosellerDebug('Squeeze', `API failed HTTP ${result.status} serverIds=[${serverIds.join(',')}]`);
                         console.warn(`[${modName}][WARN][processEligibleMonsters] Squeeze API failed: HTTP ${result.status}`);
                         continue;
                     } else {
+                        outcome.incomplete = true;
                         logAutosellerDebug('Squeeze', `unexpected API response serverIds=[${serverIds.join(',')}]`);
                         console.warn(`[Autoseller] ⚠️ Unexpected squeeze API response structure`);
                     }
                 
                     if (i + SELL_RATE_LIMIT.BATCH_SIZE < toSqueeze.length) {
                         await new Promise(res => setTimeout(res, SELL_RATE_LIMIT.BATCH_DELAY_MS));
-                        if (isCleaningUp) return;
+                        if (isCleaningUp) return outcome;
                     }
                 }
+                if (outcome.attempted > 0 && outcome.succeeded < outcome.attempted) {
+                    outcome.incomplete = true;
+                }
             }
+            return outcome;
         } catch (e) {
             console.error(`[${modName}][ERROR][processEligibleMonsters] Failed to ${type} monsters. Error: ${e.message}`, e);
             stateManager.updateErrorStats(`${type}Errors`);
+            outcome.incomplete = type === 'squeeze';
+            return outcome;
         }
     }
     
     async function processEligibleEquipment(rewardEquipmentIds, inventoryEquipment) {
+        const outcome = { incomplete: false, pendingCount: 0 };
         try {
             const settings = getSettings();
             logAutosellerDebug('Disenchant', `start: ${rewardEquipmentIds?.size ?? 0} reward equipment id(s), inventory=${Array.isArray(inventoryEquipment) ? inventoryEquipment.length : 0}`);
@@ -6220,7 +6268,7 @@
             // Check if autoduster is enabled
             if (!settings.autodusterChecked) {
                 logAutosellerDebug('Disenchant', 'skip: autoduster is disabled');
-                return;
+                return outcome;
             }
             
             // Helper function to filter equipment that should be disenchanted
@@ -6466,9 +6514,15 @@
                     }
                 }
             }
+            outcome.pendingCount = stateManager.getPendingEquipmentIds().size;
+            outcome.incomplete = outcome.pendingCount > 0;
+            return outcome;
         } catch (e) {
             console.error(`[${modName}][ERROR][processEligibleEquipment] Failed to disenchant equipment. Error: ${e.message}`, e);
             stateManager.updateErrorStats('disenchantErrors');
+            outcome.pendingCount = stateManager.getPendingEquipmentIds().size;
+            outcome.incomplete = outcome.pendingCount > 0;
+            return outcome;
         }
     }
 
@@ -7948,12 +8002,15 @@
             const meta = pendingGameEndMeta.get(seed);
             const age = now - (meta?.queuedAt ?? now);
             const syncOnly = meta?.reasons?.length > 0 &&
-                meta.reasons.every((r) => r === 'inventory-sync' || r === 'canRun-blocked');
+                meta.reasons.every((r) => isInventorySyncRetryReason(r));
+            const actionOnly = meta?.reasons?.length > 0 &&
+                meta.reasons.every((r) => isActionRetryReason(r));
             const tooOld = age > PENDING_GAME_END_MAX_AGE_MS;
-            const tooManySyncAttempts = syncOnly && (meta?.attempts ?? 0) >= PENDING_GAME_END_MAX_SYNC_ATTEMPTS;
+            const tooManySyncAttempts = syncOnly && (meta?.inventorySyncAttempts ?? 0) >= PENDING_GAME_END_MAX_SYNC_ATTEMPTS;
+            const tooManyActionAttempts = actionOnly && (meta?.actionAttempts ?? 0) >= PENDING_GAME_END_MAX_ACTION_ATTEMPTS;
             const notCurrentBattle = aggressive && boardSeed != null && seed !== boardSeed;
 
-            if (tooOld || tooManySyncAttempts || notCurrentBattle) {
+            if (tooOld || tooManySyncAttempts || tooManyActionAttempts || notCurrentBattle) {
                 pendingGameEndBySeed.delete(seed);
                 pendingGameEndMeta.delete(seed);
                 dropped++;
@@ -7979,11 +8036,16 @@
         const now = Date.now();
         let meta = pendingGameEndMeta.get(seed);
         if (!meta) {
-            meta = { attempts: 0, inventorySyncAttempts: 0, queuedAt: now, reasons: [] };
+            meta = { attempts: 0, inventorySyncAttempts: 0, actionAttempts: 0, queuedAt: now, reasons: [] };
         }
         meta.attempts += 1;
         if (reason === 'inventory-sync') {
             meta.inventorySyncAttempts = (meta.inventorySyncAttempts ?? 0) + 1;
+        } else if (isActionRetryReason(reason)) {
+            meta.actionAttempts = (meta.actionAttempts ?? 0) + 1;
+            if (!meta.reasons.includes(reason)) {
+                meta.reasons.push(reason);
+            }
         } else if (!meta.reasons.includes(reason)) {
             meta.reasons.push(reason);
         }
@@ -8093,6 +8155,10 @@
         logEquipmentDropDebug(serverResults, serverResultsSource);
         logAutosellerDebug('GameEnd', `seed=${currentSeed} source=${serverResultsSource} rewardMonsters=${rewardMonsterIds.size} rewardEquipment=${rewardEquipmentIds.size} equipDropsParsed=${battleRewardEquipment.length}`);
 
+        const squeezeRewardExpected = battleRewardsIncludeSqueezeBandMonsters(battleRewardMonsters, settings);
+        let needsActionRetry = false;
+        let actionRetryReason = null;
+
         const boardState = globalThis.state?.board?.getSnapshot?.();
         const floorFromServerResults = serverResults?.floor ?? serverResults?.rewardScreen?.floor;
         const floorFromBoardState = boardState?.context?.floor ?? boardState?.context?.room?.floor;
@@ -8123,13 +8189,14 @@
                 }
                 const meta = pendingGameEndMeta.get(currentSeed);
                 const inventorySyncRetries = meta?.inventorySyncAttempts ?? 0;
-                if (settings.autoMode === 'autoplant' && inventorySyncRetries >= 1) {
+                if (settings.autoMode === 'autoplant' && inventorySyncRetries >= 1 && !squeezeRewardExpected) {
                     logAutosellerDebug('GameEnd', `seed=${currentSeed}: reward not in inventory after ${inventorySyncRetries} sync wait(s) — likely devoured by plant, closing`);
                     finalizeProcessedGameEndSeed(currentSeed);
                     return;
                 }
                 if (inventorySyncRetries >= PENDING_GAME_END_MAX_SYNC_ATTEMPTS) {
-                    logAutosellerDebug('GameEnd', `abandon seed=${currentSeed}: inventory never matched after ${inventorySyncRetries} sync retries`);
+                    const squeezeHint = squeezeRewardExpected ? ' (was in autosqueeze gene band)' : '';
+                    logAutosellerDebug('GameEnd', `abandon seed=${currentSeed}: inventory never matched after ${inventorySyncRetries} sync retries${squeezeHint}`);
                     finalizeProcessedGameEndSeed(currentSeed);
                     return;
                 }
@@ -8162,7 +8229,16 @@
                     const monstersToSqueeze = await filterMonstersForAutosqueeze(matchedMonsters, settings);
                     if (monstersToSqueeze.length > 0) {
                         console.log('[Autoseller] Processing autosqueeze for', monstersToSqueeze.length, 'monsters');
-                        await processEligibleMonsters(monstersToSqueeze, 'squeeze');
+                        const squeezeResult = await processEligibleMonsters(monstersToSqueeze, 'squeeze');
+                        if (squeezeResult?.incomplete) {
+                            needsActionRetry = true;
+                            actionRetryReason = 'squeeze-incomplete';
+                            logAutosellerDebug(
+                                'GameEnd',
+                                `seed=${currentSeed}: squeeze incomplete (${squeezeResult.succeeded}/${squeezeResult.attempted} squeezed, ` +
+                                `localSyncMiss=${squeezeResult.skippedNoLocalMatch}) — will retry`
+                            );
+                        }
                     }
                 }
             }
@@ -8180,18 +8256,44 @@
             rewardEquipmentIds.forEach((id) => stateManager.addPendingEquipment(id));
             if (rewardEquipmentIds.size > 0) {
                 console.log('[Autoseller] Processing autoduster for', rewardEquipmentIds.size, 'equipment');
-                await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment);
+                const dusterResult = await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment);
+                if (dusterResult?.incomplete) {
+                    needsActionRetry = true;
+                    actionRetryReason = 'duster-incomplete';
+                    logAutosellerDebug(
+                        'GameEnd',
+                        `seed=${currentSeed}: duster incomplete (${dusterResult.pendingCount} equipment still pending) — will retry`
+                    );
+                }
             } else if (battleRewardEquipment.length > 0) {
                 console.log(
                     `[Autoseller][EquipDrop] seed=${currentSeed}: ${battleRewardEquipment.length} equipment drop(s) in serverResults ` +
                     'but no inventory ids resolved — queued via pending'
                 );
                 schedulePendingRewardsFlush();
+                needsActionRetry = true;
+                actionRetryReason = 'duster-incomplete';
             }
+        }
+
+        if (needsActionRetry && actionRetryReason) {
+            const meta = pendingGameEndMeta.get(currentSeed);
+            const actionAttempts = meta?.actionAttempts ?? 0;
+            if (actionAttempts < PENDING_GAME_END_MAX_ACTION_ATTEMPTS) {
+                queueGameEndForRetry(serverResults, actionRetryReason);
+                return;
+            }
+            logAutosellerDebug(
+                'GameEnd',
+                `seed=${currentSeed}: abandoning ${actionRetryReason} after ${actionAttempts} action retry(s)`
+            );
         }
 
         finalizeProcessedGameEndSeed(currentSeed);
         logAutosellerDebug('GameEnd', `done seed=${currentSeed}`);
+        if (serverResultsSource === 'queued-retry' && settings.autoMode === 'autoplant') {
+            checkAndActivateDragonPlant();
+        }
     }
 
     function setupGameEndListener() {
@@ -8238,7 +8340,12 @@
                         }
 
                         await processGameEndRewards(capturedAtFire, 'captured-at-gameEnd');
-                        checkAndActivateDragonPlant();
+                        const pendingSeed = capturedAtFire?.seed;
+                        if (pendingSeed != null && pendingGameEndBySeed.has(pendingSeed)) {
+                            logAutosellerDebug('GameEnd', `deferring plant activation — pending retry for seed=${pendingSeed}`);
+                        } else {
+                            checkAndActivateDragonPlant();
+                        }
                     }, OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS);
                     timeoutIds.push(timeoutId);
                 });
