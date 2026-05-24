@@ -80,24 +80,116 @@ const EXCLUDED_EQUIPMENT = [
     'Witch Hat'
 ];
 
-// Maps that cannot have boosted equipment (grey out in settings)
-const MAPS_WITHOUT_BOOSTED_EQUIPMENT = [
-    'Lonesome Dragon',
-    'Shore Camp',
-    'Orcsmith Orcshop',
-    'Mine Hub',
-    'Sewers',
-    'Wheat Field',
-    'Emperor Kruzak\'s Treasure Room',
-    'Mad Technomancer\'s Lab',
-    'Eclipse',
-    'Dwarven Bridge',
-    'A Secluded Herb',
-    'Amazon Camp',
-    'Black Knight Villa',
-    'Dragon Lair',
-    'Corym Base Lounge'
-];
+// Boosted map / equipment index from equipment-database.js (HARDCODED_BOOSTED_MAP)
+let _bbmBoostedMapIndex = null;
+
+function bbmGetHardcodedBoostedMap() {
+    return window.equipmentDatabase?.HARDCODED_BOOSTED_MAP || {};
+}
+
+function bbmInvalidateBoostedMapIndex() {
+    _bbmBoostedMapIndex = null;
+}
+
+function bbmGetBoostedMapToEquipmentIndex() {
+    if (_bbmBoostedMapIndex) {
+        return _bbmBoostedMapIndex;
+    }
+
+    const HARDCODED_BOOSTED_MAP = bbmGetHardcodedBoostedMap();
+    const byRoomId = new Map();
+    const byMapName = new Map();
+    const boostedEquipmentNames = new Set();
+    const roomNameMap = globalThis.state?.utils?.ROOM_NAME || {};
+    const nameToRoomId = new Map();
+    Object.entries(roomNameMap).forEach(([roomId, mapName]) => {
+        if (!nameToRoomId.has(mapName)) {
+            nameToRoomId.set(mapName, roomId);
+        }
+    });
+
+    for (const [equipmentName, wiki] of Object.entries(HARDCODED_BOOSTED_MAP)) {
+        if (wiki === false || typeof wiki !== 'string' || !wiki.trim()) {
+            continue;
+        }
+        boostedEquipmentNames.add(equipmentName);
+        wiki
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .forEach((mapName) => {
+                if (!byMapName.has(mapName)) {
+                    byMapName.set(mapName, []);
+                }
+                const byNameList = byMapName.get(mapName);
+                if (!byNameList.includes(equipmentName)) {
+                    byNameList.push(equipmentName);
+                }
+
+                const roomId = nameToRoomId.get(mapName);
+                if (roomId) {
+                    if (!byRoomId.has(roomId)) {
+                        byRoomId.set(roomId, []);
+                    }
+                    const byRoomList = byRoomId.get(roomId);
+                    if (!byRoomList.includes(equipmentName)) {
+                        byRoomList.push(equipmentName);
+                    }
+                }
+            });
+    }
+
+    for (const list of byMapName.values()) {
+        list.sort((a, b) => a.localeCompare(b));
+    }
+    for (const list of byRoomId.values()) {
+        list.sort((a, b) => a.localeCompare(b));
+    }
+
+    _bbmBoostedMapIndex = { byRoomId, byMapName, boostedEquipmentNames };
+    return _bbmBoostedMapIndex;
+}
+
+function bbmMapHasBoostedEquipment(roomId, mapName) {
+    const idx = bbmGetBoostedMapToEquipmentIndex();
+    if (roomId && idx.byRoomId.has(roomId)) {
+        return idx.byRoomId.get(roomId).length > 0;
+    }
+    if (mapName && idx.byMapName.has(mapName)) {
+        return idx.byMapName.get(mapName).length > 0;
+    }
+    return false;
+}
+
+function bbmGetBoostedEquipmentForMap(roomId, mapName) {
+    const idx = bbmGetBoostedMapToEquipmentIndex();
+    if (roomId && idx.byRoomId.has(roomId)) {
+        return idx.byRoomId.get(roomId);
+    }
+    if (mapName && idx.byMapName.has(mapName)) {
+        return idx.byMapName.get(mapName);
+    }
+    return [];
+}
+
+function bbmGetAllBoostedEquipmentNames() {
+    const idx = bbmGetBoostedMapToEquipmentIndex();
+    return [...idx.boostedEquipmentNames].sort((a, b) => a.localeCompare(b));
+}
+
+function bbmIsBoostedEquipmentName(name) {
+    return bbmGetBoostedMapToEquipmentIndex().boostedEquipmentNames.has(name);
+}
+
+/** Equipment tab: HARDCODED_BOOSTED_MAP false / empty means not selectable. */
+function bbmIsHardcodedBoostedMapDisabled(name) {
+    const HARDCODED_BOOSTED_MAP = bbmGetHardcodedBoostedMap();
+    if (!Object.prototype.hasOwnProperty.call(HARDCODED_BOOSTED_MAP, name)) {
+        return false;
+    }
+    const wiki = HARDCODED_BOOSTED_MAP[name];
+    return wiki === false || wiki == null || wiki === '';
+}
 
 // =======================
 // 1.1. Stamina Monitoring Functions
@@ -1123,27 +1215,11 @@ function bbmCreateForgeStyleEquipmentIconButton(equipmentName, onClick) {
     return btn;
 }
 
-function bbmGenerateEquipmentNameListForRules() {
-    const list = [];
-    const utils = globalThis.state?.utils;
-    if (utils) {
-        for (let i = 1; ; i++) {
-            try {
-                const equipData = utils.getEquipment(i);
-                if (equipData && equipData.metadata && equipData.metadata.name) {
-                    list.push(equipData.metadata.name);
-                } else {
-                    break;
-                }
-            } catch {
-                break;
-            }
-        }
+function bbmGenerateEquipmentNameListForRules(roomId, mapName) {
+    if (roomId != null || mapName) {
+        return bbmGetBoostedEquipmentForMap(roomId, mapName);
     }
-    if (list.length > 0) {
-        return list.sort((a, b) => a.localeCompare(b));
-    }
-    return [...(window.equipmentDatabase?.ALL_EQUIPMENT || [])].sort((a, b) => a.localeCompare(b));
+    return bbmGetAllBoostedEquipmentNames();
 }
 
 // Check if boosted map should be farmed
@@ -1761,12 +1837,37 @@ function getEquipmentRuleAutomationSettingsForBoostedMap(roomId) {
     }
 }
 
+function bbmGetGlobalDefaultAutoRefillStamina(settings) {
+    const s = settings || loadSettings();
+    return !!s.autoRefillStamina;
+}
+
+function bbmGetGlobalDefaultSetupMethod(settings) {
+    const s = settings || loadSettings();
+    return s.setupMethod || t('mods.betterBoostedMaps.autoSetup');
+}
+
+/** True when per-map context-menu data differs from global defaults or has at least one complete equipment rule. */
+function bbmHasMeaningfulMapContextSettings(mapId, ms, settings) {
+    if (!ms || typeof ms !== 'object') return false;
+    const s = settings || loadSettings();
+    const validRules = Array.isArray(ms.equipmentRules)
+        ? ms.equipmentRules.filter(
+            r => r && Array.isArray(r.equipmentNames) && r.equipmentNames.length > 0
+        )
+        : [];
+    if (validRules.length > 0) return true;
+    const defaultAuto = bbmGetGlobalDefaultAutoRefillStamina(s);
+    const defaultSetup = bbmGetGlobalDefaultSetupMethod(s);
+    const auto = ms.hasOwnProperty('autoRefillStamina') ? !!ms.autoRefillStamina : defaultAuto;
+    const setup = ms.setupMethod || defaultSetup;
+    return auto !== defaultAuto || setup !== defaultSetup;
+}
+
 function hasMapCustomSettings(mapId) {
     try {
         const ms = (loadSettings().mapSettings || {})[mapId];
-        if (!ms || typeof ms !== 'object') return false;
-        if (Array.isArray(ms.equipmentRules) && ms.equipmentRules.length > 0) return true;
-        return ms.hasOwnProperty('autoRefillStamina') || !!ms.setupMethod;
+        return bbmHasMeaningfulMapContextSettings(mapId, ms);
     } catch (error) {
         console.error('[Better Boosted Maps] Error checking map custom settings:', error);
         return false;
@@ -1893,7 +1994,7 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
     `;
     
     const setupOptions = getAvailableSetupOptions();
-    const equipmentNamesList = bbmGenerateEquipmentNameListForRules();
+    const equipmentNamesList = bbmGenerateEquipmentNameListForRules(mapId, mapName);
     const equipSectionLabel = document.createElement('div');
     equipSectionLabel.className = 'pixel-font-14';
     equipSectionLabel.textContent = t('mods.betterBoostedMaps.contextMenuIfEquipment');
@@ -2204,14 +2305,15 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         
         function paintList() {
             listScroll.innerHTML = '';
-            let purgedExcluded = false;
+            let purgedInvalid = false;
+            const allowedNames = new Set(equipmentNamesList);
             [...draft.names].forEach(n => {
-                if (EXCLUDED_EQUIPMENT.includes(n)) {
+                if (EXCLUDED_EQUIPMENT.includes(n) || !allowedNames.has(n)) {
                     draft.names.delete(n);
-                    purgedExcluded = true;
+                    purgedInvalid = true;
                 }
             });
-            if (purgedExcluded) {
+            if (purgedInvalid) {
                 syncTrigger();
                 queueMicrotask(() => {
                     if (typeof onNamesMutated === 'function') {
@@ -3297,7 +3399,14 @@ function createBoostedMapContextMenu(mapId, mapName, x, y, onClose) {
         if (collectedRules.length > 0) {
             payload.equipmentRules = collectedRules;
         }
-        s.mapSettings[mapId] = payload;
+        if (bbmHasMeaningfulMapContextSettings(mapId, payload, s)) {
+            s.mapSettings[mapId] = payload;
+        } else if (s.mapSettings && s.mapSettings[mapId]) {
+            delete s.mapSettings[mapId];
+            if (Object.keys(s.mapSettings).length === 0) {
+                delete s.mapSettings;
+            }
+        }
         localStorage.setItem('betterBoostedMapsSettings', JSON.stringify(s));
         syncResetButtonState();
     };
@@ -3720,6 +3829,8 @@ function attachSettingsListRowHover(rowEl, isDimmed) {
 }
 
 function createMapsTab(settings) {
+    bbmInvalidateBoostedMapIndex();
+
     const wrapper = document.createElement('div');
     wrapper.style.cssText = `
         display: flex;
@@ -3780,7 +3891,7 @@ function createMapsTab(settings) {
             
             // Maps in this region
             maps.forEach(({ id, name }) => {
-                const isDisabled = MAPS_WITHOUT_BOOSTED_EQUIPMENT.includes(name);
+                const isDisabled = !bbmMapHasBoostedEquipment(id, name);
                 const mapDiv = createCheckboxSetting(
                     `boosted-maps-map-${id}`,
                     name,
@@ -3977,8 +4088,10 @@ function createEquipmentTab(settings) {
         background: rgba(0, 0, 0, 0.3);
     `;
     
-    const allEquipment = window.equipmentDatabase?.ALL_EQUIPMENT || [];
-    
+    const allEquipment = [...(window.equipmentDatabase?.ALL_EQUIPMENT || [])].sort((a, b) =>
+        a.localeCompare(b)
+    );
+
     if (allEquipment.length === 0) {
         const noEquipment = document.createElement('div');
         noEquipment.textContent = t('mods.betterBoostedMaps.noEquipmentAvailable');
@@ -3988,16 +4101,17 @@ function createEquipmentTab(settings) {
     } else {
         allEquipment.forEach(equipName => {
             const equipId = equipName.toLowerCase().replace(/[^a-z0-9]/g, '-');
-            const isExcluded = EXCLUDED_EQUIPMENT.includes(equipName);
+            const isDisabled =
+                bbmIsHardcodedBoostedMapDisabled(equipName) || EXCLUDED_EQUIPMENT.includes(equipName);
             const equipDiv = createCheckboxSetting(
                 `boosted-maps-equipment-${equipId}`,
                 equipName,
                 '',
                 settings.equipment?.[equipId] !== false,
                 '14px',
-                isExcluded
+                isDisabled
             );
-            attachSettingsListRowHover(equipDiv.firstElementChild, isExcluded);
+            attachSettingsListRowHover(equipDiv.firstElementChild, isDisabled);
             scrollContainer.appendChild(equipDiv);
         });
     }

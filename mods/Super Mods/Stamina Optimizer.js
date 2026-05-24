@@ -48,6 +48,8 @@ const BESTIARY_REFILL_COOLDOWN = 10000;
 const STATE_FLAG_CLEAR_DELAY = 500;
 const AUTOPLAY_STOP_CHECK_DELAY = 3000;
 const BOOSTED_MAPS_TRIGGER_WINDOW = 5000;
+const NAVIGATION_DELAY = 500;
+const AUTO_SETUP_DELAY = 800;
 const PAUSE_BUTTON_CLICK_DELAY = 100;
 const PAUSE_BUTTON_UPDATE_DELAY = 300;
 const MODS_LOADING_GRACE_PERIOD = 10000; // 10 seconds after allModsLoaded before allowing actions
@@ -607,7 +609,7 @@ async function loadAutoSetup() {
 
         autoSetupButton.click();
         console.log('[Stamina Optimizer] Auto-setup button clicked, waiting for load...');
-        await sleep(500);
+        await sleep(AUTO_SETUP_DELAY);
         return true;
     } catch (error) {
         console.error('[Stamina Optimizer] Error loading auto-setup:', error);
@@ -636,7 +638,7 @@ async function navigateToSpecificMap(mapId) {
             roomId: mapId
         });
         
-        await sleep(500);
+        await sleep(NAVIGATION_DELAY);
         return true;
     } catch (error) {
         console.error('[Stamina Optimizer] Error navigating to map:', error);
@@ -678,6 +680,87 @@ function getCurrentMapId() {
 // Sleep helper function
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Close open modals before navigation (same pattern as Better Boosted Maps)
+function clearModalsWithEsc(count = 1) {
+    for (let i = 0; i < count; i++) {
+        document.dispatchEvent(createEscKeyEvent());
+    }
+}
+
+function showToast(message, duration = 5000) {
+    try {
+        let mainContainer = document.getElementById('stamina-optimizer-toast-container');
+        if (!mainContainer) {
+            mainContainer = document.createElement('div');
+            mainContainer.id = 'stamina-optimizer-toast-container';
+            mainContainer.style.cssText = `
+                position: fixed;
+                z-index: 9999;
+                inset: 16px 16px 64px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(mainContainer);
+        }
+
+        const existingToasts = mainContainer.querySelectorAll('.toast-item');
+        const stackOffset = existingToasts.length * 46;
+
+        const flexContainer = document.createElement('div');
+        flexContainer.className = 'toast-item';
+        flexContainer.style.cssText = `
+            left: 0px;
+            right: 0px;
+            display: flex;
+            position: absolute;
+            transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+            transform: translateY(-${stackOffset}px);
+            bottom: 0px;
+            justify-content: flex-end;
+        `;
+
+        const toast = document.createElement('button');
+        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+
+        const widgetTop = document.createElement('div');
+        widgetTop.className = 'widget-top h-2.5';
+
+        const widgetBottom = document.createElement('div');
+        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+        const iconImg = document.createElement('img');
+        iconImg.alt = 'stamina';
+        iconImg.src = 'https://bestiaryarena.com/assets/icons/stamina.png';
+        iconImg.className = 'pixelated';
+        iconImg.style.cssText = 'width: 16px; height: 16px;';
+        widgetBottom.appendChild(iconImg);
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'text-left';
+        messageDiv.textContent = message;
+        widgetBottom.appendChild(messageDiv);
+
+        toast.appendChild(widgetTop);
+        toast.appendChild(widgetBottom);
+        flexContainer.appendChild(toast);
+        mainContainer.appendChild(flexContainer);
+
+        console.log(`[Stamina Optimizer] Toast shown: ${message}`);
+
+        setTimeout(() => {
+            if (flexContainer && flexContainer.parentNode) {
+                flexContainer.parentNode.removeChild(flexContainer);
+
+                const toasts = mainContainer.querySelectorAll('.toast-item');
+                toasts.forEach((item, index) => {
+                    item.style.transform = `translateY(-${index * 46}px)`;
+                });
+            }
+        }, duration);
+    } catch (error) {
+        console.error('[Stamina Optimizer] Error showing toast:', error);
+    }
 }
 
 // ============================================================================
@@ -1128,45 +1211,58 @@ function createEscKeyEvent() {
 }
 
 // Find and click the pause button to pause autoplay session
-async function pauseAutoplayWithButton() {
+async function pauseAutoplayWithButton(maxRetries = 3, retryDelay = 500) {
     try {
         console.log('[Stamina Optimizer] Looking for pause button...');
-        
+
         const selectors = [
             'button:has(svg.lucide-pause)',
             'button.frame-1-red[class*="pause"]',
             'button.frame-1-red:has(svg.lucide-pause)',
             'button[class*="surface-red"]:has(svg.lucide-pause)'
         ];
-        let button = selectors.reduce((found, selector) => 
-            found || document.querySelector(selector), null);
-        if (!button) {
-            const flexContainer = document.querySelector('div.flex');
-            if (flexContainer) {
-                const buttons = flexContainer.querySelectorAll('button');
-                if (buttons.length >= 2) {
-                    const secondButton = buttons[1];
-                    const hasPauseIcon = secondButton.querySelector('svg.lucide-pause');
-                    if (hasPauseIcon) {
-                        button = secondButton;
-                        console.log('[Stamina Optimizer] Found pause button using structure fallback');
+
+        let button = null;
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            button = selectors.reduce((found, selector) =>
+                found || document.querySelector(selector), null);
+
+            if (!button) {
+                const flexContainers = document.querySelectorAll('div.flex');
+                for (const flexContainer of flexContainers) {
+                    const buttons = flexContainer.querySelectorAll('button');
+                    if (buttons.length >= 2) {
+                        const secondButton = buttons[1];
+                        if (secondButton.querySelector('svg.lucide-pause')) {
+                            button = secondButton;
+                            console.log('[Stamina Optimizer] Found pause button using structure fallback');
+                            break;
+                        }
                     }
                 }
             }
+
+            if (button) break;
+
+            if (attempt < maxRetries - 1) {
+                console.log(`[Stamina Optimizer] Pause button not found, retrying in ${retryDelay}ms... (attempt ${attempt + 1}/${maxRetries})`);
+                await sleep(retryDelay);
+            }
         }
+
         if (button) {
             console.log('[Stamina Optimizer] Found pause button, clicking to pause autoplay session...');
             document.dispatchEvent(createEscKeyEvent());
-            await new Promise(resolve => setTimeout(resolve, PAUSE_BUTTON_CLICK_DELAY));
+            await sleep(PAUSE_BUTTON_CLICK_DELAY);
             button.click();
-            await new Promise(resolve => setTimeout(resolve, PAUSE_BUTTON_UPDATE_DELAY));
+            await sleep(PAUSE_BUTTON_UPDATE_DELAY);
             console.log('[Stamina Optimizer] Pause button clicked successfully');
-            
             return true;
-        } else {
-            console.log('[Stamina Optimizer] Pause button not found');
-            return false;
         }
+
+        console.log('[Stamina Optimizer] Pause button not found after retries');
+        return false;
     } catch (error) {
         console.error('[Stamina Optimizer] Error clicking pause button:', error);
         return false;
@@ -1174,7 +1270,8 @@ async function pauseAutoplayWithButton() {
 }
 
 // Stop autoplay (only if we initiated it) - Uses pause button to stop session without changing mode
-async function stopAutoplay() {
+async function stopAutoplay(options = {}) {
+    const { toastMessage = null } = options;
     if (!wasInitiatedByMod || !isCurrentlyActive) {
         console.log('[Stamina Optimizer] Not stopping - autoplay was not initiated by mod');
         return false;
@@ -1185,18 +1282,25 @@ async function stopAutoplay() {
         return false;
     }
     try {
+        if (toastMessage) {
+            showToast(toastMessage);
+        }
         setStateFlag('isStoppingAutoplay');
         const boardContext = globalThis.state.board.getSnapshot().context;
         if (boardContext.mode === 'autoplay') {
-            const paused = await pauseAutoplayWithButton();
-            if (paused) {
-                console.log('[Stamina Optimizer] Autoplay session paused using pause button');
+            const needsPause = boardContext.gameStarted || isAutoplaySessionActive();
+            if (needsPause) {
+                const paused = await pauseAutoplayWithButton();
+                if (paused) {
+                    console.log('[Stamina Optimizer] Autoplay session paused using pause button');
+                } else {
+                    console.warn('[Stamina Optimizer] Pause button not found after retries - releasing control without mode change');
+                }
             } else {
-                console.log('[Stamina Optimizer] Pause button not found - falling back to mode change');
-                globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
+                console.log('[Stamina Optimizer] Autoplay idle - releasing control without pause');
             }
         }
-        
+
         releaseControlAndResetState();
         return true;
     } catch (error) {
@@ -1258,8 +1362,9 @@ async function startSpecificMapPlay() {
         }
         
         console.log(`[Stamina Optimizer] Starting specific map play: ${mapId}, setup: ${setupLabel}, floor: ${floor}`);
-        
+
         const alreadyOnMap = getCurrentMapId() === mapId;
+
         const navigated = await navigateToSpecificMap(mapId);
         if (!navigated) {
             console.error('[Stamina Optimizer] Failed to navigate to map');
@@ -1540,7 +1645,13 @@ async function executeAction() {
     const action = settings.action || DEFAULT_ACTION;
     
     console.log(`[Stamina Optimizer] Executing action: ${action}`);
-    
+
+    if (action === 'specific-map') {
+        showToast('Starting Stamina Optimizer');
+        clearModalsWithEsc(3);
+        await sleep(100);
+    }
+
     switch (action) {
         case 'boosted-maps':
             startBoostedMapFarming();
@@ -1622,7 +1733,7 @@ async function monitorStamina() {
             
             console.log(`[Stamina Optimizer] ⏹️ Stamina (${currentStamina}) < min (${minStamina}) - stopping`);
             try {
-                await stopAutoplay();
+                await stopAutoplay({ toastMessage: 'Stopping - Low Stamina' });
                 updateButton();
             } catch (error) {
                 console.error('[Stamina Optimizer] Error stopping autoplay:', error);

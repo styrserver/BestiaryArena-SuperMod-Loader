@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "3.9.5",
+      "changes": [
+        {
+          "mod": "Stamina Optimizer",
+          "type": "added",
+          "text": "Custom \"Starting Stamina Optimizer\" toast when an action runs (same style as Better Boosted Maps) and a low-stamina stop toast. Clears open modals before navigation; navigation and auto-setup delays aligned with Better Boosted Maps timing."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "fixed",
+          "text": "Disabling automation no longer shows the low-stamina stop toast. Stopping autoplay retries the pause button and no longer falls back to manual mode (which could start a manual battle); idle autoplay is released without forcing a mode change."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Maps tab and per-map right-click equipment rules now use equipment-database.js HARDCODED_BOOSTED_MAP instead of a hardcoded map blocklist. Only maps with at least one wiki boosted equipment are selectable; context menu equipment is limited to items that boost on that map. Equipment tab lists all equipment; HARDCODED_BOOSTED_MAP false and EXCLUDED_EQUIPMENT rows stay greyed out and cannot be toggled. Steel Boots set to false (Dragon Lair removed)."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "Per-map cogwheel (⚙) no longer appears after opening the right-click context menu and closing without real changes. Per-map settings are only saved and shown when equipment rules exist or stamina/setup differ from global defaults; reverting to defaults clears the stored override."
+        }
+      ]
+    },
+    {
       "version": "3.9.4",
       "changes": [
         {

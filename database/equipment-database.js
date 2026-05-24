@@ -41,7 +41,7 @@ const HARDCODED_BOOSTED_MAP = {
   'Skullcracker Armor':
     "Demonrage Seal, Alawar's Vault, Elvenbane, A Shamanic Ritual",
   'Springsprout Rod': 'Teleporter Trap, Folda Boat, Frozen Aquifer',
-  'Steel Boots': 'Dragon Lair',
+  'Steel Boots': false,
   'Stealth Ring': "Banshee's Last Room, Hedge Maze, Ab'Dendriel Hive",
   'Vampire Shield':
     "Spider Lair, Ghostlands Library, Maze Gates, Ab'Dendriel Hive",
