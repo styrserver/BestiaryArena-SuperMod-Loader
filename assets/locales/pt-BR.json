@@ -1157,6 +1157,8 @@
       "genesMinThreshold": "Limite mínimo de genes para {label}",
       "genesMaxThreshold": "Limite máximo de genes para {label}",
       "keepRangeDescription": "Manter criaturas com genes entre:",
+      "keepUpgradeLadder": "Manter upgrades até nível 50",
+      "tooltipUpgradeLadder": "Escada de upgrade: mantém 5/4/3/2 por faixa de genes do inventário completo; o excesso é vendido/espremido.",
       "actionTitleSell": "Vender",
       "actionTitleKeep": "Manter",
       "actionTitleSqueeze": "Espremer",

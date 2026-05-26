@@ -1156,6 +1156,8 @@
       "genesMinThreshold": "Minimum gene threshold for {label}",
       "genesMaxThreshold": "Maximum gene threshold for {label}",
       "keepRangeDescription": "Keep creatures with genes between:",
+      "keepUpgradeLadder": "Keep upgrades to level 50",
+      "tooltipUpgradeLadder": "Upgrade ladder: keeps 5/4/3/2 per gene band from full inventory; excess is sold/squeezed.",
       "actionTitleSell": "Sell",
       "actionTitleKeep": "Keep",
       "reset": "Reset",
