@@ -1164,6 +1164,8 @@
       resetForgeProgressBar();
 
       console.log('[Better Forge] 🔄 Refreshing UI...');
+      refreshModalArsenalGrid();
+      highlightEquipmentForForging(null, null, null);
 
               // Set completion status - UI will be refreshed after final API call completes
         setTimeout(() => {
@@ -1337,7 +1339,7 @@
   /** Vanilla game Arsenal grid — any 6×34px equipment grid that is not the modal copy. */
   function getNativeArsenalEquipmentGrid() {
     const modalGrid = getBetterForgeModalArsenalGrid();
-    const candidates = document.querySelectorAll('div[style*="grid-template-columns: repeat(6, 34px)"]');
+    const candidates = document.querySelectorAll('motion.div[style*="grid-template-columns: repeat(6, 34px)"], div[style*="grid-template-columns: repeat(6, 34px)"]');
     for (let i = 0; i < candidates.length; i++) {
       const el = candidates[i];
       if (el === modalGrid) continue;
@@ -1346,12 +1348,48 @@
     return null;
   }
 
+  /** Prefer the modal Arsenal grid when Better Forge is open. */
+  function getActiveArsenalEquipmentGrid() {
+    return getBetterForgeModalArsenalGrid() || getNativeArsenalEquipmentGrid();
+  }
+
+  function refreshModalArsenalGrid() {
+    try {
+      const modalGrid = getBetterForgeModalArsenalGrid();
+      if (!modalGrid) return;
+
+      const searchInput = document.getElementById('better-forge-search');
+      const filterBtn = document.getElementById('better-forge-filter');
+      const allEquipment = getUserOwnedEquipment();
+      const selectedEquipment = forgeState.selectedEquipmentFilter || getCurrentSelection().selectedEquipment;
+      const searchTerm = searchInput?.value?.trim() || selectedEquipment || forgeState.globalSearchTerm || '';
+      const tierFilter = forgeState.globalTierFilter || 'all';
+      const equipmentToShow = applyFilters(allEquipment, searchTerm, tierFilter);
+
+      if (searchTerm) {
+        applyEquipmentSearch(modalGrid, searchTerm, equipmentToShow, transferToDisenchant);
+      } else {
+        renderEquipmentList(modalGrid, equipmentToShow, transferToDisenchant);
+      }
+
+      if (filterBtn) {
+        updateFilterButtonText(filterBtn, tierFilter);
+      }
+
+      setTimeout(() => {
+        hideSelectedEquipmentFromArsenal();
+      }, 50);
+    } catch (error) {
+      console.warn('[Better Forge] Error refreshing modal arsenal grid:', error);
+    }
+  }
+
   function addEquipmentToArsenal(equipment) {
     try {
       console.log(`[Better Forge] 🖥️ Adding equipment to Arsenal: ${equipment.id} (${equipment.tier})`);
       
-      // Find the Arsenal scroll area
-      const arsenalScrollArea = getNativeArsenalEquipmentGrid();
+      // Find the Arsenal scroll area (modal grid when Better Forge is open)
+      const arsenalScrollArea = getActiveArsenalEquipmentGrid();
       if (!arsenalScrollArea) {
         console.warn('[Better Forge] Arsenal scroll area not found');
         return;
@@ -2298,9 +2336,9 @@
   
   function removeEquipmentFromArsenal(equipmentId) {
     try {
-      const nativeGrid = getNativeArsenalEquipmentGrid();
-      if (!nativeGrid) return;
-      const arsenalButtons = nativeGrid.querySelectorAll('button[data-equipment-id]');
+      const arsenalGrid = getActiveArsenalEquipmentGrid();
+      if (!arsenalGrid) return;
+      const arsenalButtons = arsenalGrid.querySelectorAll('button[data-equipment-id]');
       for (const btn of arsenalButtons) {
         if (btn.getAttribute('data-equipment-id') === equipmentId) {
           btn.remove();
@@ -3030,6 +3068,11 @@
       if (!equipment || !stat || !targetTier) {
         return;
       }
+
+      const modalGrid = getBetterForgeModalArsenalGrid();
+      if (!modalGrid) {
+        return;
+      }
       
       // Calculate which items will be consumed (excludes target tier items)
       let itemsToConsume = calculateItemsToConsume(equipment, stat, targetTier);
@@ -3066,9 +3109,9 @@
         itemsToConsume = uniqueItems;
       }
       
-      // Highlight the items that will be consumed and track their IDs
+      // Highlight the items that will be consumed and track their IDs (modal Arsenal only)
       itemsToConsume.forEach(item => {
-        const equipmentButton = document.querySelector(`button[data-equipment-id="${item.id}"]`);
+        const equipmentButton = modalGrid.querySelector(`button[data-equipment-id="${item.id}"]`);
         if (equipmentButton) {
           // Track this equipment ID for forging
           forgeState.highlightedEquipment.add(item.id);
@@ -3136,6 +3179,16 @@
     };
   }
   
+  function resetBetterForgeModalSessionState() {
+    autoUpgradeState.selectedEquipment = null;
+    autoUpgradeState.selectedTier = null;
+    autoUpgradeState.selectedStat = null;
+    forgeState.selectedEquipmentFilter = null;
+    forgeState.highlightedEquipment.clear();
+    forgeState.globalSearchTerm = '';
+    forgeState.globalTierFilter = 'all';
+  }
+
   function clearAutoUpgradeSelection() {
     // Reset forge confirmation mode if clearing selection
     if (forgeState.isForgeConfirmationMode) {
@@ -3905,6 +3958,8 @@
          if (forgeState.isForging || forgeState.isForgingInProgress) {
            stopForging();
          }
+
+         resetBetterForgeModalSessionState();
          
          injectBetterForgeButtonStyles();
          
@@ -3985,9 +4040,7 @@
                    stopForging();
                  }
                  
-                 // Clear global search term and tier filter when modal closes
-                 forgeState.globalSearchTerm = '';
-                 forgeState.globalTierFilter = 'all';
+                 resetBetterForgeModalSessionState();
                  
                  cleanupDustDisplay();
                });
@@ -4022,9 +4075,7 @@
                           resetForgeConfirmationModeIfActive();
                         }
                         
-                        // Clear global search term and tier filter
-                        forgeState.globalSearchTerm = '';
-                        forgeState.globalTierFilter = 'all';
+                        resetBetterForgeModalSessionState();
                         
                         cleanupDustDisplay();
                         modalCleanupObserver.disconnect();

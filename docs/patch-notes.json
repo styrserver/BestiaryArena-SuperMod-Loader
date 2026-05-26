@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.9.6",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "added",
+          "text": "Per-creature right-click option \"Keep upgrades to level 50\" on the Autoseller tab: keeps up to 5/4/3/2 copies per gene band (50–59 / 60–69 / 70–79 / 80–100) using full inventory counts. Excess copies are still sold, devoured, or auto-squeezed; protected 80–100% copies override autosqueeze for that species only. ⬆ indicator and summary hover tooltip; setting stored in autoseller-settings."
+        },
+        {
+          "mod": "Better Forge",
+          "type": "fixed",
+          "text": "Auto-upgrade forge marks (red border and stripe overlay) now apply only to equipment in the modal Arsenal grid, not the main game Arsenal sidebar. Closing and reopening the modal resets col1 to the full equipment list — auto-upgrade selection, equipment filter, search, tier filter, and highlights no longer persist across sessions. During auto-upgrade forging, consumed and newly forged equipment now updates col1 in the modal (add/remove/refresh target the modal grid instead of the native game Arsenal)."
+        }
+      ]
+    },
+    {
       "version": "3.9.5",
       "changes": [
         {

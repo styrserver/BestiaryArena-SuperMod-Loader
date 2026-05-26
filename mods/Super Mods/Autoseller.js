@@ -233,8 +233,17 @@
         sealedTier5SellDenyList: [],
         sealedTier5InjectDenyList: [],
         // Per-creature gene ranges to keep (prevents selling/devouring)
-        creatureKeepRanges: {} // { "CreatureName": { min: number, max: number } }
+        creatureKeepRanges: {}, // { "CreatureName": { min: number, max: number } }
+        // Per-creature upgrade ladder (sell-flow exceptions): keep N per gene band from full inventory
+        creatureKeepUpgradeLadder: {} // { "CreatureName": true }
     };
+
+    const UPGRADE_LADDER_BANDS = [
+        { min: 50, max: 59, keep: 5 },
+        { min: 60, max: 69, keep: 4 },
+        { min: 70, max: 79, keep: 3 },
+        { min: 80, max: 100, keep: 2 }
+    ];
     
     // =======================
     // 1.X Event Emission (Autoseller -> external listeners)
@@ -473,6 +482,10 @@
             updatedSettings.autoMode === 'autoplant') {
             updatePlantMonsterFilter(updatedSettings.autoplantIgnoreList || []);
         }
+
+        if (newSettings.creatureKeepUpgradeLadder !== undefined) {
+            updatePlantMonsterFilter(updatedSettings.autoplantIgnoreList || []);
+        }
         
         updateAutosellerSessionWidget();
         
@@ -524,6 +537,71 @@
         const ranges = { ...(settings.creatureKeepRanges || {}) };
         delete ranges[creatureName];
         setSettings({ creatureKeepRanges: ranges });
+    }
+
+    function isCreatureKeepUpgradeLadderEnabled(creatureName) {
+        const settings = getSettings();
+        return !!(creatureName && settings.creatureKeepUpgradeLadder?.[creatureName]);
+    }
+
+    function setCreatureKeepUpgradeLadder(creatureName, enabled) {
+        const settings = getSettings();
+        const ladder = { ...(settings.creatureKeepUpgradeLadder || {}) };
+        if (enabled) {
+            ladder[creatureName] = true;
+        } else {
+            delete ladder[creatureName];
+        }
+        setSettings({ creatureKeepUpgradeLadder: ladder });
+    }
+
+    function clearCreatureKeepUpgradeLadder(creatureName) {
+        setCreatureKeepUpgradeLadder(creatureName, false);
+    }
+
+    /**
+     * @param {Array} inventoryMonsters
+     * @param {Object} settings
+     * @returns {Set<string|number>}
+     */
+    function computeUpgradeLadderProtectedIds(inventoryMonsters, settings) {
+        const protectedIds = new Set();
+        const ladder = settings?.creatureKeepUpgradeLadder || {};
+        const enabledNames = Object.keys(ladder).filter((name) => ladder[name]);
+        if (enabledNames.length === 0 || !Array.isArray(inventoryMonsters)) {
+            return protectedIds;
+        }
+
+        for (const creatureName of enabledNames) {
+            const ofType = inventoryMonsters.filter((monster) => {
+                if (!monster || monster.locked || isShinyCreature(monster)) {
+                    return false;
+                }
+                return getCreatureNameFromMonster(monster) === creatureName;
+            });
+
+            for (const band of UPGRADE_LADDER_BANDS) {
+                const inBand = ofType.filter((monster) => {
+                    const genes = calculateTotalGenes(monster);
+                    return genes >= band.min && genes <= band.max;
+                });
+                const keepCount = Math.min(band.keep, inBand.length);
+                for (let i = 0; i < keepCount; i++) {
+                    if (inBand[i]?.id != null) {
+                        protectedIds.add(inBand[i].id);
+                    }
+                }
+            }
+        }
+
+        return protectedIds;
+    }
+
+    function getUpgradeLadderProtectedIds(inventoryOverride) {
+        const inventory = inventoryOverride ||
+            globalThis.state?.player?.getSnapshot?.()?.context?.monsters ||
+            [];
+        return computeUpgradeLadderProtectedIds(inventory, getSettings());
     }
 
     /**
@@ -3577,9 +3655,12 @@
             const keepRangeText = keepRange
                 ? ` ${(t('mods.autoseller.tooltipHumanKeepRange') || 'Keep range')}: ${keepRange.min}-${keepRange.max}%.`
                 : '';
+            const upgradeLadderText = isCreatureKeepUpgradeLadderEnabled(creatureName)
+                ? ` ${t('mods.autoseller.tooltipUpgradeLadder') || 'Upgrade ladder: keeps 5/4/3/2 per gene band (50–59 / 60–69 / 70–79 / 80–100) from full inventory; excess is sold/squeezed.'}`
+                : '';
             const sealedStatus = `${t('mods.autoseller.tooltipHumanSealedStatusPrefix') || 'Sealed'}: ${(t('mods.autoseller.tooltipHumanSellLabel') || 'sell/devour')} ${sellEnabled ? onText : offText}${sellBlocked ? ` (${blockedText})` : ''}, ${(t('mods.autoseller.tooltipHumanInjectLabel') || 'inject')} ${injectEnabled ? onText : offText}.`;
             const priorityText = t('mods.autoseller.tooltipInjectPriority') || 'Priority: auto-inject runs first, then sell/devour only if genes do not improve the awakened target.';
-            return `${actionSummary}${keepRangeText} ${sealedStatus} ${priorityText}`.replace(/\s+/g, ' ').trim();
+            return `${actionSummary}${keepRangeText}${upgradeLadderText} ${sealedStatus} ${priorityText}`.replace(/\s+/g, ' ').trim();
         }
         
         items.forEach(name => {
@@ -3614,6 +3695,18 @@
                         indicator.style.filter = 'grayscale(100%)';
                     }
                     item.appendChild(indicator);
+                }
+                if (isCreatureKeepUpgradeLadderEnabled(name)) {
+                    const ladderIndicator = document.createElement('span');
+                    ladderIndicator.textContent = '⬆';
+                    ladderIndicator.style.fontSize = '10px';
+                    ladderIndicator.style.flexShrink = '0';
+                    ladderIndicator.style.color = '#ffe066';
+                    if (isIgnoreList) {
+                        ladderIndicator.style.opacity = '0.5';
+                        ladderIndicator.style.filter = 'grayscale(100%)';
+                    }
+                    item.appendChild(ladderIndicator);
                 }
             }
 
@@ -3793,6 +3886,9 @@
                                     detail: { creatureName: name }
                                 });
                                 columnsContainer.dispatchEvent(refreshEvent);
+                                if (getSettings().autoMode === 'autoplant') {
+                                    updatePlantMonsterFilter(getSettings().autoplantIgnoreList || []);
+                                }
                             }
                         }, sealedActionVerb, contextDefaultRangeMin, contextDefaultRangeMax);
                     }
@@ -4033,6 +4129,35 @@
             sealedInjectToggleRow.appendChild(sealedInjectToggleLabel);
             menu.appendChild(sealedInjectToggleRow);
         }
+
+        let upgradeLadderToggle = null;
+        if (!isSqueezeContext) {
+            const upgradeLadderRow = document.createElement('div');
+            upgradeLadderRow.style.display = 'flex';
+            upgradeLadderRow.style.alignItems = 'center';
+            upgradeLadderRow.style.justifyContent = 'flex-start';
+            upgradeLadderRow.style.gap = '6px';
+            upgradeLadderRow.style.marginBottom = '12px';
+
+            upgradeLadderToggle = document.createElement('input');
+            upgradeLadderToggle.type = 'checkbox';
+            upgradeLadderToggle.checked = isCreatureKeepUpgradeLadderEnabled(creatureName);
+            upgradeLadderToggle.style.cursor = 'pointer';
+
+            const upgradeLadderLabel = document.createElement('label');
+            upgradeLadderLabel.className = 'pixel-font-14';
+            upgradeLadderLabel.textContent = t('mods.autoseller.keepUpgradeLadder') || 'Keep upgrades to level 50';
+            upgradeLadderLabel.style.fontSize = '12px';
+            upgradeLadderLabel.style.color = '#ffe066';
+            upgradeLadderLabel.style.cursor = 'pointer';
+            upgradeLadderLabel.addEventListener('click', () => {
+                upgradeLadderToggle.checked = !upgradeLadderToggle.checked;
+            });
+
+            upgradeLadderRow.appendChild(upgradeLadderToggle);
+            upgradeLadderRow.appendChild(upgradeLadderLabel);
+            menu.appendChild(upgradeLadderRow);
+        }
         
         // Button container
         const buttonContainer = document.createElement('div');
@@ -4083,6 +4208,9 @@
                 setSealedTier5SellBlocked(creatureName, sealedSellDenyToggle.checked);
             }
             setSealedTier5InjectAllowed(creatureName, finalSealedInjectAllowed);
+            if (upgradeLadderToggle) {
+                setCreatureKeepUpgradeLadder(creatureName, upgradeLadderToggle.checked);
+            }
             closeMenu();
         });
         
@@ -4110,6 +4238,7 @@
         
         clearButton.addEventListener('click', () => {
             clearCreatureKeepRange(creatureName);
+            clearCreatureKeepUpgradeLadder(creatureName);
             setSealedTier5SellAllowed(creatureName, false);
             setSealedTier5SellBlocked(creatureName, false);
             setSealedTier5InjectAllowed(creatureName, true);
@@ -4144,6 +4273,7 @@
             } else {
                 if (sealedSellDenyToggle) sealedSellDenyToggle.checked = false;
                 if (sealedInjectToggle) sealedInjectToggle.checked = false;
+                if (upgradeLadderToggle) upgradeLadderToggle.checked = false;
             }
         });
         
@@ -4172,7 +4302,7 @@
         cancelButton.addEventListener('click', closeMenu);
         
         buttonContainer.appendChild(saveButton);
-        if (currentRange) {
+        if (currentRange || isCreatureKeepUpgradeLadderEnabled(creatureName)) {
             buttonContainer.appendChild(clearButton);
         }
         buttonContainer.appendChild(resetButton);
@@ -4986,12 +5116,20 @@
                         plantMonsterFilter: (monster) => {
                             const monsterName = monster?.metadata?.name || monster?.name;
                             const totalGenes = calculateTotalGenes(monster);
+                            const upgradeLadderEnabled = isCreatureKeepUpgradeLadderEnabled(monsterName);
+                            const upgradeLadderProtected = upgradeLadderEnabled
+                                ? getUpgradeLadderProtectedIds()
+                                : null;
                             
                             // FAILSAFE: NEVER autoplant shiny creatures
                             if (isShinyCreature(monster)) {
                                 return false;
                             }
                             if (isSealedTierFiveCreature(monster) && !isSealedTier5SellAllowed(monsterName)) {
+                                return false;
+                            }
+
+                            if (upgradeLadderEnabled && monster?.id && upgradeLadderProtected?.has(monster.id)) {
                                 return false;
                             }
                             
@@ -5010,6 +5148,9 @@
                             
                             // Keep creatures with minGenes or higher - only if enabled
                             if (keepGenesEnabled && totalGenes >= minGenes) {
+                                if (upgradeLadderEnabled) {
+                                    // Excess above quota for this species may be devoured (unless reserved for squeeze above).
+                                } else {
                                 const sealedSellableInFullBand =
                                     isSealedTierFiveCreature(monster) &&
                                     isSealedTier5SellAllowed(monsterName) &&
@@ -5017,6 +5158,7 @@
                                     totalGenes <= UI_CONSTANTS.SEALED_SELL_GENE_MAX;
                                 if (!sealedSellableInFullBand) {
                                     return false;
+                                }
                                 }
                             }
                             
@@ -7797,7 +7939,7 @@
     }
     
     // Helper function to filter monsters for autosell
-    function filterMonstersForAutosell(matchedMonsters, settings) {
+    function filterMonstersForAutosell(matchedMonsters, settings, inventorySnapshot) {
         if (settings.autoMode !== 'autosell' || matchedMonsters.length === 0) {
             return [];
         }
@@ -7807,11 +7949,20 @@
         const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow ?? 49;
         const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
         const ignoreList = settings.autoplantIgnoreList || [];
-        const protectSealedTier5 = settings.protectSealedTier5 === true;
+        const upgradeLadderProtected = computeUpgradeLadderProtectedIds(
+            inventorySnapshot || globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [],
+            settings
+        );
         
         const filteredMonsters = matchedMonsters.filter(invMonster => {
             if (isShinyCreature(invMonster)) return false;
             const creatureName = getCreatureNameFromMonster(invMonster);
+            const upgradeLadderEnabled = isCreatureKeepUpgradeLadderEnabled(creatureName);
+
+            if (upgradeLadderEnabled && invMonster?.id && upgradeLadderProtected.has(invMonster.id)) {
+                return false;
+            }
+
             if (isSealedTierFiveCreature(invMonster)) {
                 const sealedSellAllowed = isSealedTier5SellAllowed(creatureName);
                 const sealedInjectAllowed = isSealedTier5InjectAllowed(creatureName);
@@ -7829,6 +7980,9 @@
             
             // Keep creatures with minGenes or higher (if enabled) - OVERRIDES ignore list
             if (keepGenesEnabled && totalGenes >= minGenes) {
+                if (upgradeLadderEnabled) {
+                    // Excess copies above the per-band quota remain eligible for sell.
+                } else {
                 const sealedSellableInFullBand =
                     isSealedTierFiveCreature(invMonster) &&
                     isSealedTier5SellAllowed(creatureName) &&
@@ -7836,6 +7990,7 @@
                     totalGenes <= UI_CONSTANTS.SEALED_SELL_GENE_MAX;
                 if (!sealedSellableInFullBand) {
                     return false;
+                }
                 }
             }
 
@@ -7858,7 +8013,7 @@
     }
     
     // Helper function to filter monsters for autosqueeze
-    async function filterMonstersForAutosqueeze(matchedMonsters, settings) {
+    async function filterMonstersForAutosqueeze(matchedMonsters, settings, inventorySnapshot) {
         if (!settings.autosqueezeChecked || matchedMonsters.length === 0) {
             return [];
         }
@@ -7866,7 +8021,10 @@
         const squeezeMinGenes = settings.autosqueezeGenesMin ?? 80;
         const squeezeMaxGenes = settings.autosqueezeGenesMax ?? 100;
         const ignoreList = settings.autosqueezeIgnoreList || [];
-        const protectSealedTier5 = settings.protectSealedTier5 === true;
+        const upgradeLadderProtected = computeUpgradeLadderProtectedIds(
+            inventorySnapshot || globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [],
+            settings
+        );
         const hasDaycare = hasDaycareIconInInventory();
         let daycareMonsterIds = [];
         
@@ -7880,6 +8038,7 @@
             shiny: 0,
             inDaycare: 0,
             inIgnoreList: 0,
+            upgradeLadder: 0,
             geneRange: 0,
             passed: 0
         };
@@ -7906,6 +8065,14 @@
                 filterStats.inIgnoreList++;
                 return false;
             }
+
+            if (creatureName &&
+                isCreatureKeepUpgradeLadderEnabled(creatureName) &&
+                invMonster?.id &&
+                upgradeLadderProtected.has(invMonster.id)) {
+                filterStats.upgradeLadder++;
+                return false;
+            }
             
             const totalGenes = calculateTotalGenes(invMonster);
             if (totalGenes < squeezeMinGenes || totalGenes > squeezeMaxGenes) {
@@ -7926,7 +8093,7 @@
                 'Squeeze',
                 `filter: 0/${filterStats.total} pass (band ${squeezeMinGenes}-${squeezeMaxGenes}; ` +
                 `locked=${filterStats.locked} shiny=${filterStats.shiny} daycare=${filterStats.inDaycare} ` +
-                `ignore=${filterStats.inIgnoreList} outsideBand=${filterStats.geneRange}; drops: ${geneSummary})`
+                `ignore=${filterStats.inIgnoreList} upgradeLadder=${filterStats.upgradeLadder} outsideBand=${filterStats.geneRange}; drops: ${geneSummary})`
             );
         }
         
@@ -8212,7 +8379,7 @@
                 }
 
                 if (settings.autoMode === 'autosell') {
-                    const monstersToSell = filterMonstersForAutosell(matchedMonsters, settings);
+                    const monstersToSell = filterMonstersForAutosell(matchedMonsters, settings, inventorySnapshot);
                     const injectCandidates = matchedMonsters.filter(invMonster => {
                         const creatureName = getCreatureNameFromMonster(invMonster);
                         return isSealedTierFiveCreature(invMonster) &&
@@ -8226,7 +8393,7 @@
                 }
 
                 if (settings.autosqueezeChecked) {
-                    const monstersToSqueeze = await filterMonstersForAutosqueeze(matchedMonsters, settings);
+                    const monstersToSqueeze = await filterMonstersForAutosqueeze(matchedMonsters, settings, inventorySnapshot);
                     if (monstersToSqueeze.length > 0) {
                         console.log('[Autoseller] Processing autosqueeze for', monstersToSqueeze.length, 'monsters');
                         const squeezeResult = await processEligibleMonsters(monstersToSqueeze, 'squeeze');
