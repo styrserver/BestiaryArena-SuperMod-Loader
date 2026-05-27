@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.9.8",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Sealed auto-inject target selection for same-creature awakened copies now prioritizes higher level, then higher total genes, then inventory order. If the top target is skipped (e.g. no gene gain, on-board, or target error), Autoseller retries progressively weaker same-gameId awakened targets before giving up."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Auto-inject sealed creatures now uses the same awakened-target priority as Autoseller for matching gameId targets (level, then total genes, then inventory order), and retries weaker targets when stronger ones are skipped or injection fails."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "New highscores now replace old entries immediately after battle: post-battle refresh bypasses stale cached snapshots, avoids caching forced-refresh reads, and clears map cache when a run ends."
+        }
+      ]
+    },
+    {
       "version": "3.9.7",
       "changes": [
         {

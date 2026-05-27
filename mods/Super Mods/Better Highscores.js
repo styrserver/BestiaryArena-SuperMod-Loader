@@ -33,7 +33,8 @@
     MAP_CHANGE_THROTTLE: 1000,
     CONTAINER_THROTTLE_NORMAL: 500,
     CONTAINER_THROTTLE_AUTOPLAY: 200,
-    UPDATE_THROTTLE: 100
+    UPDATE_THROTTLE: 100,
+    POST_BATTLE_FRESH_WINDOW: 8000
   };
   
   const UI_CONFIG = {
@@ -105,6 +106,7 @@
     // Cache state
     leaderboardCache: new Map(),
     cacheTimeout: 30000, // 30 seconds
+    lastBattleCompletionAt: 0,
     
     // Subscription management for cleanup
     subscriptions: [],
@@ -122,6 +124,7 @@
       this.lastErrorTime = 0;
       this.totalErrors = 0;
       this.leaderboardCache.clear();
+      this.lastBattleCompletionAt = 0;
       this.subscriptions = [];
       this.timeouts = [];
     },
@@ -309,11 +312,13 @@
         floorData
       };
       
-      // Cache the data
-      BetterHighscoresState.leaderboardCache.set(cacheKey, {
-        data,
-        timestamp: Date.now()
-      });
+      // Avoid poisoning cache with potentially stale immediate post-battle snapshots.
+      if (!forceRefresh) {
+        BetterHighscoresState.leaderboardCache.set(cacheKey, {
+          data,
+          timestamp: Date.now()
+        });
+      }
       
       return data;
     } catch (error) {
@@ -373,10 +378,13 @@
     }
     
     console.log('[Better Highscores] Battle completed, refreshing leaderboard data');
+    BetterHighscoresState.lastBattleCompletionAt = Date.now();
     scheduleTimeout(async () => {
       const mapCode = getCurrentMapCode();
       if (mapCode) {
         try {
+          // Clear this map's cache so fresh data can replace old records as soon as backend updates.
+          BetterHighscoresState.leaderboardCache.delete(`leaderboard_${mapCode}`);
           const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, true);
           
           // Try to update in place first (no flickering)
@@ -1127,8 +1135,10 @@
       
       const mapName = getMapName(mapCode);
       
-      // Fetch leaderboard data
-      const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, false);
+      // Use fresh reads shortly after battle completion to avoid stale cached records.
+      const shouldForceRefresh =
+        Date.now() - BetterHighscoresState.lastBattleCompletionAt < DELAYS.POST_BATTLE_FRESH_WINDOW;
+      const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, shouldForceRefresh);
       
       // Check if we can update in place (same map, container exists in DOM)
       const mapChanged = mapCode !== currentMapCode;

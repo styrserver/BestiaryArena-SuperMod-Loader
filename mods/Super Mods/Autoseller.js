@@ -1766,6 +1766,36 @@
     }
 
     /**
+     * Sort awakened inject targets (same gameId) strongest-first.
+     * Priority: higher level, then higher total genes, then earlier inventory index.
+     * @param {Array} matchingTargets - Awakened candidates with matching gameId
+     * @param {Array} inventoryMonsters - Full inventory list (defines tie-break order)
+     * @returns {Array}
+     */
+    function sortAwakenedInjectTargets(matchingTargets, inventoryMonsters) {
+        if (!Array.isArray(matchingTargets) || matchingTargets.length === 0) return [];
+
+        const inventoryOrder = new Map();
+        (inventoryMonsters || []).forEach((monster, index) => {
+            if (monster?.id != null) inventoryOrder.set(String(monster.id), index);
+        });
+
+        return [...matchingTargets].sort((a, b) => {
+            const levelA = Number(a?.level) || 0;
+            const levelB = Number(b?.level) || 0;
+            if (levelB !== levelA) return levelB - levelA;
+
+            const genesA = calculateTotalGenes(a);
+            const genesB = calculateTotalGenes(b);
+            if (genesB !== genesA) return genesB - genesA;
+
+            const orderA = inventoryOrder.get(String(a?.id)) ?? Number.MAX_SAFE_INTEGER;
+            const orderB = inventoryOrder.get(String(b?.id)) ?? Number.MAX_SAFE_INTEGER;
+            return orderA - orderB;
+        });
+    }
+
+    /**
      * Attempt to inject sealed creatures into an awakened creature.
      * @param {Array} monsters - Candidate monsters from current processing pass
      * @returns {Promise<Set<string|number>>} Server IDs consumed via doctor
@@ -1810,61 +1840,82 @@
                 const candidateGameId = Number(candidate?.gameId ?? candidate?.metadata?.id);
                 return Number.isFinite(candidateGameId) && Number.isFinite(sealedGameId) && candidateGameId === sealedGameId;
             });
-            const awakenedTarget = matchingAwakenedTargets[0];
-            if (!awakenedTarget?.id) {
+            const orderedAwakenedTargets = sortAwakenedInjectTargets(matchingAwakenedTargets, localMonsters);
+            if (orderedAwakenedTargets.length === 0) {
                 console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: no awakened target with same gameId (${sealedGameId})`);
                 emitAutosellerEvent('inject:skip', { reason: 'no-target', creatureName, gameId: sealedGameId, candidate: { stats: getMonsterGeneStats(monster) } });
                 continue;
             }
-            const awakenedTargetName = awakenedTarget?.metadata?.name || awakenedTarget?.name || getCreatureNameFromMonster(awakenedTarget) || 'unknown';
 
-            if (String(monster.id) === String(awakenedTarget.id)) {
-                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: same as target`);
-                emitAutosellerEvent('inject:skip', { reason: 'same-id', creatureName, gameId: sealedGameId, candidate: { stats: getMonsterGeneStats(monster) } });
-                continue;
-            }
-            if (!hasAnyHigherGeneStat(monster, awakenedTarget)) {
-                const c = getMonsterGeneStats(monster);
-                const t = getMonsterGeneStats(awakenedTarget);
+            let injectSucceeded = false;
+            for (let targetIndex = 0; targetIndex < orderedAwakenedTargets.length; targetIndex++) {
+                if (isCleaningUp) return consumedServerIds;
+
+                const awakenedTarget = orderedAwakenedTargets[targetIndex];
+                if (!awakenedTarget?.id) continue;
+
+                const awakenedTargetName = awakenedTarget?.metadata?.name || awakenedTarget?.name || getCreatureNameFromMonster(awakenedTarget) || 'unknown';
+                const tryWeakerNext = targetIndex < orderedAwakenedTargets.length - 1;
+
+                if (String(monster.id) === String(awakenedTarget.id)) {
+                    console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: same as target ${awakenedTargetName} (${awakenedTarget.id})`);
+                    emitAutosellerEvent('inject:skip', { reason: 'same-id', creatureName, gameId: sealedGameId, candidate: { stats: getMonsterGeneStats(monster) } });
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                    continue;
+                }
+                if (!hasAnyHigherGeneStat(monster, awakenedTarget)) {
+                    const c = getMonsterGeneStats(monster);
+                    const t = getMonsterGeneStats(awakenedTarget);
+                    console.log(
+                        `[Autoseller][Inject][Skip] ${creatureName || monster.id}: no higher gene than target ${awakenedTargetName} (${awakenedTarget.id}) ` +
+                        `(candidate hp=${c.hp} ad=${c.ad} ap=${c.ap} armor=${c.armor} mr=${c.magicResist} | ` +
+                        `target hp=${t.hp} ad=${t.ad} ap=${t.ap} armor=${t.armor} mr=${t.magicResist})`
+                    );
+                    emitAutosellerEvent('inject:skip', {
+                        reason: 'no-higher-gene',
+                        creatureName,
+                        gameId: sealedGameId,
+                        candidate: { stats: c },
+                        target: { id: awakenedTarget.id, name: awakenedTargetName, stats: t }
+                    });
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                    continue;
+                }
+
+                if (isGameCurrentlyRunning() && isMonsterCurrentlyOnBoard(awakenedTarget.id)) {
+                    console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: awakened target ${awakenedTargetName} (${awakenedTarget.id}) is on board during active battle`);
+                    emitAutosellerEvent('inject:skip', {
+                        reason: 'on-board',
+                        creatureName,
+                        gameId: sealedGameId,
+                        target: { id: awakenedTarget.id, name: awakenedTargetName },
+                        candidate: { stats: getMonsterGeneStats(monster) }
+                    });
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                    continue;
+                }
+
                 console.log(
-                    `[Autoseller][Inject][Skip] ${creatureName || monster.id}: no higher gene than target ` +
-                    `(candidate hp=${c.hp} ad=${c.ad} ap=${c.ap} armor=${c.armor} mr=${c.magicResist} | ` +
-                    `target hp=${t.hp} ad=${t.ad} ap=${t.ap} armor=${t.armor} mr=${t.magicResist})`
+                    `[Autoseller][Inject] Target selected (${targetIndex + 1}/${orderedAwakenedTargets.length}): ` +
+                    `${awakenedTargetName} (${awakenedTarget.id}) for drop ${creatureName || monster.id} (gameId=${sealedGameId})`
                 );
-                emitAutosellerEvent('inject:skip', {
-                    reason: 'no-higher-gene',
-                    creatureName,
-                    gameId: sealedGameId,
-                    candidate: { stats: c },
-                    target: { id: awakenedTarget.id, name: awakenedTargetName, stats: t }
+
+                await apiRateLimiter.waitForSlot();
+                apiRateLimiter.recordRequest();
+
+                const result = await apiRequest('https://bestiaryarena.com/api/trpc/inventory.useDoctor?batch=1', {
+                    method: 'POST',
+                    body: { "0": { json: { awakenMonsterId: awakenedTarget.id, consumingMonsterId: monster.id } } }
                 });
-                continue;
-            }
 
-            if (isGameCurrentlyRunning() && isMonsterCurrentlyOnBoard(awakenedTarget.id)) {
-                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: matching awakened target ${awakenedTargetName} (${awakenedTarget.id}) is on board during active battle`);
-                emitAutosellerEvent('inject:skip', {
-                    reason: 'on-board',
-                    creatureName,
-                    gameId: sealedGameId,
-                    target: { id: awakenedTarget.id, name: awakenedTargetName },
-                    candidate: { stats: getMonsterGeneStats(monster) }
-                });
-                continue;
-            }
-
-            console.log(`[Autoseller][Inject] Target selected: ${awakenedTargetName} (${awakenedTarget.id}) for drop ${creatureName || monster.id} (gameId=${sealedGameId})`);
-
-            await apiRateLimiter.waitForSlot();
-            apiRateLimiter.recordRequest();
-
-            const result = await apiRequest('https://bestiaryarena.com/api/trpc/inventory.useDoctor?batch=1', {
-                method: 'POST',
-                body: { "0": { json: { awakenMonsterId: awakenedTarget.id, consumingMonsterId: monster.id } } }
-            });
-
-            const goldDiff = result?.data?.[0]?.result?.data?.json?.goldDiff;
-            if (result.success && goldDiff !== undefined && goldDiff !== null) {
+                const goldDiff = result?.data?.[0]?.result?.data?.json?.goldDiff;
+                if (result.success && goldDiff !== undefined && goldDiff !== null) {
                 const candidateStats = getMonsterGeneStats(monster);
                 const targetBeforeStats = getMonsterGeneStats(awakenedTarget);
                 console.log(`[Autoseller][Inject][Success] ${creatureName || monster.id} (${monster.id}) -> ${awakenedTargetName} (${awakenedTarget.id}), goldDiff=${goldDiff}`);
@@ -2038,17 +2089,35 @@
                 } else {
                     console.warn(`[${modName}][WARN][autoInjectEligibleSealedCreatures] Inject succeeded but local inventory removal failed for ${monster.id}.`);
                 }
-            } else if (!result.success && result.status === 429) {
-                console.log(`[Autoseller][Inject][Retry] ${creatureName || monster.id}: rate limited (429)`);
-                await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
-            } else if (!result.success && result.status === 400) {
-                console.warn(
-                    `[${modName}][WARN][autoInjectEligibleSealedCreatures] useDoctor failed for ${monster.id}: HTTP 400 ` +
-                    `(awakenMonsterId=${awakenedTarget.id}, consumingMonsterId=${monster.id})`,
-                    result?.data
-                );
-            } else if (!result.success && result.status !== 404) {
-                console.warn(`[${modName}][WARN][autoInjectEligibleSealedCreatures] useDoctor failed for ${monster.id}: HTTP ${result.status}`);
+                    injectSucceeded = true;
+                    break;
+                } else if (!result.success && result.status === 429) {
+                    console.log(`[Autoseller][Inject][Retry] ${creatureName || monster.id}: rate limited (429)`);
+                    await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
+                    break;
+                } else if (!result.success && result.status === 400) {
+                    console.warn(
+                        `[${modName}][WARN][autoInjectEligibleSealedCreatures] useDoctor failed for ${monster.id}: HTTP 400 ` +
+                        `(awakenMonsterId=${awakenedTarget.id}, consumingMonsterId=${monster.id})`,
+                        result?.data
+                    );
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                } else if (!result.success && result.status !== 404) {
+                    console.warn(`[${modName}][WARN][autoInjectEligibleSealedCreatures] useDoctor failed for ${monster.id}: HTTP ${result.status}`);
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                }
+
+                if (!injectSucceeded) {
+                    await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
+                }
+            }
+
+            if (!injectSucceeded && orderedAwakenedTargets.length > 0) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: no injectable awakened target for gameId ${sealedGameId} after trying ${orderedAwakenedTargets.length} target(s)`);
             }
 
             await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
