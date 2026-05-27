@@ -251,6 +251,40 @@
             }
         }
         
+        // Decrypt v1 (single blob) or v2 (per-map chunks under .maps)
+        async function decryptBestRunsFromFirebaseRecord(remoteData, password) {
+            if (!remoteData || !password) {
+                return null;
+            }
+            if (remoteData.version === '2.0' && remoteData.maps && typeof remoteData.maps === 'object') {
+                const merged = {
+                    runs: {},
+                    metadata: remoteData.metadata || {},
+                    playerName: remoteData.playerName,
+                    uploadedAt: remoteData.lastUpdated
+                };
+                for (const [mapKey, entry] of Object.entries(remoteData.maps)) {
+                    if (!entry || !entry.encrypted) {
+                        continue;
+                    }
+                    const chunk = await decryptRunsData(entry.encrypted, password);
+                    if (!chunk) {
+                        continue;
+                    }
+                    if (chunk.runs && chunk.runs[mapKey]) {
+                        merged.runs[mapKey] = chunk.runs[mapKey];
+                    } else if (chunk.runs && typeof chunk.runs === 'object') {
+                        Object.assign(merged.runs, chunk.runs);
+                    }
+                }
+                return Object.keys(merged.runs).length > 0 ? merged : null;
+            }
+            if (remoteData.encrypted) {
+                return decryptRunsData(remoteData.encrypted, password);
+            }
+            return null;
+        }
+
         // Extract seed from replayLink string
         function extractSeedFromReplayLink(replayLink) {
             if (!replayLink) return 'N/A';
@@ -403,8 +437,8 @@
                     throw new Error(`HTTP ${response.status}`);
                 }
                 
-                const encryptedData = await response.json();
-                if (!encryptedData || !encryptedData.encrypted) {
+                const remoteData = await response.json();
+                if (!remoteData || (!remoteData.encrypted && !(remoteData.version === '2.0' && remoteData.maps))) {
                     showStatus('No encrypted data found for this player.', 'error');
                     fetchBtn.disabled = false;
                     fetchBtn.textContent = 'Download Best Runs as .txt';
@@ -413,8 +447,7 @@
                 
                 showStatus('Decrypting data...', 'info');
                 
-                // Decrypt
-                const decryptedData = await decryptRunsData(encryptedData.encrypted, password);
+                const decryptedData = await decryptBestRunsFromFirebaseRecord(remoteData, password);
                 if (!decryptedData) {
                     showStatus('Failed to decrypt. Please check that the password is correct.', 'error');
                     fetchBtn.disabled = false;

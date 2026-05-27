@@ -27,7 +27,8 @@ export const DATABASE_MODS = [
   'equipment-database.js',
   'maps-database.js',
   'equipment-lua-export.js',
-  'playereq-database.js'
+  'playereq-database.js',
+  'firebase-admins.js'
 ];
 
 // Official mods - included with the extension
@@ -91,6 +92,7 @@ export const DEFAULT_ENABLED_MODS = [
   'database/maps-database.js',
   'database/equipment-lua-export.js',
   'database/playereq-database.js',
+  'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
   'Official Mods/Custom_Display.js',
@@ -118,6 +120,7 @@ export const HIDDEN_MODS = [
   'maps-database.js',
   'equipment-lua-export.js',
   'playereq-database.js',
+  'firebase-admins.js',
   'Mod Settings.js',
   'RunTracker.js',
   'Outfiter.js'

@@ -49,6 +49,12 @@ const CHALLENGE_EQUIP_GAMEID_MAX = 300;
 const CHALLENGE_LEADERBOARD_TOP = 10;
 /** Max villain creatures per challenge roll (1 to this value, inclusive). */
 const CHALLENGE_MAX_VILLAINS = 10;
+/** Per-creature chance to roll awakened (non-awakenable creatures never awaken). */
+const CHALLENGE_AWAKEN_ROLL_CHANCE = 0.5;
+/** Difficulty contribution multiplier for an awakened villain creature. */
+const CHALLENGE_AWAKEN_DIFFICULTY_MULT = 1.5;
+const CHALLENGE_AWAKEN_STAR_TIER = 6;
+const CHALLENGE_AWAKEN_ICON_URL = 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png';
 /** localStorage key for personal (non-global) challenge runs, keyed by player name. */
 const CHALLENGE_PERSONAL_RECORDS_KEY = 'bestiary_challenges_personal';
 /** Max personal records kept per player in localStorage. */
@@ -2241,12 +2247,7 @@ function openChallengesModal() {
         gameIds.push(creatureIds[Math.floor(Math.random() * creatureIds.length)]);
       }
       rolledCreatureSpecs = gameIds.map(function(gameId) {
-        return {
-          gameId: gameId,
-          level: getRandomInt(CHALLENGE_LEVEL_MIN, CHALLENGE_LEVEL_MAX),
-          genes: rollRandomGenes(),
-          equip: rollRandomEquip()
-        };
+        return rollRandomCreatureSpec(gameId);
       });
       var diff = computeChallengeDifficulty(rolledCreatureSpecs);
       if (walkableCount <= 0) break;
@@ -2471,9 +2472,11 @@ function openChallengesModal() {
     var difficultyContrib = getCreatureDifficultyContribution(spec);
     var creatureMult = getCreatureDifficultyMultiplier(name);
     var equipMult = (spec.equip && spec.equip.gameId != null) ? getEquipmentDifficultyMultiplier(getEquipmentName(spec.equip.gameId)) : 1;
+    var awakenMult = spec.awakened === true ? CHALLENGE_AWAKEN_DIFFICULTY_MULT : 1;
     var difficultyTooltip = 'Difficulty: ' + difficultyContrib;
     if (creatureMult !== 1) difficultyTooltip += ' (creature ×' + creatureMult + ')';
     if (equipMult !== 1) difficultyTooltip += ' (equip ×' + equipMult + ')';
+    if (awakenMult !== 1) difficultyTooltip += ' (awaken ×' + awakenMult + ')';
 
     var card = document.createElement('div');
     card.style.cssText = 'display: flex; flex-direction: row; align-items: stretch; gap: 6px; padding: 4px; border: 1px solid #555; border-radius: 4px; background: rgba(0,0,0,0.2); flex-wrap: nowrap;';
@@ -2488,8 +2491,17 @@ function openChallengesModal() {
     img.style.cssText = 'width: 48px; height: 48px; object-fit: cover; border-radius: 4px; border: 1px solid #555;';
     creatureCol.appendChild(img);
     var nameP = document.createElement('p');
-    nameP.style.cssText = 'margin: 0; font-size: 11px; font-weight: bold; text-align: center; line-height: 1.2;';
+    nameP.style.cssText = 'margin: 0; font-size: 11px; font-weight: bold; text-align: center; line-height: 1.2; display: inline-flex; align-items: center; justify-content: center; gap: 3px; flex-wrap: wrap;';
     nameP.textContent = name;
+    if (spec.awakened === true) {
+      var awakenImg = document.createElement('img');
+      awakenImg.src = CHALLENGE_AWAKEN_ICON_URL;
+      awakenImg.alt = 'Awakened';
+      awakenImg.title = 'Awakened ability';
+      awakenImg.className = 'pixelated';
+      awakenImg.style.cssText = 'width: 10px; height: 10px; flex-shrink: 0;';
+      nameP.appendChild(awakenImg);
+    }
     creatureCol.appendChild(nameP);
     var levelP = document.createElement('p');
     levelP.style.cssText = 'margin: 0; font-size: 10px; line-height: 1.2;';
@@ -3500,6 +3512,46 @@ function getEquipmentName(gameId) {
   return 'Equipment ' + gameId;
 }
 
+function getNonAwakenableCreatureNames() {
+  var db = (typeof window !== 'undefined' && window.creatureDatabase) ? window.creatureDatabase : null;
+  if (db && Array.isArray(db.NON_AWAKENABLE_CREATURES) && db.NON_AWAKENABLE_CREATURES.length) {
+    return db.NON_AWAKENABLE_CREATURES;
+  }
+  return ['Dwarf Merrymancer', 'Goblin Gumslinger', 'Goblin Saboteur', 'Gummy Raider', 'Reindeer', 'Unionized Goblin'];
+}
+
+function isCreatureAwakenable(gameId) {
+  var name = getCreatureName(gameId);
+  if (!name) return false;
+  var lname = name.toLowerCase();
+  if (lname.indexOf('gazer') !== -1) return false;
+  var blocked = getNonAwakenableCreatureNames();
+  for (var i = 0; i < blocked.length; i++) {
+    if (blocked[i].toLowerCase() === lname) return false;
+  }
+  return true;
+}
+
+function rollCreatureAwakened(gameId) {
+  if (!isCreatureAwakenable(gameId)) return false;
+  return Math.random() < CHALLENGE_AWAKEN_ROLL_CHANCE;
+}
+
+/** One rolled villain creature spec (level, genes, equip, optional awakened). */
+function rollRandomCreatureSpec(gameId) {
+  return {
+    gameId: gameId,
+    level: getRandomInt(CHALLENGE_LEVEL_MIN, CHALLENGE_LEVEL_MAX),
+    genes: rollRandomGenes(),
+    equip: rollRandomEquip(),
+    awakened: rollCreatureAwakened(gameId)
+  };
+}
+
+function getCreatureAwakenDifficultyMultiplier(spec) {
+  return (spec && spec.awakened === true) ? CHALLENGE_AWAKEN_DIFFICULTY_MULT : 1;
+}
+
 // Per-creature difficulty multipliers (by name, case-insensitive). Default 1 if not listed.
 var CREATURE_DIFFICULTY_MULTIPLIERS = {
   'sheep': 0.5,
@@ -3509,6 +3561,11 @@ var CREATURE_DIFFICULTY_MULTIPLIERS = {
   'regeneration tank': 3,
   'sweaty cyclops': 1.3,
   'dharalion': 0.1,
+  'chubby gazer': 0.1,
+  'mystic gazer': 0.1,
+  'psychic gazer': 0.1,
+  'spiky gazer': 0.1,
+  'sturdy gazer': 0.1,
   'old giant spider': 2,
   'dead tree': 1.5,
   'monster cauldron': 2,
@@ -3550,7 +3607,8 @@ function getCreatureDifficultyContribution(spec) {
   if (spec.equip && spec.equip.gameId != null) {
     equipMult = getEquipmentDifficultyMultiplier(getEquipmentName(spec.equip.gameId));
   }
-  return Math.round((level + equipPoints) * creatureMult * equipMult);
+  var awakenMult = getCreatureAwakenDifficultyMultiplier(spec);
+  return Math.round((level + equipPoints) * creatureMult * equipMult * awakenMult);
 }
 
 // Difficulty = sum over creatures of (level + 10*equipTier) * creatureMult * equipmentMult, rounded.
@@ -3573,7 +3631,8 @@ function computeChallengeDifficulty(creatureSpecs) {
     if (spec.equip && spec.equip.gameId != null) {
       equipMult = getEquipmentDifficultyMultiplier(getEquipmentName(spec.equip.gameId));
     }
-    difficulty += (level + equipPoints) * creatureMult * equipMult;
+    var awakenMult = getCreatureAwakenDifficultyMultiplier(spec);
+    difficulty += (level + equipPoints) * creatureMult * equipMult * awakenMult;
   }
   difficulty = Math.round(difficulty);
   if (hasDharalion) difficulty = Math.round(difficulty * 0.5);
@@ -3768,12 +3827,7 @@ function pickRandomCreatureSpecsForRoom(roomId) {
       gameIds.push(creatureIds[Math.floor(Math.random() * creatureIds.length)]);
     }
     specs = gameIds.map(function(gameId) {
-      return {
-        gameId: gameId,
-        level: getRandomInt(CHALLENGE_LEVEL_MIN, CHALLENGE_LEVEL_MAX),
-        genes: rollRandomGenes(),
-        equip: rollRandomEquip()
-      };
+      return rollRandomCreatureSpec(gameId);
     });
     var diff = computeChallengeDifficulty(specs);
     if (walkableCount <= 0) break;
@@ -3823,6 +3877,12 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
     if (spec.equip && spec.equip.gameId != null) {
       villain.equip = { gameId: spec.equip.gameId, tier: spec.equip.tier, stat: spec.equip.stat };
     }
+    if (spec.awakened === true) {
+      villain.awaken = true;
+      villain.awakened = true;
+      villain.isAwakened = true;
+      villain.starTier = CHALLENGE_AWAKEN_STAR_TIER;
+    }
     return villain;
   });
   var config = {
@@ -3857,7 +3917,8 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
               gameId: s.gameId,
               level: s.level,
               genes: s.genes,
-              equip: s.equip || null
+              equip: s.equip || null,
+              awakened: s.awakened === true
             };
           })
         };
@@ -4004,13 +4065,14 @@ function showChallengesToast(message, options) {
     var stackOffset = existingToasts.length * 46;
     var flexContainer = document.createElement('div');
     flexContainer.className = 'challenges-toast-item';
-    flexContainer.style.cssText = 'left: 0px; right: 0px; display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-' + stackOffset + 'px); bottom: 0px; justify-content: flex-end;' + ((!isTransient || useJoinLink) ? ' pointer-events: auto;' : '');
+    flexContainer.style.cssText = 'display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-' + stackOffset + 'px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;';
     var toast = document.createElement((isTransient && !useJoinLink) ? 'button' : 'div');
     toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
     if (!isTransient) toast.setAttribute('role', 'presentation');
-    if (useJoinLink) {
+    var toastNeedsPointerEvents = isTransient || useJoinLink || options.showAccept === true || options.acceptLabel !== undefined || typeof options.onClose === 'function';
+    if (toastNeedsPointerEvents) {
       toast.style.pointerEvents = 'auto';
-      toast.style.cursor = 'default';
+      if (useJoinLink) toast.style.cursor = 'default';
     }
     var widgetTop = document.createElement('div');
     widgetTop.className = 'widget-top h-2.5';
@@ -4380,7 +4442,8 @@ function startChallenge() {
         tileIndex: tiles[i],
         level: spec.level,
         genes: spec.genes,
-        equip: spec.equip
+        equip: spec.equip,
+        awakened: spec.awakened === true
       };
     });
 

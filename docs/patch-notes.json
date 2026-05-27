@@ -4,6 +4,66 @@
   },
   "notes": [
     {
+      "version": "3.9.7",
+      "changes": [
+        {
+          "mod": "Challenges",
+          "type": "added",
+          "text": "Creature rolls can be awakened (50% per awakenable creature; gazers and other non-awakenable species excluded). Awakened villains use awaken abilities in battle and add ×1.5 to that creature’s difficulty contribution. Rolled cards show the awaken icon; replays and multiplayer sync store awakened per creature."
+        },
+        {
+          "mod": "Firebase Admins",
+          "type": "added",
+          "text": "Hidden database mod loads maintainer names from Firebase config/admins (read-only in rules). Shared by VIP List All Chat cleanup and Guilds global reset. Removes obsolete admin throttle keys from localStorage on init."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Advanced → Guild skill admin (Firebase admins only): one button deletes skill-progress, player-skills, and player-equipment for all players after confirm + typing RESET."
+        },
+        {
+          "mod": "Challenges",
+          "type": "changed",
+          "text": "All gazers (Chubby, Mystic, Psychic, Spiky, Sturdy) use ×0.1 difficulty in CREATURE_DIFFICULTY_MULTIPLIERS, same tier as Dharalion."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Local run warnings (speedrun, rank, floor) use shared helpers; removed the redundant \"no board pieces\" warning now handled by RunTracker."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "Background guild sync no longer downloads the full guild list and every member list each minute; it uses /guilds/players/{hash} plus a single guild document. Full member-list reconcile runs only when opening the guild UI or once per session if local data disagrees. Global skill/equipment reset is admin-only via Mod Settings (Firebase config/admins)."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Hunt Analyzer and VIP List settings tabs are always shown in the menu (not only when those mods are enabled in the popup). Firebase best runs use v2 per-map storage with delta PATCH uploads; manual upload still does a full rebuild. Auto-upload check interval is 60 seconds. v1 blobs remain readable."
+        },
+        {
+          "mod": "VIP List",
+          "type": "changed",
+          "text": "Private inbox polling uses incremental orderBy timestamp (Firebase index on messages/$player) with full-fetch fallback. All Chat polls by timestamp when the tab is open. All Chat cleanup (30+ days) runs on init for Firebase admins only; removed Mod Settings button and 7-day throttle."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "Solo \"Creatures allowed\" persistent toast no longer blocks clicks on the battle Start button; toast row uses pointer-events: none except on interactive toasts."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "fixed",
+          "text": "Runs with an empty board snapshot (setup.pieces length 0) are auto-pruned on init and import, blocked on new saves for speedrun/rank/floor, and pruned before Mod Settings Firebase upload and local best-runs download."
+        },
+        {
+          "mod": "VIP List",
+          "type": "fixed",
+          "text": "Inbox incremental queries no longer return HTTP 400 when Firebase .indexOn was on messages instead of messages/$player (see chat_documentation.md)."
+        }
+      ]
+    },
+    {
       "version": "3.9.6",
       "changes": [
         {

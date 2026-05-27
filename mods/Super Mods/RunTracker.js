@@ -1110,6 +1110,11 @@ async function addRun(runData) {
     // Get current board setup for comparison
     const currentSetup = getCurrentBoardSetup();
     runData.setup = currentSetup;
+
+    if (isInvalidEmptySetupRun(runData)) {
+      console.log(`[RunTracker] Skipping run for ${runData.mapName} — board setup has no pieces`);
+      return false;
+    }
     
     // Check if this map is currently boosted - SKIP BOOSTED MAPS
     try {
@@ -1562,6 +1567,55 @@ async function cleanupRuns() {
   }
 }
 
+const RUN_CATEGORIES = ['speedrun', 'rank', 'floor'];
+
+function isInvalidEmptySetupRun(run) {
+  return Boolean(run && run.setup && Array.isArray(run.setup.pieces) && run.setup.pieces.length === 0);
+}
+
+// Remove runs that were saved with an empty board snapshot (all categories).
+async function pruneInvalidEmptySetupRuns() {
+  try {
+    if (!runStorage || !runStorage.runs) {
+      return 0;
+    }
+
+    let totalRemoved = 0;
+
+    for (const [mapKey, mapData] of Object.entries(runStorage.runs)) {
+      if (!mapData) continue;
+
+      for (const category of RUN_CATEGORIES) {
+        const categoryRuns = mapData[category];
+        if (!Array.isArray(categoryRuns) || categoryRuns.length === 0) continue;
+
+        const originalCount = categoryRuns.length;
+        mapData[category] = categoryRuns.filter((run) => !isInvalidEmptySetupRun(run));
+        const removedCount = originalCount - mapData[category].length;
+
+        if (removedCount > 0) {
+          totalRemoved += removedCount;
+          console.log(`[RunTracker] Pruned ${removedCount} invalid ${category} run(s) from ${mapKey} (no board pieces)`);
+        }
+      }
+    }
+
+    if (totalRemoved > 0) {
+      runStorage.lastUpdated = Date.now();
+      runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
+        return total + (map.speedrun?.length || 0) + (map.rank?.length || 0) + (map.floor?.length || 0);
+      }, 0);
+      await StorageManager.saveStorage();
+      console.log(`[RunTracker] Pruned ${totalRemoved} total invalid run(s) with empty board setups`);
+    }
+
+    return totalRemoved;
+  } catch (error) {
+    console.error('[RunTracker] Error pruning invalid empty-setup runs:', error);
+    return 0;
+  }
+}
+
 // Clean up defeated runs with 0 rank points
 async function cleanupDefeatedRuns() {
   try {
@@ -1790,6 +1844,7 @@ async function initialize() {
     
     // Clean up any existing defeated runs with 0 rank points
     await cleanupDefeatedRuns();
+    await pruneInvalidEmptySetupRuns();
     
     // Periodic cleanup disabled - keeping runs forever
     // setInterval(cleanupRuns, 60 * 60 * 1000); // Clean up every hour
@@ -2020,6 +2075,8 @@ if (!window.RunTrackerAPI) {
         });
       }
 
+      await pruneInvalidEmptySetupRuns();
+
       await StorageManager.flushSaves();
       await StorageManager.saveStorage();
       console.log('[RunTracker] Runs imported successfully');
@@ -2034,6 +2091,8 @@ if (!window.RunTrackerAPI) {
   parseServerResults,
   cleanupRuns,
   cleanupDefeatedRuns,
+  pruneInvalidEmptySetupRuns,
+  isInvalidEmptySetupRun,
   
 
   

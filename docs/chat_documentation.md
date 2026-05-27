@@ -65,6 +65,67 @@ The chat system uses Firebase Realtime Database with the following structure:
 
 All data is stored in Firebase and synchronized across all players using the mod. Usernames are protected through encryption and hashing for enhanced privacy.
 
+## Bandwidth and Firebase indexes
+
+To keep Realtime Database download usage low, the mod uses **incremental queries** instead of downloading full message trees on every poll.
+
+### Required database indexes
+
+Add these under your Realtime Database rules (Firebase Console → Realtime Database → Rules), inside the root `"rules"` object as needed for your layout:
+
+```json
+{
+  "rules": {
+    ".read": true,
+    ".write": true,
+    "messages": {
+      "$player": {
+        ".indexOn": ["timestamp"]
+      }
+    },
+    "all-chat": {
+      ".indexOn": ["timestamp"]
+    }
+  }
+}
+```
+
+Adjust read/write rules to match your security model. The `.indexOn` entries are required for:
+
+- **Private inbox polling**: `orderBy="timestamp"` with `startAt` / `limitToLast` on `/messages/{hashedPlayer}` — index must be on **`messages/$player`**, not on `messages` itself (inbox messages are grandchildren of `messages`)
+- **All Chat polling**: `orderBy="timestamp"` with `startAt` / `limitToLast` on `/all-chat` — index on `all-chat` is correct (messages are direct children)
+
+If an index is missing, the client falls back to a larger full fetch and logs a one-time warning in the browser console.
+
+### All Chat retention
+
+Old All Chat messages are **not** deleted on every client at startup (that would download the entire channel for all users). Retention cleanup runs automatically when VIP List loads and your in-game name is listed in Firebase **`config/admins`**: messages older than **30 days** are deleted.
+
+**Recommended long-term**: a scheduled **Firebase Cloud Function** or Admin SDK job to delete messages older than 30 days (not included in this mod repo).
+
+### Admin list (`config/admins`)
+
+Maintainers for **All Chat cleanup** (VIP List) and **global guild skill reset** (Mod Settings → Advanced) are loaded from Firebase, not hardcoded in the mod.
+
+**Data shape** (Realtime Database):
+
+```json
+{
+  "config": {
+    "admins": {
+      "muhamad": true,
+      "othername": true
+    }
+  }
+}
+```
+
+Use **lowercase** in-game names as keys. Values must be `true` (or `1`).
+
+**Rules:** everyone may **read** `config/admins`; clients must **not** be allowed to **write** it (edit only in Firebase Console or Admin SDK). See rules snippet below.
+
+The mod caches the list for 5 minutes (`database/firebase-admins.js`).
+
 ## Troubleshooting
 
 ### 401 Unauthorized Errors

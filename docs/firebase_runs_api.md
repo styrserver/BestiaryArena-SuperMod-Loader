@@ -56,7 +56,7 @@ const hashedName = await hashUsername('PlayerName');
 
 ## Data Structure
 
-### Encrypted Format (from Firebase)
+### Encrypted Format v1 (legacy, still supported for download)
 ```json
 {
   "encrypted": "base64-encoded-encrypted-data",
@@ -64,6 +64,24 @@ const hashedName = await hashUsername('PlayerName');
   "version": "1.0"
 }
 ```
+
+### Encrypted Format v2 (current uploads)
+```json
+{
+  "version": "2.0",
+  "lastUpdated": 1234567890,
+  "metadata": { "season": 2, "totalRuns": 10, "totalMaps": 5 },
+  "playerName": "PlayerName",
+  "maps": {
+    "map_forest": {
+      "encrypted": "base64-per-map-chunk",
+      "lastUpdated": 1234567890
+    }
+  }
+}
+```
+
+Each `maps.{mapKey}.encrypted` blob decrypts to `{ "runs": { "{mapKey}": { speedrun, rank, floor } } }` using the same password and salt as v1.
 
 ### Decrypted Format
 ```json
@@ -234,14 +252,28 @@ async function fetchPlayerRuns(playerName, password) {
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const encryptedData = await response.json();
-    if (!encryptedData || !encryptedData.encrypted) {
+    const remoteData = await response.json();
+    if (!remoteData) {
       console.log('No encrypted data found');
       return null;
     }
-    
-    // Decrypt
-    const decryptedData = await decryptRunsData(encryptedData.encrypted, password);
+
+    // v2: merge per-map chunks; v1: single root encrypted field
+    if (remoteData.version === '2.0' && remoteData.maps) {
+      const merged = { runs: {}, metadata: remoteData.metadata || {}, playerName: remoteData.playerName };
+      for (const [mapKey, entry] of Object.entries(remoteData.maps)) {
+        if (!entry?.encrypted) continue;
+        const chunk = await decryptRunsData(entry.encrypted, password);
+        if (chunk?.runs?.[mapKey]) merged.runs[mapKey] = chunk.runs[mapKey];
+        else if (chunk?.runs) Object.assign(merged.runs, chunk.runs);
+      }
+      return Object.keys(merged.runs).length ? merged : null;
+    }
+    if (!remoteData.encrypted) {
+      console.log('No encrypted data found');
+      return null;
+    }
+    const decryptedData = await decryptRunsData(remoteData.encrypted, password);
     return decryptedData;
   } catch (error) {
     console.error('Error fetching runs:', error);

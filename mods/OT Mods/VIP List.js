@@ -244,6 +244,11 @@ const GUILD_CACHE_TTL = 3600000; // Cache guild info for 1 hour
 const MESSAGES_PER_PAGE = 20; // Number of messages to load per page for pagination
 // Cap incremental All Chat fetches (polling) — never pull unbounded history
 const ALL_CHAT_INCREMENTAL_FETCH_LIMIT = 200;
+const INBOX_CURSOR_STORAGE_PREFIX = 'vipListLastInboxTimestamp_';
+const INBOX_BOOTSTRAP_LIMIT = 50;
+const ALL_CHAT_POLL_LIMIT = 50;
+let inboxIncrementalQueryDisabled = false;
+let allChatTimestampQueryDisabled = false;
 
 // Track timeouts for cleanup (memory leak prevention)
 const pendingTimeouts = new Set();
@@ -272,6 +277,16 @@ const storage = {
       return true;
     } catch (error) {
       console.error(`[VIP List] Error saving ${key} to localStorage:`, error);
+      return false;
+    }
+  },
+
+  remove(key) {
+    try {
+      localStorage.removeItem(key);
+      return true;
+    } catch (error) {
+      console.error(`[VIP List] Error removing ${key} from localStorage:`, error);
       return false;
     }
   }
@@ -3610,6 +3625,108 @@ async function sendAllChatMessage(text) {
   }
 }
 
+function getInboxCursorStorageKey(hashedPlayer) {
+  return INBOX_CURSOR_STORAGE_PREFIX + hashedPlayer;
+}
+
+function getInboxTimestampCursor(hashedPlayer) {
+  const v = storage.get(getInboxCursorStorageKey(hashedPlayer), 0);
+  return typeof v === 'number' ? v : 0;
+}
+
+function setInboxTimestampCursor(hashedPlayer, timestamp) {
+  if (timestamp && timestamp > 0) {
+    storage.set(getInboxCursorStorageKey(hashedPlayer), timestamp);
+  }
+}
+
+function advanceInboxCursorFromData(hashedPlayer, data) {
+  if (!data || typeof data !== 'object') return;
+  let maxTs = 0;
+  for (const msg of Object.values(data)) {
+    if (msg && typeof msg.timestamp === 'number' && msg.timestamp > maxTs) {
+      maxTs = msg.timestamp;
+    }
+  }
+  if (maxTs > 0) {
+    const current = getInboxTimestampCursor(hashedPlayer);
+    if (maxTs > current) {
+      setInboxTimestampCursor(hashedPlayer, maxTs);
+    }
+  }
+}
+
+/** Fetch inbox JSON with incremental orderBy/timestamp when possible; falls back to full tree on 400. */
+async function fetchInboxMessageData(hashedCurrentPlayer, currentPlayerLower) {
+  const tryFetchUrl = async (url) => {
+    const response = await fetch(url);
+    return response;
+  };
+
+  const resolveInboxPath = async (suffix) => {
+    let response = await tryFetchUrl(`${getMessagingApiUrl()}/${hashedCurrentPlayer}.json${suffix}`);
+    if (!response.ok && response.status === 404) {
+      response = await tryFetchUrl(`${getMessagingApiUrl()}/${currentPlayerLower}.json${suffix}`);
+    }
+    return response;
+  };
+
+  if (!inboxIncrementalQueryDisabled) {
+    const lastTs = getInboxTimestampCursor(hashedCurrentPlayer);
+    if (lastTs > 0) {
+      const response = await resolveInboxPath(`?orderBy="timestamp"&startAt=${lastTs}`);
+      if (response.status === 400) {
+        inboxIncrementalQueryDisabled = true;
+        console.warn('[VIP List] Inbox incremental query unsupported (400); using full-fetch fallback');
+      } else if (response.ok) {
+        const raw = await response.json();
+        if (!raw || typeof raw !== 'object') {
+          return {};
+        }
+        const filtered = {};
+        for (const [id, msg] of Object.entries(raw)) {
+          if (msg && (msg.timestamp || 0) > lastTs) {
+            filtered[id] = msg;
+          }
+        }
+        return filtered;
+      } else if (response.status === 404) {
+        return {};
+      }
+    } else {
+      const response = await resolveInboxPath(`?orderBy="timestamp"&limitToLast=${INBOX_BOOTSTRAP_LIMIT}`);
+      if (response.status === 400) {
+        inboxIncrementalQueryDisabled = true;
+        console.warn('[VIP List] Inbox bootstrap query unsupported (400); using full-fetch fallback');
+      } else if (response.ok) {
+        const raw = await response.json();
+        advanceInboxCursorFromData(hashedCurrentPlayer, raw);
+        return raw && typeof raw === 'object' ? raw : {};
+      } else if (response.status === 404) {
+        return {};
+      }
+    }
+  }
+
+  const response = await resolveInboxPath('');
+  if (!response.ok) {
+    if (response.status === 404) {
+      return null;
+    }
+    if (response.status === 401) {
+      if (!firebase401WarningShown) {
+        console.warn('[VIP List] Firebase security rules are blocking message access (401). To enable full chat functionality, configure Firebase security rules. See firebase_setup.md for instructions. Chat sending will still work.');
+        firebase401WarningShown = true;
+      }
+      return null;
+    }
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const raw = await response.json();
+  advanceInboxCursorFromData(hashedCurrentPlayer, raw);
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
 // Check for new messages
 async function checkForMessages() {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
@@ -3622,39 +3739,19 @@ async function checkForMessages() {
       return [];
     }
     
-    // Hash username for Firebase path (try both hashed and non-hashed for backward compatibility)
     const hashedCurrentPlayer = await hashUsername(currentPlayer);
     const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
-    
-    // Try hashed path first (new format), fallback to non-hashed (backward compatibility)
-    let response = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}.json`);
-    let data = null;
-    
-    if (!response.ok && response.status === 404) {
-      // Try non-hashed path for backward compatibility
-      response = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}.json`);
+
+    const data = await fetchInboxMessageData(hashedCurrentPlayer, currentPlayerLower);
+    if (data === null) {
+      return [];
     }
-    
-    if (!response.ok) {
-      if (response.status === 404) {
-        return []; // No messages yet
-      }
-      if (response.status === 401) {
-        // Firebase security rules prevent read access - fail gracefully
-        if (!firebase401WarningShown) {
-          console.warn('[VIP List] Firebase security rules are blocking message access (401). To enable full chat functionality, configure Firebase security rules. See firebase_setup.md for instructions. Chat sending will still work.');
-          firebase401WarningShown = true;
-        }
-        return [];
-      }
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    data = await response.json();
-    
+
     if (!data || typeof data !== 'object') {
       return [];
     }
+
+    advanceInboxCursorFromData(hashedCurrentPlayer, data);
     
     // Convert Firebase object to array, decrypt messages and usernames, and filter unread messages
     const messages = await Promise.all(
@@ -3835,94 +3932,43 @@ async function checkForMessages() {
   }
 }
 
-// Check for new All Chat messages
-async function checkForAllChatMessages() {
-  if (!getAllChatApiUrl() || !MESSAGING_CONFIG.enabled) {
-    return [];
+function getAllChatCleanupMaintainerNames() {
+  if (typeof window.FirebaseAdminsAPI?.getAdminNames === 'function') {
+    return window.FirebaseAdminsAPI.getAdminNames();
   }
-  
-  // Validate that getAllChatApiUrl returns the correct endpoint
-  const allChatUrl = getAllChatApiUrl();
-  if (!allChatUrl || typeof allChatUrl !== 'string') {
-    console.error('[VIP List] Invalid All Chat API URL in checkForAllChatMessages:', allChatUrl);
-    return [];
+  return [];
+}
+
+async function canCurrentPlayerRunAllChatCleanup() {
+  const player = getCurrentPlayerName();
+  if (!player || typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync !== 'function') {
+    return false;
   }
-  
-  if (!allChatUrl.includes('/all-chat')) {
-    console.error('[VIP List] All Chat endpoint validation failed in checkForAllChatMessages: URL does not contain /all-chat', allChatUrl);
-    return [];
+  return window.FirebaseAdminsAPI.isPlayerAdminAsync(player);
+}
+
+/** Admin-only: delete all-chat messages older than ageMs. */
+async function runAllChatCleanupIfAllowed(ageMs = 30 * 24 * 60 * 60 * 1000) {
+  if (!(await canCurrentPlayerRunAllChatCleanup())) {
+    return { deleted: 0, error: 'Not authorized to run All Chat cleanup' };
   }
-  
-  if (allChatUrl.includes('/guilds/')) {
-    console.error('[VIP List] All Chat endpoint validation failed in checkForAllChatMessages: URL contains /guilds/ (should be all-chat only)', allChatUrl);
-    return [];
-  }
-  
-  try {
-    const currentPlayer = getCurrentPlayerName();
-    if (!currentPlayer) {
-      return [];
+  return cleanupOldAllChatMessages(ageMs);
+}
+
+/** Fire-and-forget: admin only (see runAllChatCleanupIfAllowed). */
+async function scheduleAllChatCleanupOnInit() {
+  if (!(await canCurrentPlayerRunAllChatCleanup())) return;
+  runAllChatCleanupIfAllowed().then((result) => {
+    if (result.error) {
+      console.warn('[VIP List] All Chat cleanup on init:', result.error);
+      return;
     }
-    
-    // Fetch all All Chat messages - use orderBy to ensure chronological order
-    // Use the validated allChatUrl variable to ensure we're using the correct endpoint
-    let response = await fetch(`${allChatUrl}.json?orderBy="$key"`);
-    
-    if (!response.ok) {
-      if (response.status === 404) {
-        return []; // No messages yet
-      }
-      if (response.status === 401) {
-        // Firebase security rules prevent read access - fail gracefully
-        return [];
-      }
-      throw new Error(`HTTP ${response.status}`);
+    if (result.deleted > 0) {
+      console.log(`[VIP List] All Chat cleanup on init: removed ${result.deleted} old message(s)`);
     }
-    
-    const data = await response.json();
-    
-    if (!data || typeof data !== 'object') {
-      return [];
-    }
-    
-    // Convert Firebase object to array and filter blocked players
-    const messages = [];
-    for (const [id, msg] of Object.entries(data)) {
-      if (!msg) continue;
-      
-      // Filter out system messages (should only appear in guild chat)
-      if (isSystemMessage(msg)) {
-        continue;
-      }
-      
-      // Filter out messages from blocked players
-      if (msg.from) {
-        const isBlocked = await isPlayerBlocked(msg.from);
-        if (isBlocked) continue;
-        
-        const isBlockedBy = await isBlockedByPlayer(msg.from);
-        if (isBlockedBy) continue;
-      }
-      
-      messages.push({ id, ...msg });
-    }
-    
-    messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-    
-    // Apply message filter: if set to 'friends', only show messages from VIP list
-    const messageFilter = getMessageFilter();
-    if (messageFilter === 'friends') {
-      return messages.filter(msg => {
-        if (!msg.from) return false;
-        return isPlayerInVIPList(msg.from);
-      });
-    }
-    
-    return messages;
-  } catch (error) {
-    console.error('[VIP List] Error checking for All Chat messages:', error);
-    return [];
-  }
+  }).catch((err) => {
+    console.warn('[VIP List] All Chat cleanup on init failed:', err);
+  });
 }
 
 // =======================
@@ -4001,7 +4047,8 @@ function isSystemMessageElement(el) {
 // limit: maximum number of messages to fetch (default: null = all)
 // endBefore: message ID or timestamp to fetch messages before (for pagination)
 // abortController: AbortController to cancel the fetch request
-async function getAllChatMessages(forceRefresh = false, limit = null, endBefore = null, abortController = null) {
+// sinceTimestamp: when set, fetch only messages with timestamp >= sinceTimestamp (incremental poll)
+async function getAllChatMessages(forceRefresh = false, limit = null, endBefore = null, abortController = null, sinceTimestamp = null) {
   if (!getAllChatApiUrl() || !MESSAGING_CONFIG.enabled) {
     return [];
   }
@@ -4029,37 +4076,47 @@ async function getAllChatMessages(forceRefresh = false, limit = null, endBefore 
       return [];
     }
     
-    // CACHE REMOVED: Always fetch from Firebase to prevent stale data and system message issues
-    
-    // Build query URL - always use orderBy to ensure chronological order
-    // Use the validated allChatUrl variable to ensure we're using the correct endpoint
-    let queryUrl = `${allChatUrl}.json?orderBy="$key"`;
-    
-    if (limit !== null) {
-      // For pagination, use limitToLast to get most recent messages
-      queryUrl += `&limitToLast=${limit}`;
-
-      // If endBefore is provided, use endAt to get messages before that key
-      if (endBefore !== null) {
-        queryUrl += `&endAt="${endBefore}"`;
-      }
-    }
-    
-    // Fetch All Chat messages with abort signal support
     const fetchOptions = {};
     if (abortController) {
       fetchOptions.signal = abortController.signal;
     }
-    
+
+    const pollLimit = limit !== null ? limit : ALL_CHAT_POLL_LIMIT;
+    let queryUrl = null;
+
+    if (
+      sinceTimestamp != null &&
+      sinceTimestamp > 0 &&
+      endBefore === null &&
+      !allChatTimestampQueryDisabled
+    ) {
+      queryUrl = `${allChatUrl}.json?orderBy="timestamp"&startAt=${sinceTimestamp}&limitToLast=${pollLimit}`;
+    } else if (limit !== null) {
+      queryUrl = `${allChatUrl}.json?orderBy="$key"&limitToLast=${limit}`;
+      if (endBefore !== null) {
+        queryUrl += `&endAt="${endBefore}"`;
+      }
+    } else {
+      queryUrl = `${allChatUrl}.json?orderBy="$key"`;
+      if (endBefore !== null) {
+        queryUrl += `&endAt="${endBefore}"`;
+      }
+    }
+
     let response;
     try {
       response = await fetch(queryUrl, fetchOptions);
     } catch (error) {
-      // If fetch was aborted, return empty array
       if (error.name === 'AbortError' || abortController?.signal.aborted) {
         return [];
       }
       throw error;
+    }
+
+    if (response.status === 400 && sinceTimestamp != null && sinceTimestamp > 0) {
+      allChatTimestampQueryDisabled = true;
+      console.warn('[VIP List] All Chat timestamp query unsupported (400); falling back to key-based fetch');
+      return getAllChatMessages(forceRefresh, pollLimit, endBefore, abortController, null);
     }
     
     if (!response.ok) {
@@ -4088,6 +4145,10 @@ async function getAllChatMessages(forceRefresh = false, limit = null, endBefore 
     
     for (const [id, msg] of Object.entries(data)) {
       if (!msg) continue;
+
+      if (sinceTimestamp != null && sinceTimestamp > 0 && (msg.timestamp || 0) <= sinceTimestamp) {
+        continue;
+      }
       
       // Filter out system messages (should only appear in guild chat)
       if (isSystemMessage(msg)) {
@@ -5725,7 +5786,14 @@ function setupPolling(interval = MESSAGING_CONFIG.checkInterval) {
             // Check if cancelled before fetching
             if (abortController?.signal.aborted) return;
             
-            const allChatMessages = await getAllChatMessages(false, null, null, abortController);
+            const sinceTs = allChatPanel._lastTimestamp || 0;
+            const allChatMessages = await getAllChatMessages(
+              false,
+              ALL_CHAT_POLL_LIMIT,
+              null,
+              abortController,
+              sinceTs > 0 ? sinceTs : null
+            );
             
             // Check if cancelled after fetching
             if (abortController?.signal.aborted) return;
@@ -6131,7 +6199,11 @@ async function loadConversation(player, container, forceScrollToBottom = false, 
     
     let filteredMessages;
     try {
-      const allMessages = await getConversationMessages(player, forceRefresh);
+      const allMessages = await getConversationMessages(
+        player,
+        forceRefresh,
+        forceRefresh ? null : MESSAGES_PER_PAGE
+      );
       
       // Apply runs-only filter to all messages first (so we can properly track filtered count)
       filteredMessages = allMessages;
@@ -7025,7 +7097,14 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
       }
     } else {
       // For updates, fetch a bounded recent window (never unbounded — was loading full history on poll)
-      const allMessages = await getAllChatMessages(forceRefresh, ALL_CHAT_INCREMENTAL_FETCH_LIMIT, null, abortController);
+      const sinceTs = panel._lastTimestamp || 0;
+      const allMessages = await getAllChatMessages(
+        forceRefresh,
+        ALL_CHAT_INCREMENTAL_FETCH_LIMIT,
+        null,
+        abortController,
+        !forceRefresh && sinceTs > 0 ? sinceTs : null
+      );
       
       // Check if cancelled after loading messages
       if (checkCancelled && checkCancelled()) {
@@ -12150,15 +12229,10 @@ exports = {
       // Setup message checking if messaging is enabled
       if (MESSAGING_CONFIG.enabled) {
         setupMessageChecking();
+        scheduleAllChatCleanupOnInit();
         
         // Sync chat enabled status to Firebase
         syncChatEnabledStatus(true);
-        
-        // Clean up old All Chat messages (older than 30 days) on init
-        // Run asynchronously to not block initialization
-        cleanupOldAllChatMessages(30 * 24 * 60 * 60 * 1000).catch(error => {
-          console.error('[VIP List] Error during message cleanup:', error);
-        });
         
         // Auto-reopen chat panel if it was previously open
         autoReopenChatPanel();

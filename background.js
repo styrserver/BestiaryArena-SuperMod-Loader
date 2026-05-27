@@ -58,6 +58,7 @@ async function loadDefaultEnabledMods() {
       'database/maps-database.js',
       'database/equipment-lua-export.js',
       'database/playereq-database.js',
+      'database/firebase-admins.js',
       'Official Mods/Bestiary_Automator.js',
       'Official Mods/Board Analyzer.js',
       'Official Mods/Custom_Display.js',
@@ -84,6 +85,7 @@ async function loadDefaultEnabledMods() {
       'database/maps-database.js',
       'database/equipment-lua-export.js',
       'database/playereq-database.js',
+      'database/firebase-admins.js',
       'Official Mods/Bestiary_Automator.js',
       'Official Mods/Board Analyzer.js',
       'Official Mods/Custom_Display.js',
@@ -1013,7 +1015,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // NOTE: Keep these in sync with content/mod-registry.js
         console.log('[Background] Chrome detected or Firefox import failed, using hardcoded counts');
         const modCounts = {
-          database: 7,
+          database: 8,
           official: 11,
           super: 25,
           ot: 4
@@ -1025,7 +1027,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Ultimate fallback
         sendResponse({ 
           success: true, 
-          counts: { database: 7, official: 11, super: 25, ot: 4 } 
+          counts: { database: 8, official: 11, super: 25, ot: 4 } 
         });
       }
     })();

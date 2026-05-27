@@ -3834,6 +3834,51 @@ function filterLocalRunsByActiveSeason(runs) {
   });
 }
 
+// RunTracker prunes empty setup.pieces on load; Cyclopedia only warns on remaining data issues.
+function shouldShowCyclopediaRunWarnings() {
+  return Number(cyclopediaState.profileSeason || 1) === 2;
+}
+
+function runSetupHasLevel1Creature(run) {
+  return Boolean(run?.setup?.pieces?.some((piece) => piece?.level === 1));
+}
+
+function getCyclopediaRunWarningReasons(run, options = {}) {
+  const reasons = [];
+  if (options.isTimeInvalid) reasons.push('faster than your best time');
+  if (options.isWorldRecordInvalid) reasons.push('faster than world record');
+  if (options.isRankInvalid) reasons.push('worse rank than your best');
+  if (runSetupHasLevel1Creature(run)) reasons.push('has level 1 creatures');
+  return reasons;
+}
+
+function getCyclopediaRunWarningState(run, options = {}) {
+  if (!shouldShowCyclopediaRunWarnings()) {
+    return { shouldWarn: false, reasons: [] };
+  }
+  const reasons = getCyclopediaRunWarningReasons(run, options);
+  return { shouldWarn: reasons.length > 0, reasons };
+}
+
+function decorateCyclopediaRunWarningCell(cell, textElement, row, warningState) {
+  const warningIcon = document.createElement('span');
+  warningIcon.innerHTML = '⚠️';
+  warningIcon.title = `This run might be invalid (${warningState.reasons.join(', ')})`;
+  warningIcon.style.cursor = 'help';
+  warningIcon.style.position = 'absolute';
+  warningIcon.style.left = '1px';
+  warningIcon.style.fontSize = '10px';
+  warningIcon.style.zIndex = '1';
+
+  textElement.style.textAlign = 'center';
+  textElement.style.flex = '1';
+  textElement.style.marginLeft = '12px';
+
+  cell.appendChild(warningIcon);
+  cell.appendChild(textElement);
+  row.style.color = '#ff6b6b';
+}
+
 function getLocalRunsForMap(mapKey, category = null) {
   try {
     
@@ -12004,50 +12049,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const timeText = document.createElement('span');
               
               
-              // Warning validation is only reliable for Season 2.
-              const showRunWarnings = Number(cyclopediaState.profileSeason || 1) === 2;
-              // Check if this run is invalid (faster than your best/WR OR has level 1 creatures OR has empty pieces)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
               const wrTicks = currentWorldRecordTicks || 0;
-              const isTimeInvalid = yourTicks > 0 && run.time < yourTicks;
-              const isWorldRecordInvalid = wrTicks > 0 && run.time < wrTicks;
-              
-              // Check if any creature in the setup has level 1
-              const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
-              
-              // Check if run has setup but no pieces (invalid run)
-              const hasEmptyPieces = run.setup && run.setup.pieces && run.setup.pieces.length === 0;
-              
-              if (showRunWarnings && (isTimeInvalid || isWorldRecordInvalid || hasLevel1Creature || hasEmptyPieces)) {
-                // Create warning icon separately for left alignment
-                const warningIcon = document.createElement('span');
-                warningIcon.innerHTML = '⚠️';
-                const reasons = [];
-                if (isTimeInvalid) reasons.push('faster than your best time');
-                if (isWorldRecordInvalid) reasons.push('faster than world record');
-                if (hasLevel1Creature) reasons.push('has level 1 creatures');
-                if (hasEmptyPieces) reasons.push('no board pieces');
-                warningIcon.title = `This run might be invalid (${reasons.join(', ')})`;
-                warningIcon.style.cursor = 'help';
-                warningIcon.style.position = 'absolute';
-                warningIcon.style.left = '1px';
-                warningIcon.style.fontSize = '10px';
-                warningIcon.style.zIndex = '1';
-                
-                // Create time text centered with left margin to avoid overlap
-                timeText.textContent = formatLocalRunTime(run.time);
-                timeText.style.textAlign = 'center';
-                timeText.style.flex = '1';
-                timeText.style.marginLeft = '12px';
-                
-                timeCell.appendChild(warningIcon);
-                timeCell.appendChild(timeText);
-                
-                // Make the entire row red
-                row.style.color = '#ff6b6b';
-                
+              const warningState = getCyclopediaRunWarningState(run, {
+                isTimeInvalid: yourTicks > 0 && run.time < yourTicks,
+                isWorldRecordInvalid: wrTicks > 0 && run.time < wrTicks
+              });
+
+              timeText.textContent = formatLocalRunTime(run.time);
+              if (warningState.shouldWarn) {
+                decorateCyclopediaRunWarningCell(timeCell, timeText, row, warningState);
               } else {
-                timeText.textContent = formatLocalRunTime(run.time);
                 timeCell.appendChild(timeText);
               }
             } else {
@@ -12625,46 +12637,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             floorCell.style.gap = '4px';
             floorCell.style.position = 'relative';
             
-            const showRunWarnings = Number(cyclopediaState.profileSeason || 1) === 2;
-            // Check if any creature in the setup has level 1
-            const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
-            
-            // Check if run has setup but no pieces (invalid run)
-            const hasEmptyPieces = run.setup && run.setup.pieces && run.setup.pieces.length === 0;
-            
+            const warningState = getCyclopediaRunWarningState(run);
+
             if (run.floor !== undefined && run.floor !== null) {
               const floorText = document.createElement('span');
               floorText.textContent = getFloorCoverageLabel(run);
               if (Array.isArray(run.floorHistory) && run.floorHistory.length > 1) {
                 floorText.title = `Floors cleared with this setup: ${getFloorCoverageLabel(run)}`;
               }
-              
-              
-              if (showRunWarnings && (hasLevel1Creature || hasEmptyPieces)) {
-                // Create warning icon separately for left alignment
-                const warningIcon = document.createElement('span');
-                warningIcon.innerHTML = '⚠️';
-                const reasons = [];
-                if (hasLevel1Creature) reasons.push('has level 1 creatures');
-                if (hasEmptyPieces) reasons.push('no board pieces');
-                warningIcon.title = `This run might be invalid (${reasons.join(', ')})`;
-                warningIcon.style.cursor = 'help';
-                warningIcon.style.position = 'absolute';
-                warningIcon.style.left = '1px';
-                warningIcon.style.fontSize = '10px';
-                warningIcon.style.zIndex = '1';
-                
-                // Create floor text centered with left margin to avoid overlap
-                floorText.style.textAlign = 'center';
-                floorText.style.flex = '1';
-                floorText.style.marginLeft = '12px';
-                
-                floorCell.appendChild(warningIcon);
-                floorCell.appendChild(floorText);
-                
-                // Make the entire row red
-                row.style.color = '#ff6b6b';
-                
+
+              if (warningState.shouldWarn) {
+                decorateCyclopediaRunWarningCell(floorCell, floorText, row, warningState);
               } else {
                 floorCell.appendChild(floorText);
               }
@@ -13240,55 +13223,20 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const timeText = document.createElement('span');
               
               
-              // Warning validation is only reliable for Season 2.
-              const showRunWarnings = Number(cyclopediaState.profileSeason || 1) === 2;
-              // Check if this run is invalid (faster than your best/WR OR worse rank than your best OR has level 1 creatures OR has empty pieces)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
               const yourBestRank = currentYourRooms?.[selectedMap]?.rank || 0;
               const wrTicks = currentWorldRecordTicks || 0;
-              const isTimeInvalid = yourTicks > 0 && run.time < yourTicks;
-              const isWorldRecordInvalid = wrTicks > 0 && run.time < wrTicks;
-              const isRankInvalid = yourBestRank > 0 && run.points > yourBestRank;
-              
-              // Check if any creature in the setup has level 1
-              const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
-              
-              // Check if run has setup but no pieces (invalid run)
-              const hasEmptyPieces = run.setup && run.setup.pieces && run.setup.pieces.length === 0;
-              
-              if (showRunWarnings && (isTimeInvalid || isWorldRecordInvalid || isRankInvalid || hasLevel1Creature || hasEmptyPieces)) {
-                // Create warning icon separately for left alignment
-                const warningIcon = document.createElement('span');
-                warningIcon.innerHTML = '⚠️';
-                const reasons = [];
-                if (isTimeInvalid) reasons.push('faster than your best time');
-                if (isWorldRecordInvalid) reasons.push('faster than world record');
-                if (isRankInvalid) reasons.push('worse rank than your best');
-                if (hasLevel1Creature) reasons.push('has level 1 creatures');
-                if (hasEmptyPieces) reasons.push('no board pieces');
-                warningIcon.title = `This run might be invalid (${reasons.join(', ')})`;
-                warningIcon.style.cursor = 'help';
-                warningIcon.style.position = 'absolute';
-                warningIcon.style.left = '1px';
-                warningIcon.style.fontSize = '10px';
-                warningIcon.style.zIndex = '1';
-                
-                // Create time text centered with left margin to avoid overlap
-                const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
-                timeText.textContent = timeValue;
-                timeText.style.textAlign = 'center';
-                timeText.style.flex = '1';
-                timeText.style.marginLeft = '12px';
-                
-                timeCell.appendChild(warningIcon);
-                timeCell.appendChild(timeText);
-                
-                // Make the entire row red
-                row.style.color = '#ff6b6b';
-                
+              const warningState = getCyclopediaRunWarningState(run, {
+                isTimeInvalid: yourTicks > 0 && run.time < yourTicks,
+                isWorldRecordInvalid: wrTicks > 0 && run.time < wrTicks,
+                isRankInvalid: yourBestRank > 0 && run.points > yourBestRank
+              });
+
+              const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
+              timeText.textContent = timeValue;
+              if (warningState.shouldWarn) {
+                decorateCyclopediaRunWarningCell(timeCell, timeText, row, warningState);
               } else {
-                const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
-                timeText.textContent = timeValue;
                 timeCell.appendChild(timeText);
               }
             } else {

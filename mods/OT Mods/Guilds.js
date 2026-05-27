@@ -30,7 +30,6 @@ const GUILD_CONFIG = {
 const SKILL_SEASON_STORAGE_KEY = 'guilds-skill-season';
 const LEGACY_SKILLS_CLEANUP_DONE = new Set();
 const LEGACY_SKILL_PROGRESS_CLEANUP_DONE = new Set();
-
 function getCurrentSkillSeasonKey() {
   try {
     const fromStorage = typeof localStorage !== 'undefined'
@@ -4760,6 +4759,89 @@ async function savePlayerSkillsToFirebase(playerName, skillsData) {
     return false;
   }
 }
+
+function canRunGuildAdminTools() {
+  const player = getCurrentPlayerName();
+  if (!player || typeof window.FirebaseAdminsAPI?.isPlayerAdmin !== 'function') {
+    return false;
+  }
+  return window.FirebaseAdminsAPI.isPlayerAdmin(player);
+}
+
+async function canRunGuildAdminToolsAsync() {
+  const player = getCurrentPlayerName();
+  if (!player || typeof window.FirebaseAdminsAPI?.isPlayerAdminAsync !== 'function') {
+    return false;
+  }
+  return window.FirebaseAdminsAPI.isPlayerAdminAsync(player);
+}
+
+async function deleteFirebaseJsonPath(url) {
+  try {
+    const response = await fetch(url, { method: 'DELETE' });
+    return response.ok || response.status === 404;
+  } catch (error) {
+    console.error('[Guilds] DELETE failed:', url, error);
+    return false;
+  }
+}
+
+/** Wipe skill-progress, player-skills, and player-equipment for all players (full trees). */
+async function resetAllPlayersGuildProgressData() {
+  const base = GUILD_CONFIG.firebaseUrl;
+  const paths = [
+    `${base}/skill-progress.json`,
+    `${base}/player-skills.json`,
+    `${base}/player-equipment.json`
+  ];
+  const failures = [];
+  let deleted = 0;
+  for (const path of paths) {
+    if (await deleteFirebaseJsonPath(path)) {
+      deleted += 1;
+    } else {
+      failures.push(path);
+    }
+  }
+  return { deleted, failures, success: failures.length === 0 };
+}
+
+/** Maintainer-only global reset. */
+async function runGlobalSkillResetIfAllowed() {
+  if (!(await canRunGuildAdminToolsAsync())) {
+    return { success: false, error: 'Not authorized', deleted: 0 };
+  }
+
+  const result = await resetAllPlayersGuildProgressData();
+
+  if (result.success) {
+    const current = getCurrentPlayerName();
+    if (current) {
+      skillBattleTracker.resetCounts(current);
+    }
+    console.log('[Guilds] Global guild progress reset completed:', result);
+  } else {
+    console.error('[Guilds] Global guild progress reset failed:', result.failures);
+  }
+
+  return {
+    success: result.success,
+    deleted: result.deleted,
+    error: result.success ? null : `Failed to delete one or more paths (${result.failures.length})`
+  };
+}
+
+function refreshGuildsPublicApi() {
+  if (typeof window === 'undefined') return;
+  window.Guilds = {
+    canRunGuildAdminTools,
+    canRunGuildAdminToolsAsync,
+    getCurrentSkillSeasonKey,
+    runGlobalSkillResetIfAllowed
+  };
+}
+
+refreshGuildsPublicApi();
 
 // Helper function to populate equipment grid with player equipment
 async function populatePlayerEquipmentGrid(container, equippedItems) {
@@ -10904,6 +10986,7 @@ let guildBackgroundSyncInterval = null;
 let guildBackgroundSyncInFlight = false;
 let playerDataBackgroundPushInterval = null;
 let playerDataBackgroundPushInFlight = false;
+let guildMembershipReconciledThisSession = false;
 const GUILD_BACKGROUND_SYNC_INTERVAL_MS = 60 * 1000; // 1 minute
 
 function startGuildBackgroundSync() {
@@ -11093,18 +11176,16 @@ async function initializeGuilds() {
   setupGuildCoinsDropSystem();
 }
 
-async function syncGuildFromFirebase(currentPlayer) {
+/** Full scan of all guild member lists — use only for repair/reconcile, not background sync. */
+async function reconcileGuildMembershipFromMembersList(currentPlayer) {
   try {
-    console.log('[Guilds] Starting sync for player:', currentPlayer);
+    console.log('[Guilds] Reconciling membership from member lists for:', currentPlayer);
     const hashedPlayer = await hashUsername(currentPlayer);
-    console.log('[Guilds] Hashed player:', hashedPlayer);
-    
-    // First, check if player is in members list of any guild (source of truth)
-    console.log('[Guilds] Checking all guilds for membership...');
+
     const allGuildsResponse = await fetch(`${getGuildsApiUrl()}.json`);
     let foundGuild = null;
     let foundGuildId = null;
-    
+
     if (allGuildsResponse.ok) {
       const allGuilds = await allGuildsResponse.json();
       if (allGuilds) {
@@ -11114,70 +11195,86 @@ async function syncGuildFromFirebase(currentPlayer) {
           if (isMember) {
             foundGuild = { ...guild, id: guildId };
             foundGuildId = guildId;
-            console.log('[Guilds] Found player in guild members:', guild.name, '(ID:', guildId + ')');
+            console.log('[Guilds] Reconcile: found player in guild members:', guild.name, '(ID:', guildId + ')');
             break;
           }
         }
       }
     }
-    
-    // Check player reference in Firebase
+
     const playerRefResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
     const hasPlayerRef = playerRefResponse.ok;
     let playerRefData = null;
     if (hasPlayerRef) {
       playerRefData = await playerRefResponse.json();
-      console.log('[Guilds] Player reference exists:', playerRefData);
-    } else {
-      console.log('[Guilds] No player reference found (status:', playerRefResponse.status + ')');
     }
-    
-    // Sync logic: members list is source of truth
+
     if (foundGuild) {
-      // Player is a member - ensure player reference matches
       if (!hasPlayerRef || !playerRefData || playerRefData.guildId !== foundGuildId) {
-        console.log('[Guilds] Fixing player reference - creating/updating to match membership');
-        const updateResult = await updatePlayerGuildReference(hashedPlayer, foundGuildId, foundGuild.name);
-        
-        if (updateResult) {
-          // Verify it was created
-          const verifyResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
-          if (verifyResponse.ok) {
-            const verifyData = await verifyResponse.json();
-            console.log('[Guilds] Verified player reference created:', verifyData);
-          } else {
-            console.error('[Guilds] Failed to verify player reference creation - status:', verifyResponse.status);
-          }
-        } else {
-          console.error('[Guilds] Failed to update player reference');
-        }
-      } else {
-        console.log('[Guilds] Player reference already matches membership');
+        await updatePlayerGuildReference(hashedPlayer, foundGuildId, foundGuild.name);
       }
-      
-      // Save to localStorage and sync chat
       savePlayerGuild(foundGuild);
-      console.log('[Guilds] Saved guild to localStorage:', foundGuild.name);
       syncGuildChatTabWithRetry();
-      return;
-    } else {
-      // Player is not a member of any guild
-      if (hasPlayerRef && playerRefData) {
-        console.warn('[Guilds] Player reference exists but player is not a member - cleaning up');
-        await updatePlayerGuildReference(hashedPlayer, null, null);
+      return { inGuild: true, guild: foundGuild };
+    }
+
+    if (hasPlayerRef && playerRefData) {
+      console.warn('[Guilds] Reconcile: player reference exists but not in any member list — cleaning up');
+      await updatePlayerGuildReference(hashedPlayer, null, null);
+    }
+    const localGuild = getPlayerGuild();
+    if (localGuild) {
+      clearPlayerGuild();
+    }
+    syncGuildChatTabWithRetry();
+    return { inGuild: false, guild: null };
+  } catch (error) {
+    console.error('[Guilds] Error reconciling guild membership:', error);
+    return { inGuild: false, guild: null, error };
+  }
+}
+
+/** Fast background sync: player ref + single guild doc (no full guild list scan). */
+async function syncGuildFromFirebase(currentPlayer) {
+  try {
+    const hashedPlayer = await hashUsername(currentPlayer);
+
+    const playerRefResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
+    let playerRefData = null;
+    if (playerRefResponse.ok) {
+      playerRefData = await playerRefResponse.json();
+    }
+
+    const localGuild = getPlayerGuild();
+
+    if (playerRefData && playerRefData.guildId) {
+      const guild = await getGuild(playerRefData.guildId);
+      if (guild) {
+        const guildWithId = { ...guild, id: playerRefData.guildId };
+        savePlayerGuild(guildWithId);
+        syncGuildChatTabWithRetry();
+        return;
       }
-      
-      // Clear localStorage if it says otherwise
-      const localGuild = getPlayerGuild();
+      console.warn('[Guilds] Player ref points to missing guild — clearing reference');
+      await updatePlayerGuildReference(hashedPlayer, null, null);
       if (localGuild) {
-        console.warn('[Guilds] Clearing localStorage - player is not in any guild');
         clearPlayerGuild();
       }
       syncGuildChatTabWithRetry();
+      return;
     }
+
+    if (localGuild) {
+      if (!guildMembershipReconciledThisSession) {
+        guildMembershipReconciledThisSession = true;
+        await reconcileGuildMembershipFromMembersList(currentPlayer);
+      }
+      return;
+    }
+
+    syncGuildChatTabWithRetry();
   } catch (error) {
     console.error('[Guilds] Error syncing guild from Firebase:', error);
-    console.error('[Guilds] Error stack:', error.stack);
   }
 }
 
@@ -11393,6 +11490,8 @@ if (typeof window !== 'undefined') {
   window.syncAllMembersAndPlayers = async function() {
     await syncAllMembersAndPlayers();
   };
+
+  refreshGuildsPublicApi();
 }
 
 // Auto-initialize if running in mod context

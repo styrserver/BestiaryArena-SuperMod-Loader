@@ -44,6 +44,7 @@ const defaultConfig = {
   enableFirebaseRunsUpload: false, // Enable uploading best runs to Firebase
   firebaseRunsPassword: '', // Encryption password for Firebase runs (stored encrypted)
   autoUploadRuns: false, // Automatically upload when new best run is recorded
+  lastFirebaseUploadedMapHashes: {}, // mapKey -> payload hash for delta Firebase uploads (v2)
   hotkeyOpenInventory: 'i', // KeyboardEvent.key id: letter/digit, or e.g. f1, insert, home, pageup
   hotkeyOpenQuestLog: 'q',
   hotkeyOpenStore: 's',
@@ -2704,8 +2705,131 @@ const FirebaseRunsService = {
       throw new Error(`Failed to ${errorContext}: ${response.status}`);
     }
     return true;
+  },
+
+  async patch(path, data, errorContext) {
+    const options = {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    };
+    const response = await fetch(`${path}.json`, options);
+    if (!response.ok) {
+      throw new Error(`Failed to ${errorContext}: ${response.status}`);
+    }
+    return await response.json();
   }
 };
+
+const FIREBASE_RUNS_VERSION_V2 = '2.0';
+
+function hashMapRunsPayload(mapData) {
+  try {
+    return JSON.stringify(mapData);
+  } catch (e) {
+    return String(Date.now());
+  }
+}
+
+async function decryptBestRunsFromFirebaseRecord(remoteData, password) {
+  if (!remoteData || !password) {
+    return null;
+  }
+
+  if (remoteData.version === FIREBASE_RUNS_VERSION_V2 && remoteData.maps && typeof remoteData.maps === 'object') {
+    const merged = {
+      runs: {},
+      metadata: remoteData.metadata || {},
+      playerName: remoteData.playerName,
+      uploadedAt: remoteData.lastUpdated
+    };
+    for (const [mapKey, entry] of Object.entries(remoteData.maps)) {
+      if (!entry || !entry.encrypted) {
+        continue;
+      }
+      const chunk = await decryptRunsData(entry.encrypted, password);
+      if (!chunk) {
+        continue;
+      }
+      if (chunk.runs && chunk.runs[mapKey]) {
+        merged.runs[mapKey] = chunk.runs[mapKey];
+      } else if (chunk.runs && typeof chunk.runs === 'object') {
+        Object.assign(merged.runs, chunk.runs);
+      }
+    }
+    return merged;
+  }
+
+  if (remoteData.encrypted) {
+    return decryptRunsData(remoteData.encrypted, password);
+  }
+
+  return null;
+}
+
+async function uploadBestRunsToFirebase(playerName, bestRuns, password, options = {}) {
+  const forceFull = options.forceFull === true;
+  try {
+    const path = await getBestRunsFirebasePath(playerName);
+    const remote = await FirebaseRunsService.get(path, 'fetch runs for delta upload', null);
+    const now = Date.now();
+    const mapHashes = { ...(config.lastFirebaseUploadedMapHashes || {}) };
+    const isLegacyV1 = remote && remote.encrypted && remote.version !== FIREBASE_RUNS_VERSION_V2;
+    const needsFullUpload = forceFull || !remote || isLegacyV1 || remote.version !== FIREBASE_RUNS_VERSION_V2;
+
+    if (needsFullUpload) {
+      const maps = {};
+      for (const [mapKey, mapData] of Object.entries(bestRuns.runs || {})) {
+        const encrypted = await encryptRunsData({ runs: { [mapKey]: mapData } }, password);
+        maps[mapKey] = { encrypted, lastUpdated: now };
+        mapHashes[mapKey] = hashMapRunsPayload(mapData);
+      }
+      await FirebaseRunsService.put(path, {
+        version: FIREBASE_RUNS_VERSION_V2,
+        lastUpdated: now,
+        metadata: bestRuns.metadata || {},
+        playerName: bestRuns.playerName || playerName,
+        maps
+      }, 'upload runs to Firebase (v2 full)');
+      config.lastFirebaseUploadedMapHashes = mapHashes;
+      console.log('[Mod Settings] Full v2 upload to Firebase:', Object.keys(maps).length, 'map(s)');
+      return true;
+    }
+
+    let changedCount = 0;
+    for (const [mapKey, mapData] of Object.entries(bestRuns.runs || {})) {
+      const payloadHash = hashMapRunsPayload(mapData);
+      if (mapHashes[mapKey] === payloadHash) {
+        continue;
+      }
+      const encrypted = await encryptRunsData({ runs: { [mapKey]: mapData } }, password);
+      await FirebaseRunsService.patch(
+        `${path}/maps/${mapKey}`,
+        { encrypted, lastUpdated: now },
+        `upload map ${mapKey} to Firebase`
+      );
+      mapHashes[mapKey] = payloadHash;
+      changedCount++;
+    }
+
+    if (changedCount > 0) {
+      await FirebaseRunsService.patch(path, {
+        version: FIREBASE_RUNS_VERSION_V2,
+        lastUpdated: now,
+        metadata: bestRuns.metadata || {},
+        playerName: bestRuns.playerName || playerName
+      }, 'update runs metadata on Firebase');
+      config.lastFirebaseUploadedMapHashes = mapHashes;
+      console.log('[Mod Settings] Delta upload to Firebase:', changedCount, 'map(s) changed');
+    } else {
+      console.log('[Mod Settings] Delta upload skipped — no map changes');
+    }
+    return true;
+  } catch (error) {
+    console.error('[Mod Settings] Error uploading runs to Firebase:', error);
+    return false;
+  }
+}
 
 // Get Firebase path for best runs
 async function getBestRunsFirebasePath(playerName) {
@@ -2713,7 +2837,7 @@ async function getBestRunsFirebasePath(playerName) {
   return `${FIREBASE_RUNS_CONFIG.firebaseUrl}/best-runs/${hashedName}`;
 }
 
-// Upload runs to Firebase
+/** @deprecated Legacy v1 full-blob upload — use uploadBestRunsToFirebase */
 async function uploadRunsToFirebase(playerName, encryptedData, password) {
   try {
     const path = await getBestRunsFirebasePath(playerName);
@@ -2723,7 +2847,7 @@ async function uploadRunsToFirebase(playerName, encryptedData, password) {
       version: '1.0'
     };
     await FirebaseRunsService.put(path, data, 'upload runs to Firebase');
-    console.log('[Mod Settings] Successfully uploaded runs to Firebase');
+    console.log('[Mod Settings] Successfully uploaded runs to Firebase (v1)');
     return true;
   } catch (error) {
     console.error('[Mod Settings] Error uploading runs to Firebase:', error);
@@ -2748,6 +2872,7 @@ async function deleteRunsFromFirebase(playerName) {
   try {
     const path = await getBestRunsFirebasePath(playerName);
     await FirebaseRunsService.delete(path, 'delete runs from Firebase');
+    config.lastFirebaseUploadedMapHashes = {};
     console.log('[Mod Settings] Successfully deleted runs from Firebase');
     return true;
   } catch (error) {
@@ -3534,8 +3659,8 @@ function formatRunsAsText(runsData) {
   }
 }
 
-// Upload best runs to Firebase
-async function uploadBestRuns() {
+// Upload best runs to Firebase (options.forceFull: true for manual full rebuild)
+async function uploadBestRuns(options = {}) {
   try {
     // Rate limiting: prevent uploads more than once every 3 seconds
     const now = Date.now();
@@ -3562,6 +3687,10 @@ async function uploadBestRuns() {
     if (!window.RunTrackerAPI || !window.RunTrackerAPI.getAllRuns) {
       console.error('[Mod Settings] Cannot upload runs: RunTracker not available');
       return { success: false, error: 'RunTracker not available' };
+    }
+
+    if (typeof window.RunTrackerAPI.pruneInvalidEmptySetupRuns === 'function') {
+      await window.RunTrackerAPI.pruneInvalidEmptySetupRuns();
     }
     
     // Get all runs from RunTracker
@@ -3869,14 +3998,14 @@ async function uploadBestRuns() {
     // Replace runs with ordered version
     bestRuns.runs = orderedRuns;
     
-    // Encrypt the data
-    const encryptedData = await encryptRunsData(bestRuns, config.firebaseRunsPassword);
-    
-    // Upload to Firebase
-    const success = await uploadRunsToFirebase(playerName, encryptedData, config.firebaseRunsPassword);
+    const success = await uploadBestRunsToFirebase(
+      playerName,
+      bestRuns,
+      config.firebaseRunsPassword,
+      { forceFull: options?.forceFull === true }
+    );
     
     if (success) {
-      // Update last upload time
       config.lastFirebaseRunsUpload = Date.now();
       saveConfig();
       return { success: true };
@@ -3896,12 +4025,12 @@ async function fetchPlayerRuns(playerName, password) {
       return null;
     }
     
-    const encryptedData = await fetchRunsFromFirebase(playerName);
-    if (!encryptedData || !encryptedData.encrypted) {
+    const remoteData = await fetchRunsFromFirebase(playerName);
+    if (!remoteData) {
       return null;
     }
     
-    const decryptedData = await decryptRunsData(encryptedData.encrypted, password);
+    const decryptedData = await decryptBestRunsFromFirebaseRecord(remoteData, password);
     return decryptedData;
   } catch (error) {
     console.error('[Mod Settings] Error fetching player runs:', error);
@@ -3928,6 +4057,11 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
       if (!window.RunTrackerAPI || !window.RunTrackerAPI.getAllRuns) {
         return { success: false, error: 'RunTracker not available' };
       }
+
+      if (typeof window.RunTrackerAPI.pruneInvalidEmptySetupRuns === 'function') {
+        await window.RunTrackerAPI.pruneInvalidEmptySetupRuns();
+      }
+
       const allRuns = window.RunTrackerAPI.getAllRuns();
       const currentSeason = detectCurrentSeasonFromRuns(allRuns);
       
@@ -4148,7 +4282,7 @@ function startAutoUploadMonitor() {
         console.error('[Mod Settings] Auto-upload failed:', result.error);
       }
     }
-  }, 10000); // Check every 10 seconds
+  }, 60000); // Check every 60 seconds
 }
 
 function stopAutoUploadMonitor() {
@@ -5386,25 +5520,12 @@ function showSettingsModal() {
       { id: 'depot-manager', label: t('mods.depot.title'), selected: false },
       { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
       { id: 'hotkeys', label: t('mods.betterUI.menuHotkeys'), selected: false },
+      { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false },
+      { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false },
       { id: 'mod-coordination', label: t('mods.betterUI.menuModCoordination'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
       { id: 'backup', label: t('mods.betterUI.menuBackup'), selected: false }
     ];
-
-    // Check if Hunt Analyzer mod is enabled and add the tab if it is
-    const huntAnalyzerMod = window.localMods.find(mod => mod.name === 'Super Mods/Hunt Analyzer.js');
-    if (huntAnalyzerMod?.enabled) {
-      // Insert Hunt Analyzer tab after hotkeys (base: creatures, depot-manager, ui, hotkeys, …)
-      menuItems.splice(4, 0, { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false });
-    }
-
-    // Check if VIP List mod is enabled and add the tab if it is
-    const vipListMod = window.localMods.find(mod => mod.name === 'OT Mods/VIP List.js');
-    if (vipListMod?.enabled) {
-      // Insert VIP List tab after hunt-analyzer (or after hotkeys if hunt-analyzer is not enabled)
-      const insertPosition = huntAnalyzerMod?.enabled ? 5 : 4;
-      menuItems.splice(insertPosition, 0, { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false });
-    }
     
     menuItems.forEach(item => {
       const menuItem = document.createElement('div');
@@ -6028,6 +6149,14 @@ function showSettingsModal() {
             </div>
             <div id="firebase-runs-status" style="margin-top: 10px; font-size: 12px; color: #7f8fa4; min-height: 20px;">
             </div>
+          </div>
+          <div id="guild-skill-admin-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: none;">
+            <h4 style="margin: 0 0 10px 0; color: #ff6b6b; font-size: 14px;">Guild skill admin</h4>
+            <p style="margin: 0 0 12px 0; font-size: 11px; color: #888;">Only names in Firebase <code>config/admins</code>. Deletes <strong>skill-progress</strong>, <strong>player-skills</strong>, and <strong>player-equipment</strong> for <strong>all players</strong>.</p>
+            <div style="margin-bottom: 12px;">
+              <button type="button" id="guild-skill-reset-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto; color: #ffb4b4;">Reset all players — skills, progress &amp; equipment</button>
+            </div>
+            <div id="guild-skill-reset-status" style="font-size: 12px; color: #7f8fa4; min-height: 18px;"></div>
           </div>
         `;
         rightColumn.appendChild(advancedContent);
@@ -6788,7 +6917,7 @@ function showSettingsModal() {
           console.log('[Mod Settings] Chat', enableVipListChatCheckbox.checked ? 'enabled' : 'disabled');
         });
       }
-    
+
     const autoplayRefreshCheckbox = content.querySelector('#autoplay-refresh-toggle');
     if (autoplayRefreshCheckbox) {
       autoplayRefreshCheckbox.checked = config.enableAutoplayRefresh;
@@ -7193,7 +7322,7 @@ function showSettingsModal() {
             updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsPasswordChanged'), '#7f8fa4');
             
             // Re-upload with new password
-            uploadBestRuns().then(result => {
+            uploadBestRuns({ forceFull: true }).then(result => {
               if (result.success) {
                 const date = formatEUDateTime(config.lastFirebaseRunsUpload);
                 updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsPasswordChangedReuploaded', { date }), '#4ade80');
@@ -7248,7 +7377,7 @@ function showSettingsModal() {
           
           updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsUploading'), '#7f8fa4');
           
-          const result = await uploadBestRuns();
+          const result = await uploadBestRuns({ forceFull: true });
           if (result.success) {
             const date = formatEUDateTime(config.lastFirebaseRunsUpload);
             updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsLastUploaded', { date }), '#4ade80');
@@ -7366,6 +7495,53 @@ function showSettingsModal() {
       if (statusDiv && config.lastFirebaseRunsUpload) {
         const date = formatEUDateTime(config.lastFirebaseRunsUpload);
         updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsLastUploaded', { date }), '#4ade80');
+      }
+
+      const guildSkillAdminSection = content.querySelector('#guild-skill-admin-section');
+      const guildSkillResetBtn = content.querySelector('#guild-skill-reset-btn');
+      const guildSkillResetStatus = content.querySelector('#guild-skill-reset-status');
+      const showGuildSkillAdminTools = async () => {
+        if (!guildSkillAdminSection) return;
+        let allowed = false;
+        if (typeof window.Guilds?.canRunGuildAdminToolsAsync === 'function') {
+          allowed = await window.Guilds.canRunGuildAdminToolsAsync();
+        } else if (typeof window.Guilds?.canRunGuildAdminTools === 'function') {
+          allowed = window.Guilds.canRunGuildAdminTools();
+        }
+        guildSkillAdminSection.style.display = allowed ? 'block' : 'none';
+      };
+      showGuildSkillAdminTools();
+      if (guildSkillResetBtn) applyAdvancedActionButtonStyle(guildSkillResetBtn, { variant: 'red' });
+      if (guildSkillResetBtn) {
+        guildSkillResetBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!window.Guilds || typeof window.Guilds.runGlobalSkillResetIfAllowed !== 'function') {
+            if (guildSkillResetStatus) guildSkillResetStatus.textContent = 'Guilds mod not loaded.';
+            return;
+          }
+          const label = 'DELETE skill-progress, player-skills, and player-equipment for ALL players';
+          if (!confirm(`${label}?\n\nThis cannot be undone.`)) return;
+          const typed = prompt('Type RESET to confirm:');
+          if (typed !== 'RESET') {
+            if (guildSkillResetStatus) guildSkillResetStatus.textContent = 'Cancelled.';
+            return;
+          }
+          guildSkillResetBtn.disabled = true;
+          if (guildSkillResetStatus) guildSkillResetStatus.textContent = 'Running global reset...';
+          try {
+            const result = await window.Guilds.runGlobalSkillResetIfAllowed();
+            if (guildSkillResetStatus) {
+              guildSkillResetStatus.textContent = result.error
+                ? `Reset failed: ${result.error}`
+                : `Reset OK (${result.deleted}/3 Firebase trees deleted). Reload the game.`;
+            }
+          } catch (err) {
+            if (guildSkillResetStatus) guildSkillResetStatus.textContent = `Reset error: ${err.message}`;
+          } finally {
+            guildSkillResetBtn.disabled = false;
+          }
+        });
       }
       
       const playercountCheckbox = content.querySelector('#playercount-toggle');

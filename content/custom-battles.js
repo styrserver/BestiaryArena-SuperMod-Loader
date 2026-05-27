@@ -4,6 +4,17 @@
 // Generic system for managing custom battles with configurable villains, restrictions, and cleanup
 'use strict';
 
+function applyVillainAwakenFromConfig(villain, villainConfig) {
+    if (!villain || !villainConfig) return villain;
+    const awakened = villainConfig.awakened === true || villainConfig.awaken === true || villainConfig.isAwakened === true;
+    if (!awakened) return villain;
+    villain.awaken = true;
+    villain.awakened = true;
+    villain.isAwakened = true;
+    villain.starTier = villainConfig.starTier != null ? villainConfig.starTier : 6;
+    return villain;
+}
+
 // Prevent multiple initializations
 if (window.CustomBattles) {
     // Already initialized, skip
@@ -182,7 +193,7 @@ if (window.CustomBattles) {
                                 key = `${prefix}${villainConfig.tileIndex}-${Date.now()}-${Math.random()}`;
                             }
                             
-                            const villain = {
+                            const villain = applyVillainAwakenFromConfig({
                                 type: "custom",
                                 key: key,
                                 nickname: villainConfig.nickname,
@@ -201,7 +212,7 @@ if (window.CustomBattles) {
                                     armor: 1,
                                     magicResist: 1
                                 }
-                            };
+                            }, villainConfig);
 
                             updatedBoardConfig.push(villain);
                             addedAny = true;
@@ -501,7 +512,7 @@ if (window.CustomBattles) {
                             } else {
                                 key = `${prefix}${tileIndex}-${Date.now()}-${Math.random()}`;
                             }
-                            const villain = {
+                            const villain = applyVillainAwakenFromConfig({
                                 type: 'custom',
                                 key: key,
                                 nickname: villainConfig.nickname,
@@ -520,7 +531,7 @@ if (window.CustomBattles) {
                                     armor: 1,
                                     magicResist: 1
                                 }
-                            };
+                            }, villainConfig);
                             restoredConfig = restoredConfig.concat([villain]);
                         }
                     });
