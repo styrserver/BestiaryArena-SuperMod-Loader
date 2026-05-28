@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "3.9.10",
+      "changes": [
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Creature squeeze dust is now tracked from inventory.monsterSqueezer responses in sessions (including Manual Runner/Autoseller squeeze flow) and shown as a separate source in Dust summaries, map breakdowns, rates, and tooltips (Loot | Disenchants | Creature Squeezes). Added localized label support for Creature Squeezes."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Summary log now shows Dragon Plant autocollect as per-collect value with collect count (5K per collect), and the Experience line now includes Exp/h rate."
+        }
+      ]
+    },
+    {
       "version": "3.9.9",
       "changes": [
         {

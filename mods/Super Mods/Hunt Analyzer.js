@@ -2176,9 +2176,10 @@ function cleanSessionData(sessions) {
             ? session.capturedCreatureSellValues
                 .map((entry) => ({
                     monsterId: typeof entry?.monsterId === 'string' ? entry.monsterId : null,
-                    goldValue: Math.max(0, Math.floor(Number(entry?.goldValue) || 0))
+                    goldValue: Math.max(0, Math.floor(Number(entry?.goldValue) || 0)),
+                    dustValue: Math.max(0, Math.floor(Number(entry?.dustValue) || 0))
                 }))
-                .filter((entry) => entry.goldValue > 0)
+                .filter((entry) => entry.goldValue > 0 || entry.dustValue > 0)
             : [];
         const capturedDisenchantDustValues = Array.isArray(session.capturedDisenchantDustValues)
             ? session.capturedDisenchantDustValues
@@ -4642,14 +4643,15 @@ function parsePossibleGoldValue(value) {
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
-function registerCreatureSellValueByMonsterId(monsterId, goldValue) {
+function registerCreatureSellValueByMonsterId(monsterId, goldValue, dustValue = 0) {
     const normalizedId = typeof monsterId === 'string' ? monsterId : String(monsterId ?? '');
     const parsedGold = parsePossibleGoldValue(goldValue);
-    if (parsedGold <= 0) return;
+    const parsedDust = parsePossibleGoldValue(dustValue);
+    if (parsedGold <= 0 && parsedDust <= 0) return;
     if (normalizedId) {
         huntAnalyzerCreatureSellByMonsterId.set(normalizedId, parsedGold);
     }
-    huntAnalyzerPendingCreatureSellEvents.push({ monsterId: normalizedId || null, goldValue: parsedGold, consumed: false });
+    huntAnalyzerPendingCreatureSellEvents.push({ monsterId: normalizedId || null, goldValue: parsedGold, dustValue: parsedDust, consumed: false });
     reconcilePendingCreatureSellEventsIntoSessions();
 }
 
@@ -4734,9 +4736,10 @@ function reconcilePendingCreatureSellEventsIntoSessions() {
             if (captured.length >= totalDrops) {
                 continue;
             }
-            captured.push({ monsterId: event.monsterId, goldValue: event.goldValue });
+            captured.push({ monsterId: event.monsterId, goldValue: event.goldValue, dustValue: event.dustValue || 0 });
             event.consumed = true;
-            console.log(`[Hunt Analyzer] Reconciled sell value into session: room=${session.roomName || 'Unknown'} +${event.goldValue}g (id=${event.monsterId || 'n/a'})`);
+            const dustLogSuffix = event.dustValue > 0 ? ` +${event.dustValue} dust` : '';
+            console.log(`[Hunt Analyzer] Reconciled creature value: room=${session.roomName || 'Unknown'} +${event.goldValue}g${dustLogSuffix} (id=${event.monsterId || 'n/a'})`);
             break;
         }
     });
@@ -4757,7 +4760,40 @@ function installCreatureSellTrackingFetchHook() {
                 cloned.json().then((data) => {
                     const payload = Array.isArray(data) ? data[0]?.result?.data?.json : null;
                     if (!payload) return;
-                    registerCreatureSellValueByMonsterId(payload.soldMonsterId, payload.goldValue);
+                    registerCreatureSellValueByMonsterId(
+                        payload.soldMonsterId,
+                        payload.goldValue,
+                        payload.dustDiff ?? payload.dustValue
+                    );
+                }).catch(() => {});
+            }
+            if (typeof url === 'string' && url.includes('/api/trpc/inventory.monsterSqueezer')) {
+                const cloned = response.clone();
+                cloned.json().then((data) => {
+                    const payload = Array.isArray(data) ? data[0]?.result?.data?.json : null;
+                    if (!payload) return;
+                    const dustDiff = parsePossibleGoldValue(payload.dustDiff ?? payload.dustValue);
+                    if (dustDiff <= 0) return;
+
+                    let requestMonsterIds = [];
+                    try {
+                        const bodyRaw = args?.[1]?.body;
+                        const bodyObj = typeof bodyRaw === 'string' ? JSON.parse(bodyRaw) : bodyRaw;
+                        requestMonsterIds = bodyObj?.[0]?.json ?? bodyObj?.['0']?.json ?? [];
+                    } catch (_e) {
+                        requestMonsterIds = [];
+                    }
+
+                    if (Array.isArray(requestMonsterIds) && requestMonsterIds.length > 0) {
+                        const perMonsterDust = Math.floor(dustDiff / requestMonsterIds.length);
+                        const remainderDust = dustDiff - (perMonsterDust * requestMonsterIds.length);
+                        requestMonsterIds.forEach((monsterId, index) => {
+                            const shareDust = perMonsterDust + (index === 0 ? remainderDust : 0);
+                            registerCreatureSellValueByMonsterId(monsterId, 0, shareDust);
+                        });
+                    } else {
+                        registerCreatureSellValueByMonsterId(null, 0, dustDiff);
+                    }
                 }).catch(() => {});
             }
             if (typeof url === 'string' && url.includes('/api/trpc/quest.plantEat')) {
@@ -4839,6 +4875,12 @@ function getSessionCreatureSellValue(session) {
     return capturedTotal > 0 ? capturedTotal : 0;
 }
 
+function getSessionCreatureSqueezeDustValue(session) {
+    if (!session || !Array.isArray(session.creatures) || session.creatures.length === 0) return 0;
+    const capturedValues = getSessionCapturedCreatureSellValues(session);
+    return capturedValues.reduce((acc, entry) => acc + parsePossibleGoldValue(entry?.dustValue), 0);
+}
+
 function getSessionDisenchantDustValue(session) {
     const capturedValues = getSessionCapturedDisenchantDustValues(session);
     return capturedValues.reduce((acc, entry) => acc + parsePossibleGoldValue(entry?.dustValue), 0);
@@ -4870,10 +4912,12 @@ function getFilteredGoldBreakdown() {
 function getSessionDustBreakdown(session) {
     const lootDust = Math.max(0, getSessionGoldAndDust(session).dust);
     const equipmentDisenchantDust = Math.max(0, getSessionDisenchantDustValue(session));
+    const creatureSqueezeDust = Math.max(0, getSessionCreatureSqueezeDustValue(session));
     return {
         lootDust,
         equipmentDisenchantDust,
-        total: lootDust + equipmentDisenchantDust
+        creatureSqueezeDust,
+        total: lootDust + equipmentDisenchantDust + creatureSqueezeDust
     };
 }
 
@@ -4881,6 +4925,7 @@ function getFilteredDustBreakdown() {
     const includeDisenchantedEquipments = HuntAnalyzerState.settings.includeDisenchantedEquipments !== false;
     let lootDust = 0;
     let equipmentDisenchantDust = 0;
+    let creatureSqueezeDust = 0;
     HuntAnalyzerState.data.sessions.forEach((session) => {
         if (HuntAnalyzerState.ui.selectedMapFilter !== 'ALL' && session?.roomName !== HuntAnalyzerState.ui.selectedMapFilter) {
             return;
@@ -4889,13 +4934,15 @@ function getFilteredDustBreakdown() {
         lootDust += sessionDust.lootDust;
         if (includeDisenchantedEquipments) {
             equipmentDisenchantDust += sessionDust.equipmentDisenchantDust;
+            creatureSqueezeDust += sessionDust.creatureSqueezeDust || 0;
         }
     });
     return {
         lootDust: Math.max(0, Math.floor(lootDust)),
         equipmentDisenchantDust: Math.max(0, Math.floor(equipmentDisenchantDust)),
+        creatureSqueezeDust: Math.max(0, Math.floor(creatureSqueezeDust)),
         includeDisenchantedEquipments,
-        total: Math.max(0, Math.floor(lootDust + equipmentDisenchantDust))
+        total: Math.max(0, Math.floor(lootDust + equipmentDisenchantDust + creatureSqueezeDust))
     };
 }
 
@@ -4923,13 +4970,11 @@ function getDragonPlantAutocollectSummaryStatus() {
         return null;
     }
 
-    const threshold = 100000;
-    const plantGoldRaw = globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.plant?.gold;
-    const plantGold = Number(plantGoldRaw);
-    if (!Number.isFinite(plantGold) || plantGold < 0) {
-        return `plantGold=${t('mods.huntAnalyzer.notAvailable')}/${threshold}`;
+    const plantDetails = getDragonPlantTooltipDetails();
+    if (!plantDetails) {
+        return `${formatExpValue(5000)} (${t('mods.huntAnalyzer.notAvailable')})`;
     }
-    return `plantGold=${Math.floor(plantGold)}/${threshold}`;
+    return `${formatExpValue(plantDetails.perCollectGold)} (${plantDetails.collectCount}x)`;
 }
 
 function trackDragonPlantCollectionValue() {
@@ -4990,6 +5035,7 @@ function createEmptyMapGroupStats(fallbackStartTime) {
         totalDust: 0,
         totalLootDust: 0,
         totalDisenchantDust: 0,
+        totalCreatureSqueezeDust: 0,
         totalStamina: 0,
         totalExperience: 0,
         totalEquipment: 0,
@@ -5015,6 +5061,7 @@ function ingestSessionIntoMapGroup(group, session, overallStartTime) {
     group.totalGold += getEffectiveSessionGold(session);
     group.totalLootDust += sessionDust.lootDust;
     group.totalDisenchantDust += sessionDust.equipmentDisenchantDust;
+    group.totalCreatureSqueezeDust += sessionDust.creatureSqueezeDust || 0;
     group.totalDust += sessionDust.total;
     group.totalStamina += session.staminaSpent || 0;
     group.totalExperience += sessionStoredExperience(session);
@@ -5102,6 +5149,7 @@ function appendMapAnalysisSection(summary, mapGroups) {
             const mapCreatureGoldRate = mapTimeHours > 0 ? Math.floor(mapData.totalCreatureSellGold / mapTimeHours) : 0;
             const mapLootDustRate = mapTimeHours > 0 ? Math.floor(mapData.totalLootDust / mapTimeHours) : 0;
             const mapDisenchantDustRate = mapTimeHours > 0 ? Math.floor(mapData.totalDisenchantDust / mapTimeHours) : 0;
+            const mapCreatureSqueezeDustRate = mapTimeHours > 0 ? Math.floor((mapData.totalCreatureSqueezeDust || 0) / mapTimeHours) : 0;
             const mapWinRate = (mapData.wins + mapData.losses) > 0
                 ? Math.round((mapData.wins / (mapData.wins + mapData.losses)) * 100)
                 : 0;
@@ -5111,7 +5159,7 @@ function appendMapAnalysisSection(summary, mapGroups) {
             summary += `  ${t('mods.huntAnalyzer.gold')}: ${mapData.totalGold} | ${t('mods.huntAnalyzer.dust')}: ${mapData.totalDust} | ${t('mods.huntAnalyzer.stamina')}: ${mapData.totalStamina} | ${t('mods.huntAnalyzer.experience')}: ${formatExpValue(mapData.totalExperience)}\n`;
             summary += `  ${t('mods.huntAnalyzer.goldSources')}: ${t('mods.huntAnalyzer.loot')} ${mapData.totalLootGold} | ${t('mods.huntAnalyzer.creatures')} ${mapData.totalCreatureSellGold}\n`;
             if (HuntAnalyzerState.settings.includeDisenchantedEquipments !== false) {
-                summary += `  ${t('mods.huntAnalyzer.dustSources')}: ${t('mods.huntAnalyzer.loot')} ${mapData.totalLootDust} | ${t('mods.huntAnalyzer.disenchants')} ${mapData.totalDisenchantDust}\n`;
+                summary += `  ${t('mods.huntAnalyzer.dustSources')}: ${t('mods.huntAnalyzer.loot')} ${mapData.totalLootDust} | ${t('mods.huntAnalyzer.disenchants')} ${mapData.totalDisenchantDust} | ${t('mods.huntAnalyzer.creatureSqueezes')} ${mapData.totalCreatureSqueezeDust || 0}\n`;
             } else {
                 summary += `  ${t('mods.huntAnalyzer.dustSources')}: ${t('mods.huntAnalyzer.loot')} ${mapData.totalLootDust}\n`;
             }
@@ -5119,7 +5167,7 @@ function appendMapAnalysisSection(summary, mapGroups) {
             summary += `  ${t('mods.huntAnalyzer.rates')}: ${rates.sessions} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${rates.gold} ${t('mods.huntAnalyzer.goldPerHour')} | ${rates.creatures} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${rates.equipment} ${t('mods.huntAnalyzer.equipmentPerHour')} | ${formatExpValue(rates.experience)} ${t('mods.huntAnalyzer.expPerHour')}\n`;
             summary += `  ${t('mods.huntAnalyzer.goldSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${mapLootGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${t('mods.huntAnalyzer.creatures')} ${mapCreatureGoldRate} ${t('mods.huntAnalyzer.goldPerHour')}\n`;
             if (HuntAnalyzerState.settings.includeDisenchantedEquipments !== false) {
-                summary += `  ${t('mods.huntAnalyzer.dustSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${mapLootDustRate} ${t('mods.huntAnalyzer.dustPerHour')} | ${t('mods.huntAnalyzer.disenchants')} ${mapDisenchantDustRate} ${t('mods.huntAnalyzer.dustPerHour')}\n`;
+                summary += `  ${t('mods.huntAnalyzer.dustSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${mapLootDustRate} ${t('mods.huntAnalyzer.dustPerHour')} | ${t('mods.huntAnalyzer.disenchants')} ${mapDisenchantDustRate} ${t('mods.huntAnalyzer.dustPerHour')} | ${t('mods.huntAnalyzer.creatureSqueezes')} ${mapCreatureSqueezeDustRate} ${t('mods.huntAnalyzer.dustPerHour')}\n`;
             } else {
                 summary += `  ${t('mods.huntAnalyzer.dustSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${mapLootDustRate} ${t('mods.huntAnalyzer.dustPerHour')}\n`;
             }
@@ -5167,6 +5215,7 @@ function generateSummaryLogText() {
     const overallCreatureGoldRate = filteredTimeHours > 0 ? Math.floor(goldBreakdown.creatureSellGold / filteredTimeHours) : 0;
     const overallLootDustRate = filteredTimeHours > 0 ? Math.floor(dustBreakdown.lootDust / filteredTimeHours) : 0;
     const overallDisenchantDustRate = filteredTimeHours > 0 ? Math.floor(dustBreakdown.equipmentDisenchantDust / filteredTimeHours) : 0;
+    const overallCreatureSqueezeDustRate = filteredTimeHours > 0 ? Math.floor((dustBreakdown.creatureSqueezeDust || 0) / filteredTimeHours) : 0;
     const totalSessionsForWinRate = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
     const winRate = totalSessionsForWinRate > 0
         ? Math.round((HuntAnalyzerState.totals.wins / totalSessionsForWinRate) * 100)
@@ -5187,8 +5236,8 @@ function generateSummaryLogText() {
     summary += `${t('mods.huntAnalyzer.goldSources')}: ${t('mods.huntAnalyzer.loot')} ${goldBreakdown.baseGold} | ${t('mods.huntAnalyzer.creatures')} ${goldBreakdown.creatureSellGold}\n`;
     summary += `${t('mods.huntAnalyzer.goldSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${overallLootGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${t('mods.huntAnalyzer.creatures')} ${overallCreatureGoldRate} ${t('mods.huntAnalyzer.goldPerHour')}\n`;
     if (dustBreakdown.includeDisenchantedEquipments) {
-        summary += `${t('mods.huntAnalyzer.dustSources')}: ${t('mods.huntAnalyzer.loot')} ${dustBreakdown.lootDust} | ${t('mods.huntAnalyzer.disenchants')} ${dustBreakdown.equipmentDisenchantDust}\n`;
-        summary += `${t('mods.huntAnalyzer.dustSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${overallLootDustRate} ${t('mods.huntAnalyzer.dustPerHour')} | ${t('mods.huntAnalyzer.disenchants')} ${overallDisenchantDustRate} ${t('mods.huntAnalyzer.dustPerHour')}\n`;
+        summary += `${t('mods.huntAnalyzer.dustSources')}: ${t('mods.huntAnalyzer.loot')} ${dustBreakdown.lootDust} | ${t('mods.huntAnalyzer.disenchants')} ${dustBreakdown.equipmentDisenchantDust} | ${t('mods.huntAnalyzer.creatureSqueezes')} ${dustBreakdown.creatureSqueezeDust || 0}\n`;
+        summary += `${t('mods.huntAnalyzer.dustSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${overallLootDustRate} ${t('mods.huntAnalyzer.dustPerHour')} | ${t('mods.huntAnalyzer.disenchants')} ${overallDisenchantDustRate} ${t('mods.huntAnalyzer.dustPerHour')} | ${t('mods.huntAnalyzer.creatureSqueezes')} ${overallCreatureSqueezeDustRate} ${t('mods.huntAnalyzer.dustPerHour')}\n`;
     } else {
         summary += `${t('mods.huntAnalyzer.dustSources')}: ${t('mods.huntAnalyzer.loot')} ${dustBreakdown.lootDust}\n`;
         summary += `${t('mods.huntAnalyzer.dustSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${overallLootDustRate} ${t('mods.huntAnalyzer.dustPerHour')}\n`;
@@ -5198,7 +5247,7 @@ function generateSummaryLogText() {
     }
     summary += `${t('mods.huntAnalyzer.equipmentDrops')}: ${HuntAnalyzerState.totals.equipment} | ${t('mods.huntAnalyzer.creatureDrops')}: ${HuntAnalyzerState.totals.creatures} (${t('mods.huntAnalyzer.shinyDrops')}: ${HuntAnalyzerState.totals.shiny} | ${t('mods.huntAnalyzer.sealedDrops')}: ${HuntAnalyzerState.totals.sealed})\n`;
     summary += `${t('mods.huntAnalyzer.totalStaminaSpent')}: ${HuntAnalyzerState.totals.staminaSpent}\n`;
-    summary += `${t('mods.huntAnalyzer.experience')}: ${formatExpValue(HuntAnalyzerState.totals.experience)}\n`;
+    summary += `${t('mods.huntAnalyzer.experience')}: ${formatExpValue(HuntAnalyzerState.totals.experience)} | ${formatExpValue(overallRates.experience)} ${t('mods.huntAnalyzer.expPerHour')}\n`;
     summary += `---------------------------\n`;
     summary += `${t('mods.huntAnalyzer.overallRates')}: ${overallRates.sessions} ${t('mods.huntAnalyzer.sessionsPerHour')} | ${overallRates.gold} ${t('mods.huntAnalyzer.goldPerHour')} | ${overallRates.creatures} ${t('mods.huntAnalyzer.creaturesPerHour')} | ${overallRates.equipment} ${t('mods.huntAnalyzer.equipmentPerHour')} | ${formatExpValue(overallRates.experience)} ${t('mods.huntAnalyzer.expPerHour')}\n`;
     summary += `${t('mods.huntAnalyzer.overallEfficiency')}: ${overallEfficiency.goldPerStamina} ${t('mods.huntAnalyzer.goldPerStamina')} | ${overallEfficiency.sessionsPerStamina} ${t('mods.huntAnalyzer.sessionsPerStamina')} | ${overallRates.staminaSpent} ${t('mods.huntAnalyzer.staminaPerHour')}\n`;
@@ -5293,10 +5342,13 @@ function updatePanelResourceTotalDisplays(elementById) {
             const disenchantLine = dustBreakdown.includeDisenchantedEquipments
                 ? `\n${t('mods.huntAnalyzer.disenchants')}: ${formatExactInt(dustBreakdown.equipmentDisenchantDust)}`
                 : '';
+            const squeezeLine = dustBreakdown.includeDisenchantedEquipments
+                ? `\n${t('mods.huntAnalyzer.creatureSqueezes')}: ${formatExactInt(dustBreakdown.creatureSqueezeDust || 0)}`
+                : '';
             setCompactTotalDisplay(element, dustBreakdown.total);
             element.setAttribute(
                 'title',
-                `${t('mods.huntAnalyzer.loot')}: ${formatExactInt(dustBreakdown.lootDust)}${disenchantLine}`
+                `${t('mods.huntAnalyzer.loot')}: ${formatExactInt(dustBreakdown.lootDust)}${disenchantLine}${squeezeLine}`
             );
             return;
         }
