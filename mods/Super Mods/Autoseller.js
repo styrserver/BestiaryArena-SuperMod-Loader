@@ -20,6 +20,7 @@
     const PENDING_GAME_END_MAX_AGE_MS = 45000;
     const PENDING_GAME_END_MAX_SYNC_ATTEMPTS = 4;
     const PENDING_GAME_END_MAX_ACTION_ATTEMPTS = 3;
+    const PENDING_EQUIPMENT_MISS_TTL_MS = 8000;
     const MAX_OBSERVER_ATTEMPTS = 10;
     const OBSERVER_DEBOUNCE_MS = 100;
     
@@ -5942,6 +5943,21 @@
         }
     };
     
+    function syncAutosellerCoordinationMetadata() {
+        try {
+            if (!window.ModCoordination) return;
+            const pendingCount = stateManager.pendingEquipmentIds?.size || 0;
+            window.ModCoordination.updateModState('Autoseller', {
+                metadata: {
+                    pendingDisenchantCount: pendingCount,
+                    pendingDisenchantActive: pendingCount > 0
+                }
+            });
+        } catch (_e) {
+            // Non-fatal: coordination metadata sync should never break autoseller flow.
+        }
+    }
+
     const stateManager = {
         sessionStats: {
             soldCount: 0,
@@ -5957,6 +5973,7 @@
         processedIds: new Set(),
         
         pendingEquipmentIds: new Set(),
+        pendingEquipmentFirstSeenAt: new Map(),
         
         errorStats: {
             fetchErrors: 0,
@@ -6038,6 +6055,7 @@
             };
             this.processedIds.clear();
             this.pendingEquipmentIds.clear();
+            this.pendingEquipmentFirstSeenAt.clear();
             this.notifyUIUpdate();
         },
         
@@ -6054,15 +6072,24 @@
                     const idsArray = Array.from(this.pendingEquipmentIds);
                     const toKeep = idsArray.slice(Math.floor(idsArray.length / 2));
                     this.pendingEquipmentIds.clear();
+                    this.pendingEquipmentFirstSeenAt.clear();
                     toKeep.forEach(equipId => this.pendingEquipmentIds.add(equipId));
+                    const now = Date.now();
+                    toKeep.forEach(equipId => this.pendingEquipmentFirstSeenAt.set(equipId, now));
                 }
                 this.pendingEquipmentIds.add(id);
+                if (!this.pendingEquipmentFirstSeenAt.has(id)) {
+                    this.pendingEquipmentFirstSeenAt.set(id, Date.now());
+                }
+                syncAutosellerCoordinationMetadata();
             }
         },
         
         removePendingEquipment(id) {
             if (id) {
                 this.pendingEquipmentIds.delete(id);
+                this.pendingEquipmentFirstSeenAt.delete(id);
+                syncAutosellerCoordinationMetadata();
             }
         },
         
@@ -6072,6 +6099,14 @@
         
         clearPendingEquipment() {
             this.pendingEquipmentIds.clear();
+            this.pendingEquipmentFirstSeenAt.clear();
+            syncAutosellerCoordinationMetadata();
+        },
+
+        getPendingEquipmentAgeMs(id) {
+            const firstSeenAt = this.pendingEquipmentFirstSeenAt.get(id);
+            if (!firstSeenAt) return Infinity;
+            return Math.max(0, Date.now() - firstSeenAt);
         },
         
         getSessionStats() {
@@ -6084,6 +6119,7 @@
         
         notifyUIUpdate() {
             updateAutosellerSessionWidget();
+            syncAutosellerCoordinationMetadata();
         }
     };
     
@@ -6470,7 +6506,7 @@
         }
     }
     
-    async function processEligibleEquipment(rewardEquipmentIds, inventoryEquipment) {
+    async function processEligibleEquipment(rewardEquipmentIds, inventoryEquipment, battleRewardEquipment = []) {
         const outcome = { incomplete: false, pendingCount: 0 };
         try {
             const settings = getSettings();
@@ -6613,6 +6649,46 @@
                 await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
             }
             
+            // Fast path: if serverResults already gives equipment ids, try disenchant immediately
+            // using drop metadata (no inventory round-trip needed) before fallback matching/retries.
+            if (rewardEquipmentIds && rewardEquipmentIds.size > 0 && Array.isArray(battleRewardEquipment) && battleRewardEquipment.length > 0) {
+                const immediateDropsById = new Map();
+                for (const drop of battleRewardEquipment) {
+                    const equipment = drop?.equip || drop || {};
+                    const serverId = equipment.id || equipment.databaseId || drop?.equipmentId || drop?.id;
+                    if (!serverId || !rewardEquipmentIds.has(serverId) || immediateDropsById.has(serverId)) continue;
+                    immediateDropsById.set(serverId, equipment);
+                }
+                if (immediateDropsById.size > 0) {
+                    let immediateAttempted = 0;
+                    let immediateSuccess = 0;
+                    let immediateDust = 0;
+                    for (const [equipmentId, dropEquipment] of immediateDropsById.entries()) {
+                        if (stateManager.isProcessed(equipmentId)) continue;
+                        const equipmentDetails = getEquipmentDetails(dropEquipment);
+                        if (!equipmentDetails) continue;
+                        const decision = getEquipmentDecisionReason(equipmentDetails, settings);
+                        if (!shouldDisenchantEquipment(equipmentDetails, settings)) {
+                            continue;
+                        }
+                        immediateAttempted++;
+                        stateManager.addPendingEquipment(equipmentId);
+                        logAutosellerDebug('Disenchant', `immediate attempt equipmentId=${equipmentId} (${decision.reason})`);
+                        const result = await processEquipmentDisenchant(equipmentId, false);
+                        if (result && result.success) {
+                            immediateSuccess++;
+                            immediateDust += result.dustGained || 0;
+                        }
+                    }
+                    if (immediateAttempted > 0) {
+                        logAutosellerDebug(
+                            'Disenchant',
+                            `immediate done: attempted=${immediateAttempted} success=${immediateSuccess} dust=${immediateDust}`
+                        );
+                    }
+                }
+            }
+
             // Process new equipment from serverResults if available
             if (rewardEquipmentIds && rewardEquipmentIds.size > 0) {
                 if (!Array.isArray(inventoryEquipment) || inventoryEquipment.length === 0) {
@@ -6681,35 +6757,49 @@
             const pendingIds = stateManager.getPendingEquipmentIds();
             if (pendingIds.size > 0) {
                 logAutosellerDebug('Disenchant', `retrying ${pendingIds.size} pending equipment id(s)`);
-                // Fetch current inventory
-                const currentInventory = await fetchServerEquipment();
-                const inventoryIds = new Set((currentInventory || []).map(eq => eq?.id).filter(Boolean));
-                
-                // Remove pending IDs that are no longer in inventory (memory leak prevention)
-                for (const pendingId of pendingIds) {
-                    if (!inventoryIds.has(pendingId)) {
-                        // Equipment no longer in inventory - remove from pending
-                        stateManager.removePendingEquipment(pendingId);
+                const rapidPendingRetryAttempts = 8;
+                const rapidPendingRetryDelayMs = 150;
+                for (let attempt = 0; attempt < rapidPendingRetryAttempts; attempt++) {
+                    const currentInventory = await fetchServerEquipment();
+                    const inventoryIds = new Set((currentInventory || []).map(eq => eq?.id).filter(Boolean));
+                    const pendingSnapshot = stateManager.getPendingEquipmentIds();
+
+                    // Remove pending IDs that are missing for too long (memory leak prevention)
+                    for (const pendingId of pendingSnapshot) {
+                        if (!inventoryIds.has(pendingId)) {
+                            const pendingAgeMs = stateManager.getPendingEquipmentAgeMs(pendingId);
+                            if (pendingAgeMs >= PENDING_EQUIPMENT_MISS_TTL_MS) {
+                                stateManager.removePendingEquipment(pendingId);
+                                logAutosellerDebug('Disenchant', `pending id ${pendingId} not in inventory for ${pendingAgeMs}ms — dropped`);
+                            }
+                        }
                     }
-                }
-                
-                // Get updated pending list after cleanup
-                const remainingPendingIds = stateManager.getPendingEquipmentIds();
-                
-                if (remainingPendingIds.size > 0 && currentInventory && currentInventory.length > 0) {
+
+                    const remainingPendingIds = stateManager.getPendingEquipmentIds();
+                    if (remainingPendingIds.size === 0) {
+                        break;
+                    }
+                    if (!currentInventory || currentInventory.length === 0) {
+                        if (attempt < rapidPendingRetryAttempts - 1) {
+                            await new Promise(resolve => setTimeout(resolve, rapidPendingRetryDelayMs));
+                            continue;
+                        }
+                        break;
+                    }
+
                     // Filter inventory to only include pending equipment IDs
-                    const pendingEquipment = currentInventory.filter(invEquipment => 
+                    const pendingEquipment = currentInventory.filter(invEquipment =>
                         invEquipment && invEquipment.id && remainingPendingIds.has(invEquipment.id)
                     );
-                    
+
                     if (pendingEquipment.length > 0) {
                         // Filter equipment that should be disenchanted (with pending cleanup)
                         const toDisenchant = filterEquipmentForDisenchant(pendingEquipment, settings, null, true);
-                        
+
                         if (toDisenchant.length > 0) {
                             let disenchantedCount = 0;
                             let totalDust = 0;
-                            
+
                             for (const equipment of toDisenchant) {
                                 const result = await processEquipmentDisenchant(equipment.id, true);
                                 if (result && result.success) {
@@ -6717,12 +6807,22 @@
                                     totalDust += result.dustGained || 0;
                                 }
                             }
-                            
+
                             if (disenchantedCount > 0) {
                                 console.log(`[Autoseller] Retried ${disenchantedCount} pending equipment → ${totalDust} dust`);
                             }
                         }
                     }
+
+                    if (stateManager.getPendingEquipmentIds().size === 0) {
+                        break;
+                    }
+                    if (attempt < rapidPendingRetryAttempts - 1) {
+                        await new Promise(resolve => setTimeout(resolve, rapidPendingRetryDelayMs));
+                    }
+                }
+                if (stateManager.getPendingEquipmentIds().size > 0) {
+                    schedulePendingRewardsFlush();
                 }
             }
             outcome.pendingCount = stateManager.getPendingEquipmentIds().size;
@@ -8492,23 +8592,22 @@
             rewardEquipmentIds.forEach((id) => stateManager.addPendingEquipment(id));
             if (rewardEquipmentIds.size > 0) {
                 console.log('[Autoseller] Processing autoduster for', rewardEquipmentIds.size, 'equipment');
-                const dusterResult = await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment);
-                if (dusterResult?.incomplete) {
-                    needsActionRetry = true;
-                    actionRetryReason = 'duster-incomplete';
-                    logAutosellerDebug(
-                        'GameEnd',
-                        `seed=${currentSeed}: duster incomplete (${dusterResult.pendingCount} equipment still pending) — will retry`
-                    );
-                }
-            } else if (battleRewardEquipment.length > 0) {
+            }
+            const dusterResult = await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment, battleRewardEquipment);
+            if (dusterResult?.incomplete) {
+                needsActionRetry = true;
+                actionRetryReason = 'duster-incomplete';
+                logAutosellerDebug(
+                    'GameEnd',
+                    `seed=${currentSeed}: duster incomplete (${dusterResult.pendingCount} equipment still pending) — will retry`
+                );
+            }
+            if (rewardEquipmentIds.size === 0 && battleRewardEquipment.length > 0) {
                 console.log(
                     `[Autoseller][EquipDrop] seed=${currentSeed}: ${battleRewardEquipment.length} equipment drop(s) in serverResults ` +
                     'but no inventory ids resolved — queued via pending'
                 );
                 schedulePendingRewardsFlush();
-                needsActionRetry = true;
-                actionRetryReason = 'duster-incomplete';
             }
         }
 

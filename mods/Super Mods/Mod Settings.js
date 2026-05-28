@@ -6169,6 +6169,24 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.huntPersistTooltip')}">${t('mods.betterUI.huntPersistLabel')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="hunt-analyzer-creature-sell-value-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #fff;" title="${t('mods.betterUI.huntIncludeCreatureSellTooltip')}">${t('mods.betterUI.huntIncludeCreatureSellLabel')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="hunt-analyzer-dragon-plant-collect-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #fff;" title="${t('mods.betterUI.huntIncludeDragonPlantCollectTooltip')}">${t('mods.betterUI.huntIncludeDragonPlantCollectLabel')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="hunt-analyzer-disenchant-value-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #fff;" title="${t('mods.betterUI.huntIncludeDisenchantedEquipmentsTooltip')}">${t('mods.betterUI.huntIncludeDisenchantedEquipmentsLabel')}</span>
+            </label>
+          </div>
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <span style="color: #ccc;">${t('mods.betterUI.huntThemeLabel')}</span>
             <select id="hunt-analyzer-theme-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
@@ -7615,6 +7633,96 @@ function showSettingsModal() {
           // Also update runtime if Hunt Analyzer is loaded
           if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
             window.HuntAnalyzerState.settings.persistData = newValue;
+          }
+        });
+      }
+
+      const huntAnalyzerCreatureSellValueCheckbox = content.querySelector('#hunt-analyzer-creature-sell-value-toggle');
+      if (huntAnalyzerCreatureSellValueCheckbox) {
+        try {
+          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+          huntAnalyzerCreatureSellValueCheckbox.checked = parsedSettings.includeCreatureSellValue !== false;
+        } catch (error) {
+          console.error('[Mod Settings] Error reading Hunt Analyzer includeCreatureSellValue setting:', error);
+          huntAnalyzerCreatureSellValueCheckbox.checked = true;
+        }
+
+        huntAnalyzerCreatureSellValueCheckbox.addEventListener('change', () => {
+          const newValue = huntAnalyzerCreatureSellValueCheckbox.checked;
+
+          try {
+            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+            settings.includeCreatureSellValue = newValue;
+            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
+            console.log('[Mod Settings] Updated Hunt Analyzer includeCreatureSellValue:', newValue);
+          } catch (error) {
+            console.error('[Mod Settings] Error updating Hunt Analyzer includeCreatureSellValue setting:', error);
+          }
+
+          if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
+            window.HuntAnalyzerState.settings.includeCreatureSellValue = newValue;
+          }
+        });
+      }
+
+      const huntAnalyzerDragonPlantCollectCheckbox = content.querySelector('#hunt-analyzer-dragon-plant-collect-toggle');
+      if (huntAnalyzerDragonPlantCollectCheckbox) {
+        try {
+          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+          huntAnalyzerDragonPlantCollectCheckbox.checked = parsedSettings.includeDragonPlantCollect !== false;
+        } catch (error) {
+          console.error('[Mod Settings] Error reading Hunt Analyzer includeDragonPlantCollect setting:', error);
+          huntAnalyzerDragonPlantCollectCheckbox.checked = true;
+        }
+
+        huntAnalyzerDragonPlantCollectCheckbox.addEventListener('change', () => {
+          const newValue = huntAnalyzerDragonPlantCollectCheckbox.checked;
+
+          try {
+            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+            settings.includeDragonPlantCollect = newValue;
+            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
+            console.log('[Mod Settings] Updated Hunt Analyzer includeDragonPlantCollect:', newValue);
+          } catch (error) {
+            console.error('[Mod Settings] Error updating Hunt Analyzer includeDragonPlantCollect setting:', error);
+          }
+
+          if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
+            window.HuntAnalyzerState.settings.includeDragonPlantCollect = newValue;
+          }
+        });
+      }
+
+      const huntAnalyzerDisenchantedEquipmentsCheckbox = content.querySelector('#hunt-analyzer-disenchant-value-toggle');
+      if (huntAnalyzerDisenchantedEquipmentsCheckbox) {
+        try {
+          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+          huntAnalyzerDisenchantedEquipmentsCheckbox.checked = parsedSettings.includeDisenchantedEquipments !== false;
+        } catch (error) {
+          console.error('[Mod Settings] Error reading Hunt Analyzer includeDisenchantedEquipments setting:', error);
+          huntAnalyzerDisenchantedEquipmentsCheckbox.checked = true;
+        }
+
+        huntAnalyzerDisenchantedEquipmentsCheckbox.addEventListener('change', () => {
+          const newValue = huntAnalyzerDisenchantedEquipmentsCheckbox.checked;
+
+          try {
+            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+            settings.includeDisenchantedEquipments = newValue;
+            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
+            console.log('[Mod Settings] Updated Hunt Analyzer includeDisenchantedEquipments:', newValue);
+          } catch (error) {
+            console.error('[Mod Settings] Error updating Hunt Analyzer includeDisenchantedEquipments setting:', error);
+          }
+
+          if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
+            window.HuntAnalyzerState.settings.includeDisenchantedEquipments = newValue;
           }
         });
       }

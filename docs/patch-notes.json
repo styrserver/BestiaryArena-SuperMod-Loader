@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.9.9",
+      "changes": [
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Gold total and Gold/h now support creature sell value with response-only tracking from game.sellMonster and quest.plantEat (no estimates). Gold source details were expanded in tooltips and copied logs (loot vs creatures, per-source rates, grouped shiny/sealed under creature totals), map summary now follows the same gold-source breakdown, and Dragon Plant details can be shown as collected value in tooltips plus autocollect status in the summary. Dust total and Dust/h now also split sources (loot vs disenchants) using response-only tracking from game.equipToDust (dustDiff), including tooltip and summary/map source-rate breakdowns. Hunt Analyzer session debug logs now include equipment drop counts, use compact single-line output, and duplicate intermediate sell/dust capture logs were removed in favor of reconcile logs. When sold-creature tracking is disabled, creature lines are now hidden from Gold/Gold-h tooltips instead of showing disabled labels."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Hunt Analyzer settings now include checkboxes to include/exclude creature sell value, disenchanted equipment dust, and Dragon Plant collect details in Gold/Gold-h and Dust/Dust-h tooltip and summary outputs."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Autoduster pending equipment retries now keep reward equipment IDs alive briefly when inventory snapshots lag (common in fast Manual Runner loops), and perform rapid same-cycle retries plus immediate equipDrop-id dust attempts before inventory fallback to make dusting happen much faster and avoid long Manual Runner stalls."
+        }
+      ]
+    },
+    {
       "version": "3.9.8",
       "changes": [
         {

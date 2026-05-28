@@ -1526,6 +1526,15 @@ async function waitForModCoordinationTasks(options = {}) {
     if (m.collectingRewards) ops.push('collecting rewards');
     if (m.handlingDaycare) ops.push('handling daycare');
     if (m.collectingSeashell) ops.push('collecting seashell');
+
+    // Also wait for Autoseller pending autoduster work so new manual runs
+    // do not race ahead before queued disenchant retries are finished.
+    const autosellerState = window.ModCoordination?.getModState('Autoseller');
+    const autosellerMeta = autosellerState?.metadata || {};
+    const pendingDisenchantCount = Number(autosellerMeta.pendingDisenchantCount) || 0;
+    if (pendingDisenchantCount > 0 || autosellerMeta.pendingDisenchantActive === true) {
+      ops.push(`autoseller disenchants pending (${pendingDisenchantCount})`);
+    }
     return ops;
   };
 
