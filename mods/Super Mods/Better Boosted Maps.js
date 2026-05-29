@@ -4460,6 +4460,7 @@ function cancelBoostedMapFarming(reason = 'unknown') {
     if (window.ModCoordination) {
         window.ModCoordination.updateModState('Better Boosted Maps', { active: false });
     }
+    updateExposedState();
     
     // Stop stamina tooltip monitoring
     stopStaminaTooltipMonitoring();
@@ -4515,6 +4516,7 @@ async function startBoostedMapFarming(force = false) {
         if (window.ModCoordination) {
             window.ModCoordination.updateModState('Better Boosted Maps', { active: true });
         }
+        updateExposedState();
         
         console.log(`[Better Boosted Maps] Starting boosted map farming: ${farmCheck.roomName}`);
         

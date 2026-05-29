@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "3.9.11",
+      "changes": [
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "Exposed farming state (isFarming) now updates immediately when boosted map farming starts or is cancelled, so other mods detect navigation in progress without stale flags."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Dragon Plant collect now tracks only the 5% collect bonus (not stored plant gold), adds it to Gold total and Gold sources (Loot | Creatures | Dragon Plant), and shows collect count as one event per collect session. Summary and tooltips use the Dragon Plant label with total bonus gold and (Nx) collects."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "fixed",
+          "text": "Registered with Mod Coordination at priority 5 (below Better Boosted Maps). Yields while Better Boosted Maps is navigating or farming, recognizes Better Boosted Maps autoplay sessions instead of treating them as player autoplay, and still applies low-stamina stops during delegated boosted-map farming."
+        }
+      ]
+    },
+    {
       "version": "3.9.10",
       "changes": [
         {

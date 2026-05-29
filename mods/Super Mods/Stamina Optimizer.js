@@ -792,6 +792,9 @@ function isRaidHunterActive() {
 // Check if Better Boosted Maps is currently active - Returns: True if active (boolean)
 function isBoostedMapsActive() {
     try {
+        if (window.ModCoordination?.isModActive('Better Boosted Maps')) {
+            return true;
+        }
         const boostedState = getBetterBoostedMapsState();
         // Check the exposed state (Better Boosted Maps uses betterBoostedMapsState, not boostedMapsState)
         if (boostedState) {
@@ -876,18 +879,52 @@ function isAutoplayControlledByOther() {
     return true;
 }
 
+function isBoostedMapsAction() {
+    const settings = loadSettings();
+    return (settings.action || DEFAULT_ACTION) === 'boosted-maps';
+}
+
+// True when Better Boosted Maps is running an autoplay session we should manage (not player autoplay)
+function isBetterBoostedMapsAutoplaySession() {
+    if (!isBoostedMapsAction()) {
+        return false;
+    }
+    try {
+        const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+        if (boardContext?.mode !== 'autoplay' || !isAutoplaySessionActive()) {
+            return false;
+        }
+    } catch (error) {
+        return false;
+    }
+    return isBoostedMapsActive();
+}
+
+function recognizeBoostedMapsAutoplaySession() {
+    if (isCurrentlyActive && wasInitiatedByMod) {
+        return;
+    }
+    isCurrentlyActive = true;
+    wasInitiatedByMod = true;
+    syncModCoordinationState();
+    updateButton();
+}
+
 // Check if Better Boosted Maps is farming a valid boosted map - Returns: True if farming valid map (boolean)
 function isBoostedMapFarmingValid() {
     try {
-        // Check if Better Boosted Maps is enabled and farming
-        const boostedState = window.betterBoostedMapsState;
-        if (!boostedState || !boostedState.enabled || !boostedState.isFarming) {
+        const boostedState = getBetterBoostedMapsState() || window.betterBoostedMapsState;
+        const modCoordActive = window.ModCoordination?.isModActive('Better Boosted Maps') === true;
+        if (!boostedState?.enabled && !modCoordActive) {
+            return false;
+        }
+        if (!boostedState?.isFarming && !modCoordActive) {
             return false;
         }
         
         // Check if there's current map info
-        if (!boostedState.currentMap) {
-            return false;
+        if (!boostedState?.currentMap) {
+            return modCoordActive;
         }
         
         // Load Better Boosted Maps settings
@@ -974,11 +1011,21 @@ function setStateFlag(flagName) {
     }
 }
 
+// Sync enabled/active flags with Mod Coordination
+function syncModCoordinationState() {
+    if (!window.ModCoordination) return;
+    window.ModCoordination.updateModState('Stamina Optimizer', {
+        enabled: isAutomationEnabled === AUTOMATION_ENABLED,
+        active: isCurrentlyActive && wasInitiatedByMod
+    });
+}
+
 // Helper to release control and reset state
 function releaseControlAndResetState() {
     isCurrentlyActive = false;
     wasInitiatedByMod = false;
     window.AutoplayManager?.releaseControl('Stamina Optimizer');
+    syncModCoordinationState();
     updateButton();
 }
 
@@ -989,6 +1036,7 @@ function requestControlAndSetActive() {
     }
     isCurrentlyActive = true;
     wasInitiatedByMod = true;
+    syncModCoordinationState();
     updateButton();
     return true;
 }
@@ -1032,6 +1080,9 @@ function isPlayerInitiatedAutoplay() {
         }
         // Paused/idle in autoplay mode (e.g. after mod clicked Pause) is not player-initiated blocking
         if (!isAutoplaySessionActive()) {
+            return false;
+        }
+        if (isBetterBoostedMapsAutoplaySession()) {
             return false;
         }
         const hasControl = window.AutoplayManager?.hasControl('Stamina Optimizer');
@@ -1537,8 +1588,17 @@ function triggerBetterBoostedMapsFunction() {
 // Start boosted map farming via Better Boosted Maps
 function startBoostedMapFarming() {
     try {
+        if (isBetterBoostedMapsAutoplaySession()) {
+            recognizeBoostedMapsAutoplaySession();
+            console.log('[Stamina Optimizer] Better Boosted Maps autoplay already running - not starting');
+            return;
+        }
         if (isPlayerInitiatedAutoplay()) {
             console.log('[Stamina Optimizer] Autoplay is player-initiated - not starting boosted map farming');
+            return;
+        }
+        if (window.ModCoordination?.isModActive('Better Boosted Maps')) {
+            console.log('[Stamina Optimizer] Better Boosted Maps is active (Mod Coordination) - not interfering');
             return;
         }
         const boostedState = getBetterBoostedMapsState();
@@ -1701,6 +1761,10 @@ async function monitorStamina() {
     updateButton();
     if (currentStamina >= maxStamina) {
         if (!isCurrentlyActive) {
+            if (isBetterBoostedMapsAutoplaySession()) {
+                recognizeBoostedMapsAutoplaySession();
+                return;
+            }
             if (isPlayerInitiatedAutoplay()) {
                 console.log('[Stamina Optimizer] Stamina high but player autoplay active — not starting');
                 return;
@@ -1823,11 +1887,14 @@ function startAutoplayStateMonitoring() {
                     console.log('[Stamina Optimizer] Raid Hunter took control - releasing our control');
                     releaseControlAndResetState();
                 }
-                if (isAutoplay && window.AutoplayManager?.hasControl('Stamina Optimizer')) {
+                if (isAutoplay && isBetterBoostedMapsAutoplaySession()) {
+                    recognizeBoostedMapsAutoplaySession();
+                } else if (isAutoplay && window.AutoplayManager?.hasControl('Stamina Optimizer')) {
                     if (!isCurrentlyActive || !wasInitiatedByMod) {
                         console.log('[Stamina Optimizer] Autoplay started (via Better Boosted Maps) - recognizing as our own');
                         isCurrentlyActive = true;
                         wasInitiatedByMod = true;
+                        syncModCoordinationState();
                         updateButton();
                     }
                 } else if (isAutoplay && isAutoplaySessionActive() && !isCurrentlyActive && !wasInitiatedByMod && !isStartingAutoplay) {
@@ -2369,6 +2436,7 @@ function createSettingsContent() {
     newAutomationCheckbox.addEventListener('change', (e) => {
         isAutomationEnabled = e.target.checked ? AUTOMATION_ENABLED : AUTOMATION_DISABLED;
         saveAutomationState();
+        syncModCoordinationState();
         updateButton();
         
         if (isAutomationEnabled) {
@@ -2786,6 +2854,7 @@ function saveAutomationState() {
 function toggleAutomation() {
     isAutomationEnabled = isAutomationEnabled === AUTOMATION_DISABLED ? AUTOMATION_ENABLED : AUTOMATION_DISABLED;
     saveAutomationState();
+    syncModCoordinationState();
     updateButton();
     
     if (isAutomationEnabled) {
@@ -2820,7 +2889,14 @@ function init() {
         console.error('[Stamina Optimizer] API not available, cannot initialize');
         return;
     }
+    if (window.ModCoordination) {
+        window.ModCoordination.registerMod('Stamina Optimizer', {
+            priority: 5,
+            metadata: { description: 'Automatically manages stamina by starting/stopping gameplay' }
+        });
+    }
     loadAutomationState();
+    syncModCoordinationState();
     createButton();
     if (isAutomationEnabled) {
         startStaminaMonitoring();
@@ -2944,6 +3020,10 @@ function cleanupStaminaOptimizer() {
 
         if (api && api.ui && api.ui.removeButton) {
             api.ui.removeButton(BUTTON_ID);
+        }
+
+        if (window.ModCoordination) {
+            window.ModCoordination.unregisterMod('Stamina Optimizer');
         }
 
         console.log('[Stamina Optimizer] Cleanup completed');

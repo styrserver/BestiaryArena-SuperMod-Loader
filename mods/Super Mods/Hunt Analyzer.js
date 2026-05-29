@@ -1865,6 +1865,9 @@ const huntAnalyzerPendingCreatureSellEvents = [];
 const huntAnalyzerPendingDisenchantDustEvents = [];
 let huntAnalyzerLastObservedPlantGold = null;
 let huntAnalyzerLastCollectedPlantGoldValue = 0;
+let huntAnalyzerPlantCollectBurstTimeoutId = null;
+const HUNT_ANALYZER_PLANT_COLLECT_BURST_MS = 12000;
+const DRAGON_PLANT_COLLECT_BONUS_RATE = 0.05;
 
 // =======================
 // 2.9. Panel Management Class
@@ -4888,6 +4891,7 @@ function getSessionDisenchantDustValue(session) {
 
 function getFilteredGoldBreakdown() {
     const includeCreatureSellValue = HuntAnalyzerState.settings.includeCreatureSellValue !== false;
+    const includeDragonPlantCollect = HuntAnalyzerState.settings.includeDragonPlantCollect !== false;
     let baseGold = 0;
     let creatureSellGold = 0;
 
@@ -4900,11 +4904,24 @@ function getFilteredGoldBreakdown() {
         creatureSellGold += getSessionCreatureSellValue(session);
     });
 
-    const total = includeCreatureSellValue ? (baseGold + creatureSellGold) : baseGold;
+    const dragonPlantBonusGold = includeDragonPlantCollect
+        ? Math.max(0, Math.floor(Number(HuntAnalyzerState.totals.dragonPlantBonusGold) || 0))
+        : 0;
+
+    let total = baseGold;
+    if (includeCreatureSellValue) {
+        total += creatureSellGold;
+    }
+    if (includeDragonPlantCollect) {
+        total += dragonPlantBonusGold;
+    }
+
     return {
         baseGold: Math.max(0, Math.floor(baseGold)),
         creatureSellGold: Math.max(0, Math.floor(creatureSellGold)),
+        dragonPlantBonusGold,
         includeCreatureSellValue,
+        includeDragonPlantCollect,
         total: Math.max(0, Math.floor(total))
     };
 }
@@ -4958,38 +4975,35 @@ function getDragonPlantAutocollectSummaryStatus() {
     if (HuntAnalyzerState.settings.includeDragonPlantCollect === false) {
         return null;
     }
-    let autosellerSettings = null;
-    try {
-        const raw = localStorage.getItem('autoseller-settings');
-        autosellerSettings = raw ? JSON.parse(raw) : null;
-    } catch (_e) {
-        autosellerSettings = null;
-    }
-
-    if (!autosellerSettings || autosellerSettings.autoplantAutocollectChecked !== true) {
-        return null;
-    }
 
     const plantDetails = getDragonPlantTooltipDetails();
-    if (!plantDetails) {
-        return `${formatExpValue(5000)} (${t('mods.huntAnalyzer.notAvailable')})`;
+    if (!plantDetails || plantDetails.collectCount <= 0) {
+        return null;
     }
-    return `${formatExpValue(plantDetails.perCollectGold)} (${plantDetails.collectCount}x)`;
+    return `${formatExpValue(plantDetails.totalBonusGold)} (${plantDetails.collectCount}x)`;
+}
+
+function registerDragonPlantCollectEvent(withdrawnFromPlant) {
+    const withdrawn = Math.max(0, Math.floor(Number(withdrawnFromPlant) || 0));
+    if (withdrawn <= 0) return;
+
+    const bonusGold = Math.floor(withdrawn * DRAGON_PLANT_COLLECT_BONUS_RATE);
+    if (bonusGold <= 0) return;
+
+    huntAnalyzerLastCollectedPlantGoldValue = bonusGold;
+    HuntAnalyzerState.totals.dragonPlantBonusGold += bonusGold;
+
+    if (huntAnalyzerPlantCollectBurstTimeoutId == null) {
+        HuntAnalyzerState.totals.dragonPlantCollects += 1;
+    }
+    clearTimeout(huntAnalyzerPlantCollectBurstTimeoutId);
+    huntAnalyzerPlantCollectBurstTimeoutId = setTimeout(() => {
+        huntAnalyzerPlantCollectBurstTimeoutId = null;
+    }, HUNT_ANALYZER_PLANT_COLLECT_BURST_MS);
 }
 
 function trackDragonPlantCollectionValue() {
     if (HuntAnalyzerState.settings.includeDragonPlantCollect === false) {
-        huntAnalyzerLastObservedPlantGold = null;
-        return;
-    }
-    let autosellerSettings = null;
-    try {
-        const raw = localStorage.getItem('autoseller-settings');
-        autosellerSettings = raw ? JSON.parse(raw) : null;
-    } catch (_e) {
-        autosellerSettings = null;
-    }
-    if (!autosellerSettings || autosellerSettings.autoplantAutocollectChecked !== true) {
         huntAnalyzerLastObservedPlantGold = null;
         return;
     }
@@ -5000,12 +5014,7 @@ function trackDragonPlantCollectionValue() {
 
     if (Number.isFinite(huntAnalyzerLastObservedPlantGold) && plantGold < huntAnalyzerLastObservedPlantGold) {
         const collected = Math.floor(huntAnalyzerLastObservedPlantGold - plantGold);
-        if (collected > 0) {
-            huntAnalyzerLastCollectedPlantGoldValue = collected;
-            const collectCountDelta = Math.max(1, Math.round(collected / 5000));
-            HuntAnalyzerState.totals.dragonPlantCollects += collectCountDelta;
-            HuntAnalyzerState.totals.dragonPlantBonusGold += collectCountDelta * 5000;
-        }
+        registerDragonPlantCollectEvent(collected);
     }
     huntAnalyzerLastObservedPlantGold = plantGold;
 }
@@ -5015,10 +5024,10 @@ function getDragonPlantTooltipDetails() {
         return null;
     }
     const collectCount = Math.max(0, Math.floor(Number(HuntAnalyzerState.totals.dragonPlantCollects) || 0));
+    const totalBonusGold = Math.max(0, Math.floor(Number(HuntAnalyzerState.totals.dragonPlantBonusGold) || 0));
     return {
-        perCollectGold: 5000,
         collectCount,
-        totalBonusGold: collectCount * 5000
+        totalBonusGold
     };
 }
 
@@ -5213,6 +5222,7 @@ function generateSummaryLogText() {
     const dragonPlantStatus = getDragonPlantAutocollectSummaryStatus();
     const overallLootGoldRate = filteredTimeHours > 0 ? Math.floor(goldBreakdown.baseGold / filteredTimeHours) : 0;
     const overallCreatureGoldRate = filteredTimeHours > 0 ? Math.floor(goldBreakdown.creatureSellGold / filteredTimeHours) : 0;
+    const overallDragonPlantGoldRate = filteredTimeHours > 0 ? Math.floor(goldBreakdown.dragonPlantBonusGold / filteredTimeHours) : 0;
     const overallLootDustRate = filteredTimeHours > 0 ? Math.floor(dustBreakdown.lootDust / filteredTimeHours) : 0;
     const overallDisenchantDustRate = filteredTimeHours > 0 ? Math.floor(dustBreakdown.equipmentDisenchantDust / filteredTimeHours) : 0;
     const overallCreatureSqueezeDustRate = filteredTimeHours > 0 ? Math.floor((dustBreakdown.creatureSqueezeDust || 0) / filteredTimeHours) : 0;
@@ -5233,8 +5243,14 @@ function generateSummaryLogText() {
     summary += `${t('mods.huntAnalyzer.winLoss')}: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)\n`;
     summary += `${t('mods.huntAnalyzer.timeElapsed')}: ${formatTime(filteredTimeHours * 60 * 60 * 1000)}\n`;
     summary += `${t('mods.huntAnalyzer.gold')}: ${goldBreakdown.total} | ${t('mods.huntAnalyzer.dust')}: ${dustBreakdown.total}\n`;
-    summary += `${t('mods.huntAnalyzer.goldSources')}: ${t('mods.huntAnalyzer.loot')} ${goldBreakdown.baseGold} | ${t('mods.huntAnalyzer.creatures')} ${goldBreakdown.creatureSellGold}\n`;
-    summary += `${t('mods.huntAnalyzer.goldSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${overallLootGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${t('mods.huntAnalyzer.creatures')} ${overallCreatureGoldRate} ${t('mods.huntAnalyzer.goldPerHour')}\n`;
+    let goldSourcesLine = `${t('mods.huntAnalyzer.loot')} ${goldBreakdown.baseGold} | ${t('mods.huntAnalyzer.creatures')} ${goldBreakdown.creatureSellGold}`;
+    let goldSourceRatesLine = `${t('mods.huntAnalyzer.loot')} ${overallLootGoldRate} ${t('mods.huntAnalyzer.goldPerHour')} | ${t('mods.huntAnalyzer.creatures')} ${overallCreatureGoldRate} ${t('mods.huntAnalyzer.goldPerHour')}`;
+    if (goldBreakdown.includeDragonPlantCollect) {
+        goldSourcesLine += ` | ${t('mods.huntAnalyzer.dragonPlant')} ${goldBreakdown.dragonPlantBonusGold}`;
+        goldSourceRatesLine += ` | ${t('mods.huntAnalyzer.dragonPlant')} ${overallDragonPlantGoldRate} ${t('mods.huntAnalyzer.goldPerHour')}`;
+    }
+    summary += `${t('mods.huntAnalyzer.goldSources')}: ${goldSourcesLine}\n`;
+    summary += `${t('mods.huntAnalyzer.goldSourceRates')}: ${goldSourceRatesLine}\n`;
     if (dustBreakdown.includeDisenchantedEquipments) {
         summary += `${t('mods.huntAnalyzer.dustSources')}: ${t('mods.huntAnalyzer.loot')} ${dustBreakdown.lootDust} | ${t('mods.huntAnalyzer.disenchants')} ${dustBreakdown.equipmentDisenchantDust} | ${t('mods.huntAnalyzer.creatureSqueezes')} ${dustBreakdown.creatureSqueezeDust || 0}\n`;
         summary += `${t('mods.huntAnalyzer.dustSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${overallLootDustRate} ${t('mods.huntAnalyzer.dustPerHour')} | ${t('mods.huntAnalyzer.disenchants')} ${overallDisenchantDustRate} ${t('mods.huntAnalyzer.dustPerHour')} | ${t('mods.huntAnalyzer.creatureSqueezes')} ${overallCreatureSqueezeDustRate} ${t('mods.huntAnalyzer.dustPerHour')}\n`;
@@ -5243,7 +5259,7 @@ function generateSummaryLogText() {
         summary += `${t('mods.huntAnalyzer.dustSourceRates')}: ${t('mods.huntAnalyzer.loot')} ${overallLootDustRate} ${t('mods.huntAnalyzer.dustPerHour')}\n`;
     }
     if (dragonPlantStatus) {
-        summary += `${t('mods.huntAnalyzer.dragonPlantAutocollect')}: ${dragonPlantStatus}\n`;
+        summary += `${t('mods.huntAnalyzer.dragonPlant')}: ${dragonPlantStatus}\n`;
     }
     summary += `${t('mods.huntAnalyzer.equipmentDrops')}: ${HuntAnalyzerState.totals.equipment} | ${t('mods.huntAnalyzer.creatureDrops')}: ${HuntAnalyzerState.totals.creatures} (${t('mods.huntAnalyzer.shinyDrops')}: ${HuntAnalyzerState.totals.shiny} | ${t('mods.huntAnalyzer.sealedDrops')}: ${HuntAnalyzerState.totals.sealed})\n`;
     summary += `${t('mods.huntAnalyzer.totalStaminaSpent')}: ${HuntAnalyzerState.totals.staminaSpent}\n`;
@@ -5329,11 +5345,13 @@ function updatePanelResourceTotalDisplays(elementById) {
             const creatureLine = breakdown.includeCreatureSellValue
                 ? `\n${t('mods.huntAnalyzer.creatures')}: ${formatExactInt(breakdown.creatureSellGold)}`
                 : '';
-            const dragonPlantTooltip = getDragonPlantTooltipDetails();
+            const dragonPlantLine = breakdown.includeDragonPlantCollect
+                ? `\n${t('mods.huntAnalyzer.dragonPlant')}: ${formatExactInt(breakdown.dragonPlantBonusGold)}`
+                : '';
             setCompactTotalDisplay(element, breakdown.total);
             element.setAttribute(
                 'title',
-                `${t('mods.huntAnalyzer.lootGold')}: ${formatExactInt(breakdown.baseGold)}${creatureLine}${dragonPlantTooltip ? `\n${t('mods.huntAnalyzer.dragonPlant')}: ${formatExactInt(dragonPlantTooltip.totalBonusGold)}` : ''}`
+                `${t('mods.huntAnalyzer.lootGold')}: ${formatExactInt(breakdown.baseGold)}${creatureLine}${dragonPlantLine}`
             );
             return;
         }
@@ -6752,12 +6770,15 @@ function updatePanelRateDisplays(elementById, filteredTimeHours = getFilteredTim
     const creatureRateLine = goldBreakdown.includeCreatureSellValue
         ? `\n${t('mods.huntAnalyzer.creatures')}/h: ${formatExactInt(creatureGoldRate)}`
         : '';
-    const dragonPlantTooltip = getDragonPlantTooltipDetails();
+    const dragonPlantGoldRate = filteredTimeHours > 0 ? Math.floor(goldBreakdown.dragonPlantBonusGold / filteredTimeHours) : 0;
+    const dragonPlantRateLine = goldBreakdown.includeDragonPlantCollect
+        ? `\n${t('mods.huntAnalyzer.dragonPlant')}/h: ${formatExactInt(dragonPlantGoldRate)}`
+        : '';
     setCompactRateDisplay(
         goldRateElement,
         'mods.huntAnalyzer.goldPerHour',
         rates.gold,
-        `${t('mods.huntAnalyzer.lootGoldPerHour')}: ${formatExactInt(rawGoldRate)}${creatureRateLine}${dragonPlantTooltip ? `\n${t('mods.huntAnalyzer.dragonPlant')}: ${formatExactInt(dragonPlantTooltip.totalBonusGold)}` : ''}`
+        `${t('mods.huntAnalyzer.lootGoldPerHour')}: ${formatExactInt(rawGoldRate)}${creatureRateLine}${dragonPlantRateLine}`
     );
     HUNT_ANALYZER_RATE_DISPLAY_SPECS.forEach(({ id, labelKey, rateKey }) => {
         if (id === 'mod-gold-rate') return;
@@ -8041,6 +8062,10 @@ async function cleanupHuntAnalyzer() {
         huntAnalyzerPendingDisenchantDustEvents.length = 0;
         huntAnalyzerLastObservedPlantGold = null;
         huntAnalyzerLastCollectedPlantGoldValue = 0;
+        if (huntAnalyzerPlantCollectBurstTimeoutId != null) {
+            clearTimeout(huntAnalyzerPlantCollectBurstTimeoutId);
+            huntAnalyzerPlantCollectBurstTimeoutId = null;
+        }
         if (huntAnalyzerOriginalFetch && huntAnalyzerFetchWrapper && typeof window !== 'undefined' && window.fetch === huntAnalyzerFetchWrapper) {
             window.fetch = huntAnalyzerOriginalFetch;
         }
