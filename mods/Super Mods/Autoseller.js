@@ -578,7 +578,7 @@
                 if (!monster || monster.locked || isShinyCreature(monster)) {
                     return false;
                 }
-                return getCreatureNameFromMonster(monster) === creatureName;
+                return inventoryMonsterMatchesCreatureName(creatureName, monster);
             });
 
             for (const band of UPGRADE_LADDER_BANDS) {
@@ -3599,7 +3599,19 @@
 
     // Helper function to get all creatures for Autoplant
     function getAllAutoplantCreatures() {
-        return window.creatureDatabase?.ALL_CREATURES || [];
+        const db = window.creatureDatabase;
+        if (typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function') {
+            return db.getAutoscrollAutosellerCreaturePickerNames();
+        }
+        if (typeof db?.getCreaturePickerNames === 'function') {
+            return db.getCreaturePickerNames().filter((name) => {
+                if (typeof db.isGazerCreatureName === 'function') {
+                    return !db.isGazerCreatureName(name);
+                }
+                return !String(name).toLowerCase().includes('gazer');
+            });
+        }
+        return (db?.ALL_CREATURES || []).filter((name) => !String(name).toLowerCase().includes('gazer'));
     }
 
     // Helper function to create creature boxes for Autoplant
@@ -8090,7 +8102,15 @@
     
     // Helper function to get creature name from monster data
     function getCreatureNameFromMonster(invMonster) {
-        if (!invMonster?.gameId || !globalThis.state?.utils?.getMonster) {
+        if (!invMonster?.gameId) {
+            return null;
+        }
+        const db = window.creatureDatabase;
+        if (typeof db?.getDisplayNameForOwnedMonster === 'function') {
+            const displayName = db.getDisplayNameForOwnedMonster(invMonster);
+            if (displayName) return displayName;
+        }
+        if (!globalThis.state?.utils?.getMonster) {
             return null;
         }
         try {
@@ -8099,6 +8119,14 @@
         } catch (e) {
             return null;
         }
+    }
+
+    function inventoryMonsterMatchesCreatureName(creatureName, invMonster) {
+        const db = window.creatureDatabase;
+        if (typeof db?.monsterMatchesCreatureDisplay === 'function') {
+            return db.monsterMatchesCreatureDisplay(creatureName, invMonster);
+        }
+        return getCreatureNameFromMonster(invMonster) === creatureName;
     }
     
     // Helper function to calculate total genes from monster stats
@@ -9063,7 +9091,12 @@
 
         function cleanupIgnoreListsWhenReady() {
             // Check if databases are loaded
-            const availableCreatures = window.creatureDatabase?.ALL_CREATURES;
+            const db = window.creatureDatabase;
+            const availableCreatures = typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function'
+                ? db.getAutoscrollAutosellerCreaturePickerNames()
+                : typeof db?.getCreaturePickerNames === 'function'
+                    ? db.getCreaturePickerNames().filter((name) => (typeof db.isGazerCreatureName === 'function' ? !db.isGazerCreatureName(name) : !String(name).toLowerCase().includes('gazer')))
+                    : db?.ALL_CREATURES;
             const availableEquipment = window.equipmentDatabase?.ALL_EQUIPMENT;
 
             if (!availableCreatures || !availableEquipment || availableCreatures.length === 0 || availableEquipment.length === 0) {

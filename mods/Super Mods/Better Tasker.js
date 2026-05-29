@@ -36,6 +36,7 @@ const DEFAULT_TASK_START_DELAY = 3;
 
 // Creatures that cannot appear in tasker tasks
 const UNSELECTABLE_CREATURES = [
+    'Albino Gazer',
     'Chubby Gazer',
     'Dwarf Merrymancer',
     'Firestarter',

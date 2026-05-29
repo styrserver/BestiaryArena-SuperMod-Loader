@@ -1803,6 +1803,11 @@ function getCreatureNameFromGameId(gameId) {
 
 function getCreatureNameFromMonster(monster) {
   if (!monster) return '';
+  const db = globalThis.creatureDatabase;
+  if (typeof db?.getDisplayNameForOwnedMonster === 'function') {
+    const displayName = db.getDisplayNameForOwnedMonster(monster);
+    if (displayName) return displayName;
+  }
   const name = monster.metadata?.name || monster.name;
   if (name) return name;
   const gameId = monster.gameId ?? monster.metadata?.id;

@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "3.9.12",
+      "changes": [
+        {
+          "mod": "creature-database.js",
+          "type": "added",
+          "text": "Shiny Mystic Gazer is exposed as Albino Gazer for Cyclopedia and creature pickers. Shared helpers split inventory by display name (shiny-only vs non-shiny Mystic), resolve portraits, and mark other gazers as having no shiny variant. EVENT_CREATURES and isEventCreatureName() exclude seasonal creatures (Merrymancer, Gumslinger, Saboteur, Gummy Raider, Reindeer, Unionized Goblin) from Autoscroller and Autoseller pickers; Yeti remains selectable."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Bestiary lists Albino Gazer separately from Mystic Gazer (shiny vs non-shiny gameId 97), including roles, portraits, and owned panels that no longer mix the two."
+        },
+        {
+          "mod": "Autoscroller",
+          "type": "changed",
+          "text": "Creature picker is a searchable icon grid (5 per row, Dice Roller–style) with green tile selection; includes Albino Gazer; excludes gazers and seasonal event creatures. Autosell option label is dynamic: \"Late-game hunt\" when tier 5 scroll is selected with no targets (before enabling the checkbox), otherwise \"Autosell non-selected\"; Hunt button still requires the checkbox. Hunt targets, stop conditions, and autosell match shiny and non-shiny Mystic separately. Modal 770px wide, creatures column 190px."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Autoplant creature lists and keep/ignore matching use creature-database display rules so Albino and Mystic Gazer settings apply to the correct inventory copies."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Albino Gazer added to the unselectable creature list alongside the other gazers."
+        },
+        {
+          "mod": "Challenges",
+          "type": "changed",
+          "text": "Albino Gazer uses the same ×0.1 difficulty multiplier as other gazers."
+        },
+        {
+          "mod": "Dice Roller",
+          "type": "changed",
+          "text": "Auto Dice Roller modal is 710px wide (was 700px); dice rules column is 230px (was 220px)."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Shiny Mystic Gazer drops are labeled Albino Gazer in session creature details."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Logs and inject messages use Albino Gazer for shiny Mystic Gazer copies."
+        }
+      ]
+    },
+    {
       "version": "3.9.11",
       "changes": [
         {

@@ -156,6 +156,33 @@ const UNOBTAINABLE_CREATURES = (window.creatureDatabase?.UNOBTAINABLE_CREATURES 
 const ALL_CREATURES = (window.creatureDatabase?.ALL_CREATURES || [])
   .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
 
+/** Obtainable species + Cyclopedia-only entries (e.g. Albino Gazer = shiny Mystic Gazer). */
+function getCyclopediaAllCreatures() {
+  const db = window.creatureDatabase;
+  if (typeof db?.getCyclopediaCreatureNames === 'function') {
+    return db.getCyclopediaCreatureNames().filter((name) => !HIDE_FROM_CYCLOPEDIA.includes(name));
+  }
+  const base = (db?.ALL_CREATURES?.length ? db.ALL_CREATURES : ALL_CREATURES)
+    .filter((name) => !HIDE_FROM_CYCLOPEDIA.includes(name));
+  const extra = db?.CYCLOPEDIA_EXTRA_CREATURES ?? ['Albino Gazer'];
+  return [...new Set([...base, ...extra])].sort((a, b) => a.localeCompare(b));
+}
+
+function cyclopediaResolveCreatureQuery(creatureName) {
+  const db = window.creatureDatabase;
+  if (typeof db?.resolveCreatureDisplay === 'function') {
+    return db.resolveCreatureDisplay(creatureName);
+  }
+  return {
+    displayName: creatureName,
+    gameId: null,
+    baseSpecies: creatureName,
+    forceShiny: false,
+    shinyOnly: false,
+    nonShinyOnly: false
+  };
+}
+
 // Get equipment data from centralized database
 const ALL_EQUIPMENT = window.equipmentDatabase?.ALL_EQUIPMENT || [];
 const HARDCODED_BOOSTED_MAP = window.equipmentDatabase?.HARDCODED_BOOSTED_MAP || {};
@@ -1503,7 +1530,7 @@ const CyclopediaHomeSearch = (() => {
 
     // Creatures (name + roles)
     const creatureNames = [
-      ...(Array.isArray(GAME_DATA.ALL_CREATURES) ? GAME_DATA.ALL_CREATURES : []),
+      ...getCyclopediaAllCreatures(),
       ...(Array.isArray(GAME_DATA.UNOBTAINABLE_CREATURES) ? GAME_DATA.UNOBTAINABLE_CREATURES : [])
     ];
     creatureNames.forEach((name) => {
@@ -3032,25 +3059,29 @@ function getCreatureStatus(creatureName) {
     
     const playerContext = globalThis.state.player.getSnapshot().context;
     const ownedMonsters = playerContext.monsters || [];
-    
-    // Get the gameId for this creature name
-    let creatureGameId = null;
-    
-    // Try to get gameId from monsterNameMap first
-    if (cyclopediaState.monsterNameMap) {
-      const entry = cyclopediaState.monsterNameMap.get(creatureName.toLowerCase());
+    const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
+
+    // Get the gameId for this creature name (Albino Gazer → Mystic Gazer / 97)
+    let creatureGameId = displayQuery.gameId ?? null;
+    const lookupName = (displayQuery.baseSpecies || creatureName).toLowerCase();
+
+    if (creatureGameId === null && cyclopediaState.monsterNameMap) {
+      const entry = cyclopediaState.monsterNameMap.get(lookupName);
       if (entry) {
         creatureGameId = entry.index;
       }
     }
-    
-    // Fallback to BestiaryModAPI utility
+
     if (creatureGameId === null && window.BestiaryModAPI?.utility?.maps) {
-      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(creatureName.toLowerCase());
+      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(lookupName);
     }
-    
-    // Find all matching monsters for this creature
-    const matchingMonsters = ownedMonsters.filter(monster => monster.gameId === creatureGameId);
+
+    let matchingMonsters = ownedMonsters.filter((monster) => monster.gameId === creatureGameId);
+    if (displayQuery.shinyOnly) {
+      matchingMonsters = matchingMonsters.filter((monster) => monster.shiny === true);
+    } else if (displayQuery.nonShinyOnly) {
+      matchingMonsters = matchingMonsters.filter((monster) => monster.shiny !== true);
+    }
     
     if (matchingMonsters.length === 0) {
       return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false, hundoTier: false };
@@ -3135,6 +3166,10 @@ function isCreatureOwned(creatureName) {
 
 // Function to check if user has any shiny variants of a creature
 function hasShinyCreature(creatureName) {
+  const db = window.creatureDatabase;
+  if (typeof db?.creatureHasShinyVariant === 'function' && !db.creatureHasShinyVariant(creatureName)) {
+    return false;
+  }
   return getCreatureStatus(creatureName).shiny;
 }
 
@@ -3181,17 +3216,25 @@ function getAwakenTrackerBestiarySortKey(creatureName) {
     const norm = String(creatureName || '').trim().toLowerCase();
     if (!norm) return empty;
 
-    let creatureGameId = null;
-    if (cyclopediaState.monsterNameMap) {
-      const entry = cyclopediaState.monsterNameMap.get(norm);
+    const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
+    let creatureGameId = displayQuery.gameId ?? null;
+    const lookupName = (displayQuery.baseSpecies || creatureName).trim().toLowerCase();
+
+    if (creatureGameId == null && cyclopediaState.monsterNameMap) {
+      const entry = cyclopediaState.monsterNameMap.get(lookupName);
       if (entry) creatureGameId = entry.index;
     }
     if (creatureGameId == null && window.BestiaryModAPI?.utility?.maps) {
-      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(norm);
+      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(lookupName);
     }
     if (creatureGameId == null) return empty;
 
-    const matching = ownedMonsters.filter((m) => m && m.gameId === creatureGameId);
+    let matching = ownedMonsters.filter((m) => m && m.gameId === creatureGameId);
+    if (displayQuery.shinyOnly) {
+      matching = matching.filter((m) => m.shiny === true);
+    } else if (displayQuery.nonShinyOnly) {
+      matching = matching.filter((m) => m.shiny !== true);
+    }
     if (matching.length === 0) return empty;
 
     const expToLevel = globalThis.state?.utils?.expToCurrentLevel;
@@ -3345,15 +3388,27 @@ function isEquipmentT5(equipmentName) {
 // Function to get creature roles from monster data
 function getCreatureRoles(creatureName) {
   try {
-    if (!cyclopediaState.monsterNameMap || typeof creatureName !== 'string') {
+    if (typeof creatureName !== 'string') {
       return null;
     }
-    
-    const entry = cyclopediaState.monsterNameMap.get(creatureName.toLowerCase());
-    if (entry && entry.monster && entry.monster.metadata && entry.monster.metadata.roles) {
+
+    const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
+    const lookupName = (displayQuery.baseSpecies || creatureName).toLowerCase();
+
+    if (typeof buildCyclopediaMonsterNameMap === 'function') {
+      buildCyclopediaMonsterNameMap();
+    }
+
+    const entry = cyclopediaState.monsterNameMap?.get?.(lookupName);
+    if (entry?.monster?.metadata?.roles) {
       return entry.monster.metadata.roles;
     }
-    
+
+    const fromDb = window.creatureDatabase?.findMonsterByName?.(lookupName);
+    if (fromDb?.metadata?.roles) {
+      return fromDb.metadata.roles;
+    }
+
     return null;
   } catch (error) {
     console.warn('[Cyclopedia] Error getting creature roles:', error);
@@ -5765,7 +5820,7 @@ function openCyclopediaModal(options) {
     let selectedEquipment = null;
     let selectedInventory = null;
 
-    const allCreatures = GAME_DATA.ALL_CREATURES;
+    const allCreatures = getCyclopediaAllCreatures();
 
     let normalizedCreature = creatureToSelect && typeof creatureToSelect === 'string' ? creatureToSelect.trim().toLowerCase() : null;
     let foundCreature = null;
@@ -6033,7 +6088,7 @@ function openCyclopediaModal(options) {
 
       const { searchContainer: bestiarySearchContainer, searchInput: bestiarySearchInput, filterBtn: bestiaryFilterBtn } = createCyclopediaSearchBar('Search creatures');
       let bestiaryFilterMode = 'name';
-      const creaturesBox = createCreatureBox('Creatures', GAME_DATA.ALL_CREATURES);
+      const creaturesBox = createCreatureBox('Creatures', getCyclopediaAllCreatures());
       const unobtainableBox = createCreatureBox('Unobtainable', GAME_DATA.UNOBTAINABLE_CREATURES);
 
       const creatureUsageByMapStats = (() => {
@@ -6800,7 +6855,7 @@ function openCyclopediaModal(options) {
               if (!creatureName) return;
               const normalizedCreatureName = creatureName.toLowerCase();
               const canonicalCreatureName =
-                GAME_DATA.ALL_CREATURES.find((c) => c.toLowerCase() === normalizedCreatureName) ||
+                getCyclopediaAllCreatures().find((c) => c.toLowerCase() === normalizedCreatureName) ||
                 GAME_DATA.UNOBTAINABLE_CREATURES.find((c) => c.toLowerCase() === normalizedCreatureName) ||
                 creatureName;
               if (typeof setActiveTab === 'function') {
@@ -13927,7 +13982,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               if (!creatureName || creatureName === 'Unknown') return;
               const normalizedCreatureName = creatureName.toLowerCase();
               const canonicalCreatureName =
-                GAME_DATA.ALL_CREATURES.find(c => c.toLowerCase() === normalizedCreatureName) ||
+                getCyclopediaAllCreatures().find(c => c.toLowerCase() === normalizedCreatureName) ||
                 GAME_DATA.UNOBTAINABLE_CREATURES.find(c => c.toLowerCase() === normalizedCreatureName) ||
                 creatureName;
               if (typeof setActiveTab === 'function') {
@@ -16102,11 +16157,17 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   let monsterId = null;
   let monster = null;
 
+  const displayQuery = cyclopediaResolveCreatureQuery(name);
+  const lookupName = (displayQuery.baseSpecies || name).toLowerCase();
+  const canUseShinySprite = window.creatureDatabase?.creatureHasShinyVariant?.(name) !== false;
+  const effectiveShinyPortraits = displayQuery.forceShiny === true
+    || (showShinyPortraits && canUseShinySprite);
+
   if (cyclopediaState.monsterNameMap && typeof name === 'string') {
-    const entry = cyclopediaState.monsterNameMap.get(name.toLowerCase());
+    const entry = cyclopediaState.monsterNameMap.get(lookupName);
     if (entry) {
       monster = entry.monster;
-      monsterId = monster.gameId !== undefined ? monster.gameId : entry.index;
+      monsterId = displayQuery.gameId ?? (monster.gameId !== undefined ? monster.gameId : entry.index);
       if (monsterId === undefined) {
         // Monster ID not found
       }
@@ -16147,7 +16208,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
         // Override portrait for shiny mode using the same approach as inventory
         // Check if creature is unobtainable - if so, don't apply shiny mode
         const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === name.toLowerCase());
-        if (showShinyPortraits && !isUnobtainable) {
+        if (effectiveShinyPortraits && !isUnobtainable) {
           const spriteImg = monsterSprite.querySelector('img.actor.spritesheet');
           if (spriteImg) {
             spriteImg.setAttribute('data-shiny', 'true');
@@ -16158,7 +16219,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
           const shinyIcon = document.createElement('img');
           shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
           shinyIcon.alt = 'shiny';
-          shinyIcon.title = 'Shiny';
+          shinyIcon.title = displayQuery.forceShiny ? 'Albino (shiny Mystic Gazer)' : 'Shiny';
           shinyIcon.style.position = 'absolute';
           shinyIcon.style.top = '4px';
           shinyIcon.style.left = '4px';
@@ -17067,7 +17128,18 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   try {
     const playerContext = globalThis.state?.player?.getSnapshot?.().context;
     if (playerContext && Array.isArray(playerContext.monsters) && monsterId != null) {
-      ownedMonsters = playerContext.monsters.filter(m => m.gameId === monsterId);
+      const db = window.creatureDatabase;
+      if (typeof db?.filterMonstersForCreatureDisplay === 'function') {
+        ownedMonsters = db.filterMonstersForCreatureDisplay(name, playerContext.monsters);
+      } else {
+        const displayQuery = cyclopediaResolveCreatureQuery(name);
+        ownedMonsters = playerContext.monsters.filter((m) => m.gameId === monsterId);
+        if (displayQuery.shinyOnly) {
+          ownedMonsters = ownedMonsters.filter((m) => m.shiny === true);
+        } else if (displayQuery.nonShinyOnly) {
+          ownedMonsters = ownedMonsters.filter((m) => m.shiny !== true);
+        }
+      }
     }
   } catch (e) {}
   const col3Title = document.createElement('h2');
@@ -18007,17 +18079,27 @@ function cyclopediaStripEquipmentPortraitChrome(root) {
 
 function cyclopediaResolveMonsterByName(creatureName) {
   if (!creatureName || typeof buildCyclopediaMonsterNameMap !== 'function') return null;
+  const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
   buildCyclopediaMonsterNameMap();
-  const entry = cyclopediaState.monsterNameMap?.get?.(String(creatureName).toLowerCase());
-  if (!entry?.monster) return null;
+  const lookupName = (displayQuery.baseSpecies || creatureName).toLowerCase();
+  const entry = cyclopediaState.monsterNameMap?.get?.(lookupName);
+  if (!entry?.monster) {
+    const fromDb = window.creatureDatabase?.findMonsterByName?.(lookupName);
+    if (!fromDb) return null;
+    const monsterId = displayQuery.gameId ?? fromDb.gameId;
+    if (monsterId == null) return null;
+    return { monster: fromDb, monsterId, forceShiny: displayQuery.forceShiny === true };
+  }
   const monster = entry.monster;
-  const monsterId = monster.gameId !== undefined ? monster.gameId : entry.index;
+  const monsterId = displayQuery.gameId ?? (monster.gameId !== undefined ? monster.gameId : entry.index);
   if (monsterId === undefined) return null;
-  return { monster, monsterId };
+  return { monster, monsterId, forceShiny: displayQuery.forceShiny === true };
 }
 
 /** gameId for /assets/portraits/{gameId}.png (all creatures, incl. bosses & unobtainables). */
 function cyclopediaResolveMonsterGameId(creatureName) {
+  const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
+  if (displayQuery.gameId != null) return displayQuery.gameId;
   const resolved = cyclopediaResolveMonsterByName(creatureName);
   if (resolved?.monsterId != null) return resolved.monsterId;
   const fromDb = window.creatureDatabase?.findMonsterByName?.(creatureName);
@@ -18045,15 +18127,17 @@ function cyclopediaCreateItemPortrait(spriteId, options = {}) {
 function cyclopediaCreateCreaturePortrait(creatureName, sizePx = CYCLOPEDIA_HOME_SEARCH_ICON_PX) {
   const gameId = cyclopediaResolveMonsterGameId(creatureName);
   if (gameId == null) return null;
+  const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
+  const useShinyPortrait = displayQuery.forceShiny === true;
   try {
     const wrap = document.createElement('div');
     const px = `${sizePx}px`;
     wrap.style.cssText = `position: relative; width: ${px}; height: ${px}; flex: none; display: inline-block; overflow: hidden;`;
     const img = document.createElement('img');
     if (window.creatureDatabase?.getMonsterPortraitUrl) {
-      img.src = window.creatureDatabase.getMonsterPortraitUrl(gameId);
+      img.src = window.creatureDatabase.getMonsterPortraitUrl(gameId, useShinyPortrait);
     } else {
-      img.src = `/assets/portraits/${gameId}.png`;
+      img.src = `/assets/portraits/${gameId}${useShinyPortrait ? '-shiny' : ''}.png`;
     }
     img.alt = creatureName || 'creature';
     img.title = creatureName || '';

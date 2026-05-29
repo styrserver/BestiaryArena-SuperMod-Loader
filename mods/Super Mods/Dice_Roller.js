@@ -4027,8 +4027,8 @@
       const contentDiv = document.createElement('div');
       contentDiv.style.width = '100%';
       contentDiv.style.height = '100%';
-      contentDiv.style.minWidth = '700px';
-      contentDiv.style.maxWidth = '700px';
+      contentDiv.style.minWidth = '710px';
+      contentDiv.style.maxWidth = '710px';
       contentDiv.style.minHeight = '400px';
       contentDiv.style.maxHeight = '400px';
       contentDiv.style.boxSizing = 'border-box';
@@ -4618,11 +4618,11 @@
             return col;
           })()
         });
-        col2.style.width = '220px';
-        col2.style.minWidth = '220px';
-        col2.style.maxWidth = '220px';
+        col2.style.width = '230px';
+        col2.style.minWidth = '230px';
+        col2.style.maxWidth = '230px';
         col2.style.height = '100%';
-        col2.style.flex = '0 0 220px';
+        col2.style.flex = '0 0 230px';
         // col3: creature details (row1), placeholder (row2)
         const col3 = createBox({
           title: 'Details',
@@ -4657,7 +4657,7 @@
       render();
       api.ui.components.createModal({
         title: 'Auto Dice Roller',
-        width: 700,
+        width: 710,
         height: 400,
         content: contentDiv,
         buttons: [{ text: 'Close', primary: true }]
@@ -4665,9 +4665,9 @@
       setTimeout(() => {
         const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
         if (dialog) {
-          dialog.style.width = '700px';
-          dialog.style.minWidth = '700px';
-          dialog.style.maxWidth = '700px';
+          dialog.style.width = '710px';
+          dialog.style.minWidth = '710px';
+          dialog.style.maxWidth = '710px';
           dialog.style.height = '400px';
           dialog.style.minHeight = '400px';
           dialog.style.maxHeight = '400px';

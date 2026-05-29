@@ -3561,6 +3561,7 @@ var CREATURE_DIFFICULTY_MULTIPLIERS = {
   'regeneration tank': 3,
   'sweaty cyclops': 1.3,
   'dharalion': 0.1,
+  'albino gazer': 0.1,
   'chubby gazer': 0.1,
   'mystic gazer': 0.1,
   'psychic gazer': 0.1,

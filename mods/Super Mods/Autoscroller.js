@@ -42,6 +42,7 @@
   const SCROLL_CONFIG = {
     SUMMON_SCROLL_API_URL: 'https://bestiaryarena.com/api/trpc/inventory.summonScroll?batch=1',
     FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png',
+    GREEN_BACKGROUND_URL: 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png',
     SCROLL_RARITIES: {
       GREY: 1,
       GREEN: 2,
@@ -213,17 +214,65 @@
   let MONSTER_NAME_CACHE = new Map(); // Cache monster name lookups
   let MONSTER_ID_CACHE = new Map(); // Cache monster ID lookups
   
+  function isExcludedFromAutoscrollPicker(creatureName) {
+    const db = window.creatureDatabase;
+    if (typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(creatureName)) {
+      return true;
+    }
+    if (typeof db?.isGazerCreatureName === 'function') {
+      return db.isGazerCreatureName(creatureName);
+    }
+    const lower = String(creatureName ?? '').toLowerCase();
+    return lower.includes('gazer') || lower === 'gummy raider';
+  }
+
   function getAllCreatures() {
     if (!ALL_CREATURES_CACHE) {
-      // Use centralized creature database
-      ALL_CREATURES_CACHE = window.creatureDatabase?.ALL_CREATURES || [];
-      
+      const db = window.creatureDatabase;
+      if (typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function') {
+        ALL_CREATURES_CACHE = db.getAutoscrollAutosellerCreaturePickerNames();
+      } else if (typeof db?.getCreaturePickerNames === 'function') {
+        ALL_CREATURES_CACHE = db.getCreaturePickerNames().filter((name) => !isExcludedFromAutoscrollPicker(name));
+      } else if (typeof db?.getCyclopediaCreatureNames === 'function') {
+        ALL_CREATURES_CACHE = db.getCyclopediaCreatureNames().filter((name) => !isExcludedFromAutoscrollPicker(name));
+      } else {
+        ALL_CREATURES_CACHE = (db?.ALL_CREATURES || []).filter((name) => !isExcludedFromAutoscrollPicker(name));
+      }
+
       console.log('[Autoscroller] Creature database integration:', {
-        hasDatabase: !!window.creatureDatabase,
-        allCreaturesFromDB: window.creatureDatabase?.ALL_CREATURES?.length || 0
+        hasDatabase: !!db,
+        pickerCreatures: ALL_CREATURES_CACHE?.length || 0
       });
     }
     return ALL_CREATURES_CACHE;
+  }
+
+  function getOwnedMonsterDisplayName(monster) {
+    const db = window.creatureDatabase;
+    if (typeof db?.getDisplayNameForOwnedMonster === 'function') {
+      return db.getDisplayNameForOwnedMonster(monster);
+    }
+    return getMonsterNameFromGameId(monster?.gameId);
+  }
+
+  function isMonsterSelectedForAutoscroll(monster) {
+    if (!monster || !selectedCreatures.length) return false;
+    const db = window.creatureDatabase;
+    if (typeof db?.monsterMatchesCreatureDisplay === 'function') {
+      return selectedCreatures.some((name) => db.monsterMatchesCreatureDisplay(name, monster));
+    }
+    const monsterName = getMonsterNameFromGameId(monster.gameId);
+    return monsterName && selectedCreatures.includes(monsterName);
+  }
+
+  function filterOwnedForDisplayCreature(creatureName, monsters) {
+    const db = window.creatureDatabase;
+    if (typeof db?.filterMonstersForCreatureDisplay === 'function') {
+      return db.filterMonstersForCreatureDisplay(creatureName, monsters);
+    }
+    const monsterId = getMonsterIdFromName(creatureName);
+    if (!monsterId) return [];
+    return (monsters || []).filter((m) => m && m.gameId === monsterId);
   }
   
   // Memory management for monster caches
@@ -1119,6 +1168,37 @@
   function isShinyHuntMode() {
     return autosellNonSelected && selectedCreatures.length === 0 && selectedScrollTier === 5;
   }
+
+  function isLateGameHuntLabelMode() {
+    return selectedCreatures.length === 0 && selectedScrollTier === 5;
+  }
+
+  function getAutosellOptionLabelText() {
+    if (isLateGameHuntLabelMode()) {
+      return 'Late-game hunt';
+    }
+    return 'Autosell non-selected';
+  }
+
+  function getAutosellOptionTooltip() {
+    if (isLateGameHuntLabelMode()) {
+      return 'Tier 5 scroll: sells/squeezes all summons except shiny, sealed (tier 5), awakened (tier 6), and gazers. No creature targets required.';
+    }
+    return 'Sells/squeezes summons not in your selected creatures, except shiny, sealed (tier 5), awakened (tier 6), and gazers.';
+  }
+
+  function updateAutosellOptionLabel(labelEl, warningEl) {
+    const label = labelEl || document.getElementById('autoscroller-autosell-label');
+    const warning = warningEl || document.getElementById('autoscroller-autosell-warning');
+    if (!label) return;
+    const tooltip = getAutosellOptionTooltip();
+    label.textContent = getAutosellOptionLabelText();
+    label.title = tooltip;
+    if (warning) {
+      warning.title = tooltip;
+      warning.setAttribute('aria-label', tooltip);
+    }
+  }
   
   /**
    * Find which creature (if any) has reached the target count
@@ -1129,14 +1209,9 @@
     const monsters = gameState?.monsters || [];
     
     for (const creatureName of selectedCreatures) {
-      const monsterId = getMonsterIdFromName(creatureName);
-      if (monsterId) {
-        const creatureMonsters = monsters.filter(monster => 
-          monster && monster.gameId === monsterId
-        );
-        if (creatureMonsters.length >= stopConditions.totalCreaturesTarget) {
-          return creatureName;
-        }
+      const creatureMonsters = filterOwnedForDisplayCreature(creatureName, monsters);
+      if (creatureMonsters.length >= stopConditions.totalCreaturesTarget) {
+        return creatureName;
       }
     }
     return null;
@@ -1246,10 +1321,7 @@
         
         if (state.selectedScrollTier) selectedScrollTier = state.selectedScrollTier;
         if (state.selectedCreatures) {
-          selectedCreatures = [...state.selectedCreatures].filter(c => {
-            const lower = c.toLowerCase();
-            return lower !== 'gummy raider' && lower !== 'yeti';
-          });
+          selectedCreatures = [...state.selectedCreatures].filter((c) => !isExcludedFromAutoscrollPicker(c));
         }
         if (state.stopConditions) stopConditions = { ...stopConditions, ...state.stopConditions };
         if (state.userDefinedSpeed) userDefinedSpeed = state.userDefinedSpeed;
@@ -1324,7 +1396,7 @@
   }
   
   function setUILocked(locked) {
-    const creatureItems = document.querySelectorAll('.autoscroller-creature-item');
+    const creatureItems = document.querySelectorAll('.autoscroller-creature-icon');
     creatureItems.forEach(item => {
       if (locked) {
         item.style.opacity = '0.5';
@@ -1375,19 +1447,26 @@
   
   function getMonsterIdFromName(creatureName) {
     const lowerName = creatureName.toLowerCase();
-    
+
     // Check cache first
     if (MONSTER_ID_CACHE.has(lowerName)) {
       return MONSTER_ID_CACHE.get(lowerName);
     }
-    
+
     try {
+      const fromDb = window.creatureDatabase?.findMonsterByName?.(creatureName);
+      if (fromDb?.gameId != null) {
+        MONSTER_ID_CACHE.set(lowerName, fromDb.gameId);
+        limitCacheSize(MONSTER_ID_CACHE, 200);
+        return fromDb.gameId;
+      }
+
       const utils = globalThis.state?.utils;
       if (!utils || !utils.getMonster) {
         console.warn('[Autoscroller] Monster API not available');
         return null;
       }
-      
+
       // Search through monster IDs to find matching name
       for (let i = 1; i < 1000; i++) {
         try {
@@ -1417,17 +1496,9 @@
         const monsters = gameState?.monsters || [];
         
         for (const creatureName of selectedCreatures) {
-          const monsterId = getMonsterIdFromName(creatureName);
-          if (monsterId) {
-            const creatureMonsters = monsters.filter(monster => 
-              monster && monster.gameId === monsterId
-            );
-            const totalForThisCreature = creatureMonsters.length;
-            
-            if (totalForThisCreature >= stopConditions.totalCreaturesTarget) {
-   
-              return true;
-            }
+          const creatureMonsters = filterOwnedForDisplayCreature(creatureName, monsters);
+          if (creatureMonsters.length >= stopConditions.totalCreaturesTarget) {
+            return true;
           }
         }
       }
@@ -1439,20 +1510,11 @@
         const tierCounts = [0, 0, 0, 0, 0];
         
         for (const creatureName of selectedCreatures) {
-          const monsterId = getMonsterIdFromName(creatureName);
-          if (monsterId) {
-            const creatureMonsters = monsters.filter(monster => 
-              monster && monster.gameId === monsterId
-            );
-            
-            creatureMonsters.forEach(monster => {
-              const tier = calculateTierFromStats(monster);
-              tierCounts[tier - 1]++;
-            });
-            
-            // Note: tierCounts already includes all monsters in inventory, including those added during this session
-            // No need to add autoscrollCount again as it would double-count
-          }
+          const creatureMonsters = filterOwnedForDisplayCreature(creatureName, monsters);
+          creatureMonsters.forEach(monster => {
+            const tier = calculateTierFromStats(monster);
+            tierCounts[tier - 1]++;
+          });
         }
         
         for (let tier = 0; tier < 5; tier++) {
@@ -1634,14 +1696,12 @@
       return { action: 'keep' };
     }
     
-    const monsterName = getMonsterNameFromGameId(monster.gameId);
-    if (!monsterName) {
+    if (!getMonsterNameFromGameId(monster.gameId)) {
       console.warn('[Autoscroller] Could not determine monster name for gameId:', monster.gameId);
       return { action: 'keep' };
     }
-    
-    // Check if the monster is in the selected creatures list
-    const isSelected = selectedCreatures.includes(monsterName);
+
+    const isSelected = isMonsterSelectedForAutoscroll(monster);
     
     // Keep if selected
     if (isSelected) {
@@ -1752,7 +1812,7 @@
         // Track shiny monsters
         if (result.summonedMonster.shiny === true) {
           autoscrollStats.shinyCount++;
-          const monsterName = getMonsterNameFromGameId(result.summonedMonster.gameId);
+          const monsterName = getOwnedMonsterDisplayName(result.summonedMonster);
           const totalGenes = getMonsterGenes(result.summonedMonster);
           console.log(`[Autoscroller] ✨ SHINY FOUND! ${monsterName || 'Unknown'} (${totalGenes}% genes)`);
           autoscrollStats.foundShinies.push({
@@ -1760,8 +1820,9 @@
             totalGenes: totalGenes
           });
         }
-        
-        const monsterName = getMonsterNameFromGameId(result.summonedMonster.gameId);
+
+        const monsterName = getOwnedMonsterDisplayName(result.summonedMonster)
+          || getMonsterNameFromGameId(result.summonedMonster.gameId);
         
         if (monsterName && autoscrollStats.targetCreatures.has(monsterName)) {
           const currentCount = autoscrollStats.foundCreatures.get(monsterName) || 0;
@@ -2130,7 +2191,219 @@
     return DOM_ELEMENTS.summonScrollButtons;
   }
 
-  function createCreaturesBox({title, items, selectedCreature, onSelectCreature}) {
+  function applyCreatureIconSelectedStyle(btn, selected) {
+    const slot = btn.querySelector('.container-slot');
+    if (selected) {
+      btn.classList.add('autoscroller-creature-selected');
+      btn.setAttribute('data-state', 'selected');
+      if (slot) {
+        slot.style.background = `url("${SCROLL_CONFIG.GREEN_BACKGROUND_URL}") repeat`;
+      }
+    } else {
+      btn.classList.remove('autoscroller-creature-selected');
+      btn.setAttribute('data-state', 'closed');
+      if (slot) {
+        slot.style.background = '';
+      }
+    }
+  }
+
+  /** One icon per species (display name → single gameId portrait), styled like Dice_Roller.createCreatureButton. */
+  function createSpeciesPickerButton(creatureName, isSelected, onToggle) {
+    const gameId = getMonsterIdFromName(creatureName);
+    const db = window.creatureDatabase;
+    const resolved = db?.resolveCreatureDisplay?.(creatureName);
+    const useShinyPortrait = resolved?.forceShiny === true;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'focus-style-visible active:opacity-70 autoscroller-creature-icon';
+    btn.setAttribute('data-state', isSelected ? 'selected' : 'closed');
+    btn.setAttribute('data-gameid', gameId != null ? String(gameId) : '');
+    btn.setAttribute('data-creature-name', creatureName);
+    btn.title = creatureName;
+    btn.style.width = '34px';
+    btn.style.height = '34px';
+    btn.style.minWidth = '34px';
+    btn.style.minHeight = '34px';
+    btn.style.maxWidth = '34px';
+    btn.style.maxHeight = '34px';
+    btn.style.display = 'flex';
+    btn.style.alignItems = 'center';
+    btn.style.justifyContent = 'center';
+    btn.style.padding = '0';
+    btn.style.margin = '0';
+    btn.style.border = 'none';
+    btn.style.background = 'none';
+    btn.style.cursor = 'pointer';
+
+    const slot = document.createElement('div');
+    slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
+    slot.setAttribute('data-highlighted', 'false');
+    slot.setAttribute('data-recent', 'false');
+    slot.setAttribute('data-multiselected', 'false');
+    slot.style.width = '34px';
+    slot.style.height = '34px';
+    slot.style.minWidth = '34px';
+    slot.style.minHeight = '34px';
+    slot.style.maxWidth = '34px';
+    slot.style.maxHeight = '34px';
+
+    const rarityDiv = document.createElement('div');
+    rarityDiv.setAttribute('role', 'none');
+    rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+    rarityDiv.setAttribute('data-rarity', '1');
+    slot.appendChild(rarityDiv);
+
+    if (gameId != null) {
+      const img = document.createElement('img');
+      img.className = 'pixelated ml-auto';
+      img.alt = creatureName;
+      img.width = 34;
+      img.height = 34;
+      img.style.width = '34px';
+      img.style.height = '34px';
+      img.style.minWidth = '34px';
+      img.style.minHeight = '34px';
+      img.style.maxWidth = '34px';
+      img.style.maxHeight = '34px';
+      img.style.objectFit = 'contain';
+      if (db?.getMonsterPortraitUrl) {
+        img.src = db.getMonsterPortraitUrl(gameId, useShinyPortrait);
+      } else {
+        img.src = `/assets/portraits/${gameId}${useShinyPortrait ? '-shiny' : ''}.png`;
+      }
+      img.draggable = false;
+      slot.appendChild(img);
+    }
+
+    btn.appendChild(slot);
+    applyCreatureIconSelectedStyle(btn, isSelected);
+
+    const handleClick = () => {
+      const nowSelected = !btn.classList.contains('autoscroller-creature-selected');
+      applyCreatureIconSelectedStyle(btn, nowSelected);
+      if (onToggle) {
+        onToggle(creatureName, nowSelected);
+      }
+    };
+    eventHandlers.add(btn, 'click', handleClick);
+
+    return btn;
+  }
+
+  function extractSpeciesSearchQuotedString(condition) {
+    const trimmed = String(condition ?? '').trim();
+    if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+      return { isExact: true, value: trimmed.slice(1, -1).toLowerCase() };
+    }
+    return { isExact: false, value: trimmed.toLowerCase() };
+  }
+
+  function matchesSpeciesNameCondition(creatureName, condition) {
+    if (!condition) return true;
+    const name = String(creatureName ?? '').toLowerCase();
+    const { isExact, value } = extractSpeciesSearchQuotedString(condition);
+    if (isExact) return name === value;
+    return name.includes(value);
+  }
+
+  function matchesSpeciesNameSearch(creatureName, searchTerm) {
+    const term = String(searchTerm ?? '').toLowerCase().trim();
+    if (!term) return true;
+    if (term.includes(' or')) {
+      return term.split(/\s+or\s*/).some((part) => matchesSpeciesNameSearch(creatureName, part.trim()));
+    }
+    if (term.includes(' and')) {
+      return term.split(/\s+and\s*/).every((part) => matchesSpeciesNameSearch(creatureName, part.trim()));
+    }
+    return matchesSpeciesNameCondition(creatureName, term);
+  }
+
+  function createAutoscrollerCreatureSearchBar() {
+    const searchContainer = document.createElement('div');
+    searchContainer.style.cssText = `
+      display: flex;
+      align-items: center;
+      padding: 4px 6px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      margin: 4px 5px;
+      width: calc(100% - 10px);
+      box-sizing: border-box;
+      flex-shrink: 0;
+    `;
+
+    const searchInput = document.createElement('input');
+    searchInput.id = 'autoscroller-creature-search';
+    searchInput.placeholder = 'Search creatures...';
+    searchInput.title = `Search by name:
+• Partial: dragon
+• Exact: "Spider"
+• Combined: orc AND shaman, wolf OR bear`;
+    searchInput.style.cssText = `
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 3px 6px;
+      border-radius: 2px;
+      font-size: 12px;
+      width: 100%;
+      font-family: inherit;
+      outline: none;
+      box-sizing: border-box;
+    `;
+
+    eventHandlers.add(searchInput, 'focus', () => {
+      searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+    });
+    eventHandlers.add(searchInput, 'blur', () => {
+      searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+    });
+
+    searchContainer.appendChild(searchInput);
+    return { searchContainer, searchInput };
+  }
+
+  function renderSpeciesPickerGrid(scrollContainer, creatures, selectedSet, onToggleCreature) {
+    scrollContainer.innerHTML = '';
+    creatures.forEach((name) => {
+      scrollContainer.appendChild(createSpeciesPickerButton(name, selectedSet.has(name), onToggleCreature));
+    });
+  }
+
+  function applyAutoscrollerSpeciesSearch(scrollContainer, allCreatures, searchValue, selectedSet, onToggleCreature) {
+    const searchTerm = String(searchValue ?? '').toLowerCase().trim();
+    if (!searchTerm) {
+      renderSpeciesPickerGrid(scrollContainer, allCreatures, selectedSet, onToggleCreature);
+      return;
+    }
+
+    const matching = allCreatures.filter((name) => matchesSpeciesNameSearch(name, searchTerm));
+    scrollContainer.innerHTML = '';
+
+    if (!matching.length) {
+      const noResults = document.createElement('div');
+      noResults.style.cssText = 'color:#888;text-align:center;padding:16px;grid-column:span 5;font-style:italic;font-size:12px;';
+      noResults.textContent = `No creatures found matching "${searchValue}"`;
+      scrollContainer.appendChild(noResults);
+      return;
+    }
+
+    matching.forEach((name) => {
+      scrollContainer.appendChild(createSpeciesPickerButton(name, selectedSet.has(name), onToggleCreature));
+    });
+  }
+
+  function createCreatureIconPicker({ title, creatures, selectedCreatures: selectedList, onToggleCreature }) {
+    const selectedSet = new Set(selectedList || []);
+    const handleToggleCreature = (creatureName, isSelected) => {
+      if (isSelected) selectedSet.add(creatureName);
+      else selectedSet.delete(creatureName);
+      if (onToggleCreature) onToggleCreature(creatureName, isSelected);
+    };
+    const allCreatures = [...creatures];
     const box = document.createElement('div');
     box.style.flex = '1 1 0';
     box.style.display = 'flex';
@@ -2144,14 +2417,14 @@
     box.style.borderImage = `url("${FRAME_IMAGE_URL}") 6 fill stretch`;
     box.style.borderRadius = '6px';
     box.style.overflow = 'hidden';
-    
+
     const titleEl = document.createElement('h2');
     titleEl.className = 'widget-top widget-top-text pixel-font-16';
     titleEl.style.margin = '0';
     titleEl.style.padding = '2px 8px';
     titleEl.style.textAlign = 'center';
     titleEl.style.color = 'rgb(255, 255, 255)';
-    
+
     const p = document.createElement('p');
     p.textContent = title;
     p.className = 'pixel-font-16';
@@ -2161,82 +2434,43 @@
     p.style.color = 'rgb(255, 255, 255)';
     titleEl.appendChild(p);
     box.appendChild(titleEl);
-    
+
+    const { searchContainer, searchInput } = createAutoscrollerCreatureSearchBar();
+    box.appendChild(searchContainer);
+
     const scrollContainer = document.createElement('div');
     scrollContainer.style.flex = '1 1 0';
     scrollContainer.style.minHeight = '0';
     scrollContainer.style.overflowY = 'auto';
-    scrollContainer.style.padding = '4px';
-    
-    items.forEach(name => {
-      const item = document.createElement('div');
-      item.textContent = name;
-      item.className = 'pixel-font-14 autoscroller-creature-item';
-      item.style.color = 'rgb(230, 215, 176)';
-      item.style.cursor = 'pointer';
-      item.style.padding = '2px 4px';
-      item.style.borderRadius = '2px';
-      item.style.textAlign = 'left';
-      item.style.marginBottom = '1px';
-      
-      // Use event delegation for better performance
-      const handleMouseEnter = () => {
-        item.style.background = 'rgba(255,255,255,0.08)';
-      };
-      
-      const handleMouseLeave = () => {
-        if (!item.classList.contains('autoscroller-selected')) {
-          item.style.background = 'none';
-        }
-      };
-      
-      const handleMouseDown = () => {
-        item.style.background = 'rgba(255,255,255,0.18)';
-      };
-      
-      const handleMouseUp = () => {
-        if (!item.classList.contains('autoscroller-selected')) {
-          item.style.background = 'rgba(255,255,255,0.08)';
-        }
-      };
-      
-      const handleClick = () => {
-        // Remove previous selection
-        document.querySelectorAll('.autoscroller-selected').forEach(el => {
-          el.classList.remove('autoscroller-selected');
-          el.style.background = 'none';
-          el.style.color = 'rgb(230, 215, 176)';
-        });
-        
-        // Select this item
-        item.classList.add('autoscroller-selected');
-        item.style.background = 'rgba(255,255,255,0.18)';
-        item.style.color = 'rgb(255, 224, 102)';
-        
-        if (onSelectCreature) {
-          onSelectCreature(name);
-        }
-      };
-      
-      // Add event listeners with tracking
-      eventHandlers.add(item, 'mouseenter', handleMouseEnter);
-      eventHandlers.add(item, 'mouseleave', handleMouseLeave);
-      eventHandlers.add(item, 'mousedown', handleMouseDown);
-      eventHandlers.add(item, 'mouseup', handleMouseUp);
-      eventHandlers.add(item, 'click', handleClick);
-      
-      // Set initial selection if this is the selected creature
-      if (selectedCreature === name) {
-        item.classList.add('autoscroller-selected');
-        item.style.background = 'rgba(255,255,255,0.18)';
-        item.style.color = 'rgb(255, 224, 102)';
-      }
-      
-      scrollContainer.appendChild(item);
+    scrollContainer.style.display = 'grid';
+    scrollContainer.style.gridTemplateColumns = 'repeat(5, 34px)';
+    scrollContainer.style.justifyContent = 'start';
+    scrollContainer.style.gridAutoRows = '34px';
+    scrollContainer.style.gap = '0';
+    scrollContainer.style.padding = '5px';
+    scrollContainer.style.background = 'rgba(40,40,40,0.96)';
+    scrollContainer.style.scrollbarWidth = 'none';
+
+    renderSpeciesPickerGrid(scrollContainer, allCreatures, selectedSet, handleToggleCreature);
+
+    let searchTimeout = null;
+    const debouncedSearch = (value) => {
+      if (searchTimeout) clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        applyAutoscrollerSpeciesSearch(scrollContainer, allCreatures, value, selectedSet, handleToggleCreature);
+      }, 200);
+    };
+
+    eventHandlers.add(searchInput, 'input', (e) => {
+      debouncedSearch(e.target.value);
     });
-    
+
     box.appendChild(scrollContainer);
     return box;
+  }
+
+  function getAutoscrollPickerCreatures() {
+    return getAllCreatures();
   }
   
   function createBox({title, content}) {
@@ -2302,13 +2536,12 @@
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
     }
     setTimeout(() => {
-      let selectedGameId = null;
       let lastStatusMessage = '';
       const contentDiv = DOMUtils.createElement('div', '', {
         width: '100%',
         height: '100%',
-        minWidth: '750px',
-        maxWidth: '750px',
+        minWidth: '770px',
+        maxWidth: '770px',
         minHeight: '400px',
         maxHeight: '400px',
         boxSizing: 'border-box',
@@ -2322,16 +2555,7 @@
       // Load saved state first
       loadStateFromStorage();
       
-      let availableCreatures = [...getAllCreatures()];
-      // When reopening the modal, respect already selected creatures:
-      // 1) Deduplicate any prior selections
-      // 2) Exclude selected creatures from the available list
-      // 3) Exclude Gummy Raider and Yeti
-      selectedCreatures = Array.from(new Set(selectedCreatures));
-      availableCreatures = availableCreatures.filter(c => {
-        const lower = c.toLowerCase();
-        return !selectedCreatures.includes(c) && lower !== 'gummy raider' && lower !== 'yeti';
-      });
+      selectedCreatures = Array.from(new Set(selectedCreatures)).filter((c) => !isExcludedFromAutoscrollPicker(c));
       
       // Only reset autoscroll state, not the configuration
       autoscrollStats = {
@@ -2372,63 +2596,36 @@
         
         contentDiv.innerHTML = '';
         
-        const col1 = DOMUtils.createModalColumn('170px');
-        
-        const creaturesBox = createCreaturesBox({
-          title: 'Available Creatures',
-          items: availableCreatures,
-          selectedCreature: selectedGameId,
-          onSelectCreature: (creatureName) => {
-            // Move creature from available to selected
-            availableCreatures = availableCreatures.filter(c => c !== creatureName);
-            selectedCreatures.push(creatureName); // Use global variable
-            selectedCreatures.sort(); // Keep alphabetical order
-            selectedGameId = null;
-            render();
+        const col1 = DOMUtils.createModalColumn('190px');
+
+        const pickerCreatures = getAutoscrollPickerCreatures();
+        const creaturesBox = createCreatureIconPicker({
+          title: 'Creatures',
+          creatures: pickerCreatures,
+          selectedCreatures,
+          onToggleCreature: (creatureName, isSelected) => {
+            if (isSelected) {
+              if (!selectedCreatures.includes(creatureName)) {
+                selectedCreatures.push(creatureName);
+                selectedCreatures.sort();
+              }
+            } else {
+              selectedCreatures = selectedCreatures.filter((c) => c !== creatureName);
+            }
             saveStateToStorage();
-            // Update selected creatures display
             if (window.AutoscrollerRenderSelectedCreatures) {
               window.AutoscrollerRenderSelectedCreatures();
             }
-            // Update button appearance when creature selection changes
             if (window.updateAutoscrollButtonAppearance) {
               window.updateAutoscrollButtonAppearance();
             }
-            // Maintain scroll tier border
             updateSelectedScrollTierBorder();
           }
         });
         creaturesBox.style.flex = '1 1 0';
         creaturesBox.style.minHeight = '0';
-        
-        const selectedBox = createCreaturesBox({
-          title: 'Selected Creatures',
-          items: selectedCreatures,
-          selectedCreature: null,
-          onSelectCreature: (creatureName) => {
-            // Move creature from selected back to available
-            selectedCreatures = selectedCreatures.filter(c => c !== creatureName); // Use global variable
-            availableCreatures.push(creatureName);
-            availableCreatures.sort(); // Keep alphabetical order
-            render();
-            saveStateToStorage();
-            // Update selected creatures display
-            if (window.AutoscrollerRenderSelectedCreatures) {
-              window.AutoscrollerRenderSelectedCreatures();
-            }
-            // Update button appearance when creature selection changes
-            if (window.updateAutoscrollButtonAppearance) {
-              window.updateAutoscrollButtonAppearance();
-            }
-            // Maintain scroll tier border
-            updateSelectedScrollTierBorder();
-          }
-        });
-        selectedBox.style.flex = '1 1 0';
-        selectedBox.style.minHeight = '0';
-        
+
         col1.appendChild(creaturesBox);
-        col1.appendChild(selectedBox);
         
         const col2 = createBox({
           title: 'Rules',
@@ -2642,16 +2839,15 @@
         autosellCheckbox.checked = autosellNonSelected; // Use the preserved state
         
         const autosellLabel = document.createElement('label');
+        autosellLabel.id = 'autoscroller-autosell-label';
         autosellLabel.htmlFor = 'autosell-checkbox';
-        autosellLabel.textContent = 'Late-game scroller';
         StyleUtils.applyLabelStyles(autosellLabel);
         autosellLabel.style.cursor = 'pointer';
         autosellLabel.style.color = '#ffcc66';
         
         const autosellWarningIcon = document.createElement('span');
+        autosellWarningIcon.id = 'autoscroller-autosell-warning';
         autosellWarningIcon.textContent = '⚠';
-        autosellWarningIcon.title = 'Sells/squeezes everything non-selected except shiny, sealed, awakened, and gazers.';
-        autosellWarningIcon.setAttribute('aria-label', 'Warning: sells/squeezes everything non-selected except shiny, sealed, awakened, and gazers.');
         autosellWarningIcon.style.cursor = 'help';
         autosellWarningIcon.style.color = '#ffcc66';
         autosellWarningIcon.style.fontSize = '12px';
@@ -2660,11 +2856,13 @@
         autosellDiv.appendChild(autosellLabel);
         autosellDiv.appendChild(autosellWarningIcon);
         div.appendChild(autosellDiv);
+        updateAutosellOptionLabel(autosellLabel, autosellWarningIcon);
         
         // Add event listener for autosell checkbox
         autosellCheckbox.addEventListener('change', () => {
           autosellNonSelected = autosellCheckbox.checked;
           saveStateToStorage();
+          updateAutosellOptionLabel();
           if (window.updateAutoscrollButtonAppearance) {
             window.updateAutoscrollButtonAppearance();
           }
@@ -2840,12 +3038,8 @@
             const gameState = cachedPlayerState?.context;
             const monsters = gameState?.monsters || [];
             
-            const monsterId = getMonsterIdFromName(creatureName);
-            
-            const creatureMonsters = monsters.filter(monster => 
-              monster && monster.gameId === monsterId
-            );
-            
+            const creatureMonsters = filterOwnedForDisplayCreature(creatureName, monsters);
+
             const totalCount = creatureMonsters.length;
             
             const tierCounts = [0, 0, 0, 0, 0];
@@ -3003,6 +3197,7 @@
 
         // Function to update button appearance based on conditions
         const updateButtonAppearance = () => {
+          updateAutosellOptionLabel();
           if (isShinyHuntMode()) {
             // Create late-game hunt button with protected-creature icons
             autoscrollBtn.innerHTML = `
@@ -3107,11 +3302,7 @@
           } else {
             resetAutoscrollState();
             localStorage.removeItem('autoscroller_state');
-            availableCreatures = [...getAllCreatures()].filter(c => {
-              const lower = c.toLowerCase();
-              return lower !== 'gummy raider' && lower !== 'yeti';
-            });
-            selectedGameId = null;
+            selectedCreatures = selectedCreatures.filter((c) => !isExcludedFromAutoscrollPicker(c));
             lastStatusMessage = '';
             render();
             if (window.AutoscrollerRenderSelectedCreatures) {
@@ -3270,11 +3461,15 @@
       setTimeout(() => {
         updateSummonScrollCounts();
         updateSelectedScrollTierBorder();
+        updateAutosellOptionLabel();
+        if (window.updateAutoscrollButtonAppearance) {
+          window.updateAutoscrollButtonAppearance();
+        }
       }, 100);
       
       api.ui.components.createModal({
         title: 'Auto Scroller',
-        width: 750,
+        width: 770,
         height: 400,
         content: contentDiv,
         buttons: [{ text: 'Close', primary: true }],
@@ -3312,9 +3507,9 @@
         
         const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
         if (dialog) {
-          dialog.style.width = '750px';
-          dialog.style.minWidth = '750px';
-          dialog.style.maxWidth = '750px';
+          dialog.style.width = '770px';
+          dialog.style.minWidth = '770px';
+          dialog.style.maxWidth = '770px';
       dialog.style.height = '400px';
       dialog.style.minHeight = '400px';
       dialog.style.maxHeight = '400px';

@@ -3442,7 +3442,8 @@ function getItemVisual(itemData, preResolvedName = null) {
 }
 function getCreatureDetails(monsterDrop) {
     let name = `GameID: ${monsterDrop.gameId}`;
-    const friendlyName = getMonsterNameFromId(monsterDrop.gameId);
+    const displayName = window.creatureDatabase?.getDisplayNameForOwnedMonster?.(monsterDrop);
+    const friendlyName = displayName || getMonsterNameFromId(monsterDrop.gameId);
     if (friendlyName) name = friendlyName;
     name = formatNameToTitleCase(name);
     
