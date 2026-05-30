@@ -62,6 +62,71 @@ function isCountedRoomForImprovements(roomCode) {
   return true;
 }
 
+function formatTickImprovementText(tickDelta, yourTicks) {
+  if (tickDelta === null) return 'Ticks unavailable';
+  if (tickDelta > 0) {
+    const pct = yourTicks > 0 ? ((tickDelta / yourTicks) * 100).toFixed(1) : '0.0';
+    return `+${tickDelta} ticks (${pct}%)`;
+  }
+  if (tickDelta < 0) {
+    return `${Math.abs(tickDelta)} ticks ahead`;
+  }
+  return 'Tied ticks';
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function floorIndexToAscensionPercent(floorIndex) {
+  if (floorIndex === null || floorIndex === undefined || !Number.isFinite(Number(floorIndex))) {
+    return null;
+  }
+  return 100 + Number(floorIndex) * 20;
+}
+
+function formatRecordValue(unit, value, subTicks) {
+  if (unit === 'ticks') {
+    return `${value} ticks`;
+  }
+  const subPart = subTicks !== null && subTicks !== undefined ? ` (${subTicks} ticks)` : '';
+  if (unit === 'rank') {
+    return `${value} points${subPart}`;
+  }
+  if (unit === 'floor') {
+    const pct = floorIndexToAscensionPercent(value);
+    if (pct === null) return `—${subPart}`;
+    return `${pct}%${subPart}`;
+  }
+  return `${value} ${unit}${subPart}`;
+}
+
+function buildRecordComparisonHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks) {
+  const showSubTicks = unit !== 'ticks' && youValue === theirValue;
+  const safeName = escapeHtml(playerName || 'Unknown');
+  const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent((playerName || '').trim())}`;
+  const nameLink = `<a href="${profileUrl}" target="_blank" rel="noopener noreferrer" style="color: #ff8; text-decoration: underline; cursor: pointer;">${safeName}</a>`;
+  return `${formatRecordValue(unit, youValue, showSubTicks ? youTicks : null)} → ${nameLink} ${formatRecordValue(unit, theirValue, showSubTicks ? theirTicks : null)}`;
+}
+
+function createImprovementsScrollContainer() {
+  const scrollContainer = api.ui.components.createScrollContainer({
+    height: '100%',
+    padding: true,
+    content: ''
+  });
+  Object.assign(scrollContainer.element.style, {
+    flex: '1 1 0',
+    minHeight: '0',
+    height: 'auto'
+  });
+  return scrollContainer;
+}
+
 // Helper function to create an item sprite element
 function createItemSprite(itemId) {
   // Create the sprite container
@@ -87,13 +152,9 @@ function createItemSprite(itemId) {
 }
 
 // Helper function to create HTML content for tick improvements
-function createTickContent(opportunities, total, minTheo, gain) {
+function createTickContent(opportunities, minTheo) {
   // Create scrollable container using the API
-  const scrollContainer = api.ui.components.createScrollContainer({
-    height: 264,
-    padding: true,
-    content: ''
-  });
+  const scrollContainer = createImprovementsScrollContainer();
   
   // Add opportunities list
   if (opportunities.length > 0) {
@@ -115,9 +176,8 @@ function createTickContent(opportunities, total, minTheo, gain) {
             onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });">
               ${o.name}
             </div>
-          <div class="pixel-font-14">Your ${o.yours} → Top ${o.best}</div>
+          <div class="pixel-font-14">${buildRecordComparisonHtml('ticks', o.yours, null, o.player, o.best, null)}</div>
           <div class="pixel-font-14" style="color: #8f8;">+${o.diff} ticks (${o.pct}%)</div>
-          <div class="pixel-font-14" style="font-size: 11px; color: #ccc;">by ${o.player}</div>
         </div>
       `;
       scrollContainer.addContent(itemEl);
@@ -132,10 +192,11 @@ function createTickContent(opportunities, total, minTheo, gain) {
   // Add stats footer
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
+  const totalTicksImprovement = opportunities.reduce((sum, o) => sum + o.diff, 0);
   statsContainer.innerHTML = `
-    <div>Total: ${total}</div>
+    <div>Rooms with ticks improvement: ${opportunities.length}</div>
+    <div>Total ticks improvement: ${totalTicksImprovement}</div>
     <div>Theoretical minimum: ${minTheo}</div>
-    <div>Possible gain: ${gain} ticks</div>
   `;
   
   return {
@@ -147,11 +208,7 @@ function createTickContent(opportunities, total, minTheo, gain) {
 // Helper function to create HTML content for rank improvements
 function createRankContent(opportunities) {
   // Create scrollable container using the API
-  const scrollContainer = api.ui.components.createScrollContainer({
-    height: 264,
-    padding: true,
-    content: ''
-  });
+  const scrollContainer = createImprovementsScrollContainer();
   
   // Add opportunities list
   if (opportunities.length > 0) {
@@ -172,9 +229,8 @@ function createRankContent(opportunities) {
             onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" >
               ${o.name}
             </div>
-          <div class="pixel-font-14">Your score ${o.yourScore} → Top ${o.bestScore}</div>
-          <div class="pixel-font-14" style="color: #8f8;">+${o.diff} rank points</div>
-          <div class="pixel-font-14" style="font-size: 11px; color: #ccc;">by ${o.player}</div>
+          <div class="pixel-font-14">${buildRecordComparisonHtml('rank', o.yourScore, o.yourRankTicks, o.player, o.bestScore, o.bestRankTicks)}</div>
+          <div class="pixel-font-14" style="color: #8f8;">${o.improvementText}</div>
         </div>
       `;
       scrollContainer.addContent(itemEl);
@@ -189,10 +245,12 @@ function createRankContent(opportunities) {
   // Add stats footer
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
+  const rankPointGain = opportunities.reduce((sum, o) => sum + Math.max(0, Number(o.diff) || 0), 0);
+  const tickGain = opportunities.reduce((sum, o) => sum + Math.max(0, Number(o.tickDiff) || 0), 0);
   statsContainer.innerHTML = `
-    <div>Rooms with score improvement: ${opportunities.length}</div>
-    <div>Total rank points to gain: ${opportunities.reduce((sum, o) => sum + o.diff, 0)}</div>
-    <div style="visibility: hidden;">.</div>
+    <div>Rooms with rank improvement: ${opportunities.length}</div>
+    <div>Total rank points to gain: ${rankPointGain}</div>
+    <div>Same-rank tick gain: ${tickGain} ticks</div>
   `;
   
   return {
@@ -203,11 +261,7 @@ function createRankContent(opportunities) {
 
 // Helper function to create HTML content for floor improvements
 function createFloorContent(opportunities) {
-  const scrollContainer = api.ui.components.createScrollContainer({
-    height: 264,
-    padding: true,
-    content: ''
-  });
+  const scrollContainer = createImprovementsScrollContainer();
   
   if (opportunities.length > 0) {
     opportunities.forEach(o => {
@@ -227,9 +281,8 @@ function createFloorContent(opportunities) {
             onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" >
               ${o.name}
             </div>
-          <div class="pixel-font-14">Your ${o.yourFloor}${o.yourFloorTicks !== null ? ` (${o.yourFloorTicks})` : ''} → Top ${o.bestFloor}${o.bestFloorTicks !== null ? ` (${o.bestFloorTicks})` : ''}</div>
+          <div class="pixel-font-14">${buildRecordComparisonHtml('floor', o.yourFloor, o.yourFloorTicks, o.player, o.bestFloor, o.bestFloorTicks)}</div>
           <div class="pixel-font-14" style="color: #8f8;">${o.improvementText}</div>
-          <div class="pixel-font-14" style="font-size: 11px; color: #ccc;">by ${o.player}</div>
         </div>
       `;
       scrollContainer.addContent(itemEl);
@@ -296,6 +349,7 @@ function createTabs(tickContent, rankContent, floorContent) {
   separator1.setAttribute('role', 'none');
   separator1.className = 'separator my-2.5';
   tickTab.appendChild(separator1);
+  tickContent.statsContainer.style.flexShrink = '0';
   tickTab.appendChild(tickContent.statsContainer);
   
   const rankTab = document.createElement('div');
@@ -309,6 +363,7 @@ function createTabs(tickContent, rankContent, floorContent) {
   separator2.setAttribute('role', 'none');
   separator2.className = 'separator my-2.5';
   rankTab.appendChild(separator2);
+  rankContent.statsContainer.style.flexShrink = '0';
   rankTab.appendChild(rankContent.statsContainer);
   
   const floorTab = document.createElement('div');
@@ -322,6 +377,7 @@ function createTabs(tickContent, rankContent, floorContent) {
   separator3.setAttribute('role', 'none');
   separator3.className = 'separator my-2.5';
   floorTab.appendChild(separator3);
+  floorContent.statsContainer.style.flexShrink = '0';
   floorTab.appendChild(floorContent.statsContainer);
   
   // Add event listeners to tab buttons
@@ -362,7 +418,7 @@ function createTabs(tickContent, rankContent, floorContent) {
 }
 
 // Expand the improvements modal size to fit 3 tabs comfortably.
-function expandImprovementsModal(widthPx = 500, heightPx = 500) {
+function expandImprovementsModal(widthPx = 500, heightPx = 550) {
   setTimeout(() => {
     try {
       const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
@@ -445,30 +501,59 @@ async function showImprovementsModal() {
       }];
     }).sort((a, b) => b.diff - a.diff);
     
-    // Calculate tick totals
-    const total = countedRoomsEntries.reduce((s, [, r]) => s + r.ticks, 0);
     const minTheo = countedRoomsEntries.reduce((s, [c, r]) =>
       s + (best[c] ? Math.min(r.ticks, best[c].ticks) : r.ticks), 0);
-    const gain = total - minTheo;
     
-    // Process rank opportunities
+    // Process rank opportunities (higher rank is better; same-rank entries are always shown)
     const rankOpportunities = countedRoomsEntries.flatMap(([code, r]) => {
-      // Skip if no rank data for this room or room has no rank property
       if (!r.rank) return [];
       
-      // Get top rank for this room
       const topRank = roomsHighscores?.rank?.[code];
-      if (!topRank || topRank.userId === you || topRank.rank <= r.rank) return [];
+      if (!topRank) return [];
+      
+      const topRankName = (topRank.userName || '').trim().toLowerCase();
+      const isOwnRankWR =
+        (topRank.userId !== undefined && topRank.userId !== null && topRank.userId === you) ||
+        (topRankName && yourName && topRankName === yourName);
+      if (isOwnRankWR) return [];
+      
+      const yourRank = Number.isFinite(Number(r.rank)) ? Number(r.rank) : 0;
+      const bestRank = Number.isFinite(Number(topRank.rank)) ? Number(topRank.rank) : 0;
+      const yourRankTicks = Number.isFinite(Number(r.rankTicks)) ? Number(r.rankTicks) : null;
+      const bestRankTicks = Number.isFinite(Number(topRank.ticks)) ? Number(topRank.ticks) : null;
+      
+      const rankDiff = bestRank - yourRank;
+      const sameRankTickDelta = (
+        rankDiff === 0 &&
+        bestRankTicks !== null &&
+        yourRankTicks !== null
+      ) ? (yourRankTicks - bestRankTicks) : null;
+      const sameRankTickGain = sameRankTickDelta !== null && sameRankTickDelta > 0
+        ? sameRankTickDelta
+        : 0;
+      
+      if (rankDiff < 0) return [];
+      
+      const improvementText = rankDiff > 0
+        ? `+${rankDiff} rank point${rankDiff > 1 ? 's' : ''}`
+        : formatTickImprovementText(sameRankTickDelta, yourRankTicks);
       
       return [{
         code,
         name: ROOM_NAMES[code] || code,
-        yourScore: r.rank,
-        bestScore: topRank.rank,
-        diff: topRank.rank - r.rank,
+        yourScore: yourRank,
+        bestScore: bestRank,
+        diff: rankDiff,
+        yourRankTicks,
+        bestRankTicks,
+        tickDiff: sameRankTickGain,
+        improvementText,
         player: topRank.userName
       }];
-    }).sort((a, b) => b.diff - a.diff);
+    }).sort((a, b) => {
+      if (b.diff !== a.diff) return b.diff - a.diff;
+      return b.tickDiff - a.tickDiff;
+    });
     
     console.log('[Highscore Improvements][Floor Debug] Starting floor opportunity processing');
     console.log('[Highscore Improvements][Floor Debug] roomsHighscores.floor keys:', Object.keys(roomsHighscores?.floor || {}).length);
@@ -546,18 +631,9 @@ async function showImprovementsModal() {
         });
       }
       
-      let improvementText;
-      if (floorDiff > 0) {
-        improvementText = `+${floorDiff} floor${floorDiff > 1 ? 's' : ''}`;
-      } else if (sameFloorTickDelta === null) {
-        improvementText = 'Ticks unavailable';
-      } else if (sameFloorTickDelta > 0) {
-        improvementText = `${sameFloorTickDelta} ticks`;
-      } else if (sameFloorTickDelta < 0) {
-        improvementText = `${Math.abs(sameFloorTickDelta)} ticks ahead`;
-      } else {
-        improvementText = 'Tied ticks';
-      }
+      const improvementText = floorDiff > 0
+        ? `+${floorDiff} floor${floorDiff > 1 ? 's' : ''}`
+        : formatTickImprovementText(sameFloorTickDelta, yourFloorTicks);
       
       return [{
         code,
@@ -586,7 +662,7 @@ async function showImprovementsModal() {
     loadingModal();
     
     // Create content for all tabs
-    const tickContent = createTickContent(tickOpportunities, total, minTheo, gain);
+    const tickContent = createTickContent(tickOpportunities, minTheo);
     const rankContent = createRankContent(rankOpportunities);
     const floorContent = createFloorContent(floorOpportunities);
     
@@ -605,7 +681,7 @@ async function showImprovementsModal() {
       ]
     });
     
-    expandImprovementsModal(500, 500);
+    expandImprovementsModal(500, 550);
     
     if (window.DEBUG) console.log('Improvement opportunities modal displayed successfully');
   } catch (error) {

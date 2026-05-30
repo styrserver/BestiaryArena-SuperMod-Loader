@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "3.9.13",
+      "changes": [
+        {
+          "mod": "Highscore Improvements",
+          "type": "changed",
+          "text": "Improvement Opportunities modal is 500×550px with flex-height tab lists. Tick Improvements footer reports rooms with tick improvement, total tick improvement, and theoretical minimum. Rank Improvements lists same-rank rooms and a Same-rank tick gain stat (aligned with Floor). Rows compare your record vs a profile-linked WR holder: tick tab as N ticks; rank as N points; floor as ascension % (100 + floor×20). Rank and floor show tick counts only when points or % match; same-rank and same-floor tick gains use +N ticks (pct%)."
+        }
+      ]
+    },
+    {
       "version": "3.9.12",
       "changes": [
         {
