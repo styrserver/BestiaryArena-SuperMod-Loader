@@ -236,22 +236,17 @@ function findBestiaryAutomator() {
 // 4. MAP, SETUP AND FLOOR MANAGEMENT
 // ============================================================================
 
-// Display names for region ids (aligned with Cyclopedia.js REGION_NAME_MAP)
-const REGION_NAME_MAP = {
-    rook: 'Rookgaard',
-    carlin: 'Carlin',
-    folda: 'Folda',
-    abdendriel: 'Ab\'Dendriel',
-    kazordoon: 'Kazordoon',
-    venore: 'Venore'
-};
-
-// Get region display name from region id (same logic as Cyclopedia getRegionDisplayName)
+// Get region display name from region id (uses maps-database)
 function getRealRegionName(region) {
     if (!region) return 'Unknown Region';
-    const regionId = region.id || region.name || 'unknown';
-    const mapped = REGION_NAME_MAP[String(regionId).toLowerCase()];
-    if (mapped) return mapped;
+    if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
+        return globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
+    }
+    if (region.name) return region.name;
+    const regionId = region.id || 'unknown';
+    if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
+        return globalThis.mapsDatabase.getRegionDisplayName(regionId);
+    }
     return String(regionId).replace(/\w\S*/g, (txt) =>
         txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
     );

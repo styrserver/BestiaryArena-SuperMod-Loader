@@ -701,6 +701,7 @@ function init() {
   // Add the configuration button
   api.ui.addButton({
     id: CONFIG_BUTTON_ID,
+    text: t('mods.tickTracker.configButtonText'),
     icon: '⚙️',
     modId: MOD_ID,
     tooltip: t('mods.tickTracker.configButtonTooltip'),

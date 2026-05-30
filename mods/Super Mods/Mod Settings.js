@@ -36,6 +36,7 @@ const defaultConfig = {
   includeHuntDataByDefault: true,
   defaultInventorySticky: false,
   inventoryBorderStyle: 'Original',
+  modButtonDisplay: 'text', // 'text' or 'icon'
   vipListInterface: 'modal', // 'modal' or 'panel'
   enableVipListChat: false, // Enable messaging/chat feature in VIP List (controls both VIP List chat and Global Chat)
   vipListMessageFilter: 'all', // 'all' or 'friends' - who can send messages
@@ -293,7 +294,7 @@ const GAME_CONSTANTS = {
 // Modal dimensions
 const MODAL_CONFIG = {
   width: 600,
-  height: 350,
+  height: 400,
   leftColumnWidth: 140,
   rightColumnWidth: 400
 };
@@ -313,6 +314,21 @@ const THROTTLE_SETTINGS = {
   DOM_CHECK: 1000,  // 1 second for DOM mutation throttle
   UPDATE: 10000     // 10 seconds for update throttle
 };
+
+/** Region display name via maps-database (game REGION_NAME / REGIONS.name / static map). */
+function resolveRegionDisplayName(region) {
+  if (!region) return 'Unknown Region';
+  if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
+    return globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
+  }
+  if (region.name) return region.name;
+  const id = region.id;
+  if (!id) return 'Unknown Region';
+  if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
+    return globalThis.mapsDatabase.getRegionDisplayName(id);
+  }
+  return String(id).replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+}
 
 // Timeout/Delay settings (in milliseconds)
 const TIMEOUT_DELAYS = {
@@ -1029,16 +1045,269 @@ function triggerStartOrSkipFromHotkey() {
 }
 
 const TURBO_MODE_MOD_NAME = 'Official Mods/Turbo Mode.js';
+const RUN_TRACKER_MOD_NAME = 'Super Mods/RunTracker.js';
+const HUNT_ANALYZER_MOD_NAME = 'Super Mods/Hunt Analyzer.js';
+const VIP_LIST_MOD_NAME = 'OT Mods/VIP List.js';
+const DEPOT_MANAGER_MOD_NAME = 'Super Mods/Depot Manager.js';
+const BETTER_HIGHSCORES_MOD_NAME = 'Super Mods/Better Highscores.js';
 
-function getTurboModeLocalMod() {
+/** @type {((categoryId: string) => void) | null} */
+let modSettingsSelectCategoryHandler = null;
+/** @type {(() => void) | null} */
+let modSettingsFirebaseUploadStateUpdater = null;
+
+function getLocalModByName(modName) {
   return Array.isArray(window.localMods)
-    ? window.localMods.find((mod) => mod && mod.name === TURBO_MODE_MOD_NAME)
+    ? window.localMods.find((mod) => mod && mod.name === modName)
     : null;
 }
 
+function isLocalModEnabledInRegistry(modName) {
+  return getLocalModByName(modName)?.enabled === true;
+}
+
 function isTurboModeModEnabled() {
-  const turboMod = getTurboModeLocalMod();
-  return turboMod?.enabled === true || !!document.getElementById('turbo-mod-button');
+  return isLocalModEnabledInRegistry(TURBO_MODE_MOD_NAME)
+    || !!document.getElementById('turbo-mod-button');
+}
+
+function isRunTrackerModEnabled() {
+  return isLocalModEnabledInRegistry(RUN_TRACKER_MOD_NAME)
+    || (window.RunTrackerAPI && window.RunTrackerAPI._initialized === true);
+}
+
+function isHuntAnalyzerModEnabled() {
+  return isLocalModEnabledInRegistry(HUNT_ANALYZER_MOD_NAME)
+    || !!window.HuntAnalyzerState
+    || !!window.HuntAnalyzerAPI;
+}
+
+function isVipListModEnabled() {
+  return isLocalModEnabledInRegistry(VIP_LIST_MOD_NAME)
+    || !!window.VIPList;
+}
+
+function isDepotManagerModEnabled() {
+  return isLocalModEnabledInRegistry(DEPOT_MANAGER_MOD_NAME)
+    || !!window.depotManager;
+}
+
+function isBetterHighscoresModEnabled() {
+  return isLocalModEnabledInRegistry(BETTER_HIGHSCORES_MOD_NAME)
+    || !!window.BetterHighscores
+    || !!document.querySelector('.better-highscores-container');
+}
+
+function applyModDependentCheckboxRow({ disabledTitle, disabled, warningEl, labelEl, checkboxEl }) {
+  if (warningEl) {
+    warningEl.hidden = !disabled;
+    warningEl.title = disabled ? disabledTitle : '';
+    warningEl.style.display = disabled ? 'inline-flex' : 'none';
+  }
+  if (labelEl) {
+    labelEl.style.opacity = disabled ? '0.5' : '1';
+    labelEl.style.cursor = disabled ? 'not-allowed' : 'pointer';
+    labelEl.title = disabled ? disabledTitle : '';
+  }
+  if (checkboxEl) {
+    checkboxEl.disabled = disabled;
+  }
+}
+
+function applyModDependentSection({ disabledTitle, disabled, sectionEl, warningEl, controlEls = [] }) {
+  if (warningEl) {
+    warningEl.hidden = !disabled;
+    warningEl.title = disabled ? disabledTitle : '';
+    warningEl.style.display = disabled ? 'inline-flex' : 'none';
+  }
+  if (sectionEl) {
+    sectionEl.style.opacity = disabled ? '0.5' : '1';
+    sectionEl.title = disabled ? disabledTitle : '';
+  }
+  for (const controlEl of controlEls) {
+    if (!controlEl) continue;
+    controlEl.disabled = disabled;
+    controlEl.style.pointerEvents = disabled ? 'none' : 'auto';
+    controlEl.title = disabled ? disabledTitle : '';
+  }
+}
+
+const RUN_TRACKER_SETTINGS_DISABLED_TITLE =
+  'Enable the Run Tracker mod for this setting to work.';
+const BETTER_HIGHSCORES_SETTINGS_DISABLED_TITLE =
+  'Enable the Better Highscores mod for these settings to work.';
+const FIREBASE_RUNS_SETTINGS_DISABLED_TITLE =
+  'Enable the Run Tracker mod to upload or download best runs.';
+const BACKUP_RUN_DATA_DISABLED_TITLE =
+  'Enable the Run Tracker mod to include run data in backups.';
+const BACKUP_HUNT_DATA_DISABLED_TITLE =
+  'Enable the Hunt Analyzer mod to include hunt data in backups.';
+
+function updateModSettingsMenuVisibility() {
+  const leftMenu = document.getElementById('mod-settings-left-menu');
+  if (!leftMenu) return;
+
+  const modAvailabilityByCategory = {
+    'depot-manager': isDepotManagerModEnabled(),
+    'hunt-analyzer': isHuntAnalyzerModEnabled(),
+    'vip-list': isVipListModEnabled()
+  };
+
+  let selectedCategory = leftMenu.dataset.selectedCategory || 'creatures';
+  let needsReselect = false;
+
+  leftMenu.querySelectorAll('[data-mod-settings-category]').forEach((menuItem) => {
+    const categoryId = menuItem.dataset.modSettingsCategory;
+    const requiresMod = menuItem.dataset.requiresMod === 'true';
+    const available = !requiresMod || modAvailabilityByCategory[categoryId] === true;
+    menuItem.hidden = !available;
+    if (!available && categoryId === selectedCategory) {
+      needsReselect = true;
+    }
+  });
+
+  if (needsReselect && typeof modSettingsSelectCategoryHandler === 'function') {
+    leftMenu.dataset.selectedCategory = 'creatures';
+    modSettingsSelectCategoryHandler('creatures');
+  }
+}
+
+function updateRunTrackerSettingsAvailability() {
+  const disabled = !isRunTrackerModEnabled();
+  applyModDependentCheckboxRow({
+    disabledTitle: RUN_TRACKER_SETTINGS_DISABLED_TITLE,
+    disabled,
+    warningEl: document.getElementById('run-tracker-unavailable-warning'),
+    labelEl: document.getElementById('run-tracker-toggle-label'),
+    checkboxEl: document.getElementById('run-tracker-toggle')
+  });
+}
+
+function updateBetterHighscoresSettingsAvailability() {
+  const disabled = !isBetterHighscoresModEnabled();
+  applyModDependentSection({
+    disabledTitle: BETTER_HIGHSCORES_SETTINGS_DISABLED_TITLE,
+    disabled,
+    sectionEl: document.getElementById('better-highscores-settings-section'),
+    warningEl: document.getElementById('better-highscores-settings-unavailable-warning'),
+    controlEls: [
+      document.getElementById('better-highscores-opacity-slider'),
+      document.getElementById('better-highscores-button-toggle')
+    ]
+  });
+}
+
+function updateFirebaseRunsSettingsAvailability() {
+  const section = document.getElementById('firebase-runs-settings-section');
+  const warning = document.getElementById('firebase-runs-unavailable-warning');
+  const disabled = !isRunTrackerModEnabled();
+  const controlEls = [
+    document.getElementById('firebase-runs-upload-toggle'),
+    document.getElementById('auto-upload-runs-toggle'),
+    document.getElementById('firebase-runs-password'),
+    document.getElementById('upload-runs-btn'),
+    document.getElementById('download-runs-btn'),
+    document.getElementById('delete-runs-btn')
+  ];
+
+  applyModDependentSection({
+    disabledTitle: FIREBASE_RUNS_SETTINGS_DISABLED_TITLE,
+    disabled,
+    sectionEl: section,
+    warningEl: warning,
+    controlEls
+  });
+
+  if (!disabled && typeof modSettingsFirebaseUploadStateUpdater === 'function') {
+    modSettingsFirebaseUploadStateUpdater();
+  }
+}
+
+function updateBackupModExportAvailability() {
+  const runTrackerDisabled = !isRunTrackerModEnabled();
+  applyModDependentCheckboxRow({
+    disabledTitle: BACKUP_RUN_DATA_DISABLED_TITLE,
+    disabled: runTrackerDisabled,
+    warningEl: document.getElementById('export-run-data-unavailable-warning'),
+    labelEl: document.getElementById('export-run-data-label'),
+    checkboxEl: document.getElementById('export-run-data')
+  });
+
+  const huntAnalyzerDisabled = !isHuntAnalyzerModEnabled();
+  applyModDependentCheckboxRow({
+    disabledTitle: BACKUP_HUNT_DATA_DISABLED_TITLE,
+    disabled: huntAnalyzerDisabled,
+    warningEl: document.getElementById('export-hunt-analyzer-unavailable-warning'),
+    labelEl: document.getElementById('export-hunt-analyzer-label'),
+    checkboxEl: document.getElementById('export-hunt-analyzer')
+  });
+}
+
+function syncModDependentSettingsAvailability() {
+  updateModSettingsMenuVisibility();
+  updateReturnToMapHotkeyAvailability();
+  updateTurboModeHotkeyAvailability();
+  updateTurboSpeedSettingsAvailability();
+  updateRoomHopperHotkeyAvailability();
+  updateCyclopediaHotkeyAvailability();
+  updateRunTrackerSettingsAvailability();
+  updateBetterHighscoresSettingsAvailability();
+  updateFirebaseRunsSettingsAvailability();
+  updateBackupModExportAvailability();
+}
+
+const TURBO_SCRIPT_CONFIG_HASH = 'local_DOM_Turbo_with_ticks.js';
+const TURBO_DEFAULT_TICK_INTERVAL_MS = 62.5;
+const TURBO_SPEED_SETTINGS_DISABLED_TITLE =
+  'Enable the Turbo Mode mod to change turbo speed.';
+
+function getTurboSpeedupFactor() {
+  if (window.turboMode && typeof window.turboMode.getSpeed === 'function') {
+    return Math.max(window.turboMode.getSpeed(), 2);
+  }
+  return Math.max(window.__turboState?.speedupFactor ?? 5, 2);
+}
+
+function setTurboSpeedupFactor(newFactor) {
+  const value = Math.max(2, Math.min(10, parseInt(newFactor, 10) || 5));
+  if (window.turboMode && typeof window.turboMode.setSpeed === 'function') {
+    window.turboMode.setSpeed(value);
+    return;
+  }
+  if (window.__turboState) {
+    window.__turboState.speedupFactor = value;
+  }
+  const speedLabel = document.getElementById('turbo-speed-value');
+  if (speedLabel) {
+    speedLabel.textContent = `${value}x`;
+  }
+  if (typeof api !== 'undefined' && api?.service?.updateScriptConfig) {
+    api.service.updateScriptConfig(TURBO_SCRIPT_CONFIG_HASH, {
+      active: window.__turboState?.active ?? false,
+      speedupFactor: value
+    });
+  }
+}
+
+function updateTurboSpeedSettingsAvailability() {
+  const section = document.getElementById('turbo-speed-settings-section');
+  const warning = document.getElementById('turbo-speed-settings-unavailable-warning');
+  const slider = document.getElementById('turbo-speed-slider');
+  const disabled = !isTurboModeModEnabled();
+
+  if (warning) {
+    warning.hidden = !disabled;
+    warning.title = disabled ? TURBO_SPEED_SETTINGS_DISABLED_TITLE : '';
+  }
+  if (section) {
+    section.style.opacity = disabled ? '0.5' : '1';
+    section.title = disabled ? TURBO_SPEED_SETTINGS_DISABLED_TITLE : '';
+  }
+  if (slider) {
+    slider.disabled = disabled;
+    slider.style.pointerEvents = disabled ? 'none' : 'auto';
+    slider.title = disabled ? TURBO_SPEED_SETTINGS_DISABLED_TITLE : '';
+  }
 }
 
 function triggerToggleTurboModeFromHotkey() {
@@ -1714,20 +1983,14 @@ function syncAllNavHotkeyCaptureDisplays() {
     if (res) res.className = HOTKEY_RESET_BUTTON_CLASS;
     if (cap && res) sizeHotkeyCaptureToResetButton(cap, res);
   }
-  updateReturnToMapHotkeyAvailability();
-  updateTurboModeHotkeyAvailability();
-  updateRoomHopperHotkeyAvailability();
-  updateCyclopediaHotkeyAvailability();
+  syncModDependentSettingsAvailability();
   scheduleTimeout(() => {
     for (const row of ALL_HOTKEY_UI_ROWS) {
       const cap = document.getElementById(row.captureId);
       const res = document.getElementById(row.resetId);
       if (cap && res) sizeHotkeyCaptureToResetButton(cap, res);
     }
-    updateReturnToMapHotkeyAvailability();
-    updateTurboModeHotkeyAvailability();
-    updateRoomHopperHotkeyAvailability();
-    updateCyclopediaHotkeyAvailability();
+    syncModDependentSettingsAvailability();
   }, 0);
 }
 
@@ -2163,6 +2426,12 @@ function refreshInventoryModButtonBorderStyle() {
     if (!borderHtml) return;
     slot.insertAdjacentHTML('beforeend', borderHtml);
   });
+}
+
+function refreshModBarButtonLabels() {
+  if (window.BestiaryModAPI?.ui?.refreshModButtonLabels) {
+    window.BestiaryModAPI.ui.refreshModButtonLabels();
+  }
 }
 
 function getInventoryModButtonClassesInDom() {
@@ -3355,23 +3624,13 @@ function formatRunsAsText(runsData) {
       const roomNames = globalThis.state?.utils?.ROOM_NAME;
       
       if (regions && Array.isArray(regions) && roomNames) {
-        // Map region IDs to proper region names
-        const regionNameMap = {
-          'rook': 'Rookgaard',
-          'carlin': 'Carlin',
-          'folda': 'Folda',
-          'abdendriel': 'Ab\'Dendriel',
-          'kazordoon': 'Kazordoon',
-          'venore': 'Venore'
-        };
-        
         // Create a map of mapKey -> region name
         const mapKeyToRegion = {};
         
         regions.forEach(region => {
           if (!region.rooms) return;
           
-          const regionName = region.id ? (regionNameMap[region.id] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+          const regionName = resolveRegionDisplayName(region);
           
           region.rooms.forEach(room => {
             const roomId = room.id;
@@ -3545,18 +3804,8 @@ function formatRunsAsText(runsData) {
       try {
         const regions = globalThis.state?.utils?.REGIONS;
         if (regions && Array.isArray(regions)) {
-        // Map region IDs to proper region names
-        const regionNameMap = {
-          'rook': 'Rookgaard',
-          'carlin': 'Carlin',
-          'folda': 'Folda',
-          'abdendriel': 'Ab\'Dendriel',
-          'kazordoon': 'Kazordoon',
-          'venore': 'Venore'
-        };
-        
         regions.forEach((region, index) => {
-          const regionId = region.id ? (regionNameMap[region.id] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : null;
+          const regionId = resolveRegionDisplayName(region);
             if (regionId === regionNameA) {
               regionOrderA = index;
             }
@@ -3742,21 +3991,11 @@ async function uploadBestRuns(options = {}) {
           mapKeyToRoomId[mapKey] = roomId;
         });
         
-        // Map region IDs to proper region names
-        const regionNameMap = {
-          'rook': 'Rookgaard',
-          'carlin': 'Carlin',
-          'folda': 'Folda',
-          'abdendriel': 'Ab\'Dendriel',
-          'kazordoon': 'Kazordoon',
-          'venore': 'Venore'
-        };
-        
         // Iterate through regions in order
         regions.forEach(region => {
           if (!region.rooms) return;
           
-          const regionName = region.id ? (regionNameMap[region.id] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+          const regionName = resolveRegionDisplayName(region);
           
           region.rooms.forEach(room => {
             const roomId = room.id;
@@ -4085,16 +4324,6 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         const roomNames = globalThis.state?.utils?.ROOM_NAME;
         
         if (regions && Array.isArray(regions) && roomNames) {
-          // Map region IDs to proper region names
-          const regionNameMap = {
-            'rook': 'Rookgaard',
-            'carlin': 'Carlin',
-            'folda': 'Folda',
-            'abdendriel': 'Ab\'Dendriel',
-            'kazordoon': 'Kazordoon',
-            'venore': 'Venore'
-          };
-          
           // Create a reverse lookup: mapKey -> roomId
           const mapKeyToRoomId = {};
           Object.keys(roomNames).forEach(roomId => {
@@ -4107,7 +4336,7 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
           regions.forEach(region => {
             if (!region.rooms) return;
             
-            const regionName = region.id ? (regionNameMap[region.id] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+            const regionName = resolveRegionDisplayName(region);
             
             region.rooms.forEach(room => {
               const roomId = room.id;
@@ -5407,6 +5636,8 @@ function showSettingsModal() {
     
     // Left column - Options
     const leftColumn = document.createElement('div');
+    leftColumn.id = 'mod-settings-left-menu';
+    leftColumn.dataset.selectedCategory = 'creatures';
     Object.assign(leftColumn.style, {
       width: `${MODAL_CONFIG.leftColumnWidth}px`,
       minWidth: `${MODAL_CONFIG.leftColumnWidth}px`,
@@ -5517,20 +5748,36 @@ function showSettingsModal() {
     // Create menu items for left column
     let menuItems = [
       { id: 'creatures', label: t('mods.betterUI.menuCreatures'), selected: true },
-      { id: 'depot-manager', label: t('mods.depot.title'), selected: false },
+      { id: 'depot-manager', label: t('mods.depot.title'), selected: false, requiresMod: true },
       { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
       { id: 'hotkeys', label: t('mods.betterUI.menuHotkeys'), selected: false },
-      { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false },
-      { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false },
+      { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false, requiresMod: true },
+      { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false, requiresMod: true },
       { id: 'mod-coordination', label: t('mods.betterUI.menuModCoordination'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
       { id: 'backup', label: t('mods.betterUI.menuBackup'), selected: false }
     ];
+
+    const selectModSettingsCategory = (categoryId) => {
+      leftColumn.dataset.selectedCategory = categoryId;
+      menuItems.forEach((mi) => {
+        const miElement = leftColumn.querySelector(`[data-mod-settings-category="${mi.id}"]`);
+        if (miElement) {
+          applyMenuItemStyle(miElement, mi.id === categoryId);
+        }
+      });
+      updateRightColumn(categoryId);
+    };
+
+    modSettingsSelectCategoryHandler = selectModSettingsCategory;
     
     menuItems.forEach(item => {
       const menuItem = document.createElement('div');
       menuItem.className = 'menu-item pixel-font-16';
-      menuItem.dataset.category = item.id;
+      menuItem.dataset.modSettingsCategory = item.id;
+      if (item.requiresMod) {
+        menuItem.dataset.requiresMod = 'true';
+      }
       Object.assign(menuItem.style, {
         cursor: 'pointer',
         padding: '2px 4px',
@@ -5557,16 +5804,15 @@ function showSettingsModal() {
       applyMenuItemStyle(menuItem, item.selected);
       
       menuItem.addEventListener('click', () => {
-        // Update menu selection
-        menuItems.forEach(mi => {
-          const miElement = leftColumn.querySelector(`[data-category="${mi.id}"]`);
-          if (miElement) {
-            applyMenuItemStyle(miElement, mi.id === item.id);
-          }
-        });
-        
-        // Update right column content
-        updateRightColumn(item.id);
+        if (item.requiresMod) {
+          const modAvailabilityByCategory = {
+            'depot-manager': isDepotManagerModEnabled(),
+            'hunt-analyzer': isHuntAnalyzerModEnabled(),
+            'vip-list': isVipListModEnabled()
+          };
+          if (!modAvailabilityByCategory[item.id]) return;
+        }
+        selectModSettingsCategory(item.id);
       });
       
       // Add hover effect
@@ -5585,6 +5831,8 @@ function showSettingsModal() {
       
       leftColumn.appendChild(menuItem);
     });
+
+    updateModSettingsMenuVisibility();
     
     // Function to update right column content based on selected category
     function updateRightColumn(categoryId) {
@@ -5593,16 +5841,38 @@ function showSettingsModal() {
       if (categoryId === 'ui') {
         const uiContent = document.createElement('div');
         uiContent.innerHTML = `
-          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="color: #ccc; min-width: 200px;">${t('mods.betterUI.betterHighscoresBackgroundOpacity')}</span>
-            <input type="range" id="better-highscores-opacity-slider" min="0" max="100" value="100" step="1" style="flex: 1; min-width: 150px; max-width: 300px; cursor: pointer;" onclick="event.stopPropagation();">
-            <span id="better-highscores-opacity-value" style="color: #ccc; min-width: 40px; text-align: right;">100%</span>
-          </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="better-highscores-button-toggle" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.showBetterHighscoresButton')}</span>
-            </label>
+          <div id="better-highscores-settings-section" style="margin-bottom: 20px;">
+            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span id="better-highscores-settings-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center;">⚠️</span>
+              <span style="color: #ccc; min-width: 200px;">${t('mods.betterUI.betterHighscoresBackgroundOpacity')}</span>
+              <input type="range" id="better-highscores-opacity-slider" min="0" max="100" value="100" step="1" style="flex: 1; min-width: 150px; max-width: 300px; cursor: pointer;" onclick="event.stopPropagation();">
+              <span id="better-highscores-opacity-value" style="color: #ccc; min-width: 40px; text-align: right;">100%</span>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="better-highscores-button-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.showBetterHighscoresButton')}</span>
+              </label>
+            </div>
+            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+              <span style="color: #ccc;">${t('mods.betterUI.modButtonDisplay')}</span>
+              <select id="mod-button-display-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+                <option value="text">${t('mods.betterUI.modButtonDisplayText')}</option>
+                <option value="icon">${t('mods.betterUI.modButtonDisplayIcon')}</option>
+              </select>
+            </div>
+            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+              <span style="color: #ccc;">${t('mods.betterUI.inventoryBorderStyle')}</span>
+              <select id="inventory-border-style-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+                <option value="Original">Original</option>
+                <option value="Demonic">Demonic</option>
+                <option value="Frosty">Frosty</option>
+                <option value="Venomous">Venomous</option>
+                <option value="Divine">Divine</option>
+                <option value="Undead">Undead</option>
+                <option value="Prismatic">Prismatic</option>
+              </select>
+            </div>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
@@ -5621,18 +5891,6 @@ function showSettingsModal() {
               <input type="checkbox" id="default-inventory-sticky-toggle" style="transform: scale(1.2);">
               <span>${t('mods.betterUI.stickyInventory')}</span>
             </label>
-          </div>
-          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
-            <span style="color: #ccc;">${t('mods.betterUI.inventoryBorderStyle')}</span>
-            <select id="inventory-border-style-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
-              <option value="Original">Original</option>
-              <option value="Demonic">Demonic</option>
-              <option value="Frosty">Frosty</option>
-              <option value="Venomous">Venomous</option>
-              <option value="Divine">Divine</option>
-              <option value="Undead">Undead</option>
-              <option value="Prismatic">Prismatic</option>
-            </select>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
@@ -6061,6 +6319,8 @@ function showSettingsModal() {
         } catch (error) {
           console.error('[Mod Settings] Error reading Bestiary Automator config for HTML:', error);
         }
+
+        const turboSpeedupFactor = getTurboSpeedupFactor();
         
         const advancedContent = document.createElement('div');
         advancedContent.innerHTML = `
@@ -6103,7 +6363,8 @@ function showSettingsModal() {
             </label>
           </div>
           <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+            <label id="run-tracker-toggle-label" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <span id="run-tracker-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center;">⚠️</span>
               <input type="checkbox" id="run-tracker-toggle" style="transform: scale(1.2);">
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableRunTrackerWarning')}">${t('mods.betterUI.disableRunTracker')}</span>
             </label>
@@ -6114,9 +6375,26 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.alwaysNavigateMaxFloorWarning')}">⚠️ ${t('mods.betterUI.alwaysNavigateMaxFloor')}</span>
             </label>
           </div>
-          <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+          <div id="turbo-speed-settings-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;">
+            <h4 style="margin: 0 0 12px 0; color: #ffaa00; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+              <span id="turbo-speed-settings-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px;">⚠️</span>
+              ${t('mods.turbo.configTitle')}
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Adjust the slider to control how much faster the game runs when Turbo is enabled. Higher values make the game run faster but may cause performance issues on some devices. Default game speed is 1x (${TURBO_DEFAULT_TICK_INTERVAL_MS}ms per tick). Turbo speeds range from 2x to 10x with performance optimizations.">⚠️</span>
+            </h4>
+            <div style="display: flex; flex-direction: column; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px; color: #ccc;">
+                <span>${t('mods.turbo.speedFactor')}</span>
+                <span id="turbo-speed-value">${turboSpeedupFactor}x</span>
+              </div>
+              <input type="range" id="turbo-speed-slider" min="2" max="10" step="1" value="${turboSpeedupFactor}" style="width: 100%; pointer-events: auto;" onclick="event.stopPropagation();">
+            </div>
+          </div>
+          <div id="firebase-runs-settings-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
             <div style="margin-bottom: 15px; text-align: center;">
-              <h4 style="margin: 0 0 15px 0; color: #ffaa00; font-size: 14px; cursor: help;" title="${t('mods.betterUI.firebaseBestRunsUploadTooltip')}">${t('mods.betterUI.firebaseBestRunsUploadTitle')}</h4>
+              <h4 style="margin: 0 0 15px 0; color: #ffaa00; font-size: 14px; cursor: help; display: inline-flex; align-items: center; gap: 6px; justify-content: center;" title="${t('mods.betterUI.firebaseBestRunsUploadTooltip')}">
+                <span id="firebase-runs-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px;">⚠️</span>
+                ${t('mods.betterUI.firebaseBestRunsUploadTitle')}
+              </h4>
             </div>
             <div style="margin-bottom: 15px;">
               <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
@@ -6386,14 +6664,16 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <h3 style="margin-bottom: 10px; color: #fff; font-size: 14px;">${t('mods.betterUI.backupExportOptions')}</h3>
             
-            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 8px;">
+            <label id="export-run-data-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 8px;">
+              <span id="export-run-data-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center;">⚠️</span>
               <input type="checkbox" id="export-run-data" checked style="cursor: pointer; transform: scale(1.2);">
               <span>${t('mods.betterUI.backupIncludeRunData')}</span>
             </label>
             <div id="run-data-info" style="margin-left: 28px; margin-bottom: 10px; font-size: 12px; color: #7f8fa4; display: none;">
             </div>
             
-            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 8px;">
+            <label id="export-hunt-analyzer-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 8px;">
+              <span id="export-hunt-analyzer-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center;">⚠️</span>
               <input type="checkbox" id="export-hunt-analyzer" checked style="cursor: pointer; transform: scale(1.2);">
               <span>${t('mods.betterUI.backupIncludeHuntData')}</span>
             </label>
@@ -6674,6 +6954,11 @@ function showSettingsModal() {
         createSettingsDropdownHandler('inventoryBorderStyle', refreshInventoryModButtonBorderStyle)(inventoryBorderStyleSelector);
       }
 
+      const modButtonDisplaySelector = content.querySelector('#mod-button-display-selector');
+      if (modButtonDisplaySelector) {
+        createSettingsDropdownHandler('modButtonDisplay', refreshModBarButtonLabels)(modButtonDisplaySelector);
+      }
+
       const enableHotkeysCheckbox = content.querySelector('#enable-hotkeys-toggle');
       const hotkeysBindingsContainer = content.querySelector('#hotkeys-bindings-container');
       const updateHotkeysBindingsVisibility = () => {
@@ -6870,10 +7155,7 @@ function showSettingsModal() {
           ''
         );
       }
-      updateReturnToMapHotkeyAvailability();
-      updateTurboModeHotkeyAvailability();
-      updateRoomHopperHotkeyAvailability();
-      updateCyclopediaHotkeyAvailability();
+      syncModDependentSettingsAvailability();
 
       const betterHighscoresOpacitySlider = content.querySelector('#better-highscores-opacity-slider');
       const betterHighscoresOpacityValue = content.querySelector('#better-highscores-opacity-value');
@@ -6935,6 +7217,23 @@ function showSettingsModal() {
           console.log('[Mod Settings] Chat', enableVipListChatCheckbox.checked ? 'enabled' : 'disabled');
         });
       }
+
+    const turboSpeedSlider = content.querySelector('#turbo-speed-slider');
+    const turboSpeedValue = content.querySelector('#turbo-speed-value');
+    if (turboSpeedSlider) {
+      const initialTurboSpeed = getTurboSpeedupFactor();
+      turboSpeedSlider.value = String(initialTurboSpeed);
+      if (turboSpeedValue) {
+        turboSpeedValue.textContent = `${initialTurboSpeed}x`;
+      }
+      turboSpeedSlider.addEventListener('input', () => {
+        const value = parseInt(turboSpeedSlider.value, 10);
+        setTurboSpeedupFactor(value);
+        if (turboSpeedValue) {
+          turboSpeedValue.textContent = `${value}x`;
+        }
+      });
+    }
 
     const autoplayRefreshCheckbox = content.querySelector('#autoplay-refresh-toggle');
     if (autoplayRefreshCheckbox) {
@@ -7242,6 +7541,11 @@ function showSettingsModal() {
       
       // Function to update upload button and checkbox states
       const updateUploadButtonState = () => {
+        if (!isRunTrackerModEnabled()) {
+          updateFirebaseRunsSettingsAvailability();
+          return;
+        }
+
         const hasPassword = config.firebaseRunsPassword && config.firebaseRunsPassword.length >= 5;
         
         if (uploadRunsBtn) {
@@ -7283,6 +7587,7 @@ function showSettingsModal() {
           }
         }
       };
+      modSettingsFirebaseUploadStateUpdater = updateUploadButtonState;
       
       if (firebaseRunsPasswordInput) {
         // Don't show the actual password, but show if one is set
@@ -7981,6 +8286,8 @@ function showSettingsModal() {
           resetAllSettings(modalRef);
         });
       }
+
+      syncModDependentSettingsAvailability();
     }
     
     // Attach event handlers to the initial content
@@ -8002,6 +8309,8 @@ function showSettingsModal() {
           closeOnClick: true,
           onClick: () => {
             console.log('[Mod Settings] Settings modal closed');
+            modSettingsSelectCategoryHandler = null;
+            modSettingsFirebaseUploadStateUpdater = null;
           }
         }
       ]
@@ -10121,17 +10430,25 @@ function getSpriteInfo(spriteElement) {
 }
 
 // Helper: Check if creature is in the unobtainable list
-// Handles creatures with suffixes like "Dwarf Henchman 4" by checking if the name starts with an unobtainable creature name
+// Handles numbered variants like "Dwarf Henchman 4" only — not distinct species that share a prefix (e.g. "Orc" vs "Orc Spearman")
 function isCreatureUnobtainable(creatureName) {
   if (!creatureName) return false;
   const UNOBTAINABLE_CREATURES = window.creatureDatabase?.UNOBTAINABLE_CREATURES || [];
   const creatureNameLower = creatureName.toLowerCase();
   return UNOBTAINABLE_CREATURES.some(c => {
     const unobtainableLower = c.toLowerCase();
-    // Check exact match or if creature name starts with unobtainable name (for suffixes like "Dwarf Henchman 4")
-    return unobtainableLower === creatureNameLower || 
-           creatureNameLower.startsWith(unobtainableLower + ' ');
+    if (unobtainableLower === creatureNameLower) return true;
+    if (!creatureNameLower.startsWith(unobtainableLower + ' ')) return false;
+    const suffix = creatureNameLower.slice(unobtainableLower.length + 1);
+    return /^\d+$/.test(suffix);
   });
+}
+
+// Helper: Skip shiny enemy overlay when the creature has no shiny sprite assets
+function shouldSkipShinyEnemy(creatureName) {
+  if (!creatureName) return false;
+  if (isCreatureUnobtainable(creatureName)) return true;
+  return window.creatureDatabase?.creatureHasShinyVariant?.(creatureName) === false;
 }
 
 // Helper: Check if a battle container is an enemy (red health bar)
@@ -10186,8 +10503,7 @@ function applyShinyEnemies() {
         creatureName = monster?.metadata?.name;
       }
       
-      // Check if unobtainable first - if so, skip entirely
-      if (isCreatureUnobtainable(creatureName)) {
+      if (shouldSkipShinyEnemy(creatureName)) {
         skippedCount++;
         return;
       }
@@ -10222,7 +10538,7 @@ function applyShinyEnemies() {
       const battleContainer = img.closest('[data-name]');
       if (battleContainer && isEnemyByHealthBar(battleContainer)) {
         const creatureName = battleContainer.getAttribute('data-name');
-        if (isCreatureUnobtainable(creatureName)) {
+        if (shouldSkipShinyEnemy(creatureName)) {
           return;
         }
         if (img.getAttribute('data-shiny') === 'false') {
@@ -10242,8 +10558,7 @@ function applyShinyEnemies() {
       const creatureName = container.getAttribute('data-name');
       
       if (isEnemyByHealthBar(container)) {
-        // Check if unobtainable first - if so, skip entirely
-        if (isCreatureUnobtainable(creatureName)) {
+        if (shouldSkipShinyEnemy(creatureName)) {
           return;
         }
         
@@ -11154,8 +11469,7 @@ function startBattleBoardObserver() {
                   const spriteContainer = spriteImg.closest('.sprite');
                   const spriteId = spriteContainer ? parseInt(extractSpriteIdFromClasses(spriteContainer), 10) : null;
                   
-                  // Check if creature is unobtainable first - if so, skip entirely
-                  if (isCreatureUnobtainable(creatureName)) {
+                  if (shouldSkipShinyEnemy(creatureName)) {
                     return;
                   }
                   
@@ -11171,13 +11485,13 @@ function startBattleBoardObserver() {
                     });
                   }
                   
-                  if (isEnemy && dataShiny === 'false' && !isCreatureUnobtainable(creatureName)) {
+                  if (isEnemy && dataShiny === 'false' && !shouldSkipShinyEnemy(creatureName)) {
                     spriteImg.setAttribute('data-shiny', 'true');
                   } else if (!isEnemy) {
                     // NOT in boardConfig as enemy - check if it's a visual summon by health bar
                     const isVisualEnemy = isEnemyByHealthBar(containerNode);
                     
-                    if (isVisualEnemy && dataShiny === 'false' && !isCreatureUnobtainable(creatureName)) {
+                    if (isVisualEnemy && dataShiny === 'false' && !shouldSkipShinyEnemy(creatureName)) {
                       spriteImg.setAttribute('data-shiny', 'true');
                     }
                   }
@@ -11247,8 +11561,6 @@ function startBattleBoardObserver() {
             }
             
             if (matchedEnemy) {
-              // Check if creature is unobtainable (no shiny version)
-              const UNOBTAINABLE_CREATURES = window.creatureDatabase?.UNOBTAINABLE_CREATURES || [];
               let creatureName = null;
               
               if (globalThis.state?.utils?.getMonster) {
@@ -11256,9 +11568,7 @@ function startBattleBoardObserver() {
                 creatureName = monster?.metadata?.name;
               }
               
-              if (isCreatureUnobtainable(creatureName)) {
-                // Skip unobtainable creatures
-              } else {
+              if (!shouldSkipShinyEnemy(creatureName)) {
                 // Re-apply shiny immediately to enemy
                 target.setAttribute('data-shiny', 'true');
                 attributesChanged = true;
@@ -12461,6 +12771,9 @@ function initBetterUI() {
 
     applyDefaultInventorySticky();
     observers.inventoryModButtons = startInventoryModButtonsObserver();
+    scheduleTimeout(() => {
+      refreshModBarButtonLabels();
+    }, 500);
 
     initHotkeys();
     

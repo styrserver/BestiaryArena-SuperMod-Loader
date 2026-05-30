@@ -140,6 +140,99 @@ function isRaid(mapId) {
   return map ? map.raid === true : false;
 }
 
+/** Region id → display name fallback when game state names are unavailable. */
+const REGION_NAME_MAP = {
+  rook: 'Rookgaard',
+  carlin: 'Carlin',
+  folda: 'Folda',
+  abdendriel: 'Ab\'Dendriel',
+  kazordoon: 'Kazordoon',
+  venore: 'Venore',
+  ankrahmun: 'Ankrahmun'
+};
+
+function titleCaseRegionId(regionId) {
+  const raw = String(regionId ?? '').trim();
+  if (!raw) return 'Unknown Region';
+  return raw.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+}
+
+/**
+ * Resolve a region id to its display name.
+ * Priority: state.utils.REGION_NAME → REGIONS[].name → static map → title case.
+ * @param {string} regionId
+ * @returns {string}
+ */
+function getRegionDisplayName(regionId) {
+  if (regionId == null || regionId === '') return 'Unknown Region';
+  const key = String(regionId).toLowerCase();
+
+  try {
+    const regionNames = globalThis.state?.utils?.REGION_NAME;
+    if (regionNames && typeof regionNames === 'object') {
+      if (regionNames[regionId]) return regionNames[regionId];
+      if (regionNames[key]) return regionNames[key];
+    }
+  } catch (_) { /* ignore */ }
+
+  try {
+    const regions = globalThis.state?.utils?.REGIONS;
+    if (Array.isArray(regions)) {
+      const region = regions.find(
+        (r) => r?.id === regionId || String(r?.id ?? '').toLowerCase() === key
+      );
+      if (region?.name) return region.name;
+    }
+  } catch (_) { /* ignore */ }
+
+  if (REGION_NAME_MAP[key]) return REGION_NAME_MAP[key];
+  if (REGION_NAME_MAP[regionId]) return REGION_NAME_MAP[regionId];
+  return titleCaseRegionId(regionId);
+}
+
+/**
+ * Resolve display name from a region object (state.utils.REGIONS entry).
+ * @param {{ id?: string, name?: string }|null|undefined} region
+ * @returns {string}
+ */
+function getRegionDisplayNameFromRegion(region) {
+  if (!region) return 'Unknown Region';
+  if (region.name) return region.name;
+  return getRegionDisplayName(region.id);
+}
+
+/**
+ * Comprehensive raid check (ROOMS, REGIONS scan, active raids list).
+ * @param {string} mapId
+ * @returns {boolean}
+ */
+function isMapRaidComprehensive(mapId) {
+  if (!mapId) return false;
+
+  try {
+    const roomData = globalThis.state?.utils?.ROOMS?.[mapId];
+    if (roomData?.raid === true) return true;
+
+    const regions = globalThis.state?.utils?.REGIONS;
+    if (regions && Array.isArray(regions)) {
+      for (const region of regions) {
+        if (region.rooms && Array.isArray(region.rooms)) {
+          const room = region.rooms.find((r) => r.id === mapId);
+          if (room && room.raid === true) return true;
+        }
+      }
+    }
+
+    const raidState = globalThis.state?.raids?.getSnapshot?.();
+    const activeRaids = raidState?.context?.list || [];
+    if (activeRaids.some((raid) => raid.roomId === mapId)) return true;
+  } catch (error) {
+    console.warn('[maps-database.js] Error checking if map is raid:', error);
+  }
+
+  return false;
+}
+
 // Static raid list (maps outside this list but marked raid are treated as dynamic event maps)
 const STATIC_RAID_EVENTS = [
   'Rat Plague',
@@ -228,8 +321,12 @@ mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
 mapsDatabase.getRaidMaps = getRaidMaps;
 mapsDatabase.getNonRaidMaps = getNonRaidMaps;
 mapsDatabase.isRaid = isRaid;
+mapsDatabase.isMapRaidComprehensive = isMapRaidComprehensive;
 mapsDatabase.isDynamicEventMap = isDynamicEventMap;
 mapsDatabase.getRegionsInOrder = getRegionsInOrder;
+mapsDatabase.REGION_NAME_MAP = { ...REGION_NAME_MAP };
+mapsDatabase.getRegionDisplayName = getRegionDisplayName;
+mapsDatabase.getRegionDisplayNameFromRegion = getRegionDisplayNameFromRegion;
 mapsDatabase.STATIC_RAID_EVENTS = STATIC_RAID_EVENTS.slice();
 mapsDatabase.EVENT_TO_ROOM_MAPPING = { ...EVENT_TO_ROOM_MAPPING };
 

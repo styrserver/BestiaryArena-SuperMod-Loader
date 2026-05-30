@@ -4,6 +4,76 @@
   },
   "notes": [
     {
+      "version": "4.0.0",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Panel header shows only the map name and enemy count (e.g. Sewers (1)) instead of prefixing with Awaken Tracker. Resizing matches Hunt Analyzer: eight edge/corner handles, min/max panel size (260×180–1200×900), and position updates when resizing from the top or left; drag clamps to the viewport. Footer merges Clear Map/Clear All with credits—tracker tab shows actions plus credits, overview tab shows credits only."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "changed",
+          "text": "Centralizes Cyclopedia-only creature data: hidden list entries, unobtainable map stat overrides, stat-bar display config, and cached getMonsterNameMap() for faster lookups. getCyclopediaCreatureNames() applies the hidden-creature filter in one place."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Performance and maintainability refactor: creature/equipment lists batch game-state reads; debounced Bestiary/Equipment search with cached row metadata; shared database helpers and deduplicated replay, search, and styling utilities; home search uses DocumentFragment; Rankings player search refreshes row highlights without rebuilding the tab. Tab body uses Hunt Analyzer–style 4-frame border. Layout fixes: Bestiary and Maps left lists no longer clip when detail content loads; Maps Map Information scrolls only the creature list; Bestiary detail uses three flex-width columns with no horizontal scrollbar (ability, location, and owned sections scroll vertically). Modal UI is English-only (removed mods.cyclopedia i18n; copy in CYCLOPEDIA_UI). Column/box titles share widget-top pixel-font-16 styling via createCyclopediaWidgetTitle. Profile loading and error states use shared HTML helpers."
+        },
+        {
+          "mod": "equipment-database.js",
+          "type": "changed",
+          "text": "Waits for game state before building ALL_EQUIPMENT (same lazy-init pattern as creature-database.js), with a placeholder global until load completes; fixes empty Arsenal/Cyclopedia equipment lists on early load. Adds cached getEquipmentNameMap() for O(1) equipment name-to-gameId lookups."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Map filter bar drops the Map Filter heading and centers a fixed 200px dropdown with ellipsis and full-name tooltip on long map names; Go to map button is capped at 25×25px. Dropdown list highlights only the active map (no stuck hover rows when reopening) and truncates long entries with tooltip."
+        },
+        {
+          "mod": "inventory-database.js",
+          "type": "changed",
+          "text": "Exports itemKeyGroups (currency, no-rarity, and upgrade item keys) for shared use with Cyclopedia inventory categorization."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Mod bar button updates use api.ui.updateButton so text/icon display mode is preserved; adds an explicit runner icon for icon mode."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "changed",
+          "text": "getRegionDisplayName() resolves labels from state.utils.REGION_NAME, REGIONS[].name, static REGION_NAME_MAP (includes Ankrahmun), then title case; adds getRegionDisplayNameFromRegion() for REGIONS entries. Better Boosted Maps, Raid Hunter, Room Hopper, Stamina Optimizer, Cyclopedia, and Mod Settings (run export/region sort via resolveRegionDisplayName()) dropped inline REGION_NAME_MAP copies. mod_development_guide.md documents using REGIONS and these helpers instead of hardcoded region lists. isMapRaidComprehensive() and getRegionsInOrder() unchanged."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Mod button bar toggle uses game frame/background assets and arrow icons, is pinned 35×35px in the bottom-right corner, and cycles layout on click: horizontal row, vertical stack, then hidden. Mod bar buttons support text or icon labels (Mod Settings → Interface) via a built-in icon registry; tooltip is used as a text fallback when label text is omitted. Hero Editor shows a Hero Editor label instead of the pencil icon; Team Copier and Tick Tracker Settings show text labels in text display mode (were icon-only). Runtime label changes should use updateButton or refreshModButtonLabels()."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Turbo speed (2x–10x) moved to Advanced below Always navigate max floor and above Firebase Best Runs; help text is on the section ⚠️. Controls that need another mod show ⚠️ and are disabled when that mod is off (Run Tracker toggle, Better Highscores opacity/button, Firebase runs upload, backup run/hunt include toggles). Depot Manager, Hunt Analyzer, and VIP List sidebar tabs hide when their mod is disabled. Interface adds Mod bar button labels (Text/Icons); that control and Inventory Mod Buttons are grouped under Show Highscores Button (section divider removed)."
+        },
+        {
+          "mod": "Turbo Mode",
+          "type": "changed",
+          "text": "Removed the cogwheel Turbo Settings button and config panel; configure speed in Mod Settings → Advanced."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "Mod bar button keeps the ⚠️ Autoplay delay warning in text display mode after init; label updates use api.ui.updateButton instead of textContent so refreshModButtonLabels() no longer strips it."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Shiny enemies no longer skips obtainable orcs (e.g. Orc Spearman) on maps like The Orc King Hall; unobtainable prefix matching is limited to numbered variants (e.g. Dwarf Henchman 4) and uses creatureHasShinyVariant for creatures without shiny sprites."
+        }
+      ]
+    },
+    {
       "version": "3.9.13",
       "changes": [
         {

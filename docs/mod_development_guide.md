@@ -129,6 +129,7 @@ if (api) {
   api.ui.addButton({
     id: 'my-awesome-mod-button',
     text: 'My Mod',
+    icon: '🎯',
     tooltip: 'Click to activate my awesome mod',
     primary: false,
     onClick: activateMod
@@ -136,6 +137,8 @@ if (api) {
 } else {
   console.error('BestiaryModAPI not available');
 }
+
+// Mod bar buttons need both text and icon — see docs/ui_management.md
 
 // Main mod functionality
 function activateMod() {
@@ -629,6 +632,13 @@ const rooms = globalThis.state.utils.ROOMS;
 // Access all regions data
 const regions = globalThis.state.utils.REGIONS;
 
+// Region display names — do not hardcode region lists in mods
+// Prefer maps-database (loaded before mods):
+const regionLabel = globalThis.mapsDatabase.getRegionDisplayName(regionId);
+const regionLabelFromObject = globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
+// Order follows the game client:
+const regionsInOrder = globalThis.mapsDatabase.getRegionsInOrder();
+
 // Get board configuration for a specific room
 const roomSetup = globalThis.state.utils.getBoardMonstersFromRoomId('abbane');
 
@@ -1035,6 +1045,7 @@ console.log('Monster Counter Mod initializing...');
 api.ui.addButton({
   id: 'monster-counter-button',
   text: 'Count',
+  icon: '👾',
   tooltip: 'Show monster count',
   primary: false,
   onClick: showMonsterCount

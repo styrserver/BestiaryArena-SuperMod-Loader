@@ -58,6 +58,12 @@
     }
 
     const PANEL_DEFAULTS = { left: 100, top: 100, width: 380, height: 500, isOpen: false, activeTab: 'tracker', hideRaids: false };
+    const PANEL_LAYOUT = {
+        minWidth: 280,
+        maxWidth: 1200,
+        minHeight: 230,
+        maxHeight: 900
+    };
 
     const STAT_LABELS = { hp: 'HP', ad: 'AD', ap: 'AP', armor: 'ARM', magicResist: 'MR' };
     const STAT_ICON_URLS = {
@@ -117,6 +123,33 @@
     let lastSeenRoomId = null;
     let lastPauseAttemptMs = 0;
     let isDraggingSlot = false;
+    let panelResizeMouseMoveHandler = null;
+    let panelResizeMouseUpHandler = null;
+
+    const panelResizeState = {
+        isResizing: false,
+        resizeDir: '',
+        resizeStartX: 0,
+        resizeStartY: 0,
+        startWidth: 0,
+        startHeight: 0,
+        startLeft: 0,
+        startTop: 0,
+        reset() {
+            this.isResizing = false;
+            this.resizeDir = '';
+            this.resizeStartX = 0;
+            this.resizeStartY = 0;
+            this.startWidth = 0;
+            this.startHeight = 0;
+            this.startLeft = 0;
+            this.startTop = 0;
+        }
+    };
+
+    function clampPanelSize(val, min, max) {
+        return Math.max(min, Math.min(max, val));
+    }
 
     // Expose for debugging
     window.AwakenTrackerState = state;
@@ -1081,18 +1114,10 @@
                 flex: 1;
                 min-width: 0;
             }
-            #${PANEL_ID} .at-toolbar {
+            #${PANEL_ID} .at-footer-actions {
                 display: flex;
                 align-items: center;
-                justify-content: flex-end;
                 gap: 6px;
-                padding: 4px 8px;
-                background-image: var(--at-bg-section);
-                background-repeat: repeat;
-                background-color: var(--at-section-bg);
-                border: 6px solid transparent;
-                border-image: var(--at-frame-4);
-                margin: 0 2px;
                 flex: 0 0 auto;
             }
             #${PANEL_ID} .at-styled-btn {
@@ -1208,6 +1233,10 @@
             }
             #${PANEL_ID} .at-footer {
                 flex: 0 0 auto;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
                 padding: 4px 8px;
                 background-image: var(--at-bg-header);
                 background-repeat: repeat;
@@ -1217,7 +1246,14 @@
                 margin: 0 2px 2px;
                 font-size: 10px;
                 color: #888;
-                text-align: right;
+            }
+            #${PANEL_ID} .at-footer.overview-only {
+                justify-content: flex-end;
+            }
+            #${PANEL_ID} .at-footer-credits {
+                flex: 0 0 auto;
+                margin-left: auto;
+                white-space: nowrap;
             }
             #${PANEL_ID} .at-footer a {
                 color: var(--at-text-gold);
@@ -1273,19 +1309,150 @@
         document.head.appendChild(style);
     }
 
+    function addResizeHandles(panel) {
+        const directions = ['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw'];
+        for (const dir of directions) {
+            const handle = document.createElement('div');
+            handle.className = 'resize-handle resize-handle-' + dir;
+            handle.setAttribute('data-dir', dir);
+            handle.style.position = 'absolute';
+            handle.style.zIndex = '10001';
+            handle.style.background = 'transparent';
+            handle.style.userSelect = 'none';
+            handle.setAttribute('aria-label', 'Resize ' + dir);
+            if (dir.length === 1) {
+                if (dir === 'n' || dir === 's') {
+                    handle.style.height = '6px';
+                    handle.style.width = '100%';
+                    handle.style.cursor = dir + '-resize';
+                    handle.style[dir === 'n' ? 'top' : 'bottom'] = '0';
+                    handle.style.left = '0';
+                } else {
+                    handle.style.width = '6px';
+                    handle.style.height = '100%';
+                    handle.style.cursor = dir + '-resize';
+                    handle.style[dir === 'w' ? 'left' : 'right'] = '0';
+                    handle.style.top = '0';
+                }
+            } else {
+                handle.style.width = '12px';
+                handle.style.height = '12px';
+                handle.style.cursor = dir + '-resize';
+                handle.style[dir.includes('n') ? 'top' : 'bottom'] = '0';
+                handle.style[dir.includes('w') ? 'left' : 'right'] = '0';
+            }
+            panel.appendChild(handle);
+        }
+    }
+
+    function onResizeHandleMouseDown(e) {
+        const dir = e.target.getAttribute('data-dir');
+        if (!dir) return;
+        const panel = e.target.parentElement;
+        if (!panel || panel.id !== PANEL_ID) return;
+        const rect = panel.getBoundingClientRect();
+        Object.assign(panelResizeState, {
+            isResizing: true,
+            resizeDir: dir,
+            resizeStartX: e.clientX,
+            resizeStartY: e.clientY,
+            startWidth: rect.width,
+            startHeight: rect.height,
+            startLeft: rect.left,
+            startTop: rect.top
+        });
+        panel.classList.add('resizing');
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    function ensurePanelResizeListeners() {
+        if (panelResizeMouseMoveHandler) return;
+        panelResizeMouseMoveHandler = (e) => {
+            if (!panelResizeState.isResizing) return;
+            const panel = document.getElementById(PANEL_ID);
+            if (!panel) return;
+            const dx = e.clientX - panelResizeState.resizeStartX;
+            const dy = e.clientY - panelResizeState.resizeStartY;
+            let newWidth = panelResizeState.startWidth;
+            let newHeight = panelResizeState.startHeight;
+            let newLeft = panelResizeState.startLeft;
+            let newTop = panelResizeState.startTop;
+            const { minWidth, maxWidth, minHeight, maxHeight } = PANEL_LAYOUT;
+
+            if (panelResizeState.resizeDir.includes('e')) {
+                newWidth = clampPanelSize(panelResizeState.startWidth + dx, minWidth, maxWidth);
+            }
+            if (panelResizeState.resizeDir.includes('w')) {
+                const rightEdge = panelResizeState.startLeft + panelResizeState.startWidth;
+                newWidth = clampPanelSize(panelResizeState.startWidth - dx, minWidth, maxWidth);
+                newLeft = rightEdge - newWidth;
+            }
+            if (panelResizeState.resizeDir.includes('s')) {
+                newHeight = clampPanelSize(panelResizeState.startHeight + dy, minHeight, maxHeight);
+            }
+            if (panelResizeState.resizeDir.includes('n')) {
+                const bottomEdge = panelResizeState.startTop + panelResizeState.startHeight;
+                newHeight = clampPanelSize(panelResizeState.startHeight - dy, minHeight, maxHeight);
+                newTop = bottomEdge - newHeight;
+            }
+
+            panel.style.width = newWidth + 'px';
+            panel.style.height = newHeight + 'px';
+            panel.style.left = newLeft + 'px';
+            panel.style.top = newTop + 'px';
+        };
+        panelResizeMouseUpHandler = () => {
+            if (!panelResizeState.isResizing) return;
+            const panel = document.getElementById(PANEL_ID);
+            if (panel) {
+                panel.classList.remove('resizing');
+                savePanelSettings({
+                    left: parseInt(panel.style.left, 10) || 0,
+                    top: parseInt(panel.style.top, 10) || 0,
+                    width: parseInt(panel.style.width, 10) || PANEL_DEFAULTS.width,
+                    height: parseInt(panel.style.height, 10) || PANEL_DEFAULTS.height
+                });
+            }
+            document.body.style.userSelect = '';
+            panelResizeState.reset();
+        };
+        document.addEventListener('mousemove', panelResizeMouseMoveHandler);
+        document.addEventListener('mouseup', panelResizeMouseUpHandler);
+    }
+
+    function teardownPanelResizeListeners() {
+        if (panelResizeMouseMoveHandler) {
+            document.removeEventListener('mousemove', panelResizeMouseMoveHandler);
+            panelResizeMouseMoveHandler = null;
+        }
+        if (panelResizeMouseUpHandler) {
+            document.removeEventListener('mouseup', panelResizeMouseUpHandler);
+            panelResizeMouseUpHandler = null;
+        }
+        panelResizeState.reset();
+        document.body.style.userSelect = '';
+    }
+
     function createPanel() {
         injectStyles();
         const s = loadPanelSettings();
         const panel = document.createElement('div');
         panel.id = PANEL_ID;
-        panel.style.cssText = `left:${s.left}px;top:${s.top}px;width:${s.width}px;height:${s.height}px;min-width:260px;min-height:180px;`;
+        const clampedWidth = clampPanelSize(s.width, PANEL_LAYOUT.minWidth, PANEL_LAYOUT.maxWidth);
+        const clampedHeight = clampPanelSize(s.height, PANEL_LAYOUT.minHeight, PANEL_LAYOUT.maxHeight);
+        panel.style.cssText =
+            `left:${s.left}px;top:${s.top}px;width:${clampedWidth}px;height:${clampedHeight}px;` +
+            `min-width:${PANEL_LAYOUT.minWidth}px;max-width:${PANEL_LAYOUT.maxWidth}px;` +
+            `min-height:${PANEL_LAYOUT.minHeight}px;max-height:${PANEL_LAYOUT.maxHeight}px;`;
 
         const header = document.createElement('div');
         header.className = 'at-header';
         const titleEl = document.createElement('span');
         titleEl.id = TITLE_ID;
         titleEl.className = 'at-title';
-        titleEl.textContent = 'Awaken Tracker';
+        titleEl.textContent = '';
         header.appendChild(titleEl);
 
         const makeConfirmButton = (baseLabel, confirmLabel, title, onConfirm) => {
@@ -1334,8 +1501,11 @@
         header.appendChild(closeBtn);
         panel.appendChild(header);
 
-        const toolbar = document.createElement('div');
-        toolbar.className = 'at-toolbar';
+        const footer = document.createElement('div');
+        footer.className = 'at-footer';
+
+        const footerActions = document.createElement('div');
+        footerActions.className = 'at-footer-actions';
 
         const clearMapBtn = makeConfirmButton('Clear Map', 'Confirm clear map', 'Clear this map only, rebaseline its stats and clear its 🎯 marks (preserves other maps)', () => {
             if (!state.currentRoomId) return;
@@ -1346,7 +1516,7 @@
             render();
             scheduleSave();
         });
-        toolbar.appendChild(clearMapBtn);
+        footerActions.appendChild(clearMapBtn);
 
         const clearAllBtn = makeConfirmButton('Clear All', 'Confirm clear all', 'Clear ALL maps, rebaseline stats and clear ALL 🎯 marks', () => {
             state.byMap.clear();
@@ -1357,7 +1527,14 @@
             render();
             scheduleSave();
         });
-        toolbar.appendChild(clearAllBtn);
+        footerActions.appendChild(clearAllBtn);
+
+        const footerCredits = document.createElement('span');
+        footerCredits.className = 'at-footer-credits';
+        footerCredits.innerHTML = 'Credits: <a href="https://bestiaryarena.com/profile/tinhozin" target="_blank">tinhozin</a>';
+
+        footer.appendChild(footerActions);
+        footer.appendChild(footerCredits);
 
         // =======================
         // Tab bar
@@ -1387,13 +1564,15 @@
             if (tab === 'tracker') {
                 trackerBody.style.display = 'block';
                 overviewBody.style.display = 'none';
-                toolbar.style.display = 'flex';
+                footerActions.style.display = 'flex';
+                footer.classList.remove('overview-only');
                 tabTrackerBtn.classList.add('active');
                 tabOverviewBtn.classList.remove('active');
             } else {
                 trackerBody.style.display = 'none';
                 overviewBody.style.display = 'flex';
-                toolbar.style.display = 'none';
+                footerActions.style.display = 'none';
+                footer.classList.add('overview-only');
                 tabTrackerBtn.classList.remove('active');
                 tabOverviewBtn.classList.add('active');
                 renderOverview();
@@ -1944,35 +2123,42 @@
         // Set initial tab from persisted settings
         switchTab(s.activeTab || 'tracker');
 
-        panel.appendChild(toolbar);
-
-        const footer = document.createElement('div');
-        footer.className = 'at-footer';
-        footer.innerHTML = 'Credits: <a href="https://bestiaryarena.com/profile/tinhozin" target="_blank">tinhozin</a>';
         panel.appendChild(footer);
 
-        const resizeHandle = document.createElement('div');
-        resizeHandle.title = 'Resize';
-        resizeHandle.style.cssText = 'position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg, transparent 50%, var(--at-border) 50%);z-index:1;';
-        panel.appendChild(resizeHandle);
+        addResizeHandles(panel);
+        ensurePanelResizeListeners();
+        panel.querySelectorAll('.resize-handle').forEach((handle) => {
+            handle.addEventListener('mousedown', onResizeHandleMouseDown);
+        });
 
-        // Drag
-        let dragOX = 0, dragOY = 0, dragMv = null, dragUp = null;
+        // Drag (viewport-clamped, same pattern as Hunt Analyzer)
+        let isDraggingPanel = false;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+        let dragMv = null;
+        let dragUp = null;
         header.addEventListener('mousedown', (e) => {
             if (e.target.tagName === 'BUTTON') return;
+            if (e.target.closest('.resize-handle')) return;
             e.preventDefault();
+            isDraggingPanel = true;
             const rect = panel.getBoundingClientRect();
-            dragOX = e.clientX - rect.left;
-            dragOY = e.clientY - rect.top;
+            dragOffsetX = e.clientX - rect.left;
+            dragOffsetY = e.clientY - rect.top;
+            document.body.style.userSelect = 'none';
             dragMv = (ev) => {
-                const nl = Math.max(0, Math.min(window.innerWidth - 60, ev.clientX - dragOX));
-                const nt = Math.max(0, Math.min(window.innerHeight - 30, ev.clientY - dragOY));
+                if (!isDraggingPanel) return;
+                const nl = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, ev.clientX - dragOffsetX));
+                const nt = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, ev.clientY - dragOffsetY));
                 panel.style.left = nl + 'px';
                 panel.style.top = nt + 'px';
             };
             dragUp = () => {
+                if (!isDraggingPanel) return;
+                isDraggingPanel = false;
                 document.removeEventListener('mousemove', dragMv);
                 document.removeEventListener('mouseup', dragUp);
+                document.body.style.userSelect = '';
                 savePanelSettings({
                     left: parseInt(panel.style.left, 10),
                     top: parseInt(panel.style.top, 10)
@@ -1980,31 +2166,6 @@
             };
             document.addEventListener('mousemove', dragMv);
             document.addEventListener('mouseup', dragUp);
-        });
-
-        // Resize
-        let rsX = 0, rsY = 0, rsW = 0, rsH = 0, rsMv = null, rsUp = null;
-        resizeHandle.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            rsX = e.clientX; rsY = e.clientY;
-            rsW = panel.offsetWidth; rsH = panel.offsetHeight;
-            rsMv = (ev) => {
-                const nw = Math.max(260, rsW + (ev.clientX - rsX));
-                const nh = Math.max(180, rsH + (ev.clientY - rsY));
-                panel.style.width = nw + 'px';
-                panel.style.height = nh + 'px';
-            };
-            rsUp = () => {
-                document.removeEventListener('mousemove', rsMv);
-                document.removeEventListener('mouseup', rsUp);
-                savePanelSettings({
-                    width: parseInt(panel.style.width, 10),
-                    height: parseInt(panel.style.height, 10)
-                });
-            };
-            document.addEventListener('mousemove', rsMv);
-            document.addEventListener('mouseup', rsUp);
         });
 
         return panel;
@@ -2058,8 +2219,8 @@
         const roomId = state.currentRoomId;
         const roomName = roomId ? (globalThis.state?.utils?.ROOM_NAME?.[roomId] || roomId) : null;
         title.textContent = enemies.length === 0
-            ? 'Awaken Tracker — no map loaded'
-            : `Awaken Tracker — ${roomName || 'current map'} (${enemies.length})`;
+            ? 'no map loaded'
+            : `${roomName || 'current map'} (${enemies.length})`;
 
         grid.innerHTML = '';
         if (enemies.length === 0) {
@@ -2097,6 +2258,7 @@
     // =======================
     function cleanup() {
         try {
+            teardownPanelResizeListeners();
             teardownListeners();
             teardownBoardSub();
             teardownPlayerSub();

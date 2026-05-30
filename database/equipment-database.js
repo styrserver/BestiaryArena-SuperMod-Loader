@@ -70,6 +70,23 @@ function getAllEquipment() {
   return equipment;
 }
 
+let equipmentNameMapCache = null;
+
+/** Cached lowercase name → { gameId, item } for O(1) equipment lookups. */
+function getEquipmentNameMap() {
+  if (equipmentNameMapCache) return equipmentNameMapCache;
+
+  equipmentNameMapCache = new Map();
+  const allEquipment = getAllEquipment();
+  for (const item of allEquipment) {
+    const name = item?.metadata?.name;
+    if (name) {
+      equipmentNameMapCache.set(name.toLowerCase(), { gameId: item.gameId, item });
+    }
+  }
+  return equipmentNameMapCache;
+}
+
 // Function to build equipment lists from dynamic data
 function buildEquipmentDatabase() {
   const allEquipment = getAllEquipment();
@@ -86,7 +103,8 @@ function buildEquipmentDatabase() {
         armor: [],
         magicResist: []
       },
-      HARDCODED_BOOSTED_MAP
+      HARDCODED_BOOSTED_MAP,
+      getEquipmentNameMap
     };
   }
   
@@ -107,24 +125,87 @@ function buildEquipmentDatabase() {
   return {
     ALL_EQUIPMENT: allEquipmentNames,
     EQUIPMENT_BY_STAT: equipmentByStat,
-    HARDCODED_BOOSTED_MAP
+    HARDCODED_BOOSTED_MAP,
+    getEquipmentNameMap
   };
 }
 
-// Build the database dynamically
-const equipmentDatabase = buildEquipmentDatabase();
+function waitForGameState(callback, retries = 0, maxRetries = 20) {
+  try {
+    const state = globalThis.state || window.state;
+    const hasPlayerState = state?.player?.getSnapshot;
+    const hasBoardState = state?.board?.getSnapshot;
+    const hasUtils = state?.utils?.getEquipment;
 
-// Export for use in other mods
-// Use multiple fallbacks to ensure the database is available globally
+    if (hasPlayerState && hasBoardState && hasUtils) {
+      callback();
+    } else if (retries < maxRetries) {
+      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
+    } else {
+      console.warn('[equipment-database.js] Game state not ready after max retries, building database anyway');
+      callback();
+    }
+  } catch (error) {
+    console.error('[equipment-database.js] Error checking game state:', error);
+    if (retries < maxRetries) {
+      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
+    } else {
+      console.warn('[equipment-database.js] Building database despite errors');
+      callback();
+    }
+  }
+}
+
+let equipmentDatabase = null;
+let databaseInitialized = false;
+
+function initializeDatabase() {
+  if (databaseInitialized) return equipmentDatabase;
+
+  equipmentNameMapCache = null;
+  equipmentDatabase = buildEquipmentDatabase();
+  equipmentDatabase.getEquipmentNameMap = getEquipmentNameMap;
+  databaseInitialized = true;
+  return equipmentDatabase;
+}
+
+const emptyEquipmentByStat = {
+  ad: [],
+  ap: [],
+  hp: [],
+  armor: [],
+  magicResist: []
+};
+
+const placeholderDatabase = {
+  ALL_EQUIPMENT: [],
+  EQUIPMENT_BY_STAT: emptyEquipmentByStat,
+  HARDCODED_BOOSTED_MAP,
+  getEquipmentNameMap
+};
+
 const globalWindow = globalThis.window || window || (typeof window !== 'undefined' ? window : null);
-if (globalWindow) {
-  globalWindow.equipmentDatabase = equipmentDatabase;
-  console.log(`[equipment-database.js] Loaded ${equipmentDatabase.ALL_EQUIPMENT.length} equipment items dynamically (cached for all mods)`);
-  console.log('[equipment-database.js] ALL_EQUIPMENT length:', equipmentDatabase.ALL_EQUIPMENT?.length);
-  console.log('[equipment-database.js] Equipment by stat:', Object.keys(equipmentDatabase.EQUIPMENT_BY_STAT).map(stat => `${stat}: ${equipmentDatabase.EQUIPMENT_BY_STAT[stat].length}`).join(', '));
-  console.log('[equipment-database.js] HARDCODED_BOOSTED_MAP entries:', Object.keys(equipmentDatabase.HARDCODED_BOOSTED_MAP || {}).length);
+if (globalWindow && !globalWindow.equipmentDatabase) {
+  globalWindow.equipmentDatabase = placeholderDatabase;
 }
-if (typeof module !== 'undefined') {
-  module.exports = equipmentDatabase;
-}
+
+waitForGameState(() => {
+  initializeDatabase();
+
+  if (globalWindow) {
+    Object.assign(globalWindow.equipmentDatabase, equipmentDatabase);
+    globalWindow.equipmentDatabase.ALL_EQUIPMENT = equipmentDatabase.ALL_EQUIPMENT;
+    globalWindow.equipmentDatabase.EQUIPMENT_BY_STAT = equipmentDatabase.EQUIPMENT_BY_STAT;
+    globalWindow.equipmentDatabase.HARDCODED_BOOSTED_MAP = equipmentDatabase.HARDCODED_BOOSTED_MAP;
+    globalWindow.equipmentDatabase.getEquipmentNameMap = getEquipmentNameMap;
+
+    console.log(`[equipment-database.js] Loaded ${equipmentDatabase.ALL_EQUIPMENT.length} equipment items dynamically (cached for all mods)`);
+    console.log('[equipment-database.js] ALL_EQUIPMENT length:', equipmentDatabase.ALL_EQUIPMENT?.length);
+    console.log('[equipment-database.js] Equipment by stat:', Object.keys(equipmentDatabase.EQUIPMENT_BY_STAT).map(stat => `${stat}: ${equipmentDatabase.EQUIPMENT_BY_STAT[stat].length}`).join(', '));
+    console.log('[equipment-database.js] HARDCODED_BOOSTED_MAP entries:', Object.keys(equipmentDatabase.HARDCODED_BOOSTED_MAP || {}).length);
+  }
+  if (typeof module !== 'undefined') {
+    module.exports = equipmentDatabase;
+  }
+});
 

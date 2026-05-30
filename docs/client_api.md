@@ -118,9 +118,9 @@ The UI API provides methods for creating and managing UI elements.
 const button = api.ui.addButton({
   id: 'my-button',
   text: 'Click Me',
+  icon: '⚙️',
   modId: 'my-mod',           // Group related buttons
   primary: false,            // Green background if true
-  icon: null,                // Optional icon character
   tooltip: 'Button tooltip',
   position: null,            // Optional position index
   onClick: (e) => console.log('Button clicked')
@@ -133,9 +133,14 @@ api.ui.updateButton('my-button', {
   tooltip: 'New tooltip'
 });
 
+// Re-apply Mod Settings text/icon display mode to all mod bar buttons
+api.ui.refreshModButtonLabels();
+
 // Remove a button
 api.ui.removeButton('my-button');
 ```
+
+Mod bar buttons should include **both** `text` and `icon`. Users switch between those labels in **Mod Settings → Interface → Mod bar button labels**. If `text` is omitted, the tooltip is used as a fallback in text mode; if `icon` is omitted, the loader uses `MOD_BUTTON_ICON_REGISTRY` in `content/client.js` or shows a generic 🔧 icon.
 
 ### Configuration Panel Management
 
@@ -289,6 +294,7 @@ try {
   api.ui.addButton({
     id: 'my-mod-button',
     text: config.enabled ? 'Disable' : 'Enable',
+    icon: '⚙️',
     tooltip: 'Toggle my awesome mod',
     primary: config.enabled,
     onClick: toggleMod

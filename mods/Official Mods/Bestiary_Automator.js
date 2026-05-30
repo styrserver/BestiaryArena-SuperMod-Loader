@@ -4755,11 +4755,21 @@ const applyButtonStyling = (btn) => {
     console.log('  - fasterAutoplayRunning:', fasterAutoplayRunning);
   }
   
-  // Update button text to show warning when Faster Autoplay is enabled or running
-  if (config.fasterAutoplay) {
-    btn.textContent = '⚠️ Automator';
+  const baseText = t('mods.automator.buttonText');
+  const buttonText = config.fasterAutoplay ? `⚠️ ${baseText}` : baseText;
+  let tooltip = t('mods.automator.configButtonTooltip');
+  if (fasterAutoplayRunning) {
+    tooltip += ' - Autoplay delay running';
+  } else if (config.fasterAutoplay) {
+    tooltip += ' - Autoplay delay enabled';
+  }
+
+  // Persist label via updateButton so refreshModButtonLabels() keeps the warning on init
+  if (api?.ui?.updateButton) {
+    api.ui.updateButton(CONFIG_BUTTON_ID, { text: buttonText, tooltip });
   } else {
-    btn.textContent = 'Automator';
+    btn.textContent = buttonText;
+    btn.title = tooltip;
   }
   
   if (config.autoRefillStamina) {
@@ -4781,15 +4791,6 @@ const applyButtonStyling = (btn) => {
     // Default: No features enabled
     console.log('[Bestiary Automator] Applying DEFAULT background');
     btn.style.background = `url('${regularBgUrl}') repeat`;
-  }
-  
-  // Update tooltip to show Faster Autoplay status
-  if (fasterAutoplayRunning) {
-    btn.title = t('mods.automator.configButtonTooltip') + ' - Autoplay delay running';
-  } else if (config.fasterAutoplay) {
-    btn.title = t('mods.automator.configButtonTooltip') + ' - Autoplay delay enabled';
-  } else {
-    btn.title = t('mods.automator.configButtonTooltip');
   }
 };
 

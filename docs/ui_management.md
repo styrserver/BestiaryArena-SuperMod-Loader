@@ -21,16 +21,55 @@ The UI Management API is available via `api.ui` in your mod's context.
 ```javascript
 const button = api.ui.addButton({
   id: 'my-mod-button',       // Unique ID for the button
-  text: 'Click Me',          // Button text
+  text: 'Click Me',          // Button text (required for text mode)
   modId: 'my-mod',           // ID of your mod (for grouping)
   primary: false,            // Whether this is a primary button (green)
-  icon: null,                // Optional icon character (e.g. '⚙️')
-  tooltip: 'Click to use',   // Optional tooltip text
+  icon: '⚙️',                // Icon character (required for icon mode)
+  tooltip: 'Click to use',   // Tooltip (also used as text fallback if text is omitted)
   position: null,            // Optional position index in the button container
   onClick: (e) => {          // Click handler
     // Button clicked
   }
 });
+```
+
+#### Mod bar button labels (text and icons)
+
+Mod buttons in the bottom-right mod bar support two display modes. Users choose between them in **Mod Settings → Interface → Mod bar button labels**:
+
+- **Text** — shows each button's `text` value
+- **Icons** — shows each button's `icon` value (or a built-in registry icon matched by button `id`)
+
+**Always provide both `text` and `icon` when calling `addButton`.** If you only pass one, the other mode will look wrong (blank label, generic 🔧 icon, or tooltip text used as a fallback).
+
+```javascript
+api.ui.addButton({
+  id: 'my-mod-button',
+  text: t('mods.myMod.buttonText'),
+  icon: '🎯',
+  modId: 'my-mod',
+  tooltip: t('mods.myMod.buttonTooltip'),
+  onClick: openMyMod
+});
+```
+
+Built-in mods should also add an entry for the button `id` in `MOD_BUTTON_ICON_REGISTRY` inside `content/client.js`, so icon mode stays consistent even when a mod omits `icon`.
+
+When button text changes at runtime (for example enable/disable labels), update through the API instead of setting `button.textContent` directly:
+
+```javascript
+api.ui.updateButton('my-mod-button', {
+  text: config.enabled ? 'Disable' : 'Enable',
+  tooltip: 'Toggle my mod'
+});
+```
+
+Direct DOM updates bypass the text/icon display mode and can leave cards blank in one mode.
+
+To re-apply the user's display preference after bulk UI changes:
+
+```javascript
+api.ui.refreshModButtonLabels();
 ```
 
 #### Updating a Button
@@ -238,11 +277,12 @@ context.exports = {
 1. Always use unique IDs for your UI elements, preferably prefixed with your mod ID
 2. Group related buttons together by using a consistent `modId`
 3. Use primary styling (green) only for the main action button
-4. Always provide tooltips for icon-only buttons
-5. Always clean up your UI elements if your mod is disabled or removed
-6. Keep configuration panels simple and focused
-7. Use the standard Apply/Cancel pattern for configuration panels
-8. Update button text and styling to reflect the current state
+4. Always provide both `text` and `icon` on mod bar buttons so text and icon display modes work
+5. Always provide tooltips on mod bar buttons (used on hover and as a text fallback)
+6. Always clean up your UI elements if your mod is disabled or removed
+7. Keep configuration panels simple and focused
+8. Use the standard Apply/Cancel pattern for configuration panels
+9. Update button text through `api.ui.updateButton`, not direct `textContent` changes
 
 ## Troubleshooting
 
@@ -267,11 +307,11 @@ BestiaryModAPI.ui.addButton(options)
 Parameters:
 - `options` (Object) - Configuration options for the button
   - `id` (String) - Unique identifier for the button
-  - `text` (String) - Button text
+  - `text` (String) - Button text (shown when Mod Settings → Interface uses **Text**)
   - `position` (String) - Position on screen ('top-right', 'bottom-left', etc.)
   - `onClick` (Function) - Callback function when button is clicked
   - `style` (Object, optional) - Custom CSS styles
-  - `icon` (String, optional) - Icon class or URL
+  - `icon` (String, optional) - Icon character (shown when Mod Settings → Interface uses **Icons**)
   - `tooltip` (String, optional) - Tooltip text
   - `group` (String, optional) - Group buttons together in a dropdown
 

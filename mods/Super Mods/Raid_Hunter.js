@@ -5403,16 +5403,14 @@ function createRaidMapSelection() {
                 if (region.rooms && Array.isArray(region.rooms)) {
                     const hasRoom = region.rooms.some(room => room.id === roomId);
                     if (hasRoom) {
-                        // Map region IDs to friendly names
-                        const regionNameMap = {
-                            'rook': 'Rookgaard',
-                            'carlin': 'Carlin',
-                            'folda': 'Folda',
-                            'abdendriel': 'Ab\'Dendriel',
-                            'kazordoon': 'Kazordoon',
-                            'venore': 'Venore'
-                        };
-                        return regionNameMap[region.id] || region.id;
+                        if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
+                            return globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
+                        }
+                        if (region.name) return region.name;
+                        if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
+                            return globalThis.mapsDatabase.getRegionDisplayName(region.id);
+                        }
+                        return region.id;
                     }
                 }
             }
@@ -5432,15 +5430,14 @@ function createRaidMapSelection() {
             for (const region of regions) {
                 if (region.rooms && Array.isArray(region.rooms)) {
                     const regionName = (() => {
-                        const regionNameMap = {
-                            'rook': 'Rookgaard',
-                            'carlin': 'Carlin',
-                            'folda': 'Folda',
-                            'abdendriel': 'Ab\'Dendriel',
-                            'kazordoon': 'Kazordoon',
-                            'venore': 'Venore'
-                        };
-                        return regionNameMap[region.id] || region.id;
+                        if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
+                            return globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
+                        }
+                        if (region.name) return region.name;
+                        if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
+                            return globalThis.mapsDatabase.getRegionDisplayName(region.id);
+                        }
+                        return region.id;
                     })();
 
                     // Initialize region if it doesn't exist

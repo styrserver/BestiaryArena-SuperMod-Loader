@@ -54,15 +54,6 @@ const BUTTON_STYLES = {
     REGULAR: 'frame-1-regular active:frame-pressed-1-regular surface-regular'
 };
 
-const REGION_NAME_MAP = {
-    'rook': 'Rookgaard',
-    'carlin': 'Carlin',
-    'folda': 'Folda',
-    'abdendriel': 'Ab\'Dendriel',
-    'kazordoon': 'Kazordoon',
-    'venore': 'Venore'
-};
-
 // Equipment that cannot be on boosted maps
 const EXCLUDED_EQUIPMENT = [
     'Amazon Armor',
@@ -3985,17 +3976,20 @@ function isRaidRoomId(roomId) {
 
 function getRealRegionName(region) {
     if (!region) return 'Unknown Region';
-    
-    if (region.name) {
-        return region.name;
+    if (typeof globalThis.mapsDatabase?.getRegionDisplayNameFromRegion === 'function') {
+        return globalThis.mapsDatabase.getRegionDisplayNameFromRegion(region);
     }
-    
-    const regionId = region.id ? region.id.toLowerCase() : '';
-    if (REGION_NAME_MAP[regionId]) {
-        return REGION_NAME_MAP[regionId];
+    if (region.name) return region.name;
+    const regionId = region.id || '';
+    if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
+        return globalThis.mapsDatabase.getRegionDisplayName(regionId);
     }
-    
-    return region.id ? (REGION_NAME_MAP[region.id.toLowerCase()] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+    const key = String(regionId).toLowerCase();
+    const mapped = globalThis.mapsDatabase?.REGION_NAME_MAP?.[key];
+    if (mapped) return mapped;
+    return region.id
+        ? region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())
+        : 'Unknown Region';
 }
 
 function organizeMapsByRegion() {

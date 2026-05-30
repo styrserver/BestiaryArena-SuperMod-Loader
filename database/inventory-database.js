@@ -509,6 +509,17 @@ const RARITY_CONFIG = {
   colors: { '1': '#9d9d9d', '2': '#1eff00', '3': '#0070dd', '4': '#a335ee', '5': '#ff8000' }
 };
 
+// Item key groups for inventory UI (currency, no-rarity consumables, upgrades)
+const ITEM_KEY_GROUPS = {
+  currency: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
+  noRarity: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
+  upgrade: [
+    'babyDragonPlant', 'creatureAwakening', 'dailyBoostedMap', 'daycare', 'dungeonAscension',
+    'dragonPlant', 'drMephistopheles', 'hygenie', 'monsterCauldron', 'monsterRaids',
+    'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract'
+  ]
+};
+
 // Combined inventory database
 const inventoryDatabase = {
   tooltips: inventoryTooltips,
@@ -517,7 +528,8 @@ const inventoryDatabase = {
   staticItems: INVENTORY_STATIC_ITEMS,
   upgradeableItems: INVENTORY_UPGRADEABLE_ITEMS,
   rarityText: RARITY_CONFIG.text,
-  rarityColors: RARITY_CONFIG.colors
+  rarityColors: RARITY_CONFIG.colors,
+  itemKeyGroups: ITEM_KEY_GROUPS
 };
 
 // Export for use in other mods

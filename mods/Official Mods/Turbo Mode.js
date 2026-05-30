@@ -424,96 +424,7 @@ function updateSpeedupFactor(newFactor) {
   }
 }
 
-// Create a configuration panel
-function createConfigPanel() {
-  if (api && api.ui) {
-    const configContent = document.createElement('div');
-    
-    // Add a heading
-    const heading = document.createElement('h3');
-    heading.textContent = 'Turbo Speed Settings';
-    heading.style.marginBottom = '15px';
-    configContent.appendChild(heading);
-    
-    // Add slider container
-    const sliderContainer = document.createElement('div');
-    sliderContainer.style.display = 'flex';
-    sliderContainer.style.flexDirection = 'column';
-    sliderContainer.style.marginBottom = '20px';
-    
-    // Add slider label
-    const sliderLabel = document.createElement('div');
-    sliderLabel.style.display = 'flex';
-    sliderLabel.style.justifyContent = 'space-between';
-    sliderLabel.style.marginBottom = '5px';
-    
-    const labelText = document.createElement('span');
-    labelText.textContent = 'Game Speed:';
-    
-    const speedValue = document.createElement('span');
-    speedValue.id = 'turbo-speed-value';
-    speedValue.textContent = `${turboState.speedupFactor}x`;
-    
-    sliderLabel.appendChild(labelText);
-    sliderLabel.appendChild(speedValue);
-    sliderContainer.appendChild(sliderLabel);
-    
-    // Add the slider
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.min = '2';
-    slider.max = '10';
-    slider.step = '1';
-    slider.value = turboState.speedupFactor;
-    slider.style.width = '100%';
-    
-    slider.addEventListener('input', () => {
-      const value = parseInt(slider.value, 10);
-      updateSpeedupFactor(value);
-    });
-    
-    sliderContainer.appendChild(slider);
-    configContent.appendChild(sliderContainer);
-    
-    // Add description
-    const description = document.createElement('p');
-    description.textContent = 'Adjust the slider to control how much faster the game runs when Turbo is enabled. Higher values make the game run faster but may cause performance issues on some devices.';
-    description.style.fontSize = '14px';
-    description.style.color = '#888';
-    configContent.appendChild(description);
-    
-    const defaultNote = document.createElement('p');
-    defaultNote.textContent = `Default game speed is 1x (${DEFAULT_TICK_INTERVAL_MS}ms per tick). Turbo speeds range from 2x to 10x with performance optimizations.`;
-    defaultNote.style.fontSize = '14px';
-    defaultNote.style.marginTop = '10px';
-    defaultNote.style.color = '#888';
-    configContent.appendChild(defaultNote);
-    
-    // Create the config panel
-    api.ui.createConfigPanel({
-      id: 'turbo-config-panel',
-      title: 'Turbo Settings',
-      content: configContent,
-      buttons: [
-        {
-          text: 'Close',
-          primary: true,
-          closeOnClick: true
-        }
-      ]
-    });
-    
-    // Create config button
-    api.ui.addButton({
-      id: 'turbo-config-button',
-      text: '⚙️',
-      tooltip: t('mods.turbo.configButtonTooltip'),
-      onClick: () => api.ui.toggleConfigPanel('turbo-config-panel')
-    });
-  }
-}
-
-// Create the Turbo button and config panel using the API
+// Create the Turbo button using the API
 if (api) {
       console.log('BestiaryModAPI available in Turbo Mod');
   
@@ -547,14 +458,11 @@ if (api) {
       });
       
       console.log('Turbo button added');
-      
-      // Create configuration panel
-      createConfigPanel();
     })
     .catch(err => {
       console.error('Error setting up Turbo mod:', err);
       
-      // Fallback - just create the button and config panel
+      // Fallback - just create the button
       window.turboButton = api.ui.addButton({
         id: 'turbo-mod-button',
         text: turboState.active ? t('mods.turbo.buttonDisable') : t('mods.turbo.buttonEnable'),
@@ -562,8 +470,6 @@ if (api) {
         primary: turboState.active,
         onClick: toggleTurbo
       });
-      
-      createConfigPanel();
     });
 } else {
   console.error('BestiaryModAPI not available in Turbo Mod');
@@ -633,9 +539,12 @@ exports = {
     turboState.timerSubscribed = false;
     turboState.lastKnownTick = -1;
     
+    delete window.turboMode;
     console.log('[Turbo Mode] Cleanup completed');
   }
 };
+
+window.turboMode = exports;
 
 // Update the Turbo button style based on state
 function updateTurboButton() {

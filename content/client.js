@@ -484,23 +484,269 @@ if (typeof browserAPI === 'undefined') {
     return translation;
   }
   
+  const MOD_TOGGLE_SIZE = 35;
+  const MOD_TOGGLE_MARGIN = 10;
+  const MOD_TOGGLE_GAP = 10;
+
+  const MOD_BUTTON_GAME_STYLE = `
+    padding: 2px 5px;
+    border: 4px solid transparent;
+    border-radius: 0;
+    cursor: pointer;
+    background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat;
+    color: #ffe066;
+    font-weight: 700;
+    font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+    box-sizing: border-box;
+    border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 4 fill stretch;
+    transition: color 0.2s, border-image 0.1s;
+    outline: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+  `;
+
+  const MOD_BUTTON_ICON_REGISTRY = {
+    'hero-editor-button': '✏️',
+    'board-analyzer-button': '📊',
+    'tick-tracker-button': '⏱️',
+    'tick-tracker-config-button': '⚙️',
+    'turbo-mod-button': '⚡',
+    'mod-awaken-tracker-button': '🌟',
+    'setup-manager-button': '📁',
+    'highscore-button': '🏆',
+    'bestiary-automator-config-button': '🤖',
+    'team-copier-button': '📋',
+    'room-hopper-button': '🗺️',
+    'manual-runner-button': '🏃',
+    'manual-runner': '🏃',
+    'mod-autoplay-button': '📈',
+    'stamina-optimizer-button': '💪',
+    'custom-display-perf-toggle': '🚀',
+    'custom-display-grid-toggle': '▦',
+    'custom-display-config-button': '⚙️',
+    'item-tier-list-button': '📦',
+    'tier-list-button': '👾'
+  };
+
+  function getModButtonDisplayMode() {
+    if (window.betterUIConfig?.modButtonDisplay === 'icon') {
+      return 'icon';
+    }
+
+    try {
+      const savedConfig = localStorage.getItem('better-ui-config');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        if (parsed.modButtonDisplay === 'icon') {
+          return 'icon';
+        }
+      }
+    } catch (error) {
+      // Ignore malformed config
+    }
+
+    return 'text';
+  }
+
+  function resolveModButtonIcon(buttonId, explicitIcon, modId) {
+    if (explicitIcon) {
+      return explicitIcon;
+    }
+
+    if (MOD_BUTTON_ICON_REGISTRY[buttonId]) {
+      return MOD_BUTTON_ICON_REGISTRY[buttonId];
+    }
+
+    if (modId && MOD_BUTTON_ICON_REGISTRY[modId]) {
+      return MOD_BUTTON_ICON_REGISTRY[modId];
+    }
+
+    return '🔧';
+  }
+
+  function applyModButtonLabel(button) {
+    if (!button || !button.id || button.id === 'bestiary-mod-buttons-toggle') {
+      return;
+    }
+
+    const displayMode = getModButtonDisplayMode();
+    const text = button._buttonText
+      ?? button.getAttribute('data-button-text')
+      ?? button.title
+      ?? '';
+    const modId = button.getAttribute('data-mod-id');
+    const icon = resolveModButtonIcon(button.id, button._buttonIcon, modId);
+
+    button.textContent = displayMode === 'icon' ? icon : text;
+
+    if (displayMode === 'icon') {
+      button.style.minWidth = '35px';
+      button.style.minHeight = '35px';
+      button.style.padding = '2px 5px';
+    } else {
+      button.style.minWidth = '';
+      button.style.minHeight = '';
+      button.style.padding = '2px 7px';
+    }
+  }
+
+  function storeModButtonMetadata(button, text, icon, tooltip) {
+    const labelText = text || tooltip || '';
+    button._buttonText = labelText;
+    button._buttonIcon = icon || null;
+    button.setAttribute('data-button-text', labelText);
+
+    if (icon) {
+      button.setAttribute('data-button-icon', icon);
+    } else {
+      button.removeAttribute('data-button-icon');
+    }
+  }
+
+  function refreshModButtonLabels() {
+    const container = document.getElementById('bestiary-mod-buttons');
+    if (!container) {
+      return 0;
+    }
+
+    const buttons = container.querySelectorAll('button[id]');
+    buttons.forEach(applyModButtonLabel);
+    return buttons.length;
+  }
+
+  const MOD_TOGGLE_BUTTON_STYLE = MOD_BUTTON_GAME_STYLE + `
+    position: fixed;
+    bottom: ${MOD_TOGGLE_MARGIN}px;
+    right: ${MOD_TOGGLE_MARGIN}px;
+    min-width: ${MOD_TOGGLE_SIZE}px;
+    min-height: ${MOD_TOGGLE_SIZE}px;
+    width: ${MOD_TOGGLE_SIZE}px;
+    height: ${MOD_TOGGLE_SIZE}px;
+    padding: 0;
+    z-index: 101;
+  `;
+
+  function applyModButtonsContainerPosition(buttonsContainer, layout) {
+    const toggleOffset = MOD_TOGGLE_MARGIN + MOD_TOGGLE_SIZE + MOD_TOGGLE_GAP;
+
+    buttonsContainer.style.position = 'fixed';
+    buttonsContainer.style.zIndex = '100';
+
+    if (layout === 'vertical') {
+      buttonsContainer.style.bottom = `${toggleOffset}px`;
+      buttonsContainer.style.right = `${MOD_TOGGLE_MARGIN}px`;
+      buttonsContainer.style.top = 'auto';
+      buttonsContainer.style.left = 'auto';
+    } else {
+      buttonsContainer.style.bottom = `${MOD_TOGGLE_MARGIN}px`;
+      buttonsContainer.style.right = `${toggleOffset}px`;
+      buttonsContainer.style.top = 'auto';
+      buttonsContainer.style.left = 'auto';
+    }
+  }
+
+  function createLucideArrowIcon(direction) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const icon = document.createElementNS(svgNS, 'svg');
+    icon.setAttribute('xmlns', svgNS);
+    icon.setAttribute('width', '24');
+    icon.setAttribute('height', '24');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    icon.setAttribute('fill', 'none');
+    icon.setAttribute('stroke', 'currentColor');
+    icon.setAttribute('stroke-width', '2');
+    icon.setAttribute('stroke-linecap', 'round');
+    icon.setAttribute('stroke-linejoin', 'round');
+    icon.setAttribute(
+      'class',
+      direction === 'left'
+        ? 'lucide lucide-arrow-left'
+        : direction === 'right'
+          ? 'lucide lucide-arrow-right'
+          : 'lucide lucide-arrow-down'
+    );
+    icon.style.cssText = 'width: 14px; height: 14px;';
+
+    const path1 = document.createElementNS(svgNS, 'path');
+    const path2 = document.createElementNS(svgNS, 'path');
+
+    if (direction === 'left') {
+      path1.setAttribute('d', 'm12 19-7-7 7-7');
+      path2.setAttribute('d', 'M19 12H5');
+    } else if (direction === 'right') {
+      path1.setAttribute('d', 'M5 12h14');
+      path2.setAttribute('d', 'm12 5 7 7-7 7');
+    } else {
+      path1.setAttribute('d', 'M12 5v14');
+      path2.setAttribute('d', 'm19 12-7 7-7-7');
+    }
+
+    icon.appendChild(path1);
+    icon.appendChild(path2);
+    return icon;
+  }
+
+  const MOD_BUTTON_LAYOUT_STATES = ['horizontal', 'vertical', 'hidden'];
+
+  function updateModButtonsToggleAppearance(toggleButton, layout) {
+    toggleButton.textContent = '';
+
+    if (layout === 'horizontal') {
+      toggleButton.appendChild(createLucideArrowIcon('down'));
+      toggleButton.title = 'Switch to vertical layout';
+    } else if (layout === 'vertical') {
+      toggleButton.appendChild(createLucideArrowIcon('left'));
+      toggleButton.title = 'Hide mod buttons';
+    } else {
+      toggleButton.appendChild(createLucideArrowIcon('right'));
+      toggleButton.title = 'Show mod buttons';
+    }
+  }
+
+  function applyModButtonsLayout(toggleButton, buttonsContainer, layout) {
+    if (toggleButton._hideTimeout) {
+      clearTimeout(toggleButton._hideTimeout);
+      toggleButton._hideTimeout = null;
+    }
+
+    toggleButton._layout = layout;
+
+    if (layout === 'hidden') {
+      buttonsContainer.style.opacity = '0';
+      buttonsContainer.style.transform = 'translateX(100%)';
+      updateModButtonsToggleAppearance(toggleButton, layout);
+
+      toggleButton._hideTimeout = setTimeout(() => {
+        if (toggleButton._layout === 'hidden') {
+          buttonsContainer.style.display = 'none';
+        }
+        toggleButton._hideTimeout = null;
+      }, 300);
+      return;
+    }
+
+    buttonsContainer.style.display = 'flex';
+    buttonsContainer.style.opacity = '1';
+    buttonsContainer.style.transform = 'translateX(0)';
+    buttonsContainer.style.flexDirection = layout === 'vertical' ? 'column' : 'row';
+    buttonsContainer.style.alignItems = layout === 'vertical' ? 'flex-end' : 'stretch';
+    applyModButtonsContainerPosition(buttonsContainer, layout);
+    updateModButtonsToggleAppearance(toggleButton, layout);
+  }
+
+  function cycleModButtonsLayout(toggleButton, buttonsContainer) {
+    const currentLayout = toggleButton._layout || 'horizontal';
+    const currentIndex = MOD_BUTTON_LAYOUT_STATES.indexOf(currentLayout);
+    const nextLayout = MOD_BUTTON_LAYOUT_STATES[(currentIndex + 1) % MOD_BUTTON_LAYOUT_STATES.length];
+    applyModButtonsLayout(toggleButton, buttonsContainer, nextLayout);
+  }
+
   // Managed mod buttons container
   function createModButtonContainer() {
     const existingContainer = document.getElementById('bestiary-mod-buttons');
     if (existingContainer) return existingContainer;
-    
-    // Create a wrapper that will contain both the toggle button and the buttons container
-    const wrapper = document.createElement('div');
-    wrapper.id = 'bestiary-mod-buttons-wrapper';
-    wrapper.style.cssText = `
-      position: fixed;
-      bottom: 10px;
-      right: 10px;
-      display: flex;
-      flex-direction: row;
-      gap: 10px;
-      z-index: 100;
-    `;
     
     // Create the mod buttons container
     const container = document.createElement('div');
@@ -512,59 +758,27 @@ if (typeof browserAPI === 'undefined') {
       transition: opacity 0.3s ease, transform 0.3s ease;
       transform-origin: right center;
     `;
+    applyModButtonsContainerPosition(container, 'horizontal');
     
-    // Create toggle button
+    // Create toggle button — pinned to the bottom-right corner
     const toggleButton = document.createElement('button');
     toggleButton.id = 'bestiary-mod-buttons-toggle';
-    toggleButton.textContent = '◀'; // Left arrow for "hide"
-    toggleButton.title = 'Hide mod buttons';
-    toggleButton.style.cssText = `
-      padding: 8px 16px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      background: #333;
-      color: white;
-      align-self: center;
-    `;
+    toggleButton.style.cssText = MOD_TOGGLE_BUTTON_STYLE;
+    toggleButton._layout = 'horizontal';
+    updateModButtonsToggleAppearance(toggleButton, 'horizontal');
     
-    // Add toggle functionality
-    toggleButton._isVisible = true;
+    // Cycle layout: horizontal -> vertical -> hidden -> horizontal
     toggleButton.addEventListener('click', (e) => {
       e.preventDefault();
-      // We'll implement direct toggle here to avoid timing issues
       const buttonsContainer = document.getElementById('bestiary-mod-buttons');
       if (buttonsContainer) {
-        toggleButton._isVisible = !toggleButton._isVisible;
-        
-        if (toggleButton._isVisible) {
-          // Show buttons
-          buttonsContainer.style.opacity = '1';
-          buttonsContainer.style.transform = 'translateX(0)';
-          buttonsContainer.style.display = 'flex';
-          toggleButton.textContent = '◀'; // Left arrow for "hide"
-          toggleButton.title = 'Hide mod buttons';
-        } else {
-          // Hide buttons
-          buttonsContainer.style.opacity = '0';
-          buttonsContainer.style.transform = 'translateX(100%)'; // Move to the right, toward the toggle button
-          toggleButton.textContent = '▶'; // Right arrow for "show"
-          toggleButton.title = 'Show mod buttons';
-          
-          // Hide after transition completes
-          setTimeout(() => {
-            if (!toggleButton._isVisible) {
-              buttonsContainer.style.display = 'none';
-            }
-          }, 300);
-        }
+        cycleModButtonsLayout(toggleButton, buttonsContainer);
       }
     });
     
-    // Add elements to the DOM - container first, then toggle button
-    wrapper.appendChild(container);
-    wrapper.appendChild(toggleButton);
-    document.body.appendChild(wrapper);
+    // Add elements to the DOM separately so the toggle stays fixed in the corner
+    document.body.appendChild(container);
+    document.body.appendChild(toggleButton);
     
     return container;
   }
@@ -984,8 +1198,9 @@ if (typeof browserAPI === 'undefined') {
           // If the button exists and has the same modId, just update it
           if (existingButton.getAttribute('data-mod-id') === (modId || '')) {
             console.log(`Button with id ${id} already exists, updating it`);
-            existingButton.textContent = icon ? icon : text;
+            storeModButtonMetadata(existingButton, text, icon, tooltip);
             existingButton.title = tooltip || text;
+            applyModButtonLabel(existingButton);
             
             const newClickHandler = (e) => {
               e.preventDefault();
@@ -1006,29 +1221,12 @@ if (typeof browserAPI === 'undefined') {
         
         const button = document.createElement('button');
         button.id = id;
-        button.textContent = icon ? icon : text;
+        storeModButtonMetadata(button, text, icon, tooltip);
         button.title = tooltip || text;
         button.setAttribute('data-mod-id', modId || '');
 
-        // Compact, styled mod button
-        button.style.cssText = `
-          padding: 2px 7px;
-          border: 4px solid transparent;
-          border-radius: 0;
-          cursor: pointer;
-          background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat;
-          color: #ffe066;
-          font-weight: 700;
-          font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
-          box-sizing: border-box;
-          border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 4 fill stretch;
-          transition: color 0.2s, border-image 0.1s;
-          outline: none;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 15px;
-        `;
+        button.style.cssText = MOD_BUTTON_GAME_STYLE;
+        applyModButtonLabel(button);
         
         button._clickHandler = (e) => {
           e.preventDefault();
@@ -1049,12 +1247,22 @@ if (typeof browserAPI === 'undefined') {
           return null;
         }
         
-        if (options.text) {
-          button.textContent = options.icon ? options.icon : options.text;
+        if (options.text !== undefined) {
+          storeModButtonMetadata(
+            button,
+            options.text,
+            options.icon ?? button._buttonIcon,
+            options.tooltip ?? button.title
+          );
+          applyModButtonLabel(button);
+        } else if (options.icon !== undefined) {
+          storeModButtonMetadata(button, button._buttonText, options.icon, options.tooltip ?? button.title);
+          applyModButtonLabel(button);
         }
         
         if (options.tooltip) {
           button.title = options.tooltip;
+          applyModButtonLabel(button);
         }
         
         if (options.primary !== undefined) {
@@ -1109,44 +1317,32 @@ if (typeof browserAPI === 'undefined') {
         return removedCount;
       },
       
-      toggleModButtons: function(visible) {
+      toggleModButtons: function(layout) {
         const toggleButton = document.getElementById('bestiary-mod-buttons-toggle');
         const buttonsContainer = document.getElementById('bestiary-mod-buttons');
         
         if (toggleButton && buttonsContainer) {
-          // If visible parameter is not specified, toggle current state
-          if (visible === undefined) {
-            visible = !toggleButton._isVisible;
-          }
-          
-          toggleButton._isVisible = visible;
-          
-          if (visible) {
-            // Show buttons
-            buttonsContainer.style.opacity = '1';
-            buttonsContainer.style.transform = 'translateX(0)';
-            buttonsContainer.style.display = 'flex';
-            toggleButton.textContent = '◀'; // Left arrow for "hide"
-            toggleButton.title = 'Hide mod buttons';
+          if (layout === undefined) {
+            cycleModButtonsLayout(toggleButton, buttonsContainer);
+          } else if (layout === true) {
+            applyModButtonsLayout(toggleButton, buttonsContainer, 'horizontal');
+          } else if (layout === false) {
+            applyModButtonsLayout(toggleButton, buttonsContainer, 'hidden');
+          } else if (MOD_BUTTON_LAYOUT_STATES.includes(layout)) {
+            applyModButtonsLayout(toggleButton, buttonsContainer, layout);
           } else {
-            // Hide buttons
-            buttonsContainer.style.opacity = '0';
-            buttonsContainer.style.transform = 'translateX(100%)'; // Move to the right, toward the toggle button
-            toggleButton.textContent = '▶'; // Right arrow for "show"
-            toggleButton.title = 'Show mod buttons';
-            
-            // Hide after transition completes
-            setTimeout(() => {
-              if (!toggleButton._isVisible) {
-                buttonsContainer.style.display = 'none';
-              }
-            }, 300);
+            console.warn(`Invalid mod button layout: ${layout}`);
+            return false;
           }
           
           return true;
         }
         
         return false;
+      },
+
+      refreshModButtonLabels: function() {
+        return refreshModButtonLabels();
       },
       
       createConfigPanel: function(options) {

@@ -479,6 +479,8 @@ function buildHuntAnalyzerCssVariableBlock(theme) {
             --ha-button-shadow-hover: ${theme.colors.buttonShadowHover};
             --ha-button-highlight: ${theme.colors.buttonHighlight};
             --ha-button-highlight-hover: ${theme.colors.buttonHighlightHover};
+            --ha-dropdown-option-hover: ${theme.colors.dropdownOptionHover};
+            --ha-dropdown-option-selected: ${theme.colors.dropdownOptionSelected};
             --ha-frame-3: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
             --ha-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
             --ha-frame-1-pressed: url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill;
@@ -629,6 +631,54 @@ function injectHuntAnalyzerStyles() {
             background-repeat: repeat;
             background-color: var(--ha-section-bg-fallback);
             box-sizing: border-box;
+        }
+
+        .map-filter-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .map-filter-container #mod-map-filter-row {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        #mod-map-filter-dropdown-button {
+            width: 200px;
+            min-width: 200px;
+            max-width: 200px;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+
+        #mod-map-filter-dropdown-label {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #mod-map-filter-dropdown-arrow {
+            flex: 0 0 auto;
+        }
+
+        #mod-map-filter-dropdown-menu [data-map-filter-option] {
+            color: var(--ha-text);
+            background-color: transparent;
+        }
+
+        #mod-map-filter-dropdown-menu [data-map-filter-option][data-selected="true"] {
+            background-color: var(--ha-dropdown-option-selected);
+            color: var(--ha-text-secondary);
+        }
+
+        #mod-map-filter-dropdown-menu [data-map-filter-option][data-selected="false"]:hover {
+            background-color: var(--ha-dropdown-option-hover);
         }
         
         .ha-icon-button {
@@ -2764,11 +2814,6 @@ function updatePanelThemeColors(panel) {
         applyFramedSectionStyles(mapFilterContainer, { noTopMargin: true });
     }
     
-    const mapFilterTitle = panel.querySelector('.map-filter-container h3');
-    if (mapFilterTitle && !mapFilterTitle.id) {
-        applyAccentTitleStyle(mapFilterTitle);
-    }
-    
     // Update button container
     const buttonContainer = panel.querySelector('.button-container');
     if (buttonContainer) {
@@ -4248,6 +4293,11 @@ function updateMapFilterDropdown() {
     const mapFilterRow = domCache.get("mod-map-filter-row");
     if (!mapFilterRow) return;
 
+    const mapFilterContainer = mapFilterRow.parentElement;
+    if (mapFilterContainer) {
+        mapFilterContainer.querySelectorAll(':scope > h3').forEach((el) => el.remove());
+    }
+
     // Prevent listener leaks across dropdown rebuilds.
     if (documentClickHandler) {
         document.removeEventListener("click", documentClickHandler);
@@ -4261,16 +4311,18 @@ function updateMapFilterDropdown() {
 
     // Clear existing content
     mapFilterRow.innerHTML = "";
-    mapFilterRow.style.display = "grid";
-    mapFilterRow.style.gridTemplateColumns = "1fr auto 1fr";
+    mapFilterRow.style.display = "flex";
     mapFilterRow.style.alignItems = "center";
+    mapFilterRow.style.justifyContent = "center";
     mapFilterRow.style.width = "100%";
+    mapFilterRow.style.gap = "8px";
 
     // Create dropdown container
     const dropdownContainer = document.createElement("div");
-    dropdownContainer.style.gridColumn = "2";
     dropdownContainer.style.position = "relative";
     dropdownContainer.style.display = "inline-block";
+    dropdownContainer.style.width = "200px";
+    dropdownContainer.style.flexShrink = "0";
 
     // Create dropdown button
     const dropdownButton = document.createElement("button");
@@ -4279,22 +4331,33 @@ function updateMapFilterDropdown() {
     dropdownButton.style.borderRadius = "4px";
     dropdownButton.style.fontSize = "12px";
     dropdownButton.style.cursor = "pointer";
-    dropdownButton.style.minWidth = "150px";
+    dropdownButton.style.width = "200px";
+    dropdownButton.style.minWidth = "200px";
+    dropdownButton.style.maxWidth = "200px";
+    dropdownButton.style.boxSizing = "border-box";
     dropdownButton.style.textAlign = "left";
     dropdownButton.style.display = "flex";
     dropdownButton.style.justifyContent = "space-between";
     dropdownButton.style.alignItems = "center";
-
-    // Create dropdown arrow
-    const arrow = document.createElement("span");
-    arrow.textContent = "▼";
-    arrow.style.fontSize = "10px";
-    arrow.style.marginLeft = "8px";
+    dropdownButton.style.gap = "8px";
+    dropdownButton.style.overflow = "hidden";
 
     const selectedMapLabel = HuntAnalyzerState.ui.selectedMapFilter === "ALL"
         ? t('mods.huntAnalyzer.allMaps')
         : HuntAnalyzerState.ui.selectedMapFilter;
-    dropdownButton.appendChild(document.createTextNode(selectedMapLabel));
+
+    const labelSpan = document.createElement("span");
+    labelSpan.id = "mod-map-filter-dropdown-label";
+    labelSpan.textContent = selectedMapLabel;
+    labelSpan.title = selectedMapLabel;
+
+    const arrow = document.createElement("span");
+    arrow.id = "mod-map-filter-dropdown-arrow";
+    arrow.textContent = "▼";
+    arrow.style.fontSize = "10px";
+    arrow.style.flexShrink = "0";
+
+    dropdownButton.appendChild(labelSpan);
     dropdownButton.appendChild(arrow);
 
     // Create dropdown menu
@@ -4356,12 +4419,21 @@ function updateMapFilterDropdown() {
         dropdownMenu.appendChild(mapOption);
     });
 
+    syncMapFilterDropdownOptionStyles();
+
     // Toggle dropdown visibility
     dropdownClickHandler = (e) => {
         e.stopPropagation();
         const isVisible = dropdownMenu.style.display === "block";
-        dropdownMenu.style.display = isVisible ? "none" : "block";
-        arrow.textContent = isVisible ? "▼" : "▲";
+        if (isVisible) {
+            dropdownMenu.style.display = "none";
+            arrow.textContent = "▼";
+            syncMapFilterDropdownOptionStyles();
+        } else {
+            syncMapFilterDropdownOptionStyles();
+            dropdownMenu.style.display = "block";
+            arrow.textContent = "▲";
+        }
     };
     dropdownButton.addEventListener("click", dropdownClickHandler);
 
@@ -4369,6 +4441,7 @@ function updateMapFilterDropdown() {
     documentClickHandler = () => {
         dropdownMenu.style.display = "none";
         arrow.textContent = "▼";
+        syncMapFilterDropdownOptionStyles();
     };
     document.addEventListener("click", documentClickHandler);
 
@@ -4380,11 +4453,16 @@ function updateMapFilterDropdown() {
 
     const navigateButton = createStyledButton('→');
     navigateButton.id = 'mod-map-filter-navigate-button';
-    navigateButton.style.gridColumn = '3';
-    navigateButton.style.justifySelf = 'center';
-    navigateButton.style.width = '24px';
-    navigateButton.style.minWidth = '24px';
-    navigateButton.style.padding = '2px 0';
+    navigateButton.style.width = '25px';
+    navigateButton.style.height = '25px';
+    navigateButton.style.maxWidth = '25px';
+    navigateButton.style.maxHeight = '25px';
+    navigateButton.style.minWidth = '0';
+    navigateButton.style.minHeight = '0';
+    navigateButton.style.flexGrow = '0';
+    navigateButton.style.flexShrink = '0';
+    navigateButton.style.padding = '0';
+    navigateButton.style.boxSizing = 'border-box';
     navigateButton.style.fontSize = '13px';
     navigateButton.style.lineHeight = '1';
     navigateButton.style.display = HuntAnalyzerState.ui.selectedMapFilter === 'ALL' ? 'none' : 'inline-flex';
@@ -4402,45 +4480,46 @@ function updateMapFilterDropdown() {
     mapFilterRow.appendChild(navigateButton);
 }
 
+function syncMapFilterDropdownOptionStyles() {
+    const dropdownMenu = document.getElementById('mod-map-filter-dropdown-menu');
+    if (!dropdownMenu) return;
+
+    const selected = HuntAnalyzerState.ui.selectedMapFilter;
+    dropdownMenu.querySelectorAll('[data-map-filter-option]').forEach((option) => {
+        const isSelected = option.dataset.mapFilterOption === selected;
+        option.dataset.selected = isSelected ? 'true' : 'false';
+        option.style.backgroundColor = '';
+        option.style.color = '';
+    });
+}
+
 // Create a dropdown option
 function createDropdownOption(mapName) {
     const option = document.createElement("div");
     const optionLabel = mapName === "ALL" ? t('mods.huntAnalyzer.allMaps') : mapName;
     option.textContent = optionLabel;
+    option.dataset.mapFilterOption = mapName;
     option.style.padding = "8px 12px";
     option.style.cursor = "pointer";
     option.style.fontSize = "12px";
-    option.style.color = getThemeColor('text');
     option.style.borderBottom = `1px solid ${getThemeColor('border')}`;
     option.style.transition = "background-color 0.2s ease";
-
-    // Highlight selected option
-    if (mapName === HuntAnalyzerState.ui.selectedMapFilter) {
-        option.style.backgroundColor = getThemeColor('dropdownOptionSelected');
-        option.style.color = getThemeColor('textSecondary');
-    }
-
-    // Hover effects
-    option.addEventListener("mouseenter", () => {
-        if (mapName !== HuntAnalyzerState.ui.selectedMapFilter) {
-            option.style.backgroundColor = getThemeColor('dropdownOptionHover');
-        }
-    });
-
-    option.addEventListener("mouseleave", () => {
-        if (mapName !== HuntAnalyzerState.ui.selectedMapFilter) {
-            option.style.backgroundColor = "transparent";
-        }
-    });
+    option.style.overflow = "hidden";
+    option.style.textOverflow = "ellipsis";
+    option.style.whiteSpace = "nowrap";
+    option.title = optionLabel;
 
     // Click handler
     option.addEventListener("click", () => {
         HuntAnalyzerState.ui.selectedMapFilter = mapName;
-        
+        syncMapFilterDropdownOptionStyles();
+
         // Update dropdown button text
         const dropdownButton = document.getElementById("mod-map-filter-dropdown-button");
-        if (dropdownButton) {
-            dropdownButton.childNodes[0].textContent = optionLabel;
+        const labelSpan = document.getElementById("mod-map-filter-dropdown-label");
+        if (labelSpan) {
+            labelSpan.textContent = optionLabel;
+            labelSpan.title = optionLabel;
         }
         
         // Close dropdown
@@ -4450,7 +4529,7 @@ function createDropdownOption(mapName) {
         }
         
         // Update arrow
-        const arrow = dropdownButton?.querySelector("span");
+        const arrow = document.getElementById("mod-map-filter-dropdown-arrow");
         if (arrow) {
             arrow.textContent = "▼";
         }
@@ -6393,29 +6472,15 @@ function createAutoplayAnalyzerPanel() {
     const mapFilterContainer = document.createElement("div");
     mapFilterContainer.className = "map-filter-container";
     mapFilterContainer.style.display = "flex";
-    mapFilterContainer.style.flexDirection = "row";
     mapFilterContainer.style.flex = "0 0 auto";
     applyFramedSectionStyles(mapFilterContainer, { noTopMargin: true });
     mapFilterContainer.style.alignItems = "center";
     mapFilterContainer.style.justifyContent = "center";
-    mapFilterContainer.style.gap = "8px";
-
-    const mapFilterTitle = document.createElement("h3");
-    mapFilterTitle.textContent = t('mods.huntAnalyzer.mapFilter');
-    mapFilterTitle.style.margin = "0px";
-    mapFilterTitle.style.fontSize = "14px";
-    mapFilterTitle.style.fontWeight = "bold";
-    mapFilterTitle.style.flex = "0 0 auto";
-    applyAccentTitleStyle(mapFilterTitle);
 
     const mapFilterRow = document.createElement("div");
     mapFilterRow.id = "mod-map-filter-row";
-    mapFilterRow.style.display = "flex";
-    mapFilterRow.style.alignItems = "center";
-    mapFilterRow.style.justifyContent = "center";
-    mapFilterRow.style.flex = "0 0 auto";
+    mapFilterRow.style.width = "100%";
 
-    mapFilterContainer.appendChild(mapFilterTitle);
     mapFilterContainer.appendChild(mapFilterRow);
 
     // 4. Loot + Creature Drops Sections (shared layout/styling)
@@ -7015,7 +7080,6 @@ function applyLayoutMode(panel, mode, mapFilterContainer, lootContainer, creatur
         if (buttonContainer) buttonContainer.style.display = 'none';
     } else {
         mapFilterContainer.style.display = 'flex';
-        mapFilterContainer.style.flexDirection = 'column';
         lootContainer.style.display = 'flex';
         lootContainer.style.flexDirection = 'column';
         creatureDropContainer.style.display = 'flex';
@@ -7086,7 +7150,6 @@ function updatePanelLayout(panel) {
         // Show containers when not minimized
         if (mapFilterContainer) {
             mapFilterContainer.style.display = 'flex';
-            mapFilterContainer.style.flexDirection = 'column';
         }
         if (lootContainer) {
             lootContainer.style.display = 'flex';
@@ -7482,11 +7545,6 @@ const translationEventHandler = (event) => {
         const copyLogButton = panel.querySelector('.button-container button:last-child');
         if (copyLogButton) {
             copyLogButton.textContent = t('mods.huntAnalyzer.copyLog');
-        }
-
-        const mapFilterTitle = panel.querySelector('.map-filter-container h3');
-        if (mapFilterTitle) {
-            mapFilterTitle.textContent = t('mods.huntAnalyzer.mapFilter');
         }
 
         const styleButton = panel.querySelector('#mod-style-button');

@@ -804,6 +804,7 @@ function showTeamCopierModal() {
 function createButton() {
   api.ui.addButton({
     id: BUTTON_ID,
+    text: t('mods.teamCopier.buttonText'),
     icon: clipboardIcon,
     modId: MOD_ID,
     tooltip: t('mods.teamCopier.buttonTooltip'),

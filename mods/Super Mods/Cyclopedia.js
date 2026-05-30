@@ -3,12 +3,6 @@
 // =======================
 'use strict';
 
-// Translation helper (api from loader, context, or BestiaryModAPI)
-function cyclopediaT(key) {
-  const a = (typeof api !== 'undefined' && api) ? api : (typeof context !== 'undefined' && context && context.api) ? context.api : (typeof window !== 'undefined' && window.BestiaryModAPI) ? window.BestiaryModAPI : null;
-  return (a && a.i18n && typeof a.i18n.t === 'function') ? a.i18n.t(key) : key;
-}
-
 function formatFloorsClearedReplayComment(uniqueFloors, floorSeeds) {
   const seeds = floorSeeds && typeof floorSeeds === 'object' ? floorSeeds : {};
   return `Floors cleared with this setup: ${uniqueFloors.map((floor) => {
@@ -17,6 +11,108 @@ function formatFloorsClearedReplayComment(uniqueFloors, floorSeeds) {
     const sn = Number(raw);
     return Number.isFinite(sn) ? `${pct}% (${sn})` : `${pct}%`;
   }).join(', ')}`;
+}
+
+function formatCyclopediaMilliseconds(ms) {
+  if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const milliseconds = Math.floor((ms % 1000) / 10);
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
+}
+
+function parseCommaSeparatedInt(text) {
+  const n = parseInt(String(text ?? '').replace(/,/g, ''), 10);
+  return Number.isFinite(n) && !isNaN(n) ? n : null;
+}
+
+function getFirstNumericGameStateValue(context, paths) {
+  if (!context || !Array.isArray(paths)) return null;
+  for (const path of paths) {
+    const value = path.split('?.').reduce((obj, key) => obj?.[key], context);
+    if (typeof value === 'number' && !isNaN(value) && value >= 0) return value;
+  }
+  return null;
+}
+
+function getCyclopediaListItemBaseName(el) {
+  const labeledSpan = el?.querySelector?.('span[data-base-label]');
+  if (labeledSpan?.dataset?.baseLabel) return labeledSpan.dataset.baseLabel;
+  const plainSpan = el?.querySelector?.('span');
+  const raw = String((plainSpan?.textContent || el?.textContent || '')).trim();
+  return raw.replace(/^\d+%\s+/, '');
+}
+
+function injectCyclopediaStyle(styleId, cssText) {
+  if (!DOMCache.get(`#${styleId}`)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = cssText;
+    document.head.appendChild(style);
+  }
+}
+
+function buildLocalRunReplayFields(run) {
+  const fields = {};
+  fields.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
+  const replayTimestamp = Number(run?.timestamp);
+  fields.timestamp = Number.isFinite(replayTimestamp) && replayTimestamp > 0 ? replayTimestamp : Date.now();
+
+  const snap = globalThis.state?.player?.getSnapshot?.();
+  const ctx = snap?.context;
+  const replayCredits = (
+    (typeof run.credits === 'string' && run.credits.trim())
+    || (typeof run.player === 'string' && run.player.trim() && !/^you$/i.test(run.player.trim()) && run.player.trim())
+    || (typeof run.userName === 'string' && run.userName.trim())
+    || (typeof ctx?.playerName === 'string' && ctx.playerName.trim())
+    || (typeof ctx?.name === 'string' && ctx.name.trim())
+  );
+  if (replayCredits) fields.credits = replayCredits;
+
+  if (typeof run.comments === 'string' && run.comments.trim()) {
+    fields.comments = run.comments.trim();
+  } else {
+    const floorHistoryValues = Array.isArray(run?.floorHistory) ? run.floorHistory : [];
+    const normalizedFloors = floorHistoryValues
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const runFloorValue = Number(run?.floor);
+    if (Number.isFinite(runFloorValue) && runFloorValue > 0) {
+      normalizedFloors.push(runFloorValue);
+    }
+    const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
+    if (uniqueFloors.length > 1) {
+      fields.comments = formatFloorsClearedReplayComment(uniqueFloors, run.floorSeeds);
+    }
+  }
+
+  if (run.setup?.pieces?.length > 0) {
+    fields.board = run.setup.pieces.map((piece) => {
+      const boardPiece = {
+        tile: piece.tile,
+        monster: {
+          name: piece.monsterName || piece.monsterId || 'unknown monster',
+          level: piece.level || 1,
+          hp: piece.monsterStats?.hp || 20,
+          ad: piece.monsterStats?.ad || 20,
+          ap: piece.monsterStats?.ap || 20,
+          armor: piece.monsterStats?.armor || 20,
+          magicResist: piece.monsterStats?.magicResist || 20
+        }
+      };
+      if (piece.equipmentName || piece.equipId) {
+        boardPiece.equipment = {
+          name: piece.equipmentName || piece.equipId || 'unknown equipment',
+          stat: piece.equipmentStat || 'ap',
+          tier: piece.equipmentTier || 5
+        };
+      }
+      return boardPiece;
+    });
+  }
+
+  return fields;
 }
 
 const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDDLE: 300, RIGHT: 300 }, API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData', FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png' };
@@ -51,19 +147,151 @@ const COLOR_CONSTANTS = {
   HOVER: '#888'
 };
 
-// Font family and size constants
+// pixel-font classes for in-modal game panels; Trebuchet lives in cyclopedia-box/subnav injected CSS
+const FONT_BODY_CLASS = 'pixel-font-16';
+const FONT_SMALL_CLASS = 'pixel-font-14';
 const FONT_CONSTANTS = {
   PRIMARY: 'pixel-font',
-  SMALL: 'pixel-font-14',
-  MEDIUM: 'pixel-font-16',
-  LARGE: 'pixel-font-16',
+  BODY: FONT_BODY_CLASS,
+  SMALL: FONT_SMALL_CLASS,
+  MEDIUM: FONT_BODY_CLASS,
+  LARGE: FONT_BODY_CLASS,
   SIZES: {
-    TITLE: 'pixel-font-16',
-    BODY: 'pixel-font-16',
-    SMALL: 'pixel-font-14',
-    TINY: 'pixel-font-14'
+    TITLE: FONT_BODY_CLASS,
+    BODY: FONT_BODY_CLASS,
+    SMALL: FONT_SMALL_CLASS,
+    TINY: FONT_SMALL_CLASS
   }
 };
+
+/** Standard Cyclopedia column/box header (matches Bestiary "Creatures" title). */
+const CYCLOPEDIA_WIDGET_TITLE_CLASS = 'widget-top widget-top-text pixel-font-16';
+const CYCLOPEDIA_WIDGET_TITLE_STYLE = {
+  margin: '0',
+  padding: '2px 8px',
+  textAlign: 'center',
+  color: COLOR_CONSTANTS.TEXT,
+  boxSizing: 'border-box'
+};
+/** Title beside a narrow toggle button (Creatures shiny / Ability awakened). */
+const CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE = {
+  width: '83%',
+  flex: '0 0 83%'
+};
+const CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE = {
+  width: '15%',
+  flex: '0 0 15%',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minHeight: '16px',
+  height: '100%',
+  alignSelf: 'stretch',
+  outline: 'none'
+};
+
+function createCyclopediaWidgetTitle(text, extraStyle = {}) {
+  const titleEl = document.createElement('h2');
+  titleEl.className = CYCLOPEDIA_WIDGET_TITLE_CLASS;
+  Object.assign(titleEl.style, CYCLOPEDIA_WIDGET_TITLE_STYLE, extraStyle);
+  if (text != null && text !== '') titleEl.textContent = text;
+  return titleEl;
+}
+
+function applyCyclopediaWidgetTitleChrome(element, extraStyle = {}) {
+  element.className = CYCLOPEDIA_WIDGET_TITLE_CLASS;
+  Object.assign(element.style, CYCLOPEDIA_WIDGET_TITLE_STYLE, extraStyle);
+}
+
+/** English UI copy (Cyclopedia modal is English-only). */
+const CYCLOPEDIA_UI = {
+  loadingTitle: 'Loading Cyclopedia...',
+  loadingSubtitle: 'Fetching your profile data',
+  errorTitle: 'Failed to Load Profile Data',
+  retry: 'Retry',
+  errorAbort: 'Request timed out. Please check your internet connection and try again.',
+  errorPlayerName: 'Player name not available. Please ensure you are logged into the game.',
+  errorHttp: 'Failed to fetch profile data. Please try again.',
+  errorUnexpected: 'An unexpected error occurred while loading the profile data.',
+  errorConnectionHint: 'Please check your internet connection and try again.',
+  welcome: 'Welcome!',
+  welcomeName: (name) => `Welcome ${name}!`,
+  seasonStatsTitle: 'Season stats',
+  seasonStatsSeason: (n) => `Season ${n}`,
+  viewFullSeasonsLeaderboard: 'View full seasons leaderboard',
+  notAvailable: 'N/A',
+  welcomeFallback: 'Welcome to Cyclopedia!',
+  searchTitle: 'Search',
+  searchPlaceholder: 'Search Cyclopedia',
+  searchTooltip:
+    'Cyclopedia search:\n• Find: creatures, equipment, maps, regions, inventory, abilities\n• Matches names, roles, map spawns, equipment drops & boosted maps\n• Ability and equipment effect text (e.g. stun)\n• Exact match: "Goblin" (not Hobgoblin)\n• Combine: goblin OR demon, "Fire Axe" AND stun\n• Operators: AND, OR (spaces required, case insensitive)\n• Use the type filter to narrow results',
+  emptyStateMinChars: 'Type at least 2 characters to search.',
+  indexingAbility: 'Indexing ability text... Results will appear shortly.',
+  noResults: 'No results found.',
+  resultBadge: 'Result',
+  noProfileData: 'No profile data found.',
+  playerInformation: 'Player information',
+  accountAlt: 'Account',
+  playerFallback: 'Player',
+  level: 'Level',
+  loyaltyPoints: 'Loyalty Points',
+  playerStats: 'Player stats',
+  currentTotal: 'Current total',
+  progress: 'Progress',
+  rankings: 'Rankings',
+  premiumPassAlt: 'Premium pass',
+  playerIconAlt: 'Player Icon',
+  statusPremium: 'Premium',
+  statusFree: 'Free',
+  statisticsSeason: (n) => `Statistics Season ${n}`,
+  mapInfoSeason: (n) => `Map Information Season ${n}`,
+  stats: {
+    shell: 'Daily Seashell',
+    tasks: 'Hunting tasks',
+    playCount: 'Total runs',
+    perfectCreatures: 'Perfect Creatures',
+    shinyCreatures: 'Shiny Creatures',
+    bisEquipments: 'BIS Equipments',
+    raids: 'Completed raids',
+    exploredMaps: 'Explored maps',
+    bagOutfits: 'Bag Outfits',
+    rankPoints: 'Rank points',
+    timeSum: 'Time sum',
+    floorsSum: 'Floors sum',
+    createdAt: 'Created at',
+    xp: 'XP',
+    name: 'Player',
+    premium: 'Status'
+  }
+};
+
+function renderCyclopediaProfileLoadingHtml() {
+  return `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
+        <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
+        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${CYCLOPEDIA_UI.loadingTitle}</div>
+        <div style="font-size: 14px; color: #888;">${CYCLOPEDIA_UI.loadingSubtitle}</div>
+      </div>`;
+}
+
+function renderCyclopediaProfileErrorHtml(message, options = {}) {
+  const { showRetry = false, showConnectionHint = false } = options;
+  const retryBtn = showRetry
+    ? `<button id="retry-profile-load" class="${FONT_CONSTANTS.PRIMARY} ${FONT_CONSTANTS.SIZES.BODY}" style="padding: 8px 16px; background: #444; border: 1px solid #666; border-radius: 4px; color: white; cursor: pointer;">${CYCLOPEDIA_UI.retry}</button>`
+    : '';
+  const hint = showConnectionHint
+    ? `<div style="font-size: 12px; color: #666;">${CYCLOPEDIA_UI.errorConnectionHint}</div>`
+    : '';
+  return `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
+        <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${CYCLOPEDIA_UI.errorTitle}</div>
+        <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${message}</div>
+        ${hint}
+        ${retryBtn}
+      </div>`;
+}
 
 // Maps Tab DOM Optimization System
 const MapsTabDOMOptimizer = {
@@ -123,44 +351,26 @@ const HUNTING_MARKS_UI_SELECTORS = [
   '.sprite.item.relative.id-35572', '.sprite.item.relative[class*="id-35572"]',
   'img[src*="huntingmarks.png"]', '[data-item*="hunting"]', '[data-item*="mark"]'
 ];
-// Monster stats configuration for display in UI
-const MONSTER_STATS_CONFIG = [
-    { key: 'hp', label: 'Hitpoints', icon: '/assets/icons/heal.png', max: 1000, barColor: 'rgb(96, 192, 96)' },
-    { key: 'ad', label: 'Attack Damage', icon: '/assets/icons/attackdamage.png', max: 110, barColor: 'rgb(255, 128, 96)' },
-    { key: 'ap', label: 'Ability Power', icon: '/assets/icons/abilitypower.png', max: 90, barColor: 'rgb(128, 128, 255)' },
-    { key: 'armor', label: 'Armor', icon: '/assets/icons/armor.png', max: 60, barColor: 'rgb(224, 224, 128)' },
-    { key: 'magicResist', label: 'Magic Resist', icon: '/assets/icons/magicresist.png', max: 60, barColor: 'rgb(192, 128, 255)' },
-    { key: 'speed', label: 'Speed', icon: '/assets/icons/speed.png', max: 200, barColor: 'rgb(255, 200, 100)' }
-];
 
-// Hardcoded monster stats for unobtainable creatures that have different stats on maps
-const HARDCODED_MONSTER_STATS = {
-  'old giant spider': { baseStats: { hp: 1140, ad: 108, ap: 30, armor: 30, magicResist: 30 }, level: 300 },
-  'willi wasp': { baseStats: { hp: 924, ad: 0, ap: 0, armor: 26, magicResist: 45 }, level: 100 },
-  'black knight': { baseStats: { hp: 4800, ad: 66, ap: 0, armor: 975, magicResist: 975 }, level: 300 },
-  'dharalion': { baseStats: { hp: 2200, ad: 33, ap: 25, armor: 60, magicResist: 66 }, level: 200 },
-  'dead tree': { baseStats: { hp: 7000, ad: 0, ap: 0, armor: 700, magicResist: 700 }, level: 100 },
-  'earth crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
-  'energy crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 150, magicResist: 30 }, level: 50 },
-  'magma crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
-  'regeneration tank': { baseStats: { hp: 8352, ad: 0, ap: 0, armor: 126, magicResist: 696 }, level: 99 },
-  'monster cauldron': { baseStats: { hp: 1114, ad: 92, ap: 112, armor: 45, magicResist: 42 }, level: 99 },
-  'grynch clan mastermind': { baseStats: { hp: 220, ad: 0, ap: 0, armor: 66, magicResist: 66 }, level: 200 }
-};
+const creatureDbRef = (typeof window !== 'undefined' && window.creatureDatabase) || {};
+const mapsDbRef = (typeof globalThis !== 'undefined' && globalThis.mapsDatabase) || {};
+const itemKeyGroups = inventoryDatabase.itemKeyGroups || {};
 
-// Get creature data from centralized database
-const HIDE_FROM_CYCLOPEDIA = ['Tentugly', 'Dwarf Henchman'];
-const UNOBTAINABLE_CREATURES = (window.creatureDatabase?.UNOBTAINABLE_CREATURES || [])
+const MONSTER_STATS_CONFIG = creatureDbRef.MONSTER_STAT_DISPLAY_CONFIG || [];
+const HARDCODED_MONSTER_STATS = creatureDbRef.HARDCODED_MAP_MONSTER_STATS || {};
+const HIDE_FROM_CYCLOPEDIA = creatureDbRef.CYCLOPEDIA_HIDDEN_CREATURES || ['Tentugly', 'Dwarf Henchman'];
+
+const UNOBTAINABLE_CREATURES = (creatureDbRef.UNOBTAINABLE_CREATURES || [])
   .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
 
-const ALL_CREATURES = (window.creatureDatabase?.ALL_CREATURES || [])
+const ALL_CREATURES = (creatureDbRef.ALL_CREATURES || [])
   .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
 
 /** Obtainable species + Cyclopedia-only entries (e.g. Albino Gazer = shiny Mystic Gazer). */
 function getCyclopediaAllCreatures() {
   const db = window.creatureDatabase;
   if (typeof db?.getCyclopediaCreatureNames === 'function') {
-    return db.getCyclopediaCreatureNames().filter((name) => !HIDE_FROM_CYCLOPEDIA.includes(name));
+    return db.getCyclopediaCreatureNames(db.ALL_CREATURES);
   }
   const base = (db?.ALL_CREATURES?.length ? db.ALL_CREATURES : ALL_CREATURES)
     .filter((name) => !HIDE_FROM_CYCLOPEDIA.includes(name));
@@ -183,14 +393,21 @@ function cyclopediaResolveCreatureQuery(creatureName) {
   };
 }
 
-// Get equipment data from centralized database
-const ALL_EQUIPMENT = window.equipmentDatabase?.ALL_EQUIPMENT || [];
 const HARDCODED_BOOSTED_MAP = window.equipmentDatabase?.HARDCODED_BOOSTED_MAP || {};
 
+/** Full equipment catalog (filled by equipment-database.js after game state is ready). */
+function getCyclopediaAllEquipmentNames() {
+  const db = window.equipmentDatabase;
+  if (Array.isArray(db?.ALL_EQUIPMENT) && db.ALL_EQUIPMENT.length > 0) {
+    return db.ALL_EQUIPMENT;
+  }
+  return [];
+}
+
 const GAME_KEYS = {
-  NO_RARITY: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
-  CURRENCY: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
-  UPGRADE: ['babyDragonPlant', 'creatureAwakening', 'dailyBoostedMap', 'daycare', 'dungeonAscension', 'dragonPlant', 'drMephistopheles', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
+  NO_RARITY: itemKeyGroups.noRarity || ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
+  CURRENCY: itemKeyGroups.currency || ['gold', 'dust', 'beastCoins', 'huntingMarks'],
+  UPGRADE: itemKeyGroups.upgrade || ['babyDragonPlant', 'creatureAwakening', 'dailyBoostedMap', 'daycare', 'dungeonAscension', 'dragonPlant', 'drMephistopheles', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
 };
 
 const MAP_INTERACTION_CONFIG = {
@@ -295,20 +512,26 @@ const NavigationHandler = {
   }
 };
 
-const REGION_NAME_MAP = {
-  'rook': 'Rookgaard',
-  'carlin': 'Carlin',
-  'folda': 'Folda',
-  'abdendriel': 'Ab\'Dendriel',
-  'kazordoon': 'Kazordoon',
-  'venore': 'Venore'
-};
+const REGION_NAME_MAP = mapsDbRef.REGION_NAME_MAP || {};
+
+function cyclopediaGetRegionDisplayName(regionId) {
+  if (typeof mapsDbRef.getRegionDisplayName === 'function') {
+    return mapsDbRef.getRegionDisplayName(regionId);
+  }
+  const key = String(regionId ?? '').toLowerCase();
+  if (REGION_NAME_MAP[key]) return REGION_NAME_MAP[key];
+  const raw = String(regionId ?? '').trim();
+  if (!raw) return 'Unknown Region';
+  return raw.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+}
 
 const GAME_DATA = {
   MONSTER_STATS_CONFIG,
   UNOBTAINABLE_CREATURES,
   ALL_CREATURES,
-  ALL_EQUIPMENT,
+  get ALL_EQUIPMENT() {
+    return getCyclopediaAllEquipmentNames();
+  },
   HARDCODED_BOOSTED_MAP,
   NO_RARITY_KEYS: GAME_KEYS.NO_RARITY,
   CURRENCY_KEYS: GAME_KEYS.CURRENCY,
@@ -540,7 +763,7 @@ const CyclopediaHomeSearch = (() => {
   };
 
   function getRegionDisplayName(regionId) {
-    return GAME_DATA.REGION_NAME_MAP?.[String(regionId).toLowerCase()] || String(regionId);
+    return cyclopediaGetRegionDisplayName(regionId);
   }
 
   function safeGetRegions() {
@@ -2455,6 +2678,7 @@ const cyclopediaState = {
     this.profileData = null; this.lastFetch = 0; this.fetchInProgress = false;
     this.searchDebounceTimer = null; this.lazyLoadQueue = []; this.isProcessingQueue = false;
     this.searchedUsername = null;
+    this.refreshRankingsTable = null;
     const cacheStats = this.getCacheStats();
   }
 };
@@ -2498,27 +2722,7 @@ function getSeason2RankBracketFromPosition(positionRaw, totalRaw) {
 }
 
 function getSeason2RankBracket(profileData, seasonEntry, seasonNum) {
-  if (Number(seasonNum) !== 2) return null;
-  const explicit = seasonEntry?.rankBracket;
-  if (explicit !== undefined && explicit !== null && String(explicit).trim() !== '') {
-    return String(explicit).trim().toUpperCase();
-  }
-
-  const rankPosCandidate = seasonEntry?.rankPosition
-    ?? seasonEntry?.position
-    ?? seasonEntry?.rankPos
-    ?? profileData?.rankPointsPosition
-    ?? profileData?.rankPosition
-    ?? profileData?.position;
-
-  const totalPlayersCandidate = seasonEntry?.totalPlayers
-    ?? seasonEntry?.playersCount
-    ?? seasonEntry?.playerCount
-    ?? profileData?.totalPlayers
-    ?? profileData?.playersCount
-    ?? profileData?.playerCount;
-
-  return getSeason2RankBracketFromPosition(rankPosCandidate, totalPlayersCandidate);
+  return getSeason2MetricBracket(profileData, seasonEntry, seasonNum, 'rank');
 }
 
 function getSeason2MetricBracket(profileData, seasonEntry, seasonNum, metricKey) {
@@ -2567,17 +2771,19 @@ function getLatestProfileSeason(profileData, fallbackSeason = 2) {
 }
 
 function cyclopediaSeasonNA() {
-  return cyclopediaT('mods.cyclopedia.startpage.notAvailable');
+  return CYCLOPEDIA_UI.notAvailable;
+}
+
+function getActiveProfileSeasonNumber() {
+  return cyclopediaState.profileSeason || 1;
 }
 
 function getMapsTabStatisticsHeading() {
-  const n = cyclopediaState.profileSeason || 1;
-  return cyclopediaT('mods.cyclopedia.maps.statisticsSeason').replace('{n}', String(n));
+  return CYCLOPEDIA_UI.statisticsSeason(getActiveProfileSeasonNumber());
 }
 
 function getMapsTabMapInfoHeading() {
-  const n = cyclopediaState.profileSeason || 1;
-  return `Map Information Season ${String(n)}`;
+  return CYCLOPEDIA_UI.mapInfoSeason(getActiveProfileSeasonNumber());
 }
 
 function filterProfileArrayBySeason(arr, seasonNum) {
@@ -2926,15 +3132,11 @@ const DOMUtils = {
     return wrapper;
   },
   
-  createTitle: function(text, className = FONT_CONSTANTS.SIZES.TITLE) {
-    const titleEl = document.createElement('h2');
-    titleEl.className = 'widget-top widget-top-text ' + className;
-    Object.assign(titleEl.style, { margin: '0', padding: '2px 8px', textAlign: 'center', color: COLOR_CONSTANTS.TEXT });
-    const p = document.createElement('p');
-    p.textContent = text; p.className = className;
-    Object.assign(p.style, { margin: '0', padding: '0', textAlign: 'center', color: COLOR_CONSTANTS.TEXT });
-    titleEl.appendChild(p);
-    return titleEl;
+  createTitle: function(text, extraStyle) {
+    const style = typeof extraStyle === 'object' && extraStyle !== null
+      ? extraStyle
+      : { width: '100%' };
+    return createCyclopediaWidgetTitle(text, style);
   },
   
   createScrollContainer: function(height = '100%', padding = false) {
@@ -3005,42 +3207,16 @@ const DOMUtils = {
     item.appendChild(contentContainer);
     
     // Apply styling based on item status
-    const baseStyle = { cursor: 'pointer', padding: '2px 4px', borderRadius: '2px', textAlign: 'left' };
-    if (hasShinyTier) {
-      // Light purple for max awakened shiny creatures (level 99 + max genes + shiny).
-      Object.assign(item.style, {
-        ...baseStyle,
-        color: COLOR_CONSTANTS.MAX_AWAKENED
-      });
-    } else if (hasHundoTier) {
-      // Light blue for non-shiny hundo creatures (level 99 + max genes, no shiny).
-      Object.assign(item.style, {
-        ...baseStyle,
-        color: COLOR_CONSTANTS.HUNDO
-      });
-    } else if (hasAwakened) {
-      // Orange for awakened creatures that are not max awakened.
-      Object.assign(item.style, {
-        ...baseStyle,
-        color: COLOR_CONSTANTS.AWAKENED
-      });
-    } else if (isPerfect) {
-      // Gold color for perfect creatures - clean and distinct
-      Object.assign(item.style, { 
-        ...baseStyle, 
-        color: COLOR_CONSTANTS.PERFECT
-      });
-    } else if (isT5) {
-      // Gold color for T5 equipment - same as perfect creatures
-      Object.assign(item.style, { 
-        ...baseStyle, 
-        color: COLOR_CONSTANTS.PERFECT
-      });
-    } else if (isOwned) {
-      Object.assign(item.style, { ...baseStyle, color: COLOR_CONSTANTS.TEXT });
-    } else {
-      Object.assign(item.style, { ...baseStyle, color: COLOR_CONSTANTS.UNOWNED, filter: 'grayscale(0.7)' });
-    }
+    Object.assign(item.style, {
+      cursor: 'pointer',
+      padding: '2px 4px',
+      borderRadius: '2px',
+      textAlign: 'left',
+      ...resolveCreatureListItemColors(
+        { owned: isOwned, perfect: isPerfect, shinyTier: hasShinyTier, hundoTier: hasHundoTier, awakened: hasAwakened },
+        { isT5 }
+      )
+    });
     
     return item;
   }
@@ -3050,37 +3226,61 @@ const DOMUtils = {
 // 4. Utility Functions
 // =======================
 
+/** Resolve display query + gameId for a creature name (Albino Gazer → Mystic Gazer / 97). */
+function resolveCreatureGameId(creatureName) {
+  const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
+  let gameId = displayQuery.gameId ?? null;
+  const lookupName = (displayQuery.baseSpecies || creatureName).trim().toLowerCase();
+
+  if (gameId == null) {
+    const db = window.creatureDatabase;
+    if (typeof buildCyclopediaMonsterNameMap === 'function') {
+      buildCyclopediaMonsterNameMap();
+    }
+    const nameMap = typeof db?.getMonsterNameMap === 'function' ? db.getMonsterNameMap() : cyclopediaState.monsterNameMap;
+    const entry = nameMap?.get?.(lookupName);
+    if (entry) gameId = entry.index ?? entry.gameId;
+  }
+
+  if (gameId == null && window.BestiaryModAPI?.utility?.maps) {
+    gameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(lookupName);
+  }
+
+  return { gameId, displayQuery, lookupName };
+}
+
+function refreshRankingsTableIfReady() {
+  if (typeof cyclopediaState.refreshRankingsTable === 'function') {
+    cyclopediaState.refreshRankingsTable();
+    return true;
+  }
+  return false;
+}
+
 // Unified function to get all creature status information
 function getCreatureStatus(creatureName) {
   try {
-    if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
+    const snap = globalThis.state?.player?.getSnapshot?.();
+    const playerContext = snap?.context;
+    if (!playerContext?.monsters) {
       return { owned: false, shiny: false, perfect: false, awakened: false, shinyTier: false, hundoTier: false };
     }
-    
-    const playerContext = globalThis.state.player.getSnapshot().context;
+
     const ownedMonsters = playerContext.monsters || [];
-    const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
+    const db = window.creatureDatabase;
+    let matchingMonsters = typeof db?.filterMonstersForCreatureDisplay === 'function'
+      ? db.filterMonstersForCreatureDisplay(creatureName, ownedMonsters)
+      : [];
 
-    // Get the gameId for this creature name (Albino Gazer → Mystic Gazer / 97)
-    let creatureGameId = displayQuery.gameId ?? null;
-    const lookupName = (displayQuery.baseSpecies || creatureName).toLowerCase();
+    if (matchingMonsters.length === 0) {
+      const { gameId: creatureGameId, displayQuery } = resolveCreatureGameId(creatureName);
 
-    if (creatureGameId === null && cyclopediaState.monsterNameMap) {
-      const entry = cyclopediaState.monsterNameMap.get(lookupName);
-      if (entry) {
-        creatureGameId = entry.index;
+      matchingMonsters = ownedMonsters.filter((monster) => monster.gameId === creatureGameId);
+      if (displayQuery.shinyOnly) {
+        matchingMonsters = matchingMonsters.filter((monster) => monster.shiny === true);
+      } else if (displayQuery.nonShinyOnly) {
+        matchingMonsters = matchingMonsters.filter((monster) => monster.shiny !== true);
       }
-    }
-
-    if (creatureGameId === null && window.BestiaryModAPI?.utility?.maps) {
-      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(lookupName);
-    }
-
-    let matchingMonsters = ownedMonsters.filter((monster) => monster.gameId === creatureGameId);
-    if (displayQuery.shinyOnly) {
-      matchingMonsters = matchingMonsters.filter((monster) => monster.shiny === true);
-    } else if (displayQuery.nonShinyOnly) {
-      matchingMonsters = matchingMonsters.filter((monster) => monster.shiny !== true);
     }
     
     if (matchingMonsters.length === 0) {
@@ -3211,22 +3411,14 @@ function getAwakenTrackerBestiarySortKey(creatureName) {
     topTierLevel: 0
   };
   try {
-    if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) return empty;
-    const ownedMonsters = globalThis.state.player.getSnapshot().context.monsters || [];
+    const snap = globalThis.state?.player?.getSnapshot?.();
+    const playerContext = snap?.context;
+    if (!playerContext?.monsters) return empty;
+    const ownedMonsters = playerContext.monsters || [];
     const norm = String(creatureName || '').trim().toLowerCase();
     if (!norm) return empty;
 
-    const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
-    let creatureGameId = displayQuery.gameId ?? null;
-    const lookupName = (displayQuery.baseSpecies || creatureName).trim().toLowerCase();
-
-    if (creatureGameId == null && cyclopediaState.monsterNameMap) {
-      const entry = cyclopediaState.monsterNameMap.get(lookupName);
-      if (entry) creatureGameId = entry.index;
-    }
-    if (creatureGameId == null && window.BestiaryModAPI?.utility?.maps) {
-      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(lookupName);
-    }
+    const { gameId: creatureGameId, displayQuery } = resolveCreatureGameId(creatureName);
     if (creatureGameId == null) return empty;
 
     let matching = ownedMonsters.filter((m) => m && m.gameId === creatureGameId);
@@ -3305,35 +3497,24 @@ function getAwakenTrackerBestiarySortKey(creatureName) {
 // Unified function to get all equipment status information
 function getEquipmentStatus(equipmentName) {
   try {
-    if (!globalThis.state?.player?.getSnapshot?.()?.context?.equips) {
+    const snap = globalThis.state?.player?.getSnapshot?.();
+    const playerContext = snap?.context;
+    if (!playerContext?.equips) {
       return { owned: false, isT5: false };
     }
-    
-    const playerContext = globalThis.state.player.getSnapshot().context;
+
     const ownedEquips = playerContext.equips || [];
-    
-    // Get the gameId for this equipment name
+
     let equipmentGameId = null;
-    
-    // Try to get gameId from BestiaryModAPI utility
+
     if (window.BestiaryModAPI?.utility?.maps) {
       equipmentGameId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds?.get(equipmentName.toLowerCase());
     }
-    
-    // Fallback to global state utils
-    if (equipmentGameId === null && globalThis.state?.utils?.getEquipment) {
-      const utils = globalThis.state.utils;
-      for (let i = 1; i < 1000; i++) {
-        try {
-          const eq = utils.getEquipment(i);
-          if (eq?.metadata?.name?.toLowerCase() === equipmentName.toLowerCase()) {
-            equipmentGameId = i;
-            break;
-          }
-        } catch (e) {
-          console.warn('[Cyclopedia] Error in equipment ownership check:', e);
-        }
-      }
+
+    if (equipmentGameId === null) {
+      const eqMap = window.equipmentDatabase?.getEquipmentNameMap?.();
+      const entry = eqMap?.get?.(equipmentName.toLowerCase());
+      if (entry) equipmentGameId = entry.gameId;
     }
     
     // Find all matching equipment for this item
@@ -3385,6 +3566,68 @@ function isEquipmentT5(equipmentName) {
   return getEquipmentStatus(equipmentName).isT5;
 }
 
+function resolveCanonicalCreatureName(creatureNameRaw) {
+  const creatureName = String(creatureNameRaw || '').trim();
+  if (!creatureName) return '';
+  const normalizedCreatureName = creatureName.toLowerCase();
+  return getCyclopediaAllCreatures().find((c) => c.toLowerCase() === normalizedCreatureName)
+    || GAME_DATA.UNOBTAINABLE_CREATURES.find((c) => c.toLowerCase() === normalizedCreatureName)
+    || creatureName;
+}
+
+function openCreatureInBestiaryTab(creatureNameRaw, {
+  setActiveTabFn,
+  clickListItemFn,
+  tabPage,
+  timerLabel = 'cyclopediaCreatureSelect'
+} = {}) {
+  const canonicalCreatureName = resolveCanonicalCreatureName(creatureNameRaw);
+  if (!canonicalCreatureName) return;
+  if (typeof setActiveTabFn === 'function') setActiveTabFn(1);
+  const clickBestiaryTimeout = setTimeout(() => {
+    if (typeof clickListItemFn === 'function' && tabPage) {
+      clickListItemFn(tabPage, canonicalCreatureName);
+    }
+  }, 0);
+  TimerManager.addTimeout(clickBestiaryTimeout, timerLabel);
+}
+
+function getCreatureDisplayStatus(creatureName) {
+  const db = window.creatureDatabase;
+  if (typeof db?.creatureHasShinyVariant === 'function' && !db.creatureHasShinyVariant(creatureName)) {
+    return { ...getCreatureStatus(creatureName), shiny: false };
+  }
+  return getCreatureStatus(creatureName);
+}
+
+function resolveCreatureListItemColors(status, { isUnobtainable = false, isT5 = false } = {}) {
+  if (isUnobtainable) {
+    return { color: COLOR_CONSTANTS.TEXT, filter: 'none' };
+  }
+  if (status.shinyTier) {
+    return { color: COLOR_CONSTANTS.MAX_AWAKENED, filter: 'none' };
+  }
+  if (status.hundoTier) {
+    return { color: COLOR_CONSTANTS.HUNDO, filter: 'none' };
+  }
+  if (status.awakened) {
+    return { color: COLOR_CONSTANTS.AWAKENED, filter: 'none' };
+  }
+  if (status.perfect || isT5) {
+    return { color: COLOR_CONSTANTS.PERFECT, filter: 'none' };
+  }
+  if (!status.owned) {
+    return { color: COLOR_CONSTANTS.UNOWNED, filter: 'grayscale(0.7)' };
+  }
+  return { color: COLOR_CONSTANTS.TEXT, filter: 'none' };
+}
+
+function applyCreatureListItemStyle(el, status, options = {}) {
+  const { color, filter } = resolveCreatureListItemColors(status, options);
+  el.style.color = color;
+  el.style.filter = filter;
+}
+
 // Function to get creature roles from monster data
 function getCreatureRoles(creatureName) {
   try {
@@ -3392,19 +3635,26 @@ function getCreatureRoles(creatureName) {
       return null;
     }
 
-    const displayQuery = cyclopediaResolveCreatureQuery(creatureName);
-    const lookupName = (displayQuery.baseSpecies || creatureName).toLowerCase();
+    const { gameId, lookupName } = resolveCreatureGameId(creatureName);
 
     if (typeof buildCyclopediaMonsterNameMap === 'function') {
       buildCyclopediaMonsterNameMap();
     }
 
-    const entry = cyclopediaState.monsterNameMap?.get?.(lookupName);
+    const nameMap = window.creatureDatabase?.getMonsterNameMap?.() || cyclopediaState.monsterNameMap;
+    const entry = nameMap?.get?.(lookupName);
     if (entry?.monster?.metadata?.roles) {
       return entry.monster.metadata.roles;
     }
 
-    const fromDb = window.creatureDatabase?.findMonsterByName?.(lookupName);
+    if (gameId != null) {
+      const fromDbById = window.creatureDatabase?.findMonsterByGameId?.(gameId);
+      if (fromDbById?.metadata?.roles) {
+        return fromDbById.metadata.roles;
+      }
+    }
+
+    const fromDb = window.creatureDatabase?.findMonsterByName?.(creatureName);
     if (fromDb?.metadata?.roles) {
       return fromDb.metadata.roles;
     }
@@ -3478,6 +3728,56 @@ function debounce(func, wait) {
     cyclopediaState.searchDebounceTimer = setTimeout(later, wait);
     TimerManager.addTimeout(cyclopediaState.searchDebounceTimer, 'searchDebounce');
   };
+}
+
+function createCyclopediaSearchBar(placeholder) {
+  const searchContainer = document.createElement('div');
+  searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; min-width: 0;';
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = placeholder;
+  searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1 1 0%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box;';
+
+  searchInput.addEventListener('focus', () => {
+    searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+  });
+  searchInput.addEventListener('blur', () => {
+    searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+  });
+
+  const filterBtn = document.createElement('button');
+  filterBtn.textContent = 'Name';
+  filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px; flex-shrink: 0;';
+  filterBtn.addEventListener('mouseenter', () => {
+    filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+    filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+  });
+  filterBtn.addEventListener('mouseleave', () => {
+    filterBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+    filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+  });
+
+  searchContainer.appendChild(searchInput);
+  searchContainer.appendChild(filterBtn);
+  return { searchContainer, searchInput, filterBtn };
+}
+
+function createNoResultsMessage(text) {
+  const msg = document.createElement('div');
+  msg.className = FONT_CONSTANTS.SIZES.SMALL;
+  msg.textContent = text;
+  msg.style.cssText = 'display:none; text-align:center; color:#aaa; font-style:italic; padding:6px 4px;';
+  return msg;
+}
+
+function mountNoResultsInsideList(box, noResultsEl) {
+  const listGrid = box.querySelector('div[data-nopadding="true"]');
+  if (listGrid) {
+    listGrid.appendChild(noResultsEl);
+    return;
+  }
+  box.appendChild(noResultsEl);
 }
 
 const DOMCache = {
@@ -3620,9 +3920,7 @@ function getCurrencyFromUI(currencyType) {
       if (div || img) {
         const span = el.querySelector('span');
         if (span) {
-          const value = span.textContent.replace(/,/g, '');
-          const parsedValue = parseInt(value, 10);
-          return isNaN(parsedValue) ? null : parsedValue;
+          return parseCommaSeparatedInt(span.textContent);
         }
       }
     }
@@ -3632,7 +3930,16 @@ function getCurrencyFromUI(currencyType) {
     return null; 
   } 
 }
-function getCurrencyFromGameState(currencyType) { try { const gameState = globalThis.state?.player?.getSnapshot()?.context; if (!gameState) return null; const paths = CURRENCY_GAME_STATE_PATHS[currencyType]; if (!paths) return null; for (const path of paths) { const value = path.split('?.').reduce((obj, key) => obj?.[key], gameState); if (typeof value === 'number' && !isNaN(value) && value >= 0) return value; } return null; } catch (error) { return null; } }
+function getCurrencyFromGameState(currencyType) {
+  try {
+    const gameState = globalThis.state?.player?.getSnapshot()?.context;
+    if (!gameState) return null;
+    const paths = CURRENCY_GAME_STATE_PATHS[currencyType];
+    return getFirstNumericGameStateValue(gameState, paths);
+  } catch (error) {
+    return null;
+  }
+}
 function getGoldFromUI() { return getCurrencyFromUI('gold'); }
 
 function getBeastCoinsFromUI() { return getCurrencyFromUI('beastCoins'); }
@@ -3674,8 +3981,8 @@ function getHuntingMarksFromUI() {
     const textContent = span?.textContent || huntingMarksSprite.textContent;
       const numberMatch = textContent.match(/(\d{1,3}(?:,\d{3})*)/);
       if (numberMatch) {
-      const parsedValue = parseInt(numberMatch[1].replace(/,/g, ''), 10);
-        if (!isNaN(parsedValue)) return parsedValue;
+      const parsedValue = parseCommaSeparatedInt(numberMatch[1]);
+        if (parsedValue !== null) return parsedValue;
     }
     
     return null;
@@ -4411,6 +4718,12 @@ const CreatureListManager = {
 
 const MONSTER_MAP_CONFIG = { maxSearchId: 1000, maxConsecutiveFailures: 10, fallbackMaxId: 200 };
 const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
+  const db = window.creatureDatabase;
+  if (typeof db?.getMonsterNameMap === 'function') {
+    cyclopediaState.monsterNameMap = db.getMonsterNameMap();
+    cyclopediaState.monsterNameMapBuilt = true;
+    return cyclopediaState.monsterNameMap;
+  }
   if (cyclopediaState.monsterNameMapBuilt && cyclopediaState.monsterNameMap) return cyclopediaState.monsterNameMap;
   cyclopediaState.monsterNameMap = new Map();
   const utils = globalThis.state.utils;
@@ -4572,13 +4885,13 @@ function getLevelFromExp(exp) {
 // 7. DOM/CSS Injection Helpers
 // =======================
 const CYCLOPEDIA_BUTTON_CSS = `.cyclopedia-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.cyclopedia-subnav > button.cyclopedia-btn, nav.cyclopedia-subnav > button.cyclopedia-btn:hover, nav.cyclopedia-subnav > button.cyclopedia-btn:focus { background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.cyclopedia-subnav > button.cyclopedia-btn.pressed, nav.cyclopedia-subnav > button.cyclopedia-btn:active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn.active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="home"], nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="wiki"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; font-size: 12px !important; }`;
-function injectCyclopediaButtonStyles() { if (!DOMCache.get('#cyclopedia-btn-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-btn-css'; style.textContent = CYCLOPEDIA_BUTTON_CSS; document.head.appendChild(style); } }
+function injectCyclopediaButtonStyles() { injectCyclopediaStyle('cyclopedia-btn-css', CYCLOPEDIA_BUTTON_CSS); }
 
 const CYCLOPEDIA_BOX_CSS = `.cyclopedia-box { display: flex; flex-direction: column; border: none; background: none; margin-bottom: 16px; min-height: 120px; box-sizing: border-box; } .cyclopedia-box-title { border: 6px solid transparent; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame-top.b7a55115.png') 6 6 0 6 stretch; border-bottom: none; background: #232323; color: #ffe066; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; font-size: 15px; font-weight: bold; padding: 4px 12px; text-align: left; letter-spacing: 1px; } .cyclopedia-box-content { flex: 1 1 0; overflow-y: auto; background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat; padding: 8px 12px; color: #e6d7b0; font-size: 14px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; min-height: 0; max-height: none; scrollbar-width: thin !important; scrollbar-color: #444 #222 !important; } .cyclopedia-box-content::-webkit-scrollbar { width: 12px !important; background: transparent !important; } .cyclopedia-box-content::-webkit-scrollbar-thumb { background: url('https://bestiaryarena.com/_next/static/media/scrollbar-handle-vertical.962972d4.png') repeat-y !important; border-radius: 4px !important; } .cyclopedia-box-content::-webkit-scrollbar-corner { background: transparent !important; }`;
-function injectCyclopediaBoxStyles() { if (!DOMCache.get('#cyclopedia-box-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-box-css'; style.textContent = CYCLOPEDIA_BOX_CSS; document.head.appendChild(style); } }
+function injectCyclopediaBoxStyles() { injectCyclopediaStyle('cyclopedia-box-css', CYCLOPEDIA_BOX_CSS); }
 
 const CYCLOPEDIA_SELECTED_CSS = `.cyclopedia-selected { background: rgba(255,255,255,0.18) !important; color: inherit !important; } .cyclopedia-box .equipment-portrait .absolute { background: none !important; } .cyclopedia-box .equipment-portrait[data-highlighted="true"] .absolute { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="background: radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="rgba(0, 0, 0, 0.5)"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute.bottom-0.left-0 { background: none !important; }`;
-function injectCyclopediaSelectedCss() { if (!DOMCache.get('#cyclopedia-selected-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-selected-css'; style.textContent = CYCLOPEDIA_SELECTED_CSS; document.head.appendChild(style); } }
+function injectCyclopediaSelectedCss() { injectCyclopediaStyle('cyclopedia-selected-css', CYCLOPEDIA_SELECTED_CSS); }
 
 function removeCyclopediaFromMenus() {
   // Generic DOM traversal helper
@@ -4832,40 +5145,10 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
   cancelButton.focus();
 }
 
-// Helper function to check if a map is a raid (comprehensive check like Raid_Hunter)
+// Helper function to check if a map is a raid (uses maps-database comprehensive check)
 function isMapRaid(mapId) {
-  if (!mapId) return false;
-  
-  try {
-    // Method 1: Check ROOMS data directly
-    const roomData = globalThis.state?.utils?.ROOMS?.[mapId];
-    if (roomData?.raid === true) {
-      return true;
-    }
-    
-    // Method 2: Check REGIONS data (finds all raid maps including events)
-    const regions = globalThis.state?.utils?.REGIONS;
-    if (regions && Array.isArray(regions)) {
-      for (const region of regions) {
-        if (region.rooms && Array.isArray(region.rooms)) {
-          const room = region.rooms.find(r => r.id === mapId);
-          if (room && room.raid === true) {
-            return true;
-          }
-        }
-      }
-    }
-    
-    // Method 3: Check currently active raids (fallback for edge cases)
-    const raidState = globalThis.state?.raids?.getSnapshot?.();
-    const activeRaids = raidState?.context?.list || [];
-    if (activeRaids.some(raid => raid.roomId === mapId)) {
-      return true;
-    }
-  } catch (error) {
-    console.warn('[Cyclopedia] Error checking if map is raid:', error);
-  }
-  
+  const classify = globalThis.mapsDatabase?.isMapRaidComprehensive;
+  if (typeof classify === 'function') return classify(mapId);
   return false;
 }
 
@@ -4905,55 +5188,47 @@ function createBox({
     return fallback;
   }
 
-  const getListItemBaseName = (el) => {
-    const labeledSpan = el?.querySelector?.('span[data-base-label]');
-    if (labeledSpan?.dataset?.baseLabel) return labeledSpan.dataset.baseLabel;
-    const plainSpan = el?.querySelector?.('span');
-    const raw = String((plainSpan?.textContent || el?.textContent || '')).trim();
-    return raw.replace(/^\d+%\s+/, '');
-  };
-  
-    items.forEach(name => {
+  const getListItemBaseName = getCyclopediaListItemBaseName;
+
+  const ownedRooms = (type === 'map' || type === 'region')
+    ? (globalThis.state?.player?.getSnapshot()?.context?.rooms ?? {})
+    : null;
+
+    items.forEach((name, itemIndex) => {
       // Check item status based on type
       let isOwned = true;
       let isPerfect = false;
       let isT5 = false;
-      
+
       let hasShiny = false;
       let hasAwakened = false;
       let hasShinyTier = false;
       let hasHundoTier = false;
-      
+
       if (type === 'creature') {
-        // Check if this is an unobtainable creature - if so, keep default styling
         const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === name.toLowerCase());
         if (!isUnobtainable) {
-          isOwned = isCreatureOwned(name);
-          isPerfect = isCreaturePerfect(name);
-          hasShiny = hasShinyCreature(name);
-          hasAwakened = hasAwakenedCreature(name);
-          hasShinyTier = hasShinyTierCreature(name);
-          hasHundoTier = hasHundoTierCreature(name);
+          const status = getCreatureDisplayStatus(name);
+          isOwned = status.owned;
+          isPerfect = status.perfect;
+          hasShiny = status.shiny;
+          hasAwakened = status.awakened;
+          hasShinyTier = status.shinyTier;
+          hasHundoTier = status.hundoTier;
         }
       } else if (type === 'equipment') {
-        isOwned = isEquipmentOwned(name);
-        isT5 = isEquipmentT5(name);
+        const eqStatus = getEquipmentStatus(name);
+        isOwned = eqStatus.owned;
+        isT5 = eqStatus.isT5;
       } else if (type === 'map') {
-        // Check if map is explored using game state
-        const mapIndex = items.indexOf(name);
-        const mapId = mapIds?.[mapIndex];
-        isOwned = mapId ? globalThis.state?.player?.getSnapshot()?.context?.rooms?.[mapId] !== undefined : false;
+        const mapId = mapIds?.[itemIndex];
+        isOwned = mapId ? ownedRooms[mapId] !== undefined : false;
       } else if (type === 'region') {
-        // Check if region has any explored maps
-        const regionIndex = items.indexOf(name);
-        const regionId = regionIds?.[regionIndex];
+        const regionId = regionIds?.[itemIndex];
         if (regionId && globalThis.state?.utils?.REGIONS) {
           const region = globalThis.state.utils.REGIONS.find(r => r.id === regionId);
           if (region && region.rooms) {
-            // Check if any map in this region is explored
-            isOwned = region.rooms.some(room => 
-              globalThis.state?.player?.getSnapshot()?.context?.rooms?.[room.id] !== undefined
-            );
+            isOwned = region.rooms.some(room => ownedRooms[room.id] !== undefined);
           } else {
             isOwned = false;
           }
@@ -4966,8 +5241,7 @@ function createBox({
       
       // Add raid icon for static raids, or event icon for dynamic event maps
       if (type === 'map') {
-        const mapIndex = items.indexOf(name);
-        const mapId = mapIds?.[mapIndex];
+        const mapId = mapIds?.[itemIndex];
         if (mapId && isMapRaid(mapId)) {
           // Find the contentContainer (first child div created by createListItem)
           const contentContainer = item.firstElementChild;
@@ -5016,30 +5290,7 @@ function createBox({
             if (type === 'creature') {
               const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === itemName.toLowerCase());
               if (!isUnobtainable) {
-                const hasShinyTier = hasShinyTierCreature(itemName);
-                const hasHundoTier = hasHundoTierCreature(itemName);
-                const hasAwakened = hasAwakenedCreature(itemName);
-                const isPerfect = isCreaturePerfect(itemName);
-                const isOwned = isCreatureOwned(itemName);
-                if (hasShinyTier) {
-                  el.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
-                  el.style.filter = 'none';
-                } else if (hasHundoTier) {
-                  el.style.color = COLOR_CONSTANTS.HUNDO;
-                  el.style.filter = 'none';
-                } else if (hasAwakened) {
-                  el.style.color = COLOR_CONSTANTS.AWAKENED;
-                  el.style.filter = 'none';
-                } else if (isPerfect) {
-                  el.style.color = COLOR_CONSTANTS.PERFECT;
-                  el.style.filter = 'none';
-                } else if (!isOwned) {
-                  el.style.color = COLOR_CONSTANTS.UNOWNED;
-                  el.style.filter = 'grayscale(0.7)';
-                } else {
-                  el.style.color = COLOR_CONSTANTS.TEXT;
-                  el.style.filter = 'none';
-                }
+                applyCreatureListItemStyle(el, getCreatureDisplayStatus(itemName), { isUnobtainable });
               } else {
                 el.style.color = COLOR_CONSTANTS.TEXT;
                 el.style.filter = 'none';
@@ -5554,27 +5805,14 @@ let cyclopediaPendingHomeSearchFocus = false;
 
 function createStartPageManager() {
   const HTML_TEMPLATES = {
-    loading: () => `
-      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT};">
-        <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
-        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${cyclopediaT('mods.cyclopedia.startpage.loadingTitle')}</div>
-        <div style="font-size: 14px; color: #888;">${cyclopediaT('mods.cyclopedia.startpage.loadingSubtitle')}</div>
-      </div>
-    `,
-    error: (message) => `
-      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
-        <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${cyclopediaT('mods.cyclopedia.startpage.errorTitle')}</div>
-        <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${message}</div>
-        <button id="retry-profile-load" style="padding: 8px 16px; background: #444; border: 1px solid #666; border-radius: 4px; color: white; cursor: pointer; font-family: ${FONT_CONSTANTS.PRIMARY};">${cyclopediaT('mods.cyclopedia.startpage.retry')}</button>
-      </div>
-    `
+    loading: () => renderCyclopediaProfileLoadingHtml(),
+    error: (message) => renderCyclopediaProfileErrorHtml(message, { showRetry: true })
   };
 
   const ERROR_MESSAGES = {
-    'AbortError': cyclopediaT('mods.cyclopedia.startpage.errorAbort'),
-    'Player name not available': cyclopediaT('mods.cyclopedia.startpage.errorPlayerName'),
-    'HTTP': cyclopediaT('mods.cyclopedia.startpage.errorHttp')
+    'AbortError': CYCLOPEDIA_UI.errorAbort,
+    'Player name not available': CYCLOPEDIA_UI.errorPlayerName,
+    'HTTP': CYCLOPEDIA_UI.errorHttp
   };
 
   class StartPageManager {
@@ -5645,7 +5883,7 @@ function createStartPageManager() {
       for (const [key, message] of Object.entries(ERROR_MESSAGES)) {
         if (error.name === key || error.message.includes(key)) return message;
       }
-      return cyclopediaT('mods.cyclopedia.startpage.errorUnexpected');
+      return CYCLOPEDIA_UI.errorUnexpected;
     }
 
     showError(message, retryFunction) {
@@ -5852,6 +6090,10 @@ function openCyclopediaModal(options) {
       tabPages.forEach((page, i) => {
         if (page) {
           page.style.display = i === 0 ? 'flex' : 'none';
+          page.style.width = '100%';
+          page.style.height = '100%';
+          page.style.minWidth = '0';
+          page.style.boxSizing = 'border-box';
           try {
             mainContent.appendChild(page);
           } catch (error) {
@@ -5897,18 +6139,19 @@ function openCyclopediaModal(options) {
       // Common layout styles
       const LAYOUT_STYLES = {
         container: {
-        display: 'flex', flexDirection: 'row', width: '100%', height: '100%',
-        alignItems: 'flex-start', justifyContent: 'center', gap: '0'
+        display: 'flex', flexDirection: 'row', width: '100%', height: '100%', minWidth: '0',
+        alignItems: 'stretch', justifyContent: 'flex-start', gap: '0', overflow: 'hidden'
         },
         rightCol: {
-          flex: '1', padding: '0', margin: '0', height: '100%', borderImage: 'none'
+          flex: '1 1 0', minWidth: '0', padding: '0', margin: '0', height: '100%',
+          borderImage: 'none', overflow: 'hidden'
         },
         leftCol: {
           width: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, minWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH,
-          maxWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, padding: '0', margin: '0', height: '100%',
+          maxWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, flex: '0 0 auto', padding: '0', margin: '0', height: '100%',
           display: 'flex', flexDirection: 'column', borderRight: '6px solid transparent',
           borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`,
-          overflowY: 'hidden', minHeight: '0'
+          boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'hidden', minHeight: '0'
         },
         box: {
           flex: '1 1 0', minHeight: '0'
@@ -5937,57 +6180,7 @@ function openCyclopediaModal(options) {
       
       const leftCol = DOMUtils.createElement('div');
       Object.assign(leftCol.style, LAYOUT_STYLES.leftCol);
-      function createCyclopediaSearchBar(placeholder) {
-        const searchContainer = document.createElement('div');
-        searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; min-width: 0;';
 
-        const searchInput = document.createElement('input');
-        searchInput.type = 'text';
-        searchInput.placeholder = placeholder;
-        searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1 1 0%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box;';
-
-        searchInput.addEventListener('focus', () => {
-          searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-        });
-
-        searchInput.addEventListener('blur', () => {
-          searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-        });
-
-        const filterBtn = document.createElement('button');
-        filterBtn.textContent = 'Name';
-        filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px; flex-shrink: 0;';
-        filterBtn.addEventListener('mouseenter', () => {
-          filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
-          filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-        });
-        filterBtn.addEventListener('mouseleave', () => {
-          filterBtn.style.background = 'rgba(255, 255, 255, 0.1)';
-          filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-        });
-
-        searchContainer.appendChild(searchInput);
-        searchContainer.appendChild(filterBtn);
-        return { searchContainer, searchInput, filterBtn };
-      }
-
-      function createNoResultsMessage(text) {
-        const msg = document.createElement('div');
-        msg.className = FONT_CONSTANTS.SIZES.SMALL;
-        msg.textContent = text;
-        msg.style.cssText = 'display:none; text-align:center; color:#aaa; font-style:italic; padding:6px 4px;';
-        return msg;
-      }
-
-      function mountNoResultsInsideList(box, noResultsEl) {
-        const listGrid = box.querySelector('div[data-nopadding="true"]');
-        if (listGrid) {
-          listGrid.appendChild(noResultsEl);
-          return;
-        }
-        box.appendChild(noResultsEl);
-      }
-      
       // Create boxes with common configuration
       const createCreatureBox = (title, items) => {
         const box = createBox({
@@ -6014,40 +6207,12 @@ function openCyclopediaModal(options) {
               gap: 1px;
             `;
             
-            // Create first title: "Creatures" (80% width)
-            const creaturesTitle = document.createElement('h2');
-            creaturesTitle.className = 'widget-top widget-top-text pixel-font-16';
-            creaturesTitle.style.cssText = `
-              margin: 0px;
-              padding: 2px 8px;
-              text-align: center;
-              color: rgb(255, 255, 255);
-              width: 83%;
-              flex: 0 0 83%;
-            `;
-            creaturesTitle.textContent = 'Creatures';
+            const creaturesTitle = createCyclopediaWidgetTitle('Creatures', CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE);
             titleContainer.appendChild(creaturesTitle);
-            
-            // Create the toggle button as a second title (same styling as "Creatures")
+
             const toggleButton = document.createElement('button');
-            toggleButton.className = 'widget-top widget-top-text pixel-font-16';
+            applyCyclopediaWidgetTitleChrome(toggleButton, CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE);
             toggleButton.title = showShinyPortraits ? 'Shiny Mode' : 'Normal Mode';
-            toggleButton.style.cssText = `
-              margin: 0px;
-              padding: 2px 8px;
-              text-align: center;
-              color: rgb(255, 255, 255);
-              cursor: pointer;
-              width: 15%;
-              flex: 0 0 15%;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              min-height: 16px;
-              height: 100%;
-              align-self: stretch;
-              outline: none;
-            `;
             
             const buttonImg = document.createElement('img');
             buttonImg.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
@@ -6141,48 +6306,18 @@ function openCyclopediaModal(options) {
       unobtainableBox.style.flex = '2 1 0';   // 2/5 = 40%
 
       // Shared selection clearing
-      const getBestiaryListItemBaseName = (el) => {
-        const labeledSpan = el?.querySelector?.('span[data-base-label]');
-        if (labeledSpan?.dataset?.baseLabel) return labeledSpan.dataset.baseLabel;
-        const plainSpan = el?.querySelector?.('span');
-        const raw = String((plainSpan?.textContent || el?.textContent || '')).trim();
-        return raw.replace(/^\d+%\s+/, '');
-      };
+      const getBestiaryListItemBaseName = getCyclopediaListItemBaseName;
 
       const clearAllBestiarySelections = () => {
         [creaturesBox, unobtainableBox].forEach(box => {
           box.querySelectorAll('.cyclopedia-selected').forEach(el => {
             el.classList.remove('cyclopedia-selected');
             el.style.background = 'none';
-            // Check creature status and restore appropriate styling
             const creatureName = getBestiaryListItemBaseName(el);
             if (box === creaturesBox) {
               const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
               if (!isUnobtainable) {
-                const hasShinyTier = hasShinyTierCreature(creatureName);
-                const hasHundoTier = hasHundoTierCreature(creatureName);
-                const hasAwakened = hasAwakenedCreature(creatureName);
-                const isPerfect = isCreaturePerfect(creatureName);
-                const isOwned = isCreatureOwned(creatureName);
-                if (hasShinyTier) {
-                  el.style.color = COLOR_CONSTANTS.MAX_AWAKENED;
-                  el.style.filter = 'none';
-                } else if (hasHundoTier) {
-                  el.style.color = COLOR_CONSTANTS.HUNDO;
-                  el.style.filter = 'none';
-                } else if (hasAwakened) {
-                  el.style.color = COLOR_CONSTANTS.AWAKENED;
-                  el.style.filter = 'none';
-                } else if (isPerfect) {
-                  el.style.color = COLOR_CONSTANTS.PERFECT;
-                  el.style.filter = 'none';
-                } else if (!isOwned) {
-                  el.style.color = COLOR_CONSTANTS.UNOWNED;
-                  el.style.filter = 'grayscale(0.7)';
-                } else {
-                  el.style.color = COLOR_CONSTANTS.TEXT;
-                  el.style.filter = 'none';
-                }
+                applyCreatureListItemStyle(el, getCreatureDisplayStatus(creatureName));
               } else {
                 el.style.color = COLOR_CONSTANTS.TEXT;
                 el.style.filter = 'none';
@@ -6198,11 +6333,10 @@ function openCyclopediaModal(options) {
       creaturesBox.clearAllSelections = clearAllBestiarySelections;
       unobtainableBox.clearAllSelections = clearAllBestiarySelections;
 
-      function filterBoxItems(box, searchTerm, mode = 'name') {
-        const q = (searchTerm || '').toLowerCase();
+      function buildBestiaryRowMeta(box) {
         const rows = Array.from(box.querySelectorAll('div.pixel-font-16'))
           .filter((el) => !!el.querySelector('span'));
-        const rowMeta = rows.map((row, idx) => {
+        return rows.map((row, idx) => {
           if (!row.dataset.originalOrder) {
             row.dataset.originalOrder = String(idx);
           }
@@ -6225,6 +6359,14 @@ function openCyclopediaModal(options) {
             awakenKey
           };
         });
+      }
+
+      let creaturesRowMetaCache = null;
+      let unobtainableRowMetaCache = null;
+
+      function filterBoxItems(box, searchTerm, mode = 'name', cachedRowMeta = null) {
+        const q = (searchTerm || '').toLowerCase();
+        const rowMeta = cachedRowMeta || buildBestiaryRowMeta(box);
 
         const listGrid = box.querySelector('div[data-nopadding="true"]');
         if (mode === 'usage' && listGrid) {
@@ -6300,15 +6442,16 @@ function openCyclopediaModal(options) {
       mountNoResultsInsideList(creaturesBox, noResultsCreatures);
       mountNoResultsInsideList(unobtainableBox, noResultsUnobtainable);
 
-      const applyBestiarySearch = () => {
+      const applyBestiarySearch = debounce(() => {
         const searchTerm = (bestiarySearchInput.value || '').trim();
-        const creaturesVisible = filterBoxItems(creaturesBox, searchTerm, bestiaryFilterMode);
-        // Unobtainable creatures do not have setup usage data; keep name-mode behavior only.
-        const unobtainableVisible = filterBoxItems(unobtainableBox, searchTerm, 'name');
+        if (!creaturesRowMetaCache) creaturesRowMetaCache = buildBestiaryRowMeta(creaturesBox);
+        if (!unobtainableRowMetaCache) unobtainableRowMetaCache = buildBestiaryRowMeta(unobtainableBox);
+        const creaturesVisible = filterBoxItems(creaturesBox, searchTerm, bestiaryFilterMode, creaturesRowMetaCache);
+        const unobtainableVisible = filterBoxItems(unobtainableBox, searchTerm, 'name', unobtainableRowMetaCache);
         const showNoResults = !!searchTerm;
         noResultsCreatures.style.display = showNoResults && creaturesVisible === 0 ? 'block' : 'none';
         noResultsUnobtainable.style.display = showNoResults && unobtainableVisible === 0 ? 'block' : 'none';
-      };
+      }, 150);
       bestiarySearchInput.addEventListener('input', applyBestiarySearch);
       bestiaryFilterBtn.addEventListener('click', () => {
         bestiaryFilterMode = bestiaryFilterMode === 'name' ? 'tier' : bestiaryFilterMode === 'tier' ? 'usage' : 'name';
@@ -6350,28 +6493,12 @@ function openCyclopediaModal(options) {
           borderRight: '6px solid transparent',
           borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`
         },
-        title: {
-        margin: '0', padding: '2px 8px', textAlign: 'center', color: 'rgb(255, 255, 255)',
-        width: '100%', boxSizing: 'border-box', marginBottom: '10px'
-        },
-        titleText: {
-        margin: '0', padding: '0', textAlign: 'center', color: 'rgb(255, 255, 255)',
-        width: '100%', boxSizing: 'border-box'
-        }
       };
 
       const createTitleElement = (titleText, updateFunction) => {
-        const title = document.createElement('h2');
-        title.className = 'widget-top widget-top-text pixel-font-16';
-        Object.assign(title.style, EQUIPMENT_STYLES.title);
-
-        const titleP = document.createElement('p');
-        titleP.className = 'pixel-font-16';
-        Object.assign(titleP.style, EQUIPMENT_STYLES.titleText);
-
-        if (updateFunction) updateFunction(titleP);
-        title.appendChild(titleP);
-        return { title, titleP };
+        const title = createCyclopediaWidgetTitle(titleText, { width: '100%', marginBottom: '10px' });
+        if (updateFunction) updateFunction(title);
+        return { title, titleP: title };
       };
 
       const d = document.createElement('div');
@@ -6534,7 +6661,7 @@ function openCyclopediaModal(options) {
           regions.forEach(region => {
             if (!region.rooms) return;
             
-            const regionName = region.id ? (GAME_DATA.REGION_NAME_MAP[region.id.toLowerCase()] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+            const regionName = cyclopediaGetRegionDisplayName(region.id);
             let regionHasMaps = false;
             
             region.rooms.forEach(room => {
@@ -6767,7 +6894,7 @@ function openCyclopediaModal(options) {
 
             const usage = getBoardConfigUsageStatsForEquipment(equipId);
             const usageTitle = document.createElement('div');
-            usageTitle.className = 'pixel-font-14';
+            usageTitle.className = FONT_CONSTANTS.SIZES.SMALL;
             usageTitle.style.cssText = 'font-weight:700; margin-bottom:4px; color:#ffe066; letter-spacing:0.02em;';
             usageTitle.textContent = 'Player usage';
             usageWrap.appendChild(usageTitle);
@@ -6837,7 +6964,7 @@ function openCyclopediaModal(options) {
             mapsColumn.style.cssText =
               'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden;';
             const mapsColTitle = document.createElement('div');
-            mapsColTitle.className = 'pixel-font-14';
+            mapsColTitle.className = FONT_CONSTANTS.SIZES.SMALL;
             mapsColTitle.textContent = 'Maps';
             mapsColTitle.style.cssText =
               'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 4px 4px 6px; border-bottom: 1px solid #555; box-sizing: border-box;';
@@ -6851,22 +6978,12 @@ function openCyclopediaModal(options) {
             const creatureUsageData = getCreatureUsageForEquipment(equipId);
 
             function openCreatureInBestiary(creatureNameRaw) {
-              const creatureName = String(creatureNameRaw || '').trim();
-              if (!creatureName) return;
-              const normalizedCreatureName = creatureName.toLowerCase();
-              const canonicalCreatureName =
-                getCyclopediaAllCreatures().find((c) => c.toLowerCase() === normalizedCreatureName) ||
-                GAME_DATA.UNOBTAINABLE_CREATURES.find((c) => c.toLowerCase() === normalizedCreatureName) ||
-                creatureName;
-              if (typeof setActiveTab === 'function') {
-                setActiveTab(1);
-              }
-              const clickBestiaryTimeout = setTimeout(() => {
-                if (typeof _cyclopediaClickListItem === 'function' && typeof tabPages !== 'undefined' && tabPages[1]) {
-                  _cyclopediaClickListItem(tabPages[1], canonicalCreatureName);
-                }
-              }, 0);
-              TimerManager.addTimeout(clickBestiaryTimeout, 'equipmentMapCreatureSelect');
+              openCreatureInBestiaryTab(creatureNameRaw, {
+                setActiveTabFn: setActiveTab,
+                clickListItemFn: typeof _cyclopediaClickListItem === 'function' ? _cyclopediaClickListItem : null,
+                tabPage: typeof tabPages !== 'undefined' ? tabPages[1] : null,
+                timerLabel: 'equipmentMapCreatureSelect'
+              });
             }
 
             function appendStyledMapRow(parentEl, mapName, creaturesLabel) {
@@ -6877,10 +6994,10 @@ function openCyclopediaModal(options) {
                     letter-spacing: 0.0625rem; word-spacing: -0.1875rem;
                     color: rgb(255, 255, 255);
                   `;
-              usageDiv.className = 'pixel-font-16';
+              usageDiv.className = FONT_CONSTANTS.SIZES.BODY;
 
               const mapNameDiv = document.createElement('div');
-              mapNameDiv.className = 'pixel-font-14';
+              mapNameDiv.className = FONT_CONSTANTS.SIZES.SMALL;
               mapNameDiv.style.cssText = `
                     font-weight: bold; line-height: 1; letter-spacing: 0.0625rem;
                     word-spacing: -0.1875rem; margin: 0px; padding: 2px 6px;
@@ -6905,7 +7022,7 @@ function openCyclopediaModal(options) {
 
               if (creaturesLabel) {
                 const creatureInfoDiv = document.createElement('div');
-                creatureInfoDiv.className = 'pixel-font-14';
+                creatureInfoDiv.className = FONT_CONSTANTS.SIZES.SMALL;
                 creatureInfoDiv.style.cssText = `
                     color: rgb(170, 170, 170); line-height: 1;
                     letter-spacing: 0.0625rem; word-spacing: -0.1875rem;
@@ -6952,7 +7069,7 @@ function openCyclopediaModal(options) {
 
             function appendRegionHeader(parentEl, regionName) {
               const regionHeader = document.createElement('div');
-              regionHeader.className = 'pixel-font-16';
+              regionHeader.className = FONT_CONSTANTS.SIZES.BODY;
               regionHeader.style.cssText = `
                   font-weight: 700; color: var(--theme-text, #e6d7b0);
                   background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
@@ -6973,10 +7090,7 @@ function openCyclopediaModal(options) {
               let idx = 0;
               regions.forEach((region) => {
                 if (!region?.rooms || !Array.isArray(region.rooms)) return;
-                const regionName = region.id
-                  ? (GAME_DATA.REGION_NAME_MAP[region.id.toLowerCase()] ||
-                    region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()))
-                  : 'Unknown Region';
+                const regionName = cyclopediaGetRegionDisplayName(region.id);
                 if (!indexByRegion.has(regionName)) {
                   indexByRegion.set(regionName, idx++);
                 }
@@ -7025,7 +7139,7 @@ function openCyclopediaModal(options) {
             boostedColumn.style.cssText =
               'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden; border-left: 1px solid #444; padding-left: 8px; box-sizing: border-box;';
             const boostedColTitle = document.createElement('div');
-            boostedColTitle.className = 'pixel-font-14';
+            boostedColTitle.className = FONT_CONSTANTS.SIZES.SMALL;
             boostedColTitle.textContent = 'Boosted Maps';
             boostedColTitle.style.cssText =
               'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 4px 4px 6px; border-bottom: 1px solid #555; box-sizing: border-box;';
@@ -7300,58 +7414,7 @@ function openCyclopediaModal(options) {
         overflowY: 'hidden', minHeight: '0'
       });
 
-      const createEquipmentSearchBar = () => {
-        const searchContainer = document.createElement('div');
-        searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; min-width: 0;';
-
-        const searchInput = document.createElement('input');
-        searchInput.type = 'text';
-        searchInput.placeholder = 'Search equipment...';
-        searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1 1 0%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box;';
-
-        searchInput.addEventListener('focus', () => {
-          searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-        });
-
-        searchInput.addEventListener('blur', () => {
-          searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-        });
-
-        const filterBtn = document.createElement('button');
-        filterBtn.textContent = 'Name';
-        filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 56px; flex-shrink: 0;';
-        filterBtn.addEventListener('mouseenter', () => {
-          filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
-          filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-        });
-        filterBtn.addEventListener('mouseleave', () => {
-          filterBtn.style.background = 'rgba(255, 255, 255, 0.1)';
-          filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-        });
-
-        searchContainer.appendChild(searchInput);
-        searchContainer.appendChild(filterBtn);
-        return { searchContainer, searchInput, filterBtn };
-      };
-
-      const createNoResultsMessage = (text) => {
-        const msg = document.createElement('div');
-        msg.className = FONT_CONSTANTS.SIZES.SMALL;
-        msg.textContent = text;
-        msg.style.cssText = 'display:none; text-align:center; color:#aaa; font-style:italic; padding:6px 4px;';
-        return msg;
-      };
-
-      const mountNoResultsInsideList = (box, noResultsEl) => {
-        const listGrid = box.querySelector('div[data-nopadding="true"]');
-        if (listGrid) {
-          listGrid.appendChild(noResultsEl);
-          return;
-        }
-        box.appendChild(noResultsEl);
-      };
-
-      const { searchContainer: equipmentSearchContainer, searchInput: equipmentSearchInput, filterBtn: equipmentFilterBtn } = createEquipmentSearchBar();
+      const { searchContainer: equipmentSearchContainer, searchInput: equipmentSearchInput, filterBtn: equipmentFilterBtn } = createCyclopediaSearchBar('Search equipment...');
       let equipmentFilterMode = 'name';
 
       const getEquipmentUsageSnapshot = () => {
@@ -7414,12 +7477,12 @@ function openCyclopediaModal(options) {
         equipmentBox.prepend(equipmentSearchContainer);
       }
 
-      function filterEquipmentBoxItems(searchTerm, mode = 'name') {
-        const q = (searchTerm || '').toLowerCase();
-        const usageSnapshot = getEquipmentUsageSnapshot();
-        const rows = Array.from(equipmentBox.querySelectorAll('div.pixel-font-16'))
+      const equipmentUsageSnapshot = getEquipmentUsageSnapshot();
+
+      function buildEquipmentRowMeta(box, usageSnapshot) {
+        const rows = Array.from(box.querySelectorAll('div.pixel-font-16'))
           .filter((el) => !!el.querySelector('span'));
-        const rowMeta = rows.map((row, idx) => {
+        return rows.map((row, idx) => {
           if (!row.dataset.originalOrder) {
             row.dataset.originalOrder = String(idx);
           }
@@ -7437,6 +7500,16 @@ function openCyclopediaModal(options) {
             usageCount: getEquipmentUsageCountByName(label, usageSnapshot)
           };
         });
+      }
+
+      let equipmentRowMetaCache = null;
+
+      function filterEquipmentBoxItems(searchTerm, mode = 'name') {
+        const q = (searchTerm || '').toLowerCase();
+        if (!equipmentRowMetaCache) {
+          equipmentRowMetaCache = buildEquipmentRowMeta(equipmentBox, equipmentUsageSnapshot);
+        }
+        const rowMeta = equipmentRowMetaCache;
 
         const listGrid = equipmentBox.querySelector('div[data-nopadding="true"]');
         if (mode === 'usage' && listGrid) {
@@ -7457,7 +7530,7 @@ function openCyclopediaModal(options) {
         let visibleCount = 0;
         rowMeta.forEach((meta) => {
           if (meta.span) {
-            const pct = usageSnapshot.total > 0 ? Math.floor((meta.usageCount / usageSnapshot.total) * 100) : 0;
+            const pct = equipmentUsageSnapshot.total > 0 ? Math.floor((meta.usageCount / equipmentUsageSnapshot.total) * 100) : 0;
             meta.span.textContent = mode === 'usage' ? `${pct}% ${meta.label}` : meta.label;
           }
           const nameMatch = !q || meta.labelNorm.includes(q);
@@ -7472,11 +7545,11 @@ function openCyclopediaModal(options) {
       const noResultsEquipment = createNoResultsMessage('No results in Equipment');
       mountNoResultsInsideList(equipmentBox, noResultsEquipment);
 
-      const applyEquipmentSearch = () => {
+      const applyEquipmentSearch = debounce(() => {
         const searchTerm = (equipmentSearchInput.value || '').trim();
         const visibleCount = filterEquipmentBoxItems(searchTerm, equipmentFilterMode);
         noResultsEquipment.style.display = searchTerm && visibleCount === 0 ? 'block' : 'none';
-      };
+      }, 150);
       equipmentSearchInput.addEventListener('input', applyEquipmentSearch);
       equipmentFilterBtn.addEventListener('click', () => {
         equipmentFilterMode = equipmentFilterMode === 'name' ? 'usage' : 'name';
@@ -7557,11 +7630,11 @@ function openCyclopediaModal(options) {
       const playerSearchBox = createPlayerSearchBox(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory);
 
       function showLoadingState(col2) {
-        col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;"><div style="font-size: 24px; margin-bottom: 16px;">📚</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading...</div><div style="font-size: 14px; color: #888;">Fetching profile data</div></div>`;
+        col2.innerHTML = renderCyclopediaProfileLoadingHtml();
       }
 
       function showErrorState(col2, message) {
-        col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Profile Data</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">${message}</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
+        col2.innerHTML = renderCyclopediaProfileErrorHtml(message, { showConnectionHint: true });
       }
 
       function createUserStatsContainer(profileData) {
@@ -7607,6 +7680,10 @@ function openCyclopediaModal(options) {
 
           const requestId = createRequest();
           showLoadingState(col2);
+
+          if (selectedCategory !== 'Rankings') {
+            cyclopediaState.refreshRankingsTable = null;
+          }
 
           // Handle special categories
           if (selectedCategory === 'Speedrun' || selectedCategory === 'Rank Points') {
@@ -8011,7 +8088,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const currentPlayerRank = rankings.find(r => r.name.toLowerCase() === playerState.name.toLowerCase());
 
           const tableContainer = document.createElement('div');
-          tableContainer.className = 'pixel-font-14';
+          tableContainer.className = FONT_CONSTANTS.SIZES.SMALL;
           tableContainer.style.cssText = `
             background: rgba(34, 34, 34, 0.9);
             border: 6px solid transparent;
@@ -8063,7 +8140,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           headerData.forEach((item, index) => {
             const headerCell = document.createElement('div');
-            headerCell.className = 'pixel-font-14';
+            headerCell.className = FONT_CONSTANTS.SIZES.SMALL;
             headerCell.style.cssText = `
               padding: 8px 4px;
               color: ${COLOR_CONSTANTS.PRIMARY};
@@ -8251,7 +8328,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
             cellData.forEach((text, cellIndex) => {
               const cell = document.createElement('div');
-              cell.className = 'pixel-font-14';
+              cell.className = FONT_CONSTANTS.SIZES.SMALL;
               cell.style.cssText = `
                 padding: 6px 4px;
                 background: ${rowBackground};
@@ -8312,6 +8389,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           renderRankingsTable();
           updateHeaderHighlighting();
+
+          cyclopediaState.refreshRankingsTable = () => {
+            renderRankingsTable();
+            updateHeaderHighlighting();
+          };
           
           scrollableContainer.appendChild(dataRowsContainer);
           tableContainer.appendChild(scrollableContainer);
@@ -8426,15 +8508,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       }
 
       function displayUserSpeedrunOrRankData(category, playerName, rooms, ROOM_NAMES, best, roomsHighscores, container, isTemplate = false) {
-        function formatTime(ms) {
-          if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
-          const totalSeconds = Math.floor(ms / 1000);
-          const minutes = Math.floor(totalSeconds / 60);
-          const seconds = totalSeconds % 60;
-          const milliseconds = Math.floor((ms % 1000) / 10);
-          return `${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}.${milliseconds.toString().padStart(3,'0')}`;
-        }
-        
+        const formatTime = formatCyclopediaMilliseconds;
         const containerDiv = document.createElement('div');
         Object.assign(containerDiv.style, {
           display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
@@ -8957,17 +9031,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
       function getRealRegionName(region) {
         if (!region) return 'Unknown Region';
-        
-        if (region.name) {
-          return region.name;
+        if (typeof mapsDbRef.getRegionDisplayNameFromRegion === 'function') {
+          return mapsDbRef.getRegionDisplayNameFromRegion(region);
         }
-        
-        const regionId = region.id ? region.id.toLowerCase() : '';
-        if (GAME_DATA.REGION_NAME_MAP[regionId]) {
-          return GAME_DATA.REGION_NAME_MAP[regionId];
-        }
-        
-        return region.id ? (GAME_DATA.REGION_NAME_MAP[region.id.toLowerCase()] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+        if (region.name) return region.name;
+        return cyclopediaGetRegionDisplayName(region.id);
       }
 
       // Helper function to create allRooms object from ROOM_NAMES
@@ -9039,14 +9107,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       }
 
       function displayUserCombinedLeaderboardsData(playerName, rooms, ROOM_NAMES, best, roomsHighscores, container) {
-        function formatTime(ms) {
-          if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
-          const totalSeconds = Math.floor(ms / 1000);
-          const minutes = Math.floor(totalSeconds / 60);
-          const seconds = totalSeconds % 60;
-          const milliseconds = Math.floor((ms % 1000) / 10);
-          return `${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}.${milliseconds.toString().padStart(3,'0')}`;
-        }
+        const formatTime = formatCyclopediaMilliseconds;
 
         const containerDiv = document.createElement('div');
         Object.assign(containerDiv.style, {
@@ -9558,14 +9619,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             }
           });
         }
-        function formatTime(ms) {
-          if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
-          const totalSeconds = Math.floor(ms / 1000);
-          const minutes = Math.floor(totalSeconds / 60);
-          const seconds = totalSeconds % 60;
-          const milliseconds = Math.floor((ms % 1000) / 10);
-          return `${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}.${milliseconds.toString().padStart(3,'0')}`;
-        }
+        const formatTime = formatCyclopediaMilliseconds;
 
         const containerDiv = document.createElement('div');
         Object.assign(containerDiv.style, {
@@ -10131,9 +10185,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Refresh the current tab to show default content
                 if (window.selectedCharacterItem === 'Rankings') {
-                  displayUserStats('Rankings').catch(error => {
-                    console.error('[Cyclopedia] Error refreshing rankings after reset:', error);
-                  });
+                  if (!refreshRankingsTableIfReady()) {
+                    displayUserStats('Rankings').catch(error => {
+                      console.error('[Cyclopedia] Error refreshing rankings after reset:', error);
+                    });
+                  }
                 } else if (window.selectedCharacterItem === 'Leaderboards') {
                   // Refresh leaderboards to show default search functionality
                   const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
@@ -10162,10 +10218,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 // Store the new search term before clearing the old one
                 const newSearchTerm = searchTerm;
                 cyclopediaState.searchedUsername = null;
-                // Refresh rankings to clear the previous blue background
-                displayUserStats('Rankings').catch(error => {
-                  console.error('[Cyclopedia] Error clearing previous search from rankings:', error);
-                });
+                if (!refreshRankingsTableIfReady()) {
+                  displayUserStats('Rankings').catch(error => {
+                    console.error('[Cyclopedia] Error clearing previous search from rankings:', error);
+                  });
+                }
                 // Restore the new search term after clearing
                 cyclopediaState.searchedUsername = newSearchTerm;
               }
@@ -10183,10 +10240,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               
               // If we're currently in the Rankings tab, refresh the rankings display immediately
               if (window.selectedCharacterItem === 'Rankings') {
-                // Refresh the rankings display to show the searched player with blue background
-                displayUserStats('Rankings').catch(error => {
-                  console.error('[Cyclopedia] Error refreshing rankings after search:', error);
-                });
+                if (!refreshRankingsTableIfReady()) {
+                  displayUserStats('Rankings').catch(error => {
+                    console.error('[Cyclopedia] Error refreshing rankings after search:', error);
+                  });
+                }
               }
               
               // Show loading state only in col3 (col2 keeps user's stats)
@@ -10967,7 +11025,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const numPart = countText.replace(',', '.').replace('m', '');
           return parseFloat(numPart) * 1000000;
         } else if (countText.includes(',')) {
-          return parseInt(countText.replace(/,/g, ''));
+          return parseCommaSeparatedInt(countText) ?? 0;
         }
         return parseInt(countText) || 0;
       };
@@ -12180,7 +12238,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     }
                     
                     if (foundRegion) {
-                      regionName = GAME_DATA.REGION_NAME_MAP[foundRegion.id] || foundRegion.id;
+                      regionName = cyclopediaGetRegionDisplayName(foundRegion.id);
                       
                     } else {
                       // Fallback: try to get region from current game state (this is the problematic part)
@@ -12191,7 +12249,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
                         // Capitalize region name
-                        regionName = GAME_DATA.REGION_NAME_MAP[regionName.toLowerCase()] || regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+                        regionName = cyclopediaGetRegionDisplayName(regionName);
                         
                       }
                     }
@@ -12203,79 +12261,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 replayData.region = regionName;
                 replayData.map = mapName;
                 
-                // Always add floor (default to 0 if not available)
-                replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
-                const replayTimestamp = Number(run?.timestamp);
-                if (Number.isFinite(replayTimestamp) && replayTimestamp > 0) {
-                  replayData.timestamp = replayTimestamp;
-                } else {
-                  replayData.timestamp = Date.now();
-                }
-                const replayCredits = (
-                  (typeof run.credits === 'string' && run.credits.trim())
-                  || (typeof run.player === 'string' && run.player.trim() && !/^you$/i.test(run.player.trim()) && run.player.trim())
-                  || (typeof run.userName === 'string' && run.userName.trim())
-                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.playerName === 'string' && globalThis.state.player.getSnapshot().context.playerName.trim())
-                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.name === 'string' && globalThis.state.player.getSnapshot().context.name.trim())
-                );
-                if (replayCredits) replayData.credits = replayCredits;
-                if (typeof run.comments === 'string' && run.comments.trim()) {
-                  replayData.comments = run.comments.trim();
-                } else {
-                  const floorHistoryValues = Array.isArray(run?.floorHistory) ? run.floorHistory : [];
-                  const normalizedFloors = floorHistoryValues
-                    .map((value) => Number(value))
-                    .filter((value) => Number.isFinite(value) && value > 0);
-                  const runFloorValue = Number(run?.floor);
-                  if (Number.isFinite(runFloorValue) && runFloorValue > 0) {
-                    normalizedFloors.push(runFloorValue);
-                  }
-                  const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
-                  if (uniqueFloors.length > 1) {
-                    replayData.comments = formatFloorsClearedReplayComment(uniqueFloors, run.floorSeeds);
-                  }
-                }
-                
-                
-                // Check if we have stored board setup data
-                if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
-                  
-                  
-                  
-                  
-                  // Convert stored pieces to board format
-                  const board = run.setup.pieces.map(piece => {
-                    const boardPiece = {
-                      tile: piece.tile,
-                      monster: {
-                        name: piece.monsterName || piece.monsterId || 'unknown monster',
-                        level: piece.level || 1,
-                        hp: piece.monsterStats?.hp || 20,
-                        ad: piece.monsterStats?.ad || 20,
-                        ap: piece.monsterStats?.ap || 20,
-                        armor: piece.monsterStats?.armor || 20,
-                        magicResist: piece.monsterStats?.magicResist || 20
-                      }
-                    };
-                    
-                    // Add equipment if available
-                    if (piece.equipmentName || piece.equipId) {
-                      boardPiece.equipment = {
-                        name: piece.equipmentName || piece.equipId || 'unknown equipment',
-                        stat: piece.equipmentStat || 'ap',
-                        tier: piece.equipmentTier || 5
-                      };
-                    }
-                    
-                    return boardPiece;
-                  });
-                  
-                  replayData.board = board;
-                  
-                  
-                } else {
-                  
-                }
+                Object.assign(replayData, buildLocalRunReplayFields(run));
                 
                 // Add seed at the end
                 replayData.seed = run.seed;
@@ -12785,7 +12771,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     }
                     
                     if (foundRegion) {
-                      regionName = GAME_DATA.REGION_NAME_MAP[foundRegion.id] || foundRegion.id;
+                      regionName = cyclopediaGetRegionDisplayName(foundRegion.id);
                       
                     } else {
                       // Fallback: try to get region from current game state
@@ -12796,7 +12782,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
                         // Capitalize region name
-                        regionName = GAME_DATA.REGION_NAME_MAP[regionName.toLowerCase()] || regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+                        regionName = cyclopediaGetRegionDisplayName(regionName);
                         
                       }
                     }
@@ -12808,79 +12794,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 replayData.region = regionName;
                 replayData.map = mapName;
                 
-                // Always add floor (default to 0 if not available)
-                replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
-                const replayTimestamp = Number(run?.timestamp);
-                if (Number.isFinite(replayTimestamp) && replayTimestamp > 0) {
-                  replayData.timestamp = replayTimestamp;
-                } else {
-                  replayData.timestamp = Date.now();
-                }
-                const replayCredits = (
-                  (typeof run.credits === 'string' && run.credits.trim())
-                  || (typeof run.player === 'string' && run.player.trim() && !/^you$/i.test(run.player.trim()) && run.player.trim())
-                  || (typeof run.userName === 'string' && run.userName.trim())
-                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.playerName === 'string' && globalThis.state.player.getSnapshot().context.playerName.trim())
-                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.name === 'string' && globalThis.state.player.getSnapshot().context.name.trim())
-                );
-                if (replayCredits) replayData.credits = replayCredits;
-                if (typeof run.comments === 'string' && run.comments.trim()) {
-                  replayData.comments = run.comments.trim();
-                } else {
-                  const floorHistoryValues = Array.isArray(run?.floorHistory) ? run.floorHistory : [];
-                  const normalizedFloors = floorHistoryValues
-                    .map((value) => Number(value))
-                    .filter((value) => Number.isFinite(value) && value > 0);
-                  const runFloorValue = Number(run?.floor);
-                  if (Number.isFinite(runFloorValue) && runFloorValue > 0) {
-                    normalizedFloors.push(runFloorValue);
-                  }
-                  const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
-                  if (uniqueFloors.length > 1) {
-                    replayData.comments = formatFloorsClearedReplayComment(uniqueFloors, run.floorSeeds);
-                  }
-                }
-                
-                
-                // Check if we have stored board setup data
-                if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
-                  
-                  
-                  
-                  
-                  // Convert stored pieces to board format
-                  const board = run.setup.pieces.map(piece => {
-                    const boardPiece = {
-                      tile: piece.tile,
-                      monster: {
-                        name: piece.monsterName || piece.monsterId || 'unknown monster',
-                        level: piece.level || 1,
-                        hp: piece.monsterStats?.hp || 20,
-                        ad: piece.monsterStats?.ad || 20,
-                        ap: piece.monsterStats?.ap || 20,
-                        armor: piece.monsterStats?.armor || 20,
-                        magicResist: piece.monsterStats?.magicResist || 20
-                      }
-                    };
-                    
-                    // Add equipment if available
-                    if (piece.equipmentName || piece.equipId) {
-                      boardPiece.equipment = {
-                        name: piece.equipmentName || piece.equipId || 'unknown equipment',
-                        stat: piece.equipmentStat || 'ap',
-                        tier: piece.equipmentTier || 5
-                      };
-                    }
-                    
-                    return boardPiece;
-                  });
-                  
-                  replayData.board = board;
-                  
-                  
-                } else {
-                  
-                }
+                Object.assign(replayData, buildLocalRunReplayFields(run));
                 
                 // Add seed at the end
                 replayData.seed = run.seed;
@@ -13357,7 +13271,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     }
                     
                     if (foundRegion) {
-                      regionName = GAME_DATA.REGION_NAME_MAP[foundRegion.id] || foundRegion.id;
+                      regionName = cyclopediaGetRegionDisplayName(foundRegion.id);
                       
                     } else {
                       // Fallback: try to get region from current game state (this is the problematic part)
@@ -13368,7 +13282,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
                         // Capitalize region name
-                        regionName = GAME_DATA.REGION_NAME_MAP[regionName.toLowerCase()] || regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+                        regionName = cyclopediaGetRegionDisplayName(regionName);
                         
                       }
                     }
@@ -13380,79 +13294,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 replayData.region = regionName;
                 replayData.map = mapName;
                 
-                // Always add floor (default to 0 if not available)
-                replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
-                const replayTimestamp = Number(run?.timestamp);
-                if (Number.isFinite(replayTimestamp) && replayTimestamp > 0) {
-                  replayData.timestamp = replayTimestamp;
-                } else {
-                  replayData.timestamp = Date.now();
-                }
-                const replayCredits = (
-                  (typeof run.credits === 'string' && run.credits.trim())
-                  || (typeof run.player === 'string' && run.player.trim() && !/^you$/i.test(run.player.trim()) && run.player.trim())
-                  || (typeof run.userName === 'string' && run.userName.trim())
-                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.playerName === 'string' && globalThis.state.player.getSnapshot().context.playerName.trim())
-                  || (typeof globalThis.state?.player?.getSnapshot?.()?.context?.name === 'string' && globalThis.state.player.getSnapshot().context.name.trim())
-                );
-                if (replayCredits) replayData.credits = replayCredits;
-                if (typeof run.comments === 'string' && run.comments.trim()) {
-                  replayData.comments = run.comments.trim();
-                } else {
-                  const floorHistoryValues = Array.isArray(run?.floorHistory) ? run.floorHistory : [];
-                  const normalizedFloors = floorHistoryValues
-                    .map((value) => Number(value))
-                    .filter((value) => Number.isFinite(value) && value > 0);
-                  const runFloorValue = Number(run?.floor);
-                  if (Number.isFinite(runFloorValue) && runFloorValue > 0) {
-                    normalizedFloors.push(runFloorValue);
-                  }
-                  const uniqueFloors = Array.from(new Set(normalizedFloors)).sort((a, b) => a - b);
-                  if (uniqueFloors.length > 1) {
-                    replayData.comments = formatFloorsClearedReplayComment(uniqueFloors, run.floorSeeds);
-                  }
-                }
-                
-                
-                // Check if we have stored board setup data
-                if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
-                  
-                  
-                  
-                  
-                  // Convert stored pieces to board format
-                  const board = run.setup.pieces.map(piece => {
-                    const boardPiece = {
-                      tile: piece.tile,
-                      monster: {
-                        name: piece.monsterName || piece.monsterId || 'unknown monster',
-                        level: piece.level || 1,
-                        hp: piece.monsterStats?.hp || 20,
-                        ad: piece.monsterStats?.ad || 20,
-                        ap: piece.monsterStats?.ap || 20,
-                        armor: piece.monsterStats?.armor || 20,
-                        magicResist: piece.monsterStats?.magicResist || 20
-                      }
-                    };
-                    
-                    // Add equipment if available
-                    if (piece.equipmentName || piece.equipId) {
-                      boardPiece.equipment = {
-                        name: piece.equipmentName || piece.equipId || 'unknown equipment',
-                        stat: piece.equipmentStat || 'ap',
-                        tier: piece.equipmentTier || 5
-                      };
-                    }
-                    
-                    return boardPiece;
-                  });
-                  
-                  replayData.board = board;
-                  
-                  
-                } else {
-                  
-                }
+                Object.assign(replayData, buildLocalRunReplayFields(run));
                 
                 // Add seed at the end
                 replayData.seed = run.seed;
@@ -13980,20 +13822,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             nameElement.title = `Open ${creatureName} in Bestiary`;
             nameElement.addEventListener('click', () => {
               if (!creatureName || creatureName === 'Unknown') return;
-              const normalizedCreatureName = creatureName.toLowerCase();
-              const canonicalCreatureName =
-                getCyclopediaAllCreatures().find(c => c.toLowerCase() === normalizedCreatureName) ||
-                GAME_DATA.UNOBTAINABLE_CREATURES.find(c => c.toLowerCase() === normalizedCreatureName) ||
-                creatureName;
-              if (typeof setActiveTab === 'function') {
-                setActiveTab(1);
-              }
-              const clickBestiaryTimeout = setTimeout(() => {
-                if (typeof _cyclopediaClickListItem === 'function' && typeof tabPages !== 'undefined' && tabPages[1]) {
-                  _cyclopediaClickListItem(tabPages[1], canonicalCreatureName);
-                }
-              }, 0);
-              TimerManager.addTimeout(clickBestiaryTimeout, 'mapsCreatureSelect');
+              openCreatureInBestiaryTab(creatureName, {
+                setActiveTabFn: setActiveTab,
+                clickListItemFn: typeof _cyclopediaClickListItem === 'function' ? _cyclopediaClickListItem : null,
+                tabPage: typeof tabPages !== 'undefined' ? tabPages[1] : null,
+                timerLabel: 'mapsCreatureSelect'
+              });
             });
             
             const levelElement = document.createElement('div');
@@ -14399,7 +14233,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       // Region title
       const regionTitle = document.createElement('h3');
-      const regionName = GAME_DATA.REGION_NAME_MAP[regionId] || regionId;
+      const regionName = cyclopediaGetRegionDisplayName(regionId);
       regionTitle.textContent = regionName;
       regionTitle.style.margin = '0 0 15px 0';
       regionTitle.style.fontSize = '18px';
@@ -14589,7 +14423,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       statsContainer.style.display = 'flex';
       statsContainer.style.flexDirection = 'column';
       statsContainer.style.width = '100%';
-      statsContainer.style.height = '100%';
+      statsContainer.style.flex = '1 1 0';
+      statsContainer.style.minHeight = '0';
+      statsContainer.style.overflowY = 'auto';
       statsContainer.style.boxSizing = 'border-box';
       statsContainer.style.padding = '15px';
       
@@ -14746,7 +14582,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       // Title
       const title = document.createElement('h3');
-      const regionName = GAME_DATA.REGION_NAME_MAP[regionId] || regionId;
+      const regionName = cyclopediaGetRegionDisplayName(regionId);
       // Header already contains season; avoid repeating "Region · Season N" inside the card.
       title.textContent = regionName;
       title.style.margin = '0 0 12px 0';
@@ -14916,6 +14752,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       mapInfoDiv.style.width = '100%';
       mapInfoDiv.style.boxSizing = 'border-box';
       mapInfoDiv.style.marginBottom = '0';
+      mapInfoDiv.style.flex = '0 0 auto';
       
       // Add room thumbnail with overlay container
       const thumbnailContainer = document.createElement('div');
@@ -15023,9 +14860,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       d.style.flexDirection = 'row';
       d.style.width = '100%';
       d.style.height = '100%';
-      d.style.alignItems = 'flex-start';
-      d.style.justifyContent = 'center';
+      d.style.minWidth = '0';
+      d.style.boxSizing = 'border-box';
+      d.style.alignItems = 'stretch';
+      d.style.justifyContent = 'flex-start';
       d.style.gap = '0';
+      d.style.overflow = 'hidden';
 
       // Fresh tab instance: reset Maps DOM diff state so first paint cannot be skipped.
       MapsTabDOMOptimizer.currentState.selectedMap = null;
@@ -15041,11 +14881,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       leftCol.style.width = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
       leftCol.style.minWidth = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
       leftCol.style.maxWidth = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
+      leftCol.style.flex = '0 0 auto';
       leftCol.style.height = '100%';
       leftCol.style.display = 'flex';
       leftCol.style.flexDirection = 'column';
       leftCol.style.borderRight = '6px solid transparent';
       leftCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      leftCol.style.boxSizing = 'border-box';
+      leftCol.style.overflowX = 'hidden';
       leftCol.style.overflowY = 'hidden';
       leftCol.style.minHeight = '0';
 
@@ -15149,7 +14992,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       if (regions.length > 0 && !selectedCategory) {
         const rookgaardRegion = regions.find((regionId) => {
           const id = String(regionId).toLowerCase();
-          const displayName = String(GAME_DATA.REGION_NAME_MAP?.[regionId] || regionId).toLowerCase();
+          const displayName = cyclopediaGetRegionDisplayName(regionId).toLowerCase();
           return id === 'rook' || id === 'rookgaard' || displayName === 'rookgaard';
         });
         const rememberedRegion = cyclopediaState.mapsLastSelectedRegionId;
@@ -15158,17 +15001,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
       const topBox = createBox({
         title: 'Regions',
-        items: regions.map(regionId => GAME_DATA.REGION_NAME_MAP[regionId] || regionId),
+        items: regions.map((regionId) => cyclopediaGetRegionDisplayName(regionId)),
         regionIds: regions,
         type: 'region',
         selectedCreature: null,
         selectedEquipment: null,
-        selectedInventory: selectedCategory ? (GAME_DATA.REGION_NAME_MAP[selectedCategory] || selectedCategory) : null,
+        selectedInventory: selectedCategory ? cyclopediaGetRegionDisplayName(selectedCategory) : null,
         setSelectedCreature: () => {},
         setSelectedEquipment: () => {},
         setSelectedInventory: (cat) => {
           // Find the region ID from the display name
-          const regionId = regions.find(regionId => GAME_DATA.REGION_NAME_MAP[regionId] === cat) || cat;
+          const regionId = regions.find((id) => cyclopediaGetRegionDisplayName(id) === cat) || cat;
           selectedCategory = regionId;
           cyclopediaState.mapsLastSelectedRegionId = selectedCategory || null;
           selectedMap = null;
@@ -15187,67 +15030,50 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Create two columns for the right side like Equipment Tab
       const col2 = document.createElement('div');
       Object.assign(col2.style, {
-        width: '250px', minWidth: '250px', maxWidth: '250px', height: '100%', display: 'flex', flexDirection: 'column',
+        width: '250px', minWidth: '250px', maxWidth: '250px', flex: '0 0 250px', height: '100%', display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'flex-start', fontSize: '16px',
         fontWeight: 'bold', color: COLOR_CONSTANTS.TEXT,
         borderRight: '6px solid transparent',
-        borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`
+        borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`,
+        boxSizing: 'border-box', overflowX: 'hidden', minHeight: '0'
       });
       col2.classList.add('text-whiteHighlight');
 
       const col3 = document.createElement('div');
       Object.assign(col3.style, {
-        flex: '1 1 0', height: '100%', display: 'flex', flexDirection: 'column',
+        flex: '1 1 0', minWidth: '0', height: '100%', display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'flex-start', fontSize: '16px',
-        fontWeight: 'bold', color: COLOR_CONSTANTS.TEXT
+        fontWeight: 'bold', color: COLOR_CONSTANTS.TEXT,
+        boxSizing: 'border-box', overflowX: 'auto', overflowY: 'hidden', minHeight: '0'
       });
       col3.classList.add('text-whiteHighlight');
       
       // Add content areas for optimized updates
       const col2Content = document.createElement('div');
       col2Content.className = 'maps-content-area';
-      col2Content.style.flex = '1';
+      col2Content.style.flex = '1 1 0';
+      col2Content.style.minHeight = '0';
       col2Content.style.width = '100%';
-      col2Content.style.overflowY = 'auto';
+      col2Content.style.display = 'flex';
+      col2Content.style.flexDirection = 'column';
+      col2Content.style.overflow = 'hidden';
+      col2Content.style.boxSizing = 'border-box';
       
       const col3Content = document.createElement('div');
       col3Content.className = 'maps-content-area';
-      col3Content.style.flex = '1';
+      col3Content.style.flex = '1 1 0';
+      col3Content.style.minHeight = '0';
       col3Content.style.width = '100%';
       col3Content.style.overflowY = 'auto';
 
       // Create titles for the columns
-      const col2Title = document.createElement('h2');
-      col2Title.className = 'widget-top widget-top-text pixel-font-16';
-      Object.assign(col2Title.style, {
-        margin: '0', padding: '2px 8px', textAlign: 'center', color: 'rgb(255, 255, 255)',
-        width: '100%', boxSizing: 'border-box', marginBottom: '10px'
-      });
-      const col2TitleP = document.createElement('p');
-      col2TitleP.className = 'pixel-font-16';
-      Object.assign(col2TitleP.style, {
-        margin: '0', padding: '0', textAlign: 'center', color: 'rgb(255, 255, 255)',
-        width: '100%', boxSizing: 'border-box'
-      });
-      col2TitleP.textContent = getMapsTabMapInfoHeading();
-      col2Title.appendChild(col2TitleP);
+      const col2Title = createCyclopediaWidgetTitle(getMapsTabMapInfoHeading(), { width: '100%', marginBottom: '10px' });
+      const col2TitleP = col2Title;
       col2.appendChild(col2Title);
       col2.appendChild(col2Content);
 
-      const col3Title = document.createElement('h2');
-      col3Title.className = 'widget-top widget-top-text pixel-font-16';
-      Object.assign(col3Title.style, {
-        margin: '0', padding: '2px 8px', textAlign: 'center', color: 'rgb(255, 255, 255)',
-        width: '100%', boxSizing: 'border-box', marginBottom: '10px'
-      });
-      const col3TitleP = document.createElement('p');
-      col3TitleP.className = 'pixel-font-16';
-      Object.assign(col3TitleP.style, {
-        margin: '0', padding: '0', textAlign: 'center', color: 'rgb(255, 255, 255)',
-        width: '100%', boxSizing: 'border-box'
-      });
-      col3TitleP.textContent = getMapsTabStatisticsHeading();
-      col3Title.appendChild(col3TitleP);
+      const col3Title = createCyclopediaWidgetTitle(getMapsTabStatisticsHeading(), { width: '100%', marginBottom: '10px' });
+      const col3TitleP = col3Title;
       col3.appendChild(col3Title);
       col3.appendChild(col3Content);
 
@@ -15274,15 +15100,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         if (isRegionSelected) {
           mapsTabStatsOnCol2 = true;
           // Region selected: Statistics (small) on left (col2), Map Information (large) on right (col3)
-          // col2 = Statistics (small, left)
           Object.assign(col2.style, {
             width: '250px', minWidth: '250px', maxWidth: '250px', flex: '0 0 250px'
           });
           col2TitleP.textContent = statsLabel;
           
-          // col3 = Map Information (large, right)
           Object.assign(col3.style, {
-            flex: '0 0 490px', width: '490px', minWidth: '490px', maxWidth: '490px'
+            flex: '1 1 0', width: 'auto', minWidth: '0', maxWidth: 'none'
           });
           col3TitleP.textContent = getMapsTabMapInfoHeading();
         } else {
@@ -15378,39 +15202,27 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             creatureInfoDiv.style.color = COLOR_CONSTANTS.TEXT;
             creatureInfoDiv.style.width = '100%';
             creatureInfoDiv.style.boxSizing = 'border-box';
+            creatureInfoDiv.style.flex = '1 1 0';
+            creatureInfoDiv.style.minHeight = '0';
+            creatureInfoDiv.style.display = 'flex';
+            creatureInfoDiv.style.flexDirection = 'column';
+            creatureInfoDiv.style.overflow = 'hidden';
             
-            // Add "Creature Information" title using Bestiary Tab title system
-            const creatureInfoTitle = document.createElement('h2');
-            creatureInfoTitle.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
-            creatureInfoTitle.style.margin = '0';
-            creatureInfoTitle.style.padding = '2px 0';
-            creatureInfoTitle.style.textAlign = 'center';
-            creatureInfoTitle.style.color = COLOR_CONSTANTS.TEXT;
-            creatureInfoTitle.style.width = '100%';
-            creatureInfoTitle.style.boxSizing = 'border-box';
-            creatureInfoTitle.style.display = 'block';
-            creatureInfoTitle.style.position = 'relative';
-            creatureInfoTitle.style.top = '0';
-            creatureInfoTitle.style.left = '0';
-            creatureInfoTitle.style.right = '0';
-            creatureInfoTitle.style.marginLeft = '0';
-            creatureInfoTitle.style.width = '100%';
-            creatureInfoTitle.style.marginBottom = '5px';
-            
-            const creatureInfoTitleP = document.createElement('p');
-            creatureInfoTitleP.textContent = 'Creature Information';
-            creatureInfoTitleP.className = FONT_CONSTANTS.SIZES.TITLE;
-            creatureInfoTitleP.style.margin = '0';
-            creatureInfoTitleP.style.padding = '0';
-            creatureInfoTitleP.style.textAlign = 'center';
-            creatureInfoTitleP.style.color = COLOR_CONSTANTS.TEXT;
-            creatureInfoTitle.appendChild(creatureInfoTitleP);
+            const creatureInfoTitle = createCyclopediaWidgetTitle('Creature Information', {
+              width: '100%',
+              marginBottom: '5px',
+              flex: '0 0 auto',
+              display: 'block',
+              position: 'relative'
+            });
+            const creatureInfoTitleP = creatureInfoTitle;
             creatureInfoDiv.appendChild(creatureInfoTitle);
             
-            // Simple content container below the title
+            // Scrollable creature list — fills remaining space below map thumbnail
             const contentContainer = document.createElement('div');
-            contentContainer.style.overflowY = 'hidden'; // Start with no scrollbar
-            contentContainer.style.maxHeight = '190px';
+            contentContainer.style.flex = '1 1 0';
+            contentContainer.style.minHeight = '0';
+            contentContainer.style.overflowY = 'auto';
             contentContainer.style.paddingRight = '8px';
             contentContainer.style.width = '100%';
             contentContainer.style.boxSizing = 'border-box';
@@ -15496,15 +15308,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             
             // Add the content container to the creature info div
             creatureInfoDiv.appendChild(contentContainer);
-            
-            // Check if content overflows and conditionally show scrollbar
-            setTimeout(() => {
-                const hasOverflow = contentContainer.scrollHeight > 190;
-                if (hasOverflow) {
-                    contentContainer.style.overflowY = 'auto';
-                }
-                // If no overflow, keep overflowY: 'hidden' (no scrollbar)
-            }, 0);
             
             // Column 3: Statistics (right column, large)
             const statsContainer = createStatisticsSection(selectedMap);
@@ -15635,6 +15438,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
     flexRow.style.height = '500px';
     flexRow.style.minHeight = '500px';
     flexRow.style.maxHeight = '500px';
+    flexRow.style.boxSizing = 'border-box';
+    flexRow.style.border = '6px solid transparent';
+    flexRow.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+    flexRow.style.overflow = 'hidden';
 
     const mainContent = document.createElement('div');
     mainContent.style.flex = '1 1 0';
@@ -15643,20 +15450,21 @@ async function fetchWithDeduplication(url, key, priority = 0) {
     mainContent.style.flexDirection = 'column';
     mainContent.style.minHeight = '0';
     mainContent.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
-    mainContent.style.justifyContent = 'center';
-    mainContent.style.alignItems = 'center';
-    mainContent.style.height = '500px';
-    mainContent.style.minHeight = '500px';
-    mainContent.style.maxHeight = '500px';
+    mainContent.style.justifyContent = 'flex-start';
+    mainContent.style.alignItems = 'stretch';
+    mainContent.style.height = '100%';
+    mainContent.style.width = '100%';
+    mainContent.style.minWidth = '0';
+    mainContent.style.overflow = 'hidden';
 
     defineSetActiveTab(tabButtons, mainContent, tabPages);
 
     // Home search navigation bridge (used by the Home tab search box)
     function _cyclopediaFindBoxByTitle(tabRoot, titleText) {
       if (!tabRoot) return null;
-      const titles = Array.from(tabRoot.querySelectorAll('h2.widget-top p'));
-      const p = titles.find(el => (el.textContent || '').trim() === titleText);
-      return p ? p.closest('div') : null;
+      const titles = Array.from(tabRoot.querySelectorAll('h2.widget-top'));
+      const h2 = titles.find(el => (el.textContent || '').trim() === titleText);
+      return h2 ? h2.closest('div') : null;
     }
 
     function _cyclopediaFindClickableListItems(root) {
@@ -16101,49 +15909,40 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   container.style.display = 'flex';
   container.style.flexDirection = 'row';
   container.style.width = '100%';
+  container.style.maxWidth = '100%';
+  container.style.minWidth = '0';
   container.style.height = '100%';
   container.style.gap = '0';
-  container.style.overflowX = 'hidden';
-  container.style.overflowY = 'auto';
+  container.style.overflow = 'hidden';
+  container.style.boxSizing = 'border-box';
+
+  const creatureTemplateColStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
+    minWidth: '0',
+    width: 'auto',
+    maxWidth: 'none',
+    height: '100%',
+    minHeight: '0',
+    boxSizing: 'border-box',
+    overflowX: 'hidden'
+  };
 
   const col1 = document.createElement('div');
-  col1.style.display = 'flex';
-  col1.style.flexDirection = 'column';
-  col1.style.width = LAYOUT_CONSTANTS.COLUMN_WIDTH;
-  col1.style.minWidth = LAYOUT_CONSTANTS.COLUMN_WIDTH;
-  col1.style.maxWidth = LAYOUT_CONSTANTS.COLUMN_WIDTH;
-  col1.style.height = '100%';
+  Object.assign(col1.style, creatureTemplateColStyle);
   col1.style.borderRight = '6px solid transparent';
   col1.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
-  col1.style.boxSizing = 'border-box';
   col1.style.marginRight = '0';
   col1.style.paddingRight = '0';
-  col1.style.overflowX = 'hidden';
   col1.style.overflowY = 'hidden';
-  const col1Title = document.createElement('h2');
-  col1Title.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
-  col1Title.style.margin = '0';
-  col1Title.style.padding = '2px 0';
-  col1Title.style.textAlign = 'center';
-  col1Title.style.color = COLOR_CONSTANTS.TEXT;
-  col1Title.style.width = '100%';
-  col1Title.style.boxSizing = 'border-box';
-  col1Title.style.display = 'block';
-  col1Title.style.position = 'relative';
-  col1Title.style.top = '0';
-  col1Title.style.left = '0';
-  col1Title.style.right = '0';
-  col1Title.style.marginLeft = '0';
-  col1Title.style.width = '100%';
-  col1Title.style.marginBottom = '5px';
-  const col1TitleP = document.createElement('p');
-  col1TitleP.textContent = name || 'Creature Information';
-  col1TitleP.className = FONT_CONSTANTS.SIZES.TITLE;
-  col1TitleP.style.margin = '0';
-  col1TitleP.style.padding = '0';
-  col1TitleP.style.textAlign = 'center';
-  col1TitleP.style.color = COLOR_CONSTANTS.TEXT;
-  col1Title.appendChild(col1TitleP);
+  const col1Title = createCyclopediaWidgetTitle(name || 'Creature Information', {
+    width: '100%',
+    marginBottom: '5px',
+    display: 'block',
+    position: 'relative'
+  });
+  const col1TitleP = col1Title;
   
   const col1Picture = document.createElement('div');
   col1Picture.style.textAlign = 'center';
@@ -16498,44 +16297,23 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
     gap: 1px;
   `;
   
-  // Create "Ability" title (83% width)
-  const abilityTitle = document.createElement('h2');
-  abilityTitle.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
-  abilityTitle.style.cssText = `
-    margin: 0px;
-    padding: 2px 8px;
-    text-align: center;
-    color: rgb(255, 255, 255);
-    width: 83%;
-    flex: 0 0 83%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 16px;
-    height: 100%;
-    align-self: stretch;
-  `;
-  abilityTitle.textContent = 'Ability';
+  const abilityTitle = createCyclopediaWidgetTitle('Ability', {
+    ...CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '16px',
+    height: '100%',
+    alignSelf: 'stretch'
+  });
   abilityTitleContainer.appendChild(abilityTitle);
 
-  // Create the toggle button (15% width, matching shiny button style)
   const awakenIconButton = document.createElement('button');
-  awakenIconButton.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
+  applyCyclopediaWidgetTitleChrome(awakenIconButton, {
+    ...CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE,
+    height: '23px'
+  });
   awakenIconButton.title = 'Normal Mode';
-  awakenIconButton.style.cssText = `
-    margin: 0px;
-    padding: 2px 8px;
-    text-align: center;
-    color: rgb(255, 255, 255);
-    cursor: pointer;
-    width: 15%;
-    flex: 0 0 15%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 23px;
-    outline: none;
-  `;
   
   const awakenIconImg = document.createElement('img');
   awakenIconImg.src = 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png';
@@ -16770,25 +16548,21 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   
   col1.appendChild(col1FlexRows);
   const col2 = document.createElement('div');
-  col2.style.display = 'flex';
-  col2.style.flexDirection = 'column';
-  col2.style.width = LAYOUT_CONSTANTS.COLUMN_WIDTH;
-  col2.style.minWidth = LAYOUT_CONSTANTS.COLUMN_WIDTH;
-  col2.style.maxWidth = LAYOUT_CONSTANTS.COLUMN_WIDTH;
-  col2.style.height = '100%';
-  col2.style.padding = '0'; // Remove padding from the column
+  Object.assign(col2.style, creatureTemplateColStyle);
+  col2.style.padding = '0';
   col2.style.margin = '0';
   col2.style.marginLeft = '0';
   col2.style.paddingLeft = '0';
   col2.style.borderRight = '6px solid transparent';
   col2.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
-  col2.style.overflowX = 'hidden';
-  col2.style.overflowY = 'auto';
+  col2.style.overflowY = 'hidden';
 
   const dropsSection = document.createElement('div');
-  dropsSection.style.height = '100%';
+  dropsSection.style.flex = '1 1 0';
+  dropsSection.style.minHeight = '0';
   dropsSection.style.display = 'flex';
   dropsSection.style.flexDirection = 'column';
+  dropsSection.style.overflow = 'hidden';
   dropsSection.className = FONT_CONSTANTS.SIZES.SMALL;
 
   const usageSection = document.createElement('div');
@@ -16796,22 +16570,8 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   usageSection.style.flexDirection = 'column';
   usageSection.style.flex = '0 0 auto';
 
-  const usageTitle = document.createElement('h2');
-  usageTitle.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
-  usageTitle.style.margin = '0';
-  usageTitle.style.padding = '2px 0';
-  usageTitle.style.textAlign = 'center';
-  usageTitle.style.color = COLOR_CONSTANTS.TEXT;
-  usageTitle.style.width = '100%';
-  usageTitle.style.boxSizing = 'border-box';
-  const usageTitleP = document.createElement('p');
-  usageTitleP.textContent = 'Player usage';
-  usageTitleP.className = FONT_CONSTANTS.SIZES.TITLE;
-  usageTitleP.style.margin = '0';
-  usageTitleP.style.padding = '0';
-  usageTitleP.style.textAlign = 'center';
-  usageTitleP.style.color = COLOR_CONSTANTS.TEXT;
-  usageTitle.appendChild(usageTitleP);
+  const usageTitle = createCyclopediaWidgetTitle('Player usage', { width: '100%' });
+  const usageTitleP = usageTitle;
 
   const usageContent = document.createElement('div');
   usageContent.className = FONT_CONSTANTS.SIZES.SMALL;
@@ -16831,30 +16591,8 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   usageSeparator.setAttribute('role', 'none');
   usageSeparator.style.margin = '2px 0';
 
-  const dropsTitle = document.createElement('h2');
-  dropsTitle.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
-  dropsTitle.style.margin = '0';
-  dropsTitle.style.padding = '2px 0';
-  dropsTitle.style.textAlign = 'center';
-  dropsTitle.style.color = COLOR_CONSTANTS.TEXT;
-  dropsTitle.style.width = '100%';
-  dropsTitle.style.boxSizing = 'border-box';
-  dropsTitle.style.display = 'block';
-  dropsTitle.style.position = 'relative';
-  dropsTitle.style.top = '0';
-  dropsTitle.style.left = '0';
-  dropsTitle.style.right = '0';
-  dropsTitle.style.marginLeft = '0';
-  dropsTitle.style.width = '100%';
-
-  const dropsTitleP = document.createElement('p');
-  dropsTitleP.textContent = 'Location';
-  dropsTitleP.className = FONT_CONSTANTS.SIZES.TITLE;
-  dropsTitleP.style.margin = '0';
-  dropsTitleP.style.padding = '0';
-  dropsTitleP.style.textAlign = 'center';
-  dropsTitleP.style.color = COLOR_CONSTANTS.TEXT;
-  dropsTitle.appendChild(dropsTitleP);
+  const dropsTitle = createCyclopediaWidgetTitle('Location', { width: '100%' });
+  const dropsTitleP = dropsTitle;
   dropsSection.appendChild(usageSection);
   dropsSection.appendChild(usageSeparator);
   dropsSection.appendChild(dropsTitle);
@@ -16870,8 +16608,10 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   dropsList.style.letterSpacing = '.0625rem';
   dropsList.style.wordSpacing = '-.1875rem';
   dropsList.style.color = COLOR_CONSTANTS.TEXT;
+  dropsList.style.flex = '1 1 0';
+  dropsList.style.minHeight = '0';
   dropsList.style.overflowY = 'auto';
-  dropsList.style.maxHeight = 'calc(100% - 40px)';
+  dropsList.style.maxHeight = 'none';
 
   let monsterLocations = [];
   try {
@@ -16881,8 +16621,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   if (monsterLocations.length > 0) {
     function capitalizeRegionName(name) {
       if (!name) return '';
-      const regionId = name.toLowerCase();
-      return GAME_DATA.REGION_NAME_MAP[regionId] || name.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+      return cyclopediaGetRegionDisplayName(name);
     }
     const regionMap = new Map();
     monsterLocations.forEach((location) => {
@@ -17067,7 +16806,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
     noLocationItem.style.letterSpacing = '.0625rem';
     noLocationItem.style.wordSpacing = '-.1875rem';
     noLocationItem.style.fontStyle = 'italic';
-    noLocationItem.className = 'pixel-font-16';
+    noLocationItem.className = FONT_CONSTANTS.SIZES.BODY;
     dropsList.appendChild(noLocationItem);
   }
   dropsSection.appendChild(dropsList);
@@ -17075,16 +16814,9 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   col2.appendChild(dropsSection);
 
   const col3 = document.createElement('div');
-  col3.style.display = 'flex';
-  col3.style.flexDirection = 'column';
-  col3.style.width = LAYOUT_CONSTANTS.COLUMN_WIDTH;
-  col3.style.minWidth = LAYOUT_CONSTANTS.COLUMN_WIDTH;
-  col3.style.maxWidth = LAYOUT_CONSTANTS.COLUMN_WIDTH;
-  col3.style.height = '100%';
-  col3.style.minHeight = '0';
+  Object.assign(col3.style, creatureTemplateColStyle);
   col3.style.maxHeight = '100%';
-  col3.style.overflowX = 'hidden';
-  col3.style.overflowY = 'auto';
+  col3.style.overflowY = 'hidden';
 
   function getBoardConfigUsageStatsForCreature(targetMonsterGameId) {
     const emptyStats = { count: 0, total: 0, percentage: 0 };
@@ -17142,22 +16874,6 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
       }
     }
   } catch (e) {}
-  const col3Title = document.createElement('h2');
-  col3Title.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
-  col3Title.style.margin = '0';
-  col3Title.style.padding = '2px 0';
-  col3Title.style.textAlign = 'center';
-  col3Title.style.color = COLOR_CONSTANTS.TEXT;
-  col3Title.style.width = '100%';
-  col3Title.style.boxSizing = 'border-box';
-  col3Title.style.display = 'block';
-  col3Title.style.position = 'relative';
-  col3Title.style.top = '0';
-  col3Title.style.left = '0';
-  col3Title.style.right = '0';
-  col3Title.style.marginLeft = '0';
-  col3Title.style.width = '100%';
-  const col3TitleP = document.createElement('p');
   const ownedName = name || '';
   const ownedCount = ownedMonsters.length;
   let pluralName = ownedName;
@@ -17172,17 +16888,13 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
     isUnobtainable = unobtainableCreatures.some(c => c.toLowerCase() === (name || '').toLowerCase());
   }
 
+  const col3Title = createCyclopediaWidgetTitle('', { width: '100%' });
+  const col3TitleP = col3Title;
   if (isUnobtainable) {
-    col3TitleP.textContent = ownedName;
+    col3Title.textContent = ownedName;
   } else {
-    col3TitleP.textContent = `Owned ${pluralName}${pluralName ? ` (${ownedCount})` : ''}`;
+    col3Title.textContent = `Owned ${pluralName}${pluralName ? ` (${ownedCount})` : ''}`;
   }
-  col3TitleP.className = FONT_CONSTANTS.SIZES.TITLE;
-  col3TitleP.style.margin = '0';
-  col3TitleP.style.padding = '0';
-  col3TitleP.style.textAlign = 'center';
-  col3TitleP.style.color = COLOR_CONSTANTS.TEXT;
-  col3Title.appendChild(col3TitleP);
 
   const col3Content = document.createElement('div');
   col3Content.style.display = 'flex';
@@ -17440,7 +17152,7 @@ function createCyclopediaSeasonsLeaderboardLink() {
   seasonLink.href = 'https://bestiaryarena.com/seasons';
   seasonLink.target = '_blank';
   seasonLink.rel = 'noopener noreferrer';
-  seasonLink.textContent = cyclopediaT('mods.cyclopedia.startpage.viewFullSeasonsLeaderboard');
+  seasonLink.textContent = CYCLOPEDIA_UI.viewFullSeasonsLeaderboard;
   Object.assign(seasonLink.style, {
     display: 'inline-flex',
     alignSelf: 'center',
@@ -17490,7 +17202,7 @@ function syncCyclopediaSeasonToggleStyles(tablist) {
 }
 
 function getCyclopediaRankingRowDisplay(profileData, rankingKey) {
-  const entry = CYCLOPEDIA_TRANSLATION[rankingKey];
+  const entry = CYCLOPEDIA_PROFILE_VALUE[rankingKey];
   const raw = entry && typeof entry.value === 'function' ? entry.value(profileData) : profileData[rankingKey];
   const positionKey = CYCLOPEDIA_RANKING_POSITION_KEYS[rankingKey];
   const position = positionKey ? profileData[positionKey] : undefined;
@@ -17647,8 +17359,8 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange, 
     headline.style.textAlign = 'center';
     headline.style.width = '100%';
     headline.textContent = playerName
-      ? cyclopediaT('mods.cyclopedia.startpage.welcomeName').replace('{name}', playerName)
-      : cyclopediaT('mods.cyclopedia.startpage.welcome');
+      ? CYCLOPEDIA_UI.welcomeName(playerName)
+      : CYCLOPEDIA_UI.welcome;
     div.appendChild(headline);
 
     if (showSeasonToggle) {
@@ -17680,7 +17392,7 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange, 
     titleIcon.className = 'pixelated';
     Object.assign(titleIcon.style, { width: '18px', height: '18px', flexShrink: '0' });
     const titleLabel = document.createElement('span');
-    titleLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.seasonStatsTitle');
+    titleLabel.textContent = CYCLOPEDIA_UI.seasonStatsTitle;
     title.appendChild(titleIcon);
     title.appendChild(titleLabel);
     statsWrap.appendChild(title);
@@ -17704,9 +17416,7 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange, 
       if (tooltipParts.length > 0) row.title = tooltipParts.join(' | ');
       const lab = document.createElement('span');
       lab.style.flexShrink = '0';
-      lab.textContent = (typeof labelKey === 'string' && labelKey.startsWith('mods.'))
-        ? cyclopediaT(labelKey)
-        : String(labelKey);
+      lab.textContent = String(labelKey);
       const val = document.createElement('span');
       val.style.display = 'flex';
       val.style.flex = '1 1 auto';
@@ -17784,7 +17494,7 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange, 
     snIcon.className = 'pixelated';
     Object.assign(snIcon.style, { width: '16px', height: '16px', flexShrink: '0' });
     const snText = document.createElement('span');
-    snText.textContent = cyclopediaT('mods.cyclopedia.startpage.seasonStatsSeason').replace('{n}', String(activeSeason));
+    snText.textContent = CYCLOPEDIA_UI.seasonStatsSeason(activeSeason);
     sn.appendChild(snIcon);
     sn.appendChild(snText);
     block.appendChild(sn);
@@ -17799,7 +17509,7 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange, 
     seasonLink.href = 'https://bestiaryarena.com/seasons';
     seasonLink.target = '_blank';
     seasonLink.rel = 'noopener noreferrer';
-    seasonLink.textContent = cyclopediaT('mods.cyclopedia.startpage.viewFullSeasonsLeaderboard');
+    seasonLink.textContent = CYCLOPEDIA_UI.viewFullSeasonsLeaderboard;
     Object.assign(seasonLink.style, {
       display: 'inline-flex',
       alignSelf: 'center',
@@ -17824,7 +17534,7 @@ function renderCyclopediaWelcomeColumn(playerName, profileData, onSeasonChange, 
     const fallbackDiv = document.createElement('div');
     fallbackDiv.style.padding = '24px';
     fallbackDiv.style.color = '#e6d7b0';
-    fallbackDiv.textContent = cyclopediaT('mods.cyclopedia.startpage.welcomeFallback');
+    fallbackDiv.textContent = CYCLOPEDIA_UI.welcomeFallback;
     return fallbackDiv;
   }
 }
@@ -17847,7 +17557,7 @@ function focusCyclopediaHomeSearchInput() {
   requestAnimationFrame(() => requestAnimationFrame(() => attemptFocus(24)));
 }
 
-const CYCLOPEDIA_HOME_SEARCH_FILTER_CONTROL_CLASS = 'pixel-font-14 bg-grayDark text-whiteHighlight';
+const CYCLOPEDIA_HOME_SEARCH_FILTER_CONTROL_CLASS = `${FONT_SMALL_CLASS} bg-grayDark text-whiteHighlight`;
 const CYCLOPEDIA_HOME_SEARCH_FILTER_INPUT_STYLE =
   'flex: 1; min-width: 0; padding: 4px 8px; border: none; border-radius: 3px; outline: none;';
 const CYCLOPEDIA_HOME_SEARCH_FILTER_SELECT_STYLE =
@@ -18467,7 +18177,7 @@ function renderCyclopediaSearchColumn() {
     height: '100%'
   });
 
-  const title = DOMUtils.createTitle(cyclopediaT('mods.cyclopedia.startpage.searchTitle'));
+  const title = DOMUtils.createTitle(CYCLOPEDIA_UI.searchTitle);
   container.appendChild(title);
 
   const panel = document.createElement('div');
@@ -18488,8 +18198,8 @@ function renderCyclopediaSearchColumn() {
   const searchInput = document.createElement('input');
   searchInput.id = CYCLOPEDIA_HOME_SEARCH_INPUT_ID;
   searchInput.type = 'text';
-  searchInput.placeholder = cyclopediaT('mods.cyclopedia.startpage.searchPlaceholder');
-  searchInput.title = cyclopediaT('mods.cyclopedia.startpage.searchTooltip');
+  searchInput.placeholder = CYCLOPEDIA_UI.searchPlaceholder;
+  searchInput.title = CYCLOPEDIA_UI.searchTooltip;
   searchInput.autocomplete = 'off';
   searchInput.autocapitalize = 'off';
   searchInput.spellcheck = false;
@@ -18537,7 +18247,7 @@ function renderCyclopediaSearchColumn() {
       <col style="width: ${colType}">
       <col style="width: ${colDetails}">
     </colgroup>
-    <thead class="pixel-font-14">
+    <thead class="${FONT_SMALL_CLASS}">
       <tr>
         <th class="${thClass}" style="text-align: left; width: ${colEntry};">Entry</th>
         <th class="${thClass}" style="text-align: left; width: ${colType};">Type</th>
@@ -18627,12 +18337,12 @@ function renderCyclopediaSearchColumn() {
   }
 
   function renderTableRows(results) {
-    tbody.innerHTML = '';
     if (!results || results.length === 0) {
       setTableMessage('No results match the current filters.');
       return;
     }
 
+    const fragment = document.createDocumentFragment();
     for (const r of results) {
       const tr = document.createElement('tr');
       tr.dataset.homeSearchResult = 'true';
@@ -18663,7 +18373,7 @@ function renderCyclopediaSearchColumn() {
         overflow: 'hidden',
         textOverflow: 'ellipsis'
       });
-      tdType.textContent = r.kindLabel || cyclopediaT('mods.cyclopedia.startpage.resultBadge');
+      tdType.textContent = r.kindLabel || CYCLOPEDIA_UI.resultBadge;
       tr.appendChild(tdType);
 
       const tdDetails = document.createElement('td');
@@ -18680,8 +18390,9 @@ function renderCyclopediaSearchColumn() {
       tdDetails.title = r.subtitle || '';
       tr.appendChild(tdDetails);
 
-      tbody.appendChild(tr);
+      fragment.appendChild(tr);
     }
+    tbody.replaceChildren(fragment);
   }
 
   function renderResults(query) {
@@ -18713,7 +18424,7 @@ function renderCyclopediaSearchColumn() {
     }
 
     if (!query || qTrim.length < 2) {
-      setTableMessage(cyclopediaT('mods.cyclopedia.startpage.emptyStateMinChars'));
+      setTableMessage(CYCLOPEDIA_UI.emptyStateMinChars);
       return;
     }
 
@@ -18724,8 +18435,8 @@ function renderCyclopediaSearchColumn() {
 
     if (!results.length) {
       if (wantsEffectIndexing && (!abilityReady || !equipmentEffectReady)) {
-        setTableMessage(cyclopediaT('mods.cyclopedia.startpage.indexingAbility'));
-      } else setTableMessage(cyclopediaT('mods.cyclopedia.startpage.noResults'));
+        setTableMessage(CYCLOPEDIA_UI.indexingAbility);
+      } else setTableMessage(CYCLOPEDIA_UI.noResults);
       return;
     }
 
@@ -18749,7 +18460,7 @@ function renderCyclopediaSearchColumn() {
     }
   });
   kindSelect.addEventListener('change', recompute);
-  setTableMessage(cyclopediaT('mods.cyclopedia.startpage.emptyStateMinChars'));
+  setTableMessage(CYCLOPEDIA_UI.emptyStateMinChars);
 
   try {
     if (CyclopediaHomeSearch.startEquipmentEffectIndexing) CyclopediaHomeSearch.startEquipmentEffectIndexing();
@@ -18811,13 +18522,12 @@ const CYCLOPEDIA_PROGRESS_STATS = [
   { key: 'bagOutfits', icon: '/assets/icons/mini-outfitbag.png', max: CYCLOPEDIA_MAX_VALUES.bagOutfits }
 ];
 
-const CYCLOPEDIA_TRANSLATION = {
-  shell: { label: 'Daily Seashell', value: d => d.shell },
-  tasks: { label: 'Hunting tasks', value: d => d.tasks },
-  playCount: { label: 'Total runs', value: d => d.playCount },
-  perfectCreatures: { label: 'Perfect Creatures', value: d => d.perfectMonsters },
+const CYCLOPEDIA_PROFILE_VALUE = {
+  shell: { value: d => d.shell },
+  tasks: { value: d => d.tasks },
+  playCount: { value: d => d.playCount },
+  perfectCreatures: { value: d => d.perfectMonsters },
   shinyCreatures: {
-    label: 'Shiny Creatures',
     value: (d) => {
       const ctx = globalThis.state?.player?.getSnapshot?.()?.context;
       if (d?.name && ctx?.name && d.name === ctx.name && Array.isArray(ctx.monsters)) {
@@ -18827,19 +18537,19 @@ const CYCLOPEDIA_TRANSLATION = {
       return null;
     }
   },
-  bisEquipments: { label: 'BIS Equipments', value: d => d.bisEquips },
-  raids: { label: 'Completed raids', value: d => d.raids },
-  exploredMaps: { label: 'Explored maps', value: d => d.maps },
-  bagOutfits: { label: 'Bag Outfits', value: d => d.ownedOutfits },
-  rankPoints: { label: 'Rank points', value: d => d.rankPoints },
-  timeSum: { label: 'Time sum', value: d => d.ticks },
-  floorsSum: { label: 'Floors sum', value: d => d.floors },
-  createdAt: { label: 'Created at', value: d => FormatUtils.date(d.createdAt) },
-  level: { label: 'Level', value: d => (typeof d.exp === 'number' ? Math.floor(d.exp / 400) + 1 : '?') },
-  xp: { label: 'XP', value: d => d.exp },
-  name: { label: 'Player', value: d => d.name },
-  premium: { label: 'Status', value: d => d.premium ? 'Premium' : 'Free' },
-  loyaltyPoints: { label: 'Loyalty Points', value: d => d.loyaltyPoints }
+  bisEquipments: { value: d => d.bisEquips },
+  raids: { value: d => d.raids },
+  exploredMaps: { value: d => d.maps },
+  bagOutfits: { value: d => d.ownedOutfits },
+  rankPoints: { value: d => d.rankPoints },
+  timeSum: { value: d => d.ticks },
+  floorsSum: { value: d => d.floors },
+  createdAt: { value: d => FormatUtils.date(d.createdAt) },
+  level: { value: d => (typeof d.exp === 'number' ? Math.floor(d.exp / 400) + 1 : '?') },
+  xp: { value: d => d.exp },
+  name: { value: d => d.name },
+  premium: { value: d => (d.premium ? CYCLOPEDIA_UI.statusPremium : CYCLOPEDIA_UI.statusFree) },
+  loyaltyPoints: { value: d => d.loyaltyPoints }
 };
 
   if (!DOMCache.get('#cyclopedia-maxed-style')) {
@@ -18855,13 +18565,13 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
     if (profileData && profileData.json) profileData = profileData.json;
     if (!profileData) {
       const div = document.createElement('div');
-      div.innerHTML = `<span style="color: #ff6b6b;">${cyclopediaT('mods.cyclopedia.startpage.noProfileData')}</span>`;
+      div.innerHTML = `<span style="color: #ff6b6b;">${CYCLOPEDIA_UI.noProfileData}</span>`;
       return div;
     }
 
   function getProfileValue(key) {
-    if (CYCLOPEDIA_TRANSLATION[key] && typeof CYCLOPEDIA_TRANSLATION[key].value === 'function') {
-      return CYCLOPEDIA_TRANSLATION[key].value(profileData);
+    if (CYCLOPEDIA_PROFILE_VALUE[key] && typeof CYCLOPEDIA_PROFILE_VALUE[key].value === 'function') {
+      return CYCLOPEDIA_PROFILE_VALUE[key].value(profileData);
     }
     return profileData[key] !== undefined ? profileData[key] : '-';
   }
@@ -18928,14 +18638,14 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   infoBox.style.marginBottom = '0';
   if (compact) infoBox.style.marginTop = '0';
   const infoIcon = document.createElement('img');
-  infoIcon.alt = cyclopediaT('mods.cyclopedia.startpage.accountAlt');
+  infoIcon.alt = CYCLOPEDIA_UI.accountAlt;
   infoIcon.src = '/assets/icons/migrate.png';
   infoIcon.className = 'pixelated inline-block translate-y-px';
   infoIcon.width = 13;
   infoIcon.height = 13;
   infoBox.appendChild(infoIcon);
   const infoTitle = document.createElement('span');
-  infoTitle.textContent = cyclopediaT('mods.cyclopedia.startpage.playerInformation');
+  infoTitle.textContent = CYCLOPEDIA_UI.playerInformation;
   infoBox.appendChild(infoTitle);
   container.appendChild(infoBox);
 
@@ -18949,7 +18659,7 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   avatarWrap.className = 'relative z-1 h-sprite w-sprite';
   const avatarImg = document.createElement('img');
   avatarImg.src = 'https://bestiaryarena.com/assets/logo.png';
-  avatarImg.alt = cyclopediaT('mods.cyclopedia.startpage.playerIconAlt');
+  avatarImg.alt = CYCLOPEDIA_UI.playerIconAlt;
   const avatarSize = compact ? 28 : 32;
   avatarImg.width = avatarSize;
   avatarImg.height = avatarSize;
@@ -18965,14 +18675,14 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   nameCol.className = 'truncate pb-px pr-0.5';
   const nameP = document.createElement('p');
   nameP.className = 'line-clamp-1 text-whiteExp animate-in fade-in';
-  nameP.textContent = getProfileValue('name') || cyclopediaT('mods.cyclopedia.startpage.playerFallback');
+  nameP.textContent = getProfileValue('name') || CYCLOPEDIA_UI.playerFallback;
   nameCol.appendChild(nameP);
   const levelRow = document.createElement('div');
   levelRow.className = 'flex justify-between gap-2';
       levelRow.title = FormatUtils.number(getProfileValue('xp')) + ' exp';
   const levelLabel = document.createElement('span');
   levelLabel.className = 'pixel-font-14 text-whiteRegular';
-  levelLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.level');
+  levelLabel.textContent = CYCLOPEDIA_UI.level;
   const levelValue = document.createElement('span');
   levelValue.className = 'text-whiteExp animate-in fade-in';
       levelValue.textContent = FormatUtils.number(getProfileValue('level'));
@@ -19007,8 +18717,8 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   grid2.className = 'grid grid-cols-3 gap-1';
   const createdDiv = document.createElement('div');
   const createdLabel = document.createElement('div');
-  createdLabel.className = 'pixel-font-14';
-  createdLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.stats.createdAt');
+  createdLabel.className = FONT_CONSTANTS.SIZES.SMALL;
+  createdLabel.textContent = CYCLOPEDIA_UI.stats.createdAt;
   const createdValue = document.createElement('div');
   createdValue.className = 'text-whiteHighlight';
   createdValue.textContent = getProfileValue('createdAt');
@@ -19018,14 +18728,14 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   grid2.appendChild(createdDiv);
   const statusDiv = document.createElement('div');
   const statusLabel = document.createElement('div');
-  statusLabel.className = 'pixel-font-14';
-  statusLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.stats.premium');
+  statusLabel.className = FONT_CONSTANTS.SIZES.SMALL;
+  statusLabel.textContent = CYCLOPEDIA_UI.stats.premium;
   const statusGrid = document.createElement('div');
   statusGrid.className = 'grid grid-cols-[min-content_1fr] gap-1 text-whiteHighlight';
   const statusIconWrap = document.createElement('div');
   statusIconWrap.className = 'relative h-full w-[22px]';
   const statusIcon = document.createElement('img');
-  statusIcon.alt = cyclopediaT('mods.cyclopedia.startpage.premiumPassAlt');
+  statusIcon.alt = CYCLOPEDIA_UI.premiumPassAlt;
   statusIcon.src = profileData.premium ? '/assets/icons/premium-yes.png' : '/assets/icons/premium-no.png';
   statusIcon.className = 'pixelated absolute -bottom-0.5 left-0';
   statusIcon.width = 22;
@@ -19034,7 +18744,7 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   statusGrid.appendChild(statusIconWrap);
   const statusText = document.createElement('span');
   statusText.className = profileData.premium ? 'text-ally' : 'text-villain';
-  statusText.textContent = profileData.premium ? cyclopediaT('mods.cyclopedia.startpage.statusPremium') : cyclopediaT('mods.cyclopedia.startpage.statusFree');
+  statusText.textContent = profileData.premium ? CYCLOPEDIA_UI.statusPremium : CYCLOPEDIA_UI.statusFree;
   statusGrid.appendChild(statusText);
   statusDiv.appendChild(statusLabel);
   statusDiv.appendChild(statusGrid);
@@ -19042,8 +18752,8 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   grid2.appendChild(statusDiv);
   const loyaltyDiv = document.createElement('div');
   const loyaltyLabel = document.createElement('div');
-  loyaltyLabel.className = 'pixel-font-14';
-  loyaltyLabel.textContent = cyclopediaT('mods.cyclopedia.startpage.loyaltyPoints');
+  loyaltyLabel.className = FONT_CONSTANTS.SIZES.SMALL;
+  loyaltyLabel.textContent = CYCLOPEDIA_UI.loyaltyPoints;
   const loyaltyValue = document.createElement('div');
   loyaltyValue.className = 'text-whiteHighlight';
   let loyaltyPoints = getProfileValue('loyaltyPoints');
@@ -19063,30 +18773,30 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   const statsBox = document.createElement('div');
   statsBox.className = 'widget-top widget-top-text flex items-center gap-1 whitespace-nowrap';
   const statsIcon = document.createElement('img');
-  statsIcon.alt = cyclopediaT('mods.cyclopedia.startpage.accountAlt');
+  statsIcon.alt = CYCLOPEDIA_UI.accountAlt;
   statsIcon.src = '/assets/icons/progress.png';
   statsIcon.className = 'pixelated inline-block translate-y-px';
   statsIcon.width = 12;
   statsIcon.height = 12;
   statsBox.appendChild(statsIcon);
   const statsTitle = document.createElement('span');
-  statsTitle.textContent = cyclopediaT('mods.cyclopedia.startpage.playerStats');
+  statsTitle.textContent = CYCLOPEDIA_UI.playerStats;
   statsBox.appendChild(statsTitle);
   container.appendChild(statsBox);
 
   const statsTableWrap = document.createElement('div');
   statsTableWrap.className = 'widget-bottom';
   const statsTable = document.createElement('table');
-  statsTable.className = (compact ? 'pixel-font-14' : 'pixel-font-16') + ' frame-pressed-1 w-full caption-bottom border-separate border-spacing-0 text-whiteRegular';
+  statsTable.className = (compact ? FONT_CONSTANTS.SIZES.SMALL : FONT_CONSTANTS.SIZES.BODY) + ' frame-pressed-1 w-full caption-bottom border-separate border-spacing-0 text-whiteRegular';
   const tbody = document.createElement('tbody');
   if (!compact) tbody.className = 'whitespace-nowrap';
 
-  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.currentTotal'), highlight: true, colspan: 2 });
-  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.stats.shell'), icon: '/assets/icons/shell-count.png', value: (getProfileValue('shell') !== undefined ? FormatUtils.number(getProfileValue('shell')) + 'x' : '-') });
-  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.stats.tasks'), icon: '/assets/icons/task-count.png', value: (getProfileValue('tasks') !== undefined ? FormatUtils.number(getProfileValue('tasks')) + 'x' : '-') });
-  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.stats.playCount'), icon: '/assets/icons/match-count.png', value: (getProfileValue('playCount') !== undefined ? FormatUtils.number(getProfileValue('playCount')) + 'x' : '-') });
+  addRow({ label: CYCLOPEDIA_UI.currentTotal, highlight: true, colspan: 2 });
+  addRow({ label: CYCLOPEDIA_UI.stats.shell, icon: '/assets/icons/shell-count.png', value: (getProfileValue('shell') !== undefined ? FormatUtils.number(getProfileValue('shell')) + 'x' : '-') });
+  addRow({ label: CYCLOPEDIA_UI.stats.tasks, icon: '/assets/icons/task-count.png', value: (getProfileValue('tasks') !== undefined ? FormatUtils.number(getProfileValue('tasks')) + 'x' : '-') });
+  addRow({ label: CYCLOPEDIA_UI.stats.playCount, icon: '/assets/icons/match-count.png', value: (getProfileValue('playCount') !== undefined ? FormatUtils.number(getProfileValue('playCount')) + 'x' : '-') });
 
-  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.progress'), highlight: true, colspan: 2 });
+  addRow({ label: CYCLOPEDIA_UI.progress, highlight: true, colspan: 2 });
   const progressStats = showShinyCreatures
     ? CYCLOPEDIA_PROGRESS_STATS
     : CYCLOPEDIA_PROGRESS_STATS.filter((stat) => stat.key !== 'shinyCreatures');
@@ -19099,16 +18809,16 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
       ? `-/${maxVal}`
       : `${FormatUtils.number(val)}/${maxVal}`;
     addRow({
-      label: cyclopediaT('mods.cyclopedia.startpage.stats.' + stat.key),
+      label: CYCLOPEDIA_UI.stats[stat.key] ?? stat.key,
       icon: stat.icon,
       value: valueStr,
       valueClass: isMax ? 'stat-maxed' : undefined
     });
   });
 
-  addRow({ label: cyclopediaT('mods.cyclopedia.startpage.rankings'), highlight: true, colspan: 2 });
+  addRow({ label: CYCLOPEDIA_UI.rankings, highlight: true, colspan: 2 });
   addRow({
-    label: cyclopediaT('mods.cyclopedia.startpage.stats.rankPoints'),
+    label: CYCLOPEDIA_UI.stats.rankPoints,
     icon: '/assets/icons/star-tier.png',
     rankingKey: 'rankPoints',
     value: (() => {
@@ -19119,7 +18829,7 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
     extraIcon: { alt: 'Highscore', src: '/assets/icons/highscore.png' }
   });
   addRow({
-    label: cyclopediaT('mods.cyclopedia.startpage.stats.timeSum'),
+    label: CYCLOPEDIA_UI.stats.timeSum,
     icon: '/assets/icons/speed.png',
     rankingKey: 'timeSum',
     value: (() => {
@@ -19130,7 +18840,7 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
     extraIcon: { alt: 'Highscore', src: '/assets/icons/highscore.png' }
   });
   addRow({
-    label: cyclopediaT('mods.cyclopedia.startpage.stats.floorsSum'),
+    label: CYCLOPEDIA_UI.stats.floorsSum,
     icon: '/assets/UI/floor-15.png',
     iconConfig: { width: 14, height: 7, className: 'pixelated -ml-px mr-0.5 inline-block -translate-y-0.5' },
     rankingKey: 'floorsSum',
@@ -19150,7 +18860,7 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
     const fallbackDiv = document.createElement('div');
     fallbackDiv.style.padding = '24px';
     fallbackDiv.style.color = '#ff6b6b';
-    fallbackDiv.textContent = cyclopediaT('mods.cyclopedia.startpage.noProfileData');
+    fallbackDiv.textContent = CYCLOPEDIA_UI.noProfileData;
     return fallbackDiv;
   }
 }
@@ -19202,7 +18912,7 @@ function renderYasirBox(yasir, utils, msUntilNextEpochDay, formatTime) {
   yasirTitle.textContent = 'Yasir';
 
   const yasirLocP = document.createElement('p');
-  yasirLocP.className = 'pixel-font-14';
+  yasirLocP.className = FONT_CONSTANTS.SIZES.SMALL;
   yasirLocP.textContent = 'Current location: ';
   const yasirLocSpan = document.createElement('span');
   yasirLocSpan.className = 'focus-within:focused-highlight whitespace-nowrap';

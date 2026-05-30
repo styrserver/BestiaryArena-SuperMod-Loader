@@ -33,7 +33,6 @@ heroEditorButton = api.ui.addButton({
   id: 'hero-editor-button',
   text: t('mods.heroEditor.buttonText'),
   tooltip: t('mods.heroEditor.buttonTooltip'),
-  icon: '✏️',
   primary: false,
   onClick: showHeroEditorModal
 });

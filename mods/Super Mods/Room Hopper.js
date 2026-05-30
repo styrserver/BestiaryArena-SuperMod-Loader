@@ -24,21 +24,18 @@ const MOD_ID = 'room-hopper';
 const BUTTON_ID = `${MOD_ID}-button`;
 const MODAL_ID = `${MOD_ID}-modal`;
 
-const REGION_NAME_MAP = {
-    rook: 'Rookgaard',
-    carlin: 'Carlin',
-    folda: 'Folda',
-    abdendriel: "Ab'Dendriel",
-    kazordoon: 'Kazordoon',
-    venore: 'Venore'
-};
-
 function resolveRegionName(regionId) {
     if (!regionId) return 'Unknown';
-    if (REGION_NAME_MAP[regionId]) return REGION_NAME_MAP[regionId];
-    // Fallback to state.utils.regionIdsToNames if available
-    const fromGame = globalThis.state?.utils?.regionIdsToNames?.[regionId];
-    return fromGame || regionId;
+    if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
+        return globalThis.mapsDatabase.getRegionDisplayName(regionId);
+    }
+    const fromGame = globalThis.state?.utils?.REGION_NAME?.[regionId]
+        || globalThis.state?.utils?.regionIdsToNames?.[regionId];
+    if (fromGame) return fromGame;
+    const key = String(regionId).toLowerCase();
+    const mapped = globalThis.mapsDatabase?.REGION_NAME_MAP?.[key];
+    if (mapped) return mapped;
+    return String(regionId).replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
 }
 
 // ============================================================================

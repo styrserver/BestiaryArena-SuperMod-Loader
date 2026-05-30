@@ -837,12 +837,22 @@ function updateMainButtonSealedWarning() {
     const currentFloor = getCurrentFloor();
     const showWarning = (Boolean(config.enableAutoSellCreatures) || Boolean(config.enableAutoInjectSealedCreatures)) && currentFloor >= 11;
     const baseText = t('mods.manualRunner.buttonText') || 'Manual Runner';
-
-    button.textContent = showWarning ? `${baseText} ⚠` : baseText;
-    button.style.color = showWarning ? '#e74c3c' : '#ffe066';
-    button.title = showWarning
+    const displayText = showWarning ? `${baseText} ⚠` : baseText;
+    const tooltip = showWarning
       ? 'Autosell or auto-inject is enabled on floor 11+ (sealed creatures may be affected)'
       : (t('mods.manualRunner.buttonTooltip') || 'Run manual mode until victory (restarts on defeat)');
+
+    if (typeof api !== 'undefined' && api?.ui?.updateButton) {
+      api.ui.updateButton(BUTTON_ID, { text: displayText, tooltip });
+    } else {
+      button.textContent = displayText;
+      button.title = tooltip;
+    }
+
+    const updatedButton = document.getElementById(BUTTON_ID);
+    if (updatedButton) {
+      updatedButton.style.color = showWarning ? '#e74c3c' : '#ffe066';
+    }
   } catch (error) {
     console.warn('[Manual Runner] Error updating main button warning:', error);
   }
@@ -4537,6 +4547,7 @@ function init() {
   api.ui.addButton({
     id: BUTTON_ID,
     text: t('mods.manualRunner.buttonText'),
+    icon: '🏃',
     modId: MOD_ID,
     tooltip: t('mods.manualRunner.buttonTooltip'),
     primary: false,

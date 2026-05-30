@@ -69,9 +69,38 @@ function creatureHasShinyVariant(creatureName) {
   return true;
 }
 
+/** Creatures hidden from Cyclopedia lists only (still in game data). */
+const CYCLOPEDIA_HIDDEN_CREATURES = ['Tentugly', 'Dwarf Henchman'];
+
+/** Hardcoded stats for unobtainable creatures that differ on maps. Keys are lowercase names. */
+const HARDCODED_MAP_MONSTER_STATS = {
+  'old giant spider': { baseStats: { hp: 1140, ad: 108, ap: 30, armor: 30, magicResist: 30 }, level: 300 },
+  'willi wasp': { baseStats: { hp: 924, ad: 0, ap: 0, armor: 26, magicResist: 45 }, level: 100 },
+  'black knight': { baseStats: { hp: 4800, ad: 66, ap: 0, armor: 975, magicResist: 975 }, level: 300 },
+  'dharalion': { baseStats: { hp: 2200, ad: 33, ap: 25, armor: 60, magicResist: 66 }, level: 200 },
+  'dead tree': { baseStats: { hp: 7000, ad: 0, ap: 0, armor: 700, magicResist: 700 }, level: 100 },
+  'earth crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
+  'energy crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 150, magicResist: 30 }, level: 50 },
+  'magma crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
+  'regeneration tank': { baseStats: { hp: 8352, ad: 0, ap: 0, armor: 126, magicResist: 696 }, level: 99 },
+  'monster cauldron': { baseStats: { hp: 1114, ad: 92, ap: 112, armor: 45, magicResist: 42 }, level: 99 },
+  'grynch clan mastermind': { baseStats: { hp: 220, ad: 0, ap: 0, armor: 66, magicResist: 66 }, level: 200 }
+};
+
+/** Stat bar display config for creature wiki templates. */
+const MONSTER_STAT_DISPLAY_CONFIG = [
+  { key: 'hp', label: 'Hitpoints', icon: '/assets/icons/heal.png', max: 1000, barColor: 'rgb(96, 192, 96)' },
+  { key: 'ad', label: 'Attack Damage', icon: '/assets/icons/attackdamage.png', max: 110, barColor: 'rgb(255, 128, 96)' },
+  { key: 'ap', label: 'Ability Power', icon: '/assets/icons/abilitypower.png', max: 90, barColor: 'rgb(128, 128, 255)' },
+  { key: 'armor', label: 'Armor', icon: '/assets/icons/armor.png', max: 60, barColor: 'rgb(224, 224, 128)' },
+  { key: 'magicResist', label: 'Magic Resist', icon: '/assets/icons/magicresist.png', max: 60, barColor: 'rgb(192, 128, 255)' },
+  { key: 'speed', label: 'Speed', icon: '/assets/icons/speed.png', max: 200, barColor: 'rgb(255, 200, 100)' }
+];
+
 function getCyclopediaCreatureNames(obtainableCreatures) {
   const base = Array.isArray(obtainableCreatures) ? obtainableCreatures : [];
-  return [...new Set([...base, ...CYCLOPEDIA_EXTRA_CREATURES])].sort((a, b) => a.localeCompare(b));
+  const filtered = base.filter((name) => !CYCLOPEDIA_HIDDEN_CREATURES.includes(name));
+  return [...new Set([...filtered, ...CYCLOPEDIA_EXTRA_CREATURES])].sort((a, b) => a.localeCompare(b));
 }
 
 /** Same list as Cyclopedia bestiary — use for creature pickers across mods. */
@@ -263,8 +292,71 @@ function getMonsterPortraitUrls(monsterId) {
 }
 
 function findMonsterByGameId(gameId) {
+  const id = Number(gameId);
+  const map = getMonsterNameMap();
+  for (const entry of map.values()) {
+    const entryId = entry.gameId ?? entry.index;
+    if (entryId === id && entry.monster) {
+      return { gameId: entryId, ...entry.monster };
+    }
+  }
+  return findMonsterByGameIdUncached(gameId);
+}
+
+function findMonsterByGameIdUncached(gameId) {
   const allMonsters = getAllMonsters();
-  return allMonsters.find(monster => monster.gameId === gameId);
+  return allMonsters.find((monster) => monster.gameId === gameId);
+}
+
+let monsterNameMapCache = null;
+
+/** Cached lowercase name → { monster, gameId, index } for O(1) lookups. */
+function getMonsterNameMap() {
+  if (monsterNameMapCache) return monsterNameMapCache;
+
+  monsterNameMapCache = new Map();
+  const state = globalThis.state || window.state;
+  if (!state?.utils?.getMonster) return monsterNameMapCache;
+
+  const maxSearchId = 1000;
+  const maxConsecutiveFailures = 10;
+  let maxId = 200;
+  let consecutiveFailures = 0;
+
+  try {
+    for (let i = 1; i < maxSearchId; i++) {
+      try {
+        const monster = state.utils.getMonster(i);
+        if (!monster?.metadata?.name) {
+          if (++consecutiveFailures >= maxConsecutiveFailures) {
+            maxId = Math.max(1, i - maxConsecutiveFailures);
+            break;
+          }
+        } else {
+          consecutiveFailures = 0;
+          maxId = i;
+        }
+      } catch (error) {
+        if (++consecutiveFailures >= maxConsecutiveFailures) {
+          maxId = Math.max(1, i - maxConsecutiveFailures);
+          break;
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('[creature-database.js] Error probing monster ids:', error);
+  }
+
+  for (let i = 1; i <= maxId; i++) {
+    try {
+      const monster = state.utils.getMonster(i);
+      if (monster?.metadata?.name) {
+        monsterNameMapCache.set(monster.metadata.name.toLowerCase(), { monster, gameId: i, index: i });
+      }
+    } catch (error) { /* skip */ }
+  }
+
+  return monsterNameMapCache;
 }
 
 function findMonsterByName(name) {
@@ -272,8 +364,12 @@ function findMonsterByName(name) {
   if (alias) {
     return findMonsterByGameId(alias.gameId);
   }
+  const entry = getMonsterNameMap().get(String(name).toLowerCase());
+  if (entry?.monster) {
+    return { gameId: entry.gameId ?? entry.index, ...entry.monster };
+  }
   const allMonsters = getAllMonsters();
-  return allMonsters.find(monster =>
+  return allMonsters.find((monster) =>
     monster.metadata?.name?.toLowerCase() === String(name).toLowerCase()
   );
 }
@@ -330,6 +426,10 @@ function initializeDatabase() {
   creatureDatabase.getDisplayNameForOwnedMonster = getDisplayNameForOwnedMonster;
   creatureDatabase.monsterMatchesCreatureDisplay = monsterMatchesCreatureDisplay;
   creatureDatabase.CYCLOPEDIA_EXTRA_CREATURES = CYCLOPEDIA_EXTRA_CREATURES;
+  creatureDatabase.CYCLOPEDIA_HIDDEN_CREATURES = CYCLOPEDIA_HIDDEN_CREATURES;
+  creatureDatabase.HARDCODED_MAP_MONSTER_STATS = HARDCODED_MAP_MONSTER_STATS;
+  creatureDatabase.MONSTER_STAT_DISPLAY_CONFIG = MONSTER_STAT_DISPLAY_CONFIG;
+  creatureDatabase.getMonsterNameMap = getMonsterNameMap;
   
   databaseInitialized = true;
   return creatureDatabase;
@@ -340,9 +440,13 @@ const placeholderDatabase = {
   UNOBTAINABLE_CREATURES: [],
   NON_AWAKENABLE_CREATURES: [],
   CYCLOPEDIA_EXTRA_CREATURES,
+  CYCLOPEDIA_HIDDEN_CREATURES,
+  HARDCODED_MAP_MONSTER_STATS,
+  MONSTER_STAT_DISPLAY_CONFIG,
   MYSTIC_GAZER_GAME_ID,
   SHINY_ALIAS_CREATURES,
   getCyclopediaCreatureNames: () => getCyclopediaCreatureNames([]),
+  getMonsterNameMap,
   resolveCreatureDisplay,
   creatureHasShinyVariant,
   filterMonstersForCreatureDisplay,
@@ -353,6 +457,10 @@ const placeholderDatabase = {
   isGazerCreatureName,
   getDisplayNameForOwnedMonster,
   monsterMatchesCreatureDisplay,
+  CYCLOPEDIA_HIDDEN_CREATURES,
+  HARDCODED_MAP_MONSTER_STATS,
+  MONSTER_STAT_DISPLAY_CONFIG,
+  getMonsterNameMap,
   getMonsterPortraitUrl: getMonsterPortraitUrl,
   getMonsterPortraitUrls: getMonsterPortraitUrls,
   findMonsterByGameId: function(gameId) {
@@ -409,6 +517,10 @@ waitForGameState(() => {
     globalWindow.creatureDatabase.isGazerCreatureName = isGazerCreatureName;
     globalWindow.creatureDatabase.getDisplayNameForOwnedMonster = getDisplayNameForOwnedMonster;
     globalWindow.creatureDatabase.monsterMatchesCreatureDisplay = monsterMatchesCreatureDisplay;
+    globalWindow.creatureDatabase.CYCLOPEDIA_HIDDEN_CREATURES = CYCLOPEDIA_HIDDEN_CREATURES;
+    globalWindow.creatureDatabase.HARDCODED_MAP_MONSTER_STATS = HARDCODED_MAP_MONSTER_STATS;
+    globalWindow.creatureDatabase.MONSTER_STAT_DISPLAY_CONFIG = MONSTER_STAT_DISPLAY_CONFIG;
+    globalWindow.creatureDatabase.getMonsterNameMap = getMonsterNameMap;
     globalWindow.creatureDatabase.findMonsterByGameId = findMonsterByGameId;
     globalWindow.creatureDatabase.findMonsterByName = findMonsterByName;
     globalWindow.creatureDatabase.getAllMonstersWithPortraits = getAllMonsters;
