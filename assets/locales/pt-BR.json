@@ -270,6 +270,9 @@
       "refreshOnMismatch": "⚠️ Atualizar em Incompatibilidade",
       "refreshOnMismatchTooltip": "Atualiza automaticamente o navegador quando uma incompatibilidade servidor/simulação é detectada",
       "inventoryBorderStyle": "Botões de Mod do Inventário",
+      "modButtonDisplay": "Rótulos dos botões da barra de mods:",
+      "modButtonDisplayText": "Texto",
+      "modButtonDisplayIcon": "Ícones",
       "betterHighscoresBackgroundOpacity": "Opacidade do Fundo do Better Highscores",
       "betterHighscoresButton": "Recordes",
       "showBetterHighscoresButton": "Mostrar Botão de Recordes",
@@ -418,6 +421,7 @@
       "madeWithHelp": "Feito com a ajuda de {link}"
     },
     "teamCopier": {
+      "buttonText": "Copiador de Equipe",
       "buttonTooltip": "Copiador de Equipe",
       "successMessage": "Configuração copiada!",
       "errorMessage": "Erro ao copiar configuração",
@@ -468,6 +472,7 @@
     "tickTracker": {
       "buttonText": "Rastreador de Ticks",
       "buttonTooltip": "Ativar/desativar rastreamento de ticks",
+      "configButtonText": "Configurações do Rastreador",
       "configButtonTooltip": "Configurações do Rastreador",
       "configTitle": "Configurações do Rastreador de Ticks",
       "enabledLabel": "Ativar rastreamento de ticks",
@@ -699,7 +704,7 @@
       "buttonTooltip": "Mostrar tier list de uso de itens"
     },
     "heroEditor": {
-      "buttonText": "Editar Heróis",
+      "buttonText": "Editor de Heróis",
       "buttonTooltip": "Editar stats e equipamentos de heróis"
     },
     "huntAnalyzer": {
@@ -1392,74 +1397,6 @@
       "noMatchingRules": "Nenhuma regra de configuração correspondente",
       "equipmentNotFound": "Equipamento não encontrado",
       "errorCheckingEquipment": "Erro ao verificar equipamento"
-    },
-    "cyclopedia": {
-      "startpage": {
-        "loadingTitle": "Carregando Enciclopédia...",
-        "loadingSubtitle": "Buscando dados do seu perfil",
-        "errorTitle": "Falha ao Carregar Dados do Perfil",
-        "retry": "Tentar novamente",
-        "errorAbort": "A solicitação expirou. Verifique sua conexão com a internet e tente novamente.",
-        "errorPlayerName": "Nome do jogador não disponível. Certifique-se de estar logado no jogo.",
-        "errorHttp": "Falha ao buscar dados do perfil. Tente novamente.",
-        "errorUnexpected": "Ocorreu um erro inesperado ao carregar os dados do perfil.",
-        "welcome": "Bem-vindo!",
-        "welcomeName": "Bem-vindo, {name}!",
-        "seasonStatsTitle": "Estatísticas da temporada",
-        "seasonStatsSeason": "Temporada {n}",
-        "seasonStatsTicks": "Ticks",
-        "seasonStatsRank": "Rank",
-        "seasonStatsFloors": "Andares",
-        "viewFullSeasonsLeaderboard": "Ver a classificação completa das temporadas",
-        "notAvailable": "N/A",
-        "seasonToggle1": "Temporada 1",
-        "seasonToggle2": "Temporada 2",
-        "welcomeFallback": "Bem-vindo à Enciclopédia!",
-        "searchTitle": "Buscar",
-        "searchPlaceholder": "Buscar na Enciclopédia",
-        "searchTooltip": "Busca na Enciclopédia:\n• Encontre: criaturas, equipamentos, mapas, regiões, inventário, habilidades\n• Nomes, funções, spawns, drops e mapas com boost de equipamento\n• Texto de habilidades e efeitos de equipamento (ex.: stun)\n• Correspondência exata: \"Goblin\" (não Hobgoblin)\n• Combine: goblin OR demon, \"Fire Axe\" AND stun\n• Operadores: AND, OR (com espaços, sem distinção de maiúsculas)\n• Use o filtro de tipo para restringir resultados",
-        "results": "Resultados",
-        "emptyStateMinChars": "Digite pelo menos 2 caracteres para buscar.",
-        "indexingAbility": "Indexando texto de habilidades... Os resultados aparecerão em breve.",
-        "noResults": "Nenhum resultado encontrado.",
-        "resultBadge": "Resultado",
-        "noProfileData": "Nenhum dado de perfil encontrado.",
-        "playerInformation": "Informações do jogador",
-        "accountAlt": "Conta",
-        "playerFallback": "Jogador",
-        "level": "Nível",
-        "loyaltyPoints": "Pontos de Fidelidade",
-        "playerStats": "Estatísticas do jogador",
-        "currentTotal": "Total atual",
-        "progress": "Progresso",
-        "rankings": "Rankings",
-        "premiumPassAlt": "Passe premium",
-        "playerIconAlt": "Ícone do jogador",
-        "statusPremium": "Premium",
-        "statusFree": "Grátis",
-        "stats": {
-          "shell": "Concha diária",
-          "tasks": "Tarefas de caça",
-          "playCount": "Total de partidas",
-          "perfectCreatures": "Criaturas perfeitas",
-          "shinyCreatures": "Criaturas shiny",
-          "bisEquipments": "Equipamentos BIS",
-          "raids": "Raids concluídas",
-          "exploredMaps": "Mapas explorados",
-          "bagOutfits": "Roupas na bolsa",
-          "rankPoints": "Pontos de rank",
-          "timeSum": "Soma de tempo",
-          "floorsSum": "Soma de andares",
-          "createdAt": "Criado em",
-          "xp": "XP",
-          "name": "Jogador",
-          "premium": "Status"
-        }
-      },
-      "maps": {
-        "statisticsSeason": "Estatísticas temporada {n}",
-        "regionStatisticsSeason": "{region} · Temporada {n}"
-      }
     },
     "quests": {
       "modalTitle": "Itens de Missão",

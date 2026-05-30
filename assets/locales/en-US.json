@@ -270,6 +270,9 @@
       "refreshOnMismatch": "⚠️ Refresh on Mismatch",
       "refreshOnMismatchTooltip": "Automatically refresh the browser when a server/simulation mismatch is detected",
       "inventoryBorderStyle": "Inventory Mod Buttons",
+      "modButtonDisplay": "Mod bar button labels:",
+      "modButtonDisplayText": "Text",
+      "modButtonDisplayIcon": "Icons",
       "betterHighscoresBackgroundOpacity": "Better Highscores Background Opacity",
       "betterHighscoresButton": "Highscores",
       "showBetterHighscoresButton": "Show Highscores Button",
@@ -418,6 +421,7 @@
       "madeWithHelp": "Made with the help of {link}"
     },
     "teamCopier": {
+      "buttonText": "Team Copier",
       "buttonTooltip": "Team Copier",
       "successMessage": "Team setup copied!",
       "errorMessage": "Error copying team setup",
@@ -468,6 +472,7 @@
     "tickTracker": {
       "buttonText": "Tick Tracker",
       "buttonTooltip": "Toggle tick tracking",
+      "configButtonText": "Tick Tracker Settings",
       "configButtonTooltip": "Tick Tracker Settings",
       "configTitle": "Tick Tracker Settings",
       "enabledLabel": "Enable tick tracking",
@@ -700,7 +705,7 @@
       "buttonTooltip": "Show item usage tier list"
     },
     "heroEditor": {
-      "buttonText": "Edit Heroes",
+      "buttonText": "Hero Editor",
       "buttonTooltip": "Edit hero stats and equipment"
     },
     "huntAnalyzer": {
@@ -1391,74 +1396,6 @@
       "noMatchingRules": "No matching setup rules",
       "equipmentNotFound": "Equipment not found",
       "errorCheckingEquipment": "Error checking equipment"
-    },
-    "cyclopedia": {
-      "startpage": {
-        "loadingTitle": "Loading Cyclopedia...",
-        "loadingSubtitle": "Fetching your profile data",
-        "errorTitle": "Failed to Load Profile Data",
-        "retry": "Retry",
-        "errorAbort": "Request timed out. Please check your internet connection and try again.",
-        "errorPlayerName": "Player name not available. Please ensure you are logged into the game.",
-        "errorHttp": "Failed to fetch profile data. Please try again.",
-        "errorUnexpected": "An unexpected error occurred while loading the profile data.",
-        "welcome": "Welcome!",
-        "welcomeName": "Welcome {name}!",
-        "seasonStatsTitle": "Season stats",
-        "seasonStatsSeason": "Season {n}",
-        "seasonStatsTicks": "Ticks",
-        "seasonStatsRank": "Rank",
-        "seasonStatsFloors": "Floors",
-        "viewFullSeasonsLeaderboard": "View full seasons leaderboard",
-        "notAvailable": "N/A",
-        "seasonToggle1": "Season 1",
-        "seasonToggle2": "Season 2",
-        "welcomeFallback": "Welcome to Cyclopedia!",
-        "searchTitle": "Search",
-        "searchPlaceholder": "Search Cyclopedia",
-        "searchTooltip": "Cyclopedia search:\n• Find: creatures, equipment, maps, regions, inventory, abilities\n• Matches names, roles, map spawns, equipment drops & boosted maps\n• Ability and equipment effect text (e.g. stun)\n• Exact match: \"Goblin\" (not Hobgoblin)\n• Combine: goblin OR demon, \"Fire Axe\" AND stun\n• Operators: AND, OR (spaces required, case insensitive)\n• Use the type filter to narrow results",
-        "results": "Results",
-        "emptyStateMinChars": "Type at least 2 characters to search.",
-        "indexingAbility": "Indexing ability text... Results will appear shortly.",
-        "noResults": "No results found.",
-        "resultBadge": "Result",
-        "noProfileData": "No profile data found.",
-        "playerInformation": "Player information",
-        "accountAlt": "Account",
-        "playerFallback": "Player",
-        "level": "Level",
-        "loyaltyPoints": "Loyalty Points",
-        "playerStats": "Player stats",
-        "currentTotal": "Current total",
-        "progress": "Progress",
-        "rankings": "Rankings",
-        "premiumPassAlt": "Premium pass",
-        "playerIconAlt": "Player Icon",
-        "statusPremium": "Premium",
-        "statusFree": "Free",
-        "stats": {
-          "shell": "Daily Seashell",
-          "tasks": "Hunting tasks",
-          "playCount": "Total runs",
-          "perfectCreatures": "Perfect Creatures",
-          "shinyCreatures": "Shiny Creatures",
-          "bisEquipments": "BIS Equipments",
-          "raids": "Completed raids",
-          "exploredMaps": "Explored maps",
-          "bagOutfits": "Bag Outfits",
-          "rankPoints": "Rank points",
-          "timeSum": "Time sum",
-          "floorsSum": "Floors sum",
-          "createdAt": "Created at",
-          "xp": "XP",
-          "name": "Player",
-          "premium": "Status"
-        }
-      },
-      "maps": {
-        "statisticsSeason": "Statistics Season {n}",
-        "regionStatisticsSeason": "{region} · Season {n}"
-      }
     },
     "quests": {
       "modalTitle": "Quest Items",
