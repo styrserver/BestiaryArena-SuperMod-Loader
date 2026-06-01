@@ -115,7 +115,13 @@ function buildLocalRunReplayFields(run) {
   return fields;
 }
 
-const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDDLE: 300, RIGHT: 300 }, API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData', FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png' };
+const START_PAGE_CONFIG = {
+  API_TIMEOUT: 10000,
+  COLUMN_WIDTHS: { PROFILE: '35%', SEARCH: '65%' },
+  COLUMN_GAP: 10,
+  API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData',
+  FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png'
+};
 const inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
 const inventoryDatabase = (typeof window !== 'undefined' && window.inventoryDatabase) || {};
 
@@ -240,6 +246,7 @@ const CYCLOPEDIA_UI = {
   currentTotal: 'Current total',
   progress: 'Progress',
   rankings: 'Rankings',
+  rankingsSeason: (n) => `Rankings - Season ${n}`,
   premiumPassAlt: 'Premium pass',
   playerIconAlt: 'Player Icon',
   statusPremium: 'Premium',
@@ -3127,7 +3134,17 @@ const DOMUtils = {
   
   createColumn: function(width, content, extraStyles = {}) {
     const wrapper = document.createElement('div');
-    Object.assign(wrapper.style, { width: width + 'px', flex: `0 0 ${width}px`, display: 'flex', flexDirection: 'column', height: '100%', ...extraStyles });
+    const widthCss = typeof width === 'number' ? `${width}px` : String(width);
+    Object.assign(wrapper.style, {
+      width: widthCss,
+      flex: `0 0 ${widthCss}`,
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      minWidth: '0',
+      boxSizing: 'border-box',
+      ...extraStyles
+    });
     if (content) wrapper.appendChild(content);
     return wrapper;
   },
@@ -5835,7 +5852,7 @@ function createStartPageManager() {
       const container = document.createElement('div');
       Object.assign(container.style, {
         display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
-        padding: '20px 0px', boxSizing: 'border-box', overflowY: 'scroll'
+        padding: '10px', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'auto', minWidth: '0'
       });
       return container;
     }
@@ -5921,25 +5938,36 @@ function createStartPageManager() {
 
         this.container.innerHTML = '';
         
+        const { PROFILE, SEARCH } = START_PAGE_CONFIG.COLUMN_WIDTHS;
+        const columnGap = START_PAGE_CONFIG.COLUMN_GAP ?? 10;
+        const profileFr = parseFloat(PROFILE) || 35;
+        const searchFr = parseFloat(SEARCH) || 65;
         const mainFlexRow = document.createElement('div');
         Object.assign(mainFlexRow.style, {
-          display: 'flex', flexDirection: 'row', width: '900px', height: '100%',
-          margin: '0 auto', gap: '0', alignItems: 'center'
+          display: 'grid',
+          gridTemplateColumns: `${profileFr}fr ${searchFr}fr`,
+          width: '100%',
+          height: '100%',
+          margin: '0',
+          columnGap: `${columnGap}px`,
+          minWidth: '0',
+          boxSizing: 'border-box'
         });
-        
+
+      const startPageColStyles = { flex: 'none', width: '100%', minWidth: '0', overflow: 'hidden' };
+
       const leftCol = DOMUtils.createColumn(
-        START_PAGE_CONFIG.COLUMN_WIDTHS.LEFT,
+        '100%',
         renderCyclopediaProfileColumn(profileData),
-        { justifyContent: 'flex-start', alignItems: 'stretch', minHeight: '0', padding: '0 12px' }
+        { ...startPageColStyles, justifyContent: 'flex-start', alignItems: 'stretch', minHeight: '0', padding: '0', margin: '0' }
       );
         mainFlexRow.appendChild(leftCol);
-        
-      const searchColWidth = START_PAGE_CONFIG.COLUMN_WIDTHS.MIDDLE + START_PAGE_CONFIG.COLUMN_WIDTHS.RIGHT;
+
       const searchCol = DOMUtils.createColumn(
-        searchColWidth,
-        renderCyclopediaSearchColumn()
+        '100%',
+        renderCyclopediaSearchColumn(),
+        { ...startPageColStyles, justifyContent: 'stretch', alignItems: 'stretch', minHeight: '0', padding: '0', margin: '0' }
       );
-      Object.assign(searchCol.style, { justifyContent: 'center', padding: '0 12px' });
       mainFlexRow.appendChild(searchCol);
         
         this.container.appendChild(mainFlexRow);
@@ -6546,7 +6574,9 @@ function openCyclopediaModal(options) {
       const ownedEquipCol = document.createElement('div');
       Object.assign(ownedEquipCol.style, EQUIPMENT_STYLES.column, {
         flex: '1 1 0',
-        minWidth: '0'
+        minWidth: '0',
+        borderRight: 'none',
+        borderImage: 'none'
       });
       ownedEquipCol.classList.add('text-whiteHighlight');
 
@@ -7584,8 +7614,7 @@ function openCyclopediaModal(options) {
       const sharedScrollContainer = DOMUtils.createElement('div');
       sharedScrollContainer.style.cssText = `
         flex: 1 1 0; display: flex; flex-direction: row; height: 100%; overflow-y: auto;
-        border-right: 6px solid transparent;
-        border-image: url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch;
+        min-width: 0;
       `;
 
       const col2 = DOMUtils.createElement('div');
@@ -7627,6 +7656,27 @@ function openCyclopediaModal(options) {
       });
 
       const { col1, col2, col3, sharedScrollContainer } = createCharactersTabColumns();
+      const charactersColFrameBorder = {
+        borderRight: '6px solid transparent',
+        borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`
+      };
+
+      function applyCharactersSplitColumnLayout() {
+        col3.style.display = 'flex';
+        col2.style.flex = '1 1 0';
+        col2.style.maxWidth = '50%';
+        col2.style.borderRight = charactersColFrameBorder.borderRight;
+        col2.style.borderImage = charactersColFrameBorder.borderImage;
+      }
+
+      function applyCharactersRankingsColumnLayout() {
+        col3.style.display = 'none';
+        col2.style.flex = '1 1 0';
+        col2.style.maxWidth = '100%';
+        col2.style.borderRight = 'none';
+        col2.style.borderImage = 'none';
+      }
+
       const playerSearchBox = createPlayerSearchBox(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory);
 
       function showLoadingState(col2) {
@@ -7641,7 +7691,7 @@ function openCyclopediaModal(options) {
         const container = DOMUtils.createElement('div');
         Object.assign(container.style, {
           display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
-          padding: '20px', boxSizing: 'border-box', overflowY: 'auto'
+          padding: '20px', boxSizing: 'border-box', overflowY: 'hidden'
         });
 
         const patched = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
@@ -8049,6 +8099,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       }
 
       async function displayRankingsData(playerState) {
+        applyCharactersRankingsColumnLayout();
         try {
           let rankingsData = getCachedRankingsData();
           if (!rankingsData) {
@@ -10455,9 +10506,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               window.currentSpeedrunRankData = null;
               
               // Show col3 again and reset col2 styling
-              col3.style.display = 'flex';
-              col2.style.flex = '1 1 0';
-              col2.style.maxWidth = '50%';
+              applyCharactersSplitColumnLayout();
               
               // Simple, robust display of user stats
               displayUserStats('Player Information');
@@ -10652,9 +10701,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               }
               
               // Show col3 again and reset col2 styling
-              col3.style.display = 'flex';
-              col2.style.flex = '1 1 0';
-              col2.style.maxWidth = '50%';
+              applyCharactersSplitColumnLayout();
               
               // Check if we're returning from Rankings and need to restore search state
               if (cyclopediaState.previousTabState && cyclopediaState.previousTabState.hasSearchedData) {
@@ -10831,9 +10878,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               });
               
               // Hide col3 for rankings
-              col3.style.display = 'none';
-              col2.style.flex = '1 1 0';
-              col2.style.maxWidth = '100%';
+              applyCharactersRankingsColumnLayout();
               
               // Store the current state for when we return from Rankings
               // This ensures search persistence when switching back to other tabs
@@ -10872,7 +10917,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               height: '100%',
               padding: '20px',
               boxSizing: 'border-box',
-              overflowY: 'scroll'
+              overflowY: 'hidden'
             });
             
             // Center the content
@@ -17189,6 +17234,13 @@ function setCyclopediaSeasonTabLabel(btn, seasonNum, currentSeason) {
   }
 }
 
+function getCyclopediaRankingsSectionLabel(seasonNum) {
+  const season = Number(seasonNum);
+  return Number.isFinite(season) && season > 0
+    ? CYCLOPEDIA_UI.rankingsSeason(season)
+    : CYCLOPEDIA_UI.rankings;
+}
+
 function syncCyclopediaSeasonToggleStyles(tablist) {
   if (!tablist) return;
   const activeSeason = Number(cyclopediaState.profileSeason || 1);
@@ -17214,7 +17266,13 @@ function getCyclopediaRankingRowDisplay(profileData, rankingKey) {
 
 function updateCyclopediaStartpageRankings(root, profileData) {
   if (!root || !profileData) return;
-  const patched = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
+  const activeSeason = cyclopediaState.profileSeason || 1;
+  const headerTr = root.querySelector('tr[data-cyclopedia-section-header="rankings"]');
+  if (headerTr) {
+    const td = headerTr.querySelector('td');
+    if (td) td.textContent = getCyclopediaRankingsSectionLabel(activeSeason);
+  }
+  const patched = patchProfileDataForActiveSeason(profileData, activeSeason);
   const highscoreIcon = { alt: 'Highscore', src: '/assets/icons/highscore.png', width: 11, height: 11, className: 'pixelated inline-block -translate-y-0.5' };
   CYCLOPEDIA_RANKING_ROW_KEYS.forEach((rankingKey) => {
     const tr = root.querySelector(`tr[data-cyclopedia-ranking-row="${rankingKey}"]`);
@@ -17303,7 +17361,10 @@ function renderCyclopediaProfileColumn(profileData) {
   });
 
   const patchedProfile = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
-  scrollArea.appendChild(renderCyclopediaPlayerInfo(patchedProfile, { compact: true }));
+  scrollArea.appendChild(renderCyclopediaPlayerInfo(patchedProfile, {
+    compact: true,
+    season: cyclopediaState.profileSeason || 1
+  }));
   wrapper.appendChild(scrollArea);
   wrapper.appendChild(createCyclopediaSeasonsLeaderboardLink());
   return wrapper;
@@ -18469,22 +18530,35 @@ function renderCyclopediaSearchColumn() {
   return container;
 }
 
-/** Obtainable creature count from creature-database.js (excludes unobtainable; applies Cyclopedia hide list). */
+/** Obtainable creature count for shiny progress (excludes event/gazer species; see creature-database getShinyProgressCreatureNames). */
 function getObtainableCreatureCountFromDatabase() {
-  return (window.creatureDatabase?.ALL_CREATURES || []).filter(
-    (name) => !HIDE_FROM_CYCLOPEDIA.includes(name)
-  ).length;
+  const db = window.creatureDatabase;
+  if (typeof db?.getShinyProgressCreatureNames === 'function') {
+    return db.getShinyProgressCreatureNames().length;
+  }
+  return (db?.ALL_CREATURES || []).filter((name) => {
+    if (!name || HIDE_FROM_CYCLOPEDIA.includes(name)) return false;
+    if (typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(name)) return false;
+    if (typeof db?.isGazerCreatureName === 'function' && db.isGazerCreatureName(name)) return false;
+    if (typeof db?.creatureHasShinyVariant === 'function' && !db.creatureHasShinyVariant(name)) return false;
+    return true;
+  }).length;
 }
 
-/** Unique obtainable species (gameId) with at least one shiny owned; unobtainable shinies excluded. */
+/** Unique obtainable species (gameId) with at least one shiny owned; event/gazer shinies excluded. */
 function countUniqueObtainableShinyCreatureGameIds(monsters) {
   if (!Array.isArray(monsters)) return 0;
-  const obtainableLower = new Set(
-    (window.creatureDatabase?.ALL_CREATURES || [])
-      .filter((name) => !HIDE_FROM_CYCLOPEDIA.includes(name))
-      .map((n) => n.toLowerCase())
-  );
   const db = window.creatureDatabase;
+  const progressNames = typeof db?.getShinyProgressCreatureNames === 'function'
+    ? db.getShinyProgressCreatureNames()
+    : (db?.ALL_CREATURES || []).filter((name) => {
+      if (!name || HIDE_FROM_CYCLOPEDIA.includes(name)) return false;
+      if (typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(name)) return false;
+      if (typeof db?.isGazerCreatureName === 'function' && db.isGazerCreatureName(name)) return false;
+      if (typeof db?.creatureHasShinyVariant === 'function' && !db.creatureHasShinyVariant(name)) return false;
+      return true;
+    });
+  const obtainableLower = new Set(progressNames.map((n) => n.toLowerCase()));
   const ids = new Set();
   for (const m of monsters) {
     if (!m || m.shiny !== true || m.gameId == null) continue;
@@ -18503,6 +18577,38 @@ function countUniqueObtainableShinyCreatureGameIds(monsters) {
     }
   }
   return ids.size;
+}
+
+/** Unique event species names with at least one shiny owned; excluded from shiny progress total. */
+function getUniqueOwnedEventShinyCreatureNames(monsters) {
+  if (!Array.isArray(monsters)) return [];
+  const db = window.creatureDatabase;
+  const namesByGameId = new Map();
+  for (const m of monsters) {
+    if (!m || m.shiny !== true || m.gameId == null) continue;
+    let name = null;
+    if (typeof db?.getDisplayNameForOwnedMonster === 'function') {
+      name = db.getDisplayNameForOwnedMonster(m);
+    }
+    if (!name && db?.findMonsterByGameId) {
+      const monster = db.findMonsterByGameId(m.gameId);
+      name = monster?.metadata?.name;
+    } else if (!name && globalThis.state?.utils?.getMonster) {
+      try {
+        const monster = globalThis.state.utils.getMonster(m.gameId);
+        name = monster?.metadata?.name;
+      } catch (e) {}
+    }
+    if (name && typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(name)) {
+      namesByGameId.set(m.gameId, name);
+    }
+  }
+  return [...namesByGameId.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/** Unique event species (gameId) with at least one shiny owned; excluded from shiny progress total. */
+function countUniqueEventShinyCreatureGameIds(monsters) {
+  return getUniqueOwnedEventShinyCreatureNames(monsters).length;
 }
 
 const CYCLOPEDIA_MAX_VALUES = {
@@ -18537,6 +18643,24 @@ const CYCLOPEDIA_PROFILE_VALUE = {
       return null;
     }
   },
+  shinyEventCreatures: {
+    value: (d) => {
+      const ctx = globalThis.state?.player?.getSnapshot?.()?.context;
+      if (d?.name && ctx?.name && d.name === ctx.name && Array.isArray(ctx.monsters)) {
+        return countUniqueEventShinyCreatureGameIds(ctx.monsters);
+      }
+      return null;
+    }
+  },
+  shinyEventCreatureNames: {
+    value: (d) => {
+      const ctx = globalThis.state?.player?.getSnapshot?.()?.context;
+      if (d?.name && ctx?.name && d.name === ctx.name && Array.isArray(ctx.monsters)) {
+        return getUniqueOwnedEventShinyCreatureNames(ctx.monsters);
+      }
+      return null;
+    }
+  },
   bisEquipments: { value: d => d.bisEquips },
   raids: { value: d => d.raids },
   exploredMaps: { value: d => d.maps },
@@ -18561,7 +18685,7 @@ const CYCLOPEDIA_PROFILE_VALUE = {
 
 function renderCyclopediaPlayerInfo(profileData, options = {}) {
   try {
-    const { showShinyCreatures = true, compact = false } = options;
+    const { showShinyCreatures = true, compact = false, season } = options;
     if (profileData && profileData.json) profileData = profileData.json;
     if (!profileData) {
       const div = document.createElement('div');
@@ -18576,10 +18700,11 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
     return profileData[key] !== undefined ? profileData[key] : '-';
   }
 
-  function addRow({ label, icon, iconConfig, value, highlight, colspan, title, extraIcon, tooltip, valueClass, rankingKey }) {
+  function addRow({ label, icon, iconConfig, value, highlight, colspan, title, extraIcon, tooltip, valueClass, rankingKey, sectionHeader, valueSuffix }) {
     const tr = document.createElement('tr');
     tr.setAttribute('data-highlight', highlight ? 'true' : 'false');
     if (rankingKey) tr.dataset.cyclopediaRankingRow = rankingKey;
+    if (sectionHeader) tr.dataset.cyclopediaSectionHeader = sectionHeader;
     tr.className = 'group/row odd:bg-grayBrightest even:bg-grayHighlight hover:bg-whiteDarkest hover:text-whiteBrightest data-[highlight=\'true\']:bg-whiteDarkest data-[highlight=\'true\']:text-whiteBrightest';
     if (colspan) {
       const td = document.createElement('td');
@@ -18603,7 +18728,15 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
       const td2 = document.createElement('td');
       td2.className = 'px-1 align-middle [&:not(:first-child)]:table-frame-left text-center';
       if (title) td2.title = title;
-      td2.textContent = value;
+      if (valueSuffix) {
+        td2.appendChild(document.createTextNode(value));
+        const suffixEl = document.createElement('span');
+        suffixEl.textContent = valueSuffix.text;
+        if (valueSuffix.title) suffixEl.title = valueSuffix.title;
+        td2.appendChild(suffixEl);
+      } else {
+        td2.textContent = value;
+      }
       if (valueClass) td2.classList.add(valueClass);
       if (extraIcon) {
         const extraImg = document.createElement('img');
@@ -18748,7 +18881,8 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
   statusGrid.appendChild(statusText);
   statusDiv.appendChild(statusLabel);
   statusDiv.appendChild(statusGrid);
-  statusDiv.style.textAlign = 'center';
+  statusLabel.style.textAlign = 'center';
+  statusGrid.style.justifyItems = 'start';
   grid2.appendChild(statusDiv);
   const loyaltyDiv = document.createElement('div');
   const loyaltyLabel = document.createElement('div');
@@ -18805,18 +18939,39 @@ function renderCyclopediaPlayerInfo(profileData, options = {}) {
     const val = getProfileValue(stat.key);
     const maxVal = typeof stat.max === 'function' ? stat.max() : stat.max;
     const isMax = typeof val === 'number' && val === maxVal;
-    const valueStr = (val === null || val === undefined || val === '-')
+    let valueStr = (val === null || val === undefined || val === '-')
       ? `-/${maxVal}`
       : `${FormatUtils.number(val)}/${maxVal}`;
+    let valueSuffix;
+    if (stat.key === 'shinyCreatures' && typeof val === 'number') {
+      const eventShinyNames = getProfileValue('shinyEventCreatureNames');
+      const eventShinyCount = Array.isArray(eventShinyNames)
+        ? eventShinyNames.length
+        : getProfileValue('shinyEventCreatures');
+      if (typeof eventShinyCount === 'number' && eventShinyCount > 0) {
+        valueSuffix = {
+          text: ` (+${FormatUtils.number(eventShinyCount)})`,
+          title: Array.isArray(eventShinyNames) && eventShinyNames.length
+            ? eventShinyNames.join('\n')
+            : undefined
+        };
+      }
+    }
     addRow({
       label: CYCLOPEDIA_UI.stats[stat.key] ?? stat.key,
       icon: stat.icon,
       value: valueStr,
+      valueSuffix,
       valueClass: isMax ? 'stat-maxed' : undefined
     });
   });
 
-  addRow({ label: CYCLOPEDIA_UI.rankings, highlight: true, colspan: 2 });
+  addRow({
+    label: getCyclopediaRankingsSectionLabel(season),
+    highlight: true,
+    colspan: 2,
+    sectionHeader: season != null ? 'rankings' : undefined
+  });
   addRow({
     label: CYCLOPEDIA_UI.stats.rankPoints,
     icon: '/assets/icons/star-tier.png',

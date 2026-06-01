@@ -145,6 +145,26 @@ function getAutoscrollAutosellerCreaturePickerNames(obtainableCreatures) {
   );
 }
 
+/** Creatures that count toward shiny collection progress (no event/gazer species; must have a shiny variant). */
+function getShinyProgressCreatureNames(obtainableCreatures) {
+  const base = Array.isArray(obtainableCreatures)
+    ? obtainableCreatures
+    : (creatureDatabase?.ALL_CREATURES || []);
+  return base.filter(
+    (name) => !CYCLOPEDIA_HIDDEN_CREATURES.includes(name)
+      && !isEventCreatureName(name)
+      && !isGazerCreatureName(name)
+      && creatureHasShinyVariant(name)
+  );
+}
+
+function isShinyProgressCreatureName(creatureName) {
+  if (!creatureName || CYCLOPEDIA_HIDDEN_CREATURES.includes(creatureName)) return false;
+  if (isEventCreatureName(creatureName)) return false;
+  if (isGazerCreatureName(creatureName)) return false;
+  return creatureHasShinyVariant(creatureName);
+}
+
 /** Display name for an owned monster (shiny Mystic Gazer → Albino Gazer). */
 function getDisplayNameForOwnedMonster(monster) {
   if (!monster || monster.gameId == null) return null;
@@ -211,6 +231,8 @@ function buildCreatureDatabase() {
         EVENT_CREATURES,
         isEventCreatureName,
         isGazerCreatureName,
+        getShinyProgressCreatureNames: () => [],
+        isShinyProgressCreatureName,
         getDisplayNameForOwnedMonster,
         monsterMatchesCreatureDisplay
       };
@@ -252,6 +274,8 @@ function buildCreatureDatabase() {
       EVENT_CREATURES,
       isEventCreatureName,
       isGazerCreatureName,
+      getShinyProgressCreatureNames: () => getShinyProgressCreatureNames(obtainableCreatures),
+      isShinyProgressCreatureName,
       resolveCreatureDisplay,
       creatureHasShinyVariant,
       filterMonstersForCreatureDisplay,
@@ -274,6 +298,8 @@ function buildCreatureDatabase() {
       EVENT_CREATURES,
       isEventCreatureName,
       isGazerCreatureName,
+      getShinyProgressCreatureNames: () => [],
+      isShinyProgressCreatureName,
       getDisplayNameForOwnedMonster,
       monsterMatchesCreatureDisplay
     };
@@ -423,6 +449,8 @@ function initializeDatabase() {
   creatureDatabase.EVENT_CREATURES = EVENT_CREATURES;
   creatureDatabase.isEventCreatureName = isEventCreatureName;
   creatureDatabase.isGazerCreatureName = isGazerCreatureName;
+  creatureDatabase.getShinyProgressCreatureNames = creatureDatabase.getShinyProgressCreatureNames || (() => getShinyProgressCreatureNames(creatureDatabase.ALL_CREATURES));
+  creatureDatabase.isShinyProgressCreatureName = isShinyProgressCreatureName;
   creatureDatabase.getDisplayNameForOwnedMonster = getDisplayNameForOwnedMonster;
   creatureDatabase.monsterMatchesCreatureDisplay = monsterMatchesCreatureDisplay;
   creatureDatabase.CYCLOPEDIA_EXTRA_CREATURES = CYCLOPEDIA_EXTRA_CREATURES;
@@ -455,6 +483,8 @@ const placeholderDatabase = {
   EVENT_CREATURES,
   isEventCreatureName,
   isGazerCreatureName,
+  getShinyProgressCreatureNames: () => [],
+  isShinyProgressCreatureName,
   getDisplayNameForOwnedMonster,
   monsterMatchesCreatureDisplay,
   CYCLOPEDIA_HIDDEN_CREATURES,
@@ -515,6 +545,8 @@ waitForGameState(() => {
     globalWindow.creatureDatabase.EVENT_CREATURES = EVENT_CREATURES;
     globalWindow.creatureDatabase.isEventCreatureName = isEventCreatureName;
     globalWindow.creatureDatabase.isGazerCreatureName = isGazerCreatureName;
+    globalWindow.creatureDatabase.getShinyProgressCreatureNames = creatureDatabase.getShinyProgressCreatureNames;
+    globalWindow.creatureDatabase.isShinyProgressCreatureName = isShinyProgressCreatureName;
     globalWindow.creatureDatabase.getDisplayNameForOwnedMonster = getDisplayNameForOwnedMonster;
     globalWindow.creatureDatabase.monsterMatchesCreatureDisplay = monsterMatchesCreatureDisplay;
     globalWindow.creatureDatabase.CYCLOPEDIA_HIDDEN_CREATURES = CYCLOPEDIA_HIDDEN_CREATURES;

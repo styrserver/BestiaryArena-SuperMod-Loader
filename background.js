@@ -33,6 +33,17 @@ let registeredTabs = new Set(); // Track which tabs have received local mods
 
 const DEBUG = false; // Set to true for development
 
+/** Extension resource path for a bundled mod (database/* or mods/*). */
+function resolveModResourcePath(modName) {
+  if (!modName || typeof modName !== 'string') {
+    throw new Error('Invalid mod name');
+  }
+  if (modName.startsWith('database/') || modName.startsWith('mods/')) {
+    return modName;
+  }
+  return `mods/${modName}`;
+}
+
 // Function to load default enabled mods from mod-registry.js
 async function loadDefaultEnabledMods() {
   try {
@@ -684,7 +695,8 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === 'getModContent') {
     try {
-      const modUrl = browserAPI.runtime.getURL(message.modName);
+      const resourcePath = resolveModResourcePath(message.modName);
+      const modUrl = browserAPI.runtime.getURL(resourcePath);
       console.log(`Background: Fetching mod content from: ${modUrl}`);
       
       fetch(modUrl)

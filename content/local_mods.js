@@ -26,9 +26,122 @@ let executedMods = {};
 let isInitializing = false;
 let initializationPromise = null;
 let isBatchExecuting = false; // Flag to prevent duplicate executions during batch operations
+let executionTriggered = false;
+let initExecutionFallbackTimer = null;
 
 // Get the base URL for mods from a message from the injector
 let modBaseUrl = '';
+
+// Embedded fallback when dynamic import of mod-registry.js fails (e.g. Orion iOS).
+// Keep in sync with content/mod-registry.js
+const FALLBACK_DATABASE_MODS = [
+  'Welcome.js', 'inventory-database.js', 'creature-database.js', 'equipment-database.js',
+  'maps-database.js', 'equipment-lua-export.js', 'playereq-database.js', 'firebase-admins.js'
+];
+const FALLBACK_OFFICIAL_MODS = [
+  'Bestiary_Automator.js', 'Board Analyzer.js', 'Custom_Display.js', 'Hero_Editor.js',
+  'Highscore_Improvements.js', 'Item_tier_list.js', 'Monster_tier_list.js', 'Setup_Manager.js',
+  'Team_Copier.js', 'Tick_Tracker.js', 'Turbo Mode.js'
+];
+const FALLBACK_SUPER_MODS = [
+  'Autoseller.js', 'Autoscroller.js', 'Better Analytics.js', 'Better Boosted Maps.js',
+  'Better Cauldron.js', 'Better Exaltation Chest.js', 'Better Forge.js', 'Better Highscores.js',
+  'Better Hy\'genie.js', 'Better Rune Recycler.js', 'Better Setups.js', 'Better Tasker.js',
+  'Better Yasir.js', 'Cyclopedia.js', 'Dice_Roller.js', 'Depot Manager.js', 'Hunt Analyzer.js',
+  'Mod Settings.js', 'Outfiter.js', 'Raid_Hunter.js', 'Manual Runner.js', 'Room Hopper.js',
+  'RunTracker.js', 'Stamina Optimizer.js', 'Awaken Tracker.js'
+];
+const FALLBACK_OT_MODS = ['Challenges.js', 'Quests.js', 'Guilds.js', 'VIP List.js'];
+const FALLBACK_DEFAULT_ENABLED_MODS = [
+  'database/Welcome.js', 'database/inventory-database.js', 'database/creature-database.js',
+  'database/equipment-database.js', 'database/maps-database.js', 'database/equipment-lua-export.js',
+  'database/playereq-database.js', 'database/firebase-admins.js',
+  'Official Mods/Bestiary_Automator.js', 'Official Mods/Board Analyzer.js', 'Official Mods/Custom_Display.js',
+  'Official Mods/Hero_Editor.js', 'Official Mods/Highscore_Improvements.js', 'Official Mods/Item_tier_list.js',
+  'Official Mods/Monster_tier_list.js', 'Official Mods/Setup_Manager.js', 'Official Mods/Team_Copier.js',
+  'Official Mods/Tick_Tracker.js', 'Official Mods/Turbo Mode.js',
+  'Super Mods/Mod Settings.js', 'Super Mods/RunTracker.js', 'Super Mods/Outfiter.js'
+];
+
+function getFallbackAllMods() {
+  return [
+    ...FALLBACK_DATABASE_MODS.map(name => `database/${name}`),
+    ...FALLBACK_OFFICIAL_MODS.map(name => `Official Mods/${name}`),
+    ...FALLBACK_SUPER_MODS.map(name => `Super Mods/${name}`),
+    ...FALLBACK_OT_MODS.map(name => `OT Mods/${name}`)
+  ];
+}
+
+let fallbackBundledModPaths = null;
+function getFallbackBundledModPathSet() {
+  if (!fallbackBundledModPaths) {
+    fallbackBundledModPaths = new Set(getFallbackAllMods());
+  }
+  return fallbackBundledModPaths;
+}
+
+function isKnownBundledModPath(modName) {
+  return getFallbackBundledModPathSet().has(modName);
+}
+
+function createFallbackRegistry() {
+  return {
+    getAllMods: getFallbackAllMods,
+    DEFAULT_ENABLED_MODS: FALLBACK_DEFAULT_ENABLED_MODS
+  };
+}
+
+function clearInitExecutionFallbackTimer() {
+  if (initExecutionFallbackTimer) {
+    clearTimeout(initExecutionFallbackTimer);
+    initExecutionFallbackTimer = null;
+  }
+}
+
+function markExecutionTriggered() {
+  executionTriggered = true;
+  clearInitExecutionFallbackTimer();
+}
+
+function scheduleInitExecutionFallback() {
+  clearInitExecutionFallbackTimer();
+  initExecutionFallbackTimer = setTimeout(() => {
+    initExecutionFallbackTimer = null;
+    if (executionTriggered || isBatchExecuting) {
+      return;
+    }
+    if (Object.keys(executedMods).length > 0) {
+      return;
+    }
+    const enabledMods = window.localMods.filter(mod => mod.enabled);
+    if (enabledMods.length === 0) {
+      return;
+    }
+    console.log('[Local Mods] No background execution yet; running init fallback for', enabledMods.length, 'mods');
+    triggerModExecution(enabledMods, 'init-fallback');
+  }, 1500);
+}
+
+function triggerModExecution(mods, source) {
+  if (!mods || mods.length === 0) {
+    return;
+  }
+  if (isBatchExecuting) {
+    console.log(`[Local Mods] Skipping execution from ${source} — batch already in progress`);
+    return;
+  }
+
+  const toRun = mods.filter(mod => mod.enabled && !executedMods[mod.name]);
+  if (toRun.length === 0) {
+    markExecutionTriggered();
+    console.log(`[Local Mods] Skipping execution from ${source} — nothing left to run`);
+    return;
+  }
+
+  markExecutionTriggered();
+  console.log(`[Local Mods] Executing ${toRun.length} mod(s) (source: ${source})`);
+  executeModsInOrder(toRun);
+}
 
 // Ensure API is created immediately
 window.localModsAPI = {
@@ -61,73 +174,107 @@ function getModUrl(modName) {
   return modBaseUrl + modName;
 }
 
+async function fetchModContentViaBackground(modName) {
+  return new Promise((resolve, reject) => {
+    const messageId = `mod_content_${Date.now()}_${Math.random()}`;
+    const timeoutId = setTimeout(() => {
+      window.removeEventListener('message', responseHandler);
+      reject(new Error(`getModContent timeout for ${modName}`));
+    }, 20000);
+
+    const responseHandler = (event) => {
+      if (event.source !== window) return;
+      if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.id === messageId) {
+        clearTimeout(timeoutId);
+        window.removeEventListener('message', responseHandler);
+        const response = event.data.response;
+        if (response && response.success && response.content) {
+          resolve(response.content);
+        } else {
+          reject(new Error(response?.error || 'Background failed to load mod content'));
+        }
+      }
+    };
+
+    window.addEventListener('message', responseHandler);
+    window.postMessage({
+      from: 'BESTIARY_CLIENT',
+      id: messageId,
+      message: { action: 'getModContent', modName }
+    }, '*');
+  });
+}
+
+async function tryDirectModFetch(modUrl) {
+  if (!modUrl) {
+    return null;
+  }
+  const response = await fetch(modUrl);
+  if (!response.ok) {
+    throw new Error(`HTTP error! Status: ${response.status}`);
+  }
+  return response.text();
+}
+
+async function tryRuntimeModFetch(modName) {
+  const api = window.browserAPI || window.chrome || window.browser;
+  if (!api?.runtime?.sendMessage) {
+    return null;
+  }
+  return new Promise((resolve, reject) => {
+    api.runtime.sendMessage({ action: 'getModContent', modName }, (response) => {
+      const lastError = chrome.runtime?.lastError || browser.runtime?.lastError;
+      if (lastError) {
+        reject(new Error(lastError.message));
+        return;
+      }
+      if (response?.success && response.content) {
+        resolve(response.content);
+      } else {
+        reject(new Error(response?.error || 'Invalid background response'));
+      }
+    });
+  });
+}
+
 async function getLocalModContent(modName) {
   try {
     console.log(`Fetching content for local mod: ${modName}`);
     const modUrl = getModUrl(modName);
     console.log(`Mod URL: ${modUrl}`);
-    
-    // Firefox-specific handling
-    if (typeof browser !== 'undefined' && browser !== window.chrome) {
-      console.log('Firefox detected, using Firefox-specific content loading');
-      
-      const api = window.browserAPI || window.chrome || window.browser;
-      if (api && api.runtime && api.runtime.sendMessage) {
-        try {
-          console.log(`Firefox: Requesting mod content via background script: ${modName}`);
-          const response = await new Promise((resolve, reject) => {
-            api.runtime.sendMessage({
-              action: 'getModContent',
-              modName: modName
-            }, (response) => {
-              const lastError = chrome.runtime.lastError || browser.runtime.lastError;
-              if (lastError) {
-                reject(new Error(lastError.message));
-              } else {
-                resolve(response);
-              }
-            });
-          });
-          
-          if (response && response.success && response.content) {
-            console.log(`Firefox: Mod content loaded via background script, length: ${response.content.length} bytes`);
-            return response.content;
-          } else {
-            throw new Error('Background script returned invalid response');
-          }
-        } catch (backgroundError) {
-          console.error(`Firefox: Background script fetch failed for ${modName}:`, backgroundError);
-          
-          // Fallback: try direct fetch even in Firefox
-          console.log(`Firefox: Trying direct fetch as fallback for ${modName}`);
-          try {
-            const response = await fetch(modUrl);
-            if (!response.ok) {
-              throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            const content = await response.text();
-            console.log(`Firefox: Direct fetch fallback successful, length: ${content.length} bytes`);
-            return content;
-          } catch (fetchError) {
-            console.error(`Firefox: Direct fetch fallback also failed for ${modName}:`, fetchError);
-            return null;
-          }
-        }
+
+    // Desktop path: direct fetch from page (fastest when supported)
+    if (modUrl) {
+      try {
+        const content = await tryDirectModFetch(modUrl);
+        console.log(`Mod content loaded via direct fetch, length: ${content.length} bytes`);
+        return content;
+      } catch (directError) {
+        console.warn(`Direct fetch failed for ${modName}, trying background:`, directError);
       }
     }
-    
-    // Chrome/Chromium fallback to direct fetch
-    console.log('Using direct fetch for mod content');
-    const response = await fetch(modUrl);
-    
-    if (!response.ok) {
-      console.error(`HTTP error fetching mod ${modName}! Status: ${response.status}`);
-      throw new Error(`HTTP error! Status: ${response.status}`);
+
+    // Mobile / Orion / Firefox fallback: background reads extension files
+    try {
+      const content = await fetchModContentViaBackground(modName);
+      console.log(`Mod content loaded via background bridge, length: ${content.length} bytes`);
+      return content;
+    } catch (bridgeError) {
+      console.warn(`Background bridge failed for ${modName}:`, bridgeError);
     }
-    
-    const content = await response.text();
-    console.log(`Mod content loaded, length: ${content.length} bytes`);
-    return content;
+
+    // Last resort when runtime is reachable from this context
+    try {
+      const content = await tryRuntimeModFetch(modName);
+      if (content) {
+        console.log(`Mod content loaded via runtime.sendMessage, length: ${content.length} bytes`);
+        return content;
+      }
+    } catch (runtimeError) {
+      console.warn(`Runtime getModContent failed for ${modName}:`, runtimeError);
+    }
+
+    return null;
   } catch (error) {
     console.error(`Error fetching local mod ${modName}:`, error);
     return null;
@@ -139,60 +286,48 @@ async function checkFileExists(modName) {
     console.log(`Checking if file exists: ${modName}`);
     const modUrl = getModUrl(modName);
     console.log(`Checking URL: ${modUrl}`);
-    
+
     if (!modUrl) {
-      console.warn(`No URL generated for mod: ${modName}`);
-      return false;
+      return isKnownBundledModPath(modName);
     }
-    
-    // Firefox-specific handling
-    if (typeof browser !== 'undefined' && browser !== window.chrome) {
-      console.log('Firefox detected, using Firefox-specific file checking');
-      
-      // For Firefox, we'll assume the file exists if we can get a URL
-      const api = window.browserAPI || window.chrome || window.browser;
-      if (api && api.runtime && api.runtime.getURL) {
-        try {
-          const testUrl = api.runtime.getURL(modName);
-          if (testUrl) {
-            console.log(`Firefox: File ${modName} URL generated successfully: ${testUrl}`);
-            return true;
-          }
-        } catch (error) {
-          console.warn(`Firefox: Error getting URL for ${modName}:`, error);
-          // In Firefox, if we can't get a URL, still assume the file exists for known files
-          if (modName.startsWith('database/') || modName.includes('Super Mods/') || modName.includes('Official Mods/') || modName.includes('OT Mods/')) {
-            console.log(`Firefox: Assuming known file ${modName} exists despite URL error`);
-            return true;
-          }
-          return false;
-        }
-      }
-      
-      // If we can't get a URL, assume database files and known mods exist in Firefox
-      if (modName.startsWith('database/') || modName.includes('Super Mods/') || modName.includes('Official Mods/') || modName.includes('OT Mods/')) {
-        console.log(`Firefox: Assuming known file ${modName} exists`);
-        return true;
-      }
-    }
-    
-    // Chrome/Chromium fallback to fetch
+
     try {
       const response = await fetch(modUrl, { method: 'HEAD' });
       const exists = response.ok;
       console.log(`File ${modName} exists: ${exists}, status: ${response.status}`);
-      if (!exists) {
-        console.error(`Failed to find mod at ${modUrl}, status: ${response.status}`);
+      if (exists) {
+        return true;
       }
-      return exists;
-    } catch (fetchError) {
-      console.warn(`Fetch check failed for ${modName}, assuming file exists:`, fetchError);
-      // In Firefox, fetch might fail due to CORS, but the file might still exist
+    } catch (headError) {
+      console.warn(`HEAD check failed for ${modName}:`, headError);
+    }
+
+    // GET probe when HEAD is blocked (common on mobile WebExtensions)
+    try {
+      const response = await fetch(modUrl, { method: 'GET' });
+      if (response.ok) {
+        console.log(`File ${modName} exists (verified via GET)`);
+        return true;
+      }
+    } catch (getError) {
+      console.warn(`GET check failed for ${modName}:`, getError);
+    }
+
+    if (isKnownBundledModPath(modName)) {
+      console.log(`Assuming bundled mod exists in registry fallback: ${modName}`);
       return true;
+    }
+
+    try {
+      const content = await fetchModContentViaBackground(modName);
+      return !!content;
+    } catch (backgroundError) {
+      console.warn(`Background existence check failed for ${modName}:`, backgroundError);
+      return false;
     }
   } catch (error) {
     console.error(`Error checking if file exists: ${modName}`, error);
-    return false;
+    return isKnownBundledModPath(modName);
   }
 }
 
@@ -229,12 +364,10 @@ async function loadModRegistry() {
     console.log('[Mod Registry] Successfully loaded mod registry');
     return module;
   } catch (error) {
-    // CRITICAL: If registry fails to load, the extension cannot function
-    console.error('[Mod Registry] CRITICAL ERROR: Failed to load mod registry!', error);
-    console.error('[Mod Registry] The extension cannot function without the registry.');
-    console.error('[Mod Registry] Please reload the extension or check the console for errors.');
-    console.error('[Mod Registry] modBaseUrl was:', modBaseUrl);
-    throw new Error('Mod registry failed to load - extension cannot function');
+    console.warn('[Mod Registry] Dynamic import failed, using embedded fallback:', error);
+    console.warn('[Mod Registry] modBaseUrl was:', modBaseUrl);
+    MOD_REGISTRY = createFallbackRegistry();
+    return MOD_REGISTRY;
   }
 }
 
@@ -511,8 +644,9 @@ async function initLocalMods() {
         }
       }, '*');
       
-      // Don't execute mods here - wait for stored states from background script
-      console.log('Mods initialized, waiting for stored states from background script before execution');
+      // Prefer background-driven execution (preserves stored enable/disable states)
+      console.log('Mods initialized, waiting for background registerLocalMods before execution');
+      scheduleInitExecutionFallback();
       
       console.log('Initialization completed successfully');
       return window.localMods;
@@ -834,6 +968,8 @@ document.addEventListener('reloadLocalMods', () => {
   window.localMods = [];
   executedMods = {};
   initializationPromise = null; // Reset initialization promise
+  executionTriggered = false;
+  clearInitExecutionFallbackTimer();
   resetCompletionSignal(); // Reset completion signal flag
   initLocalMods();
 });
@@ -925,8 +1061,7 @@ window.addEventListener('message', function(event) {
                            mod.name.startsWith('User Mods/') ? 'User' : 'Unknown';
             console.log(`  ${index + 1}. [${category}] ${mod.name}`);
           });
-          console.log('[Local Mods] Calling executeModsInOrder...');
-          executeModsInOrder(enabledMods);
+          triggerModExecution(enabledMods, 'background-registerLocalMods');
         } else if (isBatchExecuting) {
           console.log('Skipping execution - batch execution already in progress');
         } else {
@@ -958,7 +1093,7 @@ window.addEventListener('message', function(event) {
       const enabledMods = window.localMods.filter(mod => mod.enabled);
       if (enabledMods.length > 1 && !isBatchExecuting) {
         console.log(`Received individual execution request for ${modName}, but using batch execution for all ${enabledMods.length} enabled mods`);
-        executeModsInOrder(enabledMods);
+        triggerModExecution(enabledMods, 'executeLocalMod-batch');
       } else {
         executeLocalMod(modName, force).catch(err => {
           console.error(`Error executing local mod ${modName} on request:`, err);

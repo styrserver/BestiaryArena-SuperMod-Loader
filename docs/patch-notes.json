@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.0.1",
+      "changes": [
+        {
+          "mod": "creature-database.js",
+          "type": "added",
+          "text": "getShinyProgressCreatureNames() and isShinyProgressCreatureName() define the normal shiny collection pool (excludes event creatures, gazers, and species without a shiny variant) for Cyclopedia progress stats."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Home start page: shiny creature progress counts only normal obtainables (69 max, matching perfect creatures); owned event shinies show as (+N) with a hover tooltip listing species (hidden when zero). Player stats Rankings header reads Rankings - Season N and updates with the season toggle. Layout uses a 35/65 grid with 10px column gap and 10px outer padding (no fixed 900px row). Status label stays centered; Free/Premium value is left-aligned beside the pass icon. Arsenal Owned Equipment and Characters Rankings drop the trailing frame border when they are the rightmost column; Characters Player Information no longer shows an inner scrollbar."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Bundled mods load more reliably on mobile WebExtensions (e.g. Orion iOS): page fetch is still tried first on desktop; when HEAD/fetch or mod-registry import fails, mods load via background getModContent (correct mods/ and database/ paths), an embedded registry fallback list, and a 1.5s page init execution fallback if background registerLocalMods is late. Skips mods already executed to avoid double-loading on PC."
+        }
+      ]
+    },
+    {
       "version": "4.0.0",
       "changes": [
         {

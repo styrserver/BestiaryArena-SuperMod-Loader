@@ -279,6 +279,16 @@ window.addEventListener('message', function(event) {
       });
     }
     
+    if (event.data.message && event.data.message.action === 'getModContent') {
+      browserAPI.runtime.sendMessage(event.data.message, response => {
+        window.postMessage({
+          from: 'BESTIARY_EXTENSION',
+          id: event.data.id,
+          response: response || { success: false, error: 'No response from background' }
+        }, '*');
+      });
+    }
+
     if (event.data.message && event.data.message.action === 'getManualMods') {
       console.log('Content injector: Processing getManualMods request');
       

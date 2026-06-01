@@ -7,6 +7,7 @@
  * 1. THIS FILE (content/mod-registry.js) - Add to appropriate array below
  * 2. background.js - Update hardcoded counts in getModCounts (Chrome limitation)
  * 3. popup/popup.js - Add to the static list (search for "kept in sync with mod-registry.js")
+ * 4. content/local_mods.js - Update FALLBACK_* arrays when import() of this file fails (Orion iOS, etc.)
  * 
  * Why 3 places? 
  * - This file is used by content scripts (supports ES6 modules)
