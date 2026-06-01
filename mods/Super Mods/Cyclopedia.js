@@ -13080,10 +13080,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             currentYourRooms = getYourRoomsForCyclopediaSeason(playerState?.rooms || {});
           }
           
-          // Filter out defeated runs with 0 rank points
+          // Filter out defeated runs with 0 rank points and ascension-floor rank entries
           if (localRuns && localRuns.length > 0) {
             const originalCount = localRuns.length;
-            localRuns = localRuns.filter(run => run.points > 0);
+            localRuns = localRuns.filter(run => {
+              if (!(run.points > 0)) return false;
+              const floor = Number(run.floor ?? 0);
+              return Number.isFinite(floor) && floor <= 0;
+            });
             const filteredCount = localRuns.length;
             if (originalCount !== filteredCount) {
               
@@ -15066,8 +15070,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         updateRightCol: () => {}
       });
 
-      topBox.style.flex = '0 0 35%';
-      topBox.style.maxHeight = '35%';
+      topBox.style.flex = '0 0 40%';
+      topBox.style.maxHeight = '40%';
       topBox.style.minHeight = '0';
       leftCol.appendChild(topBox);
       updateBottomBox();

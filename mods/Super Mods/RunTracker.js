@@ -314,7 +314,7 @@ function normalizeFloorHistory(run) {
   return Array.from(new Set(values)).sort((a, b) => a - b);
 }
 
-// Speedrun times are only comparable at floor 0; higher floors use the floor category.
+// Speedrun times and rank points are only comparable at floor 0; higher floors use the floor category.
 function qualifiesForSpeedrunCategory(runData) {
   const floor = Number(runData?.floor ?? 0);
   return Number.isFinite(floor) && floor <= 0;
@@ -581,6 +581,24 @@ async function initializeStorage() {
     }
     if (speedrunFloorPurgeCount > 0) {
       console.log(`[RunTracker] Removed ${speedrunFloorPurgeCount} speedrun entries above floor 0`);
+      runStorage.lastUpdated = Date.now();
+      runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
+        return total + map.speedrun.length + map.rank.length + (map.floor?.length || 0);
+      }, 0);
+    }
+
+    // Remove rank entries above floor 0 (rank points are not comparable across floors)
+    let rankFloorPurgeCount = 0;
+    for (const mapKey in runStorage.runs) {
+      const mapData = runStorage.runs[mapKey];
+      if (mapData && Array.isArray(mapData.rank)) {
+        const before = mapData.rank.length;
+        mapData.rank = mapData.rank.filter(qualifiesForSpeedrunCategory);
+        rankFloorPurgeCount += before - mapData.rank.length;
+      }
+    }
+    if (rankFloorPurgeCount > 0) {
+      console.log(`[RunTracker] Removed ${rankFloorPurgeCount} rank entries above floor 0`);
       runStorage.lastUpdated = Date.now();
       runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
         return total + map.speedrun.length + map.rank.length + (map.floor?.length || 0);
@@ -1225,9 +1243,13 @@ async function addRun(runData) {
       }
     }
     
-    // Check rank category independently - same run can be in both categories
+    // Check rank only at floor 0 (higher floors belong in the floor category)
     if (runData.points !== undefined && runData.points !== null && runData.points > 0) {
-      rankUpdated = await checkAndUpdateRankRuns(runData);
+      if (qualifiesForSpeedrunCategory(runData)) {
+        rankUpdated = await checkAndUpdateRankRuns(runData);
+      } else {
+        console.log(`[RunTracker] Skipping rank category for ${runData.mapName} (floor: ${runData.floor}, only floor 0 qualifies)`);
+      }
     } else if (runData.points === 0) {
       console.log(`[RunTracker] Skipping rank category for ${runData.mapName} (rank points: 0)`);
     }
@@ -1323,6 +1345,9 @@ async function checkAndUpdateSpeedruns(runData) {
 
 // Check and update rank points category
 async function checkAndUpdateRankRuns(runData) {
+  if (!qualifiesForSpeedrunCategory(runData)) {
+    return false;
+  }
   if (runData.points === 0) {
     console.log(`[RunTracker] Skipping rank category for ${runData.mapName} (rank points: 0)`);
     return false;
@@ -1629,7 +1654,7 @@ async function cleanupDefeatedRuns() {
     for (const [mapKey, mapData] of Object.entries(runStorage.runs)) {
       if (mapData.rank && Array.isArray(mapData.rank)) {
         const originalCount = mapData.rank.length;
-        mapData.rank = mapData.rank.filter(run => run.points > 0);
+        mapData.rank = mapData.rank.filter(run => run.points > 0 && qualifiesForSpeedrunCategory(run));
         const removedCount = originalCount - mapData.rank.length;
         if (removedCount > 0) {
           console.log(`[RunTracker] Removed ${removedCount} defeated runs from ${mapKey}`);

@@ -203,8 +203,8 @@ const SELECTORS = {
   HEADER_SLOT: '#header-slot',
   CURRENCY_CONTAINER: '#header-slot > div > div:first-child',
   CREATURE_IMG: 'img[alt="creature"]',
-  STAR_TIER_4: 'img[src*="star-tier-4.png"], img[src*="star-tier-shiny.png"], img.tier-stars[alt="star tier"]',
-  RARITY_DIV: '.has-rarity, .rarity-shiny',
+  STAR_TIER_4: 'img[src*="star-tier-4.png"], img[src*="star-tier-shiny.png"], img[src*="star-tier-hundo.png"], img.tier-stars[alt="star tier"]',
+  RARITY_DIV: '.has-rarity, .rarity-shiny, .rarity-hundo, .rarity-awaken',
   RARITY_TEXT: '.has-rarity-text',
   LEVEL_SPAN: '.pixel-font-16.text-whiteExp span'
 };
@@ -2324,7 +2324,9 @@ const CSS_TEMPLATES = {
       background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
       box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
     }
-    .rarity-shiny[data-max-creatures="true"][data-max-creatures-color="${colorKey}"] {
+    .rarity-shiny[data-max-creatures="true"][data-max-creatures-color="${colorKey}"],
+    .rarity-hundo[data-max-creatures="true"][data-max-creatures-color="${colorKey}"],
+    .rarity-awaken[data-max-creatures="true"][data-max-creatures-color="${colorKey}"] {
       border: 2px solid;
       border-image: ${colorOption.borderGradient} 1;
       box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
@@ -2349,7 +2351,9 @@ const CSS_TEMPLATES = {
       background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
       box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
     }
-    .rarity-shiny[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
+    .rarity-shiny[data-max-shinies="true"][data-max-shinies-color="${colorKey}"],
+    .rarity-hundo[data-max-shinies="true"][data-max-shinies-color="${colorKey}"],
+    .rarity-awaken[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
       border: 2px solid;
       border-image: ${colorOption.borderGradient} 1;
       box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
@@ -8521,10 +8525,12 @@ function filterEligibleCreatures(visibleCreatures) {
     const button = imgEl.closest('button');
     if (!button) return;
     const elements = getCreatureElements(imgEl.parentElement);
-    const hasMaxAwakenedStar = typeof elements.starImg?.src === 'string' && elements.starImg.src.includes('star-tier-shiny.png');
+    const starSrc = typeof elements.starImg?.src === 'string' ? elements.starImg.src : '';
+    const hasGameMaxStar =
+      starSrc.includes('star-tier-shiny.png') || starSrc.includes('star-tier-hundo.png');
 
-    // User-requested simple rule: star-tier-shiny means max awakened.
-    if (hasMaxAwakenedStar && elements.starImg && elements.rarityDiv) {
+    // Game max stars: shiny (shiny lvl 99 + genes) or hundo (non-shiny lvl 99 + genes).
+    if (hasGameMaxStar && elements.starImg && elements.rarityDiv) {
       eligibleCreatures.push({
         imgEl,
         gameId,
@@ -8568,15 +8574,11 @@ function filterEligibleCreatures(visibleCreatures) {
         Number(monster.armor || 0) +
         Number(monster.magicResist || 0);
     }
-    const awakened = monster.awakened === true || (Number.isFinite(level) && level > GAME_CONSTANTS.MAX_LEVEL);
     const isMaxCreature =
       Number.isFinite(level) &&
       Number.isFinite(totalGenes) &&
-      totalGenes === GAME_CONSTANTS.MAX_TOTAL_GENES &&
-      (
-        (level === GAME_CONSTANTS.MAX_LEVEL && awakened === false) ||
-        (level === GAME_CONSTANTS.AWAKENED_MAX_LEVEL && awakened === true)
-      );
+      totalGenes >= GAME_CONSTANTS.MAX_TOTAL_GENES &&
+      (level === GAME_CONSTANTS.MAX_LEVEL || level === GAME_CONSTANTS.AWAKENED_MAX_LEVEL);
 
     if (isMaxCreature && elements.starImg && elements.rarityDiv) {
       eligibleCreatures.push({
@@ -8598,16 +8600,21 @@ function applyStylingToCreature(creature, colorKey) {
   if (!elements.starImg.hasAttribute('data-original-src')) {
     elements.starImg.setAttribute('data-original-src', elements.starImg.src);
   }
+
+  const extraAttributes = {};
+  if (elements.rarityDiv?.classList.contains('has-rarity')) {
+    extraAttributes.rarityDiv = { 'data-rarity': GAME_CONSTANTS.ELITE_RARITY_LEVEL.toString() };
+  }
+  if (elements.textRarityEl) {
+    extraAttributes.textRarityEl = { 'data-rarity': GAME_CONSTANTS.ELITE_RARITY_LEVEL.toString() };
+  }
   
   // Apply styling with data attributes
   applyDataAttributes(
     { starImg: elements.starImg, rarityDiv: elements.rarityDiv, textRarityEl: elements.textRarityEl },
     'max-creatures',
     colorKey,
-    {
-      rarityDiv: { 'data-rarity': GAME_CONSTANTS.ELITE_RARITY_LEVEL.toString() },
-      textRarityEl: { 'data-rarity': GAME_CONSTANTS.ELITE_RARITY_LEVEL.toString() }
-    }
+    extraAttributes
   );
 }
 
@@ -8738,7 +8745,9 @@ function removeMaxCreatures() {
     });
 
     // Reset all max creatures borders (regular + shiny overlays)
-    document.querySelectorAll('.has-rarity[data-max-creatures="true"], .rarity-shiny[data-max-creatures="true"]').forEach((rarityDiv) => {
+    document.querySelectorAll(
+      '.has-rarity[data-max-creatures="true"], .rarity-shiny[data-max-creatures="true"], .rarity-hundo[data-max-creatures="true"], .rarity-awaken[data-max-creatures="true"]'
+    ).forEach((rarityDiv) => {
       if (rarityDiv.classList.contains('has-rarity')) {
         rarityDiv.setAttribute('data-rarity', '5');
       } else {
@@ -8774,9 +8783,11 @@ function filterEligibleShinies(visibleCreatures) {
     if (!isShinyCreature(imgEl)) return;
     const containerSlot = imgEl.closest('.container-slot');
     const starImg = containerSlot?.querySelector('img[alt="star tier"]');
-    const hasMaxAwakenedStar = typeof starImg?.src === 'string' && starImg.src.includes('star-tier-shiny.png');
+    const starSrc = typeof starImg?.src === 'string' ? starImg.src : '';
+    const hasGameMaxStar =
+      starSrc.includes('star-tier-shiny.png') || starSrc.includes('star-tier-hundo.png');
     const alreadyMaxStyled = Boolean(containerSlot?.querySelector('[data-max-creatures="true"]'));
-    if (config.enableMaxCreatures && (hasMaxAwakenedStar || alreadyMaxStyled)) return;
+    if (config.enableMaxCreatures && (hasGameMaxStar || alreadyMaxStyled)) return;
     
     const elements = getCreatureElements(imgEl.parentElement);
     
@@ -8803,15 +8814,19 @@ function applyShinyStyling(shiny, colorKey) {
     elements.rarityDiv = rarityDiv;
   }
   
-  // Store original rarity
-  const currentRarity = elements.rarityDiv.getAttribute('data-rarity') || '5';
+  const extraAttributes = {};
+  if (elements.rarityDiv.classList.contains('has-rarity')) {
+    extraAttributes.rarityDiv = {
+      'data-original-rarity': elements.rarityDiv.getAttribute('data-rarity') || '5'
+    };
+  }
   
   // Apply styling with data attributes
   applyDataAttributes(
     { imgEl, rarityDiv: elements.rarityDiv, textRarityEl: elements.textRarityEl },
     'max-shinies',
     colorKey,
-    { rarityDiv: { 'data-original-rarity': currentRarity } }
+    extraAttributes
   );
 }
 
@@ -8860,7 +8875,9 @@ function removeMaxShinies() {
     });
     
     // Reset all shiny borders (regular + shiny overlays)
-    document.querySelectorAll('.has-rarity[data-max-shinies="true"], .rarity-shiny[data-max-shinies="true"]').forEach((rarityDiv) => {
+    document.querySelectorAll(
+      '.has-rarity[data-max-shinies="true"], .rarity-shiny[data-max-shinies="true"], .rarity-hundo[data-max-shinies="true"], .rarity-awaken[data-max-shinies="true"]'
+    ).forEach((rarityDiv) => {
       // If this was dynamically created, remove it completely
       if (rarityDiv.hasAttribute('data-dynamic-created')) {
         rarityDiv.remove();

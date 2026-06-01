@@ -77,11 +77,16 @@ const HARDCODED_MAP_MONSTER_STATS = {
   'old giant spider': { baseStats: { hp: 1140, ad: 108, ap: 30, armor: 30, magicResist: 30 }, level: 300 },
   'willi wasp': { baseStats: { hp: 924, ad: 0, ap: 0, armor: 26, magicResist: 45 }, level: 100 },
   'black knight': { baseStats: { hp: 4800, ad: 66, ap: 0, armor: 975, magicResist: 975 }, level: 300 },
+  'cobra statue': { baseStats: { hp: 1424, ad: 47, ap: 94, armor: 312, magicResist: 312 }, level: 120 },
   'dharalion': { baseStats: { hp: 2200, ad: 33, ap: 25, armor: 60, magicResist: 66 }, level: 200 },
   'dead tree': { baseStats: { hp: 7000, ad: 0, ap: 0, armor: 700, magicResist: 700 }, level: 100 },
   'earth crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
   'energy crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 150, magicResist: 30 }, level: 50 },
   'magma crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
+  'morguthis': { baseStats: { hp: 1760, ad: 0, ap: 0, armor: 58, magicResist: 49 }, level: 200 },
+  'obelisk': { baseStats: { hp: 836, ad: 0, ap: 0, armor: 99, magicResist: 99 }, level: 99 },
+  'omruc': { baseStats: { hp: 1100, ad: 74, ap: 66, armor: 62, magicResist: 53 }, level: 200 },
+  'rahemos': { baseStats: { hp: 1232, ad: 23, ap: 23, armor: 73, magicResist: 69 }, level: 200 },
   'regeneration tank': { baseStats: { hp: 8352, ad: 0, ap: 0, armor: 126, magicResist: 696 }, level: 99 },
   'monster cauldron': { baseStats: { hp: 1114, ad: 92, ap: 112, armor: 45, magicResist: 42 }, level: 99 },
   'grynch clan mastermind': { baseStats: { hp: 220, ad: 0, ap: 0, armor: 66, magicResist: 66 }, level: 200 }
@@ -239,7 +244,7 @@ function buildCreatureDatabase() {
     }
     
     const allCreatureNames = allMonsters.map(m => m.metadata.name);
-    const hardcodedUnobtainable = ['Black Knight', 'Beer Barrel', 'Dharalion', 'Dead Tree', 'Dwarf Henchman', 'Earth Crystal', 'Energy Crystal', 'Grynch Clan Commander', 'Grynch Clan Mastermind', 'Lavahole', 'Magma Crystal', 'Monster Cauldron', 'Old Giant Spider', 'Orc', 'Regeneration Tank', 'Sweaty Cyclops', 'Tentugly', 'Willi Wasp', 'The Percht Queen'];
+    const hardcodedUnobtainable = ['Black Knight', 'Beer Barrel', 'Cobra Statue', 'Dharalion', 'Dead Tree', 'Dwarf Henchman', 'Earth Crystal', 'Energy Crystal', 'Grynch Clan Commander', 'Grynch Clan Mastermind', 'Lavahole', 'Magma Crystal', 'Morguthis', 'Monster Cauldron', 'Obelisk', 'Old Giant Spider', 'Omruc', 'Orc', 'Rahemos', 'Regeneration Tank', 'Sweaty Cyclops', 'Tentugly', 'Willi Wasp', 'The Percht Queen'];
     const hardcodedNonAwakenable = [...EVENT_CREATURES];
     
     const unobtainableFromMonsters = allMonsters
