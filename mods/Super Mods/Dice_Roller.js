@@ -113,6 +113,8 @@
   let lastApiCall = 0;
   const API_THROTTLE_DELAY = 400;
   let rateLimitedInterval = null;
+  let cachedPlayerState = null;
+  let playerStateSubscription = null;
 
   let diceRulesConfig = null;
   const STAT_KEYS = ['ap', 'hp', 'ad', 'armor', 'magicResist'];
@@ -330,7 +332,7 @@
 
     memoizeWithTTL: function(fn, ttl, keyFn = (...args) => JSON.stringify(args)) {
       const cache = new Map();
-      return function(...args) {
+      const memoized = function(...args) {
         const key = keyFn(...args);
         const now = Date.now();
         const cached = cache.get(key);
@@ -343,6 +345,8 @@
         cache.set(key, { value: result, timestamp: now });
         return result;
       };
+      memoized.clearCache = () => cache.clear();
+      return memoized;
     }
   };
 
@@ -435,22 +439,24 @@
     };
   }
 
-  // Cached monster data access with TTL
-  const safeGetMonsters = MemoizationUtils.memoizeWithTTL(() => {
+  function getMonstersFromState() {
     try {
-      const { monsters } = globalThis.state.player.getSnapshot().context;
+      const context = cachedPlayerState?.context || globalThis.state?.player?.getSnapshot()?.context;
+      const monsters = context?.monsters;
       return Array.isArray(monsters) ? monsters : [];
     } catch (error) {
       console.error('[Dice Roller] Failed to get monsters:', error);
       return [];
     }
-  }, 500); // Cache for 500ms to avoid excessive state access
+  }
 
-  // Function to clear the safeGetMonsters cache
+  // Cached monster data access with TTL (search/filter only — not modal refresh after rolls)
+  const safeGetMonsters = MemoizationUtils.memoizeWithTTL(() => getMonstersFromState(), 500);
+
   const clearMonstersCache = () => {
-    // Force a cache miss by calling the function with a different timestamp
-    // This is a workaround since MemoizationUtils doesn't expose cache clearing
-    safeGetMonsters.cache = new Map();
+    if (typeof safeGetMonsters.clearCache === 'function') {
+      safeGetMonsters.clearCache();
+    }
   };
 
   // =======================
@@ -958,6 +964,7 @@
     btn.className = 'focus-style-visible active:opacity-70';
     btn.setAttribute('data-state', 'closed');
     btn.setAttribute('data-gameid', creature.gameId);
+    btn.setAttribute('data-creature-id', creature.id);
     
     // Constrain button size to match inner content
     btn.style.width = '34px';
@@ -1105,31 +1112,57 @@
     });
   }
 
+  function getInventoryItemCount(inventory, key) {
+    if (!inventory) return 0;
+    const value = inventory[key];
+    if (value == null) return 0;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'object' && typeof value.count === 'number') return value.count;
+    return 0;
+  }
+
+  function setInventoryItemCountMutable(inventory, key, count) {
+    const existing = inventory[key];
+    if (existing !== undefined && typeof existing === 'object' && existing !== null && typeof existing.count === 'number') {
+      inventory[key] = { ...existing, count };
+    } else {
+      inventory[key] = count;
+    }
+  }
+
+  function normalizeInventoryDiffValue(value) {
+    if (typeof value === 'number' && !Number.isNaN(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    return null;
+  }
+
   /**
    * Update the local inventory state using inventoryDiff from API response
    */
   function updateLocalInventoryAfterRoll(inventoryDiff) {
     try {
       const player = globalThis.state?.player;
-      if (!player) return;
-      
+      if (!player || typeof player.send !== 'function') return;
       if (!inventoryDiff || Object.keys(inventoryDiff).length === 0) return;
-      
+
       player.send({
         type: 'setState',
         fn: (prev) => {
           const newState = { ...prev };
-          // Ensure nested inventory exists
-          newState.inventory = { ...prev.inventory };
-          
+          newState.inventory = { ...(prev.inventory || {}) };
+
           Object.entries(inventoryDiff).forEach(([itemKey, change]) => {
-            if (change === 0) return;
-            if (!newState.inventory[itemKey]) newState.inventory[itemKey] = 0;
-            newState.inventory[itemKey] = Math.max(0, newState.inventory[itemKey] + change);
-            // Mirror on root for compatibility
+            const delta = normalizeInventoryDiffValue(change);
+            if (delta === null || delta === 0) return;
+            const prevCount = getInventoryItemCount(newState.inventory, itemKey);
+            const nextCount = Math.max(0, prevCount + delta);
+            setInventoryItemCountMutable(newState.inventory, itemKey, nextCount);
             newState[itemKey] = newState.inventory[itemKey];
           });
-          
+
           return newState;
         }
       });
@@ -1139,32 +1172,67 @@
   }
 
   /**
-   * Update the dice counts display in the UI
+   * Update local monster stats via player state (required for reactive UI updates)
+   */
+  function updateLocalMonsterAfterRoll(newStats) {
+    try {
+      const player = globalThis.state?.player;
+      if (!player || typeof player.send !== 'function' || !newStats?.id) return;
+
+      player.send({
+        type: 'setState',
+        fn: (prev) => {
+          if (!prev || !Array.isArray(prev.monsters)) return prev;
+          let changed = false;
+          const nextMonsters = prev.monsters.map((monster) => {
+            if (String(monster?.id) !== String(newStats.id)) return monster;
+            changed = true;
+            return { ...monster, ...newStats };
+          });
+          return changed ? { ...prev, monsters: nextMonsters } : prev;
+        }
+      });
+      clearMonstersCache();
+    } catch (error) {
+      console.warn('[Dice Roller] Error updating local monster:', error);
+    }
+  }
+
+  /** Open Dice Roller modal only (avoid touching game inventory quantity spans). */
+  function getDiceRollerModalRoot() {
+    const autoRollBtn = document.querySelector(
+      'div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]'
+    );
+    return autoRollBtn?.closest('div[role="dialog"]') || null;
+  }
+
+  /**
+   * Update the dice counts display in the Dice Roller modal only.
    */
   function updateDiceCountsDisplay() {
     try {
-      const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+      const modal = getDiceRollerModalRoot();
+      if (!modal) return;
+
+      const playerContext = cachedPlayerState?.context || globalThis.state?.player?.getSnapshot()?.context;
       if (!playerContext) return;
-      
+
       const inventory = playerContext.inventory || {};
-      
-      // Find all dice count elements in the modal
-      const countElements = document.querySelectorAll('div[role="dialog"][data-state="open"] span[translate="no"]');
-      
-      countElements.forEach((countElement, index) => {
-        const tier = index + 1; // 1-5 for dice tiers
-        if (tier > 5) return; // Only process first 5 count elements (dice manipulators)
-        
+      const countElements = modal.querySelectorAll('[data-dice-roller-tier-count]');
+
+      countElements.forEach((countElement) => {
+        const tier = parseInt(countElement.getAttribute('data-dice-roller-tier-count'), 10);
+        if (!Number.isFinite(tier) || tier < DICE_CONFIG.MIN_DICE || tier > DICE_CONFIG.MAX_DICE) return;
+
         const key = `diceManipulator${tier}`;
         const count = inventory[key] || 0;
-        
+
         if (count === 0) {
           countElement.textContent = '0';
           countElement.style.color = '#888';
           countElement.style.fontStyle = 'italic';
           countElement.style.fontWeight = 'normal';
         } else {
-          // Optimized number formatting
           const formattedCount = count >= 1000 ? `${(count / 1000).toFixed(1).replace('.', ',')}K` : count.toString();
           countElement.textContent = formattedCount;
           countElement.style.color = '#fff';
@@ -1841,82 +1909,41 @@
     const event = new CustomEvent('searchCleared');
     scrollArea.dispatchEvent(event);
   }
-    requestAnimationFrame(() => {
-      PerformanceMonitor.start('creature-search-filter');
-      try {
-        const monsters = safeGetMonsters();
-        
-        // Use module-level search functions (no duplication)
-        
-        
-        // Filter and sort matching creatures directly from monster data
-        console.log(`[Dice Roller] Starting filter with ${monsters.length} total creatures, searchTerm="${searchTerm}", filterValue="${filterValue}"`);
-        
-        const matchingMonsters = sortCreatures(
-          monsters
-            .map(monster => enrichCreatureData(monster))
-            .filter(monster => {
-              const searchMatch = SearchMatcher.matchesSearch(monster, searchTerm);
-              const filterMatch = matchesTierFilter(monster, filterValue);
-              const isVisibleCreature = !shouldHideCreature(monster);
-              const overallMatch = searchMatch && filterMatch && isVisibleCreature;
-
-              return overallMatch;
-            }),
-          searchTerm
-        );
-        
-        console.log(`[Dice Roller] Filter complete: ${matchingMonsters.length} creatures match the criteria`);
-        
-        // Performance optimization: Use DocumentFragment for batch DOM updates
-        const fragment = document.createDocumentFragment();
-        
-        // Clear the scroll area completely
-        scrollArea.innerHTML = '';
-        
-        if (matchingMonsters.length === 0) {
-          // Show "no results" message
-          const noResultsMsg = document.createElement('div');
-          noResultsMsg.className = 'no-results-message';
-          noResultsMsg.style.cssText = `
-            color: #888;
-            text-align: center;
-            padding: 20px;
-            grid-column: span 6;
-            font-style: italic;
-            font-size: 12px;
-          `;
-          
-          let message = 'No creatures found';
-          if (searchTerm && filterValue !== 'all') {
-            message = `No creatures found matching "${searchValue}" and ${filterValue} genes`;
-          } else if (searchTerm) {
-            message = `No creatures found matching "${searchValue}"`;
-          } else if (filterValue !== 'all') {
-            message = `No creatures found with ${filterValue} genes`;
-          }
-          
-          noResultsMsg.textContent = message;
-          scrollArea.appendChild(noResultsMsg);
-        } else {
-          // Re-render only matching creatures using the helper function
-          matchingMonsters.forEach(creature => {
-            const btn = createCreatureButton(creature, null);
-            fragment.appendChild(btn);
-          });
-          
-          scrollArea.appendChild(fragment);
-        }
-        
-        PerformanceMonitor.end('creature-search-filter');
-      } catch (error) {
-        console.error('[Dice Roller] Error in applyCreatureSearch:', error);
-        scrollArea.innerHTML = '<div style="color:#f66;text-align:center;padding:16px;grid-column: span 6;">Error filtering creatures.</div>';
-      }
-    });
   }
 
-  function getCreatureDetails(selectedGameId, selectedDice, currentTier = null) {
+  function refreshModalCreatureList(scrollArea) {
+    if (!scrollArea) return;
+    clearMonstersCache();
+    const modal = scrollArea.closest('div[role="dialog"]') || document.querySelector('div[role="dialog"][data-state="open"]');
+    const searchInput = modal?.querySelector('#dice-roller-search');
+    const searchTerm = searchInput?.value?.trim() || '';
+    const filterBtn = modal?.querySelector('[data-filter-value]');
+    const filterValue = filterBtn?.getAttribute('data-filter-value') || 'all';
+
+    if (searchTerm) {
+      applyCreatureSearch(scrollArea, searchTerm, filterValue);
+    } else {
+      scrollArea.dispatchEvent(new CustomEvent('searchCleared'));
+    }
+  }
+
+  function refreshModalCreatureDetailsRow(col, row1Ref, selectedGameId, selectedDice, latestMonsterStats = null) {
+    if (!col || !row1Ref || !selectedGameId) return row1Ref;
+    clearMonstersCache();
+    const currentTier = latestMonsterStats ? getCreatureTier(latestMonsterStats) : null;
+    const newRow1 = getCreatureDetails(selectedGameId, selectedDice, currentTier, latestMonsterStats);
+    newRow1.style.flex = '0 0 50%';
+    newRow1.style.height = '50%';
+    newRow1.style.maxHeight = '50%';
+    newRow1.style.overflow = 'auto';
+    newRow1.style.minHeight = '0';
+    if (row1Ref.parentNode) {
+      col.replaceChild(newRow1, row1Ref);
+    }
+    return newRow1;
+  }
+
+  function getCreatureDetails(selectedGameId, selectedDice, currentTier = null, creatureOverride = null) {
     // Initialize dice rules config using utility function
     const diceRulesConfig = initializeDiceRulesConfig();
     
@@ -1927,8 +1954,9 @@
       return div;
     }
     try {
-      const monsters = safeGetMonsters();
-      const creature = monsters.find(c => String(c.id) === String(selectedGameId));
+      const creature = (creatureOverride && String(creatureOverride.id) === String(selectedGameId))
+        ? creatureOverride
+        : getMonstersFromState().find(c => String(c.id) === String(selectedGameId));
       if (!creature) {
         const div = document.createElement('div');
         div.innerText = 'Creature not found.';
@@ -2758,6 +2786,7 @@
       countBelow.style.fontSize = '11px';
       countBelow.style.marginTop = '4px';
       countBelow.setAttribute('translate', 'no');
+      countBelow.setAttribute('data-dice-roller-tier-count', String(i));
       if (count === 0) {
         countBelow.textContent = '0';
         countBelow.style.color = '#888';
@@ -3148,28 +3177,21 @@
       throw new Error(`API request failed: ${response.status} ${response.statusText} - ${JSON.stringify(data)}`);
     }
     
-    // Update local monster state with new stats from API
-    const newStats = data[0]?.result?.data?.json?.manipulatingMonster;
+    const responseJson = data[0]?.result?.data?.json;
+
+    // Update inventory first (independent of monster payload)
+    const inventoryDiff = responseJson?.inventoryDiff;
+    if (inventoryDiff && Object.keys(inventoryDiff).length > 0) {
+      updateLocalInventoryAfterRoll(inventoryDiff);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      updateDiceCountsDisplay();
+    }
+
+    // Update local monster state with new stats from API (must use setState for UI refresh)
+    const newStats = responseJson?.manipulatingMonster;
     if (newStats && newStats.id) {
-      const monsters = globalThis.state.player.getSnapshot().context.monsters;
-      const idx = monsters.findIndex(m => String(m.id) === String(newStats.id));
-      if (idx !== -1) {
-        Object.assign(monsters[idx], newStats);
-        // Clear the monsters cache to ensure fresh data is retrieved
-        clearMonstersCache();
-      }
-      
-      // Update local inventory using inventoryDiff from API response
-      const inventoryDiff = data[0]?.result?.data?.json?.inventoryDiff;
-      if (inventoryDiff && Object.keys(inventoryDiff).length > 0) {
-        updateLocalInventoryAfterRoll(inventoryDiff);
-        
-        // Update dice counts display after inventory update
-        setTimeout(() => {
-          updateDiceCountsDisplay();
-        }, 50);
-      }
-      
+      updateLocalMonsterAfterRoll(newStats);
+
       // Check if we're in tier mode and if any target tier has been achieved
       if (window.DiceRollerMode === 'tier' && window.DiceRollerSelectedTier && window.DiceRollerSelectedTier.length > 0) {
         const currentTier = getCreatureTier(newStats);
@@ -3187,7 +3209,7 @@
           
           // Update creature portrait before returning
           if (typeof rerenderDetails === 'function') {
-            rerenderDetails();
+            rerenderDetails(newStats);
           }
           
           // Return true to indicate success and stop rolling
@@ -3199,7 +3221,7 @@
           
           // Update creature details after each roll in tier mode
           if (typeof rerenderDetails === 'function') {
-            rerenderDetails();
+            rerenderDetails(newStats);
             
             // After rerenderDetails, recalculate and select lowest stats for next roll (only for higher-tier dice)
             const { continuouslyUseSameDice } = checkboxState || {};
@@ -3245,7 +3267,7 @@
       
       // For genes mode or when not in tier mode, always update creature details
       if (typeof rerenderDetails === 'function') {
-        rerenderDetails();
+        rerenderDetails(newStats);
       }
     }
     
@@ -3487,6 +3509,16 @@
       // Autoroll button logic
   let autorolling = false;
   let autorollAttempt = 0;
+
+    function finalizeModalCreatureView(latestMonsterStats = null) {
+      const activeId = window.DiceRollerActiveCreatureId ?? selectedGameId;
+      if (!activeId) return;
+      const modal = DOMCache.get('div[role="dialog"][data-state="open"]');
+      if (!modal || !modal.contains(col)) return;
+      row1 = refreshModalCreatureDetailsRow(col, row1, activeId, selectedDice, latestMonsterStats);
+      const scrollArea = modal.querySelector('.column-content-wrapper div[style*="overflow-y: auto"]');
+      refreshModalCreatureList(scrollArea);
+    }
     
     autoRollBtn.onclick = async () => {
       if (!autorolling) {
@@ -3615,49 +3647,8 @@
                 const result = await autoroll(selectedGameId, selectedDiceTier, availableStats, msg => { 
                   // Update status displays after each roll
                   updateStatusDisplays();
-                }, () => {
-                  // Optimized rerender - only update if modal is still open
-                  const modal = DOMCache.get('div[role="dialog"][data-state="open"]');
-                  if (modal && modal.contains(col)) {
-                    const newRow1 = getCreatureDetails(selectedGameId, selectedDice);
-                    newRow1.style.flex = '0 0 50%';
-                    newRow1.style.height = '50%';
-                    newRow1.style.maxHeight = '50%';
-                    newRow1.style.overflow = 'auto';
-                    newRow1.style.minHeight = '0';
-                    
-                    // Ensure the old row exists before replacing
-                    if (row1 && row1.parentNode) {
-                      col.replaceChild(newRow1, row1);
-                      row1 = newRow1;
-                      console.log('[Stats Roller] Creature details updated successfully');
-                    } else {
-                      console.log('[Stats Roller] Could not update creature details - row1 not found');
-                    }
-                    
-                    // Also refresh the creature list in column 1 to show updated stats
-                    const col1 = modal.querySelector('.column-content-wrapper');
-                    if (col1) {
-                      const scrollArea = col1.querySelector('div[style*="overflow-y: auto"]');
-                      if (scrollArea) {
-                        // Get current search term if any
-                        const searchInput = modal.querySelector('#dice-roller-search');
-                        const searchTerm = searchInput ? searchInput.value : '';
-                        
-                        // Clear monsters cache to ensure fresh data
-                        clearMonstersCache();
-                        
-                        // Re-apply search to refresh the creature list
-                        if (searchTerm && searchTerm.trim()) {
-                          applyCreatureSearch(scrollArea, searchTerm);
-                        } else {
-                          // Trigger a full re-render of the creature list
-                          const event = new CustomEvent('searchCleared');
-                          scrollArea.dispatchEvent(event);
-                        }
-                      }
-                    }
-                  }
+                }, (latestMonsterStats) => {
+                  finalizeModalCreatureView(latestMonsterStats);
                 }, selectedDice, getCheckboxState());
                 
                 // Add delay for genes mode as well
@@ -3868,41 +3859,8 @@
             await autoroll(selectedGameId, selectedDiceTier, availableStats, msg => { 
               // Update status displays after roll
               updateStatusDisplays();
-            }, () => {
-              const newRow1 = getCreatureDetails(selectedGameId, selectedDice);
-              newRow1.style.flex = '0 0 50%';
-              newRow1.style.height = '50%';
-              newRow1.style.maxHeight = '50%';
-              newRow1.style.overflow = 'auto';
-              newRow1.style.minHeight = '0';
-              col.replaceChild(newRow1, row1);
-              row1 = newRow1;
-              
-              // Also refresh the creature list in column 1 to show updated stats
-              const modal = DOMCache.get('div[role="dialog"][data-state="open"]');
-              if (modal) {
-                const col1 = modal.querySelector('.column-content-wrapper');
-                if (col1) {
-                  const scrollArea = col1.querySelector('div[style*="overflow-y: auto"]');
-                  if (scrollArea) {
-                    // Get current search term if any
-                    const searchInput = modal.querySelector('#dice-roller-search');
-                    const searchTerm = searchInput ? searchInput.value : '';
-                    
-                    // Clear monsters cache to ensure fresh data
-                    clearMonstersCache();
-                    
-                    // Re-apply search to refresh the creature list
-                    if (searchTerm && searchTerm.trim()) {
-                      applyCreatureSearch(scrollArea, searchTerm);
-                    } else {
-                      // Trigger a full re-render of the creature list
-                      const event = new CustomEvent('searchCleared');
-                      scrollArea.dispatchEvent(event);
-                    }
-                  }
-                }
-              }
+            }, (latestMonsterStats) => {
+              finalizeModalCreatureView(latestMonsterStats);
             }, selectedDice, getCheckboxState());
             // Update roll count for single roll (only if not already counting)
             if (autorollAttempt === 0) {
@@ -3931,6 +3889,9 @@
           });
         };
         enableTierButtons();
+        
+        // Final sync so modal matches game state after autoroll completes
+        finalizeModalCreatureView();
         
         // Update status displays after autoroll ends
         setTimeout(() => {
@@ -3965,6 +3926,8 @@
           statsStatusDiv.textContent = originalText;
         }, 2000);
         
+        finalizeModalCreatureView();
+        
         // Update status displays after stopping
         setTimeout(() => {
           updateStatusDisplays();
@@ -3997,7 +3960,8 @@
     if (!detailsBox) {
       return;
     }
-    
+
+    clearMonstersCache();
     const newContent = getCreatureDetailsCol(selectedGameId, getSelectedDiceTier, getAvailableStats, null, selectedDice, lastStatusMessage);
     
     const contentWrapper = detailsBox.querySelector('.column-content-wrapper');
@@ -4080,6 +4044,7 @@
         const selectCreature = (gameId) => {
           const previousGameId = selectedGameId;
           selectedGameId = gameId;
+          window.DiceRollerActiveCreatureId = gameId;
           
           // Reset dice and stats when selecting a new creature
           if (previousGameId !== gameId) {
@@ -4949,6 +4914,16 @@
         }
         inventoryObserver = null;
       }
+
+      if (playerStateSubscription) {
+        try {
+          playerStateSubscription.unsubscribe();
+        } catch (e) {
+          console.warn('[Dice Roller] Error unsubscribing from player state:', e);
+        }
+        playerStateSubscription = null;
+        cachedPlayerState = null;
+      }
       
       // Reset counters
       failedAttempts = 0;
@@ -5055,6 +5030,17 @@
   }
   
   if (config.enabled) {
+    if (globalThis.state?.player) {
+      playerStateSubscription = globalThis.state.player.subscribe((playerState) => {
+        cachedPlayerState = playerState;
+        if (getDiceRollerModalRoot()) {
+          clearMonstersCache();
+          updateDiceCountsDisplay();
+        }
+      });
+      cachedPlayerState = globalThis.state.player.getSnapshot();
+    }
+
     observeInventory();
     if (!reinjectEventHandler) {
       reinjectEventHandler = () => requestDiceRollerButtonReinject('custom-event');

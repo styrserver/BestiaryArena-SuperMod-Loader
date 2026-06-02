@@ -17,6 +17,12 @@ console.log = function(...args) {
   }
 };
 
+// Match upstream Chrome: inject only in the top frame (game document), not ad/utility iframes.
+const IS_TOP_FRAME = window === window.top;
+if (!IS_TOP_FRAME) {
+  console.log('[Injector] Skipping subframe — mod loader runs in the top frame only');
+}
+
 function injectScript(file) {
   console.log(`Injecting script: ${file}`);
   const script = document.createElement('script');
@@ -71,9 +77,14 @@ let localModsInjected = false;
 console.log('Starting script injection sequence...');
 
 // First inject extension URLs directly
-injectExtensionURLs();
+if (IS_TOP_FRAME) {
+  injectExtensionURLs();
+}
 
 // Then inject client.js which contains the API
+if (!IS_TOP_FRAME) {
+  console.log('Bestiary Arena Mod Loader - Subframe skipped');
+} else {
 const clientScript = injectScript('content/client.js');
 clientScript.onload = function() {
   clientInjected = true;
@@ -165,6 +176,8 @@ clientScript.onload = function() {
   // Start checking immediately
   checkAPIReady();
 };
+
+} // IS_TOP_FRAME
 
 console.log('Bestiary Arena Mod Loader - Injection sequence initiated');
 

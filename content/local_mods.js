@@ -103,6 +103,24 @@ function markExecutionTriggered() {
   clearInitExecutionFallbackTimer();
 }
 
+function isModApiReadyForExecution() {
+  return !!(window.BestiaryModAPI?.ui?.addButton);
+}
+
+function whenModApiReady(callback) {
+  if (isModApiReadyForExecution()) {
+    callback();
+    return;
+  }
+  const onReady = () => {
+    document.removeEventListener('bestiary-mod-api-ready', onReady);
+    if (isModApiReadyForExecution()) {
+      callback();
+    }
+  };
+  document.addEventListener('bestiary-mod-api-ready', onReady);
+}
+
 function scheduleInitExecutionFallback() {
   clearInitExecutionFallbackTimer();
   initExecutionFallbackTimer = setTimeout(() => {
@@ -138,9 +156,20 @@ function triggerModExecution(mods, source) {
     return;
   }
 
-  markExecutionTriggered();
-  console.log(`[Local Mods] Executing ${toRun.length} mod(s) (source: ${source})`);
-  executeModsInOrder(toRun);
+  whenModApiReady(() => {
+    if (isBatchExecuting) {
+      console.log(`[Local Mods] Skipping execution from ${source} — batch started while waiting for API`);
+      return;
+    }
+    const pending = toRun.filter(mod => !executedMods[mod.name]);
+    if (pending.length === 0) {
+      markExecutionTriggered();
+      return;
+    }
+    markExecutionTriggered();
+    console.log(`[Local Mods] Executing ${pending.length} mod(s) (source: ${source})`);
+    executeModsInOrder(pending);
+  });
 }
 
 // Ensure API is created immediately
@@ -723,26 +752,33 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
   }
   
   try {
-    // Check API availability with better retry mechanism
-    if (!window.BestiaryModAPI) {
-      console.warn(`BestiaryModAPI not available yet, will retry executing mod: ${modName}`);
+    // Wait until mod-bar API is ready (ui.addButton survives UI component merge)
+    if (!isModApiReadyForExecution()) {
+      console.warn(`Mod API UI not ready yet, will retry executing mod: ${modName}`);
       
-      // Setup a more robust retry mechanism
       let retryCount = 0;
-      const maxRetries = 20; // Increase max retries
+      const maxRetries = 20;
       const checkAndExecute = () => {
         retryCount++;
-        if (window.BestiaryModAPI) {
-          console.log(`BestiaryModAPI now available on retry ${retryCount}, executing mod: ${modName}`);
+        if (isModApiReadyForExecution()) {
+          console.log(`Mod API UI ready on retry ${retryCount}, executing mod: ${modName}`);
           executeLocalMod(modNameOrObject, forceExecution);
         } else if (retryCount < maxRetries) {
-          console.log(`BestiaryModAPI still not available, retry ${retryCount}/${maxRetries}`);
-          setTimeout(checkAndExecute, 300); // Slightly faster retries
+          setTimeout(checkAndExecute, 300);
         } else {
-          console.error(`BestiaryModAPI not available after ${maxRetries} retries, giving up on mod: ${modName}`);
+          console.error(`Mod API UI not ready after ${maxRetries} retries, giving up on mod: ${modName}`);
         }
       };
       
+      const onReady = () => {
+        document.removeEventListener('bestiary-mod-api-ready', onReady);
+        if (isModApiReadyForExecution()) {
+          executeLocalMod(modNameOrObject, forceExecution);
+        } else {
+          setTimeout(checkAndExecute, 300);
+        }
+      };
+      document.addEventListener('bestiary-mod-api-ready', onReady);
       setTimeout(checkAndExecute, 300);
       return null;
     }

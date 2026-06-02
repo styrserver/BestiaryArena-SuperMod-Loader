@@ -41,10 +41,28 @@ if (typeof browserAPI === 'undefined') {
     });
   }
   
+  // Merge shared UI factories into api.ui without removing mod-bar helpers (addButton, etc.)
+  function attachUIComponentsToModApi() {
+    if (!window.BestiaryModAPI?.ui || !window.BestiaryUIComponents) {
+      return;
+    }
+    const ui = window.BestiaryModAPI.ui;
+    const external = window.BestiaryUIComponents;
+    if (!ui.components) {
+      ui.components = {};
+    }
+    for (const key of Object.keys(external)) {
+      if (typeof external[key] === 'function') {
+        ui.components[key] = external[key];
+      }
+    }
+  }
+
   // Load UI Components
   function loadUIComponents() {
     if (window.BestiaryUIComponents) {
       console.log('UI Components already loaded');
+      attachUIComponentsToModApi();
       return Promise.resolve();
     }
 
@@ -83,12 +101,7 @@ if (typeof browserAPI === 'undefined') {
       }
       script.onload = () => {
         console.log('UI Components loaded successfully');
-        
-        // Make the UI components directly available through the API
-        if (window.BestiaryUIComponents && window.BestiaryModAPI) {
-          window.BestiaryModAPI.ui = window.BestiaryUIComponents;
-        }
-        
+        attachUIComponentsToModApi();
         resolve();
       };
       script.onerror = (err) => {
@@ -100,11 +113,7 @@ if (typeof browserAPI === 'undefined') {
           createFullItem: function() { console.warn("Using fallback item"); return document.createElement('div'); },
           createFullMonster: function() { console.warn("Using fallback monster"); return document.createElement('div'); }
         };
-        
-        if (window.BestiaryModAPI) {
-          window.BestiaryModAPI.ui = window.BestiaryUIComponents;
-        }
-        
+        attachUIComponentsToModApi();
         // Resolve anyway with fallback components
         resolve();
       };
@@ -487,6 +496,9 @@ if (typeof browserAPI === 'undefined') {
   const MOD_TOGGLE_SIZE = 35;
   const MOD_TOGGLE_MARGIN = 10;
   const MOD_TOGGLE_GAP = 10;
+  const MOD_BAR_Z_INDEX = 9999;
+  const MOD_BAR_SAFE_BOTTOM = `calc(${MOD_TOGGLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`;
+  const MOD_BAR_SAFE_RIGHT = `calc(${MOD_TOGGLE_MARGIN}px + env(safe-area-inset-right, 0px))`;
 
   const MOD_BUTTON_GAME_STYLE = `
     padding: 2px 5px;
@@ -618,30 +630,30 @@ if (typeof browserAPI === 'undefined') {
 
   const MOD_TOGGLE_BUTTON_STYLE = MOD_BUTTON_GAME_STYLE + `
     position: fixed;
-    bottom: ${MOD_TOGGLE_MARGIN}px;
-    right: ${MOD_TOGGLE_MARGIN}px;
+    bottom: ${MOD_BAR_SAFE_BOTTOM};
+    right: ${MOD_BAR_SAFE_RIGHT};
     min-width: ${MOD_TOGGLE_SIZE}px;
     min-height: ${MOD_TOGGLE_SIZE}px;
     width: ${MOD_TOGGLE_SIZE}px;
     height: ${MOD_TOGGLE_SIZE}px;
     padding: 0;
-    z-index: 101;
+    z-index: ${MOD_BAR_Z_INDEX};
   `;
 
   function applyModButtonsContainerPosition(buttonsContainer, layout) {
     const toggleOffset = MOD_TOGGLE_MARGIN + MOD_TOGGLE_SIZE + MOD_TOGGLE_GAP;
 
     buttonsContainer.style.position = 'fixed';
-    buttonsContainer.style.zIndex = '100';
+    buttonsContainer.style.zIndex = String(MOD_BAR_Z_INDEX - 1);
 
     if (layout === 'vertical') {
-      buttonsContainer.style.bottom = `${toggleOffset}px`;
-      buttonsContainer.style.right = `${MOD_TOGGLE_MARGIN}px`;
+      buttonsContainer.style.bottom = `calc(${toggleOffset}px + env(safe-area-inset-bottom, 0px))`;
+      buttonsContainer.style.right = MOD_BAR_SAFE_RIGHT;
       buttonsContainer.style.top = 'auto';
       buttonsContainer.style.left = 'auto';
     } else {
-      buttonsContainer.style.bottom = `${MOD_TOGGLE_MARGIN}px`;
-      buttonsContainer.style.right = `${toggleOffset}px`;
+      buttonsContainer.style.bottom = MOD_BAR_SAFE_BOTTOM;
+      buttonsContainer.style.right = `calc(${toggleOffset}px + env(safe-area-inset-right, 0px))`;
       buttonsContainer.style.top = 'auto';
       buttonsContainer.style.left = 'auto';
     }
@@ -2171,22 +2183,13 @@ if (typeof browserAPI === 'undefined') {
   // Initialize the API and load components
   async function initializeAPI() {
     try {
-      // Clean up any existing mod buttons to prevent conflicts
-      if (window.BestiaryModAPI && window.BestiaryModAPI.ui) {
-        window.BestiaryModAPI.ui.cleanupAllModButtons();
-      }
-      
       // Wait for translations to load (already started earlier)
       while (!translationsLoaded) {
         await new Promise(resolve => setTimeout(resolve, 10));
       }
       
       await loadUIComponents();
-      
-      // Now that UI components are loaded, inject the createModal method directly
-      if (window.BestiaryUIComponents && window.BestiaryModAPI) {
-        window.BestiaryModAPI.ui = window.BestiaryUIComponents;
-      }
+      attachUIComponentsToModApi();
       
       // Setup a function to expose the utility functions to mods
       const exposeUtilityFunctions = () => {

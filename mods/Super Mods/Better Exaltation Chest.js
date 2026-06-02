@@ -523,6 +523,28 @@
       padding: 2px;
     ` + customStyles;
   }
+
+  function injectEquipmentSelectStyles() {
+    if (document.getElementById('better-exaltation-equipment-select-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'better-exaltation-equipment-select-styles';
+    style.textContent = `
+      #equipment-setup-rows .better-exaltation-equipment-select {
+        flex: 1;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function syncEquipmentSelectTitle(select) {
+    const value = select.value;
+    select.title = value && value !== 'All' ? value : '';
+  }
   
   // Reusable modal finding functions
   function findExaltationChestModal() {
@@ -2533,6 +2555,7 @@
   
   // Create equipment setup section
   function createEquipmentSetupSection() {
+    injectEquipmentSelectStyles();
     const section = document.createElement('div');
     section.style.cssText = `
       display: flex;
@@ -2635,8 +2658,8 @@
     
     // Equipment dropdown
     const equipmentSelect = document.createElement('select');
+    equipmentSelect.className = 'better-exaltation-equipment-select';
     equipmentSelect.style.cssText = createDropdownStyle(`
-      flex: 1;
       height: 24px;
     `);
     
@@ -2698,6 +2721,7 @@
         equipmentSelect.value = 'All';
         tierSelect.value = 'All';
         statSelect.value = 'All';
+        syncEquipmentSelectTitle(equipmentSelect);
         // Only save if values actually changed (change event may not fire if values were already 'All')
         if (valuesChanged) {
           saveEquipmentSetup();
@@ -2723,9 +2747,14 @@
       statSelect.value = 'All';
     }
     
+    syncEquipmentSelectTitle(equipmentSelect);
+
     // Add change listeners to save setup
     [equipmentSelect, tierSelect, statSelect].forEach(select => {
       addManagedEventListener(select, 'change', () => {
+        if (select === equipmentSelect) {
+          syncEquipmentSelectTitle(equipmentSelect);
+        }
         saveEquipmentSetup();
         disableAutoOpeningIfActive();
       });
@@ -2822,6 +2851,7 @@
           select.appendChild(option);
         });
       console.log(`[Better Exaltation Chest] Loaded ${equipmentList.length} equipment items into dropdown`);
+      syncEquipmentSelectTitle(select);
     } else if (retryCount < CONSTANTS.EQUIPMENT_LOAD_MAX_RETRIES) {
       // Database not ready yet, retry
       createTrackedTimeout(() => {

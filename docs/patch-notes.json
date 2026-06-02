@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.0.2",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Mod buttons show on mobile WebExtensions (e.g. Orion iOS): Chrome injects the top frame only (like upstream), subframes are skipped; api.ui keeps addButton when UI components load; mod bar uses z-index 9999 and safe-area insets; bundled mods wait for bestiary-mod-api-ready before batch execution."
+        },
+        {
+          "mod": "BA Sandbox Utils",
+          "type": "fixed",
+          "text": "Added Ankrahmun to regionNamesToIds. serializeBoard no longer returns empty JSON when a region ID is missing from the static map—it falls back to state.utils.REGION_NAME or title case and registers the mapping for later calls."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "changed",
+          "text": "Chest settings equipment dropdown truncates long names with ellipsis when the row is narrow; full name shows on hover."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "fixed",
+          "text": "Per-run and chart replay copy works on Ankrahmun maps (and other regions missing from the static list at first serialize). getBoardData discards incomplete cached board JSON instead of reusing {seed, floor} only; local serializeBoard uses the same region name fallbacks as BA Sandbox Utils."
+        },
+        {
+          "mod": "Dice Roller",
+          "type": "fixed",
+          "text": "Dice and creature stats update live after rolls without reloading the page: inventoryDiff applies via player setState (including object-style stack counts), monster stats use immutable state updates instead of in-place mutation, and the modal refreshes details and the creature list when autoroll finishes or stops. Fixed the monster TTL cache never clearing, duplicate creature-search repaints (e.g. filtered lists), and stale Details panel data after rolls. Live dice count refresh is scoped to the Dice Roller modal only (data-dice-roller-tier-count), so other open dialogs no longer get wrong counts or lose the game’s canvas quantity font."
+        }
+      ]
+    },
+    {
       "version": "4.0.1",
       "changes": [
         {

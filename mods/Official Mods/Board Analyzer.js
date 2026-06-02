@@ -1110,7 +1110,15 @@ const serializeBoard = () => {
   board.sort((a, b) => a.tile - b.tile);
   const selectedMap = boardContext.selectedMap;
   const regionId = selectedMap.selectedRegion.id;
-  const regionName = regionIdsToNames.get(regionId);
+  let regionName = regionIdsToNames.get(regionId);
+  if (!regionName) {
+    const fromState = globalThis.state?.utils?.REGION_NAME;
+    regionName = fromState?.[regionId] || fromState?.[String(regionId).toLowerCase()];
+    if (!regionName) {
+      const id = String(regionId ?? '').trim();
+      regionName = id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+    }
+  }
   const mapId = selectedMap.selectedRoom.id;
   const mapName = mapIdsToNames.get(mapId);
   const floor = boardContext.floor;
@@ -1364,8 +1372,12 @@ let currentGameState = null;
 // Simple board data storage - serialize once, store, reuse
 let currentBoardData = null;
 
+function isCompleteBoardData(data) {
+  return data && data.region && data.map && Array.isArray(data.board) && data.board.length > 0;
+}
+
 function getBoardData(seed = null) {
-  if (!currentBoardData) {
+  if (!isCompleteBoardData(currentBoardData)) {
     try {
       if (typeof window.$serializeBoard === 'function') {
         currentBoardData = JSON.parse(window.$serializeBoard());
@@ -1373,6 +1385,11 @@ function getBoardData(seed = null) {
         currentBoardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
       } else {
         currentBoardData = serializeBoard();
+      }
+      if (!isCompleteBoardData(currentBoardData)) {
+        console.error('Serialized board data is incomplete:', currentBoardData);
+        currentBoardData = null;
+        return null;
       }
     } catch (error) {
       console.error('Error serializing board:', error);

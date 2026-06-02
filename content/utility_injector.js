@@ -8,6 +8,11 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
 // Utility Injector - Loads the utility functions directly from local file
 
 (function() {
+  if (window !== window.top) {
+    console.log('BA Utility Injector: Skipping subframe');
+    return;
+  }
+
   console.log('BA Utility Injector: Starting');
   
   // Function to inject sandbox utils directly from local file

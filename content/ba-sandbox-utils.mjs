@@ -14,6 +14,7 @@
 			["Ab'Dendriel", 'abdendriel'],
 			['Kazordoon', 'kazordoon'],
 			['Venore', 'venore'],
+			['Ankrahmun', 'ankrahmun'],
 		]);
 
 		// Create reverse mapping
@@ -700,10 +701,20 @@
 				}
 				
 				const regionId = selectedMap.selectedRegion.id;
-				const regionName = regionIdsToNames.get(regionId);
+				let regionName = regionIdsToNames.get(regionId);
 				if (!regionName) {
-					console.warn(`Region name for ID ${regionId} not found`);
-					return '{}';
+					const fromState = safeAccess(globalThis, 'state.utils.REGION_NAME');
+					regionName = fromState?.[regionId]
+						|| fromState?.[String(regionId).toLowerCase()];
+					if (regionName) {
+						regionIdsToNames.set(regionId, regionName);
+						regionNamesToIds.set(regionName, regionId);
+					}
+				}
+				if (!regionName) {
+					const id = String(regionId ?? '').trim();
+					regionName = id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+					console.warn(`Region name for ID ${regionId} not found, using fallback: ${regionName}`);
 				}
 				
 				const mapId = selectedMap.selectedRoom.id;
