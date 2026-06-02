@@ -404,6 +404,25 @@
       return null;
     }
   }
+
+  /**
+   * Reads current dust from player snapshot (inventory first — context.dust is often 0).
+   * Matches updateLocalStateAfterDisenchant read order.
+   */
+  function getUserCurrentDust() {
+    try {
+      const snapshot = globalThis.state?.player?.getSnapshot();
+      return Number(
+        snapshot?.inventory?.dust ??
+        snapshot?.dust ??
+        snapshot?.context?.dust ??
+        0
+      ) || 0;
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error getting user dust:', error);
+      return 0;
+    }
+  }
   
   /**
    * Updates capacity display with a delay to ensure state has updated
@@ -2939,8 +2958,7 @@
     try {
       console.log('injectDustDisplayIntoModal called');
       
-      const playerContext = getPlayerContextSnapshot();
-      const currentDust = Number(playerContext?.dust) || 0;
+      const currentDust = getUserCurrentDust();
       console.log('Current dust:', currentDust);
       
       // Check if dust display already exists
@@ -3013,7 +3031,7 @@
         
         // Create a targeted subscription that only watches dust
         const subscription = globalThis.state.player
-          .select((state) => state.context?.dust)
+          .select((state) => state.inventory?.dust ?? state.dust ?? state.context?.dust ?? 0)
           .subscribe((newDust) => {
             const numericDust = Number(newDust) || 0;
             
@@ -3088,9 +3106,7 @@
     try {
       const dustAmountElement = document.getElementById('better-exaltation-dust-amount');
       if (dustAmountElement) {
-        const playerContext = getPlayerContextSnapshot();
-        const currentDust = Number(playerContext?.dust) || 0;
-        dustAmountElement.textContent = formatNumber(currentDust);
+        dustAmountElement.textContent = formatNumber(getUserCurrentDust());
       }
     } catch (error) {
       console.warn('[Better Exaltation Chest] Error updating dust display:', error);
@@ -3236,12 +3252,11 @@
         return;
       }
       
-      const playerContext = getPlayerContextSnapshot();
-      const currentDust = Number(playerContext?.dust) || 0;
+      const currentDust = getUserCurrentDust();
       
       if (numericDustChange !== 0) {
-        const startValue = currentDust - numericDustChange;
-        const endValue = currentDust;
+        const startValue = Math.max(0, currentDust - numericDustChange);
+        const endValue = Math.max(0, currentDust);
         console.log('[Better Exaltation Chest] Animating dust from', startValue, 'to', endValue);
         animateDustCount(startValue, endValue, 800);
       } else {

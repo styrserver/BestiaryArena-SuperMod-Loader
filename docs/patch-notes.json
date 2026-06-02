@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.0.3",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Player stats caps are now centralized in CYCLOPEDIA_SETTINGS.playerStatCaps for easier updates, and progression maxima were updated to Perfect Creatures 75, BIS Equipments 126, and Explored maps 73."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "fixed",
+          "text": "Dust counter and gain animation read inventory.dust (not context.dust, which was often 0), so auto-disenchant no longer animates toward zero or shows a negative count."
+        }
+      ]
+    },
+    {
       "version": "4.0.2",
       "changes": [
         {

@@ -273,6 +273,17 @@ const CYCLOPEDIA_UI = {
   }
 };
 
+/** Centralized Cyclopedia settings for easy future tuning. */
+const CYCLOPEDIA_SETTINGS = {
+  playerStatCaps: {
+    perfectCreatures: 75,
+    bisEquipments: 126,
+    exploredMaps: 73,
+    bagOutfits: 202,
+    raids: 16
+  }
+};
+
 function renderCyclopediaProfileLoadingHtml() {
   return `
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
@@ -18615,13 +18626,7 @@ function countUniqueEventShinyCreatureGameIds(monsters) {
   return getUniqueOwnedEventShinyCreatureNames(monsters).length;
 }
 
-const CYCLOPEDIA_MAX_VALUES = {
-  perfectCreatures: 69,
-  bisEquipments: 114,
-  exploredMaps: 64,
-  bagOutfits: 202,
-  raids: 16
-};
+const CYCLOPEDIA_MAX_VALUES = CYCLOPEDIA_SETTINGS.playerStatCaps;
 
 const CYCLOPEDIA_PROGRESS_STATS = [
   { key: 'perfectCreatures', icon: '/assets/icons/enemy.png', max: CYCLOPEDIA_MAX_VALUES.perfectCreatures },
