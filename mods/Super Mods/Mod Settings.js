@@ -44,6 +44,7 @@ const defaultConfig = {
   enableFirebaseRunsUpload: false, // Enable uploading best runs to Firebase
   firebaseRunsPassword: '', // Encryption password for Firebase runs (stored encrypted)
   autoUploadRuns: false, // Automatically upload when new best run is recorded
+  firebaseUploadRegions: {}, // regionId -> false when disabled; missing keys = enabled (all ON by default)
   lastFirebaseUploadedMapHashes: {}, // mapKey -> payload hash for delta Firebase uploads (v2)
   hotkeyOpenInventory: 'i', // KeyboardEvent.key id: letter/digit, or e.g. f1, insert, home, pageup
   hotkeyOpenQuestLog: 'q',
@@ -162,6 +163,7 @@ if (config.enableHotkeys === undefined) config.enableHotkeys = false;
 if (config.defaultInventorySticky === undefined) config.defaultInventorySticky = false;
 if (config.alwaysNavigateMaxFloor === undefined) config.alwaysNavigateMaxFloor = false;
 if (config.autoHideNonShinyNonAwakenedMonsters === undefined) config.autoHideNonShinyNonAwakenedMonsters = false;
+ensureFirebaseUploadRegionsConfig();
 
 // Last visited map feature globals
 const LAST_MAP_STORAGE_KEY = 'mod-settings-map-history';
@@ -328,6 +330,188 @@ function resolveRegionDisplayName(region) {
     return globalThis.mapsDatabase.getRegionDisplayName(id);
   }
   return String(id).replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+}
+
+const FIREBASE_UPLOAD_OTHER_REGION_ID = '__other__';
+
+function getRunTrackerOtherMapKeys(allRuns) {
+  const runEntries = allRuns?.runs;
+  if (!runEntries || typeof runEntries !== 'object') return [];
+
+  const processedMapKeys = new Set();
+  try {
+    const regions = globalThis.state?.utils?.REGIONS;
+    const roomNames = globalThis.state?.utils?.ROOM_NAME;
+
+    if (regions && Array.isArray(regions) && roomNames) {
+      regions.forEach((region) => {
+        if (!region.rooms) return;
+        region.rooms.forEach((room) => {
+          const roomId = room.id;
+          const roomName = roomNames[roomId] || roomId;
+          const mapKey = `map_${roomName.toLowerCase().replace(/\s+/g, '_')}`;
+
+          if (runEntries[mapKey]) {
+            processedMapKeys.add(mapKey);
+            return;
+          }
+
+          for (const [key, mapData] of Object.entries(runEntries)) {
+            if (processedMapKeys.has(key)) continue;
+            const allRunsInMap = [
+              ...(mapData.speedrun || []),
+              ...(mapData.rank || []),
+              ...(mapData.floor || [])
+            ];
+            if (allRunsInMap.some((run) => run.mapId === roomId || run.mapId === room.id)) {
+              processedMapKeys.add(key);
+              break;
+            }
+          }
+        });
+      });
+    }
+  } catch (error) {
+    console.warn('[Mod Settings] Error resolving run map regions:', error);
+  }
+
+  return Object.keys(runEntries).filter((mapKey) => !processedMapKeys.has(mapKey));
+}
+
+function hasFirebaseUploadOtherMapsRuns() {
+  if (!window.RunTrackerAPI?.getAllRuns) return false;
+  return getRunTrackerOtherMapKeys(window.RunTrackerAPI.getAllRuns()).length > 0;
+}
+
+function getFirebaseUploadRegionEntries() {
+  const entries = [];
+  const seen = new Set();
+
+  if (typeof globalThis.mapsDatabase?.getRegionsInOrder === 'function') {
+    for (const region of globalThis.mapsDatabase.getRegionsInOrder()) {
+      if (!region?.id || seen.has(region.id)) continue;
+      seen.add(region.id);
+      entries.push({
+        id: region.id,
+        name: resolveRegionDisplayName(region)
+      });
+    }
+  } else {
+    const regions = globalThis.state?.utils?.REGIONS;
+    if (Array.isArray(regions)) {
+      regions.forEach((region) => {
+        if (!region?.id || seen.has(region.id)) return;
+        seen.add(region.id);
+        entries.push({
+          id: region.id,
+          name: resolveRegionDisplayName(region)
+        });
+      });
+    }
+  }
+
+  if (hasFirebaseUploadOtherMapsRuns()) {
+    entries.push({
+      id: FIREBASE_UPLOAD_OTHER_REGION_ID,
+      name: t('mods.betterUI.firebaseUploadOtherMapsRegion')
+    });
+  }
+  return entries;
+}
+
+function isFirebaseUploadRegionEnabled(regionId) {
+  const regions = config.firebaseUploadRegions;
+  if (!regions || typeof regions !== 'object') return true;
+  return regions[regionId] !== false;
+}
+
+function ensureFirebaseUploadRegionsConfig() {
+  if (!config.firebaseUploadRegions || typeof config.firebaseUploadRegions !== 'object') {
+    config.firebaseUploadRegions = {};
+  }
+}
+
+function initFirebaseUploadRegionToggles(container) {
+  const listEl = container?.querySelector('#firebase-upload-regions-list');
+  const headerBtn = container?.querySelector('#firebase-upload-regions-header');
+  const panelEl = container?.querySelector('#firebase-upload-regions-panel');
+  const chevronEl = container?.querySelector('#firebase-upload-regions-chevron');
+  const hintEl = container?.querySelector('#firebase-upload-regions-expand-hint');
+  if (!listEl) return;
+
+  const setRegionsPanelExpanded = (expanded) => {
+    if (!panelEl || !headerBtn) return;
+    panelEl.hidden = !expanded;
+    headerBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    if (chevronEl) {
+      chevronEl.textContent = expanded ? '▾' : '▸';
+    }
+    if (hintEl) {
+      hintEl.textContent = expanded
+        ? t('mods.betterUI.firebaseUploadRegionsCollapseHint')
+        : t('mods.betterUI.firebaseUploadRegionsExpandHint');
+    }
+    headerBtn.title = expanded
+      ? t('mods.betterUI.firebaseUploadRegionsCollapseHint')
+      : t('mods.betterUI.firebaseUploadRegionsExpandHint');
+  };
+
+  if (headerBtn && panelEl && !headerBtn.dataset.collapsibleBound) {
+    headerBtn.dataset.collapsibleBound = '1';
+    setRegionsPanelExpanded(false);
+    headerBtn.addEventListener('mouseenter', () => {
+      headerBtn.style.borderColor = 'rgba(255, 170, 0, 0.65)';
+      headerBtn.style.background = 'rgba(255, 170, 0, 0.1)';
+    });
+    headerBtn.addEventListener('mouseleave', () => {
+      headerBtn.style.borderColor = 'rgba(255, 170, 0, 0.35)';
+      headerBtn.style.background = 'rgba(255, 255, 255, 0.05)';
+    });
+    headerBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setRegionsPanelExpanded(panelEl.hidden);
+    });
+  }
+
+  ensureFirebaseUploadRegionsConfig();
+  listEl.innerHTML = '';
+
+  for (const { id, name } of getFirebaseUploadRegionEntries()) {
+    const label = document.createElement('label');
+    label.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer;';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'firebase-upload-region-toggle';
+    checkbox.dataset.regionId = id;
+    checkbox.checked = isFirebaseUploadRegionEnabled(id);
+    checkbox.style.cursor = 'pointer';
+
+    const span = document.createElement('span');
+    span.style.fontSize = '13px';
+    span.style.color = '#ccc';
+    span.textContent = name;
+    if (id === FIREBASE_UPLOAD_OTHER_REGION_ID) {
+      span.title = t('mods.betterUI.firebaseUploadOtherMapsRegionTooltip');
+      span.style.cursor = 'help';
+    }
+
+    label.appendChild(checkbox);
+    label.appendChild(span);
+    listEl.appendChild(label);
+
+    checkbox.addEventListener('change', () => {
+      ensureFirebaseUploadRegionsConfig();
+      if (checkbox.checked) {
+        delete config.firebaseUploadRegions[id];
+      } else {
+        config.firebaseUploadRegions[id] = false;
+      }
+      saveConfig();
+      console.log('[Mod Settings] Firebase upload region', id, checkbox.checked ? 'enabled' : 'disabled');
+    });
+  }
 }
 
 // Timeout/Delay settings (in milliseconds)
@@ -1184,7 +1368,8 @@ function updateFirebaseRunsSettingsAvailability() {
     document.getElementById('firebase-runs-password'),
     document.getElementById('upload-runs-btn'),
     document.getElementById('download-runs-btn'),
-    document.getElementById('delete-runs-btn')
+    document.getElementById('delete-runs-btn'),
+    ...(section ? Array.from(section.querySelectorAll('.firebase-upload-region-toggle')) : [])
   ];
 
   applyModDependentSection({
@@ -3912,6 +4097,11 @@ async function uploadBestRuns(options = {}) {
       console.error('[Mod Settings] Cannot upload runs: Password not set');
       return { success: false, error: 'Password not set' };
     }
+
+    const enabledRegionCount = getFirebaseUploadRegionEntries().filter((entry) => isFirebaseUploadRegionEnabled(entry.id)).length;
+    if (enabledRegionCount === 0) {
+      return { success: false, error: t('mods.betterUI.firebaseRunsNoRegionsSelected') };
+    }
     
     if (!window.RunTrackerAPI || !window.RunTrackerAPI.getAllRuns) {
       console.error('[Mod Settings] Cannot upload runs: RunTracker not available');
@@ -3987,6 +4177,7 @@ async function uploadBestRuns(options = {}) {
                 mapKey: mapKey,
                 mapName: roomName,
                 regionName: regionName,
+                regionId: region.id,
                 regionOrder: regions.indexOf(region),
                 roomOrder: region.rooms.indexOf(room),
                 mapData: allRuns.runs[mapKey]
@@ -4012,6 +4203,7 @@ async function uploadBestRuns(options = {}) {
                     mapKey: key,
                     mapName: roomName,
                     regionName: regionName,
+                    regionId: region.id,
                     regionOrder: regions.indexOf(region),
                     roomOrder: region.rooms.indexOf(room),
                     mapData: mapData
@@ -4044,6 +4236,7 @@ async function uploadBestRuns(options = {}) {
               mapKey: mapKey,
               mapName: mapName,
               regionName: 'Other Maps',
+              regionId: FIREBASE_UPLOAD_OTHER_REGION_ID,
               regionOrder: 9999, // Put at the end
               roomOrder: 9999,
               mapData: mapData
@@ -4065,6 +4258,7 @@ async function uploadBestRuns(options = {}) {
             mapKey: mapKey,
             mapName: mapKey.replace('map_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
             regionName: 'Unknown Region',
+            regionId: FIREBASE_UPLOAD_OTHER_REGION_ID,
             regionOrder: 0,
             roomOrder: 0,
             mapData: mapData
@@ -4079,6 +4273,7 @@ async function uploadBestRuns(options = {}) {
           mapKey: mapKey,
           mapName: mapKey.replace('map_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
           regionName: 'Unknown Region',
+          regionId: FIREBASE_UPLOAD_OTHER_REGION_ID,
           regionOrder: 0,
           roomOrder: 0,
           mapData: mapData
@@ -4087,7 +4282,10 @@ async function uploadBestRuns(options = {}) {
     }
     
     // Extract best speedrun/rank per map; all floor setups for current season (now in sorted order)
-    for (const { mapKey, mapData, regionName: contextRegionName } of runsWithRegion) {
+    for (const { mapKey, mapData, regionName: contextRegionName, regionId } of runsWithRegion) {
+      if (!isFirebaseUploadRegionEnabled(regionId)) {
+        continue;
+      }
       const cleanMapData = {
         speedrun: [],
         rank: [],
@@ -6374,6 +6572,20 @@ function showSettingsModal() {
                 <span style="color: #ccc;">${t('mods.betterUI.firebaseAutoUploadRunsLabel')}</span>
               </label>
             </div>
+            <div id="firebase-upload-regions-section" style="margin-bottom: 15px;">
+              <button type="button" id="firebase-upload-regions-header" aria-expanded="false" title="${t('mods.betterUI.firebaseUploadRegionsExpandHint')}" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 170, 0, 0.35); border-radius: 4px; padding: 8px 10px; margin: 0; color: #eee; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; pointer-events: auto; transition: background 0.15s ease, border-color 0.15s ease;" onclick="event.stopPropagation();">
+                <span style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                  <span id="firebase-upload-regions-chevron" aria-hidden="true" style="color: #ffaa00; font-size: 13px; width: 14px; display: inline-block; flex-shrink: 0;">▸</span>
+                  <span style="font-weight: 600; color: #ffaa00;">${t('mods.betterUI.firebaseUploadRegionsLabel')}</span>
+                </span>
+                <span id="firebase-upload-regions-expand-hint" style="color: #9aa5b5; font-size: 11px; white-space: nowrap; flex-shrink: 0;">${t('mods.betterUI.firebaseUploadRegionsExpandHint')}</span>
+              </button>
+              <div id="firebase-upload-regions-panel" hidden style="margin-top: 8px; padding: 10px 10px 4px 14px; border-left: 2px solid rgba(255, 170, 0, 0.25);">
+                <p style="color: #7f8fa4; font-size: 11px; margin: 0 0 8px 0;">${t('mods.betterUI.firebaseUploadRegionsDesc')}</p>
+                <div id="firebase-upload-regions-list" style="display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; padding-right: 4px;">
+                </div>
+              </div>
+            </div>
             <div style="margin-bottom: 15px;">
               <label style="display: flex; flex-direction: column; gap: 5px;">
                 <span style="color: #ccc; font-size: 13px;">${t('mods.betterUI.firebaseRunsPasswordLabel')}</span>
@@ -7461,6 +7673,8 @@ function showSettingsModal() {
           }
         });
       }
+
+      initFirebaseUploadRegionToggles(content);
       
       const firebaseRunsPasswordInput = content.querySelector('#firebase-runs-password');
       const uploadRunsBtn = content.querySelector('#upload-runs-btn');
@@ -7518,6 +7732,24 @@ function showSettingsModal() {
             stopAutoUploadMonitor();
           }
         }
+
+        const regionSection = content.querySelector('#firebase-upload-regions-section');
+        const regionPanel = content.querySelector('#firebase-upload-regions-panel');
+        const regionHeader = content.querySelector('#firebase-upload-regions-header');
+        const regionToggles = content.querySelectorAll('.firebase-upload-region-toggle');
+        if (regionSection) {
+          regionSection.style.opacity = hasPassword ? '1' : '0.5';
+        }
+        if (regionPanel) {
+          regionPanel.style.pointerEvents = hasPassword ? 'auto' : 'none';
+        }
+        if (regionHeader) {
+          regionHeader.style.pointerEvents = 'auto';
+          regionHeader.style.cursor = 'pointer';
+        }
+        regionToggles.forEach((toggle) => {
+          toggle.disabled = !hasPassword;
+        });
       };
       modSettingsFirebaseUploadStateUpdater = updateUploadButtonState;
       

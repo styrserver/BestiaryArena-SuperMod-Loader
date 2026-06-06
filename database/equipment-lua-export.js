@@ -2,12 +2,33 @@
 ================================================================================
 Console — open DevTools on Bestiary Arena (loader injected), then paste:
 
-dumpEquipmentLuaTable();
+dumpEquipmentWikiLua();
+dumpEquipmentWikiLua({ includeTiers: false });
+dumpEquipmentWikiLua({ download: false, copy: true });
+dumpEquipmentWikiLua({ filename: 'equipment.lua' });
 dumpEquipmentLuaTable({ wikiPage: true });
-dumpEquipmentLuaTable({ wikiPage: true, includeTiers: false });
-dumpEquipmentLuaTable({ wikiPage: true, copy: false });
 buildEquipmentRoomPresenceForConsole();
+diffEquipmentLuaExclusionSets();
+// Optional override when mods are disabled:
+// diffEquipmentLuaExclusionSets({ exaltationChest: [...], boostedMaps: [...] });
 
+================================================================================
+Maintainer workflow
+================================================================================
+1. Reload extension + game; confirm "[equipment-lua-export.js] Loading..." in console.
+2. After mod rule changes, run diffEquipmentLuaExclusionSets() (reads live mod lists when loaded)
+   and update EXALTATION_CHEST_EXCLUDED / BOOST_MAP_EXCLUDED below when out of sync.
+3. After map/boost changes, update HARDCODED_BOOSTED_MAP in equipment-database.js (not here).
+4. Run dumpEquipmentWikiLua(); downloads equipment-wiki-YYYY-MM-DD.lua — paste into the wiki page.
+5. Spot-check rows against Cyclopedia Arsenal; use buildEquipmentRoomPresenceForConsole() for Raid/Map bugs.
+
+Sync map (edit the matching source when rules change):
+  EXALTATION_CHEST_EXCLUDED  ↔  mods/Super Mods/Better Exaltation Chest.js EXCLUDED_EQUIPMENT
+  BOOST_MAP_EXCLUDED         ↔  mods/Super Mods/Better Boosted Maps.js EXCLUDED_EQUIPMENT
+  HARDCODED_BOOSTED_MAP      ↔  database/equipment-database.js (shared with Cyclopedia, BBM)
+  Raid/Map columns           ↔  Cyclopedia buildEquipmentCreatureCache (ROOMS actors, equip.gameId)
+  RAID_FORCE_FALSE           ↔  exporter-only wiki infobox rule (no mod source)
+  WIKI_DEFAULT_TIERS_BLOCK   ↔  wiki _Tiers reference (edit here when tier stats change)
 ================================================================================
 */
 
@@ -16,20 +37,17 @@ buildEquipmentRoomPresenceForConsole();
  *
  * Usage:
  * - `dumpEquipmentLuaTable()` — one line per item (Raid/Map lists joined with ", " so wiki infoboxes split map links).
- * - `dumpEquipmentLuaTable({ wikiPage: true })` — full `return { ... }` block for wiki
- *   (comments, _Tiers, aligned keys). BoostedMap uses `equipmentDatabase.HARDCODED_BOOSTED_MAP`
- *   (equipment-database.js), else today's daily boost when it matches, else false.
- *
- * Sources (keep constants in sync when those mods change):
- * - Cyclopedia.js: buildEquipmentCreatureCache (ROOMS actors with equip.gameId)
- * - Better Boosted Maps.js: EXCLUDED_EQUIPMENT (boost column when not featured today)
- * - Better Exaltation Chest.js: EXCLUDED_EQUIPMENT (chest)
+ * - `dumpEquipmentWikiLua()` — full wiki `return { ... }` block (comments, _Tiers, aligned keys);
+ *   downloads a .lua file by default (`{ copy: true }` or `{ download: false }` to override).
+ *   BoostedMap uses `equipmentDatabase.HARDCODED_BOOSTED_MAP` (equipment-database.js),
+ *   else today's daily boost when it matches, else false.
+ * - `diffEquipmentLuaExclusionSets()` — compare local lists to live mod globals (mods must be enabled).
  */
 
 console.log('[equipment-lua-export.js] Loading equipment Lua export helpers...');
 
-// Better Exaltation Chest — equipment that cannot come from exaltation chests
-const NO_EXALTATION_CHEST = new Set([
+// Better Exaltation Chest.js EXCLUDED_EQUIPMENT — keep in sync manually
+const EXALTATION_CHEST_EXCLUDED = [
   'Amazon Armor',
   'Amazon Helmet',
   'Amazon Shield',
@@ -40,10 +58,10 @@ const NO_EXALTATION_CHEST = new Set([
   'Paladin Armor',
   'Windborn Colossus Armor',
   'Witch Hat'
-]);
+];
 
-// Better Boosted Maps — equipment that can never be the daily boosted drop
-const BOOST_EXCLUDED_EQUIPMENT = new Set([
+// Better Boosted Maps.js EXCLUDED_EQUIPMENT — keep in sync manually
+const BOOST_MAP_EXCLUDED = [
   'Amazon Armor',
   'Amazon Helmet',
   'Amazon Shield',
@@ -57,7 +75,10 @@ const BOOST_EXCLUDED_EQUIPMENT = new Set([
   'Steel Boots',
   'Windborn Colossus Armor',
   'Witch Hat'
-]);
+];
+
+const NO_EXALTATION_CHEST = new Set(EXALTATION_CHEST_EXCLUDED);
+const BOOST_EXCLUDED_EQUIPMENT = new Set(BOOST_MAP_EXCLUDED);
 
 function isRaidRoomId(roomId) {
   try {
@@ -171,6 +192,7 @@ function formatEquipmentLuaKey(name, targetBracketEndCol = 31) {
 
 /** Default _Tiers block for wiki `return { ... }` output (edit in this file if stats change). */
 const WIKI_DEFAULT_TIERS_BLOCK = `    -- [[ TIERS REFERENCE ]]
+
     ["_Tiers"] = {
         ["Grey"]   = { hp = 20,  ad = 1, ap = 2,  cost = 50 },
         ["Green"]  = { hp = 40,  ad = 2, ap = 5,  cost = 100 },
@@ -178,6 +200,25 @@ const WIKI_DEFAULT_TIERS_BLOCK = `    -- [[ TIERS REFERENCE ]]
         ["Purple"] = { hp = 90,  ad = 6, ap = 15, cost = 200 },
         ["Yellow"] = { hp = 120, ad = 8, ap = 20, cost = 0 }
     },`;
+
+function formatEquipmentLuaRow(name, fields, keyColumn, wikiPage) {
+  const lhs = wikiPage
+    ? formatEquipmentLuaKey(name, keyColumn)
+    : `["${luaEscape(name)}"]            =`;
+  return `${lhs} { chest = "${fields.chest}",  Raid = ${fields.raid}, Map = ${fields.map}, BoostedMap = ${fields.boosted} },`;
+}
+
+function buildWikiLuaDocument(lines, includeTiers) {
+  const tiersPart = includeTiers ? `${WIKI_DEFAULT_TIERS_BLOCK}\n\n` : '';
+  return `return {
+
+${tiersPart}    -- [[ EQUIPMENT LIST ]]
+    -- chest = "Yes"/"No"
+    -- Raid, Map, BoostedMap = "Location Name" or false
+${lines.map((line) => `    ${line}`).join('\n')}
+
+}`;
+}
 
 /** Raid = false for these rows (infobox: hide raid icon; e.g. Jester Hat is not a raid drop). */
 const RAID_FORCE_FALSE = new Set(['Jester Hat']);
@@ -246,21 +287,152 @@ function getEquipmentNamesList() {
   return [...new Set(out)].sort((a, b) => a.localeCompare(b));
 }
 
+function resolveModExclusionLists(modLists = {}) {
+  return {
+    exaltationChest:
+      modLists.exaltationChest ?? window.betterExaltationChestExcludedEquipment ?? null,
+    boostedMaps:
+      modLists.boostedMaps ?? window.betterBoostedMapsExcludedEquipment ?? null
+  };
+}
+
+/**
+ * @param {string} label
+ * @param {Set<string>} localSet
+ * @param {string[]|null|undefined} modList
+ * @param {string} modUnavailableHint
+ */
+function diffExclusionList(label, localSet, modList, modUnavailableHint) {
+  const local = [...localSet].sort((a, b) => a.localeCompare(b));
+
+  if (!modList) {
+    console.warn(`[${label}] ${modUnavailableHint}`);
+    console.log(`[${label}] Local only (${local.length}):`, local);
+    return { compared: false, inSync: undefined, local, missingInExport: [], extraInExport: [] };
+  }
+
+  const modSet = new Set(modList);
+  const missingInExport = [...modSet].filter((name) => !localSet.has(name)).sort((a, b) => a.localeCompare(b));
+  const extraInExport = [...localSet].filter((name) => !modSet.has(name)).sort((a, b) => a.localeCompare(b));
+  const inSync = missingInExport.length === 0 && extraInExport.length === 0;
+
+  console.log(`[${label}] ${inSync ? 'IN SYNC' : 'OUT OF SYNC'} (local ${local.length}, mod ${modList.length})`);
+  if (missingInExport.length) {
+    console.log('  Add to equipment-lua-export.js:', missingInExport);
+  }
+  if (extraInExport.length) {
+    console.log('  Remove from equipment-lua-export.js:', extraInExport);
+  }
+
+  return { compared: true, inSync, local, missingInExport, extraInExport };
+}
+
+/**
+ * Compare local exclusion lists to mod EXCLUDED_EQUIPMENT arrays.
+ * Reads window.betterExaltationChestExcludedEquipment / window.betterBoostedMapsExcludedEquipment
+ * when overrides are not passed (mods must be enabled).
+ * @param {{ exaltationChest?: string[], boostedMaps?: string[] }} [modLists]
+ * @returns {{ exaltationChest: object, boostedMaps: object, allInSync: boolean|null }}
+ */
+function diffEquipmentLuaExclusionSets(modLists = {}) {
+  const resolved = resolveModExclusionLists(modLists);
+
+  const exaltationChest = diffExclusionList(
+    'Exaltation chest (EXALTATION_CHEST_EXCLUDED)',
+    NO_EXALTATION_CHEST,
+    resolved.exaltationChest,
+    'Better Exaltation Chest not loaded — enable the mod or pass { exaltationChest: [...] }.'
+  );
+  const boostedMaps = diffExclusionList(
+    'Boosted maps (BOOST_MAP_EXCLUDED)',
+    BOOST_EXCLUDED_EQUIPMENT,
+    resolved.boostedMaps,
+    'Better Boosted Maps not loaded — enable the mod or pass { boostedMaps: [...] }.'
+  );
+
+  const compared = exaltationChest.compared && boostedMaps.compared;
+  const allInSync = compared
+    ? exaltationChest.inSync && boostedMaps.inSync
+    : null;
+
+  if (compared) {
+    console.log(
+      `[equipment-lua-export.js] Overall: ${allInSync ? 'ALL IN SYNC' : 'DRIFT DETECTED'}`
+    );
+  } else {
+    console.log(
+      '[equipment-lua-export.js] Enable Better Exaltation Chest + Better Boosted Maps, or pass override arrays.'
+    );
+  }
+
+  return { exaltationChest, boostedMaps, allInSync };
+}
+
+function getDefaultWikiLuaFilename() {
+  return `equipment-wiki-${new Date().toISOString().slice(0, 10)}.lua`;
+}
+
+function downloadTextAsFile(text, filename = getDefaultWikiLuaFilename()) {
+  try {
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+    console.log(`[equipment-lua-export.js] Downloaded ${filename}`);
+    return true;
+  } catch (err) {
+    console.warn('[equipment-lua-export.js] Download failed:', err);
+    return false;
+  }
+}
+
+function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      return navigator.clipboard.writeText(text).then(
+        () => {
+          console.log('[equipment-lua-export.js] Copied to clipboard.');
+          return true;
+        },
+        (err) => {
+          console.warn('[equipment-lua-export.js] Clipboard copy failed:', err);
+          return false;
+        }
+      );
+    }
+  } catch (err) {
+    console.warn('[equipment-lua-export.js] Clipboard copy failed:', err);
+  }
+  return Promise.resolve(false);
+}
+
 /**
  * Build Lua assignment lines for all equipment (Cyclopedia-style map presence + BBM rules).
  * @param {{
  *   copy?: boolean,
+ *   download?: boolean,
+ *   filename?: string,
  *   wikiPage?: boolean,
  *   includeTiers?: boolean,
  *   keyColumn?: number
  * }} options
  * - wikiPage: wrap in `return { ... }`, wiki comments, comma-separated Raid/Map lists (for per-map links), aligned keys.
  * - includeTiers: when wikiPage, include WIKI_DEFAULT_TIERS_BLOCK (default true).
+ * - download: when wikiPage, save a .lua file (default true). Set false to skip.
+ * - copy: clipboard copy (default true for plain export, false for wiki export unless set).
+ * - filename: download filename when download is enabled (default equipment-wiki-YYYY-MM-DD.lua).
  * @returns {string}
  */
 function dumpEquipmentLuaTable(options = {}) {
-  const copy = options.copy !== false;
   const wikiPage = options.wikiPage === true;
+  const shouldDownload = wikiPage && options.download !== false;
+  const shouldCopy = wikiPage ? options.copy === true : options.copy !== false;
   const includeTiers = options.includeTiers !== false;
 
   const presence = buildEquipmentRoomPresence();
@@ -295,43 +467,54 @@ function dumpEquipmentLuaTable(options = {}) {
       p && p.mapNames.size > 0 ? luaStringLiteral(sortedJoin(p.mapNames)) : 'false';
     const boostedLua = getBoostedMapLuaValue(gid, name);
 
-    const lhs = wikiPage ? formatEquipmentLuaKey(name, keyColumn) : `["${luaEscape(name)}"]            =`;
-    return `${lhs} { chest = "${chest}",  Raid = ${raidLua}, Map = ${mapLua}, BoostedMap = ${boostedLua} },`;
+    return formatEquipmentLuaRow(
+      name,
+      { chest, raid: raidLua, map: mapLua, boosted: boostedLua },
+      keyColumn,
+      wikiPage
+    );
   });
 
-  let text;
-  if (wikiPage) {
-    const tiersPart = includeTiers ? `${WIKI_DEFAULT_TIERS_BLOCK}\n\n` : '';
-    text = `return {
-${tiersPart}    -- [[ EQUIPMENT LIST ]]
-    -- chest = "Yes"/"No"
-    -- Raid, Map, BoostedMap = "Location Name" or false
-${lines.map((line) => `    ${line}`).join('\n')}
-}`;
-  } else {
-    text = lines.join('\n');
-  }
+  const text = wikiPage ? buildWikiLuaDocument(lines, includeTiers) : lines.join('\n');
 
   console.log(text);
-  if (copy && typeof copy === 'function') {
-    try {
-      copy(text);
-    } catch (_) {}
+  if (shouldDownload) {
+    downloadTextAsFile(text, options.filename || getDefaultWikiLuaFilename());
+  }
+  if (shouldCopy) {
+    void copyTextToClipboard(text);
   }
   return text;
+}
+
+/** Wiki-ready `return { ... }` export; downloads a .lua file by default. */
+function dumpEquipmentWikiLua(options = {}) {
+  return dumpEquipmentLuaTable({ ...options, wikiPage: true });
 }
 
 const globalWindow = globalThis.window || window;
 if (globalWindow) {
   globalWindow.dumpEquipmentLuaTable = dumpEquipmentLuaTable;
+  globalWindow.dumpEquipmentWikiLua = dumpEquipmentWikiLua;
   globalWindow.buildEquipmentRoomPresenceForConsole = buildEquipmentRoomPresence;
+  globalWindow.diffEquipmentLuaExclusionSets = diffEquipmentLuaExclusionSets;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     dumpEquipmentLuaTable,
+    dumpEquipmentWikiLua,
     buildEquipmentRoomPresence,
+    buildWikiLuaDocument,
+    formatEquipmentLuaRow,
+    diffEquipmentLuaExclusionSets,
+    resolveModExclusionLists,
+    copyTextToClipboard,
+    downloadTextAsFile,
+    getDefaultWikiLuaFilename,
     getHardcodedBoostedMapTable,
+    EXALTATION_CHEST_EXCLUDED,
+    BOOST_MAP_EXCLUDED,
     NO_EXALTATION_CHEST,
     BOOST_EXCLUDED_EQUIPMENT
   };

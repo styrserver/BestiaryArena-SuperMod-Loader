@@ -54,7 +54,8 @@
     'Windborn Colossus Armor',
     'Witch Hat'
   ];
-  
+  window.betterExaltationChestExcludedEquipment = [...EXCLUDED_EQUIPMENT];
+
   // DOM selectors
   const SELECTORS = {
     EXALTATION_CHEST_TITLE: 'p.inline.text-rarity-5',

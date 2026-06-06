@@ -4,6 +4,61 @@
   },
   "notes": [
     {
+      "version": "4.0.5",
+      "changes": [
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Exposes window.betterBoostedMapsExcludedEquipment for equipment-lua-export.js exclusion sync checks."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "changed",
+          "text": "Exposes window.betterExaltationChestExcludedEquipment for equipment-lua-export.js exclusion sync checks."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Running modal can show full live stats (S+ rate and rank breakdown, completion rate, win times, median, estimated XP, elapsed time) updated after each run. Settings adds Show advanced live stats during analysis (on by default); when off, the compact view shows progress, avg run time, est. remaining, and completion rate only."
+        },
+        {
+          "mod": "equipment-lua-export.js",
+          "type": "changed",
+          "text": "Wiki Lua export via dumpEquipmentWikiLua() downloads equipment-wiki-YYYY-MM-DD.lua (wiki page layout with _Tiers and aligned keys). Maintainer diffEquipmentLuaExclusionSets() compares local chest/boost exclusion lists against live mod globals; optional clipboard via { copy: true }."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Firebase Best Runs Upload adds a collapsible Regions to upload section (all regions ON by default) so you choose which regions are included in manual and auto-uploads; manual Upload still does a full rebuild and omits disabled regions. Other Maps appears only when Run Tracker has unmatched runs (legacy or event map keys)."
+        },
+        {
+          "mod": "Turbo Mode",
+          "type": "changed",
+          "text": "Always starts disabled on init; speed factor still persists from Mod Settings → Advanced."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Final-run autoplay resume now finds and clicks the green Start button (game UI uses Start text, not a lucide-play icon). Fixed resume falsely reporting success without clicking Start (missing await). Final-run game-end wait now runs the full 2-minute timeout instead of giving up at 30 seconds."
+        },
+        {
+          "mod": "Hero Editor",
+          "type": "changed",
+          "text": "Redesigned modal: 420×420px two-column layout with a 100px Allies column showing creature and equipment icons only (no names) and a live-updating detail panel; toolbar button disabled when the board has no heroes. List portraits use in-game rarity borders, star-tier overlays, and outlined level badges; equipment icons update as you edit. Board right-click opens a compact floating editor for the clicked ally. Removed Apply and Reset — changes apply immediately; Close only."
+        },
+        {
+          "mod": "Hero Editor",
+          "type": "fixed",
+          "text": "Portrait level badge renders correctly again (outlined game font instead of invisible text or gray fallback). Equipment tier input clamped to 1–5."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Fixed a visible gap between modal title and body (widget-top / widget-bottom) in game-styled dialogs."
+        }
+      ]
+    },
+    {
       "version": "4.0.4",
       "changes": [
         {

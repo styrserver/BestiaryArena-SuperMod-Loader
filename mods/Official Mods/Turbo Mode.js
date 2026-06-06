@@ -24,13 +24,12 @@ if (!window.__turboState) {
 // Store reference to state for easier access
 const turboState = window.__turboState;
 
-const defaultTurboConfig = { active: false, speedupFactor: 5 };
+const defaultTurboConfig = { speedupFactor: 5 };
 const savedTurboConfig = Object.assign({}, defaultTurboConfig, context.config || {});
 
 function saveTurboConfig() {
   if (!api) return;
   api.service.updateScriptConfig(context.hash, {
-    active: turboState.active,
     speedupFactor: turboState.speedupFactor
   });
 }
@@ -433,9 +432,9 @@ if (api) {
   console.log('BestiaryModAPI available in Turbo Mod');
   console.log('Loaded Turbo config:', savedTurboConfig);
 
-  if (savedTurboConfig.active && !turboState.active) {
-    console.log('Turbo was previously active, re-enabling...');
-    enableTurbo();
+  // Always start disabled on init (speed factor still restores from saved config)
+  if (turboState.active) {
+    disableTurbo();
   }
 
   window.turboButton = api.ui.addButton({

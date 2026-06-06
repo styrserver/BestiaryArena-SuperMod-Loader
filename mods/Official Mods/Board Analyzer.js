@@ -15,7 +15,8 @@ const defaultConfig = {
   stopOnOutcome: false, // false | 'victory' | 'defeat'
   stopAfterTicks: 0, // 0 means no limit
   stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
-  estimateExperience: false
+  estimateExperience: false,
+  showAdvancedLiveStats: true
 };
 
 // Initialize with saved config or defaults
@@ -1427,6 +1428,7 @@ class StatisticsCalculator {
     this.runTimesSum = 0;
     this.totalEstimatedExp = 0;
     this.expCount = 0;
+    this.rankPointsCounts = {};
   }
   
   addRun(result, runTime) {
@@ -1467,6 +1469,9 @@ class StatisticsCalculator {
     // Update S+ stats
     if (result.grade === 'S+') {
       this.sPlusCount++;
+      if (result.rankPoints != null) {
+        this.rankPointsCounts[result.rankPoints] = (this.rankPointsCounts[result.rankPoints] || 0) + 1;
+      }
       if (result.rankPoints === this.maxRankPoints) {
         this.sPlusMaxPointsCount++;
       } else if (result.rankPoints > this.maxRankPoints) {
@@ -1502,7 +1507,8 @@ class StatisticsCalculator {
       slowestRunTime: this.runTimes.length > 0 ? Math.max(...this.runTimes) : 0,
       totalEstimatedExp: this.totalEstimatedExp,
       averageEstimatedExp: this.expCount > 0 ? Math.round(this.totalEstimatedExp / this.expCount) : 0,
-      expCount: this.expCount
+      expCount: this.expCount,
+      rankPointsCounts: { ...this.rankPointsCounts }
     };
   }
   
@@ -2344,7 +2350,7 @@ async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, 
     timing.lastRunStart = performance.now();
     
     // Update status callback if provided
-    updateStatusCallback(i, runs, statsCalculator, statusCallback);
+    updateStatusCallback(i, runs, statsCalculator, statusCallback, timing);
     
     // Process individual run
     const runResult = await processSingleRun(i, thisAnalysisId, statsCalculator, bestRuns, timing);
@@ -2358,10 +2364,12 @@ async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, 
     if (typeof runResult === 'object' && runResult.shouldStop) {
       // This run triggered the stop condition, but we still want to include it
       results.push(runResult.result);
+      updateStatusCallback(i, runs, statsCalculator, statusCallback, timing);
       break; // Stop the analysis
     } else {
       // Regular run result
       results.push(runResult);
+      updateStatusCallback(i, runs, statsCalculator, statusCallback, timing);
     }
   }
   
@@ -2391,34 +2399,75 @@ function shouldContinueAnalysis(thisAnalysisId) {
   return true;
 }
 
-// Helper function to update status callback
-function updateStatusCallback(currentRun, totalRuns, statsCalculator, statusCallback) {
-  if (!statusCallback) return;
-  
-  if (statsCalculator.runTimes.length > 0) {
-    // Calculate average run time and estimated time remaining
-    const avgRunTime = statsCalculator.runTimesSum / statsCalculator.runTimes.length;
-    const remainingRuns = totalRuns - currentRun + 1;
-    const estimatedTimeRemaining = avgRunTime * remainingRuns;
-    const completionRate = statsCalculator.totalRuns > 0 ? (statsCalculator.completedRuns / statsCalculator.totalRuns * 100).toFixed(2) : '0.00';
-    
-    statusCallback({
+function getSPlusRankTextColor(highestRankPoints, rankPoints) {
+  const rankDifference = highestRankPoints - rankPoints;
+  switch (rankDifference) {
+    case 0: return '#FFD700';
+    case 1: return '#FFA500';
+    case 2: return '#FF8C00';
+    case 3: return '#FF6347';
+    case 4: return '#FF4500';
+    case 5: return '#FF0000';
+    case 6: return '#DC143C';
+    case 7: return '#8B0000';
+    default: return '#FFD700';
+  }
+}
+
+function buildAnalysisStatus(currentRun, totalRuns, statsCalculator, timing = null) {
+  if (statsCalculator.runTimes.length === 0) {
+    return {
       current: currentRun,
       total: totalRuns,
       status: 'running',
-      avgRunTime: avgRunTime.toFixed(0),
-      estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining),
-      completionRate: completionRate,
-      completedRuns: statsCalculator.completedRuns,
-      totalRunsInStats: statsCalculator.totalRuns
-    });
-  } else {
-    statusCallback({
-      current: currentRun,
-      total: totalRuns,
-      status: 'running'
-    });
+      hasStats: false
+    };
   }
+
+  const stats = statsCalculator.calculateStatistics();
+  const remainingRuns = totalRuns - currentRun + 1;
+  const estimatedTimeRemaining = stats.averageRunTime * remainingRuns;
+  const rankPointsBreakdown = Object.keys(stats.rankPointsCounts)
+    .map(points => parseInt(points))
+    .sort((a, b) => b - a)
+    .map(rankPoints => ({
+      rankPoints,
+      count: stats.rankPointsCounts[rankPoints],
+      rate: stats.totalRuns > 0
+        ? (stats.rankPointsCounts[rankPoints] / stats.totalRuns * 100).toFixed(2)
+        : '0.00'
+    }));
+
+  return {
+    current: currentRun,
+    total: totalRuns,
+    status: 'running',
+    hasStats: true,
+    avgRunTime: stats.averageRunTime.toFixed(0),
+    estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining),
+    totalTimeFormatted: timing ? formatMilliseconds(performance.now() - timing.startTime) : null,
+    completionRate: stats.completionRate,
+    completedRuns: stats.completedRuns,
+    totalRunsInStats: stats.totalRuns,
+    sPlusRate: stats.sPlusRate,
+    sPlusCount: stats.sPlusCount,
+    rankPointsBreakdown,
+    minTicks: stats.minTicks,
+    maxTicks: stats.maxTicks,
+    minDefeatTicks: stats.minDefeatTicks,
+    maxDefeatTicks: stats.maxDefeatTicks,
+    medianTicks: Math.round(stats.medianTicks),
+    averageEstimatedExp: stats.averageEstimatedExp,
+    totalEstimatedExp: stats.totalEstimatedExp,
+    hasWins: stats.completedRuns > 0,
+    estimateExperience: config.estimateExperience && stats.averageEstimatedExp > 0
+  };
+}
+
+// Helper function to update status callback
+function updateStatusCallback(currentRun, totalRuns, statsCalculator, statusCallback, timing = null) {
+  if (!statusCallback) return;
+  statusCallback(buildAnalysisStatus(currentRun, totalRuns, statsCalculator, timing));
 }
 
 // Helper function to process a single analysis run
@@ -2922,6 +2971,23 @@ function createConfigPanel(startAnalysisCallback) {
   estimateExpContainer.appendChild(estimateExpLabel);
   content.appendChild(estimateExpContainer);
 
+  // Advanced live stats checkbox
+  const advancedLiveStatsContainer = document.createElement('div');
+  advancedLiveStatsContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+  const advancedLiveStatsInput = document.createElement('input');
+  advancedLiveStatsInput.type = 'checkbox';
+  advancedLiveStatsInput.id = 'advanced-live-stats-input';
+  advancedLiveStatsInput.checked = config.showAdvancedLiveStats;
+
+  const advancedLiveStatsLabel = document.createElement('label');
+  advancedLiveStatsLabel.htmlFor = 'advanced-live-stats-input';
+  advancedLiveStatsLabel.textContent = t('mods.boardAnalyzer.showAdvancedLiveStatsLabel');
+
+  advancedLiveStatsContainer.appendChild(advancedLiveStatsInput);
+  advancedLiveStatsContainer.appendChild(advancedLiveStatsLabel);
+  content.appendChild(advancedLiveStatsContainer);
+
   // Stop on S+ checkbox
   const stopSPlusContainer = document.createElement('div');
   stopSPlusContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
@@ -3122,6 +3188,7 @@ function createConfigPanel(startAnalysisCallback) {
     config.stopAfterTicks = parseInt(document.getElementById('stop-ticks-input').value, 10);
     config.stopWhenTicksReached = parseInt(document.getElementById('stop-when-ticks-input').value, 10);
     config.estimateExperience = document.getElementById('estimate-exp-input').checked;
+    config.showAdvancedLiveStats = document.getElementById('advanced-live-stats-input').checked;
     
     // Save configuration
     api.service.updateScriptConfig(context.hash, config);
@@ -3179,8 +3246,228 @@ function closeRunningModal() {
   }
 }
 
+function applyRunningModalFrameFix(modalElement) {
+  const dialog = modalElement
+    || document.getElementById('board-analyzer-running-modal')
+    || document.querySelector('[data-analyzer-modal="running"]');
+  if (!dialog) return;
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper) {
+    rootWrapper.style.display = 'flex';
+    rootWrapper.style.flexDirection = 'column';
+    rootWrapper.style.gap = '0';
+  }
+
+  const widgetTop = dialog.querySelector('.widget-top');
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetTop) {
+    widgetTop.style.margin = '0';
+    const titleText = widgetTop.querySelector('p');
+    if (titleText) titleText.style.margin = '0';
+  }
+  if (widgetBottom) {
+    widgetBottom.style.marginTop = '-1px';
+  }
+}
+
+function appendLiveStatRow(container, labelText, valueId, valueStyle = 'text-align: right;') {
+  const label = document.createElement('div');
+  label.textContent = labelText;
+  label.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+
+  const value = document.createElement('div');
+  value.id = valueId;
+  value.textContent = '—';
+  value.style.cssText = valueStyle;
+
+  container.appendChild(label);
+  container.appendChild(value);
+}
+
+function updateBasicLiveStatsDisplay(status) {
+  const avgRunTimeEl = document.getElementById('analysis-avg-run-time');
+  const estimatedTimeEl = document.getElementById('analysis-estimated-time');
+  const completionRateEl = document.getElementById('analysis-completion-rate');
+
+  if (avgRunTimeEl) {
+    avgRunTimeEl.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${status.avgRunTime}ms`;
+  }
+  if (estimatedTimeEl) {
+    estimatedTimeEl.textContent = `${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${status.estimatedTimeRemaining}`;
+  }
+  if (completionRateEl) {
+    const isComplete = parseFloat(status.completionRate) === 100;
+    completionRateEl.style.color = isComplete ? '#2ecc71' : '#aaa';
+    completionRateEl.textContent = `${t('mods.boardAnalyzer.completionRateLabel')} ${status.completionRate}%`;
+  }
+}
+
+function updateAdvancedLiveStatsDisplay(status) {
+  const setText = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+
+  setText('analysis-live-splus-rate', `${status.sPlusRate}% (${status.sPlusCount}/${status.totalRunsInStats})`);
+
+  const sPlusBreakdownEl = document.getElementById('analysis-live-splus-breakdown');
+  if (sPlusBreakdownEl) {
+    sPlusBreakdownEl.replaceChildren();
+    if (status.rankPointsBreakdown.length > 0) {
+      const highestRankPoints = status.rankPointsBreakdown[0].rankPoints;
+      status.rankPointsBreakdown.forEach(({ rankPoints, count, rate }) => {
+        const label = document.createElement('div');
+        label.textContent = t('mods.boardAnalyzer.sPlusMaxPointsRateLabel').replace('{points}', rankPoints);
+        label.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 10px; font-style: italic;';
+
+        const value = document.createElement('div');
+        value.textContent = `${rate}% (${count}/${status.totalRunsInStats})`;
+        const textColor = getSPlusRankTextColor(highestRankPoints, rankPoints);
+        value.style.cssText = `text-align: right; color: ${textColor}; font-style: italic;`;
+
+        sPlusBreakdownEl.appendChild(label);
+        sPlusBreakdownEl.appendChild(value);
+      });
+    }
+  }
+
+  const completionEl = document.getElementById('analysis-live-completion-rate');
+  if (completionEl) {
+    completionEl.textContent = `${status.completionRate}% (${status.completedRuns}/${status.totalRunsInStats})`;
+    completionEl.style.color = parseFloat(status.completionRate) === 100 ? '#2ecc71' : 'green';
+  }
+
+  const minLabelEl = document.getElementById('analysis-live-min-time-label');
+  const maxLabelEl = document.getElementById('analysis-live-max-time-label');
+  if (minLabelEl) {
+    minLabelEl.textContent = status.hasWins
+      ? t('mods.boardAnalyzer.minTimeLabel')
+      : t('mods.boardAnalyzer.minDefeatTimeLabel');
+  }
+  if (maxLabelEl) {
+    maxLabelEl.textContent = status.hasWins
+      ? t('mods.boardAnalyzer.maxTimeLabel')
+      : t('mods.boardAnalyzer.maxDefeatTimeLabel');
+  }
+
+  const minTicks = status.hasWins ? status.minTicks : status.minDefeatTicks;
+  const maxTicks = status.hasWins ? status.maxTicks : status.maxDefeatTicks;
+  setText('analysis-live-min-time', `${minTicks} ${t('mods.boardAnalyzer.ticksSuffix')}`);
+  setText('analysis-live-max-time', `${maxTicks} ${t('mods.boardAnalyzer.ticksSuffix')}`);
+  setText('analysis-live-median-time', `${status.medianTicks} ${t('mods.boardAnalyzer.ticksSuffix')}`);
+
+  const expSection = document.getElementById('analysis-live-exp-section');
+  if (expSection) {
+    expSection.style.display = status.estimateExperience ? 'contents' : 'none';
+    if (status.estimateExperience) {
+      setText('analysis-live-avg-exp', `${status.averageEstimatedExp.toLocaleString()} XP`);
+      setText('analysis-live-total-exp', `${status.totalEstimatedExp.toLocaleString()} XP`);
+    }
+  }
+
+  if (status.totalTimeFormatted) {
+    setText('analysis-live-total-time', status.totalTimeFormatted);
+  }
+  setText('analysis-live-avg-run-time', `${status.avgRunTime}ms`);
+  setText('analysis-live-estimated-time', status.estimatedTimeRemaining);
+}
+
+function updateLiveStatsDisplay(status) {
+  const progressEl = document.getElementById('analysis-progress');
+  if (progressEl) {
+    progressEl.textContent = t('mods.boardAnalyzer.progressText')
+      .replace('{current}', status.current)
+      .replace('{total}', status.total);
+  }
+
+  if (!status.hasStats) return;
+
+  if (config.showAdvancedLiveStats) {
+    updateAdvancedLiveStatsDisplay(status);
+  } else {
+    updateBasicLiveStatsDisplay(status);
+  }
+}
+
+function appendBasicLiveStats(content) {
+  const avgRunTimeInfo = document.createElement('p');
+  avgRunTimeInfo.id = 'analysis-avg-run-time';
+  avgRunTimeInfo.style.cssText = 'margin-top: 8px; margin-bottom: 4px; font-size: 0.9em; color: #aaa;';
+  avgRunTimeInfo.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} —`;
+  content.appendChild(avgRunTimeInfo);
+
+  const estimatedTimeInfo = document.createElement('p');
+  estimatedTimeInfo.id = 'analysis-estimated-time';
+  estimatedTimeInfo.style.cssText = 'margin-top: 4px; margin-bottom: 4px; font-size: 0.9em; color: #aaa;';
+  estimatedTimeInfo.textContent = `${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} —`;
+  content.appendChild(estimatedTimeInfo);
+
+  const completionRateInfo = document.createElement('p');
+  completionRateInfo.id = 'analysis-completion-rate';
+  completionRateInfo.style.cssText = 'margin-top: 8px; margin-bottom: 4px; font-size: 0.9em; color: #aaa;';
+  completionRateInfo.textContent = `${t('mods.boardAnalyzer.completionRateLabel')} —`;
+  content.appendChild(completionRateInfo);
+}
+
+function appendAdvancedLiveStats(content) {
+  const statsContainer = document.createElement('div');
+  statsContainer.id = 'analysis-live-stats';
+  statsContainer.style.cssText = 'display: grid; grid-template-columns: 130px auto; gap: 10px; margin-bottom: 12px; text-align: left; font-size: 0.9em;';
+
+  appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.sPlusRateLabel'), 'analysis-live-splus-rate', 'text-align: right; color: #FFD700;');
+
+  const sPlusBreakdown = document.createElement('div');
+  sPlusBreakdown.id = 'analysis-live-splus-breakdown';
+  sPlusBreakdown.style.cssText = 'display: contents;';
+  statsContainer.appendChild(sPlusBreakdown);
+
+  appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.completionRateLabel'), 'analysis-live-completion-rate', 'text-align: right; color: green;');
+
+  const minTimeLabel = document.createElement('div');
+  minTimeLabel.id = 'analysis-live-min-time-label';
+  minTimeLabel.textContent = t('mods.boardAnalyzer.minTimeLabel');
+  minTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+  const minTimeValue = document.createElement('div');
+  minTimeValue.id = 'analysis-live-min-time';
+  minTimeValue.textContent = '—';
+  minTimeValue.style.cssText = 'text-align: right;';
+  statsContainer.appendChild(minTimeLabel);
+  statsContainer.appendChild(minTimeValue);
+
+  const maxTimeLabel = document.createElement('div');
+  maxTimeLabel.id = 'analysis-live-max-time-label';
+  maxTimeLabel.textContent = t('mods.boardAnalyzer.maxTimeLabel');
+  maxTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+  const maxTimeValue = document.createElement('div');
+  maxTimeValue.id = 'analysis-live-max-time';
+  maxTimeValue.textContent = '—';
+  maxTimeValue.style.cssText = 'text-align: right;';
+  statsContainer.appendChild(maxTimeLabel);
+  statsContainer.appendChild(maxTimeValue);
+
+  appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.medianTimeLabel'), 'analysis-live-median-time');
+
+  const expSection = document.createElement('div');
+  expSection.id = 'analysis-live-exp-section';
+  expSection.style.cssText = 'display: none;';
+  appendLiveStatRow(expSection, t('mods.boardAnalyzer.avgEstimatedExpLabel'), 'analysis-live-avg-exp', 'text-align: right; color: #9b59b6;');
+  appendLiveStatRow(expSection, t('mods.boardAnalyzer.totalEstimatedExpLabel'), 'analysis-live-total-exp', 'text-align: right; color: #9b59b6;');
+  statsContainer.appendChild(expSection);
+
+  const divider = document.createElement('hr');
+  divider.style.cssText = 'grid-column: 1 / -1; margin: 4px 0; border: none; border-top: 1px solid #444;';
+  statsContainer.appendChild(divider);
+
+  appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.totalTimeLabel'), 'analysis-live-total-time');
+  appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.avgRunTimeLabel'), 'analysis-live-avg-run-time');
+  appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.estimatedTimeRemainingLabel'), 'analysis-live-estimated-time');
+
+  content.appendChild(statsContainer);
+}
+
 // Call this function when starting a new analysis
-function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, estimatedTimeRemaining = null, completionRate = null, completedRuns = null, totalRunsInStats = null) {
+function showRunningAnalysisModal(currentRun, totalRuns, liveStatus = null) {
   // First, force close any existing modals
   forceCloseAllModals();
   
@@ -3196,39 +3483,19 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
   progress.textContent = t('mods.boardAnalyzer.progressText')
     .replace('{current}', currentRun)
     .replace('{total}', totalRuns);
-  progress.style.cssText = 'margin-top: 12px; margin-bottom: 8px;';
+  progress.style.cssText = config.showAdvancedLiveStats
+    ? 'margin-top: 12px; margin-bottom: 12px;'
+    : 'margin-top: 12px; margin-bottom: 8px;';
   content.appendChild(progress);
-  
-  // Add timing information if available - Split into separate lines
-  if (avgRunTime) {
-    const avgRunTimeInfo = document.createElement('p');
-    avgRunTimeInfo.id = 'analysis-avg-run-time';
-    avgRunTimeInfo.style.cssText = 'margin-top: 8px; margin-bottom: 4px; font-size: 0.9em; color: #aaa;';
-    avgRunTimeInfo.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${avgRunTime}ms`;
-    
-    content.appendChild(avgRunTimeInfo);
-    
-    if (estimatedTimeRemaining) {
-      const estimatedTimeInfo = document.createElement('p');
-      estimatedTimeInfo.id = 'analysis-estimated-time';
-      estimatedTimeInfo.style.cssText = 'margin-top: 4px; margin-bottom: 8px; font-size: 0.9em; color: #aaa;';
-      estimatedTimeInfo.textContent = `${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${estimatedTimeRemaining}`;
-      
-      content.appendChild(estimatedTimeInfo);
-    }
+
+  if (config.showAdvancedLiveStats) {
+    appendAdvancedLiveStats(content);
+  } else {
+    appendBasicLiveStats(content);
   }
-  
-  // Add running completion rate if available
-  if (completionRate !== null) {
-    const completionRateInfo = document.createElement('p');
-    completionRateInfo.id = 'analysis-completion-rate';
-    // Only make green if completion rate is 100%
-    const isComplete = parseFloat(completionRate) === 100;
-    const color = isComplete ? '#2ecc71' : '#aaa';
-    completionRateInfo.style.cssText = `margin-top: 8px; margin-bottom: 4px; font-size: 0.9em; color: ${color};`;
-    completionRateInfo.textContent = `${t('mods.boardAnalyzer.completionRateLabel')} ${completionRate}%`;
-    
-    content.appendChild(completionRateInfo);
+
+  if (liveStatus) {
+    updateLiveStatsDisplay(liveStatus);
   }
   
   const modal = api.ui.components.createModal({
@@ -3276,14 +3543,17 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
   modalManager.register('running-modal', modal);
   
   // Add a special identifier to the running modal
-  if (modal && modal.element) {
-    modal.element.id = 'board-analyzer-running-modal';
-    modal.element.dataset.analyzerModal = 'running';
-    
-    // Add class to identify it easily
-    if (modal.element.classList) {
-      modal.element.classList.add('board-analyzer-modal');
+  const runningModalElement = modal?.element
+    || document.querySelector('div[role="dialog"][data-state="open"]');
+  if (runningModalElement) {
+    runningModalElement.id = 'board-analyzer-running-modal';
+    runningModalElement.dataset.analyzerModal = 'running';
+    if (runningModalElement.classList) {
+      runningModalElement.classList.add('board-analyzer-modal');
     }
+    applyRunningModalFrameFix(runningModalElement);
+  } else {
+    setTimeout(() => applyRunningModalFrameFix(), 0);
   }
   
   activeRunningModal = modal;
@@ -3359,24 +3629,8 @@ function showResultsModal(results) {
         const value = document.createElement('div');
         value.textContent = `${rate}% (${count}/${results.summary.totalRuns})`;
         
-        // Color the S+ rate text based on rank points to match chart colors
-        // The highest rank points gets the brightest yellow, descending ranks get lighter shades
-        let textColor;
         const highestRankPoints = sortedRankPoints[0];
-        const rankDifference = highestRankPoints - rankPoints;
-        
-        switch (rankDifference) {
-          case 0: textColor = '#FFD700'; break; // Bright gold for highest rank points
-          case 1: textColor = '#FFA500'; break; // Orange for second highest
-          case 2: textColor = '#FF8C00'; break; // Dark orange for third highest
-          case 3: textColor = '#FF6347'; break; // Tomato for fourth highest
-          case 4: textColor = '#FF4500'; break; // Orange red for fifth highest
-          case 5: textColor = '#FF0000'; break; // Red for sixth highest
-          case 6: textColor = '#DC143C'; break; // Crimson for seventh highest
-          case 7: textColor = '#8B0000'; break; // Dark red for eighth highest
-          default: textColor = '#FFD700'; break; // Default gold for unknown rank differences
-        }
-        
+        const textColor = getSPlusRankTextColor(highestRankPoints, rankPoints);
         value.style.cssText = `text-align: right; color: ${textColor}; font-style: italic;`;
         
         sPlusRateElements.push({ label, value });
@@ -4040,46 +4294,16 @@ async function runAnalysis() {
     
     // Run the analysis with status updates
     const results = await analyzeBoard(config.runs, (status) => {
-      const progressEl = document.getElementById('analysis-progress');
-      if (progressEl) {
-        progressEl.textContent = t('mods.boardAnalyzer.progressText')
-          .replace('{current}', status.current)
-          .replace('{total}', status.total);
-      }
-      
-      // Update timing information if available - now in separate elements
-      if (status.avgRunTime && status.estimatedTimeRemaining) {
-        const avgRunTimeEl = document.getElementById('analysis-avg-run-time');
-        const estimatedTimeEl = document.getElementById('analysis-estimated-time');
-        const completionRateEl = document.getElementById('analysis-completion-rate');
-        
-        if (avgRunTimeEl && estimatedTimeEl) {
-          avgRunTimeEl.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${status.avgRunTime}ms`;
-          estimatedTimeEl.textContent = `${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${status.estimatedTimeRemaining}`;
-          
-          // Update completion rate if available
-          if (completionRateEl && status.completionRate !== undefined) {
-            const isComplete = parseFloat(status.completionRate) === 100;
-            const color = isComplete ? '#2ecc71' : '#aaa';
-            completionRateEl.style.color = color;
-            completionRateEl.textContent = `${t('mods.boardAnalyzer.completionRateLabel')} ${status.completionRate}%`;
-          }
-        } else {
-          // Modal elements don't exist yet, recreate modal with all data
-          if (runningModal && runningModal.close) {
-            runningModal.close();
-          }
-          runningModal = showRunningAnalysisModal(
-            status.current, 
-            status.total, 
-            status.avgRunTime, 
-            status.estimatedTimeRemaining,
-            status.completionRate,
-            status.completedRuns,
-            status.totalRunsInStats
-          );
-          activeRunningModal = runningModal;
+      const hasLiveStatsUi = document.getElementById('analysis-live-stats')
+        || document.getElementById('analysis-avg-run-time');
+      if (hasLiveStatsUi) {
+        updateLiveStatsDisplay(status);
+      } else if (status.hasStats) {
+        if (runningModal && runningModal.close) {
+          runningModal.close();
         }
+        runningModal = showRunningAnalysisModal(status.current, status.total, status);
+        activeRunningModal = runningModal;
       }
     });
     

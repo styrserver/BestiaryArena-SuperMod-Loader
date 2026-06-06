@@ -70,6 +70,7 @@ const EXCLUDED_EQUIPMENT = [
     'Windborn Colossus Armor',
     'Witch Hat'
 ];
+window.betterBoostedMapsExcludedEquipment = [...EXCLUDED_EQUIPMENT];
 
 // Boosted map / equipment index from equipment-database.js (HARDCODED_BOOSTED_MAP)
 let _bbmBoostedMapIndex = null;

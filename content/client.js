@@ -921,18 +921,22 @@ if (typeof browserAPI === 'undefined') {
       }
       
       const innerContent = document.createElement('div');
+      innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 0;';
       
       // Create header with proper widget-top class
       const header = document.createElement('h2');
       header.className = 'widget-top widget-top-text';
+      header.style.margin = '0';
       
       const headerText = document.createElement('p');
       headerText.textContent = title || 'Information';
+      headerText.style.margin = '0';
       header.appendChild(headerText);
       
       // Create content area with widget-bottom class
       const contentContainer = document.createElement('div');
       contentContainer.className = 'widget-bottom pixel-font-16 p-3 text-whiteRegular';
+      contentContainer.style.marginTop = '-1px';
       // Cyclopedia modal: force contentContainer to fill modal
       if (title && title.toLowerCase().includes('cyclopedia')) {
         contentContainer.style.height = '100%';

@@ -28,13 +28,16 @@ document.addEventListener('utility-api-ready', () => {
 });
 
 // Create UI button using the API
+const HERO_EDITOR_BUTTON_ID = 'hero-editor-button';
 let heroEditorButton = null;
+let heroEditorBoardUnsubscribe = null;
+
 heroEditorButton = api.ui.addButton({
-  id: 'hero-editor-button',
+  id: HERO_EDITOR_BUTTON_ID,
   text: t('mods.heroEditor.buttonText'),
   tooltip: t('mods.heroEditor.buttonTooltip'),
   primary: false,
-  onClick: showHeroEditorModal
+  onClick: () => showHeroEditorModal()
 });
 
 // Get player and board snapshots
@@ -135,6 +138,57 @@ function getMonsterGameIdFromDatabaseId(databaseId) {
   }
 }
 
+function createHeroEditorScrollContainer() {
+  const scrollContainer = api.ui.components.createScrollContainer({
+    height: '100%',
+    padding: true,
+    content: ''
+  });
+  Object.assign(scrollContainer.element.style, {
+    flex: '1 1 0',
+    minHeight: '0',
+    height: 'auto'
+  });
+  return scrollContainer;
+}
+
+function expandHeroEditorModal(widthPx = 420, heightPx = 420) {
+  setTimeout(() => {
+    try {
+      const dialog = document.querySelector('div[role="dialog"][data-state="open"]') ||
+        document.querySelector('div[role="dialog"]');
+      if (!dialog) return;
+
+      const width = `${widthPx}px`;
+      const height = `${heightPx}px`;
+      dialog.style.width = width;
+      dialog.style.minWidth = width;
+      dialog.style.maxWidth = width;
+      dialog.style.height = height;
+      dialog.style.minHeight = height;
+      dialog.style.maxHeight = height;
+      dialog.classList.remove('max-w-[300px]');
+
+      const rootWrapper = dialog.querySelector(':scope > div');
+      if (rootWrapper) {
+        rootWrapper.style.height = '100%';
+        rootWrapper.style.display = 'flex';
+        rootWrapper.style.flexDirection = 'column';
+      }
+
+      const widgetBottom = dialog.querySelector('.widget-bottom');
+      if (widgetBottom) {
+        widgetBottom.style.display = 'flex';
+        widgetBottom.style.flexDirection = 'column';
+        widgetBottom.style.flex = '1 1 0';
+        widgetBottom.style.minHeight = '0';
+      }
+    } catch (error) {
+      console.warn('[Hero Editor] Failed to expand modal layout:', error);
+    }
+  }, 50);
+}
+
 // Icon mapping for stats
 const iconMap = {
   ap: "/assets/icons/abilitypower.png",
@@ -145,6 +199,53 @@ const iconMap = {
   speed: "/assets/icons/speed.png",
   level: "/assets/icons/achievement.png"
 };
+
+const HERO_EDITOR_DROPDOWN_CLASS = 'hero-editor-select';
+
+const HERO_EDITOR_FLOATING_UI = {
+  fontSize: '10px',
+  titleFontSize: '11px',
+  statIconSize: 12,
+  portraitSize: '24px',
+  topButtonSize: '18px'
+};
+
+function applyHeroEditorFloatingFont(element, fontSize = HERO_EDITOR_FLOATING_UI.fontSize) {
+  element.style.fontSize = fontSize;
+}
+
+function clampEquipTier(value) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(5, Math.max(1, parsed));
+}
+
+function injectHeroEditorDropdownStyles() {
+  if (document.getElementById('hero-editor-dropdown-styles')) return;
+
+  const style = document.createElement('style');
+  style.id = 'hero-editor-dropdown-styles';
+  style.textContent = `
+    select.${HERO_EDITOR_DROPDOWN_CLASS},
+    select.${HERO_EDITOR_DROPDOWN_CLASS} option {
+      background-color: #000000 !important;
+      color: #ffffff !important;
+    }
+    .hero-editor-floating-panel select.${HERO_EDITOR_DROPDOWN_CLASS},
+    .hero-editor-floating-panel select.${HERO_EDITOR_DROPDOWN_CLASS} option {
+      font-size: ${HERO_EDITOR_FLOATING_UI.fontSize} !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function styleHeroEditorSelect(select) {
+  select.classList.add(HERO_EDITOR_DROPDOWN_CLASS);
+  select.style.backgroundColor = '#000000';
+  select.style.color = '#ffffff';
+}
+
+injectHeroEditorDropdownStyles();
 
 // Update equipment stats
 function updateEquip(equipMap, name, stat, tier) {
@@ -182,7 +283,7 @@ function updateItemPortrait(portrait, equipName, stat, tier, equipMap) {
   const newPortrait = api.ui.components.createItemPortrait({
     itemId: equipData.metadata.spriteId,
     stat: stat,
-    tier: parseInt(tier)
+    tier: clampEquipTier(tier)
   });
   
   // Replace the old portrait with the new one
@@ -245,9 +346,962 @@ function configureBoard(boardData) {
   }
 }
 
-// Main function to show the hero editor modal
-function showHeroEditorModal() {
+function getHeroEditorButton() {
+  return heroEditorButton || document.getElementById(HERO_EDITOR_BUTTON_ID);
+}
+
+function prepareHeroBoardData() {
+  const playerContext = getPlayerSnapshot();
+  const boardContext = getBoardSnapshot();
+  const originalBoardData = getSerializedBoard();
+
+  if (!originalBoardData) {
+    return null;
+  }
+
+  if (!originalBoardData.board) {
+    originalBoardData.board = [];
+  }
+
+  if (originalBoardData.board.length === 0 && boardContext.boardConfig) {
+    boardContext.boardConfig.forEach(piece => {
+      if (piece.type === 'player' && piece.databaseId) {
+        const monster = playerContext.monsters.find(m => m.id === piece.databaseId);
+        if (monster) {
+          let monsterName = null;
+          try {
+            const monsterData = globalThis.state.utils.getMonster(monster.gameId);
+            monsterName = monsterData.metadata.name.toLowerCase();
+          } catch (e) {
+            console.warn('Could not get monster name, using default', e);
+            monsterName = 'unknown monster';
+          }
+
+          originalBoardData.board.push({
+            tile: piece.tileIndex,
+            monster: {
+              name: monsterName,
+              hp: monster.hp,
+              ad: monster.ad,
+              ap: monster.ap,
+              armor: monster.armor,
+              magicResist: monster.magicResist,
+              level: monster.exp ? globalThis.state.utils.expToCurrentLevel(monster.exp) : 1
+            }
+          });
+        }
+      }
+    });
+  }
+
+  const heroEntries = originalBoardData.board.filter(hero => hero.monster);
+  if (heroEntries.length === 0) {
+    return null;
+  }
+
+  return { originalBoardData, boardContext, playerContext };
+}
+
+function hasHeroesOnBoard() {
   try {
+    return prepareHeroBoardData() !== null;
+  } catch (error) {
+    console.warn('[Hero Editor] Failed to check board heroes:', error);
+    return false;
+  }
+}
+
+function updateHeroEditorButtonState() {
+  const button = getHeroEditorButton();
+  if (!button || button.style.display === 'none') return;
+
+  const hasHeroes = hasHeroesOnBoard();
+  if (hasHeroes) {
+    button.style.opacity = '';
+    button.style.filter = '';
+    button.style.cursor = '';
+    button.style.pointerEvents = '';
+    button.removeAttribute('aria-disabled');
+    api.ui.updateButton(HERO_EDITOR_BUTTON_ID, {
+      tooltip: t('mods.heroEditor.buttonTooltip')
+    });
+  } else {
+    button.style.opacity = '0.5';
+    button.style.filter = 'grayscale(50%)';
+    button.style.cursor = 'not-allowed';
+    button.setAttribute('aria-disabled', 'true');
+    const disabledTooltip = t('mods.heroEditor.buttonTooltipNoHeroes');
+    api.ui.updateButton(HERO_EDITOR_BUTTON_ID, {
+      tooltip: disabledTooltip
+    });
+    button.title = disabledTooltip;
+  }
+}
+
+function subscribeHeroEditorBoardUpdates() {
+  if (heroEditorBoardUnsubscribe || !globalThis.state?.board?.subscribe) return;
+
+  heroEditorBoardUnsubscribe = globalThis.state.board.subscribe(() => {
+    updateHeroEditorButtonState();
+  });
+}
+
+function unsubscribeHeroEditorBoardUpdates() {
+  if (typeof heroEditorBoardUnsubscribe === 'function') {
+    heroEditorBoardUnsubscribe();
+    heroEditorBoardUnsubscribe = null;
+  }
+}
+
+const HERO_EDITOR_CONTEXT_MENU_COLORS = {
+  accent: '#e5c07b',
+  white: '#ffffff'
+};
+
+let heroEditorOpenContextMenu = null;
+
+function isSandboxModeEnabled() {
+  try {
+    const flags = new globalThis.state.utils.Flags(getPlayerSnapshot().flags);
+    return flags.isSet('sandbox');
+  } catch (error) {
+    console.warn('[Hero Editor] Failed to check sandbox mode:', error);
+    return false;
+  }
+}
+
+function isBoardAllyCreatureButton(button) {
+  if (!button) return false;
+  if (button.closest('[role="menu"]') || button.closest('[role="dialog"]')) return false;
+  if (
+    button.closest('#monster-scroll') ||
+    button.closest('.tab-picker-scroll') ||
+    button.closest('[id*="monster-scroll"]')
+  ) {
+    return false;
+  }
+
+  // Inventory creatures use img[alt="creature"]; board pieces use outfit sprites.
+  if (button.querySelector('img[alt="creature"]')) return false;
+  if (!button.querySelector('.sprite.outfit')) return false;
+
+  const isDraggable =
+    button.getAttribute('aria-roledescription') === 'draggable' ||
+    [...button.classList].some(className => className.includes('draggable'));
+  if (!isDraggable) return false;
+
+  return Boolean(
+    button.closest('#viewport') ||
+    button.closest('#tiles') ||
+    button.closest('#background-scene')
+  );
+}
+
+function getOutfitSpriteIdFromBoardButton(button) {
+  const outfit = button?.querySelector?.('.sprite.outfit');
+  if (!outfit) return null;
+  const idClass = [...outfit.classList].find(className => className.startsWith('id-'));
+  return idClass ? parseInt(idClass.replace('id-', ''), 10) : null;
+}
+
+function getAllySpriteId(piece) {
+  if (!piece) return null;
+
+  try {
+    let gameId = piece.gameId;
+    if (piece.type === 'player' && piece.databaseId) {
+      const monster = getPlayerSnapshot().monsters?.find(m => m.id === piece.databaseId);
+      gameId = monster?.gameId ?? gameId;
+    }
+    if (gameId == null) return null;
+
+    const monsterData = globalThis.state.utils.getMonster(gameId);
+    return monsterData?.metadata?.spriteId ?? gameId;
+  } catch {
+    return piece.gameId ?? null;
+  }
+}
+
+function findAllyTileIndexByOutfitSprite(button) {
+  const spriteId = getOutfitSpriteIdFromBoardButton(button);
+  if (spriteId == null) return null;
+
+  const allies = (getBoardSnapshot().boardConfig || []).filter(isAllyBoardPiece);
+  const matches = allies.filter(piece => getAllySpriteId(piece) === spriteId);
+  if (matches.length === 1) {
+    return matches[0].tileIndex;
+  }
+
+  return null;
+}
+
+function getTileIndexFromBoardPosition(element) {
+  const style = element?.getAttribute?.('style') || '';
+  const rightMatch = /right:\s*calc\(\s*([\d.]+)px\s*\*\s*var\(--zoomFactor\)\s*\)/.exec(style);
+  const bottomMatch = /bottom:\s*calc\(\s*([\d.]+)px\s*\*\s*var\(--zoomFactor\)\s*\)/.exec(style);
+  if (!rightMatch || !bottomMatch) return null;
+
+  const right = parseFloat(rightMatch[1]);
+  const bottom = parseFloat(bottomMatch[1]);
+
+  const tiles = document.querySelectorAll('[id^="tile-index-"]');
+  for (const tile of tiles) {
+    const tileStyle = tile.getAttribute('style') || '';
+    const tileRightMatch = /right:\s*calc\(\s*([\d.]+)px\s*\*\s*var\(--zoomFactor\)\s*\)/.exec(tileStyle);
+    const tileBottomMatch = /bottom:\s*calc\(\s*([\d.]+)px\s*\*\s*var\(--zoomFactor\)\s*\)/.exec(tileStyle);
+    if (!tileRightMatch || !tileBottomMatch) continue;
+
+    if (parseFloat(tileRightMatch[1]) === right && parseFloat(tileBottomMatch[1]) === bottom) {
+      return parseInt(tile.id.replace('tile-index-', ''), 10);
+    }
+  }
+
+  return null;
+}
+
+function getTileIndexFromElementBounds(element) {
+  const buttonRect = element?.getBoundingClientRect?.();
+  if (!buttonRect?.width) return null;
+
+  const cx = buttonRect.left + buttonRect.width / 2;
+  const cy = buttonRect.top + buttonRect.height / 2;
+  const tiles = document.querySelectorAll('[id^="tile-index-"]');
+
+  for (const tile of tiles) {
+    const tileRect = tile.getBoundingClientRect();
+    if (cx >= tileRect.left && cx <= tileRect.right && cy >= tileRect.top && cy <= tileRect.bottom) {
+      return parseInt(tile.id.replace('tile-index-', ''), 10);
+    }
+  }
+
+  let bestTile = null;
+  let bestDist = Infinity;
+  for (const tile of tiles) {
+    const tileRect = tile.getBoundingClientRect();
+    const tileCx = tileRect.left + tileRect.width / 2;
+    const tileCy = tileRect.top + tileRect.height / 2;
+    const dist = ((cx - tileCx) ** 2) + ((cy - tileCy) ** 2);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestTile = tile;
+    }
+  }
+
+  if (bestTile) {
+    const tileRect = bestTile.getBoundingClientRect();
+    const threshold = Math.max(tileRect.width, tileRect.height) * 0.6;
+    if (bestDist <= threshold ** 2) {
+      return parseInt(bestTile.id.replace('tile-index-', ''), 10);
+    }
+  }
+
+  return null;
+}
+
+function getTileIndexFromBoardButton(button) {
+  const tileEl = button?.closest?.('[id^="tile-index-"]');
+  if (tileEl?.id) {
+    const match = tileEl.id.match(/^tile-index-(\d+)$/);
+    if (match) return parseInt(match[1], 10);
+  }
+
+  return (
+    getTileIndexFromBoardPosition(button) ??
+    getTileIndexFromElementBounds(button) ??
+    findAllyTileIndexByOutfitSprite(button)
+  );
+}
+
+function isAllyBoardPiece(piece) {
+  return Boolean(
+    piece &&
+    (piece.type === 'player' || (piece.type === 'custom' && piece.villain === false))
+  );
+}
+
+function getAllyPieceAtTile(tileIndex) {
+  if (tileIndex == null) return null;
+  try {
+    const piece = getBoardSnapshot().boardConfig?.find(p => p.tileIndex === tileIndex);
+    return isAllyBoardPiece(piece) ? piece : null;
+  } catch {
+    return null;
+  }
+}
+
+function getAllyDisplayNameAtTile(tileIndex) {
+  const piece = getAllyPieceAtTile(tileIndex);
+  if (!piece) return null;
+
+  try {
+    if (piece.type === 'player' && piece.databaseId) {
+      const monster = getPlayerSnapshot().monsters?.find(m => m.id === piece.databaseId);
+      if (monster?.gameId) {
+        return globalThis.state.utils.getMonster(monster.gameId).metadata.name;
+      }
+    } else if (piece.type === 'custom' && piece.gameId) {
+      return globalThis.state.utils.getMonster(piece.gameId).metadata.name;
+    }
+  } catch (error) {
+    console.warn('[Hero Editor] Could not resolve ally name:', error);
+  }
+
+  return null;
+}
+
+function closeHeroEditorBoardContextMenu() {
+  if (heroEditorOpenContextMenu?.closeMenu) {
+    heroEditorOpenContextMenu.closeMenu();
+  }
+}
+
+function positionHeroEditorContextMenu(menu, clientX, clientY) {
+  const padding = 8;
+  const rect = menu.getBoundingClientRect();
+  let left = clientX;
+  let top = clientY;
+  left = Math.max(padding, Math.min(left, window.innerWidth - rect.width - padding));
+  top = Math.max(padding, Math.min(top, window.innerHeight - rect.height - padding));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function createHeroEditorBoardContextMenu(anchorEl, tileIndex, clientX, clientY) {
+  showHeroEditorModal({
+    selectTileIndex: tileIndex,
+    floating: true,
+    floatingPosition: { x: clientX, y: clientY }
+  });
+}
+
+function handleHeroEditorBoardContextMenu(event) {
+  if (!config.enabled) return;
+
+  const button = event.target.closest?.('button');
+  if (!isBoardAllyCreatureButton(button)) return;
+  if (!isSandboxModeEnabled() || !hasHeroesOnBoard()) return;
+
+  let tileIndex = getTileIndexFromBoardButton(button);
+  if (tileIndex != null && !getAllyPieceAtTile(tileIndex)) {
+    tileIndex = findAllyTileIndexByOutfitSprite(button);
+  }
+  if (tileIndex == null || !getAllyPieceAtTile(tileIndex)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  createHeroEditorBoardContextMenu(button, tileIndex, event.clientX, event.clientY);
+}
+
+document.addEventListener('contextmenu', handleHeroEditorBoardContextMenu, true);
+
+function buildBoardPayloadFromControls(originalBoardData, controls, equipMap) {
+  const updatedBoardData = JSON.parse(JSON.stringify(originalBoardData));
+
+  controls.forEach(control => {
+    if (control.type === 'stat' && control.input) {
+      const boardIndex = control.index;
+      if (updatedBoardData.board[boardIndex]?.monster) {
+        const rawValue = parseInt(control.input.value, 10);
+        if (!Number.isFinite(rawValue)) return;
+
+        if (control.stat === 'level') {
+          updatedBoardData.board[boardIndex].monster[control.stat] = rawValue || 1;
+        } else {
+          updatedBoardData.board[boardIndex].monster[control.stat] = rawValue;
+        }
+      }
+    } else if (control.type === 'equipName') {
+      const hero = control.hero;
+      const boardIndex = control.index;
+      const statControl = controls.find(c => c.hero === hero && c.type === 'equipStat');
+      const tierControl = controls.find(c => c.hero === hero && c.type === 'equipTier');
+
+      if (statControl && tierControl && updatedBoardData.board[boardIndex]) {
+        const equipName = control.select.value;
+
+        if (!equipName || equipName === '') {
+          delete updatedBoardData.board[boardIndex].equipment;
+        } else {
+          const equipId = equipMap.get(equipName.toLowerCase());
+          if (equipId) {
+            const equipData = globalThis.state.utils.getEquipment(equipId);
+            if (equipData?.metadata) {
+              updatedBoardData.board[boardIndex].equipment = {
+                name: equipData.metadata.name.toLowerCase(),
+                stat: statControl.select.value,
+                tier: clampEquipTier(tierControl.input.value)
+              };
+            }
+          }
+        }
+      }
+    }
+  });
+
+  updatedBoardData.board.forEach((piece, pieceIndex) => {
+    if (piece.monster?.name) {
+      piece.monster.name = piece.monster.name.toLowerCase();
+    }
+
+    if (piece.monster) {
+      const awakenControl = controls.find(c => c.type === 'awaken' && c.index === pieceIndex);
+      const awakenEnabled = awakenControl?.getValue ? awakenControl.getValue() : false;
+
+      piece.monster.awaken = awakenEnabled;
+      piece.monster.awakened = awakenEnabled;
+      piece.monster.isAwakened = awakenEnabled;
+      piece.tier = awakenEnabled ? 5 : 4;
+
+      if (piece.monster.level) {
+        piece.monster.level = Number(piece.monster.level);
+        piece.monster.exp = globalThis.state.utils.expAtLevel(piece.monster.level);
+      }
+    }
+  });
+
+  let currentFloor = updatedBoardData.floor;
+  if (currentFloor === undefined || currentFloor === null) {
+    try {
+      currentFloor = getBoardSnapshot().floor ?? 0;
+    } catch (e) {
+      currentFloor = 0;
+    }
+  }
+
+  return {
+    region: updatedBoardData.region,
+    map: updatedBoardData.map,
+    floor: currentFloor,
+    board: updatedBoardData.board.map(piece => {
+      if (piece.monster?.level) {
+        piece.monster.level = Number(piece.monster.level);
+      }
+      return piece;
+    })
+  };
+}
+
+function applyHeroChangesFromControls(originalBoardData, controls, equipMap, options = {}) {
+  const { silent = true } = options;
+
+  try {
+    const payload = buildBoardPayloadFromControls(originalBoardData, controls, equipMap);
+    const success = configureBoard(payload);
+
+    if (!success) {
+      throw new Error('Failed to apply changes');
+    }
+
+    if (window.DEBUG) {
+      console.log('[Hero Editor] Live board update applied:', payload);
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[Hero Editor] Error applying hero changes:', error);
+    if (!silent) {
+      api.ui.components.createModal({
+        title: 'Error',
+        content: `Failed to update heroes: ${error.message || error}`,
+        buttons: [{ text: 'OK', primary: true }]
+      });
+    }
+    return false;
+  }
+}
+
+function buildPortraitLevelIndicator(level) {
+  const levelContainer = document.createElement('div');
+  levelContainer.className = 'pixel-font-16 absolute bottom-0 left-0 z-1 flex size-full items-end pl-0.5 text-whiteExp';
+  levelContainer.style.cssText = 'line-height: 0.8; background: radial-gradient(circle at left bottom, rgba(0, 0, 0, 0.5) 6px, transparent 24px);';
+
+  const levelText = document.createElement('span');
+  levelText.className = 'relative font-outlined-fill text-transparent revert-pixel-font-spacing -translate-x-px';
+  levelText.style.cssText = 'line-height: 0.9; font-size: 16px';
+  levelText.setAttribute('translate', 'no');
+  levelText.textContent = String(level);
+
+  const levelCanvas = document.createElement('canvas');
+  levelCanvas.className = 'font-outlined pixelated pointer-events-none absolute top-0 transition-opacity';
+  levelCanvas.width = 17;
+  levelCanvas.height = 16;
+  levelCanvas.style.left = '-1px';
+
+  levelText.appendChild(levelCanvas);
+  levelContainer.appendChild(levelText);
+  return levelContainer;
+}
+
+function buildVisiblePortraitLevelIndicator(level) {
+  const levelBadge = document.createElement('span');
+  levelBadge.setAttribute('translate', 'no');
+  levelBadge.textContent = String(level);
+  levelBadge.style.cssText = 'position: absolute; bottom: 0; left: 2px; color: white; font-size: 12px; background: rgba(0, 0, 0, 0.7); padding: 0 2px; z-index: 2;';
+  return levelBadge;
+}
+
+function ensurePortraitLevelOutline(portraitRoot) {
+  if (!portraitRoot) return;
+
+  requestAnimationFrame(() => {
+    portraitRoot.querySelectorAll('canvas.font-outlined').forEach((canvas) => {
+      canvas.removeAttribute('data-loaded');
+    });
+  });
+}
+
+function findPortraitLevelSpan(portraitRoot) {
+  if (!portraitRoot) return null;
+  return (
+    portraitRoot.querySelector('span[translate="no"]') ||
+    portraitRoot.querySelector('img[alt="creature"] + span') ||
+    portraitRoot.querySelector('img[alt="Monster"] + span') ||
+    portraitRoot.querySelector(':scope > span')
+  );
+}
+
+function updateHeroPortraitLevel(portraitRoot, level) {
+  if (!portraitRoot) return;
+  const parsedLevel = parseInt(level, 10);
+  if (!Number.isFinite(parsedLevel)) return;
+  const levelSpan = findPortraitLevelSpan(portraitRoot);
+  if (levelSpan) {
+    levelSpan.textContent = String(parsedLevel);
+    ensurePortraitLevelOutline(portraitRoot);
+  }
+}
+
+function calculateTierFromStats(monster) {
+  if (!monster) return 1;
+
+  const statSum = (Number(monster.hp) || 0) +
+    (Number(monster.ad) || 0) +
+    (Number(monster.ap) || 0) +
+    (Number(monster.armor) || 0) +
+    (Number(monster.magicResist) || 0);
+
+  if (statSum >= 80) return 5;
+  if (statSum >= 70) return 4;
+  if (statSum >= 60) return 3;
+  if (statSum >= 50) return 2;
+  return 1;
+}
+
+function isHeroMaxGenes(monster, level) {
+  const parsedLevel = Number(level);
+  if (parsedLevel !== 99) return false;
+
+  return Number(monster.hp ?? 1) === 20 &&
+    Number(monster.ad ?? 1) === 20 &&
+    Number(monster.ap ?? 1) === 20 &&
+    Number(monster.armor ?? 1) === 20 &&
+    Number(monster.magicResist ?? 1) === 20;
+}
+
+function isHeroAwakened(monster, level) {
+  return monster.awaken === true ||
+    monster.awakened === true ||
+    monster.isAwakened === true ||
+    Number(level) > 50;
+}
+
+function applyHeroMonsterPortraitBorder(slot, monster, level) {
+  const statTier = calculateTierFromStats(monster);
+  const maxGenes = isHeroMaxGenes(monster, level);
+  const awakened = isHeroAwakened(monster, level);
+  const shiny = monster.shiny === true;
+
+  let rarityBg = slot.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny, .rarity-hundo');
+  if (!rarityBg) {
+    rarityBg = document.createElement('div');
+    slot.insertBefore(rarityBg, slot.firstChild);
+  }
+
+  if (maxGenes && shiny) {
+    rarityBg.className = 'absolute inset-0 z-2 opacity-80 rarity-shiny';
+    rarityBg.removeAttribute('data-rarity');
+  } else if (maxGenes) {
+    rarityBg.className = 'absolute inset-0 z-1 opacity-80 rarity-hundo';
+    rarityBg.removeAttribute('data-rarity');
+  } else if (awakened) {
+    rarityBg.className = 'absolute inset-0 z-2 opacity-80 rarity-awaken';
+    rarityBg.removeAttribute('data-rarity');
+  } else {
+    rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+    rarityBg.setAttribute('data-rarity', Math.min(5, statTier));
+  }
+
+  let starIcon = slot.querySelector('img.tier-stars, img[alt="star tier"], img[alt="shiny-tier"], img[alt="hundo-tier"]');
+  if (maxGenes) {
+    const iconSrc = shiny ? '/assets/icons/star-tier-shiny.png' : '/assets/icons/star-tier-hundo.png';
+    if (!starIcon) {
+      starIcon = document.createElement('img');
+      starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+      slot.appendChild(starIcon);
+    }
+    starIcon.src = iconSrc;
+    starIcon.alt = shiny ? 'shiny-tier' : 'hundo-tier';
+  } else if (awakened) {
+    if (!starIcon) {
+      starIcon = document.createElement('img');
+      starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+      starIcon.alt = 'star tier';
+      slot.appendChild(starIcon);
+    }
+    starIcon.src = '/assets/icons/star-tier-awaken.png';
+    starIcon.alt = 'star tier';
+  } else if (statTier > 1) {
+    if (!starIcon) {
+      starIcon = document.createElement('img');
+      starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+      starIcon.alt = 'star tier';
+      slot.appendChild(starIcon);
+    }
+    starIcon.src = `/assets/icons/star-tier-${Math.min(4, statTier)}.png`;
+  } else if (starIcon) {
+    starIcon.remove();
+  }
+}
+
+function createHeroMonsterPortraitSlot({ monsterId, level, monster, size = 32 }) {
+  const statTier = calculateTierFromStats(monster);
+  const parsedLevel = Number(level) || 1;
+
+  if (window.BestiaryUIComponents?.createMonsterPortrait) {
+    const root = window.BestiaryUIComponents.createMonsterPortrait({
+      monsterId,
+      level: parsedLevel,
+      tier: statTier
+    });
+    const slot = root.querySelector('.container-slot');
+    if (slot) {
+      slot.remove();
+      slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden shrink-0';
+      slot.style.width = `${size}px`;
+      slot.style.height = `${size}px`;
+
+      const img = slot.querySelector('img[alt="creature"]');
+      if (img) {
+        img.width = size;
+        img.height = size;
+      }
+
+      applyHeroMonsterPortraitBorder(slot, monster, parsedLevel);
+      ensurePortraitLevelOutline(slot);
+      return slot;
+    }
+  }
+
+  const slot = document.createElement('div');
+  slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden shrink-0';
+  slot.style.width = `${size}px`;
+  slot.style.height = `${size}px`;
+
+  slot.appendChild(buildPortraitLevelIndicator(parsedLevel));
+
+  const monsterImg = document.createElement('img');
+  monsterImg.className = 'pixelated ml-auto';
+  monsterImg.alt = 'creature';
+  monsterImg.width = size;
+  monsterImg.height = size;
+  monsterImg.src = `/assets/portraits/${monsterId}.png`;
+
+  slot.appendChild(monsterImg);
+  applyHeroMonsterPortraitBorder(slot, monster, parsedLevel);
+
+  if (!window.BestiaryUIComponents) {
+    slot.querySelector('.pixel-font-16')?.remove();
+    slot.appendChild(buildVisiblePortraitLevelIndicator(parsedLevel));
+  } else {
+    ensurePortraitLevelOutline(slot);
+  }
+
+  return slot;
+}
+
+function refreshHeroMonsterPortraitSlot(slot, options) {
+  if (!slot) return null;
+
+  const nextSlot = createHeroMonsterPortraitSlot(options);
+  slot.replaceWith(nextSlot);
+  ensurePortraitLevelOutline(nextSlot);
+  return nextSlot;
+}
+
+function resolveHeroMonsterInfo(hero, boardContext, monsterMap) {
+  let monsterName = hero.monster.name || 'Unknown Monster';
+  let monsterGameId = null;
+
+  if (boardContext.boardConfig) {
+    const boardPiece = boardContext.boardConfig.find(p =>
+      p.tileIndex === hero.tile && (p.type === 'player' || p.type === 'custom'));
+
+    if (boardPiece) {
+      if (boardPiece.type === 'player') {
+        monsterGameId = getMonsterGameIdFromDatabaseId(boardPiece.databaseId);
+      } else if (boardPiece.type === 'custom') {
+        monsterGameId = boardPiece.gameId;
+      }
+    }
+  }
+
+  if (!monsterGameId) {
+    monsterGameId = monsterMap.get(monsterName.toLowerCase());
+  }
+
+  if (monsterGameId) {
+    const originalName = getMonsterNameFromId(monsterGameId);
+    if (originalName) monsterName = originalName;
+  }
+
+  let monsterLevel = hero.monster.level || 1;
+
+  if (hero.monster.exp && (!hero.monster.level || hero.monster.level === 1)) {
+    try {
+      monsterLevel = globalThis.state.utils.expToCurrentLevel(hero.monster.exp);
+      hero.monster.level = monsterLevel;
+    } catch (e) {
+      console.warn('Error calculating level from exp:', e);
+    }
+  }
+
+  if (!hero.monster.exp && boardContext.boardConfig) {
+    const boardPiece = boardContext.boardConfig.find(p =>
+      p.tileIndex === hero.tile && p.type === 'player' && p.databaseId);
+
+    if (boardPiece) {
+      const playerContext = getPlayerSnapshot();
+      const monster = playerContext.monsters.find(m => m.id === boardPiece.databaseId);
+
+      if (monster && monster.exp) {
+        try {
+          monsterLevel = globalThis.state.utils.expToCurrentLevel(monster.exp);
+          hero.monster.level = monsterLevel;
+          hero.monster.exp = monster.exp;
+        } catch (e) {
+          console.warn('Error calculating level from player context exp:', e);
+        }
+      }
+    }
+  }
+
+  if (monsterLevel === 1 && !hero.monster.exp) {
+    monsterLevel = 50;
+    hero.monster.level = 50;
+  }
+
+  return { monsterName, monsterGameId, monsterLevel };
+}
+
+function resolveHeroEquipmentInfo(hero, equipMap) {
+  let equipName = '';
+  let equipStat = 'ad';
+  let equipTier = 1;
+  let equipGameId = null;
+  const hasEquipment = !!(hero.equipment && hero.equipment.name);
+
+  if (hasEquipment) {
+    equipName = hero.equipment.name || 'Unknown Item';
+    equipStat = hero.equipment.stat || 'ad';
+    equipTier = clampEquipTier(hero.equipment.tier || 1);
+
+    if (window.equipmentNamesToGameIds) {
+      equipGameId = window.equipmentNamesToGameIds.get(equipName.toLowerCase());
+    }
+
+    if (!equipGameId && equipMap) {
+      equipGameId = equipMap.get(equipName.toLowerCase());
+    }
+
+    if (equipGameId) {
+      const originalName = getEquipmentNameFromId(equipGameId);
+      if (originalName) equipName = originalName;
+    }
+  }
+
+  return { equipName, equipStat, equipTier, equipGameId, hasEquipment };
+}
+
+function updateListEquipPortrait(wrap, equipMap, equipName, equipStat, equipTier) {
+  while (wrap.firstChild) {
+    wrap.removeChild(wrap.firstChild);
+  }
+
+  if (!equipName) return;
+
+  let equipGameId = window.equipmentNamesToGameIds?.get(equipName.toLowerCase());
+  if (!equipGameId && equipMap) {
+    equipGameId = equipMap.get(equipName.toLowerCase());
+  }
+  if (!equipGameId) return;
+
+  try {
+    const equipData = globalThis.state.utils.getEquipment(equipGameId);
+    if (equipData?.metadata) {
+      wrap.appendChild(api.ui.components.createItemPortrait({
+        itemId: equipData.metadata.spriteId,
+        stat: equipStat,
+        tier: clampEquipTier(equipTier)
+      }));
+    }
+  } catch (e) {
+    console.error('Error updating list equip portrait:', e);
+  }
+}
+
+function createHeroEditorLiveApplyContext(preparedBoard) {
+  const { originalBoardData, boardContext } = preparedBoard;
+  const equipMap = buildEquipmentMap();
+  const monsterMap = buildMonsterMap();
+  const controls = [];
+  let liveApplyTimer = null;
+  const LIVE_APPLY_DELAY_MS = 250;
+
+  const scheduleLiveApply = (immediate = false) => {
+    if (liveApplyTimer) {
+      clearTimeout(liveApplyTimer);
+      liveApplyTimer = null;
+    }
+
+    const runApply = () => {
+      applyHeroChangesFromControls(originalBoardData, controls, equipMap, { silent: true });
+    };
+
+    if (immediate) {
+      runApply();
+    } else {
+      liveApplyTimer = setTimeout(runApply, LIVE_APPLY_DELAY_MS);
+    }
+  };
+
+  const clearLiveApplyTimer = () => {
+    if (liveApplyTimer) {
+      clearTimeout(liveApplyTimer);
+      liveApplyTimer = null;
+    }
+  };
+
+  return { originalBoardData, boardContext, equipMap, monsterMap, controls, scheduleLiveApply, clearLiveApplyTimer };
+}
+
+function mountHeroEditorFloatingPanel(detailContent, clientX, clientY, clearLiveApplyTimer) {
+  closeHeroEditorBoardContextMenu();
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position: fixed; inset: 0; z-index: 10000000; background: transparent; pointer-events: auto;';
+
+  const menu = document.createElement('div');
+  menu.className = 'hero-editor-floating-panel';
+  menu.style.cssText = `
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 10000001;
+    width: min(270px, calc(100vw - 16px));
+    height: auto;
+    max-height: calc(100vh - 16px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+    border: 4px solid transparent;
+    border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
+    border-radius: 6px;
+    padding: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    box-sizing: border-box;
+  `;
+
+  const scrollWrap = document.createElement('div');
+  scrollWrap.className = 'frame-pressed-1 surface-dark box-border overflow-x-hidden';
+  scrollWrap.style.cssText = 'padding: 4px; flex: 0 1 auto; overflow-y: auto; max-height: calc(100vh - 56px);';
+  scrollWrap.appendChild(detailContent);
+  menu.appendChild(scrollWrap);
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'pixel-font-12 shrink-0';
+  closeButton.textContent = t('mods.heroEditor.contextMenuClose');
+  closeButton.style.cssText = `
+    width: 100%;
+    height: 22px;
+    margin-top: 6px;
+    padding: 0 6px;
+    background: #1a1a1a;
+    color: #888888;
+    border: 1px solid #555;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: ${HERO_EDITOR_FLOATING_UI.fontSize};
+    font-weight: bold;
+    flex: 0 0 auto;
+  `;
+  menu.appendChild(closeButton);
+
+  function closeMenu() {
+    clearLiveApplyTimer?.();
+    overlay.removeEventListener('mousedown', overlayClickHandler);
+    overlay.removeEventListener('click', overlayClickHandler);
+    document.removeEventListener('keydown', escHandler);
+    overlay.remove();
+    menu.remove();
+    if (heroEditorOpenContextMenu?.overlay === overlay) {
+      heroEditorOpenContextMenu = null;
+    }
+  }
+
+  const overlayClickHandler = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeMenu();
+  };
+  const escHandler = (event) => {
+    if (event.key === 'Escape') closeMenu();
+  };
+
+  closeButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeMenu();
+  });
+
+  menu.addEventListener('mousedown', (event) => event.stopPropagation());
+  menu.addEventListener('click', (event) => event.stopPropagation());
+  menu.addEventListener('contextmenu', (event) => event.preventDefault());
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(menu);
+  overlay.addEventListener('mousedown', overlayClickHandler);
+  overlay.addEventListener('click', overlayClickHandler);
+  document.addEventListener('keydown', escHandler);
+
+  positionHeroEditorContextMenu(menu, clientX, clientY);
+  requestAnimationFrame(() => {
+    positionHeroEditorContextMenu(menu, clientX, clientY);
+  });
+
+  heroEditorOpenContextMenu = { overlay, menu, closeMenu };
+}
+
+updateHeroEditorButtonState();
+subscribeHeroEditorBoardUpdates();
+
+// Main function to show the hero editor modal
+function showHeroEditorModal(options) {
+  const modalOptions = options && !(options instanceof Event) ? options : {};
+  const selectTileIndex = modalOptions.selectTileIndex;
+  const isFloating = modalOptions.floating === true;
+  const floatingPosition = modalOptions.floatingPosition || { x: 0, y: 0 };
+
+  try {
+    if (!isFloating) {
+      closeHeroEditorBoardContextMenu();
+    }
+
+    if (!hasHeroesOnBoard()) {
+      return;
+    }
+
     // Check if sandbox mode is enabled
     const playerContext = getPlayerSnapshot();
     const playerFlags = playerContext.flags;
@@ -263,75 +1317,13 @@ function showHeroEditorModal() {
       return;
     }
     
-    // Get player data for equipment information
-    const boardContext = getBoardSnapshot();
-    
-    // Get serialized board data
-    const originalBoardData = getSerializedBoard();
-    
-    if (!originalBoardData) {
-      api.ui.components.createModal({
-        title: 'No Game Data',
-        content: 'Could not retrieve board data. Please make sure you are in an active game.',
-        buttons: [{ text: 'OK', primary: true }]
-      });
+    const preparedBoard = prepareHeroBoardData();
+    if (!preparedBoard) {
+      updateHeroEditorButtonState();
       return;
     }
-    
-    // Check if we have any board data - even if it's just monsters without equipment
-    if (!originalBoardData.board) {
-      originalBoardData.board = [];
-    }
-    
-    // If the board is empty, we need to try to create board entries based on boardConfig
-    if (originalBoardData.board.length === 0 && boardContext.boardConfig) {
-      console.log('No hero data found in serializeBoard output, attempting to create from board config');
-      
-      // Look for player pieces in the board configuration
-      boardContext.boardConfig.forEach(piece => {
-        if (piece.type === 'player' && piece.databaseId) {
-          const monster = playerContext.monsters.find(m => m.id === piece.databaseId);
-          if (monster) {
-            // Find monster name
-            let monsterName = null;
-            try {
-              const monsterData = globalThis.state.utils.getMonster(monster.gameId);
-              monsterName = monsterData.metadata.name.toLowerCase();
-            } catch (e) {
-              console.warn('Could not get monster name, using default', e);
-              monsterName = 'unknown monster';
-            }
-            
-            // Create a basic board entry
-            const boardEntry = {
-              tile: piece.tileIndex,
-              monster: {
-                name: monsterName,
-                hp: monster.hp,
-                ad: monster.ad,
-                ap: monster.ap,
-                armor: monster.armor,
-                magicResist: monster.magicResist,
-                level: monster.exp ? globalThis.state.utils.expToCurrentLevel(monster.exp) : 1
-              }
-              // Note: No equipment initially
-            };
-            
-            originalBoardData.board.push(boardEntry);
-          }
-        }
-      });
-    }
-    
-    // Still no board data
-    if (originalBoardData.board.length === 0) {
-      api.ui.components.createModal({
-        title: 'No Heroes Found',
-        content: 'No heroes were found on the board. Please place some heroes on the board before using the Hero Editor.',
-        buttons: [{ text: 'OK', primary: true }]
-      });
-      return;
-    }
+
+    const { originalBoardData, boardContext } = preparedBoard;
     
     console.log('Original board data:', originalBoardData);
     
@@ -344,137 +1336,154 @@ function showHeroEditorModal() {
     // Build monster map
     const monsterMap = buildMonsterMap();
     
-    // Keep track of controls for reset/apply functionality
+    // Keep track of controls for reset/live-apply functionality
     const controls = [];
+    let liveApplyTimer = null;
+    const LIVE_APPLY_DELAY_MS = 250;
+
+    const scheduleLiveApply = (immediate = false) => {
+      if (liveApplyTimer) {
+        clearTimeout(liveApplyTimer);
+        liveApplyTimer = null;
+      }
+
+      const runApply = () => {
+        applyHeroChangesFromControls(originalBoardData, controls, equipMap, { silent: true });
+      };
+
+      if (immediate) {
+        runApply();
+      } else {
+        liveApplyTimer = setTimeout(runApply, LIVE_APPLY_DELAY_MS);
+      }
+    };
     
-    // Create container for the modal content
     const contentContainer = document.createElement('div');
-    
-    // Create scrollable container for heroes
-    const scrollContainer = api.ui.components.createScrollContainer({
-      height: 350,
-      padding: true,
-      content: ''
+    contentContainer.className = 'flex min-h-0 flex-1 flex-col';
+    contentContainer.style.height = '100%';
+
+    const columnsContainer = document.createElement('div');
+    columnsContainer.className = 'flex min-h-0 w-full flex-1 gap-2';
+    columnsContainer.style.flex = '1 1 0';
+
+    const col1 = document.createElement('div');
+    col1.className = 'flex min-h-0 shrink-0 flex-col';
+    col1.style.width = '100px';
+    col1.style.flex = '0 0 100px';
+
+    const col1Header = document.createElement('div');
+    col1Header.className = 'pixel-font-12 text-whiteRegular mb-1 shrink-0';
+    col1Header.textContent = 'Allies';
+
+    const listScrollContainer = createHeroEditorScrollContainer();
+    listScrollContainer.element.style.width = '100%';
+    Object.assign(listScrollContainer.contentContainer.style, {
+      width: '100%',
+      gridTemplateColumns: 'minmax(0, 1fr)'
     });
+    listScrollContainer.contentContainer.classList.remove('items-start');
+    listScrollContainer.contentContainer.classList.add('items-stretch');
+    const listScrollWrapper = listScrollContainer.contentContainer.parentElement;
+    if (listScrollWrapper) {
+      listScrollWrapper.style.width = '100%';
+    }
+
+    const col2 = document.createElement('div');
+    col2.className = 'flex min-h-0 min-w-0 flex-1 flex-col';
+    col2.style.flex = '1 1 0';
+
+    const col2Header = document.createElement('div');
+    col2Header.className = 'pixel-font-12 text-whiteRegular mb-1 shrink-0';
+    col2Header.textContent = 'Details';
+
+    const detailHost = document.createElement('div');
+    detailHost.className = 'frame-pressed-1 surface-dark relative box-border min-h-0 flex-1 overflow-hidden';
+    detailHost.style.padding = '5px';
+    detailHost.style.flex = '1 1 0';
+
+    const listItems = [];
+    const detailPanels = [];
+    let selectedHeroIndex = null;
+    let floatingDetailPanel = null;
+
+    const getListItemClass = (isActive) => (
+      isActive
+        ? 'frame-pressed-1 surface-regular box-border flex w-full min-w-0 cursor-pointer items-center justify-center gap-1 p-1 tab-active'
+        : 'frame-1 surface-dark box-border flex w-full min-w-0 cursor-pointer items-center justify-center gap-1 p-1'
+    );
+
+    const refreshListEquipPortrait = (boardIndex, equipName, equipStat, equipTier) => {
+      const listEntry = listItems.find(item => item.index === boardIndex);
+      if (listEntry?.listEquipPortraitWrap) {
+        updateListEquipPortrait(listEntry.listEquipPortraitWrap, equipMap, equipName, equipStat, equipTier);
+      }
+    };
+
+    const selectHero = (boardIndex) => {
+      selectedHeroIndex = boardIndex;
+      detailPanels.forEach(({ index, element }) => {
+        element.style.display = index === boardIndex ? 'flex' : 'none';
+      });
+      listItems.forEach(({ index, element }) => {
+        element.className = getListItemClass(index === boardIndex);
+      });
+    };
+
+    const findPortraitLevelSpan = (portraitRoot) => {
+      if (!portraitRoot) return null;
+      return (
+        portraitRoot.querySelector('span[translate="no"]') ||
+        portraitRoot.querySelector('img[alt="Monster"] + span') ||
+        portraitRoot.querySelector(':scope > span')
+      );
+    };
+
+    const updateHeroPortraitLevelLocal = (portraitRoot, level) => {
+      updateHeroPortraitLevel(portraitRoot, level);
+    };
+
+    const updateHeroPortraitLevels = (boardIndex, level) => {
+      const listEntry = listItems.find(item => item.index === boardIndex);
+      updateHeroPortraitLevelLocal(listEntry?.listPortrait, level);
+      const detailEntry = detailPanels.find(panel => panel.index === boardIndex);
+      updateHeroPortraitLevelLocal(detailEntry?.headerPortrait, level);
+    };
+
+    const refreshHeroMonsterPortraits = (boardIndex, monsterGameId, level, monster) => {
+      if (!monsterGameId || !monster) return;
+
+      const listEntry = listItems.find(item => item.index === boardIndex);
+      if (listEntry?.listPortrait) {
+        listEntry.listPortrait = refreshHeroMonsterPortraitSlot(listEntry.listPortrait, {
+          monsterId: monsterGameId,
+          level,
+          monster,
+          size: 32
+        });
+      }
+
+      const detailEntry = detailPanels.find(panel => panel.index === boardIndex);
+      if (detailEntry?.headerPortrait) {
+        detailEntry.headerPortrait = refreshHeroMonsterPortraitSlot(detailEntry.headerPortrait, {
+          monsterId: monsterGameId,
+          level,
+          monster,
+          size: isFloating ? parseInt(HERO_EDITOR_FLOATING_UI.portraitSize, 10) || 24 : 36
+        });
+      }
+    };
     
-    // Create cards for each hero
+    // Create detail panels and list entries for each hero
     editableBoardData.board.forEach((hero, index) => {
       // Only process pieces with monsters
       if (!hero.monster) return;
+
+      if (isFloating && selectTileIndex != null && hero.tile !== selectTileIndex) return;
       
       // Get the properly cased monster name
-      let monsterName = hero.monster.name || 'Unknown Monster';
-      let monsterGameId = null;
-      
-      // Try to get game ID from board data if it's a player piece
-      if (boardContext.boardConfig) {
-        const boardPiece = boardContext.boardConfig.find(p => 
-          p.tileIndex === hero.tile && (p.type === 'player' || p.type === 'custom'));
-        
-        if (boardPiece) {
-          if (boardPiece.type === 'player') {
-            // For player pieces, we need to get the gameId from the databaseId
-            monsterGameId = getMonsterGameIdFromDatabaseId(boardPiece.databaseId);
-          } else if (boardPiece.type === 'custom') {
-            monsterGameId = boardPiece.gameId;
-          }
-        }
-      }
-      
-      // If not found, try to get monster game ID from the name
-      if (!monsterGameId) {
-        monsterGameId = monsterMap.get(monsterName.toLowerCase());
-      }
-      
-      // Get the original cased name if possible
-      if (monsterGameId) {
-        const originalName = getMonsterNameFromId(monsterGameId);
-        if (originalName) monsterName = originalName;
-      }
-      
-      // Calculate monster level from exp if available or use the provided level
-      let monsterLevel = hero.monster.level || 1;
-      
-      // If we have experience data but no level, calculate it
-      if (hero.monster.exp && (!hero.monster.level || hero.monster.level === 1)) {
-        try {
-          monsterLevel = globalThis.state.utils.expToCurrentLevel(hero.monster.exp);
-          // Update the hero data with the calculated level
-          hero.monster.level = monsterLevel;
-          console.log(`Calculated level ${monsterLevel} from exp ${hero.monster.exp} for ${monsterName}`);
-        } catch (e) {
-          console.warn('Error calculating level from exp:', e);
-        }
-      }
-      
-      // If no exp data in board, try to get it from player context for player pieces
-      if (!hero.monster.exp && boardContext.boardConfig) {
-        const boardPiece = boardContext.boardConfig.find(p => 
-          p.tileIndex === hero.tile && p.type === 'player' && p.databaseId);
-        
-        if (boardPiece) {
-          const playerContext = getPlayerSnapshot();
-          const monster = playerContext.monsters.find(m => m.id === boardPiece.databaseId);
-          
-          if (monster && monster.exp) {
-            try {
-              const calculatedLevel = globalThis.state.utils.expToCurrentLevel(monster.exp);
-              monsterLevel = calculatedLevel;
-              // Update the hero data with the calculated level and exp
-              hero.monster.level = monsterLevel;
-              hero.monster.exp = monster.exp;
-              console.log(`Got exp ${monster.exp} from player context, calculated level ${monsterLevel} for ${monsterName}`);
-            } catch (e) {
-              console.warn('Error calculating level from player context exp:', e);
-            }
-          }
-        }
-      }
-      
-      // If still no level data and the level is 1, assume it should be 50 (max level)
-      if (monsterLevel === 1 && !hero.monster.exp) {
-        monsterLevel = 50;
-        hero.monster.level = 50;
-                    console.log(`No exp data found, defaulting to level 50 for ${monsterName}`);
-      }
-      
-      // Create hero card container
-      const heroCard = document.createElement('div');
-      heroCard.className = 'frame-pressed-1 surface-dark p-2 mb-3';
-      
-      // Header with monster portrait/name on the left and awaken button on the right
-      const headerContainer = document.createElement('div');
-      headerContainer.style.display = 'flex';
-      headerContainer.style.alignItems = 'center';
-      headerContainer.style.justifyContent = 'space-between';
-      headerContainer.style.marginBottom = '10px';
+      const { monsterName, monsterGameId, monsterLevel } = resolveHeroMonsterInfo(hero, boardContext, monsterMap);
+      const { equipName, equipStat, equipTier, equipGameId, hasEquipment } = resolveHeroEquipmentInfo(hero, equipMap);
 
-      const headerLeftContainer = document.createElement('div');
-      headerLeftContainer.style.display = 'flex';
-      headerLeftContainer.style.alignItems = 'center';
-      headerLeftContainer.style.gap = '10px';
-      
-      // Create monster portrait if we have the ID
-      if (monsterGameId) {
-        try {
-          const monsterPortrait = api.ui.components.createMonsterPortrait({
-            monsterId: monsterGameId,
-            level: monsterLevel,
-            tier: 1
-          });
-          headerLeftContainer.appendChild(monsterPortrait);
-        } catch (e) {
-          console.error('Error creating monster portrait:', e);
-        }
-      }
-      
-      const nameElement = document.createElement('h3');
-      nameElement.textContent = toTitleCase(monsterName);
-      nameElement.className = 'pixel-font-16 text-whiteRegular';
-      
-      headerLeftContainer.appendChild(nameElement);
-      
-      // Per-creature awakened toggle
       const initialAwakenEnabled = hero.monster.awaken === true ||
         hero.monster.awakened === true ||
         hero.monster.isAwakened === true;
@@ -484,13 +1493,132 @@ function showHeroEditorModal() {
         Number(hero.monster.ap || 1) === 20 &&
         Number(hero.monster.armor || 1) === 20 &&
         Number(hero.monster.magicResist || 1) === 20;
+      const initialPortraitMonster = {
+        ...hero.monster,
+        awaken: initialAwakenEnabled || initialMaxGenesEnabled,
+        awakened: initialAwakenEnabled || initialMaxGenesEnabled,
+        isAwakened: initialAwakenEnabled || initialMaxGenesEnabled
+      };
+      
+      const detailPanel = document.createElement('div');
+      detailPanel.className = isFloating ? 'flex w-full flex-col gap-1' : 'flex w-full flex-col gap-2';
+      detailPanel.style.display = isFloating ? 'flex' : 'none';
+      if (isFloating) {
+        floatingDetailPanel = detailPanel;
+      }
+
+      if (!isFloating) {
+      const listItem = document.createElement('button');
+      listItem.type = 'button';
+      listItem.className = getListItemClass(false);
+      listItem.style.width = '100%';
+      listItem.style.boxSizing = 'border-box';
+
+      let listPortrait = null;
+      if (monsterGameId) {
+        try {
+          listPortrait = createHeroMonsterPortraitSlot({
+            monsterId: monsterGameId,
+            level: monsterLevel,
+            monster: initialPortraitMonster,
+            size: 32
+          });
+          listItem.appendChild(listPortrait);
+        } catch (e) {
+          console.error('Error creating list portrait:', e);
+        }
+      }
+
+      const listEquipPortraitWrap = document.createElement('div');
+      listEquipPortraitWrap.className = 'frame-pressed-1 shrink-0 flex items-center justify-center overflow-hidden';
+      listEquipPortraitWrap.style.cssText = 'width: 32px; height: 32px;';
+      updateListEquipPortrait(listEquipPortraitWrap, equipMap, equipName, equipStat, equipTier);
+      listItem.appendChild(listEquipPortraitWrap);
+
+      listItem.addEventListener('click', () => selectHero(index));
+
+      listItems.push({ index, element: listItem, listPortrait, listEquipPortraitWrap });
+      if (selectedHeroIndex === null) {
+        selectedHeroIndex = index;
+      }
+      listScrollContainer.addContent(listItem);
+      }
+
+      detailPanels.push({ index, element: detailPanel, headerPortrait: null });
+      if (isFloating) {
+        selectedHeroIndex = index;
+      }
+
+      const headerContainer = document.createElement('div');
+      headerContainer.className = isFloating
+        ? 'flex w-full items-center justify-between gap-1'
+        : 'flex w-full items-center justify-between gap-2';
+
+      const headerLeftContainer = document.createElement('div');
+      headerLeftContainer.className = 'flex min-w-0 flex-1 items-center gap-2';
+      
+      // Create monster portrait if we have the ID
+      let headerPortrait = null;
+      if (monsterGameId) {
+        try {
+          headerPortrait = createHeroMonsterPortraitSlot({
+            monsterId: monsterGameId,
+            level: monsterLevel,
+            monster: initialPortraitMonster,
+            size: isFloating ? parseInt(HERO_EDITOR_FLOATING_UI.portraitSize, 10) || 24 : 36
+          });
+          headerLeftContainer.appendChild(headerPortrait);
+        } catch (e) {
+          console.error('Error creating monster portrait:', e);
+        }
+      }
+
+      const detailPanelEntry = detailPanels.find(panel => panel.index === index);
+      if (detailPanelEntry) {
+        detailPanelEntry.headerPortrait = headerPortrait;
+      }
+      
+      const nameElement = document.createElement('h3');
+      nameElement.textContent = toTitleCase(monsterName);
+      nameElement.className = isFloating
+        ? 'text-whiteExp min-w-0 truncate'
+        : 'text-whiteExp pixel-font-16 min-w-0 truncate';
+      if (isFloating) {
+        applyHeroEditorFloatingFont(nameElement, HERO_EDITOR_FLOATING_UI.titleFontSize);
+      }
+      
+      headerLeftContainer.appendChild(nameElement);
+      
+      // Per-creature awakened toggle
       let awakenEnabled = initialAwakenEnabled;
       let activeTopMode = initialMaxGenesEnabled ? 'maxGenes' : (initialAwakenEnabled ? 'awaken' : 'normal');
       if (initialMaxGenesEnabled) awakenEnabled = true;
       const statInputs = {};
+
+      const getPortraitMonster = () => ({
+        ...hero.monster,
+        hp: Number(statInputs.hp?.value ?? hero.monster.hp ?? 1),
+        ad: Number(statInputs.ad?.value ?? hero.monster.ad ?? 1),
+        ap: Number(statInputs.ap?.value ?? hero.monster.ap ?? 1),
+        armor: Number(statInputs.armor?.value ?? hero.monster.armor ?? 1),
+        magicResist: Number(statInputs.magicResist?.value ?? hero.monster.magicResist ?? 1),
+        level: Number(statInputs.level?.value ?? monsterLevel),
+        awaken: awakenEnabled,
+        awakened: awakenEnabled,
+        isAwakened: awakenEnabled
+      });
+
+      const refreshPortraitAppearance = () => {
+        refreshHeroMonsterPortraits(
+          index,
+          monsterGameId,
+          Number(statInputs.level?.value || monsterLevel),
+          getPortraitMonster()
+        );
+      };
       
       const awakenButton = document.createElement('button');
-      const TOP_BUTTON_SIZE = '23px';
+      const TOP_BUTTON_SIZE = isFloating ? HERO_EDITOR_FLOATING_UI.topButtonSize : '23px';
       awakenButton.className = 'widget-top widget-top-text pixel-font-16';
       awakenButton.type = 'button';
       awakenButton.style.margin = '0';
@@ -554,6 +1682,8 @@ function showHeroEditorModal() {
         activeTopMode = willActivate ? 'awaken' : 'normal';
         awakenEnabled = willActivate;
         refreshTopButtons();
+        refreshPortraitAppearance();
+        scheduleLiveApply(true);
       });
 
       const maxGenesButton = document.createElement('button');
@@ -593,18 +1723,18 @@ function showHeroEditorModal() {
           });
         }
         syncTopModeFromStats();
+        refreshPortraitAppearance();
+        scheduleLiveApply(true);
       });
-      
+
       refreshTopButtons();
       headerContainer.appendChild(headerLeftContainer);
       const headerRightContainer = document.createElement('div');
-      headerRightContainer.style.display = 'flex';
-      headerRightContainer.style.alignItems = 'center';
-      headerRightContainer.style.gap = '6px';
+      headerRightContainer.className = 'flex shrink-0 items-center gap-1.5';
       headerRightContainer.appendChild(maxGenesButton);
       headerRightContainer.appendChild(awakenButton);
       headerContainer.appendChild(headerRightContainer);
-      heroCard.appendChild(headerContainer);
+      detailPanel.appendChild(headerContainer);
       
       controls.push({
         index,
@@ -624,12 +1754,15 @@ function showHeroEditorModal() {
         initial: initialAwakenEnabled
       });
       
-      // Stats grid
+      const statsPanel = document.createElement('div');
+      statsPanel.className = isFloating
+        ? 'frame-pressed-1 surface-darker w-full p-1'
+        : 'frame-pressed-1 surface-darker w-full p-2';
+
       const statsContainer = document.createElement('div');
-      statsContainer.style.display = 'grid';
-      statsContainer.style.gridTemplateColumns = 'repeat(3, 1fr)';
-      statsContainer.style.gap = '8px';
-      statsContainer.style.marginBottom = '10px';
+      statsContainer.className = isFloating
+        ? 'grid w-full grid-cols-3 gap-1'
+        : 'grid w-full grid-cols-3 gap-2';
       
       // Stats to display
       const stats = [
@@ -644,29 +1777,30 @@ function showHeroEditorModal() {
       // Create stat inputs
       stats.forEach(stat => {
         const statContainer = document.createElement('div');
-        statContainer.style.display = 'flex';
-        statContainer.style.flexDirection = 'column';
-        statContainer.style.gap = '2px';
-        
-        // Label with icon
+        statContainer.className = 'flex flex-col items-center gap-0.5';
+
         const labelContainer = document.createElement('div');
-        labelContainer.style.display = 'flex';
-        labelContainer.style.alignItems = 'center';
-        labelContainer.style.gap = '4px';
+        labelContainer.className = 'flex items-center justify-center gap-1';
         
         // Only add icon for stats that have one
         if (iconMap[stat.key]) {
           const iconElement = document.createElement('img');
           iconElement.src = iconMap[stat.key];
           iconElement.alt = stat.label;
-          iconElement.width = iconElement.height = 16;
+          const iconSize = isFloating ? HERO_EDITOR_FLOATING_UI.statIconSize : 16;
+          iconElement.width = iconElement.height = iconSize;
           iconElement.className = 'pixelated';
           labelContainer.appendChild(iconElement);
         }
         
         const labelElement = document.createElement('span');
         labelElement.textContent = stat.label;
-        labelElement.className = 'pixel-font-12 text-whiteRegular';
+        labelElement.className = isFloating
+          ? 'text-whiteRegular'
+          : 'pixel-font-12 text-whiteRegular';
+        if (isFloating) {
+          applyHeroEditorFloatingFont(labelElement);
+        }
         
         labelContainer.appendChild(labelElement);
         statContainer.appendChild(labelContainer);
@@ -685,8 +1819,14 @@ function showHeroEditorModal() {
           inputElement.value = hero.monster[stat.key] || 1;
         }
         
-        inputElement.className = 'frame-pressed-1 surface-darker pixel-font-14 text-whiteRegular px-2 py-1';
-        inputElement.style.width = '100%';
+        inputElement.className = isFloating
+          ? 'frame-pressed-1 surface-dark box-border w-full px-1 py-0 text-center text-whiteRegular'
+          : 'frame-pressed-1 surface-dark box-border w-full px-2 py-1 text-center pixel-font-14 text-whiteRegular';
+        inputElement.style.backgroundColor = 'var(--surface-dark)';
+        inputElement.style.color = 'var(--text-whiteRegular)';
+        if (isFloating) {
+          applyHeroEditorFloatingFont(inputElement);
+        }
         
         statContainer.appendChild(inputElement);
         
@@ -700,53 +1840,35 @@ function showHeroEditorModal() {
           initial: inputElement.value 
         });
         statInputs[stat.key] = inputElement;
-        inputElement.addEventListener('input', syncTopModeFromStats);
+        inputElement.addEventListener('input', () => {
+          refreshPortraitAppearance();
+          syncTopModeFromStats();
+          scheduleLiveApply();
+        });
+        inputElement.addEventListener('change', () => {
+          refreshPortraitAppearance();
+          scheduleLiveApply(true);
+        });
         
         statsContainer.appendChild(statContainer);
       });
       
-      heroCard.appendChild(statsContainer);
+      statsPanel.appendChild(statsContainer);
+      detailPanel.appendChild(statsPanel);
       
-      // Equipment section
       const equipContainer = document.createElement('div');
-      equipContainer.className = 'frame-pressed-1 surface-darker p-2';
+      equipContainer.className = isFloating
+        ? 'frame-pressed-1 surface-darker box-border w-full p-1'
+        : 'frame-pressed-1 surface-darker box-border w-full p-2';
       
-      // Default equipment values for new equipment
-      let equipName = '';
-      let equipStat = 'ad';
-      let equipTier = 1;
-      let equipGameId = null;
-      
-      // Check if the hero has equipment
-      const hasEquipment = hero.equipment && hero.equipment.name;
-      
-      // If hero has equipment, use those values
-      if (hasEquipment) {
-        equipName = hero.equipment.name || 'Unknown Item';
-        equipStat = hero.equipment.stat || 'ad';
-        equipTier = hero.equipment.tier || 1;
-        
-        // Try to get game ID from window.equipmentNamesToGameIds first
-        if (window.equipmentNamesToGameIds) {
-          equipGameId = window.equipmentNamesToGameIds.get(equipName.toLowerCase());
-        }
-        
-        // If not found, try with our equipMap
-        if (!equipGameId && equipMap) {
-          equipGameId = equipMap.get(equipName.toLowerCase());
-        }
-        
-        // Get the original cased name if possible
-        if (equipGameId) {
-          const originalName = getEquipmentNameFromId(equipGameId);
-          if (originalName) equipName = originalName;
-        }
-      } else {
+      if (!hasEquipment) {
         // If no equipment, add a message at the top
         const noEquipMsg = document.createElement('div');
         noEquipMsg.textContent = 'No equipment - select one below:';
-        noEquipMsg.className = 'pixel-font-12 text-whiteRegular';
-        noEquipMsg.style.marginBottom = '8px';
+        noEquipMsg.className = isFloating ? 'text-whiteRegular mb-1' : 'pixel-font-12 text-whiteRegular mb-2';
+        if (isFloating) {
+          applyHeroEditorFloatingFont(noEquipMsg);
+        }
         equipContainer.appendChild(noEquipMsg);
         
         // Initialize hero.equipment object if it doesn't exist
@@ -755,22 +1877,17 @@ function showHeroEditorModal() {
         }
       }
       
-      // Compact equipment layout with row flex
       const equipContent = document.createElement('div');
-      equipContent.style.display = 'flex';
-      equipContent.style.flexDirection = 'row';
-      equipContent.style.gap = '10px';
-      
-      // Item portrait container
+      equipContent.className = isFloating
+        ? 'flex w-full flex-row gap-1.5'
+        : 'flex w-full flex-row gap-2.5';
+
       const portraitContainer = document.createElement('div');
-      portraitContainer.style.flexShrink = '0';
-      
-      // Equipment controls
+      portraitContainer.className = 'shrink-0';
+
       const equipControls = document.createElement('div');
-      equipControls.style.display = 'flex';
-      equipControls.style.flexDirection = 'column';
-      equipControls.style.flex = '1';
-      equipControls.style.gap = '6px';
+      equipControls.className = 'flex min-w-0 flex-1 flex-col gap-1.5';
+      equipControls.style.flex = '1 1 0%';
       
       // Create item portrait if we have the ID
       let itemPortrait = null;
@@ -785,7 +1902,6 @@ function showHeroEditorModal() {
             });
             
             portraitContainer.appendChild(itemPortrait);
-            equipContent.appendChild(portraitContainer);
           }
         } catch (e) {
           console.error('Error creating item portrait:', e);
@@ -794,11 +1910,13 @@ function showHeroEditorModal() {
       
       // Equipment name dropdown
       const nameSelect = document.createElement('select');
-      nameSelect.className = 'frame-pressed-1 surface-dark pixel-font-14 text-whiteRegular px-2 py-1';
-      nameSelect.style.backgroundColor = 'var(--surface-dark)';
-      nameSelect.style.border = 'none';
-      nameSelect.style.width = '100%';
-      nameSelect.style.color = 'var(--text-whiteRegular)';
+      nameSelect.className = isFloating
+        ? 'frame-pressed-1 surface-dark box-border w-full px-1 py-0 text-whiteRegular'
+        : 'frame-pressed-1 surface-dark box-border w-full px-2 py-1 pixel-font-14 text-whiteRegular';
+      styleHeroEditorSelect(nameSelect);
+      if (isFloating) {
+        applyHeroEditorFloatingFont(nameSelect);
+      }
       
       // Get all equipment data with proper casing
       const equipmentOptions = [];
@@ -842,18 +1960,18 @@ function showHeroEditorModal() {
         portraitContainer: portraitContainer
       });
       
-      // Stat and Tier controls in a row
       const statTierContainer = document.createElement('div');
-      statTierContainer.style.display = 'flex';
-      statTierContainer.style.gap = '6px';
+      statTierContainer.className = 'flex w-full gap-1.5';
       
-      // Stat selector
       const statSelect = document.createElement('select');
-      statSelect.className = 'frame-pressed-1 surface-dark pixel-font-14 text-whiteRegular px-2 py-1';
-      statSelect.style.backgroundColor = 'var(--surface-dark)';
-      statSelect.style.border = 'none';
-      statSelect.style.flex = '1';
-      statSelect.style.color = 'var(--text-whiteRegular)';
+      statSelect.className = isFloating
+        ? 'frame-pressed-1 surface-dark box-border min-w-0 flex-1 px-1 py-0 text-whiteRegular'
+        : 'frame-pressed-1 surface-dark box-border min-w-0 flex-1 px-2 py-1 pixel-font-14 text-whiteRegular';
+      styleHeroEditorSelect(statSelect);
+      if (isFloating) {
+        applyHeroEditorFloatingFont(statSelect);
+      }
+      statSelect.style.flex = '1 1 0%';
       
       ['ad', 'ap', 'hp'].forEach(stat => {
         const option = document.createElement('option');
@@ -878,27 +1996,47 @@ function showHeroEditorModal() {
       tierInput.type = 'number';
       tierInput.min = 1;
       tierInput.max = 5;
-      tierInput.value = equipTier;
-      tierInput.className = 'frame-pressed-1 surface-dark pixel-font-14 text-whiteRegular px-2 py-1';
-      tierInput.style.width = '40px';
-      tierInput.style.textAlign = 'center';
+      tierInput.value = clampEquipTier(equipTier);
+      tierInput.className = isFloating
+        ? 'frame-pressed-1 surface-dark box-border px-1 py-0 text-center text-whiteRegular'
+        : 'frame-pressed-1 surface-dark box-border px-2 py-1 text-center pixel-font-14 text-whiteRegular';
+      tierInput.style.width = isFloating ? '32px' : '40px';
+      tierInput.style.backgroundColor = 'var(--surface-dark)';
+      tierInput.style.color = 'var(--text-whiteRegular)';
+      if (isFloating) {
+        applyHeroEditorFloatingFont(tierInput);
+      }
       
       // Label for tier
       const tierLabel = document.createElement('span');
       tierLabel.textContent = 'Tier:';
-      tierLabel.className = 'pixel-font-12 text-whiteRegular';
-      tierLabel.style.display = 'flex';
-      tierLabel.style.alignItems = 'center';
-      
+      tierLabel.className = isFloating
+        ? 'text-whiteRegular flex items-center'
+        : 'pixel-font-12 text-whiteRegular flex items-center';
+      if (isFloating) {
+        applyHeroEditorFloatingFont(tierLabel);
+      }
+
       const tierWrapper = document.createElement('div');
-      tierWrapper.style.display = 'flex';
-      tierWrapper.style.alignItems = 'center';
-      tierWrapper.style.gap = '4px';
+      tierWrapper.className = 'flex items-center gap-1';
       
       tierWrapper.appendChild(tierLabel);
       tierWrapper.appendChild(tierInput);
+
+      const clampTierInputValue = () => {
+        const clamped = clampEquipTier(tierInput.value);
+        if (String(clamped) !== tierInput.value) {
+          tierInput.value = String(clamped);
+        }
+        return clamped;
+      };
+
+      tierInput.addEventListener('input', () => {
+        clampTierInputValue();
+        scheduleLiveApply();
+      });
       
-      controls.push({ 
+      controls.push({
         index,
         hero, 
         type: 'equipTier', 
@@ -930,10 +2068,13 @@ function showHeroEditorModal() {
             if (nameControl.portraitContainer.parentElement) {
               nameControl.portraitContainer.parentElement.removeChild(nameControl.portraitContainer);
             }
+
+            refreshListEquipPortrait(index, '', statControl.select.value, tierControl.input.value);
             
             // Disable stat and tier controls when no equipment is selected
             statControl.select.disabled = true;
             tierControl.input.disabled = true;
+            scheduleLiveApply(true);
             return;
           }
           
@@ -950,7 +2091,7 @@ function showHeroEditorModal() {
               const newPortrait = api.ui.components.createItemPortrait({
                 itemId: equipData.metadata.spriteId,
                 stat: statControl.select.value,
-                tier: parseInt(tierControl.input.value)
+                tier: clampTierInputValue()
               });
               
               // Clear and append new portrait
@@ -967,9 +2108,17 @@ function showHeroEditorModal() {
               if (!nameControl.portraitContainer.parentElement) {
                 equipContent.insertBefore(nameControl.portraitContainer, equipContent.firstChild);
               }
+
+              refreshListEquipPortrait(
+                index,
+                newEquipName,
+                statControl.select.value,
+                clampTierInputValue()
+              );
             }
           }
         }
+        scheduleLiveApply(true);
       });
       
       statSelect.addEventListener('change', () => {
@@ -994,7 +2143,7 @@ function showHeroEditorModal() {
               const newPortrait = api.ui.components.createItemPortrait({
                 itemId: equipData.metadata.spriteId,
                 stat: statSelect.value,
-                tier: parseInt(tierControl.input.value)
+                tier: clampTierInputValue()
               });
               
               // Clear and append new portrait
@@ -1011,12 +2160,21 @@ function showHeroEditorModal() {
               if (!nameControl.portraitContainer.parentElement) {
                 equipContent.insertBefore(nameControl.portraitContainer, equipContent.firstChild);
               }
+
+              refreshListEquipPortrait(
+                index,
+                equipName,
+                statSelect.value,
+                clampTierInputValue()
+              );
             }
           }
         }
+        scheduleLiveApply(true);
       });
       
       tierInput.addEventListener('change', () => {
+        clampTierInputValue();
         // Find the related controls
         const nameControl = controls.find(c => c.hero === hero && c.type === 'equipName');
         const statControl = controls.find(c => c.hero === hero && c.type === 'equipStat');
@@ -1038,7 +2196,7 @@ function showHeroEditorModal() {
               const newPortrait = api.ui.components.createItemPortrait({
                 itemId: equipData.metadata.spriteId,
                 stat: statControl.select.value,
-                tier: parseInt(tierInput.value)
+                tier: clampTierInputValue()
               });
               
               // Clear and append new portrait
@@ -1055,9 +2213,17 @@ function showHeroEditorModal() {
               if (!nameControl.portraitContainer.parentElement) {
                 equipContent.insertBefore(nameControl.portraitContainer, equipContent.firstChild);
               }
+
+              refreshListEquipPortrait(
+                index,
+                equipName,
+                statControl.select.value,
+                clampTierInputValue()
+              );
             }
           }
         }
+        scheduleLiveApply(true);
       });
       
       // Trigger a change event if there is a selected equipment to initialize the portrait
@@ -1078,277 +2244,79 @@ function showHeroEditorModal() {
       equipControls.appendChild(nameSelect);
       equipControls.appendChild(statTierContainer);
       
+      equipContent.appendChild(portraitContainer);
       equipContent.appendChild(equipControls);
       equipContainer.appendChild(equipContent);
-      heroCard.appendChild(equipContainer);
+      detailPanel.appendChild(equipContainer);
       
-      scrollContainer.addContent(heroCard);
+      if (!isFloating) {
+        detailHost.appendChild(detailPanel);
+      }
     });
+
+    if (isFloating) {
+      if (!floatingDetailPanel) {
+        return;
+      }
+
+      const clearTimer = () => {
+        if (liveApplyTimer) {
+          clearTimeout(liveApplyTimer);
+          liveApplyTimer = null;
+        }
+      };
+
+      mountHeroEditorFloatingPanel(
+        floatingDetailPanel,
+        floatingPosition.x,
+        floatingPosition.y,
+        clearTimer
+      );
+      return;
+    }
+
+    if (selectTileIndex != null) {
+      const matchedIndex = editableBoardData.board.findIndex(
+        hero => hero.monster && hero.tile === selectTileIndex
+      );
+      if (matchedIndex >= 0) {
+        selectedHeroIndex = matchedIndex;
+      }
+    }
+
+    if (selectedHeroIndex !== null) {
+      selectHero(selectedHeroIndex);
+    }
+
+    col1.appendChild(col1Header);
+    col1.appendChild(listScrollContainer.element);
+    col2.appendChild(col2Header);
+    col2.appendChild(detailHost);
+    columnsContainer.appendChild(col1);
+    columnsContainer.appendChild(col2);
+    contentContainer.appendChild(columnsContainer);
     
-    contentContainer.appendChild(scrollContainer.element);
-    
-    // Create the modal
     api.ui.components.createModal({
       title: 'Edit Heroes',
-      width: 320, // Reduced width to avoid horizontal scroll
+      width: 420,
       content: contentContainer,
       buttons: [
         {
-          text: 'Reset',
-          primary: false,
-          onClick: () => {
-            // Reset all inputs to initial values
-            controls.forEach(control => {
-              if (control.input) control.input.value = control.initial;
-              if (control.select) control.select.value = control.initial;
-              if (control.type === 'awaken' && control.setValue) {
-                control.setValue(control.initial);
-              }
-              
-              // Reset portraits to match initial values
-              if (control.type === 'equipName' && control.portraitContainer) {
-                const statControl = controls.find(c => c.hero === control.hero && c.type === 'equipStat');
-                const tierControl = controls.find(c => c.hero === control.hero && c.type === 'equipTier');
-                
-                if (statControl && tierControl) {
-                  // Get equipment game ID
-                  const equipName = control.initial;
-                  const equipId = equipMap.get(equipName.toLowerCase());
-                  
-                  if (equipId) {
-                    const equipData = globalThis.state.utils.getEquipment(equipId);
-                    if (equipData && equipData.metadata) {
-                      // Create new portrait
-                      const newPortrait = api.ui.components.createItemPortrait({
-                        itemId: equipData.metadata.spriteId,
-                        stat: statControl.initial,
-                        tier: parseInt(tierControl.initial)
-                      });
-                      
-                      // Clear and append new portrait
-                      while (control.portraitContainer.firstChild) {
-                        control.portraitContainer.removeChild(control.portraitContainer.firstChild);
-                      }
-                      
-                      control.portraitContainer.appendChild(newPortrait);
-                      
-                      // Update portrait reference for all related controls
-                      control.portrait = statControl.portrait = tierControl.portrait = newPortrait;
-                    }
-                  }
-                }
-              }
-            });
-          }
-        },
-        {
-          text: 'Apply',
+          text: 'Close',
           primary: true,
           onClick: () => {
-            try {
-              // Make a fresh copy of the original board data
-              const updatedBoardData = JSON.parse(JSON.stringify(originalBoardData));
-              
-              // Update the board pieces with new stats and equipment
-              controls.forEach(control => {
-                // Update monster stats
-                if (control.type === 'stat' && control.input) {
-                  const boardIndex = control.index;
-                  if (updatedBoardData.board[boardIndex] && updatedBoardData.board[boardIndex].monster) {
-                    // For level, convert to integer to ensure it's a number
-                    if (control.stat === 'level') {
-                      updatedBoardData.board[boardIndex].monster[control.stat] = parseInt(control.input.value, 10) || 1;
-                    } else {
-                      updatedBoardData.board[boardIndex].monster[control.stat] = parseInt(control.input.value);
-                    }
-                  }
-                }
-                
-                // Equipment updates need to be grouped by hero
-                else if (control.type === 'equipName') {
-                  const hero = control.hero;
-                  const boardIndex = control.index;
-                  const statControl = controls.find(c => c.hero === hero && c.type === 'equipStat');
-                  const tierControl = controls.find(c => c.hero === hero && c.type === 'equipTier');
-                  
-                  if (statControl && tierControl && updatedBoardData.board[boardIndex]) {
-                    // Get the equipment name and data
-                    const equipName = control.select.value;
-                    
-                    // Check if "No Equipment" is selected
-                    if (!equipName || equipName === '') {
-                      // Remove equipment from the board data
-                      delete updatedBoardData.board[boardIndex].equipment;
-                    } else {
-                      // Only proceed if an equipment is selected
-                      const equipId = equipMap.get(equipName.toLowerCase());
-                      
-                      if (equipId) {
-                        const equipData = globalThis.state.utils.getEquipment(equipId);
-                        if (equipData && equipData.metadata) {
-                          // Create or update equipment in the board data
-                          // Make sure to use lowercase for equipment name to avoid errors
-                          updatedBoardData.board[boardIndex].equipment = {
-                            name: equipData.metadata.name.toLowerCase(),
-                            stat: statControl.select.value,
-                            tier: parseInt(tierControl.input.value)
-                          };
-                        }
-                      }
-                    }
-                  }
-                }
-              });
-              
-              // Make sure all monster names are lowercase to avoid errors
-              updatedBoardData.board.forEach((piece, pieceIndex) => {
-                if (piece.monster && piece.monster.name) {
-                  piece.monster.name = piece.monster.name.toLowerCase();
-                }
-                
-                if (piece.monster) {
-                  const awakenControl = controls.find(c => c.type === 'awaken' && c.index === pieceIndex);
-                  const awakenEnabled = awakenControl && awakenControl.getValue ? awakenControl.getValue() : false;
-                  const previousTier = piece.tier;
-                  const monsterName = piece.monster.name || 'unknown';
-                  
-                  // Set all known awaken flags for compatibility across serializers/readers
-                  piece.monster.awaken = awakenEnabled;
-                  piece.monster.awakened = awakenEnabled;
-                  piece.monster.isAwakened = awakenEnabled;
-                  
-                  // Awakened creatures should be tier 5, otherwise default to tier 4
-                  piece.tier = awakenEnabled ? 5 : 4;
-                  
-                  if (awakenEnabled) {
-                    console.log(
-                      `[Hero Editor] Converting creature to awakened: tile=${piece.tile}, name=${monsterName}, previousTier=${previousTier ?? 'null'}, newTier=${piece.tier}`
-                    );
-                  } else {
-                    console.log(
-                      `[Hero Editor] Converting creature to normal: tile=${piece.tile}, name=${monsterName}, previousTier=${previousTier ?? 'null'}, newTier=${piece.tier}`
-                    );
-                  }
-                }
-                
-                // Convert level to experience if it's different from original
-                if (piece.monster && piece.monster.level) {
-                  console.log(`Monster level before configure: ${piece.monster.level}`);
-                  // Calculate the experience needed for this level
-                  const expNeeded = globalThis.state.utils.expAtLevel(piece.monster.level);
-                  piece.monster.exp = expNeeded;
-                                      console.log(`Calculated experience for level ${piece.monster.level}: ${expNeeded}`);
-                }
-              });
-              
-              // Add detailed debug logging
-              console.log('DETAILED BOARD DATA:');
-              updatedBoardData.board.forEach((piece, index) => {
-                                  console.log(`Piece ${index}:`, JSON.stringify(piece));
-              });
-              
-              console.log('[Hero Editor] Awaken payload summary before configureBoard:');
-              updatedBoardData.board.forEach((piece, index) => {
-                const awakenState = piece.monster ? (
-                  piece.monster.awaken === true ||
-                  piece.monster.awakened === true ||
-                  piece.monster.isAwakened === true
-                ) : false;
-                console.log(
-                  `[Hero Editor] payload piece ${index} tile=${piece.tile} name=${piece.monster?.name || 'unknown'} tier=${piece.tier ?? 'null'} level=${piece.monster?.level ?? 'null'} awaken=${awakenState}`
-                );
-              });
-              
-              console.log('Updated board data:', updatedBoardData);
-              
-              // Apply the updated board data
-              console.log('About to call configureBoard with data:', updatedBoardData);
-
-              // Create a custom board configuration directly (test solution)
-              // Get current floor from board data or board context as fallback
-              let currentFloor = updatedBoardData.floor;
-              if (currentFloor === undefined || currentFloor === null) {
-                // Fallback to getting floor from current board context
-                try {
-                  const currentBoardContext = getBoardSnapshot();
-                  currentFloor = currentBoardContext.floor ?? 0;
-                } catch (e) {
-                  console.warn('Could not get floor from board context, defaulting to 0:', e);
-                  currentFloor = 0;
-                }
-              }
-              const testData = {
-                region: updatedBoardData.region,
-                map: updatedBoardData.map,
-                floor: currentFloor, // Preserve the current floor
-                board: updatedBoardData.board.map(piece => {
-                  // Ensure level is properly set and force it to be a number
-                  if (piece.monster && piece.monster.level) {
-                    piece.monster.level = Number(piece.monster.level);
-                  }
-                  return piece;
-                })
-              };
-              
-              console.log('[Hero Editor] Final testData board sent to configureBoard:');
-              testData.board.forEach((piece, index) => {
-                const awakenState = piece.monster ? (
-                  piece.monster.awaken === true ||
-                  piece.monster.awakened === true ||
-                  piece.monster.isAwakened === true
-                ) : false;
-                console.log(
-                  `[Hero Editor] testData piece ${index} tile=${piece.tile} name=${piece.monster?.name || 'unknown'} tier=${piece.tier ?? 'null'} level=${piece.monster?.level ?? 'null'} awaken=${awakenState}`
-                );
-              });
-
-              console.log('Modified board data for testing:', testData);
-              const success = configureBoard(testData);
-              
-              try {
-                const liveBoard = getBoardSnapshot().boardConfig || [];
-                console.log('[Hero Editor] Live boardConfig after configureBoard:');
-                liveBoard.forEach((piece, index) => {
-                  if (piece.type !== 'player' && piece.type !== 'custom') return;
-                  console.log(
-                    `[Hero Editor] live piece ${index} type=${piece.type} tile=${piece.tileIndex} gameId=${piece.gameId ?? 'null'} databaseId=${piece.databaseId ?? 'null'} tier=${piece.tier ?? 'null'} level=${piece.level ?? 'null'} starTier=${piece.starTier ?? 'null'} awaken=${piece.awaken ?? piece.awakened ?? piece.isAwakened ?? 'null'}`
-                  );
-                });
-              } catch (liveBoardError) {
-                console.warn('[Hero Editor] Failed reading live boardConfig after configureBoard:', liveBoardError);
-              }
-              
-              if (success) {
-                // Show success message
-                api.ui.components.createModal({
-                  title: 'Success',
-                  content: 'Heroes updated successfully!',
-                  buttons: [{ text: 'OK', primary: true }]
-                });
-              } else {
-                throw new Error('Failed to apply changes');
-              }
-            } catch (error) {
-              console.error('Error applying hero changes:', error);
-              
-              // Show error message
-              api.ui.components.createModal({
-                title: 'Error',
-                content: `Failed to update heroes: ${error.message || error}`,
-                buttons: [{ text: 'OK', primary: true }]
-              });
+            if (liveApplyTimer) {
+              clearTimeout(liveApplyTimer);
+              liveApplyTimer = null;
             }
           },
-          closeOnClick: true
-        },
-        {
-          text: 'Cancel',
-          primary: false,
           closeOnClick: true
         }
       ]
     });
-    
+
+    expandHeroEditorModal(420, 420);
+
   } catch (error) {
     console.error('Error showing hero editor:', error);
     
@@ -1369,7 +2337,7 @@ function hideButton() {
       console.log('[Hero Editor] Button hidden');
     } else {
       // Fallback: try to find by ID
-      const button = document.getElementById('hero-editor-button');
+      const button = document.getElementById(HERO_EDITOR_BUTTON_ID);
       if (button) {
         button.style.display = 'none';
         console.log('[Hero Editor] Button hidden (fallback)');
@@ -1388,12 +2356,13 @@ function showButton() {
       console.log('[Hero Editor] Button shown');
     } else {
       // Fallback: try to find by ID
-      const button = document.getElementById('hero-editor-button');
+      const button = document.getElementById(HERO_EDITOR_BUTTON_ID);
       if (button) {
         button.style.display = '';
         console.log('[Hero Editor] Button shown (fallback)');
       }
     }
+    updateHeroEditorButtonState();
   } catch (error) {
     console.error('[Hero Editor] Error showing button:', error);
   }
@@ -1418,6 +2387,10 @@ if (typeof window !== 'undefined') {
 // Cleanup function for Hero Editor mod (exposed for mod system)
 context.exports.cleanup = function() {
   console.log('[Hero Editor] Running cleanup...');
+  
+  closeHeroEditorBoardContextMenu();
+  document.removeEventListener('contextmenu', handleHeroEditorBoardContextMenu, true);
+  unsubscribeHeroEditorBoardUpdates();
   
   // Clear equipment map
   if (typeof equipmentMap !== 'undefined') {
