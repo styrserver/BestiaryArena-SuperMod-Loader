@@ -341,6 +341,13 @@
       "firebaseBestRunsUploadTooltip": "Upload your best runs to Firebase with password encryption. Other players can fetch and download your runs using your player name and password. Runs are encrypted client-side before upload, ensuring privacy. You can also download runs as .txt files with $replay links for easy sharing.",
       "firebaseBestRunsUploadLabel": "Upload best runs to Firebase",
       "firebaseAutoUploadRunsLabel": "Auto-upload when new best run is recorded",
+      "firebaseUploadRegionsLabel": "Regions to upload:",
+      "firebaseUploadRegionsExpandHint": "Click to expand",
+      "firebaseUploadRegionsCollapseHint": "Click to collapse",
+      "firebaseUploadRegionsDesc": "Choose which regions are included in Firebase uploads. All regions are enabled by default.",
+      "firebaseUploadOtherMapsRegion": "Other Maps",
+      "firebaseUploadOtherMapsRegionTooltip": "Runs that could not be matched to a normal game region — for example legacy data, event/raid maps, or maps saved before region info was available.",
+      "firebaseRunsNoRegionsSelected": "No regions selected for upload",
       "firebaseRunsPasswordLabel": "Encryption Password (5-20 characters):",
       "firebaseRunsPasswordPlaceholder": "Enter password (5-20 characters)",
       "firebaseRunsPasswordSetPlaceholder": "Password set (enter new to change)",
@@ -564,6 +571,7 @@
       "tooltipFloor": "Floor: {floor}",
       "tooltipSeed": "Seed: {seed}",
       "estimateExperienceLabel": "Estimate experience gained",
+      "showAdvancedLiveStatsLabel": "Show advanced live stats during analysis",
       "avgEstimatedExpLabel": "Avg Est. XP/Run:",
       "totalEstimatedExpLabel": "Total Est. XP:",
       "levelUpTooltipHeader": "Estimated level gains:",
@@ -720,7 +728,10 @@
     },
     "heroEditor": {
       "buttonText": "Hero Editor",
-      "buttonTooltip": "Edit hero stats and equipment"
+      "buttonTooltip": "Edit hero stats and equipment",
+      "buttonTooltipNoHeroes": "Place a creature on the board to use the Hero Editor",
+      "contextMenuEditHero": "Edit Hero",
+      "contextMenuClose": "Close"
     },
     "huntAnalyzer": {
       "buttonText": "Hunt Analyzer",

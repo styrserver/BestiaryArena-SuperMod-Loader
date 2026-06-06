@@ -341,6 +341,13 @@
       "firebaseBestRunsUploadTooltip": "Faça upload de suas melhores runs no Firebase com criptografia por senha. Outros jogadores podem buscar e baixar suas runs usando seu nome de jogador e senha. As runs são criptografadas no lado do cliente antes do upload, garantindo privacidade. Você também pode baixar runs como arquivos .txt com links $replay para fácil compartilhamento.",
       "firebaseBestRunsUploadLabel": "Fazer upload das melhores runs no Firebase",
       "firebaseAutoUploadRunsLabel": "Fazer upload automaticamente quando uma nova melhor run for registrada",
+      "firebaseUploadRegionsLabel": "Regiões para upload:",
+      "firebaseUploadRegionsExpandHint": "Clique para expandir",
+      "firebaseUploadRegionsCollapseHint": "Clique para recolher",
+      "firebaseUploadRegionsDesc": "Escolha quais regiões são incluídas nos uploads do Firebase. Todas as regiões estão ativadas por padrão.",
+      "firebaseUploadOtherMapsRegion": "Outros Mapas",
+      "firebaseUploadOtherMapsRegionTooltip": "Runs que não puderam ser associadas a uma região normal do jogo — por exemplo dados antigos, mapas de evento/raid ou mapas salvos antes das informações de região existirem.",
+      "firebaseRunsNoRegionsSelected": "Nenhuma região selecionada para upload",
       "firebaseRunsPasswordLabel": "Senha de Criptografia (5-20 caracteres):",
       "firebaseRunsPasswordPlaceholder": "Digite a senha (5-20 caracteres)",
       "firebaseRunsPasswordSetPlaceholder": "Senha definida (digite nova para alterar)",
@@ -564,6 +571,7 @@
       "tooltipFloor": "Andar: {floor}",
       "tooltipSeed": "Seed: {seed}",
       "estimateExperienceLabel": "Estimar experiência obtida",
+      "showAdvancedLiveStatsLabel": "Mostrar estatísticas avançadas ao vivo durante a análise",
       "avgEstimatedExpLabel": "XP est. médio/exec.:",
       "totalEstimatedExpLabel": "XP Est. Total:",
       "levelUpTooltipHeader": "Ganhos de nível estimados:",
@@ -719,7 +727,10 @@
     },
     "heroEditor": {
       "buttonText": "Editor de Heróis",
-      "buttonTooltip": "Editar stats e equipamentos de heróis"
+      "buttonTooltip": "Editar stats e equipamentos de heróis",
+      "buttonTooltipNoHeroes": "Coloque uma criatura no tabuleiro para usar o Editor de Heróis",
+      "contextMenuEditHero": "Editar Herói",
+      "contextMenuClose": "Fechar"
     },
     "huntAnalyzer": {
       "buttonText": "Analisador de Caça",
