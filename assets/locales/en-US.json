@@ -731,7 +731,8 @@
       "buttonTooltip": "Edit hero stats and equipment",
       "buttonTooltipNoHeroes": "Place a creature on the board to use the Hero Editor",
       "contextMenuEditHero": "Edit Hero",
-      "contextMenuClose": "Close"
+      "contextMenuClose": "Close",
+      "settingsAutoSave": "✓ Settings auto-save when changed"
     },
     "huntAnalyzer": {
       "buttonText": "Hunt Analyzer",

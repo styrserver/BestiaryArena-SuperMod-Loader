@@ -730,7 +730,8 @@
       "buttonTooltip": "Editar stats e equipamentos de heróis",
       "buttonTooltipNoHeroes": "Coloque uma criatura no tabuleiro para usar o Editor de Heróis",
       "contextMenuEditHero": "Editar Herói",
-      "contextMenuClose": "Fechar"
+      "contextMenuClose": "Fechar",
+      "settingsAutoSave": "✓ As configurações são salvas automaticamente ao alterar"
     },
     "huntAnalyzer": {
       "buttonText": "Analisador de Caça",
