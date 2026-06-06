@@ -24,6 +24,22 @@ if (!window.__turboState) {
 // Store reference to state for easier access
 const turboState = window.__turboState;
 
+const defaultTurboConfig = { active: false, speedupFactor: 5 };
+const savedTurboConfig = Object.assign({}, defaultTurboConfig, context.config || {});
+
+function saveTurboConfig() {
+  if (!api) return;
+  api.service.updateScriptConfig(context.hash, {
+    active: turboState.active,
+    speedupFactor: turboState.speedupFactor
+  });
+}
+
+if (!turboState._configLoaded) {
+  turboState.speedupFactor = Math.max(savedTurboConfig.speedupFactor || 5, 2);
+  turboState._configLoaded = true;
+}
+
 // Function to enable turbo mode with the new approach
 function enableTurbo() {
   if (turboState.active) return; // Already active
@@ -391,13 +407,7 @@ function toggleTurbo() {
   }
   updateTurboButton();
   
-  // Save state to extension config
-  if (api) {
-    api.service.updateScriptConfig('local_DOM_Turbo_with_ticks.js', {
-      active: turboState.active,
-      speedupFactor: turboState.speedupFactor
-    });
-  }
+  saveTurboConfig();
 }
 
 // Function to update the speedup factor
@@ -415,62 +425,28 @@ function updateSpeedupFactor(newFactor) {
     setTimeScale(newFactor);
   }
   
-  // Save to config
-  if (api) {
-    api.service.updateScriptConfig('local_DOM_Turbo_with_ticks.js', {
-      active: turboState.active,
-      speedupFactor: turboState.speedupFactor
-    });
-  }
+  saveTurboConfig();
 }
 
 // Create the Turbo button using the API
 if (api) {
-      console.log('BestiaryModAPI available in Turbo Mod');
-  
-  // Check if config has saved state
-  api.service.updateScriptConfig('local_DOM_Turbo_with_ticks.js', {})
-    .then(() => {
-      return api.service.getActiveScripts();
-    })
-    .then(scripts => {
-      const turboConfig = scripts.find(s => s.hash === 'local_DOM_Turbo_with_ticks.js')?.config || {};
-      console.log('Loaded Turbo config:', turboConfig);
-      
-      // Update speed from saved config
-      if (turboConfig.speedupFactor) {
-        turboState.speedupFactor = Math.max(turboConfig.speedupFactor || 5, 2);
-      }
-      
-      // If it was active before, reactivate it
-      if (turboConfig.active) {
-        console.log('Turbo was previously active, re-enabling...');
-        enableTurbo();
-      }
-      
-      // Create button with correct initial text
-      window.turboButton = api.ui.addButton({
-        id: 'turbo-mod-button',
-        text: turboState.active ? t('mods.turbo.buttonDisable') : t('mods.turbo.buttonEnable'),
-        tooltip: t('mods.turbo.buttonTooltip'),
-        primary: turboState.active,
-        onClick: toggleTurbo
-      });
-      
-      console.log('Turbo button added');
-    })
-    .catch(err => {
-      console.error('Error setting up Turbo mod:', err);
-      
-      // Fallback - just create the button
-      window.turboButton = api.ui.addButton({
-        id: 'turbo-mod-button',
-        text: turboState.active ? t('mods.turbo.buttonDisable') : t('mods.turbo.buttonEnable'),
-        tooltip: t('mods.turbo.buttonTooltip'),
-        primary: turboState.active,
-        onClick: toggleTurbo
-      });
-    });
+  console.log('BestiaryModAPI available in Turbo Mod');
+  console.log('Loaded Turbo config:', savedTurboConfig);
+
+  if (savedTurboConfig.active && !turboState.active) {
+    console.log('Turbo was previously active, re-enabling...');
+    enableTurbo();
+  }
+
+  window.turboButton = api.ui.addButton({
+    id: 'turbo-mod-button',
+    text: turboState.active ? t('mods.turbo.buttonDisable') : t('mods.turbo.buttonEnable'),
+    tooltip: t('mods.turbo.buttonTooltip'),
+    primary: turboState.active,
+    onClick: toggleTurbo
+  });
+
+  console.log('Turbo button added');
 } else {
   console.error('BestiaryModAPI not available in Turbo Mod');
 }

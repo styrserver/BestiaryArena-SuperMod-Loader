@@ -40,6 +40,7 @@ const MODAL_CLEANUP_DELAY_MS = 100;
 const BOARD_RESTORE_DELAY_MS = 50;
 const TURBO_RESET_DELAY_MS = 25;
 const NOTIFICATION_DISPLAY_MS = 3000;
+const BOARD_ANALYZER_TOAST_CONTAINER_ID = 'board-analyzer-toast-container';
 const COPY_FEEDBACK_DELAY_MS = 2000;
 
 // Chart rendering constants
@@ -1873,13 +1874,17 @@ async function runSingleAnalysis(i, thisAnalysisId, statusCallback, statsCalcula
     const avgRunTime = statsCalculator.runTimesSum / statsCalculator.runTimes.length;
     const remainingRuns = config.runs - i + 1;
     const estimatedTimeRemaining = avgRunTime * remainingRuns;
+    const completionRate = statsCalculator.totalRuns > 0 ? (statsCalculator.completedRuns / statsCalculator.totalRuns * 100).toFixed(2) : '0.00';
     
     statusCallback({
       current: i,
       total: config.runs,
       status: 'running',
       avgRunTime: avgRunTime.toFixed(0),
-      estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining)
+      estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining),
+      completionRate: completionRate,
+      completedRuns: statsCalculator.completedRuns,
+      totalRunsInStats: statsCalculator.totalRuns
     });
   } else if (statusCallback) {
     statusCallback({
@@ -2395,13 +2400,17 @@ function updateStatusCallback(currentRun, totalRuns, statsCalculator, statusCall
     const avgRunTime = statsCalculator.runTimesSum / statsCalculator.runTimes.length;
     const remainingRuns = totalRuns - currentRun + 1;
     const estimatedTimeRemaining = avgRunTime * remainingRuns;
+    const completionRate = statsCalculator.totalRuns > 0 ? (statsCalculator.completedRuns / statsCalculator.totalRuns * 100).toFixed(2) : '0.00';
     
     statusCallback({
       current: currentRun,
       total: totalRuns,
       status: 'running',
       avgRunTime: avgRunTime.toFixed(0),
-      estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining)
+      estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining),
+      completionRate: completionRate,
+      completedRuns: statsCalculator.completedRuns,
+      totalRunsInStats: statsCalculator.totalRuns
     });
   } else {
     statusCallback({
@@ -3171,7 +3180,7 @@ function closeRunningModal() {
 }
 
 // Call this function when starting a new analysis
-function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, estimatedTimeRemaining = null) {
+function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, estimatedTimeRemaining = null, completionRate = null, completedRuns = null, totalRunsInStats = null) {
   // First, force close any existing modals
   forceCloseAllModals();
   
@@ -3187,21 +3196,39 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
   progress.textContent = t('mods.boardAnalyzer.progressText')
     .replace('{current}', currentRun)
     .replace('{total}', totalRuns);
-  progress.style.cssText = 'margin-top: 12px;';
+  progress.style.cssText = 'margin-top: 12px; margin-bottom: 8px;';
   content.appendChild(progress);
   
-  // Add timing information if available
+  // Add timing information if available - Split into separate lines
   if (avgRunTime) {
-    const timingInfo = document.createElement('p');
-    timingInfo.id = 'analysis-timing';
-    timingInfo.style.cssText = 'margin-top: 8px; font-size: 0.9em; color: #aaa;';
-    timingInfo.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${avgRunTime}ms`;
+    const avgRunTimeInfo = document.createElement('p');
+    avgRunTimeInfo.id = 'analysis-avg-run-time';
+    avgRunTimeInfo.style.cssText = 'margin-top: 8px; margin-bottom: 4px; font-size: 0.9em; color: #aaa;';
+    avgRunTimeInfo.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${avgRunTime}ms`;
+    
+    content.appendChild(avgRunTimeInfo);
     
     if (estimatedTimeRemaining) {
-      timingInfo.textContent += ` • ${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${estimatedTimeRemaining}`;
+      const estimatedTimeInfo = document.createElement('p');
+      estimatedTimeInfo.id = 'analysis-estimated-time';
+      estimatedTimeInfo.style.cssText = 'margin-top: 4px; margin-bottom: 8px; font-size: 0.9em; color: #aaa;';
+      estimatedTimeInfo.textContent = `${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${estimatedTimeRemaining}`;
+      
+      content.appendChild(estimatedTimeInfo);
     }
+  }
+  
+  // Add running completion rate if available
+  if (completionRate !== null) {
+    const completionRateInfo = document.createElement('p');
+    completionRateInfo.id = 'analysis-completion-rate';
+    // Only make green if completion rate is 100%
+    const isComplete = parseFloat(completionRate) === 100;
+    const color = isComplete ? '#2ecc71' : '#aaa';
+    completionRateInfo.style.cssText = `margin-top: 8px; margin-bottom: 4px; font-size: 0.9em; color: ${color};`;
+    completionRateInfo.textContent = `${t('mods.boardAnalyzer.completionRateLabel')} ${completionRate}%`;
     
-    content.appendChild(timingInfo);
+    content.appendChild(completionRateInfo);
   }
   
   const modal = api.ui.components.createModal({
@@ -3649,6 +3676,62 @@ function showResultsModal(results) {
     };
     document.addEventListener('keydown', escKeyListener);
     
+    // Helper function to generate setup name and copy to clipboard
+    const generateSetupName = () => {
+      // Get completion rate
+      const successPercent = Math.round(parseFloat(results.summary.completionRate));
+      
+      // Determine the best grade achieved
+      let bestGrade = 'F';
+      if (results.summary.sPlusCount > 0) {
+        // If we have S+ runs, show S+ with the highest rank points
+        bestGrade = `S+${results.summary.maxRankPoints}`;
+      } else {
+        // Find the best grade from all results
+        const gradeOrder = { 'S': 1, 'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6, 'F': 7 };
+        let bestGradeOrder = 7;
+        
+        for (const result of results.results) {
+          const gradeVal = gradeOrder[result.grade] || 7;
+          if (gradeVal < bestGradeOrder) {
+            bestGradeOrder = gradeVal;
+            bestGrade = result.grade;
+          }
+        }
+      }
+      
+      // Get floor
+      const floor = currentFloor !== null && currentFloor !== undefined ? currentFloor : 0;
+      
+      // Get min and median ticks
+      const minTicks = Math.round(results.summary.minTicks);
+      const medTicks = Math.round(results.summary.medianTicks);
+      
+      // Format: "{success percent}% {max rank} f{floor#} {mintick}min {medtick}med"
+      const setupName = `${successPercent}% ${bestGrade} f${floor} ${minTicks}min ${medTicks}med`;
+      
+      // Copy to clipboard and return success status
+      const success = copyToClipboard(setupName);
+      return { success, setupName };
+    };
+    
+    // Add Generate Setup button to content as a regular button to prevent modal closure
+    const genNameButton = document.createElement('button');
+    genNameButton.textContent = t('mods.boardAnalyzer.generateSetupNameButton');
+    genNameButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+    genNameButton.style.cssText = 'width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 10px; margin-bottom: 10px;';
+    
+    modalEventManager.addListener(genNameButton, 'click', () => {
+      const { success, setupName } = generateSetupName();
+      if (success) {
+        showCopyNotification(t('mods.boardAnalyzer.setupNameCopiedNotification').replace('{name}', setupName));
+      } else {
+        showCopyNotification(t('mods.boardAnalyzer.setupNameCopyFailedNotification'), true);
+      }
+    });
+    
+    content.appendChild(genNameButton);
+    
     // Show the results modal with a callback to clean up when closed
     let modalTitle = t('mods.boardAnalyzer.resultTitle');
     if (currentFloor !== null && currentFloor !== undefined) {
@@ -3784,36 +3867,76 @@ function createReplayDataForRun(runResult) {
   }
 }
 
+function getBoardAnalyzerToastContainer() {
+  if (typeof document === 'undefined') return null;
+  let el = document.getElementById(BOARD_ANALYZER_TOAST_CONTAINER_ID);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = BOARD_ANALYZER_TOAST_CONTAINER_ID;
+    el.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function updateBoardAnalyzerToastPositions(container) {
+  if (!container) return;
+  container.querySelectorAll('.board-analyzer-toast-item').forEach((toast, index) => {
+    toast.style.transform = `translateY(-${index * 46}px)`;
+  });
+}
+
+function showBoardAnalyzerToast(message, options = {}) {
+  const safeMsg = message != null ? String(message).replace(/</g, '&lt;') : '';
+  const duration = typeof options.duration === 'number' ? options.duration : NOTIFICATION_DISPLAY_MS;
+  try {
+    const container = getBoardAnalyzerToastContainer();
+    if (!container) return;
+    const existingToasts = container.querySelectorAll('.board-analyzer-toast-item');
+    const stackOffset = existingToasts.length * 46;
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'board-analyzer-toast-item';
+    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
+    const toast = document.createElement('button');
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    toast.style.pointerEvents = 'auto';
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'text-left';
+    messageDiv.style.flex = '1 1 auto';
+    if (options.messageColor) messageDiv.style.color = options.messageColor;
+    messageDiv.textContent = safeMsg;
+    widgetBottom.appendChild(messageDiv);
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    container.appendChild(flexContainer);
+    toast.addEventListener('click', () => {
+      if (flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        updateBoardAnalyzerToastPositions(container);
+      }
+    });
+    setTimeout(() => {
+      if (flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        updateBoardAnalyzerToastPositions(container);
+      }
+    }, duration);
+  } catch (e) {
+    console.warn('[Board Analyzer] showBoardAnalyzerToast:', e);
+  }
+}
+
 // Function to show copy notification
 function showCopyNotification(message, isError = false) {
-  // Create notification element
-  const notification = document.createElement('div');
-  notification.textContent = message;
-  notification.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background-color: ${isError ? '#e74c3c' : '#2ecc71'};
-    color: white;
-    padding: 12px 20px;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 500;
-    z-index: 10000;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    max-width: 300px;
-    word-wrap: break-word;
-  `;
-  
-  // Add to document
-  document.body.appendChild(notification);
-  
-  // Remove after specified time
-  setTimeout(() => {
-    if (notification.parentNode) {
-      notification.parentNode.removeChild(notification);
-    }
-  }, NOTIFICATION_DISPLAY_MS);
+  showBoardAnalyzerToast(message, {
+    duration: NOTIFICATION_DISPLAY_MS,
+    messageColor: isError ? '#e74c3c' : undefined
+  });
 }
 
 // Show the configuration modal and prepare for analysis
@@ -3924,12 +4047,25 @@ async function runAnalysis() {
           .replace('{total}', status.total);
       }
       
-      // Update timing information if available
+      // Update timing information if available - now in separate elements
       if (status.avgRunTime && status.estimatedTimeRemaining) {
-        const timingEl = document.getElementById('analysis-timing');
-        if (timingEl) {
-          timingEl.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${status.avgRunTime}ms • ${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${status.estimatedTimeRemaining}`;
+        const avgRunTimeEl = document.getElementById('analysis-avg-run-time');
+        const estimatedTimeEl = document.getElementById('analysis-estimated-time');
+        const completionRateEl = document.getElementById('analysis-completion-rate');
+        
+        if (avgRunTimeEl && estimatedTimeEl) {
+          avgRunTimeEl.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${status.avgRunTime}ms`;
+          estimatedTimeEl.textContent = `${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${status.estimatedTimeRemaining}`;
+          
+          // Update completion rate if available
+          if (completionRateEl && status.completionRate !== undefined) {
+            const isComplete = parseFloat(status.completionRate) === 100;
+            const color = isComplete ? '#2ecc71' : '#aaa';
+            completionRateEl.style.color = color;
+            completionRateEl.textContent = `${t('mods.boardAnalyzer.completionRateLabel')} ${status.completionRate}%`;
+          }
         } else {
+          // Modal elements don't exist yet, recreate modal with all data
           if (runningModal && runningModal.close) {
             runningModal.close();
           }
@@ -3937,7 +4073,10 @@ async function runAnalysis() {
             status.current, 
             status.total, 
             status.avgRunTime, 
-            status.estimatedTimeRemaining
+            status.estimatedTimeRemaining,
+            status.completionRate,
+            status.completedRuns,
+            status.totalRunsInStats
           );
           activeRunningModal = runningModal;
         }

@@ -153,6 +153,7 @@ function triggerModExecution(mods, source) {
   if (toRun.length === 0) {
     markExecutionTriggered();
     console.log(`[Local Mods] Skipping execution from ${source} — nothing left to run`);
+    setTimeout(() => sendCompletionSignal([]), 500);
     return;
   }
 
@@ -935,6 +936,12 @@ async function executeModsInOrder(mods, forceExecution = false) {
   
   isBatchExecuting = true;
   console.log(`Executing ${mods.length} mods in order...`);
+
+  window.postMessage({
+    from: 'LOCAL_MODS_LOADER',
+    action: 'modBatchExecutionStarted',
+    modCount: mods.length
+  }, '*');
   
   try {
     const results = [];
@@ -943,7 +950,11 @@ async function executeModsInOrder(mods, forceExecution = false) {
         try {
           // Use the consolidated executeLocalMod function
           const result = await executeLocalMod(mod, forceExecution);
-          results.push({ mod: mod.name, success: !!result, result });
+          if (result) {
+            results.push({ mod: mod.name, success: true, result });
+          } else {
+            results.push({ mod: mod.name, success: false, error: 'Failed to load or execute' });
+          }
         } catch (error) {
           console.error(`Failed to execute mod ${mod.name}:`, error);
           results.push({ mod: mod.name, success: false, error: error.message });
@@ -957,12 +968,12 @@ async function executeModsInOrder(mods, forceExecution = false) {
     console.log('[Local Mods] About to send completion signal...');
     setTimeout(() => {
       console.log('[Local Mods] Sending completion signal now...');
-      sendCompletionSignal();
+      sendCompletionSignal(results);
     }, 500); // Increased delay to ensure Welcome mod is ready
     
     return results;
   } finally {
-    isBatchExecuting = false;
+    // isBatchExecuting stays true until sendCompletionSignal runs
   }
 }
 
@@ -974,28 +985,37 @@ function generateMessageId() {
 
 // Simple completion signal - send once when all mods are done
 let completionSignalSent = false;
+let lastCompletionErrors = [];
 
-function sendCompletionSignal() {
+function sendCompletionSignal(results = []) {
   console.log('[Local Mods] sendCompletionSignal called, completionSignalSent:', completionSignalSent);
   if (completionSignalSent) {
     console.log('[Local Mods] Completion signal already sent, skipping');
     return; // Only send once
   }
   
-  console.log('[Local Mods] All mods completed - sending signal');
+  const errors = results
+    .filter(r => !r.success)
+    .map(r => ({ mod: r.mod, error: r.error || 'Failed to load or execute' }));
+
+  console.log('[Local Mods] All mods completed - sending signal', errors.length ? `with ${errors.length} error(s)` : 'successfully');
   completionSignalSent = true;
+  lastCompletionErrors = errors;
   
   window.postMessage({
     from: 'LOCAL_MODS_LOADER',
-    action: 'allModsLoaded'
+    action: 'allModsLoaded',
+    errors
   }, '*');
   
+  isBatchExecuting = false;
   console.log('[Local Mods] Completion signal sent successfully');
 }
 
 // Reset completion signal flag (for testing/reloading)
 function resetCompletionSignal() {
   completionSignalSent = false;
+  lastCompletionErrors = [];
   console.log('[Local Mods] Completion signal flag reset');
 }
 
@@ -1013,6 +1033,9 @@ document.addEventListener('reloadLocalMods', () => {
 // Expose API functions immediately so they're available
 window.localModsAPI.executeLocalMod = executeLocalMod;
 window.localModsAPI.executeModsInOrder = executeModsInOrder;
+window.localModsAPI.isBatchExecuting = () => isBatchExecuting;
+window.localModsAPI.wasCompletionSignalSent = () => completionSignalSent;
+window.localModsAPI.getLastLoadErrors = () => lastCompletionErrors;
 
 window.addEventListener('message', function(event) {
   if (event.source !== window) return;
@@ -1102,6 +1125,7 @@ window.addEventListener('message', function(event) {
           console.log('Skipping execution - batch execution already in progress');
         } else {
           console.log('No enabled mods found in stored states');
+          setTimeout(() => sendCompletionSignal([]), 500);
         }
       }
     }

@@ -824,6 +824,19 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       });
       return true; // Keep the message channel open for async response
+    } else if (message.modName === 'Official Mods/Turbo Mode.js') {
+      browserAPI.storage.local.get('localModsConfig', (data) => {
+        const configs = data.localModsConfig || {};
+        const config = configs[message.modName] || {};
+        const legacy = configs['DOM_Turbo_with_ticks.js'] || {};
+        const merged = { ...legacy, ...config };
+        if (legacy.speedupFactor !== undefined && config.speedupFactor === undefined) {
+          configs[message.modName] = merged;
+          browserAPI.storage.local.set({ localModsConfig: configs });
+        }
+        sendResponse({ success: true, config: merged });
+      });
+      return true;
     } else {
       // For other mods, use the existing extension storage system
       browserAPI.storage.local.get('localModsConfig', (data) => {

@@ -256,6 +256,71 @@ let modsLoaded = false;
 let modLoadingObserver = null;
 let modalAborted = false; // Track if modal was aborted due to other modals
 
+const MOD_LOAD_RETRY_KEY = 'mod-load-retry-count';
+const MAX_MOD_LOAD_RETRIES = 3;
+const MOD_LOAD_REFRESH_DELAY = 3000;
+const MOD_LOAD_FALLBACK_DELAY = 8000;
+
+let modLoadingFallbackTimer = null;
+
+function getModLoadRetryCount() {
+  try {
+    return parseInt(sessionStorage.getItem(MOD_LOAD_RETRY_KEY) || '0', 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function incrementModLoadRetryCount() {
+  const count = getModLoadRetryCount() + 1;
+  try {
+    sessionStorage.setItem(MOD_LOAD_RETRY_KEY, String(count));
+  } catch {}
+  return count;
+}
+
+function resetModLoadRetryCount() {
+  try {
+    sessionStorage.removeItem(MOD_LOAD_RETRY_KEY);
+  } catch {}
+}
+
+function clearModLoadingFallbackTimer() {
+  if (modLoadingFallbackTimer) {
+    clearTrackedTimeout(modLoadingFallbackTimer);
+    modLoadingFallbackTimer = null;
+  }
+}
+
+function scheduleModLoadingFallbackTimer() {
+  clearModLoadingFallbackTimer();
+  modLoadingFallbackTimer = trackTimeout(setTimeout(() => {
+    modLoadingFallbackTimer = null;
+    if (loadingCompleted) return;
+
+    if (window.localModsAPI?.isBatchExecuting?.()) {
+      console.log('[Welcome] Mod batch still running, extending fallback timer');
+      scheduleModLoadingFallbackTimer();
+      return;
+    }
+
+    if (window.localModsAPI?.wasCompletionSignalSent?.()) {
+      const errors = window.localModsAPI.getLastLoadErrors?.() || [];
+      console.log('[Welcome] Completion signal sent but message missed — recovering');
+      handleModLoadingFinished(errors);
+      return;
+    }
+
+    console.log('[Welcome] Mod loading completion timeout — treating as load failure');
+    handleModLoadingFinished([{ mod: 'loader', error: 'Loading timed out' }]);
+  }, MOD_LOAD_FALLBACK_DELAY));
+}
+
+function onModBatchExecutionStarted() {
+  console.log('[Welcome] Mod batch execution started — arming fallback timer');
+  scheduleModLoadingFallbackTimer();
+}
+
 // Cleanup tracking
 let activeTimeouts = new Set();
 let activeEventListeners = new Map();
@@ -278,6 +343,7 @@ function trackEventListener(element, event, handler) {
     activeEventListeners.set(key, []);
   }
   activeEventListeners.get(key).push({ element, event, handler });
+  element.addEventListener(event, handler);
 }
 
 function removeTrackedEventListener(element, event, handler) {
@@ -389,17 +455,19 @@ function createToast({ message, type = 'info', duration = 3000, icon = null }) {
     totalToasts: existingToasts.length + 1
   });
   
-  // Auto-remove after duration
-  const timeoutId = trackTimeout(setTimeout(() => {
-    if (flexContainer && flexContainer.parentNode) {
-      console.log('[Welcome] Auto-removing toast after', duration, 'ms');
-      flexContainer.parentNode.removeChild(flexContainer);
-      
-      // Update positions of remaining toasts
-      updateToastPositions(mainContainer);
-    }
-    activeTimeouts.delete(timeoutId);
-  }, duration));
+  // Auto-remove after duration (duration 0 = keep until manually removed)
+  if (duration > 0) {
+    const timeoutId = trackTimeout(setTimeout(() => {
+      if (flexContainer && flexContainer.parentNode) {
+        console.log('[Welcome] Auto-removing toast after', duration, 'ms');
+        flexContainer.parentNode.removeChild(flexContainer);
+        
+        // Update positions of remaining toasts
+        updateToastPositions(mainContainer);
+      }
+      activeTimeouts.delete(timeoutId);
+    }, duration));
+  }
   
   return {
     element: flexContainer,
@@ -429,8 +497,8 @@ function showLoadingToast() {
     loadingToast = createToast({
       message: '<span class="text-monster">Loading mods</span>...',
       type: 'loading',
-      duration: 5000, // Show for 5 seconds
-      icon: 'https://bestiaryarena.com/assets/logo.png' // Use the official Bestiary Arena logo
+      duration: 0,
+      icon: 'https://bestiaryarena.com/assets/logo.png'
     });
 
     console.log('[Welcome] Loading toast created:', !!loadingToast);
@@ -457,9 +525,9 @@ function showModErrorToast(error) {
   }
 }
 
-// Update loading toast to show completion
-async function updateLoadingToComplete() {
-  console.log('[Welcome] updateLoadingToComplete called');
+// Handle mod loading finished — success only when there are no errors
+async function handleModLoadingFinished(errors = []) {
+  console.log('[Welcome] handleModLoadingFinished called, errors:', errors);
   console.log('[Welcome] loadingToast exists:', !!loadingToast);
   console.log('[Welcome] loadingCompleted:', loadingCompleted);
   
@@ -469,39 +537,69 @@ async function updateLoadingToComplete() {
     return;
   }
   
-  // Mark loading as completed
   loadingCompleted = true;
-  modsLoaded = true;
-  
-  if (!loadingToast) {
-    console.warn('[Welcome] No loading toast to update - showing welcome modal directly');
-    handleCompletionModalClose('(no loading toast)');
+  clearModLoadingFallbackTimer();
+
+  if (modLoadingObserver) {
+    modLoadingObserver.disconnect();
+    modLoadingObserver = null;
+  }
+
+  const hasErrors = Array.isArray(errors) && errors.length > 0;
+
+  loadingToast?.remove?.();
+  loadingToast = null;
+
+  if (hasErrors) {
+    modsLoaded = false;
+    const retryCount = getModLoadRetryCount();
+    const failedModNames = errors.map(e => e.mod || 'unknown').join(', ');
+    console.log('[Welcome] Mod loading had errors:', failedModNames, `(retry ${retryCount}/${MAX_MOD_LOAD_RETRIES})`);
+
+    if (retryCount < MAX_MOD_LOAD_RETRIES) {
+      const nextRetry = incrementModLoadRetryCount();
+      createToast({
+        message: `<span class="text-red-400">Mod loading incomplete.</span> Refreshing in 3s... (${nextRetry}/${MAX_MOD_LOAD_RETRIES})`,
+        type: 'error',
+        duration: MOD_LOAD_REFRESH_DELAY,
+        icon: 'https://bestiaryarena.com/assets/logo.png'
+      });
+      trackTimeout(setTimeout(() => {
+        window.location.reload();
+      }, MOD_LOAD_REFRESH_DELAY));
+    } else {
+      createToast({
+        message: `<span class="text-red-400">Mod loading incomplete.</span> Failed: ${failedModNames}. Auto-retry limit reached.`,
+        type: 'error',
+        duration: 8000,
+        icon: 'https://bestiaryarena.com/assets/logo.png'
+      });
+    }
     return;
   }
 
-  try {
-    // Remove the loading toast
-    loadingToast?.remove?.();
-    loadingToast = null;
+  modsLoaded = true;
+  resetModLoadRetryCount();
 
-    // Create a completion toast
-    const completionToast = createToast({
+  try {
+    createToast({
       message: '<span class="text-monster">Mods</span> loaded successfully!',
       type: 'success',
-      duration: 5000, // Show for 5 seconds
-      icon: 'https://bestiaryarena.com/assets/logo.png' // Use the official Bestiary Arena logo
+      duration: 5000,
+      icon: 'https://bestiaryarena.com/assets/logo.png'
     });
 
     console.log('[Welcome] Completion toast created successfully');
-    
-    // Show welcome modal immediately if enabled (don't wait for toast)
     handleCompletionModalClose('(completion toast)');
-    
   } catch (error) {
     console.error('[Welcome] Error creating completion toast:', error);
-    // Fallback: show welcome modal directly
     handleCompletionModalClose('(error fallback)');
   }
+}
+
+// Backwards-compatible alias
+async function updateLoadingToComplete(errors = []) {
+  return handleModLoadingFinished(errors);
 }
 
 // Hide loading toast
@@ -669,10 +767,15 @@ function setupModLoadingObserver() {
     if (event.source !== window) return;
     
     
+    if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'modBatchExecutionStarted') {
+      onModBatchExecutionStarted();
+    }
+
     // Listen for mod loading completion message
     if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
-      console.log('[Welcome] Received mod loading completion signal from local_mods.js');
-      updateLoadingToComplete();
+      const errors = event.data.errors || [];
+      console.log('[Welcome] Received mod loading completion signal from local_mods.js', errors.length ? `with ${errors.length} error(s)` : 'without errors');
+      handleModLoadingFinished(errors);
     }
     
     // Listen for mod loading error message
@@ -691,16 +794,10 @@ function setupModLoadingObserver() {
       console.log('[Welcome] Mod loading completion listener removed');
     }
   };
-  
-  // Fallback timer in case the message never comes
-  trackTimeout(setTimeout(() => {
-    if (modLoadingObserver && !loadingCompleted) {
-      console.log('[Welcome] Mod loading completion timeout, using fallback');
-      modLoadingObserver.disconnect();
-      modLoadingObserver = null;
-      updateLoadingToComplete();
-    }
-  }, 3000)); // Reduced to 3 second timeout for faster response
+
+  if (window.localModsAPI?.isBatchExecuting?.()) {
+    onModBatchExecutionStarted();
+  }
 }
 
 // Initialize welcome modal if conditions are met
@@ -770,6 +867,7 @@ function cleanup() {
   activeEventListeners.clear();
   
   // Disconnect observer
+  clearModLoadingFallbackTimer();
   if (modLoadingObserver) {
     modLoadingObserver.disconnect();
     modLoadingObserver = null;

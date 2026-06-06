@@ -172,11 +172,11 @@ function bbmIsBoostedEquipmentName(name) {
     return bbmGetBoostedMapToEquipmentIndex().boostedEquipmentNames.has(name);
 }
 
-/** Equipment tab: HARDCODED_BOOSTED_MAP false / empty means not selectable. */
+/** Equipment tab: only HARDCODED_BOOSTED_MAP entries with map lists are selectable. */
 function bbmIsHardcodedBoostedMapDisabled(name) {
     const HARDCODED_BOOSTED_MAP = bbmGetHardcodedBoostedMap();
     if (!Object.prototype.hasOwnProperty.call(HARDCODED_BOOSTED_MAP, name)) {
-        return false;
+        return true;
     }
     const wiki = HARDCODED_BOOSTED_MAP[name];
     return wiki === false || wiki == null || wiki === '';

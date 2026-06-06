@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "4.0.4",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Settings moved from Mod Settings to a right-click context menu on the panel: opacity, size (80–120%), top/bottom placement with centered scaling, nav Highscores button toggle, and Time/Rank/Floor column visibility. Panel hide/show persists across battles and map changes; unchecking the last visible column re-enables all three. Visibility checkboxes use full labels (Show navigation button, Show Time, Show Rank, Show Floor) instead of a separate Show heading."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Panel background now shrink-wraps the framed content on window resize; width and height track visible columns instead of stretching past the border or leaving texture outside the frame."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Running modal shows live completion rate (grey below 100%, green at 100%). Results modal adds a Generate Setup Name button that copies a Setup Manager-friendly label (e.g. 85% S+120 f3 142min 156med). Copy notifications (setup name, replay data) use the native game-style toast instead of a fixed banner. Thanks to whoman2 for these improvements."
+        },
+        {
+          "mod": "equipment-database.js",
+          "type": "changed",
+          "text": "Added Soft Boots (Darama Oasis) and Spellbook of Ancient Arcana (Putrid Chamber) to HARDCODED_BOOSTED_MAP. Removed explicit false entries (Jester Hat, Rubber Cap, Steel Boots); items omitted from the table are treated as not boosted."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Mod button bar layout (horizontal, vertical, or hidden) persists across page refreshes."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Removed Better Highscores opacity, size, placement, and nav button controls; configure those from the panel right-click menu."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "Equipment tab checkboxes are enabled only for items listed in HARDCODED_BOOSTED_MAP with boosted maps; unlisted game equipment is greyed out and cannot be toggled."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Welcome mod loading completion now reports success only when all enabled mods load without errors. Failed loads show an incomplete toast and auto-refresh after 3 seconds (up to 3 retries). Fixed the completion listener never registering (trackEventListener), the fallback timer firing too early during long batch loads, and the loading toast disappearing before mods finished. Mod button bar z-index restored to 100–101 (below game z-modals at 200) so Game mode and other native dropdowns render above mod buttons again."
+        },
+        {
+          "mod": "Turbo Mode",
+          "type": "fixed",
+          "text": "Speed factor in Mod Settings → Advanced now persists across page reloads. Fixed startup clearing saved config and loading from the wrong storage path; legacy saves are migrated on load."
+        }
+      ]
+    },
+    {
       "version": "4.0.3",
       "changes": [
         {

@@ -1,8 +1,8 @@
 console.log('[equipment-database.js] Loading equipment database...');
 
 /**
- * Wiki / infobox: comma-separated boosted map names per equipment (string), or false if N/A.
- * Shared by equipment-lua-export.js and Cyclopedia Equipment tab.
+ * Wiki / infobox: comma-separated boosted map names per equipment (string).
+ * Omitted items are not boosted-map equipment. Shared by equipment-lua-export.js and Cyclopedia.
  */
 const HARDCODED_BOOSTED_MAP = {
   'Amulet of Loss':
@@ -30,18 +30,17 @@ const HARDCODED_BOOSTED_MAP = {
     "Ghostlands Ritual Site, Banshee's Last Room, Teleporter Trap, Wyda's House",
   'Glass of Goo': "Amber's Raft, Awash Steamship",
   'Ice Rapier': 'Minotaur Hell, Carlin Sewers',
-  'Jester Hat': false,
   'Medusa Shield':
     "Rotten Graveyard, Zathroth's Throne, Teleporter Trap, Frozen Aquifer",
   'Ratana':
     'Evergreen Fields, Ghostlands Surface, Orcish Barracks, Underground Lake',
   'Royal Scale Robe': 'Rotten Graveyard, Katana Quest, Isle of Kings, Shadowthorn',
-  'Rubber Cap': false,
   'Skull Helmet': 'Rotten Graveyard, Katana Quest',
   'Skullcracker Armor':
     "Demonrage Seal, Alawar's Vault, Elvenbane, A Shamanic Ritual",
+  'Soft Boots': 'Darama Oasis',
+  'Spellbook of Ancient Arcana': 'Putrid Chamber',
   'Springsprout Rod': 'Teleporter Trap, Folda Boat, Frozen Aquifer',
-  'Steel Boots': false,
   'Stealth Ring': "Banshee's Last Room, Hedge Maze, Ab'Dendriel Hive",
   'Vampire Shield':
     "Spider Lair, Ghostlands Library, Maze Gates, Ab'Dendriel Hive",

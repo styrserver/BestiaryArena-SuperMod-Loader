@@ -496,7 +496,8 @@ if (typeof browserAPI === 'undefined') {
   const MOD_TOGGLE_SIZE = 35;
   const MOD_TOGGLE_MARGIN = 10;
   const MOD_TOGGLE_GAP = 10;
-  const MOD_BAR_Z_INDEX = 9999;
+  // Keep below game dropdowns/menus (z-modals = 200) but above normal board UI (z-1..z-10).
+  const MOD_BAR_Z_INDEX = 101;
   const MOD_BAR_SAFE_BOTTOM = `calc(${MOD_TOGGLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`;
   const MOD_BAR_SAFE_RIGHT = `calc(${MOD_TOGGLE_MARGIN}px + env(safe-area-inset-right, 0px))`;
 
@@ -701,6 +702,50 @@ if (typeof browserAPI === 'undefined') {
   }
 
   const MOD_BUTTON_LAYOUT_STATES = ['horizontal', 'vertical', 'hidden'];
+  const MOD_BUTTONS_LAYOUT_CONFIG_KEY = 'modButtonBarLayout';
+
+  function getSavedModButtonsLayout() {
+    if (
+      window.betterUIConfig?.[MOD_BUTTONS_LAYOUT_CONFIG_KEY] &&
+      MOD_BUTTON_LAYOUT_STATES.includes(window.betterUIConfig[MOD_BUTTONS_LAYOUT_CONFIG_KEY])
+    ) {
+      return window.betterUIConfig[MOD_BUTTONS_LAYOUT_CONFIG_KEY];
+    }
+
+    try {
+      const savedConfig = localStorage.getItem('better-ui-config');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        const layout = parsed[MOD_BUTTONS_LAYOUT_CONFIG_KEY];
+        if (MOD_BUTTON_LAYOUT_STATES.includes(layout)) {
+          return layout;
+        }
+      }
+    } catch (error) {
+      // Ignore malformed config
+    }
+
+    return 'horizontal';
+  }
+
+  function saveModButtonsLayout(layout) {
+    if (!MOD_BUTTON_LAYOUT_STATES.includes(layout)) {
+      return;
+    }
+
+    try {
+      const savedConfig = localStorage.getItem('better-ui-config');
+      const parsed = savedConfig ? JSON.parse(savedConfig) : {};
+      parsed[MOD_BUTTONS_LAYOUT_CONFIG_KEY] = layout;
+      localStorage.setItem('better-ui-config', JSON.stringify(parsed));
+
+      if (window.betterUIConfig) {
+        window.betterUIConfig[MOD_BUTTONS_LAYOUT_CONFIG_KEY] = layout;
+      }
+    } catch (error) {
+      // Ignore save errors
+    }
+  }
 
   function updateModButtonsToggleAppearance(toggleButton, layout) {
     toggleButton.textContent = '';
@@ -753,6 +798,7 @@ if (typeof browserAPI === 'undefined') {
     const currentIndex = MOD_BUTTON_LAYOUT_STATES.indexOf(currentLayout);
     const nextLayout = MOD_BUTTON_LAYOUT_STATES[(currentIndex + 1) % MOD_BUTTON_LAYOUT_STATES.length];
     applyModButtonsLayout(toggleButton, buttonsContainer, nextLayout);
+    saveModButtonsLayout(nextLayout);
   }
 
   // Managed mod buttons container
@@ -770,14 +816,11 @@ if (typeof browserAPI === 'undefined') {
       transition: opacity 0.3s ease, transform 0.3s ease;
       transform-origin: right center;
     `;
-    applyModButtonsContainerPosition(container, 'horizontal');
     
     // Create toggle button — pinned to the bottom-right corner
     const toggleButton = document.createElement('button');
     toggleButton.id = 'bestiary-mod-buttons-toggle';
     toggleButton.style.cssText = MOD_TOGGLE_BUTTON_STYLE;
-    toggleButton._layout = 'horizontal';
-    updateModButtonsToggleAppearance(toggleButton, 'horizontal');
     
     // Cycle layout: horizontal -> vertical -> hidden -> horizontal
     toggleButton.addEventListener('click', (e) => {
@@ -791,6 +834,8 @@ if (typeof browserAPI === 'undefined') {
     // Add elements to the DOM separately so the toggle stays fixed in the corner
     document.body.appendChild(container);
     document.body.appendChild(toggleButton);
+
+    applyModButtonsLayout(toggleButton, container, getSavedModButtonsLayout());
     
     return container;
   }
@@ -1346,6 +1391,8 @@ if (typeof browserAPI === 'undefined') {
             console.warn(`Invalid mod button layout: ${layout}`);
             return false;
           }
+
+          saveModButtonsLayout(toggleButton._layout);
           
           return true;
         }

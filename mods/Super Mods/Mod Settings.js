@@ -28,7 +28,6 @@ const defaultConfig = {
   enableAntiIdleSounds: false,
   removeWebsiteFooter: false,
   compactNavBar: false,
-  showBetterHighscoresButton: false,
   showLastVisitedMapButton: false,
   alwaysOpenHuntAnalyzer: false,
   enablePlayercount: true,
@@ -37,11 +36,11 @@ const defaultConfig = {
   defaultInventorySticky: false,
   inventoryBorderStyle: 'Original',
   modButtonDisplay: 'text', // 'text' or 'icon'
+  modButtonBarLayout: 'horizontal', // 'horizontal', 'vertical', or 'hidden'
   vipListInterface: 'modal', // 'modal' or 'panel'
   enableVipListChat: false, // Enable messaging/chat feature in VIP List (controls both VIP List chat and Global Chat)
   vipListMessageFilter: 'all', // 'all' or 'friends' - who can send messages
   autoHideNonShinyNonAwakenedMonsters: false,
-  betterHighscoresBackgroundOpacity: 1.0, // Opacity for Better Highscores background (0.0 to 1.0)
   enableFirebaseRunsUpload: false, // Enable uploading best runs to Firebase
   firebaseRunsPassword: '', // Encryption password for Firebase runs (stored encrypted)
   autoUploadRuns: false, // Automatically upload when new best run is recorded
@@ -99,6 +98,7 @@ try {
   console.error('[Mod Settings] Error loading config from localStorage:', error);
   config = Object.assign({}, defaultConfig);
 }
+window.betterUIConfig = config;
 delete config.enableFavorites;
 delete config.favoriteSymbol;
 config.hotkeyOpenInventory = sanitizeStoredHotkey(config.hotkeyOpenInventory, '');
@@ -1049,7 +1049,6 @@ const RUN_TRACKER_MOD_NAME = 'Super Mods/RunTracker.js';
 const HUNT_ANALYZER_MOD_NAME = 'Super Mods/Hunt Analyzer.js';
 const VIP_LIST_MOD_NAME = 'OT Mods/VIP List.js';
 const DEPOT_MANAGER_MOD_NAME = 'Super Mods/Depot Manager.js';
-const BETTER_HIGHSCORES_MOD_NAME = 'Super Mods/Better Highscores.js';
 
 /** @type {((categoryId: string) => void) | null} */
 let modSettingsSelectCategoryHandler = null;
@@ -1092,12 +1091,6 @@ function isDepotManagerModEnabled() {
     || !!window.depotManager;
 }
 
-function isBetterHighscoresModEnabled() {
-  return isLocalModEnabledInRegistry(BETTER_HIGHSCORES_MOD_NAME)
-    || !!window.BetterHighscores
-    || !!document.querySelector('.better-highscores-container');
-}
-
 function applyModDependentCheckboxRow({ disabledTitle, disabled, warningEl, labelEl, checkboxEl }) {
   if (warningEl) {
     warningEl.hidden = !disabled;
@@ -1134,8 +1127,6 @@ function applyModDependentSection({ disabledTitle, disabled, sectionEl, warningE
 
 const RUN_TRACKER_SETTINGS_DISABLED_TITLE =
   'Enable the Run Tracker mod for this setting to work.';
-const BETTER_HIGHSCORES_SETTINGS_DISABLED_TITLE =
-  'Enable the Better Highscores mod for these settings to work.';
 const FIREBASE_RUNS_SETTINGS_DISABLED_TITLE =
   'Enable the Run Tracker mod to upload or download best runs.';
 const BACKUP_RUN_DATA_DISABLED_TITLE =
@@ -1180,20 +1171,6 @@ function updateRunTrackerSettingsAvailability() {
     warningEl: document.getElementById('run-tracker-unavailable-warning'),
     labelEl: document.getElementById('run-tracker-toggle-label'),
     checkboxEl: document.getElementById('run-tracker-toggle')
-  });
-}
-
-function updateBetterHighscoresSettingsAvailability() {
-  const disabled = !isBetterHighscoresModEnabled();
-  applyModDependentSection({
-    disabledTitle: BETTER_HIGHSCORES_SETTINGS_DISABLED_TITLE,
-    disabled,
-    sectionEl: document.getElementById('better-highscores-settings-section'),
-    warningEl: document.getElementById('better-highscores-settings-unavailable-warning'),
-    controlEls: [
-      document.getElementById('better-highscores-opacity-slider'),
-      document.getElementById('better-highscores-button-toggle')
-    ]
   });
 }
 
@@ -1251,12 +1228,11 @@ function syncModDependentSettingsAvailability() {
   updateRoomHopperHotkeyAvailability();
   updateCyclopediaHotkeyAvailability();
   updateRunTrackerSettingsAvailability();
-  updateBetterHighscoresSettingsAvailability();
   updateFirebaseRunsSettingsAvailability();
   updateBackupModExportAvailability();
 }
 
-const TURBO_SCRIPT_CONFIG_HASH = 'local_DOM_Turbo_with_ticks.js';
+const TURBO_SCRIPT_CONFIG_HASH = 'local_Official Mods/Turbo Mode.js';
 const TURBO_DEFAULT_TICK_INTERVAL_MS = 62.5;
 const TURBO_SPEED_SETTINGS_DISABLED_TITLE =
   'Enable the Turbo Mode mod to change turbo speed.';
@@ -5845,20 +5821,7 @@ function showSettingsModal() {
       if (categoryId === 'ui') {
         const uiContent = document.createElement('div');
         uiContent.innerHTML = `
-          <div id="better-highscores-settings-section" style="margin-bottom: 20px;">
-            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <span id="better-highscores-settings-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center;">⚠️</span>
-              <span style="color: #ccc; min-width: 200px;">${t('mods.betterUI.betterHighscoresBackgroundOpacity')}</span>
-              <input type="range" id="better-highscores-opacity-slider" min="0" max="100" value="100" step="1" style="flex: 1; min-width: 150px; max-width: 300px; cursor: pointer;" onclick="event.stopPropagation();">
-              <span id="better-highscores-opacity-value" style="color: #ccc; min-width: 40px; text-align: right;">100%</span>
-            </div>
-            <div style="margin-bottom: 15px;">
-              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                <input type="checkbox" id="better-highscores-button-toggle" style="transform: scale(1.2);">
-                <span>${t('mods.betterUI.showBetterHighscoresButton')}</span>
-              </label>
-            </div>
-            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
               <span style="color: #ccc;">${t('mods.betterUI.modButtonDisplay')}</span>
               <select id="mod-button-display-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
                 <option value="text">${t('mods.betterUI.modButtonDisplayText')}</option>
@@ -5877,7 +5840,6 @@ function showSettingsModal() {
                 <option value="Prismatic">Prismatic</option>
               </select>
             </div>
-          </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="compact-nav-bar-toggle" style="transform: scale(1.2);">
@@ -6899,14 +6861,6 @@ function showSettingsModal() {
         )(abilityHoverCheckbox);
       }
       
-      const betterHighscoresButtonCheckbox = content.querySelector('#better-highscores-button-toggle');
-      if (betterHighscoresButtonCheckbox) {
-        createSettingsCheckboxHandler('showBetterHighscoresButton',
-          addBetterHighscoresNavButton,
-          removeBetterHighscoresNavButton
-        )(betterHighscoresButtonCheckbox);
-      }
-
       const lastVisitedMapCheckbox = content.querySelector('#last-visited-map-toggle');
       if (lastVisitedMapCheckbox) {
         createSettingsCheckboxHandler('showLastVisitedMapButton',
@@ -7161,32 +7115,6 @@ function showSettingsModal() {
       }
       syncModDependentSettingsAvailability();
 
-      const betterHighscoresOpacitySlider = content.querySelector('#better-highscores-opacity-slider');
-      const betterHighscoresOpacityValue = content.querySelector('#better-highscores-opacity-value');
-      if (betterHighscoresOpacitySlider && betterHighscoresOpacityValue) {
-        // Set initial value from config (convert from 0-1 to 0-100)
-        const initialValue = Math.round((config.betterHighscoresBackgroundOpacity || 1.0) * 100);
-        betterHighscoresOpacitySlider.value = initialValue;
-        betterHighscoresOpacityValue.textContent = `${initialValue}%`;
-        
-        betterHighscoresOpacitySlider.addEventListener('input', () => {
-          const opacityValue = parseInt(betterHighscoresOpacitySlider.value) / 100;
-          config.betterHighscoresBackgroundOpacity = opacityValue;
-          saveConfig();
-          betterHighscoresOpacityValue.textContent = `${betterHighscoresOpacitySlider.value}%`;
-          
-          // Update Better Highscores mod if available
-          if (window.BetterHighscores && typeof window.BetterHighscores.updateOpacity === 'function') {
-            window.BetterHighscores.updateOpacity(opacityValue);
-          } else if (window.BetterHighscores && window.BetterHighscores.updateLeaderboards) {
-            // Fallback: trigger a full update to apply new opacity
-            window.BetterHighscores.updateLeaderboards();
-          }
-          
-          console.log('[Mod Settings] Better Highscores background opacity updated:', opacityValue);
-        });
-      }
-      
       const vipListInterfaceSelector = content.querySelector('#vip-list-interface-selector');
       if (vipListInterfaceSelector) {
         createSettingsDropdownHandler('vipListInterface')(vipListInterfaceSelector);
@@ -10660,104 +10588,7 @@ function startSetupLabelsObserver() {
 }
 
 // =======================
-// 11. Better Highscores Button Functions
-// =======================
-
-// Toggle Better Highscores container visibility
-function toggleBetterHighscoresContainer(event) {
-  if (event) {
-    event.stopPropagation();
-  }
-  
-  const container = document.querySelector('.better-highscores-container');
-  if (!container) {
-    console.log('[Mod Settings] Better Highscores container not found');
-    return;
-  }
-  
-  const isVisible = container.style.display !== 'none';
-  container.style.display = isVisible ? 'none' : '';
-  
-  // Update button selected state
-  const btn = document.querySelector('.better-highscores-nav-btn');
-  if (btn) {
-    btn.setAttribute('data-selected', isVisible ? 'false' : 'true');
-  }
-  
-  console.log('[Mod Settings] Better Highscores container', isVisible ? 'hidden' : 'shown');
-}
-
-// Add Better Highscores nav button after Autoseller
-function addBetterHighscoresNavButton() {
-  const tryInsert = () => {
-    const ul = getPrimaryGameNavUl();
-    if (!ul) {
-      const timeoutId = scheduleTimeout(tryInsert, 500);
-      return;
-    }
-    
-    // Prevent duplicate button
-    if (ul.querySelector('.better-highscores-nav-btn')) {
-      console.log('[Mod Settings] Better Highscores nav button already exists, skipping insert.');
-      return;
-    }
-    
-    // Find Autoseller button
-    const autosellerBtn = ul.querySelector('.autoseller-nav-btn');
-    if (!autosellerBtn) {
-      const timeoutId = scheduleTimeout(tryInsert, 500);
-      return;
-    }
-    
-    const autosellerLi = autosellerBtn.closest('li');
-    if (!autosellerLi) {
-      const timeoutId = scheduleTimeout(tryInsert, 500);
-      return;
-    }
-    
-    // Create the button
-    const li = document.createElement('li');
-    li.className = 'hover:text-whiteExp';
-    
-    const btn = document.createElement('button');
-    btn.className = 'better-highscores-nav-btn focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp sm:px-2 sm:py-0.5';
-    btn.setAttribute('data-selected', 'false');
-    btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/achievement.png" alt="${t('mods.betterUI.betterHighscoresButton')}" width="12" height="12" class="pixelated"><span class="hidden sm:inline">${t('mods.betterUI.betterHighscoresButton')}</span>`;
-    btn.onclick = toggleBetterHighscoresContainer;
-    
-    li.appendChild(btn);
-    
-    // Insert after Autoseller
-    if (autosellerLi.nextSibling) {
-      ul.insertBefore(li, autosellerLi.nextSibling);
-    } else {
-      ul.appendChild(li);
-    }
-    
-    console.log('[Mod Settings] Better Highscores nav button inserted after Autoseller.');
-  };
-  tryInsert();
-}
-
-// Remove Better Highscores nav button
-function removeBetterHighscoresNavButton() {
-  const ul = getPrimaryGameNavUl();
-  if (!ul) {
-    return;
-  }
-  
-  const btn = ul.querySelector('.better-highscores-nav-btn');
-  if (btn) {
-    const li = btn.closest('li');
-    if (li) {
-      li.remove();
-      console.log('[Mod Settings] Better Highscores nav button removed.');
-    }
-  }
-}
-
-// =======================
-// 12. Website Footer Functions
+// 11. Website Footer Functions
 // =======================
 
 // Hide website footer
@@ -12740,14 +12571,6 @@ function initBetterUI() {
       observers.setupLabels = startSetupLabelsObserver();
       console.log('[Mod Settings] Setup labels visibility applied:', config.showSetupLabels);
     }, 1000); // Delay to ensure DOM is ready
-    
-    // Add Better Highscores nav button if enabled
-    if (config.showBetterHighscoresButton) {
-      scheduleTimeout(() => {
-        addBetterHighscoresNavButton();
-        console.log('[Mod Settings] Better Highscores nav button added:', config.showBetterHighscoresButton);
-      }, 1500); // Delay to ensure Autoseller button is loaded
-    }
 
     // Subscribe once for map-dependent features
     if (config.showLastVisitedMapButton || config.alwaysNavigateMaxFloor) {
