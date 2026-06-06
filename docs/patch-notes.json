@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.0.6",
+      "changes": [
+        {
+          "mod": "equipment-database.js",
+          "type": "changed",
+          "text": "Added Ancient Amulet (Mother of Scarabs Lair) to HARDCODED_BOOSTED_MAP. Added Mother of Scarabs Lair to Epee; Pierre's Kitchen and Serpentine Tower Basement to Spellbook of Ancient Arcana."
+        },
+        {
+          "mod": "Hero Editor",
+          "type": "changed",
+          "text": "Right-click floating editor is narrower (250px) and hides portrait level badges. Main modal footer shows “✓ Settings auto-save when changed” with a game-styled Close button (right-click menu unchanged). Empty equipment slots use the in-game circle-plus placeholder at the same 34px size as equipped items in the list and detail panel."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Removed max-width limits and flex wrapping so Time, Rank, and Floor stay on one row instead of breaking when the panel content is wider."
+        }
+      ]
+    },
+    {
       "version": "4.0.5",
       "changes": [
         {

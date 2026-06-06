@@ -183,6 +183,33 @@ function expandHeroEditorModal(widthPx = 420, heightPx = 420) {
         widgetBottom.style.flex = '1 1 0';
         widgetBottom.style.minHeight = '0';
       }
+
+      const footer = dialog.querySelector('.flex.justify-end.gap-2');
+      if (footer && !footer.querySelector('.hero-editor-auto-save-indicator')) {
+        const autoSaveIndicator = document.createElement('div');
+        autoSaveIndicator.className = 'hero-editor-auto-save-indicator pixel-font-16';
+        autoSaveIndicator.style.cssText = `
+          font-size: 11px;
+          color: rgb(74, 222, 128);
+          font-style: italic;
+          margin-right: auto;
+        `;
+        autoSaveIndicator.textContent = t('mods.heroEditor.settingsAutoSave');
+
+        footer.style.cssText = `
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 8px;
+        `;
+        footer.insertBefore(autoSaveIndicator, footer.firstChild);
+
+        const closeButton = footer.querySelector('button');
+        if (closeButton) {
+          closeButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
+          closeButton.style.cssText = '';
+        }
+      }
     } catch (error) {
       console.warn('[Hero Editor] Failed to expand modal layout:', error);
     }
@@ -209,6 +236,33 @@ const HERO_EDITOR_FLOATING_UI = {
   portraitSize: '24px',
   topButtonSize: '18px'
 };
+
+const HERO_EDITOR_EQUIPMENT_PORTRAIT_SIZE = 34;
+
+function applyEquipmentPortraitSize(element, sizePx = HERO_EDITOR_EQUIPMENT_PORTRAIT_SIZE) {
+  if (!element) return element;
+
+  const size = `${sizePx}px`;
+  element.style.width = size;
+  element.style.height = size;
+  element.style.maxWidth = size;
+  element.style.maxHeight = size;
+  element.style.flexShrink = '0';
+
+  const innerPortrait = element.querySelector('.equipment-portrait');
+  if (innerPortrait) {
+    innerPortrait.style.width = size;
+    innerPortrait.style.height = size;
+    innerPortrait.style.maxWidth = size;
+    innerPortrait.style.maxHeight = size;
+  }
+
+  return element;
+}
+
+function createHeroEditorItemPortrait(options) {
+  return applyEquipmentPortraitSize(api.ui.components.createItemPortrait(options));
+}
 
 function applyHeroEditorFloatingFont(element, fontSize = HERO_EDITOR_FLOATING_UI.fontSize) {
   element.style.fontSize = fontSize;
@@ -280,7 +334,7 @@ function updateItemPortrait(portrait, equipName, stat, tier, equipMap) {
   if (!equipData || !equipData.metadata) return null;
   
   // Create a new portrait with updated data
-  const newPortrait = api.ui.components.createItemPortrait({
+  const newPortrait = createHeroEditorItemPortrait({
     itemId: equipData.metadata.spriteId,
     stat: stat,
     tier: clampEquipTier(tier)
@@ -860,6 +914,13 @@ function findPortraitLevelSpan(portraitRoot) {
   );
 }
 
+function stripPortraitLevelIndicators(portraitRoot) {
+  if (!portraitRoot) return;
+  portraitRoot.querySelectorAll('.pixel-font-16').forEach((element) => element.remove());
+  const levelSpan = findPortraitLevelSpan(portraitRoot);
+  if (levelSpan) levelSpan.remove();
+}
+
 function updateHeroPortraitLevel(portraitRoot, level) {
   if (!portraitRoot) return;
   const parsedLevel = parseInt(level, 10);
@@ -963,7 +1024,7 @@ function applyHeroMonsterPortraitBorder(slot, monster, level) {
   }
 }
 
-function createHeroMonsterPortraitSlot({ monsterId, level, monster, size = 32 }) {
+function createHeroMonsterPortraitSlot({ monsterId, level, monster, size = 32, hideLevel = false }) {
   const statTier = calculateTierFromStats(monster);
   const parsedLevel = Number(level) || 1;
 
@@ -987,7 +1048,11 @@ function createHeroMonsterPortraitSlot({ monsterId, level, monster, size = 32 })
       }
 
       applyHeroMonsterPortraitBorder(slot, monster, parsedLevel);
-      ensurePortraitLevelOutline(slot);
+      if (hideLevel) {
+        stripPortraitLevelIndicators(slot);
+      } else {
+        ensurePortraitLevelOutline(slot);
+      }
       return slot;
     }
   }
@@ -997,7 +1062,9 @@ function createHeroMonsterPortraitSlot({ monsterId, level, monster, size = 32 })
   slot.style.width = `${size}px`;
   slot.style.height = `${size}px`;
 
-  slot.appendChild(buildPortraitLevelIndicator(parsedLevel));
+  if (!hideLevel) {
+    slot.appendChild(buildPortraitLevelIndicator(parsedLevel));
+  }
 
   const monsterImg = document.createElement('img');
   monsterImg.className = 'pixelated ml-auto';
@@ -1009,11 +1076,13 @@ function createHeroMonsterPortraitSlot({ monsterId, level, monster, size = 32 })
   slot.appendChild(monsterImg);
   applyHeroMonsterPortraitBorder(slot, monster, parsedLevel);
 
-  if (!window.BestiaryUIComponents) {
-    slot.querySelector('.pixel-font-16')?.remove();
-    slot.appendChild(buildVisiblePortraitLevelIndicator(parsedLevel));
-  } else {
-    ensurePortraitLevelOutline(slot);
+  if (!hideLevel) {
+    if (!window.BestiaryUIComponents) {
+      slot.querySelector('.pixel-font-16')?.remove();
+      slot.appendChild(buildVisiblePortraitLevelIndicator(parsedLevel));
+    } else {
+      ensurePortraitLevelOutline(slot);
+    }
   }
 
   return slot;
@@ -1024,7 +1093,9 @@ function refreshHeroMonsterPortraitSlot(slot, options) {
 
   const nextSlot = createHeroMonsterPortraitSlot(options);
   slot.replaceWith(nextSlot);
-  ensurePortraitLevelOutline(nextSlot);
+  if (!options.hideLevel) {
+    ensurePortraitLevelOutline(nextSlot);
+  }
   return nextSlot;
 }
 
@@ -1093,6 +1164,54 @@ function resolveHeroMonsterInfo(hero, boardContext, monsterMap) {
   return { monsterName, monsterGameId, monsterLevel };
 }
 
+function createEmptyEquipmentPlaceholder(sizePx = HERO_EDITOR_EQUIPMENT_PORTRAIT_SIZE) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'focus-style-visible container-slot surface-darker size-[34px] active:opacity-70 disabled:opacity-100';
+  button.style.width = `${sizePx}px`;
+  button.style.height = `${sizePx}px`;
+  button.style.maxWidth = `${sizePx}px`;
+  button.style.maxHeight = `${sizePx}px`;
+  button.style.flexShrink = '0';
+  button.disabled = true;
+  button.tabIndex = -1;
+
+  const grid = document.createElement('div');
+  grid.className = 'grid size-full place-items-center';
+  grid.setAttribute('data-state', 'closed');
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  svg.setAttribute('width', '24');
+  svg.setAttribute('height', '24');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('class', 'lucide lucide-circle-plus size-4 text-whiteDarker');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  circle.setAttribute('cx', '12');
+  circle.setAttribute('cy', '12');
+  circle.setAttribute('r', '10');
+  svg.appendChild(circle);
+
+  const horizontalPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  horizontalPath.setAttribute('d', 'M8 12h8');
+  svg.appendChild(horizontalPath);
+
+  const verticalPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  verticalPath.setAttribute('d', 'M12 8v8');
+  svg.appendChild(verticalPath);
+
+  grid.appendChild(svg);
+  button.appendChild(grid);
+  return button;
+}
+
 function resolveHeroEquipmentInfo(hero, equipMap) {
   let equipName = '';
   let equipStat = 'ad';
@@ -1127,7 +1246,10 @@ function updateListEquipPortrait(wrap, equipMap, equipName, equipStat, equipTier
     wrap.removeChild(wrap.firstChild);
   }
 
-  if (!equipName) return;
+  if (!equipName) {
+    wrap.appendChild(createEmptyEquipmentPlaceholder());
+    return;
+  }
 
   let equipGameId = window.equipmentNamesToGameIds?.get(equipName.toLowerCase());
   if (!equipGameId && equipMap) {
@@ -1138,7 +1260,7 @@ function updateListEquipPortrait(wrap, equipMap, equipName, equipStat, equipTier
   try {
     const equipData = globalThis.state.utils.getEquipment(equipGameId);
     if (equipData?.metadata) {
-      wrap.appendChild(api.ui.components.createItemPortrait({
+      wrap.appendChild(createHeroEditorItemPortrait({
         itemId: equipData.metadata.spriteId,
         stat: equipStat,
         tier: clampEquipTier(equipTier)
@@ -1197,7 +1319,7 @@ function mountHeroEditorFloatingPanel(detailContent, clientX, clientY, clearLive
     left: 0;
     top: 0;
     z-index: 10000001;
-    width: min(270px, calc(100vw - 16px));
+    width: min(250px, calc(100vw - 16px));
     height: auto;
     max-height: calc(100vh - 16px);
     display: flex;
@@ -1458,7 +1580,8 @@ function showHeroEditorModal(options) {
           monsterId: monsterGameId,
           level,
           monster,
-          size: 32
+          size: 32,
+          hideLevel: isFloating
         });
       }
 
@@ -1468,7 +1591,8 @@ function showHeroEditorModal(options) {
           monsterId: monsterGameId,
           level,
           monster,
-          size: isFloating ? parseInt(HERO_EDITOR_FLOATING_UI.portraitSize, 10) || 24 : 36
+          size: isFloating ? parseInt(HERO_EDITOR_FLOATING_UI.portraitSize, 10) || 24 : 36,
+          hideLevel: isFloating
         });
       }
     };
@@ -1531,7 +1655,7 @@ function showHeroEditorModal(options) {
 
       const listEquipPortraitWrap = document.createElement('div');
       listEquipPortraitWrap.className = 'frame-pressed-1 shrink-0 flex items-center justify-center overflow-hidden';
-      listEquipPortraitWrap.style.cssText = 'width: 32px; height: 32px;';
+      listEquipPortraitWrap.style.cssText = `width: ${HERO_EDITOR_EQUIPMENT_PORTRAIT_SIZE}px; height: ${HERO_EDITOR_EQUIPMENT_PORTRAIT_SIZE}px;`;
       updateListEquipPortrait(listEquipPortraitWrap, equipMap, equipName, equipStat, equipTier);
       listItem.appendChild(listEquipPortraitWrap);
 
@@ -1565,7 +1689,8 @@ function showHeroEditorModal(options) {
             monsterId: monsterGameId,
             level: monsterLevel,
             monster: initialPortraitMonster,
-            size: isFloating ? parseInt(HERO_EDITOR_FLOATING_UI.portraitSize, 10) || 24 : 36
+            size: isFloating ? parseInt(HERO_EDITOR_FLOATING_UI.portraitSize, 10) || 24 : 36,
+            hideLevel: isFloating
           });
           headerLeftContainer.appendChild(headerPortrait);
         } catch (e) {
@@ -1895,7 +2020,7 @@ function showHeroEditorModal(options) {
         try {
           const equipData = globalThis.state.utils.getEquipment(equipGameId);
           if (equipData && equipData.metadata) {
-            itemPortrait = api.ui.components.createItemPortrait({
+            itemPortrait = createHeroEditorItemPortrait({
               itemId: equipData.metadata.spriteId,
               stat: equipStat,
               tier: equipTier
@@ -1906,6 +2031,8 @@ function showHeroEditorModal(options) {
         } catch (e) {
           console.error('Error creating item portrait:', e);
         }
+      } else {
+        portraitContainer.appendChild(createEmptyEquipmentPlaceholder());
       }
       
       // Equipment name dropdown
@@ -2059,14 +2186,14 @@ function showHeroEditorModal(options) {
           
           // Handle "No Equipment" selection
           if (!newEquipName || newEquipName === '') {
-            // Clear the portrait container
             while (nameControl.portraitContainer.firstChild) {
               nameControl.portraitContainer.removeChild(nameControl.portraitContainer.firstChild);
             }
-            
-            // Remove the portrait container from the DOM if it's attached
-            if (nameControl.portraitContainer.parentElement) {
-              nameControl.portraitContainer.parentElement.removeChild(nameControl.portraitContainer);
+            nameControl.portraitContainer.appendChild(createEmptyEquipmentPlaceholder());
+            nameControl.portrait = statControl.portrait = tierControl.portrait = null;
+
+            if (!nameControl.portraitContainer.parentElement) {
+              equipContent.insertBefore(nameControl.portraitContainer, equipContent.firstChild);
             }
 
             refreshListEquipPortrait(index, '', statControl.select.value, tierControl.input.value);
@@ -2088,7 +2215,7 @@ function showHeroEditorModal(options) {
             const equipData = globalThis.state.utils.getEquipment(equipId);
             if (equipData && equipData.metadata) {
               // Create new portrait
-              const newPortrait = api.ui.components.createItemPortrait({
+              const newPortrait = createHeroEditorItemPortrait({
                 itemId: equipData.metadata.spriteId,
                 stat: statControl.select.value,
                 tier: clampTierInputValue()
@@ -2140,7 +2267,7 @@ function showHeroEditorModal(options) {
             const equipData = globalThis.state.utils.getEquipment(equipId);
             if (equipData && equipData.metadata) {
               // Create new portrait
-              const newPortrait = api.ui.components.createItemPortrait({
+              const newPortrait = createHeroEditorItemPortrait({
                 itemId: equipData.metadata.spriteId,
                 stat: statSelect.value,
                 tier: clampTierInputValue()
@@ -2193,7 +2320,7 @@ function showHeroEditorModal(options) {
             const equipData = globalThis.state.utils.getEquipment(equipId);
             if (equipData && equipData.metadata) {
               // Create new portrait
-              const newPortrait = api.ui.components.createItemPortrait({
+              const newPortrait = createHeroEditorItemPortrait({
                 itemId: equipData.metadata.spriteId,
                 stat: statControl.select.value,
                 tier: clampTierInputValue()

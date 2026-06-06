@@ -220,8 +220,7 @@
       right: 'auto',
       display: 'inline-block',
       width: 'fit-content',
-      height: 'fit-content',
-      maxWidth: 'calc(100% - 16px)'
+      height: 'fit-content'
     };
 
     if (placement === 'bottom') {
@@ -281,10 +280,9 @@
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'flex-start',
-      flexWrap: 'wrap',
+      flexWrap: 'nowrap',
       gap: '6px',
       width: 'auto',
-      maxWidth: 'calc(100vw - 16px)',
       background: 'transparent',
       cursor: 'context-menu'
     };

@@ -7,6 +7,7 @@ console.log('[equipment-database.js] Loading equipment database...');
 const HARDCODED_BOOSTED_MAP = {
   'Amulet of Loss':
     'Carlin Sewers, Labyrinth Depths, Hidden City of Demona',
+  'Ancient Amulet': 'Mother of Scarabs Lair',
   'Bear Skin': 'Honeyflower Tower, Bear Room',
   'Bloody Edge':
     'Evergreen Fields, City Boardgames, Carlin Sewers, Ghostlands Surface, Demon Skeleton Hell, Demonrage Seal, Elvenbane, The Orc King Hall',
@@ -22,7 +23,7 @@ const HARDCODED_BOOSTED_MAP = {
   'Dwarven Legs': 'Minotaur Mage Room, Minotaur Hell, Orc Fortress Outskirts',
   'Ectoplasmic Shield': 'Hidden City of Demona',
   'Epee':
-    "Evergreen Fields, Wolf's Den, Spider Lair, Minotaur Hell, Ghostlands Library, The Orc King Hall, Robson's Isle Ruins",
+    "Evergreen Fields, Wolf's Den, Spider Lair, Minotaur Hell, Ghostlands Library, The Orc King Hall, Robson's Isle Ruins, Mother of Scarabs Lair",
   'Fire Axe':
     "Spider Lair, Amber's Raft, Ghostlands Library, Santa Claus Home, Femor Hills, Orcish Barracks, The Orc King Hall",
   'Giant Sword': 'Honeyflower Tower, Swampy Path, Carlin Sewers',
@@ -39,7 +40,8 @@ const HARDCODED_BOOSTED_MAP = {
   'Skullcracker Armor':
     "Demonrage Seal, Alawar's Vault, Elvenbane, A Shamanic Ritual",
   'Soft Boots': 'Darama Oasis',
-  'Spellbook of Ancient Arcana': 'Putrid Chamber',
+  'Spellbook of Ancient Arcana':
+    "Putrid Chamber, Pierre's Kitchen, Serpentine Tower Basement",
   'Springsprout Rod': 'Teleporter Trap, Folda Boat, Frozen Aquifer',
   'Stealth Ring': "Banshee's Last Room, Hedge Maze, Ab'Dendriel Hive",
   'Vampire Shield':
