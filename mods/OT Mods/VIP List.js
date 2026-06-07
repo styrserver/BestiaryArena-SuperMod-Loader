@@ -9540,13 +9540,11 @@ async function minimizeChatPanel(playerName) {
 // Open chat dialog (always opens as HTML panel)
 function openChatDialog(toPlayer) {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
-    if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-      api.ui.components.createModal({
-        title: t('mods.vipList.messagingDisabled'),
-        content: t('mods.vipList.messagingDisabledText'),
-        buttons: [{ text: t('mods.vipList.closeButton'), primary: true }]
-      });
-    }
+    openVIPModal({
+      title: t('mods.vipList.messagingDisabled'),
+      content: t('mods.vipList.messagingDisabledText'),
+      buttons: [{ text: t('mods.vipList.closeButton'), primary: true }]
+    });
     return;
   }
   
@@ -9562,13 +9560,11 @@ function openChatDialog(toPlayer) {
 // Open message dialog (opens as tab in all-chat panel)
 async function openMessageDialog(toPlayer) {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
-    if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-      api.ui.components.createModal({
-        title: t('mods.vipList.messagingDisabled'),
-        content: t('mods.vipList.messagingDisabledText'),
-        buttons: [{ text: t('mods.vipList.closeButton'), primary: true }]
-      });
-    }
+    openVIPModal({
+      title: t('mods.vipList.messagingDisabled'),
+      content: t('mods.vipList.messagingDisabledText'),
+      buttons: [{ text: t('mods.vipList.closeButton'), primary: true }]
+    });
     return;
   }
   
@@ -10184,7 +10180,8 @@ function getFontSizeStyle(fontSize, forPanel) {
 
 // Query for open dialog element
 function getOpenDialog() {
-  return document.querySelector('div[role="dialog"][data-state="open"]');
+  return document.querySelector('div[role="dialog"][data-state="open"]') ||
+    document.querySelector('div[role="dialog"]');
 }
 
 // Add hover effect to element
@@ -10335,26 +10332,52 @@ function createSearchInput(originalPlaceholder, forPanel = false) {
 // 11. Modal Styling
 // =======================
 
-// Apply modal styles after creation
-function applyModalStyles(dialog) {
-  dialog.style.width = `${MODAL_DIMENSIONS.WIDTH}px`;
-  dialog.style.minWidth = `${MODAL_DIMENSIONS.WIDTH}px`;
-  dialog.style.maxWidth = `${MODAL_DIMENSIONS.WIDTH}px`;
-  dialog.style.height = `${MODAL_DIMENSIONS.HEIGHT}px`;
-  dialog.style.minHeight = `${MODAL_DIMENSIONS.HEIGHT}px`;
-  dialog.style.maxHeight = `${MODAL_DIMENSIONS.HEIGHT}px`;
-  
-  const contentElem = dialog.querySelector('.modal-content, [data-content], .content, .modal-body, .widget-bottom');
-  if (contentElem) {
-    contentElem.style.width = `${MODAL_DIMENSIONS.WIDTH}px`;
-    contentElem.style.height = `${MODAL_DIMENSIONS.HEIGHT}px`;
-    contentElem.style.display = 'flex';
-    contentElem.style.flexDirection = 'column';
-    contentElem.style.flex = '1 1 0';
-    contentElem.style.minHeight = '0';
+// Open modal via api.showModal (Highscore Improvements pattern), with createModal fallback
+function openVIPModal({ title, width, height, content, buttons }) {
+  const options = { title, content, buttons: buttons || [] };
+  if (width != null) options.width = width;
+  if (height != null && height !== undefined) options.height = height;
+
+  if (typeof api !== 'undefined' && typeof api.showModal === 'function') {
+    return api.showModal(options);
   }
-  
-  // Update separator before footer
+  if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
+    return api.ui.components.createModal(options);
+  }
+  return null;
+}
+
+// Apply modal styles after creation (expand step — matches Highscore Improvements)
+function applyModalStyles(dialog, width, height) {
+  const w = width || MODAL_DIMENSIONS.WIDTH;
+  const h = height || MODAL_DIMENSIONS.HEIGHT;
+
+  dialog.style.width = `${w}px`;
+  dialog.style.minWidth = `${w}px`;
+  dialog.style.maxWidth = `${w}px`;
+  dialog.style.height = `${h}px`;
+  dialog.style.minHeight = `${h}px`;
+  dialog.style.maxHeight = `${h}px`;
+  dialog.classList.remove('max-w-[300px]');
+
+  const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
+  if (innerWrapper) {
+    innerWrapper.style.display = 'flex';
+    innerWrapper.style.flexDirection = 'column';
+    innerWrapper.style.height = '100%';
+    innerWrapper.style.minHeight = '0';
+  }
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    widgetBottom.style.display = 'flex';
+    widgetBottom.style.flexDirection = 'column';
+    widgetBottom.style.flex = '1 1 0';
+    widgetBottom.style.minHeight = '0';
+    widgetBottom.style.height = '100%';
+    widgetBottom.style.overflow = 'hidden';
+  }
+
   const separator = dialog.querySelector('.separator');
   if (separator) {
     separator.className = 'separator my-2.5';
@@ -11916,13 +11939,13 @@ async function openVIPListPanel() {
 
 async function openVIPListModal() {
   try {
-    // Use the API's modal component if available
-    if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
+    if (typeof api !== 'undefined' && (typeof api.showModal === 'function' || (api.ui && api.ui.components && api.ui.components.createModal))) {
       // Common initialization
       await initializeVIPListInterface();
       
       const contentDiv = document.createElement('div');
       contentDiv.style.width = '100%';
+      contentDiv.style.height = '100%';
       contentDiv.style.flex = '1 1 0';
       contentDiv.style.minHeight = '0';
       contentDiv.style.boxSizing = 'border-box';
@@ -11939,10 +11962,11 @@ async function openVIPListModal() {
       vipListBox.style.width = '100%';
       vipListBox.style.height = '100%';
       vipListBox.style.flex = '1 1 0';
+      vipListBox.style.minHeight = '0';
       
       contentDiv.appendChild(vipListBox);
       
-      const modal = api.ui.components.createModal({
+      const modal = openVIPModal({
         title: t('mods.vipList.modalTitle'),
         width: MODAL_DIMENSIONS.WIDTH,
         height: MODAL_DIMENSIONS.HEIGHT,
@@ -11951,42 +11975,27 @@ async function openVIPListModal() {
           text: t('mods.vipList.closeButton'), 
           primary: true,
           onClick: () => {
-            // Clear refresh interval
             cleanupAutoRefresh();
-            // Clear modal instance reference (memory leak prevention)
             vipListModalInstance = null;
           }
         }]
       });
       
-      // Store modal instance for refreshing display
       const timeout1 = setTimeout(() => {
         pendingTimeouts.delete(timeout1);
         const dialog = getOpenDialog();
         if (dialog) {
           vipListModalInstance = dialog;
-        }
-      }, TIMEOUTS.MEDIUM);
-      trackTimeout(timeout1);
-      
-      // Adjust dialog styles after creation
-      const timeout2 = setTimeout(() => {
-        pendingTimeouts.delete(timeout2);
-        const dialog = getOpenDialog();
-        if (dialog) {
-          applyModalStyles(dialog);
-          
-          // Add search input and Add button to footer
+          applyModalStyles(dialog, MODAL_DIMENSIONS.WIDTH, MODAL_DIMENSIONS.HEIGHT);
+
           const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
           if (buttonContainer) {
             setupModalSearchInput(buttonContainer);
           }
-          
-          // Setup auto-refresh every 1 minute
+
           setupAutoRefresh('modal');
-          
-          // Watch for modal closing (via ESC or other methods)
-          modalCloseObserver = new MutationObserver((mutations) => {
+
+          modalCloseObserver = new MutationObserver(() => {
             if (!document.contains(dialog) || dialog.getAttribute('data-state') === 'closed') {
               cleanupAutoRefresh();
               vipListModalInstance = null;
@@ -11999,8 +12008,8 @@ async function openVIPListModal() {
           modalCloseObserver.observe(dialog, { attributes: true, attributeFilter: ['data-state'] });
           modalCloseObserver.observe(document.body, { childList: true, subtree: true });
         }
-      }, TIMEOUTS.NORMAL);
-      trackTimeout(timeout2);
+      }, 50);
+      trackTimeout(timeout1);
       
       console.log('[VIP List] Modal opened');
       return modal;

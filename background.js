@@ -68,6 +68,7 @@ async function loadDefaultEnabledMods() {
       'database/equipment-database.js',
       'database/maps-database.js',
       'database/equipment-lua-export.js',
+      'database/creature-lua-export.js',
       'database/playereq-database.js',
       'database/firebase-admins.js',
       'Official Mods/Bestiary_Automator.js',
@@ -95,6 +96,7 @@ async function loadDefaultEnabledMods() {
       'database/equipment-database.js',
       'database/maps-database.js',
       'database/equipment-lua-export.js',
+      'database/creature-lua-export.js',
       'database/playereq-database.js',
       'database/firebase-admins.js',
       'Official Mods/Bestiary_Automator.js',
@@ -1040,7 +1042,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // NOTE: Keep these in sync with content/mod-registry.js
         console.log('[Background] Chrome detected or Firefox import failed, using hardcoded counts');
         const modCounts = {
-          database: 8,
+          database: 9,
           official: 11,
           super: 25,
           ot: 4

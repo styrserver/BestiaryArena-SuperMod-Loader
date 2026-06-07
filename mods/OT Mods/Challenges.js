@@ -1238,8 +1238,58 @@ function createDeleteRunContextMenu(x, y, entry, onDelete, onClose) {
 // 3. Modal
 // =======================
 
+function getChallengesOpenDialog() {
+  return document.querySelector('div[role="dialog"][data-state="open"]') ||
+    document.querySelector('div[role="dialog"]');
+}
+
+function openModal(challengesApi, { title, width, height, content, buttons }) {
+  const options = { title, content, buttons: buttons || [] };
+  if (width != null) options.width = width;
+  if (height != null && height !== undefined) options.height = height;
+
+  if (challengesApi && typeof challengesApi.showModal === 'function') {
+    return challengesApi.showModal(options);
+  }
+  if (challengesApi && challengesApi.ui && challengesApi.ui.components && challengesApi.ui.components.createModal) {
+    return challengesApi.ui.components.createModal(options);
+  }
+  return null;
+}
+
+function applyChallengesModalShellStyles(dialog, widthPx, heightPx) {
+  dialog.style.width = widthPx + 'px';
+  dialog.style.minWidth = widthPx + 'px';
+  dialog.style.maxWidth = widthPx + 'px';
+  dialog.style.height = heightPx + 'px';
+  dialog.style.minHeight = heightPx + 'px';
+  dialog.style.maxHeight = heightPx + 'px';
+  dialog.classList.remove('max-w-[300px]');
+
+  const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
+  if (innerWrapper) {
+    innerWrapper.style.display = 'flex';
+    innerWrapper.style.flexDirection = 'column';
+    innerWrapper.style.height = '100%';
+    innerWrapper.style.minHeight = '0';
+  }
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    widgetBottom.style.flex = '1 1 0';
+    widgetBottom.style.minHeight = '0';
+    widgetBottom.style.height = '100%';
+    widgetBottom.style.display = 'flex';
+    widgetBottom.style.flexDirection = 'column';
+    widgetBottom.style.overflow = 'hidden';
+  }
+}
+
 function openChallengesModal() {
-  if (!context.api || !context.api.ui || !context.api.ui.components) {
+  if (!context.api || (
+    typeof context.api.showModal !== 'function' &&
+    (!context.api.ui || !context.api.ui.components)
+  )) {
     console.error('[Challenges Mod] API not available');
     return;
   }
@@ -3156,7 +3206,7 @@ function openChallengesModal() {
   updateChallengesStartButtonState();
 
   // Roll (map + creatures) / Start as modal footer buttons. Start: close modal then run challenge (sandbox + execute).
-  api.ui.components.createModal({
+  openModal(api, {
     title: t('mods.challenges.title'),
     width: MODAL_WIDTH,
     height: MODAL_HEIGHT,
@@ -3187,15 +3237,10 @@ function openChallengesModal() {
   var CHALLENGE_BLUE_BG = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
   var CHALLENGE_RED_BG = 'https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png';
   setTimeout(function() {
-    var dialog = document.querySelector('div[role="dialog"][data-state="open"]') || document.querySelector('div[role="dialog"]');
+    var dialog = getChallengesOpenDialog();
     if (!dialog) return;
     dialog.setAttribute('data-challenges-dialog', '1');
-    dialog.classList.remove('max-w-[300px]');
-    dialog.style.width = MODAL_WIDTH + 'px';
-    dialog.style.minWidth = MODAL_WIDTH + 'px';
-    dialog.style.maxWidth = MODAL_WIDTH + 'px';
-    dialog.style.height = MODAL_HEIGHT + 'px';
-    dialog.style.minHeight = MODAL_HEIGHT + 'px';
+    applyChallengesModalShellStyles(dialog, MODAL_WIDTH, MODAL_HEIGHT);
     var footer = dialog.querySelector('.flex.justify-end.gap-2');
     if (footer) {
       var fb = footer.querySelectorAll('button');
@@ -3226,22 +3271,6 @@ function openChallengesModal() {
       updateFooterQueueCount();
       if (window.__challengesFooterQueueIntervalId) clearInterval(window.__challengesFooterQueueIntervalId);
       window.__challengesFooterQueueIntervalId = setInterval(updateFooterQueueCount, 5000);
-    }
-    var innerContent = dialog.firstElementChild;
-    if (innerContent) {
-      innerContent.style.display = 'flex';
-      innerContent.style.flexDirection = 'column';
-      innerContent.style.height = '100%';
-      innerContent.style.minHeight = '0';
-    }
-    var widgetBottom = dialog.querySelector('.widget-bottom');
-    if (widgetBottom) {
-      widgetBottom.style.flex = '1 1 0';
-      widgetBottom.style.minHeight = '0';
-      widgetBottom.style.height = '100%';
-      widgetBottom.style.display = 'flex';
-      widgetBottom.style.flexDirection = 'column';
-      widgetBottom.style.overflow = 'hidden';
     }
     var randomizeBtn = getChallengesRollButton();
     if (randomizeBtn) {
@@ -3998,20 +4027,11 @@ function showChallengeToast(message) {
   var text = message ? String(message).replace(/</g, '&lt;') : '';
   try {
     var api = (typeof context !== 'undefined' && context && context.api) ? context.api : (typeof window !== 'undefined' && window.BestiaryModAPI) ? window.BestiaryModAPI : null;
-    if (api && api.ui && api.ui.components && api.ui.components.createModal) {
-      api.ui.components.createModal({
-        title: 'Challenges',
-        content: '<p>' + text + '</p>',
-        buttons: [{ text: 'OK', primary: true }]
-      });
-      return;
-    }
-    if (typeof window !== 'undefined' && window.BestiaryModAPI && typeof window.BestiaryModAPI.showModal === 'function') {
-      window.BestiaryModAPI.showModal({
-        title: 'Challenges',
-        content: '<p>' + text + '</p>',
-        buttons: [{ text: 'OK', primary: true }]
-      });
+    if (openModal(api, {
+      title: 'Challenges',
+      content: '<p>' + text + '</p>',
+      buttons: [{ text: 'OK', primary: true }]
+    })) {
       return;
     }
   } catch (e) {

@@ -8509,7 +8509,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           tooltip.innerHTML = `
             <div style="font-size: 16px; margin-bottom: 8px; color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">📊 Data Source</div>
             <div style="margin-bottom: 6px;">Rankings fetched from <a href="https://bestiaryarena.wiki.gg/wiki/Rankings" target="_blank" style="color: #ffe066; text-decoration: underline;">Bestiary Arena Wiki</a></div>
-            <div style="margin-bottom: 6px; font-size: 11px; color: #ccc;">Shows all players who completed all 64 maps, sorted by level</div>
+            <div style="margin-bottom: 6px; font-size: 11px; color: #ccc;">Shows all players who completed all ${CYCLOPEDIA_SETTINGS.playerStatCaps.exploredMaps} maps, sorted by level</div>
             <div style="font-size: 10px; color: #888;">${timestamp ? `Updated: ${timestamp}` : 'No timestamp available'}</div>
           `;
 

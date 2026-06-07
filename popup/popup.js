@@ -1094,6 +1094,7 @@ const hiddenMods = [
   'equipment-database.js',
   'maps-database.js',
   'equipment-lua-export.js',
+  'creature-lua-export.js',
   'playereq-database.js',
   'firebase-admins.js',
   'Mod Settings.js',

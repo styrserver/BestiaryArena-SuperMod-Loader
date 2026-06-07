@@ -4360,7 +4360,8 @@ function formatTime(timestamp) {
 }
 
 function getOpenDialog() {
-  return document.querySelector('div[role="dialog"][data-state="open"]');
+  return document.querySelector('div[role="dialog"][data-state="open"]') ||
+    document.querySelector('div[role="dialog"]');
 }
 
 // Close the currently open dialog
@@ -4383,8 +4384,8 @@ function openCyclopediaForPlayer(playerName) {
     if (typeof window !== 'undefined' && window.activeCyclopediaModal) return true;
     if (typeof window !== 'undefined' && window.cyclopediaModalInProgress) return true;
     if (typeof window !== 'undefined' && window.cyclopediaState && window.cyclopediaState.modalOpen) return true;
-    const openModal = document.querySelector('div[role="dialog"][data-state="open"]');
-    if (openModal && openModal.textContent && openModal.textContent.includes('Cyclopedia')) return true;
+    const openDialog = document.querySelector('div[role="dialog"][data-state="open"]');
+    if (openDialog && openDialog.textContent && openDialog.textContent.includes('Cyclopedia')) return true;
     return false;
   };
   
@@ -5369,7 +5370,7 @@ async function showPlayerEquipmentModal(playerName) {
       return;
     }
     
-    const modal = api.ui.components.createModal({
+    const modal = openModal({
       title: `${playerName}'s Equipment`,
       width: PLAYER_EQUIPMENT_PANEL_DIMENSIONS.WIDTH,
       height: PLAYER_EQUIPMENT_PANEL_DIMENSIONS.HEIGHT,
@@ -5402,7 +5403,10 @@ async function showPlayerEquipmentModal(playerName) {
 
 // Check if modal API is available
 function isModalApiAvailable() {
-  return typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal;
+  return typeof api !== 'undefined' && (
+    typeof api.showModal === 'function' ||
+    (api.ui && api.ui.components && api.ui.components.createModal)
+  );
 }
 
 // Ensure modal API is available, show error and return false if not
@@ -5414,26 +5418,35 @@ function ensureModalApi() {
   return true;
 }
 
+// Open modal via api.showModal (Highscore Improvements pattern), with createModal fallback
+function openModal({ title, width, height, content, buttons }) {
+  const options = { title, content, buttons: buttons || [] };
+  if (width != null) options.width = width;
+  if (height != null && height !== undefined) options.height = height;
+
+  if (typeof api.showModal === 'function') {
+    return api.showModal(options);
+  }
+  if (api.ui && api.ui.components && api.ui.components.createModal) {
+    return api.ui.components.createModal(options);
+  }
+  return null;
+}
+
 // Create modal with automatic styling application
 function createStyledModal({ title, width, height, content, buttons, onAfterCreate }) {
   if (!ensureModalApi()) return null;
-  
-  const modal = api.ui.components.createModal({
-    title,
-    width,
-    height: height !== undefined ? height : null,
-    content,
-    buttons
-  });
-  
+
+  const modal = openModal({ title, width, height, content, buttons });
+
   setTimeout(() => {
     const dialog = getOpenDialog();
     if (dialog) {
       applyModalStyles(dialog, width, height);
       if (onAfterCreate) onAfterCreate(dialog);
     }
-  }, 100);
-  
+  }, 50);
+
   return modal;
 }
 
@@ -5451,11 +5464,14 @@ function createCloseDialogButton(text, primary = false, onClick = null) {
 
 function applyModalStyles(dialog, width, height) {
   const w = width || MODAL_DIMENSIONS.WIDTH;
+  const hasFixedHeight = height !== null && height !== undefined;
+
   dialog.style.width = `${w}px`;
   dialog.style.minWidth = `${w}px`;
   dialog.style.maxWidth = `${w}px`;
-  
-  if (height !== null && height !== undefined) {
+  dialog.classList.remove('max-w-[300px]');
+
+  if (hasFixedHeight) {
     const h = height || MODAL_DIMENSIONS.HEIGHT;
     dialog.style.height = `${h}px`;
     dialog.style.minHeight = `${h}px`;
@@ -5465,22 +5481,33 @@ function applyModalStyles(dialog, width, height) {
     dialog.style.minHeight = 'auto';
     dialog.style.maxHeight = 'none';
   }
-  
-  const contentElem = dialog.querySelector('.modal-content, [data-content], .content, .modal-body, .widget-bottom');
-  if (contentElem) {
-    contentElem.style.width = `${w}px`;
-    if (height !== null && height !== undefined) {
-      const h = height || MODAL_DIMENSIONS.HEIGHT;
-      contentElem.style.height = `${h}px`;
-    } else {
-      contentElem.style.height = 'auto';
+
+  const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
+  if (innerWrapper) {
+    innerWrapper.style.display = 'flex';
+    innerWrapper.style.flexDirection = 'column';
+    if (hasFixedHeight) {
+      innerWrapper.style.height = '100%';
+      innerWrapper.style.minHeight = '0';
     }
-    contentElem.style.display = 'flex';
-    contentElem.style.flexDirection = 'column';
-    contentElem.style.flex = '1 1 0';
-    contentElem.style.minHeight = '0';
   }
-  
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    widgetBottom.style.display = 'flex';
+    widgetBottom.style.flexDirection = 'column';
+    widgetBottom.style.minHeight = '0';
+    if (hasFixedHeight) {
+      widgetBottom.style.flex = '1 1 0';
+      widgetBottom.style.height = '100%';
+      widgetBottom.style.overflow = 'hidden';
+    } else {
+      widgetBottom.style.flex = '';
+      widgetBottom.style.height = 'auto';
+      widgetBottom.style.overflow = '';
+    }
+  }
+
   const separator = dialog.querySelector('.separator');
   if (separator) {
     separator.className = 'separator my-2.5';
@@ -5654,7 +5681,7 @@ async function showCreateGuildDialog() {
   contentDiv.appendChild(errorMsg);
 
   let createBtnRef = null;
-  const modal = api.ui.components.createModal({
+  const modal = openModal({
     title: t('mods.guilds.createGuildTitle'),
     width: 450,
     height: null,
@@ -6411,7 +6438,7 @@ async function showGuildBrowser() {
     buttonContainer.insertBefore(searchContainer, buttonContainer.firstChild);
   };
 
-  const modal = api.ui.components.createModal({
+  const modal = openModal({
     title: t('mods.guilds.browserTitle'),
     width: MODAL_DIMENSIONS.WIDTH,
     height: MODAL_DIMENSIONS.HEIGHT,
@@ -6533,7 +6560,7 @@ async function showMemberManagementModal(guild, currentMember, targetMember) {
     modalContent.appendChild(noActionsMsg);
   }
 
-  const modal = api.ui.components.createModal({
+  const modal = openModal({
     title: t('mods.guilds.manageMember') || 'Manage Member',
     width: 350,
     height: null,
@@ -7159,7 +7186,7 @@ async function openGuildPanel(viewGuildId = null) {
     async function addInviteAndInvitedSection() {
   if (currentMember && hasPermission(currentMember.role, 'invite')) {
     const inviteBtn = createButton('+ ' + t('mods.guilds.invitePlayerTitle'), async () => {
-      const inviteModal = api.ui.components.createModal({
+      const inviteModal = openModal({
         title: t('mods.guilds.invitePlayerTitle'),
         width: 400,
         height: null,
@@ -7638,7 +7665,7 @@ async function openGuildPanel(viewGuildId = null) {
     `;
     
     const descBtn = createButton(t('mods.guilds.editDescription'), async () => {
-      const editModal = api.ui.components.createModal({
+      const editModal = openModal({
         title: t('mods.guilds.editDescription'),
         width: 450,
         height: null,
@@ -7705,7 +7732,7 @@ async function openGuildPanel(viewGuildId = null) {
                 `;
                 successContent.textContent = t('mods.guilds.descriptionUpdated');
                 
-                const successModal = api.ui.components.createModal({
+                const successModal = openModal({
                   title: t('mods.guilds.success'),
                   width: 400,
                   height: null,
@@ -7808,7 +7835,7 @@ async function openGuildPanel(viewGuildId = null) {
     const joinTypeBtn = createButton(t('mods.guilds.changeJoinType'), async () => {
       let selectedJoinType = joinType;
       
-      const editModal = api.ui.components.createModal({
+      const editModal = openModal({
         title: t('mods.guilds.changeJoinType'),
         width: 400,
         height: null,
@@ -7959,7 +7986,7 @@ async function openGuildPanel(viewGuildId = null) {
                 `;
                 successContent.textContent = t('mods.guilds.joinTypeUpdated');
                 
-                const successModal = api.ui.components.createModal({
+                const successModal = openModal({
                   title: t('mods.guilds.success'),
                   width: 400,
                   height: null,
@@ -8011,7 +8038,7 @@ async function openGuildPanel(viewGuildId = null) {
     deleteSection.style.cssText = 'display: flex; flex-direction: column; gap: 4px; margin-top: 8px;';
     
     const deleteBtn = createButton(t('mods.guilds.deleteGuild'), async () => {
-      const confirmModal = api.ui.components.createModal({
+      const confirmModal = openModal({
         title: t('mods.guilds.deleteGuild'),
         width: 450,
         height: null,
@@ -8068,7 +8095,7 @@ async function openGuildPanel(viewGuildId = null) {
                 `;
                 successContent.textContent = t('mods.guilds.guildDeleted');
                 
-                api.ui.components.createModal({
+                openModal({
                   title: t('mods.guilds.success'),
                   width: 400,
                   height: null,
@@ -8102,7 +8129,7 @@ async function openGuildPanel(viewGuildId = null) {
                 `;
                 errorContent.textContent = error.message || t('mods.guilds.error');
                 
-                api.ui.components.createModal({
+                openModal({
                   title: t('mods.guilds.error'),
                   width: 400,
                   height: null,
@@ -8214,7 +8241,7 @@ async function openGuildPanel(viewGuildId = null) {
   };
 
   const modalTitle = guild.abbreviation ? `${guild.name} [${guild.abbreviation}]` : guild.name;
-  const modal = api.ui.components.createModal({
+  const modal = openModal({
     title: modalTitle,
     width: GUILD_PANEL_DIMENSIONS.WIDTH,
     height: GUILD_PANEL_DIMENSIONS.HEIGHT,
@@ -10790,10 +10817,7 @@ async function showEquipmentModal() {
   contentDiv.style.cssText = `
     width: 100%;
     height: 100%;
-    min-width: 490px;
-    max-width: 490px;
-    min-height: 400px;
-    max-height: 400px;
+    min-height: 0;
     box-sizing: border-box;
     overflow: hidden;
     display: flex;
@@ -10855,9 +10879,8 @@ async function showEquipmentModal() {
     title: t('mods.guilds.equipment.totalStatsTitle') || 'Total stats',
     content: detailsContainer
   });
-  bottomBox.style.flex = '0 0 191px';
-  bottomBox.style.height = '191px';
-  bottomBox.style.minHeight = '191px';
+  bottomBox.style.flex = '1 1 0';
+  bottomBox.style.minHeight = '0';
   col2.appendChild(bottomBox);
   
   // Initial Tibia skills display
@@ -10918,13 +10941,10 @@ async function showEquipmentModal() {
         originalRemove();
       };
       
-      // Apply modal dimensions using applyModalStyles like guild modal
       setTimeout(() => {
         if (!dialog) return;
 
         applyModalStyles(dialog, EQUIPMENT_CONFIG.MODAL_WIDTH, EQUIPMENT_CONFIG.MODAL_HEIGHT);
-
-        dialog.classList.remove('max-w-[300px]');
 
         // Add guild coins display to footer
         const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');

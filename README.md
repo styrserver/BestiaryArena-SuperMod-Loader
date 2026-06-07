@@ -89,8 +89,10 @@ For a longer explanation with examples, see [Adding a New Built-in Mod to the Ex
 Bundled mods must be registered in more than one place (browser limits: the popup and background worker cannot always share the same module graph as the content scripts). When you add or rename an official, super, OT, or database script under `mods/` or `database/`:
 
 1. Update [`content/mod-registry.js`](content/mod-registry.js) — add the filename to `DATABASE_MODS`, `OFFICIAL_MODS`, `SUPER_MODS`, or `OT_MODS` as appropriate (see the file header for the full checklist).
-2. Update [`background.js`](background.js) — in the `getModCounts` message handler, adjust the hardcoded `modCounts` object (look for the comment *Keep these in sync with content/mod-registry.js*) so category totals stay correct on Chromium.
+2. Update [`background.js`](background.js) — add to default-enabled lists and, in the `getModCounts` message handler, adjust the hardcoded `modCounts` object (look for the comment *Keep these in sync with content/mod-registry.js*) so category totals stay correct on Chromium.
 3. Update [`popup/popup.js`](popup/popup.js) — keep the static name lists in sync with `mod-registry.js` where the popup enumerates mods.
+4. Update [`content/local_mods.js`](content/local_mods.js) — keep `FALLBACK_*` arrays in sync (Orion iOS and other environments where `mod-registry.js` import fails).
+5. For database scripts, add the path to [`manifest_firefox.json`](manifest_firefox.json) `web_accessible_resources` if the file must load in page context.
 
 ### Standardized UI Components
 
@@ -147,13 +149,15 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `utility_injector.js` - Utility injection system
 - `docs/` - Mod developer markdown guides and [`patch-notes.json`](docs/patch-notes.json) (version metadata used by the extension popup patch notes UI)
 - `database/` - Static tooltip and reference data used by mods (not `media.txt`; that file lives under `assets/originalassets/`)
-  - `creature-database.js` - Creature reference data
-  - `equipment-database.js` - Equipment reference data
-  - `playereq-database.js` - Player equipment helpers (slot types, dynamic equipment lists)
-  - `equipment-lua-export.js` - DevTools/console helpers to export equipment data in Lua/wiki-friendly form
-  - `inventory-database.js` - Inventory tooltip data
-  - `maps-database.js` - Maps reference data
   - `Welcome.js` - Welcome screen data
+  - `inventory-database.js` - Inventory tooltip data
+  - `creature-database.js` - Creature reference data (lists, map boss stats, shiny/gazer helpers)
+  - `equipment-database.js` - Equipment reference data (boosted-map overrides shared with Cyclopedia)
+  - `maps-database.js` - Maps reference data
+  - `equipment-lua-export.js` - DevTools/console helpers to export equipment wiki Lua (`dumpEquipmentWikiLua()`)
+  - `creature-lua-export.js` - DevTools/console helpers to export creature stats wiki Lua (`dumpCreatureWikiLua()`)
+  - `playereq-database.js` - Player equipment helpers (slot types, dynamic equipment lists)
+  - `firebase-admins.js` - Firebase admin allowlist for privileged mod features
 - `mods/` - Local mod files, organized as follows:
   - `Official Mods/` - Core mods that provide essential gameplay enhancements and are included by default.
   - `Super Mods/` - Advanced mods with comprehensive features, included by default (see below for details).
@@ -172,6 +176,30 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - [Client API Documentation](docs/client_api.md) - Complete reference for the game's Client API
 - [Game State API Documentation](docs/game_state_api.md) - Complete reference for accessing and modifying game state
 - [Patch notes (JSON)](docs/patch-notes.json) - Machine-readable changelog consumed by the in-loader patch notes feature
+
+### Wiki Lua export helpers
+
+Hidden database scripts (enabled by default) help wiki maintainers generate Lua modules from live game data. Open DevTools on Bestiary Arena with the loader injected, then run:
+
+**Equipment** (`equipment-lua-export.js`):
+
+```javascript
+dumpEquipmentWikiLua();                              // downloads equipment-wiki-YYYY-MM-DD.lua
+dumpEquipmentWikiLua({ download: false, copy: true });
+diffEquipmentLuaExclusionSets();                     // sync check vs Better Exaltation Chest / Better Boosted Maps
+```
+
+Raid/Map columns use room actors; BoostedMap uses `equipment-database.js` `HARDCODED_BOOSTED_MAP` or today's daily boost. See the file header for exclusion-list sync (`EXALTATION_CHEST_EXCLUDED`, `BOOST_MAP_EXCLUDED`).
+
+**Creatures** (`creature-lua-export.js`):
+
+```javascript
+dumpCreatureWikiLua();                               // downloads creature-wiki-YYYY-MM-DD.lua
+dumpCreatureWikiLua({ download: false, copy: true });
+getCreatureExportSections();                       // inspect regular / event / unobtainable / gazer lists
+```
+
+Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed, `roles`, `is_poisonous`) come from `getMonster` and `creature-database.js` `HARDCODED_MAP_MONSTER_STATS`. Wiki-only fields (`attack_speed`, `scales_ad`, `scales_ap`, specials) are in `WIKI_CREATURE_EXTRA_FIELDS` inside the exporter — update there when wiki rules change.
 
 ## Mods
 

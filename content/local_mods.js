@@ -36,7 +36,7 @@ let modBaseUrl = '';
 // Keep in sync with content/mod-registry.js
 const FALLBACK_DATABASE_MODS = [
   'Welcome.js', 'inventory-database.js', 'creature-database.js', 'equipment-database.js',
-  'maps-database.js', 'equipment-lua-export.js', 'playereq-database.js', 'firebase-admins.js'
+  'maps-database.js', 'equipment-lua-export.js', 'creature-lua-export.js', 'playereq-database.js', 'firebase-admins.js'
 ];
 const FALLBACK_OFFICIAL_MODS = [
   'Bestiary_Automator.js', 'Board Analyzer.js', 'Custom_Display.js', 'Hero_Editor.js',
@@ -55,6 +55,7 @@ const FALLBACK_OT_MODS = ['Challenges.js', 'Quests.js', 'Guilds.js', 'VIP List.j
 const FALLBACK_DEFAULT_ENABLED_MODS = [
   'database/Welcome.js', 'database/inventory-database.js', 'database/creature-database.js',
   'database/equipment-database.js', 'database/maps-database.js', 'database/equipment-lua-export.js',
+  'database/creature-lua-export.js',
   'database/playereq-database.js', 'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js', 'Official Mods/Board Analyzer.js', 'Official Mods/Custom_Display.js',
   'Official Mods/Hero_Editor.js', 'Official Mods/Highscore_Improvements.js', 'Official Mods/Item_tier_list.js',
@@ -416,6 +417,7 @@ let defaultEnabledMods = [
   'database/equipment-database.js',
   'database/maps-database.js',
   'database/equipment-lua-export.js',
+  'database/creature-lua-export.js',
   'database/playereq-database.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',

@@ -76,8 +76,10 @@ Mods can be written in JavaScript and have access to the game's state and a powe
 === Adding a mod that ships inside the extension ===
 Bundled mods must be registered in more than one place (browser limits: the popup and background worker cannot always share the same module graph as the content scripts). When you add or rename an official, super, OT, or database script under <code>mods/</code> or <code>database/</code>:
 # Update [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/content/mod-registry.js <code>content/mod-registry.js</code>] — add the filename to <code>DATABASE_MODS</code>, <code>OFFICIAL_MODS</code>, <code>SUPER_MODS</code>, or <code>OT_MODS</code> as appropriate (see the file header for the full checklist).
-# Update [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/background.js <code>background.js</code>] — in the <code>getModCounts</code> message handler, adjust the hardcoded <code>modCounts</code> object (comment: keep in sync with <code>content/mod-registry.js</code>) so category totals stay correct on Chromium.
+# Update [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/background.js <code>background.js</code>] — add to default-enabled lists and, in the <code>getModCounts</code> message handler, adjust the hardcoded <code>modCounts</code> object (comment: keep in sync with <code>content/mod-registry.js</code>) so category totals stay correct on Chromium.
 # Update [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/popup/popup.js <code>popup/popup.js</code>] — keep the static name lists in sync with <code>mod-registry.js</code> where the popup enumerates mods.
+# Update [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/content/local_mods.js <code>content/local_mods.js</code>] — keep <code>FALLBACK_*</code> arrays in sync (Orion iOS and other environments where <code>mod-registry.js</code> import fails).
+# For database scripts, add the path to [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/manifest_firefox.json <code>manifest_firefox.json</code>] <code>web_accessible_resources</code> if the file must load in page context.
 
 For a longer explanation with examples, see [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_development_guide.md#adding-a-new-built-in-mod-to-the-extension Adding a New Built-in Mod to the Extension] in the Mod Development Guide.
 
@@ -130,13 +132,15 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>utility_injector.js</code> - Utility injection system
 * <code>docs/</code> - Mod developer markdown guides and [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/patch-notes.json <code>patch-notes.json</code>] (version metadata used by the extension popup patch notes UI)
 * <code>database/</code> - Static tooltip and reference data used by mods
-** <code>creature-database.js</code> - Creature database
-** <code>equipment-database.js</code> - Equipment database
-** <code>playereq-database.js</code> - Player equipment helpers (slot types, dynamic equipment lists)
-** <code>equipment-lua-export.js</code> - Console helpers to export equipment data in Lua/wiki-friendly form
-** <code>inventory-database.js</code> - Inventory tooltip data
-** <code>maps-database.js</code> - Maps database
 ** <code>Welcome.js</code> - Welcome screen data
+** <code>inventory-database.js</code> - Inventory tooltip data
+** <code>creature-database.js</code> - Creature reference data (lists, map boss stats, shiny/gazer helpers)
+** <code>equipment-database.js</code> - Equipment reference data (boosted-map overrides shared with Cyclopedia)
+** <code>maps-database.js</code> - Maps reference data
+** <code>equipment-lua-export.js</code> - Console helpers to export equipment wiki Lua (<code>dumpEquipmentWikiLua()</code>)
+** <code>creature-lua-export.js</code> - Console helpers to export creature stats wiki Lua (<code>dumpCreatureWikiLua()</code>)
+** <code>playereq-database.js</code> - Player equipment helpers (slot types, dynamic equipment lists)
+** <code>firebase-admins.js</code> - Firebase admin allowlist for privileged mod features
 * <code>mods/</code> - Local mod files, organized as follows:
 ** <code>Official Mods/</code> - Core mods that provide essential gameplay enhancements and are included by default.
 ** <code>Super Mods/</code> - Advanced mods with comprehensive features, included by default (see below for details).
@@ -154,6 +158,25 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/client_api.md Client API Documentation] - Complete reference for the game's Client API
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/game_state_api.md Game State API Documentation] - Complete reference for accessing and modifying game state
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/patch-notes.json Patch notes (JSON)] - Machine-readable changelog consumed by the in-loader patch notes feature
+
+=== Wiki Lua export helpers ===
+Hidden database scripts (enabled by default) help wiki maintainers generate Lua modules from live game data. Open DevTools on Bestiary Arena with the loader injected, then run:
+
+'''Equipment''' (<code>equipment-lua-export.js</code>):
+<syntaxhighlight lang="javascript">
+dumpEquipmentWikiLua();                              // downloads equipment-wiki-YYYY-MM-DD.lua
+dumpEquipmentWikiLua({ download: false, copy: true });
+diffEquipmentLuaExclusionSets();                     // sync check vs Better Exaltation Chest / Better Boosted Maps
+</syntaxhighlight>
+Raid/Map columns use room actors; BoostedMap uses <code>equipment-database.js</code> <code>HARDCODED_BOOSTED_MAP</code> or today's daily boost. See the file header for exclusion-list sync (<code>EXALTATION_CHEST_EXCLUDED</code>, <code>BOOST_MAP_EXCLUDED</code>).
+
+'''Creatures''' (<code>creature-lua-export.js</code>):
+<syntaxhighlight lang="javascript">
+dumpCreatureWikiLua();                               // downloads creature-wiki-YYYY-MM-DD.lua
+dumpCreatureWikiLua({ download: false, copy: true });
+getCreatureExportSections();                       // inspect regular / event / unobtainable / gazer lists
+</syntaxhighlight>
+Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed, <code>roles</code>, <code>is_poisonous</code>) come from <code>getMonster</code> and <code>creature-database.js</code> <code>HARDCODED_MAP_MONSTER_STATS</code>. Wiki-only fields (<code>attack_speed</code>, <code>scales_ad</code>, <code>scales_ap</code>, specials) are in <code>WIKI_CREATURE_EXTRA_FIELDS</code> inside the exporter — update there when wiki rules change.
 
 == Mods ==
 The extension comes with several powerful mods that demonstrate different features:

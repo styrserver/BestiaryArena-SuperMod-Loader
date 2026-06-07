@@ -28,6 +28,7 @@ export const DATABASE_MODS = [
   'equipment-database.js',
   'maps-database.js',
   'equipment-lua-export.js',
+  'creature-lua-export.js',
   'playereq-database.js',
   'firebase-admins.js'
 ];
@@ -92,6 +93,7 @@ export const DEFAULT_ENABLED_MODS = [
   'database/equipment-database.js',
   'database/maps-database.js',
   'database/equipment-lua-export.js',
+  'database/creature-lua-export.js',
   'database/playereq-database.js',
   'database/firebase-admins.js',
   'Official Mods/Bestiary_Automator.js',
@@ -120,6 +122,7 @@ export const HIDDEN_MODS = [
   'equipment-database.js',
   'maps-database.js',
   'equipment-lua-export.js',
+  'creature-lua-export.js',
   'playereq-database.js',
   'firebase-admins.js',
   'Mod Settings.js',

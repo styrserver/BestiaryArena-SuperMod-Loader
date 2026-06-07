@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "4.0.7",
+      "changes": [
+        {
+          "mod": "creature-lua-export.js",
+          "type": "added",
+          "text": "Wiki Lua export via dumpCreatureWikiLua() downloads creature-wiki-YYYY-MM-DD.lua (regular, event, unobtainable, and gazer sections with aligned keys). Live stats and roles from getMonster metadata.roles and creature-database HARDCODED_MAP_MONSTER_STATS; wiki-only fields (attack_speed, scales_ad, scales_ap) in WIKI_CREATURE_EXTRA_FIELDS; optional clipboard via { copy: true }."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "UI createModal dialogs now set data-state=\"open\" so mods can reliably find and resize the open dialog after creation."
+        },
+        {
+          "mod": "Guilds",
+          "type": "fixed",
+          "text": "Fixed modals opening too short or clipping content: all dialogs open via shared openModal (api.showModal) with a post-create expand step, flex-fills the inner wrapper and widget-bottom below the title, and dialog lookup falls back when data-state is missing. Equipment modal content fills the full modal height; Total stats uses remaining column space instead of a fixed 191px panel."
+        },
+        {
+          "mod": "VIP List",
+          "type": "fixed",
+          "text": "Fixed modal height and layout clipping: main list and messaging-disabled notices open via shared openVIPModal (api.showModal) with the same expand/flex-fill pattern; VIP list content fills the modal body."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "Aligned modal opening with other OT mods: main dialog and toast notices use shared openModal (api.showModal) with expand/flex-fill shell styling; Challenges-specific footer button theming unchanged."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Rankings Data Source tooltip no longer says 64 maps; it reads the explored-maps cap from CYCLOPEDIA_SETTINGS.playerStatCaps (73)."
+        }
+      ]
+    },
+    {
       "version": "4.0.6",
       "changes": [
         {
