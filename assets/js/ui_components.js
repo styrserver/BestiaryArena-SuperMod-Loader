@@ -165,6 +165,7 @@ const DEBUG = false; // Set to true for development
     
     const modal = document.createElement('div');
     modal.setAttribute('role', 'dialog');
+    modal.setAttribute('data-state', 'open');
     modal.className = 'auto-centered fixed shadow-lg outline-none pixel-font';
     modal.style.cssText = `
       position: fixed;
