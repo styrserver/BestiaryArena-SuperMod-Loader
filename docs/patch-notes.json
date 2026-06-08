@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.0.9",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Sealed (tier-5) creatures at 80–100% genes are devoured again during autoplant when sell/devour sealed is enabled, even with autosqueeze on. The autosqueeze gene-band reservation no longer blocks sealed creatures (they cannot be autosqueezed)."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "Fixed Use Game State for Stamina Refill showing 360/360 in the header when potions pushed stamina above the regen cap. Applies the full potion API response (including staminaExcessMsDiff) and updates the header display immediately without a page refresh."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Results chart fills the modal width (8px bars, horizontal scroll when needed) with the dark game background texture. Sort button renamed from All Runs to Run Order."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "fixed",
+          "text": "Time and rank chart sorts use win/loss (completed) instead of F grade, so slow F-grade victories sort with other wins rather than with defeats."
+        }
+      ]
+    },
+    {
       "version": "4.0.8",
       "changes": [
         {

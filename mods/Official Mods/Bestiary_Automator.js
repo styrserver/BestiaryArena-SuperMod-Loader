@@ -747,6 +747,75 @@ const getPlayerInventory = () => {
   return playerContext.inventory || {};
 };
 
+// Stamina regens at 1 per minute; timestamp in the past = overflow above regen cap
+const STAMINA_REGEN_MS = 60000;
+
+// Derive current stamina from staminaWillBeFullAt + optional staminaExcessMs (overflow above regen cap)
+const calculateCurrentStaminaFromState = (staminaWillBeFullAt, regenMax, staminaExcessMs = 0) => {
+  if (staminaWillBeFullAt == null || regenMax == null) {
+    return null;
+  }
+  const timeUntilFull = staminaWillBeFullAt - Date.now();
+  const staminaMissing = Math.ceil(timeUntilFull / STAMINA_REGEN_MS);
+  const regenStamina = Math.max(0, regenMax - staminaMissing);
+  const excessMs = Math.max(0, Number(staminaExcessMs) || 0);
+  const excessStamina = excessMs / STAMINA_REGEN_MS;
+
+  if (excessStamina > 0) {
+    return Math.floor(Math.min(regenStamina, regenMax) + excessStamina);
+  }
+  return Math.floor(regenStamina);
+};
+
+// Resolve stamina after a potion API response (uses diffs before state has settled)
+const resolveStaminaFromPotionData = (data, prevContext) => {
+  if (!data || maxStamina == null || !prevContext) {
+    return null;
+  }
+
+  const nextWillBeFullAt = data.nextStaminaWillBeFullAt ?? prevContext.staminaWillBeFullAt;
+  let nextExcessMs = prevContext.staminaExcessMs || 0;
+
+  if (data.staminaExcessMsDiff != null) {
+    const diff = Number(data.staminaExcessMsDiff);
+    if (!Number.isNaN(diff)) {
+      nextExcessMs = Math.max(0, nextExcessMs + diff);
+    }
+  }
+
+  return calculateCurrentStaminaFromState(nextWillBeFullAt, maxStamina, nextExcessMs);
+};
+
+// Sync header stamina display — React UI does not re-render after manual API setState
+const syncStaminaDisplayToDOM = (currentStamina) => {
+  if (currentStamina == null || Number.isNaN(Number(currentStamina))) {
+    return;
+  }
+
+  try {
+    const displayValue = Math.round(Number(currentStamina));
+    const elStamina = getStaminaElement();
+    if (!elStamina) {
+      return;
+    }
+
+    const parentSpan = elStamina.querySelector('span[data-full]');
+    const valueSpan = getStaminaValueElement();
+    if (!parentSpan || !valueSpan) {
+      return;
+    }
+
+    const regenMax = maxStamina ?? parseMaxStaminaFromDOM();
+    valueSpan.textContent = String(displayValue);
+
+    if (regenMax != null) {
+      parentSpan.setAttribute('data-full', displayValue >= regenMax ? 'true' : 'false');
+    }
+  } catch (error) {
+    console.error('[Bestiary Automator] Error syncing stamina display to DOM:', error);
+  }
+};
+
 // Helper to get current stamina from Game State API (for Game State-based refill method)
 const getCurrentStaminaFromGameStateAPI = () => {
   try {
@@ -775,7 +844,20 @@ const getCurrentStaminaFromGameStateAPI = () => {
       }
     }
     
-    // Check if there's a utils function to calculate stamina
+    // Timestamp supports overflow above regen cap; prefer over utils.getCurrentStamina
+    if (playerContext.staminaWillBeFullAt != null && maxStamina !== null) {
+      const currentStamina = calculateCurrentStaminaFromState(
+        playerContext.staminaWillBeFullAt,
+        maxStamina,
+        playerContext.staminaExcessMs
+      );
+      if (currentStamina !== null) {
+        console.log(`[Bestiary Automator] Current stamina from timestamp: ${currentStamina}`);
+        return currentStamina;
+      }
+    }
+
+    // utils.getCurrentStamina may cap at regen max — fallback only
     if (globalThis.state.utils && typeof globalThis.state.utils.getCurrentStamina === 'function') {
       try {
         const stamina = globalThis.state.utils.getCurrentStamina();
@@ -787,28 +869,7 @@ const getCurrentStaminaFromGameStateAPI = () => {
         // Utils function doesn't exist or failed, continue to fallback
       }
     }
-    
-    // Calculate current stamina from staminaWillBeFullAt timestamp
-    // Stamina regenerates at 1 per minute (60 seconds)
-    if (playerContext.staminaWillBeFullAt && maxStamina !== null) {
-      const currentTime = Date.now();
-      const staminaWillBeFullAt = playerContext.staminaWillBeFullAt;
-      const timeUntilFull = staminaWillBeFullAt - currentTime;
-      
-      // If already full or past the timestamp, stamina is at max
-      if (timeUntilFull <= 0) {
-        return maxStamina;
-      }
-      
-      // Calculate missing stamina: time until full (in minutes) = stamina missing
-      // 1 stamina per minute = 60,000ms per stamina
-      const timeUntilFullMinutes = timeUntilFull / 60000;
-      const staminaMissing = Math.ceil(timeUntilFullMinutes);
-      const currentStamina = Math.max(0, maxStamina - staminaMissing);
-      
-      return currentStamina;
-    }
-    
+
     // Fallback to DOM if calculation not possible (works in foreground tabs, but not background)
     console.log('[Bestiary Automator] Cannot calculate stamina from timestamp (missing maxStamina or staminaWillBeFullAt), falling back to DOM');
     return getCurrentStaminaFromState();
@@ -895,32 +956,54 @@ const extractAPIResponseData = (result) => {
   return null;
 };
 
-// Helper to update inventory state from inventoryDiff
-const updateInventoryFromDiff = (inventoryDiff) => {
-  if (!inventoryDiff || !isGameStateAPIAvailable()) {
+// Apply stamina potion API response to game state (inventory + timestamp in one update)
+const applyStaminaPotionResponse = (data) => {
+  if (!data || !isGameStateAPIAvailable()) {
     return;
   }
-  
+
+  const prevContext = globalThis.state.player.getSnapshot().context;
+
   globalThis.state.player.send({
     type: 'setState',
     fn: (prev) => {
       const newState = { ...prev };
-      newState.inventory = { ...prev.inventory };
-      
-      for (let tier = 1; tier <= 5; tier++) {
-        const potionKey = `stamina${tier}`;
-        if (inventoryDiff[potionKey] !== undefined) {
-          const diff = inventoryDiff[potionKey];
-          if (newState.inventory[potionKey] !== undefined) {
-            newState.inventory[potionKey] = Math.max(0, newState.inventory[potionKey] + diff);
-            newState[potionKey] = newState.inventory[potionKey];
+
+      if (data.inventoryDiff) {
+        newState.inventory = { ...prev.inventory };
+
+        for (let tier = 1; tier <= 5; tier++) {
+          const potionKey = `stamina${tier}`;
+          if (data.inventoryDiff[potionKey] !== undefined) {
+            const diff = data.inventoryDiff[potionKey];
+            if (newState.inventory[potionKey] !== undefined) {
+              newState.inventory[potionKey] = Math.max(0, newState.inventory[potionKey] + diff);
+              newState[potionKey] = newState.inventory[potionKey];
+            }
           }
         }
       }
-      
+
+      if (data.nextStaminaWillBeFullAt) {
+        newState.staminaWillBeFullAt = data.nextStaminaWillBeFullAt;
+      }
+
+      if (data.staminaExcessMsDiff != null) {
+        const diff = Number(data.staminaExcessMsDiff);
+        if (!Number.isNaN(diff)) {
+          newState.staminaExcessMs = Math.max(0, (prev.staminaExcessMs || 0) + diff);
+        }
+      }
+
       return newState;
     }
   });
+
+  const displayStamina = resolveStaminaFromPotionData(data, prevContext)
+    ?? (data.pointsRestored > 0 && trackedStamina != null ? trackedStamina + data.pointsRestored : null);
+  if (displayStamina != null) {
+    syncStaminaDisplayToDOM(displayStamina);
+  }
 };
 
 const getInventoryItemCount = (inventory, key) => {
@@ -1765,20 +1848,6 @@ const openCubesIfEnabled = async () => {
   }
 };
 
-// Helper to update staminaWillBeFullAt timestamp
-const updateStaminaWillBeFullAt = (timestamp) => {
-  if (!timestamp || !isGameStateAPIAvailable()) {
-    return;
-  }
-  
-  globalThis.state.player.send({
-    type: 'setState',
-    fn: (prev) => ({
-      ...prev,
-      staminaWillBeFullAt: timestamp
-    })
-  });
-};
 
 // Simple stamina refill method for background tabs (original approach)
 const refillStaminaSimple = async (elStamina) => {
@@ -2031,24 +2100,10 @@ const refillStaminaViaAPI = async () => {
         const data = extractAPIResponseData(result);
         
         if (data && typeof data === 'object') {
-          // Update inventory state from API response
-          if (data.inventoryDiff) {
-            updateInventoryFromDiff(data.inventoryDiff);
-          }
-          
-          // Update staminaWillBeFullAt timestamp
-          if (data.nextStaminaWillBeFullAt) {
-            updateStaminaWillBeFullAt(data.nextStaminaWillBeFullAt);
-          }
-          
+          applyStaminaPotionResponse(data);
+
           const pointsRestored = data?.pointsRestored || 0;
-          
-          // Update tracked stamina from API response
-          if (pointsRestored > 0 && trackedStamina !== null) {
-            trackedStamina = trackedStamina + pointsRestored;
-          }
-          
-          // Show toast notification
+
           if (pointsRestored > 0) {
             try {
               showStaminaRestoredToast(pointsRestored);
@@ -2057,18 +2112,20 @@ const refillStaminaViaAPI = async () => {
             }
           }
         }
-        
+
         // Wait a bit before checking stamina again
         await sleep(300);
-        
-        // Re-check current stamina from Game State API (calculated from timestamp)
-        const newStamina = getCurrentStaminaFromGameStateAPI();
+
+        // State was updated in applyStaminaPotionResponse — read back including staminaExcessMs
+        let newStamina = getCurrentStaminaFromGameStateAPI();
+        if (newStamina === null && data?.pointsRestored > 0 && trackedStamina !== null) {
+          newStamina = trackedStamina + data.pointsRestored;
+        }
+
         if (newStamina !== null) {
           currentStamina = newStamina;
-          trackedStamina = newStamina; // Update tracked value with calculated value
-        } else if (trackedStamina !== null) {
-          // Use tracked value if calculation failed (fallback)
-          currentStamina = trackedStamina;
+          trackedStamina = newStamina;
+          syncStaminaDisplayToDOM(newStamina);
         } else {
           break;
         }

@@ -5220,12 +5220,17 @@
                                 return true;
                             }
 
-                            // Reserve autosqueeze band for squeeze at game end (don't devour first)
+                            // Reserve autosqueeze band for squeeze at game end (don't devour first).
+                            // Sealed tier-5 cannot be autosqueezed — allow devour when sell/devour sealed is enabled.
                             if (autosqueezeEnabled &&
                                 totalGenes >= squeezeMinGenes &&
                                 totalGenes <= squeezeMaxGenes &&
                                 !(monsterName && autosqueezeIgnoreList.includes(monsterName))) {
-                                return false;
+                                const allowSealedDevourDespiteSqueezeBand =
+                                    isSealedTierFiveCreature(monster) && isSealedTier5SellAllowed(monsterName);
+                                if (!allowSealedDevourDespiteSqueezeBand) {
+                                    return false;
+                                }
                             }
                             
                             // Keep creatures with minGenes or higher - only if enabled

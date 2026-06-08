@@ -52,6 +52,7 @@ const CHART_BATCH_SIZE = 10;
 const CHART_MIN_HEIGHT = 20;
 const CHART_MAX_HEIGHT = 120;
 const CHART_MAX_BARS = 1000; // Limit chart to prevent performance issues with large analyses
+const CHART_BACKGROUND_STYLE = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
 
 // Modal constants
 const MODAL_TYPES = {
@@ -355,7 +356,7 @@ class ChartRenderer {
       return results.slice(0, CHART_MAX_BARS);
     }
     
-    // For "All Runs" view, use smart sampling that includes best runs
+    // For run-order view, use smart sampling that includes best runs
     const sampled = new Set();
     
     // Always include top performers by time (completed runs first)
@@ -386,7 +387,8 @@ class ChartRenderer {
     try {
       // Create chart container
       const chartContainer = document.createElement('div');
-      chartContainer.style.cssText = 'margin-top: 20px; border: 1px solid #333; padding: 10px; height: 200px; position: relative; overflow: hidden;';
+      chartContainer.style.cssText = `margin-top: 20px; border: 1px solid #555; padding: 10px; height: 200px; position: relative; overflow: hidden; box-sizing: border-box; background: ${CHART_BACKGROUND_STYLE}; background-size: auto;`;
+      this.chartContainer = chartContainer;
       
       // Create all chart elements
       const chartClickableNote = document.createElement('div');
@@ -445,28 +447,27 @@ class ChartRenderer {
   }
   
   createScrollableChart(container) {
-    // Create bars container
     const barsContainer = document.createElement('div');
     barsContainer.style.cssText = 'height: 150px; position: relative;';
     
-    // Create scrollable wrapper
     const scrollWrapper = document.createElement('div');
     scrollWrapper.style.cssText = `
-      width: 246px; 
-      height: 150px; 
-      overflow-x: auto; 
+      width: 100%;
+      height: 150px;
+      overflow-x: auto;
       overflow-y: hidden;
       border: 1px solid #555;
       border-radius: 4px;
       position: relative;
-      padding-left: 2px;
-      padding-right: 2px;
+      padding: 0 2px;
+      box-sizing: border-box;
+      background: ${CHART_BACKGROUND_STYLE};
+      background-size: auto;
     `;
     
     scrollWrapper.appendChild(barsContainer);
     container.appendChild(scrollWrapper);
     
-    // Store references for later use
     this.barsContainer = barsContainer;
     this.scrollWrapper = scrollWrapper;
   }
@@ -481,25 +482,21 @@ class ChartRenderer {
   renderChart() {
     if (!this.barsContainer) return;
     
-    // Clear existing bars
+    this.renderGeneration = (this.renderGeneration || 0) + 1;
+    const generation = this.renderGeneration;
+    
     this.barsContainer.innerHTML = '';
     
-    // Sort results based on current sort type
     const sortedResults = this.getSortedResults();
-    
-    // Calculate dimensions
     const spacing = CHART_BAR_SPACING;
     const barWidth = CHART_BAR_WIDTH;
     const totalChartWidth = sortedResults.length * (barWidth + spacing) - spacing;
     
-    // Update container width
     this.barsContainer.style.width = `${totalChartWidth}px`;
     
-    // Find max ticks for scaling
-    const maxTicks = Math.max(...sortedResults.map(r => r.ticks));
+    const maxTicks = sortedResults.length > 0 ? Math.max(...sortedResults.map(r => r.ticks)) : 1;
     
-    // Render bars asynchronously to prevent UI blocking
-    this.renderBarsAsync(sortedResults, maxTicks, spacing, barWidth);
+    this.renderBarsAsync(sortedResults, maxTicks, spacing, barWidth, generation);
   }
   
   getSortedResults() {
@@ -509,20 +506,16 @@ class ChartRenderer {
     switch (this.currentSort) {
       case 'time':
         sorted = [...this.displayData].sort((a, b) => {
-          // F runs always go last
-          if (a.grade === 'F' && b.grade !== 'F') return 1;
-          if (a.grade !== 'F' && b.grade === 'F') return -1;
-          // Sort by ticks
+          // Wins first, defeats last (F grade can still be a completed win)
+          if (a.completed !== b.completed) return b.completed - a.completed;
           return a.ticks - b.ticks;
         });
         break;
       case 'splus':
         sorted = [...this.displayData].sort((a, b) => {
-          // F runs always go last
-          if (a.grade === 'F' && b.grade !== 'F') return 1;
-          if (a.grade !== 'F' && b.grade === 'F') return -1;
-          // Both F runs, sort by ticks
-          if (a.grade === 'F' && b.grade === 'F') return a.ticks - b.ticks;
+          // Defeats last; grade F on a win is still a win
+          if (a.completed !== b.completed) return b.completed - a.completed;
+          if (!a.completed && !b.completed) return a.ticks - b.ticks;
           
           if (a.grade === 'S+' && b.grade !== 'S+') return -1;
           if (a.grade !== 'S+' && b.grade === 'S+') return 1;
@@ -534,7 +527,7 @@ class ChartRenderer {
             return a.ticks - b.ticks;
           }
           // For non-S+ grades, sort by grade first
-          const gradeOrder = { 'S': 1, 'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6 };
+          const gradeOrder = { 'S': 1, 'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6, 'F': 7 };
           const gradeDiff = (gradeOrder[a.grade] || 999) - (gradeOrder[b.grade] || 999);
           if (gradeDiff !== 0) return gradeDiff;
           // Then sort by ticks (lowest first)
@@ -549,16 +542,18 @@ class ChartRenderer {
     return this.sampleResults(sorted, isSorted);
   }
   
-  async renderBarsAsync(sortedResults, maxTicks, spacing, barWidth) {
-    const batchSize = CHART_BATCH_SIZE; // Process bars in batches
+  async renderBarsAsync(sortedResults, maxTicks, spacing, barWidth, generation) {
+    const batchSize = CHART_BATCH_SIZE;
     
     for (let i = 0; i < sortedResults.length; i += batchSize) {
+      if (generation !== this.renderGeneration) return;
+      
       const batch = sortedResults.slice(i, i + batchSize);
       
-      // Use requestAnimationFrame to prevent UI blocking
       await new Promise(resolve => requestAnimationFrame(resolve));
       
-      // Create document fragment for batch DOM operations
+      if (generation !== this.renderGeneration) return;
+      
       const fragment = DOMOptimizer.createDocumentFragment();
       
       batch.forEach((result, batchIndex) => {
@@ -569,7 +564,6 @@ class ChartRenderer {
         }
       });
       
-      // Batch append all bars in this batch
       this.barsContainer.appendChild(fragment);
     }
   }
@@ -579,10 +573,8 @@ class ChartRenderer {
       const bar = document.createElement('div');
       const height = Math.max(CHART_MIN_HEIGHT, Math.floor((result.ticks / maxTicks) * CHART_MAX_HEIGHT));
       
-      // Determine bar color
       const barColor = this.getBarColor(result);
       
-      // Set bar styles
       bar.style.cssText = `
         position: absolute;
         bottom: 0;
@@ -620,7 +612,7 @@ class ChartRenderer {
       return bar;
       
     } catch (error) {
-      console.error(`Error creating bar ${index}:`, error);
+      console.error('Error creating chart bar:', error);
       return null;
     }
   }
