@@ -560,7 +560,7 @@
       "avgRunTimeLabel": "Tempo Médio/run:",
       "estimatedTimeRemainingLabel": "Tempo Restante Est.:",
       "sPlusMaxPointsRateLabel": "Taxa S+{points}:",
-      "allRunsButton": "Todas Execuções",
+      "allRunsButton": "Ordem de Execução",
       "sortTimeButton": "Ordenar Tempo",
       "sortRanksButton": "Ordenar classificações",
       "clickToCopyReplay": "Clique para copiar dados do replay",

@@ -560,7 +560,7 @@
       "avgRunTimeLabel": "Avg Run Time:",
       "estimatedTimeRemainingLabel": "Est. Remaining:",
       "sPlusMaxPointsRateLabel": "S+{points} Rate:",
-      "allRunsButton": "All Runs",
+      "allRunsButton": "Run Order",
       "sortTimeButton": "Sort Time",
       "sortRanksButton": "Sort Ranks",
       "clickToCopyReplay": "Click to copy replay data",
