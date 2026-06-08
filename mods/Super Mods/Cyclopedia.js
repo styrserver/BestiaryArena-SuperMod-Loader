@@ -4164,6 +4164,30 @@ function truncateListPlayerName(name) {
   return name.length > 6 ? name.substring(0, 6) + '...' : name;
 }
 
+function appendStatsWorldRecordPlayerLink(container, playerName, truncateStyle) {
+  const slot = container.querySelector('[data-stats-player-slot]');
+  if (!slot) return;
+  if (playerName) {
+    slot.replaceWith(createStatsWorldRecordPlayerLink(playerName, truncateStyle));
+  } else {
+    slot.remove();
+  }
+}
+
+function createStatsWorldRecordPlayerLink(playerName, truncateStyle) {
+  const line = document.createElement('div');
+  line.style.cssText = `margin-bottom: 6px; font-size: 10px; color: #888; ${truncateStyle}`;
+  line.title = playerName;
+  line.textContent = playerName;
+
+  if (playerName && playerName !== 'Unknown') {
+    NavigationHandler.attachProfileNavigation(line, playerName);
+    line.style.color = '#888';
+  }
+
+  return line;
+}
+
 // RunTracker integration functions
 // Helper function to resolve map ID to map name (same as RunTracker)
 function resolveMapName(mapId) {
@@ -8128,7 +8152,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const rankingsSectionFrame = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
           const rankingsCellFrame = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
           
-          const rankingsGridColumns = '48px 120px 53px 53px 40px 48px 40px 40px 40px 40px 40px 40px 40px';
+          const rankingsGridColumns = '48px 150px 53px 53px 40px 48px 40px 40px 40px 40px 40px 40px 40px';
           
           const containerDiv = document.createElement('div');
           Object.assign(containerDiv.style, {
@@ -11840,6 +11864,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
     // Helper function to create statistics section
     function createStatisticsSection(selectedMap) {
+      const statsLineTruncate = 'width: 100%; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; box-sizing: border-box;';
       const statsContainer = document.createElement('div');
       statsContainer.style.display = 'flex';
       statsContainer.style.flexDirection = 'column';
@@ -11861,9 +11886,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       const speedrunCol = document.createElement('div');
       speedrunCol.style.flex = '1 1 0';
       speedrunCol.style.maxWidth = '160px';
+      speedrunCol.style.minWidth = '0';
       speedrunCol.style.display = 'flex';
       speedrunCol.style.flexDirection = 'column';
-      speedrunCol.style.padding = '10px';
+      speedrunCol.style.padding = '5px';
       speedrunCol.style.borderRight = '3px solid transparent';
       speedrunCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
       speedrunCol.style.borderLeft = 'none';
@@ -11903,7 +11929,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       speedrunContent.style.fontSize = '14px';
       speedrunContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
       speedrunContent.style.textAlign = 'center';
-      speedrunContent.style.padding = '6px';
+      speedrunContent.style.padding = '2px';
+      speedrunContent.style.width = '100%';
+      speedrunContent.style.minWidth = '0';
+      speedrunContent.style.boxSizing = 'border-box';
       speedrunContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
       speedrunCol.appendChild(speedrunContent);
       
@@ -11911,9 +11940,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       const rankPointsCol = document.createElement('div');
       rankPointsCol.style.flex = '1 1 0';
       rankPointsCol.style.maxWidth = '160px';
+      rankPointsCol.style.minWidth = '0';
       rankPointsCol.style.display = 'flex';
       rankPointsCol.style.flexDirection = 'column';
-      rankPointsCol.style.padding = '10px';
+      rankPointsCol.style.padding = '5px';
       rankPointsCol.style.borderRight = '3px solid transparent';
       rankPointsCol.style.borderLeft = '3px solid transparent';
       rankPointsCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
@@ -11953,7 +11983,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       rankPointsContent.style.fontSize = '14px';
       rankPointsContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
       rankPointsContent.style.textAlign = 'center';
-      rankPointsContent.style.padding = '6px';
+      rankPointsContent.style.padding = '2px';
+      rankPointsContent.style.width = '100%';
+      rankPointsContent.style.minWidth = '0';
+      rankPointsContent.style.boxSizing = 'border-box';
       rankPointsContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
       rankPointsCol.appendChild(rankPointsContent);
       
@@ -11961,9 +11994,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       const floorsCol = document.createElement('div');
       floorsCol.style.flex = '1 1 0';
       floorsCol.style.maxWidth = '180px';
+      floorsCol.style.minWidth = '0';
       floorsCol.style.display = 'flex';
       floorsCol.style.flexDirection = 'column';
-      floorsCol.style.padding = '10px';
+      floorsCol.style.padding = '5px';
       floorsCol.style.borderLeft = '3px solid transparent';
       floorsCol.style.borderRight = 'none';
       floorsCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
@@ -12003,7 +12037,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       floorsContent.style.fontSize = '14px';
       floorsContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
       floorsContent.style.textAlign = 'center';
-      floorsContent.style.padding = '6px';
+      floorsContent.style.padding = '2px';
+      floorsContent.style.width = '100%';
+      floorsContent.style.minWidth = '0';
+      floorsContent.style.boxSizing = 'border-box';
       floorsContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
       floorsCol.appendChild(floorsContent);
       
@@ -13663,24 +13700,27 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           if (allowGlobalWorldRecords && bestTicks > 0) {
             speedrunHtml = `
               <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
-              <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestTicks} ticks</div>
-              <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestPlayer}</div>
+              <div style="margin-bottom: 2px; font-size: 12px; color: #fff; ${statsLineTruncate}" title="${bestTicks} ticks">${bestTicks} ticks</div>
+              <div data-stats-player-slot></div>
             `;
             if (yourTicks > 0) {
               speedrunHtml += `
                 <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-                <div style="font-size: 12px; color: #ccc;">${yourTicks} ticks</div>
+                <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourTicks} ticks">${yourTicks} ticks</div>
               `;
             }
           } else if (yourTicks > 0) {
             speedrunHtml = `
               <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-              <div style="font-size: 12px; color: #ccc;">${yourTicks} ticks</div>
+              <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourTicks} ticks">${yourTicks} ticks</div>
             `;
           } else {
             speedrunHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
           }
           speedrunContent.innerHTML = speedrunHtml;
+          if (allowGlobalWorldRecords && bestTicks > 0) {
+            appendStatsWorldRecordPlayerLink(speedrunContent, bestPlayer, statsLineTruncate);
+          }
           
           // Update rank points content
           const yourRankRoom = yourRooms?.[selectedMap];
@@ -13696,26 +13736,32 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           let rankPointsHtml = '';
           if (allowGlobalWorldRecords && bestRankPoints > 0) {
+            const bestRankDisplay = `${bestRankPoints.toLocaleString()}${bestRankTicks !== undefined && bestRankTicks !== null ? ` (${bestRankTicks} ticks)` : ' (null)'}`;
             rankPointsHtml = `
               <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
-              <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestRankPoints.toLocaleString()}${bestRankTicks !== undefined && bestRankTicks !== null ? ` <i style="color: #aaa;">(${bestRankTicks} ticks)</i>` : ' (null)'}</div>
-              <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestRankPlayer}</div>
+              <div style="margin-bottom: 2px; font-size: 12px; color: #fff; ${statsLineTruncate}" title="${bestRankDisplay}">${bestRankPoints.toLocaleString()}${bestRankTicks !== undefined && bestRankTicks !== null ? ` <i style="color: #aaa;">(${bestRankTicks} ticks)</i>` : ' (null)'}</div>
+              <div data-stats-player-slot></div>
             `;
             if (hasYourRankData) {
+              const yourRankDisplay = `${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` (${yourRankTicks} ticks)` : ' (null)'}`;
               rankPointsHtml += `
                 <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-                <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ' (null)'}</div>
+                <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourRankDisplay}">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ' (null)'}</div>
               `;
             }
           } else if (hasYourRankData) {
+            const yourRankDisplay = `${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` (${yourRankTicks} ticks)` : ''}`;
             rankPointsHtml = `
               <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-              <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ''}</div>
+              <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourRankDisplay}">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ''}</div>
             `;
           } else {
             rankPointsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
           }
           rankPointsContent.innerHTML = rankPointsHtml;
+          if (allowGlobalWorldRecords && bestRankPoints > 0) {
+            appendStatsWorldRecordPlayerLink(rankPointsContent, bestRankPlayer, statsLineTruncate);
+          }
           
           // Update floors content
           const yourRoom = yourRooms?.[selectedMap];
@@ -13725,28 +13771,34 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           let floorsHtml = '';
           // Check if we have world record data (best floor or fallback to ticks)
           if (allowGlobalWorldRecords && bestFloorTicks > 0) {
+            const bestFloorDisplay = `Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` (${bestFloorTicks} ticks)` : ''}`;
             floorsHtml = `
               <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
-              <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks} ticks)</i>` : ''}</div>
-              <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestFloorPlayer}</div>
+              <div style="margin-bottom: 2px; font-size: 12px; color: #fff; ${statsLineTruncate}" title="${bestFloorDisplay}">Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks} ticks)</i>` : ''}</div>
+              <div data-stats-player-slot></div>
             `;
             // Add "Your Best" if user has floor data
             if (yourFloor !== undefined && yourFloor !== null) {
+              const yourFloorDisplay = `Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` (${yourFloorTicks} ticks)` : ''}`;
               floorsHtml += `
                 <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-                <div style="font-size: 12px; color: #ccc;">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
+                <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourFloorDisplay}">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
               `;
             }
           } else if (yourFloor !== undefined && yourFloor !== null) {
+            const yourFloorDisplay = `Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` (${yourFloorTicks} ticks)` : ''}`;
             // Only show "Your Best" if no world record but user has data
             floorsHtml = `
               <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-              <div style="font-size: 12px; color: #ccc;">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
+              <div style="font-size: 12px; color: #ccc; ${statsLineTruncate}" title="${yourFloorDisplay}">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
             `;
           } else {
             floorsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
           }
           floorsContent.innerHTML = floorsHtml;
+          if (allowGlobalWorldRecords && bestFloorTicks > 0) {
+            appendStatsWorldRecordPlayerLink(floorsContent, bestFloorPlayer, statsLineTruncate);
+          }
         } else {
           speedrunContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
           rankPointsContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';

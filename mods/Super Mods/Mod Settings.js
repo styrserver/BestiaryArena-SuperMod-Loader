@@ -2271,11 +2271,15 @@ const subscriptions = {
 let antiIdleAudioElement = null;
 
 // Playercount state
+const PLAYER_COUNT_POLL_MS = 60000;
+const PLAYER_ONLINE_RECORD_CHECK_MS = 15 * 60 * 1000;
+
 const playercountState = {
   currentPlayerCount: null,
   lastUpdateTime: null,
+  onlineRecord: null,
   updateInterval: null,
-  relativeTimeInterval: null
+  recordCheckInterval: null
 };
 
 // Global update tracking
@@ -8043,17 +8047,7 @@ function showSettingsModal() {
             removeHeaderLinks();
             addPlayercountHeaderButton();
           } else {
-            // Stop updates
-            if (playercountState.updateInterval) {
-              clearInterval(playercountState.updateInterval);
-              activeTimeouts.delete(playercountState.updateInterval);
-              playercountState.updateInterval = null;
-            }
-            if (playercountState.relativeTimeInterval) {
-              clearInterval(playercountState.relativeTimeInterval);
-              activeTimeouts.delete(playercountState.relativeTimeInterval);
-              playercountState.relativeTimeInterval = null;
-            }
+            clearPlayerCountIntervals();
             // Remove button
             const btn = document.querySelector('.playercount-header-btn');
             if (btn && btn.parentNode) {
@@ -11907,6 +11901,8 @@ function startAutoplayRefreshMonitor() {
     if (globalThis.state.board) {
       // Listen for newGame event as documented in game_state_api.md
       subscriptions.autoplayRefreshGame = globalThis.state.board.on('newGame', (event) => {
+        if (isBlockedByAnalysisMods()) return;
+
         console.log('[Mod Settings] New game event:', event);
         
         // Reset board activity timer on new game
@@ -11929,6 +11925,8 @@ function startAutoplayRefreshMonitor() {
       
       // Also listen for setPlayMode when switching to autoplay
       subscriptions.autoplayRefreshSetPlayMode = globalThis.state.board.on('setPlayMode', (event) => {
+        if (isBlockedByAnalysisMods()) return;
+
         console.log(`[Mod Settings] setPlayMode event - mode: ${event.mode}`);
         if (event.mode === 'autoplay') {
           console.log('[Mod Settings] Autoplay mode set - checking refresh threshold');
@@ -11943,6 +11941,7 @@ function startAutoplayRefreshMonitor() {
       
       // Subscribe to board state changes to track activity
       subscriptions.autoplayRefreshBoardState = globalThis.state.board.subscribe((state) => {
+        if (isBlockedByAnalysisMods()) return;
         resetBoardActivityTimer();
       });
       
@@ -12036,6 +12035,8 @@ function checkAndOpenHuntAnalyzer() {
 // Check autoplay session timer and refresh if needed
 function checkAutoplayRefreshThreshold() {
   try {
+    if (isBlockedByAnalysisMods()) return;
+
     let thresholdReached = false;
     let reason = '';
     
@@ -12228,8 +12229,91 @@ function disableAntiIdleSounds() {
 // 14. Playercount Functions
 // =======================
 
-// Fetch player count from API
-async function fetchPlayerCount() {
+function getPlayerOnlineHighscorePath() {
+  return `${FIREBASE_RUNS_CONFIG.firebaseUrl}/player-online-highscore`;
+}
+
+function normalizePlayerOnlineHighscore(data) {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+  const peak = Number(data.peak);
+  if (!Number.isFinite(peak) || peak < 0) {
+    return null;
+  }
+  const achievedAt = Number(data.achievedAt);
+  return {
+    peak: Math.floor(peak),
+    achievedAt: Number.isFinite(achievedAt) && achievedAt > 0 ? achievedAt : null
+  };
+}
+
+async function fetchPlayerOnlineHighscore() {
+  try {
+    const data = await FirebaseRunsService.get(
+      getPlayerOnlineHighscorePath(),
+      'fetch player online highscore',
+      null
+    );
+    const normalized = normalizePlayerOnlineHighscore(data);
+    if (normalized) {
+      playercountState.onlineRecord = normalized;
+    }
+    return normalized;
+  } catch (error) {
+    console.error('[Mod Settings] Error fetching player online highscore:', error);
+    return playercountState.onlineRecord;
+  }
+}
+
+async function updatePlayerOnlineHighscoreIfHigher(count) {
+  if (!Number.isFinite(count) || count < 0) {
+    return playercountState.onlineRecord;
+  }
+
+  const latestRecord = await fetchPlayerOnlineHighscore();
+  const newPeak = Math.max(count, latestRecord?.peak ?? 0);
+  if (latestRecord && newPeak <= latestRecord.peak) {
+    return latestRecord;
+  }
+
+  const now = Date.now();
+  const nextRecord = { peak: Math.floor(newPeak), achievedAt: now };
+
+  try {
+    await FirebaseRunsService.put(
+      getPlayerOnlineHighscorePath(),
+      nextRecord,
+      'update player online highscore'
+    );
+    playercountState.onlineRecord = nextRecord;
+    console.log(`[Mod Settings] Player online highscore updated: ${nextRecord.peak}`);
+    return nextRecord;
+  } catch (error) {
+    console.error('[Mod Settings] Error updating player online highscore:', error);
+    return latestRecord;
+  }
+}
+
+function shouldSyncPlayerOnlineHighscore(count) {
+  if (!Number.isFinite(count) || count < 0) {
+    return false;
+  }
+  const cachedPeak = playercountState.onlineRecord?.peak;
+  if (cachedPeak == null || !Number.isFinite(cachedPeak)) {
+    return true;
+  }
+  return count >= cachedPeak;
+}
+
+async function syncPlayerOnlineHighscore(count) {
+  if (!shouldSyncPlayerOnlineHighscore(count)) {
+    return playercountState.onlineRecord;
+  }
+  return updatePlayerOnlineHighscoreIfHigher(count);
+}
+
+async function fetchLivePlayerCount() {
   try {
     const response = await fetch("/api/player-count");
     if (!response.ok) {
@@ -12237,14 +12321,13 @@ async function fetchPlayerCount() {
     }
     const countText = await response.text();
     const count = parseInt(countText, 10);
-    
+
     if (isNaN(count)) {
       throw new Error('Invalid player count data received');
     }
-    
+
     playercountState.currentPlayerCount = count;
     playercountState.lastUpdateTime = new Date();
-    
     console.log(`[Mod Settings] Player count updated: ${count}`);
     return count;
   } catch (error) {
@@ -12253,80 +12336,114 @@ async function fetchPlayerCount() {
   }
 }
 
-// Format relative time (e.g., "less than 1 minute ago", "5 minutes ago")
-function formatRelativeTime(date) {
-  if (!date) return 'Never';
-  
-  const now = new Date();
-  const diffMs = now - date;
-  const diffSeconds = Math.floor(diffMs / 1000);
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  const diffHours = Math.floor(diffMinutes / 60);
-  const diffDays = Math.floor(diffHours / 24);
-  
-  if (diffSeconds < 60) {
-    return 'less than 1 minute ago';
-  } else if (diffMinutes === 1) {
-    return '1 minute ago';
-  } else if (diffMinutes < 60) {
-    return `${diffMinutes} minutes ago`;
-  } else if (diffHours === 1) {
-    return '1 hour ago';
-  } else if (diffHours < 24) {
-    return `${diffHours} hours ago`;
-  } else if (diffDays === 1) {
-    return '1 day ago';
-  } else {
-    return `${diffDays} days ago`;
+async function runPlayerOnlineRecordCheck() {
+  let count = playercountState.currentPlayerCount;
+  if (count === null) {
+    count = await fetchLivePlayerCount();
+    if (count === null) {
+      return;
+    }
   }
+
+  await syncPlayerOnlineHighscore(count);
+  updatePlayerCountDisplay(count);
 }
 
-// Update the player count display
+function formatPlayerOnlineRecordPeak(peak) {
+  return Number(peak).toLocaleString('en-US');
+}
+
+function formatPlayerOnlineRecordTimestamp(timestampMs) {
+  const date = new Date(timestampMs);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Berlin',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+      hourCycle: 'h23'
+    }).formatToParts(date).map(({ type, value }) => [type, value])
+  );
+
+  return `${parts.month} ${parts.day} ${parts.year}, ${parts.hour}:${parts.minute}:${parts.second} CET`;
+}
+
+function buildPlayerCountTooltip() {
+  const record = playercountState.onlineRecord;
+  if (!record || !Number.isFinite(record.peak)) {
+    return '';
+  }
+
+  const when = record.achievedAt
+    ? formatPlayerOnlineRecordTimestamp(record.achievedAt)
+    : null;
+
+  return tReplace('mods.betterUI.playerOnlineRecordTooltip', {
+    record: formatPlayerOnlineRecordPeak(record.peak),
+    when: when || t('mods.betterUI.playerOnlineRecordUnknownTime')
+  });
+}
+
 function updatePlayerCountDisplay(count) {
   const playerCountBtn = document.querySelector('.playercount-header-btn');
   if (!playerCountBtn) return;
-  
+
   if (count !== null) {
     playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-ally/80">${count}</span></span>`;
-    playerCountBtn.title = `Online: ${count} (Last updated: ${formatRelativeTime(playercountState.lastUpdateTime)})`;
+    playerCountBtn.title = buildPlayerCountTooltip();
     playerCountBtn.style.color = 'inherit';
   } else {
     playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-error">?</span></span>`;
-    playerCountBtn.title = 'Player count unavailable';
+    playerCountBtn.title = buildPlayerCountTooltip();
     playerCountBtn.style.color = 'inherit';
   }
 }
 
-// Update just the relative time in the title (for periodic refresh)
-function updatePlayerCountRelativeTime() {
-  const playerCountBtn = document.querySelector('.playercount-header-btn');
-  if (!playerCountBtn || playercountState.currentPlayerCount === null) return;
-  
-  playerCountBtn.title = `Online: ${playercountState.currentPlayerCount} (Last updated: ${formatRelativeTime(playercountState.lastUpdateTime)})`;
+function clearPlayerCountIntervals() {
+  if (playercountState.updateInterval) {
+    clearInterval(playercountState.updateInterval);
+    activeTimeouts.delete(playercountState.updateInterval);
+    playercountState.updateInterval = null;
+  }
+  if (playercountState.recordCheckInterval) {
+    clearInterval(playercountState.recordCheckInterval);
+    activeTimeouts.delete(playercountState.recordCheckInterval);
+    playercountState.recordCheckInterval = null;
+  }
 }
 
 // Start periodic updates
 function startPlayerCountUpdates() {
-  // Initial fetch
-  fetchPlayerCount().then(count => {
+  clearPlayerCountIntervals();
+
+  fetchPlayerOnlineHighscore().finally(async () => {
+    const count = await fetchLivePlayerCount();
     updatePlayerCountDisplay(count);
+    if (count !== null) {
+      await syncPlayerOnlineHighscore(count);
+      updatePlayerCountDisplay(count);
+    }
   });
-  
-  // Set up periodic updates (1 minute)
-  const updateInterval = setInterval(async () => {
-    const count = await fetchPlayerCount();
+
+  playercountState.updateInterval = setInterval(async () => {
+    const count = await fetchLivePlayerCount();
     updatePlayerCountDisplay(count);
-  }, 60000);
-  
-  // Set up relative time updates (every minute)
-  const relativeTimeInterval = setInterval(() => {
-    updatePlayerCountRelativeTime();
-  }, 60000);
-  
-  playercountState.updateInterval = updateInterval;
-  playercountState.relativeTimeInterval = relativeTimeInterval;
-  activeTimeouts.add(updateInterval);
-  activeTimeouts.add(relativeTimeInterval);
+  }, PLAYER_COUNT_POLL_MS);
+
+  playercountState.recordCheckInterval = setInterval(() => {
+    runPlayerOnlineRecordCheck();
+  }, PLAYER_ONLINE_RECORD_CHECK_MS);
+
+  activeTimeouts.add(playercountState.updateInterval);
+  activeTimeouts.add(playercountState.recordCheckInterval);
 }
 
 // Remove Wiki and Discord links from header
@@ -12942,16 +13059,7 @@ function cleanupBetterUI() {
     cleanupHotkeys();
     
     // Cleanup playercount
-    if (playercountState.updateInterval) {
-      clearInterval(playercountState.updateInterval);
-      activeTimeouts.delete(playercountState.updateInterval);
-      playercountState.updateInterval = null;
-    }
-    if (playercountState.relativeTimeInterval) {
-      clearInterval(playercountState.relativeTimeInterval);
-      activeTimeouts.delete(playercountState.relativeTimeInterval);
-      playercountState.relativeTimeInterval = null;
-    }
+    clearPlayerCountIntervals();
     const playercountBtn = document.querySelector('.playercount-header-btn');
     if (playercountBtn && playercountBtn.parentNode) {
       try {
@@ -13106,8 +13214,9 @@ function cleanupBetterUI() {
     // Reset playercount state
     playercountState.currentPlayerCount = null;
     playercountState.lastUpdateTime = null;
+    playercountState.onlineRecord = null;
     playercountState.updateInterval = null;
-    playercountState.relativeTimeInterval = null;
+    playercountState.recordCheckInterval = null;
     
     // Reset global update tracking
     lastGlobalUpdate = 0;

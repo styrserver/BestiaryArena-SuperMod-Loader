@@ -7292,7 +7292,6 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
         
         // Skip recording if in sandbox mode
         if (isSandboxMode()) {
-            console.log("[Hunt Analyzer] Skipping sandbox mode session");
             return;
         }
         

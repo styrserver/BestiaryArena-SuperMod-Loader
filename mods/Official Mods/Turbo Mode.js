@@ -271,7 +271,6 @@ function tryInitTickDisplay() {
   const container = document.querySelector('.flex.flex-col.items-end.overflow-hidden');
   if (!container || document.getElementById('mb-game-timer')) return false;
   
-        console.log('Creating tick display element...');
   const tickEl = document.createElement('div');
   tickEl.id = 'mb-game-timer';
   Object.assign(tickEl.style, {

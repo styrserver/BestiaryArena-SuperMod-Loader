@@ -70,12 +70,10 @@ function serializeBoard() {
     // Method 1: Use the raw function directly from window if available
     if (typeof window.$serializeBoard === 'function') {
       boardData = JSON.parse(window.$serializeBoard());
-      console.log('Used window.$serializeBoard directly for board data');
     } 
     // Method 2: Use the function from the API if available
     else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
       boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
-              console.log('Used BestiaryModAPI.utility.serializeBoard for board data');
     } 
     // Method 3: Fallback to custom implementation
     else {

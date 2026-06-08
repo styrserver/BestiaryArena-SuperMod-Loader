@@ -36,6 +36,7 @@ const DEFAULT_TICK_INTERVAL_MS = 62.5;
 
 // Timing constants
 const ANALYSIS_STOP_DELAY_MS = 200;
+const LIVE_STATS_THROTTLE_MS = 50;
 const UI_UPDATE_DELAY_MS = 600;
 const MODAL_CLEANUP_DELAY_MS = 100;
 const BOARD_RESTORE_DELAY_MS = 50;
@@ -921,17 +922,13 @@ function enableTurbo(speedupFactor = config.speedupFactor) {
   try {
     const boardContext = globalThis.state.board.getSnapshot().context;
     if (boardContext && boardContext.world && boardContext.world.tickEngine) {
-      console.log(`Setting tick interval for existing game to ${interval}ms (${speedupFactor}x speed)`);
       boardContext.world.tickEngine.setTickInterval(interval);
-    } else {
-      console.log('No active game with tickEngine found, will apply speed on next game start');
     }
   } catch (e) {
     console.warn('Could not access current game tickEngine:', e);
   }
   
   turboActive = true;
-  console.log(`Turbo mode enabled (${speedupFactor}x)`);
 }
 
 // Disable turbo mode and restore normal timing
@@ -947,12 +944,10 @@ function disableTurbo() {
   // Reset the current game's tick interval if it exists
   if (globalThis.state?.board?.getSnapshot()?.context?.world?.tickEngine) {
     const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
-    console.log(`Resetting tick interval to default (${DEFAULT_TICK_INTERVAL_MS}ms)`);
     tickEngine.setTickInterval(DEFAULT_TICK_INTERVAL_MS);
   }
   
   turboActive = false;
-  console.log('Turbo mode disabled');
 }
 
 // Replay a board configuration with a specific seed - use API version if available
@@ -1212,13 +1207,10 @@ function ensureSandboxMode() {
     
     // If not in sandbox mode, switch to it
     if (currentMode !== 'sandbox') {
-      console.log(`Switching from ${currentMode} mode to sandbox mode`);
       globalThis.state.board.send({ type: "setPlayMode", mode: "sandbox" });
       return true; // Mode was changed
-    } else {
-      console.log('Already in sandbox mode');
-      return false; // No change needed
     }
+    return false; // No change needed
   } catch (error) {
     console.error('Error setting sandbox mode:', error);
     return false;
@@ -1228,7 +1220,7 @@ function ensureSandboxMode() {
 // Function to properly restore the board state
 function restoreBoardState() {
   try {
-    console.log('Restoring board state...');
+    console.log('[Board Analyzer] Restoring board state...');
     
     // Update coordination system state
     if (window.ModCoordination) {
@@ -1257,7 +1249,6 @@ function restoreBoardState() {
     const gameFrame = document.querySelector('main .frame-4');
     if (gameFrame && gameFrame.style.display === 'none') {
       gameFrame.style.display = '';
-      console.log('Game board visibility restored');
     }
     
     // Reset body overflow if it was modified
@@ -1268,7 +1259,6 @@ function restoreBoardState() {
     // Restore Better Highscores container if it exists
     if (window.BetterHighscores && typeof window.BetterHighscores.restoreContainer === 'function') {
       try {
-        console.log('[Board Analyzer] Restoring Better Highscores container...');
         // Small delay to ensure DOM is ready
         setTimeout(() => {
           window.BetterHighscores.restoreContainer();
@@ -1285,7 +1275,6 @@ function restoreBoardState() {
           type: 'selectRoomById',
           roomId: currentRoomId,
         });
-        console.log('[Board Analyzer] Restored original map:', currentRoomId);
         
         // Small delay to ensure map is loaded before restoring floor and board
         setTimeout(() => {
@@ -1299,7 +1288,6 @@ function restoreBoardState() {
                     floor: currentFloor,
                   }),
                 });
-                console.log('[Board Analyzer] Restored original floor:', currentFloor);
               } else if (globalThis.state.board.send) {
                 // Fallback to using send if trigger.setState is not available
                 globalThis.state.board.send({
@@ -1309,7 +1297,6 @@ function restoreBoardState() {
                     floor: currentFloor,
                   }),
                 });
-                console.log('[Board Analyzer] Restored original floor:', currentFloor);
               }
             } catch (error) {
               console.warn('[Board Analyzer] Error restoring floor:', error);
@@ -1318,9 +1305,6 @@ function restoreBoardState() {
           
           // Also restore the original board configuration if we have it
           if (boardSetup && boardSetup.length > 0) {
-            console.log('[Board Analyzer] Restoring original board configuration with', boardSetup.length, 'pieces');
-            console.log('[Board Analyzer] Board setup to restore:', boardSetup);
-            
             try {
               // Set the board configuration back to what it was before analysis
               globalThis.state.board.send({
@@ -1330,26 +1314,9 @@ function restoreBoardState() {
                   boardConfig: boardSetup
                 })
               });
-              console.log('[Board Analyzer] Original board configuration restored');
-              
-              // Verify the restoration worked
-              setTimeout(() => {
-                try {
-                  const restoredContext = globalThis.state.board.getSnapshot().context;
-                  if (restoredContext.boardConfig && restoredContext.boardConfig.length > 0) {
-                    console.log('[Board Analyzer] Verification: Board now has', restoredContext.boardConfig.length, 'pieces');
-                  } else {
-                    console.warn('[Board Analyzer] Verification: Board restoration may have failed');
-                  }
-                } catch (verifyError) {
-                  console.warn('[Board Analyzer] Error verifying board restoration:', verifyError);
-                }
-              }, BOARD_RESTORE_DELAY_MS);
             } catch (error) {
               console.warn('[Board Analyzer] Error restoring board configuration:', error);
             }
-          } else {
-            console.log('[Board Analyzer] No board configuration to restore');
           }
         }, BOARD_RESTORE_DELAY_MS); // Reduced delay for faster restoration
       } catch (error) {
@@ -1357,7 +1324,7 @@ function restoreBoardState() {
       }
     }
     
-    console.log('Board state restored successfully');
+    console.log('[Board Analyzer] Board state restored');
   } catch (error) {
     console.error('Error restoring board state:', error);
   }
@@ -1596,7 +1563,6 @@ const getLastTick = (analysisId = null) => {
     
     // Check if this analysis instance is still valid
     if (analysisId && !analysisState.isValidId(analysisId)) {
-      console.log('[Board Analyzer] Analysis instance changed in getLastTick - stopping immediately');
       resolve({
         ticks: 0,
         grade: 'F',
@@ -1610,7 +1576,6 @@ const getLastTick = (analysisId = null) => {
     
     // Check for force stop immediately
     if (analysisState.forceStop) {
-      console.log('Force stop detected in getLastTick - stopping immediately');
       resolve({
         ticks: 0,
         grade: 'F',
@@ -1629,7 +1594,6 @@ const getLastTick = (analysisId = null) => {
       
       // Check if this analysis instance is still valid
       if (analysisId && !analysisState.isValidId(analysisId) && !hasResolved) {
-        console.log('[Board Analyzer] Analysis instance changed during game - stopping immediately');
         hasResolved = true;
         if (unsubscribe) unsubscribe();
         resolve({
@@ -1645,7 +1609,7 @@ const getLastTick = (analysisId = null) => {
       
       // Check if analysis state was reset (stop button was clicked)
       if (!analysisState.isRunning() && !hasResolved) {
-        console.log('[Board Analyzer] Analysis state reset during game - stopping immediately');
+        console.log('[Board Analyzer] Stop requested during run');
         hasResolved = true;
         if (unsubscribe) unsubscribe();
         resolve({
@@ -1661,7 +1625,6 @@ const getLastTick = (analysisId = null) => {
       
       // Check for force stop on every timer update
       if (analysisState.forceStop && !hasResolved) {
-        console.log('Force stop detected during game - stopping immediately');
         hasResolved = true;
         if (unsubscribe) unsubscribe();
         resolve({
@@ -1775,7 +1738,6 @@ function setupAnalysisEnvironment() {
   if (window.turboButton) {
     window.turboButton.disabled = true;
     window.turboButton.title = t('mods.boardAnalyzer.turboDisabledTooltip');
-    console.log('[Board Analyzer] Turbo Mode button disabled');
   }
   
   // Reset tracking variables
@@ -1794,9 +1756,6 @@ function captureCurrentBoardState() {
     if (boardContext.boardConfig && Array.isArray(boardContext.boardConfig)) {
       // Deep clone the board configuration to preserve it
       boardSetup = JSON.parse(JSON.stringify(boardContext.boardConfig));
-      console.log('[Board Analyzer] Captured board configuration with', boardSetup.length, 'pieces');
-    } else {
-      console.log('[Board Analyzer] No board configuration found to capture');
     }
   } catch (error) {
     console.warn('[Board Analyzer] Error capturing board configuration:', error);
@@ -1807,7 +1766,6 @@ function captureCurrentBoardState() {
 function preserveBetterHighscores() {
   if (window.BetterHighscores && typeof window.BetterHighscores.preserveContainer === 'function') {
     try {
-      console.log('[Board Analyzer] Preserving Better Highscores container...');
       window.BetterHighscores.preserveContainer();
     } catch (error) {
       console.warn('[Board Analyzer] Error preserving Better Highscores container:', error);
@@ -1831,7 +1789,6 @@ function captureMapInformation() {
     
     if (selectedMap.selectedRegion && selectedMap.selectedRegion.id) {
       currentRegionId = selectedMap.selectedRegion.id;
-      console.log('Captured region ID:', currentRegionId);
     }
     
     if (selectedMap.selectedRoom) {
@@ -1839,13 +1796,11 @@ function captureMapInformation() {
       currentRoomName = mapIdsToNames.get(currentRoomId) || 
                          globalThis.state.utils.ROOM_NAME[currentRoomId] || 
                          selectedMap.selectedRoom.file.name;
-      console.log('Captured room ID:', currentRoomId, 'Name:', currentRoomName);
     }
     
     // Capture floor information
     if (typeof boardContext.floor !== 'undefined') {
       currentFloor = boardContext.floor;
-      console.log('Captured floor:', currentFloor);
     }
   } catch (error) {
     console.error('Error capturing map information:', error);
@@ -1887,7 +1842,7 @@ async function runSingleAnalysis(i, thisAnalysisId, statusCallback, statsCalcula
       total: config.runs,
       status: 'running',
       avgRunTime: avgRunTime.toFixed(0),
-      estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining),
+      estimatedTimeRemaining: formatDurationWholeSeconds(estimatedTimeRemaining),
       completionRate: completionRate,
       completedRuns: statsCalculator.completedRuns,
       totalRunsInStats: statsCalculator.totalRuns
@@ -1902,7 +1857,6 @@ async function runSingleAnalysis(i, thisAnalysisId, statusCallback, statsCalcula
   
   // Generate a new unique seed for this run
   const runSeed = Math.floor((Date.now() * Math.random()) % 2147483647);
-  console.log(`Run ${i} using generated seed: ${runSeed}`);
   
   try {
     // Start the game using direct state manipulation with embedded seed
@@ -1920,7 +1874,8 @@ async function runSingleAnalysis(i, thisAnalysisId, statusCallback, statsCalcula
     
     // Check if this run was force stopped, analysis changed, or analysis reset
     if (result.forceStopped || result.analysisChanged || result.analysisReset) {
-      console.log('Run was force stopped, analysis changed, or analysis reset - breaking out of analysis loop');
+      console.log('[Board Analyzer] Analysis stopped during run', i,
+        `(${statsCalculator.totalRuns} completed)`);
       return null;
     }
     
@@ -1987,7 +1942,6 @@ function initializeAnalysisEnvironment() {
   if (window.turboButton) {
     window.turboButton.disabled = true;
     window.turboButton.title = t('mods.boardAnalyzer.turboDisabledTooltip');
-    console.log('[Board Analyzer] Turbo Mode button disabled');
   }
   
   // Reset tracking variables (but preserve floor if it was already captured)
@@ -2058,9 +2012,6 @@ function captureCurrentBoardState() {
     if (boardContext.boardConfig && Array.isArray(boardContext.boardConfig)) {
       // Deep clone the board configuration to preserve it
       boardSetup = JSON.parse(JSON.stringify(boardContext.boardConfig));
-      console.log('[Board Analyzer] Captured board configuration with', boardSetup.length, 'pieces');
-    } else {
-      console.log('[Board Analyzer] No board configuration found to capture');
     }
   } catch (error) {
     console.warn('[Board Analyzer] Error capturing board configuration:', error);
@@ -2071,7 +2022,6 @@ function captureCurrentBoardState() {
 function preserveBetterHighscores() {
   if (window.BetterHighscores && typeof window.BetterHighscores.preserveContainer === 'function') {
     try {
-      console.log('[Board Analyzer] Preserving Better Highscores container...');
       window.BetterHighscores.preserveContainer();
     } catch (error) {
       console.warn('[Board Analyzer] Error preserving Better Highscores container:', error);
@@ -2095,7 +2045,6 @@ function captureMapInformation() {
       
     if (selectedMap.selectedRegion && selectedMap.selectedRegion.id) {
       currentRegionId = selectedMap.selectedRegion.id;
-      console.log('Captured region ID:', currentRegionId);
     }
     
     if (selectedMap.selectedRoom) {
@@ -2103,13 +2052,11 @@ function captureMapInformation() {
       currentRoomName = mapIdsToNames.get(currentRoomId) || 
                          globalThis.state.utils.ROOM_NAME[currentRoomId] || 
                          selectedMap.selectedRoom.file.name;
-      console.log('Captured room ID:', currentRoomId, 'Name:', currentRoomName);
     }
     
     // Capture floor information
     if (typeof boardContext.floor !== 'undefined') {
       currentFloor = boardContext.floor;
-      console.log('Captured floor:', currentFloor);
     }
   } catch (error) {
     console.error('Error capturing map information:', error);
@@ -2190,59 +2137,27 @@ function collectVillainXpLevels() {
 function estimateRunExperience(completed) {
   try {
     if (!currentRoomId) {
-      console.log('[Board Analyzer][XP] Skipped: no currentRoomId');
       return null;
     }
 
     const { eligible, excluded } = collectVillainXpLevels();
     if (eligible.length === 0) {
-      console.log('[Board Analyzer][XP] Skipped: no XP-eligible villains', {
-        roomId: currentRoomId,
-        excluded
-      });
       return excluded.length > 0 ? 0 : null;
     }
 
     const cappedLevels = eligible.map(e => e.capped);
-    const rawLevels = eligible.map(e => e.raw);
-    const names = eligible.map(e => e.name);
-    const levelSource = eligible[0]?.source || 'unknown';
 
     let defeatedLevelSum;
     if (completed) {
       defeatedLevelSum = cappedLevels.reduce((sum, lvl) => sum + lvl, 0);
-      console.log('[Board Analyzer][XP] Victory:', {
-        roomId: currentRoomId,
-        floor: currentFloor,
-        levelSource,
-        names,
-        rawLevels,
-        cappedLevels,
-        excluded,
-        defeatedLevelSum
-      });
     } else {
       const killCount = Math.floor(Math.random() * cappedLevels.length);
       const shuffled = [...eligible].sort(() => Math.random() - 0.5);
       const defeated = shuffled.slice(0, killCount);
       defeatedLevelSum = defeated.reduce((sum, e) => sum + e.capped, 0);
-      console.log('[Board Analyzer][XP] Defeat:', {
-        roomId: currentRoomId,
-        floor: currentFloor,
-        levelSource,
-        names,
-        rawLevels,
-        cappedLevels,
-        excluded,
-        killCount,
-        defeatedNames: defeated.map(e => e.name),
-        defeatedLevels: defeated.map(e => e.capped),
-        defeatedLevelSum
-      });
     }
 
     if (defeatedLevelSum === 0) {
-      console.log('[Board Analyzer][XP] Result: 0 (no defeated enemies)');
       return 0;
     }
 
@@ -2250,13 +2165,6 @@ function estimateRunExperience(completed) {
     const xpValue = defeatedLevelSum * XP_DROP_PER_LEVEL;
     const rngMultiplier = (d20Roll - 10) / 100;
     const estimatedExp = Math.round(xpValue * (1 + rngMultiplier));
-    console.log('[Board Analyzer][XP] Result:', {
-      defeatedLevelSum,
-      xpValue,
-      d20Roll,
-      rngMultiplier: `${(rngMultiplier * 100).toFixed(0)}%`,
-      estimatedExp
-    });
     return estimatedExp;
   } catch (error) {
     console.warn('[Board Analyzer][XP] Error:', error);
@@ -2287,25 +2195,7 @@ function parseServerExpReward(serverResults) {
 }
 
 function logServerExpReward(serverResults) {
-  if (!config.estimateExperience) return;
-
-  const rewardScreen = serverResults?.rewardScreen;
-  if (!rewardScreen) return;
-
-  const expReward = parseServerExpReward(serverResults);
-  const roomId = rewardScreen.roomId ?? serverResults?.roomId ?? null;
-
-  console.log('[Board Analyzer][XP] Server:', {
-    roomId,
-    floor: rewardScreen.floor ?? serverResults?.floor ?? null,
-    victory: rewardScreen.victory,
-    expReward: expReward ?? 0,
-    defeatedEnemies: rewardScreen.defeatedEnemies,
-    seed: serverResults?.seed,
-    analyzerRoomId: currentRoomId,
-    analyzerFloor: currentFloor,
-    analysisRunning: analysisState.isRunning()
-  });
+  // Reserved for manual debugging; intentionally silent during analysis.
 }
 
 function installXpDebugFetchHook() {
@@ -2337,7 +2227,7 @@ function uninstallXpDebugFetchHook() {
 }
 
 // Helper function to run the main analysis loop
-async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback) {
+async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf = null) {
   const results = [];
   
   for (let i = 1; i <= runs; i++) {
@@ -2349,11 +2239,8 @@ async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, 
     // Start timing this run
     timing.lastRunStart = performance.now();
     
-    // Update status callback if provided
-    updateStatusCallback(i, runs, statsCalculator, statusCallback, timing);
-    
     // Process individual run
-    const runResult = await processSingleRun(i, thisAnalysisId, statsCalculator, bestRuns, timing);
+    const runResult = await processSingleRun(i, thisAnalysisId, statsCalculator, bestRuns, timing, perf);
     
     if (runResult === null) {
       // Analysis was stopped
@@ -2364,12 +2251,12 @@ async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, 
     if (typeof runResult === 'object' && runResult.shouldStop) {
       // This run triggered the stop condition, but we still want to include it
       results.push(runResult.result);
-      updateStatusCallback(i, runs, statsCalculator, statusCallback, timing);
+      updateStatusCallback(i, runs, statsCalculator, statusCallback, timing, perf);
       break; // Stop the analysis
     } else {
       // Regular run result
       results.push(runResult);
-      updateStatusCallback(i, runs, statsCalculator, statusCallback, timing);
+      updateStatusCallback(i, runs, statsCalculator, statusCallback, timing, perf);
     }
   }
   
@@ -2378,21 +2265,15 @@ async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, 
 
 // Helper function to check if analysis should continue
 function shouldContinueAnalysis(thisAnalysisId) {
-  // Check if this analysis instance is still valid
   if (!analysisState.isValidId(thisAnalysisId)) {
-    console.log('[Board Analyzer] Analysis instance changed, stopping this run');
     return false;
   }
   
-  // Check if analysis state was reset (stop button was clicked)
   if (!analysisState.isRunning()) {
-    console.log('[Board Analyzer] Analysis state reset, stopping this run');
     return false;
   }
   
-  // Check if forced stop was requested
   if (analysisState.forceStop) {
-    console.log('Analysis stopped by user - breaking out of loop');
     return false;
   }
   
@@ -2444,8 +2325,8 @@ function buildAnalysisStatus(currentRun, totalRuns, statsCalculator, timing = nu
     status: 'running',
     hasStats: true,
     avgRunTime: stats.averageRunTime.toFixed(0),
-    estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining),
-    totalTimeFormatted: timing ? formatMilliseconds(performance.now() - timing.startTime) : null,
+    estimatedTimeRemaining: formatDurationWholeSeconds(estimatedTimeRemaining),
+    totalTimeFormatted: timing ? formatDurationWholeSeconds(performance.now() - timing.startTime) : null,
     completionRate: stats.completionRate,
     completedRuns: stats.completedRuns,
     totalRunsInStats: stats.totalRuns,
@@ -2465,20 +2346,20 @@ function buildAnalysisStatus(currentRun, totalRuns, statsCalculator, timing = nu
 }
 
 // Helper function to update status callback
-function updateStatusCallback(currentRun, totalRuns, statsCalculator, statusCallback, timing = null) {
+function updateStatusCallback(currentRun, totalRuns, statsCalculator, statusCallback, timing = null, perf = null) {
   if (!statusCallback) return;
-  statusCallback(buildAnalysisStatus(currentRun, totalRuns, statsCalculator, timing));
+  const buildStart = perf ? performance.now() : 0;
+  const status = buildAnalysisStatus(currentRun, totalRuns, statsCalculator, timing);
+  if (perf) {
+    perf.recordStatusBuild(performance.now() - buildStart);
+  }
+  statusCallback(status);
 }
 
 // Helper function to process a single analysis run
-async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestRuns, timing) {
+async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestRuns, timing, perf = null) {
   // Generate a new unique seed for this run
   const runSeed = Math.floor((Date.now() * Math.random()) % 2147483647);
-  
-  // Only log every 100th run to avoid console spam on large analyses
-  if (runIndex % 100 === 0 || runIndex === 1) {
-    console.log(`Run ${runIndex} using generated seed: ${runSeed}`);
-  }
   
   try {
     // Start the game using direct state manipulation with embedded seed
@@ -2496,7 +2377,11 @@ async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestR
     
     // Check if this run was force stopped, analysis changed, or analysis reset
     if (result.forceStopped || result.analysisChanged || result.analysisReset) {
-      console.log('Run was force stopped, analysis changed, or analysis reset - breaking out of analysis loop');
+      if (perf) {
+        perf.stoppedDuringRun = runIndex;
+      }
+      console.log('[Board Analyzer] Analysis stopped during run', runIndex,
+        `(${statsCalculator.totalRuns} completed)`);
       return null;
     }
     
@@ -2558,12 +2443,11 @@ function processRunResults(result, runIndex, statsCalculator, bestRuns) {
       const boardData = getBoardData(seed);
       
       if (boardData) {
-        console.log('Best time: Using board data');
         bestRuns.bestTimeRun = {
           seed: seed,
           board: boardData
         };
-        console.log(`New best time: ${ticks} ticks with seed ${seed} in run ${runIndex}`);
+        console.log(`[Board Analyzer] New best time: ${ticks} ticks (run ${runIndex})`);
       } else {
         console.warn('Failed to get board data for best time replay');
       }
@@ -2589,12 +2473,11 @@ function processRunResults(result, runIndex, statsCalculator, bestRuns) {
   
   // Check if should stop for reaching the desired number of ticks or below
   if (config.stopWhenTicksReached > 0 && completed && ticks <= config.stopWhenTicksReached) {
-    console.log(`Reached target ticks: ${ticks} <= ${config.stopWhenTicksReached}, stopping analysis`);
+    console.log(`[Board Analyzer] Target ticks reached: ${ticks} (run ${runIndex})`);
     
     const boardData = getBoardData(seed);
     
     if (boardData) {
-      console.log('Target ticks: Using board data');
       bestRuns.targetTicksRun = {
         seed: seed,
         board: boardData,
@@ -2602,7 +2485,6 @@ function processRunResults(result, runIndex, statsCalculator, bestRuns) {
         grade: grade,
         rankPoints: rankPoints
       };
-      console.log(`Target ticks run captured: ${ticks} ticks with seed ${seed}`);
     } else {
       console.warn('Failed to get board data for target ticks replay');
     }
@@ -2610,17 +2492,21 @@ function processRunResults(result, runIndex, statsCalculator, bestRuns) {
     return true; // Signal to stop
   }
   
-  // Update max rank points
-  if (rankPoints > statsCalculator.maxRankPoints) {
+  // Update max rank points (S+ only; addRun already bumped maxRankPoints on a new high)
+  if (
+    grade === 'S+' &&
+    rankPoints != null &&
+    rankPoints === statsCalculator.maxRankPoints &&
+    statsCalculator.sPlusMaxPointsCount === 1
+  ) {
     const boardData = getBoardData(seed);
     
     if (boardData) {
-      console.log('Max points: Using board data');
       bestRuns.bestScoreRun = {
         seed: seed,
         board: boardData
       };
-      console.log(`New max points: ${rankPoints} with seed ${seed} in run ${runIndex}`);
+      console.log(`[Board Analyzer] New max points: ${rankPoints} (run ${runIndex})`);
     } else {
       console.warn('Failed to get board data for max points replay');
     }
@@ -2642,25 +2528,21 @@ function cleanupAnalysisResources(thisAnalysisId) {
   // Reset analysis state
   if (analysisState.isValidId(thisAnalysisId)) {
     analysisState.reset();
-    console.log('[Board Analyzer] Analysis state reset');
   }
   
   // Clean up game state tracker if no more listeners
   if (gameStateTracker && gameStateTracker.listeners.size === 0) {
     gameStateTracker.stopSubscription();
     gameStateTracker = null;
-    console.log('[Board Analyzer] Game state tracker cleaned up');
   }
   
   // Reset board data
   currentBoardData = null;
-  console.log('[Board Analyzer] Board data reset');
   
   // Re-enable Turbo Mode button after analysis
   if (window.turboButton) {
     window.turboButton.disabled = false;
     window.turboButton.title = '';
-    console.log('[Board Analyzer] Turbo Mode button re-enabled');
   }
   
   // Also restore Turbo Mode button text and style if it was modified
@@ -2670,13 +2552,12 @@ function cleanupAnalysisResources(thisAnalysisId) {
       window.turboButton.textContent = t('mods.boardAnalyzer.enableTurboLabel');
       window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
       window.turboButton.style.color = "#ffe066";
-      console.log('[Board Analyzer] Turbo Mode button style restored');
     }
   }
 }
 
 // Main analyze function - refactored to use helper functions
-async function analyzeBoard(runs = config.runs, statusCallback = null) {
+async function analyzeBoard(runs = config.runs, statusCallback = null, perfTracker = null) {
   // Initialize analysis
   const thisAnalysisId = initializeAnalysis();
   if (!thisAnalysisId) {
@@ -2689,7 +2570,6 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
     const boardContext = globalThis.state.board.getSnapshot().context;
     if (typeof boardContext.floor !== 'undefined') {
       currentFloor = boardContext.floor;
-      console.log('[Board Analyzer] Captured floor before analysis:', currentFloor);
     }
   } catch (error) {
     console.warn('[Board Analyzer] Error capturing floor before analysis:', error);
@@ -2702,18 +2582,33 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
     // Setup analysis state
     const { statsCalculator, bestRuns, timing } = setupAnalysisState();
     
+    const perf = perfTracker || createAnalysisPerformanceTracker();
+
     // Prepare analysis environment
+    const setupStart = performance.now();
     const modeSwitched = await prepareAnalysisEnvironment();
+    perf.setupMs = performance.now() - setupStart;
+    console.log('[Board Analyzer] Analyzing', currentRoomName || currentRoomId, 'floor', currentFloor ?? 0, `(${runs} planned runs)`);
     
     // Run the main analysis loop
-    const results = await runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback);
+    const loopStart = performance.now();
+    const results = await runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback, perf);
+    perf.loopMs = performance.now() - loopStart;
     
     // Calculate final statistics
     const totalTime = performance.now() - timing.startTime;
     const stats = statsCalculator.calculateStatistics();
+    perf.runTimes = statsCalculator.runTimes;
+    perf.runTimesSum = statsCalculator.runTimesSum;
+    perf.totalWallMs = totalTime;
+    perf.forceStopped = analysisState.forceStop;
+    perf.plannedRuns = runs;
+    perf.turboEnabled = config.enableTurboAutomatically && turboActive;
+    perf.speedupFactor = config.speedupFactor;
     
     return {
       results,
+      perf,
       summary: {
         runs,
         totalRuns: stats.totalRuns,
@@ -2736,7 +2631,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         targetTicksResult: bestRuns.targetTicksRun,
         // Timing stats
         totalTimeMs: totalTime,
-        totalTimeFormatted: formatMilliseconds(totalTime),
+        totalTimeFormatted: formatDurationWholeSeconds(totalTime),
         averageRunTimeMs: stats.averageRunTime,
         averageRunTimeFormatted: formatMilliseconds(stats.averageRunTime),
         fastestRunTimeMs: stats.fastestRunTime,
@@ -2768,6 +2663,110 @@ function formatMilliseconds(ms) {
   }
 }
 
+function formatMillisecondsPrecise(ms) {
+  if (ms >= 1000) {
+    return formatMilliseconds(ms);
+  }
+  if (ms >= 10) {
+    return `${Math.round(ms)}ms`;
+  }
+  if (ms >= 1) {
+    return `${ms.toFixed(1)}ms`;
+  }
+  if (ms > 0) {
+    return `${ms.toFixed(2)}ms`;
+  }
+  return '0ms';
+}
+
+function formatDurationWholeSeconds(ms) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
+function createAnalysisPerformanceTracker() {
+  return {
+    setupMs: 0,
+    loopMs: 0,
+    statusBuildCount: 0,
+    statusBuildMs: 0,
+    liveUiFlushCount: 0,
+    liveUiFlushMs: 0,
+    recordStatusBuild(ms) {
+      this.statusBuildCount++;
+      this.statusBuildMs += ms;
+    },
+    recordLiveUiFlush(ms) {
+      this.liveUiFlushCount++;
+      this.liveUiFlushMs += ms;
+    }
+  };
+}
+
+function logAnalysisPerformanceSummary(perf, metrics) {
+  const {
+    runTimes,
+    runTimesSum,
+    totalWallMs,
+    forceStopped,
+    plannedRuns
+  } = metrics;
+  const runsExecuted = runTimes.length;
+  const runsPerSecond = totalWallMs > 0 ? runsExecuted / (totalWallMs / 1000) : 0;
+  const loopOverheadMs = Math.max(0, perf.loopMs - runTimesSum);
+  const turboOn = perf.turboEnabled;
+  const speedupFactor = perf.speedupFactor ?? config.speedupFactor;
+
+  const summary = {
+    plannedRuns,
+    runsExecuted,
+    forceStopped: !!forceStopped,
+    ...(perf.stoppedDuringRun ? { stoppedDuringRun: perf.stoppedDuringRun } : {}),
+    wallClock: {
+      total: formatMilliseconds(totalWallMs),
+      setup: formatMilliseconds(perf.setupMs),
+      loop: formatMilliseconds(perf.loopMs)
+    },
+    throughput: runsExecuted > 0
+      ? `${runsPerSecond.toFixed(1)} runs/s`
+      : '0 runs/s',
+    perRunWall: runsExecuted > 0 ? {
+      avg: formatMilliseconds(runTimesSum / runsExecuted),
+      min: formatMilliseconds(Math.min(...runTimes)),
+      max: formatMilliseconds(Math.max(...runTimes))
+    } : null,
+    scriptOverhead: {
+      loopCallbacks: formatMilliseconds(loopOverheadMs),
+      statusBuilds: {
+        count: perf.statusBuildCount,
+        total: formatMilliseconds(perf.statusBuildMs),
+        avg: perf.statusBuildCount > 0
+          ? formatMillisecondsPrecise(perf.statusBuildMs / perf.statusBuildCount)
+          : '0ms'
+      },
+      liveUiUpdates: {
+        count: perf.liveUiFlushCount,
+        total: formatMilliseconds(perf.liveUiFlushMs),
+        avg: perf.liveUiFlushCount > 0
+          ? formatMillisecondsPrecise(perf.liveUiFlushMs / perf.liveUiFlushCount)
+          : '0ms'
+      }
+    },
+    runtime: {
+      turbo: turboOn ? `on (${speedupFactor}x)` : 'off',
+      liveStats: config.showAdvancedLiveStats ? 'advanced' : 'basic',
+      liveStatsThrottleMs: LIVE_STATS_THROTTLE_MS
+    }
+  };
+
+  console.log('[Board Analyzer] Performance summary:', summary);
+}
+
 // Create replay data in the required format
 function createReplayData(seed = null) {
   try {
@@ -2778,11 +2777,6 @@ function createReplayData(seed = null) {
       console.error('Failed to get board data');
       return null;
     }
-    
-    console.log('Used board data for replay data');
-    
-    // Log the serialized data to see what we got
-    console.log('Serialized board data:', boardData);
     
     // Verify that we have required fields
     if (!boardData.region || !boardData.map) {
@@ -3231,7 +3225,6 @@ function createConfigPanel(startAnalysisCallback) {
 
 // Add a global function to forcefully close all analysis modals
 function forceCloseAllModals() {
-  console.log("Closing all registered modals...");
   modalManager.closeAll();
 }
 
@@ -3240,7 +3233,6 @@ function closeRunningModal() {
   try {
     modalManager.close('running-modal');
     activeRunningModal = null;
-    console.log('[Board Analyzer] Running modal closed successfully');
   } catch (error) {
     console.warn('[Board Analyzer] Error closing running modal:', error);
   }
@@ -3390,6 +3382,49 @@ function updateLiveStatsDisplay(status) {
   }
 }
 
+function createLiveStatsThrottler(onFlush, perf = null) {
+  let pendingStatus = null;
+  let timerId = null;
+  let lastFlushAt = 0;
+
+  return {
+    schedule(status) {
+      pendingStatus = status;
+      const now = Date.now();
+      const elapsed = now - lastFlushAt;
+      if (elapsed >= LIVE_STATS_THROTTLE_MS) {
+        this.flush();
+        return;
+      }
+      if (timerId === null) {
+        timerId = setTimeout(() => this.flush(), LIVE_STATS_THROTTLE_MS - elapsed);
+      }
+    },
+    flush() {
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      if (!pendingStatus) return;
+      lastFlushAt = Date.now();
+      const status = pendingStatus;
+      pendingStatus = null;
+      const flushStart = perf ? performance.now() : 0;
+      onFlush(status);
+      if (perf) {
+        perf.recordLiveUiFlush(performance.now() - flushStart);
+      }
+    },
+    cancel() {
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      pendingStatus = null;
+    }
+  };
+}
+
 function appendBasicLiveStats(content) {
   const avgRunTimeInfo = document.createElement('p');
   avgRunTimeInfo.id = 'analysis-avg-run-time';
@@ -3497,9 +3532,14 @@ function showRunningAnalysisModal(currentRun, totalRuns, liveStatus = null) {
   if (liveStatus) {
     updateLiveStatsDisplay(liveStatus);
   }
+
+  let modalTitle = t('mods.boardAnalyzer.runningTitle');
+  if (currentFloor !== null && currentFloor !== undefined) {
+    modalTitle += ` ${t('mods.boardAnalyzer.resultTitleFloorSuffix').replace('{floor}', currentFloor)}`;
+  }
   
   const modal = api.ui.components.createModal({
-    title: t('mods.boardAnalyzer.runningTitle'),
+    title: modalTitle,
     content: content,
     buttons: [
       {
@@ -3516,7 +3556,6 @@ function showRunningAnalysisModal(currentRun, totalRuns, liveStatus = null) {
           if (window.turboButton) {
             window.turboButton.disabled = false;
             window.turboButton.title = '';
-            console.log('[Board Analyzer] Turbo Mode button re-enabled (stop)');
           }
           
           // Update UI
@@ -3531,8 +3570,6 @@ function showRunningAnalysisModal(currentRun, totalRuns, liveStatus = null) {
             stopButton.disabled = true;
             stopButton.textContent = t('mods.boardAnalyzer.stoppingLabel');
           }
-          
-          console.log('Stop Analysis clicked - analysis will stop immediately');
         }
       }
     ]
@@ -3822,9 +3859,6 @@ function showResultsModal(results) {
         // Create the $replay formatted string
         const replayText = `$replay(${JSON.stringify(replayData)})`;
         
-        // Log for debugging
-        console.log('Target ticks replay text:', replayText);
-        
         // Copy to clipboard
         const success = copyToClipboard(replayText);
         if (success) {
@@ -3843,12 +3877,6 @@ function showResultsModal(results) {
     // Only show chart if there are results
     if (results.results.length > 0) {
       try {
-        // Debug: Log results data
-        console.log('Creating chart with results:', {
-          totalResults: results.results.length,
-          results: results.results.slice(0, 5) // Log first 5 results for debugging
-        });
-        
         // Use ChartRenderer with callback for replay generation
         chartRenderer = new ChartRenderer(content, results.results, (originalIndex, displayResult) => {
           const fullResult = results.results[originalIndex];
@@ -3900,12 +3928,10 @@ function showResultsModal(results) {
       // Clean up chart renderer event listeners
       if (chartRenderer) {
         chartRenderer.cleanup();
-        console.log('[Board Analyzer] ChartRenderer cleaned up');
       }
       
       // Clean up modal's own event listeners
       modalEventManager.cleanup();
-      console.log('[Board Analyzer] Modal event listeners cleaned up');
       
       // Remove ESC key listener
       if (escKeyListener) {
@@ -3915,7 +3941,6 @@ function showResultsModal(results) {
       // Clear global results to free memory when modal closes
       if (window.__boardAnalyzerResults) {
         window.__boardAnalyzerResults = null;
-        console.log('[Board Analyzer] Global results cleared from memory');
       }
       
       // One more check for lingering modals when user closes results
@@ -4101,8 +4126,6 @@ function createReplayDataForRun(runResult) {
       return null;
     }
 
-    console.log('Using board data for run replay data');
-
     // Override the floor with the current floor being analyzed
     if (currentFloor !== null && currentFloor !== undefined) {
       boardData.floor = currentFloor;
@@ -4219,8 +4242,6 @@ async function runAnalysis() {
   
   // Check if Turbo Mode mod is enabled and disable it before analysis
   if (window.__turboState && window.__turboState.active) {
-    console.log('Turbo Mode mod is currently enabled, disabling it before analysis...');
-    
     // Try to disable Turbo Mode using the exported function if available
     if (window.__turboState.disable && typeof window.__turboState.disable === 'function') {
       window.__turboState.disable();
@@ -4233,7 +4254,6 @@ async function runAnalysis() {
         try {
           window.__turboState.speedupSubscription.unsubscribe();
           window.__turboState.speedupSubscription = null;
-          console.log('[Board Analyzer] Turbo speedup subscription removed');
         } catch (e) {
           console.warn('[Board Analyzer] Error removing turbo subscription:', e);
         }
@@ -4244,7 +4264,6 @@ async function runAnalysis() {
         try {
           const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
           tickEngine.setTickInterval(62.5); // Reset to default tick interval
-          console.log('[Board Analyzer] Tick interval reset to default');
         } catch (e) {
           console.warn('[Board Analyzer] Error resetting tick interval:', e);
         }
@@ -4268,54 +4287,76 @@ async function runAnalysis() {
       window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
       window.turboButton.style.color = "#ffe066";
     }
-    
-    console.log('Turbo Mode mod has been completely disabled for analysis');
   }
   
   // Close any existing modals using modal manager
   modalManager.closeByType(MODAL_TYPES.RUNNING);
   activeRunningModal = null;
   
-  console.log('[Board Analyzer] Cleared any existing running modals');
-  
   // Create a variable to store the running modal
   let runningModal = null;
+  const perfTracker = createAnalysisPerformanceTracker();
+  const liveStatsThrottler = createLiveStatsThrottler((status) => {
+    updateLiveStatsDisplay(status);
+  }, perfTracker);
   
   try {
+    // Capture floor before showing the running modal
+    try {
+      const boardContext = globalThis.state.board.getSnapshot().context;
+      if (typeof boardContext.floor !== 'undefined') {
+        currentFloor = boardContext.floor;
+      }
+    } catch (error) {
+      console.warn('[Board Analyzer] Error capturing floor for running modal:', error);
+    }
+
     // Show the running analysis modal
     runningModal = showRunningAnalysisModal(0, config.runs);
     activeRunningModal = runningModal;
-    
-    // Debug: Log the modal object structure
-    console.log('Running modal object:', runningModal);
-    console.log('Modal close method:', typeof runningModal?.close);
-    console.log('Modal element:', runningModal?.element);
-    console.log('Modal remove method:', typeof runningModal?.remove);
     
     // Run the analysis with status updates
     const results = await analyzeBoard(config.runs, (status) => {
       const hasLiveStatsUi = document.getElementById('analysis-live-stats')
         || document.getElementById('analysis-avg-run-time');
       if (hasLiveStatsUi) {
-        updateLiveStatsDisplay(status);
+        liveStatsThrottler.schedule(status);
       } else if (status.hasStats) {
+        liveStatsThrottler.cancel();
         if (runningModal && runningModal.close) {
           runningModal.close();
         }
         runningModal = showRunningAnalysisModal(status.current, status.total, status);
         activeRunningModal = runningModal;
       }
-    });
+    }, perfTracker);
+
+    liveStatsThrottler.flush();
+
+    if (results?.perf) {
+      logAnalysisPerformanceSummary(results.perf, {
+        runTimes: results.perf.runTimes || [],
+        runTimesSum: results.perf.runTimesSum || 0,
+        totalWallMs: results.perf.totalWallMs || 0,
+        forceStopped: results.perf.forceStopped,
+        plannedRuns: results.perf.plannedRuns || config.runs
+      });
+    }
     
-    // Always show results, even if analysis was stopped early
-    console.log('Analysis completed, showing results:', results);
-    console.log('Results summary:', results.summary);
-    console.log('Force stopped:', results.summary.forceStopped);
-    console.log('Total runs completed:', results.summary.totalRuns);
+    if (results?.summary) {
+      const stoppedEarly = results.summary.forceStopped;
+      const stoppedDuring = results.perf?.stoppedDuringRun;
+      const completionNote = stoppedEarly
+        ? stoppedDuring
+          ? `(stopped early during run ${stoppedDuring})`
+          : '(stopped early)'
+        : '';
+      console.log('[Board Analyzer] Analysis complete:', results.summary.totalRuns, 'runs completed',
+        completionNote);
+    }
     
     // Clear old results before storing new ones to prevent memory accumulation
     if (window.__boardAnalyzerResults) {
-      console.log('[Board Analyzer] Clearing old results from memory');
       window.__boardAnalyzerResults = null;
     }
     
@@ -4368,8 +4409,8 @@ async function runAnalysis() {
       content: t('mods.boardAnalyzer.errorText'),
       buttons: [{ text: t('mods.boardAnalyzer.closeButton'), primary: true }]
     });
-    
-    console.log('[Board Analyzer] Error cleanup completed - all modals closed');
+  } finally {
+    liveStatsThrottler.cancel();
   }
 }
 

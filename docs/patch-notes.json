@@ -4,6 +4,71 @@
   },
   "notes": [
     {
+      "version": "4.0.8",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Players Online header hover shows the all-time peak from Firebase (Overall Maximum: X players on date/time CET). Firebase sync runs every 15 minutes and is skipped while the live count is below the cached record; writes only occur when a new peak is detected."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Running Analysis modal title includes the current floor (e.g. Running Analysis (Floor 15)). Live Total Time and Est. Remaining use whole seconds (45s, 2m 30s) instead of decimals. Reduced console noise during analysis: removed per-run XP logs, modal debug dumps, and redundant startup/cleanup messages."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Live stats UI updates are throttled (50ms) during analysis; status is built once per completed run instead of before and after each run."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "added",
+          "text": "Performance summary console log when analysis finishes: wall clock, throughput, per-run timing, and script overhead (status builds, live UI). Excludes tick/score results."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "fixed",
+          "text": "New max points log only fires on a genuine new S+ high, not when another run ties the current max."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "fixed",
+          "text": "Stop messaging matches recorded run count: logs stopped during run N (X completed), performance summary includes stoppedDuringRun when applicable."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Rankings (Characters tab) Player column width increased to 150px for longer player names. Maps Statistics Season panel: tighter column/content padding (5px/2px), long stat lines use CSS ellipsis instead of wrapping, world record holder names drop the \"by\" prefix and link to their Bestiary Arena profile (full name shown when space allows)."
+        },
+        {
+          "mod": "Hero Editor",
+          "type": "changed",
+          "text": "Skips board serialization and button-state checks while Board Analyzer or Manual Runner is active. Removed debug log when serializing the board for button state checks."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Sandbox sessions are still skipped when the panel is open; removed the per-run console log."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Autoplay refresh monitor (newGame, setPlayMode, board activity, and threshold checks) pauses while Board Analyzer or Autoscroller is active."
+        },
+        {
+          "mod": "Team Copier",
+          "type": "changed",
+          "text": "Removed debug log when serializing the board for copy/share actions."
+        },
+        {
+          "mod": "Turbo Mode",
+          "type": "changed",
+          "text": "Removed debug log when creating the tick display element on new games."
+        }
+      ]
+    },
+    {
       "version": "4.0.7",
       "changes": [
         {

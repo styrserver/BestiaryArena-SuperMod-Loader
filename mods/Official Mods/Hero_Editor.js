@@ -356,12 +356,10 @@ function getSerializedBoard() {
     // Method 1: Use the raw function directly from window if available
     if (typeof window.$serializeBoard === 'function') {
       boardData = JSON.parse(window.$serializeBoard());
-      console.log('Used window.$serializeBoard directly for board data');
     } 
     // Method 2: Use the function from the API if available
     else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
       boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
-              console.log('Used BestiaryModAPI.utility.serializeBoard for board data');
     }
     else {
       console.error('No serialization method available');
@@ -466,6 +464,13 @@ function hasHeroesOnBoard() {
 }
 
 function updateHeroEditorButtonState() {
+  if (
+    window.ModCoordination?.isModActive('Board Analyzer') ||
+    window.ModCoordination?.isModActive('Manual Runner')
+  ) {
+    return;
+  }
+
   const button = getHeroEditorButton();
   if (!button || button.style.display === 'none') return;
 
@@ -496,6 +501,12 @@ function subscribeHeroEditorBoardUpdates() {
   if (heroEditorBoardUnsubscribe || !globalThis.state?.board?.subscribe) return;
 
   heroEditorBoardUnsubscribe = globalThis.state.board.subscribe(() => {
+    if (
+      window.ModCoordination?.isModActive('Board Analyzer') ||
+      window.ModCoordination?.isModActive('Manual Runner')
+    ) {
+      return;
+    }
     updateHeroEditorButtonState();
   });
 }
