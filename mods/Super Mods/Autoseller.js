@@ -7444,6 +7444,32 @@
     // =======================
     // 10. Session Widget & Display
     // =======================
+
+    function formatCompactResourceAmount(num) {
+        const n = Number(num);
+        if (!Number.isFinite(n) || n < 0) return '0';
+        if (n < 1000) return String(Math.round(n));
+        const locale = 'sv-SE';
+        if (n < 1e6) {
+            const k = n / 1000;
+            const formatted = k % 1 === 0
+                ? k.toLocaleString(locale, { maximumFractionDigits: 0 })
+                : k.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+            return formatted + 'k';
+        }
+        const m = n / 1e6;
+        const formattedM = m % 1 === 0
+            ? m.toLocaleString(locale, { maximumFractionDigits: 0 })
+            : m.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+        return formattedM + 'M';
+    }
+
+    function setCompactResourceDisplay(span, num) {
+        const n = Number(num);
+        const rounded = Math.round(Number.isFinite(n) ? n : 0);
+        span.textContent = formatCompactResourceAmount(rounded);
+        span.title = rounded >= 1000 ? String(rounded) : '';
+    }
     
     function injectAutosellerWidgetStyles() {
         if (!document.getElementById('autoseller-widget-css')) {
@@ -7498,8 +7524,7 @@
                 gap: 4px;
             }
             #autoseller-session-widget .stat-icon {
-                width: 14px;
-                height: 14px;
+                flex-shrink: 0;
                 vertical-align: middle;
             }
             `;
@@ -7579,7 +7604,7 @@
                 <div class="stat-label" data-stat="sold">${soldLabel}</div>
                 <div class="stat-value" id="autoseller-session-sold-count" data-stat="sold">0</div>
                 <div class="stat-value" id="autoseller-session-sold-gold" data-stat="sold">
-                    <img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="Gold" class="stat-icon">
+                    <img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="Gold" class="stat-icon pixelated">
                     <span>0</span>
                 </div>
             `);
@@ -7598,7 +7623,7 @@
                 <div class="stat-label" data-stat="squeezed">${t('mods.autoseller.squeezed')}</div>
                 <div class="stat-value" id="autoseller-session-squeezed-count" data-stat="squeezed">0</div>
                 <div class="stat-value" id="autoseller-session-squeezed-dust" data-stat="squeezed">
-                    <img src="https://bestiaryarena.com/assets/icons/dust.png" alt="Dust" class="stat-icon">
+                    <img src="https://bestiaryarena.com/assets/icons/dust.png" alt="Dust" class="stat-icon pixelated">
                     <span>0</span>
                 </div>
             `);
@@ -7616,7 +7641,7 @@
                 <div class="stat-label" data-stat="disenchanted">${t('mods.autoseller.dustingLabel')}</div>
                 <div class="stat-value" id="autoseller-session-disenchanted-count" data-stat="disenchanted">0</div>
                 <div class="stat-value" id="autoseller-session-disenchanted-dust" data-stat="disenchanted">
-                    <img src="https://bestiaryarena.com/assets/icons/dust.png" alt="Dust" class="stat-icon">
+                    <img src="https://bestiaryarena.com/assets/icons/dust.png" alt="Dust" class="stat-icon pixelated">
                     <span>0</span>
                 </div>
             `);
@@ -7727,7 +7752,7 @@
                 const goldText = statEls.soldGold.querySelector('span');
                 if (goldText) {
                     const gold = isShowingDevoured ? currentValues.devouredGold : currentValues.soldGold;
-                    goldText.textContent = `${gold}`;
+                    setCompactResourceDisplay(goldText, gold);
                 }
             }
         }
@@ -7740,7 +7765,7 @@
             if (statEls.squeezedDust) {
                 const dustText = statEls.squeezedDust.querySelector('span');
                 if (dustText) {
-                    dustText.textContent = `${currentValues.squeezedDust}`;
+                    setCompactResourceDisplay(dustText, currentValues.squeezedDust);
                 }
             }
         }
@@ -7756,7 +7781,7 @@
                     // Each equipment = 25 dust (as per user specification)
                     // disenchantedDust stores the count of equipment, multiply by 25 for total dust
                     const totalDust = currentValues.disenchantedDust * 25;
-                    dustText.textContent = `${totalDust}`;
+                    setCompactResourceDisplay(dustText, totalDust);
                 }
             }
         }

@@ -17,11 +17,6 @@ const DEPOT_CONFIG_KEY = 'depot-manager-config';
 /** Canonical storage for favorite creatures after migration (was better-ui-favorites) */
 const FAVORITES_STORAGE_KEY = 'depot-manager-favorites';
 
-/** One-time: copy enableFavorites / favoriteSymbol from better-ui-config into depot-manager-config */
-const LEGACY_MOD_SETTINGS_MIGRATION_KEY = 'depot-manager-legacy-mod-settings-v2';
-/** One-time: copy JSON blob from better-ui-favorites into depot-manager-favorites */
-const FAVORITES_DATA_MIGRATION_FLAG = 'depot-manager-favorites-data-migrated-v1';
-
 const defaultDepotConfig = {
   enableFavorites: false,
   favoriteSymbol: 'heart',
@@ -166,65 +161,6 @@ function readLegacyBetterUiConfig() {
   }
 }
 
-/**
- * Copy Mod Settings favorite options into depot-manager-config when they exist in better-ui-config.
- * Runs once per browser (migration flag), then legacy keys can remain until Mod Settings saves without them.
- */
-function migrateLegacyModSettingsIntoDepotConfig() {
-  if (localStorage.getItem(LEGACY_MOD_SETTINGS_MIGRATION_KEY)) return;
-  try {
-    const parsed = readLegacyBetterUiConfig();
-    if (parsed) {
-      let changed = false;
-      if (typeof parsed.enableFavorites === 'boolean' && depotConfig.enableFavorites !== parsed.enableFavorites) {
-        depotConfig.enableFavorites = parsed.enableFavorites;
-        changed = true;
-      }
-      if (typeof parsed.favoriteSymbol === 'string' && parsed.favoriteSymbol && depotConfig.favoriteSymbol !== parsed.favoriteSymbol) {
-        depotConfig.favoriteSymbol = parsed.favoriteSymbol;
-        changed = true;
-      }
-      if (changed) saveDepotConfig();
-    }
-    localStorage.setItem(LEGACY_MOD_SETTINGS_MIGRATION_KEY, '1');
-  } catch (e) {
-    console.warn('[Depot Manager] Legacy Mod Settings config migration:', e);
-    try {
-      localStorage.setItem(LEGACY_MOD_SETTINGS_MIGRATION_KEY, '1');
-    } catch (e2) { /* ignore */ }
-  }
-}
-
-/**
- * Copy favorite creature map from better-ui-favorites to depot-manager-favorites if the new key is empty.
- */
-function migrateLegacyFavoritesDataBlob() {
-  if (localStorage.getItem(FAVORITES_DATA_MIGRATION_FLAG)) return;
-  try {
-    const legacy = localStorage.getItem(LEGACY_FAVORITES_DATA_KEY);
-    const next = localStorage.getItem(FAVORITES_STORAGE_KEY);
-    if (legacy && !next) {
-      localStorage.setItem(FAVORITES_STORAGE_KEY, legacy);
-      console.log('[Depot Manager] Copied favorite creature data from better-ui-favorites → depot-manager-favorites');
-    } else if (legacy && next) {
-      try {
-        const d = JSON.parse(next);
-        const l = JSON.parse(legacy);
-        if (Object.keys(d).length === 0 && Object.keys(l).length > 0) {
-          localStorage.setItem(FAVORITES_STORAGE_KEY, legacy);
-          console.log('[Depot Manager] Filled depot-manager-favorites from better-ui-favorites (was empty)');
-        }
-      } catch (e) { /* ignore */ }
-    }
-    localStorage.setItem(FAVORITES_DATA_MIGRATION_FLAG, '1');
-  } catch (e) {
-    console.warn('[Depot Manager] Legacy favorites data migration:', e);
-    try {
-      localStorage.setItem(FAVORITES_DATA_MIGRATION_FLAG, '1');
-    } catch (e2) { /* ignore */ }
-  }
-}
-
 function loadDepotConfig() {
   try {
     const raw = localStorage.getItem(DEPOT_CONFIG_KEY);
@@ -247,8 +183,6 @@ function loadDepotConfig() {
 
     // Depot is always ON now; keep any stored value overridden.
     depotConfig.enableCreatureDepot = true;
-    // If depot file already existed: still copy any favorite fields from old config once (legacy wins for that pass)
-    migrateLegacyModSettingsIntoDepotConfig();
   } catch (error) {
     console.error('[Depot Manager] Error loading config:', error);
     depotConfig = Object.assign({}, defaultDepotConfig);
@@ -1895,6 +1829,8 @@ function getBestiarySlotVisualRow(slot, domIndex) {
   const isShiny = img.src.includes('-shiny');
   const rarityEl = container?.querySelector('.has-rarity');
   const rarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+  const displayedStarTier = parseDisplayedStarTierFromCreatureSlot(container);
+  const isSealed = isDisplayedSealedCreatureSlot(container);
   return {
     slot,
     img,
@@ -1903,6 +1839,8 @@ function getBestiarySlotVisualRow(slot, domIndex) {
     wantsElite,
     isShiny,
     rarity: Number.isFinite(rarity) ? rarity : NaN,
+    displayedStarTier,
+    isSealed,
     domIndex
   };
 }
@@ -1914,7 +1852,9 @@ function getDepotVisualBucketKey(row) {
     String(row.displayedLevel ?? ''),
     row.isShiny ? '1' : '0',
     row.wantsElite ? '1' : '0',
-    Number.isFinite(row.rarity) ? String(row.rarity) : 'x'
+    Number.isFinite(row.rarity) ? String(row.rarity) : 'x',
+    row.displayedStarTier != null ? String(row.displayedStarTier) : 'x',
+    row.isSealed ? '1' : '0'
   ].join('|');
 }
 
@@ -1929,6 +1869,12 @@ function depotVisualScoreForMonster(row, m) {
   if (row.displayedLevel != null && Number.isFinite(mLevel)) {
     if (mLevel !== row.displayedLevel) return null;
   }
+  const mTier = getMonsterTierValue(m);
+  const mSealed = isMonsterSealedCreature(m);
+  if (row.displayedStarTier != null && mTier != null && row.displayedStarTier !== mTier) return null;
+  if (row.isSealed && !mSealed) return null;
+  if (!row.isSealed && row.displayedStarTier == null && mSealed) return null;
+  if ((row.isSealed || row.displayedStarTier === 5) && !mSealed) return null;
   const ambiguousDom = bestiaryDuplicateDomAmbiguous(row.wantsElite, row.rarity);
   let score = 100;
   if (!ambiguousDom) {
@@ -1936,6 +1882,8 @@ function depotVisualScoreForMonster(row, m) {
     const mr = depotRarityFromMonster(m);
     if (Number.isFinite(row.rarity) && row.rarity === mr) score += 200;
   }
+  if (row.displayedStarTier != null && mTier === row.displayedStarTier) score += 350;
+  if (row.isSealed === mSealed) score += 150;
   score -= row.domIndex * 1e-6;
   return score;
 }
@@ -2950,6 +2898,30 @@ function inferWantsEliteFromCreatureSlot(containerSlot) {
   return r2 === GAME_CONSTANTS.ELITE_RARITY_LEVEL;
 }
 
+function getMonsterTierValue(m) {
+  const tier = Number(m?.tier ?? m?.tierLevel ?? m?.starTier ?? m?.metadata?.tier);
+  return Number.isFinite(tier) ? tier : null;
+}
+
+function isMonsterSealedCreature(m) {
+  if (!m) return false;
+  const tier = getMonsterTierValue(m);
+  return m.sealed === true || tier === 5;
+}
+
+/** @returns {number|null} Star tier 1–6 from `star-tier-N.png`; null when no star icon. */
+function parseDisplayedStarTierFromCreatureSlot(containerSlot) {
+  if (!containerSlot) return null;
+  const starImg = containerSlot.querySelector('img.tier-stars[alt="star tier"], img[src*="star-tier-"]');
+  if (!starImg?.src) return null;
+  const match = starImg.src.match(/star-tier-(\d+)\.png/i);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function isDisplayedSealedCreatureSlot(containerSlot) {
+  return Boolean(containerSlot?.querySelector('.rarity-sealed'));
+}
+
 function filterMonstersForCreaturePortrait(monsters, creatureImg, displayedLevel) {
   if (!Array.isArray(monsters) || !creatureImg) return monsters;
   const wantsShiny = creatureImg.src.includes('-shiny');
@@ -2974,6 +2946,8 @@ function matchCreatureBySequentialIndex(imgEl, monsters) {
   const wantsShiny = imgEl.src.includes('-shiny');
   const rarityEl = slot?.querySelector('.has-rarity');
   const wantsRarity = parseInt(rarityEl?.getAttribute('data-rarity') || '', 10);
+  const displayedStarTier = parseDisplayedStarTierFromCreatureSlot(slot);
+  const domSealed = isDisplayedSealedCreatureSlot(slot);
   const ambiguousDom = bestiaryDuplicateDomAmbiguous(wantsElite, wantsRarity);
 
   const indexKey = String(gameId);
@@ -3018,10 +2992,18 @@ function matchCreatureBySequentialIndex(imgEl, monsters) {
         const globalIdx = matchingMonsters.indexOf(m);
         if (globalIdx < idx) continue;
         let score = 0;
+        const mTier = getMonsterTierValue(m);
+        const mSealed = isMonsterSealedCreature(m);
+        if (displayedStarTier != null && mTier != null && displayedStarTier !== mTier) continue;
+        if (domSealed && !mSealed) continue;
+        if (!domSealed && displayedStarTier == null && mSealed) continue;
+        if ((domSealed || displayedStarTier === 5) && !mSealed) continue;
         if (displayedLevel && getLevelFromExp(m.exp || 0) === displayedLevel) score += 100;
         if (isEliteMonster(m) === wantsElite) score += 40;
         if (Boolean(m.shiny) === wantsShiny) score += 20;
         if (Number.isFinite(wantsRarity) && rarityFromMonster(m) === wantsRarity) score += 15;
+        if (displayedStarTier != null && mTier === displayedStarTier) score += 50;
+        if (domSealed === mSealed) score += 25;
         score -= (globalIdx - idx) * 0.001;
         if (score > bestScore) {
           bestScore = score;
@@ -3695,7 +3677,6 @@ function initDepotManager() {
   if (depotInitialized) return;
   depotInitialized = true;
   loadDepotConfig();
-  migrateLegacyFavoritesDataBlob();
   loadFavorites();
   loadDepotCreatureIds();
   loadDepotCreatureMeta();

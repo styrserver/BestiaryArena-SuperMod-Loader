@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.0.10",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Session widget gold and dust totals use compact notation (e.g. 12,2k). Hovering a compact value shows the exact amount."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Session widget gold and dust icons use native size instead of being scaled to 14px."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "fixed",
+          "text": "Favorite hearts no longer attach to the wrong duplicate when two identical creatures share the same portrait and level. Matching now uses star tier (e.g. tier-5 sealed) and the sealed overlay so a new drop is not mistaken for an existing favorite."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Panel now stays within the viewport when the browser window is resized, matching Hunt Analyzer behavior."
+        }
+      ]
+    },
+    {
       "version": "4.0.9",
       "changes": [
         {

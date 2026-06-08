@@ -125,6 +125,7 @@
     let isDraggingSlot = false;
     let panelResizeMouseMoveHandler = null;
     let panelResizeMouseUpHandler = null;
+    let panelViewportListenerAttached = false;
 
     const panelResizeState = {
         isResizing: false,
@@ -1435,6 +1436,51 @@
         document.body.style.userSelect = '';
     }
 
+    function updatePanelPosition() {
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel || panel.style.display === 'none') return;
+
+        const maxLeft = window.innerWidth - panel.offsetWidth;
+        const maxTop = window.innerHeight - panel.offsetHeight;
+        const rect = panel.getBoundingClientRect();
+        let changed = false;
+
+        if (rect.left < 0) {
+            panel.style.left = '0px';
+            changed = true;
+        } else if (rect.left > maxLeft) {
+            panel.style.left = Math.max(0, maxLeft) + 'px';
+            changed = true;
+        }
+
+        if (rect.top < 0) {
+            panel.style.top = '0px';
+            changed = true;
+        } else if (rect.top > maxTop) {
+            panel.style.top = Math.max(0, maxTop) + 'px';
+            changed = true;
+        }
+
+        if (changed) {
+            savePanelSettings({
+                left: parseInt(panel.style.left, 10) || 0,
+                top: parseInt(panel.style.top, 10) || 0
+            });
+        }
+    }
+
+    function attachPanelViewportListener() {
+        if (panelViewportListenerAttached) return;
+        window.addEventListener('resize', updatePanelPosition);
+        panelViewportListenerAttached = true;
+    }
+
+    function detachPanelViewportListener() {
+        if (!panelViewportListenerAttached) return;
+        window.removeEventListener('resize', updatePanelPosition);
+        panelViewportListenerAttached = false;
+    }
+
     function createPanel() {
         injectStyles();
         const s = loadPanelSettings();
@@ -2168,6 +2214,9 @@
             document.addEventListener('mouseup', dragUp);
         });
 
+        updatePanelPosition();
+        attachPanelViewportListener();
+
         return panel;
     }
 
@@ -2176,6 +2225,9 @@
         if (!panel) {
             panel = createPanel();
             document.body.appendChild(panel);
+        } else {
+            updatePanelPosition();
+            attachPanelViewportListener();
         }
         panel.style.display = 'flex';
         savePanelSettings({ isOpen: true });
@@ -2258,6 +2310,7 @@
     // =======================
     function cleanup() {
         try {
+            detachPanelViewportListener();
             teardownPanelResizeListeners();
             teardownListeners();
             teardownBoardSub();
