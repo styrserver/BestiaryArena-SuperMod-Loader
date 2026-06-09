@@ -259,7 +259,28 @@ let modalAborted = false; // Track if modal was aborted due to other modals
 const MOD_LOAD_RETRY_KEY = 'mod-load-retry-count';
 const MAX_MOD_LOAD_RETRIES = 3;
 const MOD_LOAD_REFRESH_DELAY = 3000;
-const MOD_LOAD_FALLBACK_DELAY = 8000;
+const MOD_LOAD_FALLBACK_DELAY = 15000;
+
+function isGameStateReadyForMods() {
+  try {
+    const state = globalThis.state;
+    if (!state?.player?.getSnapshot || !state?.board?.getSnapshot) {
+      return false;
+    }
+    const boardCtx = state.board.getSnapshot()?.context;
+    const playerCtx = state.player.getSnapshot()?.context;
+    return !!(boardCtx && playerCtx);
+  } catch {
+    return false;
+  }
+}
+
+function hasReactHydrationErrorForWelcome() {
+  return !!(
+    window.__BA_REACT_HYDRATION_ERROR__ ||
+    window.localModsAPI?.hasReactHydrationError?.()
+  );
+}
 
 let modLoadingFallbackTimer = null;
 
@@ -545,7 +566,21 @@ async function handleModLoadingFinished(errors = []) {
     modLoadingObserver = null;
   }
 
-  const hasErrors = Array.isArray(errors) && errors.length > 0;
+  let resolvedErrors = Array.isArray(errors) ? [...errors] : [];
+  if (resolvedErrors.length === 0 && !isGameStateReadyForMods()) {
+    const hasGameMods = window.localMods?.some(mod => mod.enabled && !mod.name.startsWith('database/'));
+    if (hasGameMods) {
+      resolvedErrors.push({ mod: 'loader', error: 'Game state not ready (board/player unavailable)' });
+      console.warn('[Welcome] Mod batch reported success but game state is not ready — treating as load failure');
+    }
+  }
+
+  if (resolvedErrors.length === 0 && hasReactHydrationErrorForWelcome()) {
+    resolvedErrors.push({ mod: 'loader', error: 'React hydration error detected (#418/#423)' });
+    console.warn('[Welcome] React hydration error detected — treating as load failure');
+  }
+
+  const hasErrors = resolvedErrors.length > 0;
 
   loadingToast?.remove?.();
   loadingToast = null;
@@ -553,7 +588,7 @@ async function handleModLoadingFinished(errors = []) {
   if (hasErrors) {
     modsLoaded = false;
     const retryCount = getModLoadRetryCount();
-    const failedModNames = errors.map(e => e.mod || 'unknown').join(', ');
+    const failedModNames = resolvedErrors.map(e => e.mod || 'unknown').join(', ');
     console.log('[Welcome] Mod loading had errors:', failedModNames, `(retry ${retryCount}/${MAX_MOD_LOAD_RETRIES})`);
 
     if (retryCount < MAX_MOD_LOAD_RETRIES) {

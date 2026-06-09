@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.1.1",
+      "changes": [
+        {
+          "mod": "Better Setups",
+          "type": "fixed",
+          "text": "Load Setup accepts game setup scripts that use autoSetupBoard, selectRoomById, or state.board.send (not only $configureBoard / $replay). Successful executeCommand results no longer rejected as invalid input."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "getCurrentFloor no longer throws when globalThis.state.board is briefly unavailable (optional chaining); avoids console spam from the sealed-creature warning interval during early load."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Game-dependent mods now wait up to 10s for page ready (board/player state, document complete, 750ms settle) before executing; database mods still load first for the Welcome loading toast. React hydration errors (#418/#423) are detected from document_start and reported to Welcome so a failed load auto-refreshes instead of showing \"Mods loaded successfully\". Game mods are skipped when hydration already failed. Welcome fallback timer aligned to 15s."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "trackCreaturePlacements retries until the board is available instead of throwing when globalThis.state.board is missing during async init."
+        }
+      ]
+    },
+    {
       "version": "4.1.0",
       "changes": [
         {

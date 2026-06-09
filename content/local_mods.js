@@ -99,6 +99,143 @@ function clearInitExecutionFallbackTimer() {
   }
 }
 
+const GAME_STATE_POLL_INTERVAL_MS = 250;
+const GAME_STATE_MAX_WAIT_MS = 10000;
+const HYDRATION_SETTLE_MS = 750;
+const LOAD_READY_LOG_INTERVAL_MS = 2000;
+let reactHydrationErrorDetected = false;
+
+function isReactHydrationErrorMessage(message) {
+  const text = String(message || '');
+  return text.includes('Minified React error #418') || text.includes('Minified React error #423');
+}
+
+function hasReactHydrationError() {
+  return !!(window.__BA_REACT_HYDRATION_ERROR__ || reactHydrationErrorDetected);
+}
+
+function markReactHydrationError(source, message) {
+  window.__BA_REACT_HYDRATION_ERROR__ = true;
+  reactHydrationErrorDetected = true;
+  console.warn(`[Local Mods] React hydration error detected (${source}):`, message);
+}
+
+function resetReactHydrationErrorFlag() {
+  window.__BA_REACT_HYDRATION_ERROR__ = false;
+  reactHydrationErrorDetected = false;
+}
+
+function installReactHydrationErrorListener() {
+  if (window.__BA_HYDRATION_ERROR_LISTENER__) {
+    return;
+  }
+  window.__BA_HYDRATION_ERROR_LISTENER__ = true;
+  window.__BA_REACT_HYDRATION_ERROR__ = window.__BA_REACT_HYDRATION_ERROR__ || false;
+  window.addEventListener('error', (event) => {
+    if (isReactHydrationErrorMessage(event?.message)) {
+      markReactHydrationError('window.error', event.message);
+    }
+  });
+}
+
+installReactHydrationErrorListener();
+
+function isGameStateReady() {
+  try {
+    const state = globalThis.state;
+    if (!state?.player?.getSnapshot || !state?.board?.getSnapshot) {
+      return false;
+    }
+    const boardCtx = state.board.getSnapshot()?.context;
+    const playerCtx = state.player.getSnapshot()?.context;
+    return !!(boardCtx && playerCtx);
+  } catch {
+    return false;
+  }
+}
+
+function modRequiresGameState(modName) {
+  return modName && !modName.startsWith('database/');
+}
+
+function waitForGameState(maxWaitMs = GAME_STATE_MAX_WAIT_MS) {
+  return new Promise((resolve) => {
+    if (isGameStateReady()) {
+      resolve(true);
+      return;
+    }
+    const start = Date.now();
+    const tick = () => {
+      if (isGameStateReady()) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - start >= maxWaitMs) {
+        resolve(false);
+        return;
+      }
+      setTimeout(tick, GAME_STATE_POLL_INTERVAL_MS);
+    };
+    setTimeout(tick, GAME_STATE_POLL_INTERVAL_MS);
+  });
+}
+
+function waitForLoadReady(maxWaitMs = GAME_STATE_MAX_WAIT_MS) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    let gameStateSeenAt = null;
+    let lastLogAt = 0;
+
+    const tick = () => {
+      const elapsed = Date.now() - start;
+
+      if (hasReactHydrationError()) {
+        console.warn('[Local Mods] Aborting load-ready wait — React hydration error already detected');
+        resolve(false);
+        return;
+      }
+
+      const gameReady = isGameStateReady();
+      const docReady = document.readyState === 'complete';
+
+      if (gameReady && gameStateSeenAt === null) {
+        gameStateSeenAt = Date.now();
+        console.log('[Local Mods] Game state became ready, waiting for page settle...');
+      }
+
+      const settleMs = gameStateSeenAt ? Date.now() - gameStateSeenAt : 0;
+      const settled = gameReady && docReady && gameStateSeenAt !== null && settleMs >= HYDRATION_SETTLE_MS;
+
+      if (settled) {
+        console.log(`[Local Mods] Page load ready after ${elapsed}ms (game state + document complete + ${HYDRATION_SETTLE_MS}ms settle)`);
+        resolve(true);
+        return;
+      }
+
+      if (elapsed - lastLogAt >= LOAD_READY_LOG_INTERVAL_MS) {
+        lastLogAt = elapsed;
+        console.log(
+          `[Local Mods] Still waiting for page ready... ${Math.round(elapsed / 1000)}s ` +
+          `(game: ${gameReady}, document: ${docReady}, settle: ${settleMs}ms/${HYDRATION_SETTLE_MS}ms)`
+        );
+      }
+
+      if (elapsed >= maxWaitMs) {
+        console.warn(
+          `[Local Mods] Page ready timeout after ${maxWaitMs}ms (game: ${gameReady}, document: ${docReady})`
+        );
+        resolve(gameReady);
+        return;
+      }
+
+      setTimeout(tick, GAME_STATE_POLL_INTERVAL_MS);
+    };
+
+    console.log('[Local Mods] Waiting for page ready (game state + document complete + settle)...');
+    setTimeout(tick, GAME_STATE_POLL_INTERVAL_MS);
+  });
+}
+
 function markExecutionTriggered() {
   executionTriggered = true;
   clearInitExecutionFallbackTimer();
@@ -928,6 +1065,24 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
   }
 }
 
+async function runModBatch(mods, forceExecution, results) {
+  for (const mod of mods) {
+    if (mod.enabled || forceExecution) {
+      try {
+        const result = await executeLocalMod(mod, forceExecution);
+        if (result) {
+          results.push({ mod: mod.name, success: true, result });
+        } else {
+          results.push({ mod: mod.name, success: false, error: 'Failed to load or execute' });
+        }
+      } catch (error) {
+        console.error(`Failed to execute mod ${mod.name}:`, error);
+        results.push({ mod: mod.name, success: false, error: error.message });
+      }
+    }
+  }
+}
+
 // Optimized batch execution function
 async function executeModsInOrder(mods, forceExecution = false) {
   console.log(`[Local Mods] executeModsInOrder called with ${mods.length} mods, forceExecution: ${forceExecution}`);
@@ -947,19 +1102,26 @@ async function executeModsInOrder(mods, forceExecution = false) {
   
   try {
     const results = [];
-    for (const mod of mods) {
-      if (mod.enabled || forceExecution) {
-        try {
-          // Use the consolidated executeLocalMod function
-          const result = await executeLocalMod(mod, forceExecution);
-          if (result) {
-            results.push({ mod: mod.name, success: true, result });
-          } else {
-            results.push({ mod: mod.name, success: false, error: 'Failed to load or execute' });
-          }
-        } catch (error) {
-          console.error(`Failed to execute mod ${mod.name}:`, error);
-          results.push({ mod: mod.name, success: false, error: error.message });
+    const databaseMods = mods.filter(mod => mod.name.startsWith('database/'));
+    const gameMods = mods.filter(mod => !mod.name.startsWith('database/'));
+
+    await runModBatch(databaseMods, forceExecution, results);
+
+    if (gameMods.length > 0) {
+      if (hasReactHydrationError()) {
+        console.warn('[Local Mods] Skipping game-dependent mods — React hydration error already detected');
+      } else {
+        console.log(`[Local Mods] Waiting for page ready before ${gameMods.length} game-dependent mod(s)...`);
+        const ready = await waitForLoadReady(GAME_STATE_MAX_WAIT_MS);
+        if (!ready) {
+          console.warn('[Local Mods] Page not ready after max wait — executing game mods anyway (Welcome may refresh)');
+        } else {
+          console.log('[Local Mods] Page ready — executing game-dependent mods');
+        }
+        if (!hasReactHydrationError()) {
+          await runModBatch(gameMods, forceExecution, results);
+        } else {
+          console.warn('[Local Mods] Skipping game-dependent mods — React hydration error detected during wait');
         }
       }
     }
@@ -1000,6 +1162,17 @@ function sendCompletionSignal(results = []) {
     .filter(r => !r.success)
     .map(r => ({ mod: r.mod, error: r.error || 'Failed to load or execute' }));
 
+  const ranGameMods = results.some(r => modRequiresGameState(r.mod));
+  if (ranGameMods && !isGameStateReady()) {
+    errors.push({ mod: 'loader', error: 'Game state not ready (board/player unavailable)' });
+    console.warn('[Local Mods] Game state still not ready after mod batch — reporting to Welcome for refresh');
+  }
+
+  if (hasReactHydrationError()) {
+    errors.push({ mod: 'loader', error: 'React hydration error detected (#418/#423)' });
+    console.warn('[Local Mods] React hydration error detected — reporting to Welcome for refresh');
+  }
+
   console.log('[Local Mods] All mods completed - sending signal', errors.length ? `with ${errors.length} error(s)` : 'successfully');
   completionSignalSent = true;
   lastCompletionErrors = errors;
@@ -1029,6 +1202,7 @@ document.addEventListener('reloadLocalMods', () => {
   executionTriggered = false;
   clearInitExecutionFallbackTimer();
   resetCompletionSignal(); // Reset completion signal flag
+  resetReactHydrationErrorFlag();
   initLocalMods();
 });
 
@@ -1038,6 +1212,10 @@ window.localModsAPI.executeModsInOrder = executeModsInOrder;
 window.localModsAPI.isBatchExecuting = () => isBatchExecuting;
 window.localModsAPI.wasCompletionSignalSent = () => completionSignalSent;
 window.localModsAPI.getLastLoadErrors = () => lastCompletionErrors;
+window.localModsAPI.isGameStateReady = isGameStateReady;
+window.localModsAPI.waitForGameState = waitForGameState;
+window.localModsAPI.waitForLoadReady = waitForLoadReady;
+window.localModsAPI.hasReactHydrationError = hasReactHydrationError;
 
 window.addEventListener('message', function(event) {
   if (event.source !== window) return;

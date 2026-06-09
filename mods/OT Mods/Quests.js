@@ -11680,7 +11680,16 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   }
 
   // Function to track creature placements (only when in Mornenion quest context)
-  function trackCreaturePlacements() {
+  function trackCreaturePlacements(retryCount = 0) {
+    if (!globalThis.state?.board?.subscribe) {
+      if (retryCount < 40) {
+        setTimeout(() => trackCreaturePlacements(retryCount + 1), 250);
+      } else {
+        console.warn('[Quests Mod][Creature Placement] Board not ready after max retries, skipping tracking setup');
+      }
+      return;
+    }
+
     if (creaturePlacementSubscription) {
       creaturePlacementSubscription.unsubscribe();
     }

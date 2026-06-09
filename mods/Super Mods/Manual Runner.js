@@ -817,7 +817,10 @@ function enforceFloorLock(currentFloor = null) {
 // Get current floor (0-15)
 function getCurrentFloor() {
   try {
-    const currentFloor = globalThis.state.board.get().context.floor;
+    const currentFloor = globalThis.state?.board?.get?.()?.context?.floor;
+    if (currentFloor === undefined) {
+      return 0;
+    }
     if (typeof currentFloor === 'number' && currentFloor >= 0 && currentFloor <= 15) {
       return currentFloor;
     }

@@ -23,6 +23,19 @@ if (!IS_TOP_FRAME) {
   console.log('[Injector] Skipping subframe — mod loader runs in the top frame only');
 }
 
+// Catch React hydration failures as early as possible (before mod scripts run).
+if (IS_TOP_FRAME && !window.__BA_HYDRATION_ERROR_LISTENER__) {
+  window.__BA_HYDRATION_ERROR_LISTENER__ = true;
+  window.__BA_REACT_HYDRATION_ERROR__ = false;
+  window.addEventListener('error', (event) => {
+    const msg = event?.message || '';
+    if (msg.includes('Minified React error #418') || msg.includes('Minified React error #423')) {
+      window.__BA_REACT_HYDRATION_ERROR__ = true;
+      console.warn('[Injector] React hydration error detected:', msg);
+    }
+  });
+}
+
 function injectScript(file) {
   console.log(`Injecting script: ${file}`);
   const script = document.createElement('script');

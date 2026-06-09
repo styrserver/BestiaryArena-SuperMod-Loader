@@ -903,13 +903,16 @@ function looksLikeSetupScript(commandText) {
     /\breplay\s*\(/,
     /BestiaryModAPI/,
     /\$configureRunes\s*\(/,
-    /\bconfigureRunes\s*\(/
+    /\bconfigureRunes\s*\(/,
+    /autoSetupBoard/,
+    /selectRoomById/,
+    /(?:globalThis\.)?state\.board\.send/
   ];
   return setupPatterns.some((pattern) => pattern.test(trimmed));
 }
 
 function isMeaninglessCommandResult(result) {
-  return result === false || typeof result === 'number' || typeof result === 'boolean';
+  return result === false;
 }
 
 function rejectInvalidSetupInput() {
