@@ -982,34 +982,6 @@ footer {
   border-color: var(--theme-accent, #ffe066) !important;
 }
 
-#dashboard-btn {
-  background: url('../assets/originalassets/background-dark.95edca67.png') repeat;
-  border: 8px solid transparent;
-  border-image: url('../assets/originalassets/4-frame.a58d0c39.png') 8 fill stretch;
-  padding: 4px 14px;
-  min-width: 60px;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
-  font-size: 15px;
-  color: #ffe066;
-  font-weight: bold;
-  box-sizing: border-box;
-  position: relative;
-  cursor: pointer;
-  background-size: cover;
-}
-#dashboard-btn span {
-  position: relative;
-  z-index: 2;
-  pointer-events: none;
-}
-#dashboard-btn:hover {
-  filter: brightness(1.2);
-}
-
 /* Category Filter Buttons */
 .category-filters {
   display: flex;

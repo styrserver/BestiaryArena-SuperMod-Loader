@@ -4,6 +4,66 @@
   },
   "notes": [
     {
+      "version": "4.1.0",
+      "changes": [
+        {
+          "mod": "Better Setups",
+          "type": "added",
+          "text": "Saved-setup hover preview on green Setup/Save buttons: ally creature and equipment portraits with level and gene-tier borders; up to three per row."
+        },
+        {
+          "mod": "inventory-database.js",
+          "type": "added",
+          "text": "Christmas Summon Scroll (summonScroll7), game tier labels (EN/PT), mini icon paths, game display names, custom scroll styles (shiny/xmas), Gazer variant colors, and itemKeyAliases with resolveItemKey() and getInventoryItemCount() for merging API alias keys (e.g. runeRecycleMonster → runeKaleidoscopic)."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "added",
+          "text": "Saved setups show an inline notes preview when notes exist; the Notes button shows a ● indicator. Setup names use the same field as New Setup, with Edit/Save beside the name (Save or Enter to apply; click outside or Escape to cancel). Map shortcut bar at the board bottom: one-click load buttons for Original and each saved setup, ▼/▲ collapse toggle (persists), and hover preview with creature/equipment portraits (auto-fit width, up to three per row). Collapse arrow has Open/Close tooltip only (no native title on shortcut buttons)."
+        },
+        {
+          "mod": "Better Rune Recycler",
+          "type": "changed",
+          "text": "Rune counts and alias mapping read from inventory-database.js (itemKeyAliases, getInventoryItemCount); Kaleidoscopic Rune no longer listed twice."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "changed",
+          "text": "EN/PT translations. Load Setup and Settings modals (350px). Toasts use white text with punctuation. Settings: drag-reorder labels, inline rename, remove deletes saved setups per label; Add/Remove/Cancel/Close buttons match Setup Manager styling. Load Setup validates paste and shows generic errors for invalid input."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "changed",
+          "text": "Modal UI overhauled to match Hero Editor and Highscore Improvements: framed setup cards, inline save on the New Setup row, single-button delete confirmation (card turns red; button label Confirm), neutral Close button styling, Challenges-style toasts, Hero Editor–style creature/equipment portraits, and modal title shows room display name (e.g. Tomb Raver) instead of the internal map id. Saving or renaming to an existing name shows an error instead of overwriting. Full EN/PT strings for empty states and notes placeholder. Creature level badges match Better Setups (compact badge, 2px padding). Equipment portraits align stat icons with in-game layout; silent fallbacks when UI Components are unavailable."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "fixed",
+          "text": "Hover preview excludes villains, uses silent portrait fallbacks without console spam, and shows level plus correct rarity borders (tier stars, awaken, hundo, shiny) on fallback portraits. Equipment stat icons centered to match in-game layout. Level badges use 2px padding."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Kaleidoscopic Rune no longer appears as two inventory variants; counts from runeRecycleMonster and runeKaleidoscopic are merged via getInventoryItemCount()."
+        },
+        {
+          "mod": "inventory-database.js",
+          "type": "fixed",
+          "text": "Outfit Bag and Hunter Outfit Bag rarities corrected to match in-game values (4 and 2)."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "fixed",
+          "text": "Map shortcut bar renders above map title text and refreshes when setups are saved, renamed, or deleted."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "removed",
+          "text": "Unused assets/originalassets/ (local game UI PNGs and media.txt) and unreferenced inventory locale fragment files; inventory strings remain in inventory-database.js."
+        }
+      ]
+    },
+    {
       "version": "4.0.10",
       "changes": [
         {

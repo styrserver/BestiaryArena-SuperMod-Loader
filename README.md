@@ -136,7 +136,6 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `icons/` - Icons used by the extension and mods
   - `js/` - JavaScript libraries, including UI components
   - `locales/` - Internationalization files
-  - `originalassets/` - Original game assets for UI components (including `media.txt` media definitions)
   - Additional folders under `assets/` (for example `depot/`, `equipment/`, `guild/`, `quests/`, `skills/`) hold mod-specific images and data; they are exposed via `web_accessible_resources` in the manifest as needed—not every folder is listed here.
 - `content/` - Content scripts that are injected into the game page
   - `client.js` - Main client-side API and functionality
@@ -148,7 +147,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `ba-sandbox-utils.mjs` - Sandbox utility functions
   - `utility_injector.js` - Utility injection system
 - `docs/` - Mod developer markdown guides and [`patch-notes.json`](docs/patch-notes.json) (version metadata used by the extension popup patch notes UI)
-- `database/` - Static tooltip and reference data used by mods (not `media.txt`; that file lives under `assets/originalassets/`)
+- `database/` - Static tooltip and reference data used by mods
   - `Welcome.js` - Welcome screen data
   - `inventory-database.js` - Inventory tooltip data
   - `creature-database.js` - Creature reference data (lists, map boss stats, shiny/gazer helpers)

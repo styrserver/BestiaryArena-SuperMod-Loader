@@ -21,8 +21,10 @@
   const MODAL_PADDING_HEIGHT = 50;      // Padding to subtract from height for content
   
   // Rune list from inventory database (single source of truth); fallback if DB not loaded yet
-  const RUNE_KEYS_ORDER = ['runeAvarice', 'runeHp', 'runeAp', 'runeAd', 'runeAr', 'runeMr', 'runeBlank', 'runeRecycle', 'runeKaleidoscopic', 'runeRecycleMonster', 'runeConversionHp', 'runeConversionAd', 'runeConversionAp'];
-  const RUNE_DB_ALIAS = { runeRecycleMonster: 'runeKaleidoscopic' }; // game API may return runeRecycleMonster
+  const RUNE_KEYS_ORDER = ['runeAvarice', 'runeHp', 'runeAp', 'runeAd', 'runeAr', 'runeMr', 'runeBlank', 'runeRecycle', 'runeKaleidoscopic', 'runeConversionHp', 'runeConversionAd', 'runeConversionAp'];
+  const RUNE_DB_ALIAS = (typeof window !== 'undefined' && window.inventoryDatabase?.itemKeyAliases)
+    ? window.inventoryDatabase.itemKeyAliases
+    : { runeRecycleMonster: 'runeKaleidoscopic' };
   const RUNE_TYPES = (function () {
     const db = (typeof window !== 'undefined' && window.inventoryDatabase?.tooltips) ? window.inventoryDatabase.tooltips : null;
     return RUNE_KEYS_ORDER.map(key => {
@@ -97,6 +99,9 @@
   function getRuneCount(runeKey) {
     const inventory = getPlayerInventory();
     if (!inventory) return 0;
+    if (typeof window !== 'undefined' && window.inventoryDatabase?.getInventoryItemCount) {
+      return window.inventoryDatabase.getInventoryItemCount(inventory, runeKey);
+    }
     return inventory[runeKey] || 0;
   }
 
@@ -109,7 +114,7 @@
     
     const counts = {};
     RUNE_TYPES.forEach(rune => {
-      counts[rune.key] = inventory[rune.key] || 0;
+      counts[rune.key] = getRuneCount(rune.key);
     });
     
     return counts;

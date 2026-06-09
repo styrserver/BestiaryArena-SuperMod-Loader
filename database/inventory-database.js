@@ -57,7 +57,7 @@ const inventoryTooltips = {
     displayName: "Hunter Outfit Bag",
     text: 'Contains a random hunter outfit.',
     icon: '/assets/icons/hunteroutfitbag.png',
-    rarity: '3',
+    rarity: '2',
     obtain: 'Store (100 Beast Coins), Level-up Reward, Reward Shop (3 hunting marks)'
   },
   insightStone1: {
@@ -106,7 +106,7 @@ const inventoryTooltips = {
     displayName: "Outfit Bag",
     text: 'Contains a random outfit.',
     icon: 'sprite://653',
-    rarity: '2',
+    rarity: '4',
     obtain: 'Store (125 Beast Coins for 1x OR 250 Beast Coins for 3x), Level-up Reward, Reward Shop (3 hunting marks)'
   },
   stamina1: {
@@ -184,7 +184,16 @@ const inventoryTooltips = {
     text: 'Summon a <img src="https://bestiaryarena.com/assets/icons/shiny-star.png" alt="✨" style="display: inline-block; width: 9px; height: 10px; vertical-align: middle; margin: 0 2px;">Shiny creature with at least 80% genes.',
     icon: '/assets/icons/summonscroll6.png',
     rarity: '5',
-    obtain: 'Halloween Event'
+    obtain: 'Halloween Event',
+    customStyle: 'shiny'
+  },
+  summonScroll7: {
+    displayName: "Summon Scroll (Festive)",
+    text: 'Summon a creature with at least 80% genes.\n\nYou see a spell scroll. It reads: "utevo res".',
+    icon: '/assets/icons/summonscroll7.png',
+    rarity: '5',
+    obtain: 'Christmas Event',
+    customStyle: 'xmas'
   },
   surpriseCube1: {
     displayName: "Surprise Cube (Deformed)",
@@ -282,6 +291,13 @@ const inventoryTooltips = {
     obtain: 'Obtained from Blank Rune'
   },
   runeKaleidoscopic: {
+    displayName: "Kaleidoscopic Rune",
+    text: 'Fuse 2 shiny creatures into a Summon Scroll (Chromatic).',
+    icon: '/assets/icons/rune-monster-recycle.png',
+    rarity: '5',
+    obtain: 'Obtained from Blank Rune'
+  },
+  runeRecycleMonster: {
     displayName: "Kaleidoscopic Rune",
     text: 'Fuse 2 shiny creatures into a Summon Scroll (Chromatic).',
     icon: '/assets/icons/rune-monster-recycle.png',
@@ -466,7 +482,7 @@ const INVENTORY_VARIANTS = {
   'Exaltation Chests': ['equipChest'], 'Nickname Creature': ['nicknameMonster'], 'Outfit Bags': ['hunterOutfitBag', 'outfitBag1'],
   'Stamina Potions': ['stamina1', 'stamina2', 'stamina3', 'stamina4', 'stamina5'],
   'Stones of Insight': ['insightStone1', 'insightStone2', 'insightStone3', 'insightStone4', 'insightStone5'],
-  'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5', 'summonScroll6'],
+  'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5', 'summonScroll6', 'summonScroll7'],
   'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
   'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
   'Avarice Rune': ['runeAvarice'], 'Hitpoints Rune': ['runeHp'], 'Attack Damage Rune': ['runeAd'], 'Ability Power Rune': ['runeAp'], 'Armor Rune': ['runeAr'], 'Magic Resist Rune': ['runeMr'],
@@ -488,7 +504,7 @@ const INVENTORY_STATIC_ITEMS = {
   'runeKaleidoscopic': { name: 'Kaleidoscopic Rune', rarity: '5' }, 'runeConversionHp': { name: 'Conversion Rune (hp)', rarity: '5' }, 'runeConversionAd': { name: 'Conversion Rune (ad)', rarity: '5' }, 'runeConversionAp': { name: 'Conversion Rune (ap)', rarity: '5' },
   'nicknameMonster': { name: 'Nickname Creature', rarity: '3' }, 'nicknameChange': { name: 'Change Nickname', rarity: '2' },
   'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
-  'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },
+  'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '2' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '4' },
   'babyDragonPlant': { name: 'Baby Dragon Plant', rarity: '3' }, 'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
   'dungeonAscension': { name: 'Dungeon Ascension', rarity: '5' }, 'dragonPlant': { name: 'Dragon Plant', rarity: '4' }, 'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monstrous Cauldron', rarity: '4' },
   'creatureAwakening': { name: 'Creature Awakening', rarity: '5' },
@@ -506,7 +522,139 @@ const INVENTORY_UPGRADEABLE_ITEMS = [
 // Rarity configuration for items and equipment
 const RARITY_CONFIG = {
   text: { '1': 'Common', '2': 'Uncommon', '3': 'Rare', '4': 'Epic', '5': 'Legendary' },
+  gameText: { '1': 'Common', '2': 'Uncommon', '3': 'Rare', '4': 'Mythic', '5': 'Legendary' },
   colors: { '1': '#9d9d9d', '2': '#1eff00', '3': '#0070dd', '4': '#a335ee', '5': '#ff8000' }
+};
+
+// Game API keys that differ from canonical database keys
+const ITEM_KEY_ALIASES = {
+  runeRecycleMonster: 'runeKaleidoscopic'
+};
+
+// In-game display names (when they differ from mod-friendly tooltip names)
+const INVENTORY_GAME_DISPLAY_NAMES = {
+  runeHp: 'Augment Rune (HP)',
+  runeAp: 'Augment Rune (AP)',
+  runeAd: 'Augment Rune (AD)',
+  runeAr: 'Augment Rune (AR)',
+  runeMr: 'Augment Rune (MR)',
+  runeBlank: 'Blank Rune',
+  runeRecycleMonster: 'Kaleidoscopic Rune',
+  summonScroll7: 'Christmas Scroll',
+  outfitBag1: 'Outfit Bag',
+  hunterOutfitBag: 'Hunter Outfit Bag',
+  equipChest: 'Exaltation Chest'
+};
+
+// Tier suffix labels used by the game for variant items
+const INVENTORY_TIER_LABELS = {
+  stamina: {
+    en: { 1: 'Mini', 2: 'Strong', 3: 'Great', 4: 'Ultimate', 5: 'Supreme' },
+    pt: { 1: 'Golinho', 2: 'Frasco', 3: 'Cantil', 4: 'Muringa', 5: 'Golão' }
+  },
+  summonScroll: {
+    en: { 1: 'Crude', 2: 'Ordinary', 3: 'Refined', 4: 'Special', 5: 'Exceptional', 6: 'Chromatic', 7: 'Festive' },
+    pt: { 1: 'Tosco', 2: 'Modesto', 3: 'Refinado', 4: 'Especial', 5: 'Excepcional', 6: 'Cromático', 7: 'Festivo' }
+  },
+  diceManipulator: {
+    en: { 1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Mythic', 5: 'Legendary' },
+    pt: { 1: 'Comum', 2: 'Incomum', 3: 'Raro', 4: 'Mítico', 5: 'Lendário' }
+  },
+  surpriseCube: {
+    en: { 1: 'Deformed', 2: 'Irregular', 3: 'Uniform', 4: 'Precise', 5: 'Perfect' },
+    pt: { 1: 'Deformado', 2: 'Irregular', 3: 'Uniforme', 4: 'Preciso', 5: 'Perfeito' }
+  },
+  insightStone: {
+    en: { 1: 'Glimpse', 2: 'Awakening', 3: 'Arcane', 4: 'Enlightenment', 5: 'Epiphany' },
+    pt: { 1: 'Intuição', 2: 'Lucidez', 3: 'Arcano', 4: 'Iluminação', 5: 'Epifania' }
+  },
+  equipChest: { en: 'Honed', pt: 'Esmerado' }
+};
+
+// Compact icons used in chat, toasts, and inline reward text
+const INVENTORY_MINI_ICONS = {
+  stamina1: '/assets/icons/mini-stamina.png',
+  stamina2: '/assets/icons/mini-stamina.png',
+  stamina3: '/assets/icons/mini-stamina.png',
+  stamina4: '/assets/icons/mini-stamina.png',
+  stamina5: '/assets/icons/mini-stamina.png',
+  diceManipulator1: '/assets/icons/mini-dicemanipulator.png',
+  diceManipulator2: '/assets/icons/mini-dicemanipulator.png',
+  diceManipulator3: '/assets/icons/mini-dicemanipulator.png',
+  diceManipulator4: '/assets/icons/mini-dicemanipulator.png',
+  diceManipulator5: '/assets/icons/mini-dicemanipulator.png',
+  summonScroll1: '/assets/icons/mini-summonscroll.png',
+  summonScroll2: '/assets/icons/mini-summonscroll.png',
+  summonScroll3: '/assets/icons/mini-summonscroll.png',
+  summonScroll4: '/assets/icons/mini-summonscroll.png',
+  summonScroll5: '/assets/icons/mini-summonscroll.png',
+  summonScroll6: '/assets/icons/mini-summonscroll-shiny.png',
+  summonScroll7: '/assets/icons/mini-summonscroll-xmas.png',
+  insightStone1: '/assets/icons/mini-insightstone.png',
+  insightStone2: '/assets/icons/mini-insightstone.png',
+  insightStone3: '/assets/icons/mini-insightstone.png',
+  insightStone4: '/assets/icons/mini-insightstone.png',
+  insightStone5: '/assets/icons/mini-insightstone.png',
+  surpriseCube1: '/assets/icons/mini-cube.png',
+  surpriseCube2: '/assets/icons/mini-cube.png',
+  surpriseCube3: '/assets/icons/mini-cube.png',
+  surpriseCube4: '/assets/icons/mini-cube.png',
+  surpriseCube5: '/assets/icons/mini-cube.png',
+  outfitBag1: '/assets/icons/mini-outfitbag.png',
+  hunterOutfitBag: '/assets/icons/mini-hunteroutfitbag.png',
+  equipChest: '/assets/icons/mini-exaltationchest.png',
+  runeHp: '/assets/icons/rune-hp-mini.png',
+  runeAp: '/assets/icons/rune-ap-mini.png',
+  runeAd: '/assets/icons/rune-ad-mini.png',
+  runeAr: '/assets/icons/rune-ar-mini.png',
+  runeMr: '/assets/icons/rune-mr-mini.png',
+  runeBlank: '/assets/icons/rune-blank-mini.png',
+  runeRecycle: '/assets/icons/rune-recycle-mini.png',
+  runeKaleidoscopic: '/assets/icons/rune-monster-recycle-mini.png',
+  runeRecycleMonster: '/assets/icons/rune-monster-recycle-mini.png',
+  runeAvarice: '/assets/icons/rune-avarice-mini.png',
+  runeConversionHp: '/assets/icons/rune-conversion-hp-mini.png',
+  runeConversionAp: '/assets/icons/rune-conversion-ap-mini.png',
+  runeConversionAd: '/assets/icons/rune-conversion-ad-mini.png'
+};
+
+// Custom rarity styling flags for special scroll variants
+const INVENTORY_CUSTOM_STYLES = {
+  summonScroll6: 'shiny',
+  summonScroll7: 'xmas'
+};
+
+// Gazer reward variant colors (matches in-game reward display)
+const INVENTORY_GAZER_VARIANTS = {
+  'Albino Gazer': 'whiteExp',
+  'Chubby Gazer': 'runeHp',
+  'Spiky Gazer': 'runeAd',
+  'Psychic Gazer': 'runeAp',
+  'Sturdy Gazer': 'runeAr',
+  'Mystic Gazer': 'runeMr',
+  Gazer: 'whiteExp'
+};
+
+const resolveInventoryItemKey = (itemKey) => ITEM_KEY_ALIASES[itemKey] || itemKey;
+
+const readInventoryCount = (inventory, key) => {
+  if (!inventory || !key) return 0;
+  const itemData = inventory[key];
+  if (itemData && typeof itemData === 'object') return itemData.count || 0;
+  const value = inventory[key];
+  return typeof value === 'number' ? value : 0;
+};
+
+const getInventoryItemCount = (inventory, itemKey) => {
+  if (!inventory || !itemKey) return 0;
+  const canonicalKey = resolveInventoryItemKey(itemKey);
+  let count = readInventoryCount(inventory, canonicalKey);
+  for (const [aliasKey, canonical] of Object.entries(ITEM_KEY_ALIASES)) {
+    if (canonical === canonicalKey && aliasKey !== canonicalKey) {
+      count += readInventoryCount(inventory, aliasKey);
+    }
+  }
+  return count;
 };
 
 // Item key groups for inventory UI (currency, no-rarity consumables, upgrades)
@@ -528,8 +676,17 @@ const inventoryDatabase = {
   staticItems: INVENTORY_STATIC_ITEMS,
   upgradeableItems: INVENTORY_UPGRADEABLE_ITEMS,
   rarityText: RARITY_CONFIG.text,
+  rarityGameText: RARITY_CONFIG.gameText,
   rarityColors: RARITY_CONFIG.colors,
-  itemKeyGroups: ITEM_KEY_GROUPS
+  itemKeyGroups: ITEM_KEY_GROUPS,
+  itemKeyAliases: ITEM_KEY_ALIASES,
+  gameDisplayNames: INVENTORY_GAME_DISPLAY_NAMES,
+  tierLabels: INVENTORY_TIER_LABELS,
+  miniIcons: INVENTORY_MINI_ICONS,
+  customStyles: INVENTORY_CUSTOM_STYLES,
+  gazerVariants: INVENTORY_GAZER_VARIANTS,
+  resolveItemKey: resolveInventoryItemKey,
+  getInventoryItemCount
 };
 
 // Export for use in other mods

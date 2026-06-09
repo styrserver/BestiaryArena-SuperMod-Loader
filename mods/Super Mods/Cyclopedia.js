@@ -11480,16 +11480,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             const icon = getItemIcon(itemKey);
             
             const itemData = inventory[itemKey];
-            let count = 0;
+            let count = inventoryDatabase.getInventoryItemCount
+              ? inventoryDatabase.getInventoryItemCount(inventory, itemKey)
+              : (inventory[itemKey] || 0);
             let realIcon = icon;
             let realRarity = rarity;
             
             if (itemData && typeof itemData === 'object') {
-              count = itemData.count || 0;
               realIcon = itemData.icon || icon;
               realRarity = itemData.rarity || rarity;
-            } else {
-              count = inventory[itemKey] || 0;
             }
             
             const obtainMethod = getItemObtainMethod(itemKey);
@@ -11567,16 +11566,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const icon = getItemIcon(itemKey);
           
           const itemData = inventory[itemKey];
-          let count = 0;
+          let count = inventoryDatabase.getInventoryItemCount
+            ? inventoryDatabase.getInventoryItemCount(inventory, itemKey)
+            : (inventory[itemKey] || 0);
           let realIcon = icon;
           let realRarity = rarity;
           
           if (itemData && typeof itemData === 'object') {
-            count = itemData.count || 0;
             realIcon = itemData.icon || icon;
             realRarity = itemData.rarity || rarity;
-          } else {
-            count = inventory[itemKey] || 0;
           }
 
           const rarityColors = GAME_DATA.RARITY_COLORS;
@@ -11660,13 +11658,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       function getPlayerInventoryCount(itemKey) {
         try {
           if (!itemKey) return 0;
-          
-          const itemData = inventory[itemKey];
-          
+          const playerInventory = getPlayerInventory();
+          if (inventoryDatabase.getInventoryItemCount) {
+            return inventoryDatabase.getInventoryItemCount(playerInventory, itemKey);
+          }
+          const itemData = playerInventory[itemKey];
           if (itemData && typeof itemData === 'object') {
             return itemData.count || 0;
           }
-          return inventory[itemKey] || 0;
+          return playerInventory[itemKey] || 0;
         } catch (error) {
           console.error('[Cyclopedia] Error getting inventory count:', error);
           return 0;

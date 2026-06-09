@@ -119,7 +119,6 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>icons/</code> - Icons used by the extension and mods
 ** <code>js/</code> - JavaScript libraries, including UI components
 ** <code>locales/</code> - Internationalization files
-** <code>originalassets/</code> - Original game assets for UI components (includes <code>media.txt</code> media definitions)
 ** Additional folders under <code>assets/</code> (for example <code>depot/</code>, <code>equipment/</code>, <code>guild/</code>, <code>quests/</code>, <code>skills/</code>) hold mod-specific images and data; they are exposed via <code>web_accessible_resources</code> in the manifest as needed—not every folder is listed here.
 * <code>content/</code> - Content scripts that are injected into the game page
 ** <code>client.js</code> - Main client-side API and functionality

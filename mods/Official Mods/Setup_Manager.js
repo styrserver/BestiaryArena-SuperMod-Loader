@@ -6,6 +6,8 @@ const defaultConfig = {
   savedSetups: {},  // This will store all saved team setups by map ID
   setupNameMaxLength: 100, // Maximum character length for setup names
   maxSetupsPerMap: 10, // Maximum number of setups per map
+  showMapShortcuts: true, // Show quick-load setup buttons on the map
+  mapShortcutsMinimized: false, // Whether the map shortcut bar is collapsed
 };
 
 // Initialize with saved config or defaults
@@ -22,7 +24,6 @@ if (config.setupNameMaxLength < 100) {
 const MOD_ID = 'setup-manager';
 const BUTTON_ID = `${MOD_ID}-button`;
 const STORAGE_KEY = 'bestiary-setup-manager-v1';
-const DEFAULT_TEAM_NAMES = ['Farm', 'S+', 'Speedrun'];
 
 // Ensure the savedSetups object has structure we expect
 if (!config.savedSetups) {
@@ -31,9 +32,13 @@ if (!config.savedSetups) {
 
 // We'll hold references to active UI components here for cleanup
 let activeButtonElement = null;
+let mapShortcutsContainer = null;
+let mapShortcutsSubscription = null;
+let mapShortcutsMapId = null;
 
 // Add a reference to track active modals
 let activeModal = null;
+let pendingDeleteConfirmation = null;
 
 // Helper function to safely access nested properties
 const safeAccess = (obj, path) => {
@@ -88,8 +93,11 @@ function getMonsterInfo(monsterId) {
     return {
       gameId: monster.gameId,
       tier: displayTier, // Use calculated tier for display
-      actualTier: monster.tier, // Keep track of actual tier
       level: globalThis.state.utils.expToCurrentLevel(monster.exp),
+      shiny: monster.shiny === true,
+      awaken: monster.awaken === true || monster.awakened === true || monster.isAwakened === true,
+      awakened: monster.awakened === true || monster.isAwakened === true,
+      isAwakened: monster.isAwakened === true,
       stats: {
         hp: monster.hp,
         ad: monster.ad,
@@ -150,6 +158,10 @@ function getMonsterInfoFromCustom(customPiece) {
       gameId: customPiece.gameId,
       tier: tier,
       level: customPiece.level || 1,
+      shiny: customPiece.shiny === true,
+      awaken: customPiece.awaken === true || customPiece.awakened === true || customPiece.isAwakened === true,
+      awakened: customPiece.awakened === true || customPiece.isAwakened === true,
+      isAwakened: customPiece.isAwakened === true,
       stats: savedStats,
       isCustom: true,
       existsInCollection: !isModified // True if stats match original, false if modified
@@ -177,21 +189,42 @@ function getCurrentMapId() {
   }
 }
 
-// Get current map name
+function resolveMapDisplayName(mapId) {
+  try {
+    if (!mapId) return null;
+
+    if (window.mapIdsToNames?.has(mapId)) {
+      return window.mapIdsToNames.get(mapId);
+    }
+
+    if (globalThis.state?.utils?.ROOM_NAME?.[mapId]) {
+      return globalThis.state.utils.ROOM_NAME[mapId];
+    }
+
+    return mapId;
+  } catch (error) {
+    console.warn('[Setup Manager] Error resolving map name:', error);
+    return mapId;
+  }
+}
+
+// Get current map display name
 function getCurrentMapName() {
   try {
-    const boardSnapshot = globalThis.state.board.getSnapshot();
-    if (!boardSnapshot || !boardSnapshot.context || !boardSnapshot.context.selectedMap) {
-      return 'Unknown Map';
+    const mapId = getCurrentMapId();
+    if (!mapId) {
+      return t('mods.setupManager.unknownMap');
     }
     
-    return boardSnapshot.context.selectedMap.selectedRoom?.name || 
-           boardSnapshot.context.selectedMap.selectedRoom?.id || 
-           'Unknown Map';
+    return resolveMapDisplayName(mapId) || t('mods.setupManager.unknownMap');
   } catch (error) {
     console.error('Error getting current map name:', error);
-    return 'Unknown Map';
+    return t('mods.setupManager.unknownMap');
   }
+}
+
+function formatSetupCreatureCount(current, max) {
+  return tReplace('mods.setupManager.creatureCount', { current, max });
 }
 
 // Get current number of creatures placed on the board
@@ -295,6 +328,8 @@ function saveConfigToStorage() {
     
     // Also save via the mod config API
     api.service.updateScriptConfig(context.hash, config);
+
+    updateMapShortcuts();
   } catch (error) {
     console.error('Error saving configurations to localStorage:', error);
   }
@@ -337,21 +372,79 @@ function saveTeamSetup(mapId, name, setup) {
     return false;
   }
   
-  // Check if a setup with this name already exists for this map
-  const existingSetupIndex = config.savedSetups[mapId].findIndex(s => s.name === name);
-  if (existingSetupIndex >= 0) {
-    // Update the existing setup (preserve notes if they exist)
-    const existingNotes = config.savedSetups[mapId][existingSetupIndex].notes || '';
-    config.savedSetups[mapId][existingSetupIndex] = { name, setup, notes: existingNotes };
-  } else {
-    // Add a new setup
-    config.savedSetups[mapId].push({ name, setup, notes: '' });
+  if (config.savedSetups[mapId].some(savedSetup => savedSetup.name === name)) {
+    showNotification(t('mods.setupManager.setupNameExists'), 'error');
+    return false;
   }
+
+  config.savedSetups[mapId].push({ name, setup, notes: '' });
   
   // Save the updated config
   saveConfigToStorage();
   
   return true;
+}
+
+function renameTeamSetup(mapId, oldName, newName) {
+  const trimmedName = newName?.trim();
+  if (!mapId || !oldName || !trimmedName) {
+    showNotification(t('common.error'), 'error');
+    return false;
+  }
+
+  if (oldName === 'Auto-Setup') {
+    return false;
+  }
+
+  if (trimmedName === oldName) {
+    return true;
+  }
+
+  if (trimmedName.length > config.setupNameMaxLength) {
+    showNotification(tReplace('mods.setupManager.nameTooLong', { max: config.setupNameMaxLength }), 'error');
+    return false;
+  }
+
+  const setups = config.savedSetups[mapId];
+  if (!setups) {
+    showNotification(t('common.error'), 'error');
+    return false;
+  }
+
+  const setupIndex = setups.findIndex(setup => setup.name === oldName);
+  if (setupIndex < 0) {
+    showNotification(t('common.error'), 'error');
+    return false;
+  }
+
+  if (setups.some(setup => setup.name === trimmedName)) {
+    showNotification(t('mods.setupManager.setupNameExists'), 'error');
+    return false;
+  }
+
+  const existingSetup = setups[setupIndex];
+  setups[setupIndex] = { ...existingSetup, name: trimmedName };
+  saveConfigToStorage();
+  return true;
+}
+
+function saveSetupRenameInline(mapId, oldName, newName) {
+  const trimmedName = newName?.trim();
+  if (!trimmedName) {
+    showNotification(t('common.error'), 'error');
+    return false;
+  }
+
+  const renameResult = renameTeamSetup(mapId, oldName, trimmedName);
+  if (renameResult) {
+    if (trimmedName !== oldName) {
+      showNotification(t('mods.setupManager.teamRenamed'), 'success');
+    }
+    showSetupManagerModal();
+    return true;
+  }
+
+  return false;
 }
 
 // Update the deleteTeamSetup function to use the new storage functions
@@ -389,8 +482,7 @@ function getMapSetups(mapId) {
   return config.savedSetups[mapId] || [];
 }
 
-// Update the loadTeamSetup function to not close the modal for the Original team
-function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
+function loadTeamSetup(mapId, setupName) {
   try {
     if (!mapId) {
       console.error('No map ID provided for loading team setup');
@@ -407,7 +499,7 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
       api.ui.components.createModal({
         title: t('mods.setupManager.autosetupRequired'),
         content: t('mods.setupManager.autosetupMessage'),
-        buttons: [{ text: 'OK', primary: true }]
+        buttons: [{ text: t('controls.ok'), primary: true }]
       });
       return false;
     }
@@ -431,7 +523,7 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
           return true;
         } else {
           console.error('No saved original setup found for map:', mapId);
-          showNotification('No saved original setup found for this map', 'error');
+          showNotification(t('mods.setupManager.noOriginalSetup'), 'error');
           return false;
         }
       } catch (error) {
@@ -555,158 +647,645 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
   }
 }
 
-// Update loadTeamAndNotify to handle the modal differently for Auto-Setup team
 function loadTeamAndNotify(mapId, setupName) {
-  // Check if this is the Auto-Setup team
-  const isOriginalTeam = setupName === 'Auto-Setup';
-  
-  // If it's not the Auto-Setup team, close all modals
-  if (!isOriginalTeam) {
+  if (loadTeamSetup(mapId, setupName)) {
     forceCloseAllModals();
-  }
-  
-  // Load the team setup
-  if (loadTeamSetup(mapId, setupName, isOriginalTeam)) {
     showNotification(t('mods.setupManager.teamLoaded'), 'success');
-    
-    // For Auto-Setup team, reshow the modal after a short delay
-    if (isOriginalTeam) {
-      setTimeout(() => {
-        // Only reopen if we don't have an active modal already
-        if (!activeModal || !document.contains(activeModal.element)) {
-          showSetupManagerModal();
-        }
-      }, 300); 
-    }
-    
     return true;
-  } else {
-    showNotification(t('common.error'), 'error');
-    return false;
   }
+
+  showNotification(t('common.error'), 'error');
+  return false;
 }
 
 // ========== UI Functions ==========
 
-// Create a function to create the notification container if it doesn't exist
-function createNotificationContainer() {
-  // Check if notification container already exists
-  let notifContainer = document.getElementById('setup-manager-notification-container');
-  
-  if (!notifContainer) {
-    notifContainer = document.createElement('div');
-    notifContainer.id = 'setup-manager-notification-container';
-    notifContainer.style.cssText = `
-      position: fixed;
-      bottom: 80px; /* Increased bottom position to move notifications higher */
-      right: 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 10px;
-      z-index: 9999;
-      pointer-events: none;
-    `;
-    document.body.appendChild(notifContainer);
+const SETUP_MANAGER_MODAL_WIDTH = 500;
+const SETUP_MANAGER_MODAL_HEIGHT = 550;
+const SETUP_MANAGER_EQUIPMENT_PORTRAIT_SIZE = 34;
+const SETUP_NAME_FIELD_HEIGHT_PX = 25;
+
+const SETUP_MANAGER_BUTTON_CLASS = {
+  primary: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-14',
+  secondary: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14',
+  danger: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-14'
+};
+
+const SETUP_MANAGER_SCROLLBAR_GUTTER_PX = 12;
+
+function applySetupManagerViewportWidth(element) {
+  if (!element) return;
+  const gutter = `${SETUP_MANAGER_SCROLLBAR_GUTTER_PX}px`;
+  element.style.width = `calc(100% - ${gutter})`;
+  element.style.maxWidth = `calc(100% - ${gutter})`;
+}
+
+function applySetupManagerScrollViewportGutter(scrollContainer) {
+  if (!scrollContainer?.element) return;
+
+  const viewport = scrollContainer.scrollView ||
+    scrollContainer.element.querySelector('[data-radix-scroll-area-viewport]') ||
+    scrollContainer.element.querySelector('.scroll-view');
+  if (!viewport) return;
+
+  viewport.setAttribute('data-radix-scroll-area-viewport', '');
+  viewport.setAttribute('data-type', 'always');
+  viewport.className = 'h-full w-[calc(100%-12px)] data-[type=\'auto\']:w-full';
+  viewport.style.overflow = 'hidden scroll';
+
+  const contentContainer = scrollContainer.contentContainer;
+  if (contentContainer) {
+    contentContainer.className = 'my-1 grid items-start gap-1 data-[nopadding=\'true\']:my-0';
+    contentContainer.dataset.nopadding = 'false';
+    contentContainer.style.gridTemplateRows = 'max-content';
+  }
+
+  const scrollbar = scrollContainer.element.querySelector('[data-orientation="vertical"]') ||
+    Array.from(scrollContainer.element.children).find(
+      child => child !== viewport && child.classList?.contains('frame-1')
+    );
+  if (scrollbar) {
+    scrollbar.setAttribute('data-orientation', 'vertical');
+    scrollbar.className = 'scrollbar-element frame-1 surface-dark flex touch-none select-none border-0 data-[orientation=\'horizontal\']:h-3 data-[orientation=\'vertical\']:h-full data-[orientation=\'vertical\']:w-3 data-[orientation=\'horizontal\']:flex-col';
+    scrollbar.style.cssText = `position: absolute; top: 0px; right: 0px; bottom: 0px; width: ${SETUP_MANAGER_SCROLLBAR_GUTTER_PX}px;`;
   }
 }
 
-// Function to show notification
-function showNotification(message, type = 'info', duration = 3000) {
-  const container = document.getElementById('setup-manager-notification-container');
-  if (!container) {
-    createNotificationContainer();
-  }
-  
-  // Create notification element
-  const notification = document.createElement('div');
-  notification.className = 'setup-manager-notification';
-  
-  // Base styles for the notification
-  notification.style.cssText = `
-    padding: 10px 16px;
-    border-radius: 4px;
-    margin-bottom: 8px;
-    font-family: var(--font-primary);
-    font-size: 14px;
-    transition: all 0.3s ease;
-    opacity: 0;
-    transform: translateX(20px);
-    max-width: 300px;
-    pointer-events: auto;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+function createSetupManagerScrollContainer({ grow = true } = {}) {
+  const scrollContainer = api.ui.components.createScrollContainer({
+    height: grow ? '100%' : 'auto',
+    padding: true,
+    content: ''
+  });
+  Object.assign(scrollContainer.element.style, {
+    flex: grow ? '1 1 0' : '0 0 auto',
+    minHeight: '0',
+    height: 'auto',
+    position: 'relative',
+    overflow: 'hidden'
+  });
+  applySetupManagerScrollViewportGutter(scrollContainer);
+  return scrollContainer;
+}
+
+function styleSetupManagerFooterButtons(footer) {
+  if (!footer) return;
+
+  footer.style.cssText = `
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
   `;
-  
-  // Type-specific styles
-  switch(type) {
-    case 'success':
-      notification.style.backgroundColor = 'rgba(46, 125, 50, 0.95)';
-      notification.style.color = 'white';
-      break;
-    case 'error':
-      notification.style.backgroundColor = 'rgba(198, 40, 40, 0.95)';
-      notification.style.color = 'white';
-      break;
-    case 'warning':
-      notification.style.backgroundColor = 'rgba(255, 152, 0, 0.95)';
-      notification.style.color = 'white';
-      break;
-    default: // info
-      notification.style.backgroundColor = 'rgba(25, 118, 210, 0.95)';
-      notification.style.color = 'white';
+
+  const backBtn = footer.querySelector('.setup-manager-back-button');
+  if (backBtn) {
+    backBtn.className = `${SETUP_MANAGER_BUTTON_CLASS.secondary} setup-manager-back-button`;
+    backBtn.style.cssText = 'cursor: pointer; margin-right: auto;';
   }
-  
-  // Set the notification content
-  notification.innerText = message;
-  
-  // Add to container
-  const container2 = document.getElementById('setup-manager-notification-container');
-  container2.appendChild(notification);
-  
-  // Trigger animation
-  setTimeout(() => {
-    notification.style.opacity = '1';
-    notification.style.transform = 'translateX(0)';
-  }, 10);
-  
-  // Set removal timeout
-  setTimeout(() => {
-    notification.style.opacity = '0';
-    notification.style.transform = 'translateX(20px)';
-    
-    // Remove after animation completes
-    setTimeout(() => {
-      if (notification.parentNode) {
-        notification.parentNode.removeChild(notification);
+
+  const actionButtons = footer.querySelectorAll('button:not(.setup-manager-back-button)');
+  actionButtons.forEach((button) => {
+    const bg = button.style.backgroundColor?.toLowerCase();
+    const isPrimary = bg === 'rgb(76, 175, 80)' || bg === '#4caf50';
+    button.className = isPrimary
+      ? SETUP_MANAGER_BUTTON_CLASS.primary
+      : SETUP_MANAGER_BUTTON_CLASS.secondary;
+    button.style.cssText = '';
+  });
+}
+
+function getSetupManagerDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]') ||
+    document.querySelector('div[role="dialog"]');
+}
+
+function applySetupManagerExpandedLayout(modalRef) {
+  try {
+    const dialog = getSetupManagerDialog(modalRef);
+    if (!dialog) return;
+
+    dialog.classList.remove('w-full', 'max-w-[300px]');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+      rootWrapper.style.height = '100%';
+      rootWrapper.style.display = 'flex';
+      rootWrapper.style.flexDirection = 'column';
+    }
+
+    const widgetBottom = dialog.querySelector('.widget-bottom');
+    if (widgetBottom) {
+      widgetBottom.style.display = 'flex';
+      widgetBottom.style.flexDirection = 'column';
+      widgetBottom.style.flex = '1 1 0';
+      widgetBottom.style.minHeight = '0';
+    }
+
+    styleSetupManagerFooterButtons(dialog.querySelector('.flex.justify-end.gap-2'));
+  } catch (error) {
+    console.warn('[Setup Manager] Failed to apply expanded modal layout:', error);
+  }
+}
+
+function addSetupManagerFooterBackButton(modalRef, onClick) {
+  try {
+    const dialog = getSetupManagerDialog(modalRef);
+    const footer = dialog?.querySelector('.flex.justify-end.gap-2');
+    if (!footer || footer.querySelector('.setup-manager-back-button')) return;
+
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = `${SETUP_MANAGER_BUTTON_CLASS.secondary} setup-manager-back-button`;
+    backBtn.style.cssText = 'cursor: pointer; margin-right: auto;';
+    backBtn.textContent = t('mods.setupManager.back');
+    backBtn.addEventListener('click', () => {
+      forceCloseAllModals();
+      onClick();
+    });
+
+    footer.insertBefore(backBtn, footer.firstChild);
+    styleSetupManagerFooterButtons(footer);
+  } catch (error) {
+    console.warn('[Setup Manager] Failed to add back button:', error);
+  }
+}
+
+function applySetupManagerEquipmentPortraitSize(element, sizePx = SETUP_MANAGER_EQUIPMENT_PORTRAIT_SIZE) {
+  if (!element) return element;
+
+  const size = `${sizePx}px`;
+  const portrait = element.classList?.contains('equipment-portrait')
+    ? element
+    : element.querySelector('.equipment-portrait');
+  const target = portrait || element;
+
+  target.style.width = size;
+  target.style.height = size;
+  target.style.maxWidth = size;
+  target.style.maxHeight = size;
+  target.style.flexShrink = '0';
+
+  normalizeSetupManagerEquipmentStatIcon(target);
+  return target;
+}
+
+function normalizeSetupManagerEquipmentStatIcon(portrait) {
+  if (!portrait?.querySelector) {
+    return;
+  }
+
+  portrait.style.position = 'relative';
+  portrait.style.overflow = 'hidden';
+
+  portrait.querySelectorAll('img[alt="stat type"]').forEach((statIcon) => {
+    const container = statIcon.parentElement;
+    if (!container) {
+      return;
+    }
+
+    Object.assign(container.style, {
+      position: 'absolute',
+      bottom: '0',
+      left: '0',
+      zIndex: '2',
+      display: 'flex',
+      alignItems: 'flex-end',
+      paddingBottom: '1px',
+      paddingLeft: '2px',
+      width: '100%',
+      height: '100%',
+      pointerEvents: 'none',
+      boxSizing: 'border-box'
+    });
+
+    Object.assign(statIcon.style, {
+      width: '11px',
+      height: '11px',
+      display: 'block'
+    });
+  });
+}
+
+function extractSetupManagerEquipmentPortrait(itemPortrait) {
+  if (!itemPortrait) return null;
+
+  let portrait = itemPortrait;
+  if (itemPortrait.tagName === 'BUTTON') {
+    portrait = itemPortrait.querySelector('.equipment-portrait')
+      || Array.from(itemPortrait.children).find((child) => child.tagName === 'DIV');
+    if (!portrait) return null;
+    portrait = portrait.cloneNode(true);
+  }
+
+  portrait.classList.add('frame-pressed-1', 'pointer-events-none');
+  return applySetupManagerEquipmentPortraitSize(portrait);
+}
+
+function clampSetupEquipTier(value) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(5, Math.max(1, parsed));
+}
+
+function hasSetupManagerUIComponents() {
+  return !!(
+    window.BestiaryUIComponents?.createMonsterPortrait
+    && window.BestiaryUIComponents?.createItemPortrait
+  );
+}
+
+function getSetupManagerStatIconSrc(stat) {
+  const statType = String(stat || 'ad').toLowerCase();
+  if (statType === 'ap' || statType === 'abilitypower') return '/assets/icons/abilitypower.png';
+  if (statType === 'hp' || statType === 'health') return '/assets/icons/heal.png';
+  if (statType === 'armor') return '/assets/icons/armor.png';
+  if (statType === 'mr' || statType === 'magicresist') return '/assets/icons/magicresist.png';
+  return '/assets/icons/attackdamage.png';
+}
+
+function createSetupManagerEquipmentPortraitFallback(spriteId, stat, tier) {
+  if (!spriteId) {
+    return null;
+  }
+
+  const size = SETUP_MANAGER_EQUIPMENT_PORTRAIT_SIZE;
+  const portrait = document.createElement('div');
+  portrait.className = 'equipment-portrait surface-darker relative frame-pressed-1 pointer-events-none';
+  portrait.style.cssText = `width: ${size}px; height: ${size}px; max-width: ${size}px; max-height: ${size}px; position: relative; overflow: hidden;`;
+
+  const rarityBg = document.createElement('div');
+  rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+  rarityBg.setAttribute('data-rarity', String(clampSetupEquipTier(tier)));
+  portrait.appendChild(rarityBg);
+
+  const spriteContainer = document.createElement('div');
+  spriteContainer.className = `sprite item relative id-${spriteId}`;
+  const viewport = document.createElement('div');
+  viewport.className = 'viewport';
+  const img = document.createElement('img');
+  img.alt = String(spriteId);
+  img.className = 'spritesheet';
+  img.style.cssText = '--cropX: 0; --cropY: 0;';
+  viewport.appendChild(img);
+  spriteContainer.appendChild(viewport);
+  portrait.appendChild(spriteContainer);
+
+  const statIconContainer = document.createElement('div');
+  const statIcon = document.createElement('img');
+  statIcon.className = 'pixelated';
+  statIcon.alt = 'stat type';
+  statIcon.src = getSetupManagerStatIconSrc(stat);
+  statIconContainer.appendChild(statIcon);
+  portrait.appendChild(statIconContainer);
+
+  normalizeSetupManagerEquipmentStatIcon(portrait);
+  return portrait;
+}
+
+function createSetupItemPortrait(options) {
+  if (hasSetupManagerUIComponents()) {
+    try {
+      const itemPortrait = window.BestiaryUIComponents.createItemPortrait(options);
+      return extractSetupManagerEquipmentPortrait(itemPortrait);
+    } catch (error) {
+      // Fall through to silent fallback.
+    }
+  }
+
+  return createSetupManagerEquipmentPortraitFallback(options.itemId, options.stat, options.tier);
+}
+
+function toSetupPortraitMonster(monsterInfo) {
+  const stats = monsterInfo?.stats || monsterInfo || {};
+  return {
+    hp: stats.hp ?? monsterInfo?.hp ?? 0,
+    ad: stats.ad ?? monsterInfo?.ad ?? 0,
+    ap: stats.ap ?? monsterInfo?.ap ?? 0,
+    armor: stats.armor ?? monsterInfo?.armor ?? 0,
+    magicResist: stats.magicResist ?? monsterInfo?.magicResist ?? 0,
+    shiny: monsterInfo?.shiny === true,
+    awaken: monsterInfo?.awaken === true || monsterInfo?.awakened === true || monsterInfo?.isAwakened === true,
+    awakened: monsterInfo?.awakened === true || monsterInfo?.isAwakened === true,
+    isAwakened: monsterInfo?.isAwakened === true
+  };
+}
+
+function removeSetupPortraitLevelIndicators(slot) {
+  if (!slot) {
+    return;
+  }
+
+  slot.querySelectorAll('.pixel-font-16, .setup-manager-portrait-level').forEach((element) => {
+    element.remove();
+  });
+}
+
+function ensureSetupManagerLevelBadge(slot, level) {
+  if (!slot || slot.querySelector('.setup-manager-portrait-level')) {
+    return;
+  }
+
+  const levelBadge = document.createElement('span');
+  levelBadge.className = 'setup-manager-portrait-level';
+  levelBadge.setAttribute('translate', 'no');
+  levelBadge.textContent = String(level);
+  levelBadge.style.cssText = 'position: absolute; bottom: 0; left: 2px; z-index: 3; color: #fff; font-size: 10px; line-height: 1; background: rgba(0, 0, 0, 0.7); padding: 2px; pointer-events: none;';
+  slot.appendChild(levelBadge);
+}
+
+function finalizeSetupMonsterPortraitSlot(slot, monster, level, { hideLevel = false } = {}) {
+  const parsedLevel = Number(level) || 1;
+  const portraitMonster = toSetupPortraitMonster(monster);
+
+  removeSetupPortraitLevelIndicators(slot);
+  applySetupMonsterPortraitBorder(slot, portraitMonster, parsedLevel);
+
+  if (!hideLevel) {
+    ensureSetupManagerLevelBadge(slot, parsedLevel);
+  }
+
+  return slot;
+}
+
+function isSetupMaxGenes(monster, level) {
+  const parsedLevel = Number(level);
+  if (parsedLevel !== 99) return false;
+
+  return Number(monster.hp ?? 1) === 20 &&
+    Number(monster.ad ?? 1) === 20 &&
+    Number(monster.ap ?? 1) === 20 &&
+    Number(monster.armor ?? 1) === 20 &&
+    Number(monster.magicResist ?? 1) === 20;
+}
+
+function isSetupAwakened(monster, level) {
+  return monster.awaken === true ||
+    monster.awakened === true ||
+    monster.isAwakened === true ||
+    Number(level) > 50;
+}
+
+function applySetupMonsterPortraitBorder(slot, monster, level) {
+  const statTier = calculateTierFromStats(monster);
+  const maxGenes = isSetupMaxGenes(monster, level);
+  const awakened = isSetupAwakened(monster, level);
+  const shiny = monster.shiny === true;
+
+  let rarityBg = slot.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny, .rarity-hundo');
+  if (!rarityBg) {
+    rarityBg = document.createElement('div');
+    slot.insertBefore(rarityBg, slot.firstChild);
+  }
+
+  if (maxGenes && shiny) {
+    rarityBg.className = 'absolute inset-0 z-2 opacity-80 rarity-shiny';
+    rarityBg.removeAttribute('data-rarity');
+  } else if (maxGenes) {
+    rarityBg.className = 'absolute inset-0 z-1 opacity-80 rarity-hundo';
+    rarityBg.removeAttribute('data-rarity');
+  } else if (awakened) {
+    rarityBg.className = 'absolute inset-0 z-2 opacity-80 rarity-awaken';
+    rarityBg.removeAttribute('data-rarity');
+  } else {
+    rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+    rarityBg.setAttribute('data-rarity', Math.min(5, statTier));
+  }
+
+  let starIcon = slot.querySelector('img.tier-stars, img[alt="star tier"], img[alt="shiny-tier"], img[alt="hundo-tier"]');
+  if (maxGenes) {
+    const iconSrc = shiny ? '/assets/icons/star-tier-shiny.png' : '/assets/icons/star-tier-hundo.png';
+    if (!starIcon) {
+      starIcon = document.createElement('img');
+      starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+      slot.appendChild(starIcon);
+    }
+    starIcon.src = iconSrc;
+    starIcon.alt = shiny ? 'shiny-tier' : 'hundo-tier';
+  } else if (awakened) {
+    if (!starIcon) {
+      starIcon = document.createElement('img');
+      starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+      starIcon.alt = 'star tier';
+      slot.appendChild(starIcon);
+    }
+    starIcon.src = '/assets/icons/star-tier-awaken.png';
+    starIcon.alt = 'star tier';
+  } else if (statTier > 1) {
+    if (!starIcon) {
+      starIcon = document.createElement('img');
+      starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+      starIcon.alt = 'star tier';
+      slot.appendChild(starIcon);
+    }
+    starIcon.src = `/assets/icons/star-tier-${Math.min(4, statTier)}.png`;
+  } else if (starIcon) {
+    starIcon.remove();
+  }
+}
+
+function createSetupMonsterPortraitSlot({ monsterId, level, monster, size = SETUP_MANAGER_EQUIPMENT_PORTRAIT_SIZE, hideLevel = false }) {
+  const parsedLevel = Number(level) || 1;
+  const portraitMonster = toSetupPortraitMonster(monster);
+
+  if (window.BestiaryUIComponents?.createMonsterPortrait) {
+    try {
+      const root = window.BestiaryUIComponents.createMonsterPortrait({
+        monsterId,
+        level: parsedLevel,
+        tier: calculateTierFromStats(portraitMonster)
+      });
+      const slot = root.querySelector('.container-slot');
+      if (slot) {
+        slot.remove();
+        slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden shrink-0';
+        slot.style.width = `${size}px`;
+        slot.style.height = `${size}px`;
+
+        const img = slot.querySelector('img[alt="creature"]');
+        if (img) {
+          img.width = size;
+          img.height = size;
+        }
+
+        return finalizeSetupMonsterPortraitSlot(slot, monster, parsedLevel, { hideLevel });
       }
-    }, 300);
-  }, duration);
+    } catch (error) {
+      // Fall through to silent fallback.
+    }
+  }
+
+  const slot = document.createElement('div');
+  slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden shrink-0';
+  slot.style.width = `${size}px`;
+  slot.style.height = `${size}px`;
+  slot.style.position = 'relative';
+
+  const monsterImg = document.createElement('img');
+  monsterImg.className = 'pixelated';
+  monsterImg.alt = 'creature';
+  monsterImg.width = size;
+  monsterImg.height = size;
+  monsterImg.src = `/assets/portraits/${monsterId}.png`;
+  slot.appendChild(monsterImg);
+
+  return finalizeSetupMonsterPortraitSlot(slot, monster, parsedLevel, { hideLevel });
+}
+
+function createSetupEmptyEquipmentPlaceholder(sizePx = SETUP_MANAGER_EQUIPMENT_PORTRAIT_SIZE) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'focus-style-visible container-slot surface-darker size-[34px] active:opacity-70 disabled:opacity-100';
+  button.style.width = `${sizePx}px`;
+  button.style.height = `${sizePx}px`;
+  button.style.maxWidth = `${sizePx}px`;
+  button.style.maxHeight = `${sizePx}px`;
+  button.style.flexShrink = '0';
+  button.disabled = true;
+  button.tabIndex = -1;
+
+  const grid = document.createElement('div');
+  grid.className = 'grid size-full place-items-center';
+  grid.setAttribute('data-state', 'closed');
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  svg.setAttribute('width', '24');
+  svg.setAttribute('height', '24');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('class', 'lucide lucide-circle-plus size-4 text-whiteDarker');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  circle.setAttribute('cx', '12');
+  circle.setAttribute('cy', '12');
+  circle.setAttribute('r', '10');
+  svg.appendChild(circle);
+
+  const horizontalPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  horizontalPath.setAttribute('d', 'M8 12h8');
+  svg.appendChild(horizontalPath);
+
+  const verticalPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  verticalPath.setAttribute('d', 'M12 8v8');
+  svg.appendChild(verticalPath);
+
+  grid.appendChild(svg);
+  button.appendChild(grid);
+  return button;
+}
+
+const SETUP_MANAGER_TOAST_DURATION = 5000;
+const SETUP_MANAGER_TOAST_CONTAINER_ID = 'setup-manager-toast-container';
+
+function formatSetupManagerToastMessage(message, type = 'info') {
+  const trimmed = String(message ?? '').trim();
+  if (!trimmed) return trimmed;
+  if (/[.!?…]$/.test(trimmed)) return trimmed;
+
+  if (type === 'success') return `${trimmed}!`;
+  if (type === 'error' || type === 'warning' || type === 'info') return `${trimmed}.`;
+  return `${trimmed}.`;
+}
+
+function getSetupManagerToastContainer() {
+  if (typeof document === 'undefined') return null;
+
+  let container = document.getElementById(SETUP_MANAGER_TOAST_CONTAINER_ID);
+  if (!container) {
+    container = document.createElement('div');
+    container.id = SETUP_MANAGER_TOAST_CONTAINER_ID;
+    container.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
+function updateSetupManagerToastPositions(container) {
+  if (!container) return;
+
+  container.querySelectorAll('.setup-manager-toast-item').forEach((toast, index) => {
+    toast.style.transform = `translateY(-${index * 46}px)`;
+  });
+}
+
+function showSetupManagerToast(message, options = {}) {
+  const safeMsg = message != null && message !== '' ? String(message).replace(/</g, '&lt;') : '';
+  const duration = typeof options.duration === 'number' && options.duration > 0
+    ? options.duration
+    : SETUP_MANAGER_TOAST_DURATION;
+
+  try {
+    const container = getSetupManagerToastContainer();
+    if (!container) return;
+
+    const existingToasts = container.querySelectorAll('.setup-manager-toast-item');
+    const stackOffset = existingToasts.length * 46;
+
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'setup-manager-toast-item';
+    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
+
+    const toast = document.createElement('button');
+    toast.type = 'button';
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    toast.style.pointerEvents = 'auto';
+
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'text-left text-whiteRegular';
+    messageDiv.style.flex = '1 1 auto';
+    messageDiv.style.color = '#ffffff';
+    if (safeMsg.indexOf('\n') !== -1) {
+      messageDiv.style.whiteSpace = 'pre-line';
+    }
+    messageDiv.textContent = safeMsg;
+
+    widgetBottom.appendChild(messageDiv);
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    container.appendChild(flexContainer);
+
+    const removeToast = () => {
+      if (flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        updateSetupManagerToastPositions(container);
+      }
+    };
+
+    toast.addEventListener('click', removeToast);
+    setTimeout(removeToast, duration);
+  } catch (error) {
+    console.warn('[Setup Manager] showSetupManagerToast:', error);
+  }
+}
+
+function showNotification(message, type = 'info', duration = SETUP_MANAGER_TOAST_DURATION) {
+  showSetupManagerToast(formatSetupManagerToastMessage(message, type), { duration });
 }
 
 // Create a styled button for actions
-function createActionButton(text, onClick, primary = false, icon = null, small = false) {
+function createActionButton(text, onClick, primary = false) {
   const button = document.createElement('button');
   
-  button.className = primary 
-    ? 'frame-1-green active:frame-pressed-1-green surface-green pixel-font-14 text-whiteRegular'
-    : 'frame-1-yellow active:frame-pressed-1-yellow surface-yellow pixel-font-14 text-whiteRegular';
+  button.className = primary
+    ? SETUP_MANAGER_BUTTON_CLASS.primary
+    : SETUP_MANAGER_BUTTON_CLASS.secondary;
   
-  button.style.cssText = `
-    padding: ${small ? '4px 8px' : '6px 12px'};
-    margin-right: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-  `;
-  
-  if (icon) {
-    const iconSpan = document.createElement('span');
-    iconSpan.textContent = icon;
-    iconSpan.style.fontSize = small ? '14px' : '16px';
-    button.appendChild(iconSpan);
-  }
+  button.style.cssText = 'cursor: pointer;';
   
   const textSpan = document.createElement('span');
   textSpan.textContent = text;
@@ -717,85 +1296,503 @@ function createActionButton(text, onClick, primary = false, icon = null, small =
   return button;
 }
 
-// Create a delete button
-function createDeleteButton(onClick) {
+const SETUP_MANAGER_DELETE_CONFIRM_MS = 5000;
+const SETUP_MANAGER_SETUP_CARD_CLASS = 'setup-manager-setup-card';
+
+function setSetupCardDeleteWarning(deleteButton, active) {
+  const card = deleteButton?.closest(`.${SETUP_MANAGER_SETUP_CARD_CLASS}`);
+  if (!card) return;
+
+  if (active) {
+    card.classList.remove('frame-1', 'surface-regular');
+    card.classList.add('frame-1-red', 'surface-red');
+    card.dataset.deleteConfirming = 'true';
+    return;
+  }
+
+  card.classList.remove('frame-1-red', 'surface-red');
+  card.classList.add('frame-1', 'surface-regular');
+  card.dataset.deleteConfirming = 'false';
+}
+
+function resetDeleteButton(deleteButton) {
+  if (!deleteButton) return;
+
+  const textSpan = deleteButton.querySelector('span');
+  if (textSpan) {
+    textSpan.textContent = t('mods.setupManager.deleteTeam');
+  }
+  deleteButton.className = SETUP_MANAGER_BUTTON_CLASS.danger;
+  deleteButton.style.cssText = 'width: 100%; cursor: pointer;';
+  deleteButton.dataset.confirming = 'false';
+  setSetupCardDeleteWarning(deleteButton, false);
+}
+
+function cancelPendingDeleteConfirmation() {
+  if (!pendingDeleteConfirmation) return;
+
+  const { deleteButton, timeoutId } = pendingDeleteConfirmation;
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+  resetDeleteButton(deleteButton);
+  pendingDeleteConfirmation = null;
+}
+
+function deleteSetupInline(mapId, setupName) {
+  const deleteResult = deleteTeamSetup(mapId, setupName);
+  if (deleteResult) {
+    cancelPendingDeleteConfirmation();
+    showNotification(t('mods.setupManager.teamDeleted'), 'success');
+    showSetupManagerModal();
+    return true;
+  }
+
+  showNotification(t('common.error'), 'error');
+  return false;
+}
+
+function handleDeleteButtonClick(mapId, setupName, deleteButton) {
+  if (pendingDeleteConfirmation?.deleteButton === deleteButton) {
+    deleteSetupInline(mapId, setupName);
+    return;
+  }
+
+  cancelPendingDeleteConfirmation();
+
+  const textSpan = deleteButton.querySelector('span');
+  if (textSpan) {
+    textSpan.textContent = t('mods.setupManager.confirmDeleteButton');
+  }
+  deleteButton.dataset.confirming = 'true';
+  setSetupCardDeleteWarning(deleteButton, true);
+
+  const timeoutId = setTimeout(() => {
+    if (pendingDeleteConfirmation?.deleteButton === deleteButton) {
+      cancelPendingDeleteConfirmation();
+    }
+  }, SETUP_MANAGER_DELETE_CONFIRM_MS);
+
+  pendingDeleteConfirmation = { deleteButton, mapId, setupName, timeoutId };
+}
+
+function createDeleteButton(mapId, setupName) {
   const button = document.createElement('button');
-  button.className = 'frame-1-red active:frame-pressed-1-red surface-red pixel-font-14 text-whiteRegular';
-  button.style.cssText = `
-    padding: 4px 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `;
-  
-  // Trash icon
-  const iconSpan = document.createElement('span');
-  iconSpan.textContent = '🗑️';
-  iconSpan.style.fontSize = '14px';
-  button.appendChild(iconSpan);
-  
-  button.addEventListener('click', onClick);
-  
+  button.className = SETUP_MANAGER_BUTTON_CLASS.danger;
+  button.style.cssText = 'width: 100%; cursor: pointer;';
+  button.dataset.confirming = 'false';
+
+  const textSpan = document.createElement('span');
+  textSpan.textContent = t('mods.setupManager.deleteTeam');
+  button.appendChild(textSpan);
+
+  button.addEventListener('click', () => {
+    handleDeleteButtonClick(mapId, setupName, button);
+  });
+
   return button;
 }
 
-// Create a notes button (yellow)
-function createNotesButton(onClick) {
-  const button = document.createElement('button');
-  button.className = 'frame-1-yellow active:frame-pressed-1-yellow surface-yellow pixel-font-14 text-whiteRegular';
-  button.style.cssText = `
-    padding: 4px 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
+function hasSetupNotes(setupData) {
+  return Boolean(String(setupData?.notes ?? '').trim());
+}
+
+function createSetupNameInput(value) {
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'frame-pressed-1 surface-dark w-full p-1 text-whiteRegular pixel-font-16';
+  nameInput.maxLength = config.setupNameMaxLength;
+  nameInput.value = value;
+  nameInput.placeholder = t('mods.setupManager.setupName');
+  nameInput.style.maxWidth = '100%';
+  nameInput.style.boxSizing = 'border-box';
+  nameInput.style.height = `${SETUP_NAME_FIELD_HEIGHT_PX}px`;
+  nameInput.style.maxHeight = `${SETUP_NAME_FIELD_HEIGHT_PX}px`;
+  return nameInput;
+}
+
+function injectSetupManagerNameInputStyles() {
+  if (document.getElementById('setup-manager-name-input-styles')) return;
+
+  const style = document.createElement('style');
+  style.id = 'setup-manager-name-input-styles';
+  style.textContent = `
+    input.setup-manager-name-locked:disabled {
+      opacity: 1 !important;
+      color: inherit !important;
+      cursor: default !important;
+      -webkit-text-fill-color: inherit !important;
+    }
   `;
-  
+  document.head.appendChild(style);
+}
+
+function applySetupNameInputEditable(nameInput, editable, { greyedWhenLocked = false } = {}) {
+  injectSetupManagerNameInputStyles();
+  nameInput.classList.remove('setup-manager-name-locked');
+  nameInput.readOnly = false;
+
+  if (editable) {
+    nameInput.disabled = false;
+    nameInput.style.opacity = '';
+    nameInput.style.cursor = '';
+    nameInput.style.color = '';
+    return;
+  }
+
+  nameInput.disabled = true;
+
+  if (greyedWhenLocked) {
+    nameInput.style.opacity = '0.5';
+    nameInput.style.cursor = 'not-allowed';
+    nameInput.style.color = '#888888';
+    return;
+  }
+
+  nameInput.classList.add('setup-manager-name-locked');
+  nameInput.style.opacity = '';
+  nameInput.style.cursor = 'default';
+  nameInput.style.color = '';
+}
+
+function createEditableSetupNameRow(mapId, setupName) {
+  const nameRow = document.createElement('div');
+  nameRow.className = 'flex w-full min-w-0 items-center gap-1';
+  nameRow.style.maxHeight = `${SETUP_NAME_FIELD_HEIGHT_PX}px`;
+
+  const nameInput = createSetupNameInput(setupName);
+  nameInput.style.flex = '1 1 0';
+  nameInput.style.minWidth = '0';
+  nameInput.style.width = 'auto';
+  applySetupNameInputEditable(nameInput, false);
+  nameRow.appendChild(nameInput);
+
+  let isEditingName = false;
+  let outsideClickHandler = null;
+
+  const removeOutsideClickHandler = () => {
+    if (!outsideClickHandler) return;
+    document.removeEventListener('mousedown', outsideClickHandler, true);
+    outsideClickHandler = null;
+  };
+
+  const cancelNameEdit = () => {
+    if (!isEditingName) return;
+
+    nameInput.value = setupName;
+    isEditingName = false;
+    applySetupNameInputEditable(nameInput, false);
+    editNameButton.querySelector('span').textContent = t('mods.setupManager.editName');
+    removeOutsideClickHandler();
+  };
+
+  const startOutsideClickHandler = () => {
+    removeOutsideClickHandler();
+    outsideClickHandler = (event) => {
+      if (!isEditingName || nameRow.contains(event.target)) return;
+      cancelNameEdit();
+    };
+
+    setTimeout(() => {
+      if (isEditingName) {
+        document.addEventListener('mousedown', outsideClickHandler, true);
+      }
+    }, 0);
+  };
+
+  const editNameButton = createActionButton(
+    t('mods.setupManager.editName'),
+    () => {
+      if (!isEditingName) {
+        isEditingName = true;
+        applySetupNameInputEditable(nameInput, true);
+        editNameButton.querySelector('span').textContent = t('common.save');
+        nameInput.focus();
+        nameInput.select();
+        startOutsideClickHandler();
+        return;
+      }
+
+      removeOutsideClickHandler();
+      saveSetupRenameInline(mapId, setupName, nameInput.value);
+    },
+    false,
+    null,
+    true
+  );
+  editNameButton.style.cssText = `flex-shrink: 0; cursor: pointer; margin-right: 0; height: ${SETUP_NAME_FIELD_HEIGHT_PX}px; max-height: ${SETUP_NAME_FIELD_HEIGHT_PX}px;`;
+  nameRow.appendChild(editNameButton);
+
+  nameInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && isEditingName) {
+      removeOutsideClickHandler();
+      saveSetupRenameInline(mapId, setupName, nameInput.value);
+    } else if (event.key === 'Escape' && isEditingName) {
+      cancelNameEdit();
+    }
+  });
+
+  return nameRow;
+}
+
+function createSetupNotesPreview(notes) {
+  const trimmed = String(notes ?? '').trim();
+  if (!trimmed) return null;
+
+  const notesBlock = document.createElement('div');
+  notesBlock.className = 'frame-pressed-1 surface-dark w-full min-w-0 shrink-0 p-1';
+
+  const notesText = document.createElement('p');
+  notesText.className = 'pixel-font-14 text-whiteRegular italic m-0';
+  notesText.style.cssText = [
+    'line-height: 1.35',
+    'word-break: break-word',
+    'white-space: pre-line',
+    'overflow: hidden',
+    'display: -webkit-box',
+    '-webkit-line-clamp: 2',
+    '-webkit-box-orient: vertical'
+  ].join('; ');
+  notesText.textContent = trimmed;
+  notesText.title = trimmed;
+
+  notesBlock.appendChild(notesText);
+
+  return notesBlock;
+}
+
+// Create a notes button
+function createNotesButton(onClick, hasNotes = false) {
+  const button = document.createElement('button');
+  button.className = SETUP_MANAGER_BUTTON_CLASS.secondary;
+  button.style.cssText = 'width: 100%; cursor: pointer;';
+
   const textSpan = document.createElement('span');
-  textSpan.textContent = 'Notes';
+  textSpan.textContent = t('mods.setupManager.notes');
   button.appendChild(textSpan);
-  
+
+  if (hasNotes) {
+    const indicator = document.createElement('span');
+    indicator.className = 'setup-manager-has-notes-indicator';
+    indicator.textContent = ' ●';
+    indicator.style.color = '#ff8';
+    indicator.setAttribute('aria-hidden', 'true');
+    textSpan.appendChild(indicator);
+    button.title = t('mods.setupManager.hasNotes');
+  }
+
   button.addEventListener('click', onClick);
-  
+
   return button;
+}
+
+function createSetupTeamPreviewContainer() {
+  const teamPreview = document.createElement('div');
+  teamPreview.className = 'frame-pressed-1 p-1 min-w-0 flex flex-1 items-center min-h-0';
+
+  const teamContent = document.createElement('div');
+  teamContent.className = 'flex flex-wrap items-center';
+  teamContent.style.gap = '12px';
+  teamContent.style.width = '100%';
+
+  teamPreview.appendChild(teamContent);
+  return { teamPreview, teamContent };
+}
+
+function styleSetupCardLeftSection(leftSection) {
+  leftSection.className = 'flex flex-col w-full gap-1 min-h-0 self-stretch';
+  leftSection.style.width = '75%';
+  leftSection.style.flex = '0 0 75%';
+  leftSection.style.minWidth = '0';
+}
+
+function appendBoardPieceToTeamContent(teamContent, piece) {
+  if (!piece) return false;
+
+  if (piece.type === 'player') {
+    const monsterInfo = getMonsterInfo(piece.databaseId);
+    if (!monsterInfo) return false;
+
+    const pair = createCreatureEquipmentPair(monsterInfo, piece.equipId);
+    if (pair && pair.children.length > 0) {
+      teamContent.appendChild(pair);
+      return true;
+    }
+    return false;
+  }
+
+  if (piece.type === 'custom') {
+    const monsterInfo = getMonsterInfoFromCustom({
+      gameId: piece.gameId,
+      level: piece.level,
+      genes: piece.genes
+    });
+    if (!monsterInfo) return false;
+
+    const pair = createCreatureEquipmentPair(
+      monsterInfo,
+      null,
+      true,
+      monsterInfo.existsInCollection,
+      piece.equip || null
+    );
+    if (pair && pair.children.length > 0) {
+      teamContent.appendChild(pair);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function saveCurrentBoardSetup(mapId, name) {
+  const trimmedName = name?.trim();
+  if (!trimmedName) {
+    showNotification(t('common.error'), 'error');
+    return false;
+  }
+
+  if (trimmedName.length > config.setupNameMaxLength) {
+    showNotification(tReplace('mods.setupManager.nameTooLong', { max: config.setupNameMaxLength }), 'error');
+    return false;
+  }
+
+  const currentSetup = getCurrentTeamSetup();
+  if (!currentSetup || currentSetup.length === 0) {
+    showNotification(t('mods.setupManager.invalidSetup'), 'error');
+    return false;
+  }
+
+  const saveResult = saveTeamSetup(mapId, trimmedName, currentSetup);
+  if (saveResult) {
+    showNotification(t('mods.setupManager.teamSaved'), 'success');
+    showSetupManagerModal();
+  }
+
+  return saveResult;
+}
+
+function createCurrentBoardCard(mapId) {
+  const creatureCount = getCurrentCreatureCount();
+  const maxCount = getMaxTeamSize(mapId);
+  const hasSetup = creatureCount > 0;
+
+  const card = document.createElement('div');
+  card.className = 'frame-1 surface-regular box-border flex w-full items-stretch gap-2 overflow-hidden p-1 shrink-0';
+
+  const leftSection = document.createElement('div');
+  styleSetupCardLeftSection(leftSection);
+
+  const nameInput = createSetupNameInput(t('mods.setupManager.newSetup'));
+  applySetupNameInputEditable(nameInput, hasSetup, { greyedWhenLocked: true });
+  leftSection.appendChild(nameInput);
+
+  const { teamPreview, teamContent } = createSetupTeamPreviewContainer();
+
+  try {
+    const boardSnapshot = globalThis.state.board.getSnapshot();
+    const boardPieces = boardSnapshot?.context?.boardConfig?.filter(
+      piece => piece && (piece.type === 'player' || piece.type === 'custom') && !piece.villain
+    ) || [];
+
+    boardPieces.forEach(piece => appendBoardPieceToTeamContent(teamContent, piece));
+  } catch (error) {
+    console.error('Error building current board preview:', error);
+  }
+
+  if (teamContent.children.length === 0) {
+    const emptyText = document.createElement('p');
+    emptyText.className = 'pixel-font-14 text-whiteRegular italic';
+    emptyText.textContent = t('mods.setupManager.noMonstersOnBoard');
+    teamContent.appendChild(emptyText);
+  }
+
+  teamPreview.appendChild(teamContent);
+  leftSection.appendChild(teamPreview);
+
+  const rightSection = document.createElement('div');
+  rightSection.style.width = '25%';
+  rightSection.style.flex = '0 0 25%';
+  rightSection.style.display = 'flex';
+  rightSection.style.flexDirection = 'column';
+  rightSection.style.gap = '8px';
+  rightSection.style.alignItems = 'flex-end';
+  rightSection.style.justifyContent = 'flex-start';
+  rightSection.style.boxSizing = 'border-box';
+  rightSection.style.padding = '8px';
+
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'flex gap-1';
+  actionsDiv.style.flexDirection = 'column';
+  actionsDiv.style.width = '100%';
+  actionsDiv.style.alignItems = 'stretch';
+
+  const isMaxCreatures = creatureCount === maxCount;
+  const indicatorColor = isMaxCreatures ? '#4caf50' : '#ff4444';
+
+  const countIndicator = document.createElement('div');
+  countIndicator.className = 'pixel-font-12 text-whiteRegular shrink-0';
+  countIndicator.textContent = formatSetupCreatureCount(creatureCount, maxCount);
+  countIndicator.style.cssText = `
+    text-align: center;
+    margin-bottom: 4px;
+    opacity: 0.9;
+    color: ${indicatorColor};
+  `;
+  actionsDiv.appendChild(countIndicator);
+
+  const saveButton = createActionButton(
+    t('common.save'),
+    () => saveCurrentBoardSetup(mapId, nameInput.value),
+    true,
+    null,
+    true
+  );
+  saveButton.style.width = '100%';
+  saveButton.style.marginRight = '0';
+  if (!hasSetup) {
+    saveButton.disabled = true;
+    saveButton.style.opacity = '0.5';
+    saveButton.style.cursor = 'not-allowed';
+  }
+  nameInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !saveButton.disabled) {
+      saveCurrentBoardSetup(mapId, nameInput.value);
+    }
+  });
+  actionsDiv.appendChild(saveButton);
+
+  rightSection.appendChild(actionsDiv);
+  card.appendChild(leftSection);
+  card.appendChild(rightSection);
+
+  return card;
 }
 
 // Create a setup card for a team
 function createSetupCard(mapId, setupName, setupData) {
   const card = document.createElement('div');
-  card.className = 'frame-pressed-1 surface-dark p-2 mb-3';
-  card.style.maxWidth = '450px';
-  card.style.width = '100%';
-  card.style.boxSizing = 'border-box';
-  card.style.overflow = 'hidden';
-  card.style.display = 'flex';
-  card.style.gap = '8px';
+  card.className = `frame-1 surface-regular box-border flex w-full items-stretch gap-2 overflow-hidden p-1 shrink-0 ${SETUP_MANAGER_SETUP_CARD_CLASS}`;
+  card.dataset.deleteConfirming = 'false';
   
   // Left section (75%): Setup name and creatures
   const leftSection = document.createElement('div');
-  leftSection.style.width = '75%';
-  leftSection.style.flex = '0 0 75%';
-  leftSection.style.minWidth = '0';
-  leftSection.style.display = 'flex';
-  leftSection.style.flexDirection = 'column';
-  leftSection.style.gap = '8px';
+  styleSetupCardLeftSection(leftSection);
   
-  // Setup name
-  const nameSpan = document.createElement('span');
-  nameSpan.className = 'pixel-font-16 text-whiteRegular';
-  nameSpan.textContent = setupName;
-  nameSpan.style.maxWidth = '100%';
-  nameSpan.style.wordWrap = 'break-word';
-  nameSpan.style.wordBreak = 'break-word';
-  nameSpan.style.overflowWrap = 'break-word';
-  leftSection.appendChild(nameSpan);
+  const isSavedSetup = setupName !== 'Auto-Setup';
+  if (isSavedSetup) {
+    leftSection.appendChild(createEditableSetupNameRow(mapId, setupName));
+    const notesPreview = createSetupNotesPreview(setupData?.notes);
+    if (notesPreview) {
+      leftSection.appendChild(notesPreview);
+    }
+  } else {
+    const nameInput = createSetupNameInput(setupName);
+    applySetupNameInputEditable(nameInput, false);
+    leftSection.appendChild(nameInput);
+  }
   
-  // Team content section
-  const teamContent = document.createElement('div');
-  teamContent.className = 'flex flex-wrap';
-  teamContent.style.gap = '12px';
+  const { teamPreview, teamContent } = createSetupTeamPreviewContainer();
   
   // For "Auto-Setup" setup, get monsters from the player's saved setup
   if (setupName === 'Auto-Setup') {
@@ -816,8 +1813,8 @@ function createSetupCard(mapId, setupName, setupData) {
       });
     } else {
       const emptyText = document.createElement('p');
-      emptyText.className = 'text-whiteRegular italic';
-      emptyText.textContent = 'No monsters in original setup';
+      emptyText.className = 'pixel-font-14 text-whiteRegular italic';
+      emptyText.textContent = t('mods.setupManager.noMonstersInOriginalSetup');
       teamContent.appendChild(emptyText);
     }
   } 
@@ -863,19 +1860,20 @@ function createSetupCard(mapId, setupName, setupData) {
     // If no monsters were added, show a message
     if (teamContent.children.length === 0) {
       const emptyText = document.createElement('p');
-      emptyText.className = 'text-whiteRegular italic';
-      emptyText.textContent = 'No monsters in this setup';
+      emptyText.className = 'pixel-font-14 text-whiteRegular italic';
+      emptyText.textContent = t('mods.setupManager.noMonstersInSetup');
       teamContent.appendChild(emptyText);
     }
   } else {
     // Handle case where setup data is missing or invalid
     const emptyText = document.createElement('p');
-    emptyText.className = 'text-whiteRegular italic';
-    emptyText.textContent = 'Invalid setup data';
+    emptyText.className = 'pixel-font-14 text-whiteRegular italic';
+    emptyText.textContent = t('mods.setupManager.invalidSetup');
     teamContent.appendChild(emptyText);
   }
   
-  leftSection.appendChild(teamContent);
+  teamPreview.appendChild(teamContent);
+  leftSection.appendChild(teamPreview);
   
   // Right section (25%): Actions (Load Team and Delete buttons)
   const rightSection = document.createElement('div');
@@ -886,6 +1884,8 @@ function createSetupCard(mapId, setupName, setupData) {
   rightSection.style.gap = '8px';
   rightSection.style.alignItems = 'flex-end';
   rightSection.style.justifyContent = 'flex-start';
+  rightSection.style.boxSizing = 'border-box';
+  rightSection.style.padding = '8px';
   
   // Actions container
   const actionsDiv = document.createElement('div');
@@ -910,8 +1910,8 @@ function createSetupCard(mapId, setupName, setupData) {
   
   const maxCount = getMaxTeamSize(mapId);
   const countIndicator = document.createElement('div');
-  countIndicator.className = 'pixel-font-14 text-whiteRegular';
-  countIndicator.textContent = `${setupCreatureCount}/${maxCount} creatures`;
+  countIndicator.className = 'pixel-font-12 text-whiteRegular shrink-0';
+  countIndicator.textContent = formatSetupCreatureCount(setupCreatureCount, maxCount);
   
   // Color code: green if equals max, red otherwise
   const isMaxCreatures = setupCreatureCount === maxCount;
@@ -941,17 +1941,14 @@ function createSetupCard(mapId, setupName, setupData) {
   if (setupName !== 'Auto-Setup') {
     const notesButton = createNotesButton(() => {
       showNotesModal(mapId, setupName, setupData);
-    });
+    }, hasSetupNotes(setupData));
     notesButton.style.width = '100%';
     actionsDiv.appendChild(notesButton);
   }
   
   // Delete button (only for non-original setups)
   if (setupName !== 'Auto-Setup') {
-    const deleteButton = createDeleteButton(() => {
-      showDeleteConfirmation(mapId, setupName);
-    });
-    deleteButton.style.width = '100%';
+    const deleteButton = createDeleteButton(mapId, setupName);
     actionsDiv.appendChild(deleteButton);
   }
   
@@ -977,7 +1974,7 @@ function showSetupManagerModal() {
       api.ui.components.createModal({
         title: t('mods.setupManager.autosetupRequired'),
         content: t('mods.setupManager.autosetupMessage'),
-        buttons: [{ text: 'OK', primary: true }]
+        buttons: [{ text: t('controls.ok'), primary: true }]
       });
       return;
     }
@@ -990,17 +1987,33 @@ function showSetupManagerModal() {
     
     // Force close all open modals first
     forceCloseAllModals();
+    cancelPendingDeleteConfirmation();
     
     const mapName = getCurrentMapName();
     
     // Create modal content
     const content = document.createElement('div');
+    content.className = 'flex min-h-0 flex-1 flex-col';
+    content.style.height = '100%';
+
+    const newSetupHeader = document.createElement('div');
+    newSetupHeader.className = 'pixel-font-12 text-whiteRegular mb-1 shrink-0';
+    newSetupHeader.textContent = t('mods.setupManager.newSetup');
+    applySetupManagerViewportWidth(newSetupHeader);
+    content.appendChild(newSetupHeader);
+
+    const newSetupScroll = createSetupManagerScrollContainer({ grow: false });
+    newSetupScroll.addContent(createCurrentBoardCard(mapId));
+    newSetupScroll.element.style.marginBottom = '8px';
+    content.appendChild(newSetupScroll.element);
+
+    const listHeader = document.createElement('div');
+    listHeader.className = 'pixel-font-12 text-whiteRegular mb-1 shrink-0';
+    listHeader.textContent = t('mods.setupManager.savedSetups');
+    applySetupManagerViewportWidth(listHeader);
+    content.appendChild(listHeader);
     
-    // Create a scrollable container
-    const scrollContainer = api.ui.components.createScrollContainer({
-      height: 400,
-      padding: true
-    });
+    const scrollContainer = createSetupManagerScrollContainer();
     
     // Load the saved setups for this map
     const savedSetups = getMapSetups(mapId);
@@ -1032,185 +2045,23 @@ function showSetupManagerModal() {
     
     content.appendChild(scrollContainer.element);
     
-    // Add save button
-    const saveButton = createActionButton(
-      t('mods.setupManager.saveCurrentSetup'),
-      () => showSaveSetupModal(mapId),
-      true
-    );
-    saveButton.style.marginTop = '10px';
-    content.appendChild(saveButton);
-    
     // Create the modal
     activeModal = api.ui.components.createModal({
       title: `${t('mods.setupManager.setupManager')} - ${mapName}`,
-      width: 500,
+      width: SETUP_MANAGER_MODAL_WIDTH,
+      height: SETUP_MANAGER_MODAL_HEIGHT,
       content: content,
       buttons: [
         {
-          text: t('common.cancel'),
-          primary: false,
+          text: t('common.close'),
           closeOnClick: true
         }
       ]
     });
-    
-    // Override modal width styles to ensure 500px width
-    setTimeout(() => {
-      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-      if (dialog) {
-        dialog.style.width = '500px';
-        dialog.style.minWidth = '500px';
-        dialog.style.maxWidth = '500px';
-        dialog.classList.remove('max-w-[300px]');
-        
-        // Center the scroll viewport horizontally
-        const viewport = dialog.querySelector('div[data-radix-scroll-area-viewport]');
-        if (viewport) {
-          viewport.style.marginLeft = 'auto';
-          viewport.style.marginRight = 'auto';
-        }
-      }
-    }, 0);
+
+    applySetupManagerExpandedLayout(activeModal);
   } catch (error) {
     console.error('Error showing setup manager modal:', error);
-    showNotification(t('common.error'), 'error');
-  }
-}
-
-// Show modal to save current setup
-function showSaveSetupModal(mapId) {
-  try {
-    if (!mapId) {
-      console.error('No map ID provided for saving team setup');
-      return;
-    }
-    
-    // Check if autosetup is enabled
-    const playerContext = globalThis.state.player.getSnapshot().context;
-    const playerFlags = playerContext.flags;
-    
-    // Create Flags object to check autosetup mode
-    const flags = new globalThis.state.utils.Flags(playerFlags);
-    if (!flags.isSet("autosetup")) {
-      api.ui.components.createModal({
-        title: t('mods.setupManager.autosetupRequired'),
-        content: t('mods.setupManager.autosetupMessage'),
-        buttons: [{ text: 'OK', primary: true }]
-      });
-      return;
-    }
-    
-    // Force close all open modals first
-    forceCloseAllModals();
-    
-    // Get current team from board
-    const currentSetup = getCurrentTeamSetup();
-    
-    if (!currentSetup || currentSetup.length === 0) {
-      showNotification(t('mods.setupManager.invalidSetup'), 'error');
-      return;
-    }
-    
-    // Create modal content
-    const content = document.createElement('div');
-    
-    // Name input
-    const inputContainer = document.createElement('div');
-    inputContainer.className = 'mb-4';
-    
-    const inputLabel = document.createElement('label');
-    inputLabel.htmlFor = 'setup-name-input';
-    inputLabel.className = 'block text-whiteRegular mb-1';
-    inputLabel.textContent = t('mods.setupManager.setupName');
-    
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.id = 'setup-name-input';
-    nameInput.className = 'frame-pressed-1 surface-dark w-full p-2 text-whiteRegular';
-    nameInput.maxLength = config.setupNameMaxLength;
-    nameInput.value = t('mods.setupManager.newSetup');
-    
-    inputContainer.appendChild(inputLabel);
-    inputContainer.appendChild(nameInput);
-    content.appendChild(inputContainer);
-    
-    // Team preview section
-    const previewHeading = document.createElement('h3');
-    previewHeading.className = 'text-whiteRegular mb-2';
-    previewHeading.textContent = 'Preview';
-    content.appendChild(previewHeading);
-    
-    // Team preview container
-    const previewContainer = document.createElement('div');
-    previewContainer.className = 'flex flex-wrap mb-4';
-    previewContainer.style.gap = '12px';
-    
-    // Add monster and equipment portraits to preview
-    currentSetup.forEach(piece => {
-      if (piece && piece.monsterId) {
-        const monsterInfo = getMonsterInfo(piece.monsterId);
-        if (monsterInfo) {
-          const pair = createCreatureEquipmentPair(monsterInfo, piece.equipId);
-          if (pair && pair.children.length > 0) {
-            previewContainer.appendChild(pair);
-          }
-        }
-      }
-    });
-    
-    content.appendChild(previewContainer);
-    
-    // Create the modal
-    activeModal = api.ui.components.createModal({
-      title: t('mods.setupManager.saveTeam'),
-      width: 320,
-      content: content,
-      buttons: [
-        {
-          text: t('common.save'),
-          primary: true,
-          onClick: () => {
-            // Validate name
-            const name = nameInput.value.trim();
-            if (!name) {
-              showNotification(t('common.error'), 'error');
-              return;
-            }
-            
-            if (name.length > config.setupNameMaxLength) {
-              showNotification(tReplace('mods.setupManager.nameTooLong', { max: config.setupNameMaxLength }), 'error');
-              return;
-            }
-            
-            // Save the setup
-            const saveResult = saveTeamSetup(mapId, name, currentSetup);
-            
-            if (saveResult) {
-              showNotification(t('mods.setupManager.teamSaved'), 'success');
-              // Reopen the setup manager with updated data
-              showSetupManagerModal();
-            } else {
-              showNotification(t('common.error'), 'error');
-            }
-          }
-        },
-        {
-          text: t('common.cancel'),
-          primary: false,
-          closeOnClick: true
-        }
-      ]
-    });
-    
-    // Focus the name input field
-    setTimeout(() => {
-      nameInput.focus();
-      nameInput.select();
-    }, 100);
-    
-  } catch (error) {
-    console.error('Error showing save setup modal:', error);
     showNotification(t('common.error'), 'error');
   }
 }
@@ -1233,7 +2084,7 @@ function showNotesModal(mapId, setupName, setupData) {
       api.ui.components.createModal({
         title: t('mods.setupManager.autosetupRequired'),
         content: t('mods.setupManager.autosetupMessage'),
-        buttons: [{ text: 'OK', primary: true }]
+        buttons: [{ text: t('controls.ok'), primary: true }]
       });
       return;
     }
@@ -1244,13 +2095,13 @@ function showNotesModal(mapId, setupName, setupData) {
     // Get current notes from setup data
     const currentNotes = (setupData && setupData.notes) ? setupData.notes : '';
     
-    // Create modal content
     const content = document.createElement('div');
-    
-    // Create a container matching the scroll container style (height: 400px)
+    content.className = 'flex min-h-0 flex-1 flex-col';
+    content.style.height = '100%';
+
     const textareaContainer = document.createElement('div');
-    textareaContainer.className = 'relative overflow-hidden frame-pressed-1 surface-dark';
-    textareaContainer.style.cssText = 'position: relative; height: 400px;';
+    textareaContainer.className = 'frame-pressed-1 surface-dark relative box-border min-h-0 flex-1 overflow-hidden';
+    textareaContainer.style.padding = '5px';
     
     // Notes textarea
     const textarea = document.createElement('textarea');
@@ -1266,19 +2117,20 @@ function showNotesModal(mapId, setupName, setupData) {
       background: transparent;
     `;
     textarea.value = currentNotes;
-    textarea.placeholder = 'Add notes about this setup...';
+    textarea.placeholder = t('mods.setupManager.notesPlaceholder');
     textareaContainer.appendChild(textarea);
     
     content.appendChild(textareaContainer);
     
     // Create modal (matching setup manager modal structure)
     activeModal = api.ui.components.createModal({
-      title: `Setup Notes - ${setupName}`,
-      width: 500,
+      title: tReplace('mods.setupManager.notesModalTitle', { name: setupName }),
+      width: SETUP_MANAGER_MODAL_WIDTH,
+      height: SETUP_MANAGER_MODAL_HEIGHT,
       content: content,
       buttons: [
         {
-          text: 'Save',
+          text: t('common.save'),
           primary: true,
           onClick: () => {
             const newNotes = textarea.value.trim();
@@ -1310,35 +2162,20 @@ function showNotesModal(mapId, setupName, setupData) {
             // Save the updated config
             saveConfigToStorage();
             
-            showNotification('Notes saved', 'success');
+            showNotification(t('mods.setupManager.notesSaved'), 'success');
             
             // Reopen the setup manager to refresh the display
             setTimeout(() => {
               showSetupManagerModal();
             }, 300);
           }
-        },
-        {
-          text: t('common.cancel'),
-          primary: false,
-          closeOnClick: true
         }
       ]
     });
     
-    // Override modal width styles to ensure 500px width (matching setup manager)
-    setTimeout(() => {
-      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-      if (dialog) {
-        dialog.style.width = '500px';
-        dialog.style.minWidth = '500px';
-        dialog.style.maxWidth = '500px';
-        dialog.classList.remove('max-w-[300px]');
-      }
-      
-      // Focus the textarea
-      textarea.focus();
-    }, 0);
+    applySetupManagerExpandedLayout(activeModal);
+    addSetupManagerFooterBackButton(activeModal, () => showSetupManagerModal());
+    textarea.focus();
     
   } catch (error) {
     console.error('Error showing notes modal:', error);
@@ -1346,82 +2183,649 @@ function showNotesModal(mapId, setupName, setupData) {
   }
 }
 
-// Show confirmation before deleting a setup
-function showDeleteConfirmation(mapId, setupName) {
+// ========== Map Shortcut Bar ==========
+
+const MAP_SHORTCUTS_CLASS = 'setup-manager-map-shortcuts';
+const MAP_SHORTCUTS_BUTTONS_CLASS = 'setup-manager-map-shortcuts-buttons';
+const MAP_SHORTCUT_BUTTON_CLASS = 'setup-manager-map-shortcut-btn';
+const MAP_SHORTCUTS_TOGGLE_CLASS = 'setup-manager-map-shortcuts-toggle';
+const MAP_SHORTCUT_PREVIEW_CLASS = 'setup-manager-map-shortcut-preview';
+const MAP_SHORTCUT_NAME_MAX_LENGTH = 16;
+const MAP_SHORTCUT_PREVIEW_PADDING = 8;
+const MAP_SHORTCUT_PREVIEW_COMBOS_PER_ROW = 3;
+const MAP_SHORTCUT_PREVIEW_COMBO_INNER_GAP_PX = 2;
+const MAP_SHORTCUT_PREVIEW_COMBO_OUTER_GAP_PX = 6;
+const MAP_SHORTCUT_PREVIEW_WIDTH_EXTRA_PX = 10;
+const MAP_SHORTCUT_PREVIEW_HOVER_DELAY_MS = 200;
+
+function getMapShortcutPreviewComboWidth() {
+  return (SETUP_MANAGER_EQUIPMENT_PORTRAIT_SIZE * 2) + MAP_SHORTCUT_PREVIEW_COMBO_INNER_GAP_PX;
+}
+
+function getMapShortcutPreviewRowMaxWidth() {
+  const comboWidth = getMapShortcutPreviewComboWidth();
+  const rowGaps = MAP_SHORTCUT_PREVIEW_COMBO_OUTER_GAP_PX * (MAP_SHORTCUT_PREVIEW_COMBOS_PER_ROW - 1);
+  return (comboWidth * MAP_SHORTCUT_PREVIEW_COMBOS_PER_ROW) + rowGaps + MAP_SHORTCUT_PREVIEW_WIDTH_EXTRA_PX;
+}
+const MAP_SHORTCUTS_EDGE_GAP_PX = 4;
+const MAP_SHORTCUTS_Z_INDEX = 10000000;
+const MAP_SHORTCUT_PREVIEW_MEDIA = {
+  FRAME_BORDER: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png',
+  BACKGROUND_DARK: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png'
+};
+
+let activeMapShortcutPreview = null;
+let activeMapShortcutPreviewTimer = null;
+let activeMapShortcutPreviewAnchor = null;
+let mapShortcutsPositionHandler = null;
+
+function isAutosetupEnabled() {
   try {
-    // Check if autosetup is enabled
-    const playerContext = globalThis.state.player.getSnapshot().context;
-    const playerFlags = playerContext.flags;
-    
-    // Create Flags object to check autosetup mode
+    const playerFlags = globalThis.state.player.getSnapshot().context.flags;
     const flags = new globalThis.state.utils.Flags(playerFlags);
-    if (!flags.isSet("autosetup")) {
-      api.ui.components.createModal({
-        title: t('mods.setupManager.autosetupRequired'),
-        content: t('mods.setupManager.autosetupMessage'),
-        buttons: [{ text: 'OK', primary: true }]
+    return flags.isSet('autosetup');
+  } catch (error) {
+    console.warn('[Setup Manager] Error checking autosetup flag:', error);
+    return false;
+  }
+}
+
+function getMapMainContainer() {
+  return document.querySelector('.relative.z-0.select-none') ||
+    document.querySelector('[class*="relative"]') ||
+    document.body;
+}
+
+function syncMapShortcutsPosition() {
+  if (!mapShortcutsContainer) {
+    return;
+  }
+
+  const mainContainer = getMapMainContainer();
+  if (!mainContainer || mainContainer === document.body) {
+    return;
+  }
+
+  const rect = mainContainer.getBoundingClientRect();
+  const gap = MAP_SHORTCUTS_EDGE_GAP_PX;
+
+  Object.assign(mapShortcutsContainer.style, {
+    position: 'fixed',
+    left: `${rect.left + (rect.width / 2)}px`,
+    right: 'auto',
+    top: 'auto',
+    bottom: `${Math.max(gap, window.innerHeight - rect.bottom + gap)}px`,
+    transform: 'translateX(-50%)',
+    transformOrigin: 'bottom center',
+    zIndex: String(MAP_SHORTCUTS_Z_INDEX),
+    pointerEvents: 'auto'
+  });
+}
+
+function ensureMapShortcutsPositionListener() {
+  if (mapShortcutsPositionHandler) {
+    return;
+  }
+
+  mapShortcutsPositionHandler = () => {
+    syncMapShortcutsPosition();
+  };
+
+  window.addEventListener('resize', mapShortcutsPositionHandler);
+  window.addEventListener('scroll', mapShortcutsPositionHandler, true);
+}
+
+function removeMapShortcutsPositionListener() {
+  if (!mapShortcutsPositionHandler) {
+    return;
+  }
+
+  window.removeEventListener('resize', mapShortcutsPositionHandler);
+  window.removeEventListener('scroll', mapShortcutsPositionHandler, true);
+  mapShortcutsPositionHandler = null;
+}
+
+function truncateShortcutLabel(label, maxLength = MAP_SHORTCUT_NAME_MAX_LENGTH) {
+  if (!label || label.length <= maxLength) {
+    return label;
+  }
+
+  return `${label.slice(0, maxLength - 1)}…`;
+}
+
+function getMapShortcutEntries(mapId) {
+  const entries = [{
+    name: 'Auto-Setup',
+    label: t('mods.setupManager.originalSetup')
+  }];
+
+  getMapSetups(mapId).forEach((setup) => {
+    if (setup?.name) {
+      entries.push({
+        name: setup.name,
+        label: setup.name
       });
+    }
+  });
+
+  return entries;
+}
+
+function getMapShortcutEntriesSignature(entries) {
+  return entries.map((entry) => entry.name).join('|');
+}
+
+function getMapShortcutsContainerSignature(container) {
+  const buttons = container?.querySelectorAll(`.${MAP_SHORTCUT_BUTTON_CLASS}`) || [];
+  return Array.from(buttons).map((button) => button.dataset.setupName || '').join('|');
+}
+
+function getMapShortcutButtonStyles() {
+  return {
+    cursor: 'pointer',
+    padding: '3px 8px',
+    background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
+    backgroundSize: 'auto',
+    backgroundRepeat: 'repeat',
+    border: '4px solid transparent',
+    borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch',
+    borderRadius: '4px',
+    color: 'white',
+    fontFamily: "'Courier New', monospace",
+    fontSize: '11px',
+    lineHeight: '1.2',
+    whiteSpace: 'nowrap'
+  };
+}
+
+function appendSavedSetupPieceToPreviewContent(content, piece) {
+  if (!piece) {
+    return false;
+  }
+
+  let monsterInfo = null;
+  let equipId = null;
+  let isCustom = false;
+  let existsInCollection = true;
+  let customEquip = null;
+
+  if (piece.type === 'custom') {
+    monsterInfo = getMonsterInfoFromCustom(piece);
+    if (monsterInfo) {
+      isCustom = true;
+      existsInCollection = monsterInfo.existsInCollection;
+      customEquip = piece.equip || null;
+    }
+  } else if (piece.monsterId) {
+    monsterInfo = getMonsterInfo(piece.monsterId);
+    equipId = piece.equipId;
+  }
+
+  if (!monsterInfo) {
+    return false;
+  }
+
+  const pair = createCreatureEquipmentPair(
+    monsterInfo,
+    equipId,
+    isCustom,
+    existsInCollection,
+    customEquip
+  );
+
+  if (!pair || pair.children.length === 0) {
+    return false;
+  }
+
+  return appendMapShortcutPreviewCombo(content, pair);
+}
+
+function styleMapShortcutPreviewCombo(pair) {
+  const comboWidth = getMapShortcutPreviewComboWidth();
+  Object.assign(pair.style, {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: `${MAP_SHORTCUT_PREVIEW_COMBO_INNER_GAP_PX}px`,
+    alignItems: 'center',
+    flex: `0 0 ${comboWidth}px`,
+    width: `${comboWidth}px`,
+    maxWidth: `${comboWidth}px`
+  });
+  return pair;
+}
+
+function appendMapShortcutPreviewCombo(row, pair) {
+  if (!pair || pair.children.length === 0) {
+    return false;
+  }
+
+  row.appendChild(styleMapShortcutPreviewCombo(pair));
+  return true;
+}
+
+function buildMapShortcutPreviewContent(mapId, setupName) {
+  if (!mapId || !setupName) {
+    return null;
+  }
+
+  const rowMaxWidth = getMapShortcutPreviewRowMaxWidth();
+
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: fit-content;
+    max-width: ${rowMaxWidth}px;
+    box-sizing: border-box;
+  `;
+
+  const setupRow = document.createElement('div');
+  setupRow.style.cssText = `
+    display: flex;
+    flex-wrap: wrap;
+    gap: ${MAP_SHORTCUT_PREVIEW_COMBO_OUTER_GAP_PX}px;
+    align-items: center;
+    justify-content: flex-start;
+    width: fit-content;
+    max-width: ${rowMaxWidth}px;
+  `;
+
+  let added = false;
+  let setupNotes = '';
+
+  if (setupName === 'Auto-Setup') {
+    const boardSetup = globalThis.state.player.getSnapshot().context.boardConfigs[mapId];
+    if (boardSetup && Array.isArray(boardSetup)) {
+      boardSetup.forEach((piece) => {
+        if (!piece?.monsterId) {
+          return;
+        }
+
+        const monsterInfo = getMonsterInfo(piece.monsterId);
+        if (!monsterInfo) {
+          return;
+        }
+
+        const pair = createCreatureEquipmentPair(monsterInfo, piece.equipId);
+        if (appendMapShortcutPreviewCombo(setupRow, pair)) {
+          added = true;
+        }
+      });
+    }
+  } else {
+    const savedSetup = config.savedSetups[mapId]?.find((setup) => setup.name === setupName);
+    setupNotes = savedSetup?.notes ?? '';
+
+    if (savedSetup?.setup && Array.isArray(savedSetup.setup)) {
+      savedSetup.setup.forEach((piece) => {
+        if (appendSavedSetupPieceToPreviewContent(setupRow, piece)) {
+          added = true;
+        }
+      });
+    }
+  }
+
+  if (!added) {
+    return null;
+  }
+
+  wrapper.appendChild(setupRow);
+
+  const notesPreview = createSetupNotesPreview(setupNotes);
+  if (notesPreview) {
+    notesPreview.style.width = '100%';
+    notesPreview.style.maxWidth = `${rowMaxWidth}px`;
+    wrapper.appendChild(notesPreview);
+  }
+
+  return wrapper;
+}
+
+function positionMapShortcutPreview(preview, anchorButton) {
+  const rect = anchorButton.getBoundingClientRect();
+  const margin = 8;
+
+  preview.style.visibility = 'hidden';
+  preview.style.display = 'block';
+  const previewRect = preview.getBoundingClientRect();
+
+  let left = rect.left + (rect.width / 2) - (previewRect.width / 2);
+  let top = rect.top - previewRect.height - 6;
+
+  if (top < margin) {
+    top = rect.bottom + 6;
+  }
+
+  if (left + previewRect.width > window.innerWidth - margin) {
+    left = Math.max(margin, window.innerWidth - previewRect.width - margin);
+  }
+  if (left < margin) {
+    left = margin;
+  }
+
+  preview.style.left = `${left}px`;
+  preview.style.top = `${top}px`;
+  preview.style.visibility = 'visible';
+}
+
+function hideMapShortcutPreview() {
+  if (activeMapShortcutPreviewTimer) {
+    clearTimeout(activeMapShortcutPreviewTimer);
+    activeMapShortcutPreviewTimer = null;
+  }
+
+  if (activeMapShortcutPreview) {
+    activeMapShortcutPreview.remove();
+    activeMapShortcutPreview = null;
+  }
+
+  activeMapShortcutPreviewAnchor = null;
+}
+
+function showMapShortcutPreview(anchorButton) {
+  const mapId = anchorButton?.dataset?.mapId;
+  const setupName = anchorButton?.dataset?.setupName;
+  if (!mapId || !setupName) {
+    return;
+  }
+
+  const previewContent = buildMapShortcutPreviewContent(mapId, setupName);
+  if (!previewContent) {
+    return;
+  }
+
+  hideMapShortcutPreview();
+
+  const previewMaxWidth = getMapShortcutPreviewRowMaxWidth() + (MAP_SHORTCUT_PREVIEW_PADDING * 2);
+
+  const preview = document.createElement('div');
+  preview.className = MAP_SHORTCUT_PREVIEW_CLASS;
+  preview.style.cssText = `
+    position: fixed;
+    z-index: 10000001;
+    padding: ${MAP_SHORTCUT_PREVIEW_PADDING}px;
+    width: fit-content;
+    max-width: ${previewMaxWidth}px;
+    box-sizing: border-box;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    border: 4px solid transparent;
+    border-image: url("${MAP_SHORTCUT_PREVIEW_MEDIA.FRAME_BORDER}") 6 fill;
+    background: url("${MAP_SHORTCUT_PREVIEW_MEDIA.BACKGROUND_DARK}") repeat;
+    border-radius: 4px;
+  `;
+  preview.appendChild(previewContent);
+  document.body.appendChild(preview);
+
+  positionMapShortcutPreview(preview, anchorButton);
+  activeMapShortcutPreview = preview;
+  activeMapShortcutPreviewAnchor = anchorButton;
+}
+
+function scheduleMapShortcutPreview(button) {
+  if (!button?.dataset?.mapId || !button?.dataset?.setupName) {
+    return;
+  }
+
+  if (activeMapShortcutPreviewTimer) {
+    clearTimeout(activeMapShortcutPreviewTimer);
+  }
+
+  activeMapShortcutPreviewTimer = setTimeout(() => {
+    activeMapShortcutPreviewTimer = null;
+    showMapShortcutPreview(button);
+  }, MAP_SHORTCUT_PREVIEW_HOVER_DELAY_MS);
+}
+
+function attachMapShortcutHoverPreview(button) {
+  if (!button || button.dataset.setupManagerPreviewAttached === 'true') {
+    return;
+  }
+
+  button.dataset.setupManagerPreviewAttached = 'true';
+
+  button.addEventListener('mouseenter', () => {
+    scheduleMapShortcutPreview(button);
+  });
+
+  button.addEventListener('focus', () => {
+    scheduleMapShortcutPreview(button);
+  });
+
+  button.addEventListener('mouseleave', () => {
+    hideMapShortcutPreview();
+  });
+
+  button.addEventListener('blur', () => {
+    hideMapShortcutPreview();
+  });
+}
+
+function createMapShortcutButton(mapId, setupName, label) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `${MAP_SHORTCUT_BUTTON_CLASS} pixel-font-14`;
+  button.textContent = truncateShortcutLabel(label);
+  button.dataset.mapId = mapId;
+  button.dataset.setupName = setupName;
+  Object.assign(button.style, getMapShortcutButtonStyles());
+
+  attachMapShortcutHoverPreview(button);
+
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    hideMapShortcutPreview();
+    loadTeamAndNotify(mapId, setupName);
+  });
+
+  return button;
+}
+
+function isMapShortcutsMinimized() {
+  return config.mapShortcutsMinimized === true;
+}
+
+function applyMapShortcutsCollapsedState(wrapper) {
+  if (!wrapper) {
+    return;
+  }
+
+  const minimized = isMapShortcutsMinimized();
+  const buttonsRow = wrapper.querySelector(`.${MAP_SHORTCUTS_BUTTONS_CLASS}`);
+  const toggleButton = wrapper.querySelector(`.${MAP_SHORTCUTS_TOGGLE_CLASS}`);
+
+  if (buttonsRow) {
+    buttonsRow.style.display = minimized ? 'none' : 'inline-flex';
+  }
+
+  if (toggleButton) {
+    toggleButton.textContent = minimized ? '▲' : '▼';
+    toggleButton.title = minimized
+      ? t('mods.setupManager.mapShortcutsExpand')
+      : t('mods.setupManager.mapShortcutsCollapse');
+  }
+}
+
+function setMapShortcutsMinimized(minimized) {
+  config.mapShortcutsMinimized = minimized === true;
+  api.service.updateScriptConfig(context.hash, config);
+
+  if (mapShortcutsContainer) {
+    applyMapShortcutsCollapsedState(mapShortcutsContainer);
+  }
+}
+
+function createMapShortcutsToggleButton() {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = MAP_SHORTCUTS_TOGGLE_CLASS;
+  Object.assign(button.style, {
+    cursor: 'pointer',
+    padding: '0',
+    margin: '0',
+    minWidth: '0',
+    width: 'auto',
+    height: 'auto',
+    background: 'none',
+    border: 'none',
+    borderRadius: '0',
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontFamily: "'Courier New', monospace",
+    fontSize: '11px',
+    lineHeight: '1',
+    textShadow: '1px 1px 0 #000',
+    opacity: '0.85'
+  });
+
+  button.addEventListener('mouseenter', () => {
+    button.style.opacity = '1';
+    button.style.color = 'rgba(255, 255, 255, 0.95)';
+  });
+
+  button.addEventListener('mouseleave', () => {
+    button.style.opacity = '0.85';
+    button.style.color = 'rgba(255, 255, 255, 0.7)';
+  });
+
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMapShortcutsMinimized(!isMapShortcutsMinimized());
+  });
+
+  return button;
+}
+
+function createMapShortcutsBar(mapId) {
+  const wrapper = document.createElement('div');
+  wrapper.className = MAP_SHORTCUTS_CLASS;
+  Object.assign(wrapper.style, {
+    display: 'inline-flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: `${MAP_SHORTCUTS_EDGE_GAP_PX}px`,
+    width: 'fit-content',
+    height: 'fit-content',
+    background: 'transparent',
+    border: 'none'
+  });
+
+  const buttonsRow = document.createElement('div');
+  buttonsRow.className = MAP_SHORTCUTS_BUTTONS_CLASS;
+  Object.assign(buttonsRow.style, {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: '6px',
+    width: 'auto',
+    maxWidth: 'min(92vw, 720px)'
+  });
+
+  getMapShortcutEntries(mapId).forEach(({ name, label }) => {
+    buttonsRow.appendChild(createMapShortcutButton(mapId, name, label));
+  });
+
+  wrapper.appendChild(buttonsRow);
+  wrapper.appendChild(createMapShortcutsToggleButton());
+  applyMapShortcutsCollapsedState(wrapper);
+  return wrapper;
+}
+
+function removeMapShortcuts() {
+  hideMapShortcutPreview();
+
+  if (mapShortcutsContainer) {
+    mapShortcutsContainer.remove();
+    mapShortcutsContainer = null;
+  }
+
+  mapShortcutsMapId = null;
+  removeMapShortcutsPositionListener();
+}
+
+function updateMapShortcuts() {
+  if (config.showMapShortcuts === false) {
+    removeMapShortcuts();
+    return;
+  }
+
+  if (!isAutosetupEnabled()) {
+    removeMapShortcuts();
+    return;
+  }
+
+  const mapId = getCurrentMapId();
+  if (!mapId) {
+    removeMapShortcuts();
+    return;
+  }
+
+  const mainContainer = getMapMainContainer();
+  if (!mainContainer) {
+    return;
+  }
+
+  const entries = getMapShortcutEntries(mapId);
+  const canReuseContainer = mapShortcutsContainer &&
+    mapShortcutsMapId === mapId &&
+    document.body.contains(mapShortcutsContainer);
+
+  if (canReuseContainer) {
+    const entriesSignature = getMapShortcutEntriesSignature(entries);
+    const containerSignature = getMapShortcutsContainerSignature(mapShortcutsContainer);
+    if (containerSignature === entriesSignature) {
+      applyMapShortcutsCollapsedState(mapShortcutsContainer);
+      syncMapShortcutsPosition();
       return;
     }
-    
-    // Force close all open modals first
-    forceCloseAllModals();
-    
-    // Create confirmation modal
-    const content = document.createElement('div');
-    const message = document.createElement('p');
-    message.className = 'text-whiteRegular mb-4';
-    message.textContent = t('mods.setupManager.confirmDelete');
-    content.appendChild(message);
-    
-    const setupPreview = document.createElement('div');
-    setupPreview.className = 'frame-pressed-1 surface-dark p-2 mb-4';
-    setupPreview.style.maxWidth = '100%';
-    setupPreview.style.overflowWrap = 'break-word';
-    
-    const setupNameEl = document.createElement('h3');
-    setupNameEl.className = 'text-whiteRegular mb-2';
-    setupNameEl.textContent = setupName;
-    setupNameEl.style.wordWrap = 'break-word';
-    setupNameEl.style.wordBreak = 'break-word';
-    setupNameEl.style.overflowWrap = 'break-word';
-    setupNameEl.style.maxWidth = '100%';
-    setupPreview.appendChild(setupNameEl);
-    
-    content.appendChild(setupPreview);
-    
-    // Create the modal
-    activeModal = api.ui.components.createModal({
-      title: t('mods.setupManager.deleteTeam'),
-      width: 300,
-      content: content,
-      buttons: [
-        {
-          text: t('common.yes'),
-          primary: true,
-          onClick: () => {
-            const deleteResult = deleteTeamSetup(mapId, setupName);
-            
-            if (deleteResult) {
-              showNotification(t('mods.setupManager.teamDeleted'), 'success');
-              // Reopen the setup manager with updated data
-              showSetupManagerModal();
-            } else {
-              showNotification(t('common.error'), 'error');
-            }
-          }
-        },
-        {
-          text: t('common.no'),
-          primary: false,
-          closeOnClick: true
-        }
-      ]
-    });
-  } catch (error) {
-    console.error('Error showing delete confirmation:', error);
-    showNotification(t('common.error'), 'error');
   }
+
+  removeMapShortcuts();
+  mapShortcutsContainer = createMapShortcutsBar(mapId);
+  mapShortcutsMapId = mapId;
+  ensureMapShortcutsPositionListener();
+  document.body.appendChild(mapShortcutsContainer);
+  syncMapShortcutsPosition();
+  requestAnimationFrame(syncMapShortcutsPosition);
+}
+
+function initMapShortcuts() {
+  updateMapShortcuts();
+
+  if (!mapShortcutsContainer) {
+    setTimeout(updateMapShortcuts, 1000);
+    setTimeout(updateMapShortcuts, 3000);
+  }
+
+  if (mapShortcutsSubscription || !globalThis.state?.board?.subscribe) {
+    return;
+  }
+
+  mapShortcutsSubscription = globalThis.state.board.subscribe(() => {
+    const mapId = getCurrentMapId();
+    if (mapId !== mapShortcutsMapId) {
+      updateMapShortcuts();
+    }
+  });
+}
+
+function cleanupMapShortcuts() {
+  hideMapShortcutPreview();
+  removeMapShortcutsPositionListener();
+
+  if (mapShortcutsSubscription) {
+    try {
+      mapShortcutsSubscription();
+    } catch (error) {
+      console.warn('[Setup Manager] Error unsubscribing map shortcuts listener:', error);
+    }
+    mapShortcutsSubscription = null;
+  }
+
+  removeMapShortcuts();
 }
 
 // ========== Button Handling ==========
@@ -1455,9 +2859,6 @@ function createSetupManagerButton() {
 function init() {
   console.log('Setup Manager initializing...');
   
-  // Create notification container
-  createNotificationContainer();
-  
   // Load saved configurations
   loadConfigFromStorage();
   
@@ -1476,6 +2877,9 @@ function init() {
   
   // Create the setup manager button
   createSetupManagerButton();
+
+  // Show quick-load setup buttons on the map
+  initMapShortcuts();
   
   console.log('Setup Manager initialized');
 }
@@ -1495,16 +2899,27 @@ waitForGame();
 
 // Clean up when the mod is disabled
 function cleanup() {
+  cancelPendingDeleteConfirmation();
+
+  if (activeModal && typeof activeModal.close === 'function') {
+    try {
+      activeModal.close();
+    } catch (error) {
+      console.error('[Setup Manager] Error closing active modal:', error);
+    }
+    activeModal = null;
+  }
+
   if (activeButtonElement) {
     api.ui.removeButton(BUTTON_ID);
     activeButtonElement = null;
   }
-  
-  const notificationContainer = document.getElementById('setup-manager-notification-container');
-  if (notificationContainer) {
-    if (notificationContainer.parentNode) {
-      notificationContainer.parentNode.removeChild(notificationContainer);
-    }
+
+  cleanupMapShortcuts();
+
+  const toastContainer = document.getElementById(SETUP_MANAGER_TOAST_CONTAINER_ID);
+  if (toastContainer?.parentNode) {
+    toastContainer.parentNode.removeChild(toastContainer);
   }
 }
 
@@ -1555,7 +2970,7 @@ function addWarningSymbolToPortrait(portrait) {
     const warningSymbol = document.createElement('div');
     warningSymbol.className = 'warning-symbol';
     warningSymbol.textContent = '⚠️';
-    warningSymbol.title = 'This monster has been modified and does not exist in your collection';
+    warningSymbol.title = t('mods.setupManager.modifiedMonsterWarning');
     warningSymbol.style.cssText = `
       position: absolute;
       top: 2px;
@@ -1687,18 +3102,18 @@ function addCustomTooltipToPortrait(portrait, level, hp, ad, ap, armor, magicRes
     };
     
     // Add stat rows
-    tooltipContent.appendChild(createStatRow('Hitpoints', hp, statMaxValues.hp, statColors.hp));
-    tooltipContent.appendChild(createStatRow('Attack', ad, statMaxValues.ad, statColors.ad));
-    tooltipContent.appendChild(createStatRow('Ability Power', ap, statMaxValues.ap, statColors.ap));
-    tooltipContent.appendChild(createStatRow('Armor', armor, statMaxValues.armor, statColors.armor));
-    tooltipContent.appendChild(createStatRow('Magic Resist', magicResist, statMaxValues.magicResist, statColors.magicResist));
+    tooltipContent.appendChild(createStatRow(t('mods.setupManager.statHitpoints'), hp, statMaxValues.hp, statColors.hp));
+    tooltipContent.appendChild(createStatRow(t('mods.setupManager.statAttack'), ad, statMaxValues.ad, statColors.ad));
+    tooltipContent.appendChild(createStatRow(t('mods.setupManager.statAbilityPower'), ap, statMaxValues.ap, statColors.ap));
+    tooltipContent.appendChild(createStatRow(t('mods.setupManager.statArmor'), armor, statMaxValues.armor, statColors.armor));
+    tooltipContent.appendChild(createStatRow(t('mods.setupManager.statMagicResist'), magicResist, statMaxValues.magicResist, statColors.magicResist));
     
     // Add modified indicator if needed
     if (isModified) {
       const modifiedRow = document.createElement('div');
       modifiedRow.className = 'pixel-font-16 text-whiteRegular';
       modifiedRow.style.cssText = 'color: #ff4444; font-style: italic; margin-top: 4px;';
-      modifiedRow.textContent = '(modified)';
+      modifiedRow.textContent = t('mods.setupManager.modified');
       tooltipContent.appendChild(modifiedRow);
     }
     
@@ -1760,9 +3175,9 @@ function addCustomTooltipToPortrait(portrait, level, hp, ad, ap, armor, magicRes
     console.error('Error adding custom tooltip to portrait:', error);
     // Fallback to simple title tooltip
     const { hp = 0, ad = 0, ap = 0, armor = 0, magicResist = 0 } = { hp, ad, ap, armor, magicResist };
-    let tooltipText = `Level: ${level}\nAD: ${ad}, AP: ${ap}, HP: ${hp}, ARM: ${armor}, MR: ${magicResist}`;
+    let tooltipText = `${tReplace('mods.setupManager.tooltipLevel', { level })}\n${tReplace('mods.setupManager.tooltipStatsFallback', { ad, ap, hp, armor, magicResist })}`;
     if (isModified) {
-      tooltipText += '\n(modified)';
+      tooltipText += `\n${t('mods.setupManager.modified')}`;
     }
     portrait.title = tooltipText;
   }
@@ -1770,96 +3185,31 @@ function addCustomTooltipToPortrait(portrait, level, hp, ad, ap, armor, magicRes
 
 // Helper function to create monster portraits with correct tier coloring
 function createMonsterPortrait(monsterInfo, showWarning = false) {
-  if (!monsterInfo || !monsterInfo.gameId) {
+  if (!monsterInfo?.gameId) {
     return null;
   }
-  
+
   try {
-    // Create monster portrait with calculated tier colors
-    const portrait = api.ui.components.createMonsterPortrait({
+    const portrait = createSetupMonsterPortraitSlot({
       monsterId: monsterInfo.gameId,
       level: monsterInfo.level || 1,
-      tier: monsterInfo.tier || 1
+      monster: monsterInfo,
+      size: SETUP_MANAGER_EQUIPMENT_PORTRAIT_SIZE
     });
-    
-    // Ensure rarity border is set correctly
-    const rarity = Math.min(5, Math.max(1, monsterInfo.tier || 1));
-    
-    // Remove any inline border styles from the portrait - rarity element provides the border
-    if (portrait.style && portrait.style.border) {
-      portrait.style.border = 'none';
+
+    if (!portrait) {
+      return null;
     }
-    
-    // Try to find rarity element at different levels of nesting
-    let rarityElement = portrait.querySelector('.has-rarity');
-    if (!rarityElement) {
-      // Try finding in button or slot elements
-      const button = portrait.querySelector('button');
-      if (button) {
-        rarityElement = button.querySelector('.has-rarity');
-      }
-    }
-    if (!rarityElement) {
-      // Try finding in container-slot
-      const slot = portrait.querySelector('.container-slot');
-      if (slot) {
-        rarityElement = slot.querySelector('.has-rarity');
-      }
-    }
-    
-    // If rarity element exists, update it
-    if (rarityElement) {
-      rarityElement.setAttribute('data-rarity', rarity);
-      
-      // Remove inline border from container - rarity element provides the border
-      const container = rarityElement.parentElement;
-      if (container && container.style && container.style.border) {
-        container.style.border = 'none';
-      }
-    } else {
-      // If rarity element doesn't exist, add it to the portrait
-      // Find the main container div that has position: relative
-      const container = portrait.querySelector('div[style*="position: relative"]') || 
-                        portrait.querySelector('.container-slot') || 
-                        (portrait.style && portrait.style.position === 'relative' ? portrait : null);
-      
-      if (container) {
-        // Ensure container has position: relative for absolute positioning
-        if (!container.style.position || container.style.position !== 'relative') {
-          container.style.position = 'relative';
-        }
-        
-        // Remove inline border style - the rarity element will provide the border
-        if (container.style.border) {
-          container.style.border = 'none';
-        }
-        
-        // Create rarity element
-        const rarityBg = document.createElement('div');
-        rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
-        rarityBg.setAttribute('data-rarity', rarity);
-        rarityBg.style.cssText = 'position: absolute; inset: 0; z-index: 1; opacity: 0.8; pointer-events: none;';
-        
-        // Insert it as the first child so it's behind the image
-        if (container.firstChild) {
-          container.insertBefore(rarityBg, container.firstChild);
-        } else {
-          container.appendChild(rarityBg);
-        }
-      }
-    }
-    
-    // Add warning symbol if needed
+
     if (showWarning) {
       addWarningSymbolToPortrait(portrait);
     }
-    
-    // Add custom HTML tooltip with progress bars if stats are available
+
     if (monsterInfo.stats) {
       const { hp = 0, ad = 0, ap = 0, armor = 0, magicResist = 0 } = monsterInfo.stats;
       addCustomTooltipToPortrait(portrait, monsterInfo.level || 1, hp, ad, ap, armor, magicResist, showWarning);
     }
-    
+
     return portrait;
   } catch (error) {
     console.error('Error creating monster portrait:', error);
@@ -1891,49 +3241,22 @@ function getEquipmentSpriteId(gameId) {
   return null;
 }
 
-// Helper function to extract inner div from item portrait button
-function extractPortraitFromButton(itemPortrait) {
-  if (!itemPortrait || itemPortrait.tagName !== 'BUTTON') {
-    return itemPortrait;
-  }
-  
-  // Look for .equipment-portrait div (direct child or nested)
-  const innerDiv = itemPortrait.querySelector('.equipment-portrait');
-  if (innerDiv) {
-    return innerDiv.cloneNode(true);
-  }
-  
-  // Fallback: get the first direct child div
-  const firstDiv = Array.from(itemPortrait.children).find(child => child.tagName === 'DIV');
-  if (firstDiv) {
-    return firstDiv.cloneNode(true);
-  }
-  
-  return itemPortrait;
-}
-
 // Helper function to create equipment portrait from gameId, stat, and tier
 function createEquipmentPortraitFromData(gameId, stat, tier) {
   if (!gameId) {
     return null;
   }
-  
+
   const spriteId = getEquipmentSpriteId(gameId);
   if (!spriteId) {
     return null;
   }
-  
-  if (typeof api?.ui?.components?.createItemPortrait === 'function') {
-    const itemPortrait = api.ui.components.createItemPortrait({
-      itemId: spriteId,
-      stat: stat,
-      tier: tier
-    });
-    
-    return extractPortraitFromButton(itemPortrait);
-  }
-  
-  return null;
+
+  return createSetupItemPortrait({
+    itemId: spriteId,
+    stat: stat || 'ad',
+    tier: clampSetupEquipTier(tier)
+  });
 }
 
 // Helper function to create equipment portrait
@@ -1982,27 +3305,6 @@ function createEquipmentPortraitFromCustom(equip) {
   }
 }
 
-// Helper function to create an empty equipment frame
-function createEmptyEquipmentFrame() {
-  const portrait = document.createElement('div');
-  portrait.className = 'equipment-portrait surface-darker relative data-[alive=false]:dithered data-[noframes=false]:frame-pressed-1 hover:unset-border-image';
-  portrait.setAttribute('data-noframes', 'false');
-  portrait.setAttribute('data-alive', 'false');
-  portrait.setAttribute('data-highlighted', 'true');
-  portrait.style.cssText = 'width: 32px; height: 32px; max-width: 32px; max-height: 32px;';
-  
-  // Add rarity background (tier 1 for empty)
-  const rarityBg = document.createElement('div');
-  rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
-  rarityBg.setAttribute('data-rarity', '1');
-  portrait.appendChild(rarityBg);
-  
-  // Empty frame - no sprite, no stat icon
-  // The frame styling is already applied via classes
-  
-  return portrait;
-}
-
 // Helper function to create a creature+equipment pair container
 function createCreatureEquipmentPair(monsterInfo, equipId, isCustom = false, existsInCollection = true, customEquip = null) {
   const container = document.createElement('div');
@@ -2017,21 +3319,15 @@ function createCreatureEquipmentPair(monsterInfo, equipId, isCustom = false, exi
   if (monsterPortrait) {
     container.appendChild(monsterPortrait);
   }
-  
-  // Create equipment portrait (or empty frame if no equipment)
+
   let equipmentPortrait = null;
   if (isCustom && customEquip) {
     equipmentPortrait = createEquipmentPortraitFromCustom(customEquip);
   } else if (equipId) {
     equipmentPortrait = createEquipmentPortrait(equipId);
   }
-  
-  // Always show equipment frame (empty if no equipment)
-  if (!equipmentPortrait) {
-    equipmentPortrait = createEmptyEquipmentFrame();
-  }
-  
-  container.appendChild(equipmentPortrait);
+
+  container.appendChild(equipmentPortrait || createSetupEmptyEquipmentPlaceholder());
   
   return container;
 }
@@ -2079,26 +3375,3 @@ function forceCloseAllModals() {
   document.body.style.overflow = '';
 }
 
-// Cleanup function for Setup Manager mod (exposed for mod system)
-context.exports.cleanup = function() {
-  console.log('[Setup Manager] Running cleanup...');
-  
-  // Remove any active UI components
-  if (activeButtonElement) {
-    activeButtonElement.remove();
-    activeButtonElement = null;
-  }
-  
-  // Remove any existing modals
-  const existingModal = document.querySelector('#setup-manager-modal');
-  if (existingModal) {
-    existingModal.remove();
-  }
-  
-  // Clear any cached data
-  if (typeof window.setupManagerState !== 'undefined') {
-    delete window.setupManagerState;
-  }
-  
-  console.log('[Setup Manager] Cleanup completed');
-}; 
