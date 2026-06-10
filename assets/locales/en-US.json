@@ -165,6 +165,7 @@
       "settingsTooltip": "Mod Settings",
       "showStaminaTimer": "Show Stamina Timer",
       "showSetupLabels": "Show Setup Labels",
+      "enableSetupShortcutsAndHover": "Setup Shortcuts & Hover Previews",
       "showAdvancedStatsOnHover": "Show advanced stats on hover",
       "showAbilityOnHover": "Show ability on hover",
       "showPlayersOnline": "Show Players Online",

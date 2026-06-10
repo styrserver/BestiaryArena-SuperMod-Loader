@@ -165,6 +165,7 @@
       "settingsTooltip": "Configurações do Mod",
       "showStaminaTimer": "Mostrar Temporizador de Stamina",
       "showSetupLabels": "Mostrar Rótulos de Times",
+      "enableSetupShortcutsAndHover": "Atalhos de Times e Pré-visualização ao Passar o Mouse",
       "showAdvancedStatsOnHover": "Mostrar estatísticas avançadas ao passar o mouse",
       "showAbilityOnHover": "Mostrar habilidade ao passar o mouse",
       "showPlayersOnline": "Mostrar Jogadores Online",
