@@ -472,6 +472,7 @@ const inventoryTooltips = {
 const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
+  'Gazers': [],
   'Runes': ['Avarice Rune', 'Hitpoints Rune', 'Attack Damage Rune', 'Ability Power Rune', 'Armor Rune', 'Magic Resist Rune', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Conversion Rune (hp)', 'Conversion Rune (ad)', 'Conversion Rune (ap)'],
   'Upgrades': ['Baby Dragon Plant', 'Creature Awakening', 'Daily Boosted Map', 'Daycare', 'Dungeon Ascension', 'Dragon Plant', 'Dr. Mephistopheles', 'Hy\'genie', 'Monstrous Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };

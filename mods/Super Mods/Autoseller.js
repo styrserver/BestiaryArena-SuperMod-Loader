@@ -1640,6 +1640,13 @@
         return monster.awaken === true || monster.awakened === true || monster.isAwakened === true;
     }
 
+    function isGazerMonster(monster) {
+        const db = window.creatureDatabase;
+        if (typeof db?.isGazerMonster === 'function') return db.isGazerMonster(monster);
+        const name = monster?.metadata?.name || getCreatureNameFromMonster(monster) || '';
+        return String(name).toLowerCase().includes('gazer');
+    }
+
     /**
      * Check if candidate creature has any higher gene stat than target.
      * @param {Object} candidate - Sealed creature candidate
@@ -1816,7 +1823,7 @@
             return consumedServerIds;
         }
 
-        const awakenedCandidates = localMonsters.filter(m => m && m.id && isAwakenedCreature(m) && !isSealedTierFiveCreature(m));
+        const awakenedCandidates = localMonsters.filter(m => m && m.id && isAwakenedCreature(m) && !isSealedTierFiveCreature(m) && !isGazerMonster(m));
         if (awakenedCandidates.length === 0) {
             console.log('[Autoseller][Inject] Skip: no awakened targets in inventory');
             return consumedServerIds;

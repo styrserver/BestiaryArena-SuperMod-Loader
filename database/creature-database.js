@@ -143,6 +143,43 @@ function isGazerCreatureName(creatureName) {
   return monster?.gameId != null && ALL_GAZER_GAME_IDS.has(Number(monster.gameId));
 }
 
+/** True when a species can be awakened (excludes gazers, event creatures, and NON_AWAKENABLE list). */
+function isCreatureAwakenableName(creatureName) {
+  if (!creatureName) return false;
+  if (isGazerCreatureName(creatureName)) return false;
+  if (isEventCreatureName(creatureName)) return false;
+  const norm = String(creatureName).trim().toLowerCase();
+  const blocked = creatureDatabase?.NON_AWAKENABLE_CREATURES;
+  if (Array.isArray(blocked) && blocked.some((n) => String(n).toLowerCase() === norm)) return false;
+  return true;
+}
+
+/** True when an owned monster is a gazer species (by gameId or display name). */
+function isGazerMonster(monster) {
+  if (!monster) return false;
+  if (monster.gameId != null && ALL_GAZER_GAME_IDS.has(Number(monster.gameId))) return true;
+  const ownedDisplay = getDisplayNameForOwnedMonster(monster);
+  if (ownedDisplay && isGazerCreatureName(ownedDisplay)) return true;
+  const species = monster?.metadata?.name
+    ?? (monster.gameId != null ? findMonsterByGameId(monster.gameId)?.metadata?.name : null);
+  return species ? isGazerCreatureName(species) : false;
+}
+
+/** All gazer species for Cyclopedia Inventory tab (incl. Albino Gazer). */
+function getGazerCreatureNames(obtainableCreatures) {
+  const names = new Set();
+  const base = Array.isArray(obtainableCreatures)
+    ? obtainableCreatures
+    : (creatureDatabase?.ALL_CREATURES || []);
+  base.forEach((name) => {
+    if (isGazerCreatureName(name)) names.add(name);
+  });
+  CYCLOPEDIA_EXTRA_CREATURES.forEach((name) => {
+    if (isGazerCreatureName(name)) names.add(name);
+  });
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
 /** Creature pickers for Autoscroller / Autoseller (no gazers or event creatures). */
 function getAutoscrollAutosellerCreaturePickerNames(obtainableCreatures) {
   return getCreaturePickerNames(obtainableCreatures).filter(
@@ -236,6 +273,9 @@ function buildCreatureDatabase() {
         EVENT_CREATURES,
         isEventCreatureName,
         isGazerCreatureName,
+        isCreatureAwakenableName,
+        isGazerMonster,
+        getGazerCreatureNames: () => getGazerCreatureNames([]),
         getShinyProgressCreatureNames: () => [],
         isShinyProgressCreatureName,
         getDisplayNameForOwnedMonster,
@@ -279,6 +319,9 @@ function buildCreatureDatabase() {
       EVENT_CREATURES,
       isEventCreatureName,
       isGazerCreatureName,
+      isCreatureAwakenableName,
+      isGazerMonster,
+      getGazerCreatureNames: () => getGazerCreatureNames(obtainableCreatures),
       getShinyProgressCreatureNames: () => getShinyProgressCreatureNames(obtainableCreatures),
       isShinyProgressCreatureName,
       resolveCreatureDisplay,
@@ -303,6 +346,9 @@ function buildCreatureDatabase() {
       EVENT_CREATURES,
       isEventCreatureName,
       isGazerCreatureName,
+      isCreatureAwakenableName,
+      isGazerMonster,
+      getGazerCreatureNames: () => getGazerCreatureNames([]),
       getShinyProgressCreatureNames: () => [],
       isShinyProgressCreatureName,
       getDisplayNameForOwnedMonster,
@@ -454,6 +500,9 @@ function initializeDatabase() {
   creatureDatabase.EVENT_CREATURES = EVENT_CREATURES;
   creatureDatabase.isEventCreatureName = isEventCreatureName;
   creatureDatabase.isGazerCreatureName = isGazerCreatureName;
+  creatureDatabase.isCreatureAwakenableName = isCreatureAwakenableName;
+  creatureDatabase.isGazerMonster = isGazerMonster;
+  creatureDatabase.getGazerCreatureNames = creatureDatabase.getGazerCreatureNames || (() => getGazerCreatureNames(creatureDatabase.ALL_CREATURES));
   creatureDatabase.getShinyProgressCreatureNames = creatureDatabase.getShinyProgressCreatureNames || (() => getShinyProgressCreatureNames(creatureDatabase.ALL_CREATURES));
   creatureDatabase.isShinyProgressCreatureName = isShinyProgressCreatureName;
   creatureDatabase.getDisplayNameForOwnedMonster = getDisplayNameForOwnedMonster;
@@ -488,6 +537,9 @@ const placeholderDatabase = {
   EVENT_CREATURES,
   isEventCreatureName,
   isGazerCreatureName,
+  isCreatureAwakenableName,
+  isGazerMonster,
+  getGazerCreatureNames: () => getGazerCreatureNames([]),
   getShinyProgressCreatureNames: () => [],
   isShinyProgressCreatureName,
   getDisplayNameForOwnedMonster,
@@ -550,6 +602,9 @@ waitForGameState(() => {
     globalWindow.creatureDatabase.EVENT_CREATURES = EVENT_CREATURES;
     globalWindow.creatureDatabase.isEventCreatureName = isEventCreatureName;
     globalWindow.creatureDatabase.isGazerCreatureName = isGazerCreatureName;
+    globalWindow.creatureDatabase.isCreatureAwakenableName = isCreatureAwakenableName;
+    globalWindow.creatureDatabase.isGazerMonster = isGazerMonster;
+    globalWindow.creatureDatabase.getGazerCreatureNames = creatureDatabase.getGazerCreatureNames;
     globalWindow.creatureDatabase.getShinyProgressCreatureNames = creatureDatabase.getShinyProgressCreatureNames;
     globalWindow.creatureDatabase.isShinyProgressCreatureName = isShinyProgressCreatureName;
     globalWindow.creatureDatabase.getDisplayNameForOwnedMonster = getDisplayNameForOwnedMonster;

@@ -39,9 +39,18 @@ if (!turboState._configLoaded) {
   turboState._configLoaded = true;
 }
 
+function isTurboBlockedByAnalytics() {
+  return window.__betterAnalyticsTurboBlock === true;
+}
+
 // Function to enable turbo mode with the new approach
 function enableTurbo() {
   if (turboState.active) return; // Already active
+  if (isTurboBlockedByAnalytics()) {
+    console.log('Turbo mode blocked — Better Analytics slow motion is on');
+    updateTurboButton();
+    return;
+  }
   
   console.log('Enabling Turbo mode...');
   turboState.active = true;
@@ -71,6 +80,8 @@ function enableTurbo() {
 
 // Implementation of the new setTimeScale function
 function setTimeScale(factor) {
+  if (isTurboBlockedByAnalytics()) return;
+
   // Remove any previous custom handlers. This restores the original tick interval.
   if (turboState.speedupSubscription) {
     turboState.speedupSubscription.unsubscribe();
@@ -400,7 +411,7 @@ function watchForGameControls() {
 function toggleTurbo() {
   if (turboState.active) {
     disableTurbo();
-  } else {
+  } else if (!isTurboBlockedByAnalytics()) {
     enableTurbo();
   }
   updateTurboButton();
@@ -476,6 +487,7 @@ exports = {
   isActive: () => turboState.active,
   setSpeed: updateSpeedupFactor,
   getSpeed: () => turboState.speedupFactor,
+  refreshButton: updateTurboButton,
   cleanup: function() {
     console.log('[Turbo Mode] Running cleanup...');
     
@@ -522,15 +534,21 @@ window.turboMode = exports;
 
 // Update the Turbo button style based on state
 function updateTurboButton() {
+  const blocked = isTurboBlockedByAnalytics();
+  const blockedTooltip = 'Turbo blocked — turn off Slow motion in Advanced Analytics to speed up fights';
+
   if (api && api.ui && window.turboButton) {
     api.ui.updateButton('turbo-mod-button', {
       text: turboState.active ? t('mods.turbo.buttonDisable') : t('mods.turbo.buttonEnable'),
-      primary: turboState.active,
-      tooltip: t('mods.turbo.buttonTooltip')
+      primary: turboState.active && !blocked,
+      tooltip: blocked && !turboState.active ? blockedTooltip : t('mods.turbo.buttonTooltip')
     });
     // Apply green background when active, regular when not
     const btn = document.getElementById('turbo-mod-button');
     if (btn) {
+      btn.disabled = blocked && !turboState.active;
+      btn.style.opacity = btn.disabled ? '0.5' : '';
+      btn.style.pointerEvents = btn.disabled ? 'none' : '';
       if (turboState.active) {
         btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
         btn.style.backgroundSize = "auto";

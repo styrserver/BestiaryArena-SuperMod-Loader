@@ -396,6 +396,152 @@ function getCyclopediaAllCreatures() {
   return [...new Set([...base, ...extra])].sort((a, b) => a.localeCompare(b));
 }
 
+const CYCLOPEDIA_GAZERS_CATEGORY = 'Gazers';
+
+function isCyclopediaGazerCreatureName(creatureName) {
+  const db = window.creatureDatabase;
+  if (typeof db?.isGazerCreatureName === 'function') {
+    return db.isGazerCreatureName(creatureName);
+  }
+  return String(creatureName || '').toLowerCase().includes('gazer');
+}
+
+function isCyclopediaCreatureAwakenable(creatureName) {
+  const db = window.creatureDatabase;
+  if (typeof db?.isCreatureAwakenableName === 'function') {
+    return db.isCreatureAwakenableName(creatureName);
+  }
+  return !isCyclopediaGazerCreatureName(creatureName);
+}
+
+/** Gazer species shown in the Inventory tab (not Bestiary). */
+function getCyclopediaGazerNames() {
+  const db = window.creatureDatabase;
+  if (typeof db?.getGazerCreatureNames === 'function') {
+    return db.getGazerCreatureNames(db.ALL_CREATURES);
+  }
+  return getCyclopediaAllCreatures().filter((name) => isCyclopediaGazerCreatureName(name));
+}
+
+/** Bestiary tab creature list (excludes gazers). */
+function getCyclopediaBestiaryCreatures() {
+  return getCyclopediaAllCreatures().filter((name) => !isCyclopediaGazerCreatureName(name));
+}
+
+function getCyclopediaInventoryCategories() {
+  const categories = { ...(INVENTORY_CONFIG?.categories || {}) };
+  categories[CYCLOPEDIA_GAZERS_CATEGORY] = getCyclopediaGazerNames();
+  return categories;
+}
+
+/** Daily Seashell streak days that reward gazers (matches in-game shell tooltip). */
+const CYCLOPEDIA_GAZER_SEASHELL_REWARDS = {
+  'Albino Gazer': [{ day: 27, rewardLabel: 'Albino Gazer' }],
+  default: [
+    { day: 13, rewardLabel: 'Random Gazer' },
+    { day: 20, rewardLabel: 'Random Gazer' }
+  ]
+};
+
+function getCyclopediaGazerSeashellRewards(creatureName) {
+  const norm = String(creatureName || '').trim().toLowerCase();
+  if (norm === 'albino gazer') return CYCLOPEDIA_GAZER_SEASHELL_REWARDS['Albino Gazer'];
+  return CYCLOPEDIA_GAZER_SEASHELL_REWARDS.default;
+}
+
+function appendCyclopediaGazerObtainSourceHeader(dropsList, { label, iconSrc, iconAlt }) {
+  const sourceDiv = document.createElement('div');
+  sourceDiv.style.fontWeight = '700';
+  sourceDiv.className = FONT_CONSTANTS.SIZES.BODY;
+  sourceDiv.style.color = COLOR_CONSTANTS.TEXT;
+  sourceDiv.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+  sourceDiv.style.border = '6px solid transparent';
+  sourceDiv.style.borderColor = '#ffe066';
+  sourceDiv.style.borderImage = "url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch";
+  sourceDiv.style.borderRadius = '0';
+  sourceDiv.style.boxSizing = 'border-box';
+  sourceDiv.style.textAlign = 'center';
+  sourceDiv.style.padding = '1px 4px';
+  sourceDiv.style.margin = '1px 0 0 0';
+  sourceDiv.style.display = 'flex';
+  sourceDiv.style.alignItems = 'center';
+  sourceDiv.style.justifyContent = 'center';
+  sourceDiv.style.gap = '6px';
+  if (iconSrc) {
+    const icon = document.createElement('img');
+    icon.src = iconSrc;
+    icon.alt = iconAlt || label;
+    icon.style.width = '16px';
+    icon.style.height = '16px';
+    icon.style.flexShrink = '0';
+    if (iconAlt === 'Chromatic Scroll') {
+      icon.style.filter = 'drop-shadow(rgb(240, 240, 0) 0px 0px 2px)';
+    }
+    sourceDiv.appendChild(icon);
+  }
+  const sourceText = document.createElement('span');
+  sourceText.textContent = label;
+  sourceDiv.appendChild(sourceText);
+  dropsList.appendChild(sourceDiv);
+}
+
+function appendCyclopediaGazerObtainRow(dropsList, text) {
+  const row = document.createElement('div');
+  row.style.fontWeight = 'bold';
+  row.className = FONT_CONSTANTS.SIZES.SMALL;
+  row.style.lineHeight = '1';
+  row.style.letterSpacing = '.0625rem';
+  row.style.wordSpacing = '-.1875rem';
+  row.style.margin = '0';
+  row.style.padding = '2px 6px';
+  row.style.borderRadius = '4px';
+  row.style.display = 'flex';
+  row.style.justifyContent = 'space-between';
+  row.style.alignItems = 'center';
+  row.style.textAlign = 'left';
+
+  const nameSpan = document.createElement('span');
+  nameSpan.textContent = text;
+  nameSpan.style.flex = '1 1 auto';
+  nameSpan.style.overflow = 'hidden';
+  nameSpan.style.textOverflow = 'ellipsis';
+  nameSpan.style.whiteSpace = 'nowrap';
+  row.appendChild(nameSpan);
+  dropsList.appendChild(row);
+}
+
+function appendCyclopediaGazerObtainSeparator(dropsList) {
+  const separator = document.createElement('div');
+  separator.className = 'separator my-2.5';
+  separator.setAttribute('role', 'none');
+  separator.style.margin = '6px 0';
+  dropsList.appendChild(separator);
+}
+
+function appendCyclopediaGazerObtainLocations(dropsList, creatureName) {
+  const shellName = CYCLOPEDIA_UI.stats?.shell || 'Daily Seashell';
+  const rewards = getCyclopediaGazerSeashellRewards(creatureName);
+
+  appendCyclopediaGazerObtainSourceHeader(dropsList, {
+    label: shellName,
+    iconSrc: '/assets/icons/shell-count.png',
+    iconAlt: 'Daily Seashell'
+  });
+  rewards.forEach(({ day, rewardLabel }, index) => {
+    appendCyclopediaGazerObtainRow(dropsList, `Day ${day} — ${rewardLabel}`);
+    if (index < rewards.length - 1) appendCyclopediaGazerObtainSeparator(dropsList);
+  });
+
+  appendCyclopediaGazerObtainSeparator(dropsList);
+  const chromaticLabel = cyclopediaGetInventoryDisplayName('summonScroll6') || 'Chromatic Scroll';
+  appendCyclopediaGazerObtainSourceHeader(dropsList, {
+    label: chromaticLabel,
+    iconSrc: '/assets/icons/summonscroll6.png',
+    iconAlt: 'Chromatic Scroll'
+  });
+  appendCyclopediaGazerObtainRow(dropsList, 'Random Gazer');
+}
+
 function cyclopediaResolveCreatureQuery(creatureName) {
   const db = window.creatureDatabase;
   if (typeof db?.resolveCreatureDisplay === 'function') {
@@ -1769,9 +1915,9 @@ const CyclopediaHomeSearch = (() => {
   function buildBaseEntries() {
     const entries = [];
 
-    // Creatures (name + roles)
+    // Creatures (name + roles) — gazers live under Inventory → Gazers
     const creatureNames = [
-      ...getCyclopediaAllCreatures(),
+      ...getCyclopediaBestiaryCreatures(),
       ...(Array.isArray(GAME_DATA.UNOBTAINABLE_CREATURES) ? GAME_DATA.UNOBTAINABLE_CREATURES : [])
     ];
     creatureNames.forEach((name) => {
@@ -1814,8 +1960,30 @@ const CyclopediaHomeSearch = (() => {
       });
     });
 
+    getCyclopediaGazerNames().forEach((name) => {
+      let roleText = '';
+      try {
+        roleText = (getCreatureRoles(name) || []).join(' ');
+      } catch {
+        roleText = '';
+      }
+      entries.push({
+        kind: 'inventoryItem',
+        label: name,
+        search: cyclopediaNormalizeSearchText(`${name} ${roleText} gazer creature`),
+        subtitle: CYCLOPEDIA_GAZERS_CATEGORY,
+        target: {
+          type: 'inventoryItem',
+          categoryName: CYCLOPEDIA_GAZERS_CATEGORY,
+          catalogLabel: name,
+          itemDisplayName: name,
+          itemKey: name
+        }
+      });
+    });
+
     // Inventory categories + items
-    const categories = INVENTORY_CONFIG?.categories || {};
+    const categories = getCyclopediaInventoryCategories();
     Object.entries(categories).forEach(([categoryName, itemKeys]) => {
       entries.push({
         kind: 'inventoryCategory',
@@ -1823,6 +1991,8 @@ const CyclopediaHomeSearch = (() => {
         search: cyclopediaNormalizeSearchText(`${categoryName} inventory`),
         target: { type: 'inventoryCategory', categoryName }
       });
+
+      if (categoryName === CYCLOPEDIA_GAZERS_CATEGORY) return;
 
       if (!Array.isArray(itemKeys)) return;
       itemKeys.forEach((catalogLabel) => {
@@ -3333,8 +3503,8 @@ function getCreatureStatus(creatureName) {
     // Check for shiny variants
     const hasShiny = matchingMonsters.some(monster => monster.shiny === true);
 
-    // Check for awakened creatures
-    const hasAwakened = matchingMonsters.some(monster =>
+    // Check for awakened creatures (gazers and other non-awakenable species excluded)
+    const hasAwakened = isCyclopediaCreatureAwakenable(creatureName) && matchingMonsters.some(monster =>
       monster.awaken === true ||
       monster.awakened === true ||
       monster.isAwakened === true ||
@@ -3599,6 +3769,7 @@ function resolveCanonicalCreatureName(creatureNameRaw) {
   if (!creatureName) return '';
   const normalizedCreatureName = creatureName.toLowerCase();
   return getCyclopediaAllCreatures().find((c) => c.toLowerCase() === normalizedCreatureName)
+    || getCyclopediaGazerNames().find((c) => c.toLowerCase() === normalizedCreatureName)
     || GAME_DATA.UNOBTAINABLE_CREATURES.find((c) => c.toLowerCase() === normalizedCreatureName)
     || creatureName;
 }
@@ -3607,10 +3778,34 @@ function openCreatureInBestiaryTab(creatureNameRaw, {
   setActiveTabFn,
   clickListItemFn,
   tabPage,
+  inventoryTabPage = null,
+  findBoxByTitleFn = null,
   timerLabel = 'cyclopediaCreatureSelect'
 } = {}) {
   const canonicalCreatureName = resolveCanonicalCreatureName(creatureNameRaw);
   if (!canonicalCreatureName) return;
+
+  if (isCyclopediaGazerCreatureName(canonicalCreatureName)) {
+    if (typeof setActiveTabFn === 'function') setActiveTabFn(3);
+    const clickGazerTimeout = setTimeout(() => {
+      const inventoryTab = inventoryTabPage || tabPage;
+      if (typeof clickListItemFn !== 'function' || !inventoryTab) return;
+      const topBox = typeof findBoxByTitleFn === 'function'
+        ? findBoxByTitleFn(inventoryTab, 'Inventory')
+        : null;
+      clickListItemFn(topBox || inventoryTab, CYCLOPEDIA_GAZERS_CATEGORY);
+      const clickGazerItemTimeout = setTimeout(() => {
+        const bottomBox = typeof findBoxByTitleFn === 'function'
+          ? findBoxByTitleFn(inventoryTab, CYCLOPEDIA_GAZERS_CATEGORY)
+          : inventoryTab;
+        clickListItemFn(bottomBox || inventoryTab, canonicalCreatureName);
+      }, 0);
+      TimerManager.addTimeout(clickGazerItemTimeout, `${timerLabel}GazerItem`);
+    }, 0);
+    TimerManager.addTimeout(clickGazerTimeout, timerLabel);
+    return;
+  }
+
   if (typeof setActiveTabFn === 'function') setActiveTabFn(1);
   const clickBestiaryTimeout = setTimeout(() => {
     if (typeof clickListItemFn === 'function' && tabPage) {
@@ -6122,6 +6317,7 @@ function openCyclopediaModal(options) {
     let selectedInventory = null;
 
     const allCreatures = getCyclopediaAllCreatures();
+    let pendingGazerSelection = null;
 
     let normalizedCreature = creatureToSelect && typeof creatureToSelect === 'string' ? creatureToSelect.trim().toLowerCase() : null;
     let foundCreature = null;
@@ -6130,8 +6326,13 @@ function openCyclopediaModal(options) {
                      GAME_DATA.UNOBTAINABLE_CREATURES.find(c => c.toLowerCase() === normalizedCreature);
     }
     if (foundCreature) {
-      selectedCreature = foundCreature;
-      activeTab = 1;
+      if (isCyclopediaGazerCreatureName(foundCreature)) {
+        pendingGazerSelection = foundCreature;
+        activeTab = 3;
+      } else {
+        selectedCreature = foundCreature;
+        activeTab = 1;
+      }
     }
 
     let normalizedEquipment = equipmentToSelect && typeof equipmentToSelect === 'string' ? equipmentToSelect.trim().toLowerCase() : null;
@@ -6316,7 +6517,7 @@ function openCyclopediaModal(options) {
 
       const { searchContainer: bestiarySearchContainer, searchInput: bestiarySearchInput, filterBtn: bestiaryFilterBtn } = createCyclopediaSearchBar('Search creatures');
       let bestiaryFilterMode = 'name';
-      const creaturesBox = createCreatureBox('Creatures', getCyclopediaAllCreatures());
+      const creaturesBox = createCreatureBox('Creatures', getCyclopediaBestiaryCreatures());
       const unobtainableBox = createCreatureBox('Unobtainable', GAME_DATA.UNOBTAINABLE_CREATURES);
 
       const creatureUsageByMapStats = (() => {
@@ -7047,6 +7248,8 @@ function openCyclopediaModal(options) {
                 setActiveTabFn: setActiveTab,
                 clickListItemFn: typeof _cyclopediaClickListItem === 'function' ? _cyclopediaClickListItem : null,
                 tabPage: typeof tabPages !== 'undefined' ? tabPages[1] : null,
+                inventoryTabPage: typeof tabPages !== 'undefined' ? tabPages[3] : null,
+                findBoxByTitleFn: typeof _cyclopediaFindBoxByTitle === 'function' ? _cyclopediaFindBoxByTitle : null,
                 timerLabel: 'equipmentMapCreatureSelect'
               });
             }
@@ -11044,8 +11247,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       d.style.justifyContent = 'center';
       d.style.gap = '0';
 
-      let selectedCategory = 'Consumables';
-      let selectedInventoryItem = null;
+      let selectedCategory = pendingGazerSelection ? CYCLOPEDIA_GAZERS_CATEGORY : 'Consumables';
+      let selectedInventoryItem = pendingGazerSelection || null;
 
       const getItemInfo = (itemKey) => {
         if (!itemKey) return { displayName: 'Unknown Item', rarity: '1' };
@@ -11078,7 +11281,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       };
 
       const memoize = MemoizationUtils.memoize;
-      const allInventoryCategories = Object.keys(INVENTORY_CONFIG.categories);
+      const inventoryCategories = getCyclopediaInventoryCategories();
+      const allInventoryCategories = Object.keys(inventoryCategories);
 
       const parseInventoryItem = (button) => {
         try {
@@ -11706,25 +11910,35 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             safeRemoveChild(leftCol._bottomBox.parentNode, leftCol._bottomBox);
           }
           
-          const mainItemCategories = INVENTORY_CONFIG.categories || {};
-          const rawItems = mainItemCategories[selectedCategory] || [];
-          const items = rawItems.map(itemKey => getItemDisplayName(itemKey));
-          
+          const rawItems = inventoryCategories[selectedCategory] || [];
+          const isGazersCategory = selectedCategory === CYCLOPEDIA_GAZERS_CATEGORY;
+          const items = isGazersCategory
+            ? rawItems
+            : rawItems.map(itemKey => getItemDisplayName(itemKey));
+
           const box = createBox({
             title: selectedCategory,
             items: items,
-            type: 'inventory',
-            selectedCreature: null,
+            type: isGazersCategory ? 'creature' : 'inventory',
+            selectedCreature: isGazersCategory ? selectedInventoryItem : null,
             selectedEquipment: null,
-            selectedInventory: selectedInventoryItem ? getItemDisplayName(selectedInventoryItem) : null,
-            setSelectedCreature: () => {},
+            selectedInventory: isGazersCategory
+              ? null
+              : (selectedInventoryItem ? getItemDisplayName(selectedInventoryItem) : null),
+            setSelectedCreature: isGazersCategory
+              ? (creatureName) => {
+                selectedInventoryItem = creatureName;
+                updateRightCol();
+              }
+              : () => {},
             setSelectedEquipment: () => {},
-            setSelectedInventory: (itemDisplayName) => {
-              // Find the key that corresponds to this display name
-              const itemKey = rawItems.find(key => getItemDisplayName(key) === itemDisplayName);
-              selectedInventoryItem = itemKey || itemDisplayName;
-              updateRightCol();
-            },
+            setSelectedInventory: isGazersCategory
+              ? () => {}
+              : (itemDisplayName) => {
+                const itemKey = rawItems.find(key => getItemDisplayName(key) === itemDisplayName);
+                selectedInventoryItem = itemKey || itemDisplayName;
+                updateRightCol();
+              },
             updateRightCol: () => {}
           });
 
@@ -11790,15 +12004,22 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       function updateRightCol() {
         try {
+          if (selectedInventoryItem && selectedCategory === CYCLOPEDIA_GAZERS_CATEGORY) {
+            rightCol.innerHTML = '';
+            rightCol.appendChild(renderCreatureTemplate(selectedInventoryItem, false));
+            return;
+          }
           if (selectedInventoryItem) {
-            const itemVariants = INVENTORY_CONFIG.variants || {};
             if (INVENTORY_CONFIG.variants[selectedInventoryItem]) {
               rightCol.innerHTML = renderItemVariants(selectedInventoryItem);
             } else {
               rightCol.innerHTML = renderItemDetails(selectedInventoryItem);
             }
           } else {
-            rightCol.innerHTML = '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="display:flex;justify-content:center;align-items:center;height:100%;width:100%;color:' + COLOR_CONSTANTS.TEXT + ';font-weight:bold;text-align:center;">Select an item category to view variants.</div>';
+            const emptyMessage = selectedCategory === CYCLOPEDIA_GAZERS_CATEGORY
+              ? 'Select a gazer to view details.'
+              : 'Select an item category to view variants.';
+            rightCol.innerHTML = '<div class="' + FONT_CONSTANTS.SIZES.BODY + '" style="display:flex;justify-content:center;align-items:center;height:100%;width:100%;color:' + COLOR_CONSTANTS.TEXT + ';font-weight:bold;text-align:center;">' + emptyMessage + '</div>';
           }
         } catch (error) {
           console.error('[Cyclopedia] Error updating right column:', error);
@@ -13931,13 +14152,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               text-decoration: underline;
               text-decoration-style: solid;
             `;
-            nameElement.title = `Open ${creatureName} in Bestiary`;
+            nameElement.title = `Open ${creatureName} in Cyclopedia`;
             nameElement.addEventListener('click', () => {
               if (!creatureName || creatureName === 'Unknown') return;
               openCreatureInBestiaryTab(creatureName, {
                 setActiveTabFn: setActiveTab,
                 clickListItemFn: typeof _cyclopediaClickListItem === 'function' ? _cyclopediaClickListItem : null,
                 tabPage: typeof tabPages !== 'undefined' ? tabPages[1] : null,
+                inventoryTabPage: typeof tabPages !== 'undefined' ? tabPages[3] : null,
+                findBoxByTitleFn: typeof _cyclopediaFindBoxByTitle === 'function' ? _cyclopediaFindBoxByTitle : null,
                 timerLabel: 'mapsCreatureSelect'
               });
             });
@@ -16015,6 +16238,10 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   }
 
   buildCyclopediaMonsterNameMap();
+  const creatureCanAwaken = isCyclopediaCreatureAwakenable(name);
+  if (!creatureCanAwaken) {
+    cyclopediaState.creatureDetailShowAwakenedAbility = false;
+  }
   if (typeof unobtainableCreatures !== 'undefined' && unobtainableCreatures.includes(name)) {
   }
   const container = document.createElement('div');
@@ -16410,7 +16637,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   `;
   
   const abilityTitle = createCyclopediaWidgetTitle('Ability', {
-    ...CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE,
+    ...(creatureCanAwaken ? CYCLOPEDIA_WIDGET_TITLE_SPLIT_STYLE : { width: '100%', flex: '1 1 auto' }),
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -16420,7 +16647,9 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   });
   abilityTitleContainer.appendChild(abilityTitle);
 
-  const awakenIconButton = document.createElement('button');
+  let awakenIconButton = null;
+  if (creatureCanAwaken) {
+  awakenIconButton = document.createElement('button');
   applyCyclopediaWidgetTitleChrome(awakenIconButton, {
     ...CYCLOPEDIA_WIDGET_TITLE_TOGGLE_STYLE,
     height: '23px'
@@ -16525,8 +16754,8 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
       console.error('[Cyclopedia] Error toggling awakened ability:', error);
     }
   });
-  
   abilityTitleContainer.appendChild(awakenIconButton);
+  }
   abilitySection.appendChild(abilityTitleContainer);
 
   // Create scrollable container for ability content
@@ -16564,7 +16793,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
       const AbilityTooltip = abilityMonsterData.metadata.skill.TooltipContent;
       
       if (typeof globalThis.state.utils.createUIComponent === 'function') {
-        const useAwakened = cyclopediaState.creatureDetailShowAwakenedAbility;
+        const useAwakened = creatureCanAwaken && cyclopediaState.creatureDetailShowAwakenedAbility;
         tooltipComponent = useAwakened
           ? globalThis.state.utils.createUIComponent(rootElement, AbilityTooltip, { awaken: true })
           : globalThis.state.utils.createUIComponent(rootElement, AbilityTooltip);
@@ -16705,8 +16934,11 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
 
   const dropsTitle = createCyclopediaWidgetTitle('Location', { width: '100%' });
   const dropsTitleP = dropsTitle;
-  dropsSection.appendChild(usageSection);
-  dropsSection.appendChild(usageSeparator);
+  const isGazerCreatureDetail = isCyclopediaGazerCreatureName(name);
+  if (!isGazerCreatureDetail) {
+    dropsSection.appendChild(usageSection);
+    dropsSection.appendChild(usageSeparator);
+  }
   dropsSection.appendChild(dropsTitle);
   const dropsList = document.createElement('div');
   dropsList.style.padding = '8px 10px 8px 10px';
@@ -16726,11 +16958,16 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   dropsList.style.maxHeight = 'none';
 
   let monsterLocations = [];
-  try {
-    monsterLocations = findMonsterLocations(name);
-  } catch (error) {
+  const isGazerCreature = isGazerCreatureDetail;
+  if (!isGazerCreature) {
+    try {
+      monsterLocations = findMonsterLocations(name);
+    } catch (error) {
+    }
   }
-  if (monsterLocations.length > 0) {
+  if (isGazerCreature) {
+    appendCyclopediaGazerObtainLocations(dropsList, name);
+  } else if (monsterLocations.length > 0) {
     function capitalizeRegionName(name) {
       if (!name) return '';
       return cyclopediaGetRegionDisplayName(name);
@@ -17061,8 +17298,11 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
 
       const level = getLevelFromExp(monster.exp);
       const totalGenes = (Number(monster.hp) || 0) + (Number(monster.ad) || 0) + (Number(monster.ap) || 0) + (Number(monster.armor) || 0) + (Number(monster.magicResist) || 0);
-      const isAwakened = monster.awaken === true || monster.awakened === true || monster.isAwakened === true || Number(monster.tier) >= 6 || Number(monster.starTier) >= 6 || level > 50;
-      const isMaxAwakened = level >= 99 && totalGenes >= 100;
+      const isAwakened = creatureCanAwaken && (
+        monster.awaken === true || monster.awakened === true || monster.isAwakened === true
+        || Number(monster.tier) >= 6 || Number(monster.starTier) >= 6 || level > 50
+      );
+      const isMaxAwakened = creatureCanAwaken && level >= 99 && totalGenes >= 100;
 
       const portrait = api.ui.components.createFullMonster({
         monsterId: monster.gameId || monster.id,

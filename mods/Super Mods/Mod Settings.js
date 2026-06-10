@@ -19,6 +19,7 @@ const defaultConfig = {
   showAdvancedStatsOnHover: false,
   showAbilityOnHover: false,
   showSetupLabels: false,
+  enableSetupShortcutsAndHover: true,
   enableShinyEnemies: false,
   enableAutoplayRefresh: false,
   alwaysNavigateMaxFloor: false,
@@ -160,6 +161,7 @@ for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
   config[setupKey] = sanitizeStoredHotkey(config[setupKey], '');
 }
 if (config.enableHotkeys === undefined) config.enableHotkeys = false;
+if (config.enableSetupShortcutsAndHover === undefined) config.enableSetupShortcutsAndHover = true;
 if (config.defaultInventorySticky === undefined) config.defaultInventorySticky = false;
 if (config.alwaysNavigateMaxFloor === undefined) config.alwaysNavigateMaxFloor = false;
 if (config.autoHideNonShinyNonAwakenedMonsters === undefined) config.autoHideNonShinyNonAwakenedMonsters = false;
@@ -2873,6 +2875,12 @@ function saveConfig() {
   } catch (error) {
     console.error('[Mod Settings] Error saving config:', error);
   }
+}
+
+function notifySetupShortcutsAndHoverChanged(enabled) {
+  window.dispatchEvent(new CustomEvent('betterUISetupShortcutsAndHoverChanged', {
+    detail: { enabled: enabled === true }
+  }));
 }
 
 const DEPOT_CONFIG_STORAGE_KEY = 'depot-manager-config';
@@ -6074,6 +6082,12 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="setup-shortcuts-hover-toggle" checked="" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.enableSetupShortcutsAndHover')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="last-visited-map-toggle" style="transform: scale(1.2);">
               <span>${t('mods.betterUI.showReturnToMapButton')}</span>
             </label>
@@ -7032,6 +7046,14 @@ function showSettingsModal() {
             console.log('[Mod Settings] Setup labels hidden');
           }
         )(setupLabelsCheckbox);
+      }
+
+      const setupShortcutsHoverCheckbox = content.querySelector('#setup-shortcuts-hover-toggle');
+      if (setupShortcutsHoverCheckbox) {
+        createSettingsCheckboxHandler('enableSetupShortcutsAndHover',
+          () => notifySetupShortcutsAndHoverChanged(true),
+          () => notifySetupShortcutsAndHoverChanged(false)
+        )(setupShortcutsHoverCheckbox);
       }
       
       const shinyEnemiesCheckbox = content.querySelector('#shiny-enemies-toggle');

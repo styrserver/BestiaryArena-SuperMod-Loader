@@ -233,12 +233,11 @@ Automatically sells or squeezes creatures based on gene thresholds and user sett
 - Real-time tracking of gold and dust earnings
 
 #### Better Analytics
-Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations to the damage analyzer:
-- Real-time damage per second (DPS) calculations displayed next to damage values
-- Automatic tracking of damage changes throughout the game session
-- Support for all game modes (manual, autoplay, sandbox)
+DPS tracking for the impact analyzer plus a sandbox analytics panel (toolbar **Sandbox** button):
+- Real-time damage per second (DPS) calculations displayed next to damage values in the impact analyzer
+- Automatic tracking of damage changes throughout the game session (manual, autoplay, sandbox)
 - Auto-opening of the impact analyzer panel for seamless tracking
-- Accurate DPS calculations using server game ticks for precise timing
+- **Sandbox panel**: draggable/resizable floating panel with map/setup sync, Units tab (allies vs enemies, expandable rows), Battle Log (filtered ally/villain dmg/heal, action source tags), and sandbox fight speed slider (5–100%, disables Turbo during fights)
 
 #### Better Boosted Maps
 Automates daily boosted map farming with intelligent coordination:

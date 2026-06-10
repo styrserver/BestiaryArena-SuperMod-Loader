@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "4.1.2",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Interface option \"Setup Shortcuts & Hover Previews\" (default on) toggles Setup Manager map shortcut bar and hover previews plus Better Setups Setup/Save button hover previews; applies live without reload."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Upgraded with an advanced analytics panel!"
+        },
+        {
+          "mod": "creature-database",
+          "type": "added",
+          "text": "isCreatureAwakenableName() and isGazerMonster() centralize which species and owned copies can awaken; gazers remain on NON_AWAKENABLE_CREATURES. getGazerCreatureNames() lists gazer species for Cyclopedia Inventory."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Gazer species moved from Bestiary to Inventory → Gazers (creature detail on select; home search and deep links route there). Gazers cannot awaken: no awakened-ability toggle (Ability header spans full width), no awakened list styling, and owned copies never show awaken borders. Gazer Location lists Daily Seashell streak days (13/20 random gazer; day 27 Albino Gazer) and Chromatic Scroll (random gazer) instead of map spawns; Player usage is hidden for gazers."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Sealed tier-5 gene inject no longer targets awakened gazers in inventory."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Sealed tier-5 gene inject no longer targets awakened gazers in inventory."
+        }
+      ]
+    },
+    {
       "version": "4.1.1",
       "changes": [
         {

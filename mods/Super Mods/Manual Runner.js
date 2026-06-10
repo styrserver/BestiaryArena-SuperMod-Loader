@@ -1740,6 +1740,13 @@ function isAwakenedCreature(monster) {
   return monster.awaken === true || monster.awakened === true || monster.isAwakened === true;
 }
 
+function isGazerMonster(monster) {
+  const db = window.creatureDatabase;
+  if (typeof db?.isGazerMonster === 'function') return db.isGazerMonster(monster);
+  const name = getCreatureNameFromMonster(monster) || monster?.metadata?.name || '';
+  return String(name).toLowerCase().includes('gazer');
+}
+
 function isShinyCreature(monster) {
   if (!monster) return false;
   return monster.shiny === true || monster.isShiny === true;
@@ -2345,7 +2352,7 @@ async function manualRunnerAutoInjectSealedCreatures(serverResults) {
   }
 
   const localMonsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || inventorySnapshot || [];
-  const awakenedCandidates = localMonsters.filter(m => m?.id && isAwakenedCreature(m) && !isSealedTierFiveCreature(m));
+  const awakenedCandidates = localMonsters.filter(m => m?.id && isAwakenedCreature(m) && !isSealedTierFiveCreature(m) && !isGazerMonster(m));
   if (awakenedCandidates.length === 0) {
     console.log('[Manual Runner][Inject] Skip: no awakened targets in inventory');
     if (seed !== undefined && seed !== null) lastInjectProcessedSeed = seed;

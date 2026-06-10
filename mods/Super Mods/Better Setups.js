@@ -62,6 +62,10 @@ function getSetupNoun(count) {
     : t('mods.betterSetups.setupNoun.plural');
 }
 
+function isSetupShortcutsAndHoverEnabled() {
+  return window.betterUIConfig?.enableSetupShortcutsAndHover !== false;
+}
+
 // Global observer for setup interface changes
 let setupInterfaceObserver = null;
 
@@ -180,6 +184,16 @@ function waitForGameAndActivate() {
 }
 
 // Start early initialization attempts for faster button injection
+if (!window.__betterSetupsShortcutsHoverListenerAdded) {
+  window.__betterSetupsShortcutsHoverListenerAdded = true;
+  window.addEventListener('betterUISetupShortcutsAndHoverChanged', (event) => {
+    hideSetupPreview();
+    if (event.detail?.enabled) {
+      processSetupInterface();
+    }
+  });
+}
+
 console.log('[Better Setups] Starting early initialization attempts...');
 
 // Try immediate initialization first
@@ -2648,7 +2662,7 @@ function hideSetupPreview() {
 }
 
 function showSetupPreview(anchorButton) {
-  if (!hasSavedSetupButton(anchorButton)) return;
+  if (!isSetupShortcutsAndHoverEnabled() || !hasSavedSetupButton(anchorButton)) return;
 
   const label = extractLabelFromSetupButton(anchorButton.textContent);
   const mapId = getCurrentMapId();
@@ -2689,7 +2703,7 @@ function isBetterSetupsMainActionButton(button) {
 }
 
 function scheduleSetupPreviewForButton(setupButton) {
-  if (!setupButton || !isBetterSetupsMainActionButton(setupButton)) return;
+  if (!setupButton || !isBetterSetupsMainActionButton(setupButton) || !isSetupShortcutsAndHoverEnabled()) return;
 
   if (activeSetupPreviewTimer) {
     clearTimeout(activeSetupPreviewTimer);
@@ -2702,7 +2716,7 @@ function scheduleSetupPreviewForButton(setupButton) {
 }
 
 function attachSetupButtonHoverPreview(setupButton) {
-  if (!setupButton || setupButton.dataset.betterSetupsPreviewAttached === 'true') {
+  if (!setupButton || !isSetupShortcutsAndHoverEnabled() || setupButton.dataset.betterSetupsPreviewAttached === 'true') {
     return;
   }
 
@@ -2737,6 +2751,7 @@ function ensureSetupPreviewDelegation() {
   document.documentElement.dataset.betterSetupsPreviewDelegation = 'true';
 
   document.addEventListener('mouseover', (event) => {
+    if (!isSetupShortcutsAndHoverEnabled()) return;
     const setupButton = event.target.closest('button');
     if (!setupButton || !isBetterSetupsMainActionButton(setupButton)) return;
     attachSetupButtonHoverPreview(setupButton);

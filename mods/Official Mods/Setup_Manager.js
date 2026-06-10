@@ -48,6 +48,10 @@ const safeAccess = (obj, path) => {
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
 
+function isSetupShortcutsAndHoverEnabled() {
+  return window.betterUIConfig?.enableSetupShortcutsAndHover !== false;
+}
+
 // Helper for dynamic translation with placeholders
 const tReplace = (key, replacements) => {
   let text = t(key);
@@ -2524,6 +2528,10 @@ function hideMapShortcutPreview() {
 }
 
 function showMapShortcutPreview(anchorButton) {
+  if (!isSetupShortcutsAndHoverEnabled()) {
+    return;
+  }
+
   const mapId = anchorButton?.dataset?.mapId;
   const setupName = anchorButton?.dataset?.setupName;
   if (!mapId || !setupName) {
@@ -2564,7 +2572,7 @@ function showMapShortcutPreview(anchorButton) {
 }
 
 function scheduleMapShortcutPreview(button) {
-  if (!button?.dataset?.mapId || !button?.dataset?.setupName) {
+  if (!button?.dataset?.mapId || !button?.dataset?.setupName || !isSetupShortcutsAndHoverEnabled()) {
     return;
   }
 
@@ -2579,7 +2587,7 @@ function scheduleMapShortcutPreview(button) {
 }
 
 function attachMapShortcutHoverPreview(button) {
-  if (!button || button.dataset.setupManagerPreviewAttached === 'true') {
+  if (!button || !isSetupShortcutsAndHoverEnabled() || button.dataset.setupManagerPreviewAttached === 'true') {
     return;
   }
 
@@ -2747,7 +2755,7 @@ function removeMapShortcuts() {
 }
 
 function updateMapShortcuts() {
-  if (config.showMapShortcuts === false) {
+  if (config.showMapShortcuts === false || !isSetupShortcutsAndHoverEnabled()) {
     removeMapShortcuts();
     return;
   }
@@ -2793,6 +2801,13 @@ function updateMapShortcuts() {
 }
 
 function initMapShortcuts() {
+  if (!window.__setupManagerShortcutsHoverListenerAdded) {
+    window.__setupManagerShortcutsHoverListenerAdded = true;
+    window.addEventListener('betterUISetupShortcutsAndHoverChanged', () => {
+      updateMapShortcuts();
+    });
+  }
+
   updateMapShortcuts();
 
   if (!mapShortcutsContainer) {

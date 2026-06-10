@@ -1024,7 +1024,7 @@ const modDescriptions = {
   'Turbo Mode': 'Speed up gameplay with customizable multipliers and tick display for testing and grinding.',
   'Autoseller': 'Sells or squeezes creatures by gene thresholds; session widget for gold, dust, and counts.',
   'Autoscroller': 'Automates summon scroll usage to hunt target creatures; tiers, stop conditions, and rate-limited speed.',
-  'Better Analytics': 'Damage per tick (DPT) and DPS tracking in the damage / impact analyzer.',
+  'Better Analytics': 'DPS in the impact analyzer plus sandbox panel: units, battle log, filters, and fight speed control.',
   'Better Boosted Maps': 'Automates daily boosted map farming with mod coordination and configurable setups.',
   'Better Cauldron': 'Search and filter monsters in the Monstrous Cauldron, including by rarity.',
   'Better Exaltation Chest': 'Auto-open chests, filter equipment, disenchant unwanted gear, with dust stats.',
