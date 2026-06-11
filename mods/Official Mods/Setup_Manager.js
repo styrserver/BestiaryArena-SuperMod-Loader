@@ -2212,7 +2212,8 @@ function getMapShortcutPreviewRowMaxWidth() {
   return (comboWidth * MAP_SHORTCUT_PREVIEW_COMBOS_PER_ROW) + rowGaps + MAP_SHORTCUT_PREVIEW_WIDTH_EXTRA_PX;
 }
 const MAP_SHORTCUTS_EDGE_GAP_PX = 4;
-const MAP_SHORTCUTS_Z_INDEX = 10000000;
+// Above board map labels (z-1..z-10), below native game modals (z-modals = 200).
+const MAP_SHORTCUTS_Z_INDEX = 101;
 const MAP_SHORTCUT_PREVIEW_MEDIA = {
   FRAME_BORDER: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png',
   BACKGROUND_DARK: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png'
@@ -2551,7 +2552,7 @@ function showMapShortcutPreview(anchorButton) {
   preview.className = MAP_SHORTCUT_PREVIEW_CLASS;
   preview.style.cssText = `
     position: fixed;
-    z-index: 10000001;
+    z-index: ${MAP_SHORTCUTS_Z_INDEX + 1};
     padding: ${MAP_SHORTCUT_PREVIEW_PADDING}px;
     width: fit-content;
     max-width: ${previewMaxWidth}px;

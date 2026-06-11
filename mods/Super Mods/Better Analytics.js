@@ -86,8 +86,10 @@
     // Board Analyzer / Manual Runner coordination
     let isPausedForBlockingMod = false;
     let modCoordinationSetup = false;
+    let modCoordinationSetupTimer = null;
     let modCoordinationUnsubscribe = null;
     let modLifecycleHandlersSetup = false;
+    let sandboxPanelInitToken = 0;
     const BLOCKING_ANALYSIS_MODS = ['Board Analyzer', 'Manual Runner'];
     
     // =======================
@@ -197,9 +199,11 @@
     function setupModCoordination() {
         if (modCoordinationSetup) return;
         if (!window.ModCoordination) {
-            setTimeout(setupModCoordination, 500);
+            if (modCoordinationSetupTimer) clearTimeout(modCoordinationSetupTimer);
+            modCoordinationSetupTimer = setTimeout(setupModCoordination, 500);
             return;
         }
+        modCoordinationSetupTimer = null;
         modCoordinationSetup = true;
 
         try {
@@ -225,6 +229,10 @@
     }
 
     function teardownModCoordination() {
+        if (modCoordinationSetupTimer) {
+            clearTimeout(modCoordinationSetupTimer);
+            modCoordinationSetupTimer = null;
+        }
         if (modCoordinationUnsubscribe) {
             try {
                 modCoordinationUnsubscribe();
@@ -392,84 +400,141 @@
     
     function updateFinalDPSWithGameTicks(gameTicks) {
         setTimeout(() => {
-            updateDamageData();
-            
-            const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
-            if (!analyzerPanel) {
-                console.log(`[${modName}][DEBUG][updateFinalDPSWithGameTicks] No analyzer panel found for final DPS update`);
-                return;
-            }
-            
-            const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
-            
-            damageValueElements.forEach((damageValueElement, index) => {
-                // Use the new validation helper
-                if (!isValidDamageElement(damageValueElement)) {
-                    return;
-                }
-                
-                            const damageText = damageValueElement.textContent.trim();
-            const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
-            
-            const parentContainer = damageValueElement.closest('li');
-            const portraitImg = parentContainer ? parentContainer.querySelector('img[alt="creature"]') : null;
-            const creatureId = portraitImg ? portraitImg.src.split('/').pop().replace('.png', '') : `creature_${index}`;
-            
-            // Always create DPS display for all creatures during restoration
-            let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
-            if (!dpsDisplay) {
-                dpsDisplay = createDPSDisplayElement();
-                damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
-            }
-            
-            // If healing creature, show 0/s; if damage creature, calculate actual DPS
-            if (damageText.includes('+')) {
-                dpsDisplay.textContent = '(0/s)';
-                dpsDisplay.style.opacity = '0.7';
-                dpsDisplay.style.fontStyle = 'italic';
-                return; // Skip DPS calculation for healing creatures
-            }
-            
-            const finalDPS = calculateDPS(creatureId, damageValue, gameTicks);
-            dpsDisplay.textContent = `(${finalDPS}/s)`;
-        });
-            
-            const dpsDisplays = document.querySelectorAll(`.${CSS_CLASSES.DPS_DISPLAY}`);
-            dpsDisplays.forEach(display => {
-                display.style.opacity = '0.7';
-                display.style.fontStyle = 'italic';
-                display.removeAttribute('title');
-            });
-            
-
+            const ticks = resolveFightDurationTicks(gameTicks);
+            if (!ticks) return;
+            refreshAnalyzerDpsDisplays({ frozen: true, fightTicks: ticks });
         }, TIMING.FINAL_UPDATE_DELAY);
     }
     
-    function getCurrentGameTicks() {
+    function getServerResultFightTicks() {
         try {
-            const boardState = globalThis.state.board.getSnapshot();
-            const { serverResults } = boardState.context;
-            
-            if (serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
-                const serverGameTicks = serverResults.rewardScreen.gameTicks;
-                return serverGameTicks;
-            }
-            
-            if (gameStartTick !== null && gameStartTick !== undefined) {
-                const timerSnapshot = globalThis.state.gameTimer.getSnapshot();
-                const currentTick = timerSnapshot.context.currentTick;
-                const localGameTicks = currentTick - gameStartTick;
-                
-                if (localGameTicks > 0) {
-                    return localGameTicks;
-                }
-            }
-            
-            return null;
-        } catch (error) {
-            console.log(`[${modName}][DEBUG][getCurrentGameTicks] Error getting current game ticks`, error);
+            const { serverResults } = globalThis.state.board.getSnapshot().context;
+            const ticks = serverResults?.rewardScreen?.gameTicks;
+            return typeof ticks === 'number' && ticks > 0 ? ticks : null;
+        } catch {
             return null;
         }
+    }
+
+    function resolveFightDurationTicks(explicitTicks = null) {
+        if (typeof explicitTicks === 'number' && explicitTicks > 0) return explicitTicks;
+
+        const serverTicks = getServerResultFightTicks();
+        if (serverTicks != null) return serverTicks;
+
+        const sharedTick = getCurrentTick();
+        if (sharedTick != null && sharedTick > 0) return sharedTick;
+
+        try {
+            if (gameStartTick != null) {
+                const currentTick = globalThis.state.gameTimer.getSnapshot().context.currentTick;
+                const elapsed = currentTick - gameStartTick;
+                if (elapsed > 0) return elapsed;
+            }
+        } catch { /* ignore */ }
+
+        return null;
+    }
+
+    function getCurrentGameTicks() {
+        return resolveFightDurationTicks();
+    }
+
+    function parseAnalyzerEntry(damageValueElement, index) {
+        if (!isValidDamageElement(damageValueElement)) return null;
+
+        const damageText = damageValueElement.textContent.trim();
+        const damageValue = parseInt(damageText.replace(/[^\d]/g, ''), 10) || 0;
+        const parentContainer = damageValueElement.closest('li');
+        const portraitImg = parentContainer?.querySelector('img[alt="creature"]');
+        const creatureKey = portraitImg
+            ? portraitImg.src.split('/').pop().replace('.png', '')
+            : `creature_${index}`;
+
+        return {
+            damageText,
+            damageValue,
+            creatureKey,
+            isHeal: damageText.includes('+')
+        };
+    }
+
+    function calculateDPSFromDamage(damage, fightTicks) {
+        if (!damage || damage <= 0) return 0;
+        const ticks = resolveFightDurationTicks(fightTicks);
+        if (!ticks || ticks <= 0) return 0;
+        return Math.round((damage / ticks) * TICKS_PER_SECOND * 100) / 100;
+    }
+
+    function ensureAnalyzerDpsDisplay(damageValueElement) {
+        let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
+        if (!dpsDisplay) {
+            dpsDisplay = createDPSDisplayElement();
+            damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
+        }
+        return dpsDisplay;
+    }
+
+    function renderAnalyzerDpsDisplay(damageValueElement, index, options = {}) {
+        const entry = parseAnalyzerEntry(damageValueElement, index);
+        if (!entry) return;
+
+        const dpsDisplay = ensureAnalyzerDpsDisplay(damageValueElement);
+        const frozen = options.frozen === true;
+
+        if (entry.isHeal) {
+            dpsDisplay.textContent = '(0/s)';
+            dpsDisplay.style.opacity = '0.7';
+            dpsDisplay.style.fontStyle = 'italic';
+            dpsDisplay.removeAttribute('title');
+            return;
+        }
+
+        const dps = calculateDPSFromDamage(entry.damageValue, options.fightTicks);
+        dpsDisplay.textContent = `(${dps}/s)`;
+        dpsDisplay.style.opacity = frozen ? '0.7' : '1';
+        dpsDisplay.style.fontStyle = frozen ? 'italic' : 'normal';
+        dpsDisplay.removeAttribute('title');
+
+        if (!damageTrackingData.has(entry.creatureKey)) {
+            damageTrackingData.set(entry.creatureKey, { totalDamage: 0 });
+        }
+        damageTrackingData.get(entry.creatureKey).totalDamage = entry.damageValue;
+    }
+
+    function refreshAnalyzerDpsDisplays(options = {}) {
+        const analyzerPanel = getAnalyzerPanel();
+        if (!analyzerPanel) return;
+
+        const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
+        damageValueElements.forEach((el, index) => {
+            renderAnalyzerDpsDisplay(el, index, options);
+        });
+    }
+
+    function scheduleServerResultDpsRetry() {
+        const boardState = globalThis.state.board.getSnapshot();
+        const mode = boardState.context?.mode;
+        if (mode !== 'autoplay' && mode !== 'manual') return;
+        if (getServerResultFightTicks() != null) return;
+
+        let retryAttempts = 0;
+        const maxRetries = 20;
+        const baseInterval = 100;
+
+        const retry = () => {
+            retryAttempts++;
+            const serverTicks = getServerResultFightTicks();
+            if (serverTicks != null) {
+                refreshAnalyzerDpsDisplays({ frozen: true, fightTicks: serverTicks });
+                return;
+            }
+            if (retryAttempts < maxRetries) {
+                setTimeout(retry, baseInterval + (retryAttempts * 50));
+            }
+        };
+
+        setTimeout(retry, baseInterval);
     }
     
 
@@ -878,132 +943,12 @@
     }
     
     function restoreFrozenDPSDisplays() {
-        const analyzerPanel = getAnalyzerPanel();
-        if (!analyzerPanel) {
-            return;
-        }
-        
-        const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
-        
-        const boardState = globalThis.state.board.getSnapshot();
-        const gameMode = boardState.context.mode;
-        const { serverResults } = boardState.context;
-        
-        let gameTicks = null;
-        // Check for server results in both autoplay and manual modes
-        if ((gameMode === 'autoplay' || gameMode === 'manual') && 
-            serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
-            gameTicks = serverResults.rewardScreen.gameTicks;
-        }
-        
-        damageValueElements.forEach((damageValueElement, index) => {
-            // Use the new validation helper
-            if (!isValidDamageElement(damageValueElement)) {
-                return;
-            }
-            
-            const damageText = damageValueElement.textContent.trim();
-            const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
-            
-            const parentContainer = damageValueElement.closest('li');
-            
-            const portraitImg = parentContainer ? parentContainer.querySelector('img[alt="creature"]') : null;
-            const creatureId = portraitImg ? portraitImg.src.split('/').pop().replace('.png', '') : `creature_${index}`;
-            
-            // Always create DPS display for all creatures during restoration
-            let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
-            if (!dpsDisplay) {
-                dpsDisplay = createDPSDisplayElement();
-                damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
-            }
-            
-            // If healing creature, show 0/s; if damage creature, calculate actual DPS
-            if (damageText.includes('+')) {
-                dpsDisplay.textContent = '(0/s)';
-                dpsDisplay.style.opacity = '0.7';
-                dpsDisplay.style.fontStyle = 'italic';
-                return; // Skip DPS calculation for healing creatures
-            }
-            
-            let finalDPS;
-            if (gameTicks !== null) {
-                finalDPS = calculateDPS(creatureId, damageValue, gameTicks);
-            } else {
-                finalDPS = calculateDPS(creatureId, damageValue);
-            }
-            
-            dpsDisplay.textContent = `(${finalDPS}/s)`;
-            
-            dpsDisplay.style.opacity = '0.7';
-            dpsDisplay.style.fontStyle = 'italic';
-            dpsDisplay.removeAttribute('title');
+        const fightTicks = resolveFightDurationTicks();
+        refreshAnalyzerDpsDisplays({
+            frozen: true,
+            fightTicks: fightTicks ?? undefined
         });
-        
-        // Enhanced retry mechanism for both autoplay and manual modes when server results aren't available
-        if ((gameMode === 'autoplay' || gameMode === 'manual') && gameTicks === null) {
-            let retryAttempts = 0;
-            const maxRetries = 20;
-            const baseInterval = 100;
-            
-            const retryWithServerResults = () => {
-                retryAttempts++;
-                const retryBoardState = globalThis.state.board.getSnapshot();
-                const retryServerResults = retryBoardState.context.serverResults;
-                
-                if (retryServerResults && retryServerResults.rewardScreen && typeof retryServerResults.rewardScreen.gameTicks === 'number') {
-                    const retryGameTicks = retryServerResults.rewardScreen.gameTicks;
-                    
-                    damageValueElements.forEach((damageValueElement, index) => {
-                        // Use the new validation helper
-                        if (!isValidDamageElement(damageValueElement)) {
-                            return;
-                        }
-                        
-                        const damageText = damageValueElement.textContent.trim();
-                        const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
-                        
-                        const parentContainer = damageValueElement.closest('li');
-                        
-                        const portraitImg = parentContainer ? parentContainer.querySelector('img[alt="creature"]') : null;
-                        const creatureId = portraitImg ? portraitImg.src.split('/').pop().replace('.png', '') : `creature_${index}`;
-                        
-                        // Always create DPS display for all creatures during restoration
-                        let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
-                        if (!dpsDisplay) {
-                            dpsDisplay = createDPSDisplayElement();
-                            damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
-                        }
-                        
-                        // If healing creature, show 0/s; if damage creature, calculate actual DPS
-                        if (damageText.includes('+')) {
-                            dpsDisplay.textContent = '(0/s)';
-                            dpsDisplay.style.opacity = '0.7';
-                            dpsDisplay.style.fontStyle = 'italic';
-                            return; // Skip DPS calculation for healing creatures
-                        }
-                        
-                        const finalDPS = calculateDPS(creatureId, damageValue, retryGameTicks);
-                        dpsDisplay.textContent = `(${finalDPS}/s)`;
-                    });
-                } else if (retryAttempts < maxRetries) {
-                    // Progressive backoff: increase interval with each retry
-                    const retryInterval = baseInterval + (retryAttempts * 50);
-                    setTimeout(retryWithServerResults, retryInterval);
-                } else {
-                    // Only warn every 5th occurrence to reduce spam
-                    if (!window._betterAnalyticsWarningCount) {
-                        window._betterAnalyticsWarningCount = 0;
-                    }
-                    window._betterAnalyticsWarningCount++;
-                    
-                    if (window._betterAnalyticsWarningCount % 5 === 0) {
-                        console.log(`[${modName}][DEBUG][restoreFrozenDPSDisplays] ${gameMode} mode: Server results still not available after ${maxRetries} retries (warning ${window._betterAnalyticsWarningCount})`);
-                    }
-                }
-            };
-            
-            setTimeout(retryWithServerResults, baseInterval);
-        }
+        scheduleServerResultDpsRetry();
     }
     
     function startDamageTracking() {
@@ -1013,7 +958,6 @@
         const timerState = globalThis.state.gameTimer.getSnapshot();
         
         if (!boardState.context.gameStarted) {
-            console.log(`[${modName}][DEBUG][startDamageTracking] Game not started yet, skipping tracking`);
             return;
         }
         
@@ -1026,20 +970,7 @@
         }
         
         if (gameStartTick === null || gameStartTick === undefined) {
-            // For sandbox mode, auto-set game start tick
-            if (boardState.context.mode === 'sandbox') {
-                const timerSnapshot = globalThis.state.gameTimer.getSnapshot();
-                const currentTick = timerSnapshot.context.currentTick;
-                gameStartTick = currentTick > 0 ? currentTick : 1;
-                resetTracking();
-            } else if (boardState.context.mode === 'manual') {
-                // Manual mode relies on server results, don't auto-set gameStartTick
-                console.log(`[${modName}][INFO][startDamageTracking] Manual mode detected, waiting for server results`);
-                return;
-            } else {
-                console.log(`[${modName}][DEBUG][startDamageTracking] Game start tick not set, this should not happen`);
-                return;
-            }
+            resetTracking();
         }
         
         isTracking = true;
@@ -1082,21 +1013,10 @@
             console.error(`[${modName}][ERROR][stopDamageTracking] Error updating damage data:`, error);
         }
         
-        if (currentGameMode === 'sandbox') {
-            try {
-                const timerSnapshot = globalThis.state.gameTimer.getSnapshot();
-                const finalTick = timerSnapshot.context.currentTick;
-                const localGameTicks = finalTick - gameStartTick;
-                
-                if (localGameTicks > 0) {
-                    updateFinalDPSWithGameTicks(localGameTicks);
-                }
-            } catch (error) {
-                console.error(`[${modName}][ERROR][stopDamageTracking] Error in sandbox mode:`, error);
-            }
-        } else if (currentGameMode === 'autoplay' || currentGameMode === 'manual') {
-            // For autoplay and manual modes, ensure DPS displays are maintained
-            // Server results will trigger the final DPS update
+        const finalTicks = resolveFightDurationTicks();
+        if (finalTicks != null) {
+            updateFinalDPSWithGameTicks(finalTicks);
+        } else {
             setTimeout(() => {
                 try {
                     restoreFrozenDPSDisplays();
@@ -1106,118 +1026,28 @@
             }, 100);
         }
     }
-    
-    function updateDamageData() {
-        const analyzerPanel = getAnalyzerPanel();
-        if (!analyzerPanel) {
-            return;
-        }
-        
-        let damageEntries = analyzerPanel.querySelectorAll('li');
-        
-        if (damageEntries.length === 0) {
-            for (const selector of ALTERNATIVE_DAMAGE_SELECTORS) {
-                damageEntries = analyzerPanel.querySelectorAll(selector);
-                if (damageEntries.length > 0) {
-                    break;
-                }
-            }
-        }
-        
-        const currentTick = globalThis.state.gameTimer.getSnapshot().context.currentTick;
-        
-        damageEntries.forEach((entry, index) => {
-            const damageValueElement = entry.querySelector(DAMAGE_VALUE_SELECTOR);
-            if (!damageValueElement) {
-                return;
-            }
-            
-            const damageText = damageValueElement.textContent.trim();
-            const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
-            
-            const portraitImg = entry.querySelector('img[alt="creature"]');
-            const creatureId = portraitImg ? portraitImg.src.split('/').pop().replace('.png', '') : `creature_${index}`;
-            
-            if (!damageTrackingData.has(creatureId)) {
-                damageTrackingData.set(creatureId, {
-                    totalDamage: 0
-                });
-            }
-            
-            const creatureData = damageTrackingData.get(creatureId);
-            creatureData.totalDamage = damageValue;
-        });
-    }
-    
-    function calculateDPS(creatureId, currentDamage, gameTicks = null) {
-        if (!currentDamage || currentDamage === 0) {
-            return 0;
-        }
-        
-        const ticks = gameTicks !== null ? gameTicks : getCurrentGameTicks();
-        if (!ticks || ticks <= 0) {
-            return 0;
-        }
-        
-        const dpt = currentDamage / ticks;
-        const dps = dpt * TICKS_PER_SECOND;
-        
-        return Math.round(dps * 100) / 100;
-    }
-    
 
-    
+    function updateDamageData() {
+        refreshAnalyzerDpsDisplays({ frozen: false });
+    }
+
+    function calculateDPS(creatureId, currentDamage, gameTicks = null) {
+        return calculateDPSFromDamage(currentDamage, gameTicks);
+    }
+
     function updateDPSDisplay() {
-        // Allow autoplay and manual modes to update DPS even when not actively tracking
         const boardState = globalThis.state.board.getSnapshot();
-        const gameMode = boardState.context.mode;
-        
-        if (!isTracking && gameMode !== 'autoplay' && gameMode !== 'manual') {
+        const gameMode = boardState.context?.mode;
+        const fightEnded = !boardState.context?.gameStarted;
+        const serverTicks = getServerResultFightTicks();
+
+        if (!isTracking && !fightEnded && gameMode !== 'autoplay' && gameMode !== 'manual') {
             return;
         }
-    
-        updateDamageData();
-        
-        const analyzerPanel = getAnalyzerPanel();
-        if (!analyzerPanel) {
-            return;
-        }
-        
-        const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
-        
-        damageValueElements.forEach((damageValueElement, index) => {
-            // Use the new validation helper
-            if (!isValidDamageElement(damageValueElement)) {
-                return;
-            }
-            
-            const damageText = damageValueElement.textContent.trim();
-            const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
-            
-            const parentContainer = damageValueElement.closest('li');
-            const portraitImg = parentContainer ? parentContainer.querySelector('img[alt="creature"]') : null;
-            const creatureId = portraitImg ? portraitImg.src.split('/').pop().replace('.png', '') : `creature_${index}`;
-            
-            // Always create DPS display for all creatures during restoration
-            let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
-            if (!dpsDisplay) {
-                dpsDisplay = createDPSDisplayElement();
-                damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
-            }
-            
-            // If healing creature, show 0/s; if damage creature, calculate actual DPS
-            if (damageText.includes('+')) {
-                dpsDisplay.textContent = '(0/s)';
-                dpsDisplay.style.opacity = '0.7';
-                dpsDisplay.style.fontStyle = 'italic';
-                return; // Skip DPS calculation for healing creatures
-            }
-            
-            const totalDPS = calculateDPS(creatureId, damageValue);
-            dpsDisplay.textContent = `(${totalDPS}/s)`;
-            
-            dpsDisplay.style.opacity = '1';
-            dpsDisplay.style.fontStyle = 'normal';
+
+        refreshAnalyzerDpsDisplays({
+            frozen: fightEnded || serverTicks != null,
+            fightTicks: serverTicks ?? undefined
         });
     }
     
@@ -1242,27 +1072,14 @@
     
     function createPlaceholderDPSDisplays() {
         const analyzerPanel = getAnalyzerPanel();
-        if (!analyzerPanel) {
-            return;
-        }
+        if (!analyzerPanel) return;
 
-        const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
-        damageValueElements.forEach((damageValueElement, index) => {
-            // Use the new validation helper
-            if (!isValidDamageElement(damageValueElement)) {
-                return;
-            }
-
-            let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
-            if (!dpsDisplay) {
-                dpsDisplay = createDPSDisplayElement();
-                dpsDisplay.textContent = '(0/s)';
-                dpsDisplay.style.opacity = '0.7';
-                dpsDisplay.style.fontStyle = 'italic';
-                damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
-            } else {
-                dpsDisplay.textContent = '(0/s)';
-            }
+        analyzerPanel.querySelectorAll('span.font-outlined-fill').forEach((damageValueElement, index) => {
+            if (!parseAnalyzerEntry(damageValueElement, index)) return;
+            const dpsDisplay = ensureAnalyzerDpsDisplay(damageValueElement);
+            dpsDisplay.textContent = '(0/s)';
+            dpsDisplay.style.opacity = '0.7';
+            dpsDisplay.style.fontStyle = 'italic';
         });
         
         // Force a refresh of the cache after creating placeholders
@@ -1308,8 +1125,6 @@
 
             modLifecycleHandlersSetup = false;
             teardownModCoordination();
-
-            console.log(`[${modName}][DEBUG][cleanup] Cleanup completed successfully`);
         } catch (error) {
             console.error(`[${modName}][ERROR][cleanup] Error during cleanup:`, error);
         }
@@ -1332,7 +1147,7 @@
             
 
         } catch (error) {
-            console.log(`[${modName}][DEBUG][cleanupAllDPSDisplays] Error cleaning up DPS displays`, error);
+            console.error(`[${modName}] Error cleaning up DPS displays:`, error);
         }
     }
     
@@ -1360,10 +1175,11 @@
 
     const PANEL_ID = 'mod-better-sandbox-panel';
     const BUTTON_ID = 'mod-better-sandbox-button';
-    const ADVANCED_BUTTON_LABEL = 'Advanced Analytics';
+    const ADVANCED_BUTTON_LABEL = 'Better Analytics';
     const UNITS_BODY_ID = 'mod-better-sandbox-units-body';
     const LOG_BODY_ID = 'mod-better-sandbox-log-body';
     const LOG_LIST_ID = 'mod-better-sandbox-log-list';
+    const LOG_SUBTITLE_ID = 'mod-better-sandbox-log-subtitle';
     const TITLE_ID = 'mod-better-sandbox-title';
     const STATUS_ID = 'mod-better-sandbox-status';
     const SPEED_SLIDER_ID = 'mod-better-sandbox-speed-slider';
@@ -1372,7 +1188,6 @@
     const STYLE_ID = 'better-sandbox-styles';
     const STORAGE_KEY = 'betterSandboxPanel';
 
-    const BATTLE_LOG_MAX = 500;
     const PANEL_TICK_POLL_MS = 50;
     const DEFAULT_TICK_INTERVAL_MS = 62.5;
     const MIN_TICK_INTERVAL_MS = 16;
@@ -1383,13 +1198,17 @@
         allyDmg: true,
         allyHeal: true,
         villainDmg: true,
-        villainHeal: true
+        villainHeal: true,
+        statusFx: true,
+        pathing: true
     };
     const LOG_FILTER_LABELS = {
         allyDmg: 'Ally dmg',
         allyHeal: 'Ally heal',
         villainDmg: 'Villain dmg',
-        villainHeal: 'Villain heal'
+        villainHeal: 'Villain heal',
+        statusFx: 'Status fx',
+        pathing: 'Pathing'
     };
     const PANEL_DEFAULTS = {
         left: 120, top: 80, width: 400, height: 520, isOpen: false,
@@ -1414,6 +1233,7 @@
     let panelFightTick = null;
     let panelFightTickFrozen = null;
     let panelFightEndState = null;
+    let lastGameTimerFightState = null;
     let boardUnsubs = [];
     const boardTrack = { roomId: null, floor: null, gameStarted: false, mode: null, configSig: '' };
     let worldEventSubs = [];
@@ -1422,6 +1242,24 @@
     let lastRenderedBattleLogRevision = 0;
     let lastScrolledBattleLogRevision = 0;
     let lastRenderedLogSignature = '';
+    let lastRenderedVisibleCount = 0;
+    let lastRenderedFilterSig = '';
+    let battleLogRenderScheduled = false;
+    let cachedVisibleBattleLog = null;
+    let cachedVisibleBattleLogRevision = -1;
+    let cachedVisibleBattleLogFilterSig = '';
+    let cachedActorSnapshots = null;
+    let cachedActorSnapshotsTick = null;
+    let lastUnitStatusByKey = new Map();
+    let battleLogTracking = false;
+    let battleLogSessionEnded = false;
+    let lastStatusPollTick = -1;
+    const statusLogDedupe = new Set();
+    const damageLogDedupe = new Set();
+    const abilityCastLogDedupe = new Set();
+    const deathLogDedupe = new Set();
+    const pathLogDedupe = new Set();
+    const lastActorTileByActor = new WeakMap();
     let logFilters = { ...LOG_FILTER_DEFAULTS };
     let activeTab = 'units';
     let gameSpeedPercent = 100;
@@ -1430,6 +1268,7 @@
     let turboSuspendedForSlowMotion = false;
     let gameIdByNameCache = null;
     let collapsedOverrides = new Map();
+    let openAbilityOverrides = new Map();
     let unitsInteractUntil = 0;
     let lastUnitsRenderKey = '';
     const UNITS_INTERACT_FREEZE_MS = 10;
@@ -1439,8 +1278,11 @@
     let cachedSpawnTileKeyLookup = null;
     let panelResizeMouseMoveHandler = null;
     let panelResizeMouseUpHandler = null;
+    let panelDragMouseMoveHandler = null;
+    let panelDragMouseUpHandler = null;
     let panelViewportListenerAttached = false;
     let unitsBodyClickHandler = null;
+    let unitsBodyAbilityToggleHandler = null;
 
     const panelResizeState = {
         isResizing: false,
@@ -1460,6 +1302,19 @@
             this.startHeight = 0;
             this.startLeft = 0;
             this.startTop = 0;
+        }
+    };
+
+    const panelDragState = {
+        dragging: false,
+        dragX: 0,
+        dragY: 0,
+        panel: null,
+        reset() {
+            this.dragging = false;
+            this.dragX = 0;
+            this.dragY = 0;
+            this.panel = null;
         }
     };
 
@@ -1488,20 +1343,13 @@
 
     function loadCollapsedOverrides() {
         collapsedOverrides = new Map();
-        try {
-            const stored = loadPanelSettings().collapsedOverrides;
-            if (Array.isArray(stored)) {
-                for (const [key, value] of stored) {
-                    if (typeof key === 'string') {
-                        collapsedOverrides.set(normalizeCollapseKey(key), value === true);
-                    }
-                }
-            }
-        } catch { /* ignore */ }
     }
 
-    function saveCollapsedOverrides() {
-        savePanelSettings({ collapsedOverrides: Array.from(collapsedOverrides.entries()) });
+    function clearCollapsedOverrides() {
+        if (!collapsedOverrides.size) return;
+        collapsedOverrides.clear();
+        lastUnitsRenderKey = '';
+        pendingUnitsForceRefresh = true;
     }
 
     function savePanelSettings(patch) {
@@ -1542,6 +1390,7 @@
         const w = world ?? getActiveWorld();
         if (!w?.grid) return;
         if (activeWorld === w && worldEventSubs.length) {
+            if (isPanelOpen()) resumeBattleLogActorPatches();
             if (slowMotionEnabled && isSandboxMode()) applyTickIntervalToWorld(activeWorld);
             return;
         }
@@ -1624,6 +1473,66 @@
         return resolved?.villain === true && Number.isFinite(f) && f >= ASCENSION_AWAKEN_FLOOR;
     }
 
+    function hasCreatureAwakenFlags(source) {
+        if (!source || typeof source !== 'object') return false;
+        return source.awaken === true || source.awakened === true || source.isAwakened === true;
+    }
+
+    function isInventoryMonsterAwakened(monster) {
+        if (!monster) return false;
+        if (hasCreatureAwakenFlags(monster)) return true;
+        const tier = Number(monster.tier ?? monster.tierLevel ?? monster.starTier);
+        return Number.isFinite(tier) && tier >= 6;
+    }
+
+    function isBoardPlayerPieceAwakened(piece, inventoryMonster) {
+        if (hasCreatureAwakenFlags(piece, piece?.monster, inventoryMonster)) return true;
+        const pieceTier = Number(piece?.tier);
+        if (piece?.type === 'player' && Number.isFinite(pieceTier) && pieceTier === 5) return true;
+        return isInventoryMonsterAwakened(inventoryMonster);
+    }
+
+    function findBoardPlayerPieceForActor(actor) {
+        if (!actor || actor.villain === true) return null;
+        const tile = actor.position?.tile?.index ?? actor.position?.tileIndex ?? null;
+        const databaseId = actor.databaseId ?? actor.monsterDatabaseId ?? actor.monsterId ?? null;
+        const config = getBoardContext()?.boardConfig;
+        if (!Array.isArray(config)) return null;
+
+        for (const piece of config) {
+            if (piece?.type !== 'player') continue;
+            const pieceTile = resolveBoardPieceTileIndex(piece);
+            const pieceDb = piece.databaseId ?? piece.monsterId;
+            const tileMatch = tile != null && pieceTile === tile;
+            const dbMatch = databaseId != null && pieceDb != null && String(pieceDb) === String(databaseId);
+            if (tileMatch || dbMatch) return piece;
+        }
+        return null;
+    }
+
+    function resolveActorAwakened(actor) {
+        if (!actor) return false;
+        if (hasCreatureAwakenFlags(actor)) return true;
+        const tier = Number(actor.tier ?? actor.tierLevel ?? actor.starTier);
+        if (Number.isFinite(tier) && tier >= 6) return true;
+
+        if (actor.villain !== true) {
+            const boardPiece = findBoardPlayerPieceForActor(actor);
+            if (boardPiece) {
+                const inventoryMonster = resolvePlayerMonsterByDatabaseId(
+                    boardPiece.databaseId ?? boardPiece.monsterId
+                );
+                if (isBoardPlayerPieceAwakened(boardPiece, inventoryMonster)) return true;
+            }
+            const databaseId = actor.databaseId ?? actor.monsterDatabaseId ?? actor.monsterId ?? null;
+            if (databaseId != null && isInventoryMonsterAwakened(resolvePlayerMonsterByDatabaseId(databaseId))) {
+                return true;
+            }
+        }
+
+        return actor.awaken === true;
+    }
+
     function resolveCurrentRoomId() {
         const boardCtx = getBoardContext() || {};
         const playerCtx = globalThis.state?.player?.getSnapshot?.()?.context || {};
@@ -1680,6 +1589,7 @@
 
         if (floor !== boardTrack.floor) {
             boardTrack.floor = floor;
+            clearCollapsedOverrides();
             cachedSpawnTileKeyLookup = null;
             lastUnitsRenderKey = '';
             changed = true;
@@ -1690,6 +1600,7 @@
             teardownWorldSubscriptions();
             activeWorld = null;
             resetBattleLogState();
+            clearCollapsedOverrides();
             cachedSpawnTileKeyLookup = null;
             lastUnitsRenderKey = '';
             changed = true;
@@ -1710,13 +1621,15 @@
             } else {
                 resetPanelFightTickState();
                 teardownPanelGameTimerSub();
+                resetBattleLogState();
                 if (ctx.world) {
                     ensureFightTracking(ctx.world);
-                    resetBattleLogState();
                 }
             }
             syncPanelTickTracking();
         } else if (gameStarted && ctx.world && ctx.world !== activeWorld) {
+            resetPanelFightTickState();
+            resetBattleLogState();
             ensureFightTracking(ctx.world);
             changed = true;
         }
@@ -1927,6 +1840,15 @@
         panelFightTick = null;
         panelFightTickFrozen = null;
         panelFightEndState = null;
+        lastGameTimerFightState = getGameTimerFightState();
+    }
+
+    function isGameTimerEndState(state) {
+        return state === 'victory' || state === 'defeat';
+    }
+
+    function syncGameTimerFightStateTracking(state) {
+        lastGameTimerFightState = state ?? getGameTimerFightState();
     }
 
     function readTickFromEngine(world) {
@@ -1940,35 +1862,62 @@
         }
     }
 
+    function getGameTimerFightState() {
+        try {
+            return globalThis.state?.gameTimer?.getSnapshot?.()?.context?.state ?? null;
+        } catch {
+            return null;
+        }
+    }
+
+    function isPanelFightResolved() {
+        return panelFightEndState === 'victory' || panelFightEndState === 'defeat';
+    }
+
+    function isLiveFightTracking() {
+        return isFightActive() && panelFightEndState == null && panelFightTickFrozen == null;
+    }
+
+    /** Single tick source for battle log, status bar, and export (world engine tick). */
+    function getFightTick(world) {
+        if (panelFightTickFrozen != null) return panelFightTickFrozen;
+        if (isLiveFightTracking()) {
+            const engineTick = readTickFromEngine(world);
+            if (engineTick != null) {
+                panelFightTick = engineTick;
+                return engineTick;
+            }
+        }
+        return panelFightTick;
+    }
+
     function syncPanelFightTickFromSnapshot() {
         try {
-            const ctx = globalThis.state?.gameTimer?.getSnapshot?.()?.context;
-            if (!ctx) return;
-            const engineTick = readTickFromEngine();
-            if (ctx.state === 'victory' || ctx.state === 'defeat') {
-                const timerTick = typeof ctx.currentTick === 'number' ? ctx.currentTick : null;
-                const finalTick = timerTick != null && engineTick != null
-                    ? Math.max(timerTick, engineTick)
-                    : (timerTick ?? engineTick ?? panelFightTick);
-                if (finalTick != null) {
-                    panelFightTick = finalTick;
-                    panelFightTickFrozen = finalTick;
-                }
-                panelFightEndState = ctx.state;
-            } else if (typeof ctx.currentTick === 'number' && ctx.currentTick > 0 && !isFightActive()) {
-                panelFightTick = ctx.currentTick;
-            }
+            const state = getGameTimerFightState();
+            syncGameTimerFightStateTracking(state);
+            if (!isGameTimerEndState(state)) return;
+            if (panelFightTickFrozen != null && isPanelFightResolved()) return;
+            // Stale victory/defeat on the timer after newGame — ignore while a log session is active.
+            if (isBattleLogTracking()) return;
+            freezePanelFightTickFromEngine();
         } catch { /* ignore */ }
     }
 
     function freezePanelFightTickFromEngine(world) {
-        const engineTick = readTickFromEngine(world);
-        if (engineTick != null) {
-            panelFightTick = engineTick;
-            panelFightTickFrozen = engineTick;
+        const timerState = getGameTimerFightState();
+        if (timerState === 'victory' || timerState === 'defeat') {
+            panelFightEndState = timerState;
         }
-        syncPanelFightTickFromSnapshot();
+        if (panelFightTickFrozen == null) {
+            const engineTick = readTickFromEngine(world);
+            const finalTick = engineTick ?? panelFightTick;
+            if (finalTick != null) {
+                panelFightTick = finalTick;
+                panelFightTickFrozen = finalTick;
+            }
+        }
         stopPanelTickPoll();
+        tryEndBattleLogSession();
     }
 
     function teardownPanelGameTimerSub() {
@@ -1995,14 +1944,13 @@
             renderStatusBar();
             return;
         }
-        if (!isFightActive()) {
+        if (!isLiveFightTracking()) {
             stopPanelTickPoll();
             return;
         }
 
-        const engineTick = readTickFromEngine();
-        if (engineTick != null && engineTick !== panelFightTick) {
-            panelFightTick = engineTick;
+        pollStatusEffectTracking();
+        if (getFightTick() != null) {
             renderStatusBar();
             renderLiveFight();
         }
@@ -2021,17 +1969,23 @@
         if (!panel || panel.style.display === 'none') return;
 
         const gameState = context.state;
+        const timerJustEnded = isGameTimerEndState(gameState)
+            && !isGameTimerEndState(lastGameTimerFightState);
 
         if (panelFightTickFrozen == null) {
-            if (gameState === 'victory' || gameState === 'defeat') {
+            if (isBattleLogTracking()) {
+                if (timerJustEnded) freezePanelFightTickFromEngine();
+            } else if (isGameTimerEndState(gameState)) {
                 freezePanelFightTickFromEngine();
-            } else if (typeof context.currentTick === 'number' && context.currentTick > 0 && !isFightActive()) {
-                panelFightTick = context.currentTick;
             }
         }
 
+        syncGameTimerFightStateTracking(gameState);
+
         renderStatusBar();
-        if (isFightActive()) {
+        if (isLiveFightTracking()) {
+            pollStatusEffectTracking();
+            getFightTick();
             renderLiveFight();
         }
     }
@@ -2041,34 +1995,21 @@
         if (!gameTimer || typeof gameTimer.subscribe !== 'function') return;
         if (panelGameTimerSub) return;
 
-        syncPanelFightTickFromSnapshot();
+        if (isBattleLogTracking()) {
+            syncGameTimerFightStateTracking();
+        } else {
+            syncPanelFightTickFromSnapshot();
+        }
         panelGameTimerSub = gameTimer.subscribe(onPanelGameTimerUpdate);
     }
 
+    function getBattleLogTick() {
+        const tick = getFightTick();
+        return tick != null ? tick : 0;
+    }
+
     function getCurrentTick() {
-        if (panelFightTickFrozen != null) return panelFightTickFrozen;
-        try {
-            if (isFightActive()) {
-                const engineTick = readTickFromEngine();
-                if (engineTick != null) return engineTick;
-            }
-            const ctx = globalThis.state?.gameTimer?.getSnapshot?.()?.context;
-            if (ctx) {
-                if (ctx.state === 'victory' || ctx.state === 'defeat') {
-                    const timerTick = typeof ctx.currentTick === 'number' ? ctx.currentTick : null;
-                    const engineTick = readTickFromEngine();
-                    if (timerTick != null && engineTick != null) return Math.max(timerTick, engineTick);
-                    return timerTick ?? engineTick ?? panelFightTick;
-                }
-                if (typeof ctx.currentTick === 'number' && ctx.currentTick > 0) {
-                    return ctx.currentTick;
-                }
-            }
-            if (panelFightTick != null) return panelFightTick;
-            const engineTick = readTickFromEngine();
-            if (engineTick != null) return engineTick;
-        } catch { /* ignore */ }
-        return null;
+        return getFightTick();
     }
 
     function entityToActor(entity) {
@@ -2093,7 +2034,7 @@
     }
 
     function clearFightActorCollapseRegistry() {
-        clearUnitsStatDebugLog();
+        clearUnitsStatWarnings();
         cachedSpawnTileKeyLookup = null;
         fightActorInstanceSeq = 0;
     }
@@ -2202,12 +2143,103 @@
         return key;
     }
 
+    function invalidateActorSnapshotsCache() {
+        cachedActorSnapshots = null;
+        cachedActorSnapshotsTick = null;
+    }
+
+    function invalidateVisibleBattleLogCache() {
+        cachedVisibleBattleLog = null;
+        cachedVisibleBattleLogRevision = -1;
+        cachedVisibleBattleLogFilterSig = '';
+    }
+
     function resetBattleLogState() {
         battleLog = [];
         battleLogRevision = 0;
         lastRenderedBattleLogRevision = 0;
         lastScrolledBattleLogRevision = 0;
         lastRenderedLogSignature = '';
+        lastRenderedVisibleCount = 0;
+        lastRenderedFilterSig = '';
+        invalidateVisibleBattleLogCache();
+        invalidateActorSnapshotsCache();
+        lastUnitStatusByKey.clear();
+        battleLogTracking = false;
+        battleLogSessionEnded = false;
+        lastStatusPollTick = -1;
+        statusLogDedupe.clear();
+        damageLogDedupe.clear();
+        abilityCastLogDedupe.clear();
+        deathLogDedupe.clear();
+        pathLogDedupe.clear();
+        statusSnapshotSyncScheduled = false;
+        actorsPendingStatusSync.clear();
+    }
+
+    function isBattleLogTracking() {
+        return battleLogTracking === true && battleLogSessionEnded !== true;
+    }
+
+    function isPanelOpen() {
+        const panel = document.getElementById(PANEL_ID);
+        return Boolean(panel && panel.style.display !== 'none');
+    }
+
+    function shouldPatchBattleLogActors() {
+        return isBattleLogTracking() && isPanelOpen();
+    }
+
+    function recordBattleMarker(marker, options = {}) {
+        const tick = options.tick ?? getCurrentTick() ?? 0;
+        battleLog.push({
+            tick,
+            kind: 'marker',
+            marker,
+            endState: options.endState || null
+        });
+        battleLogRevision++;
+        scheduleBattleLogRender();
+    }
+
+    function startBattleLogSession() {
+        if (battleLogTracking) return;
+        battleLogTracking = true;
+        battleLogSessionEnded = false;
+        lastStatusPollTick = -1;
+        statusLogDedupe.clear();
+        damageLogDedupe.clear();
+        abilityCastLogDedupe.clear();
+        deathLogDedupe.clear();
+        pathLogDedupe.clear();
+        syncGameTimerFightStateTracking();
+        recordBattleMarker('start', { tick: getCurrentTick() ?? 0 });
+        seedBattleLogStatusSnapshots();
+    }
+
+    function endBattleLogSession(endState) {
+        if (!battleLogTracking || battleLogSessionEnded) return;
+        battleLogSessionEnded = true;
+        battleLogTracking = false;
+        const tick = getFightTick() ?? '?';
+        recordBattleMarker('end', { tick, endState: endState || null });
+        const world = getActiveWorld();
+        if (world) unpatchAllActors(world);
+        lastUnitStatusByKey.clear();
+        lastStatusPollTick = -1;
+        statusLogDedupe.clear();
+        damageLogDedupe.clear();
+        abilityCastLogDedupe.clear();
+        deathLogDedupe.clear();
+        pathLogDedupe.clear();
+        statusSnapshotSyncScheduled = false;
+        actorsPendingStatusSync.clear();
+    }
+
+    function tryEndBattleLogSession() {
+        const endState = panelFightEndState;
+        if (endState !== 'victory' && endState !== 'defeat') return;
+        endBattleLogSession(endState);
     }
 
     function pickLogString(...values) {
@@ -2224,6 +2256,14 @@
         if (/heal|regen/.test(v)) return 'heal';
         if (/poison|burn|bleed|dot|thorn|reflect|environment|effect/.test(v)) return 'effect';
         return null;
+    }
+
+    function damageTagsInclude(opts, result, tag) {
+        const tags = opts?.tags ?? result?.tags;
+        if (!tags) return false;
+        if (Array.isArray(tags)) return tags.includes(tag);
+        if (typeof tags.has === 'function') return tags.has(tag);
+        return false;
     }
 
     function resolveActionSource(opts = {}, result = null, fromActor = null, isHeal = false) {
@@ -2246,6 +2286,9 @@
             if (normalized) return normalized;
         }
 
+        if (damageTagsInclude(opts, result, 'autoAttack')) return 'auto attack';
+        if (damageTagsInclude(opts, result, 'selfDamage')) return 'effect';
+
         if (opts.ability || opts.skill || opts.fromAbility === true || opts.isAbility === true ||
             opts.isSkill === true || opts.spell === true) {
             return 'ability';
@@ -2260,8 +2303,11 @@
         const damageType = String(opts.damageType || result?.damageType || '').toLowerCase();
         if (/ability|skill|spell|ultimate|special/.test(damageType)) return 'ability';
         if (/poison|burn|bleed|dot|thorn|reflect|environment/.test(damageType)) return 'effect';
-        if (damageType === 'physical' || damageType === 'magic' || damageType === 'true') {
-            return 'auto attack';
+
+        if (damageTagsInclude(opts, result, 'aoe')) return 'ability';
+        if (damageTagsInclude(opts, result, 'singleTarget') &&
+            !damageTagsInclude(opts, result, 'autoAttack')) {
+            return 'ability';
         }
 
         if (fromActor?.abilityCooldown?.isOnCooldown === true) return 'ability';
@@ -2269,7 +2315,52 @@
         return 'unknown';
     }
 
+    function resolveAbilityNameForLog(fromActor, opts = {}, result = null) {
+        const named = pickLogString(
+            opts.abilityName,
+            opts.skillName,
+            opts.ability?.name,
+            opts.skill?.name,
+            result?.abilityName,
+            result?.skillName
+        );
+        if (named) return named;
+
+        const gameId = resolveGameId(fromActor);
+        if (gameId != null) {
+            const abilityInfo = getAbilityInfo(gameId);
+            if (abilityInfo?.name) return abilityInfo.name;
+        }
+
+        const src = pickLogString(
+            opts.abilitySrc,
+            opts.skillSrc,
+            opts.ability?.src,
+            opts.skill?.src,
+            fromActor?.abilityCooldown?.src,
+            result?.abilitySrc,
+            result?.skillSrc
+        );
+        return src || null;
+    }
+
+    function resolveActionSourceDisplay(opts = {}, result = null, fromActor = null, isHeal = false) {
+        const source = resolveActionSource(opts, result, fromActor, isHeal);
+        if (!source || source === 'unknown') return 'unknown';
+        if (source !== 'ability') return source;
+        return resolveAbilityNameForLog(fromActor, opts, result) || 'ability';
+    }
+
     function getLogEntryFilter(entry) {
+        if (entry.kind === 'marker') return 'marker';
+        if (entry.kind === 'status') return 'statusFx';
+        if (entry.kind === 'pathing') return 'pathing';
+        if (entry.kind === 'abilityCast') {
+            return entry.fromVillain ? 'villainDmg' : 'allyDmg';
+        }
+        if (entry.kind === 'death') {
+            return entry.unitVillain ? 'allyDmg' : 'villainDmg';
+        }
         if (entry.kind === 'heal') {
             return entry.fromVillain === true ? 'villainHeal' : 'allyHeal';
         }
@@ -2280,11 +2371,35 @@
         return 'allyDmg';
     }
 
+    const LOG_FILTER_ALL_KEY = 'all';
+
     function isLogFilterShowAll() {
-        return Object.keys(LOG_FILTER_DEFAULTS).every((k) => logFilters[k] !== false);
+        return Object.keys(LOG_FILTER_DEFAULTS).every((k) => logFilters[k] === true);
+    }
+
+    function areAllLogFiltersOff() {
+        return Object.keys(LOG_FILTER_DEFAULTS).every((k) => logFilters[k] === false);
+    }
+
+    function toggleAllLogFilters() {
+        if (isLogFilterShowAll()) {
+            for (const k of Object.keys(LOG_FILTER_DEFAULTS)) {
+                logFilters[k] = false;
+            }
+        } else {
+            Object.assign(logFilters, LOG_FILTER_DEFAULTS);
+        }
+        saveLogFilters();
+        lastRenderedLogSignature = '';
+        lastRenderedVisibleCount = 0;
+        lastRenderedFilterSig = '';
+        invalidateVisibleBattleLogCache();
+        updateLogFilterUi();
+        renderBattleLog(true);
     }
 
     function isLogEntryVisible(entry) {
+        if (entry.kind === 'marker') return true;
         const key = getLogEntryFilter(entry);
         if (isLogFilterShowAll()) return true;
         return logFilters[key] === true;
@@ -2297,30 +2412,90 @@
     function toggleLogFilter(filterKey) {
         if (!(filterKey in LOG_FILTER_DEFAULTS)) return;
 
+        const allOn = isLogFilterShowAll();
         const onlyThisFilter = Object.keys(LOG_FILTER_DEFAULTS).every(
             (k) => logFilters[k] === (k === filterKey)
         );
 
-        if (onlyThisFilter) {
-            Object.assign(logFilters, LOG_FILTER_DEFAULTS);
-        } else {
+        if (allOn) {
+            // From show-all, first click isolates one filter.
             for (const k of Object.keys(LOG_FILTER_DEFAULTS)) {
                 logFilters[k] = k === filterKey;
+            }
+        } else if (onlyThisFilter) {
+            // Clicking the sole active filter restores show-all.
+            Object.assign(logFilters, LOG_FILTER_DEFAULTS);
+        } else {
+            // Multi-select: toggle this filter on/off.
+            logFilters[filterKey] = !logFilters[filterKey];
+            if (!Object.keys(LOG_FILTER_DEFAULTS).some((k) => logFilters[k])) {
+                Object.assign(logFilters, LOG_FILTER_DEFAULTS);
             }
         }
 
         saveLogFilters();
         lastRenderedLogSignature = '';
+        lastRenderedVisibleCount = 0;
+        lastRenderedFilterSig = '';
+        invalidateVisibleBattleLogCache();
         updateLogFilterUi();
         renderBattleLog(true);
     }
 
+    function getBattleLogSubtitleText() {
+        const total = battleLog.length;
+        const visible = battleLog.filter(isLogEntryVisible).length;
+        const showAll = isLogFilterShowAll();
+        const parts = [];
+
+        if (!total) {
+            parts.push('No events yet');
+        } else if (showAll) {
+            parts.push(`${total} event${total === 1 ? '' : 's'}`);
+            parts.push('All event types');
+        } else {
+            parts.push(`${visible} of ${total} shown`);
+            const filterKeys = Object.keys(LOG_FILTER_DEFAULTS);
+            const activeCount = filterKeys.filter((key) => logFilters[key] === true).length;
+            const active = Object.entries(LOG_FILTER_LABELS)
+                .filter(([key]) => logFilters[key] === true)
+                .map(([, label]) => label);
+            parts.push(`${activeCount}/${filterKeys.length} filters`);
+            if (active.length) parts.push(active.join(', '));
+        }
+
+        return parts.join(' · ');
+    }
+
+    function updateLogToolbarTitle() {
+        const subtitle = document.getElementById(LOG_SUBTITLE_ID);
+        if (subtitle) subtitle.textContent = getBattleLogSubtitleText();
+    }
+
     function updateLogFilterUi() {
         const showAll = isLogFilterShowAll();
+        const allOff = areAllLogFiltersOff();
+        const allBtn = document.getElementById(`mod-better-sandbox-log-filter-${LOG_FILTER_ALL_KEY}`);
+        if (allBtn) {
+            allBtn.classList.toggle('active', showAll);
+            allBtn.title = showAll
+                ? 'Hide all event types (markers only)'
+                : allOff
+                    ? 'Show all event types'
+                    : 'Show all event types';
+        }
         for (const key of Object.keys(LOG_FILTER_DEFAULTS)) {
             const btn = document.getElementById(`mod-better-sandbox-log-filter-${key}`);
-            if (btn) btn.classList.toggle('active', showAll || logFilters[key] === true);
+            if (btn) {
+                btn.classList.toggle('active', logFilters[key] === true);
+                btn.title = showAll
+                    ? 'Click to show only this type'
+                    : logFilters[key]
+                        ? 'Click to hide this type'
+                        : 'Click to include this type';
+            }
         }
+        updateLogToolbarTitle();
     }
 
     function clearBattleLog() {
@@ -2328,8 +2503,17 @@
         renderBattleLog();
     }
 
+    function formatLogDamageAmount(amount, rawAmount) {
+        const applied = Math.abs(Math.round(amount));
+        const raw = rawAmount != null ? Math.abs(Math.round(rawAmount)) : null;
+        if (raw != null && Number.isFinite(raw) && raw !== applied) {
+            return `${applied} (${raw})`;
+        }
+        return String(applied);
+    }
+
     function recordBattleLogEntry(event) {
-        if (!event || !isFightActive()) return;
+        if (!event || !shouldPatchBattleLogActors()) return;
         const points = Number(event.points);
         if (!Number.isFinite(points) || points === 0) return;
 
@@ -2341,39 +2525,738 @@
             || entityToActor(event.owner);
 
         const isHeal = points > 0;
-        const tick = getCurrentTick();
+        const tick = getBattleLogTick();
+        const from = actorLabel(fromActor, isHeal ? '—' : 'Environment');
+        const to = actorLabel(toActor, '—');
+        const amount = Math.abs(Math.round(points));
+        const rawAmount = !isHeal && event.rawAmount != null
+            ? Math.abs(Math.round(Number(event.rawAmount)))
+            : null;
+        const damageType = event.damageType || (isHeal ? 'heal' : 'physical');
+        const dedupeKey = `${tick ?? '?'}|${from}|${to}|${amount}|${rawAmount ?? ''}|${damageType}|${isHeal ? 'heal' : 'dmg'}`;
+        if (damageLogDedupe.has(dedupeKey)) return;
+        damageLogDedupe.add(dedupeKey);
 
         battleLog.push({
             tick: tick != null ? tick : '?',
             kind: isHeal ? 'heal' : 'damage',
-            from: actorLabel(fromActor, isHeal ? '—' : 'Environment'),
-            to: actorLabel(toActor, '—'),
+            from,
+            to,
             fromVillain: fromActor?.villain === true,
             toVillain: toActor?.villain === true,
-            amount: Math.abs(Math.round(points)),
-            damageType: event.damageType || (isHeal ? 'heal' : 'physical'),
+            amount,
+            rawAmount: rawAmount != null && rawAmount !== amount ? rawAmount : null,
+            damageType,
             actionSource: event.actionSource || (isHeal ? 'heal' : 'unknown'),
             crit: event.crit === true
         });
 
-        if (battleLog.length > BATTLE_LOG_MAX) {
-            battleLog = battleLog.slice(-BATTLE_LOG_MAX);
-        }
+        battleLogRevision++;
+        scheduleBattleLogRender();
+    }
+
+    function recordAbilityCastLogEntry(actor) {
+        if (!actor || !shouldPatchBattleLogActors()) return;
+        const tick = getBattleLogTick();
+        const from = actorLabel(actor);
+        const abilityName = resolveAbilityNameForLog(actor, {}, null) || 'Ability';
+        const dedupeKey = `${tick ?? '?'}|${actor.id ?? from}|${abilityName}|cast`;
+        if (abilityCastLogDedupe.has(dedupeKey)) return;
+        abilityCastLogDedupe.add(dedupeKey);
+
+        battleLog.push({
+            tick: tick != null ? tick : '?',
+            kind: 'abilityCast',
+            from,
+            fromVillain: actor.villain === true,
+            abilityName
+        });
 
         battleLogRevision++;
-        if (activeTab === 'log') renderBattleLog();
+        scheduleBattleLogRender();
+    }
+
+    function collectActorAbilityCooldownComponents(actor) {
+        const components = new Set();
+        if (actor?.abilityCooldown) components.add(actor.abilityCooldown);
+        const metadata = getMonsterMetadata(resolveGameId(actor));
+        const found = findActorCooldownComponent(actor, metadata);
+        if (found) components.add(found);
+        return components;
+    }
+
+    function unpatchActorAbilityCooldownLog(actor) {
+        const patches = actor?.__bsAbilityCdPatches;
+        if (!patches) return;
+        for (const [cd, orig] of patches) {
+            if (cd && typeof cd.setCooldown === 'function') {
+                cd.setCooldown = orig;
+            }
+        }
+        patches.clear();
+        delete actor.__bsAbilityCdPatches;
+    }
+
+    function patchActorAbilityCooldownLog(actor) {
+        if (!actor) return;
+        unpatchActorAbilityCooldownLog(actor);
+        const patches = new Map();
+        for (const cd of collectActorAbilityCooldownComponents(actor)) {
+            if (!cd || typeof cd.setCooldown !== 'function' || patches.has(cd)) continue;
+            const orig = cd.setCooldown.bind(cd);
+            cd.setCooldown = (...args) => {
+                const result = orig(...args);
+                const isReset = args.length > 0 && Number(args[0]) === 0;
+                if (!isReset) recordAbilityCastLogEntry(actor);
+                return result;
+            };
+            patches.set(cd, orig);
+        }
+        if (patches.size) actor.__bsAbilityCdPatches = patches;
+    }
+
+    function recordDeathLogEntry(deathEvent) {
+        if (!deathEvent || !shouldPatchBattleLogActors()) return;
+        const actor = deathEvent.killedActor ?? deathEvent.actor ?? entityToActor(deathEvent);
+        if (!actor) return;
+
+        const tick = getBattleLogTick();
+        const unit = actorLabel(actor);
+        const killerActor = entityToActor(deathEvent.killedBy);
+        const killedBy = killerActor ? actorLabel(killerActor) : null;
+        const dedupeKey = `${tick ?? '?'}|${actor.id ?? unit}|death`;
+        if (deathLogDedupe.has(dedupeKey)) return;
+        deathLogDedupe.add(dedupeKey);
+
+        battleLog.push({
+            tick: tick != null ? tick : '?',
+            kind: 'death',
+            unit,
+            unitVillain: actor.villain === true,
+            killedBy,
+            killedByVillain: killerActor?.villain === true
+        });
+
+        battleLogRevision++;
+        scheduleBattleLogRender();
+    }
+
+    const STATUS_EFFECT_LABELS = {
+        stun: 'Stunned',
+        silence: 'Silenced',
+        'mind-control': 'Mind controlled',
+        envenom: 'Poisoned',
+        poison: 'Poisoned',
+        'snowman-debuff': 'Slowed',
+        slow: 'Slowed',
+        jar: 'Jarred',
+        disarmed: 'Disarmed',
+        'vicious-knife': 'Bleeding',
+        'amazon-bleed': 'Bleeding',
+        bleed: 'Bleeding',
+        haste: 'Haste',
+        skeleton: 'Skeleton',
+        gooshell: 'Gooshell',
+        'crystalenergy': 'Crystal energy'
+    };
+
+    const SLOW_SRC_PATTERNS = ['slow', 'snowman', 'snowstorm', 'nunu', 'slowmud', 'icearrow'];
+    const POISON_SRC_PATTERNS = ['poison', 'envenom', 'venom'];
+    const DISARMED_SRC_PATTERNS = ['disarm', 'jar'];
+    const EVENT_LOGGED_STATUS_IDS = new Set(['stun', 'slow', 'silence', 'poison', 'disarmed', 'mind-control']);
+
+    let statusSnapshotSyncScheduled = false;
+    const actorsPendingStatusSync = new Set();
+
+    function cloneStatusEffect(effect) {
+        return effect ? { ...effect } : null;
+    }
+
+    function normalizeSpellSrc(src) {
+        if (src == null) return null;
+        let key = String(src).trim();
+        if (!key) return null;
+
+        const urlMatch = key.match(/\/assets\/spells\/([^/?#]+)\.png/i);
+        if (urlMatch) return urlMatch[1].toLowerCase();
+
+        if (/[\\/]/.test(key)) {
+            const filename = key.replace(/^.*[\\/]/, '');
+            const base = filename.replace(/\.[^.]+$/i, '');
+            return base ? base.toLowerCase() : null;
+        }
+
+        return key.toLowerCase();
+    }
+
+    function isSpellAssetKey(key) {
+        if (!key) return false;
+        // Numeric src values are internal spell IDs, not /assets/spells/*.png filenames.
+        return !/^\d+$/.test(String(key));
+    }
+
+    function resolveSpellIconUrl(src) {
+        const key = normalizeSpellSrc(src);
+        if (!key || !isSpellAssetKey(key)) return null;
+        return `/assets/spells/${encodeURIComponent(key)}.png`;
+    }
+
+    function resolveSkillIcon(skill) {
+        if (!skill) return null;
+        const icon = skill.icon;
+        if (typeof icon === 'string' && icon.trim()) return icon;
+        return resolveSpellIconUrl(skill.src);
+    }
+
+    function resolveResourceSpellIcon(resource) {
+        if (!resource || typeof resource !== 'object') return null;
+        for (const candidate of [resource.src, resource.name, resource.spriteId]) {
+            const icon = resolveStatusEffectIcon(candidate);
+            if (icon) return icon;
+        }
+        return null;
+    }
+
+    function resolveResourceSpellSrc(resource) {
+        if (!resource || typeof resource !== 'object') return null;
+        for (const candidate of [resource.src, resource.name, resource.spriteId]) {
+            const normalized = normalizeSpellSrc(candidate);
+            if (normalized) return normalized;
+        }
+        return null;
+    }
+
+    function humanizeEffectSrc(src) {
+        if (!src) return 'Effect';
+        const key = normalizeSpellSrc(src) || String(src).trim().toLowerCase();
+        if (STATUS_EFFECT_LABELS[key]) return STATUS_EFFECT_LABELS[key];
+        return key
+            .replace(/-/g, ' ')
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+
+    const STATUS_EFFECT_ICON_OVERRIDES = {
+        stun: '/assets/icons/stun.png',
+        slow: '/assets/icons/slow.png',
+        silence: '/assets/icons/silence.png',
+        'mind-control': '/assets/icons/mind-control.png'
+    };
+
+    function resolveStatusEffectIcon(src) {
+        const key = normalizeSpellSrc(src);
+        if (!key) return null;
+        if (STATUS_EFFECT_ICON_OVERRIDES[key]) return STATUS_EFFECT_ICON_OVERRIDES[key];
+        return resolveSpellIconUrl(key);
+    }
+
+    const CANONICAL_STATUS_EFFECTS = {
+        slow: {
+            id: 'slow',
+            label: 'Slowed',
+            shortLabel: 'Slow',
+            type: 'debuff',
+            icon: resolveStatusEffectIcon('slow'),
+            src: 'slow'
+        },
+        poison: {
+            id: 'poison',
+            label: 'Poisoned',
+            shortLabel: 'Poison',
+            type: 'debuff',
+            icon: resolveStatusEffectIcon('envenom'),
+            src: 'poison'
+        },
+        disarmed: {
+            id: 'disarmed',
+            label: 'Disarmed',
+            shortLabel: 'Disarm',
+            type: 'debuff',
+            icon: resolveStatusEffectIcon('jar'),
+            src: 'disarmed'
+        }
+    };
+
+    function resourceSrcMatchesPatterns(resource, patterns) {
+        const src = resolveResourceSpellSrc(resource)
+            || String(resource?.src || resource?.name || '').toLowerCase();
+        return patterns.some((pattern) => src.includes(pattern));
+    }
+
+    function resolveActorAbilitySpellSrc(actor) {
+        const gameId = resolveGameId(actor);
+        const metadata = gameId != null ? getMonsterMetadata(gameId) : null;
+        return normalizeSpellSrc(
+            actor?.abilityCooldown?.src
+            ?? metadata?.skill?.src
+            ?? null
+        );
+    }
+
+    function isActorOwnAbilityResource(actor, resource) {
+        const spellSrc = resolveResourceSpellSrc(resource);
+        const abilitySrc = resolveActorAbilitySpellSrc(actor);
+        return Boolean(spellSrc && abilitySrc && spellSrc === abilitySrc);
+    }
+
+    function hasActiveResourceState(resource) {
+        const counter = resource?.counter?.current;
+        if (counter != null && Number(counter) > 0) return true;
+        const readable = resource?.readableCurrent;
+        if (readable != null) {
+            const text = String(readable).trim();
+            if (text && text !== '0') return true;
+        }
+        try {
+            if (resource?.isOnCooldown?.() === true) return true;
+            if (resource?.cooldownClock?.isOnCooldown?.() === true) return true;
+        } catch { /* ignore */ }
+        return false;
+    }
+
+    function isSlowDebuffResource(actor, resource) {
+        if (isActorOwnAbilityResource(actor, resource)) return false;
+        if (resource?.benign === true) return false;
+        return resourceSrcMatchesPatterns(resource, SLOW_SRC_PATTERNS);
+    }
+
+    function isRenderResourceActive(actor, resource) {
+        if (!resource || typeof resource !== 'object') return false;
+        if (isActorOwnAbilityResource(actor, resource)) return false;
+
+        // Duration debuffs (slow, poison, etc.) are active while listed on the actor.
+        if (resource.benign === false) return true;
+        if (isSlowDebuffResource(actor, resource)) return true;
+
+        if (resource.activePassive === true) {
+            if (resource.UI === 'bar' && resource.color === 'transparent') {
+                return hasActiveResourceState(resource);
+            }
+            return true;
+        }
+
+        return hasActiveResourceState(resource);
+    }
+
+    function getCanonicalEffectFromResource(actor, resource) {
+        if (isActorOwnAbilityResource(actor, resource)) return null;
+        if (resourceSrcMatchesPatterns(resource, SLOW_SRC_PATTERNS)) {
+            if (resource.benign === true) return null;
+            return CANONICAL_STATUS_EFFECTS.slow;
+        }
+        if (resourceSrcMatchesPatterns(resource, POISON_SRC_PATTERNS)) return CANONICAL_STATUS_EFFECTS.poison;
+        if (resourceSrcMatchesPatterns(resource, DISARMED_SRC_PATTERNS)) return CANONICAL_STATUS_EFFECTS.disarmed;
+        return null;
+    }
+
+    function readRenderCollectionItems(collection) {
+        if (!collection) return [];
+
+        if (typeof collection.getSnapshot === 'function') {
+            try {
+                const snapshot = collection.getSnapshot();
+                if (Array.isArray(snapshot)) return snapshot;
+            } catch { /* ignore */ }
+        }
+
+        const raw = collection.current ?? collection.value ?? collection;
+        if (Array.isArray(raw)) return raw;
+        if (raw && Array.isArray(raw.items)) return raw.items;
+        if (Array.isArray(collection.items)) return collection.items;
+        if (typeof collection[Symbol.iterator] === 'function') {
+            try { return [...collection]; } catch { /* ignore */ }
+        }
+        return [];
+    }
+
+    function actorHasSlowFromResources(actor) {
+        const collections = [actor?.renderResources, actor?.renderPassives];
+        for (const collection of collections) {
+            for (const resource of readRenderCollectionItems(collection)) {
+                if (isSlowDebuffResource(actor, resource)) return true;
+            }
+        }
+        return false;
+    }
+
+    function seedBattleLogStatusSnapshots() {
+        const units = collectActorSnapshots();
+        if (!Array.isArray(units)) return;
+        for (const unit of units) {
+            const key = normalizeCollapseKey(getUnitCollapseKey(unit));
+            lastUnitStatusByKey.set(key, snapshotStatusEffects(unit.statusEffects));
+        }
+    }
+
+    function readResourceEffectLabel(resource) {
+        const spellSrc = resolveResourceSpellSrc(resource);
+        const baseLabel = humanizeEffectSrc(spellSrc || resource?.src || resource?.name);
+        const readable = resource?.readableCurrent
+            ?? resource?.counter?.readableCurrent
+            ?? (resource?.counter?.current != null && resource?.UI === 'discrete'
+                ? String(resource.counter.current)
+                : null);
+        if (readable && !baseLabel.includes(String(readable))) {
+            return `${baseLabel} ${readable}`.trim();
+        }
+        return baseLabel;
+    }
+
+    function resourceEffectId(resource) {
+        if (resource?.uuid) return `fx:${resource.uuid}`;
+        const src = resolveResourceSpellSrc(resource) || resource?.src || resource?.name || resource?.spriteId || 'effect';
+        const counter = resource?.counter?.current ?? resource?.readableCurrent ?? '';
+        return `fx:${src}:${counter}`;
+    }
+
+    function collectResourceStatusEffect(actor, resource) {
+        if (!resource || typeof resource !== 'object') return null;
+        if (!isRenderResourceActive(actor, resource)) return null;
+        const spellSrc = resolveResourceSpellSrc(resource);
+        const src = spellSrc || resource.src || resource.name || null;
+        const type = resource.benign === true ? 'buff' : 'debuff';
+        const baseLabel = humanizeEffectSrc(spellSrc || src);
+        const label = readResourceEffectLabel(resource);
+        return {
+            id: resourceEffectId(resource),
+            label,
+            shortLabel: baseLabel.length > 14 ? `${baseLabel.slice(0, 12)}…` : baseLabel,
+            type,
+            icon: resolveResourceSpellIcon(resource),
+            src: spellSrc || src
+        };
+    }
+
+    function isActorMindControlled(actor) {
+        const mc = actor?.mindControl;
+        if (!mc) return false;
+        if (mc.current?.by) return true;
+        return mc.isControlled === true;
+    }
+
+    function collectActorStatusEffects(actor) {
+        if (!actor) return [];
+        const effects = [];
+        const seen = new Set();
+
+        const add = (effect) => {
+            if (!effect?.id || seen.has(effect.id)) return;
+            seen.add(effect.id);
+            effects.push(effect);
+        };
+
+        if (actor.stun?.isStunned === true) {
+            add({
+                id: 'stun',
+                label: 'Stunned',
+                shortLabel: 'Stun',
+                type: 'debuff',
+                icon: resolveStatusEffectIcon('stun'),
+                src: 'stun'
+            });
+        }
+        if (actor.silenceComponent?.isSilenced === true) {
+            add({
+                id: 'silence',
+                label: 'Silenced',
+                shortLabel: 'Silence',
+                type: 'debuff',
+                icon: resolveStatusEffectIcon('silence'),
+                src: 'silence'
+            });
+        }
+        if (isActorMindControlled(actor)) {
+            add({
+                id: 'mind-control',
+                label: 'Mind controlled',
+                shortLabel: 'MC',
+                type: 'debuff',
+                icon: resolveStatusEffectIcon('mind-control'),
+                src: 'mind-control'
+            });
+        }
+
+        const collections = [
+            { key: 'resources', collection: actor.renderResources },
+            { key: 'passives', collection: actor.renderPassives }
+        ];
+        for (const { collection } of collections) {
+            const items = readRenderCollectionItems(collection);
+            for (const resource of items) {
+                if (!isRenderResourceActive(actor, resource)) continue;
+                const canonical = getCanonicalEffectFromResource(actor, resource);
+                if (canonical) {
+                    add(cloneStatusEffect(canonical));
+                    continue;
+                }
+                const effect = collectResourceStatusEffect(actor, resource);
+                if (effect) add(effect);
+            }
+        }
+
+        const slowFromResources = actorHasSlowFromResources(actor);
+        if (!seen.has('slow') && slowFromResources) {
+            add(cloneStatusEffect(CANONICAL_STATUS_EFFECTS.slow));
+        }
+
+        actor.__bsHasSlow = slowFromResources;
+
+        return effects;
+    }
+
+    function snapshotStatusEffects(effects) {
+        return (effects || []).map((e) => ({
+            id: e.id,
+            label: e.label,
+            type: e.type
+        }));
+    }
+
+    function recordStatusEffectLogEntry(unit, effect, applied) {
+        if (!unit || !effect || !shouldPatchBattleLogActors()) return;
+        const tick = getBattleLogTick();
+        const label = effect.label || humanizeEffectSrc(effect.id);
+        const dedupeKey = `${tick ?? '?'}|${unit.name}|${effect.id || label}|${applied ? 'a' : 'r'}`;
+        if (statusLogDedupe.has(dedupeKey)) return;
+        statusLogDedupe.add(dedupeKey);
+
+        battleLog.push({
+            tick: tick != null ? tick : '?',
+            kind: 'status',
+            to: unit.name || 'Unknown',
+            toVillain: unit.villain === true,
+            effectLabel: label,
+            effectType: effect.type || 'debuff',
+            applied: applied === true
+        });
+        battleLogRevision++;
+        scheduleBattleLogRender();
+    }
+
+    function pollStatusEffectTracking(force) {
+        if (!shouldPatchBattleLogActors() || panelFightTickFrozen != null) return;
+        const engineTick = readTickFromEngine();
+        if (engineTick == null) return;
+        if (!force && engineTick === lastStatusPollTick) return;
+        lastStatusPollTick = engineTick;
+        trackStatusEffectChanges(collectActorSnapshots() || []);
+    }
+
+    function trackStatusEffectChanges(units) {
+        if (!shouldPatchBattleLogActors() || !Array.isArray(units)) return;
+        for (const unit of units) {
+            const key = normalizeCollapseKey(getUnitCollapseKey(unit));
+            const nextEffects = snapshotStatusEffects(unit.statusEffects);
+            if (!lastUnitStatusByKey.has(key)) {
+                lastUnitStatusByKey.set(key, nextEffects);
+                continue;
+            }
+
+            const prevEffects = lastUnitStatusByKey.get(key) || [];
+            const prevById = new Map(prevEffects.map((e) => [e.id, e]));
+            const nextById = new Map(nextEffects.map((e) => [e.id, e]));
+
+            for (const [, effect] of nextById) {
+                if (!prevById.has(effect.id) && !EVENT_LOGGED_STATUS_IDS.has(effect.id)) {
+                    recordStatusEffectLogEntry(unit, effect, true);
+                }
+            }
+            for (const [, effect] of prevById) {
+                if (!nextById.has(effect.id)) {
+                    recordStatusEffectLogEntry(unit, effect, false);
+                }
+            }
+
+            lastUnitStatusByKey.set(key, nextEffects);
+        }
+    }
+
+    function unpatchActorStatusLog(actor) {
+        if (!actor?.__bsStatusLogPatched) return;
+        for (const sub of actor.__bsStatusLogSubs || []) {
+            try {
+                if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
+            } catch { /* ignore */ }
+        }
+        delete actor.__bsStatusLogPatched;
+        delete actor.__bsStatusLogSubs;
+    }
+
+    function subscribeActorStatusEvent(actor, emitter, handler) {
+        if (typeof emitter?.subscribe !== 'function') return;
+        const sub = emitter.subscribe(handler);
+        if (!actor.__bsStatusLogSubs) actor.__bsStatusLogSubs = [];
+        actor.__bsStatusLogSubs.push(sub);
+    }
+
+    function actorStatusUnitSnapshot(actor) {
+        return {
+            name: actor.name || actor.nickname || 'Unknown',
+            villain: actor.villain === true
+        };
+    }
+
+    function syncActorStatusSnapshot(actor) {
+        const unit = probeActor(actor);
+        if (!unit) return;
+        const key = normalizeCollapseKey(getUnitCollapseKey(unit));
+        let effects = snapshotStatusEffects(unit.statusEffects);
+        const slowFromResources = actorHasSlowFromResources(actor);
+        const needsTransientSlow = actor.__bsHasSlow === true
+            && !slowFromResources
+            && !effects.some((e) => e.id === 'slow');
+        if (needsTransientSlow) {
+            effects = effects.concat(snapshotStatusEffects([CANONICAL_STATUS_EFFECTS.slow]));
+        }
+        lastUnitStatusByKey.set(key, effects);
+    }
+
+    function flushActorStatusSnapshotSyncs() {
+        statusSnapshotSyncScheduled = false;
+        if (!shouldPatchBattleLogActors()) {
+            actorsPendingStatusSync.clear();
+            return;
+        }
+        for (const actor of actorsPendingStatusSync) {
+            syncActorStatusSnapshot(actor);
+        }
+        actorsPendingStatusSync.clear();
+    }
+
+    function queueActorStatusSnapshotSync(actor) {
+        if (!actor || !shouldPatchBattleLogActors()) return;
+        actorsPendingStatusSync.add(actor);
+        if (statusSnapshotSyncScheduled) return;
+        statusSnapshotSyncScheduled = true;
+        queueMicrotask(flushActorStatusSnapshotSyncs);
+    }
+
+    function logActorStatusEvent(actor, effect, applied) {
+        recordStatusEffectLogEntry(actorStatusUnitSnapshot(actor), effect, applied);
+        syncActorStatusSnapshot(actor);
+    }
+
+    function readActorTileIndex(actor) {
+        return actor?.position?.tile?.index ?? actor?.position?.tileIndex ?? null;
+    }
+
+    function recordPathingLogEntry(actor, fromTile, toTile) {
+        if (!actor || fromTile == null || toTile == null || fromTile === toTile) return;
+        if (!shouldPatchBattleLogActors()) return;
+        const unit = actorStatusUnitSnapshot(actor);
+        const tick = getBattleLogTick();
+        const dedupeKey = `${tick ?? '?'}|${unit.name}|${fromTile}|${toTile}`;
+        if (pathLogDedupe.has(dedupeKey)) return;
+        pathLogDedupe.add(dedupeKey);
+
+        battleLog.push({
+            tick: tick != null ? tick : '?',
+            kind: 'pathing',
+            unit: unit.name,
+            unitVillain: unit.villain === true,
+            fromTile,
+            toTile
+        });
+        battleLogRevision++;
+        scheduleBattleLogRender();
+    }
+
+    function unpatchActorPathingLog(actor) {
+        if (!actor?.__bsPathLogPatched) return;
+        for (const sub of actor.__bsPathLogSubs || []) {
+            try {
+                if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
+            } catch { /* ignore */ }
+        }
+        delete actor.__bsPathLogPatched;
+        delete actor.__bsPathLogSubs;
+        lastActorTileByActor.delete(actor);
+    }
+
+    function patchActorPathingLog(actor) {
+        if (!actor?.position?.onChange?.subscribe || actor.__bsPathLogPatched) return;
+        actor.__bsPathLogPatched = true;
+        actor.__bsPathLogSubs = [];
+
+        const initialTile = readActorTileIndex(actor);
+        if (initialTile != null) lastActorTileByActor.set(actor, initialTile);
+
+        const sub = actor.position.onChange.subscribe((event) => {
+            const toTile = event?.tile?.index ?? readActorTileIndex(actor);
+            if (toTile == null) return;
+            const fromTile = lastActorTileByActor.get(actor);
+            lastActorTileByActor.set(actor, toTile);
+            if (fromTile == null || fromTile === toTile) return;
+            recordPathingLogEntry(actor, fromTile, toTile);
+        });
+        actor.__bsPathLogSubs.push(sub);
+    }
+
+    function patchActorStatusLog(actor) {
+        if (!actor || actor.__bsStatusLogPatched) return;
+        actor.__bsStatusLogPatched = true;
+        actor.__bsStatusLogSubs = [];
+
+        subscribeActorStatusEvent(actor, actor.stun?.onStun, () => {
+            logActorStatusEvent(actor, {
+                id: 'stun',
+                label: 'Stunned',
+                type: 'debuff'
+            }, true);
+        });
+        subscribeActorStatusEvent(actor, actor.silenceComponent?.onSilenced, () => {
+            logActorStatusEvent(actor, {
+                id: 'silence',
+                label: 'Silenced',
+                type: 'debuff'
+            }, true);
+        });
+        subscribeActorStatusEvent(actor, actor.onSlow, () => {
+            actor.__bsHasSlow = true;
+            logActorStatusEvent(actor, {
+                id: 'slow',
+                label: 'Slowed',
+                type: 'debuff'
+            }, true);
+        });
+        subscribeActorStatusEvent(actor, actor.onPoison, () => {
+            logActorStatusEvent(actor, {
+                id: 'poison',
+                label: 'Poisoned',
+                type: 'debuff'
+            }, true);
+        });
+        subscribeActorStatusEvent(actor, actor.onDisarmed, () => {
+            logActorStatusEvent(actor, {
+                id: 'disarmed',
+                label: 'Disarmed',
+                type: 'debuff'
+            }, true);
+        });
+        subscribeActorStatusEvent(actor, actor.onDebuff, () => {
+            pollStatusEffectTracking(true);
+        });
+        subscribeActorStatusEvent(actor, actor.onBuff, () => {
+            pollStatusEffectTracking(true);
+        });
     }
 
     function unpatchActorBattleLog(actor) {
+        actorsPendingStatusSync.delete(actor);
+        unpatchActorPathingLog(actor);
+        unpatchActorStatusLog(actor);
+        unpatchActorAbilityCooldownLog(actor);
         if (!actor?.hp || !actor.__bsLogPatched) return;
         if (actor.__bsOrigApplyDamage) actor.hp.applyDamage = actor.__bsOrigApplyDamage;
         if (actor.__bsOrigHealHp) actor.hp.healHp = actor.__bsOrigHealHp;
         delete actor.__bsLogPatched;
         delete actor.__bsOrigApplyDamage;
         delete actor.__bsOrigHealHp;
+        delete actor.__bsHasSlow;
     }
 
     function patchActorBattleLog(actor) {
+        patchActorPathingLog(actor);
+        patchActorStatusLog(actor);
         if (!actor?.hp || actor.__bsLogPatched) return;
 
         const hp = actor.hp;
@@ -2381,17 +3264,18 @@
             actor.__bsOrigApplyDamage = hp.applyDamage.bind(hp);
             hp.applyDamage = (opts = {}) => {
                 const result = actor.__bsOrigApplyDamage(opts);
-                const raw = opts.points ?? result?.damageToApply ?? result?.calculatedDamage;
-                const amount = Number(raw);
-                if (Number.isFinite(amount) && amount > 0) {
+                const rawAmount = Number(opts.points);
+                const appliedAmount = Number(result);
+                if (Number.isFinite(appliedAmount) && appliedAmount > 0) {
                     const fromActor = entityToActor(opts.from);
                     recordBattleLogEntry({
                         from: opts.from,
                         to: actor,
-                        points: -amount,
+                        points: -appliedAmount,
+                        rawAmount: Number.isFinite(rawAmount) ? rawAmount : null,
                         damageType: opts.damageType || result?.damageType || 'physical',
                         crit: opts.crit === true || result?.crit === true,
-                        actionSource: resolveActionSource(opts, result, fromActor, false)
+                        actionSource: resolveActionSourceDisplay(opts, result, fromActor, false)
                     });
                 }
                 return result;
@@ -2411,13 +3295,14 @@
                         points: amount,
                         damageType: opts.damageType || 'heal',
                         crit: opts.crit === true || result?.crit === true,
-                        actionSource: resolveActionSource(opts, result, fromActor, true)
+                        actionSource: resolveActionSourceDisplay(opts, result, fromActor, true)
                     });
                 }
                 return result;
             };
         }
 
+        patchActorAbilityCooldownLog(actor);
         actor.__bsLogPatched = true;
     }
 
@@ -2431,6 +3316,20 @@
         const actors = world?.grid?.actors;
         if (!Array.isArray(actors)) return;
         for (const actor of actors) patchActorBattleLog(actor);
+    }
+
+    function pauseBattleLogActorPatches() {
+        const world = getActiveWorld() || activeWorld;
+        if (world) unpatchAllActors(world);
+    }
+
+    function resumeBattleLogActorPatches() {
+        if (!shouldPatchBattleLogActors()) return;
+        const world = getActiveWorld() || activeWorld;
+        if (world) {
+            patchAllActors(world);
+            seedBattleLogStatusSnapshots();
+        }
     }
 
     function teardownWorldSubscriptions() {
@@ -2447,14 +3346,23 @@
     function setupWorldSubscriptions(world) {
         if (!world?.grid) return;
 
-        patchAllActors(world);
+        if (isPanelOpen()) {
+            startBattleLogSession();
+            patchAllActors(world);
+        }
 
-        const repatch = () => patchAllActors(world);
+        const repatch = () => {
+            if (!shouldPatchBattleLogActors()) return;
+            patchAllActors(world);
+        };
         if (typeof world.grid.onActorEnter?.subscribe === 'function') {
             worldEventSubs.push(world.grid.onActorEnter.subscribe(repatch));
         }
         if (typeof world.grid.onActorSummon?.subscribe === 'function') {
             worldEventSubs.push(world.grid.onActorSummon.subscribe(repatch));
+        }
+        if (typeof world.grid.onActorDeath?.subscribe === 'function') {
+            worldEventSubs.push(world.grid.onActorDeath.subscribe(recordDeathLogEntry));
         }
         if (typeof world.onGameEnd?.subscribe === 'function') {
             worldEventSubs.push(world.onGameEnd.subscribe(() => {
@@ -2553,12 +3461,26 @@
         return msToTicks(unit?.cooldownRemainingMs);
     }
 
-    let unitsStatDebugLogged = new Set();
-    let unitsStatResolveLogged = new Set();
+    function resolveUnitAttackDelayRemainingTicks(unit) {
+        if (unit?.attackDelayRemainingTicks != null && Number.isFinite(unit.attackDelayRemainingTicks)) {
+            return unit.attackDelayRemainingTicks;
+        }
+        return null;
+    }
 
-    function clearUnitsStatDebugLog() {
-        unitsStatDebugLogged.clear();
-        unitsStatResolveLogged.clear();
+    function renderCooldownStateHtml(ready, remainingTicks) {
+        if (ready === true) return coloredStatSpan('ready', true);
+        if (remainingTicks != null && remainingTicks > 0) {
+            return coloredStatSpan(`${formatTicks(remainingTicks)} left`, false);
+        }
+        if (ready === false) return coloredStatSpan('on cooldown', false);
+        return null;
+    }
+
+    let unitsStatWarned = new Set();
+
+    function clearUnitsStatWarnings() {
+        unitsStatWarned.clear();
     }
 
     const LIVE_STAT_ALIASES = {
@@ -3141,52 +4063,6 @@
         return detail;
     }
 
-    function logStatResolutionTrace(actor, unit, metadata, statResolutions, baseResolutions) {
-        const logKey = `${unit.collapseKey || unit.name}:resolve`;
-        if (unitsStatResolveLogged.has(logKey)) return;
-        unitsStatResolveLogged.add(logKey);
-
-        const prefix = `[${modName}][StatResolve]`;
-        const header = `${unit.name} gameId=${unit.gameId ?? '?'} Lv${unit.level ?? '?'} awaken=${unit.awaken === true}`;
-        const lines = ['ad', 'ap', 'armor', 'magicResist', 'speed'].map((key) => {
-            const live = statResolutions[key];
-            const base = baseResolutions[key];
-            return `  ${key}: live=${live?.value ?? '—'} [${live?.source ?? '?'}] | base=${base?.value ?? '—'} [${base?.source ?? '?'}]`;
-        });
-        console.log(`${prefix} ${header}\n${lines.join('\n')}`);
-
-        console.group(`${prefix} trace ${unit.name}`);
-        console.log('actor keys:', Object.keys(actor));
-        console.log('metadata.baseStats:', metadata?.baseStats ?? null);
-        console.log('catalog gameId resolve:', {
-            gameId: unit.gameId,
-            actorGameId: actor.gameId,
-            actorMonsterId: actor.monsterId,
-            actorName: actor.name
-        });
-        for (const key of ['ad', 'ap', 'armor', 'magicResist', 'speed']) {
-            console.group(`${key} resolution`);
-            console.log('live:', statResolutions[key]);
-            console.table(statResolutions[key]?.attempts ?? []);
-            if (statResolutions[key]?.discoveryMatches?.length) {
-                console.log('discovery matches:', statResolutions[key].discoveryMatches);
-            }
-            if (statResolutions[key]?.scale) {
-                console.log('scaleStat:', statResolutions[key].scale);
-            }
-            console.log('base:', baseResolutions[key]);
-            console.table(baseResolutions[key]?.attempts ?? []);
-            console.groupEnd();
-        }
-        console.log('all stat-like bags on actor:', discoverActorStatLikeBags(actor));
-        for (const key of ['ad', 'ap', 'armor', 'magicResist', 'speed']) {
-            const bag = actor[key];
-            if (!bag) continue;
-            console.log(`actor.${key} direct:`, describeStatBag(bag));
-        }
-        console.groupEnd();
-    }
-
     function readActorStat(actor, statKey) {
         return resolveActorLiveStatDetailed(actor, getMonsterMetadata(resolveGameId(actor)), statKey).value;
     }
@@ -3353,8 +4229,51 @@
         };
     }
 
+    function readActorAttackDelay(actor) {
+        const autoCd = actor?.cooldown?.autoAttack ?? null;
+        let delayTicks = readStatBagLive(actor?.attackDelay);
+        if (delayTicks == null || delayTicks <= 0) {
+            delayTicks = readComponentNumber(autoCd, [
+                '_baseCooldown', 'baseCooldown', 'baseCooldownTicks', 'cooldownTicks'
+            ]);
+        }
+
+        if (!autoCd) {
+            return {
+                delayTicks: delayTicks != null && delayTicks > 0 ? delayTicks : null,
+                delayRemainingTicks: null,
+                delayReady: null
+            };
+        }
+
+        const remainingTicks = readComponentNumber(autoCd, [
+            '_currentCooldown', 'currentCooldown', 'remainingTicks', 'cooldownRemainingTicks'
+        ]);
+
+        let delayReady = null;
+        try {
+            if (autoCd.isOnCooldown === false) delayReady = true;
+            else if (autoCd.isOnCooldown === true) delayReady = false;
+            else if (remainingTicks != null) delayReady = remainingTicks <= 0;
+        } catch { /* ignore */ }
+
+        if (delayTicks == null || delayTicks <= 0) {
+            const fromCd = readComponentNumber(autoCd, [
+                '_baseCooldown', 'baseCooldown', 'baseCooldownTicks', 'cooldownTicks'
+            ]);
+            if (fromCd != null && fromCd > 0) delayTicks = fromCd;
+        }
+
+        return {
+            delayTicks: delayTicks != null && delayTicks > 0 ? delayTicks : null,
+            delayRemainingTicks: remainingTicks,
+            delayReady
+        };
+    }
+
     function readActorAttackSpeed(actor, metadata) {
-        const delayTicks = readStatBagLive(actor.attackDelay);
+        const attackDelayInfo = readActorAttackDelay(actor);
+        const delayTicks = attackDelayInfo.delayTicks;
         if (delayTicks != null && delayTicks > 0) {
             const attacksPerSecond = TICKS_PER_SECOND / delayTicks;
             return {
@@ -3388,49 +4307,25 @@
         return { value: null, source: null };
     }
 
-    function logUnitsStatProbe(actor, unit, metadata, cooldownInfo, attackSpeedInfo) {
-        const logKey = unit.collapseKey || `${unit.name}:${unit.tileIndex ?? 'x'}`;
-        if (unitsStatDebugLogged.has(logKey)) return;
-        unitsStatDebugLogged.add(logKey);
-
+    function warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo) {
         const missingStats = ['armor', 'magicResist', 'speed'].filter((k) => unit[k] == null);
         const missingMechanics = [];
         if (cooldownInfo.cooldownMs == null && metadata?.skill?.src) {
             missingMechanics.push('abilityCooldown');
         }
         if (attackSpeedInfo.value == null) missingMechanics.push('attackSpeed');
+        if (!missingStats.length && !missingMechanics.length) return;
+
+        const logKey = unit.collapseKey || `${unit.name}:${unit.tileIndex ?? 'x'}`;
+        if (unitsStatWarned.has(logKey)) return;
+        unitsStatWarned.add(logKey);
 
         const prefix = `[${modName}][UnitsStat]`;
         if (missingStats.length) {
-            console.log(`${prefix} ${unit.name}: missing stats ${missingStats.join(', ')}`);
+            console.warn(`${prefix} ${unit.name}: missing stats ${missingStats.join(', ')}`);
         }
         if (missingMechanics.length) {
-            console.log(`${prefix} ${unit.name}: missing mechanics ${missingMechanics.join(', ')}`);
-        }
-
-        console.log(`${prefix} ${unit.name} top-level keys:`, Object.keys(actor));
-        console.log(`${prefix} ${unit.name} resolved stats:`, {
-            ad: unit.ad, ap: unit.ap, armor: unit.armor, magicResist: unit.magicResist, speed: unit.speed,
-            attackSpeed: attackSpeedInfo.value, attackSpeedSource: attackSpeedInfo.source,
-            cooldownMs: cooldownInfo.cooldownMs,
-            cooldownTicks: cooldownInfo.cooldownTicks,
-            cooldownRemainingMs: cooldownInfo.cooldownRemainingMs,
-            cooldownRemainingTicks: cooldownInfo.cooldownRemainingTicks,
-            cooldownReady: cooldownInfo.cooldownReady
-        });
-        console.log(`${prefix} ${unit.name} stat-like bags:`, discoverActorStatLikeBags(actor));
-        console.log(`${prefix} ${unit.name} abilityCooldown raw:`, cooldownInfo.raw);
-        for (const statKey of ['ad', 'ap', 'armor', 'magicResist', 'speed']) {
-            const keys = LIVE_STAT_ALIASES[statKey] || [statKey];
-            for (const key of keys) {
-                const bag = actor[key];
-                if (!bag) continue;
-                console.log(`${prefix} ${unit.name} actor.${key}:`, {
-                    shape: summarizeBagShape(bag),
-                    live: readStatBagLive(bag),
-                    base: readStatBagBase(bag)
-                });
-            }
+            console.warn(`${prefix} ${unit.name}: missing mechanics ${missingMechanics.join(', ')}`);
         }
     }
 
@@ -3443,6 +4338,7 @@
         const gameId = resolveGameId(actor);
         const metadata = getMonsterMetadata(gameId);
         const cooldownInfo = readActorCooldown(actor, metadata);
+        const attackDelayInfo = readActorAttackDelay(actor);
         const attackSpeedInfo = readActorAttackSpeed(actor, metadata);
         const catalogBase = metadata?.baseStats ?? null;
         const statKeys = ['ad', 'ap', 'armor', 'magicResist', 'speed'];
@@ -3470,7 +4366,7 @@
             gameId,
             name: actor.name || actor.nickname || metadata?.name || 'Unknown',
             villain: actor.villain === true,
-            awaken: actor.awaken === true,
+            awaken: resolveActorAwakened(actor),
             level: readActorStat(actor, 'level') ?? actor.level,
             alive: hpSnapshot.alive,
             hp: hpSnapshot.hp,
@@ -3484,7 +4380,9 @@
             statSources: Object.fromEntries(statKeys.map((k) => [k, statResolutions[k].source])),
             attackSpeed: attackSpeedInfo.value,
             attackSpeedSource: attackSpeedInfo.source,
-            attackDelayTicks: attackSpeedInfo.delayTicks ?? null,
+            attackDelayTicks: attackDelayInfo.delayTicks ?? attackSpeedInfo.delayTicks ?? null,
+            attackDelayRemainingTicks: attackDelayInfo.delayRemainingTicks,
+            attackDelayReady: attackDelayInfo.delayReady,
             cooldownMs: cooldownInfo.cooldownMs,
             cooldownTicks: cooldownInfo.cooldownTicks,
             cooldownReady: cooldownInfo.cooldownReady,
@@ -3493,24 +4391,31 @@
             abilitySrc: cooldownInfo.abilitySrc,
             silenced: actor.silenceComponent?.isSilenced === true,
             buffedCount: Array.isArray(actor.buffed) ? actor.buffed.length : null,
+            statusEffects: collectActorStatusEffects(actor),
             roles: Array.isArray(metadata?.roles) ? metadata.roles : [],
             baseStats: Object.keys(fightBaseStats).length ? fightBaseStats : null,
             tileIndex: actor.position?.tile?.index ?? actor.position?.tileIndex ?? null,
             equipment: resolveEquipmentFromActor(actor),
+            genes: extractBoardGeneStats(actor),
+            shiny: actor.shiny === true,
             source: 'fight',
             collapseKey: resolveFightCollapseKey(actor)
         };
 
-        logStatResolutionTrace(actor, unit, metadata, statResolutions, baseResolutions);
-        logUnitsStatProbe(actor, unit, metadata, cooldownInfo, attackSpeedInfo);
+        warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo);
         return unit;
     }
 
     const EQUIP_STAT_ICONS = {
         hp: '/assets/icons/heal.png',
         ad: '/assets/icons/attackdamage.png',
-        ap: '/assets/icons/abilitypower.png'
+        ap: '/assets/icons/abilitypower.png',
+        armor: '/assets/icons/armor.png',
+        mr: '/assets/icons/magicresist.png',
+        magicresist: '/assets/icons/magicresist.png'
     };
+
+    const UNIT_PORTRAIT_SIZE = 34;
 
     function getEquipmentCatalogMeta(gameId) {
         if (gameId == null) return null;
@@ -3651,21 +4556,322 @@
         return parts.join(' · ');
     }
 
-    function renderEquipmentHtml(equipment) {
-        if (!equipment) return '';
-        const summary = formatEquipmentSummary(equipment);
-        if (!summary) return '';
-        const stat = String(equipment.stat || '').toLowerCase();
-        const statIcon = EQUIP_STAT_ICONS[stat];
-        let iconHtml = '';
-        if (equipment.spriteId != null) {
-            iconHtml = `<span class="bs-equip-icon sprite item relative id-${equipment.spriteId}">` +
-                `<span class="bs-equip-viewport viewport"><img alt="" data-cropped="false" class="spritesheet"></span>` +
-                (statIcon ? `<img class="bs-equip-stat" src="${statIcon}" alt="${escapeHtml(stat)}">` : '') +
-                `</span>`;
+    function clampEquipTier(value) {
+        const parsed = parseInt(value, 10);
+        if (!Number.isFinite(parsed)) return 1;
+        return Math.min(5, Math.max(1, parsed));
+    }
+
+    function calculateTierFromStats(monster) {
+        if (!monster) return 1;
+        const statSum = (Number(monster.hp) || 0) +
+            (Number(monster.ad) || 0) +
+            (Number(monster.ap) || 0) +
+            (Number(monster.armor) || 0) +
+            (Number(monster.magicResist) || 0);
+        if (statSum >= 80) return 5;
+        if (statSum >= 70) return 4;
+        if (statSum >= 60) return 3;
+        if (statSum >= 50) return 2;
+        return 1;
+    }
+
+    function toUnitPortraitMonster(unit) {
+        const genes = unit.genes || {};
+        return {
+            hp: genes.hp ?? 1,
+            ad: genes.ad ?? 1,
+            ap: genes.ap ?? 1,
+            armor: genes.armor ?? 1,
+            magicResist: genes.magicResist ?? 1,
+            shiny: unit.shiny === true,
+            awaken: unit.awaken === true,
+            awakened: unit.awaken === true,
+            isAwakened: unit.awaken === true
+        };
+    }
+
+    function isUnitMaxGenes(unit) {
+        const level = Number(unit.level);
+        if (level !== 99) return false;
+        const monster = toUnitPortraitMonster(unit);
+        return monster.hp === 20 &&
+            monster.ad === 20 &&
+            monster.ap === 20 &&
+            monster.armor === 20 &&
+            monster.magicResist === 20;
+    }
+
+    function isUnitAwakened(unit) {
+        return unit.awaken === true;
+    }
+
+    function stripUnitPortraitLevelIndicators(slot) {
+        if (!slot) return;
+        slot.querySelectorAll('.pixel-font-16').forEach((element) => element.remove());
+        const levelSpan = slot.querySelector('span[translate="no"]') ||
+            slot.querySelector('img[alt="creature"] + span') ||
+            slot.querySelector('img[alt="Monster"] + span');
+        if (levelSpan) levelSpan.remove();
+    }
+
+    function applyUnitPortraitBorder(slot, unit) {
+        if (!slot || !unit) return;
+        const monster = toUnitPortraitMonster(unit);
+        const statTier = calculateTierFromStats(monster);
+        const maxGenes = isUnitMaxGenes(unit);
+        const awakened = isUnitAwakened(unit);
+        const shiny = monster.shiny === true;
+
+        let rarityBg = slot.querySelector('.has-rarity, .rarity-awaken, .rarity-shiny, .rarity-hundo');
+        if (!rarityBg) {
+            rarityBg = document.createElement('div');
+            slot.insertBefore(rarityBg, slot.firstChild);
         }
-        return `<div class="bs-row bs-equip-row"><span class="bs-label">Equip:</span>` +
-            `<span class="bs-equip-content">${iconHtml}<span>${escapeHtml(summary)}</span></span></div>`;
+
+        if (maxGenes && shiny) {
+            rarityBg.className = 'absolute inset-0 z-2 opacity-80 rarity-shiny';
+            rarityBg.removeAttribute('data-rarity');
+        } else if (maxGenes) {
+            rarityBg.className = 'absolute inset-0 z-1 opacity-80 rarity-hundo';
+            rarityBg.removeAttribute('data-rarity');
+        } else if (awakened) {
+            rarityBg.className = 'absolute inset-0 z-2 opacity-80 rarity-awaken';
+            rarityBg.removeAttribute('data-rarity');
+        } else {
+            rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+            rarityBg.setAttribute('data-rarity', String(Math.min(5, statTier)));
+        }
+
+        let starIcon = slot.querySelector('img.tier-stars, img[alt="star tier"], img[alt="shiny-tier"], img[alt="hundo-tier"]');
+        if (maxGenes) {
+            const iconSrc = shiny ? '/assets/icons/star-tier-shiny.png' : '/assets/icons/star-tier-hundo.png';
+            if (!starIcon) {
+                starIcon = document.createElement('img');
+                starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+                slot.appendChild(starIcon);
+            }
+            starIcon.src = iconSrc;
+            starIcon.alt = shiny ? 'shiny-tier' : 'hundo-tier';
+        } else if (awakened) {
+            if (!starIcon) {
+                starIcon = document.createElement('img');
+                starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+                starIcon.alt = 'star tier';
+                slot.appendChild(starIcon);
+            }
+            starIcon.src = '/assets/icons/star-tier-awaken.png';
+            starIcon.alt = 'star tier';
+        } else if (statTier > 1) {
+            if (!starIcon) {
+                starIcon = document.createElement('img');
+                starIcon.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+                starIcon.alt = 'star tier';
+                slot.appendChild(starIcon);
+            }
+            starIcon.src = `/assets/icons/star-tier-${Math.min(4, statTier)}.png`;
+        } else if (starIcon) {
+            starIcon.remove();
+        }
+    }
+
+    function scaleUnitPortraitElement(element, size) {
+        if (!element) return;
+        const sizePx = `${size}px`;
+        element.style.width = sizePx;
+        element.style.height = sizePx;
+        element.style.maxWidth = sizePx;
+        element.style.maxHeight = sizePx;
+        element.style.flexShrink = '0';
+
+        const creatureImg = element.querySelector?.('img[alt="creature"]');
+        if (creatureImg) {
+            creatureImg.width = size;
+            creatureImg.height = size;
+        }
+    }
+
+    function scaleUnitEquipmentPortrait(element) {
+        if (!element) return element;
+        const portrait = element.classList?.contains('equipment-portrait')
+            ? element
+            : element.querySelector('.equipment-portrait');
+        const target = portrait || element;
+        scaleUnitPortraitElement(target, UNIT_PORTRAIT_SIZE);
+        return target;
+    }
+
+    function extractUnitEquipmentPortrait(itemPortrait) {
+        if (!itemPortrait) return null;
+
+        let portrait = itemPortrait;
+        if (itemPortrait.tagName === 'BUTTON') {
+            portrait = itemPortrait.querySelector('.equipment-portrait') ||
+                Array.from(itemPortrait.children).find((child) => child.tagName === 'DIV');
+            if (!portrait) return null;
+            portrait = portrait.cloneNode(true);
+        }
+
+        portrait.classList.add('pointer-events-none');
+        return scaleUnitEquipmentPortrait(portrait);
+    }
+
+    function getEquipStatIconSrc(stat) {
+        const statType = String(stat || 'ad').toLowerCase();
+        return EQUIP_STAT_ICONS[statType] || EQUIP_STAT_ICONS.ad;
+    }
+
+    function createUnitEquipmentPortraitFallback(spriteId, stat, tier) {
+        if (spriteId == null) return null;
+
+        const portrait = document.createElement('div');
+        portrait.className = 'equipment-portrait surface-darker relative';
+        portrait.style.position = 'relative';
+        portrait.style.overflow = 'hidden';
+
+        const rarityBg = document.createElement('div');
+        rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+        rarityBg.setAttribute('data-rarity', String(clampEquipTier(tier)));
+        portrait.appendChild(rarityBg);
+
+        const spriteContainer = document.createElement('div');
+        spriteContainer.className = `sprite item relative id-${spriteId}`;
+        const viewport = document.createElement('div');
+        viewport.className = 'viewport';
+        const img = document.createElement('img');
+        img.alt = String(spriteId);
+        img.className = 'spritesheet';
+        img.style.cssText = '--cropX: 0; --cropY: 0;';
+        viewport.appendChild(img);
+        spriteContainer.appendChild(viewport);
+        portrait.appendChild(spriteContainer);
+
+        const statIconContainer = document.createElement('div');
+        statIconContainer.className = 'absolute bottom-0 left-0 z-2 flex size-full items-end pb-px pl-0.5';
+        statIconContainer.style.cssText = 'background: radial-gradient(circle at left bottom, rgba(0, 0, 0, 0.5) 6px, transparent 24px)';
+        const statIcon = document.createElement('img');
+        statIcon.className = 'pixelated size-[calc(11px*var(--zoomFactor))]';
+        statIcon.alt = 'stat type';
+        statIcon.src = getEquipStatIconSrc(stat);
+        statIconContainer.appendChild(statIcon);
+        portrait.appendChild(statIconContainer);
+
+        return scaleUnitEquipmentPortrait(portrait);
+    }
+
+    function createUnitEquipmentPortrait(equipment) {
+        if (!equipment || equipment.spriteId == null) return null;
+        const options = {
+            itemId: equipment.spriteId,
+            stat: equipment.stat || 'ad',
+            tier: clampEquipTier(equipment.tier)
+        };
+
+        // Use BestiaryUIComponents directly (like Hero_Editor monster portraits).
+        // api.ui.components.createItemPortrait warns on every call when UI isn't loaded.
+        if (window.BestiaryUIComponents?.createItemPortrait) {
+            try {
+                return extractUnitEquipmentPortrait(window.BestiaryUIComponents.createItemPortrait(options));
+            } catch { /* fall through */ }
+        }
+
+        return createUnitEquipmentPortraitFallback(options.itemId, options.stat, options.tier);
+    }
+
+    function finalizeUnitMonsterSlot(slot, unit) {
+        if (!slot) return null;
+        slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden shrink-0';
+        slot.style.position = 'relative';
+        scaleUnitPortraitElement(slot, UNIT_PORTRAIT_SIZE);
+        applyUnitPortraitBorder(slot, unit);
+        stripUnitPortraitLevelIndicators(slot);
+        return slot;
+    }
+
+    function createUnitMonsterPortraitFallback(unit) {
+        if (!unit?.gameId) return null;
+        const slot = document.createElement('div');
+        slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden shrink-0';
+        slot.style.position = 'relative';
+
+        const monsterImg = document.createElement('img');
+        monsterImg.className = 'pixelated';
+        monsterImg.alt = 'creature';
+        monsterImg.src = `/assets/portraits/${unit.gameId}.png`;
+        slot.appendChild(monsterImg);
+
+        return finalizeUnitMonsterSlot(slot, unit);
+    }
+
+    function createUnitMonsterPortrait(unit) {
+        if (!unit?.gameId) return null;
+        const monster = toUnitPortraitMonster(unit);
+        const tier = calculateTierFromStats(monster);
+
+        if (window.BestiaryUIComponents?.createMonsterPortrait) {
+            try {
+                const root = window.BestiaryUIComponents.createMonsterPortrait({
+                    monsterId: unit.gameId,
+                    level: unit.level || 1,
+                    tier
+                });
+                const slot = root.querySelector('.container-slot');
+                if (slot) {
+                    slot.remove();
+                    return finalizeUnitMonsterSlot(slot, unit);
+                }
+                return finalizeUnitMonsterSlot(root, unit);
+            } catch { /* fall through */ }
+        }
+
+        return createUnitMonsterPortraitFallback(unit);
+    }
+
+    function hydrateUnitCardPortraits(card, unit) {
+        if (!card || !unit) return;
+        const equipSummary = unit.equipment ? formatEquipmentSummary(unit.equipment) : '';
+
+        const portraitMount = card.querySelector('.bs-portrait-mount');
+        if (portraitMount) {
+            if (unit.gameId) {
+                const portrait = createUnitMonsterPortrait(unit);
+                if (portrait) portraitMount.replaceWith(portrait);
+                else portraitMount.remove();
+            } else {
+                portraitMount.remove();
+            }
+        }
+
+        const equipMount = card.querySelector('.bs-equip-mount');
+        if (equipMount) {
+            equipMount.innerHTML = '';
+            scaleUnitPortraitElement(equipMount, UNIT_PORTRAIT_SIZE);
+            if (unit.equipment?.spriteId != null) {
+                const equipPortrait = createUnitEquipmentPortrait(unit.equipment);
+                if (equipPortrait) {
+                    if (equipSummary) equipMount.title = equipSummary;
+                    equipMount.appendChild(equipPortrait);
+                }
+            }
+        }
+    }
+
+    function hydrateUnitCard(card, unit) {
+        if (!card || !unit) return;
+        hydrateUnitCardPortraits(card, unit);
+        hydrateUnitCardAbility(card, unit);
+    }
+
+    function hydrateAllUnitPortraits(body, units) {
+        if (!body || !Array.isArray(units)) return;
+        const unitByKey = new Map();
+        for (const unit of units) {
+            unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
+        }
+        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
+            const unit = unitByKey.get(card.dataset.unitKey);
+            if (unit) hydrateUnitCard(card, unit);
+        }
     }
 
     function resolvePlayerMonsterByDatabaseId(databaseId) {
@@ -3808,12 +5014,12 @@
         }
         const fightEnemy = key.match(/^fight:enemy:([^:]+):([^:]+):([^:#]+)/);
         if (fightEnemy) {
-            const [, a, b, c] = fightEnemy;
-            if (/^\d+$/.test(a) && /^\d+$/.test(b)) {
-                const rid = resolveCurrentRoomId() ?? 'x';
-                return `preview:enemy:${rid}:${a}:${b}`;
+            const [, roomId, gameId, tile] = fightEnemy;
+            const rid = resolveCurrentRoomId() ?? roomId ?? 'x';
+            if (/^\d+$/.test(gameId)) {
+                return `preview:enemy:${rid}:${gameId}:${tile}`;
             }
-            return `preview:enemy:${a}:${b}:${c}`;
+            return `preview:enemy:${roomId}:${gameId}:${tile}`;
         }
         return key;
     }
@@ -3829,7 +5035,35 @@
         const normalized = normalizeCollapseKey(key);
         collapsedOverrides.set(normalized, collapsed === true);
         if (normalized !== key) collapsedOverrides.delete(key);
-        saveCollapsedOverrides();
+    }
+
+    function readOpenAbilityOverride(key) {
+        const normalized = normalizeCollapseKey(key);
+        if (openAbilityOverrides.has(normalized)) return openAbilityOverrides.get(normalized);
+        if (normalized !== key && openAbilityOverrides.has(key)) return openAbilityOverrides.get(key);
+        return undefined;
+    }
+
+    function writeOpenAbilityOverride(key, open) {
+        const normalized = normalizeCollapseKey(key);
+        openAbilityOverrides.set(normalized, open === true);
+        if (normalized !== key) openAbilityOverrides.delete(key);
+        markUnitsInteraction();
+    }
+
+    function clearOpenAbilityOverrides() {
+        openAbilityOverrides.clear();
+    }
+
+    function defaultUnitAbilityOpen() {
+        return false;
+    }
+
+    function isUnitAbilityOpen(unit) {
+        const key = normalizeCollapseKey(getUnitCollapseKey(unit));
+        const stored = readOpenAbilityOverride(key);
+        if (stored !== undefined) return stored;
+        return defaultUnitAbilityOpen();
     }
 
     function isPanelElementVisible(el) {
@@ -3883,13 +5117,13 @@
         if (e.button !== 0) return;
         const panel = document.getElementById(PANEL_ID);
         if (isPanelResizePointer(e, panel)) return;
-        if (e.target.closest('details, summary, a, button, input, label, .bs-switch')) return;
+        if (e.target.closest('.bs-ability-details, .bs-ability-summary, details, summary, a, button, input, label, .bs-switch')) return;
         const card = e.target.closest('.bs-card');
         if (!card) return;
         const key = card.getAttribute('data-unit-key');
         if (!key) return;
-        const currentlyCollapsed = readCollapsedOverride(key);
-        const nextCollapsed = currentlyCollapsed === undefined ? false : !currentlyCollapsed;
+        const currentlyCollapsed = readCollapsedOverride(key) ?? defaultUnitCollapsed();
+        const nextCollapsed = !currentlyCollapsed;
         writeCollapsedOverride(key, nextCollapsed);
         applyUnitCardCollapsedState(card, nextCollapsed);
         markUnitsInteraction();
@@ -3898,9 +5132,11 @@
     function ensureUnitsBodyListener() {
         const body = document.getElementById(UNITS_BODY_ID);
         if (!body) return;
-        if (unitsBodyClickHandler) return;
-        unitsBodyClickHandler = handleUnitsBodyPointerDown;
-        body.addEventListener('pointerdown', unitsBodyClickHandler, true);
+        if (!unitsBodyClickHandler) {
+            unitsBodyClickHandler = handleUnitsBodyPointerDown;
+            body.addEventListener('pointerdown', unitsBodyClickHandler, true);
+        }
+        ensureUnitsBodyAbilityListener();
     }
 
     function teardownUnitsBodyListener() {
@@ -3909,6 +5145,7 @@
             body.removeEventListener('pointerdown', unitsBodyClickHandler, true);
         }
         unitsBodyClickHandler = null;
+        teardownUnitsBodyAbilityListener();
     }
 
     function resolveBoardPiece(piece) {
@@ -3928,9 +5165,10 @@
                 gameId,
                 name: metadata?.name || `#${gameId}`,
                 villain: piece.villain === true,
-                awaken: monster.awaken === true || monster.awakened === true || monster.isAwakened === true,
+                awaken: isBoardPlayerPieceAwakened(piece, monster),
                 level,
                 genes: extractBoardGeneStats(monster),
+                shiny: monster.shiny === true,
                 tileIndex,
                 equipment: resolveEquipmentFromPiece(piece),
                 identity: String(databaseId)
@@ -3944,9 +5182,11 @@
             gameId,
             name: piece.nickname || metadata?.name || `#${gameId}`,
             villain: piece.villain === true,
-            awaken: piece.awaken === true || piece.awakened === true || piece.isAwakened === true,
+            awaken: hasCreatureAwakenFlags(piece, piece.monster) ||
+                (Number(piece.tier) === 5 && piece.type === 'player'),
             level: resolveBoardPieceLevel(piece, null),
             genes: extractBoardGeneStats(piece),
+            shiny: piece.shiny === true,
             tileIndex,
             equipment: resolveEquipmentFromPiece(piece),
             identity: String(piece.key ?? piece.type ?? 'spawn')
@@ -3983,6 +5223,8 @@
             roomId: roomId ?? null,
             tileIndex: resolved.tileIndex,
             equipment: resolved.equipment ?? null,
+            genes: resolved.genes ?? null,
+            shiny: resolved.shiny === true,
             mergeKey: unitKey,
             collapseKey: unitKey,
             alive: true
@@ -4020,11 +5262,22 @@
     }
 
     function collectActorSnapshots() {
-        if (!isFightActive()) return null;
+        if (!isFightActive()) {
+            invalidateActorSnapshotsCache();
+            return null;
+        }
+        const engineTick = readTickFromEngine();
+        if (engineTick != null
+            && cachedActorSnapshots
+            && cachedActorSnapshotsTick === engineTick) {
+            return cachedActorSnapshots;
+        }
         const world = getActiveWorld();
         if (!world?.grid) return null;
         const actors = world.grid.actors || [];
-        return actors.map((a) => probeActor(a)).filter(Boolean);
+        cachedActorSnapshots = actors.map((a) => probeActor(a)).filter(Boolean);
+        cachedActorSnapshotsTick = engineTick;
+        return cachedActorSnapshots;
     }
 
     function splitByTeam(units) {
@@ -4040,19 +5293,32 @@
         return { allies, enemies };
     }
 
+    function getAbilityInfo(gameId) {
+        if (gameId == null) return null;
+        const skill = getMonsterMetadata(gameId)?.skill;
+        if (!skill) return null;
+        const src = normalizeSpellSrc(skill.src) || skill.src || null;
+        return {
+            name: skill.name || humanizeEffectSrc(src) || 'Ability',
+            src,
+            icon: resolveSkillIcon(skill),
+            TooltipContent: skill.TooltipContent || null
+        };
+    }
+
     function getAbilityText(gameId, awaken, options = {}) {
         const truncate = options.truncate ?? null;
-        const skill = getMonsterMetadata(gameId)?.skill;
-        const TooltipContent = skill?.TooltipContent;
+        const abilityInfo = getAbilityInfo(gameId);
+        const TooltipContent = abilityInfo?.TooltipContent;
         const createUIComponent = globalThis.state?.utils?.createUIComponent;
         if (!TooltipContent || typeof createUIComponent !== 'function') return '';
 
         try {
             const host = document.createElement('div');
-            host.style.cssText = 'position:fixed;left:-99999px;top:0;width:400px;opacity:0;pointer-events:none;';
+            host.style.cssText = 'position:fixed;left:-99999px;top:0;width:520px;max-width:520px;height:auto;overflow:visible;opacity:0;pointer-events:none;z-index:-1;';
             const root = document.createElement('div');
             root.className = 'tooltip-prose';
-            root.style.fontSize = '11px';
+            root.style.cssText = 'width:100%;font-size:11px;line-height:1.1;';
             host.appendChild(root);
             document.body.appendChild(host);
 
@@ -4073,8 +5339,134 @@
         }
     }
 
-    function tryRenderAbilitySnippet(gameId, awaken) {
-        return getAbilityText(gameId, awaken, { truncate: 220 });
+    function unmountUnitAbilityDetails(details) {
+        if (!details) return;
+        if (details._abilityComponent?.unmount) {
+            try { details._abilityComponent.unmount(); } catch { /* ignore */ }
+        }
+        details._abilityComponent = null;
+        delete details.dataset.abilityMountKey;
+        const mount = details.querySelector('.bs-ability-mount');
+        if (mount) mount.innerHTML = '';
+    }
+
+    function abilityMountKey(unit) {
+        if (!unit?.gameId) return null;
+        return `${unit.gameId}:${unit.awaken ? 1 : 0}`;
+    }
+
+    function mountUnitAbilityDetails(details, unit) {
+        if (!details || !unit?.gameId) return;
+        const mountKey = abilityMountKey(unit);
+        if (mountKey && details.dataset.abilityMountKey === mountKey && details._abilityComponent) {
+            return;
+        }
+        const abilityInfo = getAbilityInfo(unit.gameId);
+        const mount = details.querySelector('.bs-ability-mount');
+        if (!mount) return;
+
+        unmountUnitAbilityDetails(details);
+        if (!abilityInfo?.TooltipContent) {
+            mount.textContent = 'Ability details unavailable';
+            return;
+        }
+
+        const createUIComponent = globalThis.state?.utils?.createUIComponent;
+        if (typeof createUIComponent !== 'function') {
+            mount.textContent = 'Ability details unavailable';
+            return;
+        }
+
+        const root = document.createElement('div');
+        root.className = 'tooltip-prose bs-ability-tooltip';
+        root.style.cssText = 'width:100%;color:#ccc;font-size:10px;line-height:1.35;';
+        mount.appendChild(root);
+
+        try {
+            const component = unit.awaken
+                ? createUIComponent(root, abilityInfo.TooltipContent, { awaken: true })
+                : createUIComponent(root, abilityInfo.TooltipContent);
+            if (component?.mount) component.mount();
+            details._abilityComponent = component;
+            if (mountKey) details.dataset.abilityMountKey = mountKey;
+            root.querySelectorAll('blockquote').forEach((bq) => {
+                bq.style.setProperty('font-size', '10px', 'important');
+            });
+        } catch {
+            mount.textContent = 'Ability details unavailable';
+        }
+    }
+
+    function renderAbilityBlockHtml(unit) {
+        const abilityInfo = unit.gameId ? getAbilityInfo(unit.gameId) : null;
+        if (!abilityInfo) {
+            if (!unit.abilitySrc) return '';
+            return `<div class="bs-row"><span class="bs-label">Ability:</span> ${escapeHtml(unit.abilitySrc)}</div>`;
+        }
+
+        const summaryParts = [];
+        if (abilityInfo.icon) {
+            summaryParts.push(`<img class="bs-ability-icon pixelated" src="${escapeHtml(abilityInfo.icon)}" alt=""` +
+                ` onerror="this.style.display='none'">`);
+        }
+        summaryParts.push(`<span class="bs-ability-name">${escapeHtml(abilityInfo.name)}</span>`);
+        const summary = summaryParts.join('');
+
+        const openAttr = isUnitAbilityOpen(unit) ? ' open' : '';
+        const gameIdAttr = unit.gameId != null ? ` data-unit-game-id="${escapeHtml(String(unit.gameId))}"` : '';
+        const awakenAttr = ` data-unit-awaken="${unit.awaken ? '1' : '0'}"`;
+
+        return `<details class="bs-details bs-ability-details"${openAttr}${gameIdAttr}${awakenAttr}>` +
+            `<summary class="bs-ability-summary" title="Click to expand ability details">` +
+                `<span class="bs-ability-chevron" aria-hidden="true">▶</span>` +
+                `<span class="bs-label">Ability</span>` +
+                summary +
+            `</summary>` +
+            `<div class="bs-ability-mount"></div>` +
+        `</details>`;
+    }
+
+    function hydrateUnitCardAbility(card, unit) {
+        const details = card?.querySelector('.bs-ability-details');
+        if (!details) return;
+        if (unit.gameId != null) details.dataset.unitGameId = String(unit.gameId);
+        details.dataset.unitAwaken = unit.awaken ? '1' : '0';
+        if (details.open) mountUnitAbilityDetails(details, unit);
+    }
+
+    function resolveUnitFromAbilityDetails(details) {
+        if (!details) return null;
+        const gameId = Number(details.dataset.unitGameId);
+        return {
+            gameId: Number.isFinite(gameId) ? gameId : null,
+            awaken: details.dataset.unitAwaken === '1'
+        };
+    }
+
+    function handleUnitsBodyAbilityToggle(e) {
+        const details = e.target;
+        if (!details?.classList?.contains('bs-ability-details')) return;
+        const card = details.closest('.bs-card');
+        const key = card?.dataset?.unitKey;
+        if (key) writeOpenAbilityOverride(key, details.open);
+        if (details.open) mountUnitAbilityDetails(details, resolveUnitFromAbilityDetails(details));
+        else unmountUnitAbilityDetails(details);
+    }
+
+    function ensureUnitsBodyAbilityListener() {
+        const body = document.getElementById(UNITS_BODY_ID);
+        if (!body) return;
+        if (unitsBodyAbilityToggleHandler) return;
+        unitsBodyAbilityToggleHandler = handleUnitsBodyAbilityToggle;
+        body.addEventListener('toggle', unitsBodyAbilityToggleHandler, true);
+    }
+
+    function teardownUnitsBodyAbilityListener() {
+        const body = document.getElementById(UNITS_BODY_ID);
+        if (body && unitsBodyAbilityToggleHandler) {
+            body.removeEventListener('toggle', unitsBodyAbilityToggleHandler, true);
+        }
+        unitsBodyAbilityToggleHandler = null;
     }
 
     function formatStatLineForExport(label, live, base) {
@@ -4123,23 +5515,39 @@
 
         const attackDelayTicks = resolveUnitAttackDelayTicks(unit);
         if (attackDelayTicks != null) {
-            lines.push(`  Atk delay: ${formatTicks(attackDelayTicks)}`);
+            const atkRemainingTicks = resolveUnitAttackDelayRemainingTicks(unit);
+            let atkState = unit.attackDelayReady === true
+                ? 'ready'
+                : atkRemainingTicks != null && atkRemainingTicks > 0
+                    ? `${formatTicks(atkRemainingTicks)} left`
+                    : unit.attackDelayReady === false
+                        ? 'on cooldown'
+                        : null;
+            lines.push(`  Atk delay: ${formatTicks(attackDelayTicks)}` +
+                (atkState ? ` · ${atkState}` : ''));
         }
 
         const cooldownTicks = resolveUnitCooldownTicks(unit);
         if (cooldownTicks != null) {
-            const cdReady = unit.cooldownReady === true;
             const cdRemainingTicks = resolveUnitCooldownRemainingTicks(unit);
-            let cdState = cdReady
+            let cdState = unit.cooldownReady === true
                 ? 'ready'
                 : cdRemainingTicks != null && cdRemainingTicks > 0
                     ? `${formatTicks(cdRemainingTicks)} left`
-                    : 'on cooldown';
-            lines.push(`  Ability CD: ${formatTicks(cooldownTicks)} · ${cdState}`);
+                    : unit.cooldownReady === false
+                        ? 'on cooldown'
+                        : null;
+            lines.push(`  Ability CD: ${formatTicks(cooldownTicks)}` +
+                (cdState ? ` · ${cdState}` : ''));
         }
 
-        if (unit.abilitySrc) lines.push(`  Ability: ${unit.abilitySrc}`);
+        const exportAbilityInfo = unit.gameId ? getAbilityInfo(unit.gameId) : null;
+        if (exportAbilityInfo?.name) lines.push(`  Ability: ${exportAbilityInfo.name}`);
+        else if (unit.abilitySrc) lines.push(`  Ability: ${unit.abilitySrc}`);
         if (unit.silenced) lines.push('  Silenced');
+        if (unit.statusEffects?.length) {
+            lines.push(`  Status: ${unit.statusEffects.map((e) => e.label).join(', ')}`);
+        }
         if (unit.buffedCount != null && unit.buffedCount > 0) {
             lines.push(`  Active buffs on others: ${unit.buffedCount}`);
         }
@@ -4154,17 +5562,23 @@
     function buildStatusTextForExport() {
         const lines = [];
         const sandbox = isSandboxMode();
-        const fighting = isFightActive();
-        const tick = getCurrentTick();
+        const fightEnded = isPanelFightResolved() && panelFightTickFrozen != null;
+        const fighting = isLiveFightTracking();
+        const tick = getFightTick();
         const seed = getSeed();
         const modeLabel = getPlayModeLabel();
-        const fightEnded = panelFightEndState != null && panelFightTickFrozen != null;
         const roomName = getRoomDisplayName(resolveCurrentRoomId());
 
         if (roomName) lines.push(`Map: ${roomName}`);
         if (modeLabel) lines.push(`Mode: ${modeLabel}`);
 
-        if (fighting) {
+        if (fightEnded) {
+            const endLabel = panelFightEndState === 'victory' ? 'Victory' : 'Defeat';
+            const parts = [`${endLabel} · final tick ${getFightTick() ?? panelFightTickFrozen}`];
+            if (seed != null) parts.push(`seed ${seed}`);
+            parts.push(`${battleLog.length} log entries`);
+            lines.push(parts.join(' · '));
+        } else if (fighting) {
             const parts = ['Fight active'];
             if (tick != null) parts.push(`tick ${tick}`);
             if (seed != null) parts.push(`seed ${seed}`);
@@ -4175,12 +5589,6 @@
             } else if (!slowMotionEnabled && window.__turboState?.active) {
                 parts.push('turbo on');
             }
-            lines.push(parts.join(' · '));
-        } else if (fightEnded) {
-            const endLabel = panelFightEndState === 'victory' ? 'Victory' : 'Defeat';
-            const parts = [`${endLabel} · final tick ${panelFightTickFrozen}`];
-            if (seed != null) parts.push(`seed ${seed}`);
-            parts.push(`${battleLog.length} log entries`);
             lines.push(parts.join(' · '));
         } else {
             lines.push('Enemy preview uses scaleStat(catalog, level, eb genes) (allies use scaleStat).');
@@ -4200,15 +5608,53 @@
         return lines;
     }
 
+    function isCrossUnitHealEntry(entry) {
+        return Boolean(entry.from && entry.from !== '—' && entry.from !== entry.to);
+    }
+
     function formatBattleLogEntryForExport(entry) {
+        if (entry.kind === 'marker') {
+            if (entry.marker === 'start') return `[tick ${entry.tick}] Battle started`;
+            const label = entry.endState === 'victory' ? 'Victory'
+                : entry.endState === 'defeat' ? 'Defeat'
+                    : 'Battle ended';
+            return `[tick ${entry.tick}] ${label}`;
+        }
+        if (entry.kind === 'status') {
+            const sign = entry.applied ? '+' : '-';
+            return `[tick ${entry.tick}] ${entry.to}: ${sign}${entry.effectLabel}`;
+        }
+        if (entry.kind === 'pathing') {
+            return `[tick ${entry.tick}] ${entry.unit}: tile ${entry.fromTile} → tile ${entry.toTile}`;
+        }
+        if (entry.kind === 'abilityCast') {
+            return `[tick ${entry.tick}] ${entry.from}: cast ${entry.abilityName}`;
+        }
+        if (entry.kind === 'death') {
+            if (entry.killedBy) {
+                return `[tick ${entry.tick}] ${entry.killedBy} → ${entry.unit}: defeated`;
+            }
+            return `[tick ${entry.tick}] ${entry.unit}: defeated`;
+        }
         const source = entry.actionSource && entry.actionSource !== 'unknown'
             ? ` [${entry.actionSource}]`
             : '';
         const type = `${entry.damageType}${entry.crit ? ' crit' : ''}`;
         if (entry.kind === 'heal') {
-            return `[tick ${entry.tick}] ${entry.from} → ${entry.to}: +${entry.amount}${source} (${type})`;
+            const who = isCrossUnitHealEntry(entry) ? `${entry.from} → ${entry.to}` : entry.to;
+            return `[tick ${entry.tick}] ${who}: +${entry.amount}${source} (${type})`;
         }
-        return `[tick ${entry.tick}] ${entry.from} → ${entry.to}: ${entry.amount}${source} (${type})`;
+        const dmg = formatLogDamageAmount(entry.amount, entry.rawAmount);
+        return `[tick ${entry.tick}] ${entry.from} → ${entry.to}: ${dmg}${source} (${type})`;
+    }
+
+    function renderLogDamageAmount(entry) {
+        const applied = Math.abs(Math.round(entry.amount));
+        const raw = entry.rawAmount;
+        if (raw != null && raw !== applied) {
+            return `<span class="bs-log-dmg">${applied} <span class="bs-log-dmg-raw">(${raw})</span></span>`;
+        }
+        return `<span class="bs-log-dmg">${applied}</span>`;
     }
 
     function buildPanelExportText() {
@@ -4296,6 +5742,8 @@
                 --bs-frame-1: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
                 --bs-bg: url(/_next/static/media/background-dark.95edca67.png);
                 --bs-panel-bg: #282C34;
+                --bs-panel-inset: 8px;
+                --bs-panel-gap: 4px;
                 --bs-text: #ABB2BF;
                 --bs-gold: #E5C07B;
                 --bs-ally: #98C379;
@@ -4314,6 +5762,21 @@
                 border-image: var(--bs-frame-3);
                 box-shadow: 0 0 15px rgba(0,0,0,0.7);
                 font-family: Inter, sans-serif;
+                box-sizing: border-box;
+            }
+            #${PANEL_ID} *,
+            #${PANEL_ID} *::before,
+            #${PANEL_ID} *::after {
+                box-sizing: border-box;
+            }
+            #${PANEL_ID} .bs-header,
+            #${PANEL_ID} .bs-status,
+            #${PANEL_ID} .bs-speed-row,
+            #${PANEL_ID} .bs-tab-bar,
+            #${PANEL_ID} .bs-body {
+                width: calc(100% - (2 * var(--bs-panel-inset)));
+                margin-left: var(--bs-panel-inset);
+                margin-right: var(--bs-panel-inset);
             }
             #${PANEL_ID} .bs-header {
                 display: flex;
@@ -4323,9 +5786,10 @@
                 padding: 6px 8px;
                 cursor: move;
                 user-select: none;
-                border: 6px solid transparent;
+                border: 4px solid transparent;
                 border-image: var(--bs-frame-4);
-                margin: 2px;
+                margin-top: var(--bs-panel-gap);
+                margin-bottom: var(--bs-panel-gap);
             }
             #${PANEL_ID} .bs-title {
                 font-weight: bold;
@@ -4354,16 +5818,36 @@
                 line-height: 1;
             }
             #${PANEL_ID} .bs-status {
-                margin: 0 8px 4px;
-                padding: 4px 8px;
+                flex: 0 0 auto;
+                display: flex;
+                align-items: center;
+                margin-bottom: var(--bs-panel-gap);
+                padding: 0 8px;
+                min-height: 32px;
                 font-size: 11px;
                 line-height: 1.35;
                 color: #888;
                 border: 4px solid transparent;
                 border-image: var(--bs-frame-4);
+                overflow: hidden;
+            }
+            #${PANEL_ID} .bs-status-line {
+                flex: 1 1 auto;
+                min-width: 0;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            #${PANEL_ID} .bs-status b {
+                font-weight: 700;
+                color: var(--bs-text);
+            }
+            #${PANEL_ID} .bs-status-sep {
+                color: #555;
+                padding: 0 2px;
             }
             #${PANEL_ID} .bs-speed-row {
-                margin: 0 8px 6px;
+                margin-bottom: var(--bs-panel-gap);
                 padding: 6px 8px;
                 border: 4px solid transparent;
                 border-image: var(--bs-frame-4);
@@ -4452,7 +5936,7 @@
             }
             #${PANEL_ID} .bs-tab-bar {
                 display: flex;
-                margin: 0 2px;
+                margin-bottom: var(--bs-panel-gap);
                 flex: 0 0 auto;
                 gap: 2px;
             }
@@ -4474,19 +5958,37 @@
             }
             #${PANEL_ID} .bs-body {
                 flex: 1 1 auto;
+                min-height: 0;
                 overflow-y: auto;
-                margin: 0 2px 2px;
+                margin-bottom: var(--bs-panel-inset);
                 padding: 6px 6px 12px;
-                border: 6px solid transparent;
+                border: 4px solid transparent;
                 border-image: var(--bs-frame-4);
                 position: relative;
             }
             #${PANEL_ID} .bs-log-toolbar {
                 display: flex;
                 justify-content: space-between;
-                align-items: center;
+                align-items: flex-start;
+                gap: 8px;
                 margin-bottom: 6px;
+            }
+            #${PANEL_ID} .bs-log-toolbar-text {
+                flex: 1 1 auto;
+                min-width: 0;
+            }
+            #${PANEL_ID} .bs-log-title {
+                font-size: 12px;
+                font-weight: 800;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                color: var(--bs-gold);
+                line-height: 1.2;
+            }
+            #${PANEL_ID} .bs-log-subtitle {
+                margin-top: 3px;
                 font-size: 10px;
+                line-height: 1.35;
                 color: #888;
             }
             #${PANEL_ID} .bs-log-clear {
@@ -4519,6 +6021,14 @@
             }
             #${PANEL_ID} .bs-log-filter.filter-ally.active { color: var(--bs-ally); }
             #${PANEL_ID} .bs-log-filter.filter-enemy.active { color: var(--bs-enemy); }
+            #${PANEL_ID} .bs-log-filter.filter-neutral.active { color: var(--bs-gold); }
+            #${PANEL_ID} .bs-log-filter.filter-all {
+                font-weight: bold;
+                margin-right: 2px;
+            }
+            #${PANEL_ID} .bs-log-pathing { color: #9db4d8; }
+            #${PANEL_ID} .bs-log-ability { color: #C678DD; font-weight: 600; }
+            #${PANEL_ID} .bs-log-death { color: #E06C75; font-weight: 600; }
             #${PANEL_ID} .bs-log-source {
                 color: #b8a0d0;
                 font-size: 9px;
@@ -4535,6 +6045,7 @@
             #${PANEL_ID} .bs-log-name.ally { color: var(--bs-ally); }
             #${PANEL_ID} .bs-log-name.enemy { color: var(--bs-enemy); }
             #${PANEL_ID} .bs-log-dmg { color: #E5C07B; }
+            #${PANEL_ID} .bs-log-dmg-raw { color: #ABB2BF; font-size: 0.92em; }
             #${PANEL_ID} .bs-log-heal { color: #98C379; }
             #${PANEL_ID} .bs-log-type { color: #61AFEF; }
             #${PANEL_ID} .bs-units-columns {
@@ -4596,49 +6107,41 @@
                 flex: 0 0 auto;
             }
             #${PANEL_ID} .bs-toggle:hover { color: #ddd; }
-            #${PANEL_ID} .bs-portrait {
-                width: 22px;
-                height: 22px;
-                image-rendering: pixelated;
-                flex: 0 0 auto;
-            }
-            #${PANEL_ID} .bs-card.expanded .bs-portrait {
-                width: 28px;
-                height: 28px;
-            }
-            #${PANEL_ID} .bs-equip-row .bs-equip-content {
-                display: inline-flex;
+            #${PANEL_ID} .bs-portrait-group {
+                display: flex;
                 align-items: center;
-                gap: 6px;
-                min-width: 0;
-            }
-            #${PANEL_ID} .bs-equip-icon {
-                display: inline-block;
-                width: 32px;
-                height: 32px;
+                gap: 3px;
                 flex: 0 0 auto;
-                position: relative;
             }
-            #${PANEL_ID} .bs-equip-viewport {
-                display: block;
-                width: 100%;
-                height: 100%;
+            #${PANEL_ID} .bs-portrait-group .container-slot,
+            #${PANEL_ID} .bs-portrait-group .equipment-portrait,
+            #${PANEL_ID} .bs-equip-mount {
+                width: 34px;
+                height: 34px;
+                max-width: 34px;
+                max-height: 34px;
+                flex: 0 0 auto;
+                overflow: hidden;
             }
-            #${PANEL_ID} .bs-equip-stat {
-                position: absolute;
-                right: 0;
-                bottom: 0;
-                width: 12px;
-                height: 12px;
+            #${PANEL_ID} .bs-portrait-group img[alt="creature"] {
+                width: 34px;
+                height: 34px;
                 image-rendering: pixelated;
-                pointer-events: none;
             }
             #${PANEL_ID} .bs-compact-meta {
                 flex: 1 1 auto;
                 min-width: 0;
                 overflow: hidden;
             }
+            #${PANEL_ID} .bs-card-name-row {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                min-width: 0;
+            }
             #${PANEL_ID} .bs-card-name {
+                flex: 1 1 auto;
+                min-width: 0;
                 font-weight: 700;
                 color: #fff;
                 font-size: 12px;
@@ -4657,6 +6160,54 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+            }
+            #${PANEL_ID} .bs-status-effects {
+                display: flex;
+                flex: 0 1 auto;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 3px;
+                min-width: 0;
+                min-height: 0;
+            }
+            #${PANEL_ID} .bs-status-chip {
+                display: inline-flex;
+                align-items: center;
+                gap: 2px;
+                padding: 1px 4px;
+                border-radius: 2px;
+                font-size: 9px;
+                line-height: 1.2;
+                border: 1px solid rgba(255,255,255,0.12);
+                background: rgba(0,0,0,0.25);
+                max-width: 100%;
+                overflow: hidden;
+            }
+            #${PANEL_ID} .bs-status-chip.buff {
+                color: #9fd49f;
+                border-color: rgba(96,192,96,0.35);
+            }
+            #${PANEL_ID} .bs-status-chip.debuff {
+                color: #f0a0a0;
+                border-color: rgba(255,102,102,0.35);
+            }
+            #${PANEL_ID} .bs-status-chip.more {
+                color: #bbb;
+            }
+            #${PANEL_ID} .bs-status-icon {
+                width: 12px;
+                height: 12px;
+                flex: 0 0 auto;
+                image-rendering: pixelated;
+            }
+            #${PANEL_ID} .bs-log-status.applied { color: #9fd49f; }
+            #${PANEL_ID} .bs-log-status.removed { color: #c0c0c0; }
+            #${PANEL_ID} .bs-log-status.buff.applied { color: #9fd49f; }
+            #${PANEL_ID} .bs-log-status.debuff.applied { color: #f0a0a0; }
+            #${PANEL_ID} .bs-log-marker {
+                color: #d4af37;
+                font-weight: 600;
             }
             #${PANEL_ID} .bs-card-body {
                 margin-top: 6px;
@@ -4688,9 +6239,81 @@
             }
             #${PANEL_ID} details.bs-details summary {
                 cursor: pointer;
-                color: var(--bs-info);
                 font-size: 10px;
+            }
+            #${PANEL_ID} .bs-ability-details {
+                margin-top: 6px;
+            }
+            #${PANEL_ID} .bs-ability-summary {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                width: 100%;
+                margin: 0;
+                padding: 5px 8px;
+                list-style: none;
+                border: 2px solid #555;
+                background: rgba(0, 0, 0, 0.25);
+                user-select: none;
+            }
+            #${PANEL_ID} .bs-ability-summary::-webkit-details-marker {
+                display: none;
+            }
+            #${PANEL_ID} .bs-ability-summary::marker {
+                content: '';
+            }
+            #${PANEL_ID} .bs-ability-summary:hover {
+                border-color: #777;
+                background: rgba(255, 255, 255, 0.05);
+            }
+            #${PANEL_ID} .bs-ability-details[open] .bs-ability-summary {
+                border-color: var(--bs-info);
+                background: rgba(97, 175, 239, 0.08);
+            }
+            #${PANEL_ID} .bs-ability-chevron {
+                flex: 0 0 auto;
+                width: 10px;
+                color: #aaa;
+                font-size: 9px;
+                line-height: 1;
+                text-align: center;
+                transition: transform 0.12s ease, color 0.12s ease;
+            }
+            #${PANEL_ID} .bs-ability-summary:hover .bs-ability-chevron {
+                color: #ddd;
+            }
+            #${PANEL_ID} .bs-ability-details[open] .bs-ability-chevron {
+                color: var(--bs-info);
+                transform: rotate(90deg);
+            }
+            #${PANEL_ID} .bs-ability-summary .bs-label {
+                flex: 0 0 auto;
+                font-weight: 700;
+            }
+            #${PANEL_ID} .bs-ability-icon {
+                width: 14px;
+                height: 14px;
+                flex: 0 0 auto;
+                image-rendering: pixelated;
+            }
+            #${PANEL_ID} .bs-ability-name {
+                color: var(--bs-gold);
+                font-weight: 700;
+                flex: 1 1 auto;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            #${PANEL_ID} .bs-ability-mount {
                 margin-top: 4px;
+                padding: 4px 8px 2px 18px;
+                border-left: 2px solid rgba(97, 175, 239, 0.35);
+            }
+            #${PANEL_ID} .bs-ability-mount .tooltip-prose {
+                color: #ccc;
+                font-size: 10px;
+                line-height: 1.35;
             }
             #${PANEL_ID}.resizing {
                 user-select: none;
@@ -4872,6 +6495,59 @@
         document.body.style.userSelect = '';
     }
 
+    function ensurePanelDragListeners(panel) {
+        if (!panel || panelDragMouseMoveHandler) return;
+        panelDragState.panel = panel;
+        panelDragMouseMoveHandler = (e) => {
+            if (!panelDragState.dragging || !panelDragState.panel) return;
+            const p = panelDragState.panel;
+            const nl = clamp(e.clientX - panelDragState.dragX, 0, window.innerWidth - p.offsetWidth);
+            const nt = clamp(e.clientY - panelDragState.dragY, 0, window.innerHeight - p.offsetHeight);
+            p.style.left = `${nl}px`;
+            p.style.top = `${nt}px`;
+        };
+        panelDragMouseUpHandler = () => {
+            if (!panelDragState.dragging || !panelDragState.panel) return;
+            panelDragState.dragging = false;
+            document.body.style.userSelect = '';
+            savePanelSettings({
+                left: parseInt(panelDragState.panel.style.left, 10) || 0,
+                top: parseInt(panelDragState.panel.style.top, 10) || 0
+            });
+        };
+        document.addEventListener('mousemove', panelDragMouseMoveHandler);
+        document.addEventListener('mouseup', panelDragMouseUpHandler);
+    }
+
+    function teardownPanelDragListeners() {
+        if (panelDragMouseMoveHandler) {
+            document.removeEventListener('mousemove', panelDragMouseMoveHandler);
+            panelDragMouseMoveHandler = null;
+        }
+        if (panelDragMouseUpHandler) {
+            document.removeEventListener('mouseup', panelDragMouseUpHandler);
+            panelDragMouseUpHandler = null;
+        }
+        panelDragState.reset();
+        if (!panelResizeState.isResizing) {
+            document.body.style.userSelect = '';
+        }
+    }
+
+    function onPanelHeaderMouseDown(e) {
+        if (e.button !== 0) return;
+        if (e.target.tagName === 'BUTTON') return;
+        if (e.target.closest('.resize-handle')) return;
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel) return;
+        panelDragState.panel = panel;
+        panelDragState.dragging = true;
+        const rect = panel.getBoundingClientRect();
+        panelDragState.dragX = e.clientX - rect.left;
+        panelDragState.dragY = e.clientY - rect.top;
+        document.body.style.userSelect = 'none';
+    }
+
     function updatePanelPosition() {
         const panel = document.getElementById(PANEL_ID);
         if (!panel || panel.style.display === 'none') return;
@@ -4945,32 +6621,65 @@
         return `${unit.gameId ?? 'x'}:${unit.villain ? 1 : 0}:${unit.tileIndex ?? 'x'}:${unit.source}`;
     }
 
+    function defaultUnitCollapsed() {
+        return true;
+    }
+
     function isUnitCollapsed(unit) {
         const key = getUnitCollapseKey(unit);
         const stored = readCollapsedOverride(key);
         if (stored !== undefined) return stored;
-        return true;
+        return defaultUnitCollapsed();
     }
 
     function toggleUnitCollapsed(unitKey) {
         const stored = readCollapsedOverride(unitKey);
-        const currently = stored === undefined ? true : stored;
+        const currently = stored === undefined ? defaultUnitCollapsed() : stored;
         writeCollapsedOverride(unitKey, !currently);
         markUnitsInteraction();
+    }
+
+    function renderStatusEffectsRowHtml(unit) {
+        const effects = unit.statusEffects;
+        if (!effects?.length) return '';
+        const maxShow = 6;
+        const chips = effects.slice(0, maxShow).map((effect) => {
+            const cls = effect.type === 'buff' ? 'buff' : 'debuff';
+            const iconUrl = effect.icon || null;
+            const icon = iconUrl
+                ? `<img class="bs-status-icon pixelated" src="${escapeHtml(iconUrl)}" alt=""` +
+                    ` onerror="this.style.display='none'">`
+                : '';
+            const text = escapeHtml(effect.shortLabel || effect.label);
+            return `<span class="bs-status-chip ${cls}" title="${escapeHtml(effect.label)}">` +
+                `${icon}<span>${text}</span></span>`;
+        }).join('');
+        const more = effects.length > maxShow
+            ? `<span class="bs-status-chip more" title="${escapeHtml(effects.slice(maxShow).map((e) => e.label).join(', '))}">+${effects.length - maxShow}</span>`
+            : '';
+        return `<div class="bs-status-effects">${chips}${more}</div>`;
     }
 
     function renderCompactSummary(unit) {
         const bits = [];
         if (unit.level != null) bits.push(escapeHtml(`Lv ${unit.level}`));
-        if (unit.equipment) {
-            const equipSummary = formatEquipmentSummary(unit.equipment);
-            if (equipSummary) bits.push(escapeHtml(equipSummary));
-        }
         if (unit.hp != null) {
             const hpText = unit.source === 'fight'
                 ? `HP ${unit.hp}/${unit.hpMax ?? '?'}`
                 : `HP ${unit.hp}`;
             bits.push(coloredStatSpan(hpText, unit.alive !== false));
+        }
+        if (unit.source === 'fight') {
+            if (unit.attackDelayReady === true) {
+                bits.push(coloredStatSpan('Atk ready', true));
+            } else {
+                const atkRemainingTicks = resolveUnitAttackDelayRemainingTicks(unit);
+                if (atkRemainingTicks != null && atkRemainingTicks > 0) {
+                    bits.push(coloredStatSpan(`Atk ${formatTicks(atkRemainingTicks)}`, false));
+                } else if (unit.attackDelayReady === false) {
+                    bits.push(coloredStatSpan('Atk waiting', false));
+                }
+            }
         }
         if (unit.cooldownReady === true) {
             bits.push(coloredStatSpan('CD ready', true));
@@ -4986,27 +6695,7 @@
         return bits.join(' · ');
     }
 
-    function renderUnitCard(unit) {
-        const unitKey = getUnitCollapseKey(unit);
-        const collapsed = isUnitCollapsed(unit);
-        const displayKey = normalizeCollapseKey(unitKey);
-        const deadClass = unit.alive === false ? ' dead' : '';
-        const collapseClass = collapsed ? ' collapsed' : ' expanded';
-        const teamTag = unit.villain ? 'Enemy' : 'Ally';
-        const srcTag = unit.source === 'board'
-            ? 'Board setup · scaled preview'
-            : unit.source === 'map'
-                ? 'Map spawn · scaled preview'
-                : 'In fight';
-        const awakenTag = unit.awaken ? ' · Awakened' : '';
-        const levelStr = unit.level != null ? `Lv ${unit.level}` : '';
-        const tileStr = unit.tileIndex != null ? ` · Tile ${unit.tileIndex}` : '';
-        const nameClass = teamClass(unit.villain);
-        const compact = renderCompactSummary(unit);
-        const portrait = unit.gameId
-            ? `<img class="bs-portrait" draggable="false" src="/assets/portraits/${unit.gameId}.png" alt="">`
-            : '';
-
+    function buildUnitCardStatsHtml(unit) {
         let statsHtml = '';
         if (unit.source === 'fight' && unit.hp != null) {
             const hpText = `${unit.hp}/${unit.hpMax ?? '?'}`;
@@ -5026,25 +6715,30 @@
             const base = unit.baseStats?.[key];
             if (live != null || base != null) statsHtml += renderStatLine(label, live, base);
         }
+        return statsHtml;
+    }
 
+    function buildUnitCardMechanicsHtml(unit) {
         let mechanicsHtml = '';
         const attackDelayTicks = resolveUnitAttackDelayTicks(unit);
         if (attackDelayTicks != null) {
-            mechanicsHtml += `<div class="bs-row"><span class="bs-label">Atk delay:</span> ${formatTicks(attackDelayTicks)}</div>`;
+            const atkState = renderCooldownStateHtml(
+                unit.attackDelayReady,
+                resolveUnitAttackDelayRemainingTicks(unit)
+            );
+            mechanicsHtml += `<div class="bs-row"><span class="bs-label">Atk delay:</span> ${formatTicks(attackDelayTicks)}` +
+                (atkState ? ` · ${atkState}` : '') +
+                `</div>`;
         }
         const cooldownTicks = resolveUnitCooldownTicks(unit);
         if (cooldownTicks != null) {
-            const cdReady = unit.cooldownReady === true;
-            const cdRemainingTicks = resolveUnitCooldownRemainingTicks(unit);
-            const cdState = cdReady
-                ? coloredStatSpan('ready', true)
-                : cdRemainingTicks != null && cdRemainingTicks > 0
-                    ? coloredStatSpan(`${formatTicks(cdRemainingTicks)} left`, false)
-                    : coloredStatSpan('on cooldown', false);
-            mechanicsHtml += `<div class="bs-row"><span class="bs-label">Ability CD:</span> ${formatTicks(cooldownTicks)} · ${cdState}</div>`;
-        }
-        if (unit.abilitySrc) {
-            mechanicsHtml += `<div class="bs-row"><span class="bs-label">Ability:</span> ${unit.abilitySrc}</div>`;
+            const cdState = renderCooldownStateHtml(
+                unit.cooldownReady,
+                resolveUnitCooldownRemainingTicks(unit)
+            );
+            mechanicsHtml += `<div class="bs-row"><span class="bs-label">Ability CD:</span> ${formatTicks(cooldownTicks)}` +
+                (cdState ? ` · ${cdState}` : '') +
+                `</div>`;
         }
         if (unit.silenced) {
             mechanicsHtml += `<div class="bs-row" style="color:#E06C75">Silenced</div>`;
@@ -5055,31 +6749,95 @@
         if (unit.alive === false) {
             mechanicsHtml += `<div class="bs-row" style="color:#888">Defeated</div>`;
         }
+        return mechanicsHtml;
+    }
 
-        const rolesHtml = (unit.roles || []).map((r) => `<span class="bs-tag">${escapeHtml(r)}</span>`).join('');
+    function buildUnitCardLiveInnerHtml(unit) {
+        return buildUnitCardStatsHtml(unit) + buildUnitCardMechanicsHtml(unit);
+    }
 
-        const abilityText = unit.gameId ? tryRenderAbilitySnippet(unit.gameId, unit.awaken) : '';
-        const abilityBlock = abilityText
-            ? `<details class="bs-details"><summary>Ability description</summary><div style="margin-top:4px;color:#ccc;font-size:10px;line-height:1.35;">${abilityText}</div></details>`
+    function patchUnitCardsLiveStats(body, units) {
+        const unitByKey = new Map();
+        for (const unit of units) {
+            unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
+        }
+        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
+            const unit = unitByKey.get(card.dataset.unitKey);
+            if (!unit) continue;
+            card.classList.toggle('dead', unit.alive === false);
+            const compact = renderCompactSummary(unit);
+            const compactEl = card.querySelector('.bs-card-compact');
+            if (compactEl) {
+                if (compact) compactEl.innerHTML = compact;
+                else compactEl.remove();
+            } else if (compact) {
+                const meta = card.querySelector('.bs-compact-meta');
+                if (meta) {
+                    const div = document.createElement('div');
+                    div.className = 'bs-card-compact';
+                    div.innerHTML = compact;
+                    meta.appendChild(div);
+                }
+            }
+            const statusRow = card.querySelector('.bs-status-effects');
+            const statusHtml = renderStatusEffectsRowHtml(unit);
+            if (statusRow) {
+                if (statusHtml) statusRow.outerHTML = statusHtml;
+                else statusRow.remove();
+            } else if (statusHtml) {
+                const nameEl = card.querySelector('.bs-card-name');
+                if (nameEl) {
+                    nameEl.insertAdjacentHTML('afterend', statusHtml);
+                }
+            }
+            const live = card.querySelector('.bs-card-live');
+            if (live) live.innerHTML = buildUnitCardLiveInnerHtml(unit);
+        }
+    }
+
+    function renderUnitCard(unit) {
+        const unitKey = getUnitCollapseKey(unit);
+        const collapsed = isUnitCollapsed(unit);
+        const displayKey = normalizeCollapseKey(unitKey);
+        const deadClass = unit.alive === false ? ' dead' : '';
+        const collapseClass = collapsed ? ' collapsed' : ' expanded';
+        const metaParts = [unit.villain ? 'Enemy' : 'Ally'];
+        if (unit.awaken) metaParts.push('Awakened');
+        if (unit.level != null) metaParts.push(`Lv ${unit.level}`);
+        if (unit.tileIndex != null) metaParts.push(`Tile ${unit.tileIndex}`);
+        const metaLine = metaParts.join(' · ');
+        const nameClass = teamClass(unit.villain);
+        const compact = renderCompactSummary(unit);
+        const hasPortrait = unit.gameId != null;
+        const hasEquipPortrait = unit.equipment?.spriteId != null;
+        const portrait = (hasPortrait || hasEquipPortrait)
+            ? `<div class="bs-portrait-group">` +
+                (hasPortrait ? `<div class="bs-portrait-mount"></div>` : '') +
+                (hasEquipPortrait ? `<div class="bs-equip-mount frame-pressed-1 shrink-0 flex items-center justify-center overflow-hidden"></div>` : '') +
+              `</div>`
             : '';
+
+        const liveInner = buildUnitCardLiveInnerHtml(unit);
+        const rolesHtml = (unit.roles || []).map((r) => `<span class="bs-tag">${escapeHtml(r)}</span>`).join('');
+        const abilityBlock = renderAbilityBlockHtml(unit);
+        const statusRow = renderStatusEffectsRowHtml(unit);
 
         const header = `<div class="bs-card-header-row">` +
             `<span class="bs-toggle" title="${collapsed ? 'Expand' : 'Collapse'}">${collapsed ? '▶' : '▼'}</span>` +
             portrait +
             `<div class="bs-compact-meta">` +
-                `<div class="bs-card-name ${nameClass}">${escapeHtml(unit.name)}</div>` +
+                `<div class="bs-card-name-row">` +
+                    `<div class="bs-card-name ${nameClass}">${escapeHtml(unit.name)}</div>` +
+                    statusRow +
+                `</div>` +
                 (compact ? `<div class="bs-card-compact">${compact}</div>` : '') +
             `</div>` +
         `</div>`;
 
-        const equipmentHtml = renderEquipmentHtml(unit.equipment);
-
         const body = `<div class="bs-card-body">` +
-            `<div class="bs-card-meta">${teamTag} · ${srcTag}${awakenTag} ${levelStr}${tileStr}</div>` +
+            `<div class="bs-card-meta">${metaLine}</div>` +
             (rolesHtml ? `<div class="bs-row">${rolesHtml}</div>` : '') +
-            equipmentHtml +
-            statsHtml +
-            mechanicsHtml +
+            `<div class="bs-card-live">${liveInner}</div>` +
             abilityBlock +
         `</div>`;
 
@@ -5108,72 +6866,75 @@
         if (panel.style.display === 'none') return;
 
         const sandbox = isSandboxMode();
-        const fighting = isFightActive();
-        const tick = getCurrentTick();
+        const fightEnded = isPanelFightResolved() && panelFightTickFrozen != null;
+        const fighting = isLiveFightTracking();
+        const tick = getFightTick();
         const seed = getSeed();
         const modeLabel = getPlayModeLabel();
-        const fightEnded = panelFightEndState != null && panelFightTickFrozen != null;
 
         const roomName = getRoomDisplayName(resolveCurrentRoomId());
         title.textContent = modName;
 
-        const statusLines = [];
-        if (roomName) statusLines.push(`Map: <b>${roomName}</b>`);
-        if (modeLabel) statusLines.push(`Mode: <b>${modeLabel}</b>`);
-        if (fighting) {
-            const parts = ['Fight active'];
-            if (tick != null) parts.push(`tick ${tick}`);
-            if (seed != null) parts.push(`seed ${seed}`);
-            parts.push(`${battleLog.length} log entries`);
-            if (sandbox && slowMotionEnabled) {
-                parts.push(`slow ${gameSpeedPercent}%`);
-                parts.push(`${getTickIntervalMs().toFixed(1)}ms/tick`);
-            } else if (!slowMotionEnabled && window.__turboState?.active) {
-                parts.push('turbo on');
-            }
-            statusLines.push(parts.join(' · '));
-        } else if (fightEnded) {
+        const statusParts = [];
+        if (roomName) statusParts.push(`Map: <b>${escapeHtml(roomName)}</b>`);
+        if (modeLabel) statusParts.push(`Mode: <b>${escapeHtml(modeLabel)}</b>`);
+
+        if (fightEnded) {
             const endLabel = panelFightEndState === 'victory' ? 'Victory' : 'Defeat';
-            const parts = [`${endLabel} · final tick ${panelFightTickFrozen}`];
-            if (seed != null) parts.push(`seed ${seed}`);
-            parts.push(`${battleLog.length} log entries`);
-            statusLines.push(parts.join(' · '));
+            const endParts = [endLabel, `tick ${tick ?? panelFightTickFrozen}`];
+            if (seed != null) endParts.push(`seed ${seed}`);
+            statusParts.push(endParts.join(' '));
+        } else if (fighting) {
+            const fightParts = ['Fight'];
+            if (tick != null) fightParts.push(`tick ${tick}`);
+            if (seed != null) fightParts.push(`seed ${seed}`);
+            if (sandbox && slowMotionEnabled) {
+                fightParts.push(`slow ${gameSpeedPercent}%`);
+            } else if (!slowMotionEnabled && window.__turboState?.active) {
+                fightParts.push('turbo');
+            }
+            statusParts.push(fightParts.join(' '));
         } else {
             const floor = resolveCurrentFloor();
-            statusLines.push('Enemy preview uses scaleStat(catalog, level, eb genes) (allies use scaleStat).');
             if (floor > 0) {
-                const genes = buildAscensionVillainGenes(floor);
-                const awakenNote = floor >= ASCENSION_AWAKEN_FLOOR ? ' · villains awakened' : '';
-                statusLines.push(`Ascension floor <b>${floor}</b> (${Math.round(resolveAscensionDisplayMult(floor) * 100)}% display · genes ${genes.hp}${awakenNote}).`);
-            }
-            const preview = getBoardPreviewUnits();
-            if (preview.length) statusLines.push(`Setup preview: ${preview.length} unit(s) (board + map spawns).`);
-            if (!sandbox) {
-                statusLines.push('Slow motion slider is available in <b>Sandbox</b> only.');
+                statusParts.push(`Floor: <b>${floor}</b> (${Math.round(resolveAscensionDisplayMult(floor) * 100)}%)`);
             }
         }
-        status.innerHTML = statusLines.join('<br>');
+
+        status.innerHTML = `<span class="bs-status-line">` +
+            statusParts
+                .map((part, index) => (index === 0 ? part : `<span class="bs-status-sep">·</span>${part}`))
+                .join('') +
+        `</span>`;
 
         const sliderWrap = document.getElementById('mod-better-sandbox-speed-slider-wrap');
         if (sliderWrap) sliderWrap.classList.toggle('disabled', !slowMotionEnabled || !sandbox);
     }
 
-    function buildUnitsRenderKey(units) {
+    function buildUnitsStructureKey(units) {
         const scope = isFightActive()
             ? 'fight'
             : `preview:${boardTrack.roomId ?? resolveCurrentRoomId() ?? 'x'}:f${boardTrack.floor ?? resolveCurrentFloor()}`;
         return scope + '|' + units.map((u) => [
             getUnitCollapseKey(u),
-            isUnitCollapsed(u) ? 'c' : 'e',
+            isUnitCollapsed(u) ? 'c' : 'e'
+        ].join(':')).join('|');
+    }
+
+    function buildUnitsRenderKey(units) {
+        return buildUnitsStructureKey(units) + '|live:' + units.map((u) => [
             u.hp,
             u.hpMax,
+            resolveUnitAttackDelayRemainingTicks(u),
+            u.attackDelayReady,
             resolveUnitCooldownRemainingTicks(u),
             u.cooldownReady,
             u.alive,
             u.tileIndex,
             u.level,
             u.silenced,
-            u.buffedCount
+            u.buffedCount,
+            (u.statusEffects || []).map((e) => e.id).join('+')
         ].join(':')).join('|');
     }
 
@@ -5186,9 +6947,22 @@
         const fighting = isFightActive();
         const units = fighting ? (collectActorSnapshots() || []) : getBoardPreviewUnits();
 
+        const structureKey = buildUnitsStructureKey(units);
         const renderKey = buildUnitsRenderKey(units);
+
+        if (!force && fighting && body.querySelector('.bs-units-columns')) {
+            const prevStructure = body.dataset.unitsStructureKey || '';
+            if (structureKey === prevStructure) {
+                if (renderKey === lastUnitsRenderKey) return;
+                patchUnitCardsLiveStats(body, units);
+                lastUnitsRenderKey = renderKey;
+                return;
+            }
+        }
+
         if (!force && renderKey === lastUnitsRenderKey) return;
         lastUnitsRenderKey = renderKey;
+        body.dataset.unitsStructureKey = structureKey;
 
         const { allies, enemies } = splitByTeam(units);
         body.innerHTML =
@@ -5196,11 +6970,19 @@
             renderSection('Allies', 'ally', allies) +
             renderSection('Enemies', 'enemy', enemies) +
             `</div>`;
+        hydrateAllUnitPortraits(body, units);
     }
 
     function renderLogName(name, villain) {
         const cls = teamClass(villain);
         return `<span class="bs-log-name ${cls}">${name}</span>`;
+    }
+
+    function renderHealLogSubject(entry) {
+        if (isCrossUnitHealEntry(entry)) {
+            return `${renderLogName(entry.from, entry.fromVillain)} → ${renderLogName(entry.to, entry.toVillain)}`;
+        }
+        return renderLogName(entry.to, entry.toVillain);
     }
 
     function renderActionSourceLabel(entry) {
@@ -5209,54 +6991,138 @@
         return `<span class="bs-log-source">[${escapeHtml(src)}]</span> `;
     }
 
+    function getVisibleBattleLogEntries() {
+        const filterSig = getLogFiltersSignature();
+        if (cachedVisibleBattleLogRevision === battleLogRevision
+            && cachedVisibleBattleLogFilterSig === filterSig
+            && cachedVisibleBattleLog) {
+            return cachedVisibleBattleLog;
+        }
+        cachedVisibleBattleLog = battleLog.filter(isLogEntryVisible);
+        cachedVisibleBattleLogRevision = battleLogRevision;
+        cachedVisibleBattleLogFilterSig = filterSig;
+        return cachedVisibleBattleLog;
+    }
+
+    function buildBattleLogEntryHtml(entry) {
+        const tickLabel = `<span class="bs-log-tick">[tick ${entry.tick}]</span>`;
+        const sourceLabel = renderActionSourceLabel(entry);
+        const typeLabel = `<span class="bs-log-type">${escapeHtml(entry.damageType)}${entry.crit ? ' crit' : ''}</span>`;
+        if (entry.kind === 'marker') {
+            const markerText = entry.marker === 'start'
+                ? 'Battle started'
+                : entry.endState === 'victory' ? 'Victory'
+                    : entry.endState === 'defeat' ? 'Defeat'
+                        : 'Battle ended';
+            return `<div class="bs-log-line bs-log-marker">${tickLabel} ${escapeHtml(markerText)}</div>`;
+        }
+        if (entry.kind === 'status') {
+            const statusCls = `${entry.applied ? 'applied' : 'removed'} ${entry.effectType || 'debuff'}`;
+            const sign = entry.applied ? '+' : '−';
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.to, entry.toVillain)}: ` +
+                `<span class="bs-log-status ${statusCls}">${sign}${escapeHtml(entry.effectLabel)}</span></div>`;
+        }
+        if (entry.kind === 'pathing') {
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain)}: ` +
+                `<span class="bs-log-pathing">tile ${entry.fromTile} → tile ${entry.toTile}</span></div>`;
+        }
+        if (entry.kind === 'abilityCast') {
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain)}: ` +
+                `<span class="bs-log-ability">cast ${escapeHtml(entry.abilityName)}</span></div>`;
+        }
+        if (entry.kind === 'death') {
+            if (entry.killedBy) {
+                return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.killedBy, entry.killedByVillain)} → ` +
+                    `${renderLogName(entry.unit, entry.unitVillain)}: ` +
+                    `<span class="bs-log-death">defeated</span></div>`;
+            }
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain)}: ` +
+                `<span class="bs-log-death">defeated</span></div>`;
+        }
+        if (entry.kind === 'heal') {
+            return `<div class="bs-log-line">${tickLabel} ${renderHealLogSubject(entry)}: ` +
+                `<span class="bs-log-heal">+${entry.amount}</span> ${sourceLabel}${typeLabel}</div>`;
+        }
+        return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain)} → ` +
+            `${renderLogName(entry.to, entry.toVillain)}: ` +
+            `${renderLogDamageAmount(entry)} ${sourceLabel}${typeLabel}</div>`;
+    }
+
+    function scheduleBattleLogRender() {
+        if (activeTab !== 'log') return;
+        if (battleLogRenderScheduled) return;
+        battleLogRenderScheduled = true;
+        requestAnimationFrame(() => {
+            battleLogRenderScheduled = false;
+            renderBattleLog();
+        });
+    }
+
+    function scrollBattleLogToEnd(body) {
+        if (!body) return;
+        body.scrollTop = body.scrollHeight;
+        lastScrolledBattleLogRevision = battleLogRevision;
+    }
+
     function renderBattleLog(force) {
         const list = document.getElementById(LOG_LIST_ID);
         const body = document.getElementById(LOG_BODY_ID);
         const panel = document.getElementById(PANEL_ID);
         if (!list || !body || !panel || panel.style.display === 'none') return;
 
-        updateLogFilterUi();
-
-        const signature = `${battleLogRevision}:${getLogFiltersSignature()}:${battleLog.length}`;
+        const filterSig = getLogFiltersSignature();
         const shouldScroll = battleLogRevision > lastScrolledBattleLogRevision;
-        if (!force && signature === lastRenderedLogSignature) return;
+        const visible = getVisibleBattleLogEntries();
+        const signature = `${battleLogRevision}:${filterSig}:${battleLog.length}`;
+
+        if (!force
+            && filterSig === lastRenderedFilterSig
+            && list.querySelector('.bs-log-line')
+            && visible.length === lastRenderedVisibleCount) {
+            if (shouldScroll) scrollBattleLogToEnd(body);
+            return;
+        }
+
+        if (!force
+            && filterSig === lastRenderedFilterSig
+            && list.querySelector('.bs-log-line')
+            && visible.length > lastRenderedVisibleCount) {
+            const newHtml = visible.slice(lastRenderedVisibleCount).map(buildBattleLogEntryHtml).join('');
+            list.insertAdjacentHTML('beforeend', newHtml);
+            lastRenderedVisibleCount = visible.length;
+            lastRenderedLogSignature = signature;
+            lastRenderedBattleLogRevision = battleLogRevision;
+            updateLogToolbarTitle();
+            if (shouldScroll) scrollBattleLogToEnd(body);
+            return;
+        }
+
+        updateLogFilterUi();
 
         if (!battleLog.length) {
             list.innerHTML = '<div class="bs-empty">No battle events yet. Start a fight.</div>';
+            lastRenderedVisibleCount = 0;
+            lastRenderedFilterSig = filterSig;
             lastRenderedLogSignature = signature;
             lastRenderedBattleLogRevision = battleLogRevision;
             return;
         }
 
-        const visible = battleLog.filter(isLogEntryVisible);
         if (!visible.length) {
             list.innerHTML = '<div class="bs-empty">No events match the current filters.</div>';
+            lastRenderedVisibleCount = 0;
+            lastRenderedFilterSig = filterSig;
             lastRenderedLogSignature = signature;
             lastRenderedBattleLogRevision = battleLogRevision;
             return;
         }
 
-        const lines = visible.map((entry) => {
-            const tickLabel = `<span class="bs-log-tick">[tick ${entry.tick}]</span>`;
-            const sourceLabel = renderActionSourceLabel(entry);
-            const typeLabel = `<span class="bs-log-type">${escapeHtml(entry.damageType)}${entry.crit ? ' crit' : ''}</span>`;
-            if (entry.kind === 'heal') {
-                return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain)} → ` +
-                    `${renderLogName(entry.to, entry.toVillain)}: ` +
-                    `<span class="bs-log-heal">+${entry.amount}</span> ${sourceLabel}${typeLabel}</div>`;
-            }
-            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain)} → ` +
-                `${renderLogName(entry.to, entry.toVillain)}: ` +
-                `<span class="bs-log-dmg">${entry.amount}</span> ${sourceLabel}${typeLabel}</div>`;
-        }).join('');
-
-        list.innerHTML = lines;
+        list.innerHTML = visible.map(buildBattleLogEntryHtml).join('');
+        lastRenderedVisibleCount = visible.length;
+        lastRenderedFilterSig = filterSig;
         lastRenderedLogSignature = signature;
         lastRenderedBattleLogRevision = battleLogRevision;
-        if (shouldScroll) {
-            body.scrollTop = body.scrollHeight;
-            lastScrolledBattleLogRevision = battleLogRevision;
-        }
+        if (shouldScroll) scrollBattleLogToEnd(body);
     }
 
     function switchTab(tab) {
@@ -5280,7 +7146,7 @@
     function renderLiveFight() {
         if (!shouldBetterAnalyticsRun()) return;
         const panel = document.getElementById(PANEL_ID);
-        if (!panel || panel.style.display === 'none' || !isFightActive()) return;
+        if (!panel || panel.style.display === 'none' || !isLiveFightTracking()) return;
         if (activeTab === 'units') renderUnits();
         else renderBattleLog();
     }
@@ -5301,9 +7167,9 @@
     function syncPanelTickTracking() {
         const panel = document.getElementById(PANEL_ID);
         const panelOpen = panel && panel.style.display !== 'none';
-        if (panelOpen && (isFightActive() || panelFightTickFrozen != null)) {
+        if (panelOpen && (isLiveFightTracking() || panelFightTickFrozen != null)) {
             setupPanelGameTimerSub();
-            if (isFightActive()) startPanelTickPoll();
+            if (isLiveFightTracking()) startPanelTickPoll();
             else stopPanelTickPoll();
         } else {
             teardownPanelGameTimerSub();
@@ -5559,7 +7425,17 @@
 
         const logToolbar = document.createElement('div');
         logToolbar.className = 'bs-log-toolbar';
-        logToolbar.innerHTML = '<span>Damage and healing events</span>';
+        const logToolbarText = document.createElement('div');
+        logToolbarText.className = 'bs-log-toolbar-text';
+        const logTitle = document.createElement('div');
+        logTitle.className = 'bs-log-title';
+        logTitle.textContent = 'Battle Log';
+        const logSubtitle = document.createElement('div');
+        logSubtitle.id = LOG_SUBTITLE_ID;
+        logSubtitle.className = 'bs-log-subtitle';
+        logToolbarText.appendChild(logTitle);
+        logToolbarText.appendChild(logSubtitle);
+        logToolbar.appendChild(logToolbarText);
         const clearBtn = document.createElement('button');
         clearBtn.type = 'button';
         clearBtn.className = 'bs-log-clear';
@@ -5570,11 +7446,24 @@
 
         const logFiltersRow = document.createElement('div');
         logFiltersRow.className = 'bs-log-filters';
+        const allFilterBtn = document.createElement('button');
+        allFilterBtn.type = 'button';
+        allFilterBtn.id = `mod-better-sandbox-log-filter-${LOG_FILTER_ALL_KEY}`;
+        allFilterBtn.className = 'bs-log-filter filter-all filter-neutral';
+        allFilterBtn.textContent = 'All';
+        allFilterBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleAllLogFilters();
+        });
+        logFiltersRow.appendChild(allFilterBtn);
         for (const [key, label] of Object.entries(LOG_FILTER_LABELS)) {
             const filterBtn = document.createElement('button');
             filterBtn.type = 'button';
             filterBtn.id = `mod-better-sandbox-log-filter-${key}`;
-            filterBtn.className = `bs-log-filter ${key.includes('villain') ? 'filter-enemy' : 'filter-ally'}`;
+            const filterTeamClass = key.includes('villain') ? 'filter-enemy'
+                : (key === 'pathing' || key === 'statusFx') ? 'filter-neutral'
+                    : 'filter-ally';
+            filterBtn.className = `bs-log-filter ${filterTeamClass}`;
             filterBtn.textContent = label;
             filterBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -5602,34 +7491,8 @@
         updateSpeedSliderUi();
         switchTab('units');
 
-        let dragging = false;
-        let dragX = 0;
-        let dragY = 0;
-        header.addEventListener('mousedown', (e) => {
-            if (e.target.tagName === 'BUTTON') return;
-            if (e.target.closest('.resize-handle')) return;
-            dragging = true;
-            const rect = panel.getBoundingClientRect();
-            dragX = e.clientX - rect.left;
-            dragY = e.clientY - rect.top;
-            document.body.style.userSelect = 'none';
-        });
-        document.addEventListener('mousemove', (e) => {
-            if (!dragging) return;
-            const nl = clamp(e.clientX - dragX, 0, window.innerWidth - panel.offsetWidth);
-            const nt = clamp(e.clientY - dragY, 0, window.innerHeight - panel.offsetHeight);
-            panel.style.left = `${nl}px`;
-            panel.style.top = `${nt}px`;
-        });
-        document.addEventListener('mouseup', () => {
-            if (!dragging) return;
-            dragging = false;
-            document.body.style.userSelect = '';
-            savePanelSettings({
-                left: parseInt(panel.style.left, 10) || 0,
-                top: parseInt(panel.style.top, 10) || 0
-            });
-        });
+        header.addEventListener('mousedown', onPanelHeaderMouseDown);
+        ensurePanelDragListeners(panel);
 
         addResizeHandles(panel);
         ensurePanelResizeListeners();
@@ -5655,7 +7518,11 @@
         ensureUnitsBodyListener();
         updateSpeedSliderUi();
         switchTab('units');
-        if (isFightActive()) ensureFightTracking();
+        if (isFightActive()) {
+            ensureFightTracking();
+            if (!battleLogTracking && !battleLogSessionEnded) startBattleLogSession();
+            resumeBattleLogActorPatches();
+        }
         if (slowMotionEnabled && isSandboxMode() && isFightActive()) applyTickIntervalToCurrentGame();
         syncPanelFightTickFromSnapshot();
         syncPanelTickTracking();
@@ -5667,8 +7534,12 @@
         const panel = document.getElementById(PANEL_ID);
         if (panel) panel.style.display = 'none';
         savePanelSettings({ isOpen: false });
+        pauseBattleLogActorPatches();
         teardownPanelGameTimerSub();
         stopPanelTickPoll();
+        teardownUnitsBodyListener();
+        detachPanelViewportListener();
+        panelDragState.reset();
     }
 
     function togglePanel() {
@@ -5682,7 +7553,7 @@
             api.ui.addButton({
                 id: BUTTON_ID,
                 text: ADVANCED_BUTTON_LABEL,
-                tooltip: 'Advanced Analytics panel (units, battle log; speed in Sandbox)',
+                tooltip: 'Better Analytics panel (units, battle log; speed in Sandbox)',
                 primary: false,
                 onClick: togglePanel
             });
@@ -5690,6 +7561,7 @@
     }
 
     function cleanupSandboxPanel() {
+        sandboxPanelInitToken++;
         if (typeof api !== 'undefined' && api?.ui?.removeButton) {
             api.ui.removeButton(BUTTON_ID);
         }
@@ -5700,10 +7572,18 @@
         teardownBoardListeners();
         teardownWorldSubscriptions();
         teardownPanelResizeListeners();
+        teardownPanelDragListeners();
         teardownUnitsBodyListener();
         detachPanelViewportListener();
         activeWorld = null;
         resetBattleLogState();
+        clearCollapsedOverrides();
+        clearOpenAbilityOverrides();
+        clearFightActorCollapseRegistry();
+        cachedSpawnTileKeyLookup = null;
+        gameIdByNameCache = null;
+        lastUnitsRenderKey = '';
+        pendingUnitsForceRefresh = false;
         const panel = document.getElementById(PANEL_ID);
         if (panel) panel.remove();
         const style = document.getElementById(STYLE_ID);
@@ -5714,12 +7594,14 @@
     function initSandboxPanel() {
         if (!shouldBetterAnalyticsRun()) return;
 
+        const initToken = ++sandboxPanelInitToken;
         const wait = () => {
-            if (!shouldBetterAnalyticsRun()) return;
+            if (initToken !== sandboxPanelInitToken || !shouldBetterAnalyticsRun()) return;
             if (!globalThis.state?.board) {
                 setTimeout(wait, 300);
                 return;
             }
+            if (initToken !== sandboxPanelInitToken) return;
             const saved = loadPanelSettings();
             gameSpeedPercent = normalizeSpeedPercent(saved.gameSpeedPercent);
             slowMotionEnabled = saved.slowMotionEnabled === true;
@@ -5732,7 +7614,6 @@
             createToolbarButton();
             if (saved.isOpen) openPanel();
             else updateSpeedSliderUi();
-            console.log(`[${modName}] Advanced Analytics panel ready`);
         };
         wait();
     }

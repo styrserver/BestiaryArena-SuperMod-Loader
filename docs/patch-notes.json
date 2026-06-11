@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.1.3",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Battle log records pathing, ability casts, and defeats; Pathing filter and log-toolbar \"All\" toggle (start/end markers always visible). Live attack-delay countdown on the Units tab."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Battle-log hooks pause when the panel is closed. Unit collapse and ability-panel open state persist into fights; ability details stay visible during combat. Status bar and export share the battle log's per-fight engine tick. Verbose debug console output removed."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Slow debuffs and status-chip spell icons (normalized labels, no raw paths or numeric icon 404s). Fight tick counts 0, 1, 2… per run, freezes on victory/defeat, and resets between runs (Sandbox, Manual, Ascension) without stale game-timer carryover or instant Victory on re-run. Battle-log performance under heavy combat (batched/incremental rendering, cached snapshots). Unit cards no longer auto-expand on fight start."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "fixed",
+          "text": "Map shortcut bar and hover preview z-index fixed: shortcuts render above board map labels but stay behind native game modals."
+        }
+      ]
+    },
+    {
       "version": "4.1.2",
       "changes": [
         {
