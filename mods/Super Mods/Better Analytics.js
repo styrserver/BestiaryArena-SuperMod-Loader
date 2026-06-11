@@ -5966,6 +5966,19 @@
                 border-image: var(--bs-frame-4);
                 position: relative;
             }
+            #${PANEL_ID} #${LOG_BODY_ID} {
+                padding-top: 0;
+            }
+            #${PANEL_ID} .bs-log-sticky-header {
+                position: sticky;
+                top: 0;
+                z-index: 2;
+                margin: 0 -6px 0;
+                padding: 6px 6px 0;
+                background-color: var(--bs-panel-bg);
+                background-image: var(--bs-bg);
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.35);
+            }
             #${PANEL_ID} .bs-log-toolbar {
                 display: flex;
                 justify-content: space-between;
@@ -6005,6 +6018,7 @@
                 flex-wrap: wrap;
                 gap: 4px;
                 margin-bottom: 6px;
+                padding-bottom: 2px;
             }
             #${PANEL_ID} .bs-log-filter {
                 border: 3px solid transparent;
@@ -7423,6 +7437,9 @@
         logBody.className = 'bs-body';
         logBody.style.display = 'none';
 
+        const logStickyHeader = document.createElement('div');
+        logStickyHeader.className = 'bs-log-sticky-header';
+
         const logToolbar = document.createElement('div');
         logToolbar.className = 'bs-log-toolbar';
         const logToolbarText = document.createElement('div');
@@ -7442,7 +7459,7 @@
         clearBtn.textContent = 'Clear';
         clearBtn.addEventListener('click', clearBattleLog);
         logToolbar.appendChild(clearBtn);
-        logBody.appendChild(logToolbar);
+        logStickyHeader.appendChild(logToolbar);
 
         const logFiltersRow = document.createElement('div');
         logFiltersRow.className = 'bs-log-filters';
@@ -7471,7 +7488,8 @@
             });
             logFiltersRow.appendChild(filterBtn);
         }
-        logBody.appendChild(logFiltersRow);
+        logStickyHeader.appendChild(logFiltersRow);
+        logBody.appendChild(logStickyHeader);
 
         const logList = document.createElement('div');
         logList.id = LOG_LIST_ID;

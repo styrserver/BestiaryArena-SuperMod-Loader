@@ -120,6 +120,8 @@ const START_PAGE_CONFIG = {
   COLUMN_WIDTHS: { PROFILE: '35%', SEARCH: '65%' },
   COLUMN_GAP: 10,
   API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData',
+  RANKINGS_API_URL: 'https://bestiary-arena-ranking.vercel.app/api/v1/rankings',
+  RANKINGS_PAGE_SIZE: 50,
   FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png'
 };
 const inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
@@ -4335,8 +4337,90 @@ function getCachedProfileData(playerName, ttl = 300000) { return cyclopediaState
 function setCachedProfileData(playerName, data) { cyclopediaState.setProfileData(playerName, data); }
 function getCachedLeaderboardData(category, ttl = 300000) { return cyclopediaState.getLeaderboardData(category, ttl); }
 function setCachedLeaderboardData(category, data) { cyclopediaState.setLeaderboardData(category, data); }
-function getCachedRankingsData(ttl = 600000) { return cyclopediaState.getLeaderboardData('rankings', ttl); }
-function setCachedRankingsData(data) { cyclopediaState.setLeaderboardData('rankings', data); }
+function getRankingsCacheKey(options = {}) {
+  const seasonNum = Number(options.season);
+  const effectiveSeason = Number.isFinite(seasonNum) && seasonNum >= 0 ? seasonNum : 2;
+  const qualified = options.qualified !== false;
+  const limit = Number(options.limit) || START_PAGE_CONFIG.RANKINGS_PAGE_SIZE;
+  const offset = Number(options.offset) || 0;
+  const sort = options.sort || 'level';
+  const order = options.order === 'asc' ? 'asc' : 'desc';
+  return `rankings-v4-s${effectiveSeason}-q${qualified ? '1' : '0'}-l${limit}-o${offset}-s${sort}-${order}`;
+}
+function getRankingsListCacheKey(options = {}) {
+  const seasonNum = Number(options.season);
+  const effectiveSeason = Number.isFinite(seasonNum) && seasonNum >= 0 ? seasonNum : 2;
+  const qualified = options.qualified !== false;
+  return `rankings-list-v3-s${effectiveSeason}-q${qualified ? '1' : '0'}`;
+}
+function compareRankingsRows(a, b, sortKey, order) {
+  let aVal = a[sortKey];
+  let bVal = b[sortKey];
+  if (typeof aVal === 'string') {
+    aVal = aVal.toLowerCase();
+    bVal = bVal.toLowerCase();
+  }
+  let primarySort = 0;
+  if (sortKey === 'timeSum') {
+    primarySort = order === 'desc' ? aVal - bVal : bVal - aVal;
+  } else if (typeof aVal === 'string') {
+    primarySort = order === 'desc' ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
+  } else {
+    primarySort = order === 'desc' ? bVal - aVal : aVal - bVal;
+  }
+  if (primarySort === 0) return b.level - a.level;
+  return primarySort;
+}
+function applyClientRankingsQuery(rankings, { sort, order, limit, offset, timestamp }) {
+  let list = Array.isArray(rankings) ? [...rankings] : [];
+  const sortKey = sort || 'level';
+  const sortOrder = order === 'asc' ? 'asc' : 'desc';
+  list.sort((a, b) => compareRankingsRows(a, b, sortKey, sortOrder));
+  const total = list.length;
+  const page = list.slice(offset, offset + limit).map((row, index) => ({
+    ...row,
+    rank: offset + index + 1
+  }));
+  return {
+    rankings: page,
+    total,
+    limit,
+    offset,
+    timestamp: timestamp || null,
+    serverPaginated: false
+  };
+}
+/** Apply limit/offset when the API returns a full list without pagination metadata. */
+function normalizeRankingsApiResponse(data, queryOptions) {
+  const {
+    limit = START_PAGE_CONFIG.RANKINGS_PAGE_SIZE,
+    offset = 0,
+    sort = 'level',
+    order = 'desc'
+  } = queryOptions || {};
+  const rankings = Array.isArray(data?.rankings) ? data.rankings : [];
+  const timestamp = data?.timestamp || null;
+  const hasServerPagination = typeof data?.total === 'number';
+
+  if (hasServerPagination) {
+    return {
+      rankings,
+      total: data.total,
+      limit: data.limit ?? limit,
+      offset: typeof data.offset === 'number' ? data.offset : offset,
+      timestamp,
+      serverPaginated: true
+    };
+  }
+
+  return applyClientRankingsQuery(rankings, { sort, order, limit, offset, timestamp });
+}
+function getCachedRankingsData(options, ttl = 300000) {
+  return cyclopediaState.getLeaderboardData(getRankingsCacheKey(options), ttl);
+}
+function setCachedRankingsData(options, data) {
+  cyclopediaState.setLeaderboardData(getRankingsCacheKey(options), data);
+}
 function clearCharactersTabCache() { cyclopediaState.clearCache('all'); }
 function clearLeaderboardCache() { cyclopediaState.clearCache('leaderboardData'); }
 function clearSearchedUsername() { cyclopediaState.searchedUsername = null; }
@@ -7905,6 +7989,10 @@ function openCyclopediaModal(options) {
         col2.style.maxWidth = '50%';
         col2.style.borderRight = charactersColFrameBorder.borderRight;
         col2.style.borderImage = charactersColFrameBorder.borderImage;
+        col2.style.justifyContent = 'center';
+        col2.style.alignItems = 'center';
+        col2.style.overflow = '';
+        col2.style.minHeight = '';
       }
 
       function applyCharactersRankingsColumnLayout() {
@@ -7913,6 +8001,10 @@ function openCyclopediaModal(options) {
         col2.style.maxWidth = '100%';
         col2.style.borderRight = 'none';
         col2.style.borderImage = 'none';
+        col2.style.justifyContent = 'flex-start';
+        col2.style.alignItems = 'stretch';
+        col2.style.overflow = 'hidden';
+        col2.style.minHeight = '0';
       }
 
       const playerSearchBox = createPlayerSearchBox(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory);
@@ -8066,104 +8158,62 @@ function openCyclopediaModal(options) {
         }
       }
 
-      async function fetchRankingsFromWiki() {
-        try {
-          const apiUrl = 'https://bestiaryarena.wiki.gg/api.php?action=query&prop=revisions&titles=Rankings&rvslots=*&rvprop=content&formatversion=2&format=json&origin=*';
-          const response = await fetch(apiUrl);
-          
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          
-          const data = await response.json();
-          
-          if (!data.query?.pages?.[0]?.revisions?.[0]?.slots?.main?.content) {
-            throw new Error('Invalid response format from wiki API');
-          }
-          
-          const wikitext = data.query.pages[0].revisions[0].slots.main.content;
+      async function fetchRankingsFromApi(options = {}) {
+        const seasonNum = Number(options.season);
+        const effectiveSeason = Number.isFinite(seasonNum) && seasonNum >= 0 ? seasonNum : 2;
+        const qualified = options.qualified !== false;
+        const limit = Number(options.limit) || START_PAGE_CONFIG.RANKINGS_PAGE_SIZE;
+        const offset = Number(options.offset) || 0;
+        const sort = options.sort || 'level';
+        const order = options.order === 'asc' ? 'asc' : 'desc';
 
-          const timestampMatch = wikitext.match(/Updated \(([^)]+)\)/);
-          const timestamp = timestampMatch ? timestampMatch[1] : null;
+        const queryOptions = { season: effectiveSeason, qualified, limit, offset, sort, order };
+        const listCacheKey = getRankingsListCacheKey(queryOptions);
 
-          let tableMatch = wikitext.match(/\{\|[\s\S]*?\|\}/s);
-          if (!tableMatch) {
-            tableMatch = wikitext.match(/\{\|[\s\S]*?\|\}/);
-            if (!tableMatch) {
-              tableMatch = wikitext.match(/\{\|[\s\S]*\|\}/s);
-            }
-          }
-          
-          if (!tableMatch) {
-            return { rankings: [], timestamp: timestamp };
-          }
-          
-          const table = tableMatch[0];
-          const rows = table.split('|-').slice(1);
+        const cachedPage = getCachedRankingsData(queryOptions);
+        if (cachedPage) return cachedPage;
 
-          const rankings = [];
-          let rank = 1;
-
-          rows.forEach((row, rowIndex) => {
-            const cols = row.split('|').map(s => s.trim()).filter(Boolean);
-            if (cols.length < 11) {
-              
-              return;
-            }
-            
-            let username = cols[0];
-            const usernameMatch = username.match(/\[https:\/\/bestiaryarena\.com\/profile\/[^\s\]]+\s+([^\]]+)\]/);
-            if (usernameMatch) {
-              username = usernameMatch[1];
-            } else {
-              username = username.replace(/[\[\]]/g, '');
-            }
-            const level = parseInt(cols[1], 10);
-            const successfulRuns = parseInt(cols[2], 10);
-            const rankPoints = parseInt(cols[3], 10);
-            const timeSum = parseInt(cols[4], 10);
-            const hasFloors = cols.length >= 12;
-            const floors = hasFloors ? parseInt(cols[5], 10) : 0;
-            const dailySeashell = hasFloors ? parseInt(cols[6], 10) : parseInt(cols[5], 10);
-            const huntingTasks = hasFloors ? parseInt(cols[7], 10) : parseInt(cols[6], 10);
-            const raids = hasFloors ? parseInt(cols[8], 10) : parseInt(cols[7], 10);
-            const perfectCreatures = hasFloors ? parseInt(cols[9], 10) : parseInt(cols[8], 10);
-            const bisEquipment = hasFloors ? parseInt(cols[10], 10) : parseInt(cols[9], 10);
-            const bagOutfits = hasFloors ? parseInt(cols[11], 10) : parseInt(cols[10], 10);
-            
-            if (isNaN(level) || !username) {
-              
-              return;
-            }
-            
-            rankings.push({
-              rank: rank,
-              name: username,
-              level: level,
-              successfulRuns: successfulRuns,
-              rankPoints: rankPoints,
-              timeSum: timeSum,
-              floors: isNaN(floors) ? 0 : floors,
-              dailySeashell: dailySeashell,
-              huntingTasks: huntingTasks,
-              raids: raids,
-              perfectCreatures: perfectCreatures,
-              bisEquipment: bisEquipment,
-              bagOutfits: bagOutfits
-            });
-            
-            rank++;
-          });
-          
-          if (rankings.length === 0) {
-            console.warn('[Cyclopedia] No valid rankings data found in wiki table');
-          }
-          
-          return { rankings: rankings, timestamp: timestamp };
-        } catch (error) {
-          console.error('[Cyclopedia] Error fetching rankings from wiki:', error);
-          throw error;
+        const cachedList = cyclopediaState.getLeaderboardData(listCacheKey);
+        if (cachedList?.data?.rankings) {
+          const normalized = normalizeRankingsApiResponse(cachedList.data, queryOptions);
+          setCachedRankingsData(queryOptions, normalized);
+          return { ...normalized, season: effectiveSeason, sort, order };
         }
+
+        const params = new URLSearchParams();
+        params.set('season', String(effectiveSeason));
+        params.set('qualified', String(qualified));
+        params.set('limit', String(limit));
+        params.set('offset', String(offset));
+        params.set('sort', sort);
+        params.set('order', order);
+
+        const apiUrl = `${START_PAGE_CONFIG.RANKINGS_API_URL}?${params}`;
+        const data = await fetchWithDeduplication(
+          apiUrl,
+          `rankings-fetch-${getRankingsCacheKey(queryOptions)}`,
+          0
+        );
+
+        if (!data || !Array.isArray(data.rankings)) {
+          throw new Error('Invalid response format from rankings API');
+        }
+
+        const normalized = normalizeRankingsApiResponse(data, queryOptions);
+        if (!normalized.serverPaginated) {
+          cyclopediaState.setLeaderboardData(listCacheKey, {
+            data: { rankings: data.rankings, timestamp: data.timestamp || null },
+            timestamp: Date.now()
+          });
+        }
+        setCachedRankingsData(queryOptions, normalized);
+
+        return {
+          ...normalized,
+          season: effectiveSeason,
+          sort,
+          order
+        };
       }
 
 // =======================
@@ -8339,42 +8389,47 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       async function displayRankingsData(playerState) {
         applyCharactersRankingsColumnLayout();
         try {
-          let rankingsData = getCachedRankingsData();
-          if (!rankingsData) {
-            rankingsData = await fetchRankingsFromWiki();
-            setCachedRankingsData(rankingsData);
-          }
-          
-          const rankings = rankingsData.rankings || rankingsData;
-          const timestamp = rankingsData.timestamp;
-          
-          let allRankings = [...rankings];
-          let currentSortColumn = 'level';
-          let currentSortDirection = 'desc';
+          const activeSeason = cyclopediaState.profileSeason ?? 2;
+          const rankingsState = cyclopediaState.rankingsState?.season === activeSeason
+            ? cyclopediaState.rankingsState
+            : {
+                season: activeSeason,
+                sort: 'level',
+                order: 'desc',
+                offset: 0,
+                limit: START_PAGE_CONFIG.RANKINGS_PAGE_SIZE,
+                qualified: true
+              };
+          cyclopediaState.rankingsState = rankingsState;
+
+          let currentRankings = [];
+          let rankingsTotal = 0;
+          let rankingsTimestamp = null;
+          let isLoadingRankings = false;
+
           const rankingsPanelFrame = 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill';
           const rankingsSectionFrame = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
           const rankingsCellFrame = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
-          
           const rankingsGridColumns = '48px 150px 53px 53px 40px 48px 40px 40px 40px 40px 40px 40px 40px';
-          
+
           const containerDiv = document.createElement('div');
           Object.assign(containerDiv.style, {
             display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
-            padding: '10px 0', boxSizing: 'border-box'
+            minHeight: '0', padding: '10px 0', boxSizing: 'border-box'
           });
 
           const contentContainer = document.createElement('div');
           contentContainer.style.cssText = `
             flex: 1;
+            min-height: 0;
             padding: 0;
-            overflow-y: auto;
+            overflow: hidden;
             position: relative;
-            height: 100%;
             background: rgba(20, 20, 20, 0.7);
             box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
           `;
-
-          const currentPlayerRank = rankings.find(r => r.name.toLowerCase() === playerState.name.toLowerCase());
 
           const tableContainer = document.createElement('div');
           tableContainer.className = FONT_CONSTANTS.SIZES.SMALL;
@@ -8388,7 +8443,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
             font-size: 10px;
             position: relative;
-            height: 100%;
+            flex: 1;
+            min-height: 0;
             display: flex;
             flex-direction: column;
             width: fit-content;
@@ -8405,9 +8461,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             background: rgba(255, 224, 102, 0.08);
             border-bottom: 6px solid transparent;
             border-image: ${rankingsSectionFrame};
-            position: sticky;
-            top: 0;
-            z-index: 10;
+            flex-shrink: 0;
             width: fit-content;
           `;
 
@@ -8426,290 +8480,66 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             { type: 'icon', src: '/assets/icons/equips.png', alt: 'BIS equipments', key: 'bisEquipment', sortable: true },
             { type: 'icon', src: '/assets/icons/mini-outfitbag.png', alt: 'Bag outfits', key: 'bagOutfits', sortable: true }
           ];
-          
-          headerData.forEach((item, index) => {
-            const headerCell = document.createElement('div');
-            headerCell.className = FONT_CONSTANTS.SIZES.SMALL;
-            headerCell.style.cssText = `
-              padding: 8px 4px;
-              color: ${COLOR_CONSTANTS.PRIMARY};
-              font-weight: bold;
-              text-align: center;
-              border: 4px solid transparent;
-              border-image: ${rankingsCellFrame};
-              background: rgba(0, 0, 0, 0.2);
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
-              font-size: 10px;
-              ${item.sortable ? 'cursor: pointer;' : 'cursor: default;'}
-              transition: all 0.2s ease;
-            `;
-            
-            // Add sort indicator for current sort column
-            if (item.key === currentSortColumn) {
-              headerCell.style.background = 'rgba(255, 224, 102, 0.2)';
-            }
-            
-            if (item.type === 'icon') {
-              const icon = document.createElement('img');
-              icon.src = item.src;
-              icon.alt = item.alt;
-              icon.title = item.alt;
-              icon.style.cssText = `
-                width: 16px;
-                height: 16px;
-                object-fit: contain;
-              `;
-              headerCell.appendChild(icon);
-            } else {
-              headerCell.textContent = item.content;
-            }
-            
-            if (item.key === currentSortColumn) {
-              const sortIndicator = document.createElement('span');
-              sortIndicator.textContent = currentSortDirection === 'desc' ? ' ▼' : ' ▲';
-              sortIndicator.style.cssText = `
-                margin-left: 4px;
-                font-size: 8px;
-                color: ${COLOR_CONSTANTS.PRIMARY};
-              `;
-              headerCell.appendChild(sortIndicator);
-            }
-            
-          if (item.sortable) {
-            headerCell.addEventListener('click', () => {
-              const sortKey = item.key;
-              
-              if (sortKey === currentSortColumn) {
-                currentSortDirection = currentSortDirection === 'desc' ? 'asc' : 'desc';
-              } else {
-                currentSortColumn = sortKey;
-                currentSortDirection = 'desc';
-              }
-              
-              allRankings.sort((a, b) => {
-                let aVal = a[sortKey];
-                let bVal = b[sortKey];
-                
-                if (typeof aVal === 'string') {
-                  aVal = aVal.toLowerCase();
-                  bVal = bVal.toLowerCase();
-                }
-                
-                let primarySort = 0;
-                
-                if (sortKey === 'timeSum') {
-                  if (currentSortDirection === 'desc') {
-                    primarySort = aVal - bVal;
-                  } else {
-                    primarySort = bVal - aVal;
-                  }
-                } else {
-                  if (typeof aVal === 'string') {
-                    if (currentSortDirection === 'desc') {
-                      primarySort = bVal.localeCompare(aVal);
-                    } else {
-                      primarySort = aVal.localeCompare(bVal);
-                    }
-                  } else {
-                    if (currentSortDirection === 'desc') {
-                      primarySort = bVal - aVal;
-                    } else {
-                      primarySort = aVal - bVal;
-                    }
-                  }
-                }
-                
-                if (primarySort === 0) {
-                  return b.level - a.level;
-                }
-                
-                return primarySort;
-              });
-              
-              renderRankingsTable();
-              updateHeaderHighlighting();
-            });
-          }
-            
-            if (item.sortable) {
-              headerCell.addEventListener('mouseenter', () => {
-                if (item.key !== currentSortColumn) {
-                  headerCell.style.background = 'rgba(255, 224, 102, 0.1)';
-                }
-              });
-              
-              headerCell.addEventListener('mouseleave', () => {
-                if (item.key !== currentSortColumn) {
-                  headerCell.style.background = 'transparent';
-                }
-              });
-            }
-            
-            headerRow.appendChild(headerCell);
-          });
-          
-                    tableContainer.appendChild(headerRow);
-          
+
           const scrollableContainer = document.createElement('div');
           scrollableContainer.style.cssText = `
-            overflow-y: auto;
-            max-height: calc(100vh - 300px);
-            min-height: 400px;
+            overflow: auto;
             flex: 1;
-            display: flex;
-            flex-direction: column;
-            contain: layout paint style;
+            min-height: 0;
+            display: block;
+            box-sizing: border-box;
           `;
-          
+
           const dataRowsContainer = document.createElement('div');
           dataRowsContainer.style.cssText = `
             display: grid;
             grid-template-columns: ${rankingsGridColumns};
             gap: 1px;
             min-height: fit-content;
-            flex: 1;
             width: fit-content;
+            padding-bottom: 8px;
+            box-sizing: border-box;
           `;
 
-          allRankings.sort((a, b) => b.level - a.level);
-          
-          function renderRankingsTable() {
-            dataRowsContainer.innerHTML = '';
-            const fragment = document.createDocumentFragment();
-            
-            allRankings.forEach((ranking, index) => {
-            const isCurrentPlayer = ranking.name.toLowerCase() === playerState.name.toLowerCase();
-            const isSearchedPlayer = cyclopediaState.searchedUsername && ranking.name.toLowerCase() === cyclopediaState.searchedUsername.toLowerCase();
-            
-            let rowBackground;
-            if (isSearchedPlayer) {
-              rowBackground = 'rgba(66, 165, 245, 0.22)';
-            } else if (isCurrentPlayer) {
-              rowBackground = 'rgba(67, 160, 71, 0.22)';
-            } else {
-              rowBackground = index % 2 === 0 ? 'rgba(255, 255, 255, 0.09)' : 'rgba(255, 255, 255, 0.045)';
-            }
-            const rowBorder = isCurrentPlayer || isSearchedPlayer ? '1px solid rgba(255, 224, 102, 0.45)' : '1px solid rgba(255, 255, 255, 0.06)';
-
-            let rankIcon = '🥉';
-            if (ranking.rank === 1) rankIcon = '🥇';
-            else if (ranking.rank === 2) rankIcon = '🥈';
-            else if (ranking.rank <= 10) rankIcon = '🏅';
-
-            const cellData = [
-              `${rankIcon} #${currentSortDirection === 'desc' ? index + 1 : allRankings.length - index}`,
-              ranking.name,
-              ranking.level.toLocaleString(),
-              ranking.successfulRuns.toLocaleString(),
-              ranking.rankPoints.toLocaleString(),
-              ranking.timeSum.toLocaleString(),
-              (ranking.floors !== undefined ? ranking.floors.toLocaleString() : '0'),
-              ranking.dailySeashell.toLocaleString(),
-              ranking.huntingTasks.toLocaleString(),
-              ranking.raids.toLocaleString(),
-              ranking.perfectCreatures.toLocaleString(),
-              ranking.bisEquipment.toLocaleString(),
-              ranking.bagOutfits.toLocaleString()
-            ];
-
-            cellData.forEach((text, cellIndex) => {
-              const cell = document.createElement('div');
-              cell.className = FONT_CONSTANTS.SIZES.SMALL;
-              cell.style.cssText = `
-                padding: 6px 4px;
-                background: ${rowBackground};
-                color: #fff;
-                font-weight: ${isCurrentPlayer || isSearchedPlayer ? 'bold' : 'normal'};
-                text-align: ${cellIndex === 0 ? 'left' : cellIndex === 1 ? 'left' : 'center'};
-                border-right: 1px solid rgba(255, 255, 255, 0.08);
-                display: flex;
-                align-items: center;
-                justify-content: ${cellIndex === 0 ? 'flex-start' : cellIndex === 1 ? 'flex-start' : 'center'};
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-                border: ${rowBorder};
-                font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
-                font-size: 10px;
-              `;
-              
-              if (cellIndex === 1) {
-                NavigationHandler.attachProfileNavigation(cell, ranking.name, { color: '#fff' });
-              }
-              
-              cell.textContent = text;
-              fragment.appendChild(cell);
-            });
-          });
-            dataRowsContainer.appendChild(fragment);
-          }
-          
-          function updateHeaderHighlighting() {
-            const headerCells = headerRow.querySelectorAll('div');
-            headerCells.forEach((cell, index) => {
-              const item = headerData[index];
-              if (!item) return;
-              
-              cell.style.background = 'transparent';
-              cell.style.border = 'none';
-              
-              const existingIndicator = cell.querySelector('span');
-              if (existingIndicator) {
-                existingIndicator.remove();
-              }
-              
-              if (item.key === currentSortColumn) {
-                cell.style.background = 'rgba(255, 224, 102, 0.2)';
-                
-                const sortIndicator = document.createElement('span');
-                sortIndicator.textContent = currentSortDirection === 'desc' ? ' ▼' : ' ▲';
-                sortIndicator.style.cssText = `
-                  margin-left: 4px;
-                  font-size: 8px;
-                  color: ${COLOR_CONSTANTS.PRIMARY};
-                `;
-                cell.appendChild(sortIndicator);
-              }
-            });
-          }
-          
-          renderRankingsTable();
-          updateHeaderHighlighting();
-
-          cyclopediaState.refreshRankingsTable = () => {
-            renderRankingsTable();
-            updateHeaderHighlighting();
-          };
-          
-          scrollableContainer.appendChild(dataRowsContainer);
-          tableContainer.appendChild(scrollableContainer);
-
-          contentContainer.appendChild(tableContainer);
-
-          const infoContainer = document.createElement('div');
-          infoContainer.style.cssText = `
-            position: absolute;
-            top: 8px;
-            right: -3px;
-            z-index: 20;
-          `;
-
-          const infoIcon = document.createElement('div');
-          infoIcon.innerHTML = 'ℹ️';
-          infoIcon.style.cssText = `
-            width: 16px;
-            height: 16px;
+          const paginationBar = document.createElement('div');
+          paginationBar.style.cssText = `
             display: flex;
             align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.2s ease;
-            color: ${COLOR_CONSTANTS.PRIMARY};
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px 10px;
+            border-top: 1px solid rgba(255, 224, 102, 0.25);
+            background: rgba(0, 0, 0, 0.25);
+            font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+            font-size: 11px;
+            color: #ccc;
+            flex-shrink: 0;
           `;
+
+          const paginationInfo = document.createElement('span');
+          const prevPageBtn = document.createElement('button');
+          prevPageBtn.textContent = '◀ Prev';
+          prevPageBtn.style.cssText = `
+            background: rgba(255, 224, 102, 0.15);
+            color: ${COLOR_CONSTANTS.PRIMARY};
+            border: 1px solid rgba(255, 224, 102, 0.35);
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 11px;
+          `;
+          const nextPageBtn = document.createElement('button');
+          nextPageBtn.textContent = 'Next ▶';
+          nextPageBtn.style.cssText = prevPageBtn.style.cssText;
+
+          const paginationControls = document.createElement('div');
+          paginationControls.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+          paginationControls.appendChild(prevPageBtn);
+          paginationControls.appendChild(nextPageBtn);
+
+          paginationBar.appendChild(paginationInfo);
+          paginationBar.appendChild(paginationControls);
 
           const tooltip = document.createElement('div');
           tooltip.style.cssText = `
@@ -8733,11 +8563,320 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             backdrop-filter: blur(4px);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
           `;
-          tooltip.innerHTML = `
-            <div style="font-size: 16px; margin-bottom: 8px; color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">📊 Data Source</div>
-            <div style="margin-bottom: 6px;">Rankings fetched from <a href="https://bestiaryarena.wiki.gg/wiki/Rankings" target="_blank" style="color: #ffe066; text-decoration: underline;">Bestiary Arena Wiki</a></div>
-            <div style="margin-bottom: 6px; font-size: 11px; color: #ccc;">Shows all players who completed all ${CYCLOPEDIA_SETTINGS.playerStatCaps.exploredMaps} maps, sorted by level</div>
-            <div style="font-size: 10px; color: #888;">${timestamp ? `Updated: ${timestamp}` : 'No timestamp available'}</div>
+
+          function getRankingsQueryOptions() {
+            return {
+              season: activeSeason,
+              qualified: rankingsState.qualified,
+              limit: rankingsState.limit,
+              offset: rankingsState.offset,
+              sort: rankingsState.sort,
+              order: rankingsState.order
+            };
+          }
+
+          function updateTooltipContent() {
+            const formattedTimestamp = rankingsTimestamp
+              ? new Date(rankingsTimestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+              : null;
+            tooltip.innerHTML = `
+              <div style="font-size: 16px; margin-bottom: 8px; color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">📊 Data Source</div>
+              <div style="margin-bottom: 6px;">Rankings fetched from <a href="https://bestiary-arena-ranking.vercel.app/api/v1/rankings" target="_blank" style="color: #ffe066; text-decoration: underline;">Bestiary Arena Rankings API</a></div>
+              <div style="margin-bottom: 6px; font-size: 11px; color: #ccc;">${getCyclopediaRankingsSectionLabel(activeSeason)} — qualified players (≥${CYCLOPEDIA_SETTINGS.playerStatCaps.exploredMaps} maps), sorted by ${rankingsState.sort} (${rankingsState.order})</div>
+              <div style="font-size: 10px; color: #888;">${formattedTimestamp ? `Updated: ${formattedTimestamp}` : 'No timestamp available'}</div>
+            `;
+          }
+
+          function updatePaginationControls() {
+            const total = rankingsTotal;
+            const limit = rankingsState.limit;
+            const offset = rankingsState.offset;
+            const start = total === 0 ? 0 : offset + 1;
+            const end = Math.min(offset + currentRankings.length, total);
+            paginationInfo.textContent = total === 0
+              ? 'No results'
+              : `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()}`;
+
+            const atFirstPage = offset <= 0;
+            const atLastPage = offset + limit >= total || currentRankings.length === 0;
+            prevPageBtn.disabled = atFirstPage || isLoadingRankings;
+            nextPageBtn.disabled = atLastPage || isLoadingRankings;
+            prevPageBtn.style.opacity = prevPageBtn.disabled ? '0.45' : '1';
+            nextPageBtn.style.opacity = nextPageBtn.disabled ? '0.45' : '1';
+            prevPageBtn.style.cursor = prevPageBtn.disabled ? 'default' : 'pointer';
+            nextPageBtn.style.cursor = nextPageBtn.disabled ? 'default' : 'pointer';
+          }
+
+          function renderRankingsTable() {
+            dataRowsContainer.innerHTML = '';
+            if (currentRankings.length === 0) {
+              const emptyCell = document.createElement('div');
+              emptyCell.style.cssText = `
+                grid-column: 1 / -1;
+                padding: 24px;
+                text-align: center;
+                color: #888;
+                font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+                font-size: 12px;
+              `;
+              emptyCell.textContent = 'No rankings available';
+              dataRowsContainer.appendChild(emptyCell);
+              return;
+            }
+
+            const fragment = document.createDocumentFragment();
+            currentRankings.forEach((ranking, index) => {
+              const isCurrentPlayer = ranking.name.toLowerCase() === playerState.name.toLowerCase();
+              const isSearchedPlayer = cyclopediaState.searchedUsername && ranking.name.toLowerCase() === cyclopediaState.searchedUsername.toLowerCase();
+
+              let rowBackground;
+              if (isSearchedPlayer) {
+                rowBackground = 'rgba(66, 165, 245, 0.22)';
+              } else if (isCurrentPlayer) {
+                rowBackground = 'rgba(67, 160, 71, 0.22)';
+              } else {
+                rowBackground = index % 2 === 0 ? 'rgba(255, 255, 255, 0.09)' : 'rgba(255, 255, 255, 0.045)';
+              }
+              const rowBorder = isCurrentPlayer || isSearchedPlayer ? '1px solid rgba(255, 224, 102, 0.45)' : '1px solid rgba(255, 255, 255, 0.06)';
+
+              const displayRank = ranking.rank ?? (rankingsState.offset + index + 1);
+              let rankIcon = '🥉';
+              if (displayRank === 1) rankIcon = '🥇';
+              else if (displayRank === 2) rankIcon = '🥈';
+              else if (displayRank <= 10) rankIcon = '🏅';
+
+              const cellData = [
+                `${rankIcon} #${displayRank}`,
+                ranking.name,
+                ranking.level.toLocaleString(),
+                ranking.successfulRuns.toLocaleString(),
+                ranking.rankPoints.toLocaleString(),
+                ranking.timeSum.toLocaleString(),
+                (ranking.floors !== undefined ? ranking.floors.toLocaleString() : '0'),
+                ranking.dailySeashell.toLocaleString(),
+                ranking.huntingTasks.toLocaleString(),
+                ranking.raids.toLocaleString(),
+                ranking.perfectCreatures.toLocaleString(),
+                ranking.bisEquipment.toLocaleString(),
+                ranking.bagOutfits.toLocaleString()
+              ];
+
+              cellData.forEach((text, cellIndex) => {
+                const cell = document.createElement('div');
+                cell.className = FONT_CONSTANTS.SIZES.SMALL;
+                cell.style.cssText = `
+                  padding: 6px 4px;
+                  background: ${rowBackground};
+                  color: #fff;
+                  font-weight: ${isCurrentPlayer || isSearchedPlayer ? 'bold' : 'normal'};
+                  text-align: ${cellIndex === 0 ? 'left' : cellIndex === 1 ? 'left' : 'center'};
+                  border-right: 1px solid rgba(255, 255, 255, 0.08);
+                  display: flex;
+                  align-items: center;
+                  justify-content: ${cellIndex === 0 ? 'flex-start' : cellIndex === 1 ? 'flex-start' : 'center'};
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+                  border: ${rowBorder};
+                  font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+                  font-size: 10px;
+                `;
+
+                if (cellIndex === 1) {
+                  NavigationHandler.attachProfileNavigation(cell, ranking.name, { color: '#fff' });
+                }
+
+                cell.textContent = text;
+                fragment.appendChild(cell);
+              });
+            });
+            dataRowsContainer.appendChild(fragment);
+          }
+
+          function updateHeaderHighlighting() {
+            const headerCells = headerRow.querySelectorAll('div');
+            headerCells.forEach((cell, index) => {
+              const item = headerData[index];
+              if (!item) return;
+
+              cell.style.background = 'transparent';
+              cell.style.border = 'none';
+
+              const existingIndicator = cell.querySelector('span');
+              if (existingIndicator) {
+                existingIndicator.remove();
+              }
+
+              if (item.key === rankingsState.sort) {
+                cell.style.background = 'rgba(255, 224, 102, 0.2)';
+
+                const sortIndicator = document.createElement('span');
+                sortIndicator.textContent = rankingsState.order === 'desc' ? ' ▼' : ' ▲';
+                sortIndicator.style.cssText = `
+                  margin-left: 4px;
+                  font-size: 8px;
+                  color: ${COLOR_CONSTANTS.PRIMARY};
+                `;
+                cell.appendChild(sortIndicator);
+              }
+            });
+          }
+
+          async function loadRankings() {
+            if (isLoadingRankings) return;
+            isLoadingRankings = true;
+            updatePaginationControls();
+
+            const queryOptions = getRankingsQueryOptions();
+
+            try {
+              let rankingsData = getCachedRankingsData(queryOptions);
+              if (!rankingsData) {
+                rankingsData = await fetchRankingsFromApi(queryOptions);
+                setCachedRankingsData(queryOptions, rankingsData);
+              }
+
+              currentRankings = rankingsData.rankings || [];
+              rankingsTotal = rankingsData.total ?? currentRankings.length;
+              rankingsTimestamp = rankingsData.timestamp || null;
+              rankingsState.offset = rankingsData.offset ?? rankingsState.offset;
+
+              renderRankingsTable();
+              scrollableContainer.scrollTop = 0;
+              updateHeaderHighlighting();
+              updatePaginationControls();
+              updateTooltipContent();
+            } catch (error) {
+              console.error('[Cyclopedia] Error loading rankings page:', error);
+              dataRowsContainer.innerHTML = `
+                <div style="grid-column: 1 / -1; padding: 24px; text-align: center; color: ${COLOR_CONSTANTS.ERROR}; font-size: 12px;">
+                  Failed to load rankings. Please try again.
+                </div>
+              `;
+              rankingsTotal = 0;
+              updatePaginationControls();
+            } finally {
+              isLoadingRankings = false;
+              updatePaginationControls();
+            }
+          }
+
+          headerData.forEach((item) => {
+            const headerCell = document.createElement('div');
+            headerCell.className = FONT_CONSTANTS.SIZES.SMALL;
+            headerCell.style.cssText = `
+              padding: 8px 4px;
+              color: ${COLOR_CONSTANTS.PRIMARY};
+              font-weight: bold;
+              text-align: center;
+              border: 4px solid transparent;
+              border-image: ${rankingsCellFrame};
+              background: rgba(0, 0, 0, 0.2);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+              font-size: 10px;
+              ${item.sortable ? 'cursor: pointer;' : 'cursor: default;'}
+              transition: all 0.2s ease;
+            `;
+
+            if (item.key === rankingsState.sort) {
+              headerCell.style.background = 'rgba(255, 224, 102, 0.2)';
+            }
+
+            if (item.type === 'icon') {
+              const icon = document.createElement('img');
+              icon.src = item.src;
+              icon.alt = item.alt;
+              icon.title = item.alt;
+              icon.style.cssText = `
+                width: 16px;
+                height: 16px;
+                object-fit: contain;
+              `;
+              headerCell.appendChild(icon);
+            } else {
+              headerCell.textContent = item.content;
+            }
+
+            if (item.key === rankingsState.sort) {
+              const sortIndicator = document.createElement('span');
+              sortIndicator.textContent = rankingsState.order === 'desc' ? ' ▼' : ' ▲';
+              sortIndicator.style.cssText = `
+                margin-left: 4px;
+                font-size: 8px;
+                color: ${COLOR_CONSTANTS.PRIMARY};
+              `;
+              headerCell.appendChild(sortIndicator);
+            }
+
+            if (item.sortable) {
+              headerCell.addEventListener('click', () => {
+                const sortKey = item.key;
+                if (sortKey === rankingsState.sort) {
+                  rankingsState.order = rankingsState.order === 'desc' ? 'asc' : 'desc';
+                } else {
+                  rankingsState.sort = sortKey;
+                  rankingsState.order = 'desc';
+                }
+                rankingsState.offset = 0;
+                loadRankings();
+              });
+
+              headerCell.addEventListener('mouseenter', () => {
+                if (item.key !== rankingsState.sort) {
+                  headerCell.style.background = 'rgba(255, 224, 102, 0.1)';
+                }
+              });
+
+              headerCell.addEventListener('mouseleave', () => {
+                if (item.key !== rankingsState.sort) {
+                  headerCell.style.background = 'transparent';
+                }
+              });
+            }
+
+            headerRow.appendChild(headerCell);
+          });
+
+          prevPageBtn.addEventListener('click', () => {
+            if (prevPageBtn.disabled) return;
+            rankingsState.offset = Math.max(0, rankingsState.offset - rankingsState.limit);
+            loadRankings();
+          });
+
+          nextPageBtn.addEventListener('click', () => {
+            if (nextPageBtn.disabled) return;
+            rankingsState.offset += rankingsState.limit;
+            loadRankings();
+          });
+
+          tableContainer.appendChild(headerRow);
+          scrollableContainer.appendChild(dataRowsContainer);
+          tableContainer.appendChild(scrollableContainer);
+          tableContainer.appendChild(paginationBar);
+
+          const infoContainer = document.createElement('div');
+          infoContainer.style.cssText = `
+            position: absolute;
+            top: 8px;
+            right: -3px;
+            z-index: 20;
+          `;
+
+          const infoIcon = document.createElement('div');
+          infoIcon.innerHTML = 'ℹ️';
+          infoIcon.style.cssText = `
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+            color: ${COLOR_CONSTANTS.PRIMARY};
           `;
 
           let isTooltipPersistent = false;
@@ -8785,14 +8924,22 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           infoContainer.appendChild(tooltip);
           tableContainer.appendChild(infoContainer);
 
+          contentContainer.appendChild(tableContainer);
           containerDiv.appendChild(contentContainer);
 
           col2.innerHTML = '';
           col2.appendChild(containerDiv);
 
+          cyclopediaState.refreshRankingsTable = () => {
+            renderRankingsTable();
+            updateHeaderHighlighting();
+          };
+
+          await loadRankings();
+
         } catch (error) {
           console.error('[Cyclopedia] Error displaying rankings data:', error);
-          col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Rankings</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not fetch rankings from wiki</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
+          col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Rankings</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not fetch rankings from server</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
         }
       }
 
@@ -11205,6 +11352,20 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
       // Show player's own stats by default in col2
       displayUserStats('Player Information');
+
+      d.characterEventListeners = [];
+      const onSeasonChangedForRankings = () => {
+        if (window.selectedCharacterItem !== 'Rankings') return;
+        displayUserStats('Rankings').catch((error) => {
+          console.error('[Cyclopedia] Error refreshing rankings after season change:', error);
+        });
+      };
+      document.addEventListener('cyclopedia-season-changed', onSeasonChangedForRankings);
+      d.characterEventListeners.push({
+        element: document,
+        event: 'cyclopedia-season-changed',
+        handler: onSeasonChangedForRankings
+      });
 
       d.appendChild(col1);
       d.appendChild(sharedScrollContainer);
@@ -16242,8 +16403,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   if (!creatureCanAwaken) {
     cyclopediaState.creatureDetailShowAwakenedAbility = false;
   }
-  if (typeof unobtainableCreatures !== 'undefined' && unobtainableCreatures.includes(name)) {
-  }
+  const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === (name || '').toLowerCase());
   const container = document.createElement('div');
   container.style.display = 'flex';
   container.style.flexDirection = 'row';
@@ -16345,7 +16505,6 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
         
         // Override portrait for shiny mode using the same approach as inventory
         // Check if creature is unobtainable - if so, don't apply shiny mode
-        const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === name.toLowerCase());
         if (effectiveShinyPortraits && !isUnobtainable) {
           const spriteImg = monsterSprite.querySelector('img.actor.spritesheet');
           if (spriteImg) {
@@ -16906,36 +17065,36 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   dropsSection.style.overflow = 'hidden';
   dropsSection.className = FONT_CONSTANTS.SIZES.SMALL;
 
-  const usageSection = document.createElement('div');
-  usageSection.style.display = 'flex';
-  usageSection.style.flexDirection = 'column';
-  usageSection.style.flex = '0 0 auto';
-
-  const usageTitle = createCyclopediaWidgetTitle('Player usage', { width: '100%' });
-  const usageTitleP = usageTitle;
-
-  const usageContent = document.createElement('div');
-  usageContent.className = FONT_CONSTANTS.SIZES.SMALL;
-  usageContent.style.cssText = 'padding: 6px 8px 8px 8px; color:#e6d7b0; display:flex; flex-direction:column; gap:2px; line-height:1.15;';
-  const usageStats = getBoardConfigUsageStatsForCreature(monsterId);
-  const usedRow = document.createElement('div');
-  usedRow.textContent = `Used ${usageStats.count} times`;
-  const pctRow = document.createElement('div');
-  pctRow.textContent = `Usage percentage: ${usageStats.percentage}%`;
-  usageContent.appendChild(usedRow);
-  usageContent.appendChild(pctRow);
-  usageSection.appendChild(usageTitle);
-  usageSection.appendChild(usageContent);
-
-  const usageSeparator = document.createElement('div');
-  usageSeparator.className = 'separator my-2.5';
-  usageSeparator.setAttribute('role', 'none');
-  usageSeparator.style.margin = '2px 0';
-
   const dropsTitle = createCyclopediaWidgetTitle('Location', { width: '100%' });
   const dropsTitleP = dropsTitle;
   const isGazerCreatureDetail = isCyclopediaGazerCreatureName(name);
-  if (!isGazerCreatureDetail) {
+  if (!isGazerCreatureDetail && !isUnobtainable) {
+    const usageSection = document.createElement('div');
+    usageSection.style.display = 'flex';
+    usageSection.style.flexDirection = 'column';
+    usageSection.style.flex = '0 0 auto';
+
+    const usageTitle = createCyclopediaWidgetTitle('Player usage', { width: '100%' });
+    const usageTitleP = usageTitle;
+
+    const usageContent = document.createElement('div');
+    usageContent.className = FONT_CONSTANTS.SIZES.SMALL;
+    usageContent.style.cssText = 'padding: 6px 8px 8px 8px; color:#e6d7b0; display:flex; flex-direction:column; gap:2px; line-height:1.15;';
+    const usageStats = getBoardConfigUsageStatsForCreature(monsterId);
+    const usedRow = document.createElement('div');
+    usedRow.textContent = `Used ${usageStats.count} times`;
+    const pctRow = document.createElement('div');
+    pctRow.textContent = `Usage percentage: ${usageStats.percentage}%`;
+    usageContent.appendChild(usedRow);
+    usageContent.appendChild(pctRow);
+    usageSection.appendChild(usageTitle);
+    usageSection.appendChild(usageContent);
+
+    const usageSeparator = document.createElement('div');
+    usageSeparator.className = 'separator my-2.5';
+    usageSeparator.setAttribute('role', 'none');
+    usageSeparator.style.margin = '2px 0';
+
     dropsSection.appendChild(usageSection);
     dropsSection.appendChild(usageSeparator);
   }
@@ -17228,13 +17387,6 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   let pluralName = ownedName;
   if (ownedCount > 1 && ownedName) {
     pluralName = ownedName + 's';
-  }
-
-  let isUnobtainable = false;
-  if (typeof GAME_DATA !== 'undefined' && Array.isArray(GAME_DATA.UNOBTAINABLE_CREATURES)) {
-    isUnobtainable = GAME_DATA.UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === (name || '').toLowerCase());
-  } else if (typeof unobtainableCreatures !== 'undefined' && Array.isArray(unobtainableCreatures)) {
-    isUnobtainable = unobtainableCreatures.some(c => c.toLowerCase() === (name || '').toLowerCase());
   }
 
   const col3Title = createCyclopediaWidgetTitle('', { width: '100%' });

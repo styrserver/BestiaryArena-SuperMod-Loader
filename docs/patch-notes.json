@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.1.4",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Battle log toolbar and filter chips stay pinned at the top while scrolling long logs."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Characters → Rankings uses the Bestiary Arena Rankings API (replaces wiki table); respects the profile season toggle (per-season rank points, ticks, floors). Paginated table (50/page), column sort, and global rank; client-side paging/sort fallback when the API returns a full list without pagination metadata. Player search highlights the matched row in Rankings without hiding other players. Rankings scrolls to the top when changing pages or sort. Bestiary hides Player usage for unobtainable creatures."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Host permissions added for the rankings API on vercel.app."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Rankings last row and pagination footer no longer clipped by the scroll container."
+        }
+      ]
+    },
+    {
       "version": "4.1.3",
       "changes": [
         {
