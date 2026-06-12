@@ -14,15 +14,12 @@
     
     // DOM Selectors
     const ANALYZER_PANEL_SELECTOR = 'div[data-state="open"]';
-    const DAMAGE_ENTRIES_SELECTOR = 'div[data-state="open"] ul li';
-    const DAMAGE_VALUE_SELECTOR = 'span.font-outlined-fill';
     
     // More specific selectors for damage values
     const STATS_CONTAINER_SELECTOR = '.revert-pixel-font-spacing';
     const PORTRAIT_CONTAINER_SELECTOR = '.container-slot';
     
     // Game Mechanics Constants
-    const TICK_TO_SECONDS_RATIO = 1 / 16;
     const TICKS_PER_SECOND = 16;
     
     // Timing Configuration
@@ -33,18 +30,9 @@
         DPS_UPDATE_INTERVAL: 1000
     };
     
-    // Alternative Selectors for Damage Detection
-    const ALTERNATIVE_DAMAGE_SELECTORS = [
-        'ul.frame-2 li',
-        'ul[class*="frame-2"] li',
-        'ul li',
-        'button'
-    ];
-    
     // CSS Classes and Attributes
     const CSS_CLASSES = {
-        DPS_DISPLAY: 'better-analytics-dps',
-        PORTRAIT_CONTAINER: 'container-slot'
+        DPS_DISPLAY: 'better-analytics-dps'
     };
     
     const ATTRIBUTES = {
@@ -1194,21 +1182,40 @@
     const SPEED_MIN_PERCENT = 5;
     const SPEED_MAX_PERCENT = 100;
     const SPEED_STEP_PERCENT = 5;
-    const LOG_FILTER_DEFAULTS = {
-        allyDmg: true,
-        allyHeal: true,
-        villainDmg: true,
-        villainHeal: true,
-        statusFx: true,
-        pathing: true
-    };
+    const LOG_FILTER_ORDER = [
+        'allyDmg',
+        'allyHeal',
+        'allyStats',
+        'allyStatus',
+        'allyPathing',
+        'villainDmg',
+        'villainHeal',
+        'villainStats',
+        'villainStatus',
+        'villainPathing'
+    ];
+    const LOG_FILTER_GROUPS = [
+        {
+            keys: ['allyDmg', 'allyHeal', 'allyStats', 'allyStatus', 'allyPathing'],
+            teamClass: 'filter-ally'
+        },
+        {
+            keys: ['villainDmg', 'villainHeal', 'villainStats', 'villainStatus', 'villainPathing'],
+            teamClass: 'filter-enemy'
+        }
+    ];
+    const LOG_FILTER_DEFAULTS = Object.fromEntries(LOG_FILTER_ORDER.map((k) => [k, true]));
     const LOG_FILTER_LABELS = {
         allyDmg: 'Ally dmg',
         allyHeal: 'Ally heal',
+        allyStats: 'Ally stats',
+        allyStatus: 'Ally status',
+        allyPathing: 'Ally path',
         villainDmg: 'Villain dmg',
         villainHeal: 'Villain heal',
-        statusFx: 'Status fx',
-        pathing: 'Pathing'
+        villainStats: 'Villain stats',
+        villainStatus: 'Villain status',
+        villainPathing: 'Villain path'
     };
     const PANEL_DEFAULTS = {
         left: 120, top: 80, width: 400, height: 520, isOpen: false,
@@ -1226,6 +1233,15 @@
         { key: 'magicResist', label: 'MR' },
         { key: 'speed', label: 'SPD' }
     ];
+    const STAT_CHANGE_TRACK_KEYS = [
+        ...STAT_KEYS,
+        { key: 'hpMax', label: 'HP max' },
+        { key: 'level', label: 'Lvl' },
+        { key: 'attackDelayTicks', label: 'Atk delay' },
+        { key: 'abilityCdTicks', label: 'Ability CD' }
+    ];
+    const TICK_STAT_TRACK_KEYS = new Set(['attackDelayTicks', 'abilityCdTicks']);
+    const STAT_LOWER_IS_BETTER = new Set(['attackDelayTicks', 'abilityCdTicks']);
 
     let activeWorld = null;
     let panelGameTimerSub = null;
@@ -1255,6 +1271,8 @@
     let battleLogSessionEnded = false;
     let lastStatusPollTick = -1;
     const statusLogDedupe = new Set();
+    const statLogDedupe = new Set();
+    const lastActorStatsByActor = new WeakMap();
     const damageLogDedupe = new Set();
     const abilityCastLogDedupe = new Set();
     const deathLogDedupe = new Set();
@@ -1318,6 +1336,29 @@
         }
     };
 
+    function normalizeLogFilters(saved) {
+        const merged = { ...LOG_FILTER_DEFAULTS };
+        if (!saved || typeof saved !== 'object') return merged;
+
+        if ('statChanges' in saved) {
+            merged.allyStats = saved.statChanges !== false;
+            merged.villainStats = saved.statChanges !== false;
+        }
+        if ('statusFx' in saved) {
+            merged.allyStatus = saved.statusFx !== false;
+            merged.villainStatus = saved.statusFx !== false;
+        }
+        if ('pathing' in saved) {
+            merged.allyPathing = saved.pathing !== false;
+            merged.villainPathing = saved.pathing !== false;
+        }
+
+        for (const key of LOG_FILTER_ORDER) {
+            if (key in saved) merged[key] = saved[key] !== false;
+        }
+        return merged;
+    }
+
     function loadPanelSettings() {
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
@@ -1326,7 +1367,7 @@
             return {
                 ...PANEL_DEFAULTS,
                 ...parsed,
-                logFilters: { ...LOG_FILTER_DEFAULTS, ...(parsed.logFilters || {}) }
+                logFilters: normalizeLogFilters(parsed.logFilters)
             };
         } catch {
             return { ...PANEL_DEFAULTS, logFilters: { ...LOG_FILTER_DEFAULTS } };
@@ -1334,7 +1375,7 @@
     }
 
     function loadLogFilters() {
-        logFilters = { ...LOG_FILTER_DEFAULTS, ...loadPanelSettings().logFilters };
+        logFilters = normalizeLogFilters(loadPanelSettings().logFilters);
     }
 
     function saveLogFilters() {
@@ -2173,8 +2214,7 @@
         abilityCastLogDedupe.clear();
         deathLogDedupe.clear();
         pathLogDedupe.clear();
-        statusSnapshotSyncScheduled = false;
-        actorsPendingStatusSync.clear();
+        statLogDedupe.clear();
     }
 
     function isBattleLogTracking() {
@@ -2212,9 +2252,11 @@
         abilityCastLogDedupe.clear();
         deathLogDedupe.clear();
         pathLogDedupe.clear();
+        statLogDedupe.clear();
         syncGameTimerFightStateTracking();
         recordBattleMarker('start', { tick: getCurrentTick() ?? 0 });
         seedBattleLogStatusSnapshots();
+        seedActorStatSnapshots(getActiveWorld()?.grid?.actors);
     }
 
     function endBattleLogSession(endState) {
@@ -2232,8 +2274,7 @@
         abilityCastLogDedupe.clear();
         deathLogDedupe.clear();
         pathLogDedupe.clear();
-        statusSnapshotSyncScheduled = false;
-        actorsPendingStatusSync.clear();
+        statLogDedupe.clear();
     }
 
     function tryEndBattleLogSession() {
@@ -2353,8 +2394,15 @@
 
     function getLogEntryFilter(entry) {
         if (entry.kind === 'marker') return 'marker';
-        if (entry.kind === 'status') return 'statusFx';
-        if (entry.kind === 'pathing') return 'pathing';
+        if (entry.kind === 'status') {
+            return entry.toVillain === true ? 'villainStatus' : 'allyStatus';
+        }
+        if (entry.kind === 'pathing') {
+            return entry.unitVillain === true ? 'villainPathing' : 'allyPathing';
+        }
+        if (entry.kind === 'statChange') {
+            return entry.unitVillain === true ? 'villainStats' : 'allyStats';
+        }
         if (entry.kind === 'abilityCast') {
             return entry.fromVillain ? 'villainDmg' : 'allyDmg';
         }
@@ -2374,16 +2422,16 @@
     const LOG_FILTER_ALL_KEY = 'all';
 
     function isLogFilterShowAll() {
-        return Object.keys(LOG_FILTER_DEFAULTS).every((k) => logFilters[k] === true);
+        return LOG_FILTER_ORDER.every((k) => logFilters[k] === true);
     }
 
     function areAllLogFiltersOff() {
-        return Object.keys(LOG_FILTER_DEFAULTS).every((k) => logFilters[k] === false);
+        return LOG_FILTER_ORDER.every((k) => logFilters[k] === false);
     }
 
     function toggleAllLogFilters() {
         if (isLogFilterShowAll()) {
-            for (const k of Object.keys(LOG_FILTER_DEFAULTS)) {
+            for (const k of LOG_FILTER_ORDER) {
                 logFilters[k] = false;
             }
         } else {
@@ -2406,20 +2454,20 @@
     }
 
     function getLogFiltersSignature() {
-        return Object.keys(LOG_FILTER_DEFAULTS).map((k) => (logFilters[k] ? '1' : '0')).join('');
+        return LOG_FILTER_ORDER.map((k) => (logFilters[k] ? '1' : '0')).join('');
     }
 
     function toggleLogFilter(filterKey) {
-        if (!(filterKey in LOG_FILTER_DEFAULTS)) return;
+        if (!LOG_FILTER_ORDER.includes(filterKey)) return;
 
         const allOn = isLogFilterShowAll();
-        const onlyThisFilter = Object.keys(LOG_FILTER_DEFAULTS).every(
+        const onlyThisFilter = LOG_FILTER_ORDER.every(
             (k) => logFilters[k] === (k === filterKey)
         );
 
         if (allOn) {
             // From show-all, first click isolates one filter.
-            for (const k of Object.keys(LOG_FILTER_DEFAULTS)) {
+            for (const k of LOG_FILTER_ORDER) {
                 logFilters[k] = k === filterKey;
             }
         } else if (onlyThisFilter) {
@@ -2428,7 +2476,7 @@
         } else {
             // Multi-select: toggle this filter on/off.
             logFilters[filterKey] = !logFilters[filterKey];
-            if (!Object.keys(LOG_FILTER_DEFAULTS).some((k) => logFilters[k])) {
+            if (!LOG_FILTER_ORDER.some((k) => logFilters[k])) {
                 Object.assign(logFilters, LOG_FILTER_DEFAULTS);
             }
         }
@@ -2455,12 +2503,11 @@
             parts.push('All event types');
         } else {
             parts.push(`${visible} of ${total} shown`);
-            const filterKeys = Object.keys(LOG_FILTER_DEFAULTS);
-            const activeCount = filterKeys.filter((key) => logFilters[key] === true).length;
+            const activeCount = LOG_FILTER_ORDER.filter((key) => logFilters[key] === true).length;
             const active = Object.entries(LOG_FILTER_LABELS)
                 .filter(([key]) => logFilters[key] === true)
                 .map(([, label]) => label);
-            parts.push(`${activeCount}/${filterKeys.length} filters`);
+            parts.push(`${activeCount}/${LOG_FILTER_ORDER.length} filters`);
             if (active.length) parts.push(active.join(', '));
         }
 
@@ -2484,7 +2531,7 @@
                     ? 'Show all event types'
                     : 'Show all event types';
         }
-        for (const key of Object.keys(LOG_FILTER_DEFAULTS)) {
+        for (const key of LOG_FILTER_ORDER) {
             const btn = document.getElementById(`mod-better-sandbox-log-filter-${key}`);
             if (btn) {
                 btn.classList.toggle('active', logFilters[key] === true);
@@ -2650,11 +2697,13 @@
         'snowman-debuff': 'Slowed',
         slow: 'Slowed',
         jar: 'Jarred',
+        ultimatehealing: 'Ultimate Healing',
         disarmed: 'Disarmed',
         'vicious-knife': 'Bleeding',
         'amazon-bleed': 'Bleeding',
         bleed: 'Bleeding',
         haste: 'Haste',
+        attackspeedbuff: 'Attack speed',
         skeleton: 'Skeleton',
         gooshell: 'Gooshell',
         'crystalenergy': 'Crystal energy'
@@ -2662,11 +2711,28 @@
 
     const SLOW_SRC_PATTERNS = ['slow', 'snowman', 'snowstorm', 'nunu', 'slowmud', 'icearrow'];
     const POISON_SRC_PATTERNS = ['poison', 'envenom', 'venom'];
-    const DISARMED_SRC_PATTERNS = ['disarm', 'jar'];
-    const EVENT_LOGGED_STATUS_IDS = new Set(['stun', 'slow', 'silence', 'poison', 'disarmed', 'mind-control']);
+    const JAR_SRC_PATTERNS = ['jar'];
+    const DISARMED_SRC_PATTERNS = ['disarm'];
 
-    let statusSnapshotSyncScheduled = false;
-    const actorsPendingStatusSync = new Set();
+    // Merge rules collapse variant spell srcs into one chip/log id; everything else uses renderPassives dynamically.
+    const STATUS_EFFECT_MERGE_RULES = [
+        { id: 'slow', patterns: SLOW_SRC_PATTERNS, skipBenign: true },
+        { id: 'poison', patterns: POISON_SRC_PATTERNS },
+        { id: 'jar', patterns: JAR_SRC_PATTERNS },
+        { id: 'disarmed', patterns: DISARMED_SRC_PATTERNS }
+    ];
+
+    const STATUS_EFFECT_DEFS = {
+        stun: { shortLabel: 'Stun', type: 'debuff' },
+        silence: { shortLabel: 'Silence', type: 'debuff' },
+        'mind-control': { shortLabel: 'MC', type: 'debuff' },
+        slow: { shortLabel: 'Slow', type: 'debuff' },
+        poison: { shortLabel: 'Poison', type: 'debuff' },
+        jar: { shortLabel: 'Jar', type: 'buff' },
+        disarmed: { shortLabel: 'Disarm', type: 'debuff' }
+    };
+
+    const EVENT_LOGGED_STATUS_IDS = new Set(Object.keys(STATUS_EFFECT_DEFS));
 
     function cloneStatusEffect(effect) {
         return effect ? { ...effect } : null;
@@ -2708,15 +2774,6 @@
         return resolveSpellIconUrl(skill.src);
     }
 
-    function resolveResourceSpellIcon(resource) {
-        if (!resource || typeof resource !== 'object') return null;
-        for (const candidate of [resource.src, resource.name, resource.spriteId]) {
-            const icon = resolveStatusEffectIcon(candidate);
-            if (icon) return icon;
-        }
-        return null;
-    }
-
     function resolveResourceSpellSrc(resource) {
         if (!resource || typeof resource !== 'object') return null;
         for (const candidate of [resource.src, resource.name, resource.spriteId]) {
@@ -2735,46 +2792,18 @@
             .replace(/\b\w/g, (c) => c.toUpperCase());
     }
 
-    const STATUS_EFFECT_ICON_OVERRIDES = {
-        stun: '/assets/icons/stun.png',
-        slow: '/assets/icons/slow.png',
-        silence: '/assets/icons/silence.png',
-        'mind-control': '/assets/icons/mind-control.png'
-    };
-
-    function resolveStatusEffectIcon(src) {
-        const key = normalizeSpellSrc(src);
-        if (!key) return null;
-        if (STATUS_EFFECT_ICON_OVERRIDES[key]) return STATUS_EFFECT_ICON_OVERRIDES[key];
-        return resolveSpellIconUrl(key);
+    function buildStatusEffect(effectId) {
+        const def = STATUS_EFFECT_DEFS[effectId];
+        if (!def) return null;
+        const label = STATUS_EFFECT_LABELS[effectId] || humanizeEffectSrc(effectId);
+        return {
+            id: effectId,
+            label,
+            shortLabel: def.shortLabel,
+            type: def.type,
+            src: effectId
+        };
     }
-
-    const CANONICAL_STATUS_EFFECTS = {
-        slow: {
-            id: 'slow',
-            label: 'Slowed',
-            shortLabel: 'Slow',
-            type: 'debuff',
-            icon: resolveStatusEffectIcon('slow'),
-            src: 'slow'
-        },
-        poison: {
-            id: 'poison',
-            label: 'Poisoned',
-            shortLabel: 'Poison',
-            type: 'debuff',
-            icon: resolveStatusEffectIcon('envenom'),
-            src: 'poison'
-        },
-        disarmed: {
-            id: 'disarmed',
-            label: 'Disarmed',
-            shortLabel: 'Disarm',
-            type: 'debuff',
-            icon: resolveStatusEffectIcon('jar'),
-            src: 'disarmed'
-        }
-    };
 
     function resourceSrcMatchesPatterns(resource, patterns) {
         const src = resolveResourceSpellSrc(resource)
@@ -2793,9 +2822,16 @@
     }
 
     function isActorOwnAbilityResource(actor, resource) {
+        // Benign passives (e.g. Ultimate Healing on self) are real buffs, not ability-cooldown UI.
+        if (resource?.benign === true) return false;
         const spellSrc = resolveResourceSpellSrc(resource);
         const abilitySrc = resolveActorAbilitySpellSrc(actor);
         return Boolean(spellSrc && abilitySrc && spellSrc === abilitySrc);
+    }
+
+    function hasActiveDurationTicks(resource) {
+        const ticksLeft = resource?.ticksLeft;
+        return ticksLeft != null && Number(ticksLeft) > 0;
     }
 
     function hasActiveResourceState(resource) {
@@ -2834,17 +2870,19 @@
             return true;
         }
 
+        // E.v duration passives (jar, ultimatehealing, etc.) track time via ticksLeft, not counter.
+        if (hasActiveDurationTicks(resource)) return true;
+
         return hasActiveResourceState(resource);
     }
 
-    function getCanonicalEffectFromResource(actor, resource) {
+    function getMergedEffectFromResource(actor, resource) {
         if (isActorOwnAbilityResource(actor, resource)) return null;
-        if (resourceSrcMatchesPatterns(resource, SLOW_SRC_PATTERNS)) {
-            if (resource.benign === true) return null;
-            return CANONICAL_STATUS_EFFECTS.slow;
+        for (const rule of STATUS_EFFECT_MERGE_RULES) {
+            if (rule.skipBenign && resource?.benign === true) continue;
+            if (!resourceSrcMatchesPatterns(resource, rule.patterns)) continue;
+            return buildStatusEffect(rule.id);
         }
-        if (resourceSrcMatchesPatterns(resource, POISON_SRC_PATTERNS)) return CANONICAL_STATUS_EFFECTS.poison;
-        if (resourceSrcMatchesPatterns(resource, DISARMED_SRC_PATTERNS)) return CANONICAL_STATUS_EFFECTS.disarmed;
         return null;
     }
 
@@ -2921,7 +2959,6 @@
             label,
             shortLabel: baseLabel.length > 14 ? `${baseLabel.slice(0, 12)}…` : baseLabel,
             type,
-            icon: resolveResourceSpellIcon(resource),
             src: spellSrc || src
         };
     }
@@ -2944,36 +2981,9 @@
             effects.push(effect);
         };
 
-        if (actor.stun?.isStunned === true) {
-            add({
-                id: 'stun',
-                label: 'Stunned',
-                shortLabel: 'Stun',
-                type: 'debuff',
-                icon: resolveStatusEffectIcon('stun'),
-                src: 'stun'
-            });
-        }
-        if (actor.silenceComponent?.isSilenced === true) {
-            add({
-                id: 'silence',
-                label: 'Silenced',
-                shortLabel: 'Silence',
-                type: 'debuff',
-                icon: resolveStatusEffectIcon('silence'),
-                src: 'silence'
-            });
-        }
-        if (isActorMindControlled(actor)) {
-            add({
-                id: 'mind-control',
-                label: 'Mind controlled',
-                shortLabel: 'MC',
-                type: 'debuff',
-                icon: resolveStatusEffectIcon('mind-control'),
-                src: 'mind-control'
-            });
-        }
+        if (actor.stun?.isStunned === true) add(buildStatusEffect('stun'));
+        if (actor.silenceComponent?.isSilenced === true) add(buildStatusEffect('silence'));
+        if (isActorMindControlled(actor)) add(buildStatusEffect('mind-control'));
 
         const collections = [
             { key: 'resources', collection: actor.renderResources },
@@ -2983,9 +2993,9 @@
             const items = readRenderCollectionItems(collection);
             for (const resource of items) {
                 if (!isRenderResourceActive(actor, resource)) continue;
-                const canonical = getCanonicalEffectFromResource(actor, resource);
-                if (canonical) {
-                    add(cloneStatusEffect(canonical));
+                const merged = getMergedEffectFromResource(actor, resource);
+                if (merged) {
+                    add(cloneStatusEffect(merged));
                     continue;
                 }
                 const effect = collectResourceStatusEffect(actor, resource);
@@ -2994,11 +3004,17 @@
         }
 
         const slowFromResources = actorHasSlowFromResources(actor);
-        if (!seen.has('slow') && slowFromResources) {
-            add(cloneStatusEffect(CANONICAL_STATUS_EFFECTS.slow));
+        if (!seen.has('slow') && (slowFromResources || actor.__bsHasSlow === true)) {
+            add(cloneStatusEffect(buildStatusEffect('slow')));
+        }
+        if (!seen.has('disarmed') && actor.__bsHasDisarmed === true) {
+            add(cloneStatusEffect(buildStatusEffect('disarmed')));
         }
 
-        actor.__bsHasSlow = slowFromResources;
+        if (slowFromResources) actor.__bsHasSlow = true;
+        else if (!effects.some((e) => e.id === 'slow')) actor.__bsHasSlow = false;
+
+        if (!effects.some((e) => e.id === 'disarmed' || e.id === 'jar')) actor.__bsHasDisarmed = false;
 
         return effects;
     }
@@ -3032,6 +3048,104 @@
         scheduleBattleLogRender();
     }
 
+    function readActorAbilityCdTicks(actor, metadata) {
+        const info = readActorCooldown(actor, metadata);
+        if (info.cooldownTicks != null && Number.isFinite(info.cooldownTicks) && info.cooldownTicks > 0) {
+            return info.cooldownTicks;
+        }
+        const live = readStatBagLive(info.raw);
+        if (live != null && Number.isFinite(live) && live > 0) return live;
+        if (info.cooldownMs != null && Number.isFinite(info.cooldownMs) && info.cooldownMs > 0) {
+            const ticks = msToTicks(info.cooldownMs);
+            if (ticks != null && ticks > 0) return ticks;
+        }
+        return null;
+    }
+
+    function readActorStatsForTracking(actor) {
+        if (!actor) return null;
+        const metadata = getMonsterMetadata(resolveGameId(actor));
+        const hpSnap = readActorHp(actor.hp);
+        const stats = {};
+        for (const { key } of STAT_KEYS) {
+            const v = resolveActorLiveStat(actor, metadata, key);
+            stats[key] = roundTrackValue(v, key);
+        }
+        stats.hpMax = roundTrackValue(hpSnap.hpMax, 'hpMax');
+        const level = readActorStat(actor, 'level') ?? actor.level;
+        stats.level = roundTrackValue(level != null ? Number(level) : null, 'level');
+
+        const attackDelayTicks = readActorAttackDelay(actor).delayTicks;
+        stats.attackDelayTicks = roundTrackValue(attackDelayTicks, 'attackDelayTicks');
+
+        const abilityCdTicks = readActorAbilityCdTicks(actor, metadata);
+        stats.abilityCdTicks = roundTrackValue(abilityCdTicks, 'abilityCdTicks');
+
+        return stats;
+    }
+
+    function seedActorStatSnapshots(actors) {
+        if (!Array.isArray(actors)) return;
+        for (const actor of actors) {
+            if (!actor) continue;
+            const snapshot = readActorStatsForTracking(actor);
+            if (snapshot) lastActorStatsByActor.set(actor, snapshot);
+        }
+    }
+
+    function recordStatChangeLogEntry(actor, statKey, statLabel, fromVal, toVal) {
+        if (!actor || !shouldPatchBattleLogActors()) return;
+        if (fromVal === toVal || fromVal == null || toVal == null) return;
+
+        const tick = getBattleLogTick();
+        const unit = actorLabel(actor);
+        const dedupeKey = `${tick ?? '?'}|${unit}|${statKey}|${fromVal}|${toVal}`;
+        if (statLogDedupe.has(dedupeKey)) return;
+        statLogDedupe.add(dedupeKey);
+
+        battleLog.push({
+            tick: tick != null ? tick : '?',
+            kind: 'statChange',
+            unit,
+            unitVillain: actor.villain === true,
+            statKey,
+            statLabel,
+            from: fromVal,
+            to: toVal,
+            delta: toVal - fromVal
+        });
+        battleLogRevision++;
+        scheduleBattleLogRender();
+    }
+
+    function trackStatChanges(actors) {
+        if (!shouldPatchBattleLogActors() || !Array.isArray(actors)) return;
+        for (const actor of actors) {
+            if (!actor) continue;
+            const next = readActorStatsForTracking(actor);
+            if (!next) continue;
+
+            const prev = lastActorStatsByActor.get(actor);
+            if (!prev) {
+                lastActorStatsByActor.set(actor, next);
+                continue;
+            }
+
+            const suppressHp = actor.__bsSuppressHpStatLog === true;
+            if (suppressHp) actor.__bsSuppressHpStatLog = false;
+
+            for (const { key, label } of STAT_CHANGE_TRACK_KEYS) {
+                const oldVal = prev[key];
+                const newVal = next[key];
+                if (oldVal === newVal || oldVal == null || newVal == null) continue;
+                if (key === 'hp' && suppressHp) continue;
+                recordStatChangeLogEntry(actor, key, label, oldVal, newVal);
+            }
+
+            lastActorStatsByActor.set(actor, next);
+        }
+    }
+
     function pollStatusEffectTracking(force) {
         if (!shouldPatchBattleLogActors() || panelFightTickFrozen != null) return;
         const engineTick = readTickFromEngine();
@@ -3039,6 +3153,7 @@
         if (!force && engineTick === lastStatusPollTick) return;
         lastStatusPollTick = engineTick;
         trackStatusEffectChanges(collectActorSnapshots() || []);
+        trackStatChanges(getActiveWorld()?.grid?.actors);
     }
 
     function trackStatusEffectChanges(units) {
@@ -3105,29 +3220,9 @@
             && !slowFromResources
             && !effects.some((e) => e.id === 'slow');
         if (needsTransientSlow) {
-            effects = effects.concat(snapshotStatusEffects([CANONICAL_STATUS_EFFECTS.slow]));
+            effects = effects.concat(snapshotStatusEffects([buildStatusEffect('slow')]));
         }
         lastUnitStatusByKey.set(key, effects);
-    }
-
-    function flushActorStatusSnapshotSyncs() {
-        statusSnapshotSyncScheduled = false;
-        if (!shouldPatchBattleLogActors()) {
-            actorsPendingStatusSync.clear();
-            return;
-        }
-        for (const actor of actorsPendingStatusSync) {
-            syncActorStatusSnapshot(actor);
-        }
-        actorsPendingStatusSync.clear();
-    }
-
-    function queueActorStatusSnapshotSync(actor) {
-        if (!actor || !shouldPatchBattleLogActors()) return;
-        actorsPendingStatusSync.add(actor);
-        if (statusSnapshotSyncScheduled) return;
-        statusSnapshotSyncScheduled = true;
-        queueMicrotask(flushActorStatusSnapshotSyncs);
     }
 
     function logActorStatusEvent(actor, effect, applied) {
@@ -3196,41 +3291,26 @@
         actor.__bsStatusLogPatched = true;
         actor.__bsStatusLogSubs = [];
 
+        const logBuiltStatusEvent = (effectId, beforeLog) => {
+            if (typeof beforeLog === 'function') beforeLog();
+            const effect = buildStatusEffect(effectId);
+            if (effect) logActorStatusEvent(actor, effect, true);
+        };
+
         subscribeActorStatusEvent(actor, actor.stun?.onStun, () => {
-            logActorStatusEvent(actor, {
-                id: 'stun',
-                label: 'Stunned',
-                type: 'debuff'
-            }, true);
+            logBuiltStatusEvent('stun');
         });
         subscribeActorStatusEvent(actor, actor.silenceComponent?.onSilenced, () => {
-            logActorStatusEvent(actor, {
-                id: 'silence',
-                label: 'Silenced',
-                type: 'debuff'
-            }, true);
+            logBuiltStatusEvent('silence');
         });
         subscribeActorStatusEvent(actor, actor.onSlow, () => {
-            actor.__bsHasSlow = true;
-            logActorStatusEvent(actor, {
-                id: 'slow',
-                label: 'Slowed',
-                type: 'debuff'
-            }, true);
+            logBuiltStatusEvent('slow', () => { actor.__bsHasSlow = true; });
         });
         subscribeActorStatusEvent(actor, actor.onPoison, () => {
-            logActorStatusEvent(actor, {
-                id: 'poison',
-                label: 'Poisoned',
-                type: 'debuff'
-            }, true);
+            logBuiltStatusEvent('poison');
         });
         subscribeActorStatusEvent(actor, actor.onDisarmed, () => {
-            logActorStatusEvent(actor, {
-                id: 'disarmed',
-                label: 'Disarmed',
-                type: 'debuff'
-            }, true);
+            logBuiltStatusEvent('disarmed', () => { actor.__bsHasDisarmed = true; });
         });
         subscribeActorStatusEvent(actor, actor.onDebuff, () => {
             pollStatusEffectTracking(true);
@@ -3241,7 +3321,6 @@
     }
 
     function unpatchActorBattleLog(actor) {
-        actorsPendingStatusSync.delete(actor);
         unpatchActorPathingLog(actor);
         unpatchActorStatusLog(actor);
         unpatchActorAbilityCooldownLog(actor);
@@ -3252,6 +3331,7 @@
         delete actor.__bsOrigApplyDamage;
         delete actor.__bsOrigHealHp;
         delete actor.__bsHasSlow;
+        delete actor.__bsHasDisarmed;
     }
 
     function patchActorBattleLog(actor) {
@@ -3263,6 +3343,7 @@
         if (typeof hp.applyDamage === 'function') {
             actor.__bsOrigApplyDamage = hp.applyDamage.bind(hp);
             hp.applyDamage = (opts = {}) => {
+                actor.__bsSuppressHpStatLog = true;
                 const result = actor.__bsOrigApplyDamage(opts);
                 const rawAmount = Number(opts.points);
                 const appliedAmount = Number(result);
@@ -3285,6 +3366,7 @@
         if (typeof hp.healHp === 'function') {
             actor.__bsOrigHealHp = hp.healHp.bind(hp);
             hp.healHp = (opts = {}) => {
+                actor.__bsSuppressHpStatLog = true;
                 const result = actor.__bsOrigHealHp(opts);
                 const amount = Number(opts.points);
                 if (Number.isFinite(amount) && amount > 0) {
@@ -3303,6 +3385,8 @@
         }
 
         patchActorAbilityCooldownLog(actor);
+        const statSnapshot = readActorStatsForTracking(actor);
+        if (statSnapshot) lastActorStatsByActor.set(actor, statSnapshot);
         actor.__bsLogPatched = true;
     }
 
@@ -3329,6 +3413,7 @@
         if (world) {
             patchAllActors(world);
             seedBattleLogStatusSnapshots();
+            seedActorStatSnapshots(world.grid?.actors);
         }
     }
 
@@ -3420,16 +3505,48 @@
         }
     }
 
-    function formatPct(ratio) {
-        if (ratio == null || !Number.isFinite(ratio)) return '—';
-        return `${Math.round(ratio * 100)}%`;
-    }
-
     function formatTicks(ticks) {
         if (ticks == null || !Number.isFinite(ticks)) return '—';
         const rounded = Math.round(ticks * 10) / 10;
         const label = Math.abs(rounded) === 1 ? 'tick' : 'ticks';
         return `${rounded} ${label}`;
+    }
+
+    function isTickStatTrackKey(statKey) {
+        return TICK_STAT_TRACK_KEYS.has(statKey);
+    }
+
+    function roundTrackValue(value, statKey) {
+        if (value == null || !Number.isFinite(value)) return null;
+        if (isTickStatTrackKey(statKey)) return Math.round(value * 10) / 10;
+        return Math.round(value);
+    }
+
+    function formatStatChangeValue(statKey, value) {
+        if (value == null) return '?';
+        if (isTickStatTrackKey(statKey)) return formatTicks(value);
+        return String(value);
+    }
+
+    function formatStatChangeDelta(statKey, delta) {
+        if (isTickStatTrackKey(statKey)) {
+            const rounded = Math.round(delta * 10) / 10;
+            const sign = rounded > 0 ? '+' : '';
+            return `${sign}${rounded}`;
+        }
+        const sign = delta > 0 ? '+' : '';
+        return `${sign}${delta}`;
+    }
+
+    function isStatChangeBeneficial(statKey, delta) {
+        if (delta === 0) return false;
+        if (STAT_LOWER_IS_BETTER.has(statKey)) return delta < 0;
+        return delta > 0;
+    }
+
+    function statChangeDeltaClass(statKey, delta) {
+        if (delta === 0) return '';
+        return isStatChangeBeneficial(statKey, delta) ? 'positive' : 'negative';
     }
 
     function msToTicks(ms) {
@@ -3865,10 +3982,6 @@
         detail.value = Number(base);
         detail.source = 'catalog-unscaled-fallback';
         return detail;
-    }
-
-    function scaleActorCatalogStat(actor, metadata, statKey) {
-        return scaleActorCatalogStatDetailed(actor, metadata, statKey).value;
     }
 
     function resolveActorLiveStatDetailed(actor, metadata, statKey) {
@@ -5627,6 +5740,12 @@
         if (entry.kind === 'pathing') {
             return `[tick ${entry.tick}] ${entry.unit}: tile ${entry.fromTile} → tile ${entry.toTile}`;
         }
+        if (entry.kind === 'statChange') {
+            const from = formatStatChangeValue(entry.statKey, entry.from);
+            const to = formatStatChangeValue(entry.statKey, entry.to);
+            const delta = formatStatChangeDelta(entry.statKey, entry.delta);
+            return `[tick ${entry.tick}] ${entry.unit}: ${entry.statLabel} ${from} → ${to} (${delta})`;
+        }
         if (entry.kind === 'abilityCast') {
             return `[tick ${entry.tick}] ${entry.from}: cast ${entry.abilityName}`;
         }
@@ -6004,7 +6123,14 @@
                 line-height: 1.35;
                 color: #888;
             }
-            #${PANEL_ID} .bs-log-clear {
+            #${PANEL_ID} .bs-log-toolbar-actions {
+                display: flex;
+                flex-shrink: 0;
+                gap: 4px;
+                align-items: flex-start;
+            }
+            #${PANEL_ID} .bs-log-clear,
+            #${PANEL_ID} .bs-log-toolbar-actions .bs-log-filter {
                 border: 3px solid transparent;
                 border-image: var(--bs-frame-1);
                 background: transparent;
@@ -6012,13 +6138,20 @@
                 font-size: 10px;
                 padding: 2px 8px;
                 cursor: pointer;
+                line-height: 1.2;
+                white-space: nowrap;
             }
             #${PANEL_ID} .bs-log-filters {
                 display: flex;
-                flex-wrap: wrap;
+                flex-direction: column;
                 gap: 4px;
                 margin-bottom: 6px;
                 padding-bottom: 2px;
+            }
+            #${PANEL_ID} .bs-log-filters-row {
+                display: grid;
+                grid-template-columns: repeat(5, minmax(0, 1fr));
+                gap: 4px;
             }
             #${PANEL_ID} .bs-log-filter {
                 border: 3px solid transparent;
@@ -6026,9 +6159,15 @@
                 background: transparent;
                 color: #666;
                 font-size: 9px;
-                padding: 2px 6px;
+                padding: 3px 4px;
                 cursor: pointer;
                 line-height: 1.2;
+                width: 100%;
+                min-width: 0;
+                text-align: center;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
             #${PANEL_ID} .bs-log-filter.active {
                 color: var(--bs-gold);
@@ -6036,11 +6175,13 @@
             #${PANEL_ID} .bs-log-filter.filter-ally.active { color: var(--bs-ally); }
             #${PANEL_ID} .bs-log-filter.filter-enemy.active { color: var(--bs-enemy); }
             #${PANEL_ID} .bs-log-filter.filter-neutral.active { color: var(--bs-gold); }
-            #${PANEL_ID} .bs-log-filter.filter-all {
+            #${PANEL_ID} .bs-log-toolbar-actions .bs-log-filter.filter-all {
                 font-weight: bold;
-                margin-right: 2px;
             }
             #${PANEL_ID} .bs-log-pathing { color: #9db4d8; }
+            #${PANEL_ID} .bs-log-stat { color: #d4b896; }
+            #${PANEL_ID} .bs-log-stat-delta.positive { color: #9fd49f; }
+            #${PANEL_ID} .bs-log-stat-delta.negative { color: #f0a0a0; }
             #${PANEL_ID} .bs-log-ability { color: #C678DD; font-weight: 600; }
             #${PANEL_ID} .bs-log-death { color: #E06C75; font-weight: 600; }
             #${PANEL_ID} .bs-log-source {
@@ -6208,12 +6349,6 @@
             }
             #${PANEL_ID} .bs-status-chip.more {
                 color: #bbb;
-            }
-            #${PANEL_ID} .bs-status-icon {
-                width: 12px;
-                height: 12px;
-                flex: 0 0 auto;
-                image-rendering: pixelated;
             }
             #${PANEL_ID} .bs-log-status.applied { color: #9fd49f; }
             #${PANEL_ID} .bs-log-status.removed { color: #c0c0c0; }
@@ -6653,20 +6788,20 @@
         markUnitsInteraction();
     }
 
+    function formatStatusChipText(effect) {
+        if (effect?.src) return String(effect.src).toLowerCase();
+        if (effect?.id && !String(effect.id).startsWith('fx:')) return String(effect.id).toLowerCase();
+        return String(effect?.shortLabel || effect?.label || 'effect').toLowerCase();
+    }
+
     function renderStatusEffectsRowHtml(unit) {
         const effects = unit.statusEffects;
         if (!effects?.length) return '';
         const maxShow = 6;
         const chips = effects.slice(0, maxShow).map((effect) => {
             const cls = effect.type === 'buff' ? 'buff' : 'debuff';
-            const iconUrl = effect.icon || null;
-            const icon = iconUrl
-                ? `<img class="bs-status-icon pixelated" src="${escapeHtml(iconUrl)}" alt=""` +
-                    ` onerror="this.style.display='none'">`
-                : '';
-            const text = escapeHtml(effect.shortLabel || effect.label);
-            return `<span class="bs-status-chip ${cls}" title="${escapeHtml(effect.label)}">` +
-                `${icon}<span>${text}</span></span>`;
+            const text = escapeHtml(formatStatusChipText(effect));
+            return `<span class="bs-status-chip ${cls}" title="${escapeHtml(effect.label)}">${text}</span>`;
         }).join('');
         const more = effects.length > maxShow
             ? `<span class="bs-status-chip more" title="${escapeHtml(effects.slice(maxShow).map((e) => e.label).join(', '))}">+${effects.length - maxShow}</span>`
@@ -7039,6 +7174,15 @@
         if (entry.kind === 'pathing') {
             return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain)}: ` +
                 `<span class="bs-log-pathing">tile ${entry.fromTile} → tile ${entry.toTile}</span></div>`;
+        }
+        if (entry.kind === 'statChange') {
+            const deltaCls = statChangeDeltaClass(entry.statKey, entry.delta);
+            const from = escapeHtml(formatStatChangeValue(entry.statKey, entry.from));
+            const to = escapeHtml(formatStatChangeValue(entry.statKey, entry.to));
+            const delta = escapeHtml(formatStatChangeDelta(entry.statKey, entry.delta));
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain)}: ` +
+                `<span class="bs-log-stat">${escapeHtml(entry.statLabel)} ${from} → ${to} ` +
+                `<span class="bs-log-stat-delta ${deltaCls}">(${delta})</span></span></div>`;
         }
         if (entry.kind === 'abilityCast') {
             return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain)}: ` +
@@ -7453,42 +7597,50 @@
         logToolbarText.appendChild(logTitle);
         logToolbarText.appendChild(logSubtitle);
         logToolbar.appendChild(logToolbarText);
-        const clearBtn = document.createElement('button');
-        clearBtn.type = 'button';
-        clearBtn.className = 'bs-log-clear';
-        clearBtn.textContent = 'Clear';
-        clearBtn.addEventListener('click', clearBattleLog);
-        logToolbar.appendChild(clearBtn);
-        logStickyHeader.appendChild(logToolbar);
-
-        const logFiltersRow = document.createElement('div');
-        logFiltersRow.className = 'bs-log-filters';
+        const toolbarActions = document.createElement('div');
+        toolbarActions.className = 'bs-log-toolbar-actions';
         const allFilterBtn = document.createElement('button');
         allFilterBtn.type = 'button';
         allFilterBtn.id = `mod-better-sandbox-log-filter-${LOG_FILTER_ALL_KEY}`;
         allFilterBtn.className = 'bs-log-filter filter-all filter-neutral';
-        allFilterBtn.textContent = 'All';
+        allFilterBtn.textContent = 'All Filters';
         allFilterBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleAllLogFilters();
         });
-        logFiltersRow.appendChild(allFilterBtn);
-        for (const [key, label] of Object.entries(LOG_FILTER_LABELS)) {
-            const filterBtn = document.createElement('button');
-            filterBtn.type = 'button';
-            filterBtn.id = `mod-better-sandbox-log-filter-${key}`;
-            const filterTeamClass = key.includes('villain') ? 'filter-enemy'
-                : (key === 'pathing' || key === 'statusFx') ? 'filter-neutral'
-                    : 'filter-ally';
-            filterBtn.className = `bs-log-filter ${filterTeamClass}`;
-            filterBtn.textContent = label;
-            filterBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                toggleLogFilter(key);
-            });
-            logFiltersRow.appendChild(filterBtn);
+        toolbarActions.appendChild(allFilterBtn);
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'bs-log-clear';
+        clearBtn.textContent = 'Clear Log';
+        clearBtn.addEventListener('click', clearBattleLog);
+        toolbarActions.appendChild(clearBtn);
+        logToolbar.appendChild(toolbarActions);
+        logStickyHeader.appendChild(logToolbar);
+
+        const logFiltersWrap = document.createElement('div');
+        logFiltersWrap.className = 'bs-log-filters';
+        for (const group of LOG_FILTER_GROUPS) {
+            const row = document.createElement('div');
+            row.className = 'bs-log-filters-row';
+            for (const key of group.keys) {
+                const label = LOG_FILTER_LABELS[key];
+                if (!label) continue;
+                const filterBtn = document.createElement('button');
+                filterBtn.type = 'button';
+                filterBtn.id = `mod-better-sandbox-log-filter-${key}`;
+                filterBtn.className = `bs-log-filter ${group.teamClass}`;
+                filterBtn.textContent = label;
+                filterBtn.title = label;
+                filterBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleLogFilter(key);
+                });
+                row.appendChild(filterBtn);
+            }
+            logFiltersWrap.appendChild(row);
         }
-        logStickyHeader.appendChild(logFiltersRow);
+        logStickyHeader.appendChild(logFiltersWrap);
         logBody.appendChild(logStickyHeader);
 
         const logList = document.createElement('div');

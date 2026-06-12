@@ -58,6 +58,33 @@ function sendMessageToResolvedTab(message, sender, payload) {
   });
 }
 
+/** Push remote scripts + stored local mod states to a tab (once per page load). */
+function deliverModLoaderToTab(tabId, enabledScripts) {
+  if (registeredTabs.has(tabId)) {
+    console.log(`Tab ${tabId} already received mod loader payload, skipping duplicate delivery`);
+    return Promise.resolve(false);
+  }
+
+  return getLocalMods().then((mods) => {
+    browserAPI.tabs.sendMessage(tabId, {
+      action: 'loadScripts',
+      scripts: enabledScripts
+    });
+
+    browserAPI.tabs.sendMessage(tabId, {
+      action: 'registerLocalMods',
+      mods
+    });
+
+    registeredTabs.add(tabId);
+    console.log(`Delivered mod loader payload to tab ${tabId}:`, {
+      remoteScripts: enabledScripts.length,
+      localMods: mods.length
+    });
+    return true;
+  });
+}
+
 const GITHUB_OPTIONAL_ORIGINS = [
   '*://*.gist.githubusercontent.com/*',
   '*://gist.githubusercontent.com/*',
@@ -103,77 +130,63 @@ function resolveModResourcePath(modName) {
   return `mods/${modName}`;
 }
 
-// Function to load default enabled mods from mod-registry.js
-async function loadDefaultEnabledMods() {
+function isServiceWorkerContext() {
   try {
-    // Try dynamic import for Firefox
-    if (typeof browser !== 'undefined') {
-      console.log('[Background] Loading default enabled mods from registry (Firefox)');
+    return typeof ServiceWorkerGlobalScope !== 'undefined' &&
+      typeof self !== 'undefined' &&
+      self instanceof ServiceWorkerGlobalScope;
+  } catch {
+    return false;
+  }
+}
+
+// Keep in sync with content/mod-registry.js
+const HARDCODED_DEFAULT_ENABLED_MODS = [
+  'database/Welcome.js',
+  'database/inventory-database.js',
+  'database/creature-database.js',
+  'database/equipment-database.js',
+  'database/maps-database.js',
+  'database/equipment-lua-export.js',
+  'database/creature-lua-export.js',
+  'database/playereq-database.js',
+  'database/firebase-admins.js',
+  'Official Mods/Bestiary_Automator.js',
+  'Official Mods/Board Analyzer.js',
+  'Official Mods/Custom_Display.js',
+  'Official Mods/Hero_Editor.js',
+  'Official Mods/Highscore_Improvements.js',
+  'Official Mods/Item_tier_list.js',
+  'Official Mods/Monster_tier_list.js',
+  'Official Mods/Setup_Manager.js',
+  'Official Mods/Team_Copier.js',
+  'Official Mods/Tick_Tracker.js',
+  'Official Mods/Turbo Mode.js',
+  'Super Mods/Mod Settings.js',
+  'Super Mods/RunTracker.js',
+  'Super Mods/Outfiter.js'
+];
+
+const HARDCODED_MOD_COUNTS = {
+  database: 9,
+  official: 11,
+  super: 25,
+  ot: 4
+};
+
+async function loadDefaultEnabledMods() {
+  if (!isServiceWorkerContext()) {
+    try {
       const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
       const registry = await import(registryUrl);
-      
-      if (registry && registry.DEFAULT_ENABLED_MODS) {
-        console.log('[Background] Successfully loaded default enabled mods from registry:', registry.DEFAULT_ENABLED_MODS);
+      if (registry?.DEFAULT_ENABLED_MODS) {
         return registry.DEFAULT_ENABLED_MODS;
       }
+    } catch (error) {
+      console.warn('[Background] Could not import mod-registry.js, using hardcoded defaults:', error);
     }
-    
-    // Chrome fallback: Use hardcoded list since Chrome service workers can't use dynamic import
-    console.log('[Background] Using hardcoded default enabled mods (Chrome limitation)');
-    return [
-      'database/Welcome.js',
-      'database/inventory-database.js',
-      'database/creature-database.js',
-      'database/equipment-database.js',
-      'database/maps-database.js',
-      'database/equipment-lua-export.js',
-      'database/creature-lua-export.js',
-      'database/playereq-database.js',
-      'database/firebase-admins.js',
-      'Official Mods/Bestiary_Automator.js',
-      'Official Mods/Board Analyzer.js',
-      'Official Mods/Custom_Display.js',
-      'Official Mods/Hero_Editor.js',
-      'Official Mods/Highscore_Improvements.js',
-      'Official Mods/Item_tier_list.js',
-      'Official Mods/Monster_tier_list.js',
-      'Official Mods/Setup_Manager.js',
-      'Official Mods/Team_Copier.js',
-      'Official Mods/Tick_Tracker.js',
-      'Official Mods/Turbo Mode.js',
-      'Super Mods/Mod Settings.js',
-      'Super Mods/RunTracker.js',
-      'Super Mods/Outfiter.js'
-    ];
-  } catch (error) {
-    console.error('[Background] Error loading default enabled mods from registry:', error);
-    // Return hardcoded fallback
-    return [
-      'database/Welcome.js',
-      'database/inventory-database.js',
-      'database/creature-database.js',
-      'database/equipment-database.js',
-      'database/maps-database.js',
-      'database/equipment-lua-export.js',
-      'database/creature-lua-export.js',
-      'database/playereq-database.js',
-      'database/firebase-admins.js',
-      'Official Mods/Bestiary_Automator.js',
-      'Official Mods/Board Analyzer.js',
-      'Official Mods/Custom_Display.js',
-      'Official Mods/Hero_Editor.js',
-      'Official Mods/Highscore_Improvements.js',
-      'Official Mods/Item_tier_list.js',
-      'Official Mods/Monster_tier_list.js',
-      'Official Mods/Setup_Manager.js',
-      'Official Mods/Team_Copier.js',
-      'Official Mods/Tick_Tracker.js',
-      'Official Mods/Turbo Mode.js',
-      'Super Mods/Mod Settings.js',
-      'Super Mods/RunTracker.js',
-      'Super Mods/Outfiter.js'
-    ];
   }
+  return HARDCODED_DEFAULT_ENABLED_MODS;
 }
 
 // Enhanced function to handle multiple mod sources
@@ -490,7 +503,7 @@ async function getUtilityScript(forceRefresh = false) {
 }
 
 console.log('Bestiary Arena Mod Loader - Background script initialized');
-console.log('Running in:', typeof browser !== 'undefined' ? 'Firefox' : 'Chrome');
+console.log('Background context:', isServiceWorkerContext() ? 'MV3 service worker' : 'persistent background page');
 console.log('Using browserAPI:', typeof browserAPI);
 
 // Service worker initialization for Chrome
@@ -528,7 +541,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'ping') {
     console.log('Background script pinged, responding...');
     sendResponse({ success: true, timestamp: Date.now() });
-    return true;
+    return false;
   }
 
   if (message.action === 'requestGitHubHostAccess') {
@@ -771,7 +784,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       name: message.name
     });
     sendResponse({ success: true });
-    return true;
+    return false;
   }
 
   if (message.action === 'getModContent') {
@@ -939,21 +952,9 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   }
 
-  // Handle localStorage responses from content script
   if (message.action === 'gameLocalStorageResponse') {
-    // This is a response from the content script about localStorage operations
-    if (message.success) {
-      if (message.value !== undefined) {
-        // This is a response for a specific key request (from getLocalModConfig)
-        // The response is handled by the Promise in getLocalModConfig
-        return true;
-      } else {
-        console.log('Game localStorage operation successful:', message.data);
-      }
-    } else {
-      console.error('Game localStorage operation failed:', message.error);
-    }
-    return true;
+    sendResponse({ success: true });
+    return false;
   }
 
   if (message.action === 'toggleLocalMod') {
@@ -1047,36 +1048,14 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   if (message.action === 'contentScriptReady') {
     console.log('Content script reported ready in tab:', sender.tab.id);
-    
-    // Send active scripts
-    getActiveScripts().then(scripts => {
-      const enabledScripts = scripts.filter(s => s.enabled);
-      
-      browserAPI.tabs.sendMessage(sender.tab.id, {
-        action: 'loadScripts',
-        scripts: enabledScripts
-      });
-      
-      // OPTIMIZATION: Only register local mods, let the content script handle execution
-      setTimeout(() => {
-        getLocalMods().then(localMods => {
-          console.log(`Sending ${localMods.length} local mods to ready tab:`, 
-            localMods.map(m => `${m.name}: ${m.enabled}`));
-          
-          // Send registration message only - content script will handle execution
-          browserAPI.tabs.sendMessage(sender.tab.id, {
-            action: 'registerLocalMods',
-            mods: localMods
-          });
-          
-          // Mark this tab as registered
-          registeredTabs.add(sender.tab.id);
-        });
-      }, 500);
+
+    getActiveScripts().then((scripts) => {
+      const enabledScripts = scripts.filter((s) => s.enabled);
+      deliverModLoaderToTab(sender.tab.id, enabledScripts);
     });
-    
+
     sendResponse({ success: true });
-    return true;
+    return false;
   }
 
   if (message.action === 'getUtilityScript') {
@@ -1093,51 +1072,34 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } catch (error) {
       sendResponse({ success: false, error: error.message });
     }
-    return true; // Indicate async response
+    return false;
+  }
+
+  if (message.action === 'utilityFunctionsLoaded') {
+    sendResponse({ success: true });
+    return false;
   }
 
   if (message.action === 'getModCounts') {
-    // Chrome service workers cannot use import() or new Function()
-    // Firefox background scripts CAN use dynamic import
-    // So we need different approaches for each browser
-    
-    (async () => {
-      try {
-        // Try dynamic import for Firefox
-        if (typeof browser !== 'undefined') {
-          console.log('[Background] Firefox detected, using dynamic import...');
+    if (!isServiceWorkerContext()) {
+      (async () => {
+        try {
           const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
           const registry = await import(registryUrl);
-          
-          if (registry && registry.getModCounts) {
-            const counts = registry.getModCounts();
-            console.log('[Background] Firefox: Got counts from registry:', counts);
-            sendResponse({ success: true, counts });
+          if (registry?.getModCounts) {
+            sendResponse({ success: true, counts: registry.getModCounts() });
             return;
           }
+        } catch (error) {
+          console.warn('[Background] Could not import mod-registry.js for counts:', error);
         }
-        
-        // Chrome fallback: Use hardcoded counts
-        // NOTE: Keep these in sync with content/mod-registry.js
-        console.log('[Background] Chrome detected or Firefox import failed, using hardcoded counts');
-        const modCounts = {
-          database: 9,
-          official: 11,
-          super: 25,
-          ot: 4
-        };
-        
-        sendResponse({ success: true, counts: modCounts });
-      } catch (error) {
-        console.error('[Background] Error getting mod counts:', error);
-        // Ultimate fallback
-        sendResponse({ 
-          success: true, 
-          counts: { database: 8, official: 11, super: 25, ot: 4 } 
-        });
-      }
-    })();
-    return true; // Indicate async response
+        sendResponse({ success: true, counts: HARDCODED_MOD_COUNTS });
+      })();
+      return true;
+    }
+
+    sendResponse({ success: true, counts: HARDCODED_MOD_COUNTS });
+    return false;
   }
 });
 
@@ -1166,6 +1128,13 @@ function isBestiaryExcludedFromModInjectionUrl(url) {
 }
 
 browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (tab.url && tab.url.match(/bestiaryarena\.com/) && !isBestiaryExcludedFromModInjectionUrl(tab.url)) {
+    if (changeInfo.status === 'loading') {
+      registeredTabs.delete(tabId);
+      return;
+    }
+  }
+
   if (changeInfo.status === 'complete' && tab.url && tab.url.match(/bestiaryarena\.com/)) {
     if (isBestiaryExcludedFromModInjectionUrl(tab.url)) {
       return;
@@ -1190,32 +1159,8 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                 console.log('Injector script injected via scripting API');
                 
                 setTimeout(() => {
-                  // Use already refreshed scripts
                   console.log(`Sending ${enabledScripts.length} active scripts to tab ${tabId}`);
-                  
-                  browserAPI.tabs.sendMessage(tabId, {
-                    action: 'loadScripts',
-                    scripts: enabledScripts
-                  });
-
-                  getLocalMods().then(localMods => {
-                    console.log(`Found ${localMods.length} local mods`, localMods);
-                    
-                    // Only register if this tab hasn't been registered yet
-                    if (!registeredTabs.has(tabId)) {
-                      browserAPI.tabs.sendMessage(tabId, {
-                        action: 'registerLocalMods',
-                        mods: localMods
-                      });
-                      
-                      // Mark this tab as registered
-                      registeredTabs.add(tabId);
-                    } else {
-                      console.log(`Tab ${tabId} already registered, skipping duplicate registration`);
-                    }
-                    
-                    // OPTIMIZATION: Content script will handle execution automatically
-                  });
+                  deliverModLoaderToTab(tabId, enabledScripts);
                 }, 1000);
               }).catch(error => {
                 console.error("Error injecting injector script:", error);
@@ -1243,24 +1188,8 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                   
                   // Continue com o carregamento normal após inicialização
                   setTimeout(() => {
-                    // Use already refreshed scripts
                     console.log(`Sending ${enabledScripts.length} active scripts to tab ${tabId}`);
-                    
-                    browserAPI.tabs.sendMessage(tabId, {
-                      action: 'loadScripts',
-                      scripts: enabledScripts
-                    });
-
-                    getLocalMods().then(localMods => {
-                      console.log(`Found ${localMods.length} local mods`, localMods);
-                      
-                      browserAPI.tabs.sendMessage(tabId, {
-                        action: 'registerLocalMods',
-                        mods: localMods
-                      });
-                      
-                      // OPTIMIZATION: Content script will handle execution automatically
-                    });
+                    deliverModLoaderToTab(tabId, enabledScripts);
                   }, 1000);
                 } else {
                   console.error("Failed to initialize via messaging:", browserAPI.runtime.lastError);
@@ -1268,24 +1197,7 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
               });
             }
           } else {
-            console.log('Content script already functioning, loading scripts');
-            
-            // Use already refreshed scripts
-            browserAPI.tabs.sendMessage(tabId, {
-              action: 'loadScripts',
-              scripts: enabledScripts
-            });
-
-            getLocalMods().then(localMods => {
-              console.log(`Found ${localMods.length} local mods with states:`, 
-                localMods.map(m => `${m.name}: ${m.enabled}`));
-              
-              // Send registration message only - content script will handle execution
-              browserAPI.tabs.sendMessage(tabId, {
-                action: 'registerLocalMods',
-                mods: localMods
-              });
-            });
+            console.log('Content script already functioning; waiting for contentScriptReady to deliver mods');
           }
         });
       }, 500);

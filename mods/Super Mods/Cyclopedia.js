@@ -4423,11 +4423,21 @@ function setCachedRankingsData(options, data) {
 }
 function clearCharactersTabCache() { cyclopediaState.clearCache('all'); }
 function clearLeaderboardCache() { cyclopediaState.clearCache('leaderboardData'); }
+function clearNonRankingsLeaderboardCache() {
+  for (const key of [...cyclopediaState.cache.leaderboardData.keys()]) {
+    if (!String(key).startsWith('rankings')) {
+      cyclopediaState.cache.leaderboardData.delete(key);
+    }
+  }
+}
 function clearSearchedUsername() { cyclopediaState.searchedUsername = null; }
 function refreshCyclopediaRecordsOnOpen() {
-  // Always refresh WR + personal records when Cyclopedia opens.
-  clearCharactersTabCache();
-  clearLeaderboardCache();
+  // Always refresh WR + personal records when Cyclopedia opens (keep rankings cache).
+  cyclopediaState.cache.profileData.clear();
+  clearNonRankingsLeaderboardCache();
+  cyclopediaState.cache.roomThumbnails.clear();
+  cyclopediaState.cache.lastFetch.clear();
+  cyclopediaState.pendingRequests.clear();
   cyclopediaState.lastStartupProfileData = null;
   if (typeof MapsDataFetcher !== 'undefined' && MapsDataFetcher && typeof MapsDataFetcher.clearCache === 'function') {
     MapsDataFetcher.clearCache();
@@ -8059,7 +8069,9 @@ function openCyclopediaModal(options) {
           }
 
           const requestId = createRequest();
-          showLoadingState(col2);
+          if (selectedCategory !== 'Rankings') {
+            showLoadingState(col2);
+          }
 
           if (selectedCategory !== 'Rankings') {
             cyclopediaState.refreshRankingsTable = null;
@@ -8192,7 +8204,7 @@ function openCyclopediaModal(options) {
         const data = await fetchWithDeduplication(
           apiUrl,
           `rankings-fetch-${getRankingsCacheKey(queryOptions)}`,
-          0
+          1
         );
 
         if (!data || !Array.isArray(data.rankings)) {
@@ -8607,6 +8619,21 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             nextPageBtn.style.cursor = nextPageBtn.disabled ? 'default' : 'pointer';
           }
 
+          function renderRankingsLoadingRows() {
+            dataRowsContainer.innerHTML = '';
+            const loadingCell = document.createElement('div');
+            loadingCell.style.cssText = `
+              grid-column: 1 / -1;
+              padding: 24px;
+              text-align: center;
+              color: #888;
+              font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+              font-size: 12px;
+            `;
+            loadingCell.textContent = 'Loading rankings...';
+            dataRowsContainer.appendChild(loadingCell);
+          }
+
           function renderRankingsTable() {
             dataRowsContainer.innerHTML = '';
             if (currentRankings.length === 0) {
@@ -8619,7 +8646,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
                 font-size: 12px;
               `;
-              emptyCell.textContent = 'No rankings available';
+              emptyCell.textContent = isLoadingRankings ? 'Loading rankings...' : 'No rankings available';
               dataRowsContainer.appendChild(emptyCell);
               return;
             }
@@ -8725,6 +8752,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           async function loadRankings() {
             if (isLoadingRankings) return;
             isLoadingRankings = true;
+            renderRankingsLoadingRows();
             updatePaginationControls();
 
             const queryOptions = getRankingsQueryOptions();
@@ -8857,6 +8885,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           tableContainer.appendChild(scrollableContainer);
           tableContainer.appendChild(paginationBar);
 
+          renderRankingsLoadingRows();
+          contentContainer.appendChild(tableContainer);
+          containerDiv.appendChild(contentContainer);
+          col2.innerHTML = '';
+          col2.appendChild(containerDiv);
+
+          cyclopediaState.refreshRankingsTable = () => {
+            renderRankingsTable();
+            updateHeaderHighlighting();
+          };
+
           const infoContainer = document.createElement('div');
           infoContainer.style.cssText = `
             position: absolute;
@@ -8923,17 +8962,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           infoContainer.appendChild(infoIcon);
           infoContainer.appendChild(tooltip);
           tableContainer.appendChild(infoContainer);
-
-          contentContainer.appendChild(tableContainer);
-          containerDiv.appendChild(contentContainer);
-
-          col2.innerHTML = '';
-          col2.appendChild(containerDiv);
-
-          cyclopediaState.refreshRankingsTable = () => {
-            renderRankingsTable();
-            updateHeaderHighlighting();
-          };
 
           await loadRankings();
 
@@ -11277,13 +11305,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 // If we don't have a current search but have a previous one, restore it
                 cyclopediaState.searchedUsername = cyclopediaState.previousTabState.searchedUsername;
               }
-            }
-            
-            // Only call displayUserStats for Rankings since we handle Player Information and Leaderboards manually
-            if (selectedCharacterItem === 'Rankings') {
-              displayUserStats(selectedCharacterItem).catch(error => {
-                console.error('[Cyclopedia] Error updating user stats:', error);
-              });
             }
           });
         });

@@ -203,6 +203,11 @@ window.addEventListener('message', function(event) {
   const message = event.data.message;
   
   if (message.action) {
+    // Response-only messages from the page; not extension API requests
+    if (message.action === 'gameLocalStorageResponse') {
+      return;
+    }
+
     browserAPI.runtime.sendMessage(message, function(response) {
       console.log('Received response from background script:', response);
       
@@ -252,6 +257,39 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === 'getGameLocalStorage') {
+    const timeoutId = setTimeout(() => {
+      window.removeEventListener('message', listener);
+      sendResponse({ success: false, error: 'getGameLocalStorage timed out' });
+    }, 5000);
+
+    const listener = function(event) {
+      if (event.source !== window) return;
+      if (!event.data || event.data.from !== 'BESTIARY_CLIENT') return;
+      const clientMessage = event.data.message;
+      if (!clientMessage || clientMessage.action !== 'gameLocalStorageResponse') return;
+
+      clearTimeout(timeoutId);
+      window.removeEventListener('message', listener);
+      sendResponse({
+        success: !!clientMessage.success,
+        value: clientMessage.value,
+        data: clientMessage.data,
+        error: clientMessage.error
+      });
+    };
+
+    window.addEventListener('message', listener);
+    window.postMessage({
+      from: 'BESTIARY_EXTENSION',
+      message: {
+        action: 'getGameLocalStorage',
+        key: message.key
+      }
+    }, '*');
+    return true;
+  }
+
   if (message.action === 'restoreGameLocalStorage') {
     console.log('Restoring game localStorage data...');
     try {
@@ -274,7 +312,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       console.error('Error restoring game localStorage:', error);
       sendResponse({ success: false, error: error.message });
     }
-    return true;
+    return false;
   }
 
   if (message.action === 'clearGameLocalStorage') {
@@ -289,7 +327,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       console.error('Error clearing game localStorage:', error);
       sendResponse({ success: false, error: error.message });
     }
-    return true;
+    return false;
   }
 
   if (message.action === 'loadScripts') {
@@ -302,7 +340,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }, '*');
     
-    message.scripts.forEach(script => {
+    (message.scripts || []).forEach(script => {
       browserAPI.runtime.sendMessage({
         action: 'getScript',
         hash: script.hash
@@ -323,8 +361,9 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       });
     });
-    
-    return true;
+
+    sendResponse({ success: true });
+    return false;
   }
 
   if (message.action === 'executeLocalMod') {
@@ -338,7 +377,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }, '*');
     
     sendResponse({ success: true });
-    return true;
+    return false;
   }
 
   if (message.action === 'updateDebugMode') {
@@ -346,7 +385,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     window.BESTIARY_DEBUG = message.enabled;
     console.log('Debug mode updated to:', window.BESTIARY_DEBUG ? 'enabled' : 'disabled');
     sendResponse({ success: true });
-    return true;
+    return false;
   }
   
   if (message.action === 'getStorageSizes') {
@@ -427,7 +466,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }, '*');
     
     sendResponse({ success: true });
-    return true;
+    return false;
   }
   
   if (message.action === 'reloadLocalMods') {
@@ -449,7 +488,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }, '*');
     
     sendResponse({ success: true });
-    return true;
+    return false;
   }
   
   if (message.action === 'registerLocalMods') {
@@ -463,7 +502,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }, '*');
     
     sendResponse({ success: true });
-    return true;
+    return false;
   }
 });
 

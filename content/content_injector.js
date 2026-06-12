@@ -372,33 +372,31 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (window.DEBUG) console.log('Content script received message:', message);
   
   if (message.action === 'executeLocalMod') {
-    // Forward to page script
     window.postMessage({
       from: 'BESTIARY_EXTENSION',
       message: message
     }, '*');
-    
-    sendResponse({success: true});
+    sendResponse({ success: true });
+    return false;
   }
   
   if (message.action === 'updateLocalModState') {
-    // Forward the mod state update to the page script
     window.postMessage({
       from: 'BESTIARY_EXTENSION',
       message: message
     }, '*');
-    
-    sendResponse({success: true});
+    sendResponse({ success: true });
+    return false;
   }
   
   if (message.action === 'updateDebugMode') {
-    // Update the debug flag immediately
     window.BESTIARY_DEBUG = message.enabled;
     console.log('Debug mode updated to:', window.BESTIARY_DEBUG ? 'enabled' : 'disabled');
-    sendResponse({success: true});
+    sendResponse({ success: true });
+    return false;
   }
-  
-  return true; // Indicates we may respond asynchronously
+
+  return false;
 });
 
 if (window.DEBUG) console.log('Content Script Injector setup complete'); 

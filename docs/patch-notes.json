@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.1.7",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Battle log tracks stat changes (AD, AP, ARM, MR, SPD, HP max, level, atk delay, ability CD) with separate ally and villain stat filters; atk delay and ability CD decreases show green when beneficial."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Battle log filters split into ally and villain rows (dmg, heal, stats, status, pathing) with grid-aligned chips; toolbar actions are \"All Filters\" and \"Clear Log\". Units tab status chips are text-only; status detection reads live render data with merge rules for common effect variants."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Characters → Rankings loads faster: table skeleton appears immediately, duplicate tab fetch removed, rankings cache kept when reopening Cyclopedia, and rankings API requests no longer wait behind lower-priority queue jobs."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Benign duration passives (e.g. Jarred, Ultimate Healing, attack speed buffs) now appear on the Units tab and battle log."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Chrome MV3 service worker: background no longer mis-detects the browser or calls dynamic import() in the service worker (hardcoded registry fallbacks instead). Fixed message-port warnings from async onMessage handlers and added getGameLocalStorage bridge for Autoseller config. Startup delivers loadScripts/registerLocalMods once per page load instead of duplicating from tab update and contentScriptReady."
+        }
+      ]
+    },
+    {
       "version": "4.1.6",
       "changes": [
         {
