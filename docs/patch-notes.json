@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.1.6",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Permission hardening: removed tabs and activeTab (bestiaryarena.com host access covers tab messaging and injection). GitHub Gist/raw hosts are optional — prompted when you open the popup or import a remote mod. Firebase scoped to vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app; rankings API stays on bestiary-arena-ranking.vercel.app only. Reload or reinstall once to clear stale Chrome permission prompts."
+        }
+      ]
+    },
+    {
+      "version": "4.1.5",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Version skipped due to hotfix."
+        }
+      ]
+    },
+    {
       "version": "4.1.4",
       "changes": [
         {

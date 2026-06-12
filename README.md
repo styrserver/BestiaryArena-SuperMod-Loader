@@ -78,6 +78,22 @@ There are two ways to load mods:
 
 You can enable, disable, and configure mods from the mod loader interface. Each mod can have its own configuration settings, which are saved between sessions.
 
+### Extension Permissions
+
+The extension requests only what it needs to run mods on Bestiary Arena. See [`privacy_policy.md`](privacy_policy.md) for the full policy.
+
+**Required (install time):**
+- `storage` / `unlimitedStorage` — settings, mod cache, and backups
+- `scripting` — inject mod code into the game
+- **bestiaryarena.com** — run mods and talk to open game tabs
+- **bestiary-arena-ranking.vercel.app** — Cyclopedia Rankings API
+- **vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app** — optional Firebase-backed features (VIP List, Guilds, Quests, Challenges, Mod Settings best-runs sync)
+
+**Optional (on demand):**
+- **gist.githubusercontent.com** / **raw.githubusercontent.com** — prompted when you open the popup or import a remote Gist/GitHub mod
+
+The extension does **not** request `tabs`, `activeTab`, or browsing-history access. After a permission update, reload the extension in `chrome://extensions/` (or remove and re-add once) if Chrome still shows old prompts.
+
 ## Mod Development
 
 Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the [Mod Development Guide](docs/mod_development_guide.md) for detailed information on creating mods.
@@ -324,7 +340,7 @@ A comprehensive game data viewer and player profile manager with advanced featur
 - **Monster Database**: Browse and search all monsters with detailed stats, abilities, and locations
 - **Equipment Database**: View all equipment with stats, tiers, and optimization recommendations
 - **Player Profiles**: Search and view detailed player profiles with statistics and achievements
-- **Leaderboards**: Access real-time leaderboards for maps, rankings, and competitions
+- **Rankings**: Season-aware player rankings via the Bestiary Arena Rankings API (paginated table, sort, and search)
 - **Run Tracking**: View and analyze personal run history with RunTracker integration
 
 #### Depot Manager
@@ -568,6 +584,8 @@ If you encounter any issues:
 - **Autoseller session widget not updating?** Ensure the mod is enabled and you have completed at least one battle for stats to appear.
 - **Turbo Mode not working?** Make sure you're in a game session and try refreshing the page.
 - **Board Analyzer issues?** Ensure you're in sandbox mode and have a valid board configuration.
+- **Chrome still shows “Read your browsing history”?** Reload or reinstall the extension once after updating to 4.1.6+ — that prompt came from the old `tabs` permission and should not appear on a clean install.
+- **Gist import failed?** Allow GitHub host access when the browser prompts (opening the popup or importing a Gist triggers the optional permission).
 
 ## Credits
 

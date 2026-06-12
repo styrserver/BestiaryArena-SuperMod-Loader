@@ -114,6 +114,8 @@ The extension doesn't require a traditional build process, but you should:
 2. Test with different mods enabled/disabled
 3. Test on the latest version of Bestiary Arena
 4. Verify that your changes don't break existing functionality
+5. After changing `manifest.json` or `manifest_firefox.json` permissions, run `node scripts/validate-tabs-permission.js` from the repository root
+6. If you touch remote mod loading, test Gist import with GitHub optional permissions both granted and denied (popup should prompt on open or import)
 
 ## Documentation
 
@@ -123,6 +125,7 @@ If you're adding new features or changing existing ones, please update the docum
 2. Keep code examples up-to-date
 3. Add screenshots if they help explain the feature
 4. Follow the existing documentation style
+5. If you add or change extension permissions or network hosts, update [`privacy_policy.md`](privacy_policy.md), [`README.md`](README.md), and [`Wikitext.wikitext`](Wikitext.wikitext) so store/wiki copy stays accurate
 
 ## Creating Mods
 

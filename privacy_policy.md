@@ -1,6 +1,6 @@
 # Privacy Policy - Bestiary Arena SuperMod Loader
 
-## Last updated: April 19, 2026
+## Last updated: June 12, 2026
 
 This privacy policy describes how Bestiary Arena SuperMod Loader ("we", "our", or "extension") collects, uses, and shares information.
 
@@ -28,19 +28,24 @@ Our extension requires the following permissions:
 
 - **storage** / **unlimitedStorage**: To save your settings and local mod cache.
 - **scripting**: To inject mod code into the Bestiary Arena website.
-- **tabs** / **activeTab**: To work with Bestiary Arena tabs and the extension UI.
+- **Host access to bestiaryarena.com**: To run mods on the game site and communicate with open Bestiary Arena tabs.
+
+**Optional host access** (requested only when you open the popup or import a remote mod):
+
+- **gist.githubusercontent.com** and **raw.githubusercontent.com**: To download Gist or raw GitHub mod sources you choose to add.
 
 ## Network Access
 
 The extension and bundled mods may communicate with the following destinations, depending on what you configure and which mods you use:
 
-- **gist.githubusercontent.com** and **raw.githubusercontent.com**: To download mod sources you add (Gists and raw GitHub file URLs supported by the loader). GitHub handles these requests under [GitHub’s policies](https://docs.github.com/en/site-policy).
+- **gist.githubusercontent.com** and **raw.githubusercontent.com** (optional): To download mod sources you add (Gists and raw GitHub file URLs supported by the loader). GitHub handles these requests under [GitHub’s policies](https://docs.github.com/en/site-policy).
 - **bestiaryarena.com** (and subdomains): Where the game runs and mods are applied. Bundled mods may also call the game’s own **API** endpoints on that host (for example `bestiaryarena.com/api/...`). The game’s operator handles that traffic under their own terms.
-- **bestiaryarena.wiki.gg**: Optional requests from bundled mods (for example public rankings or wiki content via the MediaWiki API) and links in the extension UI. That wiki is operated separately from us; requests are handled under [wiki.gg](https://wiki.gg/) and the wiki’s own policies.
+- **bestiary-arena-ranking.vercel.app**: Cyclopedia Rankings API (public leaderboard data).
+- **bestiaryarena.wiki.gg**: Links in the extension UI only; rankings use the Vercel API above.
 
 ### Firebase
 
-**Optional.** Some features (for example best-runs backup/sync in Mod Settings, and certain other bundled mods) can read or write data to a **Firebase Realtime Database** project **that we configure and operate** (`*.firebasedatabase.app`), when you enable those features or use those mods. The database runs on **Google Firebase** infrastructure; Google’s processing is described in [Google’s Privacy Policy](https://policies.google.com/privacy). We choose what paths and rules apply in our Firebase project; you choose whether to upload data (for example encrypted best runs) by turning those options on.
+**Optional feature use.** Some features (for example best-runs backup/sync in Mod Settings, VIP List, Guilds, Quests, and Challenges) can read or write data to our **Firebase Realtime Database** instance at `vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app` when you enable those features or use those mods. The database runs on **Google Firebase** infrastructure; Google’s processing is described in [Google’s Privacy Policy](https://policies.google.com/privacy). We choose what paths and rules apply in our Firebase project; you choose whether to upload data (for example encrypted best runs) by turning those options on.
 
 We do **not** operate the Bestiary Arena game or GitHub.
 
@@ -48,7 +53,7 @@ We do **not** operate the Bestiary Arena game or GitHub.
 
 We do not sell your data.
 
-When you use **remote mod sources**, your browser sends requests to **GitHub** as described above. When you use **optional Firebase-backed features**, your browser sends the relevant payloads to **our Firebase project** (hosted by Google) as described above. When you use features that load **wiki rankings or other wiki content**, your browser may send requests to **bestiaryarena.wiki.gg** as described above. Core extension settings and mod cache remain local unless a feature you enable uploads them.
+When you use **remote mod sources**, your browser sends requests to **GitHub** as described above. When you use **optional Firebase-backed features**, your browser sends the relevant payloads to **our Firebase project** (hosted by Google) as described above. Core extension settings and mod cache remain local unless a feature you enable uploads them.
 
 ## Third-Party Code
 

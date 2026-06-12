@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "4.1.4",
+  "version": "4.1.6",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -79,20 +79,16 @@
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "tabs",
     "*://*.bestiaryarena.com/*",
     "*://bestiaryarena.com/*",
-    "https://*.bestiaryarena.com/*",
-    "https://bestiaryarena.com/*",
-    "http://*.bestiaryarena.com/*",
-    "http://bestiaryarena.com/*",
+    "*://bestiary-arena-ranking.vercel.app/*",
+    "https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app/*"
+  ],
+  "optional_permissions": [
     "*://*.gist.githubusercontent.com/*",
     "*://gist.githubusercontent.com/*",
     "*://*.raw.githubusercontent.com/*",
-    "*://raw.githubusercontent.com/*",
-    "*://*.vercel.app/*",
-    "*://bestiary-arena-ranking.vercel.app/*",
-    "*://*.firebasedatabase.app/*"
+    "*://raw.githubusercontent.com/*"
   ],
   "web_accessible_resources": [
     "content/client.js",
@@ -128,5 +124,5 @@
       "strict_min_version": "78.0"
     }
   },
-  "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'self' https://*.gist.githubusercontent.com https://gist.githubusercontent.com"
+  "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'self' https://*.gist.githubusercontent.com https://gist.githubusercontent.com https://*.raw.githubusercontent.com https://raw.githubusercontent.com https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app https://bestiary-arena-ranking.vercel.app"
 }

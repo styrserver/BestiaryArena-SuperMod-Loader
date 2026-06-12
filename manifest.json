@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "4.1.4",
+  "version": "4.1.6",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -74,20 +74,19 @@
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "scripting",
-    "tabs",
-    "activeTab"
+    "scripting"
   ],
   "host_permissions": [
+    "*://*.bestiaryarena.com/*",
+    "*://bestiaryarena.com/*",
+    "*://bestiary-arena-ranking.vercel.app/*",
+    "https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app/*"
+  ],
+  "optional_host_permissions": [
     "*://*.gist.githubusercontent.com/*",
     "*://gist.githubusercontent.com/*",
     "*://*.raw.githubusercontent.com/*",
-    "*://raw.githubusercontent.com/*",
-    "*://*.bestiaryarena.com/*",
-    "*://bestiaryarena.com/*",
-    "*://*.vercel.app/*",
-    "*://bestiary-arena-ranking.vercel.app/*",
-    "*://*.firebasedatabase.app/*"
+    "*://raw.githubusercontent.com/*"
   ],
   "web_accessible_resources": [
     {

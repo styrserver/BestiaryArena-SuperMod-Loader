@@ -15,6 +15,45 @@ if (typeof window.browser === 'undefined') {
 
 window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null));
 
+async function getActiveTabId() {
+  const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
+  return tab && tab.id != null ? tab.id : null;
+}
+
+const GITHUB_OPTIONAL_ORIGINS = [
+  '*://*.gist.githubusercontent.com/*',
+  '*://gist.githubusercontent.com/*',
+  '*://*.raw.githubusercontent.com/*',
+  '*://raw.githubusercontent.com/*'
+];
+
+async function hasGitHubHostAccess() {
+  if (!window.browserAPI || !window.browserAPI.permissions) {
+    return true;
+  }
+  try {
+    return await window.browserAPI.permissions.contains({ origins: GITHUB_OPTIONAL_ORIGINS });
+  } catch (error) {
+    originalConsoleLog('Error checking GitHub host permissions:', error);
+    return false;
+  }
+}
+
+async function ensureGitHubHostAccess() {
+  if (await hasGitHubHostAccess()) {
+    return true;
+  }
+  if (!window.browserAPI || !window.browserAPI.permissions) {
+    return true;
+  }
+  try {
+    return await window.browserAPI.permissions.request({ origins: GITHUB_OPTIONAL_ORIGINS });
+  } catch (error) {
+    originalConsoleLog('Error requesting GitHub host permissions:', error);
+    return false;
+  }
+}
+
 // Global Debug System for Mod Console Logs
 const DEBUG_STORAGE_KEY = 'bestiary-debug';
 let DEBUG_MODE = false;
@@ -859,6 +898,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       
+      if (!await ensureGitHubHostAccess()) {
+        const errorMsg = await getTranslation(
+          'messages.githubPermissionRequired',
+          'GitHub access is required to import remote mods. Allow it in the browser prompt, then try again.'
+        );
+        alert(errorMsg);
+        return;
+      }
+
       const url = `https://gist.githubusercontent.com/raw/${gistHash}`;
       let scriptContent = '';
       
@@ -1397,10 +1445,12 @@ function applyFilters() {
 
 async function toggleLocalMod(name, enabled) {
   try {
+    const tabId = await getActiveTabId();
     const response = await window.browserAPI.runtime.sendMessage({
       action: 'toggleLocalMod',
       name,
-      enabled
+      enabled,
+      tabId
     });
     
     if (!response.success) {
@@ -1438,9 +1488,11 @@ async function deleteManualMod(modName) {
 
 async function executeLocalMod(name) {
   try {
+    const tabId = await getActiveTabId();
     const response = await window.browserAPI.runtime.sendMessage({
       action: 'executeLocalMod',
-      name
+      name,
+      tabId
     });
     
     if (!response.success) {
@@ -1620,6 +1672,9 @@ function applyLocalization() {
 // Initialize language toggle when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
   initializeLanguageToggle();
+  ensureGitHubHostAccess().catch(error => {
+    originalConsoleLog('GitHub optional permission prompt skipped:', error);
+  });
   // Load initial translations using global system
   currentTranslations = await window.LocalizationUtils.loadTranslations();
 

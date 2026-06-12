@@ -33,6 +33,65 @@ let registeredTabs = new Set(); // Track which tabs have received local mods
 
 const DEBUG = false; // Set to true for development
 
+function resolveMessageTabId(message, sender) {
+  if (message && message.tabId != null) return message.tabId;
+  if (sender && sender.tab && sender.tab.id != null) return sender.tab.id;
+  return null;
+}
+
+function queryActiveTabId(callback) {
+  browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    callback(tabs[0] && tabs[0].id != null ? tabs[0].id : null);
+  });
+}
+
+function sendMessageToResolvedTab(message, sender, payload) {
+  const tabId = resolveMessageTabId(message, sender);
+  if (tabId != null) {
+    browserAPI.tabs.sendMessage(tabId, payload);
+    return;
+  }
+  queryActiveTabId((activeTabId) => {
+    if (activeTabId != null) {
+      browserAPI.tabs.sendMessage(activeTabId, payload);
+    }
+  });
+}
+
+const GITHUB_OPTIONAL_ORIGINS = [
+  '*://*.gist.githubusercontent.com/*',
+  '*://gist.githubusercontent.com/*',
+  '*://*.raw.githubusercontent.com/*',
+  '*://raw.githubusercontent.com/*'
+];
+
+async function hasGitHubHostAccess() {
+  if (!browserAPI || !browserAPI.permissions) {
+    return true;
+  }
+  try {
+    return await browserAPI.permissions.contains({ origins: GITHUB_OPTIONAL_ORIGINS });
+  } catch (error) {
+    console.error('Error checking GitHub host permissions:', error);
+    return false;
+  }
+}
+
+async function requestGitHubHostAccess() {
+  if (!browserAPI || !browserAPI.permissions) {
+    return true;
+  }
+  if (await hasGitHubHostAccess()) {
+    return true;
+  }
+  try {
+    return await browserAPI.permissions.request({ origins: GITHUB_OPTIONAL_ORIGINS });
+  } catch (error) {
+    console.error('Error requesting GitHub host permissions:', error);
+    return false;
+  }
+}
+
 /** Extension resource path for a bundled mod (database/* or mods/*). */
 function resolveModResourcePath(modName) {
   if (!modName || typeof modName !== 'string') {
@@ -202,6 +261,15 @@ async function fetchScript(source) {
         break;
     }
     
+    if (!await hasGitHubHostAccess()) {
+      const cached = await browserAPI.storage.local.get(`script_${source}`);
+      if (cached[`script_${source}`]) {
+        scriptCache[source] = cached[`script_${source}`];
+        return cached[`script_${source}`];
+      }
+      throw new Error('GitHub host access not granted. Open the extension popup to allow remote mod downloads.');
+    }
+
     if (DEBUG) console.log('Fetching script from:', url);
     
     const response = await fetch(url, {
@@ -347,6 +415,14 @@ async function fetchUtilityScript() {
     console.log('Fetching utility script from:', UTILITY_GIST_URL);
     const cacheParam = `?cache=${Date.now()}`;
     const url = UTILITY_GIST_URL + cacheParam;
+
+    if (!await hasGitHubHostAccess()) {
+      const data = await browserAPI.storage.local.get(['utility_script_cache']);
+      if (data.utility_script_cache) {
+        return data.utility_script_cache;
+      }
+      throw new Error('GitHub host access not granted. Open the extension popup to allow utility script downloads.');
+    }
     
     const response = await fetch(url, {
       cache: 'no-store',
@@ -452,6 +528,13 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'ping') {
     console.log('Background script pinged, responding...');
     sendResponse({ success: true, timestamp: Date.now() });
+    return true;
+  }
+
+  if (message.action === 'requestGitHubHostAccess') {
+    requestGitHubHostAccess()
+      .then(granted => sendResponse({ success: granted, granted }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
   
@@ -683,13 +766,9 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'executeLocalMod') {
-    browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]) {
-        browserAPI.tabs.sendMessage(tabs[0].id, {
-          action: 'executeLocalMod',
-          name: message.name
-        });
-      }
+    sendMessageToResolvedTab(message, sender, {
+      action: 'executeLocalMod',
+      name: message.name
     });
     sendResponse({ success: true });
     return true;
@@ -724,42 +803,46 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'executeScript') {
-    browserAPI.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      if (tabs[0]) {
-        try {
-          // Obter o conteúdo do script
-          const scriptContent = await getScript(message.hash);
-          if (!scriptContent) {
-            sendResponse({ success: false, error: 'Script content not found' });
-            return;
-          }
-          
-          // Obter a configuração do script
-          const scripts = await getActiveScripts();
-          const script = scripts.find(s => s.hash === message.hash);
-          
-          if (!script) {
-            sendResponse({ success: false, error: 'Script not found in active scripts' });
-            return;
-          }
-          
-          // Enviar mensagem para o content script executar o script
-          browserAPI.tabs.sendMessage(tabs[0].id, {
-            action: 'executeScript',
-            hash: message.hash,
-            scriptContent: scriptContent,
-            config: script.config || {}
-          });
-          
-          sendResponse({ success: true });
-        } catch (error) {
-          console.error('Error executing script:', error);
-          sendResponse({ success: false, error: error.message });
-        }
-      } else {
-        sendResponse({ success: false, error: 'No active tab found' });
+    const tabId = resolveMessageTabId(message, sender);
+    const deliverScript = async (targetTabId) => {
+      if (targetTabId == null) {
+        sendResponse({ success: false, error: 'No target tab found' });
+        return;
       }
-    });
+      try {
+        const scriptContent = await getScript(message.hash);
+        if (!scriptContent) {
+          sendResponse({ success: false, error: 'Script content not found' });
+          return;
+        }
+
+        const scripts = await getActiveScripts();
+        const script = scripts.find(s => s.hash === message.hash);
+
+        if (!script) {
+          sendResponse({ success: false, error: 'Script not found in active scripts' });
+          return;
+        }
+
+        browserAPI.tabs.sendMessage(targetTabId, {
+          action: 'executeScript',
+          hash: message.hash,
+          scriptContent: scriptContent,
+          config: script.config || {}
+        });
+
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error('Error executing script:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    };
+
+    if (tabId != null) {
+      deliverScript(tabId);
+    } else {
+      queryActiveTabId(deliverScript);
+    }
     return true;
   }
 
@@ -803,28 +886,34 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // For mods that use context.config, read from game localStorage instead of extension storage
     // This ensures mods get the actual current settings, not stale defaults
     if (message.modName === 'Super Mods/Autoseller.js') {
-      // Request actual localStorage from content script
-      browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]) {
-          browserAPI.tabs.sendMessage(tabs[0].id, {
-            action: 'getGameLocalStorage',
-            key: 'autoseller-settings'
-          }, (response) => {
-            if (response && response.success && response.value) {
-              try {
-                const settings = JSON.parse(response.value);
-                sendResponse({ success: true, config: settings });
-              } catch (e) {
-                sendResponse({ success: true, config: {} });
-              }
-            } else {
+      const requestAutosellerConfig = (targetTabId) => {
+        if (targetTabId == null) {
+          sendResponse({ success: true, config: {} });
+          return;
+        }
+        browserAPI.tabs.sendMessage(targetTabId, {
+          action: 'getGameLocalStorage',
+          key: 'autoseller-settings'
+        }, (response) => {
+          if (response && response.success && response.value) {
+            try {
+              const settings = JSON.parse(response.value);
+              sendResponse({ success: true, config: settings });
+            } catch (e) {
               sendResponse({ success: true, config: {} });
             }
-          });
-        } else {
-          sendResponse({ success: true, config: {} });
-        }
-      });
+          } else {
+            sendResponse({ success: true, config: {} });
+          }
+        });
+      };
+
+      const tabId = resolveMessageTabId(message, sender);
+      if (tabId != null) {
+        requestAutosellerConfig(tabId);
+      } else {
+        queryActiveTabId(requestAutosellerConfig);
+      }
       return true; // Keep the message channel open for async response
     } else if (message.modName === 'Official Mods/Turbo Mode.js') {
       browserAPI.storage.local.get('localModsConfig', (data) => {
@@ -901,15 +990,10 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }).finally(() => {
               // Respond to confirm it's done
               sendResponse({ success: true });
-              // Notify active tabs about the change
-              browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0]) {
-                  browserAPI.tabs.sendMessage(tabs[0].id, {
-                    action: 'updateLocalModState',
-                    name: message.name,
-                    enabled: message.enabled
-                  });
-                }
+              sendMessageToResolvedTab(message, sender, {
+                action: 'updateLocalModState',
+                name: message.name,
+                enabled: message.enabled
               });
             });
           });
@@ -935,15 +1019,10 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
               // Then respond to confirm it's done
               sendResponse({ success: true });
               
-              // Finally notify active tabs about the change
-              browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                if (tabs[0]) {
-                  browserAPI.tabs.sendMessage(tabs[0].id, {
-                    action: 'updateLocalModState',
-                    name: message.name,
-                    enabled: message.enabled
-                  });
-                }
+              sendMessageToResolvedTab(message, sender, {
+                action: 'updateLocalModState',
+                name: message.name,
+                enabled: message.enabled
               });
             });
           });
