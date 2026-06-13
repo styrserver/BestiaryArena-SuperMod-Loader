@@ -3327,6 +3327,13 @@ async function deleteRunsFromFirebase(playerName) {
   }
 }
 
+function isGazerMonsterForHide(monster) {
+  const db = window.creatureDatabase;
+  if (typeof db?.isGazerMonster === 'function') return db.isGazerMonster(monster);
+  const name = monster?.metadata?.name ?? '';
+  return String(name).toLowerCase().includes('gazer');
+}
+
 async function hideNonShinyAndNonAwakenedMonsters(onProgress = null) {
   const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters;
   if (!Array.isArray(monsters)) {
@@ -3334,10 +3341,11 @@ async function hideNonShinyAndNonAwakenedMonsters(onProgress = null) {
   }
 
   const monstersToHide = monsters.filter((monster) => {
+    if (monster?.hidden === true) return false;
+    if (isGazerMonsterForHide(monster)) return true;
     const isAwakened = Number(monster?.tier) === 6;
     const isShiny = monster?.shiny === true;
-    const isAlreadyHidden = monster?.hidden === true;
-    return !isAwakened && !isShiny && !isAlreadyHidden;
+    return !isAwakened && !isShiny;
   });
 
   let hiddenCount = 0;
@@ -10198,7 +10206,7 @@ function buildAdvancedStatsTooltip(info) {
         const root = document.createElement('div');
         root.classList.add('tooltip-prose');
         root.classList.add('pixel-font-14');
-        root.style.cssText = 'max-width: 320px; color: #fff; line-height: 1.1;';
+        root.style.cssText = 'max-width: 200px; color: #fff; line-height: 1.1;';
         tooltipContent.appendChild(root);
 
         if (typeof globalThis.state?.utils?.createUIComponent === 'function' && abilityInfo.TooltipContent) {
@@ -10281,7 +10289,7 @@ function buildEquipmentEffectTooltip(gameId) {
   const root = document.createElement('div');
   root.classList.add('tooltip-prose');
   root.classList.add('pixel-font-14');
-  root.style.cssText = 'max-width: 320px; color: #e6d7b0; line-height: 1.1;';
+  root.style.cssText = 'max-width: 200px; color: #e6d7b0; line-height: 1.1;';
   tooltipContent.appendChild(root);
 
   if (equipData?.metadata?.description) {

@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.1.9",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Summary tab (Units | Battle Log | Summary) with live per-creature combat stats; export append includes matching team totals, DPS/HPS, damage share, summon instances, and overkill."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Summary allies and enemies shown side-by-side. Panel tick display uses gameTimer only (no poll); shared tick key for status bar, summary DPS, and export. Turbo-aware UI throttling, status bar render dedup, and 100ms summary refresh."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Autohide creatures on profile page (renamed; tooltip explains behavior) now hides non-shiny, non-awakened creatures and all gazers. Show genes and equipment on hover renamed from advanced stats. Ability hover tooltip max width set to 200px."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Combat summary roster vs summon detection; per-summon instance stats (#1/#2 + tile); died N× labels; zero-damage roster units included."
+        }
+      ]
+    },
+    {
       "version": "4.1.8",
       "changes": [
         {

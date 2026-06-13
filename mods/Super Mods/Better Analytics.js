@@ -1195,6 +1195,8 @@
         return t('mods.betterAnalytics.logMarkerEnd');
     }
     const UNITS_BODY_ID = 'mod-better-sandbox-units-body';
+    const SUMMARY_BODY_ID = 'mod-better-sandbox-summary-body';
+    const SUMMARY_CONTENT_ID = 'mod-better-sandbox-summary-content';
     const LOG_BODY_ID = 'mod-better-sandbox-log-body';
     const LOG_LIST_ID = 'mod-better-sandbox-log-list';
     const LOG_SUBTITLE_ID = 'mod-better-sandbox-log-subtitle';
@@ -1208,7 +1210,9 @@
     const STYLE_ID = 'better-sandbox-styles';
     const STORAGE_KEY = 'betterSandboxPanel';
 
-    const PANEL_TICK_POLL_MS = 50;
+    const LIVE_PANEL_UPDATE_MS = 50;
+    const LIVE_PANEL_UPDATE_MS_TURBO = 125;
+    const SUMMARY_UPDATE_MS = 100;
     const DEFAULT_TICK_INTERVAL_MS = 62.5;
     const MIN_TICK_INTERVAL_MS = 16;
     const SPEED_MIN_PERCENT = 5;
@@ -1265,10 +1269,11 @@
 
     let activeWorld = null;
     let panelGameTimerSub = null;
-    let panelTickPollTimer = null;
     let panelFightTick = null;
     let panelFightTickFrozen = null;
     let panelFightEndState = null;
+    let panelTickRevision = 0;
+    let lastPanelSyncedEngineTick = null;
     let lastGameTimerFightState = null;
     let boardUnsubs = [];
     const boardTrack = { roomId: null, floor: null, gameStarted: false, mode: null, configSig: '' };
@@ -1281,11 +1286,17 @@
     let lastRenderedVisibleCount = 0;
     let lastRenderedFilterSig = '';
     let battleLogRenderScheduled = false;
+    let lastSummaryUpdateMs = 0;
+    let summaryUpdateTimer = null;
+    let cachedPreparedBattleLogSummary = null;
+    let cachedPreparedBattleLogSummaryKey = '';
     let cachedVisibleBattleLog = null;
     let cachedVisibleBattleLogRevision = -1;
     let cachedVisibleBattleLogFilterSig = '';
     let cachedActorSnapshots = null;
     let cachedActorSnapshotsTick = null;
+    let lastLivePanelUpdateMs = 0;
+    let lastStatusBarSignature = '';
     let lastUnitStatusByKey = new Map();
     let battleLogTracking = false;
     let battleLogSessionEnded = false;
@@ -1380,6 +1391,11 @@
         return merged;
     }
 
+    function normalizeActiveTab(tab) {
+        if (tab === 'summary' || tab === 'units' || tab === 'log') return tab;
+        return 'units';
+    }
+
     function loadPanelSettings() {
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
@@ -1388,6 +1404,7 @@
             return {
                 ...PANEL_DEFAULTS,
                 ...parsed,
+                activeTab: normalizeActiveTab(parsed.activeTab),
                 logFilters: normalizeLogFilters(parsed.logFilters)
             };
         } catch {
@@ -1902,7 +1919,10 @@
         panelFightTick = null;
         panelFightTickFrozen = null;
         panelFightEndState = null;
+        panelTickRevision = 0;
+        lastPanelSyncedEngineTick = null;
         lastGameTimerFightState = getGameTimerFightState();
+        lastStatusBarSignature = '';
     }
 
     function isGameTimerEndState(state) {
@@ -1924,12 +1944,26 @@
         }
     }
 
+    function resolveEngineTick(context, world) {
+        const fromTimer = context?.currentTick;
+        if (typeof fromTimer === 'number' && Number.isFinite(fromTimer)) return fromTimer;
+        return readTickFromEngine(world);
+    }
+
     function getGameTimerFightState() {
         try {
             return globalThis.state?.gameTimer?.getSnapshot?.()?.context?.state ?? null;
         } catch {
             return null;
         }
+    }
+
+    function getPanelTickRenderKey() {
+        return `${panelTickRevision}|${panelFightTickFrozen ?? panelFightTick ?? 'x'}|${panelFightEndState ?? ''}`;
+    }
+
+    function getPreparedBattleLogSummaryCacheKey() {
+        return `${battleLogRevision}:${getPanelTickRenderKey()}`;
     }
 
     function isPanelFightResolved() {
@@ -1940,17 +1974,22 @@
         return isFightActive() && panelFightEndState == null && panelFightTickFrozen == null;
     }
 
-    /** Single tick source for battle log, status bar, and export (world engine tick). */
-    function getFightTick(world) {
+    /** Cached panel tick — updated only via syncPanelTick / freezePanelFightTickFromEngine. */
+    function getFightTick() {
         if (panelFightTickFrozen != null) return panelFightTickFrozen;
-        if (isLiveFightTracking()) {
-            const engineTick = readTickFromEngine(world);
-            if (engineTick != null) {
-                panelFightTick = engineTick;
-                return engineTick;
-            }
-        }
         return panelFightTick;
+    }
+
+    function syncPanelTick(context, options = {}) {
+        if (panelFightTickFrozen != null) return false;
+        const engineTick = resolveEngineTick(context);
+        if (engineTick == null) return false;
+        if (!options.force && engineTick === lastPanelSyncedEngineTick) return false;
+        lastPanelSyncedEngineTick = engineTick;
+        if (isLiveFightTracking()) panelFightTick = engineTick;
+        panelTickRevision++;
+        invalidatePreparedBattleLogSummaryCache();
+        return true;
     }
 
     function syncPanelFightTickFromSnapshot() {
@@ -1959,7 +1998,6 @@
             syncGameTimerFightStateTracking(state);
             if (!isGameTimerEndState(state)) return;
             if (panelFightTickFrozen != null && isPanelFightResolved()) return;
-            // Stale victory/defeat on the timer after newGame — ignore while a log session is active.
             if (isBattleLogTracking()) return;
             freezePanelFightTickFromEngine();
         } catch { /* ignore */ }
@@ -1971,14 +2009,15 @@
             panelFightEndState = timerState;
         }
         if (panelFightTickFrozen == null) {
-            const engineTick = readTickFromEngine(world);
-            const finalTick = engineTick ?? panelFightTick;
-            if (finalTick != null) {
-                panelFightTick = finalTick;
-                panelFightTickFrozen = finalTick;
+            const engineTick = resolveEngineTick(null, world) ?? panelFightTick;
+            if (engineTick != null) {
+                panelFightTick = engineTick;
+                panelFightTickFrozen = engineTick;
+                lastPanelSyncedEngineTick = engineTick;
             }
         }
-        stopPanelTickPoll();
+        panelTickRevision++;
+        invalidatePreparedBattleLogSummaryCache();
         tryEndBattleLogSession();
     }
 
@@ -1989,39 +2028,33 @@
         }
     }
 
-    function stopPanelTickPoll() {
-        if (panelTickPollTimer) {
-            clearInterval(panelTickPollTimer);
-            panelTickPollTimer = null;
-        }
+    function isTurboAccelerated() {
+        return window.__turboState?.active === true && !slowMotionEnabled;
     }
 
-    function pollPanelFightTick() {
-        const panel = document.getElementById(PANEL_ID);
-        if (!panel || panel.style.display === 'none') {
-            stopPanelTickPoll();
-            return;
-        }
-        if (panelFightTickFrozen != null) {
-            renderStatusBar();
-            return;
-        }
-        if (!isLiveFightTracking()) {
-            stopPanelTickPoll();
-            return;
+    function getLivePanelUpdateIntervalMs() {
+        return isTurboAccelerated() ? LIVE_PANEL_UPDATE_MS_TURBO : LIVE_PANEL_UPDATE_MS;
+    }
+
+    function notifyPanelTickConsumers(options = {}) {
+        if (isLiveFightTracking() && shouldPatchBattleLogActors()) {
+            pollStatusEffectTracking(options.force === true);
         }
 
-        pollStatusEffectTracking();
-        if (getFightTick() != null) {
-            renderStatusBar();
+        const now = performance.now();
+        if (!options.force) {
+            const minMs = getLivePanelUpdateIntervalMs();
+            if (now - lastLivePanelUpdateMs < minMs) {
+                if (activeTab === 'summary') scheduleSummaryTabRender();
+                return;
+            }
+        }
+
+        lastLivePanelUpdateMs = now;
+        renderStatusBar();
+        if (isLiveFightTracking() && getFightTick() != null) {
             renderLiveFight();
         }
-    }
-
-    function startPanelTickPoll() {
-        stopPanelTickPoll();
-        pollPanelFightTick();
-        panelTickPollTimer = setInterval(pollPanelFightTick, PANEL_TICK_POLL_MS);
     }
 
     function onPanelGameTimerUpdate({ context }) {
@@ -2044,11 +2077,13 @@
 
         syncGameTimerFightStateTracking(gameState);
 
-        renderStatusBar();
         if (isLiveFightTracking()) {
-            pollStatusEffectTracking();
-            getFightTick();
-            renderLiveFight();
+            const tickChanged = syncPanelTick(context, { force: timerJustEnded });
+            if (tickChanged || timerJustEnded) {
+                notifyPanelTickConsumers({ force: timerJustEnded });
+            }
+        } else if (timerJustEnded) {
+            renderStatusBar(true);
         }
     }
 
@@ -2063,6 +2098,11 @@
             syncPanelFightTickFromSnapshot();
         }
         panelGameTimerSub = gameTimer.subscribe(onPanelGameTimerUpdate);
+        const snapshotCtx = gameTimer.getSnapshot?.()?.context;
+        if (snapshotCtx && isLiveFightTracking()) {
+            syncPanelTick(snapshotCtx, { force: true });
+            notifyPanelTickConsumers({ force: true });
+        }
     }
 
     function getBattleLogTick() {
@@ -2089,6 +2129,16 @@
     function actorLabel(actor, fallback = 'Unknown') {
         if (!actor) return fallback;
         return actor.name || actor.nickname || (actor.id != null ? `#${actor.id}` : fallback);
+    }
+
+    function resolveLogActorIdentity(actor) {
+        if (!actor) return null;
+        return {
+            key: resolveFightCollapseKey(actor),
+            name: actorLabel(actor),
+            villain: actor.villain === true,
+            tile: readActorTileIndex(actor)
+        };
     }
 
     function teamClass(villain) {
@@ -2225,8 +2275,13 @@
         lastRenderedVisibleCount = 0;
         lastRenderedFilterSig = '';
         invalidateVisibleBattleLogCache();
+        invalidatePreparedBattleLogSummaryCache();
         invalidateActorSnapshotsCache();
         lastUnitStatusByKey.clear();
+        lastLivePanelUpdateMs = 0;
+        clearSummaryUpdateTimer();
+        lastSummaryUpdateMs = 0;
+        lastStatusBarSignature = '';
         battleLogTracking = false;
         battleLogSessionEnded = false;
         lastStatusPollTick = -1;
@@ -2589,6 +2644,43 @@
         filtersWrap.parentNode.insertBefore(createBattleLogSearchBar(), filtersWrap.nextSibling);
     }
 
+    function ensurePanelTabs() {
+        const tabBar = document.querySelector(`#${PANEL_ID} .bs-tab-bar`);
+        if (!tabBar) return;
+
+        document.getElementById('mod-better-sandbox-log-summary')?.remove();
+
+        if (!document.getElementById('mod-better-sandbox-tab-summary')) {
+            const tabSummaryBtn = document.createElement('button');
+            tabSummaryBtn.type = 'button';
+            tabSummaryBtn.id = 'mod-better-sandbox-tab-summary';
+            tabSummaryBtn.className = 'bs-tab-btn';
+            tabSummaryBtn.textContent = t('mods.betterAnalytics.tabSummary');
+            tabSummaryBtn.addEventListener('click', () => switchTab('summary'));
+            tabBar.appendChild(tabSummaryBtn);
+        } else {
+            const tabSummary = document.getElementById('mod-better-sandbox-tab-summary');
+            if (tabSummary) tabBar.appendChild(tabSummary);
+        }
+
+        if (!document.getElementById(SUMMARY_BODY_ID)) {
+            const summaryBody = document.createElement('div');
+            summaryBody.id = SUMMARY_BODY_ID;
+            summaryBody.className = 'bs-body';
+            summaryBody.style.display = 'none';
+            const content = document.createElement('div');
+            content.id = SUMMARY_CONTENT_ID;
+            content.className = 'bs-summary-content';
+            summaryBody.appendChild(content);
+            const logBody = document.getElementById(LOG_BODY_ID);
+            if (logBody?.parentNode) logBody.parentNode.appendChild(summaryBody);
+        } else {
+            const summaryBody = document.getElementById(SUMMARY_BODY_ID);
+            const logBody = document.getElementById(LOG_BODY_ID);
+            if (summaryBody && logBody?.parentNode) logBody.parentNode.appendChild(summaryBody);
+        }
+    }
+
     function ensureSpeedRowUi() {
         const speedRow = document.getElementById('mod-better-sandbox-speed-row');
         if (!speedRow) return;
@@ -2783,6 +2875,10 @@
             kind: isHeal ? 'heal' : 'damage',
             from,
             to,
+            fromKey: fromActor ? resolveFightCollapseKey(fromActor) : null,
+            toKey: toActor ? resolveFightCollapseKey(toActor) : null,
+            fromTile: fromActor ? readActorTileIndex(fromActor) : null,
+            toTile: toActor ? readActorTileIndex(toActor) : null,
             fromVillain: fromActor?.villain === true,
             toVillain: toActor?.villain === true,
             amount,
@@ -2809,6 +2905,8 @@
             tick: tick != null ? tick : '?',
             kind: 'abilityCast',
             from,
+            fromKey: resolveFightCollapseKey(actor),
+            fromTile: readActorTileIndex(actor),
             fromVillain: actor.villain === true,
             abilityName
         });
@@ -2873,8 +2971,11 @@
             tick: tick != null ? tick : '?',
             kind: 'death',
             unit,
+            unitKey: resolveFightCollapseKey(actor),
+            unitTile: readActorTileIndex(actor),
             unitVillain: actor.villain === true,
             killedBy,
+            killedByKey: killerActor ? resolveFightCollapseKey(killerActor) : null,
             killedByVillain: killerActor?.villain === true
         });
 
@@ -3340,13 +3441,33 @@
         }
     }
 
+    function collectActorStatusUnitsForTracking() {
+        const world = getActiveWorld();
+        const actors = world?.grid?.actors;
+        if (!Array.isArray(actors)) return [];
+        const units = [];
+        for (const actor of actors) {
+            if (!actor) continue;
+            units.push({
+                name: actor.name || actor.nickname || 'Unknown',
+                villain: actor.villain === true,
+                tileIndex: readActorTileIndex(actor),
+                source: 'fight',
+                collapseKey: resolveFightCollapseKey(actor),
+                statusEffects: collectActorStatusEffects(actor)
+            });
+        }
+        return units;
+    }
+
     function pollStatusEffectTracking(force) {
         if (!shouldPatchBattleLogActors() || panelFightTickFrozen != null) return;
-        const engineTick = readTickFromEngine();
+        const engineTick = lastPanelSyncedEngineTick
+            ?? resolveEngineTick(globalThis.state?.gameTimer?.getSnapshot?.()?.context);
         if (engineTick == null) return;
         if (!force && engineTick === lastStatusPollTick) return;
         lastStatusPollTick = engineTick;
-        trackStatusEffectChanges(collectActorSnapshots() || []);
+        trackStatusEffectChanges(collectActorStatusUnitsForTracking());
         trackStatChanges(getActiveWorld()?.grid?.actors);
     }
 
@@ -3646,7 +3767,7 @@
         if (typeof world.onGameEnd?.subscribe === 'function') {
             worldEventSubs.push(world.onGameEnd.subscribe(() => {
                 freezePanelFightTickFromEngine(world);
-                renderStatusBar();
+                renderStatusBar(true);
                 render();
             }));
         }
@@ -5380,7 +5501,7 @@
     }
 
     function isPointInPanelScrollContent(clientX, clientY) {
-        for (const id of [UNITS_BODY_ID, LOG_BODY_ID]) {
+        for (const id of [SUMMARY_BODY_ID, UNITS_BODY_ID, LOG_BODY_ID]) {
             const el = document.getElementById(id);
             if (!isPanelElementVisible(el)) continue;
             const rect = el.getBoundingClientRect();
@@ -5963,6 +6084,629 @@
         return `[tick ${entry.tick}] ${entry.from} → ${entry.to}: ${dmg}${source} (${type})`;
     }
 
+    function isNamedLogCreature(name) {
+        return Boolean(name && name !== '—' && name !== 'Environment' && name !== 'Unknown');
+    }
+
+    function createEmptyBattleLogCreatureStats(name, villain) {
+        return {
+            key: null,
+            name,
+            displayName: name,
+            villain: villain === true,
+            isRoster: false,
+            isSummon: false,
+            spawnTile: null,
+            firstSeenTick: Infinity,
+            damageDealt: 0,
+            rawDamageDealt: 0,
+            overkill: 0,
+            damageTaken: 0,
+            healingDone: 0,
+            healingReceived: 0,
+            crits: 0,
+            abilityCasts: 0,
+            kills: 0,
+            deaths: 0
+        };
+    }
+
+    function resolveBattleLogStatsKey(key, name, villain) {
+        if (key) return key;
+        return `legacy:${villain ? 'e' : 'a'}:${name}`;
+    }
+
+    function touchBattleLogStatsSeen(stats, tick, tile) {
+        const t = Number(tick);
+        if (Number.isFinite(t) && t < stats.firstSeenTick) {
+            stats.firstSeenTick = t;
+            if (tile != null) stats.spawnTile = tile;
+        }
+    }
+
+    function getOrCreateBattleLogCreatureStats(statsMap, key, name, villain) {
+        if (!statsMap.has(key)) {
+            const stats = createEmptyBattleLogCreatureStats(name, villain);
+            stats.key = key;
+            statsMap.set(key, stats);
+        } else if (villain === true) {
+            statsMap.get(key).villain = true;
+        }
+        return statsMap.get(key);
+    }
+
+    function aggregateBattleLogCreatureStats() {
+        const statsMap = new Map();
+
+        for (const entry of battleLog) {
+            if (entry.kind === 'damage') {
+                if (isNamedLogCreature(entry.from)) {
+                    const key = resolveBattleLogStatsKey(entry.fromKey, entry.from, entry.fromVillain);
+                    const stats = getOrCreateBattleLogCreatureStats(statsMap, key, entry.from, entry.fromVillain);
+                    touchBattleLogStatsSeen(stats, entry.tick, entry.fromTile);
+                    stats.damageDealt += entry.amount;
+                    const raw = entry.rawAmount != null ? entry.rawAmount : entry.amount;
+                    stats.rawDamageDealt += raw;
+                    if (entry.rawAmount != null && entry.rawAmount > entry.amount) {
+                        stats.overkill += entry.rawAmount - entry.amount;
+                    }
+                    if (entry.crit) stats.crits++;
+                }
+                if (isNamedLogCreature(entry.to)) {
+                    const key = resolveBattleLogStatsKey(entry.toKey, entry.to, entry.toVillain);
+                    const stats = getOrCreateBattleLogCreatureStats(statsMap, key, entry.to, entry.toVillain);
+                    touchBattleLogStatsSeen(stats, entry.tick, entry.toTile);
+                    stats.damageTaken += entry.amount;
+                }
+            } else if (entry.kind === 'heal') {
+                if (isCrossUnitHealEntry(entry)) {
+                    if (isNamedLogCreature(entry.from)) {
+                        const key = resolveBattleLogStatsKey(entry.fromKey, entry.from, entry.fromVillain);
+                        const stats = getOrCreateBattleLogCreatureStats(statsMap, key, entry.from, entry.fromVillain);
+                        touchBattleLogStatsSeen(stats, entry.tick, entry.fromTile);
+                        stats.healingDone += entry.amount;
+                    }
+                    if (isNamedLogCreature(entry.to)) {
+                        const key = resolveBattleLogStatsKey(entry.toKey, entry.to, entry.toVillain);
+                        const stats = getOrCreateBattleLogCreatureStats(statsMap, key, entry.to, entry.toVillain);
+                        touchBattleLogStatsSeen(stats, entry.tick, entry.toTile);
+                        stats.healingReceived += entry.amount;
+                    }
+                } else if (isNamedLogCreature(entry.to)) {
+                    const key = resolveBattleLogStatsKey(entry.toKey, entry.to, entry.toVillain);
+                    const stats = getOrCreateBattleLogCreatureStats(statsMap, key, entry.to, entry.toVillain);
+                    touchBattleLogStatsSeen(stats, entry.tick, entry.toTile);
+                    stats.healingDone += entry.amount;
+                    stats.healingReceived += entry.amount;
+                }
+            } else if (entry.kind === 'abilityCast') {
+                if (isNamedLogCreature(entry.from)) {
+                    const key = resolveBattleLogStatsKey(entry.fromKey, entry.from, entry.fromVillain);
+                    const stats = getOrCreateBattleLogCreatureStats(statsMap, key, entry.from, entry.fromVillain);
+                    touchBattleLogStatsSeen(stats, entry.tick, entry.fromTile);
+                    stats.abilityCasts++;
+                }
+            } else if (entry.kind === 'death') {
+                if (isNamedLogCreature(entry.unit)) {
+                    const key = resolveBattleLogStatsKey(entry.unitKey, entry.unit, entry.unitVillain);
+                    const stats = getOrCreateBattleLogCreatureStats(statsMap, key, entry.unit, entry.unitVillain);
+                    touchBattleLogStatsSeen(stats, entry.tick, entry.unitTile);
+                    stats.deaths++;
+                }
+                if (isNamedLogCreature(entry.killedBy)) {
+                    const key = resolveBattleLogStatsKey(entry.killedByKey, entry.killedBy, entry.killedByVillain);
+                    const stats = getOrCreateBattleLogCreatureStats(statsMap, key, entry.killedBy, entry.killedByVillain);
+                    touchBattleLogStatsSeen(stats, entry.tick, null);
+                    stats.kills++;
+                }
+            }
+        }
+
+        return statsMap;
+    }
+
+    function buildBattleLogRosterRegistry() {
+        const units = getBoardPreviewUnits();
+        const allyNames = new Set();
+        const enemyNames = new Set();
+        const rosterKeys = new Set();
+        const rosterUnits = [];
+        for (const unit of units) {
+            if (!unit?.name) continue;
+            const key = unit.collapseKey || getUnitCollapseKey(unit);
+            rosterKeys.add(key);
+            rosterUnits.push({
+                key,
+                name: unit.name,
+                villain: unit.villain === true,
+                tile: unit.tileIndex ?? null
+            });
+            if (unit.villain) enemyNames.add(unit.name);
+            else allyNames.add(unit.name);
+        }
+        return { allyNames, enemyNames, rosterKeys, rosterUnits };
+    }
+
+    function findBattleLogStatsByRosterName(statsMap, name, villain) {
+        for (const stats of statsMap.values()) {
+            if (stats.name === name && stats.villain === villain) return stats;
+        }
+        return null;
+    }
+
+    function assignBattleLogSummonDisplayNames(statsMap) {
+        const summonGroups = new Map();
+        for (const stats of statsMap.values()) {
+            if (stats.isRoster) {
+                stats.displayName = stats.name;
+                continue;
+            }
+            const groupKey = `${stats.villain ? 'e' : 'a'}:${stats.name}`;
+            if (!summonGroups.has(groupKey)) summonGroups.set(groupKey, []);
+            summonGroups.get(groupKey).push(stats);
+        }
+
+        for (const group of summonGroups.values()) {
+            group.sort((a, b) => {
+                const ta = Number.isFinite(a.firstSeenTick) ? a.firstSeenTick : Infinity;
+                const tb = Number.isFinite(b.firstSeenTick) ? b.firstSeenTick : Infinity;
+                if (ta !== tb) return ta - tb;
+                return String(a.key).localeCompare(String(b.key));
+            });
+            const multi = group.length > 1;
+            group.forEach((stats, index) => {
+                if (!multi) {
+                    stats.displayName = stats.name;
+                    return;
+                }
+                stats.displayName = tReplace('mods.betterAnalytics.exportSummarySummonInstance', {
+                    name: stats.name,
+                    index: index + 1
+                });
+                if (stats.spawnTile != null) {
+                    stats.displayName += tReplace('mods.betterAnalytics.exportSummarySummonTile', {
+                        tile: stats.spawnTile
+                    });
+                }
+            });
+        }
+    }
+
+    function prepareBattleLogSummaryStats(statsMap) {
+        const roster = buildBattleLogRosterRegistry();
+
+        for (const stats of statsMap.values()) {
+            const names = stats.villain ? roster.enemyNames : roster.allyNames;
+            stats.isRoster = names.has(stats.name);
+            stats.isSummon = !stats.isRoster;
+        }
+
+        for (const unit of roster.rosterUnits) {
+            if (findBattleLogStatsByRosterName(statsMap, unit.name, unit.villain)) continue;
+            const stats = createEmptyBattleLogCreatureStats(unit.name, unit.villain);
+            stats.key = unit.key;
+            stats.spawnTile = unit.tile;
+            stats.isRoster = true;
+            stats.isSummon = false;
+            stats.displayName = unit.name;
+            statsMap.set(unit.key, stats);
+        }
+
+        assignBattleLogSummonDisplayNames(statsMap);
+
+        for (const stats of statsMap.values()) {
+            if (stats.isRoster && !stats.displayName) stats.displayName = stats.name;
+        }
+
+        return statsMap;
+    }
+
+    function formatBattleLogDeathsLabel(deaths) {
+        if (!deaths) return '';
+        return ` ${tReplace('mods.betterAnalytics.exportSummaryDied', { count: deaths })}`;
+    }
+
+    function formatBattleLogDamageDealtLine(stats, fightTicks) {
+        if (stats.damageDealt) {
+            let line = formatBattleLogStatWithRate(
+                t('mods.betterAnalytics.exportSummaryDamageDealt'),
+                stats.damageDealt,
+                fightTicks,
+                'DPS'
+            );
+            if (stats.overkill > 0) {
+                line += tReplace('mods.betterAnalytics.exportSummaryOverkillSuffix', {
+                    raw: stats.rawDamageDealt,
+                    overkill: stats.overkill
+                });
+            }
+            return line;
+        }
+        if (stats.isRoster) {
+            return `  ${t('mods.betterAnalytics.exportSummaryDamageDealt')}: 0`;
+        }
+        return null;
+    }
+
+    function formatBattleLogStatWithRate(label, total, fightTicks, rateLabel) {
+        if (!total) return null;
+        const rate = fightTicks > 0 ? calculateDPSFromDamage(total, fightTicks) : 0;
+        const rateStr = rate > 0 ? ` (${rate} ${rateLabel})` : '';
+        return `  ${label}: ${total}${rateStr}`;
+    }
+
+    function summarizeBattleLogTeamStats(creatures) {
+        return creatures.reduce((acc, stats) => {
+            acc.damageDealt += stats.damageDealt;
+            acc.damageTaken += stats.damageTaken;
+            acc.healingDone += stats.healingDone;
+            acc.kills += stats.kills;
+            acc.deaths += stats.deaths;
+            return acc;
+        }, { damageDealt: 0, damageTaken: 0, healingDone: 0, kills: 0, deaths: 0 });
+    }
+
+    function formatBattleLogTeamSummaryLine(sectionLabel, teamStats, fightTicks) {
+        const parts = [];
+        if (teamStats.damageDealt) {
+            const dps = fightTicks > 0 ? calculateDPSFromDamage(teamStats.damageDealt, fightTicks) : 0;
+            const dpsStr = dps > 0 ? ` · ${dps} DPS` : '';
+            parts.push(`${teamStats.damageDealt} ${t('mods.betterAnalytics.exportSummaryDamageShort')}${dpsStr}`);
+        }
+        if (teamStats.healingDone) {
+            const hps = fightTicks > 0 ? calculateDPSFromDamage(teamStats.healingDone, fightTicks) : 0;
+            const hpsStr = hps > 0 ? ` · ${hps} HPS` : '';
+            parts.push(`${teamStats.healingDone} ${t('mods.betterAnalytics.exportSummaryHealingShort')}${hpsStr}`);
+        }
+        if (teamStats.kills || teamStats.deaths) {
+            parts.push(`${teamStats.kills}K/${teamStats.deaths}D`);
+        }
+        if (!parts.length) return null;
+        return `${sectionLabel} — ${parts.join(' · ')}`;
+    }
+
+    function formatBattleLogDamageShare(amount, teamTotal) {
+        if (!amount || !teamTotal) return '';
+        const pct = Math.round((amount / teamTotal) * 1000) / 10;
+        return tReplace('mods.betterAnalytics.exportSummaryDamageShare', { percent: pct });
+    }
+
+    function formatBattleLogCreatureSummaryForExport(stats, fightTicks, teamDamageTotal) {
+        const team = stats.villain
+            ? t('mods.betterAnalytics.exportSummaryTeamEnemy')
+            : t('mods.betterAnalytics.exportSummaryTeamAlly');
+        const summon = stats.isSummon ? ` ${t('mods.betterAnalytics.exportSummarySummon')}` : '';
+        const died = formatBattleLogDeathsLabel(stats.deaths);
+        const share = formatBattleLogDamageShare(stats.damageDealt, teamDamageTotal);
+        const label = stats.displayName || stats.name;
+        const lines = [`${label} [${team}]${summon}${died}${share}`];
+
+        const damageDealt = formatBattleLogDamageDealtLine(stats, fightTicks);
+        if (damageDealt) lines.push(damageDealt);
+
+        if (stats.damageTaken) {
+            lines.push(`  ${t('mods.betterAnalytics.exportSummaryDamageTaken')}: ${stats.damageTaken}`);
+        }
+
+        if (stats.healingDone || stats.healingReceived) {
+            if (stats.healingDone === stats.healingReceived) {
+                const healing = formatBattleLogStatWithRate(
+                    t('mods.betterAnalytics.exportSummaryHealing'),
+                    stats.healingDone,
+                    fightTicks,
+                    'HPS'
+                );
+                if (healing) lines.push(healing);
+            } else {
+                const healingDone = formatBattleLogStatWithRate(
+                    t('mods.betterAnalytics.exportSummaryHealingDone'),
+                    stats.healingDone,
+                    fightTicks,
+                    'HPS'
+                );
+                if (healingDone) lines.push(healingDone);
+                if (stats.healingReceived) {
+                    lines.push(`  ${t('mods.betterAnalytics.exportSummaryHealingReceived')}: ${stats.healingReceived}`);
+                }
+            }
+        }
+
+        const extras = [];
+        if (stats.crits) {
+            extras.push(`${t('mods.betterAnalytics.exportSummaryCrits')}: ${stats.crits}`);
+        }
+        if (stats.abilityCasts) {
+            extras.push(`${t('mods.betterAnalytics.exportSummaryAbilityCasts')}: ${stats.abilityCasts}`);
+        }
+        if (stats.kills) {
+            extras.push(`${t('mods.betterAnalytics.exportSummaryKills')}: ${stats.kills}`);
+        }
+        if (extras.length) lines.push(`  ${extras.join(' · ')}`);
+
+        return lines;
+    }
+
+    function sortBattleLogCreatureStats(a, b) {
+        if (a.isSummon !== b.isSummon) return a.isSummon ? 1 : -1;
+        if (a.damageDealt !== b.damageDealt) return b.damageDealt - a.damageDealt;
+        if (a.healingDone !== b.healingDone) return b.healingDone - a.healingDone;
+        const fa = Number.isFinite(a.firstSeenTick) ? a.firstSeenTick : Infinity;
+        const fb = Number.isFinite(b.firstSeenTick) ? b.firstSeenTick : Infinity;
+        if (fa !== fb) return fa - fb;
+        return String(a.displayName || a.name).localeCompare(String(b.displayName || b.name));
+    }
+
+    function appendBattleLogTeamSummaryExportLines(lines, sectionLabel, creatures, fightTicks) {
+        if (!creatures.length) return;
+        const teamStats = summarizeBattleLogTeamStats(creatures);
+        const header = formatBattleLogTeamSummaryLine(sectionLabel, teamStats, fightTicks);
+        lines.push('');
+        lines.push(header || sectionLabel);
+
+        for (const stats of creatures) {
+            lines.push('');
+            lines.push(...formatBattleLogCreatureSummaryForExport(stats, fightTicks, teamStats.damageDealt));
+        }
+    }
+
+    function buildBattleLogSummaryExportLines() {
+        const lines = [];
+        lines.push(t('mods.betterAnalytics.exportBattleLogSummarySection'));
+
+        const fightTicks = getFightTick();
+        if (fightTicks != null && fightTicks > 0) {
+            lines.push(tReplace('mods.betterAnalytics.exportSummaryFightDuration', { ticks: fightTicks }));
+        }
+
+        const statsMap = prepareBattleLogSummaryStats(aggregateBattleLogCreatureStats());
+        if (!statsMap.size) {
+            lines.push(t('mods.betterAnalytics.exportSummaryNoCombat'));
+            return lines;
+        }
+
+        const allies = Array.from(statsMap.values()).filter((s) => !s.villain).sort(sortBattleLogCreatureStats);
+        const enemies = Array.from(statsMap.values()).filter((s) => s.villain).sort(sortBattleLogCreatureStats);
+
+        appendBattleLogTeamSummaryExportLines(
+            lines,
+            t('mods.betterAnalytics.exportSummaryAlliesHeader'),
+            allies,
+            fightTicks
+        );
+        appendBattleLogTeamSummaryExportLines(
+            lines,
+            t('mods.betterAnalytics.exportSummaryEnemiesHeader'),
+            enemies,
+            fightTicks
+        );
+
+        return lines;
+    }
+
+    function invalidatePreparedBattleLogSummaryCache() {
+        cachedPreparedBattleLogSummary = null;
+        cachedPreparedBattleLogSummaryKey = '';
+    }
+
+    function getPreparedBattleLogSummary() {
+        const cacheKey = getPreparedBattleLogSummaryCacheKey();
+        if (cachedPreparedBattleLogSummary && cachedPreparedBattleLogSummaryKey === cacheKey) {
+            return cachedPreparedBattleLogSummary;
+        }
+        const fightTicks = getFightTick();
+        const statsMap = prepareBattleLogSummaryStats(aggregateBattleLogCreatureStats());
+        const allies = Array.from(statsMap.values()).filter((s) => !s.villain).sort(sortBattleLogCreatureStats);
+        const enemies = Array.from(statsMap.values()).filter((s) => s.villain).sort(sortBattleLogCreatureStats);
+        cachedPreparedBattleLogSummary = { statsMap, allies, enemies, fightTicks };
+        cachedPreparedBattleLogSummaryKey = cacheKey;
+        return cachedPreparedBattleLogSummary;
+    }
+
+    function lookupBattleLogStatsForUnit(unit, statsMap) {
+        if (!unit || !statsMap?.size) return null;
+        const rawKey = unit.collapseKey || getUnitCollapseKey(unit);
+        const normKey = normalizeCollapseKey(rawKey);
+        if (statsMap.has(normKey)) return statsMap.get(normKey);
+        if (rawKey !== normKey && statsMap.has(rawKey)) return statsMap.get(rawKey);
+        for (const [key, stats] of statsMap) {
+            if (normalizeCollapseKey(key) === normKey) return stats;
+        }
+        const matches = [];
+        for (const stats of statsMap.values()) {
+            if (stats.name === unit.name && stats.villain === (unit.villain === true)) {
+                matches.push(stats);
+            }
+        }
+        if (matches.length === 1) return matches[0];
+        if (matches.length > 1 && unit.tileIndex != null) {
+            const tileMatch = matches.find((s) => s.spawnTile === unit.tileIndex);
+            if (tileMatch) return tileMatch;
+        }
+        return null;
+    }
+
+    function getUnitDisplayName(unit) {
+        if (!battleLog.length) return unit.name;
+        const stats = lookupBattleLogStatsForUnit(unit, getPreparedBattleLogSummary().statsMap);
+        return stats?.displayName || unit.name;
+    }
+
+    function formatBattleLogStatRowHtml(label, total, fightTicks, rateLabel) {
+        if (!total) return '';
+        const rate = fightTicks > 0 ? calculateDPSFromDamage(total, fightTicks) : 0;
+        const rateStr = rate > 0
+            ? ` <span class="bs-log-summary-rate">(${rate} ${rateLabel})</span>`
+            : '';
+        return `<div class="bs-log-summary-stat"><span class="bs-label">${escapeHtml(label)}:</span> ${total}${rateStr}</div>`;
+    }
+
+    function formatBattleLogCreatureSummaryHtml(stats, fightTicks, teamDamageTotal) {
+        const teamCls = stats.villain ? 'enemy' : 'ally';
+        const summonTag = stats.isSummon
+            ? `<span class="bs-log-summary-tag">${escapeHtml(t('mods.betterAnalytics.exportSummarySummon').trim())}</span>`
+            : '';
+        const diedTag = stats.deaths
+            ? `<span class="bs-log-summary-died">${escapeHtml(formatBattleLogDeathsLabel(stats.deaths).trim())}</span>`
+            : '';
+        const share = formatBattleLogDamageShare(stats.damageDealt, teamDamageTotal);
+        const shareTag = share
+            ? `<span class="bs-log-summary-share">${escapeHtml(share.trim())}</span>`
+            : '';
+        const label = escapeHtml(stats.displayName || stats.name);
+        let body = '';
+
+        if (stats.damageDealt) {
+            body += formatBattleLogStatRowHtml(
+                t('mods.betterAnalytics.exportSummaryDamageDealt'),
+                stats.damageDealt,
+                fightTicks,
+                'DPS'
+            );
+            if (stats.overkill > 0) {
+                body += `<div class="bs-log-summary-stat bs-log-summary-overkill">${escapeHtml(tReplace('mods.betterAnalytics.exportSummaryOverkillSuffix', {
+                    raw: stats.rawDamageDealt,
+                    overkill: stats.overkill
+                }).trim())}</div>`;
+            }
+        } else if (stats.isRoster) {
+            body += `<div class="bs-log-summary-stat"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.exportSummaryDamageDealt'))}:</span> 0</div>`;
+        }
+
+        if (stats.damageTaken) {
+            body += `<div class="bs-log-summary-stat"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.exportSummaryDamageTaken'))}:</span> ${stats.damageTaken}</div>`;
+        }
+
+        if (stats.healingDone || stats.healingReceived) {
+            if (stats.healingDone === stats.healingReceived) {
+                body += formatBattleLogStatRowHtml(
+                    t('mods.betterAnalytics.exportSummaryHealing'),
+                    stats.healingDone,
+                    fightTicks,
+                    'HPS'
+                );
+            } else {
+                body += formatBattleLogStatRowHtml(
+                    t('mods.betterAnalytics.exportSummaryHealingDone'),
+                    stats.healingDone,
+                    fightTicks,
+                    'HPS'
+                );
+                if (stats.healingReceived) {
+                    body += `<div class="bs-log-summary-stat"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.exportSummaryHealingReceived'))}:</span> ${stats.healingReceived}</div>`;
+                }
+            }
+        }
+
+        const extras = [];
+        if (stats.crits) extras.push(`${escapeHtml(t('mods.betterAnalytics.exportSummaryCrits'))}: ${stats.crits}`);
+        if (stats.abilityCasts) extras.push(`${escapeHtml(t('mods.betterAnalytics.exportSummaryAbilityCasts'))}: ${stats.abilityCasts}`);
+        if (stats.kills) extras.push(`${escapeHtml(t('mods.betterAnalytics.exportSummaryKills'))}: ${stats.kills}`);
+        const extrasHtml = extras.length
+            ? `<div class="bs-log-summary-extras">${extras.join(' · ')}</div>`
+            : '';
+
+        return `<div class="bs-log-summary-creature">` +
+            `<div class="bs-log-summary-creature-head ${teamCls}">${label}${summonTag}${diedTag}${shareTag}</div>` +
+            (body || extrasHtml
+                ? `<div class="bs-log-summary-creature-body">${body}${extrasHtml}</div>`
+                : '') +
+        `</div>`;
+    }
+
+    function buildBattleLogSummaryTeamHtml(sectionLabel, creatures, fightTicks, teamClass) {
+        const teamStats = summarizeBattleLogTeamStats(creatures);
+        const headerLine = formatBattleLogTeamSummaryLine(sectionLabel, teamStats, fightTicks);
+        const header = `<div class="bs-log-summary-team-head ${teamClass}">${escapeHtml(headerLine || sectionLabel)}</div>`;
+        if (!creatures.length) {
+            const emptyText = teamClass === 'enemy'
+                ? t('mods.betterAnalytics.sectionEmptyEnemies')
+                : t('mods.betterAnalytics.sectionEmptyAllies');
+            return `<div class="bs-log-summary-team">${header}<div class="bs-empty">${escapeHtml(emptyText)}</div></div>`;
+        }
+        const rows = creatures.map((stats) =>
+            formatBattleLogCreatureSummaryHtml(stats, fightTicks, teamStats.damageDealt)
+        ).join('');
+        return `<div class="bs-log-summary-team">${header}${rows}</div>`;
+    }
+
+    function buildBattleLogSummaryPanelHtml() {
+        const { allies, enemies, fightTicks } = getPreparedBattleLogSummary();
+        const title = escapeHtml(t('mods.betterAnalytics.panelBattleLogSummaryTitle'));
+        let duration = '';
+        if (fightTicks != null && fightTicks > 0) {
+            duration = `<div class="bs-log-summary-duration">${escapeHtml(tReplace('mods.betterAnalytics.exportSummaryFightDuration', { ticks: fightTicks }))}</div>`;
+        }
+        if (!allies.length && !enemies.length) {
+            return `<div class="bs-log-summary-inner">` +
+                `<div class="bs-log-summary-title">${title}</div>` +
+                duration +
+                `<div class="bs-empty">${escapeHtml(t('mods.betterAnalytics.exportSummaryNoCombat'))}</div>` +
+            `</div>`;
+        }
+        const alliesHtml = buildBattleLogSummaryTeamHtml(
+            t('mods.betterAnalytics.exportSummaryAlliesHeader'),
+            allies,
+            fightTicks,
+            'ally'
+        );
+        const enemiesHtml = buildBattleLogSummaryTeamHtml(
+            t('mods.betterAnalytics.exportSummaryEnemiesHeader'),
+            enemies,
+            fightTicks,
+            'enemy'
+        );
+        return `<div class="bs-log-summary-inner">` +
+            `<div class="bs-log-summary-title">${title}</div>` +
+            duration +
+            `<div class="bs-log-summary-columns">` +
+                `<div class="bs-log-summary-column bs-log-summary-column-ally">${alliesHtml}</div>` +
+                `<div class="bs-log-summary-column bs-log-summary-column-enemy">${enemiesHtml}</div>` +
+            `</div>` +
+        `</div>`;
+    }
+
+    function clearSummaryUpdateTimer() {
+        if (summaryUpdateTimer) {
+            clearTimeout(summaryUpdateTimer);
+            summaryUpdateTimer = null;
+        }
+    }
+
+    function scheduleSummaryTabRender() {
+        if (activeTab !== 'summary') return;
+        if (summaryUpdateTimer) return;
+        const now = performance.now();
+        const delay = Math.max(0, SUMMARY_UPDATE_MS - (now - lastSummaryUpdateMs));
+        summaryUpdateTimer = setTimeout(() => {
+            summaryUpdateTimer = null;
+            if (activeTab !== 'summary') return;
+            renderSummaryTab();
+        }, delay);
+    }
+
+    function renderSummaryTab(force) {
+        const content = document.getElementById(SUMMARY_CONTENT_ID);
+        if (!content) return;
+        if (!force) {
+            const now = performance.now();
+            if (now - lastSummaryUpdateMs < SUMMARY_UPDATE_MS) {
+                scheduleSummaryTabRender();
+                return;
+            }
+        }
+        clearSummaryUpdateTimer();
+        lastSummaryUpdateMs = performance.now();
+        if (!battleLog.length) {
+            content.innerHTML = `<div class="bs-empty">${escapeHtml(t('mods.betterAnalytics.emptySummaryNoFight'))}</div>`;
+            content.dataset.renderSig = '';
+            return;
+        }
+        const sig = `${battleLogRevision}:${getPanelTickRenderKey()}`;
+        if (content.dataset.renderSig === sig) return;
+        content.dataset.renderSig = sig;
+        content.innerHTML = buildBattleLogSummaryPanelHtml();
+    }
+
     function renderLogDamageAmount(entry) {
         const applied = Math.abs(Math.round(entry.amount));
         const raw = entry.rawAmount;
@@ -6023,6 +6767,8 @@
             for (const entry of battleLog) {
                 lines.push(formatBattleLogEntryForExport(entry));
             }
+            lines.push('');
+            lines.push(...buildBattleLogSummaryExportLines());
         }
 
         return lines.join('\n');
@@ -6437,6 +7183,87 @@
             #${PANEL_ID} .bs-log-dmg-raw { color: #ABB2BF; font-size: 0.92em; }
             #${PANEL_ID} .bs-log-heal { color: #98C379; }
             #${PANEL_ID} .bs-log-type { color: #61AFEF; }
+            #${PANEL_ID} .bs-summary-content {
+                padding: 2px 0;
+            }
+            #${PANEL_ID} .bs-log-summary-inner {
+                padding: 8px 6px 4px;
+                background: rgba(0, 0, 0, 0.22);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            #${PANEL_ID} .bs-log-summary-title {
+                font-size: 11px;
+                font-weight: 800;
+                letter-spacing: 0.05em;
+                text-transform: uppercase;
+                color: var(--bs-gold);
+                margin-bottom: 4px;
+            }
+            #${PANEL_ID} .bs-log-summary-duration {
+                font-size: 10px;
+                color: #888;
+                margin-bottom: 8px;
+            }
+            #${PANEL_ID} .bs-log-summary-columns {
+                display: flex;
+                gap: 8px;
+                align-items: flex-start;
+            }
+            #${PANEL_ID} .bs-log-summary-column {
+                flex: 1 1 0;
+                min-width: 0;
+            }
+            #${PANEL_ID} .bs-log-summary-team-head {
+                font-size: 10px;
+                font-weight: 700;
+                color: #ccc;
+                margin-bottom: 4px;
+                padding-bottom: 2px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            #${PANEL_ID} .bs-log-summary-team-head.ally { color: var(--bs-ally); }
+            #${PANEL_ID} .bs-log-summary-team-head.enemy { color: var(--bs-enemy); }
+            #${PANEL_ID} .bs-log-summary-creature {
+                margin: 6px 0 0;
+                padding: 4px 0 2px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            }
+            #${PANEL_ID} .bs-log-summary-creature:last-child {
+                border-bottom: none;
+            }
+            #${PANEL_ID} .bs-log-summary-creature-head {
+                font-size: 10px;
+                font-weight: 700;
+                margin-bottom: 2px;
+            }
+            #${PANEL_ID} .bs-log-summary-creature-head.ally { color: var(--bs-ally); }
+            #${PANEL_ID} .bs-log-summary-creature-head.enemy { color: var(--bs-enemy); }
+            #${PANEL_ID} .bs-log-summary-tag,
+            #${PANEL_ID} .bs-log-summary-died,
+            #${PANEL_ID} .bs-log-summary-share {
+                font-weight: 600;
+                color: #888;
+            }
+            #${PANEL_ID} .bs-log-summary-died { color: #E06C75; }
+            #${PANEL_ID} .bs-log-summary-share { color: #d4b896; }
+            #${PANEL_ID} .bs-log-summary-creature-body {
+                padding-left: 8px;
+            }
+            #${PANEL_ID} .bs-log-summary-stat {
+                font-size: 10px;
+                line-height: 1.4;
+                color: #bbb;
+            }
+            #${PANEL_ID} .bs-log-summary-rate { color: #888; }
+            #${PANEL_ID} .bs-log-summary-extras {
+                font-size: 10px;
+                color: #999;
+                margin-top: 1px;
+            }
+            #${PANEL_ID} .bs-log-summary-overkill {
+                color: #ABB2BF;
+                font-size: 9px;
+            }
             #${PANEL_ID} .bs-units-columns {
                 display: flex;
                 gap: 8px;
@@ -7175,6 +8002,8 @@
             }
             const live = card.querySelector('.bs-card-live');
             if (live) live.innerHTML = buildUnitCardLiveInnerHtml(unit);
+            const nameEl = card.querySelector('.bs-card-name');
+            if (nameEl) nameEl.textContent = getUnitDisplayName(unit);
         }
     }
 
@@ -7190,6 +8019,7 @@
         if (unit.tileIndex != null) metaParts.push(`Tile ${unit.tileIndex}`);
         const metaLine = metaParts.join(' · ');
         const nameClass = teamClass(unit.villain);
+        const displayName = getUnitDisplayName(unit);
         const compact = renderCompactSummary(unit);
         const hasPortrait = unit.gameId != null;
         const hasEquipPortrait = unit.equipment?.spriteId != null;
@@ -7210,7 +8040,7 @@
             portrait +
             `<div class="bs-compact-meta">` +
                 `<div class="bs-card-name-row">` +
-                    `<div class="bs-card-name ${nameClass}">${escapeHtml(unit.name)}</div>` +
+                    `<div class="bs-card-name ${nameClass}">${escapeHtml(displayName)}</div>` +
                     statusRow +
                 `</div>` +
                 (compact ? `<div class="bs-card-compact">${compact}</div>` : '') +
@@ -7244,12 +8074,33 @@
         return `<div class="bs-units-column bs-units-column-${cssClass}">${inner}</div>`;
     }
 
-    function renderStatusBar() {
+    function buildStatusBarSignature() {
+        const fightEnded = isPanelFightResolved() && panelFightTickFrozen != null;
+        const fighting = isLiveFightTracking();
+        return [
+            resolveCurrentRoomId(),
+            getPlayModeLabel(),
+            fightEnded ? 'end' : fighting ? 'fight' : 'idle',
+            getPanelTickRenderKey(),
+            getSeed(),
+            isSandboxMode(),
+            slowMotionEnabled,
+            gameSpeedPercent,
+            window.__turboState?.active === true,
+            resolveCurrentFloor()
+        ].join('|');
+    }
+
+    function renderStatusBar(force) {
         const title = document.getElementById(TITLE_ID);
         const status = document.getElementById(STATUS_ID);
         const panel = document.getElementById(PANEL_ID);
         if (!title || !status || !panel) return;
         if (panel.style.display === 'none') return;
+
+        const signature = buildStatusBarSignature();
+        if (!force && signature === lastStatusBarSignature) return;
+        lastStatusBarSignature = signature;
 
         const sandbox = isSandboxMode();
         const fightEnded = isPanelFightResolved() && panelFightTickFrozen != null;
@@ -7446,13 +8297,28 @@
     }
 
     function scheduleBattleLogRender() {
-        if (activeTab !== 'log') return;
-        if (battleLogRenderScheduled) return;
-        battleLogRenderScheduled = true;
-        requestAnimationFrame(() => {
-            battleLogRenderScheduled = false;
+        if (activeTab === 'log') {
+            if (battleLogRenderScheduled) return;
+            battleLogRenderScheduled = true;
+            requestAnimationFrame(() => {
+                battleLogRenderScheduled = false;
+                renderBattleLog();
+            });
+        } else if (activeTab === 'summary') {
+            scheduleSummaryTabRender();
+        }
+    }
+
+    function renderActiveTab(forceUnits, forceSummary) {
+        if (activeTab === 'units') {
+            renderUnits(forceUnits);
+        } else if (activeTab === 'log') {
             renderBattleLog();
-        });
+        } else if (forceSummary) {
+            renderSummaryTab(true);
+        } else {
+            scheduleSummaryTabRender();
+        }
     }
 
     function scrollBattleLogToEnd(body) {
@@ -7526,42 +8392,42 @@
     }
 
     function switchTab(tab) {
-        activeTab = tab === 'log' ? 'log' : 'units';
+        activeTab = normalizeActiveTab(tab);
         savePanelSettings({ activeTab });
 
+        const summaryBody = document.getElementById(SUMMARY_BODY_ID);
         const unitsBody = document.getElementById(UNITS_BODY_ID);
         const logBody = document.getElementById(LOG_BODY_ID);
+        const tabSummary = document.getElementById('mod-better-sandbox-tab-summary');
         const tabUnits = document.getElementById('mod-better-sandbox-tab-units');
         const tabLog = document.getElementById('mod-better-sandbox-tab-log');
 
+        if (summaryBody) summaryBody.style.display = activeTab === 'summary' ? 'block' : 'none';
         if (unitsBody) unitsBody.style.display = activeTab === 'units' ? 'block' : 'none';
         if (logBody) logBody.style.display = activeTab === 'log' ? 'block' : 'none';
+        if (tabSummary) tabSummary.classList.toggle('active', activeTab === 'summary');
         if (tabUnits) tabUnits.classList.toggle('active', activeTab === 'units');
         if (tabLog) tabLog.classList.toggle('active', activeTab === 'log');
 
-        if (activeTab === 'units') renderUnits();
-        else renderBattleLog();
+        if (activeTab !== 'summary') clearSummaryUpdateTimer();
+        renderActiveTab(false, true);
     }
 
     function renderLiveFight() {
         if (!shouldBetterAnalyticsRun()) return;
         const panel = document.getElementById(PANEL_ID);
         if (!panel || panel.style.display === 'none' || !isLiveFightTracking()) return;
-        if (activeTab === 'units') renderUnits();
-        else renderBattleLog();
+        renderActiveTab();
     }
 
     function render() {
         const panel = document.getElementById(PANEL_ID);
         if (!panel || panel.style.display === 'none') return;
-        renderStatusBar();
-        if (activeTab === 'units') {
-            const forceUnits = pendingUnitsForceRefresh;
-            pendingUnitsForceRefresh = false;
-            renderUnits(forceUnits);
-        } else {
-            renderBattleLog();
-        }
+        renderStatusBar(true);
+        const forceUnits = pendingUnitsForceRefresh;
+        pendingUnitsForceRefresh = false;
+        const forceSummary = activeTab === 'summary' && panelFightTickFrozen != null;
+        renderActiveTab(activeTab === 'units' ? forceUnits : false, forceSummary);
     }
 
     function syncPanelTickTracking() {
@@ -7569,11 +8435,8 @@
         const panelOpen = panel && panel.style.display !== 'none';
         if (panelOpen && (isLiveFightTracking() || panelFightTickFrozen != null)) {
             setupPanelGameTimerSub();
-            if (isLiveFightTracking()) startPanelTickPoll();
-            else stopPanelTickPoll();
         } else {
             teardownPanelGameTimerSub();
-            stopPanelTickPoll();
         }
     }
 
@@ -7796,6 +8659,13 @@
         const tabBar = document.createElement('div');
         tabBar.className = 'bs-tab-bar';
 
+        const tabSummaryBtn = document.createElement('button');
+        tabSummaryBtn.type = 'button';
+        tabSummaryBtn.id = 'mod-better-sandbox-tab-summary';
+        tabSummaryBtn.className = 'bs-tab-btn';
+        tabSummaryBtn.textContent = t('mods.betterAnalytics.tabSummary');
+        tabSummaryBtn.addEventListener('click', () => switchTab('summary'));
+
         const tabUnitsBtn = document.createElement('button');
         tabUnitsBtn.type = 'button';
         tabUnitsBtn.id = 'mod-better-sandbox-tab-units';
@@ -7812,6 +8682,7 @@
 
         tabBar.appendChild(tabUnitsBtn);
         tabBar.appendChild(tabLogBtn);
+        tabBar.appendChild(tabSummaryBtn);
 
         const unitsBody = document.createElement('div');
         unitsBody.id = UNITS_BODY_ID;
@@ -7821,6 +8692,15 @@
         logBody.id = LOG_BODY_ID;
         logBody.className = 'bs-body';
         logBody.style.display = 'none';
+
+        const summaryBody = document.createElement('div');
+        summaryBody.id = SUMMARY_BODY_ID;
+        summaryBody.className = 'bs-body';
+        summaryBody.style.display = 'none';
+        const summaryContent = document.createElement('div');
+        summaryContent.id = SUMMARY_CONTENT_ID;
+        summaryContent.className = 'bs-summary-content';
+        summaryBody.appendChild(summaryContent);
 
         const logStickyHeader = document.createElement('div');
         logStickyHeader.className = 'bs-log-sticky-header';
@@ -7895,13 +8775,15 @@
         panel.appendChild(tabBar);
         panel.appendChild(unitsBody);
         panel.appendChild(logBody);
+        panel.appendChild(summaryBody);
 
         gameSpeedPercent = normalizeSpeedPercent(s.gameSpeedPercent);
         slowMotionEnabled = s.slowMotionEnabled === true;
         syncTurboBlockFlag();
         if (slowMotionEnabled) suspendTurboForSlowMotion();
         updateSpeedSliderUi();
-        switchTab('units');
+        activeTab = normalizeActiveTab(s.activeTab);
+        switchTab(activeTab);
 
         header.addEventListener('mousedown', onPanelHeaderMouseDown);
         ensurePanelDragListeners(panel);
@@ -7923,6 +8805,7 @@
             document.body.appendChild(panel);
         } else {
             ensureBattleLogSearchBar();
+            ensurePanelTabs();
             ensureSpeedRowUi();
             updatePanelPosition();
             attachPanelViewportListener();
@@ -7931,7 +8814,8 @@
         savePanelSettings({ isOpen: true });
         ensureUnitsBodyListener();
         updateSpeedSliderUi();
-        switchTab('units');
+        activeTab = normalizeActiveTab(loadPanelSettings().activeTab);
+        switchTab(activeTab);
         if (isFightActive()) {
             ensureFightTracking();
             if (!battleLogTracking && !battleLogSessionEnded) startBattleLogSession();
@@ -7940,8 +8824,8 @@
         if (slowMotionEnabled && isSandboxMode() && isFightActive()) applyTickIntervalToCurrentGame();
         syncPanelFightTickFromSnapshot();
         syncPanelTickTracking();
-        renderStatusBar();
-        renderUnits(true);
+        renderStatusBar(true);
+        renderActiveTab(true, activeTab === 'summary');
     }
 
     function closePanel() {
@@ -7950,7 +8834,6 @@
         savePanelSettings({ isOpen: false });
         pauseBattleLogActorPatches();
         teardownPanelGameTimerSub();
-        stopPanelTickPoll();
         teardownUnitsBodyListener();
         detachPanelViewportListener();
         panelDragState.reset();
@@ -7980,7 +8863,6 @@
             api.ui.removeButton(BUTTON_ID);
         }
         teardownPanelGameTimerSub();
-        stopPanelTickPoll();
         resetPanelFightTickState();
         resetTickSpeedToDefault();
         teardownBoardListeners();
