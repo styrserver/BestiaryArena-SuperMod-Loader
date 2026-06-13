@@ -1210,6 +1210,7 @@
     const STYLE_ID = 'better-sandbox-styles';
     const STORAGE_KEY = 'betterSandboxPanel';
 
+    const PANEL_TICK_POLL_MS = 50;
     const LIVE_PANEL_UPDATE_MS = 50;
     const LIVE_PANEL_UPDATE_MS_TURBO = 125;
     const SUMMARY_UPDATE_MS = 100;
@@ -1269,6 +1270,7 @@
 
     let activeWorld = null;
     let panelGameTimerSub = null;
+    let panelTickPollTimer = null;
     let panelFightTick = null;
     let panelFightTickFrozen = null;
     let panelFightEndState = null;
@@ -1689,7 +1691,12 @@
             boardTrack.gameStarted = gameStarted;
             changed = true;
             if (!gameStarted) {
-                syncPanelFightTickFromSnapshot();
+                const endWorld = getActiveWorld() || ctx.world;
+                if (isBattleLogTracking() && panelFightTickFrozen == null) {
+                    freezePanelFightTickFromEngine(endWorld);
+                } else {
+                    syncPanelFightTickFromSnapshot();
+                }
                 if (!slowMotionEnabled) restoreTurboIfSuspended();
                 if (ctx.world?.tickEngine?.setTickInterval) {
                     ctx.world.tickEngine.setTickInterval(getBaselineTickIntervalMs());
@@ -1945,9 +1952,50 @@
     }
 
     function resolveEngineTick(context, world) {
+        const engineTick = readTickFromEngine(world);
+        if (isLiveFightTracking()) {
+            if (engineTick != null) return engineTick;
+        }
         const fromTimer = context?.currentTick;
-        if (typeof fromTimer === 'number' && Number.isFinite(fromTimer)) return fromTimer;
-        return readTickFromEngine(world);
+        if (typeof fromTimer === 'number' && Number.isFinite(fromTimer)) {
+            // Manual/autoplay: gameTimer.currentTick stays 0 for the whole fight.
+            if (fromTimer > 0 || engineTick == null) return fromTimer;
+        }
+        return engineTick;
+    }
+
+    function resolveFightEndTick(world) {
+        const serverTicks = getServerResultFightTicks();
+        if (serverTicks != null) return serverTicks;
+        const engineTick = readTickFromEngine(world);
+        if (engineTick != null) return engineTick;
+        const fromTimer = globalThis.state?.gameTimer?.getSnapshot?.()?.context?.currentTick;
+        if (typeof fromTimer === 'number' && Number.isFinite(fromTimer) && fromTimer > 0) {
+            return fromTimer;
+        }
+        return null;
+    }
+
+    function resolvePanelFightEndState(options = {}) {
+        if (options.endState === 'victory' || options.endState === 'defeat') {
+            return options.endState;
+        }
+        const timerState = options.gameTimerState ?? getGameTimerFightState();
+        if (timerState === 'victory' || timerState === 'defeat') {
+            return timerState;
+        }
+        try {
+            const victory = getBoardContext()?.serverResults?.rewardScreen?.victory;
+            if (typeof victory === 'boolean') {
+                return victory ? 'victory' : 'defeat';
+            }
+        } catch { /* ignore */ }
+        const winner = options.winner;
+        if (winner === 'nonVillains') return 'victory';
+        if (typeof winner === 'string' && winner !== 'nonVillains' && /villain/i.test(winner)) {
+            return 'defeat';
+        }
+        return null;
     }
 
     function getGameTimerFightState() {
@@ -1996,24 +2044,25 @@
         try {
             const state = getGameTimerFightState();
             syncGameTimerFightStateTracking(state);
-            if (!isGameTimerEndState(state)) return;
+            if (!isGameTimerEndState(state) && isFightActive()) return;
             if (panelFightTickFrozen != null && isPanelFightResolved()) return;
-            if (isBattleLogTracking()) return;
+            // Ignore stale victory/defeat on the timer during an active log session.
+            if (isBattleLogTracking() && isFightActive()) return;
             freezePanelFightTickFromEngine();
         } catch { /* ignore */ }
     }
 
-    function freezePanelFightTickFromEngine(world) {
-        const timerState = getGameTimerFightState();
-        if (timerState === 'victory' || timerState === 'defeat') {
-            panelFightEndState = timerState;
+    function freezePanelFightTickFromEngine(world, options = {}) {
+        if (panelFightEndState == null) {
+            const resolved = resolvePanelFightEndState(options);
+            if (resolved) panelFightEndState = resolved;
         }
         if (panelFightTickFrozen == null) {
-            const engineTick = resolveEngineTick(null, world) ?? panelFightTick;
-            if (engineTick != null) {
-                panelFightTick = engineTick;
-                panelFightTickFrozen = engineTick;
-                lastPanelSyncedEngineTick = engineTick;
+            const finalTick = resolveFightEndTick(world) ?? panelFightTick;
+            if (finalTick != null) {
+                panelFightTick = finalTick;
+                panelFightTickFrozen = finalTick;
+                lastPanelSyncedEngineTick = finalTick;
             }
         }
         panelTickRevision++;
@@ -2026,6 +2075,34 @@
             try { panelGameTimerSub.unsubscribe(); } catch { /* ignore */ }
             panelGameTimerSub = null;
         }
+    }
+
+    function stopPanelTickPoll() {
+        if (panelTickPollTimer) {
+            clearInterval(panelTickPollTimer);
+            panelTickPollTimer = null;
+        }
+    }
+
+    function pollPanelFightTick() {
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel || panel.style.display === 'none') {
+            stopPanelTickPoll();
+            return;
+        }
+        if (panelFightTickFrozen != null || !isLiveFightTracking()) {
+            stopPanelTickPoll();
+            return;
+        }
+        const ctx = globalThis.state?.gameTimer?.getSnapshot?.()?.context;
+        const tickChanged = syncPanelTick(ctx);
+        if (tickChanged) notifyPanelTickConsumers();
+    }
+
+    function startPanelTickPoll() {
+        stopPanelTickPoll();
+        pollPanelFightTick();
+        panelTickPollTimer = setInterval(pollPanelFightTick, PANEL_TICK_POLL_MS);
     }
 
     function isTurboAccelerated() {
@@ -2069,9 +2146,11 @@
 
         if (panelFightTickFrozen == null) {
             if (isBattleLogTracking()) {
-                if (timerJustEnded) freezePanelFightTickFromEngine();
+                if (timerJustEnded) {
+                    freezePanelFightTickFromEngine(undefined, { gameTimerState: gameState });
+                }
             } else if (isGameTimerEndState(gameState)) {
-                freezePanelFightTickFromEngine();
+                freezePanelFightTickFromEngine(undefined, { gameTimerState: gameState });
             }
         }
 
@@ -2354,9 +2433,9 @@
     }
 
     function tryEndBattleLogSession() {
-        const endState = panelFightEndState;
-        if (endState !== 'victory' && endState !== 'defeat') return;
-        endBattleLogSession(endState);
+        if (!battleLogTracking || battleLogSessionEnded) return;
+        if (panelFightTickFrozen == null && panelFightEndState == null) return;
+        endBattleLogSession(panelFightEndState);
     }
 
     function pickLogString(...values) {
@@ -3765,8 +3844,8 @@
             worldEventSubs.push(world.grid.onActorDeath.subscribe(recordDeathLogEntry));
         }
         if (typeof world.onGameEnd?.subscribe === 'function') {
-            worldEventSubs.push(world.onGameEnd.subscribe(() => {
-                freezePanelFightTickFromEngine(world);
+            worldEventSubs.push(world.onGameEnd.subscribe((winner) => {
+                freezePanelFightTickFromEngine(world, { winner });
                 renderStatusBar(true);
                 render();
             }));
@@ -8435,8 +8514,11 @@
         const panelOpen = panel && panel.style.display !== 'none';
         if (panelOpen && (isLiveFightTracking() || panelFightTickFrozen != null)) {
             setupPanelGameTimerSub();
+            if (isLiveFightTracking()) startPanelTickPoll();
+            else stopPanelTickPoll();
         } else {
             teardownPanelGameTimerSub();
+            stopPanelTickPoll();
         }
     }
 
@@ -8475,6 +8557,9 @@
             const world = getActiveWorld() || getBoardContext()?.world;
             if (world?.tickEngine?.setTickInterval) {
                 world.tickEngine.setTickInterval(getBaselineTickIntervalMs());
+            }
+            if (isBattleLogTracking() && panelFightTickFrozen == null) {
+                freezePanelFightTickFromEngine(world);
             }
             teardownWorldSubscriptions();
             activeWorld = null;
@@ -8834,6 +8919,7 @@
         savePanelSettings({ isOpen: false });
         pauseBattleLogActorPatches();
         teardownPanelGameTimerSub();
+        stopPanelTickPoll();
         teardownUnitsBodyListener();
         detachPanelViewportListener();
         panelDragState.reset();
@@ -8863,6 +8949,7 @@
             api.ui.removeButton(BUTTON_ID);
         }
         teardownPanelGameTimerSub();
+        stopPanelTickPoll();
         resetPanelFightTickState();
         resetTickSpeedToDefault();
         teardownBoardListeners();

@@ -3650,6 +3650,45 @@ function updateFirebaseStatus(statusDiv, message, color = '#7f8fa4') {
   }
 }
 
+function normalizeReplayEntityName(name, id, idToNameMap, lookupFromGameState) {
+  if (typeof name === 'string' && name.trim()) {
+    return name.trim().toLowerCase();
+  }
+
+  const lookupId = id ?? (typeof name === 'number' && Number.isFinite(name) ? name : null);
+  if (lookupId != null) {
+    const mappedName = idToNameMap?.get?.(Number(lookupId)) ?? idToNameMap?.get?.(lookupId);
+    if (typeof mappedName === 'string' && mappedName.trim()) {
+      return mappedName.trim().toLowerCase();
+    }
+
+    const resolvedName = lookupFromGameState?.(lookupId);
+    if (typeof resolvedName === 'string' && resolvedName.trim()) {
+      return resolvedName.trim().toLowerCase();
+    }
+  }
+
+  return null;
+}
+
+function resolveReplayMonsterName(piece) {
+  return normalizeReplayEntityName(
+    piece.monsterName,
+    piece.monsterId,
+    window.monsterGameIdsToNames,
+    (monsterId) => globalThis.state?.utils?.getMonster?.(monsterId)?.metadata?.name
+  ) || 'unknown monster';
+}
+
+function resolveReplayEquipmentName(piece) {
+  return normalizeReplayEntityName(
+    piece.equipmentName,
+    piece.equipId,
+    window.equipmentGameIdsToNames,
+    (equipId) => globalThis.state?.utils?.getEquipment?.(equipId)?.metadata?.name
+  ) || 'unknown equipment';
+}
+
 // Generate $replay link from run data
 function generateReplayLink(runData) {
   try {
@@ -3674,9 +3713,9 @@ function generateReplayLink(runData) {
         };
         
         // Add monster as object with name and stats
-        const monsterName = piece.monsterName || piece.monsterId || 'unknown monster';
+        const monsterName = resolveReplayMonsterName(piece);
         boardPiece.monster = normalizeMonster({
-          name: monsterName.toLowerCase(),
+          name: monsterName,
           level: piece.level || 1,
           hp: piece.monsterStats?.hp || 20,
           ad: piece.monsterStats?.ad || 20,
@@ -3687,9 +3726,9 @@ function generateReplayLink(runData) {
         
         // Add equipment as object if available
         if (piece.equipmentName || piece.equipId) {
-          const equipmentName = piece.equipmentName || piece.equipId || 'unknown equipment';
+          const equipmentName = resolveReplayEquipmentName(piece);
           boardPiece.equipment = {
-            name: equipmentName.toLowerCase(),
+            name: equipmentName,
             stat: piece.equipmentStat || 'ap',
             tier: piece.equipmentTier || 5
           };

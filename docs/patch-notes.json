@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.1.10",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Manual and Autoplay panel tick counter (tickEngine during fights; gameTimer stays 0). Victory/Defeat battle log end marker, status bar, and export final tick via onGameEnd winner and server results."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Toggle-off error tearing down manual play detection; board state subscribe/unsubscribe now supports XState v3 subscription objects."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Firebase run upload replay links when setup pieces stored numeric monster or equipment IDs instead of names."
+        }
+      ]
+    },
+    {
       "version": "4.1.9",
       "changes": [
         {

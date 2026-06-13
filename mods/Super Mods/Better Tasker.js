@@ -840,8 +840,23 @@ function isManualPlayPaused() {
     return Date.now() < manualPlayPauseUntil;
 }
 
+function isActiveStateSubscription(subscription) {
+    return typeof subscription === 'function'
+        || (subscription && typeof subscription.unsubscribe === 'function');
+}
+
+function invokeStateSubscription(subscription) {
+    if (typeof subscription === 'function') {
+        subscription();
+        return;
+    }
+    if (subscription && typeof subscription.unsubscribe === 'function') {
+        subscription.unsubscribe();
+    }
+}
+
 function setupManualPlayDetection() {
-    if (manualPlayBoardUnsubscribe) {
+    if (isActiveStateSubscription(manualPlayBoardUnsubscribe)) {
         return;
     }
 
@@ -885,9 +900,9 @@ function setupManualPlayDetection() {
 }
 
 function teardownManualPlayDetection() {
-    if (manualPlayBoardUnsubscribe) {
+    if (isActiveStateSubscription(manualPlayBoardUnsubscribe)) {
         try {
-            manualPlayBoardUnsubscribe();
+            invokeStateSubscription(manualPlayBoardUnsubscribe);
         } catch (error) {
             console.error('[Better Tasker] Error tearing down manual play detection:', error);
         }
@@ -3602,8 +3617,8 @@ function restoreQuestButtonAppearance() {
 // Function to start monitoring quest button validation using real-time board state subscription
 function startQuestButtonValidation() {
     // Clear any existing subscription or interval
-    if (boardStateUnsubscribe && typeof boardStateUnsubscribe === 'function') {
-        boardStateUnsubscribe();
+    if (isActiveStateSubscription(boardStateUnsubscribe)) {
+        invokeStateSubscription(boardStateUnsubscribe);
         boardStateUnsubscribe = null;
     }
     if (questButtonValidationInterval) {
@@ -3709,8 +3724,8 @@ function startQuestButtonValidationPolling() {
 // Function to stop monitoring quest button validation
 function stopQuestButtonValidation() {
     // Unsubscribe from board state changes
-    if (boardStateUnsubscribe && typeof boardStateUnsubscribe === 'function') {
-        boardStateUnsubscribe();
+    if (isActiveStateSubscription(boardStateUnsubscribe)) {
+        invokeStateSubscription(boardStateUnsubscribe);
         boardStateUnsubscribe = null;
         console.log('[Better Tasker] Board state subscription stopped');
     }
@@ -7264,7 +7279,7 @@ function subscribeToGameState() {
             
             // Subscribe to newGame event (primary handler)
             const newGameUnsub = globalThis.state.board.on('newGame', handleNewGame);
-            if (typeof newGameUnsub === 'function') {
+            if (isActiveStateSubscription(newGameUnsub)) {
                 gameStateUnsubscribers.push(newGameUnsub);
             }
             
@@ -7335,12 +7350,12 @@ function subscribeToGameState() {
             
             // Subscribe to emitEndGame event
             const endGameUnsub = globalThis.state.board.on('emitEndGame', handleEndGame);
-            if (typeof endGameUnsub === 'function') {
+            if (isActiveStateSubscription(endGameUnsub)) {
                 gameStateUnsubscribers.push(endGameUnsub);
             }
 
             const emitNewGameGuardUnsub = globalThis.state.board.on('emitNewGame', onTaskHuntingEmitNewGameGuard);
-            if (typeof emitNewGameGuardUnsub === 'function') {
+            if (isActiveStateSubscription(emitNewGameGuardUnsub)) {
                 gameStateUnsubscribers.push(emitNewGameGuardUnsub);
             }
         }
@@ -7355,9 +7370,9 @@ function subscribeToGameState() {
 function unsubscribeFromGameState() {
     // Clean up game state API subscriptions
     gameStateUnsubscribers.forEach(unsub => {
-        if (typeof unsub === 'function') {
+        if (isActiveStateSubscription(unsub)) {
             try {
-                unsub();
+                invokeStateSubscription(unsub);
             } catch (error) {
                 console.error('[Better Tasker] Error unsubscribing from game state:', error);
             }
@@ -7366,9 +7381,9 @@ function unsubscribeFromGameState() {
     gameStateUnsubscribers = [];
     
     // Also clean up board state subscription for quest button validation
-    if (boardStateUnsubscribe && typeof boardStateUnsubscribe === 'function') {
+    if (isActiveStateSubscription(boardStateUnsubscribe)) {
         try {
-            boardStateUnsubscribe();
+            invokeStateSubscription(boardStateUnsubscribe);
             boardStateUnsubscribe = null;
         } catch (error) {
             console.error('[Better Tasker] Error unsubscribing from board state:', error);
@@ -8513,8 +8528,8 @@ function cleanupBetterTasker() {
         stopStaminaTooltipMonitoring();
         
         // Clean up board state subscription
-        if (boardStateUnsubscribe && typeof boardStateUnsubscribe === 'function') {
-            boardStateUnsubscribe();
+        if (isActiveStateSubscription(boardStateUnsubscribe)) {
+            invokeStateSubscription(boardStateUnsubscribe);
             boardStateUnsubscribe = null;
         }
         
