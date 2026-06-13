@@ -84,6 +84,8 @@ const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1
 const MAX_START_DELAY = 10;            // 10 seconds maximum
 const ESC_KEY_DELAY = 50;
 const TASK_START_DELAY = 200;
+const MANUAL_PLAY_PAUSE_MS = 180000; // 3 minutes — back off after user changes map manually
+const PROGRAMMATIC_NAV_GUARD_MS = 5000;
 
 // Stamina constants
 const DEFAULT_STAMINA_COST = 30;
@@ -755,6 +757,218 @@ function clearModalsWithEscSync(count = 3) {
     }
 }
 
+function getQuestLogRootElement() {
+    const container = findQuestLogContainer();
+    if (!container) {
+        return null;
+    }
+    return container.closest('[role="dialog"]') || container.closest('.widget-bottom') || container;
+}
+
+function isQuestLogOpen() {
+    return !!findQuestLogContainer();
+}
+
+function clickQuestLogCloseButtons() {
+    const questLogRoot = getQuestLogRootElement();
+    if (!questLogRoot) {
+        return false;
+    }
+
+    const closeText = t('controls.close');
+    let clickedCount = 0;
+
+    for (const button of questLogRoot.querySelectorAll('button')) {
+        if (button.textContent.trim() === closeText && isElementVisible(button)) {
+            console.log(`[Better Tasker] Clicking quest log close button: "${closeText}"`);
+            button.click();
+            clickedCount++;
+        }
+    }
+
+    if (clickedCount > 0) {
+        console.log(`[Better Tasker] Clicked ${clickedCount} quest log close button(s)`);
+    }
+
+    return clickedCount > 0;
+}
+
+async function closeQuestLogIfOpen() {
+    if (!isQuestLogOpen()) {
+        return false;
+    }
+
+    console.log('[Better Tasker] Closing quest log (scoped)...');
+    clickQuestLogCloseButtons();
+
+    if (isQuestLogOpen()) {
+        await clearModalsWithEsc(1);
+        await sleep(50);
+        clickQuestLogCloseButtons();
+    }
+
+    await sleep(AUTOMATION_CHECK_DELAY);
+    return true;
+}
+
+async function clearScrollLockIfNeeded() {
+    if (document.body?.hasAttribute?.('data-scroll-locked')) {
+        await clearModalsWithEsc(1);
+        await sleep(100);
+        return true;
+    }
+    return false;
+}
+
+function markProgrammaticNavigation() {
+    programmaticNavigationUntil = Date.now() + PROGRAMMATIC_NAV_GUARD_MS;
+}
+
+function isProgrammaticNavigationActive() {
+    return Date.now() < programmaticNavigationUntil;
+}
+
+function pauseAutomationForManualPlay(reason) {
+    manualPlayPauseUntil = Date.now() + MANUAL_PLAY_PAUSE_MS;
+    console.log(
+        `[Better Tasker] Manual play pause (${Math.round(MANUAL_PLAY_PAUSE_MS / 1000)}s): ${reason}`
+    );
+    updateExposedState();
+}
+
+function isManualPlayPaused() {
+    return Date.now() < manualPlayPauseUntil;
+}
+
+function setupManualPlayDetection() {
+    if (manualPlayBoardUnsubscribe) {
+        return;
+    }
+
+    try {
+        if (!globalThis.state?.board?.subscribe) {
+            return;
+        }
+
+        lastTrackedRoomIdForManualPlay = getCurrentRoomId();
+        manualPlayBoardUnsubscribe = globalThis.state.board.subscribe((state) => {
+            try {
+                if (taskerState !== TASKER_STATES.ENABLED) {
+                    return;
+                }
+
+                const roomId = state.context?.selectedMap?.selectedRoom?.id;
+                if (!roomId || roomId === lastTrackedRoomIdForManualPlay) {
+                    return;
+                }
+
+                const previousRoomId = lastTrackedRoomIdForManualPlay;
+                lastTrackedRoomIdForManualPlay = roomId;
+
+                if (isProgrammaticNavigationActive()) {
+                    return;
+                }
+
+                if (taskingMapId && roomId !== taskingMapId) {
+                    pauseAutomationForManualPlay(`user left tasking map (${previousRoomId} -> ${roomId})`);
+                    taskNavigationCompleted = true;
+                } else if (!taskHuntingOngoing && !taskOperationInProgress) {
+                    pauseAutomationForManualPlay(`manual map selection (${previousRoomId} -> ${roomId})`);
+                }
+            } catch (error) {
+                console.error('[Better Tasker] Error in manual play detection:', error);
+            }
+        });
+    } catch (error) {
+        console.error('[Better Tasker] Error setting up manual play detection:', error);
+    }
+}
+
+function teardownManualPlayDetection() {
+    if (manualPlayBoardUnsubscribe) {
+        try {
+            manualPlayBoardUnsubscribe();
+        } catch (error) {
+            console.error('[Better Tasker] Error tearing down manual play detection:', error);
+        }
+        manualPlayBoardUnsubscribe = null;
+    }
+    lastTrackedRoomIdForManualPlay = null;
+}
+
+function showTaskStartToast() {
+    const now = Date.now();
+    if (now - lastTaskStartToastAt < TASK_START_TOAST_COOLDOWN_MS) {
+        return;
+    }
+    lastTaskStartToastAt = now;
+    showToast('Starting Better Tasker');
+}
+
+function claimTaskOperation(operationLabel = 'task operation') {
+    if (taskOperationInProgress) {
+        return false;
+    }
+    taskOperationInProgress = true;
+    updateExposedState();
+    console.log(`[Better Tasker] Task operation claimed: ${operationLabel}`);
+
+    const safetyTimeout = setTimeout(() => {
+        if (taskOperationInProgress) {
+            console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
+            taskOperationInProgress = false;
+            updateExposedState();
+        }
+    }, 30000);
+    safetyTimeouts.push(safetyTimeout);
+
+    return true;
+}
+
+function releaseTaskOperation() {
+    if (!taskOperationInProgress) {
+        return;
+    }
+    taskOperationInProgress = false;
+    updateExposedState();
+}
+
+function clearTaskCompletionRetryTimeout() {
+    if (taskCompletionRetryTimeout) {
+        clearTimeout(taskCompletionRetryTimeout);
+        taskCompletionRetryTimeout = null;
+    }
+}
+
+function releaseTaskCompletionFlow(clearOperation = true) {
+    taskCompletionInProgress = false;
+    pendingTaskCompletion = false;
+    if (clearOperation) {
+        taskOperationInProgress = false;
+    }
+    clearTaskCompletionRetryTimeout();
+    updateExposedState();
+}
+
+function scheduleTaskCompletionRetry(reason) {
+    const taskStillReady = globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.task?.ready;
+    if (!taskStillReady) {
+        releaseTaskCompletionFlow();
+        return;
+    }
+
+    console.log(`[Better Tasker] Scheduling task completion retry (${TASK_COMPLETION_RETRY_DELAY_MS}ms): ${reason}`);
+    clearTaskCompletionRetryTimeout();
+    taskCompletionInProgress = false;
+    pendingTaskCompletion = true;
+    updateExposedState();
+
+    taskCompletionRetryTimeout = setTimeout(() => {
+        taskCompletionRetryTimeout = null;
+        void handlePostGameTaskCompletion(false);
+    }, TASK_COMPLETION_RETRY_DELAY_MS);
+}
+
 // Show toast notification
 function showToast(message, duration = 5000) {
     try {
@@ -967,7 +1181,7 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
                 callback();
             }
         }
-    }, 15000); // Check every 15 seconds (stamina regenerates 1 per minute)
+    }, STAMINA_CHECK_INTERVAL_MS);
     
     // Store interval for cleanup
     window.betterTaskerStaminaInterval = staminaCheckInterval;
@@ -1657,19 +1871,40 @@ let lastGameStateChange = 0;
 let lastNewGameDebounceAt = 0;
 let lastEndGameDebounceAt = 0;
 let lastNoTaskCheck = 0;
+let manualPlayPauseUntil = 0;
+let programmaticNavigationUntil = 0;
+let manualPlayBoardUnsubscribe = null;
+let lastTrackedRoomIdForManualPlay = null;
+let lastTaskStartToastAt = 0;
+let taskCompletionInProgress = false;
+let taskCompletionRetryTimeout = null;
+let lastFailsafeTriggerAt = 0;
+const TASK_START_TOAST_COOLDOWN_MS = 10000;
+const FINISH_BUTTON_INITIAL_WAIT_MS = 1500;
+const FINISH_BUTTON_POLL_INTERVAL_MS = 200;
+const FINISH_BUTTON_MAX_ATTEMPTS = 20;
+const TASK_COMPLETION_RETRY_DELAY_MS = 3000;
+const FAILSAFE_DEBOUNCE_MS = 2000;
+const PAUSE_VERIFY_ATTEMPTS = 16;
+const NO_TASK_CHECK_DELAY = 30000;
+const STAMINA_CHECK_INTERVAL_MS = 10000;
+const BACKUP_POLL_INTERVAL_MS = 20000;
+const AUTOPLAY_TRANSITION_MAX_ATTEMPTS = 200; // 20s at 100ms intervals
+const SCHEDULER_COOLDOWN_CAP_MS = 600000;
+const SCHEDULER_ERROR_RETRY_MS = 120000;
 
 // Loop detection and auto-refresh
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 5; // Refresh after 5 consecutive failures
 let lastFailureType = null;
-const FAILURE_RESET_TIME = 60000; // Reset counter after 60 seconds of no failures
+const FAILURE_RESET_TIME = 30000; // Reset counter after 30 seconds of no failures
 
 // Task removal retry tracking (prevents endless loops)
 let taskRemovalRetryCount = 0;
 let lastTaskRemovalAttempt = 0;
 const MAX_TASK_REMOVAL_RETRIES = 3; // Max retries before giving up
-const TASK_REMOVAL_RETRY_COOLDOWN = 30000; // 30 seconds cooldown after max retries
-const TASK_REMOVAL_RESET_TIME = 60000; // Reset counter after 60 seconds of success
+const TASK_REMOVAL_RETRY_COOLDOWN = 20000; // Cooldown after max retries (backoff already spaces attempts)
+const TASK_REMOVAL_RESET_TIME = 30000; // Reset retry counter after quiet period
 
 // Check if it's safe to reload the page (won't interrupt user's active game)
 function isSafeToReload() {
@@ -1715,6 +1950,11 @@ function resetState(resetType = 'full') {
             lastForcedResumeAt = 0;
             pendingTaskCompletion = false;
             taskOperationInProgress = false;
+            taskCompletionInProgress = false;
+            if (taskCompletionRetryTimeout) {
+                clearTimeout(taskCompletionRetryTimeout);
+                taskCompletionRetryTimeout = null;
+            }
             lastNoTaskCheck = 0;
             
             // Stop quest button validation and restore appearance
@@ -1879,11 +2119,12 @@ function cleanupTaskCompletionFailure(reason = 'unknown') {
         // Clear all task-related flags
         resetState('taskComplete');
         
-        // Close any open quest log
-        clickAllCloseButtons();
-        
-        // Press ESC to ensure quest log is closed
-        clearModalsWithEscSync(3);
+        // Close quest log only (do not dismiss unrelated map/UI modals)
+        clickQuestLogCloseButtons();
+        if (isQuestLogOpen()) {
+            clearModalsWithEscSync(1);
+            clickQuestLogCloseButtons();
+        }
         
         // Update exposed state for other mods
         updateExposedState();
@@ -1943,11 +2184,8 @@ async function controlAutoplayWithButton(action) {
         if (button) {
             console.log(`[Better Tasker] Found ${buttonLabel} button, clicking to ${action === 'play' ? 'start' : action} autoplay...`);
             
-            // Clear any modals by simulating ESC key presses to remove data-scroll-locked
-            await clearModalsWithEsc(3);
-            
-            // Brief wait for modals to close and scroll lock to clear
-            await sleep(100);
+            await closeQuestLogIfOpen();
+            await clearScrollLockIfNeeded();
             
             button.click();
             
@@ -2221,8 +2459,11 @@ async function scheduleForegroundTaskRecheck() {
         }
 
         if (!isGameRunning && (pendingTaskCompletion || taskReady || quotaReached)) {
+            if (taskCompletionInProgress) {
+                return;
+            }
             console.log('[Better Tasker] Foreground recheck detected completable task state - running post-game completion');
-            await handlePostGameTaskCompletion();
+            await handlePostGameTaskCompletion(false);
             return;
         }
 
@@ -2859,7 +3100,7 @@ function setupQuestBlipMonitoring() {
                 }
             }
         }
-    }, 30000);
+    }, BACKUP_POLL_INTERVAL_MS);
     
     console.log('[Better Tasker] Quest blip monitoring started (MutationObserver + periodic checks)');
 }
@@ -2970,8 +3211,8 @@ async function handleNewTaskOnly() {
         console.log('[Better Tasker] New Task+ mode - accepting task without filtering...');
         const taskAccepted = await acceptNewTaskFromQuestLog(true); // Skip filtering
         
-        // 3. Close quest log with ESC key
-        await clearModalsWithEsc(3);
+        // 3. Close quest log (scoped — do not dismiss unrelated modals)
+        await closeQuestLogIfOpen();
         
         if (taskAccepted) {
             console.log('[Better Tasker] Quest log closed - New Task+ mode complete (task accepted)');
@@ -3001,6 +3242,7 @@ function toggleTasker() {
             break;
         case TASKER_STATES.NEW_TASK_ONLY:
             taskerState = TASKER_STATES.DISABLED;
+            teardownManualPlayDetection();
             // Clear scheduler when disabling
             if (taskCheckTimeout) {
                 clearTimeout(taskCheckTimeout);
@@ -3461,7 +3703,7 @@ function startQuestButtonValidationPolling() {
         } catch (error) {
             console.error('[Better Tasker] Error in quest button validation:', error);
         }
-    }, 30000); // Check every 30 seconds
+    }, BACKUP_POLL_INTERVAL_MS);
 }
 
 // Function to stop monitoring quest button validation
@@ -3493,19 +3735,29 @@ function stopQuestButtonValidation() {
 
 // Check for quest log content
 function checkForQuestLogContent(node) {
-    return node.textContent?.includes('Quest Log') || 
-           (node.querySelector?.('*') && 
-            Array.from(node.querySelectorAll('*')).some(el => 
-              el.textContent?.includes('Quest Log')
-            )) ||
-           // Check for quest log container structure
-           (node.classList?.contains('grid') && 
-            node.classList?.contains('items-start') && 
-            node.classList?.contains('gap-1')) ||
-           // Check for widget-bottom that might contain quest log
-           node.classList?.contains('widget-bottom') ||
-           // Check for any element with quest log related classes
-           (node.querySelector && node.querySelector('.grid.h-\\[260px\\].items-start.gap-1'));
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+        return false;
+    }
+
+    const questLogSelector = '.grid.h-\\[260px\\].items-start.gap-1';
+
+    if (node.textContent?.includes('Quest Log') ||
+        node.textContent?.includes('Paw and Fur Society')) {
+        return true;
+    }
+
+    if (node.matches?.(questLogSelector) || node.querySelector?.(questLogSelector)) {
+        return true;
+    }
+
+    if (node.querySelector?.('*')) {
+        return Array.from(node.querySelectorAll('*')).some((el) =>
+            el.textContent?.includes('Quest Log') ||
+            el.textContent?.includes('Paw and Fur Society')
+        );
+    }
+
+    return false;
 }
 
 // Check for Paw and Fur Society content
@@ -4527,16 +4779,13 @@ function enableBestiaryAutomatorSettings(returnSuccess = false, settingsOverride
 
 // Handle quest log state - close quest log first, then navigate to suggested map
 async function handleQuestLogState(roomId, targetFloor = 0) {
-    // First, close the quest log with ESC key presses (like Raid Hunter)
     console.log('[Better Tasker] Closing quest log before navigation...');
-    await clearModalsWithEsc(3);
-    
-    // Wait for quest log to close
-    await sleep(AUTOMATION_CHECK_DELAY);
-    console.log('[Better Tasker] Quest log closed with ESC presses');
+    await closeQuestLogIfOpen();
+    console.log('[Better Tasker] Quest log close step completed');
     
     // Now navigate to the suggested map
     console.log('[Better Tasker] Navigating to selected map via API...');
+    markProgrammaticNavigation();
     globalThis.state.board.send({
         type: 'selectRoomById',
         roomId: roomId
@@ -4671,6 +4920,11 @@ function resolveTaskerAutomationSettingsForRoom(roomId, baseSettings, baseFloor)
 // Navigate to suggested map and start autoplay using API
 async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null, preferredCreatureName = null) {
     try {
+        if (isManualPlayPaused()) {
+            console.log('[Better Tasker] Manual play pause active - skipping navigation');
+            return false;
+        }
+
         // CRITICAL: Check if Raid Hunter is actively raiding BEFORE doing anything (HIGH priority raids take precedence)
         if (isRaidHunterRaiding()) {
             console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - aborting navigation (HIGH priority raid takes precedence)');
@@ -4722,7 +4976,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 };
                 
                 // Show toast notification
-                showToast('Starting Better Tasker');
+                showTaskStartToast();
                 
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId, roomAutomation.floor);
@@ -4935,8 +5189,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     setupMethod: roomAutomation.setupMethod,
                     autoRefillStamina: roomAutomation.autoRefillStamina
                 };
-                // Show toast notification
-                showToast('Starting Better Tasker');
+                showTaskStartToast();
                 
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId, roomAutomation.floor);
@@ -5202,28 +5455,9 @@ async function waitForGameToEnd() {
 }
 
 
-// Click all Close buttons
+// Click Close buttons inside the quest log only (avoids closing map pickers and other UI)
 function clickAllCloseButtons() {
-    const closeButtons = document.querySelectorAll('button');
-    let clickedCount = 0;
-    
-    // Get close button text in current language
-    const closeText = t('controls.close');
-    
-    for (const button of closeButtons) {
-        const buttonText = button.textContent.trim();
-        if (buttonText === closeText) {
-            console.log(`[Better Tasker] Clicking close button: "${buttonText}"`);
-            button.click();
-            clickedCount++;
-        }
-    }
-    
-    if (clickedCount > 0) {
-        console.log(`[Better Tasker] Clicked ${clickedCount} close button(s)`);
-    }
-    
-    return clickedCount > 0;
+    return clickQuestLogCloseButtons();
 }
 
 // ============================================================================
@@ -5645,6 +5879,21 @@ function ensureAutoplayMode() {
 
 // Consolidated failsafe function - replaces all duplicated failsafe logic
 async function triggerFailsafe(reason) {
+    const now = Date.now();
+    if (now - lastFailsafeTriggerAt < FAILSAFE_DEBOUNCE_MS) {
+        console.log(`[Better Tasker] Failsafe debounced (${reason})`);
+        return;
+    }
+    if (taskCompletionInProgress) {
+        console.log(`[Better Tasker] Failsafe skipped - task completion already in progress (${reason})`);
+        return;
+    }
+
+    lastFailsafeTriggerAt = now;
+    taskCompletionInProgress = true;
+    pendingTaskCompletion = true;
+    updateExposedState();
+
     console.log(`[Better Tasker] FAILSAFE TRIGGERED: ${reason} - stopping autoplay immediately!`);
     
     // Stop all automations immediately (includes autoplay, Bestiary Automator, Raid Hunter coordination)
@@ -5771,7 +6020,7 @@ async function pauseAutoplay() {
             if (paused) {
                 // Wait for game state to update (give it up to 3 seconds)
                 let verified = false;
-                for (let checkAttempt = 0; checkAttempt < 6; checkAttempt++) {
+                for (let checkAttempt = 0; checkAttempt < PAUSE_VERIFY_ATTEMPTS; checkAttempt++) {
                     await sleep(500);
                     const newBoardContext = globalThis.state.board.getSnapshot().context;
                     if (!newBoardContext.gameStarted) {
@@ -5783,7 +6032,7 @@ async function pauseAutoplay() {
                 }
                 
                 if (!verified) {
-                    console.warn('[Better Tasker] Pause button clicked but game still running after 3s - continuing anyway');
+                    console.warn(`[Better Tasker] Pause button clicked but game still running after ${PAUSE_VERIFY_ATTEMPTS * 500}ms - continuing anyway`);
                     autoplayPausedByTasker = false;
                     return false;
                 }
@@ -5830,7 +6079,11 @@ async function handleFinalRunPauseWithRetry() {
                     (prog ? prog.current + '/' + prog.target : 'no API progress') +
                     ') — opening quest log to finish or verify task state'
             );
-            await handlePostGameTaskCompletion();
+            if (taskCompletionInProgress) {
+                console.log('[Better Tasker] [runs-budget] task completion already in progress - skipping duplicate final-run handler');
+                return;
+            }
+            await handlePostGameTaskCompletion(false);
             return;
         }
 
@@ -6013,6 +6266,23 @@ async function openQuestLogDirectly() {
         if (isRaidHunterRaiding()) {
             console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - aborting quest log opening');
             return false;
+        }
+
+        // Quest blip toggles the log — if it is already open, do not click the blip again
+        const alreadyOpenQuestLog = findQuestLogContainer();
+        if (alreadyOpenQuestLog) {
+            console.log('[Better Tasker] Quest log already open - skipping blip toggle');
+
+            const backButton = Array.from(document.querySelectorAll('button')).find(btn =>
+                btn.querySelector('svg.lucide-arrow-left')
+            );
+
+            if (backButton && isElementVisible(backButton)) {
+                backButton.click();
+                await sleep(500);
+            }
+
+            return true;
         }
         
         // FIRST: Try to find and click quest blip (most reliable for task completion)
@@ -6316,36 +6586,22 @@ async function findAndClickFinishButton() {
     try {
         console.log('[Better Tasker] Looking for Finish button...');
         
-        // Wait for quest log to load
-        await sleep(1200);
+        await sleep(FINISH_BUTTON_INITIAL_WAIT_MS);
         
-        // Find Finish button (100ms fast polling, 5 attempts)
-        const finishButton = await findFinishButton(100, 5, false);
+        const finishButton = await findFinishButton(
+            FINISH_BUTTON_POLL_INTERVAL_MS,
+            FINISH_BUTTON_MAX_ATTEMPTS,
+            false
+        );
         
-        // Click Finish button and verify completion
         if (finishButton) {
             return await clickFinishAndVerify(finishButton);
-        } else {
-            console.log('[Better Tasker] Finish button never became ready');
-            // Clear task operation in progress flag since no finish button appeared
-            taskOperationInProgress = false;
-            updateExposedState();
-            console.log('[Better Tasker] Task completion and progress flags cleared - no finish button');
-            
-            // Stop quest button validation and restore appearance
-            stopQuestButtonValidation();
-            restoreQuestButtonAppearance();
-            updateToggleButton();
-            
-            return false;
         }
+
+        console.log('[Better Tasker] Finish button never became ready');
+        return false;
     } catch (error) {
         console.error('[Better Tasker] Error finding and clicking Finish button:', error);
-        
-        // Clear flags on error
-        taskOperationInProgress = false;
-        updateExposedState();
-        
         return false;
     }
 }
@@ -6383,16 +6639,7 @@ async function handleTaskReadyCompletion() {
         // Start quest button validation monitoring
         startQuestButtonValidation();
         
-        // Clear any modals with ESC key presses
-        console.log('[Better Tasker] Clearing any modals with ESC key presses...');
-        await clearModalsWithEsc(3);
-        
-        // Also try clicking any Close buttons
-        clickAllCloseButtons();
-        
-        // Wait for modals to clear
-        await sleep(200);
-        console.log('[Better Tasker] Modal clearing completed');
+        await closeQuestLogIfOpen();
         
         // Check if a game is actually running before waiting for it to finish
         const boardContext = globalThis.state.board.getSnapshot().context;
@@ -6409,12 +6656,12 @@ async function handleTaskReadyCompletion() {
             // while game is still running
         } else {
             console.log('[Better Tasker] No game running, proceeding with task completion...');
-            // No game running, proceed with quest log opening
-            await handlePostGameTaskCompletion();
+            await handlePostGameTaskCompletion(true);
         }
         
     } catch (error) {
         console.error('[Better Tasker] Error in handleTaskReadyCompletion:', error);
+        releaseTaskCompletionFlow();
         cleanupTaskCompletionFailure('error in handleTaskReadyCompletion');
     }
 }
@@ -6435,9 +6682,9 @@ async function openQuestLogWithRetry() {
         
         // If not the last attempt, try ESC key and retry
         if (attempt < 3) {
-            console.log(`[Better Tasker] Quest log opening failed, trying ESC key and retrying...`);
-            await clearModalsWithEsc(1);
-            await sleep(200); // Wait for any modals to close
+            console.log(`[Better Tasker] Quest log opening failed, closing quest log and retrying...`);
+            await closeQuestLogIfOpen();
+            await sleep(200);
         }
     }
     
@@ -6453,62 +6700,70 @@ async function openQuestLogWithRetry() {
 }
 
 // Handle quest log opening and button clicking AFTER game finishes
-async function handlePostGameTaskCompletion() {
+async function handlePostGameTaskCompletion(fromFailsafeChain = false) {
     try {
+        if (!fromFailsafeChain) {
+            if (taskCompletionInProgress) {
+                console.log('[Better Tasker] Task completion already in progress - skipping duplicate post-game handler');
+                return;
+            }
+            taskCompletionInProgress = true;
+            pendingTaskCompletion = true;
+            updateExposedState();
+        }
+
         console.log('[Better Tasker] Handling post-game task completion...');
         
-        // Wait for game to finish completely
         console.log('[Better Tasker] Waiting for game to finish...');
-        await sleep(1000); // Wait for game end animations and UI to settle
+        await sleep(1000);
         
-        
-        // Check current task state to determine what to do
         const playerContext = globalThis.state.player.getSnapshot().context;
         const task = playerContext?.questLog?.task;
         
         if (task && task.ready) {
-            // Check if autocomplete is enabled before claiming rewards
             const settings = loadSettings();
             if (!settings.autoCompleteTasks) {
                 console.log('[Better Tasker] Autocomplete tasks disabled, skipping reward claim');
-                // Clear flags since we're not completing the task
-                taskOperationInProgress = false;
-                updateExposedState();
+                releaseTaskCompletionFlow();
                 return;
             }
             
-            // Task is ready - open quest log and look for Finish button
             console.log('[Better Tasker] Task is ready, opening quest log for Finish button...');
             
-            // Try to open quest log with retry mechanism
             const questLogOpened = await openQuestLogWithRetry();
             
             if (questLogOpened) {
-                // Look for Finish button
-                await findAndClickFinishButton();
+                const finishSuccess = await findAndClickFinishButton();
+                if (!finishSuccess && globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.task?.ready) {
+                    scheduleTaskCompletionRetry('finish button not ready');
+                    return;
+                }
             } else {
                 console.log('[Better Tasker] Failed to open quest log after 3 attempts');
+                scheduleTaskCompletionRetry('quest log open failed');
+                return;
             }
         } else {
-            // No active task or not ready - check if new task is available
             console.log('[Better Tasker] No ready task, checking if new task is available...');
             
             if (isQuestBlipAvailable()) {
                 console.log('[Better Tasker] New task available - opening quest log to accept task');
+                releaseTaskCompletionFlow(false);
                 await openQuestLogAndAcceptTask();
             } else {
                 console.log('[Better Tasker] No new task available yet (cooldown active)');
+                releaseTaskCompletionFlow();
                 cleanupTaskCompletionFailure('no new task available');
             }
+            return;
         }
         
-        // Clear task operation flag on successful completion
-        taskOperationInProgress = false;
-        updateExposedState();
+        releaseTaskCompletionFlow();
         console.log('[Better Tasker] Task operation completed successfully');
         
     } catch (error) {
         console.error('[Better Tasker] Error in handlePostGameTaskCompletion:', error);
+        releaseTaskCompletionFlow();
         cleanupTaskCompletionFailure('error in handlePostGameTaskCompletion');
     }
 }
@@ -6517,6 +6772,10 @@ async function handlePostGameTaskCompletion() {
 async function handleTaskFinishing() {
     if (taskerState !== TASKER_STATES.ENABLED) {
         console.log('[Better Tasker] Tasker not in enabled state, skipping task completion');
+        return;
+    }
+
+    if (isManualPlayPaused()) {
         return;
     }
     
@@ -6647,11 +6906,10 @@ async function handleTaskFinishing() {
                 if (autoButton && autoButton.textContent.includes('Auto') && autoButton.hasAttribute('disabled')) {
                     console.log('[Better Tasker] Waiting for autoplay button to transition from "Auto" to "Autoplay" state...');
                     
-                    // Wait up to 30 seconds for the transition
+                    // Wait up to 20 seconds for the transition
                     let waitAttempts = 0;
-                    const maxWaitAttempts = 300; // 30 seconds with 100ms intervals
                     
-                    while (!isAutoplayActive && waitAttempts < maxWaitAttempts) {
+                    while (!isAutoplayActive && waitAttempts < AUTOPLAY_TRANSITION_MAX_ATTEMPTS) {
                         await sleep(100);
                         waitAttempts++;
                         isAutoplayActive = checkIfAutoplayIsActive();
@@ -6715,9 +6973,13 @@ async function handleTaskFinishing() {
                 return;
                 
             } else if (isQuestBlipReady) {
-                console.log('[Better Tasker] New task available - opening quest log to start task...');
-                // New task availability is only for starting new tasks, not completing existing ones
-                
+                if (taskOperationInProgress) {
+                    console.log('[Better Tasker] Task accept already in progress - skipping duplicate delegate');
+                    return;
+                }
+                console.log('[Better Tasker] New task available - delegating to openQuestLogAndAcceptTask');
+                await openQuestLogAndAcceptTask();
+                return;
             } else if (task.gameId && !task.ready) {
                 // Active task that's not ready yet - check if we need to navigate to the task map
                 if (!taskNavigationCompleted) {
@@ -6768,7 +7030,6 @@ async function handleTaskFinishing() {
             } else {
                 // No active task and no new task available
                 const now = Date.now();
-                const NO_TASK_CHECK_DELAY = 60000; // 1 minute in milliseconds
                 
                 if (now - lastNoTaskCheck < NO_TASK_CHECK_DELAY) {
                     // Still within the delay period, skip this check
@@ -6777,173 +7038,15 @@ async function handleTaskFinishing() {
                 
                 // Update the last check time
                 lastNoTaskCheck = now;
-                console.log('[Better Tasker] No quest blip found and no active task - waiting 1 minute before next check');
+                console.log('[Better Tasker] No quest blip found and no active task - waiting 30s before next check');
                 return;
             }
             
             // 1. Open quest log for other cases (autoplay active, etc.)
+            // New tasks are handled via openQuestLogAndAcceptTask() earlier in this function
             console.log('[Better Tasker] Opening quest log for general case...');
             
-            if (isQuestBlipReady) {
-                // Set task completion in progress flag to prevent duplicate operations
-                taskCompletionInProgress = true;
-                updateExposedState(); // Update exposed state for other mods
-                console.log('[Better Tasker] Task completion in progress flag set - preventing duplicate operations');
-                
-                // Set task in progress flag to prevent duplicate quest log operations
-                taskInProgress = true;
-                console.log('[Better Tasker] Task in progress flag set - preventing duplicate quest log operations');
-                
-                // Start quest button validation monitoring
-                startQuestButtonValidation();
-                // Clear any modals with ESC key presses
-                console.log('[Better Tasker] Clearing any modals with ESC key presses...');
-                await clearModalsWithEsc(3);
-                
-                // Also try clicking any Close buttons
-                clickAllCloseButtons();
-                
-                // Wait for modals to clear
-                await sleep(200);
-                console.log('[Better Tasker] Modal clearing completed');
-                
-                // Find and click the quest blip
-                const questBlip = document.querySelector('img[src*="quest-blip.png"]');
-                if (questBlip) {
-                    questBlip.click();
-                } else {
-                    console.log('[Better Tasker] Quest blip not found when trying to click');
-                    return;
-                }
-                await sleep(200);
-                console.log('[Better Tasker] Quest log opened via quest blip');
-                
-                // Wait for quest log to fully load
-                await sleep(300);
-                
-                // 2. Look for and click "New Task" button
-                console.log('[Better Tasker] Looking for New Task button...');
-                let newTaskButton = document.querySelector('button:has(svg.lucide-plus)');
-                if (!newTaskButton) {
-                    // Use localization system to find New Task button
-                    newTaskButton = findButtonByText('New task');
-                }
-                
-                if (newTaskButton) {
-                    console.log('[Better Tasker] New Task button found, clicking...');
-                    // Set task operation in progress flag when actually accepting a new task
-                    taskOperationInProgress = true;
-                    updateExposedState();
-                    console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
-                    
-                    // Safety timeout to reset the flag if operation gets stuck (30 seconds)
-                    const safetyTimeout = setTimeout(() => {
-                        if (taskOperationInProgress) {
-                            console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
-                            taskOperationInProgress = false;
-                            updateExposedState();
-                        }
-                    }, 30000);
-                    safetyTimeouts.push(safetyTimeout);
-                    
-                    newTaskButton.click();
-                    await sleep(200);
-                    console.log('[Better Tasker] New Task button clicked');
-                    
-                    // Wait for task selection to load
-                    await sleep(500);
-                    
-                    // Check if the task creature is allowed before proceeding
-                    console.log('[Better Tasker] Checking creature filtering in handleTaskFinishing...');
-                    const creatureName = extractCreatureFromTask();
-                    console.log('[Better Tasker] Extracted creature name:', creatureName);
-                    if (creatureName && !isCreatureAllowed(creatureName)) {
-                        console.log(`[Better Tasker] Task rejected - creature "${creatureName}" is not in allowed list`);
-                        
-                        // Remove the task directly while quest log is open
-                        console.log('[Better Tasker] Removing rejected task directly from quest log...');
-                        const taskRemoved = await removeTaskDirectlyFromQuestLog();
-                        if (taskRemoved) {
-                            console.log('[Better Tasker] Rejected task successfully removed from game');
-                        } else {
-                            console.log('[Better Tasker] Failed to remove rejected task from game');
-                        }
-                        
-                        // Clear task operation in progress flag and return early
-                        taskOperationInProgress = false;
-                        updateExposedState();
-                        return;
-                    }
-                    
-                    console.log('[Better Tasker] Task creature is allowed, proceeding with navigation...');
-                    
-                    // Check if Raid Hunter is actively raiding before navigating
-                    if (isRaidHunterRaiding()) {
-                        console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - deferring task navigation');
-                        return;
-                    }
-                    
-                    // 3. Navigate to suggested map and start autoplay
-                    await navigateToSuggestedMapAndStartAutoplay();
-                } else {
-                    console.log('[Better Tasker] New Task button not found, checking for suggested map...');
-                    
-                    // Check if Raid Hunter is actively raiding before navigating
-                    if (isRaidHunterRaiding()) {
-                        console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - deferring task navigation');
-                        return;
-                    }
-                    
-                    // Try to navigate to suggested map using API (will validate Paw and Fur Society section internally)
-                    await navigateToSuggestedMapAndStartAutoplay();
-                }
-                
-                // 4. Find Finish button (100ms fast polling, 5 attempts, no fallback selectors)
-                const finishButton = await findFinishButton(100, 5, false);
-                
-                // 5. Check if autocomplete is enabled before claiming rewards
-                const settings = loadSettings();
-                if (finishButton && settings.autoCompleteTasks) {
-                    await clickFinishAndVerify(finishButton);
-                } else if (finishButton && !settings.autoCompleteTasks) {
-                    console.log('[Better Tasker] Autocomplete tasks disabled, skipping reward claim');
-                    // Clear flags since we're not completing the task
-                    taskOperationInProgress = false;
-                    updateExposedState();
-                    clickAllCloseButtons();
-                } else {
-                    // If we were checking during autoplay and no finish button appeared, just close the quest log
-                    if (isAutoplayActive && !isTaskReady) {
-                        console.log('[Better Tasker] No finish button found during autoplay, closing quest log');
-                        clickAllCloseButtons();
-                // Clear task operation in progress flag since we're closing the quest log
-                taskOperationInProgress = false;
-                updateExposedState(); // Update exposed state for other mods
-                console.log('[Better Tasker] Task completion and progress flags cleared - quest log closed');
-                
-                // Stop quest button validation and restore appearance
-                stopQuestButtonValidation();
-                restoreQuestButtonAppearance();
-                
-                // Restore normal button state
-                updateToggleButton();
-                    } else {
-                        console.log('[Better Tasker] Finish button never became ready');
-                        // Clear task operation in progress flag since no finish button appeared
-                        taskOperationInProgress = false;
-                        updateExposedState();
-                        console.log('[Better Tasker] Task completion and progress flags cleared - no finish button');
-                        
-                        // Stop quest button validation and restore appearance
-                        stopQuestButtonValidation();
-                        restoreQuestButtonAppearance();
-                        
-                        // Restore normal button state
-                        updateToggleButton();
-                    }
-                }
-            } else {
-                // Fallback: Try to open quest log using "Quests" button for active tasks
+            // Fallback: Try to open quest log using "Quests" button for active tasks
                 console.log('[Better Tasker] No quest blip found, trying Quests button fallback...');
                 const questsButton = document.querySelector('button img[src*="quest.png"]');
                 if (questsButton) {
@@ -6969,16 +7072,7 @@ async function handleTaskFinishing() {
                         // Start quest button validation monitoring
                         startQuestButtonValidation();
                         
-                        // Clear any modals with ESC key presses
-                        console.log('[Better Tasker] Clearing any modals with ESC key presses...');
-                        await clearModalsWithEsc(3);
-                        
-                        // Also try clicking any Close buttons
-                        clickAllCloseButtons();
-                        
-                        // Wait for modals to clear
-                        await sleep(200);
-                        console.log('[Better Tasker] Modal clearing completed');
+                        await closeQuestLogIfOpen();
                         
                         questButton.click();
                         await sleep(200);
@@ -7027,10 +7121,17 @@ async function handleTaskFinishing() {
                             // Check if Raid Hunter is actively raiding before navigating
                             if (isRaidHunterRaiding()) {
                                 console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - deferring task navigation');
+                                taskOperationInProgress = false;
+                                updateExposedState();
                                 return;
                             }
                             console.log('[Better Tasker] Suggested map found, navigating...');
-                            await navigateToSuggestedMapAndStartAutoplay(suggestedMapElement, creatureName);
+                            const navigationResult = await navigateToSuggestedMapAndStartAutoplay(suggestedMapElement, creatureName);
+                            taskOperationInProgress = false;
+                            updateExposedState();
+                            if (!navigationResult) {
+                                console.log('[Better Tasker] Navigation/autoplay start failed - will retry on next check');
+                            }
                         } else {
                             console.log('[Better Tasker] No suggested map found in Paw and Fur Society section');
                         }
@@ -7039,9 +7140,8 @@ async function handleTaskFinishing() {
                     }
                 }
                 
-                // Check if we should wait before re-checking (1 minute delay)
+                // Check if we should wait before re-checking
                 const now = Date.now();
-                const NO_TASK_CHECK_DELAY = 60000; // 1 minute in milliseconds
                 
                 if (now - lastNoTaskCheck < NO_TASK_CHECK_DELAY) {
                     // Still within the delay period, skip this check
@@ -7050,7 +7150,7 @@ async function handleTaskFinishing() {
                 
                 // Update the last check time
                 lastNoTaskCheck = now;
-                console.log('[Better Tasker] Quest blip not found and Quests button fallback failed - waiting 1 minute before next check');
+                console.log('[Better Tasker] Quest blip not found and Quests button fallback failed - waiting 30s before next check');
                 // Clear task operation in progress flag since no quest blip was found
                 taskOperationInProgress = false;
                 updateExposedState();
@@ -7062,11 +7162,9 @@ async function handleTaskFinishing() {
                 
                 // Restore normal button state
                 updateToggleButton();
-            }
         } else {
-            // Check if we should wait before re-checking (1 minute delay)
+            // Check if we should wait before re-checking
             const now = Date.now();
-            const NO_TASK_CHECK_DELAY = 60000; // 1 minute in milliseconds
             
             if (now - lastNoTaskCheck < NO_TASK_CHECK_DELAY) {
                 // Still within the delay period, skip this check
@@ -7075,7 +7173,7 @@ async function handleTaskFinishing() {
             
             // Update the last check time
             lastNoTaskCheck = now;
-            console.log('[Better Tasker] No quest log or task found - waiting 1 minute before next check');
+            console.log('[Better Tasker] No quest log or task found - waiting 30s before next check');
             // Clear task operation in progress flag since no quest log or task was found
             taskOperationInProgress = false;
             updateExposedState();
@@ -7226,8 +7324,13 @@ function subscribeToGameState() {
                     return;
                 }
                 
+                if (taskCompletionInProgress || pendingTaskCompletion) {
+                    console.log('[Better Tasker] Task completion already in progress - skipping duplicate end-game handler');
+                    return;
+                }
+
                 // Check and finish tasks immediately after game ends (only when not raiding)
-                await handlePostGameTaskCompletion();
+                await handlePostGameTaskCompletion(false);
             };
             
             // Subscribe to emitEndGame event
@@ -7293,6 +7396,7 @@ function startAutomation() {
     
     // Subscribe to game state for task completion (always set up, even during raids for new task acceptance)
     subscribeToGameState();
+    setupManualPlayDetection();
     
     // Check if Raid Hunter is actively raiding
     if (isRaidHunterRaiding()) {
@@ -7357,6 +7461,8 @@ function pauseAutomationDuringRaid() {
 }
 
 async function stopAutomation() {
+    teardownManualPlayDetection();
+
     if (!automationInterval) return;
     
     console.log('[Better Tasker] Stopping automation loop');
@@ -7432,6 +7538,10 @@ function runAutomationTasks() {
     try {
         // Only run if tasker is enabled
         if (taskerState !== TASKER_STATES.ENABLED) {
+            return;
+        }
+
+        if (isManualPlayPaused()) {
             return;
         }
         
@@ -7761,8 +7871,7 @@ async function removeCurrentTaskIfNotAllowed() {
         
         // Close quest log after task removal
         console.log('[Better Tasker] Closing quest log after task removal...');
-        await clearModalsWithEsc(3);
-        await sleep(200);
+        await closeQuestLogIfOpen();
         
         return true;
         
@@ -7921,7 +8030,7 @@ function scheduleTaskCheck() {
         // Get task info from game state
         const playerContext = globalThis.state.player.getSnapshot().context;
         if (!playerContext.questLog || !playerContext.questLog.task) {
-            taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), 600000);
+            taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), SCHEDULER_COOLDOWN_CAP_MS);
             return;
         }
         
@@ -7955,7 +8064,7 @@ function scheduleTaskCheck() {
         }
         
         // Cap delay at 10 minutes (600000ms)
-        const delay = Math.min(timeRemaining, 600000);
+        const delay = Math.min(timeRemaining, SCHEDULER_COOLDOWN_CAP_MS);
         // Schedule next check
         taskCheckTimeout = setTimeout(() => {
             scheduleTaskCheck(); // Rechain
@@ -7963,8 +8072,8 @@ function scheduleTaskCheck() {
         
     } catch (error) {
         console.error('[Better Tasker] Scheduler: Error during check:', error);
-        // Retry in 10 minutes on error
-        taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), 600000);
+        // Retry in 2 minutes on error
+        taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), SCHEDULER_ERROR_RETRY_MS);
     }
 }
 
@@ -8046,9 +8155,13 @@ async function acceptNewTaskFromQuestLog(skipCreatureFiltering = false) {
 async function openQuestLogAndAcceptTask() {
     try {
         console.log('[Better Tasker] === OPEN QUEST LOG AND ACCEPT TASK START ===');
-        
-        // Prevent concurrent calls - if already in progress, return immediately
-        if (taskOperationInProgress) {
+
+        if (isManualPlayPaused()) {
+            console.log('[Better Tasker] Manual play pause active - skipping quest log accept');
+            return;
+        }
+
+        if (!claimTaskOperation('open quest log and accept task')) {
             console.log('[Better Tasker] Task operation already in progress, skipping duplicate call');
             return;
         }
@@ -8071,9 +8184,7 @@ async function openQuestLogAndAcceptTask() {
             if (taskRemovalRetryCount >= MAX_TASK_REMOVAL_RETRIES && timeSinceLastAttempt < TASK_REMOVAL_RETRY_COOLDOWN) {
                 const remainingCooldown = Math.ceil((TASK_REMOVAL_RETRY_COOLDOWN - timeSinceLastAttempt) / 1000);
                 console.log(`[Better Tasker] Task removal retry limit reached (${taskRemovalRetryCount}/${MAX_TASK_REMOVAL_RETRIES}). Cooldown active: ${remainingCooldown}s remaining. Stopping to prevent loop.`);
-                // Clear the flag since we're not proceeding
-                taskOperationInProgress = false;
-                updateExposedState();
+                releaseTaskOperation();
                 // Schedule next check after cooldown expires
                 const cooldownRemaining = TASK_REMOVAL_RETRY_COOLDOWN - timeSinceLastAttempt;
                 taskCheckTimeout = setTimeout(() => {
@@ -8104,7 +8215,7 @@ async function openQuestLogAndAcceptTask() {
                     taskRemoved = await removeTaskDirectlyFromQuestLog();
                     if (taskRemoved) {
                         await sleep(1000);
-                        await clearModalsWithEsc(3);
+                        await closeQuestLogIfOpen();
                     }
                 }
             }
@@ -8112,9 +8223,7 @@ async function openQuestLogAndAcceptTask() {
             if (!taskRemoved) {
                 taskRemovalRetryCount++;
                 console.log(`[Better Tasker] Could not remove active task (retry ${taskRemovalRetryCount}/${MAX_TASK_REMOVAL_RETRIES}) - will retry later`);
-                // Clear the flag since we're not proceeding
-                taskOperationInProgress = false;
-                updateExposedState();
+                releaseTaskOperation();
                 
                 // Use exponential backoff: 5s, 10s, 20s
                 const backoffDelay = Math.min(5000 * Math.pow(2, taskRemovalRetryCount - 1), 20000);
@@ -8134,12 +8243,8 @@ async function openQuestLogAndAcceptTask() {
         // Note: We allow task acceptance during raids (non-invasive), but navigation is blocked at line 6707
         console.log('[Better Tasker] Opening quest log to check for tasks...');
         
-        // Clear any open modals first
-        await clearModalsWithEsc(3);
-        
-        // Wait for modals to clear
-        await sleep(200);
-        console.log('[Better Tasker] Modal clearing completed');
+        await closeQuestLogIfOpen();
+        console.log('[Better Tasker] Quest log pre-open cleanup completed');
         
         // Find and click quest blip or use "Quests/Raiding" button as fallback
         let questLogOpened = false;
@@ -8190,21 +8295,6 @@ async function openQuestLogAndAcceptTask() {
             // Wait for quest log to fully load
             await sleep(300);
             
-            // Set task operation in progress flag when actually accepting a new task
-            taskOperationInProgress = true;
-            updateExposedState();
-            console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
-            
-            // Safety timeout to reset the flag if operation gets stuck (30 seconds)
-            const safetyTimeout = setTimeout(() => {
-                if (taskOperationInProgress) {
-                    console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
-                    taskOperationInProgress = false;
-                    updateExposedState();
-                }
-            }, 30000);
-            safetyTimeouts.push(safetyTimeout);
-            
             // Check if Raid Hunter is actively raiding OR if in New Task+ mode - both skip creature filtering
             const isRaiding = isRaidHunterRaiding();
             const isNewTaskMode = taskerState === TASKER_STATES.NEW_TASK_ONLY;
@@ -8235,10 +8325,8 @@ async function openQuestLogAndAcceptTask() {
                 
                 if (hasErrorText && !activeTaskAfterFailure && !taskGameIdAfterFailure) {
                     console.log('[Better Tasker] Stale state detected: API error but no local active task. Browser may need refresh. Stopping retries to prevent loop.');
-                    // Clear task operation in progress flag
-                    taskOperationInProgress = false;
-                    updateExposedState();
-                    await clearModalsWithEsc(3); // Close quest log
+                    releaseTaskOperation();
+                    await closeQuestLogIfOpen();
                     // Reset retry counter and schedule check after longer delay (5 minutes)
                     taskRemovalRetryCount = 0;
                     taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), 300000); // 5 minutes
@@ -8247,10 +8335,8 @@ async function openQuestLogAndAcceptTask() {
                 
                 if (activeTaskAfterFailure || taskGameIdAfterFailure) {
                     console.log('[Better Tasker] Active task detected after failure - will retry after removal');
-                    // Clear task operation in progress flag
-                    taskOperationInProgress = false;
-                    updateExposedState();
-                    await clearModalsWithEsc(3); // Close quest log
+                    releaseTaskOperation();
+                    await closeQuestLogIfOpen();
                     // Wait a bit before rescheduling to allow task state to update
                     await sleep(2000);
                     // Re-run the check which will now detect and remove the active task (with retry protection)
@@ -8258,10 +8344,8 @@ async function openQuestLogAndAcceptTask() {
                     return;
                 }
                 
-                // Clear task operation in progress flag and reschedule next check
-                taskOperationInProgress = false;
-                updateExposedState();
-                await clearModalsWithEsc(3); // Close quest log
+                releaseTaskOperation();
+                await closeQuestLogIfOpen();
                 // Wait a bit before rescheduling to avoid immediate retry
                 await sleep(1000);
                 scheduleTaskCheck(); // Schedule next task check
@@ -8276,9 +8360,8 @@ async function openQuestLogAndAcceptTask() {
                 // Ensure Bestiary Automator settings are enabled even when not navigating
                 enableBestiaryAutomatorSettings();
                 
-                await clearModalsWithEsc(3); // Close quest log
-                taskOperationInProgress = false;
-                updateExposedState();
+                await closeQuestLogIfOpen();
+                releaseTaskOperation();
                 // Reset retry counter on success
                 taskRemovalRetryCount = 0;
                 console.log('[Better Tasker] Task claimed successfully - retry counter reset');
@@ -8290,9 +8373,16 @@ async function openQuestLogAndAcceptTask() {
             
             // Otherwise proceed with full automation (Enabled mode, no raid - navigate to map and start autoplay)
             console.log('[Better Tasker] Enabled mode, no raid - proceeding with navigation and autoplay...');
-            await navigateToSuggestedMapAndStartAutoplay();
+            const navigationResult = await navigateToSuggestedMapAndStartAutoplay();
+            releaseTaskOperation();
+            if (!navigationResult) {
+                console.log('[Better Tasker] Navigation/autoplay start failed after task accept - will retry');
+                await sleep(1000);
+                scheduleTaskCheck();
+            }
         } else {
             console.log('[Better Tasker] Could not open quest log - neither quest blip nor Quests button found');
+            releaseTaskOperation();
         }
         
         console.log('[Better Tasker] === OPEN QUEST LOG AND ACCEPT TASK END ===');
@@ -8300,9 +8390,7 @@ async function openQuestLogAndAcceptTask() {
     } catch (error) {
         console.error('[Better Tasker] Error opening quest log and accepting task:', error);
         console.log('[Better Tasker] === OPEN QUEST LOG AND ACCEPT TASK END (error) ===');
-        // Always clear the flag on error
-        taskOperationInProgress = false;
-        updateExposedState();
+        releaseTaskOperation();
         // Wait a bit before rescheduling to avoid spamming
         await sleep(2000);
         cleanupTaskCompletionFailure('error opening quest log and accepting task');
@@ -8371,10 +8459,9 @@ function init() {
     // Always start UI monitoring to insert buttons (needed to enable/disable mod)
     startUIMonitoring();
     
-    // Start automation if enabled (will check for Raid Hunter internally)
+    // Start automation if enabled (startAutomation also schedules task checks)
     if (taskerState === TASKER_STATES.ENABLED) {
         startAutomation();
-        scheduleTaskCheck(); // Check resetAt and schedule next task check
     }
     
     // Start scheduler if in New Task+ mode (uses same logic as Enabled mode for task acceptance)
@@ -8570,7 +8657,8 @@ function exposeTaskerState() {
             pendingTaskCompletion: pendingTaskCompletion,
             taskerState: taskerState,
             taskNavigationCompleted: taskNavigationCompleted,
-            hasActiveTask: hasActiveTask
+            hasActiveTask: hasActiveTask,
+            manualPlayPaused: isManualPlayPaused()
         };
         
         // Update coordination system state

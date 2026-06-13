@@ -1163,15 +1163,47 @@
 
     const PANEL_ID = 'mod-better-sandbox-panel';
     const BUTTON_ID = 'mod-better-sandbox-button';
-    const ADVANCED_BUTTON_LABEL = 'Better Analytics';
+
+    const t = (key) => {
+        if (typeof api !== 'undefined' && api.i18n && api.i18n.t) {
+            return api.i18n.t(key);
+        }
+        return key;
+    };
+
+    const tReplace = (key, replacements) => {
+        let text = t(key);
+        if (typeof text !== 'string') return key;
+        for (const [placeholder, value] of Object.entries(replacements)) {
+            text = text.split(`{${placeholder}}`).join(String(value));
+        }
+        return text;
+    };
+
+    function getModDisplayName() {
+        return t('mods.betterAnalytics.modName');
+    }
+
+    function getLogFilterLabel(key) {
+        return t(`mods.betterAnalytics.logFilters.${key}`);
+    }
+
+    function getLogMarkerText(entry) {
+        if (entry.marker === 'start') return t('mods.betterAnalytics.logMarkerStart');
+        if (entry.endState === 'victory') return t('mods.betterAnalytics.logMarkerVictory');
+        if (entry.endState === 'defeat') return t('mods.betterAnalytics.logMarkerDefeat');
+        return t('mods.betterAnalytics.logMarkerEnd');
+    }
     const UNITS_BODY_ID = 'mod-better-sandbox-units-body';
     const LOG_BODY_ID = 'mod-better-sandbox-log-body';
     const LOG_LIST_ID = 'mod-better-sandbox-log-list';
     const LOG_SUBTITLE_ID = 'mod-better-sandbox-log-subtitle';
+    const LOG_SEARCH_INPUT_ID = 'mod-better-sandbox-log-search-input';
     const TITLE_ID = 'mod-better-sandbox-title';
     const STATUS_ID = 'mod-better-sandbox-status';
     const SPEED_SLIDER_ID = 'mod-better-sandbox-speed-slider';
     const SPEED_VALUE_ID = 'mod-better-sandbox-speed-value';
+    const SPEED_SANDBOX_ONLY_ID = 'mod-better-sandbox-speed-sandbox-only';
     const SLOW_MOTION_TOGGLE_ID = 'mod-better-sandbox-slow-motion-toggle';
     const STYLE_ID = 'better-sandbox-styles';
     const STORAGE_KEY = 'betterSandboxPanel';
@@ -1205,18 +1237,6 @@
         }
     ];
     const LOG_FILTER_DEFAULTS = Object.fromEntries(LOG_FILTER_ORDER.map((k) => [k, true]));
-    const LOG_FILTER_LABELS = {
-        allyDmg: 'Ally dmg',
-        allyHeal: 'Ally heal',
-        allyStats: 'Ally stats',
-        allyStatus: 'Ally status',
-        allyPathing: 'Ally path',
-        villainDmg: 'Villain dmg',
-        villainHeal: 'Villain heal',
-        villainStats: 'Villain stats',
-        villainStatus: 'Villain status',
-        villainPathing: 'Villain path'
-    };
     const PANEL_DEFAULTS = {
         left: 120, top: 80, width: 400, height: 520, isOpen: false,
         activeTab: 'units', gameSpeedPercent: 100, slowMotionEnabled: false,
@@ -1279,6 +1299,7 @@
     const pathLogDedupe = new Set();
     const lastActorTileByActor = new WeakMap();
     let logFilters = { ...LOG_FILTER_DEFAULTS };
+    let logSearchQuery = '';
     let activeTab = 'units';
     let gameSpeedPercent = 100;
     let slowMotionEnabled = false;
@@ -1846,7 +1867,7 @@
     function updateSpeedSliderUi() {
         const slider = document.getElementById(SPEED_SLIDER_ID);
         const valueEl = document.getElementById(SPEED_VALUE_ID);
-        const hintEl = document.getElementById('mod-better-sandbox-speed-hint');
+        const sandboxOnlyEl = document.getElementById(SPEED_SANDBOX_ONLY_ID);
         const toggle = document.getElementById(SLOW_MOTION_TOGGLE_ID);
         const sandbox = isSandboxMode();
         const sliderActive = slowMotionEnabled && sandbox;
@@ -1856,16 +1877,16 @@
         const sliderWrap = document.getElementById('mod-better-sandbox-speed-slider-wrap');
         if (sliderWrap) sliderWrap.classList.toggle('disabled', !sliderActive);
         if (valueEl) {
-            const factor = getSandboxSpeedFactor();
-            valueEl.textContent = slowMotionEnabled
-                ? `${gameSpeedPercent}% (${factor.toFixed(2)}×)`
-                : 'Turbo Mode';
+            if (slowMotionEnabled) {
+                const factor = getSandboxSpeedFactor();
+                valueEl.textContent = `${gameSpeedPercent}% (${factor.toFixed(2)}×)`;
+                valueEl.style.display = '';
+            } else {
+                valueEl.textContent = '';
+                valueEl.style.display = 'none';
+            }
         }
-        if (hintEl) {
-            hintEl.textContent = slowMotionEnabled
-                ? `Slow motion on — Turbo blocked. 100% = normal speed. Steps of ${SPEED_STEP_PERCENT}% (${SPEED_MIN_PERCENT}% = 0.05×). Sandbox fights only.`
-                : 'Slow motion off — use Turbo Mode to speed up. Turn on Slow motion to slow sandbox fights (blocks Turbo).';
-        }
+        if (sandboxOnlyEl) sandboxOnlyEl.style.display = sandbox ? 'none' : 'block';
     }
 
     function setGameSpeedPercent(percent) {
@@ -2438,23 +2459,188 @@
             Object.assign(logFilters, LOG_FILTER_DEFAULTS);
         }
         saveLogFilters();
-        lastRenderedLogSignature = '';
-        lastRenderedVisibleCount = 0;
-        lastRenderedFilterSig = '';
-        invalidateVisibleBattleLogCache();
+        invalidateBattleLogView();
         updateLogFilterUi();
         renderBattleLog(true);
     }
 
-    function isLogEntryVisible(entry) {
+    function debounce(fn, wait) {
+        let timer = null;
+        return (...args) => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => {
+                timer = null;
+                fn(...args);
+            }, wait);
+        };
+    }
+
+    function extractLogSearchQuotedString(condition) {
+        const trimmed = String(condition ?? '').trim();
+        if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+            return { isExact: true, value: trimmed.slice(1, -1).toLowerCase() };
+        }
+        return { isExact: false, value: trimmed.toLowerCase() };
+    }
+
+    function matchesLogSearchSingleCondition(text, condition) {
+        if (!condition) return true;
+        const blob = String(text ?? '').toLowerCase();
+        const { isExact, value } = extractLogSearchQuotedString(condition);
+        if (!value) return true;
+        if (isExact) {
+            if (value.includes(' ')) return blob.includes(value);
+            return blob.split(/[^a-z0-9]+/).includes(value);
+        }
+        return blob.includes(value);
+    }
+
+    function battleLogTextMatchesSearch(text, searchTerm) {
+        const term = String(searchTerm ?? '').trim();
+        if (!term) return true;
+        if (/\s+or\s+/i.test(term)) {
+            return term.split(/\s+or\s+/i).some((part) => battleLogTextMatchesSearch(text, part.trim()));
+        }
+        if (/\s+and\s+/i.test(term)) {
+            return term.split(/\s+and\s+/i).every((part) => battleLogTextMatchesSearch(text, part.trim()));
+        }
+        return matchesLogSearchSingleCondition(text, term);
+    }
+
+    function battleLogEntryMatchesSearch(entry, query) {
+        const q = (query || '').trim();
+        if (!q) return true;
+        return battleLogTextMatchesSearch(formatBattleLogEntryForExport(entry), q);
+    }
+
+    function isLogEntryFilterVisible(entry) {
         if (entry.kind === 'marker') return true;
         const key = getLogEntryFilter(entry);
         if (isLogFilterShowAll()) return true;
         return logFilters[key] === true;
     }
 
+    function isLogEntryVisible(entry) {
+        if (!isLogEntryFilterVisible(entry)) return false;
+        return battleLogEntryMatchesSearch(entry, logSearchQuery);
+    }
+
     function getLogFiltersSignature() {
         return LOG_FILTER_ORDER.map((k) => (logFilters[k] ? '1' : '0')).join('');
+    }
+
+    function getLogViewSignature() {
+        const q = (logSearchQuery || '').trim().toLowerCase();
+        return `${getLogFiltersSignature()}:${q}`;
+    }
+
+    function invalidateBattleLogView() {
+        lastRenderedLogSignature = '';
+        lastRenderedVisibleCount = 0;
+        lastRenderedFilterSig = '';
+        invalidateVisibleBattleLogCache();
+    }
+
+    function applyLogSearch() {
+        const input = document.getElementById(LOG_SEARCH_INPUT_ID);
+        logSearchQuery = (input?.value || '').trim();
+        invalidateBattleLogView();
+        updateLogToolbarTitle();
+        renderBattleLog(true);
+    }
+
+    function createBattleLogSearchBar() {
+        const searchContainer = document.createElement('div');
+        searchContainer.className = 'bs-log-search';
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.id = LOG_SEARCH_INPUT_ID;
+        searchInput.placeholder = t('mods.betterAnalytics.searchPlaceholder');
+        searchInput.title = t('mods.betterAnalytics.searchTitle');
+        searchInput.className = 'bs-log-search-input';
+        searchInput.autocomplete = 'off';
+        searchInput.autocapitalize = 'off';
+        searchInput.spellcheck = false;
+
+        const debouncedApply = debounce(applyLogSearch, 150);
+        searchInput.addEventListener('input', debouncedApply);
+        searchInput.addEventListener('focus', () => {
+            searchInput.classList.add('focused');
+        });
+        searchInput.addEventListener('blur', () => {
+            searchInput.classList.remove('focused');
+        });
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                searchInput.value = '';
+                applyLogSearch();
+            }
+        });
+
+        searchContainer.appendChild(searchInput);
+        return searchContainer;
+    }
+
+    function ensureBattleLogSearchBar() {
+        if (document.getElementById(LOG_SEARCH_INPUT_ID)) return;
+        const filtersWrap = document.querySelector(`#${PANEL_ID} .bs-log-filters`);
+        if (!filtersWrap?.parentNode) return;
+        filtersWrap.parentNode.insertBefore(createBattleLogSearchBar(), filtersWrap.nextSibling);
+    }
+
+    function ensureSpeedRowUi() {
+        const speedRow = document.getElementById('mod-better-sandbox-speed-row');
+        if (!speedRow) return;
+
+        document.getElementById('mod-better-sandbox-speed-hint')?.remove();
+        speedRow.querySelector('.bs-speed-head')?.remove();
+
+        const toggleRow = speedRow.querySelector('.bs-speed-toggle-row');
+        const sliderWrap = document.getElementById('mod-better-sandbox-speed-slider-wrap');
+        const valueEl = document.getElementById(SPEED_VALUE_ID);
+        if (toggleRow && valueEl) {
+            let titleWrap = toggleRow.querySelector('.bs-speed-toggle-text');
+            if (!titleWrap) {
+                titleWrap = document.createElement('div');
+                titleWrap.className = 'bs-speed-toggle-text';
+                const label = toggleRow.querySelector('span');
+                if (label) {
+                    toggleRow.insertBefore(titleWrap, toggleRow.firstChild);
+                    titleWrap.appendChild(label);
+                }
+            }
+            if (valueEl.parentNode !== titleWrap) {
+                valueEl.className = 'bs-speed-value';
+                titleWrap.appendChild(valueEl);
+            }
+        }
+
+        if (!document.getElementById(SPEED_SANDBOX_ONLY_ID)) {
+            const sandboxOnlyNote = document.createElement('span');
+            sandboxOnlyNote.className = 'bs-speed-sandbox-only';
+            sandboxOnlyNote.id = SPEED_SANDBOX_ONLY_ID;
+            sandboxOnlyNote.textContent = t('mods.betterAnalytics.sandboxOnly');
+            const titleWrap = toggleRow?.querySelector('.bs-speed-toggle-text');
+            const label = titleWrap?.querySelector('span');
+            if (titleWrap && label) titleWrap.insertBefore(sandboxOnlyNote, label.nextSibling);
+            else if (sliderWrap) speedRow.insertBefore(sandboxOnlyNote, sliderWrap);
+            else speedRow.appendChild(sandboxOnlyNote);
+        } else {
+            const sandboxOnlyNote = document.getElementById(SPEED_SANDBOX_ONLY_ID);
+            const titleWrap = toggleRow?.querySelector('.bs-speed-toggle-text');
+            const label = titleWrap?.querySelector('span');
+            if (sandboxOnlyNote && titleWrap && label && sandboxOnlyNote.parentNode !== titleWrap) {
+                titleWrap.insertBefore(sandboxOnlyNote, label.nextSibling);
+            }
+            if (sandboxOnlyNote?.tagName === 'DIV') {
+                const span = document.createElement('span');
+                span.className = sandboxOnlyNote.className;
+                span.id = sandboxOnlyNote.id;
+                span.textContent = sandboxOnlyNote.textContent;
+                sandboxOnlyNote.replaceWith(span);
+            }
+        }
     }
 
     function toggleLogFilter(filterKey) {
@@ -2482,10 +2668,7 @@
         }
 
         saveLogFilters();
-        lastRenderedLogSignature = '';
-        lastRenderedVisibleCount = 0;
-        lastRenderedFilterSig = '';
-        invalidateVisibleBattleLogCache();
+        invalidateBattleLogView();
         updateLogFilterUi();
         renderBattleLog(true);
     }
@@ -2497,18 +2680,29 @@
         const parts = [];
 
         if (!total) {
-            parts.push('No events yet');
-        } else if (showAll) {
-            parts.push(`${total} event${total === 1 ? '' : 's'}`);
-            parts.push('All event types');
+            parts.push(t('mods.betterAnalytics.subtitleNoEvents'));
+        } else if (showAll && !logSearchQuery) {
+            parts.push(tReplace('mods.betterAnalytics.subtitleEventsCount', {
+                count: total,
+                plural: total === 1 ? '' : 's'
+            }));
+            parts.push(t('mods.betterAnalytics.subtitleAllEventTypes'));
         } else {
-            parts.push(`${visible} of ${total} shown`);
-            const activeCount = LOG_FILTER_ORDER.filter((key) => logFilters[key] === true).length;
-            const active = Object.entries(LOG_FILTER_LABELS)
-                .filter(([key]) => logFilters[key] === true)
-                .map(([, label]) => label);
-            parts.push(`${activeCount}/${LOG_FILTER_ORDER.length} filters`);
-            if (active.length) parts.push(active.join(', '));
+            parts.push(tReplace('mods.betterAnalytics.subtitleShown', { visible, total }));
+            if (!showAll) {
+                const activeCount = LOG_FILTER_ORDER.filter((key) => logFilters[key] === true).length;
+                const active = LOG_FILTER_ORDER
+                    .filter((key) => logFilters[key] === true)
+                    .map((key) => getLogFilterLabel(key));
+                parts.push(tReplace('mods.betterAnalytics.subtitleFilters', {
+                    activeCount,
+                    total: LOG_FILTER_ORDER.length
+                }));
+                if (active.length) parts.push(active.join(', '));
+            }
+            if (logSearchQuery) {
+                parts.push(tReplace('mods.betterAnalytics.subtitleSearch', { query: logSearchQuery }));
+            }
         }
 
         return parts.join(' · ');
@@ -2526,20 +2720,20 @@
         if (allBtn) {
             allBtn.classList.toggle('active', showAll);
             allBtn.title = showAll
-                ? 'Hide all event types (markers only)'
+                ? t('mods.betterAnalytics.filterAllTitleHideAll')
                 : allOff
-                    ? 'Show all event types'
-                    : 'Show all event types';
+                    ? t('mods.betterAnalytics.filterAllTitleShowAll')
+                    : t('mods.betterAnalytics.filterAllTitleShowAll');
         }
         for (const key of LOG_FILTER_ORDER) {
             const btn = document.getElementById(`mod-better-sandbox-log-filter-${key}`);
             if (btn) {
                 btn.classList.toggle('active', logFilters[key] === true);
                 btn.title = showAll
-                    ? 'Click to show only this type'
+                    ? t('mods.betterAnalytics.filterTitleIsolate')
                     : logFilters[key]
-                        ? 'Click to hide this type'
-                        : 'Click to include this type';
+                        ? t('mods.betterAnalytics.filterTitleHide')
+                        : t('mods.betterAnalytics.filterTitleInclude');
             }
         }
         updateLogToolbarTitle();
@@ -5480,13 +5674,13 @@
 
         unmountUnitAbilityDetails(details);
         if (!abilityInfo?.TooltipContent) {
-            mount.textContent = 'Ability details unavailable';
+            mount.textContent = t('mods.betterAnalytics.abilityDetailsUnavailable');
             return;
         }
 
         const createUIComponent = globalThis.state?.utils?.createUIComponent;
         if (typeof createUIComponent !== 'function') {
-            mount.textContent = 'Ability details unavailable';
+            mount.textContent = t('mods.betterAnalytics.abilityDetailsUnavailable');
             return;
         }
 
@@ -5506,7 +5700,7 @@
                 bq.style.setProperty('font-size', '10px', 'important');
             });
         } catch {
-            mount.textContent = 'Ability details unavailable';
+            mount.textContent = t('mods.betterAnalytics.abilityDetailsUnavailable');
         }
     }
 
@@ -5664,7 +5858,7 @@
         if (unit.buffedCount != null && unit.buffedCount > 0) {
             lines.push(`  Active buffs on others: ${unit.buffedCount}`);
         }
-        if (unit.alive === false) lines.push('  Defeated');
+        if (unit.alive === false) lines.push(`  ${t('mods.betterAnalytics.defeated')}`);
 
         const abilityText = unit.gameId ? getAbilityText(unit.gameId, unit.awaken) : '';
         if (abilityText) lines.push(`  Ability description: ${abilityText}`);
@@ -5686,7 +5880,9 @@
         if (modeLabel) lines.push(`Mode: ${modeLabel}`);
 
         if (fightEnded) {
-            const endLabel = panelFightEndState === 'victory' ? 'Victory' : 'Defeat';
+            const endLabel = panelFightEndState === 'victory'
+                ? t('mods.betterAnalytics.statusVictory')
+                : t('mods.betterAnalytics.statusDefeat');
             const parts = [`${endLabel} · final tick ${getFightTick() ?? panelFightTickFrozen}`];
             if (seed != null) parts.push(`seed ${seed}`);
             parts.push(`${battleLog.length} log entries`);
@@ -5715,7 +5911,7 @@
             }
             const preview = getBoardPreviewUnits();
             if (preview.length) lines.push(`Setup preview: ${preview.length} unit(s) (board + map spawns).`);
-            if (!sandbox) lines.push('Slow motion slider is available in Sandbox only.');
+            if (!sandbox) lines.push(t('mods.betterAnalytics.exportSlowMotionSandboxOnly'));
         }
 
         return lines;
@@ -5727,11 +5923,10 @@
 
     function formatBattleLogEntryForExport(entry) {
         if (entry.kind === 'marker') {
-            if (entry.marker === 'start') return `[tick ${entry.tick}] Battle started`;
-            const label = entry.endState === 'victory' ? 'Victory'
-                : entry.endState === 'defeat' ? 'Defeat'
-                    : 'Battle ended';
-            return `[tick ${entry.tick}] ${label}`;
+            if (entry.marker === 'start') {
+                return `[tick ${entry.tick}] ${getLogMarkerText({ marker: 'start' })}`;
+            }
+            return `[tick ${entry.tick}] ${getLogMarkerText(entry)}`;
         }
         if (entry.kind === 'status') {
             const sign = entry.applied ? '+' : '-';
@@ -5747,18 +5942,19 @@
             return `[tick ${entry.tick}] ${entry.unit}: ${entry.statLabel} ${from} → ${to} (${delta})`;
         }
         if (entry.kind === 'abilityCast') {
-            return `[tick ${entry.tick}] ${entry.from}: cast ${entry.abilityName}`;
+            return `[tick ${entry.tick}] ${entry.from}: ${t('mods.betterAnalytics.logCast')} ${entry.abilityName}`;
         }
         if (entry.kind === 'death') {
+            const defeated = t('mods.betterAnalytics.logDefeated');
             if (entry.killedBy) {
-                return `[tick ${entry.tick}] ${entry.killedBy} → ${entry.unit}: defeated`;
+                return `[tick ${entry.tick}] ${entry.killedBy} → ${entry.unit}: ${defeated}`;
             }
-            return `[tick ${entry.tick}] ${entry.unit}: defeated`;
+            return `[tick ${entry.tick}] ${entry.unit}: ${defeated}`;
         }
         const source = entry.actionSource && entry.actionSource !== 'unknown'
             ? ` [${entry.actionSource}]`
             : '';
-        const type = `${entry.damageType}${entry.crit ? ' crit' : ''}`;
+        const type = `${entry.damageType}${entry.crit ? t('mods.betterAnalytics.logCritSuffix') : ''}`;
         if (entry.kind === 'heal') {
             const who = isCrossUnitHealEntry(entry) ? `${entry.from} → ${entry.to}` : entry.to;
             return `[tick ${entry.tick}] ${who}: +${entry.amount}${source} (${type})`;
@@ -5778,21 +5974,21 @@
 
     function buildPanelExportText() {
         const lines = [];
-        lines.push('Better Analytics Export');
-        lines.push(`Exported: ${new Date().toISOString()}`);
+        lines.push(t('mods.betterAnalytics.exportHeader'));
+        lines.push(tReplace('mods.betterAnalytics.exportExported', { timestamp: new Date().toISOString() }));
         lines.push('');
-        lines.push('=== Status ===');
+        lines.push(t('mods.betterAnalytics.exportStatusSection'));
         lines.push(...buildStatusTextForExport());
         lines.push('');
-        lines.push('=== Units ===');
+        lines.push(t('mods.betterAnalytics.exportUnitsSection'));
 
         const fighting = isFightActive();
         const units = fighting ? (collectActorSnapshots() || []) : getBoardPreviewUnits();
         const { allies, enemies } = splitByTeam(units);
 
-        lines.push(`Allies (${allies.length})`);
+        lines.push(`${t('mods.betterAnalytics.sectionAllies')} (${allies.length})`);
         if (!allies.length) {
-            lines.push('  No allies in this fight.');
+            lines.push(`  ${t('mods.betterAnalytics.exportNoAllies')}`);
         } else {
             for (const unit of allies) {
                 lines.push('');
@@ -5801,9 +5997,9 @@
         }
 
         lines.push('');
-        lines.push(`Enemies (${enemies.length})`);
+        lines.push(`${t('mods.betterAnalytics.sectionEnemies')} (${enemies.length})`);
         if (!enemies.length) {
-            lines.push('  No enemies in this fight.');
+            lines.push(`  ${t('mods.betterAnalytics.exportNoEnemies')}`);
         } else {
             for (const unit of enemies) {
                 lines.push('');
@@ -5812,15 +6008,17 @@
         }
 
         lines.push('');
-        lines.push('=== Battle Log ===');
-        lines.push(`Total entries: ${battleLog.length}`);
-        const activeFilters = Object.entries(LOG_FILTER_LABELS)
-            .filter(([key]) => logFilters[key] === true)
-            .map(([, label]) => label);
-        lines.push(`Panel filters (export includes all entries): ${activeFilters.length ? activeFilters.join(', ') : 'none'}`);
+        lines.push(t('mods.betterAnalytics.exportBattleLogSection'));
+        lines.push(tReplace('mods.betterAnalytics.exportTotalEntries', { count: battleLog.length }));
+        const activeFilters = LOG_FILTER_ORDER
+            .filter((key) => logFilters[key] === true)
+            .map((key) => getLogFilterLabel(key));
+        lines.push(tReplace('mods.betterAnalytics.exportPanelFilters', {
+            filters: activeFilters.length ? activeFilters.join(', ') : t('mods.betterAnalytics.exportNoFilters')
+        }));
 
         if (!battleLog.length) {
-            lines.push('No battle events yet. Start a fight.');
+            lines.push(t('mods.betterAnalytics.emptyNoBattleEvents'));
         } else {
             for (const entry of battleLog) {
                 lines.push(formatBattleLogEntryForExport(entry));
@@ -5973,21 +6171,34 @@
                 font-size: 11px;
                 color: var(--bs-text);
             }
-            #${PANEL_ID} .bs-speed-head {
+            #${PANEL_ID} .bs-speed-toggle-row {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                margin-bottom: 4px;
                 gap: 8px;
+                margin-bottom: 6px;
             }
-            #${PANEL_ID} .bs-speed-head span:first-child {
+            #${PANEL_ID} .bs-speed-toggle-text {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                min-width: 0;
+            }
+            #${PANEL_ID} .bs-speed-toggle-text > span:first-child {
                 color: var(--bs-gold);
                 font-weight: 700;
             }
-            #${PANEL_ID} .bs-speed-hint {
+            #${PANEL_ID} .bs-speed-value {
+                color: var(--bs-text);
+                font-weight: 400;
                 font-size: 10px;
-                color: #777;
-                margin-top: 4px;
+                white-space: nowrap;
+            }
+            #${PANEL_ID} .bs-speed-sandbox-only {
+                font-size: 9px;
+                font-weight: 600;
+                color: #d4a24a;
+                white-space: nowrap;
             }
             #${PANEL_ID} .bs-speed-row input[type="range"] {
                 width: 100%;
@@ -5997,17 +6208,6 @@
             #${PANEL_ID} .bs-speed-row.disabled {
                 opacity: 0.45;
                 pointer-events: none;
-            }
-            #${PANEL_ID} .bs-speed-toggle-row {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                gap: 8px;
-                margin-bottom: 6px;
-            }
-            #${PANEL_ID} .bs-speed-toggle-row span {
-                color: var(--bs-gold);
-                font-weight: 700;
             }
             #${PANEL_ID} .bs-switch {
                 position: relative;
@@ -6152,6 +6352,40 @@
                 display: grid;
                 grid-template-columns: repeat(5, minmax(0, 1fr));
                 gap: 4px;
+            }
+            #${PANEL_ID} .bs-log-search {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                margin-bottom: 6px;
+                width: 100%;
+                box-sizing: border-box;
+                padding: 4px 6px;
+                background: rgba(0, 0, 0, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 3px;
+            }
+            #${PANEL_ID} .bs-log-search-input {
+                flex: 1 1 0%;
+                min-width: 0;
+                width: 100%;
+                box-sizing: border-box;
+                background: rgba(255, 255, 255, 0.1);
+                color: var(--bs-text);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 2px;
+                padding: 3px 6px;
+                font-size: 10px;
+                font-family: inherit;
+                outline: none;
+            }
+            #${PANEL_ID} .bs-log-search-input.focused,
+            #${PANEL_ID} .bs-log-search-input:focus {
+                color: #fff;
+                border-color: rgba(255, 255, 255, 0.4);
+            }
+            #${PANEL_ID} .bs-log-search-input::placeholder {
+                color: #666;
             }
             #${PANEL_ID} .bs-log-filter {
                 border: 3px solid transparent;
@@ -6840,7 +7074,7 @@
                 bits.push(coloredStatSpan('CD on cooldown', false));
             }
         }
-        if (unit.alive === false) bits.push('<span style="color:#888">Defeated</span>');
+        if (unit.alive === false) bits.push(`<span style="color:#888">${escapeHtml(t('mods.betterAnalytics.defeated'))}</span>`);
         return bits.join(' · ');
     }
 
@@ -6896,7 +7130,7 @@
             mechanicsHtml += `<div class="bs-row"><span class="bs-label">Active buffs on others:</span> ${unit.buffedCount}</div>`;
         }
         if (unit.alive === false) {
-            mechanicsHtml += `<div class="bs-row" style="color:#888">Defeated</div>`;
+            mechanicsHtml += `<div class="bs-row" style="color:#888">${escapeHtml(t('mods.betterAnalytics.defeated'))}</div>`;
         }
         return mechanicsHtml;
     }
@@ -6998,9 +7232,12 @@
 
     function renderSection(title, cssClass, units) {
         const count = units.length;
-        let inner = `<div class="bs-section-title ${cssClass}">${title} (${count})</div>`;
+        let inner = `<div class="bs-section-title ${cssClass}">${escapeHtml(title)} (${count})</div>`;
         if (count === 0) {
-            inner += `<div class="bs-empty">No ${title.toLowerCase()} in this fight.</div>`;
+            const emptyText = cssClass === 'ally'
+                ? t('mods.betterAnalytics.sectionEmptyAllies')
+                : t('mods.betterAnalytics.sectionEmptyEnemies');
+            inner += `<div class="bs-empty">${escapeHtml(emptyText)}</div>`;
         } else {
             inner += units.map(renderUnitCard).join('');
         }
@@ -7022,31 +7259,37 @@
         const modeLabel = getPlayModeLabel();
 
         const roomName = getRoomDisplayName(resolveCurrentRoomId());
-        title.textContent = modName;
+        title.textContent = getModDisplayName();
 
         const statusParts = [];
-        if (roomName) statusParts.push(`Map: <b>${escapeHtml(roomName)}</b>`);
-        if (modeLabel) statusParts.push(`Mode: <b>${escapeHtml(modeLabel)}</b>`);
+        if (roomName) {
+            statusParts.push(`${t('mods.betterAnalytics.statusMap')} <b>${escapeHtml(roomName)}</b>`);
+        }
+        if (modeLabel) {
+            statusParts.push(`${t('mods.betterAnalytics.statusMode')} <b>${escapeHtml(modeLabel)}</b>`);
+        }
 
         if (fightEnded) {
-            const endLabel = panelFightEndState === 'victory' ? 'Victory' : 'Defeat';
-            const endParts = [endLabel, `tick ${tick ?? panelFightTickFrozen}`];
-            if (seed != null) endParts.push(`seed ${seed}`);
+            const endLabel = panelFightEndState === 'victory'
+                ? t('mods.betterAnalytics.statusVictory')
+                : t('mods.betterAnalytics.statusDefeat');
+            const endParts = [endLabel, tReplace('mods.betterAnalytics.statusTick', { tick: tick ?? panelFightTickFrozen })];
+            if (seed != null) endParts.push(tReplace('mods.betterAnalytics.statusSeed', { seed }));
             statusParts.push(endParts.join(' '));
         } else if (fighting) {
-            const fightParts = ['Fight'];
-            if (tick != null) fightParts.push(`tick ${tick}`);
-            if (seed != null) fightParts.push(`seed ${seed}`);
+            const fightParts = [t('mods.betterAnalytics.statusFight')];
+            if (tick != null) fightParts.push(tReplace('mods.betterAnalytics.statusTick', { tick }));
+            if (seed != null) fightParts.push(tReplace('mods.betterAnalytics.statusSeed', { seed }));
             if (sandbox && slowMotionEnabled) {
-                fightParts.push(`slow ${gameSpeedPercent}%`);
+                fightParts.push(tReplace('mods.betterAnalytics.statusSlow', { percent: gameSpeedPercent }));
             } else if (!slowMotionEnabled && window.__turboState?.active) {
-                fightParts.push('turbo');
+                fightParts.push(t('mods.betterAnalytics.statusTurbo'));
             }
             statusParts.push(fightParts.join(' '));
         } else {
             const floor = resolveCurrentFloor();
             if (floor > 0) {
-                statusParts.push(`Floor: <b>${floor}</b> (${Math.round(resolveAscensionDisplayMult(floor) * 100)}%)`);
+                statusParts.push(`${t('mods.betterAnalytics.statusFloor')} <b>${floor}</b> (${Math.round(resolveAscensionDisplayMult(floor) * 100)}%)`);
             }
         }
 
@@ -7056,8 +7299,7 @@
                 .join('') +
         `</span>`;
 
-        const sliderWrap = document.getElementById('mod-better-sandbox-speed-slider-wrap');
-        if (sliderWrap) sliderWrap.classList.toggle('disabled', !slowMotionEnabled || !sandbox);
+        updateSpeedSliderUi();
     }
 
     function buildUnitsStructureKey(units) {
@@ -7116,8 +7358,8 @@
         const { allies, enemies } = splitByTeam(units);
         body.innerHTML =
             `<div class="bs-units-columns">` +
-            renderSection('Allies', 'ally', allies) +
-            renderSection('Enemies', 'enemy', enemies) +
+            renderSection(t('mods.betterAnalytics.sectionAllies'), 'ally', allies) +
+            renderSection(t('mods.betterAnalytics.sectionEnemies'), 'enemy', enemies) +
             `</div>`;
         hydrateAllUnitPortraits(body, units);
     }
@@ -7141,7 +7383,7 @@
     }
 
     function getVisibleBattleLogEntries() {
-        const filterSig = getLogFiltersSignature();
+        const filterSig = getLogViewSignature();
         if (cachedVisibleBattleLogRevision === battleLogRevision
             && cachedVisibleBattleLogFilterSig === filterSig
             && cachedVisibleBattleLog) {
@@ -7156,13 +7398,9 @@
     function buildBattleLogEntryHtml(entry) {
         const tickLabel = `<span class="bs-log-tick">[tick ${entry.tick}]</span>`;
         const sourceLabel = renderActionSourceLabel(entry);
-        const typeLabel = `<span class="bs-log-type">${escapeHtml(entry.damageType)}${entry.crit ? ' crit' : ''}</span>`;
+        const typeLabel = `<span class="bs-log-type">${escapeHtml(entry.damageType)}${entry.crit ? escapeHtml(t('mods.betterAnalytics.logCritSuffix')) : ''}</span>`;
         if (entry.kind === 'marker') {
-            const markerText = entry.marker === 'start'
-                ? 'Battle started'
-                : entry.endState === 'victory' ? 'Victory'
-                    : entry.endState === 'defeat' ? 'Defeat'
-                        : 'Battle ended';
+            const markerText = getLogMarkerText(entry);
             return `<div class="bs-log-line bs-log-marker">${tickLabel} ${escapeHtml(markerText)}</div>`;
         }
         if (entry.kind === 'status') {
@@ -7186,16 +7424,17 @@
         }
         if (entry.kind === 'abilityCast') {
             return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain)}: ` +
-                `<span class="bs-log-ability">cast ${escapeHtml(entry.abilityName)}</span></div>`;
+                `<span class="bs-log-ability">${escapeHtml(t('mods.betterAnalytics.logCast'))} ${escapeHtml(entry.abilityName)}</span></div>`;
         }
         if (entry.kind === 'death') {
+            const defeated = escapeHtml(t('mods.betterAnalytics.logDefeated'));
             if (entry.killedBy) {
                 return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.killedBy, entry.killedByVillain)} → ` +
                     `${renderLogName(entry.unit, entry.unitVillain)}: ` +
-                    `<span class="bs-log-death">defeated</span></div>`;
+                    `<span class="bs-log-death">${defeated}</span></div>`;
             }
             return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain)}: ` +
-                `<span class="bs-log-death">defeated</span></div>`;
+                `<span class="bs-log-death">${defeated}</span></div>`;
         }
         if (entry.kind === 'heal') {
             return `<div class="bs-log-line">${tickLabel} ${renderHealLogSubject(entry)}: ` +
@@ -7228,7 +7467,7 @@
         const panel = document.getElementById(PANEL_ID);
         if (!list || !body || !panel || panel.style.display === 'none') return;
 
-        const filterSig = getLogFiltersSignature();
+        const filterSig = getLogViewSignature();
         const shouldScroll = battleLogRevision > lastScrolledBattleLogRevision;
         const visible = getVisibleBattleLogEntries();
         const signature = `${battleLogRevision}:${filterSig}:${battleLog.length}`;
@@ -7258,7 +7497,7 @@
         updateLogFilterUi();
 
         if (!battleLog.length) {
-            list.innerHTML = '<div class="bs-empty">No battle events yet. Start a fight.</div>';
+            list.innerHTML = `<div class="bs-empty">${escapeHtml(t('mods.betterAnalytics.emptyNoBattleEvents'))}</div>`;
             lastRenderedVisibleCount = 0;
             lastRenderedFilterSig = filterSig;
             lastRenderedLogSignature = signature;
@@ -7267,7 +7506,10 @@
         }
 
         if (!visible.length) {
-            list.innerHTML = '<div class="bs-empty">No events match the current filters.</div>';
+            const emptyMsg = logSearchQuery
+                ? tReplace('mods.betterAnalytics.emptyNoSearchMatch', { query: logSearchQuery })
+                : t('mods.betterAnalytics.emptyNoFilterMatch');
+            list.innerHTML = `<div class="bs-empty">${escapeHtml(emptyMsg)}</div>`;
             lastRenderedVisibleCount = 0;
             lastRenderedFilterSig = filterSig;
             lastRenderedLogSignature = signature;
@@ -7464,14 +7706,14 @@
         const titleEl = document.createElement('div');
         titleEl.id = TITLE_ID;
         titleEl.className = 'bs-title';
-        titleEl.textContent = modName;
+        titleEl.textContent = getModDisplayName();
         const headerActions = document.createElement('div');
         headerActions.className = 'bs-header-actions';
 
         const exportBtn = document.createElement('button');
         exportBtn.className = 'bs-icon-btn';
         exportBtn.textContent = '⤓';
-        exportBtn.title = 'Export everything to .txt';
+        exportBtn.title = t('mods.betterAnalytics.exportTitle');
         exportBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             downloadPanelExport();
@@ -7480,7 +7722,7 @@
         const closeBtn = document.createElement('button');
         closeBtn.className = 'bs-icon-btn';
         closeBtn.textContent = '×';
-        closeBtn.title = 'Close';
+        closeBtn.title = t('mods.betterAnalytics.close');
         closeBtn.addEventListener('click', closePanel);
 
         headerActions.appendChild(exportBtn);
@@ -7498,11 +7740,23 @@
 
         const slowMotionRow = document.createElement('div');
         slowMotionRow.className = 'bs-speed-toggle-row';
+        const slowMotionTitleWrap = document.createElement('div');
+        slowMotionTitleWrap.className = 'bs-speed-toggle-text';
         const slowMotionLabel = document.createElement('span');
-        slowMotionLabel.textContent = 'Slow motion';
+        slowMotionLabel.textContent = t('mods.betterAnalytics.slowMotion');
+        const sandboxOnlyNote = document.createElement('span');
+        sandboxOnlyNote.className = 'bs-speed-sandbox-only';
+        sandboxOnlyNote.id = SPEED_SANDBOX_ONLY_ID;
+        sandboxOnlyNote.textContent = t('mods.betterAnalytics.sandboxOnly');
+        const speedValue = document.createElement('span');
+        speedValue.id = SPEED_VALUE_ID;
+        speedValue.className = 'bs-speed-value';
+        slowMotionTitleWrap.appendChild(slowMotionLabel);
+        slowMotionTitleWrap.appendChild(sandboxOnlyNote);
+        slowMotionTitleWrap.appendChild(speedValue);
         const slowMotionSwitch = document.createElement('label');
         slowMotionSwitch.className = 'bs-switch';
-        slowMotionSwitch.title = 'On = slow fights (blocks Turbo). Off = use Turbo Mode to speed up.';
+        slowMotionSwitch.title = t('mods.betterAnalytics.slowMotionToggleTitle');
         const slowMotionInput = document.createElement('input');
         slowMotionInput.type = 'checkbox';
         slowMotionInput.id = SLOW_MOTION_TOGGLE_ID;
@@ -7516,20 +7770,12 @@
         slowMotionSlider.className = 'bs-switch-slider';
         slowMotionSwitch.appendChild(slowMotionInput);
         slowMotionSwitch.appendChild(slowMotionSlider);
-        slowMotionRow.appendChild(slowMotionLabel);
+        slowMotionRow.appendChild(slowMotionTitleWrap);
         slowMotionRow.appendChild(slowMotionSwitch);
 
         const speedSliderWrap = document.createElement('div');
         speedSliderWrap.id = 'mod-better-sandbox-speed-slider-wrap';
         speedSliderWrap.className = 'bs-speed-slider-wrap';
-        const speedHead = document.createElement('div');
-        speedHead.className = 'bs-speed-head';
-        const speedLabel = document.createElement('span');
-        speedLabel.textContent = 'Game speed';
-        const speedValue = document.createElement('span');
-        speedValue.id = SPEED_VALUE_ID;
-        speedHead.appendChild(speedLabel);
-        speedHead.appendChild(speedValue);
         const speedSlider = document.createElement('input');
         speedSlider.type = 'range';
         speedSlider.id = SPEED_SLIDER_ID;
@@ -7542,15 +7788,10 @@
             setGameSpeedPercent(e.target.value);
         });
         speedSlider.addEventListener('mousedown', (e) => e.stopPropagation());
-        speedSliderWrap.appendChild(speedHead);
         speedSliderWrap.appendChild(speedSlider);
 
-        const speedHint = document.createElement('div');
-        speedHint.className = 'bs-speed-hint';
-        speedHint.id = 'mod-better-sandbox-speed-hint';
         speedRow.appendChild(slowMotionRow);
         speedRow.appendChild(speedSliderWrap);
-        speedRow.appendChild(speedHint);
 
         const tabBar = document.createElement('div');
         tabBar.className = 'bs-tab-bar';
@@ -7559,14 +7800,14 @@
         tabUnitsBtn.type = 'button';
         tabUnitsBtn.id = 'mod-better-sandbox-tab-units';
         tabUnitsBtn.className = 'bs-tab-btn';
-        tabUnitsBtn.textContent = 'Units';
+        tabUnitsBtn.textContent = t('mods.betterAnalytics.tabUnits');
         tabUnitsBtn.addEventListener('click', () => switchTab('units'));
 
         const tabLogBtn = document.createElement('button');
         tabLogBtn.type = 'button';
         tabLogBtn.id = 'mod-better-sandbox-tab-log';
         tabLogBtn.className = 'bs-tab-btn';
-        tabLogBtn.textContent = 'Battle Log';
+        tabLogBtn.textContent = t('mods.betterAnalytics.tabBattleLog');
         tabLogBtn.addEventListener('click', () => switchTab('log'));
 
         tabBar.appendChild(tabUnitsBtn);
@@ -7590,7 +7831,7 @@
         logToolbarText.className = 'bs-log-toolbar-text';
         const logTitle = document.createElement('div');
         logTitle.className = 'bs-log-title';
-        logTitle.textContent = 'Battle Log';
+        logTitle.textContent = t('mods.betterAnalytics.battleLogTitle');
         const logSubtitle = document.createElement('div');
         logSubtitle.id = LOG_SUBTITLE_ID;
         logSubtitle.className = 'bs-log-subtitle';
@@ -7603,7 +7844,7 @@
         allFilterBtn.type = 'button';
         allFilterBtn.id = `mod-better-sandbox-log-filter-${LOG_FILTER_ALL_KEY}`;
         allFilterBtn.className = 'bs-log-filter filter-all filter-neutral';
-        allFilterBtn.textContent = 'All Filters';
+        allFilterBtn.textContent = t('mods.betterAnalytics.allFilters');
         allFilterBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleAllLogFilters();
@@ -7612,7 +7853,7 @@
         const clearBtn = document.createElement('button');
         clearBtn.type = 'button';
         clearBtn.className = 'bs-log-clear';
-        clearBtn.textContent = 'Clear Log';
+        clearBtn.textContent = t('mods.betterAnalytics.clearLog');
         clearBtn.addEventListener('click', clearBattleLog);
         toolbarActions.appendChild(clearBtn);
         logToolbar.appendChild(toolbarActions);
@@ -7624,7 +7865,7 @@
             const row = document.createElement('div');
             row.className = 'bs-log-filters-row';
             for (const key of group.keys) {
-                const label = LOG_FILTER_LABELS[key];
+                const label = getLogFilterLabel(key);
                 if (!label) continue;
                 const filterBtn = document.createElement('button');
                 filterBtn.type = 'button';
@@ -7641,6 +7882,7 @@
             logFiltersWrap.appendChild(row);
         }
         logStickyHeader.appendChild(logFiltersWrap);
+        logStickyHeader.appendChild(createBattleLogSearchBar());
         logBody.appendChild(logStickyHeader);
 
         const logList = document.createElement('div');
@@ -7680,6 +7922,8 @@
             panel = createPanel();
             document.body.appendChild(panel);
         } else {
+            ensureBattleLogSearchBar();
+            ensureSpeedRowUi();
             updatePanelPosition();
             attachPanelViewportListener();
         }
@@ -7722,7 +7966,7 @@
         if (typeof api !== 'undefined' && api?.ui?.addButton) {
             api.ui.addButton({
                 id: BUTTON_ID,
-                text: ADVANCED_BUTTON_LABEL,
+                text: getModDisplayName(),
                 tooltip: 'Better Analytics panel (units, battle log; speed in Sandbox)',
                 primary: false,
                 onClick: togglePanel

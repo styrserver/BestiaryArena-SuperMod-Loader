@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.1.8",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Battle log search below type filters (partial, exact \"phrase\", AND/OR syntax; filters first, then search; Esc clears). Full en-US and pt-BR panel translations for tabs, filters, status bar, log text, and export."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Slow motion row: speed % beside the title (hidden when off); Sandbox only inline warning outside sandbox; removed Game speed header, hint text, and Turbo Mode label."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Fixed automation closing unrelated menus and failing to accept/start tasks; duplicate accept and navigation runs; unreliable finish at 60/60. Quest-log close is scoped to the quest log, manual map changes pause automation, and completion retries on Finish failure."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Shortened long backup timers (task removal, failure reset, idle checks, polling, scheduler errors)."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "pt-BR rolling label typo: Sortendo → Sorteando."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "pt-BR locale: standardized Poeira terminology in Hunt Analyzer and Better Yasir; removed unused Hunt Analyzer confirm/clearData keys."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "NPC conversations stay English-only (e.g. King Tibianus starter-coin reply); quest UI strings remain localized."
+        }
+      ]
+    },
+    {
       "version": "4.1.7",
       "changes": [
         {
