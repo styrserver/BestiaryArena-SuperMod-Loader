@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.1.11",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Ability tooltips scale to the selected unit's AP/AD/HP: flat and per-stat bonuses, inline speed and AP multipliers, duration chunks, lifesteal %, and cooldown reduction as total ticks with hover math (effective CD and minimum CD)."
+        },
+        {
+          "mod": "creature-lua-export.js",
+          "type": "changed",
+          "text": "dumpCreatureWikiLua() exports obtainable combat stats at maxed level 50 and 99 via scaleStat (\"50 (99)\" when they differ); gazers and unobtainables use fixed stats. Added Larva and Scarab unobtainable map stats."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Battle log summary overkill counts post-mitigation excess only. Cooldown-reduction minimum uses ability script/constants (not in-fight effective CD); distant CDR const refs (e.g. Slime) resolved from the game bundle. Status bar stops refreshing with no new data after victory."
+        },
+        {
+          "mod": "Core",
+          "type": "fixed",
+          "text": "Fixed mod loader injecting on /abilities and other manifest-excluded pages: the background fallback now reads exclude_matches from the manifest at startup (update manifest.json and manifest_firefox.json only). Profile exclusion widened to profile* so bare /profile is covered."
+        }
+      ]
+    },
+    {
       "version": "4.1.10",
       "changes": [
         {

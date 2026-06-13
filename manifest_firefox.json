@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "4.1.10",
+  "version": "4.1.11",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -33,8 +33,8 @@
       "exclude_matches": [
         "*://bestiaryarena.com/abilities*",
         "*://*.bestiaryarena.com/abilities*",
-        "*://bestiaryarena.com/profile/*",
-        "*://*.bestiaryarena.com/profile/*",
+        "*://bestiaryarena.com/profile*",
+        "*://*.bestiaryarena.com/profile*",
         "*://bestiaryarena.com/recolor*",
         "*://*.bestiaryarena.com/recolor*",
         "*://bestiaryarena.com/assets*",
@@ -58,8 +58,8 @@
       "exclude_matches": [
         "*://bestiaryarena.com/abilities*",
         "*://*.bestiaryarena.com/abilities*",
-        "*://bestiaryarena.com/profile/*",
-        "*://*.bestiaryarena.com/profile/*",
+        "*://bestiaryarena.com/profile*",
+        "*://*.bestiaryarena.com/profile*",
         "*://bestiaryarena.com/recolor*",
         "*://*.bestiaryarena.com/recolor*",
         "*://bestiaryarena.com/assets*",

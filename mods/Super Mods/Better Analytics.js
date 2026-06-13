@@ -1213,8 +1213,16 @@
     const PANEL_TICK_POLL_MS = 50;
     const LIVE_PANEL_UPDATE_MS = 50;
     const LIVE_PANEL_UPDATE_MS_TURBO = 125;
+    const ABILITY_TOOLTIP_REFRESH_MS = 300;
     const SUMMARY_UPDATE_MS = 100;
     const DEFAULT_TICK_INTERVAL_MS = 62.5;
+    const EQUIPMENT_TIER_BONUSES = {
+        1: { hp: 20, ad: 1, ap: 2 },
+        2: { hp: 40, ad: 2, ap: 5 },
+        3: { hp: 60, ad: 4, ap: 10 },
+        4: { hp: 90, ad: 6, ap: 15 },
+        5: { hp: 120, ad: 8, ap: 20 }
+    };
     const MIN_TICK_INTERVAL_MS = 16;
     const SPEED_MIN_PERCENT = 5;
     const SPEED_MAX_PERCENT = 100;
@@ -1274,6 +1282,7 @@
     let panelFightTick = null;
     let panelFightTickFrozen = null;
     let panelFightEndState = null;
+    let panelFightSeedFrozen = null;
     let panelTickRevision = 0;
     let lastPanelSyncedEngineTick = null;
     let lastGameTimerFightState = null;
@@ -1321,6 +1330,7 @@
     let gameIdByNameCache = null;
     let collapsedOverrides = new Map();
     let openAbilityOverrides = new Map();
+    const abilityTooltipRefreshTimers = new WeakMap();
     let unitsInteractUntil = 0;
     let lastUnitsRenderKey = '';
     const UNITS_INTERACT_FREEZE_MS = 10;
@@ -1670,7 +1680,6 @@
 
         if (floor !== boardTrack.floor) {
             boardTrack.floor = floor;
-            clearCollapsedOverrides();
             cachedSpawnTileKeyLookup = null;
             lastUnitsRenderKey = '';
             changed = true;
@@ -1926,6 +1935,7 @@
         panelFightTick = null;
         panelFightTickFrozen = null;
         panelFightEndState = null;
+        panelFightSeedFrozen = null;
         panelTickRevision = 0;
         lastPanelSyncedEngineTick = null;
         lastGameTimerFightState = getGameTimerFightState();
@@ -2065,9 +2075,13 @@
                 lastPanelSyncedEngineTick = finalTick;
             }
         }
+        if (panelFightSeedFrozen == null) {
+            panelFightSeedFrozen = getSeed();
+        }
         panelTickRevision++;
         invalidatePreparedBattleLogSummaryCache();
         tryEndBattleLogSession();
+        syncPanelTickTracking();
     }
 
     function teardownPanelGameTimerSub() {
@@ -2161,7 +2175,7 @@
             if (tickChanged || timerJustEnded) {
                 notifyPanelTickConsumers({ force: timerJustEnded });
             }
-        } else if (timerJustEnded) {
+        } else if (timerJustEnded && panelFightTickFrozen == null) {
             renderStatusBar(true);
         }
     }
@@ -2962,6 +2976,7 @@
             toVillain: toActor?.villain === true,
             amount,
             rawAmount: rawAmount != null && rawAmount !== amount ? rawAmount : null,
+            overkill: !isHeal && event.overkill > 0 ? Math.abs(Math.round(Number(event.overkill))) : 0,
             damageType,
             actionSource: event.actionSource || (isHeal ? 'heal' : 'unknown'),
             crit: event.crit === true
@@ -3714,6 +3729,30 @@
         });
     }
 
+    function resolveApplyDamagePoints(hp, opts) {
+        let points = Number(opts.points);
+        if (!Number.isFinite(points)) return points;
+        const hooks = hp._onBeforeApplyingDamage;
+        if (!Array.isArray(hooks)) return points;
+        for (const { fn } of hooks) {
+            if (typeof fn !== 'function') continue;
+            points = fn({
+                points,
+                damageType: opts.damageType,
+                from: opts.from,
+                tags: opts.tags
+            }).modifiedDamage;
+        }
+        return points;
+    }
+
+    function peekAppliedDamageBreakdown(hp, opts) {
+        if (typeof hp.calculateAppliedDamage !== 'function') return null;
+        const damageType = opts.damageType || 'physical';
+        const points = resolveApplyDamagePoints(hp, opts);
+        return hp.calculateAppliedDamage({ points, damageType });
+    }
+
     function unpatchActorBattleLog(actor) {
         unpatchActorPathingLog(actor);
         unpatchActorStatusLog(actor);
@@ -3738,16 +3777,21 @@
             actor.__bsOrigApplyDamage = hp.applyDamage.bind(hp);
             hp.applyDamage = (opts = {}) => {
                 actor.__bsSuppressHpStatLog = true;
+                const preCalc = peekAppliedDamageBreakdown(hp, opts);
                 const result = actor.__bsOrigApplyDamage(opts);
                 const rawAmount = Number(opts.points);
                 const appliedAmount = Number(result);
                 if (Number.isFinite(appliedAmount) && appliedAmount > 0) {
                     const fromActor = entityToActor(opts.from);
+                    const overkill = preCalc
+                        ? Math.max(0, Math.round(preCalc.damageToApply - preCalc.calculatedDamage))
+                        : 0;
                     recordBattleLogEntry({
                         from: opts.from,
                         to: actor,
                         points: -appliedAmount,
                         rawAmount: Number.isFinite(rawAmount) ? rawAmount : null,
+                        overkill: overkill > 0 ? overkill : null,
                         damageType: opts.damageType || result?.damageType || 'physical',
                         crit: opts.crit === true || result?.crit === true,
                         actionSource: resolveActionSourceDisplay(opts, result, fromActor, false)
@@ -3899,11 +3943,16 @@
         }
     }
 
-    function formatTicks(ticks) {
-        if (ticks == null || !Number.isFinite(ticks)) return '—';
+    function formatTicksParts(ticks) {
+        if (ticks == null || !Number.isFinite(ticks)) return { value: '—', suffix: '' };
         const rounded = Math.round(ticks * 10) / 10;
         const label = Math.abs(rounded) === 1 ? 'tick' : 'ticks';
-        return `${rounded} ${label}`;
+        return { value: String(rounded), suffix: ` ${label}` };
+    }
+
+    function formatTicks(ticks) {
+        const { value, suffix } = formatTicksParts(ticks);
+        return suffix ? `${value}${suffix}` : value;
     }
 
     function isTickStatTrackKey(statKey) {
@@ -3946,6 +3995,11 @@
     function msToTicks(ms) {
         if (ms == null || !Number.isFinite(ms)) return null;
         return ms / DEFAULT_TICK_INTERVAL_MS;
+    }
+
+    function msToGameCooldownTicks(ms) {
+        if (ms == null || !Number.isFinite(ms)) return null;
+        return Math.round(ms / DEFAULT_TICK_INTERVAL_MS);
     }
 
     function resolveUnitAttackDelayTicks(unit) {
@@ -4922,6 +4976,33 @@
         magicresist: '/assets/icons/magicresist.png'
     };
 
+    const ABILITY_DAMAGE_TYPE_PRESENTATION = {
+        physical: {
+            color: '#f97316',
+            icon: EQUIP_STAT_ICONS.ad,
+            iconClass: 'pixelated inline -translate-x-px -translate-y-px',
+            alt: 'attack damage'
+        },
+        magic: {
+            color: '#c084fc',
+            icon: EQUIP_STAT_ICONS.ap,
+            iconClass: 'pixelated inline -translate-x-0.5 -translate-y-px',
+            alt: 'ability power'
+        },
+        heal: {
+            color: '#6699ff',
+            icon: EQUIP_STAT_ICONS.hp,
+            iconClass: 'pixelated inline -translate-x-0.5 -translate-y-px',
+            alt: 'hitpoints'
+        },
+        trueDamage: {
+            color: '#ffffff',
+            icon: EQUIP_STAT_ICONS.ad,
+            iconClass: 'pixelated inline -translate-x-px -translate-y-px bs-true-damage-icon',
+            alt: 'true damage'
+        }
+    };
+
     const UNIT_PORTRAIT_SIZE = 34;
 
     function getEquipmentCatalogMeta(gameId) {
@@ -5067,6 +5148,58 @@
         const parsed = parseInt(value, 10);
         if (!Number.isFinite(parsed)) return 1;
         return Math.min(5, Math.max(1, parsed));
+    }
+
+    function normalizeEquipmentStatKey(stat) {
+        const key = String(stat || '').toLowerCase();
+        if (key === 'mr' || key === 'magicresist') return 'magicResist';
+        if (key === 'hp' || key === 'ad' || key === 'ap' || key === 'armor' || key === 'magicresist' || key === 'speed') {
+            return key === 'magicresist' ? 'magicResist' : key;
+        }
+        return stat || null;
+    }
+
+    function resolveEquipmentTierStatBonus(equipment) {
+        if (!equipment) return { statKey: null, value: null };
+        const statKey = normalizeEquipmentStatKey(equipment.stat);
+        const tier = clampEquipTier(equipment.tier);
+        if (!statKey || !tier) return { statKey: null, value: null };
+
+        try {
+            const utils = globalThis.state?.utils;
+            const candidates = [
+                utils?.getEquipmentTierBonus,
+                utils?.getEquipmentStatValue,
+                utils?.scaleEquipmentStat
+            ];
+            for (const fn of candidates) {
+                if (typeof fn !== 'function') continue;
+                const raw = Number(fn({
+                    stat: statKey,
+                    tier,
+                    gameId: equipment.gameId,
+                    equipment
+                }));
+                if (Number.isFinite(raw)) return { statKey, value: raw };
+            }
+        } catch { /* ignore */ }
+
+        const tierRow = EQUIPMENT_TIER_BONUSES[tier];
+        const value = tierRow?.[statKey];
+        if (value == null || !Number.isFinite(value)) return { statKey: null, value: null };
+        return { statKey, value };
+    }
+
+    function applyEquipmentStatBonus(stats, equipment, statSources) {
+        const { statKey, value } = resolveEquipmentTierStatBonus(equipment);
+        if (!statKey || value == null || stats[statKey] == null || !Number.isFinite(stats[statKey])) {
+            return;
+        }
+        stats[statKey] = Math.round(stats[statKey] + value);
+        if (statSources) {
+            const prev = statSources[statKey] || 'preview';
+            statSources[statKey] = `${prev}+equip(+${value} ${statKey})`;
+        }
     }
 
     function calculateTierFromStats(monster) {
@@ -5482,7 +5615,17 @@
         }
 
         const maxHp = stats.hp;
-        return { stats, baseStats, statSources, hp: maxHp, hpMax: maxHp };
+        if (resolved.equipment) {
+            applyEquipmentStatBonus(stats, resolved.equipment, statSources);
+        }
+        const hpAfterEquip = stats.hp;
+        return {
+            stats,
+            baseStats,
+            statSources,
+            hp: hpAfterEquip,
+            hpMax: hpAfterEquip ?? maxHp
+        };
     }
 
     function resolveBoardPieceTileIndex(piece) {
@@ -5813,8 +5956,1314 @@
         };
     }
 
+    function logAbilityScaling(...args) {
+        console.log(`[${modName}][AbilityScale]`, ...args);
+    }
+
+    function logAbilityScalingVerbose(...args) {
+        const first = args[0];
+        if (typeof first === 'string' && (
+            first.startsWith('enhance attempt')
+            || first.startsWith('skip wrap')
+            || first === 'frozen tooltip html'
+        )) {
+            return;
+        }
+        logAbilityScaling(...args);
+    }
+
+    function warnAbilityScaling(...args) {
+        console.warn(`[${modName}][AbilityScale]`, ...args);
+    }
+
+    function getTooltipWrapSpans(wrap) {
+        if (!wrap) return [];
+        if (typeof wrap.querySelectorAll === 'function') {
+            try {
+                const scoped = wrap.querySelectorAll(':scope > span');
+                if (scoped.length >= 2) return [...scoped];
+            } catch { /* ignore */ }
+        }
+        return [...wrap.children].filter((node) => node.tagName === 'SPAN');
+    }
+
+    function freezeAbilityTooltipContent(details, root, component) {
+        if (!root) return;
+        const html = root.innerHTML;
+        if (component?.unmount) {
+            try { component.unmount(); } catch (error) {
+                logAbilityScaling('unmount failed', error);
+            }
+        }
+        if (details) details._abilityComponent = null;
+        root.innerHTML = html;
+        root.dataset.abilityScaled = '1';
+        logAbilityScalingVerbose('frozen tooltip html', {
+            scaled: root.querySelectorAll('.bs-scaled-value').length,
+            wraps: root.querySelectorAll('span.whitespace-nowrap').length
+        });
+    }
+
+    function parseTooltipPercentText(text) {
+        const match = String(text || '').trim().match(/^([+-]?[\d.]+)%$/);
+        return match ? parseFloat(match[1]) : null;
+    }
+
+    function parseTooltipLabeledPercentText(text) {
+        const trimmed = String(text || '').trim();
+        const plain = parseTooltipPercentText(trimmed);
+        if (plain != null) {
+            const sign = trimmed.startsWith('-') ? '-' : (trimmed.startsWith('+') ? '+' : '');
+            return { percent: plain, sign, label: '' };
+        }
+        const match = trimmed.match(/^([+-]?)([\d.]+)%\s*(.*)$/i);
+        if (!match) return null;
+        const percent = parseFloat(match[2]);
+        if (!Number.isFinite(percent)) return null;
+        const sign = match[1] || (percent < 0 ? '-' : '+');
+        const label = match[3] ? ` ${match[3]}` : '';
+        return { percent, sign, label };
+    }
+
+    function parseTooltipFlatText(text) {
+        const match = String(text || '').trim().match(/^([+-]?[\d.]+)$/);
+        return match ? parseFloat(match[1]) : null;
+    }
+
+    function resolveAbilityScalingStatInfo(wrap, unit) {
+        const img = wrap?.querySelector?.('img[alt]');
+        const alt = String(img?.getAttribute('alt') || '').toLowerCase();
+        if (alt.includes('ability power') || alt.includes('abilitypower')) {
+            return { value: unit?.ap, label: 'AP' };
+        }
+        if (alt.includes('attack damage') || alt.includes('attackdamage')) {
+            return { value: unit?.ad, label: 'AD' };
+        }
+        if (alt.includes('hp') || alt.includes('heal')) {
+            return { value: unit?.hp, label: 'HP' };
+        }
+        if (unit?.ap != null) return { value: unit.ap, label: 'AP' };
+        if (unit?.ad != null) return { value: unit.ad, label: 'AD' };
+        return { value: null, label: 'stat' };
+    }
+
+    function resolveAbilityScalingStat(wrap, unit) {
+        return resolveAbilityScalingStatInfo(wrap, unit).value;
+    }
+
+    function parseTooltipPerChunkRatio(text) {
+        const trimmed = String(text || '').trim();
+        const durationMatch = trimmed.match(/^([+-]?[\d.]+)s\s*per\s*([\d.]+)$/i);
+        if (durationMatch) {
+            const amount = parseFloat(durationMatch[1]);
+            const chunkSize = parseFloat(durationMatch[2]);
+            if (!Number.isFinite(amount) || !Number.isFinite(chunkSize) || chunkSize <= 0) return null;
+            return { amount, isPercent: false, chunkSize, isDuration: true };
+        }
+
+        const match = trimmed.match(/^([+-]?[\d.]+)(%?)\s*per\s*([\d.]+)$/i);
+        if (!match) return null;
+        const amount = parseFloat(match[1]);
+        const chunkSize = parseFloat(match[3]);
+        if (!Number.isFinite(amount) || !Number.isFinite(chunkSize) || chunkSize <= 0) return null;
+        return { amount, isPercent: match[2] === '%', chunkSize, isDuration: false };
+    }
+
+    function isAttackSpeedScalingContext(contextText) {
+        return /bonus\s+attack\s+speed|attack\s+speed\s+buff/i.test(String(contextText || ''));
+    }
+
+    function formatScalingExpression(inner, rawTotal, displayTotal, suffix = '') {
+        const floored = Math.floor(rawTotal);
+        if (floored === displayTotal && Math.abs(rawTotal - displayTotal) > 1e-9) {
+            return `floor(${inner}) = ${displayTotal}${suffix}`;
+        }
+        return `${inner} = ${displayTotal}${suffix}`;
+    }
+
+    function buildScalingMathTitle(parts) {
+        const {
+            base,
+            statValue,
+            statLabel,
+            total,
+            suffix = '',
+            cap,
+            capped
+        } = parts;
+        let title = parts.expression;
+        if (!title) return `Scaled for current stats (base ${base}${suffix})`;
+        if (capped && cap != null && Number.isFinite(cap)) {
+            title += ` (cap: ${cap}${suffix})`;
+        }
+        return title;
+    }
+
+    function buildScaledDurationResult(baseText, perChunk, statValue, statLabel) {
+        const baseDurationMs = parseTooltipDurationText(baseText);
+        if (baseDurationMs == null) return null;
+
+        const baseLabel = formatAbilityDurationMs(baseDurationMs);
+        const baseSec = baseDurationMs / 1000;
+        const rawTotalSec = baseSec + (statValue / perChunk.chunkSize) * perChunk.amount;
+        const totalLabel = formatAbilityDurationMs(rawTotalSec * 1000);
+        const valueMatch = totalLabel?.match(/^([\d.]+)s$/i);
+        const amountLabel = `${perChunk.amount}s`;
+        const inner = `${baseLabel} + (${statValue} ${statLabel} ÷ ${perChunk.chunkSize}) × ${amountLabel}`;
+        const expression = `${inner} = ${totalLabel}`;
+        return {
+            value: valueMatch ? valueMatch[1] : String(rawTotalSec),
+            suffix: 's',
+            title: buildScalingMathTitle({
+                base: baseLabel,
+                statValue,
+                statLabel,
+                total: valueMatch ? valueMatch[1] : rawTotalSec,
+                suffix: 's',
+                expression
+            })
+        };
+    }
+
+    function computeScaledTooltipTotal(baseText, ratioText, statInfo, contextText) {
+        const statValue = statInfo?.value;
+        const statLabel = statInfo?.label || 'stat';
+        if (statValue == null || !Number.isFinite(statValue)) return null;
+
+        const perChunk = parseTooltipPerChunkRatio(ratioText);
+        if (perChunk) {
+            if (perChunk.isDuration) {
+                const durationScaled = buildScaledDurationResult(baseText, perChunk, statValue, statLabel);
+                if (durationScaled) return durationScaled;
+            }
+
+            const basePercent = parseTooltipPercentText(baseText);
+            const baseFlat = parseTooltipFlatText(baseText);
+
+            if (perChunk.isPercent || basePercent != null) {
+                const base = basePercent ?? 0;
+                const attackSpeed = isAttackSpeedScalingContext(contextText);
+                const extra = attackSpeed
+                    ? (statValue / perChunk.chunkSize) * (perChunk.amount / 2)
+                    : (statValue / perChunk.chunkSize) * perChunk.amount;
+                let totalPercent = base + extra;
+                let capped = false;
+                const capMatch = String(contextText || '').match(/capped at\s*([+-]?[\d.]+)\s*%/i);
+                let cap = null;
+                if (capMatch) {
+                    cap = parseFloat(capMatch[1]);
+                    if (Number.isFinite(cap)) {
+                        const beforeCap = totalPercent;
+                        totalPercent = extra < 0 || base < 0
+                            ? Math.max(totalPercent, cap)
+                            : Math.min(totalPercent, cap);
+                        capped = beforeCap !== totalPercent;
+                    }
+                }
+                const total = Math.floor(totalPercent);
+                const amountSuffix = '%';
+                const inner = attackSpeed
+                    ? `${base}${amountSuffix} + ${statValue} ${statLabel} × ${perChunk.amount / (2 * perChunk.chunkSize)}${amountSuffix}`
+                    : `${base}${amountSuffix} + (${statValue} ${statLabel} ÷ ${perChunk.chunkSize}) × ${perChunk.amount}${amountSuffix}`;
+                const expression = formatScalingExpression(inner, totalPercent, total, amountSuffix);
+                return {
+                    value: total,
+                    suffix: amountSuffix,
+                    title: buildScalingMathTitle({
+                        base,
+                        statValue,
+                        statLabel,
+                        total,
+                        suffix: amountSuffix,
+                        expression,
+                        cap,
+                        capped
+                    })
+                };
+            }
+
+            const base = baseFlat ?? 0;
+            const rawTotal = base + (statValue / perChunk.chunkSize) * perChunk.amount;
+            const total = Math.floor(rawTotal);
+            const inner = `${base} + (${statValue} ${statLabel} ÷ ${perChunk.chunkSize}) × ${perChunk.amount}`;
+            const expression = formatScalingExpression(inner, rawTotal, total);
+            return {
+                value: total,
+                suffix: '',
+                title: buildScalingMathTitle({
+                    base,
+                    statValue,
+                    statLabel,
+                    total,
+                    expression
+                })
+            };
+        }
+
+        const baseFlat = parseTooltipFlatText(baseText);
+        if (baseFlat == null) return null;
+        if (/\bper\b/i.test(ratioText)) return null;
+
+        const ratioMatch = String(ratioText || '').trim().match(/^([+-]?[\d.]+)/);
+        const ratioFlat = ratioMatch ? parseFloat(ratioMatch[1]) : NaN;
+        if (!Number.isFinite(ratioFlat)) return null;
+        const rawTotal = baseFlat + statValue * ratioFlat;
+        const total = Math.floor(rawTotal);
+        const inner = `${baseFlat} + ${statValue} ${statLabel} × ${ratioFlat}`;
+        const expression = formatScalingExpression(inner, rawTotal, total);
+        return {
+            value: total,
+            suffix: '',
+            title: buildScalingMathTitle({
+                base: baseFlat,
+                statValue,
+                statLabel,
+                total,
+                expression
+            })
+        };
+    }
+
+    function applyScaledTooltipValue(targetSpan, baseText, scaled, originalBaseText) {
+        if (!targetSpan || !scaled) return;
+        targetSpan.textContent = `${scaled.value}${scaled.suffix}`;
+        targetSpan.classList.add('bs-scaled-value');
+        targetSpan.title = scaled.title
+            || `Scaled for current stats (base ${originalBaseText ?? baseText})`;
+    }
+
+    function wrapHasScalingStatIcon(wrap) {
+        return [...(wrap?.querySelectorAll?.('img[alt]') || [])].some((img) => {
+            const alt = String(img.getAttribute('alt') || '').toLowerCase();
+            return alt.includes('ability power')
+                || alt.includes('attack damage')
+                || alt.includes('hitpoint')
+                || alt === 'hp';
+        });
+    }
+
+    function shouldAppendScaledDamageIcon(wrap, baseText, scaled, contextText, statInfo) {
+        if (!scaled) return false;
+        if (scaled.suffix === '%' || scaled.suffix === 's') return false;
+        if (parseTooltipPercentText(baseText) != null) return false;
+        if (parseTooltipFlatText(baseText) == null && parseTooltipDurationText(baseText) == null) return false;
+
+        const hasStatScaling = statInfo?.label === 'AD'
+            || statInfo?.label === 'AP'
+            || statInfo?.label === 'HP'
+            || wrapHasScalingStatIcon(wrap);
+        if (hasStatScaling) return true;
+
+        const ctx = String(contextText || '').toLowerCase();
+        if (/\bcooldown\b/.test(ctx) && /\breduced\s+by\b/.test(ctx)) return false;
+        if (/\b(range|attack\s+speed|bonus\s+attack\s+speed)\b/.test(ctx)
+            && !/\b(damage|deals|damaging|explosion|heal|heals|self-heal|true\s+damage)\b/.test(ctx)) {
+            return false;
+        }
+
+        const hasDamageContext = /\b(damage|deals|damaging|explosion|detonates|hit|hits|strikes|burns|incinerates)\b/.test(ctx);
+        const hasHealContext = /\b(heal|heals|self-heals?|restores|regenerates)\b/.test(ctx);
+        const hasTrueDamageContext = /\btrue\s+damage\b/.test(ctx);
+        const hasRatioIcon = wrapHasScalingStatIcon(wrap);
+
+        return hasTrueDamageContext
+            || hasHealContext
+            || hasDamageContext
+            || (hasRatioIcon && /\b(for|deals|damaging|explosion|heal|heals|self-heal)\b/.test(ctx));
+    }
+
+    function detectTooltipScalingDamageType(wrap, contextText, statInfo) {
+        const ctx = String(contextText || '').toLowerCase();
+        if (/\btrue\s+damage\b/.test(ctx)) return 'trueDamage';
+
+        for (const img of wrap?.querySelectorAll?.('img[alt]') || []) {
+            const alt = String(img.getAttribute('alt') || '').toLowerCase();
+            if (alt.includes('attack damage')) return 'physical';
+            if (alt.includes('ability power')) return 'magic';
+            if (alt.includes('hitpoint') || alt === 'hp') return 'heal';
+        }
+
+        if (statInfo?.label === 'AD') return 'physical';
+        if (statInfo?.label === 'AP') return 'magic';
+        if (statInfo?.label === 'HP') return 'heal';
+
+        if (/\b(heal|heals|self-heals?|restores|regenerates)\b/.test(ctx)) return 'heal';
+        if (/\b(damage|deals|damaging|explosion|detonates)\b/.test(ctx)) return 'magic';
+        return null;
+    }
+
+    function createTooltipDamageTypeIcon(damageType) {
+        const spec = ABILITY_DAMAGE_TYPE_PRESENTATION[damageType];
+        if (!spec) return null;
+        const img = document.createElement('img');
+        img.src = spec.icon;
+        img.alt = spec.alt;
+        img.width = 11;
+        img.height = 11;
+        img.className = 'pixelated inline -translate-y-px bs-scaled-damage-icon';
+        img.setAttribute('aria-hidden', 'true');
+        return img;
+    }
+
+    function trimTooltipWrapTrailingContent(wrap) {
+        if (!wrap) return;
+        let node = wrap.lastChild;
+        while (node) {
+            if (node.nodeType === Node.TEXT_NODE && !node.textContent?.trim()) {
+                const prev = node.previousSibling;
+                wrap.removeChild(node);
+                node = prev;
+                continue;
+            }
+            break;
+        }
+    }
+
+    function applyScaledDamageTypePresentation(wrap, valueSpan, damageType) {
+        const spec = ABILITY_DAMAGE_TYPE_PRESENTATION[damageType];
+        if (!spec || !wrap || !valueSpan) return;
+        valueSpan.style.color = spec.color;
+        const existingIcon = wrap.querySelector('.bs-scaled-damage-icon');
+        if (existingIcon) {
+            existingIcon.className = 'pixelated inline -translate-y-px bs-scaled-damage-icon';
+            trimTooltipWrapTrailingContent(wrap);
+            return;
+        }
+        const icon = createTooltipDamageTypeIcon(damageType);
+        if (!icon) return;
+        wrap.appendChild(document.createTextNode(' '));
+        wrap.appendChild(icon);
+        trimTooltipWrapTrailingContent(wrap);
+    }
+
+    function formatAbilityDurationMs(ms) {
+        if (ms == null || !Number.isFinite(ms)) return null;
+        const seconds = (ms / 1000).toFixed(2).replace('.00', '');
+        return `${seconds}s`;
+    }
+
+    function parseTooltipDurationText(text) {
+        const match = String(text || '').trim().match(/^([+-]?[\d.]+)s$/i);
+        if (!match) return null;
+        const seconds = parseFloat(match[1]);
+        if (!Number.isFinite(seconds)) return null;
+        return Math.round(seconds * 1000);
+    }
+
+    function getWorldsForUnitProbe() {
+        const worlds = [];
+        const boardWorld = getBoardContext()?.world;
+        if (boardWorld) worlds.push(boardWorld);
+        if (activeWorld && activeWorld !== boardWorld) worlds.push(activeWorld);
+        return worlds;
+    }
+
+    function findActorForPanelUnit(unit) {
+        if (!unit) return null;
+
+        const unitKey = normalizeCollapseKey(getUnitCollapseKey(unit));
+        for (const world of getWorldsForUnitProbe()) {
+            const actors = world?.grid?.actors;
+            if (!Array.isArray(actors) || !actors.length) continue;
+
+            for (const actor of actors) {
+                if (resolveFightCollapseKey(actor) === unitKey) return actor;
+            }
+            for (const actor of actors) {
+                if (resolveGameId(actor) !== unit.gameId) continue;
+                const tile = readActorTileIndex(actor);
+                if (unit.tileIndex != null && tile != null && tile !== unit.tileIndex) continue;
+                if (unit.villain != null && (actor.villain === true) !== unit.villain) continue;
+                return actor;
+            }
+        }
+        return null;
+    }
+
+    function resolveUnitAbilityScalingStats(unit) {
+        if (!unit) return null;
+
+        const actor = findActorForPanelUnit(unit);
+        if (actor) {
+            const metadata = getMonsterMetadata(unit.gameId);
+            const hpSnapshot = readActorHp(actor.hp);
+            return {
+                ...unit,
+                ap: resolveActorLiveStatDetailed(actor, metadata, 'ap').value ?? unit.ap,
+                ad: resolveActorLiveStatDetailed(actor, metadata, 'ad').value ?? unit.ad,
+                hp: hpSnapshot.hp ?? unit.hp,
+                hpMax: hpSnapshot.hpMax ?? unit.hpMax ?? unit.hp,
+                armor: resolveActorLiveStatDetailed(actor, metadata, 'armor').value ?? unit.armor,
+                magicResist: resolveActorLiveStatDetailed(actor, metadata, 'magicResist').value ?? unit.magicResist,
+                speed: resolveActorLiveStatDetailed(actor, metadata, 'speed').value ?? unit.speed
+            };
+        }
+
+        return unit;
+    }
+
+    function collectActorCooldownCalculatorTargets(actor) {
+        if (!actor) return [];
+        const targets = [actor, actor.skill, actor.ability];
+        for (const cd of collectActorAbilityCooldownComponents(actor)) {
+            targets.push(cd);
+        }
+        for (const listKey of ['componentList', 'components']) {
+            const list = actor[listKey];
+            if (Array.isArray(list)) targets.push(...list);
+        }
+        return [...new Set(targets.filter(Boolean))];
+    }
+
+    function invokeActorCooldownCalculator(actor, ap) {
+        if (!actor) return null;
+        const apValue = Number.isFinite(ap) ? ap : (actor.ap?.currentValue ?? actor.ap);
+        for (const target of collectActorCooldownCalculatorTargets(actor)) {
+            if (typeof target.calculateSpellCooldownTicks === 'function') {
+                try {
+                    const fn = target.calculateSpellCooldownTicks;
+                    const ticks = fn.length > 0 && apValue != null
+                        ? fn.call(target, apValue)
+                        : fn.call(target);
+                    if (Number.isFinite(ticks)) {
+                        return { effectiveTicks: ticks, kind: 'ticks' };
+                    }
+                } catch { /* ignore */ }
+            }
+            if (typeof target.calculateSpellCooldownMs === 'function') {
+                try {
+                    const ms = target.calculateSpellCooldownMs.call(target);
+                    if (Number.isFinite(ms)) {
+                        return { effectiveMs: ms, kind: 'ms' };
+                    }
+                } catch { /* ignore */ }
+            }
+        }
+        return null;
+    }
+
+    function readActorCdrFormulaBounds(actor) {
+        if (!actor) return { baseMs: null, minMs: null };
+        return {
+            baseMs: pickFirstNumber(actor, ['_baseCdrMs', 'CD_BASE_MS']),
+            minMs: pickFirstNumber(actor, ['MIN_COOLDOWN_MS'])
+        };
+    }
+
+    function computeCdrEffectiveMs(ap, reductionPerApMs, baseMs, minMs) {
+        if (baseMs == null || !Number.isFinite(baseMs)) return null;
+        return Math.max(Math.round(baseMs - reductionPerApMs * ap), minMs ?? 0);
+    }
+
+    function findTemplateActorForCdr(unit) {
+        const direct = findActorForPanelUnit(unit);
+        if (direct) return direct;
+
+        if (!unit?.gameId) return null;
+        for (const world of getWorldsForUnitProbe()) {
+            const actors = world?.grid?.actors;
+            if (!Array.isArray(actors)) continue;
+            for (const actor of actors) {
+                if (resolveGameId(actor) !== unit.gameId) continue;
+                if (unit.villain != null && (actor.villain === true) !== unit.villain) continue;
+                return actor;
+            }
+        }
+        return null;
+    }
+
+    function resolveCdrBaseMsForTitle(actor, bounds) {
+        if (bounds?.baseMs != null) return bounds.baseMs;
+        if (!actor) return null;
+        const atZero = invokeActorCooldownCalculator(actor, 0);
+        if (atZero?.effectiveMs != null) return atZero.effectiveMs;
+        if (atZero?.effectiveTicks != null) return ticksToMs(atZero.effectiveTicks);
+        return null;
+    }
+
+    function buildScaledCooldownDisplay(effectiveMs, ap, reductionPerApMs, baseMs, minMs, options = {}) {
+        const effectiveTicks = options.effectiveTicks ?? msToGameCooldownTicks(effectiveMs);
+        if (effectiveTicks == null) return null;
+        const { value, suffix } = formatTicksParts(effectiveTicks);
+        const effectiveLabel = formatTicks(effectiveTicks);
+
+        let title = `Effective cooldown at ${ap} AP = ${effectiveLabel}`;
+        if (baseMs != null && Number.isFinite(baseMs)) {
+            const baseTicks = msToGameCooldownTicks(baseMs);
+            const reductionTicks = msToGameCooldownTicks(reductionPerApMs);
+            const minTicks = minMs != null && Number.isFinite(minMs) ? msToGameCooldownTicks(minMs) : null;
+            const inner = `${formatTicks(baseTicks)} - ${ap} AP × ${formatTicks(reductionTicks)}`;
+            const rawMs = baseMs - reductionPerApMs * ap;
+            if (minTicks != null && Math.round(rawMs) < minMs) {
+                title = `max(round(${inner}), ${formatTicks(minTicks)}) = ${effectiveLabel}`;
+            } else {
+                title = `round(${inner}) = ${effectiveLabel}`;
+            }
+        }
+        return { value, suffix, title };
+    }
+
+    const CDR_SCRIPT_BASE_MS_KEYS = ['BASE_COOLDOWN_MS', 'COOLDOWN_BASE_MS', 'REVIVE_COOLDOWN_MS', 'CD_BASE_MS'];
+    const CDR_SCRIPT_PER_AP_KEYS = ['CDR_PER_AP', 'CDR_MS_PER_AP', 'COOLDOWN_MS_REDUCTION_PER_AP'];
+    const CDR_SCRIPT_MIN_MS_KEYS = ['MIN_COOLDOWN_MS'];
+
+    let cachedGameChunk661Text = null;
+    let cachedGameChunk661Promise = null;
+    const cachedCdrScriptBounds = new Map();
+
+    function prefetchGameChunk661ForCdr() {
+        ensureGameChunk661Text().catch(() => { /* ignore */ });
+    }
+
+    function findGameChunk661ScriptUrl() {
+        for (const script of document.scripts) {
+            const src = script.src;
+            if (src && /\/661-[\w-]+\.js(?:\?|$)/.test(src)) return src;
+        }
+        return null;
+    }
+
+    function ensureGameChunk661Text() {
+        if (cachedGameChunk661Text) return Promise.resolve(cachedGameChunk661Text);
+        if (!cachedGameChunk661Promise) {
+            cachedGameChunk661Promise = (async () => {
+                const src = findGameChunk661ScriptUrl();
+                if (!src) return null;
+                try {
+                    const res = await fetch(src, { credentials: 'same-origin' });
+                    if (!res.ok) return null;
+                    cachedGameChunk661Text = await res.text();
+                    return cachedGameChunk661Text;
+                } catch {
+                    return null;
+                }
+            })();
+        }
+        return cachedGameChunk661Promise;
+    }
+
+    function parseCdrConstObjectBody(body) {
+        const out = {};
+        const re = /([A-Z_]+):([\d.]+(?:e\d+)?)/g;
+        let match;
+        while ((match = re.exec(body))) {
+            out[match[1]] = Number(match[2]);
+        }
+        return out;
+    }
+
+    function mapCdrScriptFields(fields) {
+        const pick = (keys) => {
+            for (const key of keys) {
+                if (fields[key] != null && Number.isFinite(fields[key])) return fields[key];
+            }
+            return null;
+        };
+        return {
+            baseMs: pick(CDR_SCRIPT_BASE_MS_KEYS),
+            reductionPerApMs: pick(CDR_SCRIPT_PER_AP_KEYS),
+            minMs: pick(CDR_SCRIPT_MIN_MS_KEYS)
+        };
+    }
+
+    function escapeCdrRegexLiteral(str) {
+        return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function findCdrConstObjectInScript(scriptText, constName) {
+        if (!constName) return null;
+        const constPattern = new RegExp(`${escapeCdrRegexLiteral(constName)}=\\{[^}]*\\}`);
+        return constPattern.exec(scriptText);
+    }
+
+    function extractCdrBoundsFrom661Script(scriptText, unit, reductionPerApMs) {
+        if (!scriptText || !unit?.gameId || reductionPerApMs == null) return null;
+
+        const name = getMonsterMetadata(unit.gameId)?.name;
+        if (!name) return null;
+
+        const nameIdx = scriptText.indexOf(`name:"${name}"`);
+        const searchSlice = nameIdx >= 0
+            ? scriptText.slice(nameIdx, nameIdx + 40000)
+            : scriptText;
+
+        let match = null;
+        const refMatch = searchSlice.match(/([\w$]+)\.(CDR_PER_AP|CDR_MS_PER_AP|COOLDOWN_MS_REDUCTION_PER_AP)/);
+        if (refMatch) {
+            match = findCdrConstObjectInScript(scriptText, refMatch[1]);
+        }
+
+        if (!match) {
+            const constPattern = new RegExp(
+                `\\w+=\\{[^}]*(?:CDR_PER_AP|CDR_MS_PER_AP|COOLDOWN_MS_REDUCTION_PER_AP):${reductionPerApMs}[^}]*\\}`
+            );
+            match = constPattern.exec(searchSlice) || constPattern.exec(scriptText);
+        }
+        if (!match) return null;
+
+        const bodyMatch = match[0].match(/\{([^}]+)\}/);
+        if (!bodyMatch) return null;
+
+        const mapped = mapCdrScriptFields(parseCdrConstObjectBody(bodyMatch[1]));
+        if (mapped.reductionPerApMs !== reductionPerApMs) return null;
+        if (mapped.baseMs == null) return null;
+
+        if (mapped.minMs == null) {
+            const minTickMatch = bodyMatch[1].match(/MIN_COOLDOWN_TICKS:\(0,\w+\.HX\)\(([\d.e]+)\)/);
+            if (minTickMatch) mapped.minMs = Number(minTickMatch[1]);
+        }
+
+        if (mapped.minMs == null) return null;
+        return mapped;
+    }
+
+    function resolveCdrBoundsFromGameScript(unit, reductionPerApMs) {
+        if (!cachedGameChunk661Text || !unit?.gameId || reductionPerApMs == null) return null;
+
+        const cacheKey = `${unit.gameId}:${reductionPerApMs}`;
+        if (cachedCdrScriptBounds.has(cacheKey)) {
+            return cachedCdrScriptBounds.get(cacheKey);
+        }
+
+        const parsed = extractCdrBoundsFrom661Script(cachedGameChunk661Text, unit, reductionPerApMs);
+        cachedCdrScriptBounds.set(cacheKey, parsed);
+        return parsed;
+    }
+
+    function computeCappedReductionMs(ap, reductionPerApMs, baseMs, minMs) {
+        const rawMs = reductionPerApMs * ap;
+        if (baseMs == null || !Number.isFinite(baseMs) || minMs == null || !Number.isFinite(minMs)) {
+            return rawMs;
+        }
+        return Math.min(rawMs, Math.max(0, baseMs - minMs));
+    }
+
+    function probeActorFormulaMinMs(actor) {
+        if (!actor) return null;
+        const calc = invokeActorCooldownCalculator(actor, 999999);
+        if (calc?.effectiveTicks != null) return ticksToMs(calc.effectiveTicks);
+        return null;
+    }
+
+    function resolveCdrBoundsForUnit(unit, reductionPerApMs) {
+        const actor = findTemplateActorForCdr(unit);
+        const scriptBounds = resolveCdrBoundsFromGameScript(unit, reductionPerApMs);
+        const bounds = readActorCdrFormulaBounds(actor);
+
+        let baseMs = bounds.baseMs ?? resolveCdrBaseMsForTitle(actor, bounds);
+        if (baseMs == null && scriptBounds) baseMs = scriptBounds.baseMs;
+
+        // Script/constants first — live calculateSpellCooldownMs() is current effective CD, not the floor.
+        let minMs = scriptBounds?.minMs ?? bounds.minMs ?? probeActorFormulaMinMs(actor);
+
+        return { actor, baseMs, minMs };
+    }
+
+    function buildScaledCooldownReductionTotalDisplay(ap, reductionPerApMs, bounds = {}) {
+        if (ap == null || !Number.isFinite(ap) || !reductionPerApMs) return null;
+
+        const { baseMs, minMs } = bounds;
+        const rawMs = reductionPerApMs * ap;
+        const totalMs = computeCappedReductionMs(ap, reductionPerApMs, baseMs, minMs);
+        const capped = baseMs != null && minMs != null && rawMs > totalMs + 0.5;
+
+        const reductionTicks = msToGameCooldownTicks(totalMs);
+        if (reductionTicks == null) return null;
+
+        const perApTicks = msToGameCooldownTicks(reductionPerApMs);
+        const { value, suffix } = formatTicksParts(reductionTicks);
+        const perLabel = perApTicks != null ? formatTicks(perApTicks) : null;
+        const totalLabel = formatTicks(reductionTicks);
+
+        let title = perLabel
+            ? `${ap} AP × ${perLabel} = ${totalLabel}`
+            : `${ap} AP × ${reductionPerApMs}ms = ${totalLabel}`;
+
+        if (capped && baseMs != null && minMs != null) {
+            const maxReductionTicks = msToGameCooldownTicks(baseMs - minMs);
+            if (maxReductionTicks != null) {
+                title += ` (capped at ${formatTicks(maxReductionTicks)} max reduction)`;
+            }
+        }
+
+        if (baseMs != null && minMs != null) {
+            const effectiveMs = computeCdrEffectiveMs(ap, reductionPerApMs, baseMs, minMs);
+            const effectiveTicks = msToGameCooldownTicks(effectiveMs);
+            if (effectiveTicks != null) {
+                title += `; effective CD ${formatTicks(effectiveTicks)}`;
+            }
+        }
+
+        if (minMs != null) {
+            const minTicks = msToGameCooldownTicks(minMs);
+            if (minTicks != null) {
+                title += `; minimum CD ${formatTicks(minTicks)}`;
+            }
+        }
+
+        return { value, suffix, title, minMs, capped };
+    }
+
+    function resolveScaledAbilityCooldownDetails(unit, reductionPerApMs) {
+        const ap = unit?.ap;
+        if (ap == null || !Number.isFinite(ap) || !reductionPerApMs) return null;
+
+        const actor = findTemplateActorForCdr(unit);
+        const bounds = readActorCdrFormulaBounds(actor);
+        const baseMsForTitle = resolveCdrBaseMsForTitle(actor, bounds);
+        const calculator = actor ? invokeActorCooldownCalculator(actor, ap) : null;
+
+        if (calculator) {
+            const effectiveMs = calculator.effectiveMs ?? ticksToMs(calculator.effectiveTicks);
+            return buildScaledCooldownDisplay(
+                effectiveMs,
+                ap,
+                reductionPerApMs,
+                baseMsForTitle,
+                bounds.minMs,
+                calculator.effectiveTicks != null ? { effectiveTicks: calculator.effectiveTicks } : {}
+            );
+        }
+
+        if (unit.cooldownTicks != null && Number.isFinite(unit.cooldownTicks)) {
+            return buildScaledCooldownDisplay(
+                ticksToMs(unit.cooldownTicks),
+                ap,
+                reductionPerApMs,
+                baseMsForTitle,
+                bounds.minMs,
+                { effectiveTicks: unit.cooldownTicks }
+            );
+        }
+        if (unit.cooldownMs != null && Number.isFinite(unit.cooldownMs)) {
+            return buildScaledCooldownDisplay(
+                unit.cooldownMs,
+                ap,
+                reductionPerApMs,
+                baseMsForTitle,
+                bounds.minMs
+            );
+        }
+
+        if (actor) {
+            const cdInfo = readActorCooldown(actor, getMonsterMetadata(unit.gameId));
+            if (cdInfo.cooldownTicks != null) {
+                return buildScaledCooldownDisplay(
+                    ticksToMs(cdInfo.cooldownTicks),
+                    ap,
+                    reductionPerApMs,
+                    baseMsForTitle,
+                    bounds.minMs,
+                    { effectiveTicks: cdInfo.cooldownTicks }
+                );
+            }
+            if (cdInfo.cooldownMs != null) {
+                return buildScaledCooldownDisplay(
+                    cdInfo.cooldownMs,
+                    ap,
+                    reductionPerApMs,
+                    baseMsForTitle,
+                    bounds.minMs
+                );
+            }
+        }
+
+        if (baseMsForTitle != null) {
+            const effectiveMs = computeCdrEffectiveMs(ap, reductionPerApMs, baseMsForTitle, bounds.minMs);
+            return buildScaledCooldownDisplay(
+                effectiveMs,
+                ap,
+                reductionPerApMs,
+                baseMsForTitle,
+                bounds.minMs
+            );
+        }
+
+        return null;
+    }
+
+    function isCooldownApReductionParagraph(paragraph) {
+        return /cooldown.*is\s+reduced\s+by/i.test(paragraph?.textContent || '');
+    }
+
+    function isCooldownPerApMarkerSpan(span) {
+        const paragraph = span?.closest?.('p');
+        if (!paragraph || !isCooldownApReductionParagraph(paragraph)) return false;
+        if (!span?.querySelector?.('img[alt]')) return false;
+        return /^1\s*$/.test(String(span.textContent || '').trim());
+    }
+
+    function findCooldownReductionDurationSpan(paragraph) {
+        if (!paragraph) return null;
+        const candidates = [...paragraph.querySelectorAll('.text-cooldown')]
+            .filter((span) => parseTooltipDurationText(span.textContent?.trim()) != null);
+        if (!candidates.length) return null;
+        return candidates.length === 1 ? candidates[0] : candidates[candidates.length - 1];
+    }
+
+    function appendCooldownReductionMinDisplay(paragraph, minMs) {
+        if (minMs == null || !Number.isFinite(minMs) || paragraph.querySelector('.bs-scaled-min-cd')) return;
+
+        const minTicks = msToGameCooldownTicks(minMs);
+        if (minTicks == null) return;
+        const { value, suffix } = formatTicksParts(minTicks);
+
+        paragraph.appendChild(document.createTextNode(', minimum '));
+        const minSpan = document.createElement('span');
+        minSpan.className = 'text-cooldown bs-scaled-min-cd';
+        minSpan.textContent = `${value}${suffix}`;
+        minSpan.title = `Minimum ability cooldown (${formatTicks(minTicks)})`;
+        paragraph.appendChild(minSpan);
+        paragraph.appendChild(document.createTextNode('.'));
+    }
+
+    function rewriteCooldownReductionClause(paragraph, durationSpan, scaled, originalText, minMs) {
+        applyScaledTooltipValue(durationSpan, originalText, scaled, originalText);
+        collapseTooltipScalingSuffix(paragraph, durationSpan);
+        normalizeScaledInlineSpacing(durationSpan);
+        appendCooldownReductionMinDisplay(paragraph, minMs);
+        if (!paragraph.textContent?.trim().endsWith('.')) {
+            paragraph.appendChild(document.createTextNode('.'));
+        }
+    }
+
+    function enhanceCooldownReductionParagraphs(root, unit) {
+        if (!root || !unit || unit.ap == null || !Number.isFinite(unit.ap)) return 0;
+
+        let applied = 0;
+        for (const paragraph of root.querySelectorAll('p')) {
+            if (!isCooldownApReductionParagraph(paragraph)) continue;
+
+            const durationSpan = findCooldownReductionDurationSpan(paragraph);
+            if (!durationSpan || durationSpan.classList.contains('bs-scaled-value')) continue;
+
+            const originalText = durationSpan.textContent?.trim() ?? '';
+            const reductionPerApMs = parseTooltipDurationText(originalText);
+            if (!reductionPerApMs) continue;
+
+            const { baseMs, minMs } = resolveCdrBoundsForUnit(unit, reductionPerApMs);
+            let scaled = buildScaledCooldownReductionTotalDisplay(unit.ap, reductionPerApMs, { baseMs, minMs });
+            if (!scaled) continue;
+
+            logAbilityScaling('cooldown reduction', {
+                originalText,
+                reductionPerApMs,
+                ap: unit.ap,
+                baseMs,
+                minMs,
+                scaled,
+                abilitySrc: unit.abilitySrc,
+                gameId: unit.gameId,
+                name: unit.name
+            });
+
+            rewriteCooldownReductionClause(paragraph, durationSpan, scaled, originalText, minMs);
+            applied += 1;
+        }
+        return applied;
+    }
+
+    function collapseTooltipScalingSuffix(wrap, baseSpan) {
+        if (!wrap || !baseSpan) return;
+        let node = baseSpan.nextSibling;
+        while (node) {
+            const next = node.nextSibling;
+            wrap.removeChild(node);
+            node = next;
+        }
+    }
+
+    function ensureAdjacentTooltipSpace(node, sides = {}) {
+        if (!node?.parentNode) return;
+        if (sides.before) {
+            const prev = node.previousSibling;
+            if (prev?.nodeType === Node.TEXT_NODE) {
+                if (!/\s$/.test(prev.textContent)) {
+                    prev.textContent += ' ';
+                }
+            } else {
+                node.parentNode.insertBefore(document.createTextNode(' '), node);
+            }
+        }
+        if (sides.after) {
+            const next = node.nextSibling;
+            if (next?.nodeType === Node.TEXT_NODE) {
+                if (!/^\s/.test(next.textContent)) {
+                    next.textContent = ` ${next.textContent}`;
+                }
+            } else if (next) {
+                node.parentNode.insertBefore(document.createTextNode(' '), next);
+            } else {
+                node.parentNode.appendChild(document.createTextNode(' '));
+            }
+        }
+    }
+
+    function trimParenthesisAroundNode(node) {
+        if (!node?.parentNode) return;
+        let prev = node.previousSibling;
+        while (prev) {
+            if (prev.nodeType !== Node.TEXT_NODE) break;
+            const text = prev.textContent;
+            if (!text.includes('(')) break;
+            if (/^\s*\(\s*$/.test(text)) {
+                prev.remove();
+            } else {
+                prev.textContent = text.replace(/\s*\(\s*$/, '');
+            }
+            break;
+        }
+        let next = node.nextSibling;
+        while (next) {
+            if (next.nodeType !== Node.TEXT_NODE) break;
+            const text = next.textContent;
+            if (!text.includes(')')) break;
+            if (/^\s*\)\s*$/.test(text)) {
+                next.remove();
+            } else {
+                next.textContent = text.replace(/^\s*\)\s*/, '');
+            }
+            break;
+        }
+    }
+
+    function normalizeScaledInlineSpacing(node) {
+        ensureAdjacentTooltipSpace(node, { before: true, after: true });
+    }
+
+    function collapseTooltipRatioSpan(ratioSpan, valueNode) {
+        if (!ratioSpan) return;
+        trimParenthesisAroundNode(ratioSpan);
+        ratioSpan.remove();
+        normalizeScaledInlineSpacing(valueNode);
+    }
+
+    function parseTooltipStatMultiplierSpan(span) {
+        const text = span.textContent?.trim() ?? '';
+        if (/\bper\b/i.test(text) || /%/.test(text) || /\ba cada\b/i.test(text)) return null;
+
+        const match = text.match(/^([\d.]+)/);
+        if (!match) return null;
+        const ratio = parseFloat(match[1]);
+        if (!Number.isFinite(ratio) || ratio < 0) return null;
+
+        const img = span.querySelector('img[alt]');
+        const alt = String(img?.getAttribute('alt') || '').toLowerCase();
+        const isAp = alt.includes('ability power') || alt.includes('abilitypower');
+        const isAd = alt.includes('attack damage') || alt.includes('attackdamage');
+        if (!isAp && !isAd) return null;
+
+        return { ratio };
+    }
+
+    function buildScaledStatMultiplierResult(statInfo, ratio) {
+        const statValue = statInfo?.value;
+        const statLabel = statInfo?.label || 'stat';
+        if (statValue == null || !Number.isFinite(statValue)) return null;
+
+        const rawTotal = statValue * ratio;
+        const total = Math.floor(rawTotal);
+        const inner = `${statValue} ${statLabel} × ${ratio}`;
+        const expression = formatScalingExpression(inner, rawTotal, total);
+        return {
+            value: total,
+            suffix: '',
+            title: buildScalingMathTitle({
+                base: 0,
+                statValue,
+                statLabel,
+                total,
+                expression
+            })
+        };
+    }
+
+    function detectInlineStatMultiplierDamageType(span, contextText, statInfo) {
+        if (span.classList.contains('text-healing')) return 'heal';
+        const ctx = String(contextText || '').toLowerCase();
+        if (/\b(heal|heals|self-heals?|restores|regenerates)\b/.test(ctx)) return 'heal';
+        return detectTooltipScalingDamageType(span, contextText, statInfo) || 'magic';
+    }
+
+    function enhanceInlineStatMultiplierSpan(span, unit) {
+        if (!span || span.classList.contains('bs-scaled-value')) return false;
+        if (span.closest('span.whitespace-nowrap')) return false;
+        if (span.style.display === 'none') return false;
+        if (isCooldownPerApMarkerSpan(span)) return false;
+
+        const parsed = parseTooltipStatMultiplierSpan(span);
+        if (!parsed) return false;
+
+        const statInfo = resolveAbilityScalingStatInfo(span, unit);
+        const scaled = buildScaledStatMultiplierResult(statInfo, parsed.ratio);
+        if (!scaled) return false;
+
+        const container = span.closest('p, li');
+        const contextText = container?.textContent || '';
+        const damageType = detectInlineStatMultiplierDamageType(span, contextText, statInfo);
+
+        trimParenthesisAroundNode(span);
+
+        const wrap = document.createElement('span');
+        wrap.className = 'whitespace-nowrap';
+        const valueSpan = document.createElement('span');
+        wrap.appendChild(valueSpan);
+
+        applyScaledTooltipValue(valueSpan, '0', scaled, String(parsed.ratio));
+        if (damageType) applyScaledDamageTypePresentation(wrap, valueSpan, damageType);
+
+        span.replaceWith(wrap);
+        normalizeScaledInlineSpacing(wrap);
+
+        logAbilityScaling('inline stat multiplier', {
+            ratio: parsed.ratio,
+            statValue: statInfo.value,
+            scaled,
+            damageType,
+            gameId: unit.gameId,
+            name: unit.name
+        });
+        return true;
+    }
+
+    function enhanceInlineFlatSpeedScalingSpan(span, unit) {
+        if (!span || span.classList.contains('bs-scaled-value')) return false;
+        if (span.closest('span.whitespace-nowrap')) return false;
+        if (span.style.display === 'none') return false;
+
+        const ratioText = span.textContent?.trim() ?? '';
+        const perChunk = parseTooltipPerChunkRatio(ratioText);
+        if (!perChunk || perChunk.isPercent || perChunk.isDuration) return false;
+
+        const container = span.closest('p, li');
+        if (!container || !/\bspeed\b/i.test(container.textContent)) return false;
+
+        let baseSpan = null;
+        for (const candidate of container.querySelectorAll('.text-speed')) {
+            if (candidate === span || candidate.classList.contains('bs-scaled-value')) continue;
+            if (parseTooltipFlatText(candidate.textContent?.trim()) != null) {
+                baseSpan = candidate;
+                break;
+            }
+        }
+        if (!baseSpan) return false;
+
+        const statInfo = resolveAbilityScalingStatInfo(span, unit);
+        const baseText = baseSpan.textContent?.trim() ?? '';
+        const scaled = computeScaledTooltipTotal(baseText, ratioText, statInfo, container.textContent);
+        if (!scaled) return false;
+
+        const sign = baseText.startsWith('+') ? '+' : (baseText.startsWith('-') ? '-' : '');
+        applyScaledTooltipValue(baseSpan, baseText, scaled, baseText);
+        if (sign) baseSpan.textContent = `${sign}${scaled.value}${scaled.suffix}`;
+
+        logAbilityScaling('inline speed boost', {
+            baseText,
+            ratioText,
+            statValue: statInfo.value,
+            scaled,
+            gameId: unit.gameId,
+            name: unit.name
+        });
+        collapseTooltipRatioSpan(span, baseSpan);
+        return true;
+    }
+
+    function enhanceInlinePercentScalingSpan(span, unit) {
+        if (!span || span.classList.contains('bs-scaled-value')) return false;
+        const text = span.textContent?.trim() ?? '';
+        const match = text.match(/^([+-]?[\d.]+)%\s*per\s*([\d.]+)/i);
+        if (!match) return false;
+
+        const statInfo = resolveAbilityScalingStatInfo(span, unit);
+        const statValue = statInfo.value;
+        if (statValue == null || !Number.isFinite(statValue)) return false;
+
+        const ratioAmount = parseFloat(match[1]);
+        const chunkSize = parseFloat(match[2]);
+        if (!Number.isFinite(ratioAmount) || !Number.isFinite(chunkSize) || chunkSize <= 0) return false;
+
+        const container = span.closest('p, li');
+        if (!container) return false;
+
+        let baseSpan = container.querySelector('.text-lifesteal');
+        if (!baseSpan || baseSpan === span || baseSpan.classList.contains('bs-scaled-value')) {
+            baseSpan = null;
+            for (const candidate of container.querySelectorAll('span')) {
+                if (candidate === span || candidate.classList.contains('bs-scaled-value')) continue;
+                if (parseTooltipLabeledPercentText(candidate.textContent?.trim()) != null) {
+                    baseSpan = candidate;
+                    break;
+                }
+            }
+        }
+        if (!baseSpan) return false;
+
+        const labeled = parseTooltipLabeledPercentText(baseSpan.textContent?.trim());
+        if (!labeled) return false;
+        const base = labeled.percent;
+        const rawTotal = base + (statValue / chunkSize) * ratioAmount;
+        const total = Math.floor(rawTotal);
+        const inner = `${base}% + (${statValue} ${statInfo.label} ÷ ${chunkSize}) × ${ratioAmount}%`;
+        const expression = formatScalingExpression(inner, rawTotal, total, '%');
+        applyScaledTooltipValue(baseSpan, `${base}%`, {
+            value: total,
+            suffix: '%',
+            title: buildScalingMathTitle({
+                base,
+                statValue,
+                statLabel: statInfo.label,
+                total,
+                suffix: '%',
+                expression
+            })
+        }, `${base}%`);
+        if (labeled.label) {
+            baseSpan.textContent = `${labeled.sign}${total}%${labeled.label}`;
+        }
+        collapseTooltipRatioSpan(span, baseSpan);
+        return true;
+    }
+
+    function enhanceAbilityTooltipScaledValues(root, unit) {
+        if (!root || !unit) return 0;
+        const scalingUnit = resolveUnitAbilityScalingStats(unit) || unit;
+        if (scalingUnit.ap == null && scalingUnit.ad == null && scalingUnit.hp == null) return 0;
+
+        let applied = enhanceCooldownReductionParagraphs(root, scalingUnit);
+
+        for (const wrap of root.querySelectorAll('span.whitespace-nowrap')) {
+            const spans = getTooltipWrapSpans(wrap);
+            if (spans.length < 2) {
+                if (wrap.querySelector('.bs-scaled-value')) {
+                    const icon = wrap.querySelector('.bs-scaled-damage-icon');
+                    if (icon) {
+                        icon.className = 'pixelated inline -translate-y-px bs-scaled-damage-icon';
+                        trimTooltipWrapTrailingContent(wrap);
+                    }
+                } else {
+                    logAbilityScalingVerbose('skip wrap: not enough spans', {
+                        spanCount: spans.length,
+                        html: wrap.innerHTML.slice(0, 120)
+                    });
+                }
+                continue;
+            }
+            if (spans[0].classList.contains('bs-scaled-value')) continue;
+
+            const baseText = spans[0].textContent?.trim() ?? '';
+            const ratioText = spans[1].textContent?.trim() ?? '';
+            const statInfo = resolveAbilityScalingStatInfo(wrap, scalingUnit);
+            const statValue = statInfo.value;
+            const contextText = wrap.closest('p')?.textContent || '';
+            if (isCooldownApReductionParagraph(wrap.closest('p'))) continue;
+            const scaled = computeScaledTooltipTotal(baseText, ratioText, statInfo, contextText);
+            logAbilityScaling('nowrap block', {
+                baseText,
+                ratioText,
+                statValue,
+                scaled,
+                gameId: scalingUnit.gameId,
+                name: scalingUnit.name
+            });
+            if (!scaled) continue;
+            const damageType = shouldAppendScaledDamageIcon(wrap, baseText, scaled, contextText, statInfo)
+                ? detectTooltipScalingDamageType(wrap, contextText, statInfo)
+                : null;
+            applyScaledTooltipValue(spans[0], baseText, scaled, baseText);
+            collapseTooltipScalingSuffix(wrap, spans[0]);
+            if (damageType) applyScaledDamageTypePresentation(wrap, spans[0], damageType);
+            applied += 1;
+        }
+
+        for (const span of root.querySelectorAll('.text-abilityPower, .text-villain')) {
+            if (enhanceInlineFlatSpeedScalingSpan(span, scalingUnit)) applied += 1;
+            else if (enhanceInlineStatMultiplierSpan(span, scalingUnit)) applied += 1;
+            else if (enhanceInlinePercentScalingSpan(span, scalingUnit)) applied += 1;
+        }
+
+        return applied;
+    }
+
+    function scheduleAbilityTooltipEnhance(root, unit, details, component, attempt = 0) {
+        if (!root || !unit) return;
+        if (attempt === 0 && root.dataset.abilityEnhancePending === '1') return;
+        const maxAttempts = 16;
+        const run = () => {
+            if (root.dataset.abilityScaled === '1' && attempt === 0) {
+                delete root.dataset.abilityEnhancePending;
+                return;
+            }
+            const applied = enhanceAbilityTooltipScaledValues(root, unit);
+            const wraps = root.querySelectorAll('span.whitespace-nowrap');
+            const scaled = root.querySelectorAll('.bs-scaled-value').length;
+            const hasContent = Boolean(root.textContent?.trim());
+            const hasStats = unit.ap != null || unit.ad != null || unit.hp != null;
+
+            logAbilityScalingVerbose('enhance attempt', {
+                attempt,
+                applied,
+                wraps: wraps.length,
+                scaled,
+                hasContent,
+                hasStats,
+                ap: unit.ap,
+                ad: unit.ad,
+                gameId: unit.gameId,
+                name: unit.name
+            });
+
+            if (!hasContent && attempt < maxAttempts) {
+                scheduleAbilityTooltipEnhance(root, unit, details, component, attempt + 1);
+                return;
+            }
+
+            const pendingScale = hasStats && wraps.length > 0 && scaled === 0;
+            if (pendingScale && attempt < maxAttempts) {
+                scheduleAbilityTooltipEnhance(root, unit, details, component, attempt + 1);
+                return;
+            }
+
+            if (pendingScale) {
+                warnAbilityScaling('scaling incomplete after retries', {
+                    gameId: unit.gameId,
+                    name: unit.name,
+                    ap: unit.ap,
+                    ad: unit.ad,
+                    wraps: wraps.length,
+                    html: root.innerHTML.slice(0, 240)
+                });
+            }
+
+            if (details && root.dataset.abilityScaled !== '1') {
+                freezeAbilityTooltipContent(details, root, component);
+            }
+            delete root.dataset.abilityEnhancePending;
+        };
+
+        if (attempt === 0) {
+            root.dataset.abilityEnhancePending = '1';
+            requestAnimationFrame(() => requestAnimationFrame(run));
+        } else if (attempt < 5) {
+            requestAnimationFrame(run);
+        } else {
+            setTimeout(run, 20 * Math.max(1, attempt - 3));
+        }
+    }
+
+    function syncAbilityDetailsDataset(details, unit) {
+        if (!details || !unit) return;
+        if (unit.gameId != null) details.dataset.unitGameId = String(unit.gameId);
+        details.dataset.unitAwaken = unit.awaken ? '1' : '0';
+        if (unit.ap != null) details.dataset.unitAp = String(Math.round(unit.ap));
+        else delete details.dataset.unitAp;
+        if (unit.ad != null) details.dataset.unitAd = String(Math.round(unit.ad));
+        else delete details.dataset.unitAd;
+    }
+
     function getAbilityText(gameId, awaken, options = {}) {
         const truncate = options.truncate ?? null;
+        const unit = options.unit ?? null;
         const abilityInfo = getAbilityInfo(gameId);
         const TooltipContent = abilityInfo?.TooltipContent;
         const createUIComponent = globalThis.state?.utils?.createUIComponent;
@@ -5833,6 +7282,10 @@
                 ? createUIComponent(root, TooltipContent, { awaken: true })
                 : createUIComponent(root, TooltipContent);
             if (component?.mount) component.mount();
+            if (unit) {
+                enhanceAbilityTooltipScaledValues(root, unit);
+                scheduleAbilityTooltipEnhance(root, unit, null, component);
+            }
 
             const text = (root.textContent || '').replace(/\s+/g, ' ').trim();
             if (component?.unmount) component.unmount();
@@ -5848,31 +7301,95 @@
 
     function unmountUnitAbilityDetails(details) {
         if (!details) return;
+        clearAbilityTooltipRefreshTimer(details);
         if (details._abilityComponent?.unmount) {
             try { details._abilityComponent.unmount(); } catch { /* ignore */ }
         }
         details._abilityComponent = null;
         delete details.dataset.abilityMountKey;
+        delete details.dataset.abilityScaled;
+        delete details.dataset.abilityTooltipTemplate;
         const mount = details.querySelector('.bs-ability-mount');
         if (mount) mount.innerHTML = '';
     }
 
     function abilityMountKey(unit) {
         if (!unit?.gameId) return null;
-        return `${unit.gameId}:${unit.awaken ? 1 : 0}`;
+        const ap = unit.ap != null ? Math.round(unit.ap) : 'x';
+        const ad = unit.ad != null ? Math.round(unit.ad) : 'x';
+        const equip = unit.equipment;
+        const equipSig = equip ? `${equip.stat || 'x'}:${equip.tier || 'x'}` : '';
+        return `${unit.gameId}:${unit.awaken ? 1 : 0}:${ap}:${ad}:${equipSig}`;
+    }
+
+    function findPanelUnitByCollapseKey(unitKey) {
+        const normalized = normalizeCollapseKey(unitKey);
+        if (!normalized) return null;
+        for (const unit of getCurrentPanelUnits()) {
+            if (normalizeCollapseKey(getUnitCollapseKey(unit)) === normalized) return unit;
+        }
+        return null;
+    }
+
+    function queueAbilityTooltipRefresh(details, unitKey) {
+        if (!details?.open || !unitKey) return;
+        const prev = abilityTooltipRefreshTimers.get(details);
+        if (prev) clearTimeout(prev);
+        const timer = setTimeout(() => {
+            abilityTooltipRefreshTimers.delete(details);
+            const unit = findPanelUnitByCollapseKey(unitKey);
+            if (!unit || !needsAbilityTooltipRefresh(details, unit)) return;
+            mountUnitAbilityDetails(details, unit);
+        }, ABILITY_TOOLTIP_REFRESH_MS);
+        abilityTooltipRefreshTimers.set(details, timer);
+    }
+
+    function clearAbilityTooltipRefreshTimer(details) {
+        const prev = abilityTooltipRefreshTimers.get(details);
+        if (prev) clearTimeout(prev);
+        abilityTooltipRefreshTimers.delete(details);
+    }
+
+    function needsAbilityTooltipRefresh(details, unit) {
+        if (!details?.open || !unit?.gameId) return false;
+        const mountKey = abilityMountKey(unit);
+        if (!mountKey) return false;
+        if (details.dataset.abilityMountKey !== mountKey) return true;
+        const root = details.querySelector('.bs-ability-mount .bs-ability-tooltip');
+        return root?.dataset?.abilityScaled !== '1';
     }
 
     function mountUnitAbilityDetails(details, unit) {
         if (!details || !unit?.gameId) return;
-        const mountKey = abilityMountKey(unit);
-        if (mountKey && details.dataset.abilityMountKey === mountKey && details._abilityComponent) {
+        clearAbilityTooltipRefreshTimer(details);
+        const resolvedUnit = unit.ap != null || unit.ad != null || unit.name
+            ? unit
+            : resolveUnitForAbilityDetails(details) || unit;
+        const scalingUnit = resolveUnitAbilityScalingStats(resolvedUnit) || resolvedUnit;
+        syncAbilityDetailsDataset(details, scalingUnit);
+        const mountKey = abilityMountKey(resolvedUnit);
+        const mount = details.querySelector('.bs-ability-mount');
+        const existingRoot = mount?.querySelector('.bs-ability-tooltip');
+        if (mountKey && details.dataset.abilityMountKey === mountKey) {
+            if (existingRoot?.dataset?.abilityScaled === '1') {
+                return;
+            }
+            if (details._abilityComponent && existingRoot) {
+                scheduleAbilityTooltipEnhance(existingRoot, scalingUnit, details, details._abilityComponent);
+                return;
+            }
+        }
+        if (mountKey && details.dataset.abilityMountKey !== mountKey && existingRoot && details.dataset.abilityTooltipTemplate) {
+            existingRoot.innerHTML = details.dataset.abilityTooltipTemplate;
+            delete existingRoot.dataset.abilityScaled;
+            details.dataset.abilityMountKey = mountKey;
+            scheduleAbilityTooltipEnhance(existingRoot, scalingUnit, details, null);
             return;
         }
-        const abilityInfo = getAbilityInfo(unit.gameId);
-        const mount = details.querySelector('.bs-ability-mount');
         if (!mount) return;
 
         unmountUnitAbilityDetails(details);
+        const abilityInfo = getAbilityInfo(resolvedUnit.gameId);
         if (!abilityInfo?.TooltipContent) {
             mount.textContent = t('mods.betterAnalytics.abilityDetailsUnavailable');
             return;
@@ -5890,15 +7407,17 @@
         mount.appendChild(root);
 
         try {
-            const component = unit.awaken
+            const component = resolvedUnit.awaken
                 ? createUIComponent(root, abilityInfo.TooltipContent, { awaken: true })
                 : createUIComponent(root, abilityInfo.TooltipContent);
             if (component?.mount) component.mount();
+            details.dataset.abilityTooltipTemplate = root.innerHTML;
             details._abilityComponent = component;
             if (mountKey) details.dataset.abilityMountKey = mountKey;
             root.querySelectorAll('blockquote').forEach((bq) => {
                 bq.style.setProperty('font-size', '10px', 'important');
             });
+            scheduleAbilityTooltipEnhance(root, scalingUnit, details, component);
         } catch {
             mount.textContent = t('mods.betterAnalytics.abilityDetailsUnavailable');
         }
@@ -5922,8 +7441,10 @@
         const openAttr = isUnitAbilityOpen(unit) ? ' open' : '';
         const gameIdAttr = unit.gameId != null ? ` data-unit-game-id="${escapeHtml(String(unit.gameId))}"` : '';
         const awakenAttr = ` data-unit-awaken="${unit.awaken ? '1' : '0'}"`;
+        const apAttr = unit.ap != null ? ` data-unit-ap="${escapeHtml(String(Math.round(unit.ap)))}"` : '';
+        const adAttr = unit.ad != null ? ` data-unit-ad="${escapeHtml(String(Math.round(unit.ad)))}"` : '';
 
-        return `<details class="bs-details bs-ability-details"${openAttr}${gameIdAttr}${awakenAttr}>` +
+        return `<details class="bs-details bs-ability-details"${openAttr}${gameIdAttr}${awakenAttr}${apAttr}${adAttr}>` +
             `<summary class="bs-ability-summary" title="Click to expand ability details">` +
                 `<span class="bs-ability-chevron" aria-hidden="true">▶</span>` +
                 `<span class="bs-label">Ability</span>` +
@@ -5936,18 +7457,46 @@
     function hydrateUnitCardAbility(card, unit) {
         const details = card?.querySelector('.bs-ability-details');
         if (!details) return;
-        if (unit.gameId != null) details.dataset.unitGameId = String(unit.gameId);
-        details.dataset.unitAwaken = unit.awaken ? '1' : '0';
-        if (details.open) mountUnitAbilityDetails(details, unit);
+        syncAbilityDetailsDataset(details, unit);
+        if (details.open && needsAbilityTooltipRefresh(details, unit)) {
+            queueAbilityTooltipRefresh(details, normalizeCollapseKey(getUnitCollapseKey(unit)));
+        }
+    }
+
+    function getCurrentPanelUnits() {
+        if (isFightActive()) return collectActorSnapshots() || [];
+        return getBoardPreviewUnits();
+    }
+
+    function readAbilityDetailsStat(dataset, key) {
+        const raw = dataset?.[key];
+        if (raw === undefined || raw === '') return null;
+        const value = Number(raw);
+        return Number.isFinite(value) ? value : null;
     }
 
     function resolveUnitFromAbilityDetails(details) {
         if (!details) return null;
-        const gameId = Number(details.dataset.unitGameId);
         return {
-            gameId: Number.isFinite(gameId) ? gameId : null,
-            awaken: details.dataset.unitAwaken === '1'
+            gameId: readAbilityDetailsStat(details.dataset, 'unitGameId'),
+            awaken: details.dataset.unitAwaken === '1',
+            ap: readAbilityDetailsStat(details.dataset, 'unitAp'),
+            ad: readAbilityDetailsStat(details.dataset, 'unitAd')
         };
+    }
+
+    function resolveUnitForAbilityDetails(details) {
+        if (!details) return null;
+        const card = details.closest('.bs-card');
+        const unitKey = card?.dataset?.unitKey;
+        if (unitKey) {
+            for (const unit of getCurrentPanelUnits()) {
+                if (normalizeCollapseKey(getUnitCollapseKey(unit)) === unitKey) return unit;
+            }
+        }
+        const partial = resolveUnitFromAbilityDetails(details);
+        if (partial?.gameId == null) return null;
+        return partial;
     }
 
     function handleUnitsBodyAbilityToggle(e) {
@@ -5956,7 +7505,7 @@
         const card = details.closest('.bs-card');
         const key = card?.dataset?.unitKey;
         if (key) writeOpenAbilityOverride(key, details.open);
-        if (details.open) mountUnitAbilityDetails(details, resolveUnitFromAbilityDetails(details));
+        if (details.open) mountUnitAbilityDetails(details, resolveUnitForAbilityDetails(details));
         else unmountUnitAbilityDetails(details);
     }
 
@@ -6060,7 +7609,7 @@
         }
         if (unit.alive === false) lines.push(`  ${t('mods.betterAnalytics.defeated')}`);
 
-        const abilityText = unit.gameId ? getAbilityText(unit.gameId, unit.awaken) : '';
+        const abilityText = unit.gameId ? getAbilityText(unit.gameId, unit.awaken, { unit }) : '';
         if (abilityText) lines.push(`  Ability description: ${abilityText}`);
 
         return lines.join('\n');
@@ -6072,7 +7621,7 @@
         const fightEnded = isPanelFightResolved() && panelFightTickFrozen != null;
         const fighting = isLiveFightTracking();
         const tick = getFightTick();
-        const seed = getSeed();
+        const seed = panelFightSeedFrozen ?? getSeed();
         const modeLabel = getPlayModeLabel();
         const roomName = getRoomDisplayName(resolveCurrentRoomId());
 
@@ -6226,8 +7775,8 @@
                     stats.damageDealt += entry.amount;
                     const raw = entry.rawAmount != null ? entry.rawAmount : entry.amount;
                     stats.rawDamageDealt += raw;
-                    if (entry.rawAmount != null && entry.rawAmount > entry.amount) {
-                        stats.overkill += entry.rawAmount - entry.amount;
+                    if (entry.overkill > 0) {
+                        stats.overkill += entry.overkill;
                     }
                     if (entry.crit) stats.crits++;
                 }
@@ -7604,6 +9153,18 @@
                 font-size: 10px;
                 line-height: 1.35;
             }
+            #${PANEL_ID} .bs-ability-mount .bs-scaled-value {
+                text-decoration: underline solid rgba(192, 132, 252, 0.55);
+                text-underline-offset: 2px;
+                cursor: help;
+            }
+            #${PANEL_ID} .bs-ability-mount .bs-scaled-damage-icon {
+                vertical-align: middle;
+                margin-right: -1px;
+            }
+            #${PANEL_ID} .bs-ability-mount .bs-true-damage-icon {
+                filter: brightness(0) invert(1);
+            }
             #${PANEL_ID}.resizing {
                 user-select: none;
             }
@@ -8045,6 +9606,26 @@
         return buildUnitCardStatsHtml(unit) + buildUnitCardMechanicsHtml(unit);
     }
 
+    function buildUnitCardPatchKey(unit) {
+        return [
+            unit.hp,
+            unit.hpMax,
+            unit.ap,
+            unit.ad,
+            unit.armor,
+            unit.magicResist,
+            unit.speed,
+            unit.alive,
+            unit.silenced,
+            unit.buffedCount,
+            resolveUnitAttackDelayRemainingTicks(unit),
+            unit.attackDelayReady,
+            resolveUnitCooldownRemainingTicks(unit),
+            unit.cooldownReady,
+            (unit.statusEffects || []).map((e) => e.id).join('+')
+        ].join(':');
+    }
+
     function patchUnitCardsLiveStats(body, units) {
         const unitByKey = new Map();
         for (const unit of units) {
@@ -8053,6 +9634,18 @@
         for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
             const unit = unitByKey.get(card.dataset.unitKey);
             if (!unit) continue;
+            const patchKey = buildUnitCardPatchKey(unit);
+            const abilityDetails = card.querySelector('.bs-ability-details');
+            if (card.dataset.unitPatchKey === patchKey) {
+                if (abilityDetails?.open) {
+                    syncAbilityDetailsDataset(abilityDetails, unit);
+                    if (needsAbilityTooltipRefresh(abilityDetails, unit)) {
+                        queueAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey);
+                    }
+                }
+                continue;
+            }
+            card.dataset.unitPatchKey = patchKey;
             card.classList.toggle('dead', unit.alive === false);
             const compact = renderCompactSummary(unit);
             const compactEl = card.querySelector('.bs-card-compact');
@@ -8081,6 +9674,12 @@
             }
             const live = card.querySelector('.bs-card-live');
             if (live) live.innerHTML = buildUnitCardLiveInnerHtml(unit);
+            if (abilityDetails) {
+                syncAbilityDetailsDataset(abilityDetails, unit);
+                if (abilityDetails.open && needsAbilityTooltipRefresh(abilityDetails, unit)) {
+                    queueAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey);
+                }
+            }
             const nameEl = card.querySelector('.bs-card-name');
             if (nameEl) nameEl.textContent = getUnitDisplayName(unit);
         }
@@ -8156,17 +9755,18 @@
     function buildStatusBarSignature() {
         const fightEnded = isPanelFightResolved() && panelFightTickFrozen != null;
         const fighting = isLiveFightTracking();
+        const seed = fightEnded ? panelFightSeedFrozen : getSeed();
         return [
             resolveCurrentRoomId(),
             getPlayModeLabel(),
             fightEnded ? 'end' : fighting ? 'fight' : 'idle',
             getPanelTickRenderKey(),
-            getSeed(),
+            seed,
             isSandboxMode(),
             slowMotionEnabled,
             gameSpeedPercent,
             window.__turboState?.active === true,
-            resolveCurrentFloor()
+            fightEnded ? 'frozen' : resolveCurrentFloor()
         ].join('|');
     }
 
@@ -8185,7 +9785,7 @@
         const fightEnded = isPanelFightResolved() && panelFightTickFrozen != null;
         const fighting = isLiveFightTracking();
         const tick = getFightTick();
-        const seed = getSeed();
+        const seed = panelFightSeedFrozen ?? getSeed();
         const modeLabel = getPlayModeLabel();
 
         const roomName = getRoomDisplayName(resolveCurrentRoomId());
@@ -8246,6 +9846,8 @@
         return buildUnitsStructureKey(units) + '|live:' + units.map((u) => [
             u.hp,
             u.hpMax,
+            u.ap,
+            u.ad,
             resolveUnitAttackDelayRemainingTicks(u),
             u.attackDelayReady,
             resolveUnitCooldownRemainingTicks(u),
@@ -8502,7 +10104,7 @@
     function render() {
         const panel = document.getElementById(PANEL_ID);
         if (!panel || panel.style.display === 'none') return;
-        renderStatusBar(true);
+        renderStatusBar();
         const forceUnits = pendingUnitsForceRefresh;
         pendingUnitsForceRefresh = false;
         const forceSummary = activeTab === 'summary' && panelFightTickFrozen != null;
@@ -8512,10 +10114,9 @@
     function syncPanelTickTracking() {
         const panel = document.getElementById(PANEL_ID);
         const panelOpen = panel && panel.style.display !== 'none';
-        if (panelOpen && (isLiveFightTracking() || panelFightTickFrozen != null)) {
+        if (panelOpen && isLiveFightTracking()) {
             setupPanelGameTimerSub();
-            if (isLiveFightTracking()) startPanelTickPoll();
-            else stopPanelTickPoll();
+            startPanelTickPoll();
         } else {
             teardownPanelGameTimerSub();
             stopPanelTickPoll();
@@ -8589,6 +10190,9 @@
                 const boardConfigSel = board.select((state) =>
                     getBoardConfigSignature(state?.context?.boardConfig));
                 const configSub = boardConfigSel.subscribe(() => {
+                    const configSig = getBoardConfigSignature(getBoardContext()?.boardConfig);
+                    if (configSig === boardTrack.configSig) return;
+                    boardTrack.configSig = configSig;
                     lastUnitsRenderKey = '';
                     pendingUnitsForceRefresh = true;
                     render();
@@ -8897,6 +10501,7 @@
         }
         panel.style.display = 'flex';
         savePanelSettings({ isOpen: true });
+        prefetchGameChunk661ForCdr();
         ensureUnitsBodyListener();
         updateSpeedSliderUi();
         activeTab = normalizeActiveTab(loadPanelSettings().activeTab);
@@ -8994,6 +10599,7 @@
             loadLogFilters();
             setupBoardListeners();
             setupTickSpeedControl();
+            prefetchGameChunk661ForCdr();
             createToolbarButton();
             if (saved.isOpen) openPanel();
             else updateSpeedSliderUi();

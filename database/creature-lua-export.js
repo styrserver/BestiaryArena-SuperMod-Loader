@@ -14,6 +14,8 @@ Maintainer workflow
 2. Run dumpCreatureWikiLua(); downloads creature-wiki-YYYY-MM-DD.lua — paste into the wiki page.
 3. Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_speed,
    is_poisonous, roles) come from getMonster + creature-database HARDCODED_MAP_MONSTER_STATS.
+   Obtainable creatures export maxed lvl 50 and lvl 99 via scaleStat as "50 (99)" when they differ.
+   Gazers and unobtainable creatures use fixed base stats (no level scaling).
 4. Wiki-only fields (attack_speed, scales_ad, scales_ap, Picture_Creature, Albino Gazer stats)
    live in WIKI_CREATURE_EXTRA_FIELDS below — update when wiki rules change.
 5. Section lists follow creature-database.js (ALL_CREATURES, EVENT_CREATURES,
@@ -47,7 +49,9 @@ const WIKI_CREATURE_KEY_ALIASES = {
 const WIKI_EXTRA_UNOBTAINABLE = [
   'Barrel',
   'Beer Barrel',
+  'Larva',
   'Orc Warrior',
+  'Scarab',
   'Snowman',
   'Squidgy Slime',
   'Stone Golem',
@@ -113,6 +117,10 @@ const WIKI_CREATURE_EXTRA_FIELDS = {
   'Gummy Raider': { attack_speed: 0.5, scales_ad: 'auto', scales_ap: 'spell' },
   'Knight': { attack_speed: 0.15, scales_ad: 'auto', scales_ap: 'spell' },
   'Lavahole': { attack_speed: 0.5 },
+  'Larva': {
+    stats: { hp: 324, ad: 0, ap: 0, armor: 15, magicResist: 11, speed: 45 },
+    attack_speed: 0.5
+  },
   'Magma Crystal': { attack_speed: 0.5 },
   'Minotaur': { attack_speed: 0.33, scales_ad: 'auto', scales_ap: 'spell' },
   'Minotaur Archer': { attack_speed: 0.25, scales_ad: 'auto', scales_ap: '' },
@@ -141,6 +149,10 @@ const WIKI_CREATURE_EXTRA_FIELDS = {
   'Rorc': { attack_speed: 0.5, scales_ad: 'auto', scales_ap: 'spell' },
   'Rotworm': { attack_speed: 0.33, scales_ad: 'auto', scales_ap: 'spell' },
   'Scorpion': { attack_speed: 0.33, scales_ad: 'auto', scales_ap: 'spell' },
+  'Scarab': {
+    stats: { hp: 2400, ad: 0, ap: 0, armor: 48, magicResist: 30, speed: 45 },
+    attack_speed: 0.5
+  },
   'Sheep': { attack_speed: 0.5, scales_ad: '', scales_ap: 'spell' },
   'Skeleton': { attack_speed: 0.5, scales_ad: 'auto', scales_ap: 'spell' },
   'Slime': { attack_speed: 0.25, scales_ad: 'auto', scales_ap: 'spell' },
@@ -183,8 +195,10 @@ const WIKI_HEADER_COMMENTS = `-- CENTRAL DATABASE FOR CREATURE STATS
 -- =============================================================================
 
 -- NEW ENTRY TEMPLATE:
--- ["Name"] = { title1 = "Name", roles = { "Role" }, hitpoints = 0, attack = 0, ability_power = 0, armor = 0, magic_resist = 0, attack_speed = 0.50, movement_speed = 0, is_poisonous = false, scales_ad = "auto", scales_ap = "spell" },
+-- ["Name"] = { title1 = "Name", roles = { "Role" }, hitpoints = "500 (1200)", attack = 0, ability_power = 0, armor = 0, magic_resist = 0, attack_speed = 0.50, movement_speed = 0, is_poisonous = false, scales_ad = "auto", scales_ap = "spell" },
 `;
+
+const MAXED_GENE_VALUE = 20;
 
 function getCreatureDb() {
   try {
@@ -214,6 +228,41 @@ function formatLuaNumber(value, { attackSpeed = false, unobtainable = false } = 
     return fixed.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
   }
   return String(Math.round(value));
+}
+
+function formatLuaStatValue(value, options = {}) {
+  if (typeof value === 'string') return luaStringLiteral(value);
+  return formatLuaNumber(value, options);
+}
+
+function scaleCreatureStat(baseValue, level, geneValue = MAXED_GENE_VALUE) {
+  const scaleStat = globalThis.state?.utils?.scaleStat;
+  if (typeof scaleStat !== 'function' || typeof baseValue !== 'number' || !Number.isFinite(baseValue)) {
+    return null;
+  }
+  try {
+    const scaled = Number(scaleStat({ stat: baseValue, level, geneValue, awaken: false }));
+    return Number.isFinite(scaled) ? Math.round(scaled) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function formatDualMaxedStat(lvl50, lvl99) {
+  const rounded50 = Math.round(lvl50);
+  const rounded99 = Math.round(lvl99);
+  if (rounded50 === rounded99) return rounded50;
+  return `${rounded50} (${rounded99})`;
+}
+
+function formatMaxedLevelStat(baseValue, canScale) {
+  const fallback = Math.round(baseValue ?? 0);
+  if (!canScale) return fallback;
+
+  const lvl50 = scaleCreatureStat(baseValue, 50);
+  const lvl99 = scaleCreatureStat(baseValue, 99);
+  if (lvl50 == null || lvl99 == null) return fallback;
+  return formatDualMaxedStat(lvl50, lvl99);
 }
 
 /** Pad \`["Name"]\` so \`=\` lines up for wiki-style tables. */
@@ -340,16 +389,17 @@ function resolveCreatureStats(creatureName, section) {
     (section === 'unobtainable' ? 0.5 : 0.5);
 
   const roles = Array.isArray(extras.roles) ? extras.roles : normalizeCreatureRoles(monster);
+  const canScaleStats = section !== 'unobtainable' && section !== 'gazers';
 
   return {
     wikiKey,
     title1: wikiKey,
     roles,
-    hitpoints: mergedBase.hp ?? 0,
-    attack: mergedBase.ad ?? 0,
-    ability_power: mergedBase.ap ?? 0,
-    armor: mergedBase.armor ?? 0,
-    magic_resist: mergedBase.magicResist ?? 0,
+    hitpoints: formatMaxedLevelStat(mergedBase.hp ?? 0, canScaleStats),
+    attack: formatMaxedLevelStat(mergedBase.ad ?? 0, canScaleStats),
+    ability_power: formatMaxedLevelStat(mergedBase.ap ?? 0, canScaleStats),
+    armor: formatMaxedLevelStat(mergedBase.armor ?? 0, canScaleStats),
+    magic_resist: formatMaxedLevelStat(mergedBase.magicResist ?? 0, canScaleStats),
     attack_speed: attackSpeed,
     movement_speed: mergedBase.speed ?? 0,
     is_poisonous: creatureHasPoisonousRole(monster),
@@ -371,17 +421,17 @@ function buildCreatureLuaFieldParts(fields, section) {
   }
 
   parts.push(
-    `hitpoints = ${formatLuaNumber(fields.hitpoints)}`,
-    `attack = ${formatLuaNumber(fields.attack)}`
+    `hitpoints = ${formatLuaStatValue(fields.hitpoints)}`,
+    `attack = ${formatLuaStatValue(fields.attack)}`
   );
 
   if (!unobtainable || fields.ability_power) {
-    parts.push(`ability_power = ${formatLuaNumber(fields.ability_power)}`);
+    parts.push(`ability_power = ${formatLuaStatValue(fields.ability_power)}`);
   }
 
   parts.push(
-    `armor = ${formatLuaNumber(fields.armor)}`,
-    `magic_resist = ${formatLuaNumber(fields.magic_resist)}`,
+    `armor = ${formatLuaStatValue(fields.armor)}`,
+    `magic_resist = ${formatLuaStatValue(fields.magic_resist)}`,
     `attack_speed = ${formatLuaNumber(fields.attack_speed, { attackSpeed: true, unobtainable })}`,
     `movement_speed = ${formatLuaNumber(fields.movement_speed)}`
   );
@@ -602,6 +652,10 @@ if (typeof module !== 'undefined' && module.exports) {
     dumpCreatureWikiLua,
     getCreatureExportSections,
     resolveCreatureStats,
+    scaleCreatureStat,
+    formatMaxedLevelStat,
+    formatDualMaxedStat,
+    formatLuaStatValue,
     normalizeCreatureRoles,
     formatCreatureLuaRow,
     buildWikiLuaDocument,

@@ -1111,17 +1111,66 @@ browserAPI.tabs.onRemoved.addListener((tabId) => {
 // Mirrors content_scripts exclude_matches in manifest.json — when a URL is excluded,
 // no content script runs, so checkAPI fails and this listener would otherwise inject
 // injector.js via scripting.executeScript and bypass the exclusion.
+const BESTIARY_MOD_INJECTION_EXCLUDE_PATTERNS = (() => {
+  try {
+    const patterns = new Set();
+    for (const entry of browserAPI.runtime.getManifest().content_scripts || []) {
+      for (const pattern of entry.exclude_matches || []) {
+        patterns.add(pattern);
+      }
+    }
+    return [...patterns];
+  } catch {
+    return [];
+  }
+})();
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function urlMatchesChromeMatchPattern(url, pattern) {
+  const match = pattern.match(/^(\*|https?|file|ftp):\/\/([^/]+)(\/.*)$/);
+  if (!match) return false;
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return false;
+  }
+
+  const [, schemePattern, hostPattern, pathPattern] = match;
+  const scheme = parsedUrl.protocol.replace(':', '');
+
+  if (schemePattern !== '*') {
+    if (schemePattern !== scheme) return false;
+  } else if (!['http', 'https', 'file', 'ftp'].includes(scheme)) {
+    return false;
+  }
+
+  let hostRegex;
+  if (hostPattern === '*') {
+    hostRegex = /^.*$/;
+  } else if (hostPattern.startsWith('*.')) {
+    const suffix = escapeRegExp(hostPattern.slice(2));
+    hostRegex = new RegExp(`^(.+\\.)?${suffix}$`);
+  } else {
+    hostRegex = new RegExp(`^${escapeRegExp(hostPattern)}$`);
+  }
+  if (!hostRegex.test(parsedUrl.hostname)) return false;
+
+  const pathRegex = new RegExp(`^${pathPattern.split('*').map(escapeRegExp).join('.*')}$`);
+  return pathRegex.test(parsedUrl.pathname);
+}
+
 function isBestiaryExcludedFromModInjectionUrl(url) {
   try {
-    const u = new URL(url);
-    if (!u.hostname.endsWith('bestiaryarena.com')) return false;
-    const p = u.pathname;
-    if (p.startsWith('/profile/') || p === '/profile') return true;
-    if (p.startsWith('/recolor')) return true;
-    if (p.startsWith('/assets')) return true;
-    if (p.startsWith('/_next/')) return true;
-    if (p === '/seasons' || p.startsWith('/seasons/')) return true;
-    return false;
+    const hostname = new URL(url).hostname;
+    if (!hostname.endsWith('bestiaryarena.com')) return false;
+    return BESTIARY_MOD_INJECTION_EXCLUDE_PATTERNS.some(
+      (pattern) => urlMatchesChromeMatchPattern(url, pattern)
+    );
   } catch {
     return false;
   }
