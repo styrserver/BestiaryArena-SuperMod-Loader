@@ -216,11 +216,15 @@ const SKILL_PROGRESSION_CONFIG = {
 const EQUIPMENT_SKILL_MAPPING = {
   // Weapons that increase Axe Fighting
   'Fire Axe': 'axeFighting',
+  'Twin Axe': 'axeFighting',
+  'Vile Axe': 'axeFighting',
 
   // Weapons that increase Sword Fighting
   'Bloody Edge': 'swordFighting',
+  'Djinn Blade': 'swordFighting',
   'Epee': 'swordFighting',
   'Giant Sword': 'swordFighting',
+  'Haunted Blade': 'swordFighting',
   'Ice Rapier': 'swordFighting',
   'Ratana': 'swordFighting',
 

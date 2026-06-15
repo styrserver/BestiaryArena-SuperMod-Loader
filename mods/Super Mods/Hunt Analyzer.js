@@ -2930,6 +2930,11 @@ const UIElements = {
 // =======================
 
 const HUNT_ANALYZER_RUNE_LOOKUP_PATTERNS = [
+    { patterns: ['shinytransfer', 'shiny-transfer', 'transfusion'], key: 'runeTransfusion' },
+    { patterns: ['kaleidoscopic', 'monster-recycle'], key: 'runeKaleidoscopic' },
+    { patterns: ['conversionhp', 'conversion-hp'], key: 'runeConversionHp' },
+    { patterns: ['conversionad', 'conversion-ad'], key: 'runeConversionAd' },
+    { patterns: ['conversionap', 'conversion-ap'], key: 'runeConversionAp' },
     { patterns: ['blankrune', 'blank'], key: 'runeBlank' },
     { patterns: ['avaricerune', 'avarice'], key: 'runeAvarice' },
     { patterns: ['recyclerune', 'recycle'], key: 'runeRecycle' },
@@ -2948,6 +2953,11 @@ const HUNT_ANALYZER_TIERED_CONSUMABLE_RULES = [
 ];
 
 const HUNT_ANALYZER_RUNE_SPRITE_KEYS = [
+    ['rune-shiny-transfer', 'runeTransfusion'],
+    ['rune-monster-recycle', 'runeKaleidoscopic'],
+    ['rune-conversion-hp', 'runeConversionHp'],
+    ['rune-conversion-ad', 'runeConversionAd'],
+    ['rune-conversion-ap', 'runeConversionAp'],
     ['rune-avarice', 'runeAvarice'],
     ['rune-recycle', 'runeRecycle'],
     ['rune-hp', 'runeHp'],

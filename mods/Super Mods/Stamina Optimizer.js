@@ -52,7 +52,7 @@ const NAVIGATION_DELAY = 500;
 const AUTO_SETUP_DELAY = 800;
 const PAUSE_BUTTON_CLICK_DELAY = 100;
 const PAUSE_BUTTON_UPDATE_DELAY = 300;
-const MODS_LOADING_GRACE_PERIOD = 10000; // 10 seconds after allModsLoaded before allowing actions
+const MODS_LOADING_GRACE_PERIOD = 3000; // 3 seconds after allModsLoaded before allowing actions
 const MAX_WAIT_FOR_SIGNAL = 15000; // Maximum time to wait for allModsLoaded signal (15 seconds)
 
 const COLOR_ACCENT = '#ffe066';
@@ -1736,7 +1736,7 @@ async function monitorStamina() {
     if (gracePeriodEndTime > 0 && now < gracePeriodEndTime) {
         const remainingSeconds = Math.ceil((gracePeriodEndTime - now) / 1000);
         // Only log at 10s, 5s, and when it ends
-        if (remainingSeconds === 10 || remainingSeconds === 5 || remainingSeconds === 1) {
+        if (remainingSeconds === 3 || remainingSeconds === 2 || remainingSeconds === 1) {
             console.log(`[Stamina Optimizer] ⏳ Waiting for mods to finish loading (${remainingSeconds}s remaining)...`);
         }
         return;
@@ -1807,6 +1807,7 @@ function startStaminaMonitoring() {
         clearInterval(staminaCheckInterval);
     }
     
+    monitorStamina();
     staminaCheckInterval = setInterval(() => {
         if (!isLifecycleActive) return;
         monitorStamina();

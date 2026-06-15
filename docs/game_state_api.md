@@ -610,6 +610,18 @@ console.log(rat.metadata.baseStats); // HP, AD, AP, etc.
 // Get equipment data by ID
 const boots = globalThis.state.utils.getEquipment(1);
 console.log(boots.metadata.name); // "Boots of Haste"
+
+// Render equipment effect tooltips with tier-scaled values (T1–T5)
+const host = document.createElement('div');
+const component = window.equipmentDatabase.mountEquipmentEffectComponent(
+  host,
+  boots.metadata.EffectComponent,
+  4 // player's equipment tier — effect numbers scale with tier (T5 = max)
+);
+// component.unmount() when done
+
+// Tier stat bonuses (forge tiers Grey → Yellow) live on equipment-database.js:
+// window.equipmentDatabase.EQUIPMENT_TIER_STAT_BONUSES
 ```
 
 ### Monster Drop System

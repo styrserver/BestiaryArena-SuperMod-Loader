@@ -1214,6 +1214,11 @@
     const PANEL_TICK_POLL_MS = 50;
     const LIVE_PANEL_UPDATE_MS = 50;
     const LIVE_PANEL_UPDATE_MS_TURBO = 125;
+    const UNITS_LIVE_UPDATE_MS = 100;
+    const UNITS_LIVE_UPDATE_MS_TURBO = 175;
+    const UNITS_BOARD_UPDATE_MS = 300;
+    const UNITS_LAG_SLOW_MS = 8;
+    const UNITS_LAG_REPORT_MS = 2000;
     const ABILITY_TOOLTIP_REFRESH_MS = 100;
     const SUMMARY_UPDATE_MS = 100;
     const DEFAULT_TICK_INTERVAL_MS = 62.5;
@@ -1313,6 +1318,9 @@
     let boardUnsubs = [];
     const boardTrack = { roomId: null, floor: null, gameStarted: false, mode: null, configSig: '' };
     const previewMechanicsLogSig = new Map();
+    const previewMechanicsResultCache = new Map();
+    const metadataUntimedCooldownCache = new Map();
+    const unitsLagStats = { counts: new Map(), ms: new Map(), lastReport: 0 };
     let cachedBoardPreviewUnits = null;
     let cachedBoardPreviewSig = '';
     let cachedRefreshedBoardPreviewUnits = null;
@@ -1338,12 +1346,15 @@
     let cachedVisibleBattleLogFilterSig = '';
     let cachedActorSnapshots = null;
     let cachedActorSnapshotsTick = null;
+    let actorSnapshotCacheGen = 0;
+    const actorSnapshotCache = new WeakMap();
     let lastLivePanelUpdateMs = 0;
     let lastStatusBarSignature = '';
     let lastUnitStatusByKey = new Map();
     let battleLogTracking = false;
     let battleLogSessionEnded = false;
     let lastStatusPollTick = -1;
+    let lastStatTrackMs = 0;
     const statusLogDedupe = new Set();
     const statLogDedupe = new Set();
     const lastActorStatsByActor = new WeakMap();
@@ -1365,8 +1376,18 @@
     const abilityTooltipRefreshTimers = new WeakMap();
     const abilityScalingSubs = new WeakMap();
     const ABILITY_SCALING_STAT_KEYS = ['ap', 'ad', 'hp'];
+    const UNITS_LIVE_STAT_INVALIDATE_KEYS = new Set([
+        'hp', 'hpMax', 'ad', 'ap', 'armor', 'magicResist', 'speed',
+        'attackDelayTicks', 'abilityCdTicks'
+    ]);
     let unitsInteractUntil = 0;
     let lastUnitsRenderKey = '';
+    let lastUnitsLiveUpdateMs = 0;
+    let lastUnitsMechanicsPollSig = '';
+    let lastUnitsMechanicsProbeTick = null;
+    let actorUnitsMechanicsSubs = new Map();
+    let unitsMechanicsPatchTimer = null;
+    let unitsStatsPatchTimer = null;
     const UNITS_INTERACT_FREEZE_MS = 10;
     let pendingUnitsForceRefresh = false;
     const fightActorCollapseKeys = new WeakMap();
@@ -1523,6 +1544,7 @@
         activeWorld = w;
         registerFightActorCollapseKeys(activeWorld);
         setupWorldSubscriptions(activeWorld);
+        setupUnitsMechanicsSubscriptions(activeWorld);
         if (slowMotionEnabled && isSandboxMode()) applyTickIntervalToWorld(activeWorld);
     }
 
@@ -1988,6 +2010,9 @@
         panelFightSeedFrozen = null;
         panelTickRevision = 0;
         lastPanelSyncedEngineTick = null;
+        lastUnitsMechanicsProbeTick = null;
+        invalidateActorSnapshotsCache();
+        invalidateActorProbeCache();
         lastGameTimerFightState = getGameTimerFightState();
         lastStatusBarSignature = '';
     }
@@ -2009,6 +2034,11 @@
         } catch {
             return null;
         }
+    }
+
+    /** Engine tick for live fight probes — never use gameTimer.currentTick (stays 0 in manual fights). */
+    function resolveLiveEngineTick(world) {
+        return readTickFromEngine(world ?? getActiveWorld());
     }
 
     function resolveEngineTick(context, world) {
@@ -2082,6 +2112,29 @@
         return isFightActive() && panelFightEndState == null && panelFightTickFrozen == null;
     }
 
+    function readFightTickEnginePlaying(world) {
+        const w = world ?? getActiveWorld();
+        try {
+            const store = w?.tickEngine?.isPlayingStore;
+            if (!store) return true;
+            if (typeof store.getSnapshot === 'function') return store.getSnapshot() === true;
+            if (typeof store.get === 'function') return store.get() === true;
+        } catch { /* ignore */ }
+        return true;
+    }
+
+    /** Buff/debuff chips are transient combat UI — only while ticks are actively advancing. */
+    function shouldShowLiveStatusEffects() {
+        return isLiveFightTracking() && readFightTickEnginePlaying();
+    }
+
+    function refreshUnitsAfterStatusVisibilityChange() {
+        invalidateActorSnapshotsCache();
+        invalidateActorProbeCache();
+        lastUnitsRenderKey = '';
+        if (activeTab === 'units' && isPanelOpen()) renderUnits(true);
+    }
+
     /** Cached panel tick — updated only via syncPanelTick / freezePanelFightTickFromEngine. */
     function getFightTick() {
         if (panelFightTickFrozen != null) return panelFightTickFrozen;
@@ -2132,6 +2185,7 @@
         invalidatePreparedBattleLogSummaryCache();
         tryEndBattleLogSession();
         syncPanelTickTracking();
+        refreshUnitsAfterStatusVisibilityChange();
     }
 
     function teardownPanelGameTimerSub() {
@@ -2160,7 +2214,12 @@
         }
         const ctx = globalThis.state?.gameTimer?.getSnapshot?.()?.context;
         const tickChanged = syncPanelTick(ctx);
-        if (tickChanged) notifyPanelTickConsumers();
+        if (tickChanged) {
+            if (activeTab === 'units' && isFightActive()) {
+                patchUnitsLiveMechanicsIfNeeded();
+            }
+            notifyPanelTickConsumers();
+        }
     }
 
     function startPanelTickPoll() {
@@ -2177,8 +2236,177 @@
         return isTurboAccelerated() ? LIVE_PANEL_UPDATE_MS_TURBO : LIVE_PANEL_UPDATE_MS;
     }
 
+    function getUnitsLiveUpdateIntervalMs() {
+        return isTurboAccelerated() ? UNITS_LIVE_UPDATE_MS_TURBO : UNITS_LIVE_UPDATE_MS;
+    }
+
+    function getUnitsRenderIntervalMs() {
+        return isFightActive() ? getUnitsLiveUpdateIntervalMs() : UNITS_BOARD_UPDATE_MS;
+    }
+
+    function recordUnitsLag(label, elapsedMs) {
+        if (activeTab !== 'units') return;
+        unitsLagStats.counts.set(label, (unitsLagStats.counts.get(label) || 0) + 1);
+        unitsLagStats.ms.set(label, (unitsLagStats.ms.get(label) || 0) + elapsedMs);
+        if (elapsedMs >= UNITS_LAG_SLOW_MS) {
+            console.log(`[${modName}][UnitsLag] slow ${label}: ${elapsedMs.toFixed(1)}ms`);
+        }
+        reportUnitsLagSummary();
+    }
+
+    function reportUnitsLagSummary() {
+        const now = performance.now();
+        if (now - unitsLagStats.lastReport < UNITS_LAG_REPORT_MS) return;
+        unitsLagStats.lastReport = now;
+        const rows = [...unitsLagStats.ms.entries()]
+            .map(([label, ms]) => ({
+                label,
+                ms,
+                count: unitsLagStats.counts.get(label) || 0
+            }))
+            .filter((row) => row.count > 0)
+            .sort((a, b) => b.ms - a.ms);
+        if (!rows.length) return;
+        const summary = rows
+            .map((row) => `${row.label}: ${row.count}x ${row.ms.toFixed(0)}ms`)
+            .join(' | ');
+        console.log(`[${modName}][UnitsLag] summary: ${summary}`);
+        unitsLagStats.counts.clear();
+        unitsLagStats.ms.clear();
+    }
+
+    function profileUnitsLag(label, fn) {
+        const start = performance.now();
+        try {
+            return fn();
+        } finally {
+            recordUnitsLag(label, performance.now() - start);
+        }
+    }
+
+    function shouldThrottleUnitsRender(force) {
+        if (force || activeTab !== 'units') return false;
+        const now = performance.now();
+        const minMs = getUnitsRenderIntervalMs();
+        if (now - lastUnitsLiveUpdateMs < minMs) return true;
+        lastUnitsLiveUpdateMs = now;
+        return false;
+    }
+
+    function shouldThrottleUnitsLiveRender(force) {
+        return shouldThrottleUnitsRender(force);
+    }
+
+    function patchUnitsLiveMechanicsIfNeeded(force = false) {
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel || panel.style.display === 'none') return;
+        const body = document.getElementById(UNITS_BODY_ID);
+        if (!body?.querySelector('.bs-units-columns')) return;
+
+        const world = getActiveWorld();
+        const probeTick = resolveLiveEngineTick(world);
+        if (!force && probeTick != null && probeTick === lastUnitsMechanicsProbeTick) return;
+        lastUnitsMechanicsProbeTick = probeTick;
+
+        const units = collectActorMechanicsSnapshots() || [];
+        if (!units.length) return;
+
+        profileUnitsLag('patchUnitsMechanics', () => {
+            patchUnitCardsMechanicsOnly(body, units);
+        });
+    }
+
+    function scheduleUnitsMechanicsPatch() {
+        if (activeTab !== 'units' || !isFightActive()) return;
+        if (unitsMechanicsPatchTimer != null) return;
+        unitsMechanicsPatchTimer = setTimeout(() => {
+            unitsMechanicsPatchTimer = null;
+            patchUnitsLiveMechanicsIfNeeded(true);
+        }, 0);
+    }
+
+    function subscribeCooldownComponentUpdates(cd, callback, subs) {
+        if (cd && typeof cd.subscribe === 'function') {
+            subs.push(cd.subscribe(callback));
+        }
+    }
+
+    function scheduleUnitsLiveStatsPatch() {
+        if (activeTab !== 'units' || !isFightActive()) return;
+        if (unitsStatsPatchTimer != null) return;
+        unitsStatsPatchTimer = setTimeout(() => {
+            unitsStatsPatchTimer = null;
+            patchUnitsLiveStatsIfNeeded();
+        }, 0);
+    }
+
+    function patchUnitsLiveStatsIfNeeded() {
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel || panel.style.display === 'none') return;
+        const body = document.getElementById(UNITS_BODY_ID);
+        if (!body?.querySelector('.bs-units-columns')) return;
+        invalidateActorSnapshotsCache();
+        const units = collectActorSnapshots() || [];
+        if (!units.length) return;
+        profileUnitsLag('patchUnitCardsLiveStats', () => {
+            patchUnitCardsLiveStats(body, units);
+        });
+    }
+
+    function subscribeActorUnitsMechanics(actor) {
+        if (!actor || actorUnitsMechanicsSubs.has(actor)) return;
+        const subs = [];
+        const onChange = () => {
+            delete actor.__bsCooldownComp;
+            delete actor.__bsCooldownCompSig;
+            scheduleUnitsMechanicsPatch();
+        };
+        const onResourcesChange = () => syncActorResourceRevision(actor);
+        actor.__bsResourcesSig = getActorResourcesSignature(actor);
+        subscribeCooldownComponentUpdates(actor.abilityCooldown, onChange, subs);
+        subscribeCooldownComponentUpdates(resolveActorAutoAttackCooldown(actor), onChange, subs);
+        for (const cd of collectActorAbilityCooldownComponents(actor)) {
+            subscribeCooldownComponentUpdates(cd, onChange, subs);
+        }
+        for (const collection of [actor.renderResources, actor.renderPassives]) {
+            subscribeCooldownComponentUpdates(collection, onResourcesChange, subs);
+        }
+        subscribeCooldownComponentUpdates(actor.onDebuff, () => {
+            onResourcesChange();
+            scheduleUnitsLiveStatsPatch();
+        }, subs);
+        subscribeCooldownComponentUpdates(actor.onBuff, () => {
+            onResourcesChange();
+            scheduleUnitsLiveStatsPatch();
+        }, subs);
+        if (subs.length) actorUnitsMechanicsSubs.set(actor, subs);
+    }
+
+    function teardownActorUnitsMechanicsSubs() {
+        for (const subs of actorUnitsMechanicsSubs.values()) {
+            unsubscribeAll(subs);
+        }
+        actorUnitsMechanicsSubs.clear();
+        if (unitsMechanicsPatchTimer != null) {
+            clearTimeout(unitsMechanicsPatchTimer);
+            unitsMechanicsPatchTimer = null;
+        }
+        if (unitsStatsPatchTimer != null) {
+            clearTimeout(unitsStatsPatchTimer);
+            unitsStatsPatchTimer = null;
+        }
+    }
+
+    function setupUnitsMechanicsSubscriptions(world) {
+        teardownActorUnitsMechanicsSubs();
+        const actors = world?.grid?.actors;
+        if (!Array.isArray(actors)) return;
+        seedActorStatSnapshots(actors);
+        for (const actor of actors) subscribeActorUnitsMechanics(actor);
+    }
+
     function notifyPanelTickConsumers(options = {}) {
-        if (isLiveFightTracking() && shouldPatchBattleLogActors()) {
+        if (isLiveFightTracking()) {
             pollStatusEffectTracking(options.force === true);
         }
 
@@ -2193,10 +2421,15 @@
 
         lastLivePanelUpdateMs = now;
         renderStatusBar();
+        const unitsThrottled = shouldThrottleUnitsLiveRender(options.force);
         if (isLiveFightTracking() && getFightTick() != null) {
-            renderLiveFight();
+            if (activeTab !== 'units' || !unitsThrottled) {
+                renderLiveFight();
+            }
         }
-        pollOpenAbilityScalingRefresh();
+        if (activeTab === 'units' && !unitsThrottled) {
+            pollOpenAbilityScalingRefresh();
+        }
     }
 
     function onPanelGameTimerUpdate({ context }) {
@@ -2224,6 +2457,9 @@
         if (isLiveFightTracking()) {
             const tickChanged = syncPanelTick(context, { force: timerJustEnded });
             if (tickChanged || timerJustEnded) {
+                if (activeTab === 'units' && isFightActive()) {
+                    patchUnitsLiveMechanicsIfNeeded();
+                }
                 notifyPanelTickConsumers({ force: timerJustEnded });
             }
         } else if (timerJustEnded && panelFightTickFrozen == null) {
@@ -2293,6 +2529,7 @@
         clearUnitsStatWarnings();
         cachedSpawnTileKeyLookup = null;
         fightActorInstanceSeq = 0;
+        invalidateActorProbeCache();
     }
 
     function buildSpawnTileKeyLookup() {
@@ -2402,6 +2639,70 @@
     function invalidateActorSnapshotsCache() {
         cachedActorSnapshots = null;
         cachedActorSnapshotsTick = null;
+        lastUnitsLiveUpdateMs = 0;
+        lastUnitsMechanicsPollSig = '';
+        lastUnitsMechanicsProbeTick = null;
+    }
+
+    function invalidateActorProbeCache() {
+        actorSnapshotCacheGen++;
+    }
+
+    function getCachedActorProbe(actor) {
+        const entry = actorSnapshotCache.get(actor);
+        if (entry && entry.gen === actorSnapshotCacheGen) return entry.snapshot;
+        return null;
+    }
+
+    function setCachedActorProbe(actor, snapshot) {
+        if (!actor || !snapshot) return;
+        actorSnapshotCache.set(actor, { gen: actorSnapshotCacheGen, snapshot });
+    }
+
+    function bumpActorResourceRevision(actor) {
+        if (!actor) return;
+        actor.__bsResourceRev = (actor.__bsResourceRev ?? 0) + 1;
+    }
+
+    function getActorResourcesSignature(actor) {
+        if (!actor) return '';
+        const parts = [];
+        for (const collection of [actor.renderResources, actor.renderPassives]) {
+            for (const resource of readRenderCollectionItems(collection)) {
+                if (!isRenderResourceActive(actor, resource)) continue;
+                parts.push(resourceEffectId(resource));
+            }
+        }
+        parts.sort();
+        return parts.join('|');
+    }
+
+    function syncActorResourceRevision(actor) {
+        const sig = getActorResourcesSignature(actor);
+        if (actor.__bsResourcesSig === sig) return;
+        actor.__bsResourcesSig = sig;
+        bumpActorResourceRevision(actor);
+    }
+
+    function actorSnapshotNeedsStatusRefresh(actor, prev) {
+        if (!prev) return true;
+        if ((actor.__bsResourceRev ?? 0) !== (prev._resourceRev ?? 0)) return true;
+        const stun = actor.stun?.isStunned === true;
+        const silenced = actor.silenceComponent?.isSilenced === true;
+        const mindControlled = isActorMindControlled(actor);
+        if (stun !== (prev._stun === true)) return true;
+        if (silenced !== (prev._silenced === true)) return true;
+        if (mindControlled !== (prev._mindControlled === true)) return true;
+        return false;
+    }
+
+    function attachActorSnapshotMeta(snapshot, actor) {
+        if (!snapshot || !actor) return snapshot;
+        snapshot._resourceRev = actor.__bsResourceRev ?? 0;
+        snapshot._stun = actor.stun?.isStunned === true;
+        snapshot._silenced = actor.silenceComponent?.isSilenced === true;
+        snapshot._mindControlled = isActorMindControlled(actor);
+        return snapshot;
     }
 
     function invalidateVisibleBattleLogCache() {
@@ -2421,6 +2722,7 @@
         invalidateVisibleBattleLogCache();
         invalidatePreparedBattleLogSummaryCache();
         invalidateActorSnapshotsCache();
+        invalidateActorProbeCache();
         lastUnitStatusByKey.clear();
         lastLivePanelUpdateMs = 0;
         clearSummaryUpdateTimer();
@@ -3505,7 +3807,7 @@
     }
 
     function readActorAbilityCdTicks(actor, metadata) {
-        const info = readActorCooldown(actor, metadata);
+        const info = readActorCooldown(actor, metadata, { skipCalculator: true });
         if (info.cooldownTicks != null && Number.isFinite(info.cooldownTicks) && info.cooldownTicks > 0) {
             return info.cooldownTicks;
         }
@@ -3524,7 +3826,7 @@
         const hpSnap = readActorHp(actor.hp);
         const stats = {};
         for (const { key } of STAT_KEYS) {
-            const v = resolveActorLiveStat(actor, metadata, key);
+            const v = readActorLiveStatFast(actor, key);
             stats[key] = roundTrackValue(v, key);
         }
         stats.hpMax = roundTrackValue(hpSnap.hpMax, 'hpMax');
@@ -3574,8 +3876,10 @@
         scheduleBattleLogRender();
     }
 
-    function trackStatChanges(actors) {
-        if (!shouldPatchBattleLogActors() || !Array.isArray(actors)) return;
+    function trackStatChanges(actors, options = {}) {
+        const log = options.log === true && shouldPatchBattleLogActors();
+        if (!Array.isArray(actors)) return false;
+        let changed = false;
         for (const actor of actors) {
             if (!actor) continue;
             const next = readActorStatsForTracking(actor);
@@ -3595,15 +3899,19 @@
                 const newVal = next[key];
                 if (oldVal === newVal || oldVal == null || newVal == null) continue;
                 if (key === 'hp' && suppressHp) continue;
-                recordStatChangeLogEntry(actor, key, label, oldVal, newVal);
-                if (ABILITY_SCALING_STAT_KEYS.includes(key) || key === 'hpMax') {
+                changed = true;
+                if (log) recordStatChangeLogEntry(actor, key, label, oldVal, newVal);
+                if (UNITS_LIVE_STAT_INVALIDATE_KEYS.has(key)) {
                     invalidateActorSnapshotsCache();
+                }
+                if (ABILITY_SCALING_STAT_KEYS.includes(key) || key === 'hpMax') {
                     queueAbilityTooltipRefreshForActor(actor);
                 }
             }
 
             lastActorStatsByActor.set(actor, next);
         }
+        return changed;
     }
 
     function collectActorStatusUnitsForTracking() {
@@ -3626,14 +3934,32 @@
     }
 
     function pollStatusEffectTracking(force) {
-        if (!shouldPatchBattleLogActors() || panelFightTickFrozen != null) return;
+        if (!isLiveFightTracking() || panelFightTickFrozen != null) return;
+        const onUnitsTab = activeTab === 'units';
+        const onLogTab = activeTab === 'log';
+        if (!force && !onLogTab && !onUnitsTab) return;
+
         const engineTick = lastPanelSyncedEngineTick
             ?? resolveEngineTick(globalThis.state?.gameTimer?.getSnapshot?.()?.context);
         if (engineTick == null) return;
         if (!force && engineTick === lastStatusPollTick) return;
         lastStatusPollTick = engineTick;
-        trackStatusEffectChanges(collectActorStatusUnitsForTracking());
-        trackStatChanges(getActiveWorld()?.grid?.actors);
+
+        if (shouldPatchBattleLogActors() && (force || onLogTab)) {
+            profileUnitsLag('trackStatusEffects', () => {
+                trackStatusEffectChanges(collectActorStatusUnitsForTracking());
+            });
+        }
+
+        let statsChanged = false;
+        profileUnitsLag('trackStatChanges', () => {
+            statsChanged = trackStatChanges(getActiveWorld()?.grid?.actors, {
+                log: shouldPatchBattleLogActors() && (force || onLogTab)
+            });
+        });
+        if (onUnitsTab && statsChanged) {
+            scheduleUnitsLiveStatsPatch();
+        }
     }
 
     function trackStatusEffectChanges(units) {
@@ -3695,7 +4021,7 @@
     }
 
     function syncActorStatusSnapshot(actor) {
-        const unit = probeActor(actor);
+        const unit = probeActorFast(actor);
         if (!unit) return;
         const key = normalizeCollapseKey(getUnitCollapseKey(unit));
         let effects = snapshotStatusEffects(unit.statusEffects);
@@ -3919,6 +4245,7 @@
     function teardownWorldSubscriptions() {
         unsubscribeAll(worldEventSubs);
         worldEventSubs = [];
+        teardownActorUnitsMechanicsSubs();
         const world = getActiveWorld();
         if (world) unpatchAllActors(world);
     }
@@ -3931,15 +4258,15 @@
             patchAllActors(world);
         }
 
-        const repatch = () => {
-            if (!shouldPatchBattleLogActors()) return;
-            patchAllActors(world);
+        const onActorEnter = (actor) => {
+            if (shouldPatchBattleLogActors()) patchActorBattleLog(actor);
+            subscribeActorUnitsMechanics(actor);
         };
         if (typeof world.grid.onActorEnter?.subscribe === 'function') {
-            worldEventSubs.push(world.grid.onActorEnter.subscribe(repatch));
+            worldEventSubs.push(world.grid.onActorEnter.subscribe(onActorEnter));
         }
         if (typeof world.grid.onActorSummon?.subscribe === 'function') {
-            worldEventSubs.push(world.grid.onActorSummon.subscribe(repatch));
+            worldEventSubs.push(world.grid.onActorSummon.subscribe(onActorEnter));
         }
         if (typeof world.grid.onActorDeath?.subscribe === 'function') {
             worldEventSubs.push(world.grid.onActorDeath.subscribe(recordDeathLogEntry));
@@ -3949,6 +4276,12 @@
                 freezePanelFightTickFromEngine(world, { winner });
                 renderStatusBar(true);
                 render();
+            }));
+        }
+        const playingStore = world.tickEngine?.isPlayingStore;
+        if (playingStore && typeof playingStore.subscribe === 'function') {
+            worldEventSubs.push(playingStore.subscribe(() => {
+                refreshUnitsAfterStatusVisibilityChange();
             }));
         }
     }
@@ -4039,10 +4372,23 @@
         return Math.round(value);
     }
 
+    const FRACTIONAL_UNIT_STAT_KEYS = new Set(['ad', 'ap', 'armor', 'magicResist']);
+
+    function normalizeUnitStatValue(statKey, value) {
+        if (value == null || !Number.isFinite(value)) return value;
+        if (FRACTIONAL_UNIT_STAT_KEYS.has(statKey)) return Math.round(value * 10) / 10;
+        return Math.round(value);
+    }
+
+    function formatUnitStatDisplay(statKey, value) {
+        if (value == null || !Number.isFinite(value)) return '—';
+        return String(normalizeUnitStatValue(statKey, value));
+    }
+
     function formatStatChangeValue(statKey, value) {
         if (value == null) return '?';
         if (isTickStatTrackKey(statKey)) return formatTicks(value);
-        return String(value);
+        return formatUnitStatDisplay(statKey, value);
     }
 
     function formatStatChangeDelta(statKey, delta) {
@@ -4106,6 +4452,10 @@
             return unit.attackDelayRemainingTicks;
         }
         return null;
+    }
+
+    function unitShowsLiveMechanics(unit) {
+        return unit?.source === 'fight' && isFightActive();
     }
 
     function renderCooldownStateHtml(ready, remainingTicks) {
@@ -4339,6 +4689,35 @@
         return null;
     }
 
+    function isHpDefensiveStatKey(statKey) {
+        return statKey === 'armor' || statKey === 'magicResist';
+    }
+
+    function readDefensiveStatFromHpBag(actor, statKey) {
+        if (!actor?.hp || !isHpDefensiveStatKey(statKey)) return null;
+        const hpBag = actor.hp;
+        const keys = LIVE_STAT_ALIASES[statKey] || [statKey];
+
+        for (const key of keys) {
+            const bag = hpBag[key];
+            const bagInfo = describeStatBag(bag);
+            if (bagInfo.readLive != null) {
+                return { value: bagInfo.readLive, source: `actor.hp.${key}` };
+            }
+        }
+
+        const pattern = STAT_BAG_PATH_PATTERNS[statKey];
+        if (!pattern) return null;
+        for (const entry of discoverActorStatLikeBags(hpBag, 3)) {
+            const leaf = entry.path.split('.').pop() || entry.path;
+            if (!pattern.test(leaf) && !pattern.test(entry.path)) continue;
+            if (entry.live != null) {
+                return { value: entry.live, source: `actor.hp.${entry.path}` };
+            }
+        }
+        return null;
+    }
+
     function finishStatBagResolution(detail, containerLabel, key, bagInfo) {
         if (bagInfo.readLive == null) return false;
         detail.value = bagInfo.readLive;
@@ -4507,6 +4886,39 @@
         return detail;
     }
 
+    function readActorLiveStatFast(actor, statKey) {
+        if (!actor) return null;
+
+        if (isHpDefensiveStatKey(statKey)) {
+            const hpDefensive = readDefensiveStatFromHpBag(actor, statKey);
+            if (hpDefensive?.value != null) {
+                return normalizeUnitStatValue(statKey, hpDefensive.value);
+            }
+        }
+
+        const keys = LIVE_STAT_ALIASES[statKey] || [statKey];
+        for (const key of keys) {
+            const v = readStatBagLive(actor[key]);
+            if (v != null) return normalizeUnitStatValue(statKey, v);
+        }
+
+        if (statKey === 'speed') {
+            const speedCandidates = [
+                actor.movement?.speed,
+                actor.movement?.moveSpeed,
+                actor.moveSpeed
+            ];
+            for (const bag of speedCandidates) {
+                const v = readStatBagLive(bag);
+                if (v != null) return normalizeUnitStatValue(statKey, v);
+            }
+        }
+
+        const plain = readActorPlainStat(actor, statKey);
+        const value = plain?.value ?? null;
+        return value != null ? normalizeUnitStatValue(statKey, value) : null;
+    }
+
     function resolveActorLiveStatDetailed(actor, metadata, statKey) {
         const detail = {
             statKey,
@@ -4518,6 +4930,17 @@
             fuzzyMatches: []
         };
         if (!actor) return detail;
+
+        // Armor/MR bags live on actor.hp and include flat modifiers (e.g. Goblin Scavenger helmet).
+        if (isHpDefensiveStatKey(statKey)) {
+            const hpDefensive = readDefensiveStatFromHpBag(actor, statKey);
+            detail.attempts.push({ phase: 'hp-defensive-primary', result: hpDefensive });
+            if (hpDefensive?.value != null) {
+                detail.value = hpDefensive.value;
+                detail.source = hpDefensive.source;
+                return detail;
+            }
+        }
 
         const keys = LIVE_STAT_ALIASES[statKey] || [statKey];
 
@@ -4599,6 +5022,14 @@
                     return detail;
                 }
             }
+        }
+
+        const hpDefensive = readDefensiveStatFromHpBag(actor, statKey);
+        detail.attempts.push({ phase: 'hp-defensive-fallback', result: hpDefensive });
+        if (hpDefensive?.value != null) {
+            detail.value = hpDefensive.value;
+            detail.source = hpDefensive.source;
+            return detail;
         }
 
         const geneValue = readActorGeneStat(actor, statKey);
@@ -4754,8 +5185,8 @@
         }
 
         return {
-            hp,
-            hpMax,
+            hp: normalizeUnitStatValue('hp', hp),
+            hpMax: normalizeUnitStatValue('hpMax', hpMax),
             hpPct,
             alive: hpBag.isAlive !== false
         };
@@ -4765,13 +5196,62 @@
         if (!component) return null;
         for (const key of keys) {
             try {
-                if (key in component || component[key] != null) {
-                    const v = Number(component[key]);
-                    if (Number.isFinite(v)) return v;
-                }
+                const raw = component[key];
+                if (raw == null && raw !== 0) continue;
+                const v = Number(raw);
+                if (Number.isFinite(v)) return v;
             } catch { /* ignore */ }
         }
         return null;
+    }
+
+    function readCooldownComponentState(cd) {
+        const empty = { remainingTicks: null, remainingMs: null, ready: null };
+        if (!cd) return empty;
+
+        let remainingTicks = null;
+        let remainingMs = null;
+        let ready = null;
+
+        try {
+            if (cd.isOnCooldown === true) ready = false;
+            else if (cd.isOnCooldown === false) ready = true;
+        } catch { /* ignore */ }
+
+        try {
+            const current = cd.currentCooldown;
+            if (typeof current === 'number' && Number.isFinite(current)) {
+                remainingTicks = Math.max(0, current);
+            }
+        } catch { /* ignore */ }
+
+        try {
+            if (typeof cd.getRemainingMs === 'function') {
+                const ms = cd.getRemainingMs();
+                if (Number.isFinite(ms)) remainingMs = ms;
+            }
+        } catch { /* ignore */ }
+
+        if (remainingMs == null) {
+            try {
+                if (Number.isFinite(cd.remainingMilliseconds)) remainingMs = cd.remainingMilliseconds;
+                else if (Number.isFinite(cd.remainingMs)) remainingMs = cd.remainingMs;
+            } catch { /* ignore */ }
+        }
+
+        if (remainingTicks == null) {
+            remainingTicks = readComponentNumber(cd, [
+                '_currentCooldown', 'remainingTicks', 'cooldownRemainingTicks', 'ticksLeft'
+            ]);
+        }
+        if (remainingTicks == null && remainingMs != null) {
+            remainingTicks = msToGameCooldownTicks(remainingMs);
+        }
+        if (ready == null && remainingTicks != null) {
+            ready = remainingTicks <= 0;
+        }
+
+        return { remainingTicks, remainingMs, ready };
     }
 
     function ticksToMs(ticks) {
@@ -4797,18 +5277,59 @@
         return false;
     }
 
-    function isAbilityCooldownCandidate(actor, cd) {
+    function metadataHasNoTimedAbilityCooldown(metadata) {
+        if (!metadata?.skill?.src || !cachedGameChunk661Text) return false;
+        const cacheKey = `${metadata.name ?? ''}|${metadata.skill.src}`;
+        if (metadataUntimedCooldownCache.has(cacheKey)) {
+            return metadataUntimedCooldownCache.get(cacheKey);
+        }
+        const monsterName = metadata?.name;
+        const anchor = findMonsterMetadataAnchor(
+            cachedGameChunk661Text, metadata.skill.src, monsterName);
+        if (!anchor) {
+            metadataUntimedCooldownCache.set(cacheKey, false);
+            return false;
+        }
+        const classSlice = findMonsterClassSlice(
+            cachedGameChunk661Text, anchor.varName, anchor.index);
+        if (!classSlice) {
+            metadataUntimedCooldownCache.set(cacheKey, false);
+            return false;
+        }
+        const result = !!resolvePreviewUntimedAbilityReason(classSlice, anchor.varName);
+        metadataUntimedCooldownCache.set(cacheKey, result);
+        return result;
+    }
+
+    function isAbilityCooldownCandidate(actor, cd, metadata) {
+        if (metadataHasNoTimedAbilityCooldown(metadata)) return false;
         return cd != null
             && !isActorAutoAttackCooldown(actor, cd)
             && !isUntimedSkillCooldownComponent(cd);
     }
 
-    function findActorCooldownComponent(actor, metadata) {
+    function findActorCooldownComponentUncached(actor, metadata) {
+        if (metadataHasNoTimedAbilityCooldown(metadata)) return null;
+
+        if (actor?.isMeditating === true && actor.meditateCooldownClock) {
+            const channel = actor.meditateCooldownClock;
+            if (!isActorAutoAttackCooldown(actor, channel) && !isUntimedSkillCooldownComponent(channel)) {
+                return channel;
+            }
+        }
+
         const direct = actor.abilityCooldown
             ?? actor.skillCooldown
             ?? actor.ability?.cooldown
             ?? actor.skill?.cooldown;
-        if (isAbilityCooldownCandidate(actor, direct)) return direct;
+        if (isAbilityCooldownCandidate(actor, direct, metadata)) return direct;
+
+        for (const key of Object.keys(actor)) {
+            if (!/Cooldown$/.test(key) || key === 'autoAttackCooldown') continue;
+            if (key === 'meditateCooldownClock') continue;
+            const cd = actor[key];
+            if (isAbilityCooldownCandidate(actor, cd, metadata)) return cd;
+        }
 
         const list = actor.cooldownList;
         if (!Array.isArray(list) || !list.length) return null;
@@ -4817,7 +5338,7 @@
         if (skillSrc) {
             const skillNeedle = String(skillSrc).toLowerCase();
             const bySrc = list.find((cd) => {
-                if (!isAbilityCooldownCandidate(actor, cd)) return false;
+                if (!isAbilityCooldownCandidate(actor, cd, metadata)) return false;
                 const src = String(cd?.src ?? '').toLowerCase();
                 return src && (src === skillNeedle || src.includes(skillNeedle) || src.endsWith(`/${skillNeedle}.png`));
             });
@@ -4825,13 +5346,27 @@
         }
 
         const abilityLike = list.find((cd) =>
-            isAbilityCooldownCandidate(actor, cd) && cd.src && cd.benign !== true);
+            isAbilityCooldownCandidate(actor, cd, metadata) && cd.src && cd.benign !== true);
         if (abilityLike) return abilityLike;
 
         return null;
     }
 
-    function readActorCooldown(actor, metadata) {
+    function findActorCooldownComponent(actor, metadata) {
+        if (!actor) return null;
+        const meditate = actor.isMeditating === true;
+        const skillSrc = metadata?.skill?.src ?? '';
+        const cacheSig = `${skillSrc}|${meditate ? 1 : 0}`;
+        if (actor.__bsCooldownCompSig === cacheSig && actor.__bsCooldownComp !== undefined) {
+            return actor.__bsCooldownComp;
+        }
+        const result = findActorCooldownComponentUncached(actor, metadata);
+        actor.__bsCooldownComp = result;
+        actor.__bsCooldownCompSig = cacheSig;
+        return result;
+    }
+
+    function readActorCooldown(actor, metadata, options = {}) {
         const cd = findActorCooldownComponent(actor, metadata);
         if (!cd) {
             return {
@@ -4845,52 +5380,41 @@
             };
         }
 
-        const calculator = invokeActorCooldownCalculator(actor);
-        let baseTicks = null;
-        let cooldownMs = null;
-        if (calculator?.effectiveMs != null && Number.isFinite(calculator.effectiveMs) && calculator.effectiveMs > 0) {
-            cooldownMs = calculator.effectiveMs;
-            baseTicks = msToGameCooldownTicks(calculator.effectiveMs);
-        } else if (calculator?.effectiveTicks != null && Number.isFinite(calculator.effectiveTicks) && calculator.effectiveTicks > 0) {
-            baseTicks = calculator.effectiveTicks;
-            cooldownMs = ticksToMs(calculator.effectiveTicks);
-        }
-
-        if (cooldownMs == null) {
-            baseTicks = readComponentNumber(cd, [
-                '_baseCooldown', 'baseCooldown', 'baseCooldownTicks', 'cooldownTicks'
-            ]);
-            cooldownMs = pickFirstNumber(cd, [
-                'cooldownMilliseconds', 'baseCooldownMilliseconds', 'cooldownMs', 'baseCooldownMs',
-                'duration', 'baseDuration', 'cooldown', 'maxCooldown', 'totalCooldown'
-            ]);
-            if (cooldownMs == null && baseTicks != null) {
-                cooldownMs = ticksToMs(baseTicks);
-            }
-        }
-
-        const remainingTicks = readComponentNumber(cd, [
-            '_currentCooldown', 'currentCooldown', 'remainingTicks', 'cooldownRemainingTicks'
+        let baseTicks = readComponentNumber(cd, [
+            '_baseCooldown', 'baseCooldown', 'baseCooldownTicks', 'cooldownTicks'
         ]);
-        let cooldownRemainingMs = null;
-        try {
-            if (typeof cd.getRemainingMs === 'function') {
-                cooldownRemainingMs = cd.getRemainingMs();
-            } else if (Number.isFinite(cd.remainingMilliseconds)) {
-                cooldownRemainingMs = cd.remainingMilliseconds;
-            } else if (Number.isFinite(cd.remainingMs)) {
-                cooldownRemainingMs = cd.remainingMs;
-            } else if (remainingTicks != null) {
-                cooldownRemainingMs = ticksToMs(remainingTicks);
-            }
-        } catch { /* ignore */ }
+        let cooldownMs = pickFirstNumber(cd, [
+            'cooldownMilliseconds', 'baseCooldownMilliseconds', 'cooldownMs', 'baseCooldownMs',
+            'duration', 'baseDuration', 'cooldown', 'maxCooldown', 'totalCooldown'
+        ]);
+        if (baseTicks == null && cooldownMs != null) {
+            baseTicks = msToGameCooldownTicks(cooldownMs);
+        }
+        if (cooldownMs == null && baseTicks != null) {
+            cooldownMs = ticksToMs(baseTicks);
+        }
 
-        let cooldownReady = null;
-        try {
-            if (cd.isOnCooldown === false) cooldownReady = true;
-            else if (cd.isOnCooldown === true) cooldownReady = false;
-            else if (remainingTicks != null) cooldownReady = remainingTicks <= 0;
-        } catch { /* ignore */ }
+        if (!options.skipCalculator && (baseTicks == null || cooldownMs == null)) {
+            const calculator = invokeActorCooldownCalculator(actor);
+            if (calculator?.effectiveMs != null && Number.isFinite(calculator.effectiveMs) && calculator.effectiveMs > 0) {
+                cooldownMs = calculator.effectiveMs;
+                baseTicks = msToGameCooldownTicks(calculator.effectiveMs);
+            } else if (calculator?.effectiveTicks != null && Number.isFinite(calculator.effectiveTicks) && calculator.effectiveTicks > 0) {
+                baseTicks = calculator.effectiveTicks;
+                cooldownMs = ticksToMs(calculator.effectiveTicks);
+            }
+        }
+
+        const cdState = readCooldownComponentState(cd);
+        const remainingTicks = cdState.remainingTicks;
+        const cooldownRemainingMs = cdState.remainingMs;
+        let cooldownReady = cdState.ready;
+        if (cooldownReady == null) {
+            try {
+                if (cd.isOnCooldown === false) cooldownReady = true;
+                else if (cd.isOnCooldown === true) cooldownReady = false;
+            } catch { /* ignore */ }
+        }
 
         const abilitySrc = cd.src ?? cd.abilitySrc ?? cd.skillSrc ?? metadata?.skill?.src ?? null;
         if ((baseTicks == null || baseTicks <= 0) && (cooldownMs == null || cooldownMs <= 0)) {
@@ -4916,7 +5440,23 @@
     }
 
     function readActorAttackDelay(actor) {
-        const autoCd = actor?.cooldown?.autoAttack ?? null;
+        if (!actorHasAutoAttack(actor)) {
+            return {
+                delayTicks: null,
+                delayRemainingTicks: null,
+                delayReady: null
+            };
+        }
+
+        if (actor?.isMeditating === true) {
+            return {
+                delayTicks: null,
+                delayRemainingTicks: null,
+                delayReady: null
+            };
+        }
+
+        const autoCd = resolveActorAutoAttackCooldown(actor);
         let delayTicks = readStatBagLive(actor?.attackDelay);
         if (delayTicks == null || delayTicks <= 0) {
             delayTicks = readComponentNumber(autoCd, [
@@ -4932,16 +5472,15 @@
             };
         }
 
-        const remainingTicks = readComponentNumber(autoCd, [
-            '_currentCooldown', 'currentCooldown', 'remainingTicks', 'cooldownRemainingTicks'
-        ]);
-
-        let delayReady = null;
-        try {
-            if (autoCd.isOnCooldown === false) delayReady = true;
-            else if (autoCd.isOnCooldown === true) delayReady = false;
-            else if (remainingTicks != null) delayReady = remainingTicks <= 0;
-        } catch { /* ignore */ }
+        const cdState = readCooldownComponentState(autoCd);
+        const remainingTicks = cdState.remainingTicks;
+        let delayReady = cdState.ready;
+        if (delayReady == null) {
+            try {
+                if (autoCd.isOnCooldown === false) delayReady = true;
+                else if (autoCd.isOnCooldown === true) delayReady = false;
+            } catch { /* ignore */ }
+        }
 
         if (delayTicks == null || delayTicks <= 0) {
             const fromCd = readComponentNumber(autoCd, [
@@ -4995,9 +5534,10 @@
 
     function expectsTimedAbilityCooldown(actor, metadata) {
         if (!metadata?.skill?.src || !actor) return false;
+        if (metadataHasNoTimedAbilityCooldown(metadata)) return false;
         if (findActorCooldownComponent(actor, metadata)) return true;
         const direct = actor.abilityCooldown ?? actor.skillCooldown;
-        return direct != null && isAbilityCooldownCandidate(actor, direct);
+        return direct != null && isAbilityCooldownCandidate(actor, direct, metadata);
     }
 
     function warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo, actor) {
@@ -5006,7 +5546,9 @@
         if (cooldownInfo.cooldownMs == null && expectsTimedAbilityCooldown(actor, metadata)) {
             missingMechanics.push('abilityCooldown');
         }
-        if (attackSpeedInfo.value == null) missingMechanics.push('attackSpeed');
+        if (attackSpeedInfo.value == null && actorHasAutoAttack(actor)) {
+            missingMechanics.push('attackSpeed');
+        }
         if (!missingStats.length && !missingMechanics.length) return;
 
         const logKey = unit.collapseKey || `${unit.name}:${unit.tileIndex ?? 'x'}`;
@@ -5022,6 +5564,124 @@
         }
     }
 
+    function probeActorFast(actor, options = {}) {
+        if (!actor) return null;
+
+        const light = options.light === true;
+        if (!options.bypassCache && !light) {
+            const prev = getCachedActorProbe(actor);
+            if (prev) return refreshActorSnapshotFast(prev, actor, options);
+        }
+
+        const hpBag = actor.hp;
+        const hpSnapshot = readActorHp(hpBag);
+
+        const gameId = resolveGameId(actor);
+        const metadata = getMonsterMetadata(gameId);
+        const cooldownInfo = readActorCooldown(actor, metadata, { skipCalculator: true });
+        const attackDelayInfo = readActorAttackDelay(actor);
+        const statKeys = ['ad', 'ap', 'armor', 'magicResist', 'speed'];
+        const stats = {};
+        for (const statKey of statKeys) {
+            stats[statKey] = readActorLiveStatFast(actor, statKey);
+        }
+
+        const snapshot = {
+            gameId,
+            name: actor.name || actor.nickname || metadata?.name || 'Unknown',
+            villain: actor.villain === true,
+            awaken: resolveActorAwakened(actor),
+            level: actor.level ?? readActorGeneStat(actor, 'level'),
+            alive: hpSnapshot.alive,
+            hp: hpSnapshot.hp,
+            hpMax: hpSnapshot.hpMax,
+            hpPct: hpSnapshot.hpPct,
+            ad: stats.ad,
+            ap: stats.ap,
+            armor: stats.armor,
+            magicResist: stats.magicResist,
+            speed: stats.speed,
+            attackDelayTicks: attackDelayInfo.delayTicks ?? null,
+            attackDelayRemainingTicks: attackDelayInfo.delayRemainingTicks,
+            attackDelayReady: attackDelayInfo.delayReady,
+            cooldownMs: cooldownInfo.cooldownMs,
+            cooldownTicks: cooldownInfo.cooldownTicks,
+            cooldownReady: cooldownInfo.cooldownReady,
+            cooldownRemainingMs: cooldownInfo.cooldownRemainingMs,
+            cooldownRemainingTicks: cooldownInfo.cooldownRemainingTicks,
+            abilitySrc: cooldownInfo.abilitySrc,
+            isMeditating: actor.isMeditating === true,
+            silenced: actor.silenceComponent?.isSilenced === true,
+            buffedCount: Array.isArray(actor.buffed) ? actor.buffed.length : null,
+            statusEffects: light || !shouldShowLiveStatusEffects() ? [] : collectActorStatusEffects(actor),
+            roles: Array.isArray(metadata?.roles) ? metadata.roles : [],
+            baseStats: metadata?.baseStats ?? null,
+            tileIndex: actor.position?.tile?.index ?? actor.position?.tileIndex ?? null,
+            equipment: resolveEquipmentFromActor(actor),
+            genes: light ? null : extractBoardGeneStats(actor),
+            shiny: actor.shiny === true,
+            source: 'fight',
+            collapseKey: resolveFightCollapseKey(actor)
+        };
+        attachActorSnapshotMeta(snapshot, actor);
+        if (!light && !options.bypassCache) setCachedActorProbe(actor, snapshot);
+        return snapshot;
+    }
+
+    function refreshActorSnapshotFast(prev, actor, options = {}) {
+        const light = options.light === true;
+        const hpSnapshot = readActorHp(actor.hp);
+        const gameId = prev.gameId ?? resolveGameId(actor);
+        const metadata = getMonsterMetadata(gameId);
+        const cooldownInfo = readActorCooldown(actor, metadata, { skipCalculator: true });
+        const attackDelayInfo = readActorAttackDelay(actor);
+        const statKeys = ['ad', 'ap', 'armor', 'magicResist', 'speed'];
+        const stats = {};
+        for (const statKey of statKeys) {
+            stats[statKey] = readActorLiveStatFast(actor, statKey);
+        }
+
+        let statusEffects = prev.statusEffects;
+        if (!shouldShowLiveStatusEffects() || light) {
+            statusEffects = [];
+        } else if (actorSnapshotNeedsStatusRefresh(actor, prev)) {
+            statusEffects = collectActorStatusEffects(actor);
+        }
+
+        const snapshot = {
+            ...prev,
+            name: actor.name || actor.nickname || prev.name,
+            villain: actor.villain === true,
+            alive: hpSnapshot.alive,
+            hp: hpSnapshot.hp,
+            hpMax: hpSnapshot.hpMax,
+            hpPct: hpSnapshot.hpPct,
+            ad: stats.ad,
+            ap: stats.ap,
+            armor: stats.armor,
+            magicResist: stats.magicResist,
+            speed: stats.speed,
+            attackDelayTicks: attackDelayInfo.delayTicks ?? null,
+            attackDelayRemainingTicks: attackDelayInfo.delayRemainingTicks,
+            attackDelayReady: attackDelayInfo.delayReady,
+            cooldownMs: cooldownInfo.cooldownMs,
+            cooldownTicks: cooldownInfo.cooldownTicks,
+            cooldownReady: cooldownInfo.cooldownReady,
+            cooldownRemainingMs: cooldownInfo.cooldownRemainingMs,
+            cooldownRemainingTicks: cooldownInfo.cooldownRemainingTicks,
+            abilitySrc: cooldownInfo.abilitySrc,
+            isMeditating: actor.isMeditating === true,
+            silenced: actor.silenceComponent?.isSilenced === true,
+            buffedCount: Array.isArray(actor.buffed) ? actor.buffed.length : null,
+            statusEffects,
+            tileIndex: actor.position?.tile?.index ?? actor.position?.tileIndex ?? prev.tileIndex ?? null,
+            collapseKey: prev.collapseKey ?? resolveFightCollapseKey(actor)
+        };
+        attachActorSnapshotMeta(snapshot, actor);
+        if (!options.bypassCache) setCachedActorProbe(actor, snapshot);
+        return snapshot;
+    }
+
     function probeActor(actor) {
         if (!actor) return null;
 
@@ -5030,7 +5690,7 @@
 
         const gameId = resolveGameId(actor);
         const metadata = getMonsterMetadata(gameId);
-        const cooldownInfo = readActorCooldown(actor, metadata);
+        const cooldownInfo = readActorCooldown(actor, metadata, { skipCalculator: true });
         const attackDelayInfo = readActorAttackDelay(actor);
         const attackSpeedInfo = readActorAttackSpeed(actor, metadata);
         const catalogBase = metadata?.baseStats ?? null;
@@ -5043,12 +5703,12 @@
         }
 
         const liveBase = {
-            hp: readActorStatBase(actor, 'hp') ?? readStatBagBase(hpBag),
-            ad: baseResolutions.ad.value,
-            ap: baseResolutions.ap.value,
-            armor: baseResolutions.armor.value,
-            magicResist: baseResolutions.magicResist.value,
-            speed: baseResolutions.speed.value
+            hp: normalizeUnitStatValue('hp', readActorStatBase(actor, 'hp') ?? readStatBagBase(hpBag)),
+            ad: normalizeUnitStatValue('ad', baseResolutions.ad.value),
+            ap: normalizeUnitStatValue('ap', baseResolutions.ap.value),
+            armor: normalizeUnitStatValue('armor', baseResolutions.armor.value),
+            magicResist: normalizeUnitStatValue('magicResist', baseResolutions.magicResist.value),
+            speed: normalizeUnitStatValue('speed', baseResolutions.speed.value)
         };
         const fightBaseStats = catalogBase ? { ...catalogBase } : {};
         for (const [key, value] of Object.entries(liveBase)) {
@@ -5065,11 +5725,11 @@
             hp: hpSnapshot.hp,
             hpMax: hpSnapshot.hpMax,
             hpPct: hpSnapshot.hpPct,
-            ad: statResolutions.ad.value,
-            ap: statResolutions.ap.value,
-            armor: statResolutions.armor.value,
-            magicResist: statResolutions.magicResist.value,
-            speed: statResolutions.speed.value,
+            ad: normalizeUnitStatValue('ad', statResolutions.ad.value),
+            ap: normalizeUnitStatValue('ap', statResolutions.ap.value),
+            armor: normalizeUnitStatValue('armor', statResolutions.armor.value),
+            magicResist: normalizeUnitStatValue('magicResist', statResolutions.magicResist.value),
+            speed: normalizeUnitStatValue('speed', statResolutions.speed.value),
             statSources: Object.fromEntries(statKeys.map((k) => [k, statResolutions[k].source])),
             attackSpeed: attackSpeedInfo.value,
             attackSpeedSource: attackSpeedInfo.source,
@@ -5084,7 +5744,7 @@
             abilitySrc: cooldownInfo.abilitySrc,
             silenced: actor.silenceComponent?.isSilenced === true,
             buffedCount: Array.isArray(actor.buffed) ? actor.buffed.length : null,
-            statusEffects: collectActorStatusEffects(actor),
+            statusEffects: shouldShowLiveStatusEffects() ? collectActorStatusEffects(actor) : [],
             roles: Array.isArray(metadata?.roles) ? metadata.roles : [],
             baseStats: Object.keys(fightBaseStats).length ? fightBaseStats : null,
             tileIndex: actor.position?.tile?.index ?? actor.position?.tileIndex ?? null,
@@ -5299,6 +5959,41 @@
         const parsed = parseInt(value, 10);
         if (!Number.isFinite(parsed)) return 1;
         return Math.min(5, Math.max(1, parsed));
+    }
+
+    function resolveEquipmentTierForEffectScale(equipment) {
+        const raw = equipment?.tier ?? equipment?.metadata?.tier;
+        const parsed = parseInt(raw, 10);
+        if (!Number.isFinite(parsed)) return null;
+        return Math.min(5, Math.max(1, parsed));
+    }
+
+    /** Max-tier effect constants from chunk 235 scale linearly by equipment tier (T5 = full value). */
+    function scaleEquipmentEffectForTier(maxValue, tierOrEquipment) {
+        if (maxValue == null || !Number.isFinite(maxValue)) return 0;
+
+        let tier = null;
+        if (tierOrEquipment != null && typeof tierOrEquipment === 'object') {
+            tier = resolveEquipmentTierForEffectScale(tierOrEquipment);
+        } else {
+            const parsed = parseInt(tierOrEquipment, 10);
+            if (Number.isFinite(parsed)) tier = Math.min(5, Math.max(1, parsed));
+        }
+        if (tier == null) return maxValue;
+
+        try {
+            const utils = globalThis.state?.utils;
+            if (typeof utils?.scaleEquipmentEffect === 'function') {
+                const scaled = Number(utils.scaleEquipmentEffect({ value: maxValue, tier }));
+                if (Number.isFinite(scaled)) return scaled;
+            }
+            if (typeof utils?.getEquipmentEffectForTier === 'function') {
+                const scaled = Number(utils.getEquipmentEffectForTier(maxValue, tier));
+                if (Number.isFinite(scaled)) return scaled;
+            }
+        } catch { /* ignore */ }
+
+        return maxValue * tier / 5;
     }
 
     function normalizeEquipmentStatKey(stat) {
@@ -5859,11 +6554,81 @@
         };
     }
 
+    function resolveActorAutoAttackCooldown(actor) {
+        return actor?.cooldown?.autoAttack ?? actor?.autoAttackCooldown ?? null;
+    }
+
+    function actorHasAutoAttack(actor) {
+        if (typeof actor?.autoAttack === 'function') {
+            return !!(actor?.autoAttackCooldown ?? actor?.cooldown?.autoAttack);
+        }
+        if (actor?.autoAttack) return true;
+        if (typeof actor?.regularAttack === 'function') {
+            return !!(actor?.autoAttackCooldown ?? actor?.cooldown?.autoAttack);
+        }
+        return false;
+    }
+
+    function classSliceHasAutoAttackComponent(classSlice) {
+        if (!classSlice) return false;
+        if (/\bthis\.autoAttack\s*=\s*this\.addComponent\(\s*new\s+\w+\.A\s*\(/.test(classSlice)) {
+            return true;
+        }
+        if (/\bregularAttack\s*=/.test(classSlice) && /\bautoAttackCooldown\b/.test(classSlice)) {
+            return true;
+        }
+        if (/attack:this\.regularAttack/.test(classSlice)) {
+            return true;
+        }
+        if (/\bautoAttackCooldown\b/.test(classSlice)
+            && /\bthis\.autoAttack\s*=/.test(classSlice)
+            && /attack:this\.autoAttack/.test(classSlice)) {
+            return true;
+        }
+        return false;
+    }
+
+    function creatureHasAutoAttackFrom661Script(gameId, metadata) {
+        const scriptText = cachedGameChunk661Text;
+        if (!scriptText || gameId == null) return null;
+
+        const skillSrc = metadata?.skill?.src;
+        const monsterName = metadata?.name;
+        const anchor = findMonsterMetadataAnchor(scriptText, skillSrc, monsterName);
+        if (!anchor) return null;
+
+        const classSlice = findMonsterClassSlice(scriptText, anchor.varName, anchor.index);
+        if (!classSlice) return null;
+
+        return classSliceHasAutoAttackComponent(classSlice);
+    }
+
+    function creatureHasAutoAttack(gameId, metadata, actor = null) {
+        if (actor) return actorHasAutoAttack(actor);
+
+        const fromScript = creatureHasAutoAttackFrom661Script(gameId, metadata);
+        if (fromScript === true) return true;
+
+        const catalogBase = metadata?.baseStats?.attackDelayTicks;
+        const hasCatalogAttackDelay = catalogBase != null && Number.isFinite(Number(catalogBase));
+        if (fromScript === false) return hasCatalogAttackDelay;
+
+        return hasCatalogAttackDelay;
+    }
+
     function resolvePreviewAttackDelayTicks(resolved, metadata) {
         return resolvePreviewAttackDelayDetailed(resolved, metadata).ticks;
     }
 
     function resolvePreviewAttackDelayDetailed(resolved, metadata) {
+        if (!creatureHasAutoAttack(resolved?.gameId, metadata)) {
+            return {
+                ticks: null,
+                reason: 'no auto-attack',
+                catalogBase: null
+            };
+        }
+
         const catalogBase = metadata?.baseStats?.attackDelayTicks;
         if (catalogBase == null || !Number.isFinite(Number(catalogBase))) {
             const defaultTicks = msToGameCooldownTicks(DEFAULT_PREVIEW_ATTACK_DELAY_MS);
@@ -5922,6 +6687,8 @@
                 atkLine += ')';
             }
             console.log(atkLine);
+        } else if (attackDelayDetail?.reason === 'no auto-attack') {
+            console.log(`${prefix} ${label} atk delay: n/a — ${attackDelayDetail.reason}`);
         } else {
             console.log(`${prefix} ${label} atk delay: missing — ${attackDelayDetail?.reason ?? 'unknown'}`);
         }
@@ -5938,7 +6705,53 @@
         }
     }
 
+    function resolvePreviewInitialAbilityCooldownTicks(metadata) {
+        const scriptText = cachedGameChunk661Text;
+        const skillSrc = metadata?.skill?.src;
+        if (!scriptText || !skillSrc) return null;
+
+        const anchor = findMonsterMetadataAnchor(scriptText, skillSrc, metadata?.name);
+        if (!anchor) return null;
+        const classSlice = findMonsterClassSlice(scriptText, anchor.varName, anchor.index);
+        if (!classSlice) return null;
+
+        for (const { component, body } of iteratePreviewCooldownClockInits(classSlice)) {
+            if (component !== 'abilityCooldown') continue;
+            const initMatch = body.match(/initialCooldownTicks:([\w$.]+)/);
+            if (!initMatch) continue;
+            const ref = initMatch[1];
+            const hxInline = ref.match(/\(0,\w+\.HX\)\(([\d.e]+)\)/);
+            if (hxInline) {
+                const ms = Number(hxInline[1]);
+                if (Number.isFinite(ms) && ms > 0) {
+                    return roundTrackValue(msToGameCooldownTicks(ms), 'abilityCdTicks');
+                }
+            }
+            const constMatch = ref.match(/(\w+)\.INITIAL_COOLDOWN_TICKS/);
+            if (constMatch) {
+                const defs = findScriptConstDefinitions(scriptText, constMatch[1], anchor.index);
+                const fields = defs[0]?.fields;
+                const raw = fields?.INITIAL_COOLDOWN_TICKS;
+                if (raw != null && Number.isFinite(raw) && raw > 0) {
+                    return roundTrackValue(msToGameCooldownTicks(raw), 'abilityCdTicks');
+                }
+            }
+        }
+        return null;
+    }
+
     function resolvePreviewMechanics(resolved, metadata, previewStats, source) {
+        const cacheKey = [
+            buildStablePreviewKey(resolved, resolveCurrentRoomId()),
+            source,
+            getBoardPreviewCacheSig(),
+            previewStats.stats.ap,
+            previewStats.stats.ad,
+            resolved.equipment?.name ?? resolved.equipment?.metadata?.name ?? ''
+        ].join('|');
+        const cached = previewMechanicsResultCache.get(cacheKey);
+        if (cached) return cached;
+
         const equipment = resolved.equipment ?? null;
         const partialUnit = {
             gameId: resolved.gameId,
@@ -5959,9 +6772,11 @@
             cooldownTicks: abilityCooldown?.cooldownTicks ?? null,
             cooldownMs: abilityCooldown?.cooldownMs ?? null,
             cooldownReady: abilityCooldown ? true : null,
-            cooldownRemainingTicks: null
+            cooldownRemainingTicks: null,
+            previewInitialCooldownTicks: resolvePreviewInitialAbilityCooldownTicks(metadata)
         };
         logPreviewPlacementMechanics(resolved, source, metadata, mechanics, attackDelayDetail, cdDetail);
+        previewMechanicsResultCache.set(cacheKey, mechanics);
         return mechanics;
     }
 
@@ -6212,13 +7027,13 @@
             villain: resolved.villain,
             awaken,
             level: resolved.level,
-            hp: previewStats.hp,
-            hpMax: previewStats.hpMax,
-            ad: stats.ad,
-            ap: stats.ap,
-            armor: stats.armor,
-            magicResist: stats.magicResist,
-            speed: stats.speed,
+            hp: normalizeUnitStatValue('hp', previewStats.hp),
+            hpMax: normalizeUnitStatValue('hpMax', previewStats.hpMax),
+            ad: normalizeUnitStatValue('ad', stats.ad),
+            ap: normalizeUnitStatValue('ap', stats.ap),
+            armor: normalizeUnitStatValue('armor', stats.armor),
+            magicResist: normalizeUnitStatValue('magicResist', stats.magicResist),
+            speed: normalizeUnitStatValue('speed', stats.speed),
             statSources,
             roles: Array.isArray(metadata?.roles) ? metadata.roles : [],
             baseStats: Object.keys(baseStats).some((k) => baseStats[k] != null) ? baseStats : null,
@@ -6230,6 +7045,7 @@
             cooldownMs: mechanics.cooldownMs,
             cooldownReady: mechanics.cooldownReady,
             cooldownRemainingTicks: mechanics.cooldownRemainingTicks,
+            previewInitialCooldownTicks: mechanics.previewInitialCooldownTicks,
             source,
             roomId: roomId ?? null,
             tileIndex: resolved.tileIndex,
@@ -6284,6 +7100,59 @@
         return null;
     }
 
+    function previewEquipmentSig(equipment) {
+        if (!equipment) return '';
+        const name = equipment?.name ?? equipment?.metadata?.name ?? '';
+        const tier = equipment?.tier ?? equipment?.metadata?.tier ?? '';
+        const stat = equipment?.stat ?? equipment?.metadata?.stat ?? '';
+        return `${name}|${tier}|${stat}`;
+    }
+
+    function applyPreviewStatsToUnit(unit, resolved, previewStats, metadata, source) {
+        const previewFloor = resolved.villain ? resolveCurrentFloor() : 0;
+        const awaken = resolved.villain
+            ? resolveVillainAwakenForFloor(resolved, previewFloor)
+            : resolved.awaken === true;
+        const { stats, baseStats, statSources } = previewStats;
+        const equipmentSig = previewEquipmentSig(resolved.equipment);
+        const prevEquipmentSig = previewEquipmentSig(unit.equipment);
+        const mechanicsChanged = equipmentSig !== prevEquipmentSig
+            || stats.ap !== unit.ap
+            || stats.ad !== unit.ad;
+
+        const next = {
+            ...unit,
+            awaken,
+            level: resolved.level,
+            hp: normalizeUnitStatValue('hp', previewStats.hp),
+            hpMax: normalizeUnitStatValue('hpMax', previewStats.hpMax),
+            ad: normalizeUnitStatValue('ad', stats.ad),
+            ap: normalizeUnitStatValue('ap', stats.ap),
+            armor: normalizeUnitStatValue('armor', stats.armor),
+            magicResist: normalizeUnitStatValue('magicResist', stats.magicResist),
+            speed: normalizeUnitStatValue('speed', stats.speed),
+            statSources,
+            baseStats: Object.keys(baseStats).some((k) => baseStats[k] != null) ? baseStats : null,
+            equipment: resolved.equipment ?? null,
+            genes: resolved.genes ?? unit.genes ?? null,
+            tileIndex: resolved.tileIndex ?? unit.tileIndex
+        };
+
+        if (mechanicsChanged) {
+            const mechanics = resolvePreviewMechanics(resolved, metadata, previewStats, source);
+            next.attackDelayTicks = mechanics.attackDelayTicks;
+            next.attackDelayReady = mechanics.attackDelayReady;
+            next.attackDelayRemainingTicks = mechanics.attackDelayRemainingTicks;
+            next.cooldownTicks = mechanics.cooldownTicks;
+            next.cooldownMs = mechanics.cooldownMs;
+            next.cooldownReady = mechanics.cooldownReady;
+            next.cooldownRemainingTicks = mechanics.cooldownRemainingTicks;
+            next.previewInitialCooldownTicks = mechanics.previewInitialCooldownTicks;
+        }
+
+        return next;
+    }
+
     function refreshBoardPreviewUnitStats(unit) {
         if (!unit || isFightActive()) return unit;
         if (unit.source !== 'board' && unit.source !== 'map') return unit;
@@ -6291,16 +7160,15 @@
         const found = findBoardResolvedForPreviewUnit(unit);
         if (!found) return unit;
 
-        const fresh = pieceToPreviewUnit(
+        const metadata = getMonsterMetadata(found.resolved.gameId);
+        const previewStats = resolveBoardPreviewStats(found.resolved);
+        return applyPreviewStatsToUnit(
+            unit,
             found.resolved,
-            found.source,
-            unit.roomId ?? resolveCurrentRoomId());
-        return {
-            ...unit,
-            ...fresh,
-            collapseKey: unit.collapseKey ?? fresh.collapseKey,
-            mergeKey: unit.mergeKey ?? fresh.mergeKey
-        };
+            previewStats,
+            metadata,
+            found.source
+        );
     }
 
     function getBoardPreviewCacheSig() {
@@ -6319,6 +7187,7 @@
         cachedBoardPreviewSig = '';
         cachedRefreshedBoardPreviewUnits = null;
         cachedRefreshedBoardPreviewSig = '';
+        previewMechanicsResultCache.clear();
         cachedCdrScriptBounds.clear();
         lastBoardAbilityPollMs = 0;
         if (options.clearMechanicsLog) {
@@ -6331,71 +7200,139 @@
     }
 
     function getRefreshedBoardPreviewUnits() {
-        const cacheSig = getBoardPreviewCacheSig();
-        if (cachedRefreshedBoardPreviewUnits && cachedRefreshedBoardPreviewSig === cacheSig) {
+        return profileUnitsLag('getRefreshedBoardPreviewUnits', () => {
+            const cacheSig = getBoardPreviewCacheSig();
+            if (cachedRefreshedBoardPreviewUnits && cachedRefreshedBoardPreviewSig === cacheSig) {
+                return cachedRefreshedBoardPreviewUnits;
+            }
+            const boardCacheHit = cachedBoardPreviewUnits != null && cachedBoardPreviewSig === cacheSig;
+            const units = getBoardPreviewUnits();
+            cachedRefreshedBoardPreviewUnits = boardCacheHit
+                ? units.map((unit) => refreshBoardPreviewUnitStats(unit))
+                : units;
+            cachedRefreshedBoardPreviewSig = cacheSig;
             return cachedRefreshedBoardPreviewUnits;
-        }
-        cachedRefreshedBoardPreviewUnits = getBoardPreviewUnits()
-            .map((unit) => refreshBoardPreviewUnitStats(unit));
-        cachedRefreshedBoardPreviewSig = cacheSig;
-        return cachedRefreshedBoardPreviewUnits;
+        });
     }
 
     function getBoardPreviewUnits() {
-        const cacheSig = getBoardPreviewCacheSig();
-        if (cachedBoardPreviewUnits && cachedBoardPreviewSig === cacheSig) {
+        return profileUnitsLag('getBoardPreviewUnits', () => {
+            if (!cachedGameChunk661Text || !cachedGameChunk235Text) {
+                prefetchGameChunk661ForCdr();
+            }
+            const cacheSig = getBoardPreviewCacheSig();
+            if (cachedBoardPreviewUnits && cachedBoardPreviewSig === cacheSig) {
+                return cachedBoardPreviewUnits;
+            }
+
+            const merged = new Map();
+            const roomId = resolveCurrentRoomId();
+
+            const addResolved = (resolved, source) => {
+                if (!resolved) return;
+                const unitKey = buildStablePreviewKey(resolved, roomId);
+                if (merged.has(unitKey)) return;
+                const unit = pieceToPreviewUnit(resolved, source, roomId);
+                merged.set(unitKey, unit);
+            };
+            const addPiece = (p, source) => {
+                addResolved(resolveBoardPiece(p), source);
+            };
+
+            const config = getBoardContext()?.boardConfig;
+            if (Array.isArray(config)) {
+                for (const p of config) addPiece(p, 'board');
+            }
+
+            const getBoardMonsters = globalThis.state?.utils?.getBoardMonstersFromRoomId;
+            if (roomId && typeof getBoardMonsters === 'function') {
+                try {
+                    for (const p of getBoardMonsters(roomId) || []) addPiece(p, 'map');
+                } catch { /* ignore */ }
+            }
+
+            cachedBoardPreviewUnits = Array.from(merged.values());
+            cachedBoardPreviewSig = cacheSig;
             return cachedBoardPreviewUnits;
+        });
+    }
+
+    function collectActorMechanicsSnapshots() {
+        if (!isFightActive()) return null;
+        const world = getActiveWorld();
+        const actors = world?.grid?.actors;
+        if (!Array.isArray(actors) || !actors.length) return null;
+
+        const snapshots = [];
+        for (const actor of actors) {
+            if (!actor) continue;
+            const gameId = resolveGameId(actor);
+            const metadata = getMonsterMetadata(gameId);
+            const hpSnapshot = readActorHp(actor.hp);
+            const cooldownInfo = readActorCooldown(actor, metadata, { skipCalculator: true });
+            const attackDelayInfo = readActorAttackDelay(actor);
+            snapshots.push({
+                gameId,
+                name: actor.name || actor.nickname || metadata?.name || 'Unknown',
+                villain: actor.villain === true,
+                level: actor.level ?? readActorGeneStat(actor, 'level'),
+                alive: hpSnapshot.alive,
+                hp: hpSnapshot.hp,
+                hpMax: hpSnapshot.hpMax,
+                attackDelayTicks: attackDelayInfo.delayTicks ?? null,
+                attackDelayRemainingTicks: attackDelayInfo.delayRemainingTicks,
+                attackDelayReady: attackDelayInfo.delayReady,
+                cooldownTicks: cooldownInfo.cooldownTicks,
+                cooldownReady: cooldownInfo.cooldownReady,
+                cooldownRemainingTicks: cooldownInfo.cooldownRemainingTicks,
+                isMeditating: actor.isMeditating === true,
+                tileIndex: actor.position?.tile?.index ?? actor.position?.tileIndex ?? null,
+                source: 'fight',
+                collapseKey: resolveFightCollapseKey(actor)
+            });
         }
-
-        const merged = new Map();
-        const roomId = resolveCurrentRoomId();
-
-        const addResolved = (resolved, source) => {
-            if (!resolved) return;
-            const unitKey = buildStablePreviewKey(resolved, roomId);
-            if (merged.has(unitKey)) return;
-            const unit = pieceToPreviewUnit(resolved, source, roomId);
-            merged.set(unitKey, unit);
-        };
-        const addPiece = (p, source) => {
-            addResolved(resolveBoardPiece(p), source);
-        };
-
-        const config = getBoardContext()?.boardConfig;
-        if (Array.isArray(config)) {
-            for (const p of config) addPiece(p, 'board');
-        }
-
-        const getBoardMonsters = globalThis.state?.utils?.getBoardMonstersFromRoomId;
-        if (roomId && typeof getBoardMonsters === 'function') {
-            try {
-                for (const p of getBoardMonsters(roomId) || []) addPiece(p, 'map');
-            } catch { /* ignore */ }
-        }
-
-        cachedBoardPreviewUnits = Array.from(merged.values());
-        cachedBoardPreviewSig = cacheSig;
-        return cachedBoardPreviewUnits;
+        return snapshots;
     }
 
     function collectActorSnapshots(options = {}) {
+        return profileUnitsLag('collectActorSnapshots', () => {
         if (!isFightActive()) {
             invalidateActorSnapshotsCache();
             return null;
         }
-        const engineTick = readTickFromEngine();
+        const world = getActiveWorld();
+        const cacheTick = resolveLiveEngineTick(world);
+        const light = options.light === true;
         if (!options.bypassCache
-            && engineTick != null
+            && !light
+            && cacheTick != null
             && cachedActorSnapshots
-            && cachedActorSnapshotsTick === engineTick) {
+            && cachedActorSnapshotsTick === cacheTick) {
             return cachedActorSnapshots;
         }
-        const world = getActiveWorld();
         if (!world?.grid) return null;
         const actors = world.grid.actors || [];
-        cachedActorSnapshots = actors.map((a) => probeActor(a)).filter(Boolean);
-        cachedActorSnapshotsTick = engineTick;
-        return cachedActorSnapshots;
+        let snapshots = actors.map((a) => probeActorFast(a, { light })).filter(Boolean);
+        if (light && cachedActorSnapshots?.length) {
+            const fullByKey = new Map(
+                cachedActorSnapshots.map((u) => [normalizeCollapseKey(getUnitCollapseKey(u)), u])
+            );
+            snapshots = snapshots.map((unit) => {
+                const full = fullByKey.get(normalizeCollapseKey(getUnitCollapseKey(unit)));
+                if (!full) return unit;
+                return {
+                    ...unit,
+                    statusEffects: shouldShowLiveStatusEffects() ? full.statusEffects : [],
+                    genes: full.genes
+                };
+            });
+        }
+        if (!light && cacheTick != null) {
+            cachedActorSnapshots = snapshots;
+            cachedActorSnapshotsTick = cacheTick;
+        }
+        return snapshots;
+        });
     }
 
     function splitByTeam(units) {
@@ -6424,8 +7361,8 @@
         };
     }
 
-    function logAbilityScaling(...args) {
-        console.log(`[${modName}][AbilityScale]`, ...args);
+    function logAbilityScaling() {
+        // intentionally empty — no runtime debug logging
     }
 
     function resolveBoardAbilityScalingUnit(_details, unit) {
@@ -6537,6 +7474,54 @@
         return match ? parseFloat(match[1]) : null;
     }
 
+    function parseTooltipHealAmountText(text) {
+        const match = String(text || '').trim().match(/^([+-]?[\d.]+)\s*HP$/i);
+        return match ? parseFloat(match[1]) : null;
+    }
+
+    function isHealPerStatChunkMarkerSpan(span) {
+        const container = span?.closest?.('p, li');
+        if (!container) return false;
+        const ctx = container.textContent || '';
+        if (!/\bper\b/i.test(ctx)) return false;
+        if (!/\b(heal|heals|self-heals?|restores|regenerates)\b/i.test(ctx)) return false;
+        for (const candidate of container.querySelectorAll('.text-healing')) {
+            if (candidate === span || candidate.classList.contains('bs-scaled-value')) continue;
+            if (parseTooltipHealAmountText(candidate.textContent?.trim()) != null) return true;
+        }
+        return false;
+    }
+
+    function trimTooltipPerLabelAfterNode(node) {
+        if (!node?.parentNode) return;
+        let next = node.nextSibling;
+        while (next) {
+            if (next.nodeType !== Node.TEXT_NODE) break;
+            const text = next.textContent || '';
+            if (!/\bper\b/i.test(text)) break;
+            const trimmed = text.replace(/\s*per\s*/i, ' ').replace(/^\s+/, '');
+            if (!trimmed.trim()) {
+                const remove = next;
+                next = next.nextSibling;
+                remove.remove();
+                continue;
+            }
+            next.textContent = trimmed;
+            break;
+        }
+        normalizeTooltipPunctuationSpacing(node);
+    }
+
+    function normalizeTooltipPunctuationSpacing(node) {
+        if (!node?.parentNode) return;
+        const next = node.nextSibling;
+        if (next?.nodeType === Node.TEXT_NODE) {
+            const text = next.textContent || '';
+            const fixed = text.replace(/^\s+([,.;:!?])/g, '$1');
+            if (fixed !== text) next.textContent = fixed;
+        }
+    }
+
     function resolveAbilityScalingStatInfo(wrap, unit) {
         const img = wrap?.querySelector?.('img[alt]');
         const alt = String(img?.getAttribute('alt') || '').toLowerCase();
@@ -6560,7 +7545,7 @@
 
     function parseTooltipPerChunkRatio(text) {
         const trimmed = String(text || '').trim();
-        const durationMatch = trimmed.match(/^([+-]?[\d.]+)s\s*per\s*([\d.]+)$/i);
+        const durationMatch = trimmed.match(/^([+-]?[\d.]+)s\s*(?:per|for\s+every)\s*([\d.]+)$/i);
         if (durationMatch) {
             const amount = parseFloat(durationMatch[1]);
             const chunkSize = parseFloat(durationMatch[2]);
@@ -6568,12 +7553,48 @@
             return { amount, isPercent: false, chunkSize, isDuration: true };
         }
 
-        const match = trimmed.match(/^([+-]?[\d.]+)(%?)\s*per\s*([\d.]+)$/i);
+        const match = trimmed.match(/^([+-]?[\d.]+)(%?)\s*(?:per|for\s+every)\s*([\d.]+)$/i);
+        if (match) {
+            const amount = parseFloat(match[1]);
+            const chunkSize = parseFloat(match[3]);
+            if (!Number.isFinite(amount) || !Number.isFinite(chunkSize) || chunkSize <= 0) return null;
+            return { amount, isPercent: match[2] === '%', chunkSize, isDuration: false };
+        }
+
+        // Game x tooltip: ratio ends with "per" and the stat icon is a sibling (e.g. Monk "+2 per" + AP).
+        const implicitMatch = trimmed.match(/^([+-]?[\d.]+)(%?)\s*(?:per|for\s+every)\s*$/i);
+        if (implicitMatch) {
+            const amount = parseFloat(implicitMatch[1]);
+            if (!Number.isFinite(amount)) return null;
+            return { amount, isPercent: implicitMatch[2] === '%', chunkSize: 1, isDuration: false };
+        }
+
+        return null;
+    }
+
+    function parseTooltipPerStatPercentRatio(text) {
+        const trimmed = String(text || '').trim();
+        const match = trimmed.match(/^([+-]?[\d.]+)%\s*(?:per|for\s+every)\s*([\d.]+)/i);
         if (!match) return null;
         const amount = parseFloat(match[1]);
-        const chunkSize = parseFloat(match[3]);
+        const chunkSize = parseFloat(match[2]);
         if (!Number.isFinite(amount) || !Number.isFinite(chunkSize) || chunkSize <= 0) return null;
-        return { amount, isPercent: match[2] === '%', chunkSize, isDuration: false };
+        return { amount, chunkSize };
+    }
+
+    function stripTooltipScalingParenthetical(label) {
+        const trimmed = String(label || '');
+        const match = trimmed.match(/^(\s*)\(([^)]+)\)([\s\S]*)$/);
+        if (!match) return trimmed;
+        const inner = match[2].trim();
+        if (parseTooltipPerStatPercentRatio(inner) || parseTooltipPerChunkRatio(inner)) {
+            return match[3] || '';
+        }
+        return trimmed;
+    }
+
+    function isStandaloneDurationSpanText(text) {
+        return parseTooltipDurationText(String(text || '').trim()) != null;
     }
 
     function isAttackSpeedScalingContext(contextText) {
@@ -6796,6 +7817,7 @@
     function detectTooltipScalingDamageType(wrap, contextText, statInfo) {
         const ctx = String(contextText || '').toLowerCase();
         if (/\btrue\s+damage\b/.test(ctx)) return 'trueDamage';
+        if (/\b(heal|heals|self-heals?|restores|regenerates)\b/.test(ctx)) return 'heal';
 
         for (const img of wrap?.querySelectorAll?.('img[alt]') || []) {
             const alt = String(img.getAttribute('alt') || '').toLowerCase();
@@ -6808,7 +7830,6 @@
         if (statInfo?.label === 'AP') return 'magic';
         if (statInfo?.label === 'HP') return 'heal';
 
-        if (/\b(heal|heals|self-heals?|restores|regenerates)\b/.test(ctx)) return 'heal';
         if (/\b(damage|deals|damaging|explosion|detonates)\b/.test(ctx)) return 'magic';
         return null;
     }
@@ -7051,19 +8072,152 @@
     const CDR_SCRIPT_PER_AP_KEYS = ['CDR_PER_AP', 'CDR_MS_PER_AP', 'COOLDOWN_MS_REDUCTION_PER_AP'];
     const CDR_SCRIPT_MIN_MS_KEYS = ['MIN_COOLDOWN_MS'];
 
+    const WEBPACK_CHUNK_URL_RE = /\/\d+-[\w-]+\.js(?:\?|$)/;
+
+    const GAME_SCRIPT_CHUNK_PROFILES = {
+        monsters: {
+            key: 'monsters',
+            preferredChunkIds: [876, 661],
+            markers: ['calculateSpellCooldownTicks', 'abilityCooldown']
+        },
+        equipment: {
+            key: 'equipment',
+            preferredChunkIds: [876, 277, 235],
+            markers: ['COOLDOWN_REDUCTION_PERCENT', 'addPercentageModifier']
+        }
+    };
+
     let cachedGameChunk661Text = null;
     let cachedGameChunk661Promise = null;
     const cachedCdrScriptBounds = new Map();
+    const discoveredGameChunkUrlByProfile = new Map();
+    const gameScriptTextCacheByUrl = new Map();
+    let gameChunkScriptPreviewRefreshTimer = null;
 
     function prefetchGameChunk661ForCdr() {
         ensureGameChunk661Text().catch(() => { /* ignore */ });
         ensureGameChunk235Text().catch(() => { /* ignore */ });
     }
 
-    function findGameChunk661ScriptUrl() {
+    function collectWebpackChunkUrls() {
+        const urls = new Set();
         for (const script of document.scripts) {
-            const src = script.src;
-            if (src && /\/661-[\w-]+\.js(?:\?|$)/.test(src)) return src;
+            if (script.src && WEBPACK_CHUNK_URL_RE.test(script.src)) urls.add(script.src);
+        }
+        if (typeof performance?.getEntriesByType === 'function') {
+            for (const entry of performance.getEntriesByType('resource')) {
+                const name = entry?.name;
+                if (name && WEBPACK_CHUNK_URL_RE.test(name)) urls.add(name);
+            }
+        }
+        return [...urls];
+    }
+
+    function findWebpackChunkUrlById(chunkId) {
+        const pattern = new RegExp(`\\/${chunkId}-[\\w-]+\\.js(?:\\?|$)`);
+        for (const script of document.scripts) {
+            if (script.src && pattern.test(script.src)) return script.src;
+        }
+        if (typeof performance?.getEntriesByType === 'function') {
+            const entries = performance.getEntriesByType('resource');
+            for (let i = entries.length - 1; i >= 0; i--) {
+                const name = entries[i]?.name;
+                if (name && pattern.test(name)) return name;
+            }
+        }
+        return null;
+    }
+
+    function findGameChunkScriptUrl(chunkId) {
+        return findWebpackChunkUrlById(chunkId);
+    }
+
+    function scriptTextMatchesProfile(text, profile) {
+        return profile.markers.every((marker) => text.includes(marker));
+    }
+
+    async function fetchScriptTextFromUrl(url) {
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (!res.ok) return null;
+        const text = await res.text();
+        return text || null;
+    }
+
+    async function fetchScriptTextCached(url) {
+        if (gameScriptTextCacheByUrl.has(url)) return gameScriptTextCacheByUrl.get(url);
+        const text = await fetchScriptTextFromUrl(url);
+        if (text) gameScriptTextCacheByUrl.set(url, text);
+        return text;
+    }
+
+    function scheduleGameChunkScriptPreviewRefresh() {
+        if (isFightActive()) return;
+        if (gameChunkScriptPreviewRefreshTimer != null) {
+            clearTimeout(gameChunkScriptPreviewRefreshTimer);
+        }
+        gameChunkScriptPreviewRefreshTimer = setTimeout(() => {
+            gameChunkScriptPreviewRefreshTimer = null;
+            invalidateBoardPreviewCache({ clearMechanicsLog: true });
+            lastUnitsRenderKey = '';
+            renderUnits(true);
+        }, 16);
+    }
+
+    async function resolveGameScriptChunkUrl(profile, options = {}) {
+        const cachedUrl = discoveredGameChunkUrlByProfile.get(profile.key);
+        if (cachedUrl) return cachedUrl;
+
+        const tried = new Set();
+        const tryUrl = async (url) => {
+            if (!url || tried.has(url)) return null;
+            tried.add(url);
+            const text = await fetchScriptTextCached(url);
+            if (text && scriptTextMatchesProfile(text, profile)) {
+                discoveredGameChunkUrlByProfile.set(profile.key, url);
+                return url;
+            }
+            return null;
+        };
+
+        for (const chunkId of profile.preferredChunkIds) {
+            const hit = await tryUrl(findWebpackChunkUrlById(chunkId));
+            if (hit) return hit;
+        }
+
+        if (options.scanAllChunks !== false) {
+            for (const url of options.chunkUrls ?? collectWebpackChunkUrls()) {
+                const hit = await tryUrl(url);
+                if (hit) return hit;
+            }
+        }
+        return null;
+    }
+
+    function findGameChunk661ScriptUrl() {
+        return discoveredGameChunkUrlByProfile.get('monsters')
+            ?? findWebpackChunkUrlById(876)
+            ?? findWebpackChunkUrlById(661);
+    }
+
+    function onGameChunkScriptLoadedForPreview() {
+        scheduleGameChunkScriptPreviewRefresh();
+    }
+
+    async function fetchGameScriptChunkText(profile, options = {}) {
+        const maxAttempts = options.maxAttempts ?? 50;
+        const delayMs = options.delayMs ?? 200;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const url = await resolveGameScriptChunkUrl(profile, {
+                chunkUrls: collectWebpackChunkUrls(),
+                scanAllChunks: attempt === 0 || attempt >= 4
+            });
+            if (url) {
+                const text = gameScriptTextCacheByUrl.get(url) ?? await fetchScriptTextCached(url);
+                if (text) return text;
+            }
+            if (attempt < maxAttempts - 1) {
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+            }
         }
         return null;
     }
@@ -7072,21 +8226,14 @@
         if (cachedGameChunk661Text) return Promise.resolve(cachedGameChunk661Text);
         if (!cachedGameChunk661Promise) {
             cachedGameChunk661Promise = (async () => {
-                const src = findGameChunk661ScriptUrl();
-                if (!src) return null;
-                try {
-                    const res = await fetch(src, { credentials: 'same-origin' });
-                    if (!res.ok) return null;
-                    cachedGameChunk661Text = await res.text();
-                    if (cachedGameChunk661Text && !isFightActive()) {
-                        invalidateBoardPreviewCache();
-                        lastUnitsRenderKey = '';
-                        renderUnits(true);
-                    }
-                    return cachedGameChunk661Text;
-                } catch {
+                const text = await fetchGameScriptChunkText(GAME_SCRIPT_CHUNK_PROFILES.monsters);
+                if (!text) {
+                    cachedGameChunk661Promise = null;
                     return null;
                 }
+                cachedGameChunk661Text = text;
+                onGameChunkScriptLoadedForPreview();
+                return cachedGameChunk661Text;
             })();
         }
         return cachedGameChunk661Promise;
@@ -7097,33 +8244,34 @@
     let cachedEquipmentCdrPercentByKey = null;
 
     function findGameChunk235ScriptUrl() {
-        for (const script of document.scripts) {
-            const src = script.src;
-            if (src && /\/235-[\w-]+\.js(?:\?|$)/.test(src)) return src;
-        }
-        return null;
+        return discoveredGameChunkUrlByProfile.get('equipment')
+            ?? findWebpackChunkUrlById(876)
+            ?? findWebpackChunkUrlById(277)
+            ?? findWebpackChunkUrlById(235);
     }
 
     function ensureGameChunk235Text() {
         if (cachedGameChunk235Text) return Promise.resolve(cachedGameChunk235Text);
         if (!cachedGameChunk235Promise) {
             cachedGameChunk235Promise = (async () => {
-                const src = findGameChunk235ScriptUrl();
-                if (!src) return null;
-                try {
-                    const res = await fetch(src, { credentials: 'same-origin' });
-                    if (!res.ok) return null;
-                    cachedGameChunk235Text = await res.text();
+                await ensureGameChunk661Text().catch(() => null);
+                const monstersText = cachedGameChunk661Text;
+                const profile = GAME_SCRIPT_CHUNK_PROFILES.equipment;
+                if (monstersText && scriptTextMatchesProfile(monstersText, profile)) {
+                    cachedGameChunk235Text = monstersText;
                     cachedEquipmentCdrPercentByKey = null;
-                    if (cachedGameChunk235Text && !isFightActive()) {
-                        invalidateBoardPreviewCache({ clearMechanicsLog: true });
-                        lastUnitsRenderKey = '';
-                        renderUnits(true);
-                    }
+                    onGameChunkScriptLoadedForPreview();
                     return cachedGameChunk235Text;
-                } catch {
+                }
+                const text = await fetchGameScriptChunkText(profile);
+                if (!text) {
+                    cachedGameChunk235Promise = null;
                     return null;
                 }
+                cachedGameChunk235Text = text;
+                cachedEquipmentCdrPercentByKey = null;
+                onGameChunkScriptLoadedForPreview();
+                return cachedGameChunk235Text;
             })();
         }
         return cachedGameChunk235Promise;
@@ -7134,7 +8282,7 @@
         if (!scriptText) return map;
 
         const cdrConsts = new Map();
-        for (const m of scriptText.matchAll(/\b(\w+)=\{COOLDOWN_REDUCTION_PERCENT:([\d.]+)\}/g)) {
+        for (const m of scriptText.matchAll(/\b(\w+)=\{[^}]*COOLDOWN_REDUCTION_PERCENT:([\d.]+)/g)) {
             cdrConsts.set(m[1], Number(m[2]));
         }
 
@@ -7169,14 +8317,15 @@
 
         const lookup = getEquipmentCdrPercentLookup();
         const nameKey = equipment.name ? String(equipment.name).toLowerCase() : '';
-        if (nameKey && lookup.has(nameKey)) return lookup.get(nameKey);
+        let maxPercent = nameKey && lookup.has(nameKey) ? lookup.get(nameKey) : null;
 
-        if (equipment.gameId != null) {
+        if (maxPercent == null && equipment.gameId != null) {
             const catalog = getEquipmentCatalogMeta(equipment.gameId);
             const catalogName = catalog?.name?.toLowerCase();
-            if (catalogName && lookup.has(catalogName)) return lookup.get(catalogName);
+            if (catalogName && lookup.has(catalogName)) maxPercent = lookup.get(catalogName);
         }
-        return 0;
+        if (maxPercent == null || !Number.isFinite(maxPercent)) return 0;
+        return scaleEquipmentEffectForTier(maxPercent, equipment);
     }
 
     function resolvePreviewEquipmentPercentageBasis(equipment) {
@@ -7221,6 +8370,103 @@
         if (/^[\d.]+(?:e\d+)?$/i.test(trimmed)) return Number(trimmed);
         const hxMatch = trimmed.match(/\(0,\w+\.HX\)\(([\d.e]+)\)/);
         if (hxMatch) return Number(hxMatch[1]);
+        return null;
+    }
+
+    function parseScriptConstMapValue(scriptText, constName, mapField, key, nearIndex = 0) {
+        if (!scriptText || !constName || !mapField || !key) return null;
+        const anchor = scriptText.indexOf(`${constName}=`, nearIndex >= 0 ? nearIndex : 0);
+        if (anchor < 0) return null;
+        const window = scriptText.slice(anchor, anchor + 4000);
+        const mapRe = new RegExp(`${escapeCdrRegexLiteral(mapField)}:\\{([^}]+)\\}`);
+        const mapMatch = window.match(mapRe);
+        if (!mapMatch) return null;
+        const keyRe = new RegExp(
+            `\\b${escapeCdrRegexLiteral(key)}:((?:\\(0,\\w+\\.HX\\)\\([\\d.e]+\\))|(?:\\d+(?:\\.\\d+)?(?:e\\d+)?))`
+        );
+        const km = mapMatch[1].match(keyRe);
+        if (!km) return null;
+        return parseScriptConstNumericValue(km[1]);
+    }
+
+    function resolvePreviewWeaponVariant(classSlice, unit) {
+        const rules = [
+            ['Giant Sword', 'SWORD'],
+            ['Cranial Basher', 'CLUB'],
+            ['Fire Axe', 'AXE']
+        ];
+        const names = [];
+        const eq = unit?.equipment;
+        if (eq && typeof eq === 'object') {
+            names.push(eq.name, eq.metadata?.name);
+        }
+        for (const [weaponName, variant] of rules) {
+            if (names.some((n) => n && String(n).includes(weaponName))) return variant;
+        }
+        if (!classSlice) return 'NONE';
+        for (const [weaponName, variant] of rules) {
+            if (classSlice.includes(`"${weaponName}"`) && names.length === 0) continue;
+        }
+        return 'NONE';
+    }
+
+    function previewCooldownBodyHasTimedInit(body) {
+        const msRef = body.match(/cooldownMilliseconds:(\w+\.\w+|\d+)/);
+        if (msRef && msRef[1] !== '0') return true;
+        if (/cooldownTicks:this\.\w+\(\)/.test(body)) return true;
+        if (/cooldownTicks:\(0,\w+\.HX\)/.test(body)) return true;
+        return false;
+    }
+
+    function evaluatePreviewCooldownCalculateTicks(classSlice, scriptText, methodName, unit, metadataIndex, percentageBasis = 1) {
+        if (!classSlice || !methodName) return null;
+        const methodBody = classSlice.match(
+            new RegExp(`${escapeCdrRegexLiteral(methodName)}=\\(\\)=>\\{([^}]+)\\}`)
+        );
+        if (!methodBody) return null;
+        const body = methodBody[1];
+
+        const baseMatch = body.match(/\(0,\w+\.HX\)\((\w+)\.(\w+)\[this\.getVariant\(\)\]\)/);
+        if (!baseMatch) return null;
+
+        const variant = resolvePreviewWeaponVariant(classSlice, unit);
+        const baseMs = parseScriptConstMapValue(
+            scriptText, baseMatch[1], baseMatch[2], variant, metadataIndex);
+        if (baseMs == null || !Number.isFinite(baseMs)) return null;
+
+        let ticks = msToGameCooldownTicks(baseMs);
+        if (percentageBasis !== 1) ticks = Math.round(ticks * percentageBasis);
+
+        const minMatch = body.match(/Math\.max\(e,(\w+)\.(\w+)\[this\.getVariant\(\)\]\)/);
+        if (minMatch) {
+            const minRaw = parseScriptConstMapValue(
+                scriptText, minMatch[1], minMatch[2], variant, metadataIndex);
+            if (minRaw != null && Number.isFinite(minRaw)) {
+                ticks = Math.max(ticks, msToGameCooldownTicks(minRaw));
+            }
+        }
+        return ticks > 0 ? ticks : null;
+    }
+
+    function resolvePreviewCooldownTicksInitMs(scriptText, classSlice, body, unit, metadataIndex, percentageBasis = 1) {
+        const calcRef = body.match(/cooldownTicks:this\.(\w+)\(\)/);
+        if (calcRef) {
+            const ticks = evaluatePreviewCooldownCalculateTicks(
+                classSlice, scriptText, calcRef[1], unit, metadataIndex, percentageBasis);
+            if (ticks != null && ticks > 0) return ticksToMs(ticks);
+        }
+
+        const hxRef = body.match(/cooldownTicks:\(0,\w+\.HX\)\(([\d.e]+)\)/);
+        if (hxRef) {
+            const ms = Number(hxRef[1]);
+            if (Number.isFinite(ms) && ms > 0) return ms;
+        }
+
+        const ticksRef = body.match(/cooldownTicks:(\d+)/);
+        if (ticksRef) {
+            const ticks = Number(ticksRef[1]);
+            if (Number.isFinite(ticks) && ticks > 0) return ticksToMs(ticks);
+        }
         return null;
     }
 
@@ -7279,6 +8525,34 @@
         return constPattern.exec(scriptText);
     }
 
+    function mapCdrBoundsFromConstMatch(scriptText, match, nearIndex = 0) {
+        const bodyMatch = match[0].match(/\{([^}]+)\}/);
+        if (!bodyMatch) return null;
+
+        const mapped = mapCdrScriptFields(parseCdrConstObjectBody(bodyMatch[1]));
+        if (mapped.baseMs == null || mapped.reductionPerApMs == null) return null;
+
+        if (mapped.minMs == null) {
+            const minTickMatch = bodyMatch[1].match(/MIN_COOLDOWN_TICKS:\(0,\w+\.HX\)\(([\d.e]+)\)/);
+            if (minTickMatch) mapped.minMs = Number(minTickMatch[1]);
+        }
+        if (mapped.minMs == null) {
+            const constName = match[0].match(/^([\w$]+)=/)?.[1];
+            if (constName) mapped.minMs = readScriptConstMinMs(scriptText, constName, nearIndex);
+        }
+        if (mapped.minMs == null) return null;
+        return mapped;
+    }
+
+    function findCdrConstMatchNearSlice(scriptText, searchSlice) {
+        if (!scriptText || !searchSlice) return null;
+        const refMatch = searchSlice.match(/([\w$]+)\.(CDR_PER_AP|CDR_MS_PER_AP|COOLDOWN_MS_REDUCTION_PER_AP)/);
+        if (refMatch) {
+            return findCdrConstObjectInScript(scriptText, refMatch[1]);
+        }
+        return null;
+    }
+
     function extractCdrBoundsFrom661Script(scriptText, unit, reductionPerApMs) {
         if (!scriptText || !unit?.gameId || reductionPerApMs == null) return null;
 
@@ -7290,11 +8564,7 @@
             ? scriptText.slice(nameIdx, nameIdx + 40000)
             : scriptText;
 
-        let match = null;
-        const refMatch = searchSlice.match(/([\w$]+)\.(CDR_PER_AP|CDR_MS_PER_AP|COOLDOWN_MS_REDUCTION_PER_AP)/);
-        if (refMatch) {
-            match = findCdrConstObjectInScript(scriptText, refMatch[1]);
-        }
+        let match = findCdrConstMatchNearSlice(scriptText, searchSlice);
 
         if (!match) {
             const constPattern = new RegExp(
@@ -7304,19 +8574,8 @@
         }
         if (!match) return null;
 
-        const bodyMatch = match[0].match(/\{([^}]+)\}/);
-        if (!bodyMatch) return null;
-
-        const mapped = mapCdrScriptFields(parseCdrConstObjectBody(bodyMatch[1]));
-        if (mapped.reductionPerApMs !== reductionPerApMs) return null;
-        if (mapped.baseMs == null) return null;
-
-        if (mapped.minMs == null) {
-            const minTickMatch = bodyMatch[1].match(/MIN_COOLDOWN_TICKS:\(0,\w+\.HX\)\(([\d.e]+)\)/);
-            if (minTickMatch) mapped.minMs = Number(minTickMatch[1]);
-        }
-
-        if (mapped.minMs == null) return null;
+        const mapped = mapCdrBoundsFromConstMatch(scriptText, match, nameIdx >= 0 ? nameIdx : 0);
+        if (!mapped || mapped.reductionPerApMs !== reductionPerApMs) return null;
         return mapped;
     }
 
@@ -7338,7 +8597,7 @@
 
         if (monsterName) {
             const namePattern = new RegExp(
-                `(\\w+)=\\{name:"${escapeCdrRegexLiteral(String(monsterName))}"`
+                `([\\w$]+)=\\{name:"${escapeCdrRegexLiteral(String(monsterName))}"`
             );
             let nameMatch;
             while ((nameMatch = namePattern.exec(scriptText))) {
@@ -7351,11 +8610,48 @@
             }
         }
 
+        if (skillSrc) {
+            const skillNeedle = `skill:{src:"${String(skillSrc)}"`;
+            let idx = 0;
+            while ((idx = scriptText.indexOf(skillNeedle, idx)) >= 0) {
+                const windowStart = Math.max(0, idx - 12000);
+                const chunk = scriptText.slice(windowStart, idx);
+                const metaMatch = /([\w$]+)=\{name:"[^"]*"/g;
+                let last = null;
+                let m;
+                while ((m = metaMatch.exec(chunk))) last = m;
+                if (last) {
+                    return {
+                        varName: last[1],
+                        index: windowStart + last.index
+                    };
+                }
+                idx++;
+            }
+        }
+
         return null;
     }
 
     function findMonsterMetadataVarName(scriptText, skillSrc, monsterName) {
         return findMonsterMetadataAnchor(scriptText, skillSrc, monsterName)?.varName ?? null;
+    }
+
+    function classSliceUsesIndirectMetadataParam(classSlice, metadataVarName) {
+        if (!classSlice || !metadataVarName) return false;
+        return new RegExp(`constructor\\(e,t=${escapeCdrRegexLiteral(metadataVarName)}\\)`).test(classSlice);
+    }
+
+    function getPreviewSkillSpreads(metadataVarName, classSlice) {
+        const spreads = [`...${metadataVarName}.skill`];
+        if (classSliceUsesIndirectMetadataParam(classSlice, metadataVarName)) {
+            spreads.push('...t.skill');
+        }
+        return spreads;
+    }
+
+    function bodyIncludesPreviewSkillSpread(body, spreads) {
+        return spreads.some((spread) => body.includes(spread));
     }
 
     function findMonsterClassSlice(scriptText, metadataVarName, metadataIndex) {
@@ -7364,7 +8660,10 @@
         const needles = [
             `super({...e,...${metadataVarName},`,
             `super({...e,...${metadataVarName}}`,
-            `super({...${metadataVarName},`
+            `super({...${metadataVarName},`,
+            `super({...${metadataVarName},...e}`,
+            `super({...e,...${metadataVarName}},`,
+            `constructor(e,t=${metadataVarName}){super({...e,...t}`
         ];
         let start = -1;
         for (const needle of needles) {
@@ -7470,32 +8769,149 @@
             return { component: abilityInit.component, ms: abilityInit.ms, source: 'script-init' };
         }
 
+        const skillInit = inits.find((h) =>
+            h.component !== 'abilityCooldown'
+            && isPreviewSkillAbilityCooldownComponent(h.component)
+            && h.ms != null && h.ms > 0);
+        if (skillInit && Number.isFinite(skillInit.ms)) {
+            return { component: skillInit.component, ms: skillInit.ms, source: 'script-init' };
+        }
+
         const abilityCdr = computed.find((h) =>
             h.component === 'abilityCooldown' && h.ms != null && h.ms > 0);
         if (abilityCdr && Number.isFinite(abilityCdr.ms)) {
             return abilityCdr;
         }
 
+        const spellCdr = computed.find((h) =>
+            h.component === 'spellCooldown' && h.ms != null && h.ms > 0);
+        if (spellCdr && Number.isFinite(spellCdr.ms)) {
+            return { component: 'abilityCooldown', ms: spellCdr.ms, source: spellCdr.source };
+        }
+
         return null;
     }
 
-    function extractPreviewCooldownInitsFrom661(scriptText, classSlice, metadataVarName, metadataIndex) {
+    function extractPreviewCdrBoundsFromClassSlice(scriptText, classSlice, metadataIndex) {
+        if (!scriptText || !classSlice) return null;
+
+        let constName = classSlice.match(
+            /([\w$]+)\.(CDR_PER_AP|CDR_MS_PER_AP|COOLDOWN_MS_REDUCTION_PER_AP)/
+        )?.[1];
+
+        if (!constName) {
+            constName = classSlice.match(/([\w$]+)\.BASE_COOLDOWN_MS/)?.[1];
+        }
+        if (!constName) {
+            constName = classSlice.match(
+                /calculateSpellCooldownMs=\(\)=>Math\.max\(Math\.round\(this\.CD_BASE_MS-(\w+)\./
+            )?.[1];
+        }
+        if (!constName) {
+            constName = classSlice.match(
+                /calculateSpellCooldownTicks=\(\)=>\(0,\w+\.HX\)\(Math\.max\(Math\.round\(this\._baseCdrMs-(\w+)\./
+            )?.[1];
+        }
+        if (!constName) return null;
+
+        const fields = readScriptConstObject(scriptText, constName, { nearIndex: metadataIndex ?? 0 });
+        const mapped = mapCdrScriptFields(fields);
+        if (mapped.baseMs == null || mapped.reductionPerApMs == null) return null;
+
+        if (mapped.minMs == null) {
+            mapped.minMs = readScriptConstMinMs(scriptText, constName, metadataIndex ?? 0);
+        }
+        if (mapped.minMs == null) return null;
+
+        return mapped;
+    }
+
+    function extractPreviewCdrBoundsFrom661Script(scriptText, unit, metadataVarName, metadataIndex) {
+        if (!scriptText || !unit?.gameId) return null;
+
+        const region = findMonsterScriptRegion(scriptText, metadataVarName, metadataIndex);
+        const near = metadataIndex != null && metadataIndex >= 0 ? metadataIndex : 0;
+        const match = findCdrConstMatchNearSlice(scriptText, region);
+        if (!match) return null;
+        return mapCdrBoundsFromConstMatch(scriptText, match, near);
+    }
+
+    function resolvePreviewCdrBounds(scriptText, classSlice, unit, metadataIndex, metadataVarName) {
+        const fromClass = extractPreviewCdrBoundsFromClassSlice(scriptText, classSlice, metadataIndex);
+        if (fromClass) return fromClass;
+
+        const region = findMonsterScriptRegion(scriptText, metadataVarName, metadataIndex);
+        if (!findCdrConstMatchNearSlice(scriptText, region)) return null;
+
+        return extractPreviewCdrBoundsFrom661Script(scriptText, unit, metadataVarName, metadataIndex);
+    }
+
+    function resolvePreviewCdrCooldownMsFromBounds(unit, cdrBounds, percentageBasis = 1) {
+        if (!cdrBounds || unit?.ap == null || !Number.isFinite(unit.ap)) return null;
+        const scaledBaseMs = percentageBasis !== 1
+            ? Math.round(cdrBounds.baseMs * percentageBasis)
+            : cdrBounds.baseMs;
+        const ms = computeCdrEffectiveMs(unit.ap, cdrBounds.reductionPerApMs, scaledBaseMs, cdrBounds.minMs);
+        if (ms == null || !Number.isFinite(ms) || ms <= 0) return null;
+        return ms;
+    }
+
+    const PREVIEW_PASSIVE_SKILL_CLOCKS = new Set(['rageCooldownClock', 'passiveCooldownClock']);
+    const PREVIEW_NON_ABILITY_COOLDOWN_CLOCKS = new Set(['autoAttackCooldown']);
+
+    function isPreviewSkillAbilityCooldownComponent(componentName) {
+        if (!componentName || PREVIEW_PASSIVE_SKILL_CLOCKS.has(componentName)) return false;
+        if (PREVIEW_NON_ABILITY_COOLDOWN_CLOCKS.has(componentName)) return false;
+        if (componentName === 'abilityCooldown') return true;
+        return /Cooldown$/.test(componentName);
+    }
+
+    function* iteratePreviewCooldownClockInits(classSlice) {
+        if (!classSlice) return;
+        const patterns = [
+            /this\.(\w+)=new \w+\.e\(\{([^}]{0,800})\}/g,
+            /this\.(\w+)=this\.addCooldown\(new \w+\.e\(\{([^}]{0,800})\}\)\)/g
+        ];
+        for (const re of patterns) {
+            for (const m of classSlice.matchAll(re)) {
+                yield { component: m[1], body: m[2] };
+            }
+        }
+    }
+
+    function classSliceUsesAbilityCooldownGameplay(classSlice) {
+        if (!classSlice || !/abilityCooldown/.test(classSlice)) return false;
+        return /abilityCooldown\.setCooldown|abilityCooldown\.isOnCooldown|abilityCooldown\.setBaseCooldown|addCooldown\(this\.abilityCooldown\)|this\.abilityCooldown=this\.addCooldown|renderCooldownBars\.add\(this\.abilityCooldown\)|isOnCooldown:\(\)=>this\.abilityCooldown/.test(classSlice);
+    }
+
+    function previewCooldownInitUsesSkill(body, component, skillSpreads) {
+        if (component === 'abilityCooldown') return true;
+        return bodyIncludesPreviewSkillSpread(body, skillSpreads);
+    }
+
+    function extractPreviewCooldownInitsFrom661(scriptText, classSlice, metadataVarName, metadataIndex, unit, percentageBasis = 1) {
         if (!scriptText || !classSlice || !metadataVarName) return [];
-        const skillSpread = `...${metadataVarName}.skill`;
-        const re = /this\.(\w+)=new \w+\.e\(\{([^}]{0,800})\}/g;
+        const skillSpreads = getPreviewSkillSpreads(metadataVarName, classSlice);
         const hits = [];
-        for (const m of classSlice.matchAll(re)) {
-            if (m[1] !== 'abilityCooldown') continue;
-            const body = m[2];
-            if (!body.includes(skillSpread)) continue;
+        for (const { component, body } of iteratePreviewCooldownClockInits(classSlice)) {
+            if (!isPreviewSkillAbilityCooldownComponent(component)) continue;
+            if (component === 'abilityCooldown' && !classSliceUsesAbilityCooldownGameplay(classSlice)) continue;
+            if (!previewCooldownInitUsesSkill(body, component, skillSpreads)) continue;
             if (/disabledPassive:!0/.test(body) && /cooldownMilliseconds:0/.test(body)) continue;
 
             const msRef = body.match(/cooldownMilliseconds:([\w$]+\.\w+|\d+)/);
             if (msRef) {
                 const ms = resolveScriptMsReference(scriptText, msRef[1], { nearIndex: metadataIndex ?? 0 });
                 if (ms != null && Number.isFinite(ms) && ms > 0) {
-                    hits.push({ component: m[1], ms, body });
+                    hits.push({ component, ms, body });
+                    continue;
                 }
+            }
+
+            const ticksMs = resolvePreviewCooldownTicksInitMs(
+                scriptText, classSlice, body, unit, metadataIndex, percentageBasis);
+            if (ticksMs != null && Number.isFinite(ticksMs) && ticksMs > 0) {
+                hits.push({ component, ms: ticksMs, body });
             }
         }
         return hits;
@@ -7503,16 +8919,24 @@
 
     function resolvePreviewUntimedAbilityReason(classSlice, metadataVarName) {
         if (!classSlice || !metadataVarName) return null;
-        const skillSpread = `...${metadataVarName}.skill`;
+        const skillSpreads = getPreviewSkillSpreads(metadataVarName, classSlice);
         let hasTimedAbilityCd = false;
         let hasUntimedSkillClock = false;
-        for (const m of classSlice.matchAll(/this\.(\w+)=new \w+\.e\(\{([^}]{0,800})\}/g)) {
-            if (!m[2].includes(skillSpread)) continue;
-            if (m[1] === 'abilityCooldown') {
-                const msRef = m[2].match(/cooldownMilliseconds:(\w+\.\w+|\d+)/);
+        for (const { component, body } of iteratePreviewCooldownClockInits(classSlice)) {
+            if (component === 'abilityCooldown') {
+                if (!classSliceUsesAbilityCooldownGameplay(classSlice)) {
+                    hasUntimedSkillClock = true;
+                    continue;
+                }
+                const msRef = body.match(/cooldownMilliseconds:([\w$]+\.\w+|\d+)/);
                 if (msRef && msRef[1] !== '0') hasTimedAbilityCd = true;
+                continue;
             }
-            if (/rageCooldownClock|passiveCooldownClock/.test(m[1]) && /cooldownMilliseconds:0/.test(m[2])) {
+            if (!bodyIncludesPreviewSkillSpread(body, skillSpreads)) continue;
+            if (isPreviewSkillAbilityCooldownComponent(component)) {
+                if (previewCooldownBodyHasTimedInit(body)) hasTimedAbilityCd = true;
+            }
+            if (PREVIEW_PASSIVE_SKILL_CLOCKS.has(component) && /cooldownMilliseconds:0/.test(body)) {
                 hasUntimedSkillClock = true;
             }
         }
@@ -7522,12 +8946,45 @@
         return null;
     }
 
-    function extractPreviewCdrCooldownMsFrom661(scriptText, metadataVarName, ap, metadataIndex) {
+    function findMonsterScriptRegion(scriptText, metadataVarName, metadataIndex) {
+        if (!scriptText) return '';
+        const start = metadataIndex != null && metadataIndex >= 0 ? metadataIndex : 0;
+        const classSlice = findMonsterClassSlice(scriptText, metadataVarName, metadataIndex);
+        if (classSlice && metadataVarName) {
+            const needles = [
+                `super({...e,...${metadataVarName},`,
+                `super({...e,...${metadataVarName}}`,
+                `super({...${metadataVarName},`,
+                `constructor(e,t=${metadataVarName}){super({...e,...t}`
+            ];
+            for (const needle of needles) {
+                const classStart = scriptText.indexOf(needle, start);
+                if (classStart >= 0) {
+                    return scriptText.slice(start, classStart + classSlice.length);
+                }
+            }
+        }
+
+        const tail = scriptText.slice(start + 1);
+        const nextMeta = tail.search(/[\w$]+=\{name:"/);
+        const end = nextMeta >= 0 ? start + 1 + nextMeta : start + 12000;
+        return scriptText.slice(start, end);
+    }
+
+    function extractPreviewCdrCooldownMsFrom661(scriptText, metadataVarName, unit, metadataIndex) {
+        const ap = unit?.ap;
         const classSlice = findMonsterClassSlice(scriptText, metadataVarName, metadataIndex);
         const computed = extractPreviewComputedCooldownsFrom661(
             scriptText, classSlice, ap, metadataIndex);
         const pick = pickPreviewCooldownHit([], computed);
-        return pick?.ms ?? null;
+        if (pick?.ms != null) return pick.ms;
+
+        const cdrBounds = resolvePreviewCdrBounds(scriptText, classSlice, unit, metadataIndex, metadataVarName);
+        if (cdrBounds && ap != null && Number.isFinite(ap)) {
+            const ms = computeCdrEffectiveMs(ap, cdrBounds.reductionPerApMs, cdrBounds.baseMs, cdrBounds.minMs);
+            if (ms != null && ms > 0) return ms;
+        }
+        return null;
     }
 
     function readScriptConstObject(scriptText, constName, opts = {}) {
@@ -7585,6 +9042,8 @@
     function resolvePreviewAbilityCooldownFromActor(unit) {
         const actor = findActorForPanelUnit(unit);
         if (!actor) return null;
+        const metadata = getMonsterMetadata(unit?.gameId ?? resolveGameId(actor));
+        if (metadataHasNoTimedAbilityCooldown(metadata)) return null;
         const calculator = invokeActorCooldownCalculator(actor, unit.ap);
         if (calculator?.effectiveTicks != null && Number.isFinite(calculator.effectiveTicks) && calculator.effectiveTicks > 0) {
             return {
@@ -7621,18 +9080,29 @@
         const computed = extractPreviewComputedCooldownsFrom661(
             scriptText, classSlice, unit.ap, metadataIndex, percentageBasis);
         const inits = extractPreviewCooldownInitsFrom661(
-            scriptText, classSlice, metadataVarName, metadataIndex);
+            scriptText, classSlice, metadataVarName, metadataIndex, unit, percentageBasis);
         const pick = pickPreviewCooldownHit(inits, computed);
-        if (!pick || pick.ms == null || !Number.isFinite(pick.ms) || pick.ms <= 0) return null;
 
-        let ms = pick.ms;
-        let source = pick.source;
-        if (percentageBasis !== 1 && percentageSync && pick.source === 'script-init') {
-            ms = applyPreviewPercentageBasisToCooldownMs(ms, percentageBasis, percentageSync.minMs);
-            source = 'script-init+equip-cdr';
-        } else if (percentageBasis !== 1 && pick.source === 'script-cdr') {
-            source = 'script-cdr+equip-cdr';
+        let ms = null;
+        let source = null;
+        if (pick?.ms != null && Number.isFinite(pick.ms) && pick.ms > 0) {
+            ms = pick.ms;
+            source = pick.source;
+            if (percentageBasis !== 1 && percentageSync && pick.source === 'script-init') {
+                ms = applyPreviewPercentageBasisToCooldownMs(ms, percentageBasis, percentageSync.minMs);
+                source = 'script-init+equip-cdr';
+            } else if (percentageBasis !== 1 && pick.source === 'script-cdr') {
+                source = 'script-cdr+equip-cdr';
+            }
+        } else if (!resolvePreviewUntimedAbilityReason(classSlice, metadataVarName)) {
+            const cdrBounds = resolvePreviewCdrBounds(scriptText, classSlice, unit, metadataIndex, metadataVarName);
+            ms = resolvePreviewCdrCooldownMsFromBounds(unit, cdrBounds, percentageBasis);
+            if (ms != null) {
+                source = percentageBasis !== 1 ? 'script-cdr+equip-cdr' : 'script-cdr';
+            }
         }
+
+        if (ms == null || !Number.isFinite(ms) || ms <= 0) return null;
 
         return {
             cooldownTicks: roundTrackValue(msToGameCooldownTicks(ms), 'abilityCdTicks'),
@@ -7656,6 +9126,20 @@
                 source: null,
                 reason: `metadata.skill.src missing (gameId ${unit.gameId})`
             };
+        }
+
+        if (cachedGameChunk661Text) {
+            const skillSrc = metadata.skill.src;
+            const monsterName = metadata?.name ?? unit?.name;
+            const anchor = findMonsterMetadataAnchor(cachedGameChunk661Text, skillSrc, monsterName);
+            if (anchor) {
+                const classSlice = findMonsterClassSlice(
+                    cachedGameChunk661Text, anchor.varName, anchor.index);
+                const passiveReason = resolvePreviewUntimedAbilityReason(classSlice, anchor.varName);
+                if (passiveReason) {
+                    return { result: null, source: null, reason: passiveReason };
+                }
+            }
         }
 
         const fromActor = resolvePreviewAbilityCooldownFromActor(unit);
@@ -7684,7 +9168,7 @@
             return {
                 result: null,
                 source: null,
-                reason: '661 game script not loaded yet'
+                reason: 'monster game script not loaded yet'
             };
         }
 
@@ -7701,9 +9185,9 @@
 
         const { varName: metadataVarName, index: metadataIndex } = anchor;
         const classSlice = findMonsterClassSlice(scriptText, metadataVarName, metadataIndex);
-        const cdrMs = extractPreviewCdrCooldownMsFrom661(scriptText, metadataVarName, unit.ap, metadataIndex);
+        const cdrMs = extractPreviewCdrCooldownMsFrom661(scriptText, metadataVarName, unit, metadataIndex);
         const inits = extractPreviewCooldownInitsFrom661(
-            scriptText, classSlice, metadataVarName, metadataIndex);
+            scriptText, classSlice, metadataVarName, metadataIndex, unit);
         const passiveReason = resolvePreviewUntimedAbilityReason(classSlice, metadataVarName);
         if (passiveReason) {
             return { result: null, source: null, reason: passiveReason };
@@ -7998,7 +9482,7 @@
         if (!root) return 0;
 
         let applied = 0;
-        for (const span of root.querySelectorAll('.text-cooldown')) {
+        for (const span of root.querySelectorAll('.text-cooldown, .text-stun')) {
             if (span.classList.contains('bs-scaled-value') || span.classList.contains('bs-scaled-min-cd')) continue;
 
             const paragraph = span.closest('p');
@@ -8008,6 +9492,8 @@
             if (span.closest('span.whitespace-nowrap')) continue;
 
             const originalText = span.textContent?.trim() ?? '';
+            if (!isStandaloneDurationSpanText(originalText)) continue;
+
             const durationMs = parseTooltipDurationText(originalText);
             if (durationMs == null) continue;
 
@@ -8111,13 +9597,15 @@
         if (sides.after) {
             const next = node.nextSibling;
             if (next?.nodeType === Node.TEXT_NODE) {
-                if (!/^\s/.test(next.textContent)) {
-                    next.textContent = ` ${next.textContent}`;
+                const text = next.textContent || '';
+                const trimmedStart = text.replace(/^\s+/, '');
+                if (/^[,.;:!?]/.test(trimmedStart)) {
+                    if (text !== trimmedStart) next.textContent = trimmedStart;
+                } else if (!/^\s/.test(text)) {
+                    next.textContent = ` ${text}`;
                 }
             } else if (next) {
                 node.parentNode.insertBefore(document.createTextNode(' '), next);
-            } else {
-                node.parentNode.appendChild(document.createTextNode(' '));
             }
         }
     }
@@ -8152,6 +9640,7 @@
 
     function normalizeScaledInlineSpacing(node) {
         ensureAdjacentTooltipSpace(node, { before: true, after: true });
+        normalizeTooltipPunctuationSpacing(node);
     }
 
     function collapseTooltipRatioSpan(ratioSpan, valueNode) {
@@ -8208,11 +9697,80 @@
         return detectTooltipScalingDamageType(span, contextText, statInfo) || 'magic';
     }
 
+    function enhanceInlineHealPerApChunkSpan(span, unit) {
+        if (!span || span.classList.contains('bs-scaled-value')) return false;
+        if (span.closest('span.whitespace-nowrap')) return false;
+        if (span.style.display === 'none') return false;
+        if (!isHealPerStatChunkMarkerSpan(span)) return false;
+
+        const text = span.textContent?.trim() ?? '';
+        const chunkMatch = text.match(/^([\d.]+)/);
+        if (!chunkMatch) return false;
+        const chunkSize = parseFloat(chunkMatch[1]);
+        if (!Number.isFinite(chunkSize) || chunkSize <= 0) return false;
+
+        const img = span.querySelector('img[alt]');
+        const alt = String(img?.getAttribute('alt') || '').toLowerCase();
+        if (!alt.includes('ability power') && !alt.includes('abilitypower')) return false;
+
+        const container = span.closest('p, li');
+        if (!container) return false;
+
+        let baseSpan = null;
+        let baseAmount = null;
+        for (const candidate of container.querySelectorAll('.text-healing')) {
+            if (candidate === span || candidate.classList.contains('bs-scaled-value')) continue;
+            const amount = parseTooltipHealAmountText(candidate.textContent?.trim());
+            if (amount != null) {
+                baseSpan = candidate;
+                baseAmount = amount;
+                break;
+            }
+        }
+        if (!baseSpan || baseAmount == null) return false;
+
+        const statInfo = resolveAbilityScalingStatInfo(span, unit);
+        const statValue = statInfo.value;
+        if (statValue == null || !Number.isFinite(statValue)) return false;
+
+        const rawTotal = (statValue / chunkSize) * baseAmount;
+        const total = Math.floor(rawTotal);
+        const inner = `(${statValue} ${statInfo.label} ÷ ${chunkSize}) × ${baseAmount}`;
+        const expression = formatScalingExpression(inner, rawTotal, total, ' HP');
+        collapseTooltipRatioSpan(span, baseSpan);
+        trimTooltipPerLabelAfterNode(baseSpan);
+        applyScaledTooltipValue(baseSpan, `${baseAmount} HP`, {
+            value: total,
+            suffix: ' HP',
+            title: buildScalingMathTitle({
+                base: baseAmount,
+                statValue,
+                statLabel: statInfo.label,
+                total,
+                suffix: ' HP',
+                expression
+            })
+        }, `${baseAmount} HP`);
+        baseSpan.textContent = `${total} HP`;
+        normalizeScaledInlineSpacing(baseSpan);
+
+        logAbilityScaling('inline heal per ap chunk', {
+            baseAmount,
+            chunkSize,
+            statValue,
+            total,
+            gameId: unit.gameId,
+            name: unit.name
+        });
+        return true;
+    }
+
     function enhanceInlineStatMultiplierSpan(span, unit) {
         if (!span || span.classList.contains('bs-scaled-value')) return false;
         if (span.closest('span.whitespace-nowrap')) return false;
         if (span.style.display === 'none') return false;
         if (isCooldownPerApMarkerSpan(span)) return false;
+        if (isHealPerStatChunkMarkerSpan(span)) return false;
 
         const parsed = parseTooltipStatMultiplierSpan(span);
         if (!parsed) return false;
@@ -8295,21 +9853,19 @@
     function enhanceInlinePercentScalingSpan(span, unit) {
         if (!span || span.classList.contains('bs-scaled-value')) return false;
         const text = span.textContent?.trim() ?? '';
-        const match = text.match(/^([+-]?[\d.]+)%\s*per\s*([\d.]+)/i);
-        if (!match) return false;
+        const ratio = parseTooltipPerStatPercentRatio(text);
+        if (!ratio) return false;
 
         const statInfo = resolveAbilityScalingStatInfo(span, unit);
         const statValue = statInfo.value;
         if (statValue == null || !Number.isFinite(statValue)) return false;
 
-        const ratioAmount = parseFloat(match[1]);
-        const chunkSize = parseFloat(match[2]);
-        if (!Number.isFinite(ratioAmount) || !Number.isFinite(chunkSize) || chunkSize <= 0) return false;
+        const { amount: ratioAmount, chunkSize } = ratio;
 
         const container = span.closest('p, li');
         if (!container) return false;
 
-        let baseSpan = container.querySelector('.text-lifesteal');
+        let baseSpan = container.querySelector('.text-lifesteal, .text-attackSpeed');
         if (!baseSpan || baseSpan === span || baseSpan.classList.contains('bs-scaled-value')) {
             baseSpan = null;
             for (const candidate of container.querySelectorAll('span')) {
@@ -8324,31 +9880,35 @@
 
         const labeled = parseTooltipLabeledPercentText(baseSpan.textContent?.trim());
         if (!labeled) return false;
-        const base = labeled.percent;
-        const rawTotal = base + (statValue / chunkSize) * ratioAmount;
+        const signedBase = labeled.sign === '-'
+            ? -Math.abs(labeled.percent)
+            : (labeled.sign === '+' ? Math.abs(labeled.percent) : labeled.percent);
+        const rawTotal = signedBase + (statValue / chunkSize) * ratioAmount;
         const total = Math.floor(rawTotal);
-        const inner = `${base}% + (${statValue} ${statInfo.label} ÷ ${chunkSize}) × ${ratioAmount}%`;
+        const inner = `${signedBase}% + (${statValue} ${statInfo.label} ÷ ${chunkSize}) × ${ratioAmount}%`;
         const expression = formatScalingExpression(inner, rawTotal, total, '%');
-        applyScaledTooltipValue(baseSpan, `${base}%`, {
+        const cleanLabel = stripTooltipScalingParenthetical(labeled.label);
+        collapseTooltipRatioSpan(span, baseSpan);
+        applyScaledTooltipValue(baseSpan, `${signedBase}%`, {
             value: total,
             suffix: '%',
             title: buildScalingMathTitle({
-                base,
+                base: signedBase,
                 statValue,
                 statLabel: statInfo.label,
                 total,
                 suffix: '%',
                 expression
             })
-        }, `${base}%`);
-        if (labeled.label) {
-            baseSpan.textContent = `${labeled.sign}${total}%${labeled.label}`;
+        }, `${signedBase}%`);
+        if (cleanLabel) {
+            baseSpan.textContent = `${total}%${cleanLabel}`;
         }
-        collapseTooltipRatioSpan(span, baseSpan);
         return true;
     }
 
     function enhanceAbilityTooltipScaledValues(root, unit, options = {}) {
+        return profileUnitsLag('enhanceAbilityTooltip', () => {
         if (!root || !unit) return 0;
         const force = options.force === true;
         const scalingUnit = resolveUnitAbilityScalingStats(unit) || unit;
@@ -8403,11 +9963,17 @@
 
         for (const span of root.querySelectorAll('.text-abilityPower, .text-villain')) {
             if (enhanceInlineFlatSpeedScalingSpan(span, scalingUnit)) applied += 1;
+            else if (enhanceInlineHealPerApChunkSpan(span, scalingUnit)) applied += 1;
             else if (enhanceInlineStatMultiplierSpan(span, scalingUnit)) applied += 1;
             else if (enhanceInlinePercentScalingSpan(span, scalingUnit)) applied += 1;
         }
 
+        for (const scaled of root.querySelectorAll('.bs-scaled-value')) {
+            normalizeTooltipPunctuationSpacing(scaled);
+        }
+
         return applied;
+        });
     }
 
     function bumpAbilityEnhanceGeneration(details) {
@@ -8614,13 +10180,28 @@
         const ad = unit.ad != null ? Math.round(unit.ad) : null;
         if (ap == null && ad == null) return false;
 
+        const equipCdr = resolveAbilityScalingEquipCdr(unit);
+        const unitHasEquipCdr = equipCdr?.basis != null && equipCdr.basis !== 1;
+        const equipPctLabel = formatEquipCdrPercentLabel(equipCdr?.percent);
+
+        let matchedStat = false;
         for (const span of root.querySelectorAll('.bs-scaled-value')) {
             const title = span.title || '';
             if (!title) continue;
-            if (ap != null && title.includes(`${ap} AP`)) return true;
-            if (ad != null && title.includes(`${ad} AD`)) return true;
+
+            if (title.includes('minimum CD') || title.includes('effective CD')) {
+                const titleHasEquip = title.includes('equip');
+                if (unitHasEquipCdr !== titleHasEquip) return false;
+                if (unitHasEquipCdr && equipPctLabel != null
+                    && !title.includes(`−${equipPctLabel}%`)) {
+                    return false;
+                }
+            }
+
+            if (ap != null && title.includes(`${ap} AP`)) matchedStat = true;
+            if (ad != null && title.includes(`${ad} AD`)) matchedStat = true;
         }
-        return false;
+        return matchedStat;
     }
 
     function isAbilityTooltipEnhancePending(details) {
@@ -8760,7 +10341,6 @@
 
     function resolveFreshPanelUnit(unit) {
         if (!unit) return null;
-        if (isFightActive()) invalidateActorSnapshotsCache();
         const unitKey = normalizeCollapseKey(getUnitCollapseKey(unit));
         return findPanelUnitByCollapseKey(unitKey, { fresh: true }) || unit;
     }
@@ -8848,9 +10428,7 @@
 
     function queueAbilityTooltipRefreshForActor(actor) {
         if (!actor) return;
-        const unit = probeActor(actor);
-        if (!unit) return;
-        const unitKey = normalizeCollapseKey(getUnitCollapseKey(unit));
+        const unitKey = normalizeCollapseKey(resolveFightCollapseKey(actor));
         const body = document.getElementById(UNITS_BODY_ID);
         if (!body) return;
         for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
@@ -8861,37 +10439,46 @@
     }
 
     function patchOpenAbilityTooltips(body, units) {
-        if (!body?.querySelector('.bs-ability-details[open]')) return;
+        return profileUnitsLag('patchOpenAbilityTooltips', () => {
+            if (!body?.querySelector('.bs-ability-details[open]')) return;
+            const unitByKey = new Map();
+            for (const unit of units) {
+                unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
+            }
+            for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
+                const abilityDetails = card.querySelector('.bs-ability-details');
+                if (!abilityDetails?.open) continue;
+                const unit = unitByKey.get(card.dataset.unitKey);
+                if (!unit) continue;
+                const scalingUnit = resolveBoardAbilityScalingUnit(abilityDetails, unit);
+                syncAbilityDetailsDataset(abilityDetails, scalingUnit);
+                if (needsAbilityTooltipRefresh(abilityDetails, scalingUnit)) {
+                    requestAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey, scalingUnit);
+                }
+            }
+        });
+    }
+
+    function abilityTooltipNeedsPoll(body, units) {
+        if (!body?.querySelector('.bs-ability-details[open]')) return false;
         const unitByKey = new Map();
         for (const unit of units) {
             unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
         }
         for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
-            const abilityDetails = card.querySelector('.bs-ability-details');
-            if (!abilityDetails?.open) continue;
-            const unit = unitByKey.get(card.dataset.unitKey);
-            if (!unit) continue;
-            const scalingUnit = resolveBoardAbilityScalingUnit(abilityDetails, unit);
-            syncAbilityDetailsDataset(abilityDetails, scalingUnit);
-            requestAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey, scalingUnit);
-        }
-    }
-
-    function boardAbilityTooltipNeedsPoll(body) {
-        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
             const details = card.querySelector('.bs-ability-details');
             if (!details?.open) continue;
             if (isAbilityTooltipRefreshQueued(details)) return false;
-            const unitAp = details.dataset.unitAp;
-            const appliedKey = details.dataset.abilityAppliedScalingKey;
-            if (!appliedKey || unitAp == null) return true;
-            const apToken = `:${Math.round(Number(unitAp))}:`;
-            if (!appliedKey.includes(apToken)) return true;
-            const root = getAbilityTooltipRoot(details);
-            if (root?.dataset?.abilityScaled !== '1') return true;
-            if (!abilityTooltipScalingDisplayMatchesUnit(root, { ap: Number(unitAp) })) return true;
+            const unit = unitByKey.get(card.dataset.unitKey);
+            if (!unit) continue;
+            const scalingUnit = resolveBoardAbilityScalingUnit(details, unit);
+            if (needsAbilityTooltipRefresh(details, scalingUnit)) return true;
         }
         return false;
+    }
+
+    function boardAbilityTooltipNeedsPoll(body) {
+        return abilityTooltipNeedsPoll(body, getRefreshedBoardPreviewUnits());
     }
 
     function pollOpenAbilityScalingRefresh() {
@@ -8910,16 +10497,16 @@
             return;
         }
 
-        const units = collectActorSnapshots({ bypassCache: true }) || [];
+        const units = collectActorSnapshots() || [];
+        if (!abilityTooltipNeedsPoll(body, units)) return;
         patchOpenAbilityTooltips(body, units);
     }
 
     function findPanelUnitByCollapseKey(unitKey, options = {}) {
         const normalized = normalizeCollapseKey(unitKey);
         if (!normalized) return null;
-        if (options.fresh && isFightActive()) invalidateActorSnapshotsCache();
         const units = options.fresh && isFightActive()
-            ? (collectActorSnapshots({ bypassCache: true }) || [])
+            ? (collectActorSnapshots() || [])
             : getCurrentPanelUnits();
         for (const unit of units) {
             if (normalizeCollapseKey(getUnitCollapseKey(unit)) === normalized) {
@@ -9019,14 +10606,6 @@
             reasons.push('unscaled-display');
         }
         if (!reasons.length) return { needed: false, log: null };
-
-        if (root?.dataset?.abilityScaled === '1'
-            && reasons.length === 1
-            && reasons[0] === 'scaling-key'
-            && abilityTooltipScalingDisplayMatchesUnit(root, unit)) {
-            markAbilityTooltipScalingApplied(details, unit, scalingKey);
-            return { needed: false, log: null };
-        }
 
         return {
             needed: true,
@@ -9232,10 +10811,14 @@
         unitsBodyAbilityToggleHandler = null;
     }
 
-    function formatStatLineForExport(label, live, base) {
+    function formatStatLineForExport(label, live, base, statKey) {
         if (live == null && base == null) return '';
-        let line = `  ${label}: ${live != null ? live : '—'}`;
-        if (base != null && base !== live) line += ` (base ${base})`;
+        let line = `  ${label}: ${live != null ? formatUnitStatDisplay(statKey, live) : '—'}`;
+        const liveNorm = live != null ? normalizeUnitStatValue(statKey, live) : null;
+        const baseNorm = base != null ? normalizeUnitStatValue(statKey, base) : null;
+        if (baseNorm != null && baseNorm !== liveNorm) {
+            line += ` (base ${formatUnitStatDisplay(statKey, base)})`;
+        }
         return line;
     }
 
@@ -9272,7 +10855,7 @@
 
         for (const { key, label } of STAT_KEYS) {
             if (key === 'hp') continue;
-            const statLine = formatStatLineForExport(label, unit[key], unit.baseStats?.[key]);
+            const statLine = formatStatLineForExport(label, unit[key], unit.baseStats?.[key], key);
             if (statLine) lines.push(statLine);
         }
 
@@ -11247,17 +12830,21 @@
         const base = unit.baseStats?.[key];
         if (live == null && base == null) return '<div class="bs-stat-cell"></div>';
 
+        const liveNorm = live != null ? normalizeUnitStatValue(key, live) : null;
+        const baseNorm = base != null ? normalizeUnitStatValue(key, base) : null;
+
         let valueHtml;
         if (key === 'hp' && live != null) {
+            const hpMaxText = unit.hpMax != null ? formatUnitStatDisplay('hpMax', unit.hpMax) : '?';
             const hpText = unit.source === 'fight'
-                ? `${live}/${unit.hpMax ?? '?'}`
-                : String(live);
+                ? `${formatUnitStatDisplay('hp', live)}/${hpMaxText}`
+                : formatUnitStatDisplay(key, live);
             valueHtml = coloredStatSpan(hpText, unit.alive !== false);
         } else {
-            valueHtml = live != null ? String(live) : '—';
+            valueHtml = live != null ? formatUnitStatDisplay(key, live) : '—';
         }
-        const baseStr = base != null && base !== live
-            ? ` <span class="bs-stat-base">(${base})</span>`
+        const baseStr = baseNorm != null && baseNorm !== liveNorm
+            ? ` <span class="bs-stat-base">(${formatUnitStatDisplay(key, base)})</span>`
             : '';
         return `<div class="bs-stat-cell">${renderStatIconHtml(key)}<span class="bs-stat-value">${valueHtml}${baseStr}</span></div>`;
     }
@@ -11300,6 +12887,7 @@
     }
 
     function renderStatusEffectsRowHtml(unit) {
+        if (unit?.source === 'fight' && !shouldShowLiveStatusEffects()) return '';
         const effects = unit.statusEffects;
         if (!effects?.length) return '';
         const maxShow = 6;
@@ -11323,7 +12911,7 @@
                 : `HP ${unit.hp}`;
             bits.push(coloredStatSpan(hpText, unit.alive !== false));
         }
-        if (unit.source === 'fight') {
+        if (unitShowsLiveMechanics(unit)) {
             if (unit.attackDelayReady === true) {
                 bits.push(coloredStatSpan('Atk ready', true));
             } else {
@@ -11340,9 +12928,9 @@
                 bits.push(coloredStatSpan(`Atk ${formatTicks(attackDelayTicks)}`, true));
             }
         }
-        if (unit.cooldownReady === true && unit.source === 'fight') {
+        if (unit.cooldownReady === true && unitShowsLiveMechanics(unit)) {
             bits.push(coloredStatSpan('CD ready', true));
-        } else if (unit.source !== 'fight') {
+        } else if (!unitShowsLiveMechanics(unit)) {
             const cdTicks = resolveUnitCooldownTicks(unit);
             if (cdTicks != null) {
                 bits.push(coloredStatSpan(`CD ${formatTicks(cdTicks)}`, true));
@@ -11377,28 +12965,42 @@
         return `<div class="bs-stat-grid">${rowsHtml}</div>`;
     }
 
-    function buildUnitCardMechanicsHtml(unit) {
+    function buildUnitCardTickMechanicsHtml(unit) {
         let mechanicsHtml = '';
+        const liveMechanics = unitShowsLiveMechanics(unit);
         const attackDelayTicks = resolveUnitAttackDelayTicks(unit);
         if (attackDelayTicks != null) {
-            const atkState = renderCooldownStateHtml(
-                unit.attackDelayReady,
-                resolveUnitAttackDelayRemainingTicks(unit)
-            );
-            mechanicsHtml += `<div class="bs-row"><span class="bs-label">Atk delay:</span> ${formatTicks(attackDelayTicks)}` +
+            const atkState = liveMechanics
+                ? renderCooldownStateHtml(
+                    unit.attackDelayReady,
+                    resolveUnitAttackDelayRemainingTicks(unit)
+                )
+                : null;
+            mechanicsHtml += `<div class="bs-row" data-bs-mech="atk-delay"><span class="bs-label">Atk delay:</span> ${formatTicks(attackDelayTicks)}` +
                 (atkState ? ` · ${atkState}` : '') +
                 `</div>`;
         }
         const cooldownTicks = resolveUnitCooldownTicks(unit);
         if (cooldownTicks != null) {
-            const cdState = renderCooldownStateHtml(
-                unit.cooldownReady,
-                resolveUnitCooldownRemainingTicks(unit)
-            );
-            mechanicsHtml += `<div class="bs-row"><span class="bs-label">Ability CD:</span> ${formatTicks(cooldownTicks)}` +
-                (cdState ? ` · ${cdState}` : '') +
-                `</div>`;
+            const cdState = liveMechanics
+                ? renderCooldownStateHtml(
+                    unit.cooldownReady,
+                    resolveUnitCooldownRemainingTicks(unit)
+                )
+                : null;
+            const initialCd = !liveMechanics && unit.previewInitialCooldownTicks != null
+                ? ` · starts ${formatTicks(unit.previewInitialCooldownTicks)}`
+                : '';
+            const meditatingLabel = unit.isMeditating ? ' <span style="color:#888">(meditating)</span>' : '';
+            mechanicsHtml += `<div class="bs-row" data-bs-mech="ability-cd"><span class="bs-label">Ability CD:</span> ${formatTicks(cooldownTicks)}` +
+                (cdState ? ` · ${cdState}` : initialCd) +
+                `${meditatingLabel}</div>`;
         }
+        return mechanicsHtml;
+    }
+
+    function buildUnitCardStatusMechanicsHtml(unit) {
+        let mechanicsHtml = '';
         if (unit.silenced) {
             mechanicsHtml += `<div class="bs-row" style="color:#E06C75">Silenced</div>`;
         }
@@ -11411,66 +13013,142 @@
         return mechanicsHtml;
     }
 
+    function buildUnitCardMechanicsHtml(unit) {
+        return buildUnitCardTickMechanicsHtml(unit) + buildUnitCardStatusMechanicsHtml(unit);
+    }
+
     function buildUnitCardLiveInnerHtml(unit) {
         return buildUnitCardStatsHtml(unit) + buildUnitCardMechanicsHtml(unit);
     }
 
-    function buildUnitCardPatchKey(unit) {
+    function buildUnitCardStatPatchKey(unit) {
         return [
-            unit.hp,
-            unit.hpMax,
-            unit.ap,
-            unit.ad,
-            unit.armor,
-            unit.magicResist,
-            unit.speed,
+            normalizeUnitStatValue('hp', unit.hp),
+            normalizeUnitStatValue('hpMax', unit.hpMax),
+            normalizeUnitStatValue('ap', unit.ap),
+            normalizeUnitStatValue('ad', unit.ad),
+            normalizeUnitStatValue('armor', unit.armor),
+            normalizeUnitStatValue('magicResist', unit.magicResist),
+            normalizeUnitStatValue('speed', unit.speed),
             unit.alive,
             unit.silenced,
             unit.buffedCount,
             getUnitEquipmentPatchSig(unit),
+            (unit.statusEffects || []).map((e) => e.id).join('+')
+        ].join(':');
+    }
+
+    function buildUnitCardMechanicsPatchKey(unit) {
+        return [
             resolveUnitAttackDelayTicks(unit),
             resolveUnitCooldownTicks(unit),
             resolveUnitAttackDelayRemainingTicks(unit),
             unit.attackDelayReady,
             resolveUnitCooldownRemainingTicks(unit),
             unit.cooldownReady,
-            (unit.statusEffects || []).map((e) => e.id).join('+')
+            unit.isMeditating === true
         ].join(':');
     }
 
-    function patchUnitCardsLiveStats(body, units) {
+    function buildUnitCardPatchKey(unit) {
+        return `${buildUnitCardStatPatchKey(unit)}|${buildUnitCardMechanicsPatchKey(unit)}`;
+    }
+
+    function patchUnitCardCompactSummary(card, unit) {
+        const compact = renderCompactSummary(unit);
+        const compactEl = card.querySelector('.bs-card-compact');
+        if (compactEl) {
+            if (compact) compactEl.innerHTML = compact;
+            else compactEl.remove();
+        } else if (compact) {
+            const meta = card.querySelector('.bs-compact-meta');
+            if (meta) {
+                const div = document.createElement('div');
+                div.className = 'bs-card-compact';
+                div.innerHTML = compact;
+                meta.appendChild(div);
+            }
+        }
+    }
+
+    function patchUnitCardCompactSummaries(body, units) {
         const unitByKey = new Map();
         for (const unit of units) {
             unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
         }
         for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
-            const unit = unitByKey.get(card.dataset.unitKey);
+            const unit = unitByKey.get(normalizeCollapseKey(card.dataset.unitKey));
+            if (unit) patchUnitCardCompactSummary(card, unit);
+        }
+    }
+
+    function patchUnitCardTickMechanics(card, unit) {
+        const live = card.querySelector('.bs-card-live');
+        if (!live) return;
+        live.querySelector('[data-bs-mech="atk-delay"]')?.remove();
+        live.querySelector('[data-bs-mech="ability-cd"]')?.remove();
+        const tickHtml = buildUnitCardTickMechanicsHtml(unit);
+        if (!tickHtml) return;
+        const anchor = live.querySelector('.bs-stat-grid');
+        if (anchor) anchor.insertAdjacentHTML('afterend', tickHtml);
+        else live.insertAdjacentHTML('afterbegin', tickHtml);
+    }
+
+    function patchUnitCardsMechanicsOnly(body, units) {
+        const unitByKey = new Map();
+        for (const unit of units) {
+            unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
+        }
+        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
+            const cardKey = normalizeCollapseKey(card.dataset.unitKey);
+            const unit = unitByKey.get(cardKey);
+            if (!unit) continue;
+            const mechPatchKey = buildUnitCardMechanicsPatchKey(unit);
+            if (card.dataset.unitMechPatchKey === mechPatchKey) continue;
+            const statPatchKey = card.dataset.unitStatPatchKey || buildUnitCardStatPatchKey(unit);
+            card.dataset.unitMechPatchKey = mechPatchKey;
+            card.dataset.unitPatchKey = `${statPatchKey}|${mechPatchKey}`;
+            patchUnitCardTickMechanics(card, unit);
+            patchUnitCardCompactSummary(card, unit);
+        }
+    }
+
+    function patchUnitCardsLiveStats(body, units) {
+        return profileUnitsLag('patchUnitCardsLiveStats', () => {
+        const unitByKey = new Map();
+        for (const unit of units) {
+            unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
+        }
+        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
+            const unit = unitByKey.get(normalizeCollapseKey(card.dataset.unitKey));
             if (!unit) continue;
             const patchKey = buildUnitCardPatchKey(unit);
+            const statPatchKey = buildUnitCardStatPatchKey(unit);
+            const mechPatchKey = buildUnitCardMechanicsPatchKey(unit);
             const abilityDetails = card.querySelector('.bs-ability-details');
             if (card.dataset.unitPatchKey === patchKey) {
-                if (abilityDetails?.open) {
+                if (abilityDetails?.open && needsAbilityTooltipRefresh(abilityDetails, unit)) {
                     syncAbilityDetailsDataset(abilityDetails, unit);
                     requestAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey, unit);
                 }
                 continue;
             }
+
+            const mechanicsOnly = card.dataset.unitStatPatchKey === statPatchKey
+                && card.dataset.unitMechPatchKey !== mechPatchKey;
+
             card.dataset.unitPatchKey = patchKey;
+            card.dataset.unitStatPatchKey = statPatchKey;
+            card.dataset.unitMechPatchKey = mechPatchKey;
             card.classList.toggle('dead', unit.alive === false);
-            const compact = renderCompactSummary(unit);
-            const compactEl = card.querySelector('.bs-card-compact');
-            if (compactEl) {
-                if (compact) compactEl.innerHTML = compact;
-                else compactEl.remove();
-            } else if (compact) {
-                const meta = card.querySelector('.bs-compact-meta');
-                if (meta) {
-                    const div = document.createElement('div');
-                    div.className = 'bs-card-compact';
-                    div.innerHTML = compact;
-                    meta.appendChild(div);
-                }
+
+            if (mechanicsOnly) {
+                patchUnitCardTickMechanics(card, unit);
+                patchUnitCardCompactSummary(card, unit);
+                continue;
             }
+
+            patchUnitCardCompactSummary(card, unit);
             const statusRow = card.querySelector('.bs-status-effects');
             const statusHtml = renderStatusEffectsRowHtml(unit);
             if (statusRow) {
@@ -11487,13 +13165,14 @@
             hydrateUnitCardPortraits(card, unit);
             if (abilityDetails) {
                 syncAbilityDetailsDataset(abilityDetails, unit);
-                if (abilityDetails.open) {
+                if (abilityDetails.open && needsAbilityTooltipRefresh(abilityDetails, unit)) {
                     requestAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey, unit);
                 }
             }
             const nameEl = card.querySelector('.bs-card-name');
             if (nameEl) nameEl.textContent = getUnitDisplayName(unit);
         }
+        });
     }
 
     function renderUnitCard(unit) {
@@ -11662,6 +13341,7 @@
             resolveUnitCooldownTicks(u),
             resolveUnitCooldownRemainingTicks(u),
             u.cooldownReady,
+            u.isMeditating === true,
             u.alive,
             u.tileIndex,
             u.level,
@@ -11673,6 +13353,11 @@
     }
 
     function renderUnits(force) {
+        if (shouldThrottleUnitsRender(force)) {
+            recordUnitsLag('renderUnits:throttled', 0);
+            return;
+        }
+        return profileUnitsLag('renderUnits', () => {
         const body = document.getElementById(UNITS_BODY_ID);
         const panel = document.getElementById(PANEL_ID);
         if (!body || !panel || panel.style.display === 'none') return;
@@ -11720,6 +13405,7 @@
             renderSection(t('mods.betterAnalytics.sectionEnemies'), 'enemy', enemies) +
             `</div>`;
         hydrateAllUnitPortraits(body, units);
+        });
     }
 
     function renderLogName(name, villain) {
@@ -11917,6 +13603,7 @@
         if (tabLog) tabLog.classList.toggle('active', activeTab === 'log');
 
         if (activeTab !== 'summary') clearSummaryUpdateTimer();
+        if (activeTab === 'units') lastUnitsLiveUpdateMs = 0;
         renderActiveTab(false, true);
     }
 
@@ -11991,6 +13678,7 @@
             clearFightActorCollapseRegistry();
             boardTrack.gameStarted = false;
             invalidateActorSnapshotsCache();
+            invalidateActorProbeCache();
             invalidateBoardPreviewCache();
             clearScalingRuntimeCaches();
             lastUnitsRenderKey = '';

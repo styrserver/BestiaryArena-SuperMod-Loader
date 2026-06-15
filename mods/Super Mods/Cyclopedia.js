@@ -901,7 +901,7 @@ const CyclopediaHomeSearch = (() => {
   let creatureToEquipmentNames = null; // Map<normalizedCreatureName, Set<equipmentDisplayName>>
   let creatureAbilityTextCache = null; // Map<creatureNameLower, { v: number, text: string } | string>
   let equipmentEffectTextCache = null; // Map<normalizedEquipmentName, { v: number, text: string }>
-  const EQUIPMENT_EFFECT_TEXT_CACHE_VERSION = 3;
+  const EQUIPMENT_EFFECT_TEXT_CACHE_VERSION = 5;
   let equipmentEffectIndexState = {
     abortToken: 0,
     running: false,
@@ -1339,7 +1339,7 @@ const CyclopediaHomeSearch = (() => {
       const effectComponent = meta?.EffectComponent;
       const skillTooltip = meta?.skill?.TooltipContent;
 
-      const mountAndRead = (UIComponent, cb) => {
+      const mountAndRead = (UIComponent, cb, tier) => {
         if (!UIComponent || typeof createUIComponent !== 'function') {
           cb('');
           return;
@@ -1360,8 +1360,20 @@ const CyclopediaHomeSearch = (() => {
 
         let component = null;
         try {
-          component = createUIComponent(root, UIComponent);
-          if (component && typeof component.mount === 'function') component.mount();
+          if (tier != null) {
+            const mountEffect = window.equipmentDatabase?.mountEquipmentEffectComponent;
+            component = typeof mountEffect === 'function'
+              ? mountEffect(root, UIComponent, tier)
+              : null;
+          } else {
+            component = createUIComponent(root, UIComponent);
+            if (component && typeof component.mount === 'function') component.mount();
+          }
+          if (!component) {
+            try { host.remove(); } catch { /* ignore */ }
+            cb('');
+            return;
+          }
         } catch {
           try { host.remove(); } catch { /* ignore */ }
           cb('');
@@ -1390,13 +1402,17 @@ const CyclopediaHomeSearch = (() => {
         });
       };
 
-      mountAndRead(effectComponent, (effectText) => {
-        if (effectText) prefixText += `${effectText}\n`;
-        mountAndRead(skillTooltip, (skillText) => {
-          if (skillText) prefixText += `${skillText}\n`;
-          onDone(cyclopediaNormalizeSearchText(prefixText));
-        });
-      });
+      mountAndRead(
+        effectComponent,
+        (effectText) => {
+          if (effectText) prefixText += `${effectText}\n`;
+          mountAndRead(skillTooltip, (skillText) => {
+            if (skillText) prefixText += `${skillText}\n`;
+            onDone(cyclopediaNormalizeSearchText(prefixText));
+          });
+        },
+        window.equipmentDatabase?.DEFAULT_EQUIPMENT_EFFECT_TIER ?? 5
+      );
     } catch {
       onDone('');
     }
@@ -7238,9 +7254,16 @@ function openCyclopediaModal(options) {
 
             if (equipData?.metadata?.description) {
               tooltipDiv.innerHTML = equipData.metadata.description;
-            } else if (equipData?.metadata?.EffectComponent && typeof globalThis.state.utils.createUIComponent === 'function') {
-              const tooltipComponent = globalThis.state.utils.createUIComponent(tooltipDiv, equipData.metadata.EffectComponent);
-              tooltipComponent.mount();
+            } else if (equipData?.metadata?.EffectComponent) {
+              const tooltipTier = window.equipmentDatabase?.DEFAULT_EQUIPMENT_EFFECT_TIER ?? 5;
+              const tooltipComponent = window.equipmentDatabase?.mountEquipmentEffectComponent?.(
+                tooltipDiv,
+                equipData.metadata.EffectComponent,
+                tooltipTier
+              );
+              if (!tooltipComponent) {
+                tooltipDiv.textContent = 'No description available.';
+              }
             } else {
               tooltipDiv.textContent = 'No description available.';
             }
@@ -19010,6 +19033,18 @@ function renderCyclopediaSearchColumn() {
   return container;
 }
 
+/** BIS equipment max: one tier-5 roll per stat (hp, ad, ap) for each non-event equipment in the catalog. */
+function getBisEquipmentMaxFromDatabase() {
+  const db = window.equipmentDatabase;
+  const progressNames = typeof db?.getBisProgressEquipmentNames === 'function'
+    ? db.getBisProgressEquipmentNames(getCyclopediaAllEquipmentNames())
+    : getCyclopediaAllEquipmentNames().filter((name) => !db?.isEventEquipmentName?.(name));
+  if (progressNames.length > 0) {
+    return progressNames.length * 3;
+  }
+  return CYCLOPEDIA_SETTINGS.playerStatCaps.bisEquipments;
+}
+
 /** Obtainable creature count for shiny progress (excludes event/gazer species; see creature-database getShinyProgressCreatureNames). */
 function getObtainableCreatureCountFromDatabase() {
   const db = window.creatureDatabase;
@@ -19096,7 +19131,7 @@ const CYCLOPEDIA_MAX_VALUES = CYCLOPEDIA_SETTINGS.playerStatCaps;
 const CYCLOPEDIA_PROGRESS_STATS = [
   { key: 'perfectCreatures', icon: '/assets/icons/enemy.png', max: CYCLOPEDIA_MAX_VALUES.perfectCreatures },
   { key: 'shinyCreatures', icon: 'https://bestiaryarena.com/assets/icons/shiny-star.png', max: getObtainableCreatureCountFromDatabase },
-  { key: 'bisEquipments', icon: '/assets/icons/equips.png', max: CYCLOPEDIA_MAX_VALUES.bisEquipments },
+  { key: 'bisEquipments', icon: '/assets/icons/equips.png', max: getBisEquipmentMaxFromDatabase },
   { key: 'raids', icon: '/assets/icons/raid.png', max: CYCLOPEDIA_MAX_VALUES.raids },
   { key: 'exploredMaps', icon: '/assets/icons/map.png', max: CYCLOPEDIA_MAX_VALUES.exploredMaps },
   { key: 'bagOutfits', icon: '/assets/icons/mini-outfitbag.png', max: CYCLOPEDIA_MAX_VALUES.bagOutfits }

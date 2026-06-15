@@ -2,7 +2,8 @@ console.log('[equipment-database.js] Loading equipment database...');
 
 /**
  * Wiki / infobox: comma-separated boosted map names per equipment (string).
- * Omitted items are not boosted-map equipment. Shared by equipment-lua-export.js and Cyclopedia.
+ * Omitted items are not boosted-map equipment. Empty string = listed, boosted maps TBD.
+ * Shared by equipment-lua-export.js and Cyclopedia.
  */
 const HARDCODED_BOOSTED_MAP = {
   'Amulet of Loss':
@@ -21,6 +22,7 @@ const HARDCODED_BOOSTED_MAP = {
   'Cranial Basher': 'Isle of Kings, The Farms',
   'Dwarven Helmet': 'Goblin Temple, City Boardgames, Isle of Kings',
   'Dwarven Legs': 'Minotaur Mage Room, Minotaur Hell, Orc Fortress Outskirts',
+  'Djinn Blade': 'Lonesome Dragon',
   'Ectoplasmic Shield': 'Hidden City of Demona',
   'Epee':
     "Evergreen Fields, Wolf's Den, Spider Lair, Minotaur Hell, Ghostlands Library, The Orc King Hall, Robson's Isle Ruins, Mother of Scarabs Lair",
@@ -30,6 +32,7 @@ const HARDCODED_BOOSTED_MAP = {
   'Glacial Rod':
     "Ghostlands Ritual Site, Banshee's Last Room, Teleporter Trap, Wyda's House",
   'Glass of Goo': "Amber's Raft, Awash Steamship",
+  'Haunted Blade': 'Awash Steamship, Cave Entrance, Minotaur Hell',
   'Ice Rapier': 'Minotaur Hell, Carlin Sewers',
   'Medusa Shield':
     "Rotten Graveyard, Zathroth's Throne, Teleporter Trap, Frozen Aquifer",
@@ -44,12 +47,82 @@ const HARDCODED_BOOSTED_MAP = {
     "Putrid Chamber, Pierre's Kitchen, Serpentine Tower Basement",
   'Springsprout Rod': 'Teleporter Trap, Folda Boat, Frozen Aquifer',
   'Stealth Ring': "Banshee's Last Room, Hedge Maze, Ab'Dendriel Hive",
+  'Twin Axe': 'A Secluded Herb, Shore Camp',
   'Vampire Shield':
     "Spider Lair, Ghostlands Library, Maze Gates, Ab'Dendriel Hive",
+  'Vile Axe': 'Cave Entrance, Dwarven Bridge, Minotaur Hell',
   'Wand of Decay':
     "Minotaur Hell, Ghostlands Ritual Site, Banshee's Last Room, Teleporter Trap, Folda Boat, Vega Mountain, Dwarven Brewery, Robson's Isle Ruins",
   'White Skull': 'Rotten Graveyard, Katana Quest'
 };
+
+/** Seasonal / event equipment — excluded from Cyclopedia BIS progress max. */
+const EVENT_EQUIPMENT = [
+  'Orclops Santa',
+  'Witch Hat'
+];
+
+/**
+ * Equipment forge tier stat bonuses (wiki _Tiers reference).
+ * Numeric tier 1–5 maps to Grey → Yellow; T5 = max catalog effect values.
+ */
+const EQUIPMENT_TIER_STAT_BONUSES = {
+  Grey: { hp: 20, ad: 1, ap: 2, cost: 50 },
+  Green: { hp: 40, ad: 2, ap: 5, cost: 100 },
+  Blue: { hp: 60, ad: 4, ap: 10, cost: 150 },
+  Purple: { hp: 90, ad: 6, ap: 15, cost: 200 },
+  Yellow: { hp: 120, ad: 8, ap: 20, cost: 0 }
+};
+
+const EQUIPMENT_TIER_COLOR_BY_NUMBER = ['Grey', 'Green', 'Blue', 'Purple', 'Yellow'];
+
+/** Default tier for catalog/browse tooltips (max effect values). */
+const DEFAULT_EQUIPMENT_EFFECT_TIER = 5;
+
+function clampEquipmentTier(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.min(5, Math.max(1, parsed));
+}
+
+function getEquipmentTierColorLabel(tier) {
+  const clamped = clampEquipmentTier(tier);
+  if (clamped == null) return null;
+  return EQUIPMENT_TIER_COLOR_BY_NUMBER[clamped - 1] || null;
+}
+
+/**
+ * Mount equipment EffectComponent in a tooltip host with tier-scaled effect values.
+ * Game API: createUIComponent(root, EffectComponent, { tier }).
+ * @returns {object|null} mounted component, or null on failure
+ */
+function mountEquipmentEffectComponent(root, effectComponent, tier = DEFAULT_EQUIPMENT_EFFECT_TIER) {
+  const createUIComponent = globalThis.state?.utils?.createUIComponent;
+  if (!root || !effectComponent || typeof createUIComponent !== 'function') return null;
+
+  const clamped = clampEquipmentTier(tier) ?? DEFAULT_EQUIPMENT_EFFECT_TIER;
+  try {
+    const component = createUIComponent(root, effectComponent, { tier: clamped });
+    if (component && typeof component.mount === 'function') component.mount();
+    return component || null;
+  } catch {
+    return null;
+  }
+}
+
+function isEventEquipmentName(equipmentName) {
+  const norm = String(equipmentName ?? '').trim().toLowerCase();
+  if (!norm) return false;
+  return EVENT_EQUIPMENT.some((name) => name.toLowerCase() === norm);
+}
+
+/** Equipment that counts toward BIS collection progress (catalog minus event items). */
+function getBisProgressEquipmentNames(allEquipmentNames) {
+  const base = Array.isArray(allEquipmentNames)
+    ? allEquipmentNames
+    : (equipmentDatabase?.ALL_EQUIPMENT || []);
+  return base.filter((name) => !isEventEquipmentName(name));
+}
 
 // Function to dynamically fetch all equipment
 function getAllEquipment() {
@@ -105,7 +178,16 @@ function buildEquipmentDatabase() {
         magicResist: []
       },
       HARDCODED_BOOSTED_MAP,
-      getEquipmentNameMap
+      EVENT_EQUIPMENT,
+      EQUIPMENT_TIER_STAT_BONUSES,
+      EQUIPMENT_TIER_COLOR_BY_NUMBER,
+      DEFAULT_EQUIPMENT_EFFECT_TIER,
+      isEventEquipmentName,
+      getBisProgressEquipmentNames,
+      getEquipmentNameMap,
+      clampEquipmentTier,
+      getEquipmentTierColorLabel,
+      mountEquipmentEffectComponent
     };
   }
   
@@ -127,7 +209,16 @@ function buildEquipmentDatabase() {
     ALL_EQUIPMENT: allEquipmentNames,
     EQUIPMENT_BY_STAT: equipmentByStat,
     HARDCODED_BOOSTED_MAP,
-    getEquipmentNameMap
+    EVENT_EQUIPMENT,
+    EQUIPMENT_TIER_STAT_BONUSES,
+    EQUIPMENT_TIER_COLOR_BY_NUMBER,
+    DEFAULT_EQUIPMENT_EFFECT_TIER,
+    isEventEquipmentName,
+    getBisProgressEquipmentNames,
+    getEquipmentNameMap,
+    clampEquipmentTier,
+    getEquipmentTierColorLabel,
+    mountEquipmentEffectComponent
   };
 }
 
@@ -182,7 +273,16 @@ const placeholderDatabase = {
   ALL_EQUIPMENT: [],
   EQUIPMENT_BY_STAT: emptyEquipmentByStat,
   HARDCODED_BOOSTED_MAP,
-  getEquipmentNameMap
+  EVENT_EQUIPMENT,
+  EQUIPMENT_TIER_STAT_BONUSES,
+  EQUIPMENT_TIER_COLOR_BY_NUMBER,
+  DEFAULT_EQUIPMENT_EFFECT_TIER,
+  isEventEquipmentName,
+  getBisProgressEquipmentNames,
+  getEquipmentNameMap,
+  clampEquipmentTier,
+  getEquipmentTierColorLabel,
+  mountEquipmentEffectComponent
 };
 
 const globalWindow = globalThis.window || window || (typeof window !== 'undefined' ? window : null);
@@ -198,7 +298,16 @@ waitForGameState(() => {
     globalWindow.equipmentDatabase.ALL_EQUIPMENT = equipmentDatabase.ALL_EQUIPMENT;
     globalWindow.equipmentDatabase.EQUIPMENT_BY_STAT = equipmentDatabase.EQUIPMENT_BY_STAT;
     globalWindow.equipmentDatabase.HARDCODED_BOOSTED_MAP = equipmentDatabase.HARDCODED_BOOSTED_MAP;
+    globalWindow.equipmentDatabase.EVENT_EQUIPMENT = EVENT_EQUIPMENT;
+    globalWindow.equipmentDatabase.EQUIPMENT_TIER_STAT_BONUSES = EQUIPMENT_TIER_STAT_BONUSES;
+    globalWindow.equipmentDatabase.EQUIPMENT_TIER_COLOR_BY_NUMBER = EQUIPMENT_TIER_COLOR_BY_NUMBER;
+    globalWindow.equipmentDatabase.DEFAULT_EQUIPMENT_EFFECT_TIER = DEFAULT_EQUIPMENT_EFFECT_TIER;
+    globalWindow.equipmentDatabase.isEventEquipmentName = isEventEquipmentName;
+    globalWindow.equipmentDatabase.getBisProgressEquipmentNames = getBisProgressEquipmentNames;
     globalWindow.equipmentDatabase.getEquipmentNameMap = getEquipmentNameMap;
+    globalWindow.equipmentDatabase.clampEquipmentTier = clampEquipmentTier;
+    globalWindow.equipmentDatabase.getEquipmentTierColorLabel = getEquipmentTierColorLabel;
+    globalWindow.equipmentDatabase.mountEquipmentEffectComponent = mountEquipmentEffectComponent;
 
     console.log(`[equipment-database.js] Loaded ${equipmentDatabase.ALL_EQUIPMENT.length} equipment items dynamically (cached for all mods)`);
     console.log('[equipment-database.js] ALL_EQUIPMENT length:', equipmentDatabase.ALL_EQUIPMENT?.length);

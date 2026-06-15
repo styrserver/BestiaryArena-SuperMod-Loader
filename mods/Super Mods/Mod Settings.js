@@ -10294,7 +10294,7 @@ function buildAdvancedStatsTooltip(info) {
   };
 }
 
-function buildEquipmentEffectTooltip(gameId) {
+function buildEquipmentEffectTooltip(gameId, tier = 1) {
   if (gameId == null) return null;
   let equipData = null;
   try {
@@ -10303,6 +10303,10 @@ function buildEquipmentEffectTooltip(gameId) {
     return null;
   }
   if (!equipData) return null;
+
+  const effectTier =
+    window.equipmentDatabase?.clampEquipmentTier?.(tier) ??
+    (Number.isFinite(Number(tier)) ? Math.min(5, Math.max(1, Number(tier))) : 1);
 
   const mountedComponents = [];
   const tooltip = document.createElement('div');
@@ -10333,26 +10337,18 @@ function buildEquipmentEffectTooltip(gameId) {
 
   if (equipData?.metadata?.description) {
     root.innerHTML = equipData.metadata.description;
-  } else if (
-    equipData?.metadata?.EffectComponent &&
-    typeof globalThis.state?.utils?.createUIComponent === 'function'
-  ) {
-    try {
-      const component = globalThis.state.utils.createUIComponent(
-        root,
-        equipData.metadata.EffectComponent
-      );
-      if (component && typeof component.mount === 'function') {
-        component.mount();
-        mountedComponents.push(component);
-        root.querySelectorAll('blockquote').forEach((bq) => {
-          bq.style.setProperty('font-size', '10px', 'important');
-        });
-      } else {
-        root.textContent = 'Effect details unavailable';
-        root.className = 'pixel-font-14 text-whiteDark';
-      }
-    } catch (error) {
+  } else if (equipData?.metadata?.EffectComponent) {
+    const component = window.equipmentDatabase?.mountEquipmentEffectComponent?.(
+      root,
+      equipData.metadata.EffectComponent,
+      effectTier
+    );
+    if (component) {
+      mountedComponents.push(component);
+      root.querySelectorAll('blockquote').forEach((bq) => {
+        bq.style.setProperty('font-size', '10px', 'important');
+      });
+    } else {
       root.textContent = 'Effect details unavailable';
       root.className = 'pixel-font-14 text-whiteDark';
     }
@@ -10406,7 +10402,8 @@ function attachEquipmentAbilityHoverTooltip(button) {
       destroyTooltip();
       const equipGameId = resolveEquipmentGameIdFromInventoryButton(button);
       if (equipGameId == null) return;
-      const built = buildEquipmentEffectTooltip(equipGameId);
+      const tier = getEquipmentTierFromInventoryButton(button);
+      const built = buildEquipmentEffectTooltip(equipGameId, tier);
       if (!built) return;
       advancedHoverState.activeTooltip = built.tooltip;
       advancedHoverState.activeCleanup = built.cleanup;

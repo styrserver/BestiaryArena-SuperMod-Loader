@@ -325,6 +325,13 @@ const inventoryTooltips = {
     rarity: '5',
     obtain: 'Obtained from Blank Rune'
   },
+  runeTransfusion: {
+    displayName: 'Transfusion Rune',
+    text: 'Transfuse the shiny trait from one awakened creature to another.',
+    icon: '/assets/icons/rune-shiny-transfer.png',
+    rarity: '5',
+    obtain: 'Obtained from Blank Rune, Recycle Rune'
+  },
 
   // =======================
   // Currency
@@ -473,7 +480,7 @@ const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
   'Gazers': [],
-  'Runes': ['Avarice Rune', 'Hitpoints Rune', 'Attack Damage Rune', 'Ability Power Rune', 'Armor Rune', 'Magic Resist Rune', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Conversion Rune (hp)', 'Conversion Rune (ad)', 'Conversion Rune (ap)'],
+  'Runes': ['Avarice Rune', 'Hitpoints Rune', 'Attack Damage Rune', 'Ability Power Rune', 'Armor Rune', 'Magic Resist Rune', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Transfusion Rune', 'Conversion Rune (hp)', 'Conversion Rune (ad)', 'Conversion Rune (ap)'],
   'Upgrades': ['Baby Dragon Plant', 'Creature Awakening', 'Daily Boosted Map', 'Daycare', 'Dungeon Ascension', 'Dragon Plant', 'Dr. Mephistopheles', 'Hy\'genie', 'Monstrous Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
@@ -488,7 +495,8 @@ const INVENTORY_VARIANTS = {
   'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
   'Avarice Rune': ['runeAvarice'], 'Hitpoints Rune': ['runeHp'], 'Attack Damage Rune': ['runeAd'], 'Ability Power Rune': ['runeAp'], 'Armor Rune': ['runeAr'], 'Magic Resist Rune': ['runeMr'],
   'Blank Rune': ['runeBlank'], 'Recycle Rune': ['runeRecycle'],
-  'Kaleidoscopic Rune': ['runeKaleidoscopic'], 'Conversion Rune (hp)': ['runeConversionHp'], 'Conversion Rune (ad)': ['runeConversionAd'], 'Conversion Rune (ap)': ['runeConversionAp'],
+  'Kaleidoscopic Rune': ['runeKaleidoscopic'], 'Transfusion Rune': ['runeTransfusion'],
+  'Conversion Rune (hp)': ['runeConversionHp'], 'Conversion Rune (ad)': ['runeConversionAd'], 'Conversion Rune (ap)': ['runeConversionAp'],
   'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dungeon Ascension': ['dungeonAscension'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
   'Creature Awakening': ['creatureAwakening'],
   'Dr. Mephistopheles': ['drMephistopheles'],
@@ -502,7 +510,8 @@ const INVENTORY_STATIC_ITEMS = {
   'runeAvarice': { name: 'Avarice Rune', rarity: '2' }, 'runeHp': { name: 'Hitpoints Rune', rarity: '3' }, 'runeAd': { name: 'Attack Damage Rune', rarity: '3' }, 'runeAp': { name: 'Ability Power Rune', rarity: '3' }, 
   'runeAr': { name: 'Armor Rune', rarity: '3' }, 'runeMr': { name: 'Magic Resist Rune', rarity: '3' },
   'runeBlank': { name: 'Blank Rune', rarity: '4' }, 'runeRecycle': { name: 'Recycle Rune', rarity: '4' },
-  'runeKaleidoscopic': { name: 'Kaleidoscopic Rune', rarity: '5' }, 'runeConversionHp': { name: 'Conversion Rune (hp)', rarity: '5' }, 'runeConversionAd': { name: 'Conversion Rune (ad)', rarity: '5' }, 'runeConversionAp': { name: 'Conversion Rune (ap)', rarity: '5' },
+  'runeKaleidoscopic': { name: 'Kaleidoscopic Rune', rarity: '5' }, 'runeTransfusion': { name: 'Transfusion Rune', rarity: '5' },
+  'runeConversionHp': { name: 'Conversion Rune (hp)', rarity: '5' }, 'runeConversionAd': { name: 'Conversion Rune (ad)', rarity: '5' }, 'runeConversionAp': { name: 'Conversion Rune (ap)', rarity: '5' },
   'nicknameMonster': { name: 'Nickname Creature', rarity: '3' }, 'nicknameChange': { name: 'Change Nickname', rarity: '2' },
   'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
   'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '2' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '4' },
@@ -529,7 +538,8 @@ const RARITY_CONFIG = {
 
 // Game API keys that differ from canonical database keys
 const ITEM_KEY_ALIASES = {
-  runeRecycleMonster: 'runeKaleidoscopic'
+  runeRecycleMonster: 'runeKaleidoscopic',
+  runeShinyTransfer: 'runeTransfusion'
 };
 
 // Canonical rune keys in UI order (from categories + variants)
@@ -541,6 +551,7 @@ const RUNE_KEYS_ORDER = INVENTORY_CATEGORIES['Runes'].flatMap(
 const RUNE_NON_SACRIFICABLE_KEYS = [
   'runeBlank',
   'runeKaleidoscopic',
+  'runeTransfusion',
   'runeConversionHp',
   'runeConversionAd',
   'runeConversionAp'
@@ -630,7 +641,9 @@ const INVENTORY_MINI_ICONS = {
   runeAvarice: '/assets/icons/rune-avarice-mini.png',
   runeConversionHp: '/assets/icons/rune-conversion-hp-mini.png',
   runeConversionAp: '/assets/icons/rune-conversion-ap-mini.png',
-  runeConversionAd: '/assets/icons/rune-conversion-ad-mini.png'
+  runeConversionAd: '/assets/icons/rune-conversion-ad-mini.png',
+  runeTransfusion: '/assets/icons/rune-shiny-transfer-mini.png',
+  runeShinyTransfer: '/assets/icons/rune-shiny-transfer-mini.png'
 };
 
 // Custom rarity styling flags for special scroll variants

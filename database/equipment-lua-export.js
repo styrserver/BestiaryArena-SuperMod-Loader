@@ -28,7 +28,7 @@ Sync map (edit the matching source when rules change):
   HARDCODED_BOOSTED_MAP      ↔  database/equipment-database.js (shared with Cyclopedia, BBM)
   Raid/Map columns           ↔  Cyclopedia buildEquipmentCreatureCache (ROOMS actors, equip.gameId)
   RAID_FORCE_FALSE           ↔  exporter-only wiki infobox rule (no mod source)
-  WIKI_DEFAULT_TIERS_BLOCK   ↔  wiki _Tiers reference (edit here when tier stats change)
+  WIKI_DEFAULT_TIERS_BLOCK   ↔  equipment-database.js EQUIPMENT_TIER_STAT_BONUSES
 ================================================================================
 */
 
@@ -39,6 +39,8 @@ Sync map (edit the matching source when rules change):
  * - `dumpEquipmentLuaTable()` — one line per item (Raid/Map lists joined with ", " so wiki infoboxes split map links).
  * - `dumpEquipmentWikiLua()` — full wiki `return { ... }` block (comments, _Tiers, aligned keys);
  *   downloads a .lua file by default (`{ copy: true }` or `{ download: false }` to override).
+ *   Equipment rows: live `getEquipment()` scan ∪ `ALL_EQUIPMENT` ∪ `HARDCODED_BOOSTED_MAP` keys
+ *   (avoids stale equipment-database cache omitting new game items).
  *   BoostedMap uses `equipmentDatabase.HARDCODED_BOOSTED_MAP` (equipment-database.js),
  *   else today's daily boost when it matches, else false.
  * - `diffEquipmentLuaExclusionSets()` — compare local lists to live mod globals (mods must be enabled).
@@ -190,16 +192,31 @@ function formatEquipmentLuaKey(name, targetBracketEndCol = 31) {
   return `${key}${' '.repeat(spaces)}=`;
 }
 
-/** Default _Tiers block for wiki `return { ... }` output (edit in this file if stats change). */
-const WIKI_DEFAULT_TIERS_BLOCK = `    -- [[ TIERS REFERENCE ]]
+/** Default _Tiers block for wiki `return { ... }` output (from equipment-database.js). */
+function buildWikiDefaultTiersBlock() {
+  const tiers =
+    (globalThis.window || window)?.equipmentDatabase?.EQUIPMENT_TIER_STAT_BONUSES ||
+    {
+      Grey: { hp: 20, ad: 1, ap: 2, cost: 50 },
+      Green: { hp: 40, ad: 2, ap: 5, cost: 100 },
+      Blue: { hp: 60, ad: 4, ap: 10, cost: 150 },
+      Purple: { hp: 90, ad: 6, ap: 15, cost: 200 },
+      Yellow: { hp: 120, ad: 8, ap: 20, cost: 0 }
+    };
+
+  const rows = Object.entries(tiers).map(([label, stats]) => {
+    const padded = `["${label}"]`.padEnd(11, ' ');
+    return `        ${padded} = { hp = ${stats.hp},  ad = ${stats.ad}, ap = ${stats.ap},  cost = ${stats.cost} }`;
+  });
+
+  return `    -- [[ TIERS REFERENCE ]]
 
     ["_Tiers"] = {
-        ["Grey"]   = { hp = 20,  ad = 1, ap = 2,  cost = 50 },
-        ["Green"]  = { hp = 40,  ad = 2, ap = 5,  cost = 100 },
-        ["Blue"]   = { hp = 60,  ad = 4, ap = 10, cost = 150 },
-        ["Purple"] = { hp = 90,  ad = 6, ap = 15, cost = 200 },
-        ["Yellow"] = { hp = 120, ad = 8, ap = 20, cost = 0 }
+${rows.join(',\n')}
     },`;
+}
+
+const WIKI_DEFAULT_TIERS_BLOCK = buildWikiDefaultTiersBlock();
 
 function formatEquipmentLuaRow(name, fields, keyColumn, wikiPage) {
   const lhs = wikiPage
@@ -268,10 +285,7 @@ function getBoostedMapLuaValue(equipGameId, equipmentName) {
   return luaStringLiteral(getRoomDisplayName(boosted.roomId));
 }
 
-function getEquipmentNamesList() {
-  if (window.equipmentDatabase?.ALL_EQUIPMENT?.length) {
-    return [...window.equipmentDatabase.ALL_EQUIPMENT].sort((a, b) => a.localeCompare(b));
-  }
+function scanEquipmentNamesFromGame() {
   const out = [];
   const utils = globalThis.state?.utils;
   if (!utils?.getEquipment) return out;
@@ -284,7 +298,18 @@ function getEquipmentNamesList() {
       break;
     }
   }
-  return [...new Set(out)].sort((a, b) => a.localeCompare(b));
+  return [...new Set(out)];
+}
+
+function getEquipmentNamesList() {
+  const names = new Set(scanEquipmentNamesFromGame());
+  for (const n of window.equipmentDatabase?.ALL_EQUIPMENT || []) {
+    if (n) names.add(n);
+  }
+  for (const name of Object.keys(getHardcodedBoostedMapTable())) {
+    if (name) names.add(name);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
 }
 
 function resolveModExclusionLists(modLists = {}) {
@@ -506,6 +531,7 @@ if (typeof module !== 'undefined' && module.exports) {
     dumpEquipmentWikiLua,
     buildEquipmentRoomPresence,
     buildWikiLuaDocument,
+    buildWikiDefaultTiersBlock,
     formatEquipmentLuaRow,
     diffEquipmentLuaExclusionSets,
     resolveModExclusionLists,

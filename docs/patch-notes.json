@@ -4,6 +4,66 @@
   },
   "notes": [
     {
+      "version": "4.2.0",
+      "changes": [
+        {
+          "mod": "equipment-database.js",
+          "type": "added",
+          "text": "Equipment tier helpers (EQUIPMENT_TIER_STAT_BONUSES, clampEquipmentTier(), mountEquipmentEffectComponent() with { tier } for EffectComponent tooltips). HARDCODED_BOOSTED_MAP synced with wiki: Djinn Blade (Lonesome Dragon), Haunted Blade (Awash Steamship, Cave Entrance, Minotaur Hell), Twin Axe (A Secluded Herb, Shore Camp), Vile Axe (Cave Entrance, Dwarven Bridge, Minotaur Hell). EVENT_EQUIPMENT with isEventEquipmentName() and getBisProgressEquipmentNames() for Cyclopedia BIS progress."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "added",
+          "text": "Rune loot detection for Transfusion, Kaleidoscopic, and Conversion runes (name patterns and rune-shiny-transfer, monster-recycle, and conversion sprite keys)."
+        },
+        {
+          "mod": "inventory-database.js",
+          "type": "added",
+          "text": "Transfusion Rune (runeTransfusion): catalog entry, Cyclopedia/home search, game icon paths (rune-shiny-transfer), runeShinyTransfer alias, mini icons, and non-sacrificable recycler exclusion (awaken-only shiny trait transfer)."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Fight Units snapshot performance: per-actor incremental refresh, cached 661 passive-CD checks and cooldown-component lookups, resource-set signatures for status effects (not every DoT tick), and ability-tooltip fresh lookups no longer wipe the fight snapshot cache."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Equipment tab and effect search index use equipment-database mountEquipmentEffectComponent with tier (T5 max for catalog/browse). Effect search cache version 5. BIS Equipments progress max is obtainable equipment count × 3 from equipment-database.js (excludes event equipment)."
+        },
+        {
+          "mod": "game_state_api.md",
+          "type": "changed",
+          "text": "Equipment Data section documents mountEquipmentEffectComponent() and tier-scaled EffectComponent tooltips (T1–T5); references EQUIPMENT_TIER_STAT_BONUSES on equipment-database.js."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "Twin Axe and Vile Axe map to axe Fighting; Djinn Blade and Haunted Blade map to sword Fighting for guild skill progression."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Arsenal Show ability on hover passes each item's tier to mountEquipmentEffectComponent so effect tooltip values match the hovered piece (not catalog T5 max)."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Startup grace period after all mods load reduced from 10s to 3s; stamina monitoring runs an immediate first check instead of waiting for the 5s poll interval."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Pre-fight equipment cooldown-reduction preview scales with equipped tier (linear T5 max from chunk 235 constants; uses game scaleEquipmentEffect utils when available). Board preview ability CD for AP-scaled abilities (e.g. Slime) reads each monster's own script 661 CDR constants with equip −% base applied; passive abilities (e.g. Rat) no longer show a false timed CD from other creatures' constants. Open ability tooltips rescale cooldown reduction when equipment changes without reopening. Preview CD recognizes wakeCooldown, flurryCooldown, and similar; indirect metadata constructors (Bog Raider, Dwarf Geomancer) resolve ...t.skill spreads; no atk delay for non-auto-attack units (Bonelord); function-style magic auto-attacks (Elf Arcanist); addCooldown without skill spread (Ghoul Energysap); display-only abilityCooldown clocks (Goblin Assassin). Live Units atk delay and ability CD count down during manual/autoplay (engine tick, not frozen gameTimer). Temporary fight stat changes (e.g. Knightstatue stun zeroing AD/AP, +ARM) update Units cards via live stat bags and per-tick polling on the Units tab. Ability tooltip scaling: Orc Shaman revive DoT percent collapses parenthetical ratio; Rotworm Fishtail heal per AP chunk (e.g. 50 HP at 84 AP, not AP×chunk); no space before trailing punctuation. Unit stat display normalizes floating-point values. Units panel buff/debuff chips clear when a fight ends or sandbox is paused (only shown while combat ticks are actively advancing). Pre-fight atk delay and ability CD restored after Next.js migration: monster/equipment game scripts resolve from loaded webpack chunks (e.g. 876) via content markers with retry until available, equipment reuses the shared monsters chunk when both live in the same file, and units preview refreshes once (debounced) when scripts finish loading."
+        },
+        {
+          "mod": "equipment-lua-export.js",
+          "type": "fixed",
+          "text": "Wiki Lua export merges a fresh getEquipment() scan with ALL_EQUIPMENT and HARDCODED_BOOSTED_MAP keys so new game equipment is not omitted when equipment-database.js cached an older list. Wiki _Tiers block generated from equipment-database EQUIPMENT_TIER_STAT_BONUSES."
+        }
+      ]
+    },
+    {
       "version": "4.1.12",
       "changes": [
         {
