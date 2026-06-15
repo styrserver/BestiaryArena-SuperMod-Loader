@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.1.12",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Units panel board-placement preview before fight: catalog-scaled attack delay (32-tick default when missing), ability CD from game script 661 (fixed inits, AP-scaled CDR, passive untimed abilities), equipment portraits on unit cards, and pre-battle ability CDR from equipment effects (chunk 235, e.g. Spellbook −20%). Board stats use game equipment-tier bonuses when utils load. Refreshes when scripts load or board/equipment changes."
+        },
+        {
+          "mod": "inventory-database.js",
+          "type": "added",
+          "text": "Rune helpers for mods: runeKeysOrder and runeNonSacrificableKeys from categories/variants, plus getRuneType(), getRuneTypes(), and getRecyclableRuneTypes() (alias-aware via resolveItemKey)."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Ability tooltip durations as ticks: AP-scaled chunks, cooldown spans, and CDR clauses with hover math — AP reduction, equip −% base in the displayed total reduction, effective CD, and minimum CD. Open tooltip scaling refreshes coalesced (100 ms debounce, 150 ms board poll) without console spam. Uses creature-database.js for creature name/metadata lookups, stat icons, and portraits (game-state fallback). Refactored battle-log summary and export formatting, subscription teardown, and UI override helpers — no intended behavior change."
+        },
+        {
+          "mod": "Better Rune Recycler",
+          "type": "changed",
+          "text": "Requires inventory-database.js with no inline fallbacks: rune list, sacrificable filter, recycling config, sacrifice building, validation, counts, and Created/Consumed stats all use the database helpers. Kaleidoscopic Rune from API alias runeRecycleMonster is normalized in Created stats."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Preview ability CD matches fight script logic; passive abilities (e.g. Rat) show no timed CD. Equipment CDR affects ability CD only, not attack delay. Equipped AP in pre-fight tooltips uses tier-table bonuses (capped, e.g. Deer 104 AP not inflated +24). Post-combat open tooltips settle on board stats, not fight buffs. Panel close and units grid rebuild tear down ability mounts, timers, and preview caches."
+        }
+      ]
+    },
+    {
       "version": "4.1.11",
       "changes": [
         {

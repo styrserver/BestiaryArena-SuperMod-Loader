@@ -146,12 +146,7 @@
                 serverResultsSubscription = null;
             }
 
-            worldEventSubscriptions.forEach(sub => {
-                if (sub && typeof sub.unsubscribe === 'function') {
-                    sub.unsubscribe();
-                }
-            });
-            worldEventSubscriptions = [];
+            clearWorldEventSubscriptions();
 
             cleanupAllDPSDisplays();
             damageTrackingData.clear();
@@ -578,14 +573,7 @@
     }
     
     function setupWorldEventTracking() {
-        // Clean up previous world subscriptions
-        worldEventSubscriptions.forEach(sub => {
-            if (sub && typeof sub.unsubscribe === 'function') {
-                sub.unsubscribe();
-            }
-        });
-        worldEventSubscriptions = [];
-        
+        clearWorldEventSubscriptions();
         const listener = globalThis.state.board.on('newGame', (event) => {
             const world = event.world;
             
@@ -1080,6 +1068,19 @@
     // =======================
     // 5. Utility Functions
     // =======================
+
+    function unsubscribeAll(subs) {
+        for (const sub of subs || []) {
+            try {
+                if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
+            } catch { /* ignore */ }
+        }
+    }
+
+    function clearWorldEventSubscriptions() {
+        unsubscribeAll(worldEventSubscriptions);
+        worldEventSubscriptions = [];
+    }
     
     function resetTracking() {
         damageTrackingData.clear();
@@ -1213,9 +1214,10 @@
     const PANEL_TICK_POLL_MS = 50;
     const LIVE_PANEL_UPDATE_MS = 50;
     const LIVE_PANEL_UPDATE_MS_TURBO = 125;
-    const ABILITY_TOOLTIP_REFRESH_MS = 300;
+    const ABILITY_TOOLTIP_REFRESH_MS = 100;
     const SUMMARY_UPDATE_MS = 100;
     const DEFAULT_TICK_INTERVAL_MS = 62.5;
+    const DEFAULT_PREVIEW_ATTACK_DELAY_MS = 2000;
     const EQUIPMENT_TIER_BONUSES = {
         1: { hp: 20, ad: 1, ap: 2 },
         2: { hp: 40, ad: 2, ap: 5 },
@@ -1266,6 +1268,28 @@
         { key: 'magicResist', label: 'MR' },
         { key: 'speed', label: 'SPD' }
     ];
+    const STAT_ICONS = (() => {
+        const fallback = {
+            hp: '/assets/icons/heal.png',
+            ad: '/assets/icons/attackdamage.png',
+            ap: '/assets/icons/abilitypower.png',
+            armor: '/assets/icons/armor.png',
+            magicResist: '/assets/icons/magicresist.png',
+            speed: '/assets/icons/speed.png'
+        };
+        const config = window.creatureDatabase?.MONSTER_STAT_DISPLAY_CONFIG;
+        if (!Array.isArray(config) || !config.length) return fallback;
+        const icons = { ...fallback };
+        for (const entry of config) {
+            if (entry?.key && entry?.icon) icons[entry.key] = entry.icon;
+        }
+        return icons;
+    })();
+    const STAT_GRID_ROWS = [
+        ['hp', 'armor'],
+        ['ad', 'magicResist'],
+        ['ap', 'speed']
+    ];
     const STAT_CHANGE_TRACK_KEYS = [
         ...STAT_KEYS,
         { key: 'hpMax', label: 'HP max' },
@@ -1288,6 +1312,14 @@
     let lastGameTimerFightState = null;
     let boardUnsubs = [];
     const boardTrack = { roomId: null, floor: null, gameStarted: false, mode: null, configSig: '' };
+    const previewMechanicsLogSig = new Map();
+    let cachedBoardPreviewUnits = null;
+    let cachedBoardPreviewSig = '';
+    let cachedRefreshedBoardPreviewUnits = null;
+    let cachedRefreshedBoardPreviewSig = '';
+    const cachedEquipStatBonusBySig = new Map();
+    let lastBoardAbilityPollMs = 0;
+    const BOARD_ABILITY_POLL_PENDING_MS = 150;
     let worldEventSubs = [];
     let battleLog = [];
     let battleLogRevision = 0;
@@ -1331,6 +1363,8 @@
     let collapsedOverrides = new Map();
     let openAbilityOverrides = new Map();
     const abilityTooltipRefreshTimers = new WeakMap();
+    const abilityScalingSubs = new WeakMap();
+    const ABILITY_SCALING_STAT_KEYS = ['ap', 'ad', 'hp'];
     let unitsInteractUntil = 0;
     let lastUnitsRenderKey = '';
     const UNITS_INTERACT_FREEZE_MS = 10;
@@ -1648,7 +1682,15 @@
         return config.map((p) => {
             const tile = p?.tileIndex ?? p?.tile ?? '';
             const id = p?.databaseId ?? p?.monsterId ?? p?.gameId ?? '';
-            return `${p?.type ?? ''}:${id}:${p?.villain === true}:${tile}:${p?.level ?? ''}:${p?.key ?? ''}`;
+            const equipId = p?.equipId
+                ?? p?.equip?.id
+                ?? p?.equip?.gameId
+                ?? p?.equipment?.id
+                ?? p?.equipment?.gameId
+                ?? '';
+            const equipTier = p?.equip?.tier ?? p?.equipmentTier ?? p?.equipment?.tier ?? '';
+            const equipStat = p?.equip?.stat ?? p?.equipmentStat ?? p?.equipment?.stat ?? '';
+            return `${p?.type ?? ''}:${id}:${p?.villain === true}:${tile}:${p?.level ?? ''}:${p?.key ?? ''}:${equipId}:${equipTier}:${equipStat}`;
         }).join('|');
     }
 
@@ -1672,6 +1714,7 @@
         if (!ctx) return false;
 
         let changed = false;
+        let needsUnitsRebuild = false;
         const roomId = resolveCurrentRoomId();
         const floor = resolveCurrentFloor();
         const gameStarted = ctx.gameStarted === true;
@@ -1681,8 +1724,10 @@
         if (floor !== boardTrack.floor) {
             boardTrack.floor = floor;
             cachedSpawnTileKeyLookup = null;
+            invalidateBoardPreviewCache();
             lastUnitsRenderKey = '';
             changed = true;
+            needsUnitsRebuild = true;
         }
 
         if (roomId !== boardTrack.roomId) {
@@ -1692,8 +1737,10 @@
             resetBattleLogState();
             clearCollapsedOverrides();
             cachedSpawnTileKeyLookup = null;
+            invalidateBoardPreviewCache();
             lastUnitsRenderKey = '';
             changed = true;
+            needsUnitsRebuild = true;
         }
 
         if (gameStarted !== boardTrack.gameStarted) {
@@ -1745,13 +1792,16 @@
 
         if (configSig !== boardTrack.configSig) {
             boardTrack.configSig = configSig;
+            invalidateBoardPreviewCache({ clearMechanicsLog: true });
             lastUnitsRenderKey = '';
             changed = true;
+            needsUnitsRebuild = true;
         }
 
         if (changed) {
+            invalidateBoardPreviewCache();
             lastUnitsRenderKey = '';
-            pendingUnitsForceRefresh = true;
+            if (needsUnitsRebuild) pendingUnitsForceRefresh = true;
         }
 
         return changed;
@@ -2146,6 +2196,7 @@
         if (isLiveFightTracking() && getFightTick() != null) {
             renderLiveFight();
         }
+        pollOpenAbilityScalingRefresh();
     }
 
     function onPanelGameTimerUpdate({ context }) {
@@ -2930,12 +2981,20 @@
     }
 
     function formatLogDamageAmount(amount, rawAmount) {
-        const applied = Math.abs(Math.round(amount));
-        const raw = rawAmount != null ? Math.abs(Math.round(rawAmount)) : null;
-        if (raw != null && Number.isFinite(raw) && raw !== applied) {
-            return `${applied} (${raw})`;
-        }
+        const { applied, showRaw, raw } = resolveLogDamageDisplay(amount, rawAmount, { roundRaw: true });
+        if (showRaw) return `${applied} (${raw})`;
         return String(applied);
+    }
+
+    function resolveLogDamageDisplay(amount, rawAmount, { roundRaw = true } = {}) {
+        const applied = Math.abs(Math.round(amount));
+        let raw = rawAmount;
+        if (raw != null) {
+            const numericRaw = roundRaw ? Math.abs(Math.round(raw)) : Math.abs(raw);
+            raw = Number.isFinite(numericRaw) ? numericRaw : null;
+        }
+        const showRaw = raw != null && raw !== applied;
+        return { applied, raw: showRaw ? raw : null, showRaw };
     }
 
     function recordBattleLogEntry(event) {
@@ -3122,6 +3181,14 @@
     };
 
     const EVENT_LOGGED_STATUS_IDS = new Set(Object.keys(STATUS_EFFECT_DEFS));
+
+    const STATUS_LOG_BUILT_EFFECTS = [
+        { getEmitter: (actor) => actor.stun?.onStun, effectId: 'stun' },
+        { getEmitter: (actor) => actor.silenceComponent?.onSilenced, effectId: 'silence' },
+        { getEmitter: (actor) => actor.onSlow, effectId: 'slow', beforeLog: (actor) => { actor.__bsHasSlow = true; } },
+        { getEmitter: (actor) => actor.onPoison, effectId: 'poison' },
+        { getEmitter: (actor) => actor.onDisarmed, effectId: 'disarmed', beforeLog: (actor) => { actor.__bsHasDisarmed = true; } }
+    ];
 
     function cloneStatusEffect(effect) {
         return effect ? { ...effect } : null;
@@ -3529,6 +3596,10 @@
                 if (oldVal === newVal || oldVal == null || newVal == null) continue;
                 if (key === 'hp' && suppressHp) continue;
                 recordStatChangeLogEntry(actor, key, label, oldVal, newVal);
+                if (ABILITY_SCALING_STAT_KEYS.includes(key) || key === 'hpMax') {
+                    invalidateActorSnapshotsCache();
+                    queueAbilityTooltipRefreshForActor(actor);
+                }
             }
 
             lastActorStatsByActor.set(actor, next);
@@ -3594,15 +3665,19 @@
         }
     }
 
+    function unpatchActorEmitterSubs(actor, { patchedKey, subsKey, onCleanup }) {
+        if (!actor?.[patchedKey]) return;
+        unsubscribeAll(actor[subsKey]);
+        delete actor[patchedKey];
+        delete actor[subsKey];
+        if (typeof onCleanup === 'function') onCleanup();
+    }
+
     function unpatchActorStatusLog(actor) {
-        if (!actor?.__bsStatusLogPatched) return;
-        for (const sub of actor.__bsStatusLogSubs || []) {
-            try {
-                if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
-            } catch { /* ignore */ }
-        }
-        delete actor.__bsStatusLogPatched;
-        delete actor.__bsStatusLogSubs;
+        unpatchActorEmitterSubs(actor, {
+            patchedKey: '__bsStatusLogPatched',
+            subsKey: '__bsStatusLogSubs'
+        });
     }
 
     function subscribeActorStatusEvent(actor, emitter, handler) {
@@ -3665,15 +3740,11 @@
     }
 
     function unpatchActorPathingLog(actor) {
-        if (!actor?.__bsPathLogPatched) return;
-        for (const sub of actor.__bsPathLogSubs || []) {
-            try {
-                if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
-            } catch { /* ignore */ }
-        }
-        delete actor.__bsPathLogPatched;
-        delete actor.__bsPathLogSubs;
-        lastActorTileByActor.delete(actor);
+        unpatchActorEmitterSubs(actor, {
+            patchedKey: '__bsPathLogPatched',
+            subsKey: '__bsPathLogSubs',
+            onCleanup: () => lastActorTileByActor.delete(actor)
+        });
     }
 
     function patchActorPathingLog(actor) {
@@ -3706,21 +3777,11 @@
             if (effect) logActorStatusEvent(actor, effect, true);
         };
 
-        subscribeActorStatusEvent(actor, actor.stun?.onStun, () => {
-            logBuiltStatusEvent('stun');
-        });
-        subscribeActorStatusEvent(actor, actor.silenceComponent?.onSilenced, () => {
-            logBuiltStatusEvent('silence');
-        });
-        subscribeActorStatusEvent(actor, actor.onSlow, () => {
-            logBuiltStatusEvent('slow', () => { actor.__bsHasSlow = true; });
-        });
-        subscribeActorStatusEvent(actor, actor.onPoison, () => {
-            logBuiltStatusEvent('poison');
-        });
-        subscribeActorStatusEvent(actor, actor.onDisarmed, () => {
-            logBuiltStatusEvent('disarmed', () => { actor.__bsHasDisarmed = true; });
-        });
+        for (const { getEmitter, effectId, beforeLog } of STATUS_LOG_BUILT_EFFECTS) {
+            subscribeActorStatusEvent(actor, getEmitter(actor), () => {
+                logBuiltStatusEvent(effectId, beforeLog ? () => beforeLog(actor) : undefined);
+            });
+        }
         subscribeActorStatusEvent(actor, actor.onDebuff, () => {
             pollStatusEffectTracking(true);
         });
@@ -3856,11 +3917,7 @@
     }
 
     function teardownWorldSubscriptions() {
-        for (const sub of worldEventSubs) {
-            try {
-                if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
-            } catch { /* ignore */ }
-        }
+        unsubscribeAll(worldEventSubs);
         worldEventSubs = [];
         const world = getActiveWorld();
         if (world) unpatchAllActors(world);
@@ -3925,22 +3982,39 @@
         return map;
     }
 
+    function resolveGameIdFromName(name) {
+        if (!name) return null;
+        const fromDb = window.creatureDatabase?.findMonsterByName?.(name);
+        const dbId = fromDb?.gameId;
+        if (dbId != null && Number.isFinite(Number(dbId))) return Number(dbId);
+        return buildGameIdByNameMap().get(String(name).toLowerCase()) ?? null;
+    }
+
     function resolveGameId(actor) {
         if (!actor) return null;
         const direct = actor.gameId ?? actor.monsterId ?? actor.metadata?.id;
         if (direct != null && Number.isFinite(Number(direct))) return Number(direct);
         const name = actor.name || actor.metadata?.name;
         if (!name) return null;
-        return buildGameIdByNameMap().get(String(name).toLowerCase()) ?? null;
+        return resolveGameIdFromName(name);
     }
 
     function getMonsterMetadata(gameId) {
         if (gameId == null) return null;
+        const fromDb = window.creatureDatabase?.findMonsterByGameId?.(gameId);
+        if (fromDb?.metadata) return fromDb.metadata;
         try {
             return globalThis.state?.utils?.getMonster?.(gameId)?.metadata ?? null;
         } catch {
             return null;
         }
+    }
+
+    function getMonsterPortraitSrc(gameId) {
+        if (gameId == null) return null;
+        const fromDb = window.creatureDatabase?.getMonsterPortraitUrl?.(gameId);
+        if (fromDb) return fromDb;
+        return `/assets/portraits/${gameId}.png`;
     }
 
     function formatTicksParts(ticks) {
@@ -4013,10 +4087,11 @@
     }
 
     function resolveUnitCooldownTicks(unit) {
-        if (unit?.cooldownTicks != null && Number.isFinite(unit.cooldownTicks)) {
+        if (unit?.cooldownTicks != null && Number.isFinite(unit.cooldownTicks) && unit.cooldownTicks > 0) {
             return unit.cooldownTicks;
         }
-        return msToTicks(unit?.cooldownMs);
+        const fromMs = msToTicks(unit?.cooldownMs);
+        return fromMs != null && fromMs > 0 ? fromMs : null;
     }
 
     function resolveUnitCooldownRemainingTicks(unit) {
@@ -4704,12 +4779,36 @@
         return ticks * DEFAULT_TICK_INTERVAL_MS;
     }
 
+    function isActorAutoAttackCooldown(actor, cd) {
+        return cd != null && actor?.cooldown?.autoAttack === cd;
+    }
+
+    function isUntimedSkillCooldownComponent(cd) {
+        if (!cd) return false;
+        const ms = pickFirstNumber(cd, [
+            'cooldownMilliseconds', 'baseCooldownMilliseconds', 'cooldownMs', 'baseCooldownMs',
+            'duration', 'baseDuration', 'cooldown', 'maxCooldown', 'totalCooldown'
+        ]);
+        const baseTicks = readComponentNumber(cd, [
+            '_baseCooldown', 'baseCooldown', 'baseCooldownTicks', 'cooldownTicks'
+        ]);
+        if (ms === 0 && (baseTicks == null || baseTicks <= 0)) return true;
+        if (ms == null && (baseTicks == null || baseTicks <= 0)) return true;
+        return false;
+    }
+
+    function isAbilityCooldownCandidate(actor, cd) {
+        return cd != null
+            && !isActorAutoAttackCooldown(actor, cd)
+            && !isUntimedSkillCooldownComponent(cd);
+    }
+
     function findActorCooldownComponent(actor, metadata) {
         const direct = actor.abilityCooldown
             ?? actor.skillCooldown
             ?? actor.ability?.cooldown
             ?? actor.skill?.cooldown;
-        if (direct) return direct;
+        if (isAbilityCooldownCandidate(actor, direct)) return direct;
 
         const list = actor.cooldownList;
         if (!Array.isArray(list) || !list.length) return null;
@@ -4718,16 +4817,18 @@
         if (skillSrc) {
             const skillNeedle = String(skillSrc).toLowerCase();
             const bySrc = list.find((cd) => {
+                if (!isAbilityCooldownCandidate(actor, cd)) return false;
                 const src = String(cd?.src ?? '').toLowerCase();
                 return src && (src === skillNeedle || src.includes(skillNeedle) || src.endsWith(`/${skillNeedle}.png`));
             });
             if (bySrc) return bySrc;
         }
 
-        const abilityLike = list.find((cd) => cd && cd.src && cd.benign !== true);
+        const abilityLike = list.find((cd) =>
+            isAbilityCooldownCandidate(actor, cd) && cd.src && cd.benign !== true);
         if (abilityLike) return abilityLike;
 
-        return list.find((cd) => cd?.src) ?? list[0] ?? null;
+        return null;
     }
 
     function readActorCooldown(actor, metadata) {
@@ -4744,15 +4845,28 @@
             };
         }
 
-        const baseTicks = readComponentNumber(cd, [
-            '_baseCooldown', 'baseCooldown', 'baseCooldownTicks', 'cooldownTicks'
-        ]);
-        let cooldownMs = pickFirstNumber(cd, [
-            'cooldownMilliseconds', 'baseCooldownMilliseconds', 'cooldownMs', 'baseCooldownMs',
-            'duration', 'baseDuration', 'cooldown', 'maxCooldown', 'totalCooldown'
-        ]);
-        if (cooldownMs == null && baseTicks != null) {
-            cooldownMs = ticksToMs(baseTicks);
+        const calculator = invokeActorCooldownCalculator(actor);
+        let baseTicks = null;
+        let cooldownMs = null;
+        if (calculator?.effectiveMs != null && Number.isFinite(calculator.effectiveMs) && calculator.effectiveMs > 0) {
+            cooldownMs = calculator.effectiveMs;
+            baseTicks = msToGameCooldownTicks(calculator.effectiveMs);
+        } else if (calculator?.effectiveTicks != null && Number.isFinite(calculator.effectiveTicks) && calculator.effectiveTicks > 0) {
+            baseTicks = calculator.effectiveTicks;
+            cooldownMs = ticksToMs(calculator.effectiveTicks);
+        }
+
+        if (cooldownMs == null) {
+            baseTicks = readComponentNumber(cd, [
+                '_baseCooldown', 'baseCooldown', 'baseCooldownTicks', 'cooldownTicks'
+            ]);
+            cooldownMs = pickFirstNumber(cd, [
+                'cooldownMilliseconds', 'baseCooldownMilliseconds', 'cooldownMs', 'baseCooldownMs',
+                'duration', 'baseDuration', 'cooldown', 'maxCooldown', 'totalCooldown'
+            ]);
+            if (cooldownMs == null && baseTicks != null) {
+                cooldownMs = ticksToMs(baseTicks);
+            }
         }
 
         const remainingTicks = readComponentNumber(cd, [
@@ -4779,6 +4893,17 @@
         } catch { /* ignore */ }
 
         const abilitySrc = cd.src ?? cd.abilitySrc ?? cd.skillSrc ?? metadata?.skill?.src ?? null;
+        if ((baseTicks == null || baseTicks <= 0) && (cooldownMs == null || cooldownMs <= 0)) {
+            return {
+                cooldownMs: null,
+                cooldownTicks: null,
+                cooldownRemainingMs: null,
+                cooldownRemainingTicks: null,
+                cooldownReady: null,
+                abilitySrc: metadata?.skill?.src ?? null,
+                raw: null
+            };
+        }
         return {
             cooldownMs,
             cooldownTicks: baseTicks,
@@ -4868,10 +4993,17 @@
         return { value: null, source: null };
     }
 
-    function warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo) {
+    function expectsTimedAbilityCooldown(actor, metadata) {
+        if (!metadata?.skill?.src || !actor) return false;
+        if (findActorCooldownComponent(actor, metadata)) return true;
+        const direct = actor.abilityCooldown ?? actor.skillCooldown;
+        return direct != null && isAbilityCooldownCandidate(actor, direct);
+    }
+
+    function warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo, actor) {
         const missingStats = ['armor', 'magicResist', 'speed'].filter((k) => unit[k] == null);
         const missingMechanics = [];
-        if (cooldownInfo.cooldownMs == null && metadata?.skill?.src) {
+        if (cooldownInfo.cooldownMs == null && expectsTimedAbilityCooldown(actor, metadata)) {
             missingMechanics.push('abilityCooldown');
         }
         if (attackSpeedInfo.value == null) missingMechanics.push('attackSpeed');
@@ -4963,17 +5095,17 @@
             collapseKey: resolveFightCollapseKey(actor)
         };
 
-        warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo);
+        warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo, actor);
         return unit;
     }
 
     const EQUIP_STAT_ICONS = {
-        hp: '/assets/icons/heal.png',
-        ad: '/assets/icons/attackdamage.png',
-        ap: '/assets/icons/abilitypower.png',
-        armor: '/assets/icons/armor.png',
-        mr: '/assets/icons/magicresist.png',
-        magicresist: '/assets/icons/magicresist.png'
+        hp: STAT_ICONS.hp,
+        ad: STAT_ICONS.ad,
+        ap: STAT_ICONS.ap,
+        armor: STAT_ICONS.armor,
+        mr: STAT_ICONS.magicResist,
+        magicresist: STAT_ICONS.magicResist
     };
 
     const ABILITY_DAMAGE_TYPE_PRESENTATION = {
@@ -5144,6 +5276,25 @@
         return parts.join(' · ');
     }
 
+    function getUnitEquipmentPatchSig(unit) {
+        const equipment = unit?.equipment;
+        if (!equipment) return '';
+        return [
+            equipment.gameId ?? '',
+            equipment.tier ?? '',
+            equipment.stat ?? '',
+            equipment.spriteId ?? ''
+        ].join('/');
+    }
+
+    function ensureUnitCardEquipMount(card) {
+        const group = card.querySelector('.bs-portrait-group');
+        if (!group || group.querySelector('.bs-equip-mount')) return;
+        const mount = document.createElement('div');
+        mount.className = 'bs-equip-mount frame-pressed-1 shrink-0 flex items-center justify-center overflow-hidden';
+        group.appendChild(mount);
+    }
+
     function clampEquipTier(value) {
         const parsed = parseInt(value, 10);
         if (!Number.isFinite(parsed)) return 1;
@@ -5159,35 +5310,95 @@
         return stat || null;
     }
 
-    function resolveEquipmentTierStatBonus(equipment) {
-        if (!equipment) return { statKey: null, value: null };
+    function enrichEquipmentForStatBonus(equipment) {
+        if (!equipment || equipment.gameId != null) return equipment;
+        try {
+            const equips = globalThis.state?.player?.getSnapshot?.()?.context?.equips;
+            if (!Array.isArray(equips)) return equipment;
+            for (const bag of equips) {
+                const norm = normalizeEquipmentInfo(bag);
+                if (!norm?.gameId) continue;
+                if (equipment.spriteId != null && norm.spriteId === equipment.spriteId) {
+                    return { ...equipment, gameId: norm.gameId, name: equipment.name || norm.name };
+                }
+                if (equipment.name && norm.name
+                    && String(equipment.name).toLowerCase() === String(norm.name).toLowerCase()) {
+                    return {
+                        ...equipment,
+                        gameId: norm.gameId,
+                        spriteId: equipment.spriteId ?? norm.spriteId
+                    };
+                }
+            }
+        } catch { /* ignore */ }
+        return equipment;
+    }
+
+    function getEquipStatBonusCacheSig(equipment) {
+        if (!equipment) return null;
         const statKey = normalizeEquipmentStatKey(equipment.stat);
         const tier = clampEquipTier(equipment.tier);
+        if (!statKey || !tier) return null;
+        return [
+            equipment.spriteId ?? '',
+            equipment.gameId ?? '',
+            statKey,
+            tier
+        ].join(':');
+    }
+
+    function resolveEquipmentTierStatBonus(equipment) {
+        const enriched = enrichEquipmentForStatBonus(equipment);
+        if (!enriched) return { statKey: null, value: null };
+        const statKey = normalizeEquipmentStatKey(enriched.stat);
+        const tier = clampEquipTier(enriched.tier);
         if (!statKey || !tier) return { statKey: null, value: null };
 
+        const cacheSig = getEquipStatBonusCacheSig(enriched);
+        let bestValue = null;
+
         try {
-            const utils = globalThis.state?.utils;
-            const candidates = [
-                utils?.getEquipmentTierBonus,
-                utils?.getEquipmentStatValue,
-                utils?.scaleEquipmentStat
-            ];
-            for (const fn of candidates) {
-                if (typeof fn !== 'function') continue;
-                const raw = Number(fn({
+            const getTierBonus = globalThis.state?.utils?.getEquipmentTierBonus;
+            if (typeof getTierBonus === 'function') {
+                const raw = Number(getTierBonus({
                     stat: statKey,
                     tier,
-                    gameId: equipment.gameId,
-                    equipment
+                    gameId: enriched.gameId,
+                    equipment: enriched
                 }));
-                if (Number.isFinite(raw)) return { statKey, value: raw };
+                if (Number.isFinite(raw)) bestValue = raw;
             }
         } catch { /* ignore */ }
 
-        const tierRow = EQUIPMENT_TIER_BONUSES[tier];
-        const value = tierRow?.[statKey];
-        if (value == null || !Number.isFinite(value)) return { statKey: null, value: null };
-        return { statKey, value };
+        if (bestValue == null) {
+            const tierRow = EQUIPMENT_TIER_BONUSES[tier];
+            const fallback = tierRow?.[statKey];
+            if (fallback != null && Number.isFinite(fallback)) bestValue = fallback;
+        }
+
+        if (cacheSig) {
+            const cached = cachedEquipStatBonusBySig.get(cacheSig);
+            if (bestValue == null && cached?.statKey === statKey) {
+                bestValue = cached.value;
+            }
+        }
+
+        const tableBonus = EQUIPMENT_TIER_BONUSES[tier]?.[statKey];
+        if (bestValue != null && tableBonus != null && Number.isFinite(tableBonus) && bestValue > tableBonus) {
+            bestValue = tableBonus;
+        }
+
+        if (cacheSig) {
+            if (bestValue != null) {
+                cachedEquipStatBonusBySig.set(cacheSig, { statKey, value: bestValue });
+            } else {
+                const cached = cachedEquipStatBonusBySig.get(cacheSig);
+                if (cached?.statKey === statKey) return cached;
+            }
+        }
+
+        if (bestValue == null) return { statKey: null, value: null };
+        return { statKey, value: bestValue };
     }
 
     function applyEquipmentStatBonus(stats, equipment, statSources) {
@@ -5418,6 +5629,20 @@
         return createUnitEquipmentPortraitFallback(options.itemId, options.stat, options.tier);
     }
 
+    function createUnitEmptyEquipmentPortrait() {
+        const slot = document.createElement('div');
+        slot.className = 'container-slot surface-dark flex items-center justify-center overflow-hidden shrink-0';
+        const img = document.createElement('img');
+        img.alt = 'empty equipment';
+        img.src = '/assets/icons/empty-equip.png';
+        img.width = 32;
+        img.height = 32;
+        img.className = 'pixelated opacity-60';
+        slot.appendChild(img);
+        scaleUnitPortraitElement(slot, UNIT_PORTRAIT_SIZE);
+        return slot;
+    }
+
     function finalizeUnitMonsterSlot(slot, unit) {
         if (!slot) return null;
         slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden shrink-0';
@@ -5437,7 +5662,7 @@
         const monsterImg = document.createElement('img');
         monsterImg.className = 'pixelated';
         monsterImg.alt = 'creature';
-        monsterImg.src = `/assets/portraits/${unit.gameId}.png`;
+        monsterImg.src = getMonsterPortraitSrc(unit.gameId);
         slot.appendChild(monsterImg);
 
         return finalizeUnitMonsterSlot(slot, unit);
@@ -5469,6 +5694,7 @@
 
     function hydrateUnitCardPortraits(card, unit) {
         if (!card || !unit) return;
+        ensureUnitCardEquipMount(card);
         const equipSummary = unit.equipment ? formatEquipmentSummary(unit.equipment) : '';
 
         const portraitMount = card.querySelector('.bs-portrait-mount');
@@ -5485,13 +5711,18 @@
         const equipMount = card.querySelector('.bs-equip-mount');
         if (equipMount) {
             equipMount.innerHTML = '';
+            equipMount.removeAttribute('title');
             scaleUnitPortraitElement(equipMount, UNIT_PORTRAIT_SIZE);
             if (unit.equipment?.spriteId != null) {
                 const equipPortrait = createUnitEquipmentPortrait(unit.equipment);
                 if (equipPortrait) {
                     if (equipSummary) equipMount.title = equipSummary;
                     equipMount.appendChild(equipPortrait);
+                } else {
+                    equipMount.appendChild(createUnitEmptyEquipmentPortrait());
                 }
+            } else {
+                equipMount.appendChild(createUnitEmptyEquipmentPortrait());
             }
         }
     }
@@ -5628,6 +5859,112 @@
         };
     }
 
+    function resolvePreviewAttackDelayTicks(resolved, metadata) {
+        return resolvePreviewAttackDelayDetailed(resolved, metadata).ticks;
+    }
+
+    function resolvePreviewAttackDelayDetailed(resolved, metadata) {
+        const catalogBase = metadata?.baseStats?.attackDelayTicks;
+        if (catalogBase == null || !Number.isFinite(Number(catalogBase))) {
+            const defaultTicks = msToGameCooldownTicks(DEFAULT_PREVIEW_ATTACK_DELAY_MS);
+            return {
+                ticks: roundTrackValue(defaultTicks, 'attackDelayTicks'),
+                reason: null,
+                catalogBase: null,
+                usedDefault: true,
+                scaleSource: `default ${DEFAULT_PREVIEW_ATTACK_DELAY_MS}ms (game mL)`
+            };
+        }
+
+        if (resolved.villain) {
+            return {
+                ticks: roundTrackValue(Number(catalogBase), 'attackDelayTicks'),
+                reason: null,
+                catalogBase: Number(catalogBase)
+            };
+        }
+
+        const actor = buildBoardPreviewStatActor(resolved, 0);
+        const scaled = scaleActorCatalogStatDetailed(actor, metadata, 'attackDelayTicks');
+        const ticks = scaled.value ?? Number(catalogBase);
+        return {
+            ticks: roundTrackValue(ticks, 'attackDelayTicks'),
+            reason: null,
+            catalogBase: Number(catalogBase),
+            scaleSource: scaled.source
+        };
+    }
+
+    function logPreviewPlacementMechanics(resolved, source, metadata, mechanics, attackDelayDetail, cdDetail) {
+        const unitKey = buildStablePreviewKey(resolved, resolveCurrentRoomId());
+        const sig = [
+            unitKey,
+            source,
+            mechanics.attackDelayTicks,
+            mechanics.cooldownTicks,
+            cdDetail?.reason,
+            attackDelayDetail?.reason
+        ].join('|');
+        if (previewMechanicsLogSig.get(unitKey) === sig) return;
+        previewMechanicsLogSig.set(unitKey, sig);
+
+        const prefix = `[${modName}][PreviewMechanics]`;
+        const team = resolved.villain ? 'enemy' : 'ally';
+        const label = `${resolved.name} (#${resolved.gameId}, ${team}, tile ${resolved.tileIndex ?? '?'}, source=${source})`;
+
+        if (mechanics.attackDelayTicks != null) {
+            let atkLine = `${prefix} ${label} atk delay: ${formatTicks(mechanics.attackDelayTicks)}`;
+            if (attackDelayDetail?.usedDefault) {
+                atkLine += ` (${attackDelayDetail.scaleSource})`;
+            } else if (attackDelayDetail?.catalogBase != null) {
+                atkLine += ` (catalog ${attackDelayDetail.catalogBase}`;
+                if (attackDelayDetail.scaleSource) atkLine += `, ${attackDelayDetail.scaleSource}`;
+                atkLine += ')';
+            }
+            console.log(atkLine);
+        } else {
+            console.log(`${prefix} ${label} atk delay: missing — ${attackDelayDetail?.reason ?? 'unknown'}`);
+        }
+
+        if (mechanics.cooldownTicks != null) {
+            let cdLine = `${prefix} ${label} ability CD: ${formatTicks(mechanics.cooldownTicks)}`;
+            if (mechanics.cooldownMs != null) cdLine += ` (${mechanics.cooldownMs}ms)`;
+            cdLine += ` via ${cdDetail?.source ?? 'unknown'}`;
+            console.log(cdLine);
+        } else if (cdDetail?.reason === 'passive ability (no timed CD)') {
+            console.log(`${prefix} ${label} ability CD: n/a — ${cdDetail.reason}`);
+        } else {
+            console.log(`${prefix} ${label} ability CD: missing — ${cdDetail?.reason ?? 'unknown'}`);
+        }
+    }
+
+    function resolvePreviewMechanics(resolved, metadata, previewStats, source) {
+        const equipment = resolved.equipment ?? null;
+        const partialUnit = {
+            gameId: resolved.gameId,
+            name: resolved.name,
+            villain: resolved.villain,
+            tileIndex: resolved.tileIndex,
+            ap: previewStats.stats.ap,
+            equipment,
+            collapseKey: buildStablePreviewKey(resolved, resolveCurrentRoomId())
+        };
+        const attackDelayDetail = resolvePreviewAttackDelayDetailed(resolved, metadata);
+        const cdDetail = resolvePreviewAbilityCooldownDetailed(partialUnit, metadata);
+        const abilityCooldown = cdDetail.result;
+        const mechanics = {
+            attackDelayTicks: attackDelayDetail.ticks,
+            attackDelayReady: attackDelayDetail.ticks != null ? true : null,
+            attackDelayRemainingTicks: null,
+            cooldownTicks: abilityCooldown?.cooldownTicks ?? null,
+            cooldownMs: abilityCooldown?.cooldownMs ?? null,
+            cooldownReady: abilityCooldown ? true : null,
+            cooldownRemainingTicks: null
+        };
+        logPreviewPlacementMechanics(resolved, source, metadata, mechanics, attackDelayDetail, cdDetail);
+        return mechanics;
+    }
+
     function resolveBoardPieceTileIndex(piece) {
         return piece?.tileIndex ?? piece?.tile ?? null;
     }
@@ -5674,31 +6011,47 @@
         return key;
     }
 
-    function readCollapsedOverride(key) {
+    function readMapOverride(map, key) {
         const normalized = normalizeCollapseKey(key);
-        if (collapsedOverrides.has(normalized)) return collapsedOverrides.get(normalized);
-        if (normalized !== key && collapsedOverrides.has(key)) return collapsedOverrides.get(key);
+        if (map.has(normalized)) return map.get(normalized);
+        if (normalized !== key && map.has(key)) return map.get(key);
         return undefined;
+    }
+
+    function writeMapOverride(map, key, value) {
+        const normalized = normalizeCollapseKey(key);
+        map.set(normalized, value);
+        if (normalized !== key) map.delete(key);
+    }
+
+    function readCollapsedOverride(key) {
+        return readMapOverride(collapsedOverrides, key);
     }
 
     function writeCollapsedOverride(key, collapsed) {
-        const normalized = normalizeCollapseKey(key);
-        collapsedOverrides.set(normalized, collapsed === true);
-        if (normalized !== key) collapsedOverrides.delete(key);
+        writeMapOverride(collapsedOverrides, key, collapsed === true);
     }
 
     function readOpenAbilityOverride(key) {
-        const normalized = normalizeCollapseKey(key);
-        if (openAbilityOverrides.has(normalized)) return openAbilityOverrides.get(normalized);
-        if (normalized !== key && openAbilityOverrides.has(key)) return openAbilityOverrides.get(key);
-        return undefined;
+        return readMapOverride(openAbilityOverrides, key);
+    }
+
+    function rememberOpenAbilityOverride(key, open) {
+        writeMapOverride(openAbilityOverrides, key, open === true);
     }
 
     function writeOpenAbilityOverride(key, open) {
-        const normalized = normalizeCollapseKey(key);
-        openAbilityOverrides.set(normalized, open === true);
-        if (normalized !== key) openAbilityOverrides.delete(key);
+        rememberOpenAbilityOverride(key, open);
         markUnitsInteraction();
+    }
+
+    function snapshotOpenAbilityKeysFromDom(body) {
+        if (!body) return;
+        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
+            const details = card.querySelector('.bs-ability-details');
+            if (!details || !card.dataset.unitKey) continue;
+            rememberOpenAbilityOverride(card.dataset.unitKey, details.open);
+        }
     }
 
     function clearOpenAbilityOverrides() {
@@ -5852,6 +6205,7 @@
         const awaken = resolved.villain
             ? resolveVillainAwakenForFloor(resolved, previewFloor)
             : resolved.awaken === true;
+        const mechanics = resolvePreviewMechanics(resolved, metadata, previewStats, source);
         return {
             gameId: resolved.gameId,
             name: resolved.name,
@@ -5869,6 +6223,13 @@
             roles: Array.isArray(metadata?.roles) ? metadata.roles : [],
             baseStats: Object.keys(baseStats).some((k) => baseStats[k] != null) ? baseStats : null,
             abilitySrc: metadata?.skill?.src ?? null,
+            attackDelayTicks: mechanics.attackDelayTicks,
+            attackDelayReady: mechanics.attackDelayReady,
+            attackDelayRemainingTicks: mechanics.attackDelayRemainingTicks,
+            cooldownTicks: mechanics.cooldownTicks,
+            cooldownMs: mechanics.cooldownMs,
+            cooldownReady: mechanics.cooldownReady,
+            cooldownRemainingTicks: mechanics.cooldownRemainingTicks,
             source,
             roomId: roomId ?? null,
             tileIndex: resolved.tileIndex,
@@ -5881,7 +6242,111 @@
         };
     }
 
+    function hasEquipmentTierBonusUtils() {
+        const utils = globalThis.state?.utils;
+        return typeof utils?.getEquipmentTierBonus === 'function'
+            || typeof utils?.getEquipmentStatValue === 'function'
+            || typeof utils?.scaleEquipmentStat === 'function';
+    }
+
+    function findBoardResolvedForPreviewUnit(unit) {
+        if (!unit?.gameId) return null;
+
+        const roomId = unit.roomId ?? resolveCurrentRoomId();
+        const matchResolved = (resolved) => {
+            if (!resolved || resolved.gameId !== unit.gameId) return false;
+            if (unit.villain != null && resolved.villain !== unit.villain) return false;
+            if (unit.tileIndex != null && resolved.tileIndex != null && resolved.tileIndex !== unit.tileIndex) {
+                return false;
+            }
+            if (unit.identity && resolved.identity && unit.identity !== resolved.identity) return false;
+            return true;
+        };
+
+        const config = getBoardContext()?.boardConfig;
+        if (Array.isArray(config)) {
+            for (const piece of config) {
+                const resolved = resolveBoardPiece(piece);
+                if (matchResolved(resolved)) return { resolved, source: 'board' };
+            }
+        }
+
+        const getBoardMonsters = globalThis.state?.utils?.getBoardMonstersFromRoomId;
+        if (roomId && typeof getBoardMonsters === 'function') {
+            try {
+                for (const piece of getBoardMonsters(roomId) || []) {
+                    const resolved = resolveBoardPiece(piece);
+                    if (matchResolved(resolved)) return { resolved, source: 'map' };
+                }
+            } catch { /* ignore */ }
+        }
+
+        return null;
+    }
+
+    function refreshBoardPreviewUnitStats(unit) {
+        if (!unit || isFightActive()) return unit;
+        if (unit.source !== 'board' && unit.source !== 'map') return unit;
+
+        const found = findBoardResolvedForPreviewUnit(unit);
+        if (!found) return unit;
+
+        const fresh = pieceToPreviewUnit(
+            found.resolved,
+            found.source,
+            unit.roomId ?? resolveCurrentRoomId());
+        return {
+            ...unit,
+            ...fresh,
+            collapseKey: unit.collapseKey ?? fresh.collapseKey,
+            mergeKey: unit.mergeKey ?? fresh.mergeKey
+        };
+    }
+
+    function getBoardPreviewCacheSig() {
+        return [
+            resolveCurrentRoomId() ?? '',
+            resolveCurrentFloor(),
+            boardTrack.configSig || getBoardConfigSignature(getBoardContext()?.boardConfig),
+            cachedGameChunk661Text ? '1' : '0',
+            cachedGameChunk235Text ? '1' : '0',
+            hasEquipmentTierBonusUtils() ? '1' : '0'
+        ].join('|');
+    }
+
+    function invalidateBoardPreviewCache(options = {}) {
+        cachedBoardPreviewUnits = null;
+        cachedBoardPreviewSig = '';
+        cachedRefreshedBoardPreviewUnits = null;
+        cachedRefreshedBoardPreviewSig = '';
+        cachedCdrScriptBounds.clear();
+        lastBoardAbilityPollMs = 0;
+        if (options.clearMechanicsLog) {
+            previewMechanicsLogSig.clear();
+        }
+    }
+
+    function clearScalingRuntimeCaches() {
+        cachedEquipStatBonusBySig.clear();
+    }
+
+    function getRefreshedBoardPreviewUnits() {
+        const cacheSig = getBoardPreviewCacheSig();
+        if (cachedRefreshedBoardPreviewUnits && cachedRefreshedBoardPreviewSig === cacheSig) {
+            return cachedRefreshedBoardPreviewUnits;
+        }
+        cachedRefreshedBoardPreviewUnits = getBoardPreviewUnits()
+            .map((unit) => refreshBoardPreviewUnitStats(unit));
+        cachedRefreshedBoardPreviewSig = cacheSig;
+        return cachedRefreshedBoardPreviewUnits;
+    }
+
     function getBoardPreviewUnits() {
+        const cacheSig = getBoardPreviewCacheSig();
+        if (cachedBoardPreviewUnits && cachedBoardPreviewSig === cacheSig) {
+            return cachedBoardPreviewUnits;
+        }
+
         const merged = new Map();
         const roomId = resolveCurrentRoomId();
 
@@ -5908,16 +6373,19 @@
             } catch { /* ignore */ }
         }
 
-        return Array.from(merged.values());
+        cachedBoardPreviewUnits = Array.from(merged.values());
+        cachedBoardPreviewSig = cacheSig;
+        return cachedBoardPreviewUnits;
     }
 
-    function collectActorSnapshots() {
+    function collectActorSnapshots(options = {}) {
         if (!isFightActive()) {
             invalidateActorSnapshotsCache();
             return null;
         }
         const engineTick = readTickFromEngine();
-        if (engineTick != null
+        if (!options.bypassCache
+            && engineTick != null
             && cachedActorSnapshots
             && cachedActorSnapshotsTick === engineTick) {
             return cachedActorSnapshots;
@@ -5960,20 +6428,55 @@
         console.log(`[${modName}][AbilityScale]`, ...args);
     }
 
-    function logAbilityScalingVerbose(...args) {
-        const first = args[0];
-        if (typeof first === 'string' && (
-            first.startsWith('enhance attempt')
-            || first.startsWith('skip wrap')
-            || first === 'frozen tooltip html'
-        )) {
-            return;
-        }
-        logAbilityScaling(...args);
+    function resolveBoardAbilityScalingUnit(_details, unit) {
+        return resolveUnitAbilityScalingStats(unit) || unit;
     }
 
-    function warnAbilityScaling(...args) {
-        console.warn(`[${modName}][AbilityScale]`, ...args);
+    function getAbilityTooltipDisplaySnapshot(root) {
+        if (!root) return null;
+        const scaled = root.querySelector('.bs-scaled-value');
+        return {
+            scaledText: scaled?.textContent?.trim() || null,
+            scaledTitle: scaled?.title || null,
+            wrapCount: root.querySelectorAll('span.whitespace-nowrap').length
+        };
+    }
+
+    function abilityTooltipHasScalableWraps(root) {
+        if (!root) return false;
+        for (const wrap of root.querySelectorAll('span.whitespace-nowrap')) {
+            if (getTooltipWrapSpans(wrap).length >= 2) return true;
+        }
+        return false;
+    }
+
+    function abilityTooltipCanRescale(root) {
+        if (!root) return false;
+        if (abilityTooltipHasScalableWraps(root)) return true;
+        if (root.querySelector('.text-cooldown')) return true;
+        if (root.querySelector('.text-abilityPower, .text-villain')) return true;
+        return false;
+    }
+
+    function abilityTooltipCanRescaleFromHtml(html) {
+        if (!html || !String(html).trim()) return false;
+        const probe = document.createElement('div');
+        probe.innerHTML = html;
+        return abilityTooltipCanRescale(probe);
+    }
+
+    function abilityTooltipCanRescaleFromTemplate(details) {
+        const template = getAbilityTooltipTemplate(details);
+        return template ? abilityTooltipCanRescaleFromHtml(template) : false;
+    }
+
+    function markAbilityTooltipScalingApplied(details, unit, scalingKey) {
+        if (!details) return;
+        syncAbilityDetailsDataset(details, unit);
+        if (scalingKey) {
+            details.dataset.abilityAppliedScalingKey = scalingKey;
+            details.dataset.abilityMountKey = scalingKey;
+        }
     }
 
     function getTooltipWrapSpans(wrap) {
@@ -5987,7 +6490,7 @@
         return [...wrap.children].filter((node) => node.tagName === 'SPAN');
     }
 
-    function freezeAbilityTooltipContent(details, root, component) {
+    function freezeAbilityTooltipContent(details, root, component, scalingKey) {
         if (!root) return;
         const html = root.innerHTML;
         if (component?.unmount) {
@@ -5998,7 +6501,11 @@
         if (details) details._abilityComponent = null;
         root.innerHTML = html;
         root.dataset.abilityScaled = '1';
-        logAbilityScalingVerbose('frozen tooltip html', {
+        if (details && scalingKey) {
+            details.dataset.abilityAppliedScalingKey = scalingKey;
+            details.dataset.abilityMountKey = scalingKey;
+        }
+        logAbilityScaling('frozen tooltip html', {
             scaled: root.querySelectorAll('.bs-scaled-value').length,
             wraps: root.querySelectorAll('span.whitespace-nowrap').length
         });
@@ -6103,23 +6610,28 @@
         const baseDurationMs = parseTooltipDurationText(baseText);
         if (baseDurationMs == null) return null;
 
-        const baseLabel = formatAbilityDurationMs(baseDurationMs);
-        const baseSec = baseDurationMs / 1000;
-        const rawTotalSec = baseSec + (statValue / perChunk.chunkSize) * perChunk.amount;
-        const totalLabel = formatAbilityDurationMs(rawTotalSec * 1000);
-        const valueMatch = totalLabel?.match(/^([\d.]+)s$/i);
-        const amountLabel = `${perChunk.amount}s`;
+        const amountMs = Math.round(perChunk.amount * 1000);
+        const rawTotalMs = baseDurationMs + (statValue / perChunk.chunkSize) * amountMs;
+        const baseTicks = msToGameCooldownTicks(baseDurationMs);
+        const totalTicks = msToGameCooldownTicks(rawTotalMs);
+        if (baseTicks == null || totalTicks == null) return null;
+
+        const baseLabel = formatTicks(baseTicks);
+        const totalLabel = formatTicks(totalTicks);
+        const { value, suffix } = formatTicksParts(totalTicks);
+        const amountTicks = msToGameCooldownTicks(amountMs);
+        const amountLabel = amountTicks != null ? formatTicks(amountTicks) : `${perChunk.amount}s`;
         const inner = `${baseLabel} + (${statValue} ${statLabel} ÷ ${perChunk.chunkSize}) × ${amountLabel}`;
         const expression = `${inner} = ${totalLabel}`;
         return {
-            value: valueMatch ? valueMatch[1] : String(rawTotalSec),
-            suffix: 's',
+            value,
+            suffix,
             title: buildScalingMathTitle({
                 base: baseLabel,
                 statValue,
                 statLabel,
-                total: valueMatch ? valueMatch[1] : rawTotalSec,
-                suffix: 's',
+                total: totalLabel,
+                suffix: '',
                 expression
             })
         };
@@ -6226,10 +6738,19 @@
 
     function applyScaledTooltipValue(targetSpan, baseText, scaled, originalBaseText) {
         if (!targetSpan || !scaled) return;
-        targetSpan.textContent = `${scaled.value}${scaled.suffix}`;
+        const prev = targetSpan.textContent?.trim() ?? '';
+        const next = `${scaled.value}${scaled.suffix}`;
+        targetSpan.textContent = next;
         targetSpan.classList.add('bs-scaled-value');
         targetSpan.title = scaled.title
             || `Scaled for current stats (base ${originalBaseText ?? baseText})`;
+        if (prev !== next) {
+            logAbilityScaling('change:apply', {
+                from: prev || (originalBaseText ?? baseText),
+                to: next,
+                math: scaled.title
+            });
+        }
     }
 
     function wrapHasScalingStatIcon(wrap) {
@@ -6244,7 +6765,7 @@
 
     function shouldAppendScaledDamageIcon(wrap, baseText, scaled, contextText, statInfo) {
         if (!scaled) return false;
-        if (scaled.suffix === '%' || scaled.suffix === 's') return false;
+        if (scaled.suffix === '%' || scaled.suffix === 's' || String(scaled.suffix || '').includes('tick')) return false;
         if (parseTooltipPercentText(baseText) != null) return false;
         if (parseTooltipFlatText(baseText) == null && parseTooltipDurationText(baseText) == null) return false;
 
@@ -6338,8 +6859,7 @@
 
     function formatAbilityDurationMs(ms) {
         if (ms == null || !Number.isFinite(ms)) return null;
-        const seconds = (ms / 1000).toFixed(2).replace('.00', '');
-        return `${seconds}s`;
+        return formatTicks(msToGameCooldownTicks(ms));
     }
 
     function parseTooltipDurationText(text) {
@@ -6383,19 +6903,32 @@
     function resolveUnitAbilityScalingStats(unit) {
         if (!unit) return null;
 
+        if (unit.source === 'fight') {
+            return unit;
+        }
+
+        if (unit.source === 'board' || unit.source === 'map') {
+            return refreshBoardPreviewUnitStats(unit);
+        }
+
         const actor = findActorForPanelUnit(unit);
         if (actor) {
             const metadata = getMonsterMetadata(unit.gameId);
             const hpSnapshot = readActorHp(actor.hp);
+            const preferUnit = (key, actorValue) => {
+                const unitValue = unit[key];
+                if (unitValue != null && Number.isFinite(unitValue)) return unitValue;
+                return actorValue ?? unitValue;
+            };
             return {
                 ...unit,
-                ap: resolveActorLiveStatDetailed(actor, metadata, 'ap').value ?? unit.ap,
-                ad: resolveActorLiveStatDetailed(actor, metadata, 'ad').value ?? unit.ad,
+                ap: preferUnit('ap', resolveActorLiveStatDetailed(actor, metadata, 'ap').value),
+                ad: preferUnit('ad', resolveActorLiveStatDetailed(actor, metadata, 'ad').value),
                 hp: hpSnapshot.hp ?? unit.hp,
                 hpMax: hpSnapshot.hpMax ?? unit.hpMax ?? unit.hp,
-                armor: resolveActorLiveStatDetailed(actor, metadata, 'armor').value ?? unit.armor,
-                magicResist: resolveActorLiveStatDetailed(actor, metadata, 'magicResist').value ?? unit.magicResist,
-                speed: resolveActorLiveStatDetailed(actor, metadata, 'speed').value ?? unit.speed
+                armor: preferUnit('armor', resolveActorLiveStatDetailed(actor, metadata, 'armor').value),
+                magicResist: preferUnit('magicResist', resolveActorLiveStatDetailed(actor, metadata, 'magicResist').value),
+                speed: preferUnit('speed', resolveActorLiveStatDetailed(actor, metadata, 'speed').value)
             };
         }
 
@@ -6486,19 +7019,30 @@
         if (effectiveTicks == null) return null;
         const { value, suffix } = formatTicksParts(effectiveTicks);
         const effectiveLabel = formatTicks(effectiveTicks);
+        const equipCdr = options.equipCdr;
+        const equipPctLabel = formatEquipCdrPercentLabel(equipCdr?.percent);
+        const scaleEquipBase = options.scaleEquipBase !== false && equipCdr?.basis != null && equipCdr.basis !== 1;
 
         let title = `Effective cooldown at ${ap} AP = ${effectiveLabel}`;
         if (baseMs != null && Number.isFinite(baseMs)) {
-            const baseTicks = msToGameCooldownTicks(baseMs);
+            const formulaBaseMs = scaleEquipBase ? Math.round(baseMs * equipCdr.basis) : baseMs;
+            const baseTicks = msToGameCooldownTicks(formulaBaseMs);
             const reductionTicks = msToGameCooldownTicks(reductionPerApMs);
             const minTicks = minMs != null && Number.isFinite(minMs) ? msToGameCooldownTicks(minMs) : null;
             const inner = `${formatTicks(baseTicks)} - ${ap} AP × ${formatTicks(reductionTicks)}`;
-            const rawMs = baseMs - reductionPerApMs * ap;
+            const rawMs = formulaBaseMs - reductionPerApMs * ap;
             if (minTicks != null && Math.round(rawMs) < minMs) {
                 title = `max(round(${inner}), ${formatTicks(minTicks)}) = ${effectiveLabel}`;
             } else {
                 title = `round(${inner}) = ${effectiveLabel}`;
             }
+            if (equipPctLabel != null) {
+                title += scaleEquipBase
+                    ? ` (base CD −${equipPctLabel}% equip)`
+                    : ` (includes equip −${equipPctLabel}% CD)`;
+            }
+        } else if (equipPctLabel != null) {
+            title += ` (includes equip −${equipPctLabel}% CD)`;
         }
         return { value, suffix, title };
     }
@@ -6513,6 +7057,7 @@
 
     function prefetchGameChunk661ForCdr() {
         ensureGameChunk661Text().catch(() => { /* ignore */ });
+        ensureGameChunk235Text().catch(() => { /* ignore */ });
     }
 
     function findGameChunk661ScriptUrl() {
@@ -6533,6 +7078,11 @@
                     const res = await fetch(src, { credentials: 'same-origin' });
                     if (!res.ok) return null;
                     cachedGameChunk661Text = await res.text();
+                    if (cachedGameChunk661Text && !isFightActive()) {
+                        invalidateBoardPreviewCache();
+                        lastUnitsRenderKey = '';
+                        renderUnits(true);
+                    }
                     return cachedGameChunk661Text;
                 } catch {
                     return null;
@@ -6542,14 +7092,167 @@
         return cachedGameChunk661Promise;
     }
 
+    let cachedGameChunk235Text = null;
+    let cachedGameChunk235Promise = null;
+    let cachedEquipmentCdrPercentByKey = null;
+
+    function findGameChunk235ScriptUrl() {
+        for (const script of document.scripts) {
+            const src = script.src;
+            if (src && /\/235-[\w-]+\.js(?:\?|$)/.test(src)) return src;
+        }
+        return null;
+    }
+
+    function ensureGameChunk235Text() {
+        if (cachedGameChunk235Text) return Promise.resolve(cachedGameChunk235Text);
+        if (!cachedGameChunk235Promise) {
+            cachedGameChunk235Promise = (async () => {
+                const src = findGameChunk235ScriptUrl();
+                if (!src) return null;
+                try {
+                    const res = await fetch(src, { credentials: 'same-origin' });
+                    if (!res.ok) return null;
+                    cachedGameChunk235Text = await res.text();
+                    cachedEquipmentCdrPercentByKey = null;
+                    if (cachedGameChunk235Text && !isFightActive()) {
+                        invalidateBoardPreviewCache({ clearMechanicsLog: true });
+                        lastUnitsRenderKey = '';
+                        renderUnits(true);
+                    }
+                    return cachedGameChunk235Text;
+                } catch {
+                    return null;
+                }
+            })();
+        }
+        return cachedGameChunk235Promise;
+    }
+
+    function buildEquipmentCdrPercentLookup(scriptText) {
+        const map = new Map();
+        if (!scriptText) return map;
+
+        const cdrConsts = new Map();
+        for (const m of scriptText.matchAll(/\b(\w+)=\{COOLDOWN_REDUCTION_PERCENT:([\d.]+)\}/g)) {
+            cdrConsts.set(m[1], Number(m[2]));
+        }
+
+        const classRe = /class \w+ extends p\.V\{constructor\(e\)\{super\(e,(\w+)\)[\s\S]{0,1200}?addPercentageModifier\(-(\w+)\.COOLDOWN_REDUCTION_PERCENT\)/g;
+        for (const m of scriptText.matchAll(classRe)) {
+            const metaVar = m[1];
+            const cdrVar = m[2];
+            const percent = cdrConsts.get(cdrVar);
+            if (percent == null || !Number.isFinite(percent)) continue;
+
+            const metaPattern = new RegExp(`\\b${metaVar.replace(/\$/g, '\\$')}=\\{[^}]*name:"([^"]+)"`);
+            const metaMatch = metaPattern.exec(scriptText);
+            if (!metaMatch) continue;
+
+            const nameKey = metaMatch[1].toLowerCase();
+            map.set(nameKey, percent);
+            const spriteMatch = scriptText.slice(metaMatch.index, metaMatch.index + 400)
+                .match(/spriteId:(?:\w+\.)?(\w+)/);
+            if (spriteMatch) map.set(`sprite:${spriteMatch[1]}`, percent);
+        }
+        return map;
+    }
+
+    function getEquipmentCdrPercentLookup() {
+        if (cachedEquipmentCdrPercentByKey) return cachedEquipmentCdrPercentByKey;
+        cachedEquipmentCdrPercentByKey = buildEquipmentCdrPercentLookup(cachedGameChunk235Text);
+        return cachedEquipmentCdrPercentByKey;
+    }
+
+    function resolveEquipmentCooldownReductionPercent(equipment) {
+        if (!equipment) return 0;
+
+        const lookup = getEquipmentCdrPercentLookup();
+        const nameKey = equipment.name ? String(equipment.name).toLowerCase() : '';
+        if (nameKey && lookup.has(nameKey)) return lookup.get(nameKey);
+
+        if (equipment.gameId != null) {
+            const catalog = getEquipmentCatalogMeta(equipment.gameId);
+            const catalogName = catalog?.name?.toLowerCase();
+            if (catalogName && lookup.has(catalogName)) return lookup.get(catalogName);
+        }
+        return 0;
+    }
+
+    function resolvePreviewEquipmentPercentageBasis(equipment) {
+        const reduction = resolveEquipmentCooldownReductionPercent(equipment);
+        if (!reduction || !Number.isFinite(reduction)) return 1;
+        return Math.max(0, 1 - reduction);
+    }
+
+    function resolveAbilityScalingEquipCdr(unit) {
+        const percent = resolveEquipmentCooldownReductionPercent(unit?.equipment);
+        if (!percent || !Number.isFinite(percent)) {
+            return { percent: 0, basis: 1 };
+        }
+        return { percent, basis: Math.max(0, 1 - percent) };
+    }
+
+    function formatEquipCdrPercentLabel(percent) {
+        if (!percent || !Number.isFinite(percent)) return null;
+        return Math.round(percent * 100);
+    }
+
+    function applyPreviewPercentageBasisToCooldownMs(ms, percentageBasis, minMs) {
+        if (ms == null || !Number.isFinite(ms) || percentageBasis === 1) return ms;
+        const scaled = Math.round(ms * percentageBasis);
+        if (minMs != null && Number.isFinite(minMs)) return Math.max(scaled, minMs);
+        return scaled;
+    }
+
+    function extractPreviewPercentageBasisSyncFrom661(scriptText, classSlice, metadataIndex) {
+        if (!scriptText || !classSlice) return null;
+        const m = classSlice.match(
+            /onCooldownReductionUpdateSync:e=>\{let t=\(0,\w+\.HX\)\((\w+)\.(\w+)\);t\*=e\.percentageBasis,t\+=e\.flatTicks,t=Math\.max\(t,\1\.(\w+)\)/
+        );
+        if (!m) return null;
+        const minMs = readScriptConstMinMs(scriptText, m[1], metadataIndex ?? 0);
+        return { constName: m[1], minMs };
+    }
+
+    function parseScriptConstNumericValue(raw) {
+        if (raw == null) return null;
+        const trimmed = String(raw).trim();
+        if (/^[\d.]+(?:e\d+)?$/i.test(trimmed)) return Number(trimmed);
+        const hxMatch = trimmed.match(/\(0,\w+\.HX\)\(([\d.e]+)\)/);
+        if (hxMatch) return Number(hxMatch[1]);
+        return null;
+    }
+
     function parseCdrConstObjectBody(body) {
         const out = {};
-        const re = /([A-Z_]+):([\d.]+(?:e\d+)?)/g;
+        const re = /([A-Z_]+):((?:\(0,\w+\.HX\)\([\d.e]+\))|(?:[\d.]+(?:e\d+)?))/g;
         let match;
         while ((match = re.exec(body))) {
-            out[match[1]] = Number(match[2]);
+            const value = parseScriptConstNumericValue(match[2]);
+            if (value != null && Number.isFinite(value)) out[match[1]] = value;
         }
         return out;
+    }
+
+    const SCRIPT_COOLDOWN_CONST_FIELD_HINTS = [
+        'COOLDOWN_MS', 'BASE_COOLDOWN_MS', 'MIN_COOLDOWN_MS', 'MIN_COOLDOWN_TICKS',
+        'INITIAL_COOLDOWN_TICKS', 'CDR_PER_AP', 'CDR_MS_PER_AP'
+    ];
+
+    function findScriptConstDefinitions(scriptText, constName, fromIndex = 0) {
+        if (!scriptText || !constName) return [];
+        const re = new RegExp(`\\b${escapeCdrRegexLiteral(constName)}=\\{([^}]+)\\}`, 'g');
+        re.lastIndex = Math.max(0, fromIndex);
+        const defs = [];
+        let match;
+        while ((match = re.exec(scriptText))) {
+            defs.push({
+                index: match.index,
+                fields: parseCdrConstObjectBody(match[1])
+            });
+        }
+        return defs;
     }
 
     function mapCdrScriptFields(fields) {
@@ -6630,6 +7333,393 @@
         return parsed;
     }
 
+    function findMonsterMetadataAnchor(scriptText, skillSrc, monsterName) {
+        if (!scriptText) return null;
+
+        if (monsterName) {
+            const namePattern = new RegExp(
+                `(\\w+)=\\{name:"${escapeCdrRegexLiteral(String(monsterName))}"`
+            );
+            let nameMatch;
+            while ((nameMatch = namePattern.exec(scriptText))) {
+                const varName = nameMatch[1];
+                if (!skillSrc) return { varName, index: nameMatch.index };
+                const metaChunk = scriptText.slice(nameMatch.index, nameMatch.index + 12000);
+                if (metaChunk.includes(`skill:{src:"${String(skillSrc)}"`)) {
+                    return { varName, index: nameMatch.index };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function findMonsterMetadataVarName(scriptText, skillSrc, monsterName) {
+        return findMonsterMetadataAnchor(scriptText, skillSrc, monsterName)?.varName ?? null;
+    }
+
+    function findMonsterClassSlice(scriptText, metadataVarName, metadataIndex) {
+        if (!scriptText || !metadataVarName) return null;
+        const searchFrom = metadataIndex != null && metadataIndex >= 0 ? metadataIndex : 0;
+        const needles = [
+            `super({...e,...${metadataVarName},`,
+            `super({...e,...${metadataVarName}}`,
+            `super({...${metadataVarName},`
+        ];
+        let start = -1;
+        for (const needle of needles) {
+            const idx = scriptText.indexOf(needle, searchFrom);
+            if (idx >= 0) {
+                start = idx;
+                break;
+            }
+        }
+        if (start < 0) return null;
+
+        const classEnd = scriptText.indexOf('class ', start + 20);
+        const end = classEnd >= 0 ? classEnd : start + 12000;
+        return scriptText.slice(start, end);
+    }
+
+    function readScriptConstMinMs(scriptText, constName, nearIndex = 0) {
+        const fields = readScriptConstObject(scriptText, constName, {
+            nearIndex,
+            fieldHint: 'MIN_COOLDOWN_MS'
+        });
+        const minMs = pickFirstScriptConstField(fields, CDR_SCRIPT_MIN_MS_KEYS);
+        if (minMs != null) return minMs;
+
+        const tickFields = readScriptConstObject(scriptText, constName, {
+            nearIndex,
+            fieldHint: 'MIN_COOLDOWN_TICKS'
+        });
+        const minTicks = tickFields?.MIN_COOLDOWN_TICKS;
+        if (minTicks != null && Number.isFinite(minTicks)) return minTicks;
+        return null;
+    }
+
+    function extractPreviewComputedCooldownsFrom661(scriptText, classSlice, ap, metadataIndex = 0, percentageBasis = 1) {
+        if (!scriptText || !classSlice || ap == null || !Number.isFinite(ap)) return [];
+
+        const hits = [];
+        const readConst = (constName, fieldHint = null) =>
+            readScriptConstObject(scriptText, constName, { nearIndex: metadataIndex, fieldHint });
+        const scaleBaseMs = (baseMs) => {
+            if (baseMs == null || !Number.isFinite(baseMs) || percentageBasis === 1) return baseMs;
+            return Math.round(baseMs * percentageBasis);
+        };
+
+        const cdrSpellFormula = classSlice.match(
+            /calculateSpellCooldownTicks=\(\)=>\(0,\w+\.HX\)\(Math\.max\(Math\.round\(this\._baseCdrMs-(\w+)\.CDR_PER_AP\*this\.ap\.currentValue\),(\w+)\.MIN_COOLDOWN_MS\)\)/
+        );
+        if (cdrSpellFormula && cdrSpellFormula[1] === cdrSpellFormula[2]) {
+            const cdrConst = readConst(cdrSpellFormula[1]);
+            const baseMs = scaleBaseMs(pickFirstScriptConstField(cdrConst, [...CDR_SCRIPT_BASE_MS_KEYS, 'COOLDOWN_MS']));
+            const cdrPerAp = pickFirstScriptConstField(cdrConst, CDR_SCRIPT_PER_AP_KEYS);
+            const minMs = pickFirstScriptConstField(cdrConst, CDR_SCRIPT_MIN_MS_KEYS);
+            const ms = computeCdrEffectiveMs(ap, cdrPerAp, baseMs, minMs);
+            if (ms != null && ms > 0) hits.push({ component: 'abilityCooldown', ms, source: 'script-cdr' });
+        }
+
+        const cdrMsFormula = classSlice.match(
+            /calculateSpellCooldownMs=\(\)=>Math\.max\(Math\.round\(this\.CD_BASE_MS-(\w+)\.COOLDOWN_MS_REDUCTION_PER_AP\*this\.ap\.currentValue\),\1\.MIN_COOLDOWN_MS\)/
+        );
+        if (cdrMsFormula) {
+            const cdrConst = readConst(cdrMsFormula[1]);
+            const baseMs = scaleBaseMs(pickFirstScriptConstField(cdrConst, CDR_SCRIPT_BASE_MS_KEYS));
+            const cdrPerAp = pickFirstScriptConstField(cdrConst, CDR_SCRIPT_PER_AP_KEYS);
+            const minMs = pickFirstScriptConstField(cdrConst, CDR_SCRIPT_MIN_MS_KEYS);
+            const ms = computeCdrEffectiveMs(ap, cdrPerAp, baseMs, minMs);
+            if (ms != null && ms > 0) hits.push({ component: 'abilityCooldown', ms, source: 'script-cdr' });
+        }
+
+        const reviveFormula = classSlice.match(
+            /calculateReviveCooldownTicks=\(\)=>\(0,\w+\.HX\)\(Math\.max\(Math\.round\((\w+)\.(\w+)-\1\.(\w+)\*this\.ap\.currentValue\),\1\.(\w+)\)\)/
+        );
+        if (reviveFormula) {
+            const constName = reviveFormula[1];
+            const cdrConst = readConst(constName);
+            const baseMs = cdrConst?.[reviveFormula[2]];
+            const cdrPerAp = cdrConst?.[reviveFormula[3]];
+            const minMs = cdrConst?.[reviveFormula[4]];
+            const ms = computeCdrEffectiveMs(ap, cdrPerAp, baseMs, minMs);
+            if (ms != null && ms > 0) {
+                hits.push({ component: 'chargingReviveCooldown', ms, source: 'script-cdr' });
+            }
+        }
+
+        if (/calculateSpellCooldownTicks=\w+=>/.test(classSlice) && /BASE_COOLDOWN_MS/.test(classSlice)) {
+            const constMatch = classSlice.match(/([\w$]+)\.BASE_COOLDOWN_MS/);
+            if (constMatch) {
+                const cdrConst = readConst(constMatch[1]);
+                const baseMs = scaleBaseMs(cdrConst?.BASE_COOLDOWN_MS ?? cdrConst?.COOLDOWN_MS);
+                const cdrPerAp = pickFirstScriptConstField(cdrConst, CDR_SCRIPT_PER_AP_KEYS);
+                const minMs = readScriptConstMinMs(scriptText, constMatch[1], metadataIndex);
+                const ms = computeCdrEffectiveMs(ap, cdrPerAp, baseMs, minMs);
+                if (ms != null && ms > 0) hits.push({ component: 'spellCooldown', ms, source: 'script-cdr' });
+            }
+        }
+
+        return hits;
+    }
+
+    function pickPreviewCooldownHit(inits, computed) {
+        const abilityInit = inits.find((h) =>
+            h.component === 'abilityCooldown' && h.ms != null && h.ms > 0);
+        if (abilityInit && Number.isFinite(abilityInit.ms)) {
+            return { component: abilityInit.component, ms: abilityInit.ms, source: 'script-init' };
+        }
+
+        const abilityCdr = computed.find((h) =>
+            h.component === 'abilityCooldown' && h.ms != null && h.ms > 0);
+        if (abilityCdr && Number.isFinite(abilityCdr.ms)) {
+            return abilityCdr;
+        }
+
+        return null;
+    }
+
+    function extractPreviewCooldownInitsFrom661(scriptText, classSlice, metadataVarName, metadataIndex) {
+        if (!scriptText || !classSlice || !metadataVarName) return [];
+        const skillSpread = `...${metadataVarName}.skill`;
+        const re = /this\.(\w+)=new \w+\.e\(\{([^}]{0,800})\}/g;
+        const hits = [];
+        for (const m of classSlice.matchAll(re)) {
+            if (m[1] !== 'abilityCooldown') continue;
+            const body = m[2];
+            if (!body.includes(skillSpread)) continue;
+            if (/disabledPassive:!0/.test(body) && /cooldownMilliseconds:0/.test(body)) continue;
+
+            const msRef = body.match(/cooldownMilliseconds:([\w$]+\.\w+|\d+)/);
+            if (msRef) {
+                const ms = resolveScriptMsReference(scriptText, msRef[1], { nearIndex: metadataIndex ?? 0 });
+                if (ms != null && Number.isFinite(ms) && ms > 0) {
+                    hits.push({ component: m[1], ms, body });
+                }
+            }
+        }
+        return hits;
+    }
+
+    function resolvePreviewUntimedAbilityReason(classSlice, metadataVarName) {
+        if (!classSlice || !metadataVarName) return null;
+        const skillSpread = `...${metadataVarName}.skill`;
+        let hasTimedAbilityCd = false;
+        let hasUntimedSkillClock = false;
+        for (const m of classSlice.matchAll(/this\.(\w+)=new \w+\.e\(\{([^}]{0,800})\}/g)) {
+            if (!m[2].includes(skillSpread)) continue;
+            if (m[1] === 'abilityCooldown') {
+                const msRef = m[2].match(/cooldownMilliseconds:(\w+\.\w+|\d+)/);
+                if (msRef && msRef[1] !== '0') hasTimedAbilityCd = true;
+            }
+            if (/rageCooldownClock|passiveCooldownClock/.test(m[1]) && /cooldownMilliseconds:0/.test(m[2])) {
+                hasUntimedSkillClock = true;
+            }
+        }
+        if (!hasTimedAbilityCd && hasUntimedSkillClock) {
+            return 'passive ability (no timed CD)';
+        }
+        return null;
+    }
+
+    function extractPreviewCdrCooldownMsFrom661(scriptText, metadataVarName, ap, metadataIndex) {
+        const classSlice = findMonsterClassSlice(scriptText, metadataVarName, metadataIndex);
+        const computed = extractPreviewComputedCooldownsFrom661(
+            scriptText, classSlice, ap, metadataIndex);
+        const pick = pickPreviewCooldownHit([], computed);
+        return pick?.ms ?? null;
+    }
+
+    function readScriptConstObject(scriptText, constName, opts = {}) {
+        if (!scriptText || !constName) return null;
+        const { nearIndex = 0, fieldHint = null } = opts;
+        const defs = findScriptConstDefinitions(scriptText, constName, 0);
+        if (!defs.length) return null;
+
+        if (fieldHint) {
+            const withField = defs.find((d) =>
+                d.fields[fieldHint] != null && Number.isFinite(d.fields[fieldHint]));
+            if (withField) return withField.fields;
+        }
+
+        const cooldownDefs = defs.filter((d) =>
+            SCRIPT_COOLDOWN_CONST_FIELD_HINTS.some((key) =>
+                d.fields[key] != null && Number.isFinite(d.fields[key])));
+        if (cooldownDefs.length) {
+            const after = nearIndex > 0
+                ? cooldownDefs.filter((d) => d.index >= nearIndex)
+                : cooldownDefs;
+            const pool = after.length ? after : cooldownDefs;
+            return pool[pool.length - 1].fields;
+        }
+
+        if (nearIndex > 0) {
+            const after = defs.filter((d) => d.index >= nearIndex);
+            if (after.length) return after[0].fields;
+        }
+        return null;
+    }
+
+    function resolveScriptMsReference(scriptText, ref, opts = {}) {
+        if (ref == null) return null;
+        const raw = String(ref).trim();
+        if (/^\d+(?:\.\d+)?(?:e\d+)?$/i.test(raw)) return Number(raw);
+        const m = raw.match(/^([\w$]+)\.(\w+)$/);
+        if (!m) return null;
+        const fields = readScriptConstObject(scriptText, m[1], {
+            ...opts,
+            fieldHint: m[2]
+        });
+        if (!fields || fields[m[2]] == null || !Number.isFinite(fields[m[2]])) return null;
+        return fields[m[2]];
+    }
+
+    function pickFirstScriptConstField(fields, keys) {
+        if (!fields) return null;
+        for (const key of keys) {
+            if (fields[key] != null && Number.isFinite(fields[key])) return fields[key];
+        }
+        return null;
+    }
+
+    function resolvePreviewAbilityCooldownFromActor(unit) {
+        const actor = findActorForPanelUnit(unit);
+        if (!actor) return null;
+        const calculator = invokeActorCooldownCalculator(actor, unit.ap);
+        if (calculator?.effectiveTicks != null && Number.isFinite(calculator.effectiveTicks) && calculator.effectiveTicks > 0) {
+            return {
+                cooldownTicks: roundTrackValue(calculator.effectiveTicks, 'abilityCdTicks'),
+                cooldownMs: ticksToMs(calculator.effectiveTicks),
+                cooldownReady: true,
+                source: 'board-actor-calculator'
+            };
+        }
+        if (calculator?.effectiveMs != null && Number.isFinite(calculator.effectiveMs) && calculator.effectiveMs > 0) {
+            return {
+                cooldownTicks: roundTrackValue(msToGameCooldownTicks(calculator.effectiveMs), 'abilityCdTicks'),
+                cooldownMs: calculator.effectiveMs,
+                cooldownReady: true,
+                source: 'board-actor-calculator'
+            };
+        }
+        return null;
+    }
+
+    function resolvePreviewAbilityCooldownFrom661Script(unit, metadata) {
+        const scriptText = cachedGameChunk661Text;
+        const skillSrc = metadata?.skill?.src;
+        if (!scriptText || !skillSrc) return null;
+
+        const monsterName = metadata?.name ?? unit?.name;
+        const anchor = findMonsterMetadataAnchor(scriptText, skillSrc, monsterName);
+        if (!anchor) return null;
+
+        const { varName: metadataVarName, index: metadataIndex } = anchor;
+        const classSlice = findMonsterClassSlice(scriptText, metadataVarName, metadataIndex);
+        const percentageBasis = resolvePreviewEquipmentPercentageBasis(unit?.equipment);
+        const percentageSync = extractPreviewPercentageBasisSyncFrom661(scriptText, classSlice, metadataIndex);
+        const computed = extractPreviewComputedCooldownsFrom661(
+            scriptText, classSlice, unit.ap, metadataIndex, percentageBasis);
+        const inits = extractPreviewCooldownInitsFrom661(
+            scriptText, classSlice, metadataVarName, metadataIndex);
+        const pick = pickPreviewCooldownHit(inits, computed);
+        if (!pick || pick.ms == null || !Number.isFinite(pick.ms) || pick.ms <= 0) return null;
+
+        let ms = pick.ms;
+        let source = pick.source;
+        if (percentageBasis !== 1 && percentageSync && pick.source === 'script-init') {
+            ms = applyPreviewPercentageBasisToCooldownMs(ms, percentageBasis, percentageSync.minMs);
+            source = 'script-init+equip-cdr';
+        } else if (percentageBasis !== 1 && pick.source === 'script-cdr') {
+            source = 'script-cdr+equip-cdr';
+        }
+
+        return {
+            cooldownTicks: roundTrackValue(msToGameCooldownTicks(ms), 'abilityCdTicks'),
+            cooldownMs: ms,
+            cooldownReady: true,
+            source
+        };
+    }
+
+    function resolvePreviewAbilityCooldown(unit, metadata) {
+        return resolvePreviewAbilityCooldownDetailed(unit, metadata).result;
+    }
+
+    function resolvePreviewAbilityCooldownDetailed(unit, metadata) {
+        if (!unit) {
+            return { result: null, source: null, reason: 'no-unit' };
+        }
+        if (!metadata?.skill?.src) {
+            return {
+                result: null,
+                source: null,
+                reason: `metadata.skill.src missing (gameId ${unit.gameId})`
+            };
+        }
+
+        const fromActor = resolvePreviewAbilityCooldownFromActor(unit);
+        if (fromActor?.cooldownTicks != null && fromActor.cooldownTicks > 0) {
+            return { result: fromActor, source: fromActor.source, reason: null };
+        }
+
+        const fromScript = cachedGameChunk661Text
+            ? resolvePreviewAbilityCooldownFrom661Script(unit, metadata)
+            : null;
+        if (fromScript?.cooldownTicks != null && fromScript.cooldownTicks > 0) {
+            return { result: fromScript, source: fromScript.source, reason: null };
+        }
+
+        const boardActor = findActorForPanelUnit(unit);
+        if (boardActor) {
+            return {
+                result: null,
+                source: null,
+                reason: 'board actor found but no readable ability cooldown'
+            };
+        }
+
+        const scriptText = cachedGameChunk661Text;
+        if (!scriptText) {
+            return {
+                result: null,
+                source: null,
+                reason: '661 game script not loaded yet'
+            };
+        }
+
+        const skillSrc = metadata.skill.src;
+        const monsterName = metadata?.name ?? unit?.name;
+        const anchor = findMonsterMetadataAnchor(scriptText, skillSrc, monsterName);
+        if (!anchor) {
+            return {
+                result: null,
+                source: null,
+                reason: `661 script metadata var not found for skill "${skillSrc}"`
+            };
+        }
+
+        const { varName: metadataVarName, index: metadataIndex } = anchor;
+        const classSlice = findMonsterClassSlice(scriptText, metadataVarName, metadataIndex);
+        const cdrMs = extractPreviewCdrCooldownMsFrom661(scriptText, metadataVarName, unit.ap, metadataIndex);
+        const inits = extractPreviewCooldownInitsFrom661(
+            scriptText, classSlice, metadataVarName, metadataIndex);
+        const passiveReason = resolvePreviewUntimedAbilityReason(classSlice, metadataVarName);
+        if (passiveReason) {
+            return { result: null, source: null, reason: passiveReason };
+        }
+
+        const initSummary = inits.length
+            ? inits.map((h) => `${h.component}=${h.ms}ms`).join(', ')
+            : 'none';
+
+        return {
+            result: null,
+            source: null,
+            reason: `661 script has no preview CD (var=${metadataVarName}, cdrMs=${cdrMs ?? 'none'}, inits=${initSummary})`
+        };
+    }
+
     function computeCappedReductionMs(ap, reductionPerApMs, baseMs, minMs) {
         const rawMs = reductionPerApMs * ap;
         if (baseMs == null || !Number.isFinite(baseMs) || minMs == null || !Number.isFinite(minMs)) {
@@ -6659,38 +7749,78 @@
         return { actor, baseMs, minMs };
     }
 
-    function buildScaledCooldownReductionTotalDisplay(ap, reductionPerApMs, bounds = {}) {
+    function buildScaledCooldownReductionTotalDisplay(ap, reductionPerApMs, bounds = {}, equipCdr = null) {
         if (ap == null || !Number.isFinite(ap) || !reductionPerApMs) return null;
 
         const { baseMs, minMs } = bounds;
-        const rawMs = reductionPerApMs * ap;
-        const totalMs = computeCappedReductionMs(ap, reductionPerApMs, baseMs, minMs);
-        const capped = baseMs != null && minMs != null && rawMs > totalMs + 0.5;
+        const equipBasis = equipCdr?.basis ?? 1;
+        const equipPctLabel = formatEquipCdrPercentLabel(equipCdr?.percent);
+        const scaledBaseMs = (baseMs != null && equipBasis !== 1)
+            ? Math.round(baseMs * equipBasis)
+            : baseMs;
+        const equipReductionMs = (scaledBaseMs != null && baseMs != null && equipBasis !== 1)
+            ? baseMs - scaledBaseMs
+            : 0;
 
-        const reductionTicks = msToGameCooldownTicks(totalMs);
+        const rawMs = reductionPerApMs * ap;
+        const apReductionMs = computeCappedReductionMs(ap, reductionPerApMs, baseMs, minMs);
+        const capped = baseMs != null && minMs != null && rawMs > apReductionMs + 0.5;
+
+        const effectiveMs = (baseMs != null && minMs != null)
+            ? computeCdrEffectiveMs(ap, reductionPerApMs, scaledBaseMs, minMs)
+            : null;
+        const totalReductionMs = (effectiveMs != null && baseMs != null)
+            ? baseMs - effectiveMs
+            : apReductionMs;
+        const displayMs = equipReductionMs > 0 ? totalReductionMs : apReductionMs;
+
+        const reductionTicks = msToGameCooldownTicks(displayMs);
         if (reductionTicks == null) return null;
 
         const perApTicks = msToGameCooldownTicks(reductionPerApMs);
+        const apReductionTicks = msToGameCooldownTicks(apReductionMs);
         const { value, suffix } = formatTicksParts(reductionTicks);
         const perLabel = perApTicks != null ? formatTicks(perApTicks) : null;
+        const apReductionLabel = apReductionTicks != null ? formatTicks(apReductionTicks) : null;
         const totalLabel = formatTicks(reductionTicks);
 
-        let title = perLabel
-            ? `${ap} AP × ${perLabel} = ${totalLabel}`
+        let title = perLabel && apReductionLabel
+            ? `${ap} AP × ${perLabel} = ${apReductionLabel}`
             : `${ap} AP × ${reductionPerApMs}ms = ${totalLabel}`;
+
+        if (equipPctLabel != null && equipReductionMs > 0) {
+            const equipReductionTicks = msToGameCooldownTicks(equipReductionMs);
+            const equipLabel = equipReductionTicks != null ? formatTicks(equipReductionTicks) : null;
+            if (equipLabel) {
+                title += ` + equip −${equipPctLabel}% base (${equipLabel})`;
+            }
+            const combinedMs = apReductionMs + equipReductionMs;
+            if (Math.abs(totalReductionMs - combinedMs) > 0.5) {
+                title += ` = ${totalLabel} total`;
+            }
+        }
 
         if (capped && baseMs != null && minMs != null) {
             const maxReductionTicks = msToGameCooldownTicks(baseMs - minMs);
             if (maxReductionTicks != null) {
-                title += ` (capped at ${formatTicks(maxReductionTicks)} max reduction)`;
+                title += ` (capped at ${formatTicks(maxReductionTicks)} max AP reduction)`;
             }
         }
 
-        if (baseMs != null && minMs != null) {
-            const effectiveMs = computeCdrEffectiveMs(ap, reductionPerApMs, baseMs, minMs);
+        if (baseMs != null && minMs != null && effectiveMs != null) {
+            const withoutEquipMs = computeCdrEffectiveMs(ap, reductionPerApMs, baseMs, minMs);
+            const withoutEquipTicks = msToGameCooldownTicks(withoutEquipMs);
             const effectiveTicks = msToGameCooldownTicks(effectiveMs);
             if (effectiveTicks != null) {
-                title += `; effective CD ${formatTicks(effectiveTicks)}`;
+                if (equipPctLabel != null && equipReductionMs > 0) {
+                    if (withoutEquipTicks != null && withoutEquipTicks !== effectiveTicks) {
+                        title += `; effective CD ${formatTicks(effectiveTicks)} (was ${formatTicks(withoutEquipTicks)} without equip)`;
+                    } else {
+                        title += `; effective CD ${formatTicks(effectiveTicks)}`;
+                    }
+                } else {
+                    title += `; effective CD ${formatTicks(effectiveTicks)}`;
+                }
             }
         }
 
@@ -6704,9 +7834,13 @@
         return { value, suffix, title, minMs, capped };
     }
 
-    function resolveScaledAbilityCooldownDetails(unit, reductionPerApMs) {
+    function resolveScaledAbilityCooldownDetails(unit, reductionPerApMs, equipCdr = null) {
         const ap = unit?.ap;
         if (ap == null || !Number.isFinite(ap) || !reductionPerApMs) return null;
+
+        equipCdr = equipCdr ?? resolveAbilityScalingEquipCdr(unit);
+        const displayOpts = { equipCdr, scaleEquipBase: false };
+        const formulaOpts = { equipCdr, scaleEquipBase: true };
 
         const actor = findTemplateActorForCdr(unit);
         const bounds = readActorCdrFormulaBounds(actor);
@@ -6721,7 +7855,9 @@
                 reductionPerApMs,
                 baseMsForTitle,
                 bounds.minMs,
-                calculator.effectiveTicks != null ? { effectiveTicks: calculator.effectiveTicks } : {}
+                calculator.effectiveTicks != null
+                    ? { ...displayOpts, effectiveTicks: calculator.effectiveTicks }
+                    : displayOpts
             );
         }
 
@@ -6732,7 +7868,7 @@
                 reductionPerApMs,
                 baseMsForTitle,
                 bounds.minMs,
-                { effectiveTicks: unit.cooldownTicks }
+                { ...displayOpts, effectiveTicks: unit.cooldownTicks }
             );
         }
         if (unit.cooldownMs != null && Number.isFinite(unit.cooldownMs)) {
@@ -6741,7 +7877,8 @@
                 ap,
                 reductionPerApMs,
                 baseMsForTitle,
-                bounds.minMs
+                bounds.minMs,
+                displayOpts
             );
         }
 
@@ -6754,7 +7891,7 @@
                     reductionPerApMs,
                     baseMsForTitle,
                     bounds.minMs,
-                    { effectiveTicks: cdInfo.cooldownTicks }
+                    { ...displayOpts, effectiveTicks: cdInfo.cooldownTicks }
                 );
             }
             if (cdInfo.cooldownMs != null) {
@@ -6763,19 +7900,24 @@
                     ap,
                     reductionPerApMs,
                     baseMsForTitle,
-                    bounds.minMs
+                    bounds.minMs,
+                    displayOpts
                 );
             }
         }
 
         if (baseMsForTitle != null) {
-            const effectiveMs = computeCdrEffectiveMs(ap, reductionPerApMs, baseMsForTitle, bounds.minMs);
+            const scaledBaseMs = equipCdr.basis !== 1
+                ? Math.round(baseMsForTitle * equipCdr.basis)
+                : baseMsForTitle;
+            const effectiveMs = computeCdrEffectiveMs(ap, reductionPerApMs, scaledBaseMs, bounds.minMs);
             return buildScaledCooldownDisplay(
                 effectiveMs,
                 ap,
                 reductionPerApMs,
                 baseMsForTitle,
-                bounds.minMs
+                bounds.minMs,
+                formulaOpts
             );
         }
 
@@ -6784,6 +7926,31 @@
 
     function isCooldownApReductionParagraph(paragraph) {
         return /cooldown.*is\s+reduced\s+by/i.test(paragraph?.textContent || '');
+    }
+
+    function isSpanBeforeReducedByClause(span, paragraph) {
+        if (!paragraph) return true;
+        const fullText = paragraph.textContent || '';
+        const reducedMatch = fullText.match(/reduced\s+by/i);
+        if (!reducedMatch || reducedMatch.index == null) return true;
+
+        const spanText = span.textContent?.trim() ?? '';
+        if (!spanText) return false;
+        const spanIdx = fullText.indexOf(spanText);
+        if (spanIdx < 0) return true;
+        return spanIdx < reducedMatch.index;
+    }
+
+    function findCooldownParagraphBaseDurationSpan(paragraph) {
+        if (!paragraph) return null;
+
+        for (const span of paragraph.querySelectorAll('.text-cooldown')) {
+            if (span.classList.contains('bs-scaled-min-cd')) continue;
+            const text = span.textContent?.trim() ?? '';
+            if (parseTooltipDurationText(text) == null) continue;
+            if (isSpanBeforeReducedByClause(span, paragraph)) return span;
+        }
+        return null;
     }
 
     function isCooldownPerApMarkerSpan(span) {
@@ -6827,6 +7994,37 @@
         }
     }
 
+    function enhanceStaticCooldownDurationSpans(root) {
+        if (!root) return 0;
+
+        let applied = 0;
+        for (const span of root.querySelectorAll('.text-cooldown')) {
+            if (span.classList.contains('bs-scaled-value') || span.classList.contains('bs-scaled-min-cd')) continue;
+
+            const paragraph = span.closest('p');
+            if (paragraph && isCooldownApReductionParagraph(paragraph) && !isSpanBeforeReducedByClause(span, paragraph)) {
+                continue;
+            }
+            if (span.closest('span.whitespace-nowrap')) continue;
+
+            const originalText = span.textContent?.trim() ?? '';
+            const durationMs = parseTooltipDurationText(originalText);
+            if (durationMs == null) continue;
+
+            const ticks = msToGameCooldownTicks(durationMs);
+            if (ticks == null) continue;
+
+            const { value, suffix } = formatTicksParts(ticks);
+            applyScaledTooltipValue(span, originalText, {
+                value,
+                suffix,
+                title: `${originalText} = ${formatTicks(ticks)}`
+            }, originalText);
+            applied += 1;
+        }
+        return applied;
+    }
+
     function enhanceCooldownReductionParagraphs(root, unit) {
         if (!root || !unit || unit.ap == null || !Number.isFinite(unit.ap)) return 0;
 
@@ -6842,7 +8040,9 @@
             if (!reductionPerApMs) continue;
 
             const { baseMs, minMs } = resolveCdrBoundsForUnit(unit, reductionPerApMs);
-            let scaled = buildScaledCooldownReductionTotalDisplay(unit.ap, reductionPerApMs, { baseMs, minMs });
+            const equipCdr = resolveAbilityScalingEquipCdr(unit);
+            let scaled = buildScaledCooldownReductionTotalDisplay(
+                unit.ap, reductionPerApMs, { baseMs, minMs }, equipCdr);
             if (!scaled) continue;
 
             logAbilityScaling('cooldown reduction', {
@@ -6851,6 +8051,7 @@
                 ap: unit.ap,
                 baseMs,
                 minMs,
+                equipCdr,
                 scaled,
                 abilitySrc: unit.abilitySrc,
                 gameId: unit.gameId,
@@ -6859,6 +8060,28 @@
 
             rewriteCooldownReductionClause(paragraph, durationSpan, scaled, originalText, minMs);
             applied += 1;
+
+            const baseSpan = findCooldownParagraphBaseDurationSpan(paragraph);
+            if (baseSpan && !baseSpan.classList.contains('bs-scaled-value')) {
+                const baseOriginal = baseSpan.textContent?.trim() ?? '';
+                let baseScaled = resolveScaledAbilityCooldownDetails(unit, reductionPerApMs, equipCdr);
+                if (!baseScaled) {
+                    const baseMs = parseTooltipDurationText(baseOriginal);
+                    const baseTicks = baseMs != null ? msToGameCooldownTicks(baseMs) : null;
+                    if (baseTicks != null) {
+                        const { value, suffix } = formatTicksParts(baseTicks);
+                        baseScaled = {
+                            value,
+                            suffix,
+                            title: `${baseOriginal} = ${formatTicks(baseTicks)}`
+                        };
+                    }
+                }
+                if (baseScaled) {
+                    applyScaledTooltipValue(baseSpan, baseOriginal, baseScaled, baseOriginal);
+                    applied += 1;
+                }
+            }
         }
         return applied;
     }
@@ -7125,12 +8348,14 @@
         return true;
     }
 
-    function enhanceAbilityTooltipScaledValues(root, unit) {
+    function enhanceAbilityTooltipScaledValues(root, unit, options = {}) {
         if (!root || !unit) return 0;
+        const force = options.force === true;
         const scalingUnit = resolveUnitAbilityScalingStats(unit) || unit;
         if (scalingUnit.ap == null && scalingUnit.ad == null && scalingUnit.hp == null) return 0;
 
         let applied = enhanceCooldownReductionParagraphs(root, scalingUnit);
+        applied += enhanceStaticCooldownDurationSpans(root);
 
         for (const wrap of root.querySelectorAll('span.whitespace-nowrap')) {
             const spans = getTooltipWrapSpans(wrap);
@@ -7142,14 +8367,14 @@
                         trimTooltipWrapTrailingContent(wrap);
                     }
                 } else {
-                    logAbilityScalingVerbose('skip wrap: not enough spans', {
+                    logAbilityScaling('skip wrap: not enough spans', {
                         spanCount: spans.length,
                         html: wrap.innerHTML.slice(0, 120)
                     });
                 }
                 continue;
             }
-            if (spans[0].classList.contains('bs-scaled-value')) continue;
+            if (!force && spans[0].classList.contains('bs-scaled-value')) continue;
 
             const baseText = spans[0].textContent?.trim() ?? '';
             const ratioText = spans[1].textContent?.trim() ?? '';
@@ -7185,22 +8410,38 @@
         return applied;
     }
 
-    function scheduleAbilityTooltipEnhance(root, unit, details, component, attempt = 0) {
+    function bumpAbilityEnhanceGeneration(details) {
+        if (!details) return 0;
+        const next = (Number(details._abilityEnhanceGeneration) || 0) + 1;
+        details._abilityEnhanceGeneration = next;
+        return next;
+    }
+
+    function scheduleAbilityTooltipEnhance(root, unit, details, component, attempt = 0, generation = null) {
         if (!root || !unit) return;
-        if (attempt === 0 && root.dataset.abilityEnhancePending === '1') return;
+        if (attempt === 0) {
+            generation = details ? bumpAbilityEnhanceGeneration(details) : 0;
+            delete root.dataset.abilityEnhancePending;
+        } else if (generation == null) {
+            generation = details?._abilityEnhanceGeneration ?? 0;
+        }
         const maxAttempts = 16;
         const run = () => {
+            if (details && generation !== details._abilityEnhanceGeneration) return;
             if (root.dataset.abilityScaled === '1' && attempt === 0) {
                 delete root.dataset.abilityEnhancePending;
                 return;
             }
-            const applied = enhanceAbilityTooltipScaledValues(root, unit);
             const wraps = root.querySelectorAll('span.whitespace-nowrap');
-            const scaled = root.querySelectorAll('.bs-scaled-value').length;
             const hasContent = Boolean(root.textContent?.trim());
             const hasStats = unit.ap != null || unit.ad != null || unit.hp != null;
+            if (details && hasContent && !getAbilityTooltipTemplate(details) && root.querySelectorAll('.bs-scaled-value').length === 0) {
+                setAbilityTooltipTemplate(details, root.innerHTML);
+            }
+            const applied = enhanceAbilityTooltipScaledValues(root, unit);
+            const scaled = root.querySelectorAll('.bs-scaled-value').length;
 
-            logAbilityScalingVerbose('enhance attempt', {
+            logAbilityScaling('enhance attempt', {
                 attempt,
                 applied,
                 wraps: wraps.length,
@@ -7214,18 +8455,18 @@
             });
 
             if (!hasContent && attempt < maxAttempts) {
-                scheduleAbilityTooltipEnhance(root, unit, details, component, attempt + 1);
+                scheduleAbilityTooltipEnhance(root, unit, details, component, attempt + 1, generation);
                 return;
             }
 
             const pendingScale = hasStats && wraps.length > 0 && scaled === 0;
             if (pendingScale && attempt < maxAttempts) {
-                scheduleAbilityTooltipEnhance(root, unit, details, component, attempt + 1);
+                scheduleAbilityTooltipEnhance(root, unit, details, component, attempt + 1, generation);
                 return;
             }
 
             if (pendingScale) {
-                warnAbilityScaling('scaling incomplete after retries', {
+                logAbilityScaling('scaling incomplete after retries', {
                     gameId: unit.gameId,
                     name: unit.name,
                     ap: unit.ap,
@@ -7235,8 +8476,25 @@
                 });
             }
 
-            if (details && root.dataset.abilityScaled !== '1') {
-                freezeAbilityTooltipContent(details, root, component);
+            if (details && generation !== details._abilityEnhanceGeneration) return;
+
+            const shouldFreeze = !pendingScale
+                && (scaled > 0 || !hasStats || attempt >= maxAttempts);
+            if (details && root.dataset.abilityScaled !== '1' && shouldFreeze) {
+                const scalingUnit = resolveBoardAbilityScalingUnit(
+                    details,
+                    resolveUnitAbilityScalingStats(unit) || unit
+                );
+                const scalingKey = abilityScalingMountKey(scalingUnit);
+                logAbilityScaling('change:freeze', {
+                    name: scalingUnit.name,
+                    ap: scalingUnit.ap,
+                    scalingKey,
+                    display: getAbilityTooltipDisplaySnapshot(root)
+                });
+                enhanceAbilityTooltipScaledValues(root, scalingUnit, { force: true });
+                freezeAbilityTooltipContent(details, root, component, scalingKey);
+                root.style.visibility = '';
             }
             delete root.dataset.abilityEnhancePending;
         };
@@ -7299,49 +8557,396 @@
         }
     }
 
+    function teardownAllAbilityTooltipsInBody(body) {
+        if (!body) return;
+        for (const details of body.querySelectorAll('.bs-ability-details')) {
+            unmountUnitAbilityDetails(details);
+        }
+    }
+
     function unmountUnitAbilityDetails(details) {
         if (!details) return;
         clearAbilityTooltipRefreshTimer(details);
+        teardownAbilityScalingSubs(details);
         if (details._abilityComponent?.unmount) {
             try { details._abilityComponent.unmount(); } catch { /* ignore */ }
         }
         details._abilityComponent = null;
         delete details.dataset.abilityMountKey;
+        delete details.dataset.abilityAppliedScalingKey;
         delete details.dataset.abilityScaled;
-        delete details.dataset.abilityTooltipTemplate;
+        clearAbilityTooltipTemplate(details);
         const mount = details.querySelector('.bs-ability-mount');
         if (mount) mount.innerHTML = '';
+    }
+
+    function buildAbilityScalingEquipSig(equipment) {
+        if (!equipment) return '';
+        if (equipment.spriteId != null) {
+            return `${equipment.spriteId}:${equipment.stat || 'x'}:${equipment.tier || 'x'}`;
+        }
+        if (equipment.gameId != null) {
+            return `${equipment.gameId}:${equipment.stat || 'x'}:${equipment.tier || 'x'}`;
+        }
+        return `${equipment.stat || 'x'}:${equipment.tier || 'x'}`;
     }
 
     function abilityMountKey(unit) {
         if (!unit?.gameId) return null;
         const ap = unit.ap != null ? Math.round(unit.ap) : 'x';
         const ad = unit.ad != null ? Math.round(unit.ad) : 'x';
-        const equip = unit.equipment;
-        const equipSig = equip ? `${equip.stat || 'x'}:${equip.tier || 'x'}` : '';
+        const equipSig = buildAbilityScalingEquipSig(unit.equipment);
         return `${unit.gameId}:${unit.awaken ? 1 : 0}:${ap}:${ad}:${equipSig}`;
     }
 
-    function findPanelUnitByCollapseKey(unitKey) {
+    function abilityScalingMountKey(unit) {
+        const scaling = resolveUnitAbilityScalingStats(unit) || unit;
+        if (!scaling?.gameId) return null;
+        const ap = scaling.ap != null ? Math.round(scaling.ap) : 'x';
+        const ad = scaling.ad != null ? Math.round(scaling.ad) : 'x';
+        const equipSig = buildAbilityScalingEquipSig(scaling.equipment);
+        return `${scaling.gameId}:${scaling.awaken ? 1 : 0}:${ap}:${ad}:${equipSig}`;
+    }
+
+    function abilityTooltipScalingDisplayMatchesUnit(root, unit) {
+        if (!root || !unit) return false;
+        const ap = unit.ap != null ? Math.round(unit.ap) : null;
+        const ad = unit.ad != null ? Math.round(unit.ad) : null;
+        if (ap == null && ad == null) return false;
+
+        for (const span of root.querySelectorAll('.bs-scaled-value')) {
+            const title = span.title || '';
+            if (!title) continue;
+            if (ap != null && title.includes(`${ap} AP`)) return true;
+            if (ad != null && title.includes(`${ad} AD`)) return true;
+        }
+        return false;
+    }
+
+    function isAbilityTooltipEnhancePending(details) {
+        if (!details) return false;
+        const root = getAbilityTooltipRoot(details);
+        if (root?.dataset?.abilityEnhancePending === '1') return true;
+        return Boolean(details._abilityComponent && root?.dataset?.abilityScaled !== '1');
+    }
+
+    function subscribeAbilityScalingEmitter(emitter, handler, subs) {
+        if (typeof emitter?.subscribe !== 'function') return;
+        subs.push(emitter.subscribe(handler));
+    }
+
+    function teardownAbilityScalingSubs(details) {
+        const entry = abilityScalingSubs.get(details);
+        if (!entry) return;
+        unsubscribeAll(entry.subs);
+        abilityScalingSubs.delete(details);
+    }
+
+    function subscribeAbilityScalingRefresh(details, unit) {
+        teardownAbilityScalingSubs(details);
+        if (!details?.open || !unit) return;
+
+        // Pre-fight board preview uses recomputed panel stats; live actors can report
+        // stale AP (before equip) and spam onChange while the tooltip is frozen.
+        if (!isFightActive() && (unit.source === 'board' || unit.source === 'map')) {
+            return;
+        }
+
+        const unitKey = normalizeCollapseKey(getUnitCollapseKey(unit));
+        const actor = findActorForPanelUnit(unit);
+        if (!actor) return;
+
+        const subs = [];
+        const refresh = () => {
+            if (!details.open || isAbilityTooltipEnhancePending(details)) return;
+            if (activeTab !== 'units') return;
+            const panel = document.getElementById(PANEL_ID);
+            if (!panel || panel.style.display === 'none') return;
+            queueAbilityTooltipRefresh(details, unitKey);
+        };
+        for (const key of ABILITY_SCALING_STAT_KEYS) {
+            subscribeAbilityScalingEmitter(actor[key]?.onChange, refresh, subs);
+        }
+        subscribeAbilityScalingEmitter(actor.onBuff, refresh, subs);
+        subscribeAbilityScalingEmitter(actor.onDebuff, refresh, subs);
+        if (subs.length) abilityScalingSubs.set(details, { subs, unitKey });
+    }
+
+    function getAbilityTooltipTemplate(details) {
+        const stored = details?._abilityTooltipTemplate;
+        if (typeof stored === 'string' && stored.trim()) return stored;
+        const legacy = details?.dataset?.abilityTooltipTemplate;
+        return typeof legacy === 'string' && legacy.trim() ? legacy : '';
+    }
+
+    function setAbilityTooltipTemplate(details, html) {
+        if (!details || typeof html !== 'string' || !html.trim()) return;
+        details._abilityTooltipTemplate = html;
+    }
+
+    function clearAbilityTooltipTemplate(details) {
+        if (!details) return;
+        delete details._abilityTooltipTemplate;
+        delete details.dataset.abilityTooltipTemplate;
+    }
+
+    function getAbilityTooltipRoot(details) {
+        return details?.querySelector('.bs-ability-mount .bs-ability-tooltip') || null;
+    }
+
+    function resetAbilityTooltipForRescale(details) {
+        const root = getAbilityTooltipRoot(details);
+        if (!root) return null;
+        const template = getAbilityTooltipTemplate(details);
+        if (!template || !abilityTooltipCanRescaleFromHtml(template)) return null;
+        root.style.visibility = 'hidden';
+        root.innerHTML = template;
+        delete root.dataset.abilityScaled;
+        delete root.dataset.abilityEnhancePending;
+        return root;
+    }
+
+    function remountAndScaleAbilityTooltip(details, unit, reason = 'unknown') {
+        if (!details?.open || !unit?.gameId) return false;
+
+        clearAbilityTooltipRefreshTimer(details);
+        bumpAbilityEnhanceGeneration(details);
+
+        const resolvedUnit = unit.ap != null || unit.ad != null || unit.name
+            ? unit
+            : resolveUnitForAbilityDetails(details) || unit;
+        const scalingUnit = resolveUnitAbilityScalingStats(resolvedUnit) || resolvedUnit;
+        const mount = details.querySelector('.bs-ability-mount');
+        if (!mount) return false;
+
+        logAbilityScaling('change:remount', {
+            reason,
+            name: resolvedUnit.name,
+            gameId: resolvedUnit.gameId,
+            ap: scalingUnit.ap,
+            ad: scalingUnit.ad
+        });
+
+        if (details._abilityComponent?.unmount) {
+            try { details._abilityComponent.unmount(); } catch { /* ignore */ }
+        }
+        details._abilityComponent = null;
+        mount.innerHTML = '';
+
+        const abilityInfo = getAbilityInfo(resolvedUnit.gameId);
+        const createUIComponent = globalThis.state?.utils?.createUIComponent;
+        if (!abilityInfo?.TooltipContent || typeof createUIComponent !== 'function') return false;
+
+        const root = document.createElement('div');
+        root.className = 'tooltip-prose bs-ability-tooltip';
+        root.style.cssText = 'width:100%;color:#ccc;font-size:10px;line-height:1.35;';
+        mount.appendChild(root);
+
+        try {
+            const component = resolvedUnit.awaken
+                ? createUIComponent(root, abilityInfo.TooltipContent, { awaken: true })
+                : createUIComponent(root, abilityInfo.TooltipContent);
+            if (component?.mount) component.mount();
+            details._abilityComponent = component;
+            syncAbilityDetailsDataset(details, scalingUnit);
+            scheduleAbilityTooltipEnhance(root, scalingUnit, details, component);
+            subscribeAbilityScalingRefresh(details, resolvedUnit);
+            return true;
+        } catch {
+            mount.textContent = t('mods.betterAnalytics.abilityDetailsUnavailable');
+            return false;
+        }
+    }
+
+    function resolveFreshPanelUnit(unit) {
+        if (!unit) return null;
+        if (isFightActive()) invalidateActorSnapshotsCache();
+        const unitKey = normalizeCollapseKey(getUnitCollapseKey(unit));
+        return findPanelUnitByCollapseKey(unitKey, { fresh: true }) || unit;
+    }
+
+    function refreshAbilityTooltipScaling(details, unit, reason = 'unknown') {
+        if (!details?.open || !unit?.gameId) return false;
+        if (isAbilityTooltipEnhancePending(details)) return false;
+
+        clearAbilityTooltipRefreshTimer(details);
+        bumpAbilityEnhanceGeneration(details);
+
+        const resolvedUnit = resolveFreshPanelUnit(
+            unit.ap != null || unit.ad != null || unit.name
+                ? unit
+                : resolveUnitForAbilityDetails(details) || unit
+        );
+        const scalingUnit = resolveBoardAbilityScalingUnit(
+            details,
+            resolveUnitAbilityScalingStats(resolvedUnit) || resolvedUnit
+        );
+        const scalingKey = abilityScalingMountKey(scalingUnit);
+        const rootBefore = getAbilityTooltipRoot(details);
+        if (rootBefore?.dataset?.abilityScaled === '1'
+            && details.dataset.abilityAppliedScalingKey === scalingKey) {
+            return false;
+        }
+        const before = getAbilityTooltipDisplaySnapshot(rootBefore);
+
+        logAbilityScaling('change:refresh-start', {
+            reason,
+            name: scalingUnit.name,
+            gameId: scalingUnit.gameId,
+            ap: scalingUnit.ap,
+            ad: scalingUnit.ad,
+            prevKey: details.dataset.abilityAppliedScalingKey || null,
+            nextKey: scalingKey,
+            hasTemplate: Boolean(getAbilityTooltipTemplate(details)),
+            before
+        });
+
+        const template = getAbilityTooltipTemplate(details);
+        if (!template || !rootBefore) {
+            return remountAndScaleAbilityTooltip(details, resolvedUnit, 'no-template-or-root');
+        }
+
+        if (!abilityTooltipCanRescaleFromHtml(template)) {
+            markAbilityTooltipScalingApplied(details, scalingUnit, scalingKey);
+            return false;
+        }
+
+        const root = resetAbilityTooltipForRescale(details);
+        if (!root) {
+            return remountAndScaleAbilityTooltip(details, resolvedUnit, 'template-not-scalable');
+        }
+
+        syncAbilityDetailsDataset(details, scalingUnit);
+        const applied = enhanceAbilityTooltipScaledValues(root, scalingUnit, { force: true });
+        if (applied === 0) {
+            markAbilityTooltipScalingApplied(details, scalingUnit, scalingKey);
+            root.style.visibility = '';
+            logAbilityScaling('change:refresh-skip', {
+                reason: 'zero-applied',
+                ap: scalingUnit.ap,
+                ad: scalingUnit.ad
+            });
+            return false;
+        }
+
+        freezeAbilityTooltipContent(details, root, null, scalingKey);
+        root.style.visibility = '';
+        subscribeAbilityScalingRefresh(details, resolvedUnit);
+        clearAbilityTooltipRefreshLogSig(details);
+
+        const after = getAbilityTooltipDisplaySnapshot(root);
+        logAbilityScaling('change:refresh-done', {
+            reason,
+            ap: scalingUnit.ap,
+            applied,
+            prevKey: before?.scaledText,
+            nextKey: scalingKey,
+            after
+        });
+        return true;
+    }
+
+    function queueAbilityTooltipRefreshForActor(actor) {
+        if (!actor) return;
+        const unit = probeActor(actor);
+        if (!unit) return;
+        const unitKey = normalizeCollapseKey(getUnitCollapseKey(unit));
+        const body = document.getElementById(UNITS_BODY_ID);
+        if (!body) return;
+        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
+            if (card.dataset.unitKey !== unitKey) continue;
+            const details = card.querySelector('.bs-ability-details');
+            if (details?.open) queueAbilityTooltipRefresh(details, unitKey);
+        }
+    }
+
+    function patchOpenAbilityTooltips(body, units) {
+        if (!body?.querySelector('.bs-ability-details[open]')) return;
+        const unitByKey = new Map();
+        for (const unit of units) {
+            unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
+        }
+        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
+            const abilityDetails = card.querySelector('.bs-ability-details');
+            if (!abilityDetails?.open) continue;
+            const unit = unitByKey.get(card.dataset.unitKey);
+            if (!unit) continue;
+            const scalingUnit = resolveBoardAbilityScalingUnit(abilityDetails, unit);
+            syncAbilityDetailsDataset(abilityDetails, scalingUnit);
+            requestAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey, scalingUnit);
+        }
+    }
+
+    function boardAbilityTooltipNeedsPoll(body) {
+        for (const card of body.querySelectorAll('.bs-card[data-unit-key]')) {
+            const details = card.querySelector('.bs-ability-details');
+            if (!details?.open) continue;
+            if (isAbilityTooltipRefreshQueued(details)) return false;
+            const unitAp = details.dataset.unitAp;
+            const appliedKey = details.dataset.abilityAppliedScalingKey;
+            if (!appliedKey || unitAp == null) return true;
+            const apToken = `:${Math.round(Number(unitAp))}:`;
+            if (!appliedKey.includes(apToken)) return true;
+            const root = getAbilityTooltipRoot(details);
+            if (root?.dataset?.abilityScaled !== '1') return true;
+            if (!abilityTooltipScalingDisplayMatchesUnit(root, { ap: Number(unitAp) })) return true;
+        }
+        return false;
+    }
+
+    function pollOpenAbilityScalingRefresh() {
+        if (activeTab !== 'units') return;
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel || panel.style.display === 'none') return;
+        const body = document.getElementById(UNITS_BODY_ID);
+        if (!body?.querySelector('.bs-ability-details[open]')) return;
+
+        if (!isFightActive()) {
+            if (!boardAbilityTooltipNeedsPoll(body)) return;
+            const now = performance.now();
+            if (now - lastBoardAbilityPollMs < BOARD_ABILITY_POLL_PENDING_MS) return;
+            lastBoardAbilityPollMs = now;
+            patchOpenAbilityTooltips(body, getRefreshedBoardPreviewUnits());
+            return;
+        }
+
+        const units = collectActorSnapshots({ bypassCache: true }) || [];
+        patchOpenAbilityTooltips(body, units);
+    }
+
+    function findPanelUnitByCollapseKey(unitKey, options = {}) {
         const normalized = normalizeCollapseKey(unitKey);
         if (!normalized) return null;
-        for (const unit of getCurrentPanelUnits()) {
-            if (normalizeCollapseKey(getUnitCollapseKey(unit)) === normalized) return unit;
+        if (options.fresh && isFightActive()) invalidateActorSnapshotsCache();
+        const units = options.fresh && isFightActive()
+            ? (collectActorSnapshots({ bypassCache: true }) || [])
+            : getCurrentPanelUnits();
+        for (const unit of units) {
+            if (normalizeCollapseKey(getUnitCollapseKey(unit)) === normalized) {
+                return unit;
+            }
         }
         return null;
     }
 
-    function queueAbilityTooltipRefresh(details, unitKey) {
-        if (!details?.open || !unitKey) return;
-        const prev = abilityTooltipRefreshTimers.get(details);
-        if (prev) clearTimeout(prev);
-        const timer = setTimeout(() => {
-            abilityTooltipRefreshTimers.delete(details);
-            const unit = findPanelUnitByCollapseKey(unitKey);
-            if (!unit || !needsAbilityTooltipRefresh(details, unit)) return;
-            mountUnitAbilityDetails(details, unit);
-        }, ABILITY_TOOLTIP_REFRESH_MS);
-        abilityTooltipRefreshTimers.set(details, timer);
+    function isAbilityTooltipRefreshQueued(details) {
+        return Boolean(details && abilityTooltipRefreshTimers.has(details));
+    }
+
+    function buildAbilityTooltipRefreshLogSig(scalingKey, reasons) {
+        return `${scalingKey || ''}|${(reasons || []).join('+')}`;
+    }
+
+    function logAbilityTooltipRefreshNeeded(details, payload) {
+        if (!details || !payload) return;
+        const logSig = buildAbilityTooltipRefreshLogSig(payload.scalingKey, payload.reasons);
+        if (details._abilityRefreshLogSig === logSig) return;
+        details._abilityRefreshLogSig = logSig;
+        logAbilityScaling('change:needs-refresh', payload);
+    }
+
+    function clearAbilityTooltipRefreshLogSig(details) {
+        if (details) delete details._abilityRefreshLogSig;
     }
 
     function clearAbilityTooltipRefreshTimer(details) {
@@ -7350,13 +8955,96 @@
         abilityTooltipRefreshTimers.delete(details);
     }
 
+    function queueAbilityTooltipRefresh(details, unitKey, logPayload = null) {
+        if (!details?.open || !unitKey) return;
+        if (isAbilityTooltipRefreshQueued(details)) return;
+        if (logPayload) logAbilityTooltipRefreshNeeded(details, logPayload);
+        const timer = setTimeout(() => {
+            abilityTooltipRefreshTimers.delete(details);
+            const unit = findPanelUnitByCollapseKey(unitKey, { fresh: true });
+            if (!unit) return;
+            const scalingUnit = resolveBoardAbilityScalingUnit(details, unit);
+            const refreshState = getAbilityTooltipRefreshState(details, scalingUnit);
+            if (!refreshState.needed) return;
+            refreshAbilityTooltipScaling(details, scalingUnit, 'queued');
+        }, ABILITY_TOOLTIP_REFRESH_MS);
+        abilityTooltipRefreshTimers.set(details, timer);
+    }
+
+    function requestAbilityTooltipRefresh(details, unitKey, unit) {
+        if (!details?.open || !unitKey || !unit) return;
+        if (isAbilityTooltipRefreshQueued(details)) return;
+        const refreshState = getAbilityTooltipRefreshState(details, unit);
+        if (refreshState.needed) {
+            queueAbilityTooltipRefresh(details, unitKey, refreshState.log);
+        }
+    }
+
+    function getAbilityTooltipRefreshState(details, unit) {
+        if (!details?.open || !unit?.gameId) return { needed: false, log: null };
+        if (isAbilityTooltipEnhancePending(details)) return { needed: false, log: null };
+        if (isAbilityTooltipRefreshQueued(details)) return { needed: false, log: null };
+
+        unit = resolveBoardAbilityScalingUnit(details, unit);
+        const scalingKey = abilityScalingMountKey(unit);
+        if (!scalingKey) return { needed: false, log: null };
+
+        const root = getAbilityTooltipRoot(details);
+        if (root?.dataset?.abilityScaled === '1'
+            && details.dataset.abilityAppliedScalingKey === scalingKey) {
+            return { needed: false, log: null };
+        }
+        if (root?.dataset?.abilityScaled === '1' && !abilityTooltipCanRescaleFromTemplate(details)) {
+            if (details.dataset.abilityAppliedScalingKey !== scalingKey) {
+                markAbilityTooltipScalingApplied(details, unit, scalingKey);
+            }
+            return { needed: false, log: null };
+        }
+
+        const display = getAbilityTooltipDisplaySnapshot(root);
+        const reasons = [];
+        if (details.dataset.abilityAppliedScalingKey !== scalingKey) {
+            reasons.push('scaling-key');
+        }
+        if (unit.ap != null && details.dataset.unitAp !== String(Math.round(unit.ap))) {
+            reasons.push('unit-ap');
+        }
+        if (unit.ad != null && details.dataset.unitAd !== String(Math.round(unit.ad))) {
+            reasons.push('unit-ad');
+        }
+        if (root?.dataset?.abilityScaled !== '1' && getAbilityTooltipTemplate(details)) {
+            reasons.push('not-frozen');
+        }
+        if (root && !display?.scaledText && abilityTooltipCanRescale(root)) {
+            reasons.push('unscaled-display');
+        }
+        if (!reasons.length) return { needed: false, log: null };
+
+        if (root?.dataset?.abilityScaled === '1'
+            && reasons.length === 1
+            && reasons[0] === 'scaling-key'
+            && abilityTooltipScalingDisplayMatchesUnit(root, unit)) {
+            markAbilityTooltipScalingApplied(details, unit, scalingKey);
+            return { needed: false, log: null };
+        }
+
+        return {
+            needed: true,
+            log: {
+                name: unit.name,
+                gameId: unit.gameId,
+                ap: unit.ap,
+                ad: unit.ad,
+                reasons,
+                appliedKey: details.dataset.abilityAppliedScalingKey || null,
+                scalingKey,
+                display
+            }
+        };
+    }
+
     function needsAbilityTooltipRefresh(details, unit) {
-        if (!details?.open || !unit?.gameId) return false;
-        const mountKey = abilityMountKey(unit);
-        if (!mountKey) return false;
-        if (details.dataset.abilityMountKey !== mountKey) return true;
-        const root = details.querySelector('.bs-ability-mount .bs-ability-tooltip');
-        return root?.dataset?.abilityScaled !== '1';
+        return getAbilityTooltipRefreshState(details, unit).needed;
     }
 
     function mountUnitAbilityDetails(details, unit) {
@@ -7365,25 +9053,37 @@
         const resolvedUnit = unit.ap != null || unit.ad != null || unit.name
             ? unit
             : resolveUnitForAbilityDetails(details) || unit;
-        const scalingUnit = resolveUnitAbilityScalingStats(resolvedUnit) || resolvedUnit;
+        const scalingUnit = resolveBoardAbilityScalingUnit(
+            details,
+            resolveUnitAbilityScalingStats(resolvedUnit) || resolvedUnit
+        );
         syncAbilityDetailsDataset(details, scalingUnit);
-        const mountKey = abilityMountKey(resolvedUnit);
+        const scalingKey = abilityScalingMountKey(scalingUnit);
         const mount = details.querySelector('.bs-ability-mount');
-        const existingRoot = mount?.querySelector('.bs-ability-tooltip');
-        if (mountKey && details.dataset.abilityMountKey === mountKey) {
+        const existingRoot = getAbilityTooltipRoot(details);
+        if (scalingKey && details.dataset.abilityAppliedScalingKey === scalingKey) {
             if (existingRoot?.dataset?.abilityScaled === '1') {
+                subscribeAbilityScalingRefresh(details, resolvedUnit);
                 return;
             }
             if (details._abilityComponent && existingRoot) {
                 scheduleAbilityTooltipEnhance(existingRoot, scalingUnit, details, details._abilityComponent);
+                subscribeAbilityScalingRefresh(details, resolvedUnit);
                 return;
             }
         }
-        if (mountKey && details.dataset.abilityMountKey !== mountKey && existingRoot && details.dataset.abilityTooltipTemplate) {
-            existingRoot.innerHTML = details.dataset.abilityTooltipTemplate;
-            delete existingRoot.dataset.abilityScaled;
-            details.dataset.abilityMountKey = mountKey;
-            scheduleAbilityTooltipEnhance(existingRoot, scalingUnit, details, null);
+        if (scalingKey
+            && details.dataset.abilityAppliedScalingKey !== scalingKey
+            && existingRoot) {
+            if (isAbilityTooltipEnhancePending(details)) {
+                subscribeAbilityScalingRefresh(details, resolvedUnit);
+            } else {
+                requestAbilityTooltipRefresh(
+                    details,
+                    normalizeCollapseKey(getUnitCollapseKey(resolvedUnit)),
+                    scalingUnit
+                );
+            }
             return;
         }
         if (!mount) return;
@@ -7411,13 +9111,13 @@
                 ? createUIComponent(root, abilityInfo.TooltipContent, { awaken: true })
                 : createUIComponent(root, abilityInfo.TooltipContent);
             if (component?.mount) component.mount();
-            details.dataset.abilityTooltipTemplate = root.innerHTML;
             details._abilityComponent = component;
-            if (mountKey) details.dataset.abilityMountKey = mountKey;
+            if (scalingKey) details.dataset.abilityMountKey = scalingKey;
             root.querySelectorAll('blockquote').forEach((bq) => {
                 bq.style.setProperty('font-size', '10px', 'important');
             });
             scheduleAbilityTooltipEnhance(root, scalingUnit, details, component);
+            subscribeAbilityScalingRefresh(details, resolvedUnit);
         } catch {
             mount.textContent = t('mods.betterAnalytics.abilityDetailsUnavailable');
         }
@@ -7458,14 +9158,19 @@
         const details = card?.querySelector('.bs-ability-details');
         if (!details) return;
         syncAbilityDetailsDataset(details, unit);
-        if (details.open && needsAbilityTooltipRefresh(details, unit)) {
-            queueAbilityTooltipRefresh(details, normalizeCollapseKey(getUnitCollapseKey(unit)));
+        if (!details.open) return;
+        if (isAbilityTooltipEnhancePending(details)) return;
+        const root = getAbilityTooltipRoot(details);
+        if (!root) {
+            mountUnitAbilityDetails(details, unit);
+            return;
         }
+        requestAbilityTooltipRefresh(details, normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
     }
 
     function getCurrentPanelUnits() {
         if (isFightActive()) return collectActorSnapshots() || [];
-        return getBoardPreviewUnits();
+        return getRefreshedBoardPreviewUnits();
     }
 
     function readAbilityDetailsStat(dataset, key) {
@@ -7491,7 +9196,9 @@
         const unitKey = card?.dataset?.unitKey;
         if (unitKey) {
             for (const unit of getCurrentPanelUnits()) {
-                if (normalizeCollapseKey(getUnitCollapseKey(unit)) === unitKey) return unit;
+                if (normalizeCollapseKey(getUnitCollapseKey(unit)) === unitKey) {
+                    return unit;
+                }
             }
         }
         const partial = resolveUnitFromAbilityDetails(details);
@@ -7956,9 +9663,14 @@
         return null;
     }
 
+    function computeStatRate(total, fightTicks) {
+        if (!total) return 0;
+        return fightTicks > 0 ? calculateDPSFromDamage(total, fightTicks) : 0;
+    }
+
     function formatBattleLogStatWithRate(label, total, fightTicks, rateLabel) {
         if (!total) return null;
-        const rate = fightTicks > 0 ? calculateDPSFromDamage(total, fightTicks) : 0;
+        const rate = computeStatRate(total, fightTicks);
         const rateStr = rate > 0 ? ` (${rate} ${rateLabel})` : '';
         return `  ${label}: ${total}${rateStr}`;
     }
@@ -7999,28 +9711,63 @@
         return tReplace('mods.betterAnalytics.exportSummaryDamageShare', { percent: pct });
     }
 
+    function splitBattleLogCreatureStats(statsMap) {
+        const allies = [];
+        const enemies = [];
+        for (const stats of statsMap.values()) {
+            if (stats.villain) enemies.push(stats);
+            else allies.push(stats);
+        }
+        allies.sort(sortBattleLogCreatureStats);
+        enemies.sort(sortBattleLogCreatureStats);
+        return { allies, enemies };
+    }
+
+    function buildBattleLogCreatureSummaryModel(stats, fightTicks, teamDamageTotal) {
+        const extras = [];
+        if (stats.crits) extras.push({ key: 'crits', value: stats.crits });
+        if (stats.abilityCasts) extras.push({ key: 'abilityCasts', value: stats.abilityCasts });
+        if (stats.kills) extras.push({ key: 'kills', value: stats.kills });
+        return {
+            label: stats.displayName || stats.name,
+            villain: stats.villain === true,
+            isSummon: stats.isSummon === true,
+            deaths: stats.deaths,
+            share: formatBattleLogDamageShare(stats.damageDealt, teamDamageTotal),
+            damageDealt: stats.damageDealt,
+            overkill: stats.overkill,
+            rawDamageDealt: stats.rawDamageDealt,
+            isRoster: stats.isRoster === true,
+            damageTaken: stats.damageTaken,
+            healingDone: stats.healingDone,
+            healingReceived: stats.healingReceived,
+            healingCombined: stats.healingDone === stats.healingReceived,
+            extras,
+            fightTicks
+        };
+    }
+
     function formatBattleLogCreatureSummaryForExport(stats, fightTicks, teamDamageTotal) {
-        const team = stats.villain
+        const model = buildBattleLogCreatureSummaryModel(stats, fightTicks, teamDamageTotal);
+        const team = model.villain
             ? t('mods.betterAnalytics.exportSummaryTeamEnemy')
             : t('mods.betterAnalytics.exportSummaryTeamAlly');
-        const summon = stats.isSummon ? ` ${t('mods.betterAnalytics.exportSummarySummon')}` : '';
-        const died = formatBattleLogDeathsLabel(stats.deaths);
-        const share = formatBattleLogDamageShare(stats.damageDealt, teamDamageTotal);
-        const label = stats.displayName || stats.name;
-        const lines = [`${label} [${team}]${summon}${died}${share}`];
+        const summon = model.isSummon ? ` ${t('mods.betterAnalytics.exportSummarySummon')}` : '';
+        const died = formatBattleLogDeathsLabel(model.deaths);
+        const lines = [`${model.label} [${team}]${summon}${died}${model.share}`];
 
         const damageDealt = formatBattleLogDamageDealtLine(stats, fightTicks);
         if (damageDealt) lines.push(damageDealt);
 
-        if (stats.damageTaken) {
-            lines.push(`  ${t('mods.betterAnalytics.exportSummaryDamageTaken')}: ${stats.damageTaken}`);
+        if (model.damageTaken) {
+            lines.push(`  ${t('mods.betterAnalytics.exportSummaryDamageTaken')}: ${model.damageTaken}`);
         }
 
-        if (stats.healingDone || stats.healingReceived) {
-            if (stats.healingDone === stats.healingReceived) {
+        if (model.healingDone || model.healingReceived) {
+            if (model.healingCombined) {
                 const healing = formatBattleLogStatWithRate(
                     t('mods.betterAnalytics.exportSummaryHealing'),
-                    stats.healingDone,
+                    model.healingDone,
                     fightTicks,
                     'HPS'
                 );
@@ -8028,28 +9775,28 @@
             } else {
                 const healingDone = formatBattleLogStatWithRate(
                     t('mods.betterAnalytics.exportSummaryHealingDone'),
-                    stats.healingDone,
+                    model.healingDone,
                     fightTicks,
                     'HPS'
                 );
                 if (healingDone) lines.push(healingDone);
-                if (stats.healingReceived) {
-                    lines.push(`  ${t('mods.betterAnalytics.exportSummaryHealingReceived')}: ${stats.healingReceived}`);
+                if (model.healingReceived) {
+                    lines.push(`  ${t('mods.betterAnalytics.exportSummaryHealingReceived')}: ${model.healingReceived}`);
                 }
             }
         }
 
-        const extras = [];
-        if (stats.crits) {
-            extras.push(`${t('mods.betterAnalytics.exportSummaryCrits')}: ${stats.crits}`);
+        const extraParts = [];
+        for (const extra of model.extras) {
+            if (extra.key === 'crits') {
+                extraParts.push(`${t('mods.betterAnalytics.exportSummaryCrits')}: ${extra.value}`);
+            } else if (extra.key === 'abilityCasts') {
+                extraParts.push(`${t('mods.betterAnalytics.exportSummaryAbilityCasts')}: ${extra.value}`);
+            } else if (extra.key === 'kills') {
+                extraParts.push(`${t('mods.betterAnalytics.exportSummaryKills')}: ${extra.value}`);
+            }
         }
-        if (stats.abilityCasts) {
-            extras.push(`${t('mods.betterAnalytics.exportSummaryAbilityCasts')}: ${stats.abilityCasts}`);
-        }
-        if (stats.kills) {
-            extras.push(`${t('mods.betterAnalytics.exportSummaryKills')}: ${stats.kills}`);
-        }
-        if (extras.length) lines.push(`  ${extras.join(' · ')}`);
+        if (extraParts.length) lines.push(`  ${extraParts.join(' · ')}`);
 
         return lines;
     }
@@ -8092,8 +9839,7 @@
             return lines;
         }
 
-        const allies = Array.from(statsMap.values()).filter((s) => !s.villain).sort(sortBattleLogCreatureStats);
-        const enemies = Array.from(statsMap.values()).filter((s) => s.villain).sort(sortBattleLogCreatureStats);
+        const { allies, enemies } = splitBattleLogCreatureStats(statsMap);
 
         appendBattleLogTeamSummaryExportLines(
             lines,
@@ -8123,8 +9869,7 @@
         }
         const fightTicks = getFightTick();
         const statsMap = prepareBattleLogSummaryStats(aggregateBattleLogCreatureStats());
-        const allies = Array.from(statsMap.values()).filter((s) => !s.villain).sort(sortBattleLogCreatureStats);
-        const enemies = Array.from(statsMap.values()).filter((s) => s.villain).sort(sortBattleLogCreatureStats);
+        const { allies, enemies } = splitBattleLogCreatureStats(statsMap);
         cachedPreparedBattleLogSummary = { statsMap, allies, enemies, fightTicks };
         cachedPreparedBattleLogSummaryKey = cacheKey;
         return cachedPreparedBattleLogSummary;
@@ -8161,7 +9906,7 @@
 
     function formatBattleLogStatRowHtml(label, total, fightTicks, rateLabel) {
         if (!total) return '';
-        const rate = fightTicks > 0 ? calculateDPSFromDamage(total, fightTicks) : 0;
+        const rate = computeStatRate(total, fightTicks);
         const rateStr = rate > 0
             ? ` <span class="bs-log-summary-rate">(${rate} ${rateLabel})</span>`
             : '';
@@ -8169,66 +9914,68 @@
     }
 
     function formatBattleLogCreatureSummaryHtml(stats, fightTicks, teamDamageTotal) {
-        const teamCls = stats.villain ? 'enemy' : 'ally';
-        const summonTag = stats.isSummon
+        const model = buildBattleLogCreatureSummaryModel(stats, fightTicks, teamDamageTotal);
+        const teamCls = model.villain ? 'enemy' : 'ally';
+        const summonTag = model.isSummon
             ? `<span class="bs-log-summary-tag">${escapeHtml(t('mods.betterAnalytics.exportSummarySummon').trim())}</span>`
             : '';
-        const diedTag = stats.deaths
-            ? `<span class="bs-log-summary-died">${escapeHtml(formatBattleLogDeathsLabel(stats.deaths).trim())}</span>`
+        const diedTag = model.deaths
+            ? `<span class="bs-log-summary-died">${escapeHtml(formatBattleLogDeathsLabel(model.deaths).trim())}</span>`
             : '';
-        const share = formatBattleLogDamageShare(stats.damageDealt, teamDamageTotal);
-        const shareTag = share
-            ? `<span class="bs-log-summary-share">${escapeHtml(share.trim())}</span>`
+        const shareTag = model.share
+            ? `<span class="bs-log-summary-share">${escapeHtml(model.share.trim())}</span>`
             : '';
-        const label = escapeHtml(stats.displayName || stats.name);
+        const label = escapeHtml(model.label);
         let body = '';
 
-        if (stats.damageDealt) {
+        if (model.damageDealt) {
             body += formatBattleLogStatRowHtml(
                 t('mods.betterAnalytics.exportSummaryDamageDealt'),
-                stats.damageDealt,
+                model.damageDealt,
                 fightTicks,
                 'DPS'
             );
-            if (stats.overkill > 0) {
+            if (model.overkill > 0) {
                 body += `<div class="bs-log-summary-stat bs-log-summary-overkill">${escapeHtml(tReplace('mods.betterAnalytics.exportSummaryOverkillSuffix', {
-                    raw: stats.rawDamageDealt,
-                    overkill: stats.overkill
+                    raw: model.rawDamageDealt,
+                    overkill: model.overkill
                 }).trim())}</div>`;
             }
-        } else if (stats.isRoster) {
+        } else if (model.isRoster) {
             body += `<div class="bs-log-summary-stat"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.exportSummaryDamageDealt'))}:</span> 0</div>`;
         }
 
-        if (stats.damageTaken) {
-            body += `<div class="bs-log-summary-stat"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.exportSummaryDamageTaken'))}:</span> ${stats.damageTaken}</div>`;
+        if (model.damageTaken) {
+            body += `<div class="bs-log-summary-stat"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.exportSummaryDamageTaken'))}:</span> ${model.damageTaken}</div>`;
         }
 
-        if (stats.healingDone || stats.healingReceived) {
-            if (stats.healingDone === stats.healingReceived) {
+        if (model.healingDone || model.healingReceived) {
+            if (model.healingCombined) {
                 body += formatBattleLogStatRowHtml(
                     t('mods.betterAnalytics.exportSummaryHealing'),
-                    stats.healingDone,
+                    model.healingDone,
                     fightTicks,
                     'HPS'
                 );
             } else {
                 body += formatBattleLogStatRowHtml(
                     t('mods.betterAnalytics.exportSummaryHealingDone'),
-                    stats.healingDone,
+                    model.healingDone,
                     fightTicks,
                     'HPS'
                 );
-                if (stats.healingReceived) {
-                    body += `<div class="bs-log-summary-stat"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.exportSummaryHealingReceived'))}:</span> ${stats.healingReceived}</div>`;
+                if (model.healingReceived) {
+                    body += `<div class="bs-log-summary-stat"><span class="bs-label">${escapeHtml(t('mods.betterAnalytics.exportSummaryHealingReceived'))}:</span> ${model.healingReceived}</div>`;
                 }
             }
         }
 
         const extras = [];
-        if (stats.crits) extras.push(`${escapeHtml(t('mods.betterAnalytics.exportSummaryCrits'))}: ${stats.crits}`);
-        if (stats.abilityCasts) extras.push(`${escapeHtml(t('mods.betterAnalytics.exportSummaryAbilityCasts'))}: ${stats.abilityCasts}`);
-        if (stats.kills) extras.push(`${escapeHtml(t('mods.betterAnalytics.exportSummaryKills'))}: ${stats.kills}`);
+        for (const extra of model.extras) {
+            if (extra.key === 'crits') extras.push(`${escapeHtml(t('mods.betterAnalytics.exportSummaryCrits'))}: ${extra.value}`);
+            else if (extra.key === 'abilityCasts') extras.push(`${escapeHtml(t('mods.betterAnalytics.exportSummaryAbilityCasts'))}: ${extra.value}`);
+            else if (extra.key === 'kills') extras.push(`${escapeHtml(t('mods.betterAnalytics.exportSummaryKills'))}: ${extra.value}`);
+        }
         const extrasHtml = extras.length
             ? `<div class="bs-log-summary-extras">${extras.join(' · ')}</div>`
             : '';
@@ -8336,9 +10083,8 @@
     }
 
     function renderLogDamageAmount(entry) {
-        const applied = Math.abs(Math.round(entry.amount));
-        const raw = entry.rawAmount;
-        if (raw != null && raw !== applied) {
+        const { applied, showRaw, raw } = resolveLogDamageDisplay(entry.amount, entry.rawAmount, { roundRaw: false });
+        if (showRaw) {
             return `<span class="bs-log-dmg">${applied} <span class="bs-log-dmg-raw">(${raw})</span></span>`;
         }
         return `<span class="bs-log-dmg">${applied}</span>`;
@@ -8972,6 +10718,12 @@
                 height: 34px;
                 image-rendering: pixelated;
             }
+            #${PANEL_ID} .bs-equip-mount img[alt="empty equipment"] {
+                width: 32px;
+                height: 32px;
+                opacity: 0.6;
+                image-rendering: pixelated;
+            }
             #${PANEL_ID} .bs-compact-meta {
                 flex: 1 1 auto;
                 min-width: 0;
@@ -9059,6 +10811,34 @@
             }
             #${PANEL_ID} .bs-row { margin: 2px 0; }
             #${PANEL_ID} .bs-label { color: #777; }
+            #${PANEL_ID} .bs-stat-grid {
+                display: grid;
+                grid-template-columns: max-content max-content;
+                column-gap: 16px;
+                row-gap: 2px;
+                width: fit-content;
+                max-width: 100%;
+                margin: 2px 0;
+            }
+            #${PANEL_ID} .bs-stat-row {
+                display: contents;
+            }
+            #${PANEL_ID} .bs-stat-cell {
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                gap: 4px;
+                min-height: 14px;
+            }
+            #${PANEL_ID} .bs-stat-icon {
+                width: 11px;
+                height: 11px;
+                flex-shrink: 0;
+            }
+            #${PANEL_ID} .bs-stat-base {
+                color: #777;
+                font-size: 9px;
+            }
             #${PANEL_ID} .bs-tag {
                 display: inline-block;
                 padding: 1px 5px;
@@ -9451,11 +11231,35 @@
         return `<span style="color:${color}">${text}</span>`;
     }
 
-    function renderStatLine(label, live, base) {
-        if (live == null && base == null) return '';
-        const liveStr = live != null ? live : '—';
-        const baseStr = base != null && base !== live ? ` (base ${base})` : '';
-        return `<div class="bs-row"><span class="bs-label">${label}:</span> ${liveStr}${baseStr}</div>`;
+    function getStatLabel(key) {
+        return STAT_KEYS.find((stat) => stat.key === key)?.label || key;
+    }
+
+    function renderStatIconHtml(key) {
+        const label = getStatLabel(key);
+        const src = STAT_ICONS[key];
+        if (!src) return '';
+        return `<img class="bs-stat-icon pixelated" src="${src}" alt="${escapeHtml(label)}" title="${escapeHtml(label)}">`;
+    }
+
+    function renderGridStatCell(unit, key) {
+        const live = key === 'hp' ? unit.hp : unit[key];
+        const base = unit.baseStats?.[key];
+        if (live == null && base == null) return '<div class="bs-stat-cell"></div>';
+
+        let valueHtml;
+        if (key === 'hp' && live != null) {
+            const hpText = unit.source === 'fight'
+                ? `${live}/${unit.hpMax ?? '?'}`
+                : String(live);
+            valueHtml = coloredStatSpan(hpText, unit.alive !== false);
+        } else {
+            valueHtml = live != null ? String(live) : '—';
+        }
+        const baseStr = base != null && base !== live
+            ? ` <span class="bs-stat-base">(${base})</span>`
+            : '';
+        return `<div class="bs-stat-cell">${renderStatIconHtml(key)}<span class="bs-stat-value">${valueHtml}${baseStr}</span></div>`;
     }
 
     function escapeHtml(text) {
@@ -9530,8 +11334,22 @@
                     bits.push(coloredStatSpan('Atk waiting', false));
                 }
             }
+        } else {
+            const attackDelayTicks = resolveUnitAttackDelayTicks(unit);
+            if (attackDelayTicks != null) {
+                bits.push(coloredStatSpan(`Atk ${formatTicks(attackDelayTicks)}`, true));
+            }
         }
-        if (unit.cooldownReady === true) {
+        if (unit.cooldownReady === true && unit.source === 'fight') {
+            bits.push(coloredStatSpan('CD ready', true));
+        } else if (unit.source !== 'fight') {
+            const cdTicks = resolveUnitCooldownTicks(unit);
+            if (cdTicks != null) {
+                bits.push(coloredStatSpan(`CD ${formatTicks(cdTicks)}`, true));
+            } else if (unit.cooldownReady === true) {
+                bits.push(coloredStatSpan('CD ready', true));
+            }
+        } else if (unit.cooldownReady === true) {
             bits.push(coloredStatSpan('CD ready', true));
         } else {
             const cdRemainingTicks = resolveUnitCooldownRemainingTicks(unit);
@@ -9546,26 +11364,17 @@
     }
 
     function buildUnitCardStatsHtml(unit) {
-        let statsHtml = '';
-        if (unit.source === 'fight' && unit.hp != null) {
-            const hpText = `${unit.hp}/${unit.hpMax ?? '?'}`;
-            const hpBase = unit.baseStats?.hp;
-            const hpBaseStr = hpBase != null && hpBase !== unit.hp ? ` (base ${hpBase})` : '';
-            statsHtml += `<div class="bs-row"><span class="bs-label">HP:</span> ` +
-                `${coloredStatSpan(hpText, unit.alive !== false)}${hpBaseStr}</div>`;
-        } else if (unit.hp != null && unit.source !== 'fight') {
-            const hpBase = unit.baseStats?.hp;
-            const hpBaseStr = hpBase != null && hpBase !== unit.hp ? ` (base ${hpBase})` : '';
-            statsHtml += `<div class="bs-row"><span class="bs-label">HP:</span> ` +
-                `${coloredStatSpan(String(unit.hp), true)}${hpBaseStr}</div>`;
+        const hasAnyStat = STAT_GRID_ROWS.flat().some((key) => {
+            const live = key === 'hp' ? unit.hp : unit[key];
+            return live != null || unit.baseStats?.[key] != null;
+        });
+        if (!hasAnyStat) return '';
+
+        let rowsHtml = '';
+        for (const [leftKey, rightKey] of STAT_GRID_ROWS) {
+            rowsHtml += `<div class="bs-stat-row">${renderGridStatCell(unit, leftKey)}${renderGridStatCell(unit, rightKey)}</div>`;
         }
-        for (const { key, label } of STAT_KEYS) {
-            if (key === 'hp') continue;
-            const live = unit[key];
-            const base = unit.baseStats?.[key];
-            if (live != null || base != null) statsHtml += renderStatLine(label, live, base);
-        }
-        return statsHtml;
+        return `<div class="bs-stat-grid">${rowsHtml}</div>`;
     }
 
     function buildUnitCardMechanicsHtml(unit) {
@@ -9618,6 +11427,9 @@
             unit.alive,
             unit.silenced,
             unit.buffedCount,
+            getUnitEquipmentPatchSig(unit),
+            resolveUnitAttackDelayTicks(unit),
+            resolveUnitCooldownTicks(unit),
             resolveUnitAttackDelayRemainingTicks(unit),
             unit.attackDelayReady,
             resolveUnitCooldownRemainingTicks(unit),
@@ -9639,9 +11451,7 @@
             if (card.dataset.unitPatchKey === patchKey) {
                 if (abilityDetails?.open) {
                     syncAbilityDetailsDataset(abilityDetails, unit);
-                    if (needsAbilityTooltipRefresh(abilityDetails, unit)) {
-                        queueAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey);
-                    }
+                    requestAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey, unit);
                 }
                 continue;
             }
@@ -9674,10 +11484,11 @@
             }
             const live = card.querySelector('.bs-card-live');
             if (live) live.innerHTML = buildUnitCardLiveInnerHtml(unit);
+            hydrateUnitCardPortraits(card, unit);
             if (abilityDetails) {
                 syncAbilityDetailsDataset(abilityDetails, unit);
-                if (abilityDetails.open && needsAbilityTooltipRefresh(abilityDetails, unit)) {
-                    queueAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey);
+                if (abilityDetails.open) {
+                    requestAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey, unit);
                 }
             }
             const nameEl = card.querySelector('.bs-card-name');
@@ -9700,11 +11511,10 @@
         const displayName = getUnitDisplayName(unit);
         const compact = renderCompactSummary(unit);
         const hasPortrait = unit.gameId != null;
-        const hasEquipPortrait = unit.equipment?.spriteId != null;
-        const portrait = (hasPortrait || hasEquipPortrait)
+        const portrait = hasPortrait
             ? `<div class="bs-portrait-group">` +
-                (hasPortrait ? `<div class="bs-portrait-mount"></div>` : '') +
-                (hasEquipPortrait ? `<div class="bs-equip-mount frame-pressed-1 shrink-0 flex items-center justify-center overflow-hidden"></div>` : '') +
+                `<div class="bs-portrait-mount"></div>` +
+                `<div class="bs-equip-mount frame-pressed-1 shrink-0 flex items-center justify-center overflow-hidden"></div>` +
               `</div>`
             : '';
 
@@ -9833,23 +11643,23 @@
     }
 
     function buildUnitsStructureKey(units) {
-        const scope = isFightActive()
-            ? 'fight'
-            : `preview:${boardTrack.roomId ?? resolveCurrentRoomId() ?? 'x'}:f${boardTrack.floor ?? resolveCurrentFloor()}`;
-        return scope + '|' + units.map((u) => [
-            getUnitCollapseKey(u),
+        return units.map((u) => [
+            normalizeCollapseKey(getUnitCollapseKey(u)),
             isUnitCollapsed(u) ? 'c' : 'e'
-        ].join(':')).join('|');
+        ].join(':')).sort().join('|');
     }
 
     function buildUnitsRenderKey(units) {
-        return buildUnitsStructureKey(units) + '|live:' + units.map((u) => [
+        const liveParts = units.map((u) => [
+            normalizeCollapseKey(getUnitCollapseKey(u)),
             u.hp,
             u.hpMax,
             u.ap,
             u.ad,
+            resolveUnitAttackDelayTicks(u),
             resolveUnitAttackDelayRemainingTicks(u),
             u.attackDelayReady,
+            resolveUnitCooldownTicks(u),
             resolveUnitCooldownRemainingTicks(u),
             u.cooldownReady,
             u.alive,
@@ -9858,7 +11668,8 @@
             u.silenced,
             u.buffedCount,
             (u.statusEffects || []).map((e) => e.id).join('+')
-        ].join(':')).join('|');
+        ].join(':')).sort();
+        return buildUnitsStructureKey(units) + '|live:' + liveParts.join('|');
     }
 
     function renderUnits(force) {
@@ -9867,25 +11678,40 @@
         if (!body || !panel || panel.style.display === 'none') return;
         if (!canRefreshUnitsDom(force)) return;
 
+        snapshotOpenAbilityKeysFromDom(body);
+
         const fighting = isFightActive();
-        const units = fighting ? (collectActorSnapshots() || []) : getBoardPreviewUnits();
+        const units = fighting ? (collectActorSnapshots() || []) : getRefreshedBoardPreviewUnits();
+
+        if (fighting && !units.length && body.querySelector('.bs-card')) {
+            return;
+        }
 
         const structureKey = buildUnitsStructureKey(units);
         const renderKey = buildUnitsRenderKey(units);
 
-        if (!force && fighting && body.querySelector('.bs-units-columns')) {
+        if (body.querySelector('.bs-units-columns')) {
             const prevStructure = body.dataset.unitsStructureKey || '';
             if (structureKey === prevStructure) {
-                if (renderKey === lastUnitsRenderKey) return;
+                if (renderKey === lastUnitsRenderKey) {
+                    patchOpenAbilityTooltips(body, units);
+                    return;
+                }
                 patchUnitCardsLiveStats(body, units);
+                patchOpenAbilityTooltips(body, units);
                 lastUnitsRenderKey = renderKey;
                 return;
             }
         }
 
-        if (!force && renderKey === lastUnitsRenderKey) return;
+        if (!force && renderKey === lastUnitsRenderKey) {
+            patchOpenAbilityTooltips(body, units);
+            return;
+        }
         lastUnitsRenderKey = renderKey;
         body.dataset.unitsStructureKey = structureKey;
+
+        teardownAllAbilityTooltipsInBody(body);
 
         const { allies, enemies } = splitByTeam(units);
         body.innerHTML =
@@ -10124,11 +11950,7 @@
     }
 
     function teardownBoardListeners() {
-        for (const sub of boardUnsubs) {
-            try {
-                if (sub && typeof sub.unsubscribe === 'function') sub.unsubscribe();
-            } catch { /* ignore */ }
-        }
+        unsubscribeAll(boardUnsubs);
         boardUnsubs = [];
     }
 
@@ -10140,6 +11962,7 @@
         syncBoardTrackFromContext();
 
         const onNewGame = (event) => {
+            snapshotOpenAbilityKeysFromDom(document.getElementById(UNITS_BODY_ID));
             teardownWorldSubscriptions();
             activeWorld = event?.world ?? getBoardContext()?.world ?? null;
             resetBattleLogState();
@@ -10150,6 +11973,7 @@
             syncBoardTrackFromContext();
             teardownPanelGameTimerSub();
             syncPanelTickTracking();
+            lastUnitsRenderKey = '';
             render();
         };
 
@@ -10166,6 +11990,11 @@
             activeWorld = null;
             clearFightActorCollapseRegistry();
             boardTrack.gameStarted = false;
+            invalidateActorSnapshotsCache();
+            invalidateBoardPreviewCache();
+            clearScalingRuntimeCaches();
+            lastUnitsRenderKey = '';
+            pendingUnitsForceRefresh = true;
             syncPanelFightTickFromSnapshot();
             syncPanelTickTracking();
             render();
@@ -10178,6 +12007,7 @@
         try {
             const autoSetupSub = board.on('autoSetupBoard', () => {
                 cachedSpawnTileKeyLookup = null;
+                invalidateBoardPreviewCache();
                 lastUnitsRenderKey = '';
                 pendingUnitsForceRefresh = true;
                 render();
@@ -10193,6 +12023,7 @@
                     const configSig = getBoardConfigSignature(getBoardContext()?.boardConfig);
                     if (configSig === boardTrack.configSig) return;
                     boardTrack.configSig = configSig;
+                    invalidateBoardPreviewCache();
                     lastUnitsRenderKey = '';
                     pendingUnitsForceRefresh = true;
                     render();
@@ -10523,6 +12354,8 @@
         if (panel) panel.style.display = 'none';
         savePanelSettings({ isOpen: false });
         pauseBattleLogActorPatches();
+        teardownAllAbilityTooltipsInBody(document.getElementById(UNITS_BODY_ID));
+        clearSummaryUpdateTimer();
         teardownPanelGameTimerSub();
         stopPanelTickPoll();
         teardownUnitsBodyListener();
@@ -10553,6 +12386,8 @@
         if (typeof api !== 'undefined' && api?.ui?.removeButton) {
             api.ui.removeButton(BUTTON_ID);
         }
+        teardownAllAbilityTooltipsInBody(document.getElementById(UNITS_BODY_ID));
+        clearSummaryUpdateTimer();
         teardownPanelGameTimerSub();
         stopPanelTickPoll();
         resetPanelFightTickState();
@@ -10568,6 +12403,8 @@
         clearCollapsedOverrides();
         clearOpenAbilityOverrides();
         clearFightActorCollapseRegistry();
+        invalidateBoardPreviewCache({ clearMechanicsLog: true });
+        clearScalingRuntimeCaches();
         cachedSpawnTileKeyLookup = null;
         gameIdByNameCache = null;
         lastUnitsRenderKey = '';
@@ -10650,4 +12487,3 @@
     }
 
 })();
-

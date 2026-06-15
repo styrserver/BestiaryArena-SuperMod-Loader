@@ -19,25 +19,41 @@
   const MODAL_HEIGHT = 500;             // Main modal height in pixels
   const MODAL_PADDING_WIDTH = 30;       // Padding to subtract from width for content
   const MODAL_PADDING_HEIGHT = 50;      // Padding to subtract from height for content
-  
-  // Rune list from inventory database (single source of truth); fallback if DB not loaded yet
-  const RUNE_KEYS_ORDER = ['runeAvarice', 'runeHp', 'runeAp', 'runeAd', 'runeAr', 'runeMr', 'runeBlank', 'runeRecycle', 'runeKaleidoscopic', 'runeConversionHp', 'runeConversionAd', 'runeConversionAp'];
-  const RUNE_DB_ALIAS = (typeof window !== 'undefined' && window.inventoryDatabase?.itemKeyAliases)
-    ? window.inventoryDatabase.itemKeyAliases
-    : { runeRecycleMonster: 'runeKaleidoscopic' };
-  const RUNE_TYPES = (function () {
-    const db = (typeof window !== 'undefined' && window.inventoryDatabase?.tooltips) ? window.inventoryDatabase.tooltips : null;
-    return RUNE_KEYS_ORDER.map(key => {
-      const dbKey = RUNE_DB_ALIAS[key] || key;
-      const entry = db && db[dbKey] ? db[dbKey] : null;
-      return {
-        key: key,
-        displayName: entry?.displayName || (key.replace(/^rune/, '').replace(/([A-Z])/g, ' $1').trim() + ' Rune'),
-        icon: entry?.icon || '/assets/icons/rune-blank.png',
-        rarity: entry?.rarity || '3'
-      };
+
+  const inventoryDB = window.inventoryDatabase;
+  if (!inventoryDB?.getRuneTypes || !inventoryDB.resolveItemKey || !inventoryDB.getInventoryItemCount) {
+    console.error('[Better Rune Recycler] Requires inventory-database.js. Enable it in mod settings.');
+    return;
+  }
+
+  const RUNE_TYPES = inventoryDB.getRuneTypes();
+  const RECYCLABLE_RUNE_TYPES = inventoryDB.getRecyclableRuneTypes();
+
+  function createDefaultRecyclingConfig() {
+    const config = {
+      cycles: 1,
+      useBlankRune: false,
+      useMaxCycles: false,
+    };
+    RECYCLABLE_RUNE_TYPES.forEach(rune => {
+      config[rune.key] = 0;
     });
-  })();
+    return config;
+  }
+
+  function getSacrificeCountPerCycle(config) {
+    return RECYCLABLE_RUNE_TYPES.reduce((sum, rune) => sum + (config[rune.key] || 0), 0);
+  }
+
+  /** Map API alias keys (e.g. runeRecycleMonster) to canonical rune keys for stats/display. */
+  function normalizeRuneKey(runeKey) {
+    return inventoryDB.resolveItemKey(runeKey);
+  }
+
+  function trackRuneCreated(runeKey, count = 1) {
+    const canonical = normalizeRuneKey(runeKey);
+    recyclingStats.runesCreated[canonical] = (recyclingStats.runesCreated[canonical] || 0) + count;
+  }
 
   // =====================================================
   // State Management
@@ -47,18 +63,7 @@
   let recycleInProgress = false;
   
   // Recycling configuration
-  let recyclingConfig = {
-    runeAvarice: 0,
-    runeHp: 0,
-    runeAp: 0,
-    runeAd: 0,
-    runeAr: 0,
-    runeMr: 0,
-    runeRecycle: 0,
-    cycles: 1,
-    useBlankRune: false, // if true, use blank rune after each recycle when available
-    useMaxCycles: false, // if true, run until no runes/gold left instead of fixed cycles
-  };
+  let recyclingConfig = createDefaultRecyclingConfig();
   
   // Statistics tracking
   let recyclingStats = {
@@ -99,10 +104,7 @@
   function getRuneCount(runeKey) {
     const inventory = getPlayerInventory();
     if (!inventory) return 0;
-    if (typeof window !== 'undefined' && window.inventoryDatabase?.getInventoryItemCount) {
-      return window.inventoryDatabase.getInventoryItemCount(inventory, runeKey);
-    }
-    return inventory[runeKey] || 0;
+    return inventoryDB.getInventoryItemCount(inventory, runeKey);
   }
 
   /**
@@ -289,13 +291,13 @@
     if (!inv) return false;
     const gold = getPlayerGold();
     const sacrifice = buildSacrificeArray(config);
-    const useBlank = config.useBlankRune && (inv.runeBlank || 0) > 0 && gold >= BLANK_RUNE_GOLD_COST;
+    const useBlank = config.useBlankRune && getRuneCount('runeBlank') > 0 && gold >= BLANK_RUNE_GOLD_COST;
     if (useBlank) return true;
     if (gold < RECYCLE_GOLD_COST) return false;
     const needRecycle = 1 + sacrifice.filter(k => k === 'runeRecycle').length;
-    if ((inv.runeRecycle || 0) < needRecycle) return false;
+    if (getRuneCount('runeRecycle') < needRecycle) return false;
     for (const key of sacrifice) {
-      const count = inv[key] || 0;
+      const count = getRuneCount(key);
       const need = (key === 'runeRecycle' ? needRecycle : 1);
       if (count < need) return false;
     }
@@ -315,7 +317,7 @@
 
     const gold = getPlayerGold();
     const cycles = config.useMaxCycles ? 1 : (config.cycles || 1);
-    const blankCount = (inventory.runeBlank || 0);
+    const blankCount = getRuneCount('runeBlank');
     const useBlank = !!config.useBlankRune;
     const blankCycles = useBlank ? Math.min(blankCount, cycles) : 0;
     const recycleCycles = cycles - blankCycles;
@@ -331,22 +333,17 @@
     }
 
     // Check if we have enough runes to sacrifice for recycle cycles (including Recycle Runes if used)
-    const runesNeeded = {
-      runeAvarice: config.runeAvarice * recycleCycles,
-      runeHp: config.runeHp * recycleCycles,
-      runeAp: config.runeAp * recycleCycles,
-      runeAd: config.runeAd * recycleCycles,
-      runeAr: config.runeAr * recycleCycles,
-      runeMr: config.runeMr * recycleCycles,
-      runeRecycle: config.runeRecycle * recycleCycles,
-    };
+    const runesNeeded = {};
+    RECYCLABLE_RUNE_TYPES.forEach(rune => {
+      runesNeeded[rune.key] = (config[rune.key] || 0) * recycleCycles;
+    });
     runesNeeded.runeRecycle += recycleCycles;
 
     for (const [runeKey, needed] of Object.entries(runesNeeded)) {
       if (needed > 0) {
-        const available = inventory[runeKey] || 0;
+        const available = getRuneCount(runeKey);
         if (available < needed) {
-          const runeName = RUNE_TYPES.find(r => r.key === runeKey)?.displayName || runeKey;
+          const runeName = inventoryDB.getRuneType(runeKey)?.displayName || runeKey;
           const forRecycling = runeKey === 'runeRecycle' ? ` (${recycleCycles} to use + ${config.runeRecycle * recycleCycles} to sacrifice)` : '';
           return { valid: false, reason: `Not enough ${runeName}${forRecycling} (have ${available}, need ${needed})` };
         }
@@ -354,7 +351,7 @@
     }
 
     // Check if exactly 3 runes are selected per cycle (needed when we do any recycle)
-    const totalRunesPerCycle = config.runeAvarice + config.runeHp + config.runeAp + config.runeAd + config.runeAr + config.runeMr + config.runeRecycle;
+    const totalRunesPerCycle = getSacrificeCountPerCycle(config);
     if (totalRunesPerCycle !== 3) {
       return { valid: false, reason: `Must select exactly 3 runes per cycle (currently ${totalRunesPerCycle})` };
     }
@@ -367,8 +364,7 @@
    * When useBlankRune is on: blank cycles cost 3000 gold each, recycle cycles 5000 each.
    */
   function getMaxCycles() {
-    const totalRunesPerCycle = recyclingConfig.runeAvarice + recyclingConfig.runeHp + recyclingConfig.runeAp +
-      recyclingConfig.runeAd + recyclingConfig.runeAr + recyclingConfig.runeMr + recyclingConfig.runeRecycle;
+    const totalRunesPerCycle = getSacrificeCountPerCycle(recyclingConfig);
     if (totalRunesPerCycle !== 3) return 999;
 
     const inventory = getPlayerInventory();
@@ -376,27 +372,23 @@
 
     const gold = getPlayerGold();
 
-    const perCycle = {
-      runeAvarice: recyclingConfig.runeAvarice,
-      runeHp: recyclingConfig.runeHp,
-      runeAp: recyclingConfig.runeAp,
-      runeAd: recyclingConfig.runeAd,
-      runeAr: recyclingConfig.runeAr,
-      runeMr: recyclingConfig.runeMr,
-      runeRecycle: recyclingConfig.runeRecycle + 1, // +1 for the 1 Recycle Rune cost per cycle
-    };
+    const perCycle = {};
+    RECYCLABLE_RUNE_TYPES.forEach(rune => {
+      perCycle[rune.key] = recyclingConfig[rune.key] || 0;
+    });
+    perCycle.runeRecycle += 1; // +1 for the 1 Recycle Rune cost per cycle
 
     let maxRecycleCyclesFromRunes = 999;
     for (const [runeKey, needPerCycle] of Object.entries(perCycle)) {
       if (needPerCycle > 0) {
-        const available = inventory[runeKey] || 0;
+        const available = getRuneCount(runeKey);
         maxRecycleCyclesFromRunes = Math.min(maxRecycleCyclesFromRunes, Math.floor(available / needPerCycle));
       }
     }
     maxRecycleCyclesFromRunes = Math.max(0, maxRecycleCyclesFromRunes);
 
     if (recyclingConfig.useBlankRune) {
-      const blankCount = inventory.runeBlank || 0;
+      const blankCount = getRuneCount('runeBlank');
       const maxBlankFromGold = Math.floor(gold / BLANK_RUNE_GOLD_COST);
       const maxBlankCycles = Math.min(blankCount, maxBlankFromGold);
       const goldAfterBlanks = gold - maxBlankCycles * BLANK_RUNE_GOLD_COST;
@@ -415,16 +407,9 @@
    */
   function buildSacrificeArray(config) {
     const sacrifice = [];
-    
-    // Add runes based on configuration
-    for (let i = 0; i < config.runeAvarice; i++) sacrifice.push('runeAvarice');
-    for (let i = 0; i < config.runeHp; i++) sacrifice.push('runeHp');
-    for (let i = 0; i < config.runeAp; i++) sacrifice.push('runeAp');
-    for (let i = 0; i < config.runeAd; i++) sacrifice.push('runeAd');
-    for (let i = 0; i < config.runeAr; i++) sacrifice.push('runeAr');
-    for (let i = 0; i < config.runeMr; i++) sacrifice.push('runeMr');
-    for (let i = 0; i < config.runeRecycle; i++) sacrifice.push('runeRecycle');
-    
+    RECYCLABLE_RUNE_TYPES.forEach(rune => {
+      for (let i = 0; i < (config[rune.key] || 0); i++) sacrifice.push(rune.key);
+    });
     return sacrifice;
   }
 
@@ -448,7 +433,7 @@
       // Track created rune
       const createdRune = result.runeCreated;
       if (createdRune) {
-        recyclingStats.runesCreated[createdRune] = (recyclingStats.runesCreated[createdRune] || 0) + 1;
+        trackRuneCreated(createdRune);
       }
       
       // Track gold spent
@@ -469,11 +454,9 @@
     recyclingStats.goldSpent += BLANK_RUNE_GOLD_COST;
     const diff = blankResult.inventoryDiff;
     if (diff && typeof diff === 'object') {
-      const runeKeys = ['runeAvarice', 'runeHp', 'runeAp', 'runeAd', 'runeAr', 'runeMr', 'runeBlank', 'runeRecycle', 'runeKaleidoscopic', 'runeRecycleMonster', 'runeConversionHp', 'runeConversionAd', 'runeConversionAp'];
-      for (const runeKey of runeKeys) {
-        const delta = diff[runeKey];
+      for (const [runeKey, delta] of Object.entries(diff)) {
         if (typeof delta === 'number' && delta > 0) {
-          recyclingStats.runesCreated[runeKey] = (recyclingStats.runesCreated[runeKey] || 0) + delta;
+          trackRuneCreated(runeKey, delta);
         }
       }
     }
@@ -482,7 +465,7 @@
     if (typeof createdRune === 'string' && createdRune) {
       const alreadyFromDiff = diff && typeof diff[createdRune] === 'number' && diff[createdRune] > 0;
       if (!alreadyFromDiff) {
-        recyclingStats.runesCreated[createdRune] = (recyclingStats.runesCreated[createdRune] || 0) + 1;
+        trackRuneCreated(createdRune);
       }
     }
   }
@@ -970,9 +953,7 @@
   function getConfigContent() {
     const runeCounts = getAllRuneCounts();
     
-    // Only show common/sacrificable runes (exclude Blank, Kaleidoscopic, and Conversion runes)
-    const nonSacrificableRunes = ['runeBlank', 'runeKaleidoscopic', 'runeRecycleMonster', 'runeConversionHp', 'runeConversionAd', 'runeConversionAp'];
-    const recyclableRunes = RUNE_TYPES.filter(r => !nonSacrificableRunes.includes(r.key));
+    const recyclableRunes = RECYCLABLE_RUNE_TYPES;
     
     const container = document.createElement('div');
     container.style.cssText = 'padding: 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box;';
@@ -1322,9 +1303,7 @@
    * Validate that exactly 3 runes are selected
    */
   function validateRuneSelection() {
-    const total = recyclingConfig.runeAvarice + recyclingConfig.runeHp + recyclingConfig.runeAp + 
-                  recyclingConfig.runeAd + recyclingConfig.runeAr + 
-                  recyclingConfig.runeMr + recyclingConfig.runeRecycle;
+    const total = getSacrificeCountPerCycle(recyclingConfig);
     
     const statusMsg = document.getElementById('status-message');
     if (!statusMsg) return;
@@ -1424,7 +1403,7 @@
         consumedStats.innerHTML = Object.entries(recyclingStats.runesConsumed)
           .filter(([_, count]) => count > 0)
           .map(([runeKey, count]) => {
-            const rune = RUNE_TYPES.find(r => r.key === runeKey);
+            const rune = inventoryDB.getRuneType(runeKey);
             const displayName = rune ? rune.displayName.replace(' Rune', '') : runeKey.replace('rune', '');
             const iconPath = rune ? rune.icon : '/assets/icons/rune-blank.png';
             
@@ -1453,7 +1432,7 @@
           .filter(([_, count]) => count > 0)
           .sort((a, b) => b[1] - a[1]) // Sort by count descending
           .map(([runeKey, count]) => {
-            const rune = RUNE_TYPES.find(r => r.key === runeKey);
+            const rune = inventoryDB.getRuneType(runeKey);
             const displayName = rune ? rune.displayName.replace(' Rune', '') : runeKey.replace('rune', '');
             const iconPath = rune ? rune.icon : '/assets/icons/rune-blank.png';
             

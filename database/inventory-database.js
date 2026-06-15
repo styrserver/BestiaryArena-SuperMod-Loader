@@ -532,6 +532,20 @@ const ITEM_KEY_ALIASES = {
   runeRecycleMonster: 'runeKaleidoscopic'
 };
 
+// Canonical rune keys in UI order (from categories + variants)
+const RUNE_KEYS_ORDER = INVENTORY_CATEGORIES['Runes'].flatMap(
+  displayName => INVENTORY_VARIANTS[displayName] || []
+);
+
+// Runes that cannot be sacrificed in the recycler
+const RUNE_NON_SACRIFICABLE_KEYS = [
+  'runeBlank',
+  'runeKaleidoscopic',
+  'runeConversionHp',
+  'runeConversionAd',
+  'runeConversionAp'
+];
+
 // In-game display names (when they differ from mod-friendly tooltip names)
 const INVENTORY_GAME_DISPLAY_NAMES = {
   runeHp: 'Augment Rune (HP)',
@@ -658,6 +672,23 @@ const getInventoryItemCount = (inventory, itemKey) => {
   return count;
 };
 
+const getRuneType = (itemKey) => {
+  const key = resolveInventoryItemKey(itemKey);
+  const entry = inventoryTooltips[key];
+  if (!entry) return null;
+  return {
+    key,
+    displayName: entry.displayName,
+    icon: entry.icon,
+    rarity: entry.rarity
+  };
+};
+
+const getRuneTypes = () => RUNE_KEYS_ORDER.map(getRuneType).filter(Boolean);
+
+const getRecyclableRuneTypes = () =>
+  getRuneTypes().filter(r => !RUNE_NON_SACRIFICABLE_KEYS.includes(r.key));
+
 // Item key groups for inventory UI (currency, no-rarity consumables, upgrades)
 const ITEM_KEY_GROUPS = {
   currency: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
@@ -687,7 +718,12 @@ const inventoryDatabase = {
   customStyles: INVENTORY_CUSTOM_STYLES,
   gazerVariants: INVENTORY_GAZER_VARIANTS,
   resolveItemKey: resolveInventoryItemKey,
-  getInventoryItemCount
+  getInventoryItemCount,
+  runeKeysOrder: RUNE_KEYS_ORDER,
+  runeNonSacrificableKeys: RUNE_NON_SACRIFICABLE_KEYS,
+  getRuneType,
+  getRuneTypes,
+  getRecyclableRuneTypes
 };
 
 // Export for use in other mods
