@@ -5377,7 +5377,7 @@ function createUnifiedGridContainer() {
     const gridContainer = document.createElement('div');
     gridContainer.style.display = 'grid';
     gridContainer.style.gridTemplateColumns = 'repeat(5, 1fr)';
-    gridContainer.style.gap = '6px';
+    gridContainer.style.gap = '2px';
     return gridContainer;
 }
 
@@ -5387,9 +5387,9 @@ function createGridEntryCell() {
     cell.style.flexDirection = 'column';
     cell.style.alignItems = 'center';
     cell.style.justifyContent = 'center';
-    cell.style.padding = '4px';
+    cell.style.padding = '2px';
     cell.style.backgroundColor = getThemeColor('entryBackground');
-    cell.style.borderRadius = '6px';
+    cell.style.borderRadius = '4px';
     return cell;
 }
 
@@ -5556,14 +5556,14 @@ function createDropSection({ containerClassName, titleId, displayId }) {
     const displayDiv = document.createElement("div");
     displayDiv.id = displayId;
     displayDiv.style.width = "100%";
-    displayDiv.style.padding = "4px";
+    displayDiv.style.padding = "2px";
     applyThemeFramedDisplaySurface(displayDiv);
     displayDiv.style.fontSize = "11px";
     displayDiv.style.overflowY = "scroll";
     displayDiv.style.flexGrow = "1";
     displayDiv.style.display = "flex";
     displayDiv.style.flexDirection = "column";
-    displayDiv.style.gap = "6px";
+    displayDiv.style.gap = "2px";
 
     container.appendChild(titleContainer);
     container.appendChild(displayDiv);

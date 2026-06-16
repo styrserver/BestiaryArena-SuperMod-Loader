@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.2.4",
+      "changes": [
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Loot and creature drop grids use tighter spacing: 2px grid and display flex gaps, 2px cell padding, 4px cell border radius, and 2px display padding."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "fixed",
+          "text": "Runs are captured once per battle via the network server-results path only; removed the board subscription re-process that could save the same win again after XP applied (e.g. level 12 then 13). Session dedupe by seed + mapId keeps battle-time creature levels in saved setups."
+        }
+      ]
+    },
+    {
       "version": "4.2.3",
       "changes": [
         {

@@ -32,7 +32,6 @@ const PROFILE_PAGE_DATA_URL = 'https://bestiaryarena.com/api/trpc/serverSide.pro
 
 // Debounce times
 const RUN_DEBOUNCE_TIME = 2000; // 2 seconds
-const BOARD_DEBOUNCE_TIME = 1000; // 1 second
 const NETWORK_DEBOUNCE_TIME = 1000; // 1 second
 
 // =======================
@@ -69,12 +68,12 @@ let isInitializing = false;
 let hasInitialized = false;
 let initializationPromise = null;
 
+// Server results already handled for this session (seed + mapId)
+const processedServerResultKeys = new Set();
+
 // Cleanup tracking for memory leak prevention
-let boardUnsubscribe = null;
-let gameTimerUnsubscribe = null;
 let originalFetch = null;
 let originalConsoleLog = null;
-let retryInterval = null;
 let latestKnownSeason = 2;
 let seasonLastFetchedAt = 0;
 let seasonFetchPromise = null;
@@ -84,26 +83,8 @@ async function performCleanup() {
   try {
     console.log('[RunTracker] Cleaning up mod resources...');
     
-    // Unsubscribe from game state listeners
-    if (boardUnsubscribe && typeof boardUnsubscribe === 'function') {
-      boardUnsubscribe();
-      boardUnsubscribe = null;
-      console.log('[RunTracker] Unsubscribed from board state');
-    }
-    
-    if (gameTimerUnsubscribe && typeof gameTimerUnsubscribe === 'function') {
-      gameTimerUnsubscribe();
-      gameTimerUnsubscribe = null;
-      console.log('[RunTracker] Unsubscribed from game timer state');
-    }
-    
-    // Clear retry interval
-    if (retryInterval) {
-      clearInterval(retryInterval);
-      retryInterval = null;
-      console.log('[RunTracker] Cleared retry interval');
-    }
-    
+    processedServerResultKeys.clear();
+
     // Restore original global functions
     if (originalFetch) {
       console.log('[RunTracker] Restoring original fetch function');
@@ -186,7 +167,6 @@ const Utils = {
     }
   },
   
-  // Safe localStorage operations
   safeLocalStorage: {
     get: (key, fallback = null) => {
       try {
@@ -208,6 +188,10 @@ const Utils = {
     }
   }
 };
+
+function getServerResultKey(seed, mapId) {
+  return `${seed}_${mapId || 'unknown'}`;
+}
 
 // =======================
 // 3.1. Monster & Equipment Name Resolution
@@ -1104,6 +1088,18 @@ async function addRun(runData) {
       console.warn('[RunTracker] Invalid run data:', runData);
       return false;
     }
+
+    if (runData.seed === undefined || runData.seed === null) {
+      console.warn('[RunTracker] Invalid run data: missing seed', runData);
+      return false;
+    }
+
+    const resultKey = getServerResultKey(runData.seed, runData.mapId);
+    if (processedServerResultKeys.has(resultKey)) {
+      console.log('[RunTracker] Skipping already processed server results:', resultKey);
+      return false;
+    }
+    processedServerResultKeys.add(resultKey);
     
     // Ensure runStorage is properly initialized
     if (!runStorage) {
@@ -1114,15 +1110,6 @@ async function addRun(runData) {
     if (!runStorage.runs) {
       console.warn('[RunTracker] runStorage.runs is undefined, initializing');
       runStorage.runs = {};
-    }
-    
-    // Create a unique key for this run
-    const runKey = `${runData.seed}_${runData.mapKey}`;
-    
-    // Check if we've recently processed this run
-    if (Utils.debouncer.isDebounced(runKey)) {
-      console.log('[RunTracker] Skipping duplicate run (debounced):', runKey);
-      return false;
     }
     
     // Get current board setup for comparison
@@ -1210,9 +1197,6 @@ async function addRun(runData) {
         console.log('[RunTracker] New run is not better than existing run in checked categories, but will check each category independently');
       }
     }
-    
-    // Debounce this run
-    Utils.debouncer.debounce(runKey, RUN_DEBOUNCE_TIME, () => {});
     
     // Initialize map if it doesn't exist
     if (!runStorage.runs[runData.mapKey]) {
@@ -1685,77 +1669,6 @@ async function cleanupDefeatedRuns() {
 // =======================
 // 7. Event Listeners
 // =======================
-// Set up server results listener
-function setupResultsListener() {
-  try {
-    // Try to set up listeners immediately
-    function setupListeners() {
-      // Listen for game board subscription (like Hunt Analyzer)
-      if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
-        boardUnsubscribe = globalThis.state.board.subscribe(({ context }) => {
-          // Check if RunTracker is enabled before processing
-          if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
-            return;
-          }
-          
-          const serverResults = context.serverResults;
-          if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') return;
-          
-          // Create a unique key for this board update
-          const boardKey = `${serverResults.seed}_${serverResults.rewardScreen.roomId || 'unknown'}`;
-          
-          // Check if we've recently processed this board update
-          if (Utils.debouncer.isDebounced(boardKey)) {
-            console.log('[RunTracker] Skipping duplicate board update (debounced):', boardKey);
-            return;
-          }
-          
-          // Debounce this board update
-          Utils.debouncer.debounce(boardKey, BOARD_DEBOUNCE_TIME, () => {});
-          
-          // Parse and store the run
-          const runData = parseServerResults(serverResults);
-          if (runData) {
-            addRun(runData);
-          }
-        });
-        console.log('[RunTracker] Server results listener set up');
-        return true;
-      }
-      
-      // Alternative: Listen for game timer subscription
-      if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.gameTimer && globalThis.state.gameTimer.subscribe) {
-        gameTimerUnsubscribe = globalThis.state.gameTimer.subscribe((data) => {
-          const { readableGrade, rankPoints } = data.context;
-          if ((readableGrade !== undefined && readableGrade !== null) || (rankPoints !== undefined && rankPoints !== null)) {
-            // This might be a game end event, but we need server results for full data
-            console.log('[RunTracker] Game end detected, but waiting for server results');
-          }
-        });
-      }
-      
-      return false;
-    }
-    
-    // Try immediately, then retry a few times if needed
-    if (!setupListeners()) {
-      let attempts = 0;
-      const maxAttempts = 10;
-      retryInterval = setInterval(() => {
-        attempts++;
-        if (setupListeners() || attempts >= maxAttempts) {
-          clearInterval(retryInterval);
-          if (attempts >= maxAttempts) {
-            console.log('[RunTracker] Game state not available, will retry when available');
-          }
-        }
-      }, 100);
-    }
-  } catch (error) {
-    console.error('[RunTracker] Error setting up results listener:', error);
-  }
-}
-
 // Set up network listener to catch server results and replay data
 function setupNetworkListener() {
   try {
@@ -1785,8 +1698,7 @@ function setupNetworkListener() {
           
           // Check if this contains server results
           if (data && data.rewardScreen && typeof data.seed !== 'undefined') {
-            // Create a unique key for this request
-            const requestKey = `${data.seed}_${data.rewardScreen.roomId || 'unknown'}`;
+            const requestKey = getServerResultKey(data.seed, data.rewardScreen.roomId);
             
             // Check if we've recently processed this request
             if (Utils.debouncer.isDebounced(requestKey)) {
@@ -1864,7 +1776,6 @@ async function initialize() {
   try {
     await initializeStorage();
     fetchLatestProfileSeason();
-    setupResultsListener();
     setupNetworkListener();
     
     // Clean up any existing defeated runs with 0 rank points
