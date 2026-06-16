@@ -7676,9 +7676,7 @@
             if (perChunk.isPercent || basePercent != null) {
                 const base = basePercent ?? 0;
                 const attackSpeed = isAttackSpeedScalingContext(contextText);
-                const extra = attackSpeed
-                    ? (statValue / perChunk.chunkSize) * (perChunk.amount / 2)
-                    : (statValue / perChunk.chunkSize) * perChunk.amount;
+                const extra = (statValue / perChunk.chunkSize) * perChunk.amount;
                 let totalPercent = base + extra;
                 let capped = false;
                 const capMatch = String(contextText || '').match(/capped at\s*([+-]?[\d.]+)\s*%/i);
@@ -7695,9 +7693,7 @@
                 }
                 const total = Math.floor(totalPercent);
                 const amountSuffix = '%';
-                const inner = attackSpeed
-                    ? `${base}${amountSuffix} + ${statValue} ${statLabel} × ${perChunk.amount / (2 * perChunk.chunkSize)}${amountSuffix}`
-                    : `${base}${amountSuffix} + (${statValue} ${statLabel} ÷ ${perChunk.chunkSize}) × ${perChunk.amount}${amountSuffix}`;
+                const inner = `${base}${amountSuffix} + (${statValue} ${statLabel} ÷ ${perChunk.chunkSize}) × ${perChunk.amount}${amountSuffix}`;
                 const expression = formatScalingExpression(inner, totalPercent, total, amountSuffix);
                 return {
                     value: total,

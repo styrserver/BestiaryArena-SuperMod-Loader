@@ -1307,6 +1307,172 @@
     }
   }
 
+  function getEntryFloorTicks(entry) {
+    if (!entry) {
+      return null;
+    }
+    if (entry.floorTicks !== null && entry.floorTicks !== undefined) {
+      return entry.floorTicks;
+    }
+    if (entry.ticks !== null && entry.ticks !== undefined) {
+      return entry.ticks;
+    }
+    return null;
+  }
+
+  function isTicksBetterOrEqual(userTicks, wrTicks) {
+    if (userTicks === null || userTicks === undefined) {
+      return false;
+    }
+    if (wrTicks === null || wrTicks === undefined) {
+      return true;
+    }
+    return userTicks <= wrTicks;
+  }
+
+  function isRankBetterOrEqual(userRank, userTicks, wrRank, wrTicks) {
+    if (userRank === null || userRank === undefined) {
+      return false;
+    }
+    if (wrRank === null || wrRank === undefined) {
+      return true;
+    }
+    if (userRank > wrRank) {
+      return true;
+    }
+    if (userRank < wrRank) {
+      return false;
+    }
+    return isTicksBetterOrEqual(userTicks, wrTicks);
+  }
+
+  function isFloorBetterOrEqual(userFloor, userFloorTicks, wrFloor, wrFloorTicks) {
+    const normalizedUserFloor = userFloor !== null && userFloor !== undefined ? userFloor : 0;
+    if (wrFloor === null || wrFloor === undefined) {
+      return true;
+    }
+    if (normalizedUserFloor > wrFloor) {
+      return true;
+    }
+    if (normalizedUserFloor < wrFloor) {
+      return false;
+    }
+    return isTicksBetterOrEqual(userFloorTicks, wrFloorTicks);
+  }
+
+  function getBestLeaderboardEntry(data, config) {
+    if (!data || data.length === 0) {
+      return null;
+    }
+    if (data.length === 1) {
+      return data[0];
+    }
+
+    return data.reduce((best, entry) => {
+      if (!best) {
+        return entry;
+      }
+      if (config.isFloor) {
+        return isFloorBetterOrEqual(
+          entry.floor,
+          getEntryFloorTicks(entry),
+          best.floor,
+          getEntryFloorTicks(best)
+        ) ? entry : best;
+      }
+      if (config.isRank) {
+        return isRankBetterOrEqual(
+          entry.rank,
+          entry.ticks,
+          best.rank,
+          best.ticks
+        ) ? entry : best;
+      }
+      return isTicksBetterOrEqual(entry.ticks, best.ticks) ? entry : best;
+    }, null);
+  }
+
+  function userBeatsOrTiesWorldRecord(userScores, wrEntry, config) {
+    if (!wrEntry) {
+      return false;
+    }
+    if (config.isFloor) {
+      return isFloorBetterOrEqual(
+        userScores?.bestFloor,
+        userScores?.bestFloorTicks,
+        wrEntry.floor,
+        getEntryFloorTicks(wrEntry)
+      );
+    }
+    if (config.isRank) {
+      return isRankBetterOrEqual(
+        userScores?.bestRank,
+        userScores?.bestRankTicks,
+        wrEntry.rank,
+        wrEntry.ticks
+      );
+    }
+    return isTicksBetterOrEqual(userScores?.bestTicks, wrEntry.ticks);
+  }
+
+  function buildTopDisplayEntry(wrEntry, userScores, config, playerName) {
+    if (!wrEntry || !userBeatsOrTiesWorldRecord(userScores, wrEntry, config)) {
+      return wrEntry;
+    }
+
+    if (config.isFloor) {
+      return {
+        userName: playerName,
+        floor: userScores?.bestFloor !== null && userScores?.bestFloor !== undefined ? userScores.bestFloor : 0,
+        floorTicks: userScores?.bestFloorTicks,
+        ticks: userScores?.bestFloorTicks
+      };
+    }
+    if (config.isRank) {
+      return {
+        userName: playerName,
+        rank: userScores?.bestRank,
+        ticks: userScores?.bestRankTicks
+      };
+    }
+    return {
+      userName: playerName,
+      ticks: userScores?.bestTicks
+    };
+  }
+
+  function getUserProgressValue(userScores, wrEntry, config) {
+    if (config.isFloor) {
+      if (userScores?.bestFloor !== null && userScores?.bestFloor !== undefined) {
+        return userScores.bestFloor;
+      }
+      return wrEntry?.floor ?? null;
+    }
+    if (config.isRank) {
+      if (userScores?.bestRank !== null && userScores?.bestRank !== undefined) {
+        return userScores.bestRank;
+      }
+      return wrEntry?.rank ?? null;
+    }
+    return null;
+  }
+
+  function scoresAreEqual(userScores, wrEntry, config) {
+    if (!wrEntry) {
+      return false;
+    }
+    if (config.isFloor) {
+      const userFloor = userScores?.bestFloor !== null && userScores?.bestFloor !== undefined ? userScores.bestFloor : 0;
+      return userFloor === wrEntry.floor &&
+        userScores?.bestFloorTicks === getEntryFloorTicks(wrEntry);
+    }
+    if (config.isRank) {
+      return userScores?.bestRank === wrEntry.rank &&
+        userScores?.bestRankTicks === wrEntry.ticks;
+    }
+    return userScores?.bestTicks === wrEntry.ticks;
+  }
+
   function formatLeaderboardEntry(entry, index, isRankLeaderboard = false, isFloorLeaderboard = false, fallbackTick = null) {
     const medalColor = getMedalColor(index + 1);
     
@@ -1385,35 +1551,24 @@
         section.appendChild(maxDisplay);
       }
       
+      const wrEntry = getBestLeaderboardEntry(data, config);
+
       // Get user and top values
       let userValue, worldRecordValue;
       if (config.isFloor) {
         // Default to 0 if no floor data
         userValue = userScores?.bestFloor !== null && userScores?.bestFloor !== undefined ? userScores.bestFloor : 0;
-        worldRecordValue = data[0].floor;
+        worldRecordValue = wrEntry.floor;
       } else if (config.isRank) {
         userValue = userScores?.bestRank;
-        worldRecordValue = data[0].rank;
+        worldRecordValue = wrEntry.rank;
       } else {
         userValue = userScores?.bestTicks;
-        worldRecordValue = data[0].ticks;
+        worldRecordValue = wrEntry.ticks;
       }
       
-      const userHoldsWorldRecord = data[0].userName === playerName;
-      
-      // For floor, check both floor value and time (ticks)
-      let userTiesWorldRecord = userValue === worldRecordValue;
-      if (config.isFloor && userTiesWorldRecord) {
-        const userFloorTicks = userScores?.bestFloorTicks;
-        const wrFloorTicks = data[0].floorTicks !== null && data[0].floorTicks !== undefined 
-          ? data[0].floorTicks 
-          : data[0].ticks;
-        
-        // Only green if floor equals WR floor AND time is equal or better
-        userTiesWorldRecord = userFloorTicks !== null && userFloorTicks !== undefined && 
-                              wrFloorTicks !== null && wrFloorTicks !== undefined && 
-                              userFloorTicks <= wrFloorTicks;
-      }
+      const userHoldsWorldRecord = userBeatsOrTiesWorldRecord(userScores, wrEntry, config);
+      const userTiesWorldRecord = scoresAreEqual(userScores, wrEntry, config);
       
       // User's best score (display first, only if not world record holder)
       // For floor, always show user value (defaults to 0 if no data)
@@ -1460,11 +1615,12 @@
         section.appendChild(userEntrySpan);
       }
       
-      // Top entry (display second)
-      data.slice(0, 1).forEach((entry, index) => {
-        // For floor entries with floor 0, use best tick from tick leaderboard as fallback
-        const fallbackTick = (config.isFloor && entry.floor === 0 && tickData && tickData.length > 0) 
-          ? tickData[0].ticks 
+      // Top entry (display second) — use best API entry, or your score when you beat stale WR data
+      const topEntry = buildTopDisplayEntry(wrEntry, userScores, config, playerName);
+      [topEntry].filter(Boolean).forEach((entry, index) => {
+        const bestTickEntry = tickData && tickData.length > 0 ? getBestLeaderboardEntry(tickData, {}) : null;
+        const fallbackTick = (config.isFloor && entry.floor === 0 && bestTickEntry)
+          ? bestTickEntry.ticks
           : null;
         const formattedEntry = formatLeaderboardEntry(entry, index, config.isRank, config.isFloor, fallbackTick);
         const entrySpan = document.createElement('span');
@@ -1525,8 +1681,10 @@
     // Get max values
     const maxRankPoints = getMaxRankPoints();
     const maxFloor = getMaxFloor();
-    const currentRankRecord = rankData && rankData.length > 0 ? rankData[0].rank : null;
-    const currentFloorRecord = floorData && floorData.length > 0 ? floorData[0].floor : null;
+    const bestRankEntry = getBestLeaderboardEntry(rankData, { isRank: true });
+    const bestFloorEntry = getBestLeaderboardEntry(floorData, { isFloor: true });
+    const currentRankRecord = getUserProgressValue(userScores, bestRankEntry, { isRank: true });
+    const currentFloorRecord = getUserProgressValue(userScores, bestFloorEntry, { isFloor: true });
     
     // Get the three sections (tick, rank, floor)
     const sections = contentDiv.children;
@@ -1664,8 +1822,10 @@
     // Get max values for rank and floor
     const maxRankPoints = getMaxRankPoints();
     const maxFloor = getMaxFloor();
-    const currentRankRecord = rankData && rankData.length > 0 ? rankData[0].rank : null;
-    const currentFloorRecord = floorData && floorData.length > 0 ? floorData[0].floor : null;
+    const bestRankEntry = getBestLeaderboardEntry(rankData, { isRank: true });
+    const bestFloorEntry = getBestLeaderboardEntry(floorData, { isFloor: true });
+    const currentRankRecord = getUserProgressValue(userScores, bestRankEntry, { isRank: true });
+    const currentFloorRecord = getUserProgressValue(userScores, bestFloorEntry, { isFloor: true });
     
     // Create tick leaderboard section
     const tickSection = createLeaderboardSection(tickData, {

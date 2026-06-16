@@ -4,8 +4,13 @@
   },
   "notes": [
     {
-      "version": "4.2.2",
+      "version": "4.2.3",
       "changes": [
+        {
+          "mod": "Better Forge",
+          "type": "added",
+          "text": "Arsenal Type filter (click to cycle All, Type, T1–T5). All keeps tier-high-first sort; Type and tier filters sort by equipment name, then tier high to low."
+        },
         {
           "mod": "equipment-database.js",
           "type": "added",
@@ -15,6 +20,11 @@
           "mod": "Better Analytics",
           "type": "changed",
           "text": "Pre-battle equipment cooldown reduction refactor: first render may show base CD, then board cards auto-refresh to tier-scaled CD after async EffectComponent parsing cache resolves (Cyclopedia-style mount/read path). Removed deprecated chunk/script CDR helper path and debug logging noise."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Attack speed buff tooltip scaling now uses full per-stat ratio (removed incorrect /2 halving), aligning passive math with in-game values (e.g., Deer AP scaling)."
         }
       ]
     },

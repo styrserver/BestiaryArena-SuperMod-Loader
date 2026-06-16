@@ -73,8 +73,8 @@
     selectedEquipmentFilter: null,
     // Track global search term across tabs
     globalSearchTerm: '',
-    // Track global tier filter across tabs
-    globalTierFilter: 'all'
+    // Track global type filter across tabs (All, Type, T1–T5)
+    globalTypeFilter: 'all'
   };
 
   // ============================================================================
@@ -1359,12 +1359,12 @@
       if (!modalGrid) return;
 
       const searchInput = document.getElementById('better-forge-search');
-      const filterBtn = document.getElementById('better-forge-filter');
+      const filterBtn = document.getElementById('better-forge-type');
       const allEquipment = getUserOwnedEquipment();
       const selectedEquipment = forgeState.selectedEquipmentFilter || getCurrentSelection().selectedEquipment;
       const searchTerm = searchInput?.value?.trim() || selectedEquipment || forgeState.globalSearchTerm || '';
-      const tierFilter = forgeState.globalTierFilter || 'all';
-      const equipmentToShow = applyFilters(allEquipment, searchTerm, tierFilter);
+      const typeFilter = forgeState.globalTypeFilter || 'all';
+      const equipmentToShow = applyFilters(allEquipment, searchTerm, typeFilter);
 
       if (searchTerm) {
         applyEquipmentSearch(modalGrid, searchTerm, equipmentToShow, transferToDisenchant);
@@ -1373,7 +1373,7 @@
       }
 
       if (filterBtn) {
-        updateFilterButtonText(filterBtn, tierFilter);
+        updateFilterButtonText(filterBtn, typeFilter);
       }
 
       setTimeout(() => {
@@ -1409,7 +1409,8 @@
       const existingButtons = Array.from(arsenalScrollArea.querySelectorAll('button[data-equipment-id]'));
       let insertIndex = 0;
       
-      // Sort by tier (descending), then by name, then by stat
+      const typeFilter = forgeState.globalTypeFilter || 'all';
+      const compare = getEquipmentSortComparator(typeFilter);
       for (let i = 0; i < existingButtons.length; i++) {
         const existingBtn = existingButtons[i];
         
@@ -1427,25 +1428,9 @@
           stat: existingBtn.getAttribute('data-stat') || ''
         };
         
-        // Compare tiers first (higher tiers first)
-        if (equipment.tier > existingEquipment.tier) {
+        if (compare(equipment, existingEquipment) < 0) {
           insertIndex = i;
-          console.log(`[Better Forge] 📍 Inserting at position ${i} (higher tier)`);
           break;
-        } else if (equipment.tier === existingEquipment.tier) {
-          // Same tier, compare names
-          if (equipment.name < existingEquipment.name) {
-            insertIndex = i;
-            console.log(`[Better Forge] 📍 Inserting at position ${i} (same tier, name comes first)`);
-            break;
-          } else if (equipment.name === existingEquipment.name) {
-            // Same name, compare stats
-            if (equipment.stat < existingEquipment.stat) {
-              insertIndex = i;
-              console.log(`[Better Forge] 📍 Inserting at position ${i} (same tier/name, stat comes first)`);
-              break;
-            }
-          }
         }
         insertIndex = i + 1;
       }
@@ -2404,13 +2389,39 @@
   // ============================================================================
   // 7. FILTER AND SEARCH UTILITIES
   // ============================================================================
+
+  const TYPE_FILTER_OPTIONS = ['All', 'Type', 'T1', 'T2', 'T3', 'T4', 'T5'];
+
+  function compareEquipmentByTierThenName(a, b) {
+    if (a.tier !== b.tier) return b.tier - a.tier;
+    if (a.name !== b.name) return a.name.localeCompare(b.name);
+    return a.stat.localeCompare(b.stat);
+  }
+
+  function compareEquipmentByNameThenTier(a, b) {
+    if (a.name !== b.name) return a.name.localeCompare(b.name);
+    if (a.tier !== b.tier) return b.tier - a.tier;
+    return a.stat.localeCompare(b.stat);
+  }
+
+  function usesTypeSort(typeFilter) {
+    return typeFilter === 'type';
+  }
+
+  function getEquipmentSortComparator(typeFilter) {
+    return usesTypeSort(typeFilter) ? compareEquipmentByNameThenTier : compareEquipmentByTierThenName;
+  }
+
+  function sortEquipmentForDisplay(equipment, typeFilter) {
+    return [...equipment].sort(getEquipmentSortComparator(typeFilter));
+  }
   
-  // Centralized filter logic
-  function applyTierFilter(equipment, tierFilter) {
-    if (!tierFilter || tierFilter === 'all') {
+  // Centralized type/tier filter logic
+  function applyTypeFilter(equipment, typeFilter) {
+    if (!typeFilter || typeFilter === 'all' || typeFilter === 'type') {
       return equipment;
     }
-    const tierNum = parseInt(tierFilter.substring(1));
+    const tierNum = parseInt(typeFilter.substring(1));
     return equipment.filter(equip => equip.tier === tierNum);
   }
   
@@ -2419,12 +2430,11 @@
     return searchBarContent || globalSearchTerm || '';
   }
   
-  // Apply both tier and search filters
-  function applyFilters(equipment, searchTerm, tierFilter) {
+  // Apply type filter and search filters
+  function applyFilters(equipment, searchTerm, typeFilter) {
     let filtered = equipment;
     
-    // Apply tier filter first
-    filtered = applyTierFilter(filtered, tierFilter);
+    filtered = applyTypeFilter(filtered, typeFilter);
     
     // Apply search filter if present
     if (searchTerm) {
@@ -2443,13 +2453,12 @@
     }
   }
   
-  // Update filter button text
-  function updateFilterButtonText(filterBtn, tierFilter) {
-    if (filterBtn && tierFilter) {
-      const filterOptions = ['All', 'T1', 'T2', 'T3', 'T4', 'T5'];
-      const filterIndex = filterOptions.findIndex(option => option.toLowerCase() === tierFilter);
+  // Update type filter button text
+  function updateFilterButtonText(filterBtn, typeFilter) {
+    if (filterBtn && typeFilter) {
+      const filterIndex = TYPE_FILTER_OPTIONS.findIndex(option => option.toLowerCase() === typeFilter);
       if (filterIndex >= 0) {
-        filterBtn.textContent = filterOptions[filterIndex];
+        filterBtn.textContent = TYPE_FILTER_OPTIONS[filterIndex];
       }
     }
   }
@@ -3186,7 +3195,7 @@
     forgeState.selectedEquipmentFilter = null;
     forgeState.highlightedEquipment.clear();
     forgeState.globalSearchTerm = '';
-    forgeState.globalTierFilter = 'all';
+    forgeState.globalTypeFilter = 'all';
   }
 
   function clearAutoUpgradeSelection() {
@@ -3246,7 +3255,7 @@
             
             // Update filter button using centralized logic
             const filterBtn = actualMainContent.querySelector('button');
-            updateFilterButtonText(filterBtn, forgeState.globalTierFilter);
+            updateFilterButtonText(filterBtn, forgeState.globalTypeFilter);
             
             if (searchTerm) {
               // Apply search filter if search bar has text or global search term exists
@@ -3254,12 +3263,12 @@
               updateSearchInput(searchInput, searchTerm, searchBarContent);
               
               // Apply filters using centralized logic
-              const equipmentToSearch = applyFilters(allEquipment, searchTerm, forgeState.globalTierFilter);
+              const equipmentToSearch = applyFilters(allEquipment, searchTerm, forgeState.globalTypeFilter);
               
               applyEquipmentSearch(scrollArea, searchTerm, equipmentToSearch, transferToDisenchant);
             } else {
               // Apply tier filter even when no search term
-              const equipmentToShow = applyFilters(allEquipment, '', forgeState.globalTierFilter);
+              const equipmentToShow = applyFilters(allEquipment, '', forgeState.globalTypeFilter);
               
               renderEquipmentList(scrollArea, equipmentToShow, transferToDisenchant);
             }
@@ -4147,12 +4156,10 @@
                    scrollArea.id = 'better-forge-modal-arsenal-grid';
                    scrollArea.style.cssText = 'flex: 1 1 0; height: calc(100% - 40px); min-height: 0; width: 100%; max-width: 100%; overflow-y: auto; display: grid; grid-template-columns: repeat(6, 34px); grid-auto-rows: 34px; gap: 0; padding: 5px; background: rgba(40,40,40,0.96); box-sizing: border-box; justify-content: center;';
                    
-                   let currentFilter = forgeState.globalTierFilter || 'all';
+                   let currentFilter = forgeState.globalTypeFilter || 'all';
                    let filteredEquipment = availableEquipment;
                    let currentSearchTerm = forgeState.globalSearchTerm || '';
-                   // Initialize filter index based on current filter
-                   const filterOptions = ['All', 'T1', 'T2', 'T3', 'T4', 'T5'];
-                   let currentFilterIndex = filterOptions.findIndex(option => option.toLowerCase() === currentFilter);
+                   let currentFilterIndex = TYPE_FILTER_OPTIONS.findIndex(option => option.toLowerCase() === currentFilter);
                    if (currentFilterIndex < 0) currentFilterIndex = 0;
                    
                    // Set search input to global search term
@@ -4202,11 +4209,11 @@
                    });
                    
                    eventManager.add(filterBtn, 'click', () => {
-                     currentFilterIndex = (currentFilterIndex + 1) % filterOptions.length;
-                     const selectedFilter = filterOptions[currentFilterIndex];
+                     currentFilterIndex = (currentFilterIndex + 1) % TYPE_FILTER_OPTIONS.length;
+                     const selectedFilter = TYPE_FILTER_OPTIONS[currentFilterIndex];
                      
-                     currentFilter = selectedFilter.toLowerCase(); // Update currentFilter variable
-                     forgeState.globalTierFilter = currentFilter; // Store globally
+                     currentFilter = selectedFilter.toLowerCase();
+                     forgeState.globalTypeFilter = currentFilter;
                      
                      // Update filter button text using centralized logic
                      updateFilterButtonText(filterBtn, currentFilter);
@@ -4223,7 +4230,7 @@
                      }
                      
                      // Apply tier filter using centralized logic
-                     filteredEquipment = applyTierFilter(baseEquipment, currentFilter);
+                     filteredEquipment = applyTypeFilter(baseEquipment, currentFilter);
                      
                      scrollArea.innerHTML = '';
                      
@@ -4253,7 +4260,7 @@
                      }
                      
                      // Apply tier filter using centralized logic
-                     filteredEquipment = applyTierFilter(baseEquipment, currentFilter);
+                     filteredEquipment = applyTypeFilter(baseEquipment, currentFilter);
                      
                      if (!filteredEquipment.length) {
                        scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">No equipment found.</div>';
@@ -4356,7 +4363,8 @@
          });
          
          const filterBtn = document.createElement('button');
-         filterBtn.id = 'better-forge-filter';
+         filterBtn.id = 'better-forge-type';
+         filterBtn.title = 'Type';
          filterBtn.textContent = 'All';
          filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 50px;';
          
@@ -4507,12 +4515,7 @@
            return;
          }
        
-       // Sort equipment items before rendering
-       const sortedEquipment = [...equipmentItems].sort((a, b) => {
-         if (a.tier !== b.tier) return b.tier - a.tier;
-         if (a.name !== b.name) return a.name.localeCompare(b.name);
-         return a.stat.localeCompare(b.stat);
-       });
+       const sortedEquipment = sortEquipmentForDisplay(equipmentItems, forgeState.globalTypeFilter || 'all');
        
        for (const equipment of sortedEquipment) {
          const btn = createEquipmentButton(equipment, onSelect);
@@ -4539,19 +4542,14 @@
              equipment.name.toLowerCase().includes(searchTerm)
            );
            
-           if (matchingEquipment.length > 0) {
-             matchingEquipment.sort((a, b) => {
-               if (a.tier !== b.tier) return b.tier - a.tier;
-               if (a.name !== b.name) return a.name.localeCompare(b.name);
-               return a.stat.localeCompare(b.stat);
-             });
-           }
+           const typeFilter = forgeState.globalTypeFilter || 'all';
+           const sortedMatches = sortEquipmentForDisplay(matchingEquipment, typeFilter);
            
            requestAnimationFrame(() => {
              try {
                scrollArea.innerHTML = '';
                
-               if (matchingEquipment.length === 0) {
+               if (sortedMatches.length === 0) {
                  const noResultsMsg = document.createElement('div');
                  noResultsMsg.style.cssText = `
                    color: #bbb;
@@ -4566,7 +4564,7 @@
                  scrollArea.appendChild(noResultsMsg);
                } else {
                  const fragment = document.createDocumentFragment();
-                 matchingEquipment.forEach(equipment => {
+                 sortedMatches.forEach(equipment => {
                    const btn = createEquipmentButton(equipment, onSelect);
                    fragment.appendChild(btn);
                  });
