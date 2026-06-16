@@ -6747,7 +6747,7 @@
             getBoardPreviewCacheSig(),
             previewStats.stats.ap,
             previewStats.stats.ad,
-            resolved.equipment?.name ?? resolved.equipment?.metadata?.name ?? ''
+            previewEquipmentSig(resolved.equipment)
         ].join('|');
         const cached = previewMechanicsResultCache.get(cacheKey);
         if (cached) return cached;
@@ -8083,7 +8083,7 @@
         equipment: {
             key: 'equipment',
             preferredChunkIds: [876, 277, 235],
-            markers: ['COOLDOWN_REDUCTION_PERCENT', 'addPercentageModifier']
+            markers: ['extends p.V', 'COOLDOWN_REDUCTION_PERCENT', 'addPercentageModifier']
         }
     };
 
@@ -8133,6 +8133,13 @@
     }
 
     function scriptTextMatchesProfile(text, profile) {
+        if (!text || !profile) return false;
+        if (profile.key === 'equipment') {
+            // Minified aliases differ between builds; match CDR equip structure, not exact tokens.
+            return /COOLDOWN_REDUCTION_PERCENT/.test(text)
+                && /addPercentageModifier\(-\w+\.COOLDOWN_REDUCTION_PERCENT\)/.test(text)
+                && /class \w+ extends \w+\.V\{constructor\(e\)\{super\(e,\w+\)/.test(text);
+        }
         return profile.markers.every((marker) => text.includes(marker));
     }
 
@@ -8241,7 +8248,8 @@
 
     let cachedGameChunk235Text = null;
     let cachedGameChunk235Promise = null;
-    let cachedEquipmentCdrPercentByKey = null;
+    const runtimeEquipmentCdrPercentCache = new Map();
+    const pendingRuntimeEquipmentCdr = new Set();
 
     function findGameChunk235ScriptUrl() {
         return discoveredGameChunkUrlByProfile.get('equipment')
@@ -8251,25 +8259,19 @@
     }
 
     function ensureGameChunk235Text() {
+        if (cachedGameChunk235Text
+            && !scriptTextMatchesProfile(cachedGameChunk235Text, GAME_SCRIPT_CHUNK_PROFILES.equipment)) {
+            cachedGameChunk235Text = null;
+        }
         if (cachedGameChunk235Text) return Promise.resolve(cachedGameChunk235Text);
         if (!cachedGameChunk235Promise) {
             cachedGameChunk235Promise = (async () => {
-                await ensureGameChunk661Text().catch(() => null);
-                const monstersText = cachedGameChunk661Text;
-                const profile = GAME_SCRIPT_CHUNK_PROFILES.equipment;
-                if (monstersText && scriptTextMatchesProfile(monstersText, profile)) {
-                    cachedGameChunk235Text = monstersText;
-                    cachedEquipmentCdrPercentByKey = null;
-                    onGameChunkScriptLoadedForPreview();
-                    return cachedGameChunk235Text;
-                }
-                const text = await fetchGameScriptChunkText(profile);
+                const text = await fetchGameScriptChunkText(GAME_SCRIPT_CHUNK_PROFILES.equipment);
                 if (!text) {
                     cachedGameChunk235Promise = null;
                     return null;
                 }
                 cachedGameChunk235Text = text;
-                cachedEquipmentCdrPercentByKey = null;
                 onGameChunkScriptLoadedForPreview();
                 return cachedGameChunk235Text;
             })();
@@ -8277,55 +8279,112 @@
         return cachedGameChunk235Promise;
     }
 
-    function buildEquipmentCdrPercentLookup(scriptText) {
-        const map = new Map();
-        if (!scriptText) return map;
-
-        const cdrConsts = new Map();
-        for (const m of scriptText.matchAll(/\b(\w+)=\{[^}]*COOLDOWN_REDUCTION_PERCENT:([\d.]+)/g)) {
-            cdrConsts.set(m[1], Number(m[2]));
+    function parseRuntimeCooldownPercentFromText(text) {
+        const raw = String(text || '');
+        if (!raw) return null;
+        const matches = [...raw.matchAll(/([+-]?\d+(?:\.\d+)?)\s*%/g)];
+        if (!matches.length) return null;
+        let best = null;
+        for (const m of matches) {
+            const value = Number(m[1]);
+            if (!Number.isFinite(value)) continue;
+            const normalized = Math.abs(value) / 100;
+            if (best == null || normalized > best) best = normalized;
         }
-
-        const classRe = /class \w+ extends p\.V\{constructor\(e\)\{super\(e,(\w+)\)[\s\S]{0,1200}?addPercentageModifier\(-(\w+)\.COOLDOWN_REDUCTION_PERCENT\)/g;
-        for (const m of scriptText.matchAll(classRe)) {
-            const metaVar = m[1];
-            const cdrVar = m[2];
-            const percent = cdrConsts.get(cdrVar);
-            if (percent == null || !Number.isFinite(percent)) continue;
-
-            const metaPattern = new RegExp(`\\b${metaVar.replace(/\$/g, '\\$')}=\\{[^}]*name:"([^"]+)"`);
-            const metaMatch = metaPattern.exec(scriptText);
-            if (!metaMatch) continue;
-
-            const nameKey = metaMatch[1].toLowerCase();
-            map.set(nameKey, percent);
-            const spriteMatch = scriptText.slice(metaMatch.index, metaMatch.index + 400)
-                .match(/spriteId:(?:\w+\.)?(\w+)/);
-            if (spriteMatch) map.set(`sprite:${spriteMatch[1]}`, percent);
-        }
-        return map;
+        return best;
     }
 
-    function getEquipmentCdrPercentLookup() {
-        if (cachedEquipmentCdrPercentByKey) return cachedEquipmentCdrPercentByKey;
-        cachedEquipmentCdrPercentByKey = buildEquipmentCdrPercentLookup(cachedGameChunk235Text);
-        return cachedEquipmentCdrPercentByKey;
+    function getEquipmentCdrCacheKey(equipment) {
+        if (!equipment) return '';
+        return [
+            equipment.gameId ?? '',
+            equipment.spriteId ?? '',
+            String(equipment.name ?? ''),
+            equipment.tier ?? equipment.metadata?.tier ?? ''
+        ].join('|');
     }
+
+    function scheduleRuntimeEquipmentCooldownResolution(equipment) {
+        const key = getEquipmentCdrCacheKey(equipment);
+        if (!key || pendingRuntimeEquipmentCdr.has(key)) return;
+        pendingRuntimeEquipmentCdr.add(key);
+
+        const gameId = Number(equipment?.gameId);
+        const tier = Math.min(5, Math.max(1, Number.parseInt(equipment?.tier ?? equipment?.metadata?.tier, 10) || 5));
+        const getEquipment = globalThis.state?.utils?.getEquipment;
+        const createUIComponent = globalThis.state?.utils?.createUIComponent;
+        if (!Number.isFinite(gameId) || typeof getEquipment !== 'function' || typeof createUIComponent !== 'function' || !document?.createElement) {
+            pendingRuntimeEquipmentCdr.delete(key);
+            return;
+        }
+
+        let item;
+        try { item = getEquipment(gameId); } catch { item = null; }
+        const effectComponent = item?.metadata?.EffectComponent;
+        if (!effectComponent) {
+            pendingRuntimeEquipmentCdr.delete(key);
+            return;
+        }
+
+        const host = document.createElement('div');
+        host.style.cssText = 'position:fixed;left:-99999px;top:0;width:520px;max-width:520px;height:auto;overflow:visible;opacity:0;pointer-events:none;z-index:-1;';
+        const root = document.createElement('div');
+        root.className = 'tooltip-prose';
+        host.appendChild(root);
+        document.body?.appendChild(host);
+
+        let component = null;
+        try {
+            component = createUIComponent(root, effectComponent, { tier });
+            if (component && typeof component.mount === 'function') component.mount();
+        } catch {
+            try { component?.unmount?.(); } catch { /* ignore */ }
+            host.remove();
+            pendingRuntimeEquipmentCdr.delete(key);
+            return;
+        }
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                let parsed = null;
+                try {
+                    for (const node of root.querySelectorAll('.text-cooldown')) {
+                        parsed = parseRuntimeCooldownPercentFromText(node.textContent);
+                        if (parsed != null) break;
+                    }
+                    if (parsed == null) parsed = parseRuntimeCooldownPercentFromText(root.textContent);
+                } catch { /* ignore */ }
+
+                if (parsed != null && Number.isFinite(parsed) && parsed > 0) {
+                    runtimeEquipmentCdrPercentCache.set(key, parsed);
+                    invalidateBoardPreviewCache({ clearMechanicsLog: false });
+                    lastUnitsRenderKey = '';
+                    renderUnits(true);
+                }
+                try { component?.unmount?.(); } catch { /* ignore */ }
+                host.remove();
+                pendingRuntimeEquipmentCdr.delete(key);
+            });
+        });
+    }
+
 
     function resolveEquipmentCooldownReductionPercent(equipment) {
         if (!equipment) return 0;
 
-        const lookup = getEquipmentCdrPercentLookup();
-        const nameKey = equipment.name ? String(equipment.name).toLowerCase() : '';
-        let maxPercent = nameKey && lookup.has(nameKey) ? lookup.get(nameKey) : null;
+        const key = getEquipmentCdrCacheKey(equipment);
+        const cached = key ? runtimeEquipmentCdrPercentCache.get(key) : null;
+        if (cached != null && Number.isFinite(cached) && cached > 0) return cached;
 
-        if (maxPercent == null && equipment.gameId != null) {
-            const catalog = getEquipmentCatalogMeta(equipment.gameId);
-            const catalogName = catalog?.name?.toLowerCase();
-            if (catalogName && lookup.has(catalogName)) maxPercent = lookup.get(catalogName);
+        const fromDatabase = globalThis.equipmentDatabase?.getEquipmentCooldownReductionPercent;
+        if (typeof fromDatabase === 'function') {
+            const resolved = Number(fromDatabase(equipment));
+            if (Number.isFinite(resolved) && resolved > 0) return resolved;
         }
-        if (maxPercent == null || !Number.isFinite(maxPercent)) return 0;
-        return scaleEquipmentEffectForTier(maxPercent, equipment);
+
+        // Fallback 3 (async): EffectComponent runtime parse, then cache + re-render.
+        scheduleRuntimeEquipmentCooldownResolution(equipment);
+        return 0;
     }
 
     function resolvePreviewEquipmentPercentageBasis(equipment) {
@@ -8355,13 +8414,20 @@
     }
 
     function extractPreviewPercentageBasisSyncFrom661(scriptText, classSlice, metadataIndex) {
-        if (!scriptText || !classSlice) return null;
-        const m = classSlice.match(
-            /onCooldownReductionUpdateSync:e=>\{let t=\(0,\w+\.HX\)\((\w+)\.(\w+)\);t\*=e\.percentageBasis,t\+=e\.flatTicks,t=Math\.max\(t,\1\.(\w+)\)/
-        );
-        if (!m) return null;
-        const minMs = readScriptConstMinMs(scriptText, m[1], metadataIndex ?? 0);
-        return { constName: m[1], minMs };
+        if (!scriptText) return null;
+        const syncRe = /onCooldownReductionUpdateSync:e=>\{let t=\(0,\w+\.HX\)\((\w+)\.(\w+)\);t\*=e\.percentageBasis,t\+=e\.flatTicks,t=Math\.max\(t,\1\.(\w+)\)/;
+        const haystacks = [];
+        if (classSlice) haystacks.push(classSlice);
+        if (metadataIndex != null && metadataIndex >= 0) {
+            haystacks.push(scriptText.slice(metadataIndex, metadataIndex + 15000));
+        }
+        for (const haystack of haystacks) {
+            const m = haystack.match(syncRe);
+            if (!m) continue;
+            const minMs = readScriptConstMinMs(scriptText, m[1], metadataIndex ?? 0);
+            return { constName: m[1], minMs };
+        }
+        return null;
     }
 
     function parseScriptConstNumericValue(raw) {
@@ -9088,8 +9154,9 @@
         if (pick?.ms != null && Number.isFinite(pick.ms) && pick.ms > 0) {
             ms = pick.ms;
             source = pick.source;
-            if (percentageBasis !== 1 && percentageSync && pick.source === 'script-init') {
-                ms = applyPreviewPercentageBasisToCooldownMs(ms, percentageBasis, percentageSync.minMs);
+            if (percentageBasis !== 1 && pick.source === 'script-init') {
+                ms = applyPreviewPercentageBasisToCooldownMs(
+                    ms, percentageBasis, percentageSync?.minMs ?? null);
                 source = 'script-init+equip-cdr';
             } else if (percentageBasis !== 1 && pick.source === 'script-cdr') {
                 source = 'script-cdr+equip-cdr';
@@ -9482,7 +9549,7 @@
         if (!root) return 0;
 
         let applied = 0;
-        for (const span of root.querySelectorAll('.text-cooldown, .text-stun')) {
+        for (const span of root.querySelectorAll('.text-cooldown, .text-stun, .text-silence')) {
             if (span.classList.contains('bs-scaled-value') || span.classList.contains('bs-scaled-min-cd')) continue;
 
             const paragraph = span.closest('p');

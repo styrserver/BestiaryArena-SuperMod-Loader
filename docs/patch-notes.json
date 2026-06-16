@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.2.2",
+      "changes": [
+        {
+          "mod": "equipment-database.js",
+          "type": "added",
+          "text": "Equipment CDR source-of-truth exports: getEquipmentCdrPercentByGameIdMap() and getEquipmentCooldownReductionPercent(equipment), dynamically read from each equipment EffectComponent at the equipped tier (no hardcoded CDR values)."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Pre-battle equipment cooldown reduction refactor: first render may show base CD, then board cards auto-refresh to tier-scaled CD after async EffectComponent parsing cache resolves (Cyclopedia-style mount/read path). Removed deprecated chunk/script CDR helper path and debug logging noise."
+        }
+      ]
+    },
+    {
       "version": "4.2.1",
       "changes": [
         {

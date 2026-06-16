@@ -91,6 +91,92 @@ function getEquipmentTierColorLabel(tier) {
   return EQUIPMENT_TIER_COLOR_BY_NUMBER[clamped - 1] || null;
 }
 
+function parseCooldownPercentFromText(text) {
+  const raw = String(text || '');
+  if (!raw) return null;
+
+  const matches = [...raw.matchAll(/([+-]?\d+(?:\.\d+)?)\s*%/g)];
+  if (!matches.length) return null;
+
+  // Prefer the strongest percentage mention in the tooltip line/component.
+  let best = null;
+  for (const match of matches) {
+    const value = Number(match[1]);
+    if (!Number.isFinite(value)) continue;
+    const normalized = Math.abs(value) / 100;
+    if (best == null || normalized > best) best = normalized;
+  }
+  return best;
+}
+
+function readEquipmentCooldownReductionPercentFromItem(item, tier = DEFAULT_EQUIPMENT_EFFECT_TIER) {
+  const effectComponent = item?.metadata?.EffectComponent;
+  const createUIComponent = globalThis.state?.utils?.createUIComponent;
+  if (!effectComponent || typeof createUIComponent !== 'function' || !document?.createElement) return null;
+
+  const host = document.createElement('div');
+  host.style.display = 'none';
+  try {
+    document.body?.appendChild(host);
+    const clampedTier = clampEquipmentTier(tier) ?? DEFAULT_EQUIPMENT_EFFECT_TIER;
+    const component = createUIComponent(host, effectComponent, { tier: clampedTier });
+    if (component && typeof component.mount === 'function') component.mount();
+
+    // Prefer explicit cooldown spans from game tooltips.
+    for (const node of host.querySelectorAll('.text-cooldown')) {
+      const parsed = parseCooldownPercentFromText(node.textContent);
+      if (parsed != null) return parsed;
+    }
+    return parseCooldownPercentFromText(host.textContent);
+  } catch {
+    return null;
+  } finally {
+    try {
+      host._reactRootContainer?.unmount?.();
+    } catch { /* ignore */ }
+    host.remove();
+  }
+}
+
+function resolveEquipmentCatalogEntry(equipment) {
+  if (!equipment || typeof equipment !== 'object') return null;
+  const state = globalThis.state || window.state;
+  const gameId = Number(equipment.gameId);
+  if (Number.isFinite(gameId) && typeof state?.utils?.getEquipment === 'function') {
+    try {
+      const item = state.utils.getEquipment(gameId);
+      if (item?.metadata) return { gameId, item };
+    } catch { /* ignore */ }
+  }
+
+  const name = equipment.name ? String(equipment.name).toLowerCase() : '';
+  if (!name) return null;
+  return getEquipmentNameMap().get(name) || null;
+}
+
+function getEquipmentCdrPercentByGameIdMap() {
+  const out = {};
+  const allEquipment = getAllEquipment();
+  for (const entry of allEquipment) {
+    const gameId = Number(entry?.gameId);
+    if (!Number.isFinite(gameId)) continue;
+    const percent = readEquipmentCooldownReductionPercentFromItem(entry, DEFAULT_EQUIPMENT_EFFECT_TIER);
+    if (percent == null || !Number.isFinite(percent) || percent <= 0) continue;
+    out[gameId] = percent;
+  }
+  return out;
+}
+
+function getEquipmentCooldownReductionPercent(equipment) {
+  if (!equipment || typeof equipment !== 'object') return 0;
+  const resolved = resolveEquipmentCatalogEntry(equipment);
+  if (!resolved?.item) return 0;
+  const tier = clampEquipmentTier(equipment.tier ?? equipment.metadata?.tier) ?? DEFAULT_EQUIPMENT_EFFECT_TIER;
+  const percent = readEquipmentCooldownReductionPercentFromItem(resolved.item, tier);
+  if (percent == null || !Number.isFinite(percent) || percent <= 0) return 0;
+  return percent;
+}
+
 /**
  * Mount equipment EffectComponent in a tooltip host with tier-scaled effect values.
  * Game API: createUIComponent(root, EffectComponent, { tier }).
@@ -182,6 +268,8 @@ function buildEquipmentDatabase() {
       EQUIPMENT_TIER_STAT_BONUSES,
       EQUIPMENT_TIER_COLOR_BY_NUMBER,
       DEFAULT_EQUIPMENT_EFFECT_TIER,
+      getEquipmentCdrPercentByGameIdMap,
+      getEquipmentCooldownReductionPercent,
       isEventEquipmentName,
       getBisProgressEquipmentNames,
       getEquipmentNameMap,
@@ -213,6 +301,8 @@ function buildEquipmentDatabase() {
     EQUIPMENT_TIER_STAT_BONUSES,
     EQUIPMENT_TIER_COLOR_BY_NUMBER,
     DEFAULT_EQUIPMENT_EFFECT_TIER,
+    getEquipmentCdrPercentByGameIdMap,
+    getEquipmentCooldownReductionPercent,
     isEventEquipmentName,
     getBisProgressEquipmentNames,
     getEquipmentNameMap,
@@ -277,6 +367,8 @@ const placeholderDatabase = {
   EQUIPMENT_TIER_STAT_BONUSES,
   EQUIPMENT_TIER_COLOR_BY_NUMBER,
   DEFAULT_EQUIPMENT_EFFECT_TIER,
+  getEquipmentCdrPercentByGameIdMap,
+  getEquipmentCooldownReductionPercent,
   isEventEquipmentName,
   getBisProgressEquipmentNames,
   getEquipmentNameMap,
@@ -302,6 +394,8 @@ waitForGameState(() => {
     globalWindow.equipmentDatabase.EQUIPMENT_TIER_STAT_BONUSES = EQUIPMENT_TIER_STAT_BONUSES;
     globalWindow.equipmentDatabase.EQUIPMENT_TIER_COLOR_BY_NUMBER = EQUIPMENT_TIER_COLOR_BY_NUMBER;
     globalWindow.equipmentDatabase.DEFAULT_EQUIPMENT_EFFECT_TIER = DEFAULT_EQUIPMENT_EFFECT_TIER;
+    globalWindow.equipmentDatabase.getEquipmentCdrPercentByGameIdMap = getEquipmentCdrPercentByGameIdMap;
+    globalWindow.equipmentDatabase.getEquipmentCooldownReductionPercent = getEquipmentCooldownReductionPercent;
     globalWindow.equipmentDatabase.isEventEquipmentName = isEventEquipmentName;
     globalWindow.equipmentDatabase.getBisProgressEquipmentNames = getBisProgressEquipmentNames;
     globalWindow.equipmentDatabase.getEquipmentNameMap = getEquipmentNameMap;
