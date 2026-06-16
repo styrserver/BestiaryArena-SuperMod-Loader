@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.2.1",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "added",
+          "text": "Arsenal equipment details: T1–T6 tier selector (default T5, resets when modal closes). T1–T5 use forge tiers; T6 previews Awaken Cyclops in-battle upgrade via data-rarity AWAKEN-CYCLOPS-TIER and createUIComponent { tier: 'AWAKEN-CYCLOPS-TIER' } (not numeric tier 6). Documented in game_state_api.md Equipment Data."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Arsenal equipment details column: 40%/55% row split (was 30%+10px/65%), top-aligned tier/portrait/description block, separator under T1–T6 buttons, tighter Found in maps/boosted lists spacing."
+        },
+        {
+          "mod": "game_state_api.md",
+          "type": "changed",
+          "text": "Equipment Data documents forge tiers T1–T5, Awaken Cyclops upgrade (AWAKEN-CYCLOPS-TIER string tier for effect tooltips), and Cyclopedia T6 preview behavior."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Startup grace period after all mods load increased from 3s to 5s so dependent mods finish initializing before automation runs. Actions show the \"Starting Stamina Optimizer\" toast, clear modals, wait 1s, then activate (same pattern as Better Tasker)."
+        }
+      ]
+    },
+    {
       "version": "4.2.0",
       "changes": [
         {

@@ -624,6 +624,44 @@ const component = window.equipmentDatabase.mountEquipmentEffectComponent(
 // window.equipmentDatabase.EQUIPMENT_TIER_STAT_BONUSES
 ```
 
+#### Equipment forge tiers (T1–T5)
+
+Player inventory equipment uses **numeric** `tier` values `1`–`5` (Grey → Yellow). `player.context.equips[].tier` never exceeds `5`.
+
+- `window.equipmentDatabase.clampEquipmentTier()` clamps to `1`–`5`.
+- `mountEquipmentEffectComponent()` and `createUIComponent(root, EffectComponent, { tier })` expect a number in that range for forge tiers.
+- **Do not pass `tier: 6`** — the game's effect scaler only knows forge tiers and will render `NaN` for cooldowns and similar values.
+
+#### Awaken Cyclops upgrade (in-battle “T6” preview)
+
+This is **not** a sixth forge tier. When an **awakened Cyclops** upgrades an adjacent ally's equipment during a fight, the game shows a special rarity frame and adjusted effect numbers.
+
+| Surface | Value |
+| --- | --- |
+| Portrait `data-rarity` | `AWAKEN-CYCLOPS-TIER` |
+| Effect tooltip `createUIComponent` props | `{ tier: 'AWAKEN-CYCLOPS-TIER' }` |
+| Player `equips[].tier` | Still `1`–`5` (unchanged in inventory) |
+
+Example ([Amazon Armor](https://bestiaryarena.wiki.gg/wiki/Amazon_Armor)): forge T5 cooldown **9s**; with Awaken Cyclops upgrade **8s**.
+
+```javascript
+// Portrait rarity (after createItemPortrait with tier: 5)
+portrait.querySelector('[data-rarity]').setAttribute('data-rarity', 'AWAKEN-CYCLOPS-TIER');
+
+// Effect tooltip for Cyclops-upgraded values
+const createUIComponent = globalThis.state?.utils?.createUIComponent;
+const component = createUIComponent(
+  host,
+  boots.metadata.EffectComponent,
+  { tier: 'AWAKEN-CYCLOPS-TIER' }
+);
+if (component?.mount) component.mount();
+```
+
+**Cyclopedia (Arsenal tab):** Equipment details include a **T1–T6** selector above the portrait. T1–T5 use numeric forge tiers (default **T5**). **T6** previews the Awaken Cyclops upgrade (rarity + effect props above). The selected tier persists until the Cyclopedia modal closes, then resets to T5.
+
+If `{ tier: 'AWAKEN-CYCLOPS-TIER' }` fails to render, Cyclopedia retries `{ tier: 5, awakenCyclops: true }`, then `{ tier: 5, cyclopsUpgrade: true }`, then plain T5 as a last resort.
+
 ### Monster Drop System
 
 Below is the internal monster drop logic provided by [Xandjiji](https://github.com/xandjiji). It handles normal drops, shiny rolls, and sealed monster drops based on floor depth:

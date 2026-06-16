@@ -52,7 +52,9 @@ const NAVIGATION_DELAY = 500;
 const AUTO_SETUP_DELAY = 800;
 const PAUSE_BUTTON_CLICK_DELAY = 100;
 const PAUSE_BUTTON_UPDATE_DELAY = 300;
-const MODS_LOADING_GRACE_PERIOD = 3000; // 3 seconds after allModsLoaded before allowing actions
+const MODS_LOADING_GRACE_PERIOD = 5000; // 5 seconds after allModsLoaded before allowing actions
+const ACTION_START_DELAY = 1000;
+const ACTION_START_TOAST_COOLDOWN_MS = 10000;
 const MAX_WAIT_FOR_SIGNAL = 15000; // Maximum time to wait for allModsLoaded signal (15 seconds)
 
 const COLOR_ACCENT = '#ffe066';
@@ -133,6 +135,8 @@ let lastMissingFunctionLog = 0;
 let functionRetryAttempts = 0;
 const MAX_FUNCTION_RETRY_ATTEMPTS = 3;
 const FUNCTION_RETRY_DELAY = 2000; // 2 seconds
+let lastActionStartToastAt = 0;
+let isActionPending = false;
 let isLifecycleActive = true;
 
 // Schedule a timeout tracked for cleanup; no-op after cleanupStaminaOptimizer()
@@ -756,6 +760,15 @@ function showToast(message, duration = 5000) {
     } catch (error) {
         console.error('[Stamina Optimizer] Error showing toast:', error);
     }
+}
+
+function showActionStartToast() {
+    const now = Date.now();
+    if (now - lastActionStartToastAt < ACTION_START_TOAST_COOLDOWN_MS) {
+        return;
+    }
+    lastActionStartToastAt = now;
+    showToast('Starting Stamina Optimizer');
 }
 
 // ============================================================================
@@ -1696,26 +1709,42 @@ function startBoostedMapFarming() {
 
 // Execute the configured action
 async function executeAction() {
-    const settings = loadSettings();
-    const action = settings.action || DEFAULT_ACTION;
-    
-    console.log(`[Stamina Optimizer] Executing action: ${action}`);
+    if (isActionPending) {
+        return;
+    }
+    isActionPending = true;
+    try {
+        const settings = loadSettings();
+        const action = settings.action || DEFAULT_ACTION;
+        
+        console.log(`[Stamina Optimizer] Executing action: ${action}`);
 
-    if (action === 'specific-map') {
-        showToast('Starting Stamina Optimizer');
+        showActionStartToast();
         clearModalsWithEsc(3);
         await sleep(100);
-    }
 
-    switch (action) {
-        case 'boosted-maps':
-            startBoostedMapFarming();
-            break;
-        case 'specific-map':
-            await startSpecificMapPlay();
-            break;
-        default:
-            console.log(`[Stamina Optimizer] Unknown action: ${action}`);
+        console.log(`[Stamina Optimizer] Waiting ${ACTION_START_DELAY}ms before starting action...`);
+        await sleep(ACTION_START_DELAY);
+
+        if (!isLifecycleActive || !isAutomationEnabled) {
+            return;
+        }
+        if (!canProceed()) {
+            return;
+        }
+
+        switch (action) {
+            case 'boosted-maps':
+                startBoostedMapFarming();
+                break;
+            case 'specific-map':
+                await startSpecificMapPlay();
+                break;
+            default:
+                console.log(`[Stamina Optimizer] Unknown action: ${action}`);
+        }
+    } finally {
+        isActionPending = false;
     }
 }
 
@@ -1755,7 +1784,7 @@ async function monitorStamina() {
     );
     updateButton();
     if (currentStamina >= maxStamina) {
-        if (!isCurrentlyActive) {
+        if (!isCurrentlyActive && !isActionPending) {
             if (isBetterBoostedMapsAutoplaySession()) {
                 recognizeBoostedMapsAutoplaySession();
                 return;
@@ -3007,6 +3036,7 @@ function cleanupStaminaOptimizer() {
 
         isStartingAutoplay = false;
         isStoppingAutoplay = false;
+        isActionPending = false;
         functionRetryAttempts = 0;
 
         delete window.__staminaOptimizerLoaded;

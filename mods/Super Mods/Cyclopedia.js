@@ -6854,6 +6854,155 @@ function openCyclopediaModal(options) {
     }
 
     function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
+      let equipmentPreviewTier = window.equipmentDatabase?.DEFAULT_EQUIPMENT_EFFECT_TIER ?? 5;
+      const EQUIPMENT_PREVIEW_TIER_COLORS = ['#9e9e9e', '#4caf50', '#42a5f5', '#ab47bc', '#ffc107', '#ff5722'];
+      const EQUIPMENT_PREVIEW_TIER_MAX = 6;
+      const EQUIPMENT_PREVIEW_CYCLOPS_RARITY = 'AWAKEN-CYCLOPS-TIER';
+
+      const clampEquipmentPreviewTier = (value) => {
+        const parsed = Number.parseInt(value, 10);
+        if (!Number.isFinite(parsed)) return 5;
+        return Math.min(EQUIPMENT_PREVIEW_TIER_MAX, Math.max(1, parsed));
+      };
+
+      const applyEquipmentPreviewPortraitTier = (portraitRoot, tier) => {
+        if (!portraitRoot) return;
+        const portrait = portraitRoot.classList?.contains('equipment-portrait')
+          ? portraitRoot
+          : portraitRoot.querySelector?.('.equipment-portrait');
+        if (!portrait) return;
+        const rarityEl = portrait.querySelector('.has-rarity, [data-rarity]');
+        if (!rarityEl) return;
+        if (tier >= EQUIPMENT_PREVIEW_TIER_MAX) {
+          rarityEl.setAttribute('data-rarity', EQUIPMENT_PREVIEW_CYCLOPS_RARITY);
+        } else {
+          rarityEl.setAttribute('data-rarity', String(tier));
+        }
+      };
+
+      const getEquipmentPreviewEffectProps = (previewTier) => {
+        if (previewTier < EQUIPMENT_PREVIEW_TIER_MAX) {
+          return { tier: previewTier };
+        }
+        // In-battle Cyclops awaken upgrade — not numeric tier 6 (player equips stay T1–T5).
+        return { tier: EQUIPMENT_PREVIEW_CYCLOPS_RARITY };
+      };
+
+      const resolveEquipmentPreviewSpriteId = (metadata, previewTier) => {
+        if (!metadata) return null;
+        if (previewTier < EQUIPMENT_PREVIEW_TIER_MAX) return metadata.spriteId ?? null;
+        for (const key of ['awakenCyclopsSpriteId', 'cyclopsSpriteId', 'upgradedSpriteId', 'spriteId']) {
+          const id = Number(metadata[key]);
+          if (Number.isFinite(id)) return id;
+        }
+        return metadata.spriteId ?? null;
+      };
+
+      const mountEquipmentPreviewEffect = (root, effectComponent, tier, effectHost) => {
+        const createUIComponent = globalThis.state?.utils?.createUIComponent;
+        if (!root || !effectComponent || typeof createUIComponent !== 'function') return null;
+        const previewTier = clampEquipmentPreviewTier(tier);
+
+        const cyclopsFallbackProps = [
+          { tier: EQUIPMENT_PREVIEW_CYCLOPS_RARITY },
+          { tier: 5, awakenCyclops: true },
+          { tier: 5, cyclopsUpgrade: true },
+          { tier: 5 }
+        ];
+
+        const mountWithProps = (props) => {
+          try {
+            const component = createUIComponent(root, effectComponent, props);
+            if (component && typeof component.mount === 'function') component.mount();
+            return component || null;
+          } catch {
+            return null;
+          }
+        };
+
+        const initialProps = getEquipmentPreviewEffectProps(previewTier);
+        let component = mountWithProps(initialProps);
+        if (!component) return null;
+
+        if (previewTier >= EQUIPMENT_PREVIEW_TIER_MAX) {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const text = root.textContent || '';
+              if (!/\bNaN\b/.test(text)) return;
+
+              try {
+                if (component && typeof component.unmount === 'function') component.unmount();
+              } catch {
+                // ignore
+              }
+              root.replaceChildren();
+
+              for (let i = 1; i < cyclopsFallbackProps.length; i++) {
+                const alt = mountWithProps(cyclopsFallbackProps[i]);
+                if (!alt) continue;
+                const altText = root.textContent || '';
+                if (!/\bNaN\b/.test(altText)) {
+                  if (effectHost) effectHost._effectTooltipComponent = alt;
+                  return;
+                }
+                try {
+                  if (typeof alt.unmount === 'function') alt.unmount();
+                } catch {
+                  // ignore
+                }
+                root.replaceChildren();
+              }
+            });
+          });
+        }
+
+        return component;
+      };
+
+      const createEquipmentTierSelector = (onTierChange) => {
+        const row = document.createElement('div');
+        row.style.cssText =
+          'display:flex; flex-direction:row; gap:3px; justify-content:center; align-items:center; margin:0 auto 8px; width:100%; flex-wrap:nowrap;';
+
+        for (let tier = 1; tier <= EQUIPMENT_PREVIEW_TIER_MAX; tier++) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = `T${tier}`;
+          btn.title = tier === EQUIPMENT_PREVIEW_TIER_MAX
+            ? 'Awaken Cyclops upgrade (in-battle)'
+            : `Tier ${tier}`;
+          const isActive = tier === equipmentPreviewTier;
+          const accent = EQUIPMENT_PREVIEW_TIER_COLORS[tier - 1];
+          btn.style.cssText =
+            `background:${isActive ? accent : 'rgba(255,255,255,0.1)'};` +
+            `color:${isActive ? '#1a1a1a' : '#e6d7b0'};` +
+            `border:1px solid ${isActive ? accent : 'rgba(255,255,255,0.2)'};` +
+            'padding:2px 6px; border-radius:2px; font-size:11px; cursor:pointer; font-family:inherit; outline:none; min-width:24px; line-height:1.2;';
+          btn.addEventListener('mouseenter', () => {
+            if (equipmentPreviewTier !== tier) {
+              btn.style.background = 'rgba(255,255,255,0.2)';
+              btn.style.borderColor = accent;
+            }
+          });
+          btn.addEventListener('mouseleave', () => {
+            if (equipmentPreviewTier !== tier) {
+              btn.style.background = 'rgba(255,255,255,0.1)';
+              btn.style.borderColor = 'rgba(255,255,255,0.2)';
+              btn.style.color = '#e6d7b0';
+            }
+          });
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const clamped = clampEquipmentPreviewTier(tier);
+            if (equipmentPreviewTier === clamped) return;
+            equipmentPreviewTier = clamped;
+            onTierChange();
+          });
+          row.appendChild(btn);
+        }
+        return row;
+      };
+
       // Common styles for equipment tab
       const EQUIPMENT_STYLES = {
         container: {
@@ -6890,7 +7039,7 @@ function openCyclopediaModal(options) {
       // Create top section for equipment details
       const equipDetailsTop = document.createElement('div');
       Object.assign(equipDetailsTop.style, {
-        flex: '0 0 calc(30% + 10px)', minHeight: '0', width: '100%', display: 'flex',
+        flex: '0 0 40%', minHeight: '0', width: '100%', display: 'flex',
         flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start'
       });
 
@@ -6903,15 +7052,16 @@ function openCyclopediaModal(options) {
       // Create bottom section for creature usage info
       const equipDetailsBottom = document.createElement('div');
       Object.assign(equipDetailsBottom.style, {
-        flex: '0 0 65%', minHeight: '0', width: '100%', display: 'flex',
+        flex: '0 0 55%', minHeight: '0', width: '100%', display: 'flex',
         flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
-        borderTop: '2px solid #444', marginTop: '5px', paddingTop: '5px', boxSizing: 'border-box'
+        borderTop: '2px solid #444', marginTop: '2px', paddingTop: '2px', boxSizing: 'border-box'
       });
 
       const updateCreatureUsageTitle = (titleP) => {
         titleP.textContent = 'Found in:';
       };
       const { title: creatureUsageTitle, titleP: creatureUsageTitleP } = createTitleElement('Found in:', updateCreatureUsageTitle);
+      creatureUsageTitle.style.marginBottom = '4px';
       equipDetailsBottom.appendChild(creatureUsageTitle);
 
       equipDetailsCol.appendChild(equipDetailsTop);
@@ -7158,6 +7308,15 @@ function openCyclopediaModal(options) {
       }
 
       function updateRightCol() {
+        if (equipDetailsTop._effectTooltipComponent) {
+          try {
+            equipDetailsTop._effectTooltipComponent.unmount?.();
+          } catch {
+            // ignore
+          }
+          equipDetailsTop._effectTooltipComponent = null;
+        }
+
         equipDetailsTop.innerHTML = '';
         equipDetailsTop.appendChild(equipDetailsTitle);
         equipDetailsBottom.innerHTML = '';
@@ -7225,16 +7384,22 @@ function openCyclopediaModal(options) {
             topRow.style.cssText = 'display:flex; flex-direction:row; gap:8px; width:100%; max-width:100%; align-items:stretch; min-height:0; flex:1 1 auto; box-sizing:border-box;';
 
             const detailsWrap = document.createElement('div');
-            detailsWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; justify-content:center; width:50%; min-width:0;';
+            detailsWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; justify-content:flex-start; width:50%; min-width:0;';
+
+            const previewTier = clampEquipmentPreviewTier(equipmentPreviewTier);
+
+            const previewSpriteId = resolveEquipmentPreviewSpriteId(equipData?.metadata, previewTier);
 
             let portrait = api.ui.components.createItemPortrait({
-              itemId: equipData?.metadata?.spriteId,
-              tier: 5
+              itemId: previewSpriteId ?? equipData?.metadata?.spriteId,
+              tier: previewTier >= EQUIPMENT_PREVIEW_TIER_MAX ? 5 : previewTier
             });
 
             if (portrait.tagName === 'BUTTON' && portrait.firstChild) {
               portrait = portrait.firstChild;
             }
+
+            applyEquipmentPreviewPortraitTier(portrait, previewTier);
 
             portrait.style.display = 'block';
             portrait.style.margin = '0 auto 8px auto';
@@ -7255,18 +7420,28 @@ function openCyclopediaModal(options) {
             if (equipData?.metadata?.description) {
               tooltipDiv.innerHTML = equipData.metadata.description;
             } else if (equipData?.metadata?.EffectComponent) {
-              const tooltipTier = window.equipmentDatabase?.DEFAULT_EQUIPMENT_EFFECT_TIER ?? 5;
-              const tooltipComponent = window.equipmentDatabase?.mountEquipmentEffectComponent?.(
+              const tooltipComponent = mountEquipmentPreviewEffect(
                 tooltipDiv,
                 equipData.metadata.EffectComponent,
-                tooltipTier
+                previewTier,
+                equipDetailsTop
               );
               if (!tooltipComponent) {
                 tooltipDiv.textContent = 'No description available.';
+              } else {
+                equipDetailsTop._effectTooltipComponent = tooltipComponent;
               }
             } else {
               tooltipDiv.textContent = 'No description available.';
             }
+
+            detailsWrap.appendChild(createEquipmentTierSelector(updateRightCol));
+
+            const tierSeparator = document.createElement('div');
+            tierSeparator.className = 'separator my-2.5';
+            tierSeparator.setAttribute('role', 'none');
+            tierSeparator.style.margin = '0 0 4px 0';
+            detailsWrap.appendChild(tierSeparator);
 
             detailsWrap.appendChild(portrait);
             detailsWrap.appendChild(tooltipDiv);
@@ -7341,21 +7516,21 @@ function openCyclopediaModal(options) {
 
             const foundInRow = document.createElement('div');
             foundInRow.style.cssText =
-              'display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; width: 100%; gap: 10px; align-items: stretch; box-sizing: border-box;';
+              'display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; width: 100%; gap: 6px; align-items: stretch; box-sizing: border-box;';
 
             const mapsColumn = document.createElement('div');
             mapsColumn.style.cssText =
-              'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden;';
+              'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow: hidden;';
             const mapsColTitle = document.createElement('div');
             mapsColTitle.className = FONT_CONSTANTS.SIZES.SMALL;
             mapsColTitle.textContent = 'Maps';
             mapsColTitle.style.cssText =
-              'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 4px 4px 6px; border-bottom: 1px solid #555; box-sizing: border-box;';
+              'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 2px 4px 3px; border-bottom: 1px solid #555; box-sizing: border-box;';
 
             const creatureUsageContainer = document.createElement('div');
             creatureUsageContainer.style.cssText = `
-              width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px; box-sizing: border-box;
-              display: flex; flex-direction: column; gap: 4px;
+              width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 3px; box-sizing: border-box;
+              display: flex; flex-direction: column; gap: 2px;
             `;
 
             const creatureUsageData = getCreatureUsageForEquipment(equipId);
@@ -7374,8 +7549,8 @@ function openCyclopediaModal(options) {
             function appendStyledMapRow(parentEl, mapName, creaturesLabel) {
               const usageDiv = document.createElement('div');
               usageDiv.style.cssText = `
-                    padding: 4px 6px; display: flex; flex-direction: column; gap: 3px;
-                    margin-top: 2px; margin-bottom: 2px; line-height: 1;
+                    padding: 2px 4px; display: flex; flex-direction: column; gap: 2px;
+                    margin-top: 1px; margin-bottom: 1px; line-height: 1;
                     letter-spacing: 0.0625rem; word-spacing: -0.1875rem;
                     color: rgb(255, 255, 255);
                   `;
@@ -7385,7 +7560,7 @@ function openCyclopediaModal(options) {
               mapNameDiv.className = FONT_CONSTANTS.SIZES.SMALL;
               mapNameDiv.style.cssText = `
                     font-weight: bold; line-height: 1; letter-spacing: 0.0625rem;
-                    word-spacing: -0.1875rem; margin: 0px; padding: 2px 6px;
+                    word-spacing: -0.1875rem; margin: 0px; padding: 1px 4px;
                     border-radius: 4px; display: flex; justify-content: space-between;
                     align-items: center; text-align: left; cursor: pointer;
                     text-decoration: underline; background: transparent;
@@ -7446,7 +7621,7 @@ function openCyclopediaModal(options) {
               const separator = document.createElement('div');
               separator.className = 'separator my-2.5';
               separator.setAttribute('role', 'none');
-              separator.style.cssText = 'margin: 3px 0px;';
+              separator.style.cssText = 'margin: 1px 0px;';
               usageDiv.appendChild(separator);
 
               parentEl.appendChild(usageDiv);
@@ -7461,7 +7636,7 @@ function openCyclopediaModal(options) {
                   border-width: 6px; border-style: solid; border-color: rgb(255, 224, 102);
                   border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill;
                   border-radius: 0px; box-sizing: border-box; text-align: center;
-                  padding: 1px 4px; margin: 1px 0px 0px; display: block;
+                  padding: 0px 4px; margin: 0px; display: block;
                 `;
               regionHeader.textContent = regionName;
               parentEl.appendChild(regionHeader);
@@ -7494,7 +7669,7 @@ function openCyclopediaModal(options) {
               noUsageDiv.className = FONT_CONSTANTS.SIZES.SMALL;
               noUsageDiv.style.textAlign = 'center';
               noUsageDiv.style.color = '#888';
-              noUsageDiv.style.padding = '12px';
+              noUsageDiv.style.padding = '6px';
               noUsageDiv.style.fontStyle = 'italic';
               noUsageDiv.textContent = 'No map data';
               creatureUsageContainer.appendChild(noUsageDiv);
@@ -7522,17 +7697,17 @@ function openCyclopediaModal(options) {
 
             const boostedColumn = document.createElement('div');
             boostedColumn.style.cssText =
-              'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden; border-left: 1px solid #444; padding-left: 8px; box-sizing: border-box;';
+              'flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow: hidden; border-left: 1px solid #444; padding-left: 6px; box-sizing: border-box;';
             const boostedColTitle = document.createElement('div');
             boostedColTitle.className = FONT_CONSTANTS.SIZES.SMALL;
             boostedColTitle.textContent = 'Boosted Maps';
             boostedColTitle.style.cssText =
-              'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 4px 4px 6px; border-bottom: 1px solid #555; box-sizing: border-box;';
+              'font-weight: 700; color: #ffe066; text-align: center; width: 100%; padding: 2px 4px 3px; border-bottom: 1px solid #555; box-sizing: border-box;';
 
             const boostedScroll = document.createElement('div');
             boostedScroll.style.cssText = `
-              width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px; box-sizing: border-box;
-              display: flex; flex-direction: column; gap: 4px;
+              width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 3px; box-sizing: border-box;
+              display: flex; flex-direction: column; gap: 2px;
             `;
 
             const boostedWiki = GAME_DATA.HARDCODED_BOOSTED_MAP[currentSelectedEquipment];
@@ -7541,7 +7716,7 @@ function openCyclopediaModal(options) {
               noBoosted.className = FONT_CONSTANTS.SIZES.SMALL;
               noBoosted.style.textAlign = 'center';
               noBoosted.style.color = '#888';
-              noBoosted.style.padding = '12px';
+              noBoosted.style.padding = '6px';
               noBoosted.style.fontStyle = 'italic';
               noBoosted.textContent = '—';
               boostedScroll.appendChild(noBoosted);
