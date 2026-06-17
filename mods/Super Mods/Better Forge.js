@@ -1137,6 +1137,7 @@
         console.log(`[Better Forge] 💰 Applying cumulative dust change: ${forgeState.cumulativeDustChange}`);
         updateLocalInventoryGoldDust(0, forgeState.cumulativeDustChange);
         forgeState.cumulativeDustChange = 0; // Reset after applying
+        updateDustDisplay();
       }
       
       forgeState.isForging = false;
@@ -1658,6 +1659,7 @@
             });
             const dustGained = result.dustGained ?? 0;
             updateLocalInventoryGoldDust(0, dustGained);
+            updateDustDisplayWithAnimation(dustGained);
             if (forgeState.disenchantInterval) {
               clearInterval(forgeState.disenchantInterval);
               forgeState.disenchantInterval = null;
@@ -1767,6 +1769,7 @@
            removeEquipmentFromLocalInventory(equipment.id);
             const dustGained = getDisenchantDust(equipment);
             updateLocalInventoryGoldDust(0, dustGained);
+            updateDustDisplayWithAnimation(dustGained);
           } else if (result.status === 404) {
             equipment.element.remove();
             removeEquipmentFromArsenal(equipment.id);
@@ -2829,12 +2832,47 @@
   // 9. INVENTORY CHECKING AND STATUS FUNCTIONS
   // ============================================================================
   
+  function parseDustAmount(value) {
+    if (value == null) return null;
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? Math.max(0, value) : null;
+    }
+    if (typeof value === 'object') {
+      const nested = value.count ?? value.amount ?? value.quantity;
+      if (typeof nested === 'number' && Number.isFinite(nested)) {
+        return Math.max(0, nested);
+      }
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value.replace(/,/g, ''));
+      return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+    }
+    return null;
+  }
+
+  function readDustFromPlayerState(state) {
+    if (!state) return 0;
+    const candidates = [
+      state.inventory?.dust,
+      state.context?.inventory?.dust,
+      state.dust,
+      state.context?.dust,
+    ];
+    for (const candidate of candidates) {
+      const parsed = parseDustAmount(candidate);
+      if (parsed != null) return parsed;
+    }
+    return 0;
+  }
+
+  function formatDustDisplay(amount) {
+    const safe = Number.isFinite(amount) ? Math.max(0, Math.floor(amount)) : 0;
+    return safe.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
   function getUserCurrentDust() {
     try {
-      const snapshot = globalThis.state?.player?.getSnapshot();
-      // Try multiple locations for dust, matching the update function's read pattern
-      const dust = Number(snapshot?.context?.dust ?? snapshot?.inventory?.dust ?? snapshot?.dust ?? 0);
-      return dust;
+      return readDustFromPlayerState(globalThis.state?.player?.getSnapshot());
     } catch (error) {
       console.error('[Better Forge] Error getting user dust:', error);
       return 0;
@@ -3769,8 +3807,7 @@
   
   function injectDustDisplayIntoModal() {
     try {
-             const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-       const currentDust = Number(playerContext?.dust) || 0;
+       const currentDust = getUserCurrentDust();
        
        const buttonContainer = document.querySelector('div[role="dialog"][data-state="open"] .flex.justify-end.gap-2');
        if (!buttonContainer) return;
@@ -3785,33 +3822,60 @@
       
              const dustAmount = document.createElement('span');
        dustAmount.id = 'better-forge-dust-amount';
-       dustAmount.textContent = currentDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+       dustAmount.textContent = formatDustDisplay(currentDust);
        
        dustDisplay.appendChild(dustIcon);
        dustDisplay.appendChild(dustAmount);
        
        buttonContainer.insertBefore(dustDisplay, buttonContainer.firstChild);
       
-              if (globalThis.state?.player?.subscribe) {
+      if (globalThis.state?.player?.select) {
           let previousDust = currentDust;
-          const unsubscribe = globalThis.state.player.subscribe((state) => {
-            const newDust = Number(state.context?.dust) || 0;
-            const dustChange = newDust - previousDust;
-            
-            // Handle both positive and negative changes with animation
+          let isFirstCallback = true;
+          const subscription = globalThis.state.player
+            .select((state) => readDustFromPlayerState(state))
+            .subscribe((newDust) => {
+              const numericDust = Number.isFinite(newDust) ? newDust : 0;
+
+              if (isFirstCallback) {
+                isFirstCallback = false;
+                previousDust = numericDust;
+                return;
+              }
+
+              const dustChange = numericDust - previousDust;
+
+              if (dustChange !== 0) {
+                updateDustDisplayWithAnimation(dustChange);
+              } else {
+                const dustAmountElement = document.getElementById('better-forge-dust-amount');
+                if (dustAmountElement) {
+                  dustAmountElement.textContent = formatDustDisplay(numericDust);
+                }
+              }
+
+              previousDust = numericDust;
+            });
+
+          dustDisplay._unsubscribe = subscription.unsubscribe;
+        } else if (globalThis.state?.player?.subscribe) {
+          let previousDust = currentDust;
+          const unsubscribe = globalThis.state.player.subscribe(() => {
+            const numericDust = getUserCurrentDust();
+            const dustChange = numericDust - previousDust;
+
             if (dustChange !== 0) {
               updateDustDisplayWithAnimation(dustChange);
             } else {
-              // No change, just update display directly
               const dustAmountElement = document.getElementById('better-forge-dust-amount');
               if (dustAmountElement) {
-                dustAmountElement.textContent = Math.max(0, newDust).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                dustAmountElement.textContent = formatDustDisplay(numericDust);
               }
             }
-            
-            previousDust = newDust;
+
+            previousDust = numericDust;
           });
-          
+
           dustDisplay._unsubscribe = unsubscribe;
         }
       
@@ -3824,11 +3888,8 @@
     try {
       const dustAmountElement = document.getElementById('better-forge-dust-amount');
       if (dustAmountElement) {
-        const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-        const currentDust = Number(playerContext?.dust) || 0;
-        // Ensure dust is never displayed as negative
-        const safeDust = Math.max(0, currentDust);
-        dustAmountElement.textContent = safeDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        const currentDust = getUserCurrentDust();
+        dustAmountElement.textContent = formatDustDisplay(currentDust);
       }
     } catch (error) {
       console.warn('[Better Forge] Error updating dust display:', error);
@@ -3856,7 +3917,7 @@
         
         // Ensure displayed value is never negative
         const displayValue = Math.max(0, currentValue);
-        dustAmountElement.textContent = displayValue.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        dustAmountElement.textContent = formatDustDisplay(displayValue);
         
         if (progress < 1) {
           requestAnimationFrame(updateCount);
@@ -3889,9 +3950,7 @@
         return;
       }
 
-      // Get current dust from global state (already updated by updateLocalInventoryGoldDust when not forging)
-      const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-      const currentDust = Number(playerContext?.dust) || 0;
+      const currentDust = getUserCurrentDust();
 
       // Safety check: if dust is 0 but we're not supposed to have 0 dust, log a warning
       if (currentDust === 0 && numericDustChange > 0) {
@@ -3915,9 +3974,9 @@
         }
         animateDustCount(startValue, endValue, 800);
       } else if (typeof cumulativeDisplay === 'number') {
-        dustAmountElement.textContent = Math.max(0, currentDust + cumulativeDisplay).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        dustAmountElement.textContent = formatDustDisplay(currentDust + cumulativeDisplay);
       } else {
-        dustAmountElement.textContent = Math.max(0, currentDust).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        dustAmountElement.textContent = formatDustDisplay(currentDust);
       }
 
     } catch (error) {
@@ -5494,7 +5553,7 @@
           newState.context = { ...prev.context };
           
           const currentGold = Number(prev.inventory?.gold ?? prev.gold ?? 0);
-          const currentDust = Number(prev.inventory?.dust ?? prev.dust ?? prev.context?.dust ?? 0);
+          const currentDust = readDustFromPlayerState(prev);
           
           if (goldChange !== 0) {
             const newGold = currentGold + goldChange;

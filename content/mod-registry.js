@@ -53,6 +53,7 @@ export const SUPER_MODS = [
   'Autoseller.js',
   'Autoscroller.js',
   'Better Analytics.js',
+  'Better Bestiary.js',
   'Better Boosted Maps.js',
   'Better Cauldron.js',
   'Better Exaltation Chest.js',

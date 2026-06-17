@@ -2482,6 +2482,10 @@ function isScrollLocked() {
   return scrollLocked >= '2';
 }
 
+function shouldSkipScrollLocked(options) {
+  return !options?.ignoreScrollLock && isScrollLocked();
+}
+
 // CSS template system
 const CSS_TEMPLATES = {
   maxCreatures: (colorOption, colorKey) => `
@@ -7059,6 +7063,7 @@ function showSettingsModal() {
       if (sealedColorPicker) {
         createSettingsDropdownHandler('sealedCreaturesColor', () => {
           if (config.enableSealed) applySealedCreatures();
+          notifyBetterUICreatureCosmeticsChanged();
         })(sealedColorPicker);
       }
       
@@ -7066,6 +7071,7 @@ function showSettingsModal() {
       if (colorPicker) {
         createSettingsDropdownHandler('maxCreaturesColor', () => {
           if (config.enableMaxCreatures) applyMaxCreatures();
+          notifyBetterUICreatureCosmeticsChanged();
         })(colorPicker);
       }
       
@@ -7078,6 +7084,7 @@ function showSettingsModal() {
       if (shinyColorPicker) {
         createSettingsDropdownHandler('maxShiniesColor', () => {
           if (config.enableMaxShinies) applyMaxShinies();
+          notifyBetterUICreatureCosmeticsChanged();
         })(shinyColorPicker);
       }
       
@@ -8724,13 +8731,223 @@ function reapplyCreatureCosmeticPriority() {
   if (config.enableMaxCreatures) applyMaxCreatures();
   if (config.enableMaxShinies) applyMaxShinies();
   if (config.enableSealed) applySealedCreatures();
+  notifyBetterUICreatureCosmeticsChanged();
 }
+
+function ensureMaxCreaturesCSS(colorOption, colorKey) {
+  const styleId = `max-creatures-${colorKey}-style`;
+  if (document.getElementById(styleId)) return;
+  const style = document.createElement('style');
+  style.id = styleId;
+  style.textContent = generateMaxCreaturesCSS(colorOption, colorKey);
+  document.head.appendChild(style);
+}
+
+function ensureMaxShiniesCSS(colorOption, colorKey) {
+  const styleId = `max-shinies-${colorKey}-style`;
+  if (document.getElementById(styleId)) return;
+  const style = document.createElement('style');
+  style.id = styleId;
+  style.textContent = generateMaxShiniesCSS(colorOption, colorKey);
+  document.head.appendChild(style);
+}
+
+function ensureSealedCreaturesCSS(colorOption, colorKey) {
+  const styleId = `sealed-creatures-${colorKey}-style`;
+  if (document.getElementById(styleId)) return;
+  const style = document.createElement('style');
+  style.id = styleId;
+  style.textContent = `
+    .rarity-sealed[data-sealed-creatures="true"][data-sealed-creatures-color="${colorKey}"] {
+      border: 2px solid;
+      border-image: ${colorOption.borderGradient} 1;
+      background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
+      opacity: 0.8;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function removeCreatureCosmeticsInRoot(root) {
+  if (!root) return;
+  clearCreatureCosmeticsCheckedMarks(root);
+
+  root.querySelectorAll('img[alt="creature"][data-max-creatures="true"]').forEach((img) => {
+    img.removeAttribute('data-max-creatures');
+    img.removeAttribute('data-max-creatures-color');
+  });
+  root.querySelectorAll('img[data-max-creatures="true"]').forEach((starImg) => {
+    const originalSrc = starImg.getAttribute('data-original-src');
+    if (originalSrc) {
+      starImg.src = originalSrc;
+      starImg.removeAttribute('data-original-src');
+    }
+    starImg.removeAttribute('data-max-creatures');
+    starImg.removeAttribute('data-max-creatures-color');
+  });
+  root.querySelectorAll(
+    '.has-rarity[data-max-creatures="true"], .rarity-shiny[data-max-creatures="true"], .rarity-hundo[data-max-creatures="true"], .rarity-awaken[data-max-creatures="true"]'
+  ).forEach((rarityDiv) => {
+    if (rarityDiv.classList.contains('has-rarity')) {
+      rarityDiv.setAttribute('data-rarity', '5');
+    } else {
+      rarityDiv.removeAttribute('data-rarity');
+    }
+    rarityDiv.removeAttribute('data-max-creatures');
+    rarityDiv.removeAttribute('data-max-creatures-color');
+  });
+  root.querySelectorAll('.has-rarity-text[data-max-creatures="true"]').forEach((textRarityEl) => {
+    textRarityEl.setAttribute('data-rarity', '5');
+    textRarityEl.removeAttribute('data-max-creatures');
+    textRarityEl.removeAttribute('data-max-creatures-color');
+  });
+
+  root.querySelectorAll('img[alt="creature"][data-max-shinies="true"]').forEach((img) => {
+    img.removeAttribute('data-max-shinies');
+    img.removeAttribute('data-max-shinies-color');
+  });
+  root.querySelectorAll(
+    '.has-rarity[data-max-shinies="true"], .rarity-shiny[data-max-shinies="true"], .rarity-hundo[data-max-shinies="true"], .rarity-awaken[data-max-shinies="true"]'
+  ).forEach((rarityDiv) => {
+    if (rarityDiv.hasAttribute('data-dynamic-created')) {
+      rarityDiv.remove();
+      return;
+    }
+    if (rarityDiv.classList.contains('has-rarity')) {
+      const originalRarity = rarityDiv.getAttribute('data-original-rarity') || '5';
+      rarityDiv.setAttribute('data-rarity', originalRarity);
+    } else {
+      rarityDiv.removeAttribute('data-rarity');
+    }
+    rarityDiv.removeAttribute('data-max-shinies');
+    rarityDiv.removeAttribute('data-max-shinies-color');
+    rarityDiv.removeAttribute('data-original-rarity');
+  });
+  root.querySelectorAll('.has-rarity-text[data-max-shinies="true"]').forEach((textRarityEl) => {
+    textRarityEl.removeAttribute('data-max-shinies');
+    textRarityEl.removeAttribute('data-max-shinies-color');
+  });
+
+  root.querySelectorAll('.rarity-sealed[data-sealed-creatures="true"]').forEach((sealedOverlay) => {
+    sealedOverlay.removeAttribute('data-sealed-creatures');
+    sealedOverlay.removeAttribute('data-sealed-creatures-color');
+  });
+}
+
+function notifyBetterUICreatureCosmeticsChanged() {
+  window.dispatchEvent(new CustomEvent('betterUICreatureCosmeticsChanged'));
+}
+
+function clearCreatureCosmeticsCheckedMarks(root) {
+  if (!root) return;
+  root.querySelectorAll('button[data-better-ui-cosmetics-checked="true"]').forEach((button) => {
+    button.removeAttribute('data-better-ui-cosmetics-checked');
+  });
+}
+
+function markCreatureCosmeticsChecked(imgEl) {
+  imgEl?.closest('button')?.setAttribute('data-better-ui-cosmetics-checked', 'true');
+}
+
+function getUnprocessedCreatureImages(root) {
+  if (!root) return [];
+  return [...root.querySelectorAll('img[alt="creature"]')].filter((imgEl) => {
+    const button = imgEl.closest('button');
+    return button && !button.hasAttribute('data-better-ui-cosmetics-checked');
+  });
+}
+
+function applyCreatureCosmeticsIncrementalIn(root) {
+  if (!root || isBlockedByAnalysisMods()) return;
+
+  const filterOptions = { ignoreScrollLock: true };
+  let pending = getUnprocessedCreatureImages(root);
+  if (!pending.length) return;
+
+  if (config.enableMaxCreatures) {
+    const colorKey = config.maxCreaturesColor;
+    const colorOption = COLOR_OPTIONS[colorKey] || COLOR_OPTIONS.prismatic;
+    filterEligibleCreatures(pending, filterOptions).forEach((item) => {
+      applyStylingToCreature(item, colorKey);
+      markCreatureCosmeticsChecked(item.imgEl);
+    });
+    ensureMaxCreaturesCSS(colorOption, colorKey);
+    pending = getUnprocessedCreatureImages(root);
+  }
+
+  if (config.enableMaxShinies && pending.length) {
+    const colorKey = config.maxShiniesColor;
+    const colorOption = COLOR_OPTIONS[colorKey] || COLOR_OPTIONS.prismatic;
+    filterEligibleShinies(pending, filterOptions).forEach((item) => {
+      applyShinyStyling(item, colorKey);
+      markCreatureCosmeticsChecked(item.imgEl);
+    });
+    ensureMaxShiniesCSS(colorOption, colorKey);
+    pending = getUnprocessedCreatureImages(root);
+  }
+
+  if (config.enableSealed && pending.length) {
+    const colorKey = config.sealedCreaturesColor;
+    const colorOption = COLOR_OPTIONS[colorKey] || COLOR_OPTIONS.prismatic;
+    filterEligibleSealedCreatures(pending, filterOptions).forEach((item) => {
+      applySealedStyling(item, colorKey);
+      markCreatureCosmeticsChecked(item.imgEl);
+    });
+    ensureSealedCreaturesCSS(colorOption, colorKey);
+    pending = getUnprocessedCreatureImages(root);
+  }
+
+  pending.forEach((imgEl) => markCreatureCosmeticsChecked(imgEl));
+}
+
+function applyCreatureCosmeticsInRoot(root) {
+  if (!root || isBlockedByAnalysisMods()) return;
+
+  const visibleCreatures = root.querySelectorAll('img[alt="creature"]');
+  if (!visibleCreatures.length) return;
+
+  clearCreatureCosmeticsCheckedMarks(root);
+  removeCreatureCosmeticsInRoot(root);
+
+  const filterOptions = { ignoreScrollLock: true };
+
+  if (config.enableMaxCreatures) {
+    const colorKey = config.maxCreaturesColor;
+    const colorOption = COLOR_OPTIONS[colorKey] || COLOR_OPTIONS.prismatic;
+    filterEligibleCreatures(visibleCreatures, filterOptions).forEach((item) => {
+      applyStylingToCreature(item, colorKey);
+    });
+    ensureMaxCreaturesCSS(colorOption, colorKey);
+  }
+  if (config.enableMaxShinies) {
+    const colorKey = config.maxShiniesColor;
+    const colorOption = COLOR_OPTIONS[colorKey] || COLOR_OPTIONS.prismatic;
+    filterEligibleShinies(visibleCreatures, filterOptions).forEach((item) => {
+      applyShinyStyling(item, colorKey);
+    });
+    ensureMaxShiniesCSS(colorOption, colorKey);
+  }
+  if (config.enableSealed) {
+    const colorKey = config.sealedCreaturesColor;
+    const colorOption = COLOR_OPTIONS[colorKey] || COLOR_OPTIONS.prismatic;
+    filterEligibleSealedCreatures(visibleCreatures, filterOptions).forEach((item) => {
+      applySealedStyling(item, colorKey);
+    });
+    ensureSealedCreaturesCSS(colorOption, colorKey);
+  }
+
+  visibleCreatures.forEach((imgEl) => markCreatureCosmeticsChecked(imgEl));
+}
+
+window.BetterUIApplyCreatureCosmeticsIn = applyCreatureCosmeticsInRoot;
+window.BetterUIApplyCreatureCosmeticsIncrementalIn = applyCreatureCosmeticsIncrementalIn;
+window.BetterUIRemoveCreatureCosmeticsIn = removeCreatureCosmeticsInRoot;
 
 // Apply max creatures styling to elite monsters
 // Helper functions for applyMaxCreatures
-function filterEligibleCreatures(visibleCreatures) {
-  // Skip if scroll is locked (e.g., Bestiary tab)
-  if (isScrollLocked()) return [];
+function filterEligibleCreatures(visibleCreatures, options = {}) {
+  if (shouldSkipScrollLocked(options)) return [];
 
   const allMonsters = getPlayerMonsters();
   const depotIdMap =
@@ -8861,8 +9078,8 @@ function injectMaxCreaturesCSS(colorOption, colorKey) {
   style.textContent = css;
 }
 
-function filterEligibleSealedCreatures(visibleCreatures) {
-  if (isScrollLocked()) return [];
+function filterEligibleSealedCreatures(visibleCreatures, options = {}) {
+  if (shouldSkipScrollLocked(options)) return [];
   const eligibleCreatures = [];
 
   visibleCreatures.forEach((imgEl) => {
@@ -8996,9 +9213,8 @@ function removeMaxCreatures() {
 // =======================
 
 // Apply max shinies styling to shiny creatures
-function filterEligibleShinies(visibleCreatures) {
-  // Skip if scroll is locked (e.g., Bestiary tab)
-  if (isScrollLocked()) return [];
+function filterEligibleShinies(visibleCreatures, options = {}) {
+  if (shouldSkipScrollLocked(options)) return [];
   
   const eligibleShinies = [];
   

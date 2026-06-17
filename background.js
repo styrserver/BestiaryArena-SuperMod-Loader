@@ -170,7 +170,7 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
 const HARDCODED_MOD_COUNTS = {
   database: 9,
   official: 11,
-  super: 25,
+  super: 26,
   ot: 4
 };
 
@@ -187,6 +187,85 @@ async function loadDefaultEnabledMods() {
     }
   }
   return HARDCODED_DEFAULT_ENABLED_MODS;
+}
+
+const REGISTRY_MOD_ARRAYS = [
+  { exportName: 'DATABASE_MODS', prefix: 'database/' },
+  { exportName: 'OFFICIAL_MODS', prefix: 'Official Mods/' },
+  { exportName: 'SUPER_MODS', prefix: 'Super Mods/' },
+  { exportName: 'OT_MODS', prefix: 'OT Mods/' }
+];
+
+function parseModNamesFromRegistrySource(source) {
+  const paths = [];
+  for (const { exportName, prefix } of REGISTRY_MOD_ARRAYS) {
+    const match = source.match(new RegExp(`export const ${exportName} = \\[([\\s\\S]*?)\\];`));
+    if (!match) continue;
+    for (const item of match[1].matchAll(/'((?:\\'|[^'])*)'/g)) {
+      paths.push(`${prefix}${item[1].replace(/\\'/g, "'")}`);
+    }
+  }
+  return paths;
+}
+
+async function loadBundledModPathsFromRegistry() {
+  if (!isServiceWorkerContext()) {
+    try {
+      const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
+      const registry = await import(registryUrl);
+      if (registry?.getAllMods) {
+        return registry.getAllMods();
+      }
+    } catch (error) {
+      console.warn('[Background] Could not import mod-registry.js for bundled mod list:', error);
+    }
+  }
+
+  try {
+    const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
+    const response = await fetch(registryUrl);
+    if (!response.ok) return null;
+    const paths = parseModNamesFromRegistrySource(await response.text());
+    return paths.length > 0 ? paths : null;
+  } catch (error) {
+    console.warn('[Background] Could not read mod-registry.js for bundled mod list:', error);
+    return null;
+  }
+}
+
+function buildBundledModEntry(modPath, defaultEnabledMods) {
+  const fileName = modPath.split('/').pop();
+  return {
+    name: modPath,
+    displayName: fileName.replace('.js', '').replace(/_/g, ' '),
+    isLocal: true,
+    enabled: defaultEnabledMods.includes(modPath),
+    type: 'file'
+  };
+}
+
+async function mergeMissingBundledMods(storedMods) {
+  const bundledPaths = await loadBundledModPathsFromRegistry();
+  if (!bundledPaths?.length) return storedMods;
+
+  const defaultEnabledMods = await loadDefaultEnabledMods();
+  const byName = new Map(storedMods.map((mod) => [mod.name, mod]));
+  let changed = false;
+
+  for (const modPath of bundledPaths) {
+    if (!byName.has(modPath)) {
+      byName.set(modPath, buildBundledModEntry(modPath, defaultEnabledMods));
+      changed = true;
+    }
+  }
+
+  if (!changed) return storedMods;
+
+  const merged = Array.from(byName.values());
+  await browserAPI.storage.sync.set({ localMods: merged });
+  await browserAPI.storage.local.set({ localMods: merged });
+  console.log('[Background] Merged missing bundled mods from mod-registry into storage');
+  return merged;
 }
 
 // Enhanced function to handle multiple mod sources
@@ -378,6 +457,9 @@ async function getLocalMods() {
       originalName: mod.name
     }));
     
+    // Add bundled mods from mod-registry that are not yet in storage (e.g. after an extension update).
+    mods = await mergeMissingBundledMods(mods);
+
     // Combine file-based mods and manual mods without duplicates,
     // but PREFER the manual mod entry (so its enabled state wins)
     const byName = new Map(mods.map(m => [m.name, m]));

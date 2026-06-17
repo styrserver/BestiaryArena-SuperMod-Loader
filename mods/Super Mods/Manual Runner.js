@@ -479,12 +479,28 @@ let gameTimerUnsubscribe = null; // Unsubscribe function for gameTimer
 
 /** Log [Perf] every N attempts + batch start/end (Chrome: heap via performance.memory). */
 const PERF_LOG_EVERY_N_ATTEMPTS = 25;
+/** Warn once per batch when Chrome tab heap grows this much (includes game + other mods, not just Manual Runner). */
+const HEAP_WARN_BATCH_DELTA_MB = 64;
+
+let batchStartHeapMb = null;
+let heapWarnLogged = false;
+
+function getHeapMbNow() {
+  if (typeof performance !== 'undefined' && performance.memory?.usedJSHeapSize) {
+    return Math.round(performance.memory.usedJSHeapSize / 1048576);
+  }
+  return null;
+}
+
+function resetBatchHeapTracking() {
+  batchStartHeapMb = getHeapMbNow();
+  heapWarnLogged = false;
+}
 
 function getManualRunnerPerfSnapshot() {
-  const heapMb =
-    typeof performance !== 'undefined' && performance.memory?.usedJSHeapSize
-      ? Math.round(performance.memory.usedJSHeapSize / 1048576)
-      : null;
+  const heapMb = getHeapMbNow();
+  const heapDeltaMb =
+    batchStartHeapMb != null && heapMb != null ? heapMb - batchStartHeapMb : null;
   return {
     stored: allAttempts.length,
     pending: pendingServerResults.size,
@@ -493,21 +509,95 @@ function getManualRunnerPerfSnapshot() {
     timerSub: !!gameTimerUnsubscribe,
     trackerListeners: gameStateTracker?.listeners?.size ?? 0,
     modals: modalManager?.activeModals?.size ?? 0,
-    heapMb
+    heapMb,
+    heapDeltaMb
   };
 }
 
 function formatManualRunnerPerfSnapshot(s) {
   const heap = s.heapMb != null ? ` heap=${s.heapMb}MB` : '';
-  return `stored=${s.stored} pending=${s.pending} subs=${s.boardSub ? 1 : 0}/${s.rewardsSub ? 1 : 0}/${s.timerSub ? 1 : 0} listeners=${s.trackerListeners} modals=${s.modals}${heap}`;
+  const delta =
+    s.heapDeltaMb != null && s.heapDeltaMb !== 0 ? ` (+${s.heapDeltaMb}MB)` : '';
+  return `stored=${s.stored} pending=${s.pending} subs=${s.boardSub ? 1 : 0}/${s.rewardsSub ? 1 : 0}/${s.timerSub ? 1 : 0} listeners=${s.trackerListeners} modals=${s.modals}${heap}${delta}`;
+}
+
+function maybeWarnHeapGrowth(attemptNumber) {
+  if (heapWarnLogged || batchStartHeapMb == null) return;
+  const heapMb = getHeapMbNow();
+  if (heapMb == null) return;
+  const delta = heapMb - batchStartHeapMb;
+  if (delta < HEAP_WARN_BATCH_DELTA_MB) return;
+  heapWarnLogged = true;
+  console.warn(
+    `[Manual Runner][Perf] Tab heap +${delta}MB since batch start (${batchStartHeapMb}→${heapMb}MB at attempt ${attemptNumber}). ` +
+    `Usually mostly the game page; Manual Runner stores ${allAttempts.length} slim attempt row(s), pending=${pendingServerResults.size}.`
+  );
 }
 
 function logManualRunnerPerfCheckpoint(attemptNumber, attemptMs) {
   if (PERF_LOG_EVERY_N_ATTEMPTS <= 0) return;
   if (attemptNumber !== 1 && attemptNumber % PERF_LOG_EVERY_N_ATTEMPTS !== 0) return;
+  maybeWarnHeapGrowth(attemptNumber);
   console.log(
     `[Manual Runner][Perf] attempt=${attemptNumber} attemptMs=${Math.round(attemptMs)} ${formatManualRunnerPerfSnapshot(getManualRunnerPerfSnapshot())}`
   );
+}
+
+/** Per-attempt trace folded into one summary line (replaces step-by-step console noise). */
+let currentAttemptTrace = null;
+
+function beginAttemptTrace(attemptNumber) {
+  currentAttemptTrace = { attemptNumber, skipped: false, reward: null, rewardMs: null, waits: [] };
+}
+
+function noteServerResultsCaptured(serverResults) {
+  if (!currentAttemptTrace || !serverResults) return;
+  currentAttemptTrace.seed = serverResults.seed;
+  const rs = serverResults.rewardScreen;
+  if (rs) {
+    currentAttemptTrace.victory = rs.victory;
+    currentAttemptTrace.ticks = rs.gameTicks;
+  }
+}
+
+function noteAttemptSkip() {
+  if (currentAttemptTrace) currentAttemptTrace.skipped = true;
+}
+
+function noteRewardHandled(action, ms) {
+  if (!currentAttemptTrace) return;
+  currentAttemptTrace.reward = action;
+  if (ms != null) currentAttemptTrace.rewardMs = ms;
+}
+
+function shortenCoordinationLabel(context, ops) {
+  const op = ops[0] || 'automator';
+  if (context.includes('pre-start')) return `pre:${op}`;
+  if (context.includes('post-attempt') || context.includes('post-victory')) return `post:${op}`;
+  return op;
+}
+
+function noteCoordinationWait(context, ms, ops) {
+  if (!currentAttemptTrace || !ms || ms < 50) return;
+  currentAttemptTrace.waits.push({ label: shortenCoordinationLabel(context, ops), ms: Math.round(ms) });
+}
+
+function logAttemptSummary(attemptNumber, { victory, ticks, grade, rankPoints, staminaThis, attemptMs }) {
+  const t = currentAttemptTrace;
+  const outcome = victory ? 'W' : 'L';
+  const seed = t?.seed != null ? ` seed=${t.seed}` : '';
+  const parts = [`#${attemptNumber} ${outcome} ${ticks}t ${grade} +${rankPoints}rp ${staminaThis}sta${seed}`];
+  const extras = [];
+  if (t?.skipped) extras.push('skip');
+  if (t?.reward) {
+    extras.push(t.rewardMs != null ? `${t.reward} ${t.rewardMs}ms` : t.reward);
+  }
+  if (t?.waits?.length) {
+    for (const w of t.waits) extras.push(`wait:${w.label} ${w.ms}ms`);
+  }
+  if (extras.length) parts.push(extras.join(' · '));
+  if (attemptMs != null) parts.push(`${Math.round(attemptMs)}ms`);
+  console.log(`[Manual Runner] ${parts.join(' | ')}`);
 }
 
 // =======================
@@ -699,6 +789,44 @@ function clickStartButton() {
     return true;
   }
   return false;
+}
+
+function getCurrentRunStaminaCost() {
+  try {
+    const room = globalThis.state?.board?.getSnapshot()?.context?.selectedMap?.selectedRoom;
+    if (room?.staminaCost != null) return Number(room.staminaCost);
+  } catch (_) {}
+  return 6;
+}
+
+function getCurrentStaminaForRun() {
+  try {
+    const ctx = globalThis.state?.player?.getSnapshot()?.context;
+    if (ctx?.stamina != null && !Number.isNaN(Number(ctx.stamina))) return Number(ctx.stamina);
+    if (ctx?.currentStamina != null && !Number.isNaN(Number(ctx.currentStamina))) return Number(ctx.currentStamina);
+    if (typeof globalThis.state?.utils?.getCurrentStamina === 'function') {
+      const s = Number(globalThis.state.utils.getCurrentStamina());
+      if (!Number.isNaN(s)) return s;
+    }
+    const el = document.querySelector('[title="Stamina"] span span');
+    if (el) {
+      const s = Number(el.textContent);
+      if (!Number.isNaN(s)) return s;
+    }
+  } catch (_) {}
+  return null;
+}
+
+/** Game tooltip or stamina below map cost — refill may run at pre-start but cannot create stamina from nothing. */
+function hasInsufficientStaminaForNextRun() {
+  const cost = getCurrentRunStaminaCost();
+  const stamina = getCurrentStaminaForRun();
+  const tooltip = document.querySelector(
+    '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
+  );
+  if (tooltip) return { insufficient: true, cost, stamina };
+  if (stamina != null && stamina < cost) return { insufficient: true, cost, stamina };
+  return { insufficient: false, cost, stamina };
 }
 
 /**
@@ -980,6 +1108,7 @@ function cleanupGameTimerSubscription() {
 async function waitForGameCompletion(analysisId) {
   // Reset reward screen state at start (should already be false, but ensure it)
   rewardScreenOpen = false;
+  let skippedThisRun = false;
   
   // Promise-based approach: wait for callback to fire or timeout
   const maxWaitMs = 240000; // 4 minutes max
@@ -1033,11 +1162,9 @@ async function waitForGameCompletion(analysisId) {
         }
       }
       
-      // Check for skip
+      // Check for skip — keep waiting for reward screen; loot handling runs after battle ends
       if (await handleSkipDetection(`[Manual Runner] Skip detected during wait check ${checkCount}`)) {
-        clearInterval(intervalId);
-        rewardScreenOpenedCallback = null;
-        reject('skip');
+        skippedThisRun = true;
         return;
       }
       
@@ -1079,8 +1206,6 @@ async function waitForGameCompletion(analysisId) {
   } catch (reason) {
     if (reason === 'invalid_id' || reason === 'stopped' || reason === 'force_stopped') {
       return createForceStopResult();
-    } else if (reason === 'skip') {
-      return createSkipResult();
     } else if (reason === 'timeout') {
       console.log('[Manual Runner] Timeout waiting for reward screen - returning failed state');
       return {
@@ -1165,7 +1290,8 @@ async function waitForGameCompletion(analysisId) {
     ticks: currentTick,
     grade: readableGrade,
     rankPoints: rankPoints,
-    completed: completed
+    completed: completed,
+    skipped: skippedThisRun
   };
 }
 
@@ -1219,9 +1345,8 @@ function setupBoardSubscription() {
       
       // One pending entry per run (avoids map growth); single clone at capture
       pendingServerResults.clear();
-      pendingServerResults.set(seed, cloneServerResults(serverResults));
-      
-      console.log('[Manual Runner] ServerResults captured, seed:', seed, 'victory:', serverResults.rewardScreen.victory, 'ticks:', serverResults.rewardScreen.gameTicks);
+      pendingServerResults.set(seed, slimServerResultsClone(serverResults));
+      noteServerResultsCaptured(serverResults);
     });
   }
 }
@@ -1270,9 +1395,7 @@ function setupRewardsScreenSubscription() {
 
 // Function to close the reward screen (like btlucas fix.js)
 function closeRewardScreen() {
-  const scrollLocked = document.body?.getAttribute('data-scroll-locked');
   dispatchEsc();
-  console.log('[Manual Runner] ESC → close reward screen' + (scrollLocked === '1' ? ' (modal)' : ''));
 }
 
 /** Skip button shows a stamina cost (e.g. Skip (stamina icon 2)). */
@@ -1340,7 +1463,7 @@ async function handleSkipButton() {
         console.log('[Manual Runner] Skip not auto-clicked (stamina skip disabled in config):', skipButton.textContent.trim());
         return false;
       }
-      console.log('[Manual Runner] Skip:', skipButton.textContent.trim());
+      noteAttemptSkip();
       skipButton.click();
       await sleep(500); // Wait for skip to process
 
@@ -1396,13 +1519,60 @@ function getBoardOpenRewardsSnapshot() {
   return rewardScreenOpen;
 }
 
-function cloneServerResults(serverResults) {
-  if (!serverResults) return null;
+function cloneJsonValue(value) {
+  if (value == null) return value;
   try {
-    return JSON.parse(JSON.stringify(serverResults));
+    return JSON.parse(JSON.stringify(value));
   } catch (_) {
-    return serverResults;
+    return value;
   }
+}
+
+/** Keep only fields inject/sell/stats need — avoids cloning full server payloads each run. */
+function slimServerResultsClone(serverResults) {
+  if (!serverResults) return null;
+  const rs = serverResults.rewardScreen;
+  const slim = {
+    seed: serverResults.seed,
+    enableSkip: serverResults.enableSkip
+  };
+  if (rs) {
+    slim.rewardScreen = {
+      victory: rs.victory,
+      gameTicks: rs.gameTicks,
+      grade: rs.grade,
+      rank: rs.rank,
+      roomId: rs.roomId,
+      floor: rs.floor
+    };
+    if (rs.monsterDrop != null) slim.rewardScreen.monsterDrop = cloneJsonValue(rs.monsterDrop);
+    if (rs.loot != null) slim.rewardScreen.loot = cloneJsonValue(rs.loot);
+    if (rs.monsters != null) slim.rewardScreen.monsters = cloneJsonValue(rs.monsters);
+  }
+  if (serverResults.monsters != null) slim.monsters = cloneJsonValue(serverResults.monsters);
+  if (serverResults.rewards?.monsters != null) {
+    slim.rewards = { monsters: cloneJsonValue(serverResults.rewards.monsters) };
+  }
+  if (serverResults.next) {
+    slim.next = {};
+    if (serverResults.next.monsterDrop != null) {
+      slim.next.monsterDrop = cloneJsonValue(serverResults.next.monsterDrop);
+    }
+    if (typeof serverResults.next.playerExpDiff === 'number') {
+      slim.next.playerExpDiff = serverResults.next.playerExpDiff;
+    }
+  }
+  return slim;
+}
+
+function cloneServerResults(serverResults) {
+  return slimServerResultsClone(serverResults);
+}
+
+/** Drop per-attempt caches so long batches do not retain stale serverResults references. */
+function pruneRunTransientMemoryAfterAttempt() {
+  pendingServerResults.clear();
+  currentAttemptTrace = null;
 }
 
 // Function to wait for reward screen to close
@@ -1551,20 +1721,10 @@ async function waitForModCoordinationTasks(options = {}) {
     return ops;
   };
 
-  const initialMeta = getAutomatorMetadata();
   const initialOps = getActiveOperations();
   const contextSuffix = context ? ` [${context}]` : '';
 
   let activeOperations = initialOps;
-
-  if (activeOperations.length > 0) {
-    console.log(`[Manual Runner] Coordination: waiting for Automator (${activeOperations.join(', ')})${contextSuffix}`, {
-      automatorRefilling: !!initialMeta.refilling,
-      automatorCollectingRewards: !!initialMeta.collectingRewards,
-      automatorHandlingDaycare: !!initialMeta.handlingDaycare,
-      automatorCollectingSeashell: !!initialMeta.collectingSeashell
-    });
-  }
 
   while (activeOperations.length > 0) {
     const elapsed = performance.now() - start;
@@ -1580,7 +1740,10 @@ async function waitForModCoordinationTasks(options = {}) {
 
   if (waitAttempts > 0) {
     const elapsed = Math.round(performance.now() - start);
-    console.log(`[Manual Runner] Automator idle after ${elapsed}ms${contextSuffix}`);
+    noteCoordinationWait(context, elapsed, initialOps);
+    if (elapsed >= 3000) {
+      console.log(`[Manual Runner] Coordination slow (${elapsed}ms)${contextSuffix}: ${initialOps.join(', ')}`);
+    }
   }
 }
 
@@ -1721,7 +1884,7 @@ function peekServerResultsForCurrentReward() {
   try {
     const contextServerResults = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults;
     if (contextServerResults?.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
-      return contextServerResults;
+      return slimServerResultsClone(contextServerResults);
     }
   } catch (_) {}
   return null;
@@ -2518,19 +2681,28 @@ async function autoSellCreatures() {
   }
   
   try {
-    const soldLabel = sellButton.textContent.trim() || 'sell';
     sellButton.click();
     await sleep(500); // Wait for sell action to complete
     
     dispatchEsc();
     await sleep(200);
     
-    console.log('[Manual Runner] Auto-sell:', soldLabel);
+    noteRewardHandled('sell', null);
     return true;
   } catch (error) {
     console.error('[Manual Runner] Error during auto-sell:', error);
     return false;
   }
+}
+
+function setManualRunnerRewardHandlingFlag(busy) {
+  try {
+    if (!window.ModCoordination) return;
+    const prev = window.ModCoordination.getModState('Manual Runner')?.metadata || {};
+    window.ModCoordination.updateModState('Manual Runner', {
+      metadata: { ...prev, handlingRewardScreen: !!busy }
+    });
+  } catch (_) {}
 }
 
 async function ensureRewardScreenHandled() {
@@ -2544,19 +2716,25 @@ async function ensureRewardScreenHandled() {
     return;
   }
 
+  setManualRunnerRewardHandlingFlag(true);
+  try {
+  const serverResultsPeek = peekServerResultsForCurrentReward();
+  const hasCreatureDrop = serverResultsPeek ? serverResultsHasCreatureDrop(serverResultsPeek) : false;
+  const needsLootUi = hasCreatureDrop && (wantsInject || wantsSell);
   // Act on the loot screen while it is still open — do NOT wait for Automator first (it can take seconds).
-  const screenReady = await waitForRewardScreenReady(8000);
+  const screenReady = await waitForRewardScreenReady(needsLootUi ? 8000 : 2000);
   if (!screenReady) {
     console.warn('[Manual Runner] Reward screen not open; inject may still use API, autosell needs the loot UI');
   }
 
   await sleep(300);
   const serverResults = await waitForServerResultsForReward(3000);
-  const hasCreatureDrop = serverResults ? serverResultsHasCreatureDrop(serverResults) : false;
+  const hasCreatureDropResolved = serverResults ? serverResultsHasCreatureDrop(serverResults) : hasCreatureDrop;
 
+  let consumedByInject = new Set();
   if (wantsInject && serverResults) {
-    await manualRunnerAutoInjectSealedCreatures(serverResults);
-    if (wantsSell && hasCreatureDrop) {
+    consumedByInject = await manualRunnerAutoInjectSealedCreatures(serverResults);
+    if (wantsSell && hasCreatureDropResolved) {
       await sleep(300);
     }
   } else if (wantsInject && !serverResults) {
@@ -2564,8 +2742,18 @@ async function ensureRewardScreenHandled() {
   }
 
   let autoSellSuccess = false;
-  if (wantsSell && hasCreatureDrop) {
-    if (!getOpenRewardsStateWithFallback()) {
+  if (wantsSell && hasCreatureDropResolved) {
+    const { rewardMonsterIds } = serverResults
+      ? extractManualRunnerRewardMonsters(serverResults)
+      : { rewardMonsterIds: new Set() };
+    const allRewardDropsConsumed =
+      consumedByInject.size > 0 &&
+      rewardMonsterIds.size > 0 &&
+      [...rewardMonsterIds].every((id) => consumedByInject.has(id));
+
+    if (allRewardDropsConsumed) {
+      noteRewardHandled('inject', null);
+    } else if (!getOpenRewardsStateWithFallback()) {
       console.warn('[Manual Runner] Autosell skipped: reward screen already closed before sell');
     } else {
       autoSellSuccess = await autoSellCreatures();
@@ -2579,6 +2767,10 @@ async function ensureRewardScreenHandled() {
 
     const rewardClosed = await waitForRewardScreenToClose(2500);
     const closeElapsed = Math.round(performance.now() - closeStart);
+    noteRewardHandled(
+      currentAttemptTrace?.reward === 'inject' ? 'inject' : 'esc',
+      closeElapsed
+    );
     
     if (!rewardClosed) {
       console.warn(`[Manual Runner] Reward screen did not close within timeout (${closeElapsed}ms), trying ESC key...`);
@@ -2589,14 +2781,18 @@ async function ensureRewardScreenHandled() {
       } else {
         rewardScreenOpen = false;
       }
-    } else {
-      console.log(`[Manual Runner] Reward screen closed in ${closeElapsed}ms`);
     }
   } else {
     // Autosell handled closing — verify it closed
     await sleep(300);
     if (!getBoardOpenRewardsSnapshot()) {
       rewardScreenOpen = false;
+    }
+  }
+  } finally {
+    setManualRunnerRewardHandlingFlag(false);
+    if (!getOpenRewardsStateWithFallback() && isBoardGameRunning()) {
+      await ensureGameStopped({ context: 'post-reward board reset', maxWaitMs: 5000 });
     }
   }
 }
@@ -2615,7 +2811,7 @@ async function waitForServerResults(maxWaitTime = 2000) {
 
     const contextServerResults = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults;
     if (contextServerResults && contextServerResults.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
-      serverResults = contextServerResults;
+      serverResults = slimServerResultsClone(contextServerResults);
       break;
     }
 
@@ -2693,16 +2889,6 @@ function createForceStopResult() {
     rankPoints: 0,
     completed: false,
     forceStopped: true
-  };
-}
-
-function createSkipResult() {
-  return {
-    ticks: 0,
-    grade: 'F',
-    rankPoints: 0,
-    completed: false,
-    skipped: true
   };
 }
 
@@ -2809,6 +2995,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
   const thisAnalysisId = analysisState.start();
   let startTime = null;
   let userForceStopped = false;
+  let stoppedOutOfStamina = false;
   
   try {
     // Reset attempts array and tracking variables
@@ -2841,6 +3028,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     
     attemptCount = 0;
     startTime = performance.now();
+    resetBatchHeapTracking();
     console.log(`[Manual Runner][Perf] batch start ${formatManualRunnerPerfSnapshot(getManualRunnerPerfSnapshot())}`);
     
     while (true) {
@@ -2864,9 +3052,19 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         });
       }
 
-      console.log(`[Manual Runner] Attempt ${attemptCount}: Starting game...`);
+      beginAttemptTrace(attemptCount);
 
       await waitForModCoordinationTasks({ context: `pre-start attempt ${attemptCount}` });
+
+      const staminaCheck = hasInsufficientStaminaForNextRun();
+      if (staminaCheck.insufficient) {
+        stoppedOutOfStamina = true;
+        console.warn(
+          `[Manual Runner] Stopping run: insufficient stamina (${staminaCheck.stamina ?? '?'} / ${staminaCheck.cost} required; auto-refill needs potions)`
+        );
+        break;
+      }
+
       prepareAttemptState(attemptCount + 1);
 
       if (!await clickStartButtonRobust({ maxWaitMs: 10000, recheckDelayMs: 1000 })) {
@@ -2955,15 +3153,16 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
 
       allAttempts.push(attemptData);
 
-      console.log(`[Manual Runner] Attempt ${attemptCount} done:`, {
+      logAttemptSummary(attemptCount, {
         victory: isVictory,
         ticks: result.ticks,
         grade: result.grade,
         rankPoints: result.rankPoints,
         staminaThis: attemptStaminaSpent,
-        staminaTotal: totalStaminaSpent
+        attemptMs: runTime
       });
       logManualRunnerPerfCheckpoint(attemptCount, runTime);
+      pruneRunTransientMemoryAfterAttempt();
       
       // Check if stop was requested during this run (after recording attempt data)
       if (!analysisState.isRunning()) {
@@ -3122,11 +3321,17 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       if (!victoryContinueDueToTicks && !isVictory) {
         console.log(`[Manual Runner] Defeat on attempt ${attemptCount} — retry`);
       }
-
-      const cleanupStart = performance.now();
       
       if (!await ensureGameStopped({ context: `post-attempt cleanup ${attemptCount}` })) {
-        console.warn('[Manual Runner] Stopping run: board still busy after idle wait (not a user stop)');
+        const staminaAfter = hasInsufficientStaminaForNextRun();
+        if (staminaAfter.insufficient) {
+          stoppedOutOfStamina = true;
+          console.warn(
+            `[Manual Runner] Stopping run: out of stamina after attempt ${attemptCount} (board stuck with gameStarted=true)`
+          );
+        } else {
+          console.warn('[Manual Runner] Stopping run: board still busy after idle wait (not a user stop)');
+        }
         break;
       }
 
@@ -3142,9 +3347,6 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       await waitForModCoordinationTasks({ context: `post-attempt cleanup ${attemptCount}` });
 
       await sleep(GAME_RESTART_DELAY_MS);
-      
-      const cleanupElapsed = Math.round(performance.now() - cleanupStart);
-      console.log(`[Manual Runner] Ready attempt ${attemptCount + 1} (+${cleanupElapsed}ms cleanup)`);
     }
     
     const totalTime = performance.now() - startTime;
@@ -3152,6 +3354,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       success: false,
       attempts: attemptCount,
       forceStopped: userForceStopped,
+      stoppedOutOfStamina,
       totalTimeMs: totalTime,
       allAttempts: allAttempts
     };
@@ -3171,6 +3374,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     analysisState.reset();
     teardownManualRunnerSubscriptions();
     resetManualRunnerTransientState();
+    maybeWarnHeapGrowth(attemptCount);
     console.log(
       `[Manual Runner][Perf] batch end attempts=${attemptCount} ${formatManualRunnerPerfSnapshot(getManualRunnerPerfSnapshot())}`
     );
@@ -4496,6 +4700,7 @@ async function runAnalysis() {
       success: results?.success,
       attempts: results?.attempts,
       forceStopped: results?.forceStopped,
+      stoppedOutOfStamina: results?.stoppedOutOfStamina,
       allAttempts: results?.allAttempts?.length
     });
     
@@ -4589,6 +4794,7 @@ function init() {
 /** Reward-screen flags, pending results, skip debounce — reset between runs and on mod unload. */
 function resetManualRunnerTransientState() {
   pendingServerResults.clear();
+  currentAttemptTrace = null;
   rewardScreenOpen = false;
   rewardScreenOpenedCallback = null;
   rewardScreenClosedCallback = null;

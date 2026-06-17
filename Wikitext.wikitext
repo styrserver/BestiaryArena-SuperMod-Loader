@@ -196,7 +196,7 @@ Live stats (hitpoints, attack, ability_power, armor, magic_resist, movement_spee
 The extension comes with several powerful mods that demonstrate different features:
 
 === Super Mods ===
-These are advanced mods that provide comprehensive game enhancement features. All 25 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 26 Super Mods listed below are included by default in this loader:
 
 ==== Autoscroller ====
 Automates summon scroll usage to collect specific creatures:
@@ -228,6 +228,13 @@ DPS tracking for the impact analyzer plus a sandbox analytics panel (toolbar '''
 * Automatic tracking of damage changes throughout the game session (manual, autoplay, sandbox)
 * Auto-opening of the impact analyzer panel for seamless tracking
 * '''Sandbox panel''': draggable/resizable floating panel with map/setup sync, Units tab (allies vs enemies, expandable rows), Battle Log (filtered ally/villain dmg/heal, action source tags), and sandbox fight speed slider (5–100%, disables Turbo during fights)
+
+==== Better Bestiary ====
+Enhances the Bestiary sell modal with creature selection presets and temporary overlay toggles:
+* '''Creature Selector''' presets: Already Shiny, Already Awakened, and Already A/S select unlocked duplicates when you already own that milestone per species
+* '''Overlays''' column: temporary session toggles for Maxed, Sealed, and Shinies borders (Mod Settings styling; restores when the modal closes)
+* Activated title and author credit in the creature details column
+* EN/PT labels and hover tooltips on all controls
 
 ==== Better Boosted Maps ====
 Automates daily boosted map farming with intelligent coordination:

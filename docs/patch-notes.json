@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.2.5",
+      "changes": [
+        {
+          "mod": "Better Bestiary",
+          "type": "added",
+          "text": "NEW MOD! Bestiary sell modal: Creature Selector presets (Already Shiny, Already Awakened, Already A/S) select unlocked duplicates when you already own that milestone per species; Overlays column toggles Maxed, Sealed, and Shinies temporarily (Mod Settings styling, restored on close); activated title and author credit in the details column. EN/PT labels and tooltips."
+        },
+        {
+          "mod": "Core",
+          "type": "changed",
+          "text": "README and Wikitext document Better Bestiary (26 Super Mods). Popup EN/PT mod descriptions synced: Better Analytics sandbox, Better Forge type filter, Depot Manager, Room Hopper and Awaken Tracker locale keys."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Per-attempt console output is one summary line (result, seed, skip, esc/sell/inject, coordination waits). Perf logs show tab heap delta (+NMB) per batch; slim serverResults snapshots and per-attempt memory prune reduce long-run retention."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "BetterUIApplyCreatureCosmeticsIn and incremental variant apply max, shiny, and sealed styling inside scroll-locked dialogs (Bestiary modal) with the same colors and Maxed > Shiny > Sealed priority as the main UI."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "fixed",
+          "text": "Level-up reward collection, cube opening, and daycare defer while the battle loot modal is open or Manual Runner / Board Analyzer is handling post-run rewards, so inject/sell/keep are not interrupted."
+        },
+        {
+          "mod": "Better Forge",
+          "type": "fixed",
+          "text": "Dust counter reads inventory.dust (not context.dust), parses { count } dust objects, refreshes after disenchant and forge completion, and no longer shows 0, NaN, or stale values during multi-step auto-upgrade."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Loot handling: handlingRewardScreen coordination flag; skip waits for the reward modal; shorter wait when no creature drop; board idle reset after rewards. Stops with a clear message when stamina is insufficient (including board stuck after the last run with no potions). Auto-sell is skipped when inject already consumed the reward drop (same rule as Autoseller)."
+        }
+      ]
+    },
+    {
       "version": "4.2.4",
       "changes": [
         {

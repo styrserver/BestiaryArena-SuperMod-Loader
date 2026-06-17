@@ -63,7 +63,7 @@ To create a mod, you need to:
 
 ### Adding a New Built-in Mod to the Extension
 
-If you're developing a mod to be included with the extension (not a user-generated mod), register it in **three places**. The same checklist appears in the repository README under **Adding a mod that ships inside the extension** ([`README.md`](../README.md#adding-a-mod-that-ships-inside-the-extension)).
+If you're developing a mod to be included with the extension (not a user-generated mod), register it in **four places**. The same checklist appears in the repository README under **Adding a mod that ships inside the extension** ([`README.md`](../README.md#adding-a-mod-that-ships-inside-the-extension)).
 
 **1. `content/mod-registry.js`** — Add the filename to `DATABASE_MODS`, `OFFICIAL_MODS`, `SUPER_MODS`, or `OT_MODS` (see the file header for the full checklist).
 
@@ -80,7 +80,7 @@ export const SUPER_MODS = [
 
 **2. `background.js`** — In the `getModCounts` message handler, update the hardcoded `modCounts` object so `database`, `official`, `super`, and `ot` match the lengths in `mod-registry.js`. Chromium uses this fallback because the service worker cannot dynamically import the registry. Search for the comment *Keep these in sync with content/mod-registry.js*.
 
-**3. `popup/popup.js`** — Update the static name arrays so the popup lists match `mod-registry.js` (search for *kept in sync with mod-registry.js*).
+**3. `popup/popup.js`** — Update the static name arrays so the popup lists match `mod-registry.js` (search for *kept in sync with mod-registry.js*). Also add a short entry to `modDescriptions` and, if you use translated tooltips, `assets/locales/en-US.json` and `assets/locales/pt-BR.json` under `popup.modDescriptions`.
 
 ```javascript
 const superModNames = [
@@ -91,11 +91,16 @@ const superModNames = [
 ];
 ```
 
-**Why three places?**
+**4. `content/local_mods.js`** — Add the filename to the matching `FALLBACK_*` array (search for *Keep in sync with content/mod-registry.js*). This list is used when the page cannot dynamically import `mod-registry.js` (for example Orion iOS).
+
+**After updating:** reload the extension in your browser (`chrome://extensions` → Reload). The popup reads bundled mods from extension storage; `background.js` merges any new registry entries into storage when you open the popup. If a mod still does not appear, refresh a Bestiary Arena tab once so the content script re-registers mods, or use the popup’s **Reset local mods** button and refresh the game tab.
+
+**Why four places?**
 
 - `mod-registry.js` is the source of truth for content scripts (ES modules).
-- The popup cannot load those modules the same way, so it duplicates filenames for the UI.
-- On Chrome, the background service worker cannot use `import()` for the registry, so category totals use the hardcoded `modCounts` object until that limitation changes.
+- The popup cannot load those modules the same way, so it duplicates filenames for categorization and descriptions.
+- `local_mods.js` embeds the same lists for environments where dynamic import fails.
+- On Chrome, the background service worker cannot use `import()` for the registry in all code paths, so category totals use the hardcoded `modCounts` object until that limitation changes.
 
 ### Debug System
 

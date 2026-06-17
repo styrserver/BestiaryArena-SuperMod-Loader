@@ -611,6 +611,34 @@ const isGameActive = () => {
   }
 };
 
+// Battle loot screen is open — Manual Runner (and Board Analyzer) need it for inject/sell/keep.
+const isBattleRewardScreenOpen = () => {
+  try {
+    const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+    return !!(ctx && ctx.openRewards);
+  } catch (_) {
+    return false;
+  }
+};
+
+// Defer Automator UI tasks that steal focus from the post-run loot modal.
+const shouldDeferUiAutomationForBattleRewards = () => {
+  if (isBattleRewardScreenOpen()) {
+    return true;
+  }
+  try {
+    const manualRunner = window.ModCoordination?.getModState('Manual Runner');
+    if (manualRunner?.active && manualRunner?.metadata?.handlingRewardScreen) {
+      return true;
+    }
+    const boardAnalyzer = window.ModCoordination?.getModState('Board Analyzer');
+    if (boardAnalyzer?.active && boardAnalyzer?.metadata?.handlingRewardScreen) {
+      return true;
+    }
+  } catch (_) {}
+  return false;
+};
+
 // Simple game readiness check for stamina refill
 const isGameReadyForStaminaRefill = () => {
   try {
@@ -1815,6 +1843,9 @@ const openAllSurpriseCubesFromInventory = async (options = {}) => {
 };
 
 const openCubesIfEnabled = async () => {
+  if (shouldDeferUiAutomationForBattleRewards()) {
+    return;
+  }
   if (!config.autoOpenCubes || cubesOpenedThisSession) {
     if (!config.autoOpenCubes) {
       console.log('[Bestiary Automator] [cubes] Skipping trigger: autoOpenCubes disabled');
@@ -2513,6 +2544,10 @@ const takeRewardsIfAvailable = async () => {
   if (!shouldCollectLevelUpRewards && !shouldCollectSeashell) {
     return;
   }
+
+  if (shouldDeferUiAutomationForBattleRewards()) {
+    return;
+  }
   
   try {
     // Check if player state is available
@@ -2891,6 +2926,10 @@ const closeQuestLog = async () => {
 // Handle day care
 const handleDayCare = async () => {
   if (!config.autoDayCare) return;
+
+  if (shouldDeferUiAutomationForBattleRewards()) {
+    return;
+  }
   
   // Check if Board Analyzer is running - if so, skip daycare detection
   if (isBoardAnalyzerRunning()) return;
