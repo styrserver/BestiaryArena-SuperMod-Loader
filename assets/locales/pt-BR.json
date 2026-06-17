@@ -124,25 +124,28 @@
       "Turbo Mode": "Acelere o jogo com multiplicadores e exibição de ticks para testes e farm.",
       "Autoseller": "Vende ou espreme criaturas por genes; widget de sessão com ouro, poeira e contadores.",
       "Autoscroller": "Automatiza pergaminhos de invocação para buscar criaturas alvo; tiers, paradas e velocidade limitada.",
-      "Better Analytics": "DPT e DPS no analisador de dano / impacto.",
+      "Better Analytics": "DPS no analisador de impacto mais painel sandbox: unidades, battle log, filtros e controle de velocidade.",
+      "Better Bestiary": "Modal de venda do Bestiário: presets do Seletor de Criaturas e Destaques temporários (Maxados, Selados, Shinies) para vender duplicatas quando você já tem shiny e/ou despertos por espécie.",
       "Better Boosted Maps": "Farm do mapa impulsionado diário com coordenação entre mods e setups configuráveis.",
       "Better Cauldron": "Busca e filtro no Caldeirão Monstruoso, inclusive por raridade.",
       "Better Exaltation Chest": "Abrir baús automaticamente, filtrar equipamentos, desencantar indesejados, stats de poeira.",
-      "Better Forge": "Arsenal, desencantamento em lote, busca e filtros por tier com rastreamento de poeira.",
+      "Better Forge": "Arsenal, desencantamento em lote, busca e filtros de tipo/tier com poeira ao vivo.",
       "Better Highscores": "Leaderboards de tick e rank do mapa atual com estilo de medalhas.",
       "Better Hy'genie": "Campos de quantidade, proporções de fusão e UI de fusão melhorada.",
       "Better Rune Recycler": "Reciclagem de runas em lotes, validação e rastreamento de ouro/stats.",
       "Better Setups": "Rótulos de setup (Farm, Speedrun etc.), edição na UI, integração com Configurator.",
       "Better Tasker": "Automação de quests: log, aceitar tarefas, mapas; pausa quando há recompensas.",
       "Better Yasir": "Compra e venda em massa no Yasir com preços ao vivo e confirmações.",
-      "Cyclopedia": "Bases de criaturas e itens, perfis, leaderboards e integração com RunTracker.",
+      "Cyclopedia": "Bases de monstros e equipamentos, perfis, rankings por temporada e RunTracker.",
       "Dice Roller": "Rola dados automaticamente até atingir os stats desejados.",
       "Challenges": "Desafios aleatórios com sorteios, pontuação, leaderboards e compartilhamento de replay.",
       "Guilds": "Crie guildas com cargos, chat criptografado, convites e navegador de guildas.",
-      "Hunt Analyzer": "Estatísticas de batalhas (autoplay): ouro, poeira, drops, resumos e exportação.",
+      "Hunt Analyzer": "Estatísticas de sessão no autoplay: ouro, poeira, drops, resumos e exportação.",
       "Raid Hunter": "Automação de raids: detectar e entrar, setup, autoplay, stamina e filas.",
       "Manual Runner": "Repete runs manuais até vitória, S+ alvo ou andar máximo; stats e cópia de replay.",
-      "Depot Manager": "Gerencie seu bestiário e equipamentos.",
+      "Room Hopper": "Lista de mapas pesquisável com filtros de criatura/equipamento, XP por stamina e teleporte.",
+      "Awaken Tracker": "Progresso de genes de despertar por mapa com deltas ao vivo, logs de eventos e pausa no cap.",
+      "Depot Manager": "Fileiras de depósito de criaturas e equipamentos, favoritos e envio rápido ao depósito.",
       "Stamina Optimizer": "Inicia ou para o jogo nos limites de stamina; coordena com outros mods de farm.",
       "Quests": "Missões, diálogos com NPCs, itens de quest e progresso via Firebase.",
       "VIP List": "Jogadores favoritos com perfil, colunas ordenáveis e links para Cyclopedia.",
@@ -158,6 +161,32 @@
       "enableCreatureDepot": "Depósito de criaturas",
       "sendToDepot": "Enviar para o depósito",
       "sendToBestiary": "Enviar para o bestiário"
+    },
+    "betterBestiary": {
+      "activated": "Better Bestiary ativado!",
+      "authorCredit": "por megafuji",
+      "presetsColumnTitle": "Seletor de Criaturas",
+      "cosmeticsColumnTitle": "Destaques",
+      "cosmeticToggleHint": "(temporário enquanto o Bestiário estiver aberto)",
+      "cosmetics": {
+        "maxed": { "label": "Maxados" },
+        "sealed": { "label": "Selados" },
+        "shinies": { "label": "Shinies" }
+      },
+      "presets": {
+        "shiny": {
+          "label": "Já Shiny",
+          "tooltip": "Seleciona duplicatas não shiny desbloqueadas de espécies das quais você já possui um shiny. Criaturas bloqueadas são ignoradas."
+        },
+        "awakened": {
+          "label": "Já Despertado",
+          "tooltip": "Seleciona duplicatas não despertas desbloqueadas de espécies das quais você já possui um despertado. Criaturas bloqueadas são ignoradas."
+        },
+        "both": {
+          "label": "Já A/S",
+          "tooltip": "Seleciona cópias desbloqueadas de espécies das quais você já possui um keeper shiny despertado (tier 6 ou nível 50+). Criaturas bloqueadas são ignoradas."
+        }
+      }
     },
     "betterUI": {
       "settingsTitle": "Configurações do Mod",

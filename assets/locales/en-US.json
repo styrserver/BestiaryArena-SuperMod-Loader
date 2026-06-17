@@ -124,25 +124,28 @@
       "Turbo Mode": "Speed up gameplay with customizable multipliers and tick display for testing and grinding.",
       "Autoseller": "Sells or squeezes creatures by gene thresholds; session widget for gold, dust, and counts.",
       "Autoscroller": "Automates summon scroll usage to hunt target creatures; tiers, stop conditions, and rate-limited speed.",
-      "Better Analytics": "Damage per tick (DPT) and DPS tracking in the damage / impact analyzer.",
+      "Better Analytics": "DPS in the impact analyzer plus sandbox panel: units, battle log, filters, and fight speed control.",
+      "Better Bestiary": "Bestiary sell modal: Creature Selector presets and temporary Overlays (Maxed, Sealed, Shinies) for duplicate bulk-sell when you already have shiny and/or awaken keepers per species.",
       "Better Boosted Maps": "Automates daily boosted map farming with mod coordination and configurable setups.",
       "Better Cauldron": "Search and filter monsters in the Monstrous Cauldron, including by rarity.",
       "Better Exaltation Chest": "Auto-open chests, filter equipment, disenchant unwanted gear, with dust stats.",
-      "Better Forge": "Arsenal management, batch disenchant, search, and tier filters with dust tracking.",
+      "Better Forge": "Arsenal management, batch disenchant, search, and type/tier filters with live dust tracking.",
       "Better Highscores": "Live tick and rank leaderboards for the current map with medal styling.",
       "Better Hy'genie": "Quantity inputs, smart fusion ratios, and improved fusion UI for Hy'genie.",
       "Better Rune Recycler": "Automates rune recycling with batch cycles, validation, and gold/stat tracking.",
       "Better Setups": "Setup labels (Farm, Speedrun, etc.), edit from the setup UI, Configurator integration.",
       "Better Tasker": "Quest automation: open log, accept tasks, navigate maps; pauses when claims are ready.",
       "Better Yasir": "Bulk buy and sell at Yasir with live pricing and confirmation prompts.",
-      "Cyclopedia": "Monster and equipment databases, player profiles, leaderboards, RunTracker integration.",
+      "Cyclopedia": "Monster and equipment databases, player profiles, season rankings, and RunTracker integration.",
       "Dice Roller": "Auto-rolls dice for stat rerolls until your target stats are reached.",
       "Challenges": "Random challenge runs with map/creature rolls, scoring, leaderboards, and replay sharing.",
       "Guilds": "Create guilds with roles, encrypted chat, invites, and a guild browser.",
-      "Hunt Analyzer": "Autoplay battle stats: gold, dust, drops, summaries, and export.",
+      "Hunt Analyzer": "Autoplay session stats: gold, dust, drops, summaries, and export.",
       "Raid Hunter": "Raid automation: detect and join raids, setup, autoplay, stamina, and queues.",
       "Manual Runner": "Repeats manual runs until victory, target S+ rank, or max floor; stats and replay copy.",
-      "Depot Manager": "Manage your bestiary and equipments.",
+      "Room Hopper": "Searchable map list with creature/equip filters, XP per stamina, and one-click teleport.",
+      "Awaken Tracker": "Tracks per-map awaken gene progress with live stat deltas, event logs, and pause-on-cap.",
+      "Depot Manager": "Creature and equipment depot rows, favorites, and quick send-to-depot from the bestiary.",
       "Stamina Optimizer": "Starts or stops gameplay at min/max stamina; coordinates with other farming mods.",
       "Quests": "Quest tracking, NPC dialogs, quest items, and Firebase-backed progress.",
       "VIP List": "Track favorite players with profiles, sortable stats, and Cyclopedia links.",
@@ -158,6 +161,32 @@
       "enableCreatureDepot": "Creature depot",
       "sendToDepot": "Send to depot",
       "sendToBestiary": "Send to bestiary"
+    },
+    "betterBestiary": {
+      "activated": "Better Bestiary activated!",
+      "authorCredit": "by megafuji",
+      "presetsColumnTitle": "Creature Selector",
+      "cosmeticsColumnTitle": "Overlays",
+      "cosmeticToggleHint": "(temporary while Bestiary is open)",
+      "cosmetics": {
+        "maxed": { "label": "Maxed" },
+        "sealed": { "label": "Sealed" },
+        "shinies": { "label": "Shinies" }
+      },
+      "presets": {
+        "shiny": {
+          "label": "Already Shiny",
+          "tooltip": "Selects unlocked non-shiny duplicates for species where you already have a shiny. Locked creatures are skipped."
+        },
+        "awakened": {
+          "label": "Already Awakened",
+          "tooltip": "Selects unlocked non-awaken duplicates for species where you already have an awakened creature. Locked creatures are skipped."
+        },
+        "both": {
+          "label": "Already A/S",
+          "tooltip": "Selects unlocked copies for species where you already have a shiny awaken keeper (tier 6 or level 50+). Locked creatures are skipped."
+        }
+      }
     },
     "betterUI": {
       "settingsTitle": "Mod Settings",
