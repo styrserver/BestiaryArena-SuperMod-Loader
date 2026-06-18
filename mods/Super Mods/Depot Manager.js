@@ -63,6 +63,8 @@ function isEliteMonster(monster) {
 const DATA_DEPOT_SLOT_ID = 'data-depot-creature-id';
 const DATA_DEPOT_HIDDEN = 'data-depot-hidden';
 const DATA_DEPOT_EQUIPMENT_HIDDEN = 'data-depot-equipment-hidden';
+const DATA_DEPOT_BB_GREYSCALE = 'data-depot-bb-greyscale';
+const BB_DEPOT_VISIBLE_GREYSCALE = 'grayscale(90%)';
 
 const TIMEOUT_DELAYS = {
   MENU_CLOSE: 10,
@@ -114,6 +116,10 @@ let lastArsenalDiagnosisAt = 0;
 
 /** Prevents MutationObserver feedback while we reorder the grid (appendChild triggers subtree mutations). */
 let depotLayoutApplying = false;
+/** Prevents grid observer feedback while favorite hearts are inserted/removed. */
+let favoritesHeartsApplying = false;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let favoriteHeartsPendingTimeout = null;
 /** @type {Element | null} */
 let depotMonsterGridObserveTarget = null;
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -1714,9 +1720,39 @@ function isInMonsterInventoryGrid(imgEl) {
   return Boolean(imgEl && imgEl.closest('#monster-scroll'));
 }
 
+function findOpenBetterBestiaryModal() {
+  return document.querySelector('[role="dialog"][data-state="open"][data-better-bestiary-enhanced]');
+}
+
+function isBetterBestiaryCreatureImg(imgEl) {
+  if (!imgEl) return false;
+  const modal = imgEl.closest('[role="dialog"][data-better-bestiary-enhanced]');
+  if (!modal || modal.getAttribute('data-state') !== 'open') return false;
+  return Boolean(imgEl.closest('[class*="container-inventory"]'));
+}
+
+function isCreatureInventoryGridImg(imgEl) {
+  return isInMonsterInventoryGrid(imgEl) || isBetterBestiaryCreatureImg(imgEl);
+}
+
+function allowsCreatureContextMenuWhileLocked(menuElem) {
+  if (
+    currentRightClickedCreature?.creatureImg &&
+    isCreatureInventoryGridImg(currentRightClickedCreature.creatureImg)
+  ) {
+    return true;
+  }
+  return Boolean(findOpenBetterBestiaryModal() && getCreatureNameFromMenu(menuElem));
+}
+
+function shouldBlockCreatureContextMenuForScrollLock(menuElem) {
+  return isScrollLocked() && !allowsCreatureContextMenuWhileLocked(menuElem);
+}
+
 /** Creature tiles under the grid that should not participate in favorites ID resolution. */
 function isCreatureImgExcludedFromFavoriteGrid(img) {
   if (!img) return true;
+  if (isBetterBestiaryCreatureImg(img)) return false;
   if (img.closest('[role="menu"]') || img.closest('[role="dialog"]')) return true;
   const isInAnalyzer =
     img.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
@@ -1742,6 +1778,206 @@ function getMonsterInventorySlotFromImg(creatureImg) {
   return null;
 }
 
+/** Main inventory `div.flex` slot or Better Bestiary creature `button` / `.container-slot`. */
+function getDepotSlotFromCreatureImg(creatureImg) {
+  if (!creatureImg) return null;
+  if (isBetterBestiaryCreatureImg(creatureImg)) {
+    return creatureImg.closest('button') || creatureImg.closest('.container-slot');
+  }
+  return getMonsterInventorySlotFromImg(creatureImg);
+}
+
+function getBetterBestiaryCreatureSlotElements(modal) {
+  const grid = modal?.querySelector('[class*="container-inventory"]');
+  if (!grid) return [];
+  return Array.from(grid.querySelectorAll('button')).filter(
+    (btn) => btn.querySelector('img[alt="creature"]')
+  );
+}
+
+function shouldShowDepotInBetterBestiary() {
+  try {
+    return typeof window.__betterBestiaryShowDepotCreatures === 'function'
+      && window.__betterBestiaryShowDepotCreatures();
+  } catch {
+    return false;
+  }
+}
+
+function getDepotCreatureIdSet() {
+  return new Set(depotCreatureState.ids.map((id) => String(id)));
+}
+
+function addCreatureToDepot(liveSid, { imgEl = null, creatureName = null, lockCreature = true } = {}) {
+  if (!depotConfig.enableCreatureDepot) return false;
+  const sid = String(liveSid);
+  if (depotCreatureState.ids.some((id) => String(id) === sid)) return false;
+
+  const liveMonster = getPlayerMonsters().find((m) => String(m.id) === sid) || null;
+  const visualSignature = imgEl ? getDepotVisualSignatureFromImg(imgEl) : null;
+  const resolvedCreatureName =
+    creatureName ||
+    liveMonster?.metadata?.name ||
+    null;
+
+  depotCreatureState.ids.push(sid);
+  upsertDepotCreatureMeta(sid, {
+    name: resolvedCreatureName,
+    gameId: liveMonster?.gameId ?? null,
+    shiny: !!liveMonster?.shiny,
+    exp: liveMonster?.exp ?? null,
+    hp: liveMonster?.hp ?? 0,
+    ad: liveMonster?.ad ?? 0,
+    ap: liveMonster?.ap ?? 0,
+    armor: liveMonster?.armor ?? 0,
+    magicResist: liveMonster?.magicResist ?? 0,
+    tier: liveMonster?.tier ?? null,
+    rowBucketKey: visualSignature?.rowBucketKey ?? null,
+    rowBucketIndex: visualSignature?.rowBucketIndex ?? null
+  });
+
+  if (lockCreature && !liveMonster?.locked) {
+    const lockId = Number.isFinite(Number(sid)) ? Number(sid) : sid;
+    (async () => {
+      try {
+        await lockCreatureAPI(lockId);
+        updateLocalCreatureLock(lockId);
+      } catch (error) {
+        console.error('[Depot Manager] Failed to lock creature after sending to depot:', error);
+      }
+    })();
+  }
+  if (imgEl) setDepotSlotTagFromImg(imgEl, sid);
+  return true;
+}
+
+function removeCreatureFromDepot(liveSid, { imgEl = null } = {}) {
+  const sid = String(liveSid);
+  const idx = depotCreatureState.ids.findIndex((depotId) => String(depotId) === sid);
+  if (idx < 0) return false;
+
+  depotCreatureState.ids.splice(idx, 1);
+  if (!depotCreatureState.ids.some((depotId) => String(depotId) === sid)) {
+    depotCreatureState.metaById.delete(sid);
+  }
+  if (imgEl) setDepotSlotTagFromImg(imgEl, null);
+  return true;
+}
+
+function transferCreaturesDepot(entries) {
+  if (!depotConfig.enableCreatureDepot || !Array.isArray(entries) || entries.length === 0) {
+    return { toDepot: 0, toBestiary: 0 };
+  }
+
+  const depotSet = getDepotCreatureIdSet();
+  let toDepot = 0;
+  let toBestiary = 0;
+
+  for (const entry of entries) {
+    const id = String(entry?.id ?? entry);
+    const img = entry?.img ?? null;
+    if (depotSet.has(id)) {
+      if (removeCreatureFromDepot(id, { imgEl: img })) {
+        toBestiary++;
+        depotSet.delete(id);
+      }
+    } else if (addCreatureToDepot(id, { imgEl: img })) {
+      toDepot++;
+      depotSet.add(id);
+    }
+  }
+
+  if (toDepot + toBestiary > 0) {
+    saveDepotCreatureIds();
+    saveDepotCreatureMeta();
+    updateDepotInventoryButtonCount();
+    applyDepotLayout();
+    scheduleApplyDepotLayout(TIMEOUT_DELAYS.DEPOT_USER_ACTION * 2);
+  }
+
+  return { toDepot, toBestiary };
+}
+
+function sendCreaturesToDepot(entries) {
+  if (!depotConfig.enableCreatureDepot || !Array.isArray(entries) || entries.length === 0) return 0;
+
+  let added = 0;
+  for (const entry of entries) {
+    const id = entry?.id ?? entry;
+    const img = entry?.img ?? null;
+    if (addCreatureToDepot(id, { imgEl: img })) added++;
+  }
+
+  if (added > 0) {
+    saveDepotCreatureIds();
+    saveDepotCreatureMeta();
+    updateDepotInventoryButtonCount();
+    applyDepotLayout();
+    scheduleApplyDepotLayout(TIMEOUT_DELAYS.DEPOT_USER_ACTION * 2);
+  }
+  return added;
+}
+
+function getBetterBestiaryDepotGreyscaleTarget(slot) {
+  if (!slot) return null;
+  return slot.querySelector('.container-slot') || slot.querySelector('img[alt="creature"]') || slot;
+}
+
+function clearBetterBestiaryDepotGreyscale(slot) {
+  const target = getBetterBestiaryDepotGreyscaleTarget(slot);
+  if (!target) return;
+  target.removeAttribute(DATA_DEPOT_BB_GREYSCALE);
+  target.style.removeProperty('filter');
+}
+
+function isBetterBestiaryDepotGreyscaleSkipped(slot) {
+  return slot?.classList?.contains('better-bestiary-depot-selected') === true;
+}
+
+function applyBetterBestiaryDepotGreyscale(slot) {
+  if (isBetterBestiaryDepotGreyscaleSkipped(slot)) return;
+  const target = getBetterBestiaryDepotGreyscaleTarget(slot);
+  if (!target) return;
+  target.setAttribute(DATA_DEPOT_BB_GREYSCALE, 'true');
+  target.style.setProperty('filter', BB_DEPOT_VISIBLE_GREYSCALE, 'important');
+}
+
+function applyBetterBestiaryDepotLayout(modal) {
+  if (!modal) return;
+  const slotElements = getBetterBestiaryCreatureSlotElements(modal);
+
+  if (!depotConfig.enableCreatureDepot) {
+    for (const slot of slotElements) {
+      slot.removeAttribute(DATA_DEPOT_HIDDEN);
+      slot.removeAttribute(DATA_DEPOT_SLOT_ID);
+      slot.style.removeProperty('display');
+      clearBetterBestiaryDepotGreyscale(slot);
+    }
+    return;
+  }
+
+  if (slotElements.length === 0) return;
+
+  for (const slot of slotElements) {
+    slot.removeAttribute(DATA_DEPOT_HIDDEN);
+    slot.removeAttribute(DATA_DEPOT_SLOT_ID);
+    slot.style.removeProperty('display');
+    clearBetterBestiaryDepotGreyscale(slot);
+  }
+
+  const hidePairs = buildDepotHideSlotPairsFromVisualMatch(slotElements);
+  const showDepot = shouldShowDepotInBetterBestiary();
+  for (const { slot, id } of hidePairs) {
+    slot.setAttribute(DATA_DEPOT_SLOT_ID, String(id));
+    if (showDepot) {
+      applyBetterBestiaryDepotGreyscale(slot);
+      continue;
+    }
+    slot.setAttribute(DATA_DEPOT_HIDDEN, 'true');
+    slot.style.setProperty('display', 'none', 'important');
+  }
+}
+
 /**
  * Bestiary flex grid slots in DOM order — same sequence depot layout and sequential ID resolution use.
  * Skips creature imgs inside menus/dialogs and analyzer/autoplay widgets if they appear under the grid.
@@ -1757,8 +1993,33 @@ function getMonsterGridFavoriteSlotEntries() {
   return out;
 }
 
+function getBetterBestiaryFavoriteSlotEntries(modal) {
+  const grid = modal?.querySelector('[class*="container-inventory"]');
+  if (!grid) return [];
+  const out = [];
+  for (const img of grid.querySelectorAll('img[alt="creature"]')) {
+    if (!isBetterBestiaryCreatureImg(img)) continue;
+    if (isCreatureImgExcludedFromFavoriteGrid(img)) continue;
+    const slot = img.closest('.container-slot') || img.closest('button') || img.parentElement;
+    if (!slot) continue;
+    out.push({ slot, img });
+  }
+  return out;
+}
+
+/** Main inventory grid, or Better Bestiary sell modal when it is open (scroll-locked). */
+function getFavoriteGridSlotEntries() {
+  const modal = findOpenBetterBestiaryModal();
+  if (modal) return getBetterBestiaryFavoriteSlotEntries(modal);
+  return getMonsterGridFavoriteSlotEntries();
+}
+
+function shouldSkipFavoriteHeartsForScrollLock() {
+  return isScrollLocked() && !findOpenBetterBestiaryModal();
+}
+
 function setDepotSlotTagFromImg(creatureImg, uniqueIdOrNull) {
-  const slot = getMonsterInventorySlotFromImg(creatureImg);
+  const slot = getDepotSlotFromCreatureImg(creatureImg);
   if (!slot) return;
   if (uniqueIdOrNull == null || uniqueIdOrNull === '') {
     slot.removeAttribute(DATA_DEPOT_SLOT_ID);
@@ -1817,7 +2078,7 @@ function bestiaryDuplicateDomAmbiguous(wantsElite, rarityOverlay) {
  */
 function getBestiarySlotVisualRow(slot, domIndex) {
   const img = slot.querySelector('img[alt="creature"]');
-  if (!img || !isInMonsterInventoryGrid(img)) return null;
+  if (!img || !isCreatureInventoryGridImg(img)) return null;
   const gameId = getCreatureGameId(img);
   if (!gameId) return null;
   const button = img.closest('button');
@@ -1910,9 +2171,11 @@ function collectBestiaryVisualRowsFromSlotElements(slotElements) {
 }
 
 function getDepotVisualSignatureFromImg(creatureImg) {
-  const slot = getMonsterInventorySlotFromImg(creatureImg);
+  const slot = getDepotSlotFromCreatureImg(creatureImg);
   if (!slot) return null;
-  const slotElements = getMonsterGridCreatureSlotElements();
+  const slotElements = isBetterBestiaryCreatureImg(creatureImg)
+    ? getBetterBestiaryCreatureSlotElements(creatureImg.closest('[role="dialog"]'))
+    : getMonsterGridCreatureSlotElements();
   if (!Array.isArray(slotElements) || slotElements.length === 0) return null;
   const domIndex = slotElements.indexOf(slot);
   if (domIndex < 0) return null;
@@ -2016,6 +2279,8 @@ function applyDepotLayout() {
         slot.style.removeProperty('display');
       });
     }
+    const bbModal = findOpenBetterBestiaryModal();
+    if (bbModal) applyBetterBestiaryDepotLayout(bbModal);
     return;
   }
 
@@ -2024,60 +2289,54 @@ function applyDepotLayout() {
 
   try {
     const grid = getMonsterGridFlexContainer();
-    if (!grid) {
-      return;
+    if (grid && !isMonsterBestiarySearchFiltering()) {
+      const slotElements = getMonsterGridCreatureSlotElements(grid);
+      if (slotElements.length > 0) {
+        slotElements.forEach((slot) => {
+          slot.removeAttribute(DATA_DEPOT_HIDDEN);
+          slot.style.removeProperty('display');
+        });
+
+        const hidePairs = buildDepotHideSlotPairsFromVisualMatch(slotElements);
+
+        slotElements.forEach((slot) => slot.removeAttribute(DATA_DEPOT_SLOT_ID));
+
+        depotDebug('applyDepotLayout: visual-match assignment', {
+          slotCount: slotElements.length,
+          assignedHideCount: hidePairs.length,
+          depotListLength: depotCreatureState.ids.length,
+          depotIds: [...depotCreatureState.ids]
+        });
+        if (hidePairs.length < depotCreatureState.ids.length) {
+          depotDebug('applyDepotLayout: unmatched depot entries (no grid cell matched visuals)', {
+            unmatched: depotCreatureState.ids.length - hidePairs.length
+          });
+        }
+
+        let hiddenSlots = 0;
+        for (const { slot, id } of hidePairs) {
+          slot.setAttribute(DATA_DEPOT_SLOT_ID, String(id));
+          slot.setAttribute(DATA_DEPOT_HIDDEN, 'true');
+          slot.style.setProperty('display', 'none', 'important');
+          hiddenSlots += 1;
+        }
+
+        grid.querySelectorAll('[data-depot-separator]').forEach((el) => el.remove());
+        depotDebug('applyDepotLayout done', {
+          hiddenSlots,
+          depotIds: [...depotCreatureState.ids]
+        });
+      } else {
+        depotDebug('applyDepotLayout: skip (no creature slots in grid)');
+      }
     }
-
-    if (isMonsterBestiarySearchFiltering()) {
-      return;
-    }
-
-    const slotElements = getMonsterGridCreatureSlotElements(grid);
-    if (slotElements.length === 0) {
-      depotDebug('applyDepotLayout: skip (no creature slots in grid)');
-      return;
-    }
-
-    slotElements.forEach((slot) => {
-      slot.removeAttribute(DATA_DEPOT_HIDDEN);
-      slot.style.removeProperty('display');
-    });
-
-    const hidePairs = buildDepotHideSlotPairsFromVisualMatch(slotElements);
-
-    slotElements.forEach((slot) => slot.removeAttribute(DATA_DEPOT_SLOT_ID));
-
-    depotDebug('applyDepotLayout: visual-match assignment', {
-      slotCount: slotElements.length,
-      assignedHideCount: hidePairs.length,
-      depotListLength: depotCreatureState.ids.length,
-      depotIds: [...depotCreatureState.ids]
-    });
-    if (hidePairs.length < depotCreatureState.ids.length) {
-      depotDebug('applyDepotLayout: unmatched depot entries (no grid cell matched visuals)', {
-        unmatched: depotCreatureState.ids.length - hidePairs.length
-      });
-    }
-
-    let hiddenSlots = 0;
-    for (const { slot, id } of hidePairs) {
-      slot.setAttribute(DATA_DEPOT_SLOT_ID, String(id));
-      slot.setAttribute(DATA_DEPOT_HIDDEN, 'true');
-      slot.style.setProperty('display', 'none', 'important');
-      hiddenSlots += 1;
-    }
-
-    // In hidden-mode depot, no visual separator/row is rendered.
-    grid.querySelectorAll('[data-depot-separator]').forEach((el) => el.remove());
-    depotDebug('applyDepotLayout done', {
-      hiddenSlots,
-      depotIds: [...depotCreatureState.ids]
-    });
 
     if (depotConfig.enableFavorites && !isBlockedByAnalysisMods()) {
-      scheduleTimeout(() => updateFavoriteHearts(), TIMEOUT_DELAYS.FAVORITES_AFTER_DEPOT_LAYOUT);
+      scheduleTimeout(() => scheduleFavoriteHeartsUpdate(0), TIMEOUT_DELAYS.FAVORITES_AFTER_DEPOT_LAYOUT);
     }
   } finally {
+    const bbModal = findOpenBetterBestiaryModal();
+    if (bbModal) applyBetterBestiaryDepotLayout(bbModal);
     depotLayoutApplying = false;
     scheduleTimeout(() => resumeMonsterGridObserverAfterLayout(), 0);
   }
@@ -2100,7 +2359,7 @@ function startMonsterGridObserver() {
   if (depotObservers.monsterGrid) return;
 
   const run = () => {
-    if (!depotConfig.enableCreatureDepot || depotLayoutApplying) return;
+    if (!depotConfig.enableCreatureDepot || depotLayoutApplying || favoritesHeartsApplying) return;
     if (isMonsterBestiarySearchFiltering()) return;
     scheduleApplyDepotLayout();
   };
@@ -2127,7 +2386,7 @@ function stopMonsterGridObserver() {
  */
 function validateDepotContextMenu(menuElem) {
   if (!depotConfig.enableCreatureDepot) return false;
-  if (isScrollLocked()) return false;
+  if (shouldBlockCreatureContextMenuForScrollLock(menuElem)) return false;
   if (menuElem.hasAttribute('data-depot-processed')) return false;
 
   const creatureName = getCreatureNameFromMenu(menuElem);
@@ -2159,11 +2418,11 @@ function injectDepotMenuItems(menuElem) {
     });
     return false;
   }
-  if (!currentRightClickedCreature?.creatureImg || !isInMonsterInventoryGrid(currentRightClickedCreature.creatureImg)) {
+  if (!currentRightClickedCreature?.creatureImg || !isCreatureInventoryGridImg(currentRightClickedCreature.creatureImg)) {
     depotDebug('injectDepotMenuItems: no inventory creature context', {
       hasImg: !!currentRightClickedCreature?.creatureImg,
       inGrid: currentRightClickedCreature?.creatureImg
-        ? isInMonsterInventoryGrid(currentRightClickedCreature.creatureImg)
+        ? isCreatureInventoryGridImg(currentRightClickedCreature.creatureImg)
         : false
     });
     return false;
@@ -2190,10 +2449,9 @@ function injectDepotMenuItems(menuElem) {
   menuElem.setAttribute('data-depot-processed', 'true');
 
   const sid = String(uniqueId);
-  const clickedSlot = getMonsterInventorySlotFromImg(rightClickedImg);
-  const inDepot = Boolean(
-    clickedSlot &&
-    String(clickedSlot.getAttribute(DATA_DEPOT_SLOT_ID) || '').trim() === sid
+  const clickedSlot = getDepotSlotFromCreatureImg(rightClickedImg);
+  const inDepot = depotCreatureState.ids.some((id) => String(id) === sid) || Boolean(
+    clickedSlot && String(clickedSlot.getAttribute(DATA_DEPOT_SLOT_ID) || '').trim() === sid
   );
 
   const depotLabel = inDepot ? t('mods.depot.sendToBestiary') : t('mods.depot.sendToDepot');
@@ -2208,17 +2466,12 @@ function injectDepotMenuItems(menuElem) {
     const liveSid = sid || getResolvedUniqueIdForCreatureImg(imgEl);
     const liveMonsters = getPlayerMonsters();
     const liveMonster = liveMonsters.find((m) => String(m.id) === String(liveSid)) || null;
-    const visualSignature = getDepotVisualSignatureFromImg(imgEl);
     const resolvedCreatureName =
       liveMonster?.metadata?.name ||
       menuCreatureName ||
       creatureData?.creatureName ||
       null;
-    const liveSlot = getMonsterInventorySlotFromImg(imgEl);
-    const liveInDepot = Boolean(
-      liveSlot &&
-      String(liveSlot.getAttribute(DATA_DEPOT_SLOT_ID) || '').trim() === liveSid
-    );
+    const liveInDepot = depotCreatureState.ids.some((id) => String(id) === String(liveSid));
     if (liveInDepot) {
       removeOneDepotId(liveSid);
       if (!depotCreatureState.ids.includes(String(liveSid))) {
@@ -2226,35 +2479,10 @@ function injectDepotMenuItems(menuElem) {
       }
       setDepotSlotTagFromImg(imgEl, null);
     } else {
-      depotCreatureState.ids.push(liveSid);
-      const matchedMonster = liveMonster;
-      upsertDepotCreatureMeta(liveSid, {
-        name: resolvedCreatureName,
-        gameId: matchedMonster?.gameId ?? null,
-        shiny: !!matchedMonster?.shiny,
-        exp: matchedMonster?.exp ?? null,
-        hp: matchedMonster?.hp ?? 0,
-        ad: matchedMonster?.ad ?? 0,
-        ap: matchedMonster?.ap ?? 0,
-        armor: matchedMonster?.armor ?? 0,
-        magicResist: matchedMonster?.magicResist ?? 0,
-        tier: matchedMonster?.tier ?? null,
-        rowBucketKey: visualSignature?.rowBucketKey ?? null,
-        rowBucketIndex: visualSignature?.rowBucketIndex ?? null
+      addCreatureToDepot(liveSid, {
+        imgEl,
+        creatureName: resolvedCreatureName
       });
-      // Match Favorites behavior: auto-lock creature when adding to depot.
-      if (!matchedMonster?.locked) {
-        const lockId = Number.isFinite(Number(liveSid)) ? Number(liveSid) : liveSid;
-        (async () => {
-          try {
-            await lockCreatureAPI(lockId);
-            updateLocalCreatureLock(lockId);
-          } catch (error) {
-            console.error('[Depot Manager] Failed to lock creature after sending to depot:', error);
-          }
-        })();
-      }
-      setDepotSlotTagFromImg(imgEl, liveSid);
     }
     saveDepotCreatureIds();
     saveDepotCreatureMeta();
@@ -2602,7 +2830,7 @@ function getCreatureNameFromMenu(menuElem) {
 
 function validateContextMenu(menuElem) {
   if (!depotConfig.enableFavorites) return false;
-  if (isScrollLocked()) return false;
+  if (shouldBlockCreatureContextMenuForScrollLock(menuElem)) return false;
   if (menuElem.hasAttribute('data-favorite-processed')) return false;
 
   const creatureName = getCreatureNameFromMenu(menuElem);
@@ -2805,6 +3033,25 @@ function removeFavoriteHearts() {
   document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove());
 }
 
+function scheduleFavoriteHeartsUpdate(delay = 200) {
+  if (!depotConfig.enableFavorites || isBlockedByAnalysisMods()) return;
+  if (shouldSkipFavoriteHeartsForScrollLock()) return;
+
+  if (favoriteHeartsPendingTimeout !== null) {
+    clearTimeout(favoriteHeartsPendingTimeout);
+    activeTimeouts.delete(favoriteHeartsPendingTimeout);
+  }
+
+  favoriteHeartsPendingTimeout = scheduleTimeout(() => {
+    favoriteHeartsPendingTimeout = null;
+    const bbModal = findOpenBetterBestiaryModal();
+    if (bbModal && depotConfig.enableCreatureDepot) {
+      applyBetterBestiaryDepotLayout(bbModal);
+    }
+    updateFavoriteHearts();
+  }, delay);
+}
+
 function updateFavoriteHearts(targetUniqueId = null) {
   if (isBlockedByAnalysisMods()) return;
 
@@ -2813,41 +3060,56 @@ function updateFavoriteHearts(targetUniqueId = null) {
     return;
   }
 
-  if (isScrollLocked()) return;
+  if (shouldSkipFavoriteHeartsForScrollLock()) return;
 
-  const slotEntries = getMonsterGridFavoriteSlotEntries();
+  const slotEntries = getFavoriteGridSlotEntries();
   if (slotEntries.length === 0) return;
 
   if (targetUniqueId) {
-    updateSingleFavoriteHeart(targetUniqueId, slotEntries);
-    favoritesState.lastOptimizedUpdate = Date.now();
+    favoritesHeartsApplying = true;
+    try {
+      updateSingleFavoriteHeart(targetUniqueId, slotEntries);
+    } finally {
+      favoritesHeartsApplying = false;
+      favoritesState.lastOptimizedUpdate = Date.now();
+    }
     return;
   }
 
-  removeFavoriteHearts();
-  const uniqueIdByImg = buildBestiaryFavoriteUniqueIdMap(slotEntries);
+  favoritesHeartsApplying = true;
+  pauseMonsterGridObserverForLayout();
+  try {
+    removeFavoriteHearts();
+    const uniqueIdByImg = buildBestiaryFavoriteUniqueIdMap(slotEntries);
 
-  let heartsAdded = 0;
-  let creaturesChecked = 0;
+    let heartsAdded = 0;
+    let creaturesChecked = 0;
 
-  for (const { slot, img } of slotEntries) {
-    const uniqueId = uniqueIdByImg.get(img);
-    if (uniqueId == null) continue;
-    creaturesChecked++;
-    if (slot.getAttribute(DATA_DEPOT_HIDDEN) === 'true') continue;
-    if (favoritesState.creatures.has(uniqueId)) {
-      const symbolKey = favoritesState.creatures.get(uniqueId) || 'heart';
-      const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
-      const heart = createFavoriteHeartElement(symbolKey, symbol);
-      img.parentElement.appendChild(heart);
-      heartsAdded++;
+    for (const { slot, img } of slotEntries) {
+      const uniqueId = uniqueIdByImg.get(img);
+      if (uniqueId == null) continue;
+      creaturesChecked++;
+      if (slot.getAttribute(DATA_DEPOT_HIDDEN) === 'true') continue;
+      if (favoritesState.creatures.has(uniqueId)) {
+        const symbolKey = favoritesState.creatures.get(uniqueId) || 'heart';
+        const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
+        const heart = createFavoriteHeartElement(symbolKey, symbol);
+        img.parentElement.appendChild(heart);
+        heartsAdded++;
+      }
     }
-  }
 
-  if (heartsAdded > 0) {
-    const currentResult = `${creaturesChecked}-${heartsAdded}`;
-    if (favoritesState.lastLoggedResult !== currentResult) {
-      favoritesState.lastLoggedResult = currentResult;
+    if (heartsAdded > 0) {
+      const currentResult = `${creaturesChecked}-${heartsAdded}`;
+      if (favoritesState.lastLoggedResult !== currentResult) {
+        favoritesState.lastLoggedResult = currentResult;
+      }
+    }
+  } finally {
+    favoritesHeartsApplying = false;
+    favoritesState.lastOptimizedUpdate = Date.now();
+    if (depotConfig.enableCreatureDepot) {
+      scheduleTimeout(() => resumeMonsterGridObserverAfterLayout(), 0);
     }
   }
 }
@@ -3055,7 +3317,30 @@ function resolveCreaturesSequentially(creatures, monsters) {
  * favorite hearts. Visible rows match against non-depot monsters with the same visual scoring as
  * depot layout; sequential fallback only for leftovers.
  */
+function buildBetterBestiaryFavoriteUniqueIdMap(slotEntries) {
+  const uniqueIdByImg = new Map();
+  const unmappedImgs = [];
+  for (const { img } of slotEntries) {
+    const uid = resolveCreatureUniqueIdFromReactFiber(img);
+    if (uid != null) uniqueIdByImg.set(img, uid);
+    else unmappedImgs.push(img);
+  }
+  if (unmappedImgs.length === 0) return uniqueIdByImg;
+
+  const monsters = getPlayerMonsters();
+  const assigned = new Set(uniqueIdByImg.values());
+  const pool = monsters.filter((m) => !assigned.has(String(m.id)));
+  for (const r of resolveCreaturesSequentially(unmappedImgs, pool)) {
+    uniqueIdByImg.set(r.imgEl, r.uniqueId);
+  }
+  return uniqueIdByImg;
+}
+
 function buildBestiaryFavoriteUniqueIdMap(slotEntries) {
+  if (slotEntries.length > 0 && slotEntries.every(({ img }) => isBetterBestiaryCreatureImg(img))) {
+    return buildBetterBestiaryFavoriteUniqueIdMap(slotEntries);
+  }
+
   const monsters = getPlayerMonsters();
   const imgs = slotEntries.map((e) => e.img);
 
@@ -3151,7 +3436,11 @@ function getBestiaryCreatureIdMapForInterop() {
 }
 
 function getResolvedUniqueIdForCreatureImg(creatureImg) {
-  if (!creatureImg || !isInMonsterInventoryGrid(creatureImg)) return null;
+  if (!creatureImg || !isCreatureInventoryGridImg(creatureImg)) return null;
+  if (isBetterBestiaryCreatureImg(creatureImg)) {
+    const fromFiber = resolveCreatureUniqueIdFromReactFiber(creatureImg);
+    return fromFiber != null ? String(fromFiber) : null;
+  }
   const map = getBestiaryCreatureIdMapForInterop();
   const uid = map.get(creatureImg);
   if (uid != null) return String(uid);
@@ -3257,6 +3546,7 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
   const allVisibleCreatures = Array.from(document.querySelectorAll('img[alt="creature"]')).filter(img => {
     const isInContextMenu = img.closest('[role="menu"]');
     const isInModal = img.closest('[role="dialog"]');
+    if (isBetterBestiaryCreatureImg(img)) return true;
     return !isInContextMenu && !isInModal;
   });
 
@@ -3449,13 +3739,25 @@ function startContextMenuObserver() {
     });
   }
 
+  function resolveCreatureImgFromContextEvent(event) {
+    const target = event.target;
+    if (!(target instanceof Element)) return null;
+    const fromButton = target.closest('button')?.querySelector('img[alt="creature"]');
+    if (fromButton) return fromButton;
+    return target.matches('img[alt="creature"]') ? target : null;
+  }
+
+  function rememberCreatureContextMenu(creatureImg) {
+    const resolvedUniqueId = resolveCreatureUniqueIdFromReactFiber(creatureImg);
+    currentRightClickedCreature = { creatureImg, resolvedUniqueId };
+    [0, 16, 50, 100, 200].forEach((d) => scheduleTimeout(tryInjectOpenMenus, d));
+  }
+
   function handleCreatureRightClick(event) {
-    const creatureImg = event.target.closest('button')?.querySelector('img[alt="creature"]');
-    if (creatureImg) {
-      const resolvedUniqueId = resolveCreatureUniqueIdFromReactFiber(creatureImg);
-      currentRightClickedCreature = { creatureImg, resolvedUniqueId };
-      [0, 16, 50, 100, 200].forEach((d) => scheduleTimeout(tryInjectOpenMenus, d));
-    }
+    const creatureImg = resolveCreatureImgFromContextEvent(event);
+    if (!creatureImg || !isCreatureInventoryGridImg(creatureImg)) return;
+    if (isCreatureImgExcludedFromFavoriteGrid(creatureImg)) return;
+    rememberCreatureContextMenu(creatureImg);
   }
 
   function handleAnyRightClick(event) {
@@ -3502,7 +3804,9 @@ function startContextMenuObserver() {
 
   depotObservers.contextMenu = createThrottledObserver(processMenuMutations, 50);
   depotObservers.contextMenu.observe(document.body, { childList: true, subtree: true });
+  depotObservers.contextMenuCreatureRightClick = handleCreatureRightClick;
   depotObservers.contextMenuAnyRightClick = handleAnyRightClick;
+  document.addEventListener('contextmenu', handleCreatureRightClick, true);
   document.addEventListener('contextmenu', handleAnyRightClick, true);
   addRightClickListeners();
 }
@@ -3519,6 +3823,10 @@ function stopContextMenuObserver() {
       favoritesState.buttonListeners.delete(button);
     }
   });
+  if (depotObservers.contextMenuCreatureRightClick) {
+    document.removeEventListener('contextmenu', depotObservers.contextMenuCreatureRightClick, true);
+    depotObservers.contextMenuCreatureRightClick = null;
+  }
   if (depotObservers.contextMenuAnyRightClick) {
     document.removeEventListener('contextmenu', depotObservers.contextMenuAnyRightClick, true);
     depotObservers.contextMenuAnyRightClick = null;
@@ -3637,7 +3945,9 @@ function stopTabButtonObserver() {
 }
 
 function notifyFavoriteGridRefresh(kind) {
-  if (depotConfig.enableCreatureDepot && !isBlockedByAnalysisMods()) {
+  const betterBestiaryOpen = Boolean(findOpenBetterBestiaryModal());
+
+  if (depotConfig.enableCreatureDepot && !isBlockedByAnalysisMods() && !betterBestiaryOpen) {
     if (kind === 'creature') {
       const timeSince = Date.now() - lastDepotLayoutCreatureRefreshAt;
       if (timeSince > 400 && !isMonsterBestiarySearchFiltering()) {
@@ -3653,20 +3963,16 @@ function notifyFavoriteGridRefresh(kind) {
   if (isBlockedByAnalysisMods()) return;
 
   if (kind === 'creature') {
-    const timeSinceOptimizedUpdate = Date.now() - favoritesState.lastOptimizedUpdate;
-    if (timeSinceOptimizedUpdate <= 500) {
-      return;
-    }
-    updateFavoriteHearts();
+    scheduleFavoriteHeartsUpdate(betterBestiaryOpen ? 250 : 200);
     return;
   }
 
   if (kind === 'tab') {
-    scheduleTimeout(() => updateFavoriteHearts(), TIMEOUT_DELAYS.TAB_REAPPLY);
+    scheduleTimeout(() => scheduleFavoriteHeartsUpdate(0), TIMEOUT_DELAYS.TAB_REAPPLY);
     return;
   }
 
-  updateFavoriteHearts();
+  scheduleFavoriteHeartsUpdate(kind === 'scroll' ? 300 : 200);
 }
 
 // =======================
@@ -3697,11 +4003,18 @@ function initDepotManager() {
 
   window.depotManager = {
     notifyFavoriteGridRefresh,
+    scheduleFavoriteHeartsUpdate,
     isFavoritesEnabled: () => depotConfig.enableFavorites,
+    isCreatureDepotEnabled: () => depotConfig.enableCreatureDepot,
     reloadDepotConfigFromStorage,
     applyDepotLayout,
+    applyBetterBestiaryDepotLayout,
+    clearBetterBestiaryDepotGreyscale,
     resetDepotCreatureIds,
     showDepotModal,
+    getDepotCreatureIdSet,
+    sendCreaturesToDepot,
+    transferCreaturesDepot,
     getBestiaryCreatureIdMap: getBestiaryCreatureIdMapForInterop
   };
 
@@ -3721,6 +4034,11 @@ function cleanupDepotManager() {
     clearTimeout(depotLayoutPendingTimeout);
     activeTimeouts.delete(depotLayoutPendingTimeout);
     depotLayoutPendingTimeout = null;
+  }
+  if (favoriteHeartsPendingTimeout !== null) {
+    clearTimeout(favoriteHeartsPendingTimeout);
+    activeTimeouts.delete(favoriteHeartsPendingTimeout);
+    favoriteHeartsPendingTimeout = null;
   }
   stopContextMenuObserver();
   stopTabButtonObserver();

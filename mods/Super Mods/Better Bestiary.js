@@ -47,12 +47,24 @@
   const DETAILS_TITLE_ATTR = `data-${NS}-details-title`;
   const DETAILS_TITLE_BLOCK_ATTR = `data-${NS}-details-title-block`;
   const HEADER_LABEL_SUPPRESSED_ATTR = `data-${NS}-header-label-suppressed`;
+  const ORIGINAL_LABEL_ATTR = `data-${NS}-original-label`;
   const TITLE_TEXT_ATTR = `data-${NS}-title-text`;
-  const TITLE_CREDIT_ATTR = `data-${NS}-title-credit`;
-  const AUTHOR_PROFILE_URL = 'https://bestiaryarena.com/profile/megafuji';
+  const CREATURE_DETAILS_LABEL_RE = /creature\s*details|detalhes\s*(da\s*)?criatura/i;
   const FILTERS_ATTR = `data-${NS}-filters`;
   const PRESET_ATTR = `data-${NS}-preset`;
+  const DEPOT_MULTISELECTOR_ATTR = `data-${NS}-depot-multiselector`;
+  const DEPOT_CUSTOM_SELECTED_ATTR = `data-${NS}-depot-selected`;
   const COSMETIC_TOGGLE_ATTR = `data-${NS}-cosmetic-toggle`;
+  const SESSION_OVERLAY_ATTR = `data-${NS}-session-overlay`;
+  const DEPOT_SEND_TO_ATTR = `data-${NS}-depot-send-to`;
+  const DEPOT_REMOVE_FROM_ATTR = `data-${NS}-depot-remove-from`;
+  const DEPOT_SELECTED_CLASS = `${NS}-depot-selected`;
+  const DEPOT_GREEN_BACKGROUND_URL =
+    'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
+  const FOOTER_BTN_CLASS =
+    'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
+  const FOOTER_BTN_SEND_CLASS =
+    'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
   const ACTIVATED_TITLE_COLOR = 'rgb(50, 205, 50)';
   const BTN_TOGGLE_BASE =
     'focus-style-visible flex w-full items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 gap-1 px-1 h-[21px] min-h-[21px] max-h-[21px] py-0 pixel-font-14 whitespace-nowrap';
@@ -75,6 +87,20 @@
     },
   ];
 
+  const SESSION_OVERLAY_TOGGLES = [
+    {
+      key: 'showDepot',
+      labelKey: 'mods.betterBestiary.cosmetics.depot.label',
+      tooltipKey: 'mods.betterBestiary.cosmetics.depot.tooltip',
+    },
+  ];
+
+  let sessionOverlayState = { showDepot: false };
+  let sessionOverlaySessionActive = false;
+  let depotMultiselectorActive = false;
+  let depotMultiselectListener = null;
+  const depotCustomSelectedIds = new Set();
+
   let savedCosmeticSnapshot = null;
 
   const tick = (ms = 16) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,6 +108,175 @@
   const waitFrame = () => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   });
+
+  function resetDepotMultiselectorSession() {
+    depotMultiselectorActive = false;
+    depotCustomSelectedIds.clear();
+    detachDepotMultiselectClickHandler();
+  }
+
+  function clearDepotGreyscaleOnButton(button) {
+    if (!button) return;
+    window.depotManager?.clearBetterBestiaryDepotGreyscale?.(button);
+    const slot = button.querySelector('.container-slot');
+    const img = button.querySelector('img[alt="creature"]');
+    if (slot) window.depotManager?.clearBetterBestiaryDepotGreyscale?.(slot);
+    if (img) img.style.removeProperty('filter');
+  }
+
+  function applyDepotCustomSelectionVisual(button, selected, { refreshGreyscale = true } = {}) {
+    if (!button) return;
+    const modal = findBestiaryModal();
+    const slot = button.querySelector('.container-slot');
+
+    if (selected) {
+      button.setAttribute(DEPOT_CUSTOM_SELECTED_ATTR, 'true');
+      button.classList.add(DEPOT_SELECTED_CLASS);
+      button.setAttribute('data-state', 'selected');
+      clearDepotGreyscaleOnButton(button);
+      if (slot) {
+        slot.setAttribute(DEPOT_CUSTOM_SELECTED_ATTR, 'true');
+        slot.style.background = `url("${DEPOT_GREEN_BACKGROUND_URL}") repeat`;
+        slot.style.boxShadow = 'inset 0 0 0 1px rgba(255, 255, 255, 0.95)';
+        slot.style.outline = '1px solid rgba(255, 255, 255, 0.85)';
+        slot.style.outlineOffset = '-1px';
+      }
+      return;
+    }
+
+    button.removeAttribute(DEPOT_CUSTOM_SELECTED_ATTR);
+    button.classList.remove(DEPOT_SELECTED_CLASS);
+    if (button.getAttribute('data-state') === 'selected') {
+      button.setAttribute('data-state', 'closed');
+    }
+    if (slot?.getAttribute(DEPOT_CUSTOM_SELECTED_ATTR) === 'true') {
+      slot.removeAttribute(DEPOT_CUSTOM_SELECTED_ATTR);
+      slot.style.background = '';
+      slot.style.boxShadow = '';
+      slot.style.outline = '';
+      slot.style.outlineOffset = '';
+    }
+    if (refreshGreyscale && modal) {
+      refreshDepotOverlayLayout(modal);
+    }
+  }
+
+  function isDepotCustomSelected(button) {
+    return button?.classList.contains(DEPOT_SELECTED_CLASS);
+  }
+
+  function clearDepotCustomSelection(modal = findBestiaryModal()) {
+    depotCustomSelectedIds.clear();
+    if (!modal) return;
+    for (const button of getCreatureButtons(modal)) {
+      applyDepotCustomSelectionVisual(button, false, { refreshGreyscale: false });
+    }
+    refreshDepotOverlayLayout(modal);
+  }
+
+  function syncDepotCustomSelectionVisuals(modal = findBestiaryModal()) {
+    if (!modal || !depotMultiselectorActive) return;
+
+    const depotMap = getBestiaryCreatureIdMap();
+    for (const button of getCreatureButtons(modal)) {
+      const id = resolveMonsterIdFromButton(button, depotMap);
+      const shouldSelect = id != null && depotCustomSelectedIds.has(id);
+      if (isDepotCustomSelected(button) !== shouldSelect) {
+        applyDepotCustomSelectionVisual(button, shouldSelect);
+        continue;
+      }
+      if (shouldSelect && !button.classList.contains(DEPOT_SELECTED_CLASS)) {
+        applyDepotCustomSelectionVisual(button, true, { refreshGreyscale: false });
+      } else if (shouldSelect) {
+        clearDepotGreyscaleOnButton(button);
+      }
+    }
+  }
+
+  function toggleDepotCustomSelection(button, modal = findBestiaryModal()) {
+    const id = resolveMonsterIdFromButton(button, getBestiaryCreatureIdMap());
+    if (!id) return;
+
+    if (depotCustomSelectedIds.has(id)) {
+      depotCustomSelectedIds.delete(id);
+      applyDepotCustomSelectionVisual(button, false);
+    } else {
+      depotCustomSelectedIds.add(id);
+      applyDepotCustomSelectionVisual(button, true);
+    }
+
+    updateDepotFooterButtons(modal);
+  }
+
+  function scheduleDepotFooterEnsure(modal) {
+    if (!modal || !depotMultiselectorActive) return;
+
+    let attempts = 0;
+    const retry = () => {
+      if (!depotMultiselectorActive || findBestiaryModal() !== modal) return;
+      ensureDepotFooterButtons(modal);
+      if (!modal.querySelector(`[${DEPOT_SEND_TO_ATTR}]`) && attempts < 24) {
+        attempts += 1;
+        requestAnimationFrame(retry);
+      }
+    };
+    retry();
+  }
+
+  function detachDepotMultiselectClickHandler() {
+    if (!depotMultiselectListener) return;
+    depotMultiselectListener.grid.removeEventListener('click', depotMultiselectListener.handler, true);
+    depotMultiselectListener = null;
+  }
+
+  function attachDepotMultiselectClickHandler(modal) {
+    const grid = getCreatureGrid(modal);
+    if (!grid) return;
+
+    if (depotMultiselectListener?.grid === grid) return;
+    detachDepotMultiselectClickHandler();
+
+    const handler = (event) => {
+      if (!depotMultiselectorActive) return;
+
+      const button = event.target.closest('button');
+      if (!button || !grid.contains(button)) return;
+      if (!button.querySelector('img[alt="creature"]')) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      toggleDepotCustomSelection(button, modal);
+    };
+
+    grid.addEventListener('click', handler, true);
+    depotMultiselectListener = { grid, handler };
+  }
+
+  function resetSessionOverlayState() {
+    resetDepotMultiselectorSession();
+    sessionOverlaySessionActive = false;
+    sessionOverlayState = { showDepot: false };
+    delete window.__betterBestiaryShowDepotCreatures;
+  }
+
+  function beginSessionOverlaySession() {
+    if (sessionOverlaySessionActive) return;
+    sessionOverlaySessionActive = true;
+    sessionOverlayState = { showDepot: false };
+    syncBetterBestiaryShowDepotFlag();
+  }
+
+  function syncBetterBestiaryShowDepotFlag() {
+    window.__betterBestiaryShowDepotCreatures = () => sessionOverlayState.showDepot === true;
+  }
+
+  function refreshDepotOverlayLayout(modal = findBestiaryModal()) {
+    if (!modal) return;
+    window.depotManager?.applyBetterBestiaryDepotLayout?.(modal)
+      ?? window.depotManager?.applyDepotLayout?.();
+    syncDepotCustomSelectionVisuals(modal);
+  }
 
   function getBestiaryCreatureIdMap() {
     try {
@@ -138,6 +333,7 @@
       modal.removeAttribute(INITIAL_STYLED_ATTR);
       applyCreatureStyling(modal);
       modal.setAttribute(INITIAL_STYLED_ATTR, 'true');
+      window.depotManager?.scheduleFavoriteHeartsUpdate?.(250);
     }, FULL_STYLING_DEBOUNCE_MS);
   }
 
@@ -215,17 +411,28 @@
     detachLayoutObserver();
   }
 
-  function teardownModalSession({ full = false } = {}) {
+  function prepareForExternalClose() {
     clearAllTimers();
     detachAllModalObservers();
     isSyncingLayout = false;
     restoreTemporaryCosmeticSettings();
+    resetSessionOverlayState();
+    detachDepotMultiselectClickHandler();
+  }
 
-    if (activeModal) {
-      window.BetterUIRemoveCreatureCosmeticsIn?.(activeModal);
-      resetModalEnhancement(activeModal);
-    }
+  function teardownModalSession({ full = false, resetDom = false } = {}) {
+    prepareForExternalClose();
+
+    const modal = activeModal;
     activeModal = null;
+
+    // React owns dialog teardown after ESC — only reset injected DOM if still open (mod disable).
+    if (resetDom && modal?.isConnected && modal.getAttribute('data-state') === 'open') {
+      window.BetterUIRemoveCreatureCosmeticsIn?.(modal);
+      resetModalEnhancement(modal);
+    }
+
+    window.depotManager?.scheduleFavoriteHeartsUpdate?.(300);
 
     if (!full) return;
 
@@ -256,11 +463,17 @@
 
     gridObserver?.disconnect();
     gridObserverTarget = grid;
-    gridObserver = new MutationObserver(() => scheduleIncrementalStyling(modal));
+    gridObserver = new MutationObserver(() => {
+      scheduleIncrementalStyling(modal);
+      syncDepotCustomSelectionVisuals(modal);
+      checkNativeSelectionDisablesDepot(modal);
+      updateDepotFooterButtons(modal);
+    });
     gridObserver.observe(grid, {
       subtree: true,
+      childList: true,
       attributes: true,
-      attributeFilter: ['data-multiselected'],
+      attributeFilter: ['data-multiselected', 'data-highlighted', DEPOT_CUSTOM_SELECTED_ATTR],
     });
     attachScrollStylingListener(modal);
     return true;
@@ -277,6 +490,11 @@
   function ensureModalObservers(modal) {
     ensureLayoutObserver(modal);
     attachGridObserver(modal);
+    if (depotMultiselectorActive) {
+      attachDepotMultiselectClickHandler(modal);
+      syncDepotCustomSelectionVisuals(modal);
+      ensureDepotFooterButtons(modal);
+    }
   }
 
   function isModalSetupComplete(modal) {
@@ -309,34 +527,118 @@
     retry();
   }
 
+  function restoreModalInlineStyles(modal) {
+    if (!modal) return;
+
+    modal.style.height = '';
+    modal.style.minHeight = '';
+    modal.style.maxHeight = '';
+
+    const rootWrapper = modal.querySelector(':scope > div');
+    if (rootWrapper) {
+      rootWrapper.style.height = '';
+      rootWrapper.style.display = '';
+      rootWrapper.style.flexDirection = '';
+      rootWrapper.style.minHeight = '';
+      rootWrapper.style.flex = '';
+    }
+
+    const widgetBottom = modal.querySelector('.widget-bottom');
+    if (widgetBottom) {
+      widgetBottom.style.display = '';
+      widgetBottom.style.flexDirection = '';
+      widgetBottom.style.flex = '';
+      widgetBottom.style.minHeight = '';
+    }
+
+    const contentGrid = getBestiaryContentGrid(modal);
+    if (contentGrid) {
+      contentGrid.style.flex = '';
+      contentGrid.style.minHeight = '';
+      contentGrid.style.height = '';
+      contentGrid.style.gridTemplateRows = '';
+      contentGrid.style.alignContent = '';
+    }
+
+    const scrollArea = getCreatureScrollArea(modal);
+    if (scrollArea) {
+      scrollArea.style.height = '';
+      scrollArea.style.minHeight = '';
+      scrollArea.style.maxHeight = '';
+      scrollArea.style.alignSelf = '';
+      scrollArea.querySelector('[data-radix-scroll-area-viewport]')?.style.removeProperty('height');
+    }
+  }
+
+  function isBetterBestiaryModalOpen() {
+    return Boolean(findBestiaryModal());
+  }
+
+  function simulateEscapePresses(count = 3, intervalMs = 100) {
+    return new Promise((resolve) => {
+      let presses = 0;
+      const press = () => {
+        const init = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true };
+        document.dispatchEvent(new KeyboardEvent('keydown', init));
+        document.dispatchEvent(new KeyboardEvent('keyup', init));
+        presses += 1;
+        if (presses >= count) {
+          resolve();
+          return;
+        }
+        setTimeout(press, intervalMs);
+      };
+      press();
+    });
+  }
+
+  function closeForExternalNavigation() {
+    if (!isBetterBestiaryModalOpen()) return Promise.resolve(false);
+    prepareForExternalClose();
+    return simulateEscapePresses(3, 100).then(() => {
+      activeModal = null;
+      return true;
+    });
+  }
+
   function resetModalEnhancement(modal) {
     if (!modal) return;
+    restoreModalInlineStyles(modal);
     modal.removeAttribute(ENHANCED_ATTR);
     modal.removeAttribute(INITIAL_STYLED_ATTR);
     modal.removeAttribute(SIZED_ATTR);
     modal.removeAttribute(LAYOUT_SIZED_ATTR);
     modal.querySelector(`[${FILTERS_ATTR}="true"]`)?.remove();
+    removeDepotFooterButtons(modal);
     modal.querySelector(`[${DETAILS_TITLE_BLOCK_ATTR}="true"]`)?.remove();
     restoreHeaderDetailsLabels(modal);
     resetDetailsColumnLayout(modal);
     for (const label of modal.querySelectorAll(`[${DETAILS_TITLE_ATTR}="true"]`)) {
+      const original = label.getAttribute(ORIGINAL_LABEL_ATTR);
       label.removeAttribute(DETAILS_TITLE_ATTR);
+      label.removeAttribute(ORIGINAL_LABEL_ATTR);
       label.style.color = '';
       label.style.textAlign = '';
       label.classList.remove('text-center', 'w-full');
       label.querySelector(`[${TITLE_TEXT_ATTR}]`)?.remove();
-      label.querySelector(`[${TITLE_CREDIT_ATTR}]`)?.remove();
+      label.querySelector(`[data-${NS}-title-credit]`)?.remove();
+      if (original) label.textContent = original;
     }
   }
 
-  function t(key) {
+  function t(key, params) {
+    let text = key;
     if (typeof api !== 'undefined' && api.i18n?.t) {
-      return api.i18n.t(key);
+      text = api.i18n.t(key);
+    } else if (typeof context !== 'undefined' && context.api?.i18n?.t) {
+      text = context.api.i18n.t(key);
     }
-    if (typeof context !== 'undefined' && context.api?.i18n?.t) {
-      return context.api.i18n.t(key);
+    if (params && typeof text === 'string') {
+      for (const [paramKey, value] of Object.entries(params)) {
+        text = text.replaceAll(`{${paramKey}}`, String(value));
+      }
     }
-    return key;
+    return text;
   }
 
   function getPresetLabel(presetKey) {
@@ -698,6 +1000,10 @@
       return;
     }
 
+    if (depotMultiselectorActive) {
+      await deactivateDepotMultiselector(modal);
+    }
+
     const ids = filterIdsByPreset(presetKey);
     if (ids.length === 0) {
       console.info(
@@ -750,6 +1056,83 @@
     return btn;
   }
 
+  function updateDepotMultiselectorButton(btn) {
+    btn.className = depotMultiselectorActive
+      ? `${BTN_TOGGLE_BASE} frame-1-green active:frame-pressed-1-green surface-green`
+      : `${BTN_TOGGLE_BASE} frame-1 active:frame-pressed-1 surface-regular opacity-70`;
+    btn.textContent = t('mods.betterBestiary.depotMultiselector.label');
+    btn.title = `${t('mods.betterBestiary.depotMultiselector.tooltip')} ${t('mods.betterBestiary.cosmeticToggleHint')}`;
+    btn.setAttribute('aria-pressed', depotMultiselectorActive ? 'true' : 'false');
+  }
+
+  function refreshDepotMultiselectorButton(modal = findBestiaryModal()) {
+    if (!modal) return;
+    for (const btn of modal.querySelectorAll(`[${DEPOT_MULTISELECTOR_ATTR}]`)) {
+      updateDepotMultiselectorButton(btn);
+    }
+  }
+
+  function hasGameNativeSelection(modal) {
+    for (const btn of getCreatureButtons(modal)) {
+      if (isDepotCustomSelected(btn)) continue;
+      if (isSlotSelected(btn)) return true;
+    }
+    return false;
+  }
+
+  async function checkNativeSelectionDisablesDepot(modal = findBestiaryModal()) {
+    if (!modal || !depotMultiselectorActive || isApplyingSelection) return;
+    if (!hasGameNativeSelection(modal)) return;
+    await deactivateDepotMultiselector(modal);
+  }
+
+  async function deactivateDepotMultiselector(modal = findBestiaryModal()) {
+    depotMultiselectorActive = false;
+    detachDepotMultiselectClickHandler();
+    if (modal) {
+      refreshDepotMultiselectorButton(modal);
+      removeDepotFooterButtons(modal);
+      clearDepotCustomSelection(modal);
+    }
+  }
+
+  async function activateDepotMultiselector(modal = findBestiaryModal()) {
+    if (!modal || !window.depotManager?.isCreatureDepotEnabled?.()) return;
+
+    depotCustomSelectedIds.clear();
+    depotMultiselectorActive = true;
+    await clearSelection(modal);
+    refreshDepotMultiselectorButton(modal);
+    attachDepotMultiselectClickHandler(modal);
+
+    ensureDepotFooterButtons(modal);
+    updateDepotFooterButtons(modal);
+    scheduleDepotFooterEnsure(modal);
+  }
+
+  async function toggleDepotMultiselector() {
+    const modal = findBestiaryModal();
+    if (!modal) return;
+
+    if (depotMultiselectorActive) {
+      await deactivateDepotMultiselector(modal);
+      return;
+    }
+
+    await activateDepotMultiselector(modal);
+  }
+
+  function makeDepotMultiselectorButton() {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute(DEPOT_MULTISELECTOR_ATTR, 'true');
+    updateDepotMultiselectorButton(btn);
+    btn.addEventListener('click', () => {
+      toggleDepotMultiselector();
+    });
+    return btn;
+  }
+
   function updateCosmeticToggleButton(btn, configKey) {
     const enabled = getCosmeticSetting(configKey);
     btn.className = getCosmeticToggleBtnClass(enabled);
@@ -774,6 +1157,195 @@
     }
   }
 
+  function getSessionOverlaySetting(overlayKey) {
+    return sessionOverlayState[overlayKey] === true;
+  }
+
+  function getSessionOverlayTooltip(overlayKey) {
+    const entry = SESSION_OVERLAY_TOGGLES.find((item) => item.key === overlayKey);
+    const settingLabel = t(entry?.tooltipKey ?? overlayKey);
+    return `${settingLabel} ${t('mods.betterBestiary.cosmeticToggleHint')}`;
+  }
+
+  function updateSessionOverlayToggleButton(btn, overlayKey) {
+    const enabled = getSessionOverlaySetting(overlayKey);
+    btn.className = getCosmeticToggleBtnClass(enabled);
+    btn.title = getSessionOverlayTooltip(overlayKey);
+    btn.textContent = t(SESSION_OVERLAY_TOGGLES.find((entry) => entry.key === overlayKey)?.labelKey ?? overlayKey);
+    btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  }
+
+  function toggleSessionOverlaySetting(overlayKey) {
+    sessionOverlayState[overlayKey] = !getSessionOverlaySetting(overlayKey);
+    syncBetterBestiaryShowDepotFlag();
+
+    const modal = findBestiaryModal();
+    if (modal) {
+      refreshSessionOverlayToggleButtons(modal);
+      if (overlayKey === 'showDepot') {
+        refreshDepotOverlayLayout(modal);
+      }
+    }
+  }
+
+  function makeSessionOverlayToggleButton(overlayKey) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute(SESSION_OVERLAY_ATTR, overlayKey);
+    updateSessionOverlayToggleButton(btn, overlayKey);
+    btn.addEventListener('click', () => toggleSessionOverlaySetting(overlayKey));
+    return btn;
+  }
+
+  function refreshSessionOverlayToggleButtons(modal = findBestiaryModal()) {
+    if (!modal) return;
+    for (const btn of modal.querySelectorAll(`[${SESSION_OVERLAY_ATTR}]`)) {
+      updateSessionOverlayToggleButton(btn, btn.getAttribute(SESSION_OVERLAY_ATTR));
+    }
+  }
+
+  function findModalFooterCloseButton(modal) {
+    if (!modal) return null;
+    const widgetBottom = modal.querySelector('.widget-bottom');
+    const scope = widgetBottom ?? modal;
+    return [...scope.querySelectorAll('div.flex.justify-end.gap-2 button')]
+      .find((btn) => /^(Close|Fechar)$/i.test(btn.textContent.trim())) ?? null;
+  }
+
+  function findModalFooterRow(modal) {
+    if (!modal) return null;
+
+    const clearBtn = findClearSelectionButton(modal);
+    const clearRow = clearBtn?.closest('div.flex.justify-end.gap-2');
+    if (clearRow) return clearRow;
+
+    const closeBtn = findModalFooterCloseButton(modal);
+    const closeRow = closeBtn?.closest('div.flex.justify-end.gap-2');
+    if (closeRow) return closeRow;
+
+    return modal.querySelector('.widget-bottom div.flex.justify-end.gap-2')
+      ?? modal.querySelector('div.flex.justify-end.gap-2');
+  }
+
+  function removeDepotFooterButtons(modal) {
+    if (!modal) return;
+    modal.querySelector(`[${DEPOT_SEND_TO_ATTR}]`)?.remove();
+    modal.querySelector(`[${DEPOT_REMOVE_FROM_ATTR}]`)?.remove();
+  }
+
+  function getSelectedDepotTransferPlan(modal) {
+    const depotMap = getBestiaryCreatureIdMap();
+    const depotSet = window.depotManager?.getDepotCreatureIdSet?.() ?? new Set();
+    const toDepot = [];
+    const toBestiary = [];
+
+    for (const btn of getCreatureButtons(modal)) {
+      if (!isDepotCustomSelected(btn)) continue;
+      const id = resolveMonsterIdFromButton(btn, depotMap);
+      if (!id) continue;
+      const entry = { id, img: btn.querySelector('img[alt="creature"]') };
+      if (depotSet.has(id)) toBestiary.push(entry);
+      else toDepot.push(entry);
+    }
+
+    return {
+      toDepot,
+      toBestiary,
+      total: toDepot.length + toBestiary.length,
+    };
+  }
+
+  function updateDepotFooterButtons(modal = findBestiaryModal()) {
+    if (!modal) return;
+
+    const sendBtn = modal.querySelector(`[${DEPOT_SEND_TO_ATTR}]`);
+    const removeBtn = modal.querySelector(`[${DEPOT_REMOVE_FROM_ATTR}]`);
+    if (!sendBtn && !removeBtn) return;
+
+    const { toDepot, toBestiary } = getSelectedDepotTransferPlan(modal);
+    const enabled = window.depotManager?.isCreatureDepotEnabled?.() === true && depotMultiselectorActive;
+
+    if (sendBtn) {
+      sendBtn.disabled = !enabled || toDepot.length === 0;
+      sendBtn.textContent = t('mods.betterBestiary.sendCreaturesToDepot', { count: toDepot.length });
+      sendBtn.title = t('mods.betterBestiary.sendCreaturesToDepotTooltip');
+    }
+
+    if (removeBtn) {
+      removeBtn.disabled = !enabled || toBestiary.length === 0;
+      removeBtn.textContent = t('mods.betterBestiary.removeCreaturesFromDepot', { count: toBestiary.length });
+      removeBtn.title = t('mods.betterBestiary.removeCreaturesFromDepotTooltip');
+    }
+  }
+
+  async function transferDepotSelection(modal = findBestiaryModal(), mode = 'all') {
+    const depotManager = window.depotManager;
+    if (!modal || !depotManager?.transferCreaturesDepot || !depotManager.isCreatureDepotEnabled?.()) return;
+
+    const { toDepot, toBestiary } = getSelectedDepotTransferPlan(modal);
+    const entries = mode === 'toDepot'
+      ? toDepot
+      : mode === 'fromDepot'
+        ? toBestiary
+        : [...toDepot, ...toBestiary];
+
+    if (entries.length === 0) return;
+
+    const result = depotManager.transferCreaturesDepot(entries);
+    console.info(
+      `[Better Bestiary] Depot transfer: ${result.toDepot} to depot, ${result.toBestiary} to bestiary`,
+    );
+
+    await deactivateDepotMultiselector(modal);
+    refreshDepotOverlayLayout(modal);
+  }
+
+  function ensureDepotFooterButtons(modal) {
+    if (!modal) return;
+
+    if (!depotMultiselectorActive || !window.depotManager?.isCreatureDepotEnabled?.()) {
+      removeDepotFooterButtons(modal);
+      return;
+    }
+
+    const row = findModalFooterRow(modal);
+    if (!row) return;
+
+    let sendBtn = row.querySelector(`[${DEPOT_SEND_TO_ATTR}]`);
+    let removeBtn = row.querySelector(`[${DEPOT_REMOVE_FROM_ATTR}]`);
+    const closeBtn = findModalFooterCloseButton(modal);
+    const insertBefore = closeBtn ?? null;
+
+    if (!removeBtn) {
+      removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = FOOTER_BTN_CLASS;
+      removeBtn.setAttribute(DEPOT_REMOVE_FROM_ATTR, 'true');
+      removeBtn.addEventListener('click', () => {
+        transferDepotSelection(modal, 'fromDepot');
+      });
+      if (insertBefore) insertBefore.insertAdjacentElement('beforebegin', removeBtn);
+      else row.appendChild(removeBtn);
+    }
+
+    if (!sendBtn) {
+      sendBtn = document.createElement('button');
+      sendBtn.type = 'button';
+      sendBtn.className = FOOTER_BTN_SEND_CLASS;
+      sendBtn.setAttribute(DEPOT_SEND_TO_ATTR, 'true');
+      sendBtn.addEventListener('click', () => {
+        transferDepotSelection(modal, 'toDepot');
+      });
+      removeBtn.insertAdjacentElement('beforebegin', sendBtn);
+    }
+
+    if (sendBtn.nextElementSibling !== removeBtn) {
+      removeBtn.insertAdjacentElement('beforebegin', sendBtn);
+    }
+
+    updateDepotFooterButtons(modal);
+  }
+
   function createFiltersColumn(titleKey, buttonFactory) {
     const column = document.createElement('div');
     column.className = 'flex min-w-0 flex-col gap-1';
@@ -794,12 +1366,19 @@
     const panel = document.createElement('div');
     panel.className = 'grid w-full grid-cols-2 gap-2';
     panel.setAttribute(FILTERS_ATTR, 'true');
-    panel.appendChild(createFiltersColumn('mods.betterBestiary.presetsColumnTitle', () =>
-      PRESET_KEYS.map((presetKey) => makePresetButton(presetKey)),
-    ));
-    panel.appendChild(createFiltersColumn('mods.betterBestiary.cosmeticsColumnTitle', () =>
-      COSMETIC_TOGGLES.map(({ key }) => makeCosmeticToggleButton(key)),
-    ));
+    panel.appendChild(createFiltersColumn('mods.betterBestiary.presetsColumnTitle', () => {
+      const buttons = PRESET_KEYS.map((presetKey) => makePresetButton(presetKey));
+      if (window.depotManager?.isCreatureDepotEnabled?.()) {
+        buttons.push(makeDepotMultiselectorButton());
+      }
+      return buttons;
+    }));
+    panel.appendChild(createFiltersColumn('mods.betterBestiary.cosmeticsColumnTitle', () => [
+      ...COSMETIC_TOGGLES.map(({ key }) => makeCosmeticToggleButton(key)),
+      ...SESSION_OVERLAY_TOGGLES
+        .filter(({ key }) => key !== 'showDepot' || window.depotManager?.isCreatureDepotEnabled?.())
+        .map(({ key }) => makeSessionOverlayToggleButton(key)),
+    ]));
     return panel;
   }
 
@@ -809,6 +1388,8 @@
       updatePresetButton(btn, btn.getAttribute(PRESET_ATTR));
     }
     refreshCosmeticToggleButtons(filters.closest('[role="dialog"]') ?? findBestiaryModal());
+    refreshSessionOverlayToggleButtons(filters.closest('[role="dialog"]') ?? findBestiaryModal());
+    refreshDepotMultiselectorButton(filters.closest('[role="dialog"]') ?? findBestiaryModal());
     return filters;
   }
 
@@ -816,7 +1397,11 @@
     let filters = detailsCol.querySelector(`[${FILTERS_ATTR}="true"]`);
     const needsRebuild = !filters
       || !filters.classList.contains('grid-cols-2')
-      || !filters.querySelector(`[${COSMETIC_TOGGLE_ATTR}]`);
+      || !filters.querySelector(`[${COSMETIC_TOGGLE_ATTR}]`)
+      || !filters.querySelector(`[${SESSION_OVERLAY_ATTR}]`)
+      || PRESET_KEYS.some((presetKey) => !filters.querySelector(`[${PRESET_ATTR}="${presetKey}"]`))
+      || (window.depotManager?.isCreatureDepotEnabled?.()
+        && !filters.querySelector(`[${DEPOT_MULTISELECTOR_ATTR}]`));
 
     if (needsRebuild) {
       const next = buildFiltersPanel();
@@ -855,22 +1440,28 @@
     return getBestiaryContentGrid(modal)?.querySelector(':scope > .col-span-full') ?? null;
   }
 
-  function suppressHeaderDetailsLabels(modal) {
+  function findHeaderCreatureDetailsLabel(headerRow) {
+    if (!headerRow) return null;
+    const labels = [...headerRow.querySelectorAll('p[data-empty]')];
+    return labels.find((label) => CREATURE_DETAILS_LABEL_RE.test(label.textContent))
+      ?? labels.at(-1)
+      ?? null;
+  }
+
+  function enhanceHeaderCreatureDetailsLabel(modal) {
     const headerRow = getBestiaryHeaderRow(modal);
     if (!headerRow) return;
 
+    const activatedText = t('mods.betterBestiary.activated');
+    const detailsLabel = findHeaderCreatureDetailsLabel(headerRow);
+
     for (const label of headerRow.querySelectorAll('p[data-empty]')) {
-      if (label.getAttribute(DETAILS_TITLE_ATTR) === 'true') {
-        label.removeAttribute(DETAILS_TITLE_ATTR);
-        label.style.color = '';
-        label.style.textAlign = '';
-        label.classList.remove('text-center', 'w-full');
-        label.querySelector(`[${TITLE_TEXT_ATTR}]`)?.remove();
-        label.querySelector(`[${TITLE_CREDIT_ATTR}]`)?.remove();
-      }
-      if (!label.hasAttribute(HEADER_LABEL_SUPPRESSED_ATTR)) {
-        label.classList.add('!hidden');
-        label.setAttribute(HEADER_LABEL_SUPPRESSED_ATTR, 'true');
+      if (label !== detailsLabel) continue;
+
+      label.classList.remove('!hidden', 'hidden');
+      label.removeAttribute(HEADER_LABEL_SUPPRESSED_ATTR);
+      if (needsDetailsTitleEnhancement(label, activatedText)) {
+        applyDetailsTitleEnhancement(label, activatedText);
       }
     }
   }
@@ -883,64 +1474,42 @@
   }
 
   function needsDetailsTitleEnhancement(label, activatedText) {
-    const creditText = t('mods.betterBestiary.authorCredit');
     const titleSpan = label.querySelector(`[${TITLE_TEXT_ATTR}]`);
-    const credit = label.querySelector(`[${TITLE_CREDIT_ATTR}]`);
     return label.getAttribute(DETAILS_TITLE_ATTR) !== 'true'
       || titleSpan?.textContent !== activatedText
-      || credit?.textContent !== creditText
-      || credit?.getAttribute('href') !== AUTHOR_PROFILE_URL;
+      || !!label.querySelector(`[data-${NS}-title-credit]`);
   }
 
   function applyDetailsTitleEnhancement(label, activatedText) {
+    if (!label.hasAttribute(ORIGINAL_LABEL_ATTR)) {
+      const original = label.textContent.trim();
+      if (original) label.setAttribute(ORIGINAL_LABEL_ATTR, original);
+    }
+
+    label.classList.remove('!hidden', 'hidden');
     label.style.textAlign = 'center';
     label.classList.add('text-center', 'w-full');
     label.setAttribute(DETAILS_TITLE_ATTR, 'true');
 
     let titleSpan = label.querySelector(`[${TITLE_TEXT_ATTR}]`);
-    let credit = label.querySelector(`[${TITLE_CREDIT_ATTR}]`);
-    if (!titleSpan || !credit) {
+    if (!titleSpan) {
       label.replaceChildren();
       titleSpan = document.createElement('span');
       titleSpan.setAttribute(TITLE_TEXT_ATTR, 'true');
       titleSpan.className = 'block';
-      credit = document.createElement('a');
-      credit.setAttribute(TITLE_CREDIT_ATTR, 'true');
-      credit.href = AUTHOR_PROFILE_URL;
-      credit.target = '_blank';
-      credit.rel = 'noopener noreferrer';
-      credit.className = 'pixel-font-14 text-whiteDarker hover:text-whiteHighlight';
       label.appendChild(titleSpan);
-      label.appendChild(credit);
     }
 
+    label.querySelector(`[data-${NS}-title-credit]`)?.remove();
     titleSpan.textContent = activatedText;
     titleSpan.style.color = ACTIVATED_TITLE_COLOR;
-    credit.textContent = t('mods.betterBestiary.authorCredit');
-    credit.href = AUTHOR_PROFILE_URL;
-  }
-
-  function ensureDetailsTitleBlock(detailsCol) {
-    let titleBlock = detailsCol.querySelector(`[${DETAILS_TITLE_BLOCK_ATTR}="true"]`);
-    if (!titleBlock) {
-      titleBlock = document.createElement('p');
-      titleBlock.setAttribute(DETAILS_TITLE_BLOCK_ATTR, 'true');
-      titleBlock.className = 'w-full text-center';
-    }
-
-    const activatedText = t('mods.betterBestiary.activated');
-    if (needsDetailsTitleEnhancement(titleBlock, activatedText)) {
-      applyDetailsTitleEnhancement(titleBlock, activatedText);
-    }
-
-    return titleBlock;
   }
 
   function enhanceDetailsTitle(modal) {
-    suppressHeaderDetailsLabels(modal);
-    const detailsCol = findBestiaryDetailsColumn(modal);
-    if (!detailsCol) return;
-    ensureDetailsTitleBlock(detailsCol);
+    enhanceHeaderCreatureDetailsLabel(modal);
+    findBestiaryDetailsColumn(modal)
+      ?.querySelector(`[${DETAILS_TITLE_BLOCK_ATTR}="true"]`)
+      ?.remove();
   }
 
   function syncModalLayout(modal) {
@@ -949,7 +1518,10 @@
     try {
       if (ensurePresetButtons(modal)) {
         refreshCosmeticToggleButtons(modal);
+        refreshSessionOverlayToggleButtons(modal);
+        refreshDepotMultiselectorButton(modal);
       }
+      ensureDepotFooterButtons(modal);
     } finally {
       isSyncingLayout = false;
     }
@@ -986,6 +1558,7 @@
     if (!detailsCol) return null;
 
     beginTemporaryCosmeticSession();
+    beginSessionOverlaySession();
 
     const misplaced = modal.querySelector(`[${FILTERS_ATTR}="true"]`);
     if (misplaced && !detailsCol.contains(misplaced)) {
@@ -996,6 +1569,7 @@
     const filters = ensureFiltersPanel(detailsCol);
     placeDetailsColumnLayout(detailsCol, filters);
     modal.setAttribute(ENHANCED_ATTR, 'true');
+    window.depotManager?.scheduleFavoriteHeartsUpdate?.(250);
     return detailsCol;
   }
 
@@ -1034,7 +1608,6 @@
   }
 
   function placeDetailsColumnLayout(detailsCol, filters = null) {
-    const titleBlock = ensureDetailsTitleBlock(detailsCol);
     const panel = filters ?? detailsCol.querySelector(`[${FILTERS_ATTR}="true"]`);
     if (!panel) return;
 
@@ -1044,20 +1617,12 @@
       if (panel.nextElementSibling !== contentBlock) {
         contentBlock.insertAdjacentElement('beforebegin', panel);
       }
-      if (titleBlock.nextElementSibling !== panel) {
-        panel.insertAdjacentElement('beforebegin', titleBlock);
-      }
       applyDetailsColumnGridSizing(detailsCol);
       return;
     }
 
-    if (!detailsCol.contains(titleBlock)) {
-      detailsCol.prepend(titleBlock);
-    }
     if (!detailsCol.contains(panel)) {
-      titleBlock.insertAdjacentElement('afterend', panel);
-    } else if (titleBlock.nextElementSibling !== panel) {
-      panel.insertAdjacentElement('beforebegin', titleBlock);
+      detailsCol.prepend(panel);
     }
 
     applyDetailsColumnGridSizing(detailsCol);
@@ -1240,7 +1805,11 @@
   }
 
   function cleanup() {
-    teardownModalSession({ full: true });
+    const modal = activeModal ?? findBestiaryModal();
+    teardownModalSession({
+      full: true,
+      resetDom: Boolean(modal?.isConnected && modal.getAttribute('data-state') === 'open'),
+    });
     console.log('[Better Bestiary] cleaned up');
   }
 
@@ -1253,10 +1822,16 @@
 
   initialize();
 
+  window.__betterBestiaryClose = closeForExternalNavigation;
+  window.__betterBestiaryPrepareClose = prepareForExternalClose;
+  window.__betterBestiaryIsOpen = isBetterBestiaryModalOpen;
+
   exports = {
     cleanup,
     updateConfig,
     applyPresetSelection,
     refresh: processMutations,
+    closeForExternalNavigation,
+    isOpen: isBetterBestiaryModalOpen,
   };
 })();

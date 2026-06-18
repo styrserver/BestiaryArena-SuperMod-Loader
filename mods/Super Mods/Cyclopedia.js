@@ -122,6 +122,7 @@ const START_PAGE_CONFIG = {
   API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData',
   RANKINGS_API_URL: 'https://bestiary-arena-ranking.vercel.app/api/v1/rankings',
   RANKINGS_PAGE_SIZE: 50,
+  RANKINGS_PREFETCH_LIMIT: 500,
   FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png'
 };
 const inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
@@ -5926,12 +5927,18 @@ function addCyclopediaHeaderButton() {
   }
 }
 
+function findOpenBetterBestiaryModal() {
+  return document.querySelector('[role="dialog"][data-state="open"][data-better-bestiary-enhanced]');
+}
+
 function injectCyclopediaButton(menuElem) {
   const body = document.body;
   const scrollLocked = body.getAttribute('data-scroll-locked');
   if (scrollLocked >= '2') {
-    
-    return false;
+    const creatureMenu = getItemNameFromMenu(menuElem)?.type === 'monster';
+    if (!(findOpenBetterBestiaryModal() && creatureMenu)) {
+      return false;
+    }
   }
   
         const existingButtons = Array.from(menuElem.querySelectorAll('.cyclopedia-menu-item'));
@@ -6001,25 +6008,22 @@ function injectCyclopediaButton(menuElem) {
   cyclopediaItem.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open"><path d="M2 19V6a2 2 0 0 1 2-2h7"></path><path d="M22 19V6a2 2 0 0 0-2-2h-7"></path><path d="M2 19a2 2 0 0 0 2 2h7"></path><path d="M22 19a2 2 0 0 1-2 2h-7"></path></svg>Cyclopedia`;
   cyclopediaItem.addEventListener('click', (e) => {
     e.stopPropagation();
-    
-    // Sequence: 10ms delay, press ESC, 10ms delay, then open cyclopedia
+
+    const openCyclopedia = () => {
+      const equipmentToOpen = matchedEquipment;
+      const creatureToOpen = monsterName;
+      if (equipmentToOpen) {
+        openCyclopediaModal({ equipment: equipmentToOpen });
+      } else if (creatureToOpen && typeof creatureToOpen === 'string') {
+        openCyclopediaModal({ creature: creatureToOpen });
+      } else {
+        openCyclopediaModal({});
+      }
+    };
+
     const escTimeout = setTimeout(() => {
-      // Press ESC to close context menu
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
-      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
-      
-      const openTimeout = setTimeout(() => {
-        // Open cyclopedia
-        const equipmentToOpen = matchedEquipment;
-        const creatureToOpen = monsterName;
-        if (equipmentToOpen) {
-          openCyclopediaModal({ equipment: equipmentToOpen });
-        } else if (creatureToOpen && typeof creatureToOpen === 'string') {
-          openCyclopediaModal({ creature: creatureToOpen });
-        } else {
-          openCyclopediaModal({});
-        }
-      }, 10);
+      dispatchEscapePress();
+      const openTimeout = setTimeout(openCyclopedia, 10);
       TimerManager.addTimeout(openTimeout, 'cyclopediaOpen');
     }, 10);
     TimerManager.addTimeout(escTimeout, 'cyclopediaEsc');
@@ -6381,10 +6385,68 @@ function createStartPage() {
   return startPage.container;
 }
 
+function isBodyScrollLocked() {
+  const raw = document.body.getAttribute('data-scroll-locked');
+  return raw != null && raw !== '' && raw >= '2';
+}
+
+function dispatchEscapePress() {
+  const init = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true };
+  document.dispatchEvent(new KeyboardEvent('keydown', init));
+  document.dispatchEvent(new KeyboardEvent('keyup', init));
+}
+
+function waitForDialogsCleared(maxMs = 2500) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = () => {
+      const bestiaryGone = !document.querySelector('[role="dialog"][data-state="open"][data-better-bestiary-enhanced]')
+        && !(typeof window.__betterBestiaryIsOpen === 'function' && window.__betterBestiaryIsOpen());
+      if ((bestiaryGone && !isBodyScrollLocked()) || Date.now() - start > maxMs) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(check);
+    };
+    check();
+  });
+}
+
+function simulateEscapePresses(count = 3, intervalMs = 100) {
+  return new Promise((resolve) => {
+    let presses = 0;
+    const press = () => {
+      dispatchEscapePress();
+      presses += 1;
+      if (presses >= count) {
+        waitForDialogsCleared().then(resolve);
+        return;
+      }
+      setTimeout(press, intervalMs);
+    };
+    press();
+  });
+}
+
+function closeDialogsForCyclopedia() {
+  window.__betterBestiaryPrepareClose?.();
+  return simulateEscapePresses(3, 100);
+}
+
 function openCyclopediaModal(options) {
   try {
     const now = Date.now();
     options = options || {};
+    const betterBestiaryOpen = typeof window.__betterBestiaryIsOpen === 'function'
+      ? window.__betterBestiaryIsOpen()
+      : Boolean(document.querySelector('[role="dialog"][data-state="open"][data-better-bestiary-enhanced]'));
+    const scrollLocked = isBodyScrollLocked();
+    if ((betterBestiaryOpen || scrollLocked) && !options._closedDialogs) {
+      closeDialogsForCyclopedia().then(() => {
+        openCyclopediaModal({ ...options, _closedDialogs: true });
+      });
+      return;
+    }
     const forceOpen = options.force === true || options.priority === true || options.fromHomeSearch === true;
     if (cyclopediaModalInProgress) return;
     if (!forceOpen && now - lastModalCall < 1000) return;
@@ -8268,6 +8330,17 @@ function openCyclopediaModal(options) {
 
           const requestId = createRequest();
           if (selectedCategory !== 'Rankings') {
+            const rankingsPrefetchOptions = {
+              season: cyclopediaState.profileSeason ?? 2,
+              qualified: true,
+              limit: START_PAGE_CONFIG.RANKINGS_PAGE_SIZE,
+              offset: 0,
+              sort: 'level',
+              order: 'desc'
+            };
+            fetchRankingsFromApi(rankingsPrefetchOptions).catch(() => {});
+          }
+          if (selectedCategory !== 'Rankings') {
             showLoadingState(col2);
           }
 
@@ -8388,6 +8461,50 @@ function openCyclopediaModal(options) {
           const normalized = normalizeRankingsApiResponse(cachedList.data, queryOptions);
           setCachedRankingsData(queryOptions, normalized);
           return { ...normalized, season: effectiveSeason, sort, order };
+        }
+
+        if (qualified) {
+          const fullListLimit = Math.max(limit, START_PAGE_CONFIG.RANKINGS_PREFETCH_LIMIT || 500);
+          const fullListParams = new URLSearchParams();
+          fullListParams.set('season', String(effectiveSeason));
+          fullListParams.set('qualified', 'true');
+          fullListParams.set('limit', String(fullListLimit));
+          fullListParams.set('offset', '0');
+          fullListParams.set('sort', sort);
+          fullListParams.set('order', order);
+
+          const fullListUrl = `${START_PAGE_CONFIG.RANKINGS_API_URL}?${fullListParams}`;
+          const fullListData = await fetchWithDeduplication(
+            fullListUrl,
+            `rankings-fetch-full-s${effectiveSeason}-${sort}-${order}`,
+            1
+          );
+
+          if (!fullListData || !Array.isArray(fullListData.rankings)) {
+            throw new Error('Invalid response format from rankings API');
+          }
+
+          const fullListTotal = Number(fullListData.total);
+          if (Number.isFinite(fullListTotal) && fullListTotal > 0 && fullListData.rankings.length >= fullListTotal) {
+            cyclopediaState.setLeaderboardData(listCacheKey, {
+              data: { rankings: fullListData.rankings, timestamp: fullListData.timestamp || null },
+              timestamp: Date.now()
+            });
+            const normalizedFromList = applyClientRankingsQuery(fullListData.rankings, {
+              sort,
+              order,
+              limit,
+              offset,
+              timestamp: fullListData.timestamp || null
+            });
+            setCachedRankingsData(queryOptions, normalizedFromList);
+            return {
+              ...normalizedFromList,
+              season: effectiveSeason,
+              sort,
+              order
+            };
+          }
         }
 
         const params = new URLSearchParams();
@@ -8611,6 +8728,18 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 qualified: true
               };
           cyclopediaState.rankingsState = rankingsState;
+          const initialQueryOptions = {
+            season: activeSeason,
+            qualified: rankingsState.qualified,
+            limit: rankingsState.limit,
+            offset: rankingsState.offset,
+            sort: rankingsState.sort,
+            order: rankingsState.order
+          };
+          const initialQueryCacheKey = getRankingsCacheKey(initialQueryOptions);
+          let initialRankingsPromise = getCachedRankingsData(initialQueryOptions)
+            ? null
+            : fetchRankingsFromApi(initialQueryOptions);
 
           let currentRankings = [];
           let rankingsTotal = 0;
@@ -8710,6 +8839,47 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             padding-bottom: 8px;
             box-sizing: border-box;
           `;
+          const baseRankingsCellStyle = `
+            padding: 6px 4px;
+            color: #fff;
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+            font-size: 10px;
+          `;
+          const escapeRankingsText = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => {
+            if (char === '&') return '&amp;';
+            if (char === '<') return '&lt;';
+            if (char === '>') return '&gt;';
+            if (char === '"') return '&quot;';
+            return '&#39;';
+          });
+
+          dataRowsContainer.addEventListener('click', (event) => {
+            const playerCell = event.target?.closest?.('[data-rankings-player]');
+            if (!playerCell) return;
+            const encodedName = playerCell.getAttribute('data-rankings-player');
+            if (!encodedName) return;
+            NavigationHandler.navigateToProfile(decodeURIComponent(encodedName));
+          });
+          dataRowsContainer.addEventListener('mouseover', (event) => {
+            const playerCell = event.target?.closest?.('[data-rankings-player]');
+            if (!playerCell || !dataRowsContainer.contains(playerCell)) return;
+            const fromNode = event.relatedTarget;
+            if (fromNode && playerCell.contains(fromNode)) return;
+            playerCell.style.color = '#fff';
+          });
+          dataRowsContainer.addEventListener('mouseout', (event) => {
+            const playerCell = event.target?.closest?.('[data-rankings-player]');
+            if (!playerCell || !dataRowsContainer.contains(playerCell)) return;
+            const toNode = event.relatedTarget;
+            if (toNode && playerCell.contains(toNode)) return;
+            playerCell.style.color = COLOR_CONSTANTS.PRIMARY;
+          });
 
           const paginationBar = document.createElement('div');
           paginationBar.style.cssText = `
@@ -8849,8 +9019,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               return;
             }
 
-            const fragment = document.createDocumentFragment();
-            currentRankings.forEach((ranking, index) => {
+            const rowsHtml = currentRankings.map((ranking, index) => {
               const isCurrentPlayer = ranking.name.toLowerCase() === playerState.name.toLowerCase();
               const isSearchedPlayer = cyclopediaState.searchedUsername && ranking.name.toLowerCase() === cyclopediaState.searchedUsername.toLowerCase();
 
@@ -8886,36 +9055,20 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 ranking.bagOutfits.toLocaleString()
               ];
 
-              cellData.forEach((text, cellIndex) => {
-                const cell = document.createElement('div');
-                cell.className = FONT_CONSTANTS.SIZES.SMALL;
-                cell.style.cssText = `
-                  padding: 6px 4px;
-                  background: ${rowBackground};
-                  color: #fff;
-                  font-weight: ${isCurrentPlayer || isSearchedPlayer ? 'bold' : 'normal'};
-                  text-align: ${cellIndex === 0 ? 'left' : cellIndex === 1 ? 'left' : 'center'};
-                  border-right: 1px solid rgba(255, 255, 255, 0.08);
-                  display: flex;
-                  align-items: center;
-                  justify-content: ${cellIndex === 0 ? 'flex-start' : cellIndex === 1 ? 'flex-start' : 'center'};
-                  overflow: hidden;
-                  text-overflow: ellipsis;
-                  white-space: nowrap;
-                  border: ${rowBorder};
-                  font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
-                  font-size: 10px;
-                `;
-
-                if (cellIndex === 1) {
-                  NavigationHandler.attachProfileNavigation(cell, ranking.name, { color: '#fff' });
-                }
-
-                cell.textContent = text;
-                fragment.appendChild(cell);
-              });
-            });
-            dataRowsContainer.appendChild(fragment);
+              return cellData.map((text, cellIndex) => {
+                const isPlayerCell = cellIndex === 1;
+                const textAlign = (cellIndex === 0 || isPlayerCell) ? 'left' : 'center';
+                const justifyContent = (cellIndex === 0 || isPlayerCell) ? 'flex-start' : 'center';
+                const playerAttrs = isPlayerCell
+                  ? ` data-rankings-player="${encodeURIComponent(ranking.name)}" title="${escapeRankingsText(ranking.name)}"`
+                  : '';
+                const playerStyle = isPlayerCell
+                  ? `cursor:pointer;text-decoration:underline;color:${COLOR_CONSTANTS.PRIMARY};transition:color 0.15s ease;`
+                  : '';
+                return `<div class="${FONT_CONSTANTS.SIZES.SMALL}"${playerAttrs} style="${baseRankingsCellStyle}background:${rowBackground};font-weight:${isCurrentPlayer || isSearchedPlayer ? 'bold' : 'normal'};text-align:${textAlign};justify-content:${justifyContent};border:${rowBorder};${playerStyle}">${escapeRankingsText(text)}</div>`;
+              }).join('');
+            }).join('');
+            dataRowsContainer.innerHTML = rowsHtml;
           }
 
           function updateHeaderHighlighting() {
@@ -8954,11 +9107,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             updatePaginationControls();
 
             const queryOptions = getRankingsQueryOptions();
+            const queryCacheKey = getRankingsCacheKey(queryOptions);
 
             try {
               let rankingsData = getCachedRankingsData(queryOptions);
               if (!rankingsData) {
-                rankingsData = await fetchRankingsFromApi(queryOptions);
+                if (initialRankingsPromise && queryCacheKey === initialQueryCacheKey) {
+                  rankingsData = await initialRankingsPromise;
+                  initialRankingsPromise = null;
+                } else {
+                  rankingsData = await fetchRankingsFromApi(queryOptions);
+                }
                 setCachedRankingsData(queryOptions, rankingsData);
               }
 

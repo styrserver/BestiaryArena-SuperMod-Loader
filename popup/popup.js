@@ -1099,6 +1099,10 @@ const modDescriptions = {
   'VIP List': 'Track favorite players with profiles, sortable stats, and Cyclopedia links.'
 };
 
+const modAuthorProfileUrls = {
+  'Better Bestiary': 'https://bestiaryarena.com/profile/megafuji',
+};
+
 // Super Mods list - kept in sync with mod-registry.js
 const superModNames = [
   'Autoseller.js',
@@ -1232,6 +1236,17 @@ async function createModCard(mod) {
   desc.className = 'mod-card-description';
   desc.textContent = description;
 
+  const authorProfileUrl = modAuthorProfileUrls[displayName];
+  let authorCredit = null;
+  if (authorProfileUrl) {
+    authorCredit = document.createElement('a');
+    authorCredit.className = 'mod-card-author-credit';
+    authorCredit.href = authorProfileUrl;
+    authorCredit.target = '_blank';
+    authorCredit.rel = 'noopener noreferrer';
+    authorCredit.textContent = await getTranslation('mods.betterBestiary.authorCredit', 'by megafuji');
+  }
+
   // Footer with toggle and delete
   const footer = document.createElement('div');
   footer.className = 'mod-card-footer';
@@ -1297,6 +1312,9 @@ async function createModCard(mod) {
 
   modCard.appendChild(header);
   modCard.appendChild(desc);
+  if (authorCredit) {
+    modCard.appendChild(authorCredit);
+  }
   modCard.appendChild(footer);
 
   return modCard;

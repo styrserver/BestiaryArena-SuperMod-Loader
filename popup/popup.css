@@ -677,6 +677,19 @@ main {
   overflow: hidden;
 }
 
+.mod-card-author-credit {
+  display: block;
+  margin: -8px 0 12px;
+  font-size: 11px;
+  color: var(--theme-text-secondary, #b0b0b0);
+  text-decoration: none;
+}
+
+.mod-card-author-credit:hover {
+  color: var(--theme-text-primary, #e8e8e8);
+  text-decoration: underline;
+}
+
 .mod-card-footer {
   display: flex;
   justify-content: space-between;

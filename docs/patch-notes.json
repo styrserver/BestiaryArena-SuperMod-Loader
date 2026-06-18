@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.2.6",
+      "changes": [
+        {
+          "mod": "Better Bestiary",
+          "type": "changed",
+          "text": "Author credit moved from the sell-modal activated title to the extension popup mod card (localized by megafuji link to profile). Sell-modal creature slots show Depot Manager favorite hearts; depot creatures are hidden from the grid by default. Overlays: Depot toggle shows them at 90% greyscale. Creature Selector: Depot multiselector uses custom selection (including locked creatures, Autoscroller-style green tile and thin white border, full color while selected) with footer Send N to depot / Remove N from depot buttons for bulk transfer; it turns off when you use sell presets or the game multiselect, and clears game selection when enabled."
+        },
+        {
+          "mod": "Better Bestiary",
+          "type": "fixed",
+          "text": "Closing the sell modal with ESC or opening Cyclopedia from the right-click menu no longer crashes React (mod detaches observers on external close instead of removing injected DOM while the dialog unmounts)."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Characters Rankings tab loads faster: background prefetch when browsing Characters, parallel API fetch while the table builds, qualified full-list cache for instant paging and sorting, and lighter batch row rendering with delegated player links. Opening from the Better Bestiary creature menu prepares and closes the sell modal (ESC sequence) before Cyclopedia opens so scroll-lock does not block or crash the UI."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "changed",
+          "text": "Better Bestiary integration: right-click menu on sell-modal creatures adds Send to depot and favorite toggle (React creature ID resolution). Depot layout hides depot creatures in the modal grid as well as the main bestiary; optional show-depot overlay applies 90% greyscale (skipped on depot-multiselected slots). Bulk transferCreaturesDepot / remove APIs power multiselector footer actions. Debounced favorite-heart updates avoid freezing the backpack when favorites are enabled on large collections."
+        }
+      ]
+    },
+    {
       "version": "4.2.5",
       "changes": [
         {
