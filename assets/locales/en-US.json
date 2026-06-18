@@ -171,7 +171,11 @@
       "cosmetics": {
         "maxed": { "label": "Maxed" },
         "sealed": { "label": "Sealed" },
-        "shinies": { "label": "Shinies" }
+        "shinies": { "label": "Shinies" },
+        "depot": {
+          "label": "Depot",
+          "tooltip": "Show creatures stored in the depot"
+        }
       },
       "presets": {
         "shiny": {
@@ -186,7 +190,15 @@
           "label": "Already A/S",
           "tooltip": "Selects unlocked copies for species where you already have a shiny awaken keeper (tier 6 or level 50+). Locked creatures are skipped."
         }
-      }
+      },
+      "depotMultiselector": {
+        "label": "Depot multiselector",
+        "tooltip": "Custom selection for any creature, including locked. Transfer multiple to or from the depot."
+      },
+      "sendCreaturesToDepot": "Send {count} creatures to depot",
+      "sendCreaturesToDepotTooltip": "Send selected creatures that are not in the depot",
+      "removeCreaturesFromDepot": "Remove {count} creatures from depot",
+      "removeCreaturesFromDepotTooltip": "Return selected depot creatures to the bestiary"
     },
     "betterUI": {
       "settingsTitle": "Mod Settings",

@@ -171,7 +171,11 @@
       "cosmetics": {
         "maxed": { "label": "Maxados" },
         "sealed": { "label": "Selados" },
-        "shinies": { "label": "Shinies" }
+        "shinies": { "label": "Shinies" },
+        "depot": {
+          "label": "Depósito",
+          "tooltip": "Mostra criaturas armazenadas no depósito"
+        }
       },
       "presets": {
         "shiny": {
@@ -186,7 +190,15 @@
           "label": "Já A/S",
           "tooltip": "Seleciona cópias desbloqueadas de espécies das quais você já possui um keeper shiny despertado (tier 6 ou nível 50+). Criaturas bloqueadas são ignoradas."
         }
-      }
+      },
+      "depotMultiselector": {
+        "label": "Multisseletor de depósito",
+        "tooltip": "Seleção personalizada para qualquer criatura, incluindo bloqueadas. Transfira várias para ou do depósito."
+      },
+      "sendCreaturesToDepot": "Enviar {count} criaturas para o depósito",
+      "sendCreaturesToDepotTooltip": "Enviar criaturas selecionadas que não estão no depósito",
+      "removeCreaturesFromDepot": "Remover {count} criaturas do depósito",
+      "removeCreaturesFromDepotTooltip": "Devolver criaturas selecionadas do depósito para o bestiário"
     },
     "betterUI": {
       "settingsTitle": "Configurações do Mod",
