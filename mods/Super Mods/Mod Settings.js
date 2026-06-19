@@ -3646,6 +3646,116 @@ function getRunsForSeason(runs, targetSeason) {
   return runs.filter(run => getRunSeasonValue(run) === targetSeason);
 }
 
+let uploadValidationLeaderboardCache = null;
+let uploadValidationLeaderboardCacheTime = 0;
+const UPLOAD_VALIDATION_LEADERBOARD_TTL = 5 * 60 * 1000;
+
+function getYourRoomsForUploadValidation() {
+  if (window.currentSpeedrunRankData?.yourRooms) {
+    return window.currentSpeedrunRankData.yourRooms;
+  }
+  return globalThis.state?.player?.getSnapshot?.()?.context?.rooms || {};
+}
+
+async function fetchUploadValidationLeaderboardData() {
+  const now = Date.now();
+  if (uploadValidationLeaderboardCache && now - uploadValidationLeaderboardCacheTime < UPLOAD_VALIDATION_LEADERBOARD_TTL) {
+    return uploadValidationLeaderboardCache;
+  }
+
+  if (window.currentSpeedrunRankData?.best) {
+    uploadValidationLeaderboardCache = {
+      best: window.currentSpeedrunRankData.best,
+      yourRooms: window.currentSpeedrunRankData.yourRooms || getYourRoomsForUploadValidation()
+    };
+    uploadValidationLeaderboardCacheTime = now;
+    return uploadValidationLeaderboardCache;
+  }
+
+  try {
+    const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ['undefined'] } } }));
+    const response = await fetch(`/api/trpc/game.getTickHighscores?batch=1&input=${inp}`, {
+      headers: { Accept: '*/*', 'Content-Type': 'application/json', 'X-Game-Version': '1' }
+    });
+    if (!response.ok) {
+      console.warn('[Mod Settings] Could not fetch tick highscores for run validation');
+      return { best: {}, yourRooms: getYourRoomsForUploadValidation() };
+    }
+    const json = await response.json();
+    const best = json[0]?.result?.data?.json || {};
+    uploadValidationLeaderboardCache = { best, yourRooms: getYourRoomsForUploadValidation() };
+    uploadValidationLeaderboardCacheTime = now;
+    return uploadValidationLeaderboardCache;
+  } catch (error) {
+    console.warn('[Mod Settings] Error fetching tick highscores for run validation:', error);
+    return { best: {}, yourRooms: getYourRoomsForUploadValidation() };
+  }
+}
+
+function runSetupHasLevel1Creature(run) {
+  return Boolean(run?.setup?.pieces?.some((piece) => piece?.level === 1));
+}
+
+function resolveLeaderboardRoomKey(mapKey, mapName, mapData) {
+  const runs = [
+    ...(mapData?.speedrun || []),
+    ...(mapData?.rank || []),
+    ...(mapData?.floor || [])
+  ];
+  const mapId = runs.find((run) => run?.mapId)?.mapId;
+  if (mapId) return mapId;
+
+  const roomNames = globalThis.state?.utils?.ROOM_NAME;
+  if (roomNames) {
+    const target = (mapName || mapKey.replace(/^map_/, '').replace(/_/g, ' ')).toLowerCase();
+    for (const [roomId, name] of Object.entries(roomNames)) {
+      if (String(name).toLowerCase() === target) return roomId;
+    }
+  }
+  return mapKey;
+}
+
+function buildMapRunValidationContext(mapKey, mapName, mapData, leaderboardData, season) {
+  const roomKey = resolveLeaderboardRoomKey(mapKey, mapName, mapData);
+  const yourRooms = leaderboardData?.yourRooms || {};
+  const best = leaderboardData?.best || {};
+  return {
+    season,
+    yourTicks: yourRooms?.[roomKey]?.ticks || 0,
+    yourBestRank: yourRooms?.[roomKey]?.rank || 0,
+    wrTicks: season >= 2 ? (best?.[roomKey]?.ticks || 0) : 0
+  };
+}
+
+function getRunMightBeInvalidReasons(run, { season, category, yourTicks, wrTicks, yourBestRank }) {
+  if (season < 2) return [];
+
+  const reasons = [];
+  if (category === 'speedrun' || category === 'rank') {
+    if (yourTicks > 0 && run.time < yourTicks) reasons.push('faster than your best time');
+    if (wrTicks > 0 && run.time < wrTicks) reasons.push('faster than world record');
+  }
+  if (category === 'rank' && yourBestRank > 0 && run.points > yourBestRank) {
+    reasons.push('worse rank than your best');
+  }
+  if (runSetupHasLevel1Creature(run)) reasons.push('has level 1 creatures');
+  return reasons;
+}
+
+function isRunMightBeInvalid(run, context, category) {
+  return getRunMightBeInvalidReasons(run, { ...context, category }).length > 0;
+}
+
+function findFirstValidRunForUpload(runs, context, category) {
+  if (!Array.isArray(runs)) return null;
+  for (const run of runs) {
+    if (!isRunMightBeInvalid(run, context, category)) {
+      return run;
+    }
+  }
+  return null;
+}
+
 // Helper function to update Firebase status display
 function updateFirebaseStatus(statusDiv, message, color = '#7f8fa4') {
   if (statusDiv) {
@@ -4178,6 +4288,9 @@ async function uploadBestRuns(options = {}) {
     // Get all runs from RunTracker
     const allRuns = window.RunTrackerAPI.getAllRuns();
     const currentSeason = detectCurrentSeasonFromRuns(allRuns);
+    const leaderboardData = currentSeason >= 2
+      ? await fetchUploadValidationLeaderboardData()
+      : { best: {}, yourRooms: getYourRoomsForUploadValidation() };
     
     // Best speedrun + rank per map; all floor setups per map for current season (multiple clears to floor 15)
     // Sort by region and map order before storing. Floor runs: dedupe by replay hash within this upload only
@@ -4345,30 +4458,37 @@ async function uploadBestRuns(options = {}) {
     }
     
     // Extract best speedrun/rank per map; all floor setups for current season (now in sorted order)
-    for (const { mapKey, mapData, regionName: contextRegionName, regionId } of runsWithRegion) {
+    for (const { mapKey, mapData, regionName: contextRegionName, regionId, mapName } of runsWithRegion) {
       if (!isFirebaseUploadRegionEnabled(regionId)) {
         continue;
       }
+      const validationContext = buildMapRunValidationContext(
+        mapKey,
+        mapName,
+        mapData,
+        leaderboardData,
+        currentSeason
+      );
       const cleanMapData = {
         speedrun: [],
         rank: [],
         floor: []
       };
       
-      // Clean speedrun runs - simplified: generate replayLink and store only essentials
+      // Clean speedrun runs - skip "might be invalid" entries, use next valid run
       const currentSeasonSpeedruns = getRunsForSeason(mapData.speedrun, currentSeason);
-      if (currentSeasonSpeedruns.length > 0) {
-        const bestSpeedrun = currentSeasonSpeedruns[0];
+      const bestSpeedrun = findFirstValidRunForUpload(currentSeasonSpeedruns, validationContext, 'speedrun');
+      if (bestSpeedrun) {
         const cleanSpeedrun = cleanRunForUpload(bestSpeedrun, contextRegionName, {
           time: bestSpeedrun.time
         });
         cleanMapData.speedrun = [cleanSpeedrun];
       }
       
-      // Clean rank runs - simplified: generate replayLink and store only essentials
+      // Clean rank runs - skip "might be invalid" entries, use next valid run
       const currentSeasonRankRuns = getRunsForSeason(mapData.rank, currentSeason);
-      if (currentSeasonRankRuns.length > 0) {
-        const bestRank = currentSeasonRankRuns[0];
+      const bestRank = findFirstValidRunForUpload(currentSeasonRankRuns, validationContext, 'rank');
+      if (bestRank) {
         const cleanRank = cleanRunForUpload(bestRank, contextRegionName, {
           points: bestRank.points,
           time: bestRank.time
@@ -4384,6 +4504,9 @@ async function uploadBestRuns(options = {}) {
           (run) => run.floor !== undefined && run.floor !== null && run.floor > 0
         );
         for (const floorRun of floorCandidates) {
+          if (isRunMightBeInvalid(floorRun, validationContext, 'floor')) {
+            continue;
+          }
           const cleanFloor = cleanRunForUpload(floorRun, contextRegionName, {
             floor: floorRun.floor,
             floorTicks: floorRun.floorTicks
@@ -4544,6 +4667,9 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
 
       const allRuns = window.RunTrackerAPI.getAllRuns();
       const currentSeason = detectCurrentSeasonFromRuns(allRuns);
+      const leaderboardData = currentSeason >= 2
+        ? await fetchUploadValidationLeaderboardData()
+        : { best: {}, yourRooms: getYourRoomsForUploadValidation() };
       
       // Best per map for speedrun/rank; all floor setups per map for current season
       const bestRuns = {
@@ -4623,32 +4749,34 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         
         // Get the correct region name for this map
         const contextRegionName = mapKeyToRegionName[mapKey] || null;
+        const mapName = mapKey.replace('map_', '').replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+        const validationContext = buildMapRunValidationContext(
+          mapKey,
+          mapName,
+          mapData,
+          leaderboardData,
+          currentSeason
+        );
         
-        // Get best speedrun (first in sorted array) - clean it like upload does
+        // Best valid speedrun — skip "might be invalid" entries
         const currentSeasonSpeedruns = getRunsForSeason(mapData.speedrun, currentSeason);
-        if (currentSeasonSpeedruns.length > 0) {
-          const bestSpeedrun = currentSeasonSpeedruns[0];
-          // Ensure required fields are present
-          if (bestSpeedrun.time !== undefined && bestSpeedrun.time !== null) {
-            const cleanSpeedrun = cleanRunForUpload(bestSpeedrun, contextRegionName, {
-              time: bestSpeedrun.time
-            });
-            cleanMapData.speedrun = [cleanSpeedrun];
-          }
+        const bestSpeedrun = findFirstValidRunForUpload(currentSeasonSpeedruns, validationContext, 'speedrun');
+        if (bestSpeedrun && bestSpeedrun.time !== undefined && bestSpeedrun.time !== null) {
+          const cleanSpeedrun = cleanRunForUpload(bestSpeedrun, contextRegionName, {
+            time: bestSpeedrun.time
+          });
+          cleanMapData.speedrun = [cleanSpeedrun];
         }
         
-        // Get best rank (first in sorted array) - clean it like upload does
+        // Best valid rank — skip "might be invalid" entries
         const currentSeasonRankRuns = getRunsForSeason(mapData.rank, currentSeason);
-        if (currentSeasonRankRuns.length > 0) {
-          const bestRank = currentSeasonRankRuns[0];
-          // Ensure required fields are present
-          if (bestRank.points !== undefined && bestRank.points !== null) {
-            const cleanRank = cleanRunForUpload(bestRank, contextRegionName, {
-              points: bestRank.points,
-              time: bestRank.time
-            });
-            cleanMapData.rank = [cleanRank];
-          }
+        const bestRank = findFirstValidRunForUpload(currentSeasonRankRuns, validationContext, 'rank');
+        if (bestRank && bestRank.points !== undefined && bestRank.points !== null) {
+          const cleanRank = cleanRunForUpload(bestRank, contextRegionName, {
+            points: bestRank.points,
+            time: bestRank.time
+          });
+          cleanMapData.rank = [cleanRank];
         }
         
         // All floor setups for current season — same as upload
@@ -4656,6 +4784,7 @@ async function downloadRunsAsTxt(playerName, password, source = 'local') {
         if (currentSeasonFloorRuns.length > 0) {
           cleanMapData.floor = currentSeasonFloorRuns
             .filter((run) => run.floor !== undefined && run.floor !== null && run.floor > 0)
+            .filter((run) => !isRunMightBeInvalid(run, validationContext, 'floor'))
             .map((floorRun) =>
               cleanRunForUpload(floorRun, contextRegionName, {
                 floor: floorRun.floor,

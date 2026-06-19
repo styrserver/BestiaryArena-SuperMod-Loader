@@ -15,7 +15,7 @@
       
       // Performance constants
       const CONSTANTS = {
-        DEBOUNCE_DELAY: 50, // Reduced from 100ms for faster response
+        DEBOUNCE_DELAY: 50,
         RETRY_MAX_ATTEMPTS: 5,
         RETRY_BASE_DELAY: 100,
         RETRY_DELAY: 500,
@@ -48,53 +48,15 @@
         STONE_OF_INSIGHT_SPRITE: '.sprite.item'
       };
       
-      // DOM cache for frequently accessed elements
-      const domCache = new Map();
-      const CACHE_TTL = 15000; // 15 seconds cache time (reduced from 30s for better responsiveness)
+      // Track processed elements to prevent re-processing
+      const processedElements = new WeakSet();
       
-      // DOM cache management
-      function getCachedElement(selector, context = document) {
-        const cacheKey = `${selector}-${context.uid || 'document'}`;
-        const cached = domCache.get(cacheKey);
-        
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-          return cached.element;
-        }
-        
-        const element = context.querySelector(selector);
-        if (element) {
-          domCache.set(cacheKey, { element, timestamp: Date.now() });
-        }
-        return element;
+      // Per-slot item key memo (WeakMap — no leak when nodes are removed)
+      let itemKeyCache = new WeakMap();
+      
+      function clearItemKeyCache() {
+        itemKeyCache = new WeakMap();
       }
-      
-      function getCachedElements(selector, context = document) {
-        const cacheKey = `${selector}-all-${context.uid || 'document'}`;
-        const cached = domCache.get(cacheKey);
-        
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-          return cached.elements;
-        }
-        
-        const elements = Array.from(context.querySelectorAll(selector));
-        domCache.set(cacheKey, { elements, timestamp: Date.now() });
-        return elements;
-      }
-      
-      function clearDomCache() {
-        domCache.clear();
-      }
-      
-      function invalidateCacheForElement(element) {
-        // Remove any cache entries that reference this element
-        for (const [key, value] of domCache.entries()) {
-          if (value.element === element || (value.elements && value.elements.includes(element))) {
-            domCache.delete(key);
-          }
-        }
-      }
-      
-      // Event listener management
       const eventListeners = new Map();
       let confirmationOutsideHandler = null;
       let observer = null;
@@ -117,12 +79,6 @@
       let yasirDailyPoSetupRetryTimer = null;
       let yasirPoHeadlessFulfillTimer = null;
       let yasirPoOrderPlacementGraceUntil = 0;
-      
-      // Track processed elements to prevent re-processing
-      const processedElements = new WeakSet();
-      
-      // Cache item key detection results
-      let itemKeyCache = new WeakMap();
       
       // Centralized event listener management
       function addManagedEventListener(element, event, handler, options = {}) {
@@ -660,6 +616,56 @@
         }
       }
       
+      /** Match Yasir shop section headers (game EN/PT copy + Better Yasir rewrites). */
+      const yasirSectionHeader = {
+        normalize(text) {
+          return (text || '').trim();
+        },
+        isBuy(text) {
+          const header = yasirSectionHeader.normalize(text);
+          if (!header) return false;
+          if (header === t('mods.betterYasir.buy')) return true;
+          if (/^current stock$/i.test(header)) return true;
+          if (header === t('mods.betterYasir.currentStock')) return true;
+          return /^produtos dispon/i.test(header);
+        },
+        isSell(text) {
+          const header = yasirSectionHeader.normalize(text);
+          if (!header) return false;
+          if (header === t('mods.betterYasir.sell')) return true;
+          if (/^exchange your items for dust$/i.test(header)) return true;
+          if (header === t('mods.betterYasir.exchangeItems')) return true;
+          if (/^trocar seus itens por/i.test(header)) return true;
+          return /exchange/i.test(header) && /dust/i.test(header);
+        },
+        sectionFromRow(element) {
+          const tableRow = element?.closest?.('tr');
+          const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
+          return yasirSectionHeader.normalize(tableHeader?.textContent);
+        },
+        isSellRow(element) {
+          return yasirSectionHeader.isSell(yasirSectionHeader.sectionFromRow(element));
+        },
+        shopSections(widget) {
+          let hasBuy = false;
+          let hasSell = false;
+          widget?.querySelectorAll('table thead tr th:first-child')?.forEach((th) => {
+            const header = th.textContent || '';
+            if (yasirSectionHeader.isBuy(header)) hasBuy = true;
+            if (yasirSectionHeader.isSell(header)) hasSell = true;
+          });
+          return { hasBuy, hasSell };
+        },
+        isYasirShopWidget(widget) {
+          if (!widget?.classList?.contains('widget-bottom') || !widget.querySelector('table')) {
+            return false;
+          }
+          if (!(widget.textContent || '').includes('Yasir')) return false;
+          const { hasBuy, hasSell } = yasirSectionHeader.shopSections(widget);
+          return hasBuy && hasSell;
+        }
+      };
+
       // Common DOM query utilities
       const domUtils = {
         // Find Yasir modal with multiple fallback strategies
@@ -671,8 +677,7 @@
           // Method 2: Look for any widget-bottom containing Yasir content
           const widgetBottoms = document.querySelectorAll('.widget-bottom');
           for (const widget of widgetBottoms) {
-            const text = widget.textContent || '';
-            if (text.includes('Yasir') && (text.includes('Buy') || text.includes('Sell') || text.includes('Exchange'))) {
+            if (yasirSectionHeader.isYasirShopWidget(widget)) {
               return widget;
             }
           }
@@ -702,18 +707,13 @@
         getTableContext(container) {
           const tableRow = container.closest('tr');
           const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-          const headerText = tableHeader?.textContent || '';
-          const exchangeText = t('mods.betterYasir.exchangeItems');
-          const sellText = t('mods.betterYasir.sell');
-          const isExchangeSection = headerText.includes('Exchange') || 
-                                   headerText.includes(sellText) ||
-                                   headerText.includes(exchangeText);
+          const isExchangeSection = yasirSectionHeader.isSell(tableHeader?.textContent);
           
           return { tableRow, tableHeader, isExchangeSection };
         }
       };
     
-      // Game state: always read fresh snapshots (no TTL cache — clearCaches was invalidating it constantly).
+      // Game state: always read fresh snapshots (no TTL cache).
       function getGameState() {
         if (!document.querySelector('.widget-bottom') &&
             !document.querySelector('h2 p')?.textContent?.includes('Yasir')) {
@@ -814,6 +814,23 @@
         const n = typeof rawQuantity === 'number' ? rawQuantity : parseInt(rawQuantity, 10) || 0;
         quantitySpan.textContent = formatQuantityDisplay(n);
         quantitySpan.dataset.rawQuantity = String(n);
+      }
+
+      const SELL_QUANTITY_SPAN_STYLE =
+        'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
+
+      function applySellQuantitySpanStyle(quantitySpan) {
+        if (!quantitySpan) return;
+        quantitySpan.className = 'relative font-outlined-fill text-white';
+        quantitySpan.style.cssText = SELL_QUANTITY_SPAN_STYLE;
+      }
+
+      function updateSellSlotQuantity(slot, quantity) {
+        if (!yasirSectionHeader.isSellRow(slot)) return;
+        const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
+        if (!quantitySpan) return;
+        setQuantitySpanDisplay(quantitySpan, quantity);
+        applySellQuantitySpanStyle(quantitySpan);
       }
       
       // Get minimum quantity from DOM for an item
@@ -1612,7 +1629,7 @@
     
       function showConfirmationPrompt(quantity, itemKey, actionButton, actionType) {
         try {
-          const tooltip = ensureYasirTooltipStructure() || getCachedElement('.tooltip-prose');
+          const tooltip = ensureYasirTooltipStructure() || document.querySelector('.tooltip-prose');
           if (!tooltip) return;
           const paragraphs = tooltip.querySelectorAll('p');
           if (paragraphs.length < 2) return;
@@ -1621,7 +1638,7 @@
             tooltip.dataset.originalText = msgElem.textContent;
           }
           // remove any previous confirmation
-          getCachedElements('.better-yasir-action-button.confirm').forEach(btn=>{
+          document.querySelectorAll('.better-yasir-action-button.confirm').forEach(btn=>{
             btn.classList.remove('confirm');
             delete btn.dataset.confirm;
           });
@@ -1695,7 +1712,7 @@
       
       function removeConfirmationPrompt() {
         try {
-          const tooltip = ensureYasirTooltipStructure() || getCachedElement('.tooltip-prose');
+          const tooltip = ensureYasirTooltipStructure() || document.querySelector('.tooltip-prose');
           if (!tooltip || !tooltip.dataset.originalText) return;
           const paragraphs = tooltip.querySelectorAll('p');
           if (paragraphs.length < 2) return;
@@ -1705,7 +1722,7 @@
           delete tooltip.dataset.originalText;
           // remove confirm class from any button
           // Remove pending confirmation from all action buttons
-          getCachedElements('.better-yasir-action-button').forEach(b=>{
+          document.querySelectorAll('.better-yasir-action-button').forEach(b=>{
             b.classList.remove('confirm');
             delete b.dataset.confirm;
           });
@@ -1810,8 +1827,7 @@
         quantityIndicator.className = 'revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5';
         
         const quantitySpan = document.createElement('span');
-        quantitySpan.className = 'relative font-outlined-fill text-white';
-        quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
+        applySellQuantitySpanStyle(quantitySpan);
         quantitySpan.setAttribute('translate', 'no');
         setQuantitySpanDisplay(quantitySpan, quantity);
         
@@ -1961,7 +1977,7 @@
           
           // Force a fresh read of the game state (no caching)
           // Clear the cache first to ensure we get fresh data
-          clearCaches();
+          clearItemKeyCache();
           const gameState = getGameState();
           const inventory = gameState?.playerState?.inventory || {};
           const playerDust = gameState?.playerState?.dust || 0;
@@ -2001,27 +2017,10 @@
               
               if (actionButton) {
                 // More reliable way to determine action type: check the table section first
-                const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                const headerText = tableHeader?.textContent || '';
-                const exchangeText = t('mods.betterYasir.exchangeItems');
-                const sellText = t('mods.betterYasir.sell');
-                const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
-                
-                if (isExchangeSection) {
-                  // If we're in the exchange/sell section, it's definitely a sell action
-                  isBuyAction = false;
-                } else {
-                  // If we're in the buy section, it's definitely a buy action
-                  isBuyAction = true;
-                }
+                isBuyAction = !yasirSectionHeader.isSellRow(tableRow);
               } else {
                 // Fallback: determine action type by looking at the table header
-                const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                const headerText = tableHeader?.textContent || '';
-                const exchangeText = t('mods.betterYasir.exchangeItems');
-                const sellText = t('mods.betterYasir.sell');
-                const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
-                isBuyAction = !isExchangeSection;
+                isBuyAction = !yasirSectionHeader.isSellRow(tableRow);
               }
             }
             
@@ -2082,12 +2081,7 @@
             }
             
             // Check if this slot is in the Buy section or Sell section
-            const tableRow = slot.closest('tr');
-            const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-            const headerText = tableHeader?.textContent || '';
-            const exchangeText = t('mods.betterYasir.exchangeItems');
-            const sellText = t('mods.betterYasir.sell');
-            const isSellSection = headerText.includes(sellText) || headerText.includes('Exchange') || headerText.includes(exchangeText);
+            const isSellSection = yasirSectionHeader.isSellRow(slot);
             
             // Only update quantities for items in the Sell section
             // For Buy section items (like dice manipulators), preserve the original quantity display
@@ -2121,87 +2115,11 @@
       // Update specific item quantities with direct selectors (only for Sell section)
       function updateSpecificItemQuantities(modal, inventory) {
         try {
-          // Update Stone of Insight specifically (only in Sell section)
-          if (inventory.insightStone5 !== undefined) {
-            const insightStoneSlots = modal.querySelectorAll('.container-slot[data-item-key="insightStone5"]');
-            
-            insightStoneSlots.forEach((slot, index) => {
-              // Check if this slot is in the Sell section
-              const tableRow = slot.closest('tr');
-              const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-              const headerText = tableHeader?.textContent || '';
-              const exchangeText = t('mods.betterYasir.exchangeItems');
-              const sellText = t('mods.betterYasir.sell');
-              const isSellSection = headerText.includes(sellText) || headerText.includes('Exchange') || headerText.includes(exchangeText);
-              
-              if (isSellSection) {
-                const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
-                if (quantitySpan) {
-                  setQuantitySpanDisplay(quantitySpan, inventory.insightStone5);
-                  // Apply the same styling as dice manipulators for consistent appearance
-                  quantitySpan.className = 'relative font-outlined-fill text-white';
-                  quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
-                }
-              }
+          Object.entries(inventory).forEach(([itemKey, quantity]) => {
+            modal.querySelectorAll(`.container-slot[data-item-key="${itemKey}"]`).forEach((slot) => {
+              updateSellSlotQuantity(slot, quantity);
             });
-          }
-          
-          // Update dice manipulators specifically (only in Sell section)
-          Object.entries(inventory).forEach(([itemKey, quantity]) => {
-            if (itemKey.startsWith('diceManipulator')) {
-              const slots = modal.querySelectorAll(`.container-slot[data-item-key="${itemKey}"]`);
-              if (slots.length > 0) {
-                slots.forEach((slot, index) => {
-                  // Check if this slot is in the Sell section
-                  const tableRow = slot.closest('tr');
-                  const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-                  const headerText = tableHeader?.textContent || '';
-                  const exchangeText = t('mods.betterYasir.exchangeItems');
-                  const sellText = t('mods.betterYasir.sell');
-                  const isSellSection = headerText.includes(sellText) || headerText.includes('Exchange') || headerText.includes(exchangeText);
-                  
-                  if (isSellSection) {
-                    const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
-                    if (quantitySpan) {
-                      setQuantitySpanDisplay(quantitySpan, quantity);
-                      // Use the same styling as Stone of Insight for consistent appearance
-                      quantitySpan.className = 'relative font-outlined-fill text-white';
-                      quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
-                    }
-                  }
-                });
-              }
-            }
           });
-          
-          // Update other items as needed (only in Sell section)
-          Object.entries(inventory).forEach(([itemKey, quantity]) => {
-            if (itemKey === 'insightStone5' || itemKey.startsWith('diceManipulator')) return; // Already handled above
-            
-            const slots = modal.querySelectorAll(`.container-slot[data-item-key="${itemKey}"]`);
-            if (slots.length > 0) {
-              slots.forEach((slot, index) => {
-                // Check if this slot is in the Sell section
-                const tableRow = slot.closest('tr');
-                const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-                const headerText = tableHeader?.textContent || '';
-                const exchangeText = t('mods.betterYasir.exchangeItems');
-                const sellText = t('mods.betterYasir.sell');
-                const isSellSection = headerText.includes(sellText) || headerText.includes('Exchange') || headerText.includes(exchangeText);
-                
-                if (isSellSection) {
-                  const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
-                  if (quantitySpan) {
-                    setQuantitySpanDisplay(quantitySpan, quantity);
-                    // Use the same styling as Stone of Insight for consistent appearance
-                    quantitySpan.className = 'relative font-outlined-fill text-white';
-                    quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
-                  }
-                }
-              });
-            }
-          });
-          
         } catch (error) {
           handleError(error, 'Error updating specific item quantities');
         }
@@ -2548,12 +2466,12 @@
             }
             
             // Clear caches immediately after successful action to get fresh state
-            clearCaches();
+            clearItemKeyCache();
             
             // Single consolidated UI update with fresh state
             setTimeout(() => {
               // Clear caches and get fresh state
-              clearCaches();
+              clearItemKeyCache();
               
               // Get fresh state using optimized functions
               const currentDust = getPlayerDust();
@@ -2588,29 +2506,17 @@
                 // Improved buy/sell detection
                 let isBuyAction = false;
                 if (actionButton) {
-                  // More reliable way to determine action type: check the table section first
                   const tableRow = container.closest('tr');
                   if (tableRow) {
-                    const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                    const headerText = tableHeader?.textContent || '';
-                    const exchangeText = t('mods.betterYasir.exchangeItems');
-                    const sellText = t('mods.betterYasir.sell');
-                    const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
-                    isBuyAction = !isExchangeSection;
+                    isBuyAction = !yasirSectionHeader.isSellRow(tableRow);
                   } else {
                     // Fallback: determine by item type (Exaltation Chest and Recycle Rune are always buy)
                     isBuyAction = slotItemKey === 'exaltationChest' || slotItemKey === 'recycleRune';
                   }
                 } else {
-                  // Fallback: determine by table section
                   const tableRow = container.closest('tr');
                   if (tableRow) {
-                    const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                    const headerText = tableHeader?.textContent || '';
-                    const exchangeText = t('mods.betterYasir.exchangeItems');
-                    const sellText = t('mods.betterYasir.sell');
-                    const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
-                    isBuyAction = !isExchangeSection;
+                    isBuyAction = !yasirSectionHeader.isSellRow(tableRow);
                   } else {
                     // Second fallback: determine by item type (Exaltation Chest and Recycle Rune are always buy)
                     isBuyAction = slotItemKey === 'exaltationChest' || slotItemKey === 'recycleRune';
@@ -2852,8 +2758,7 @@
                       quantityIndicator.className = 'revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5';
                       
                       const quantitySpan = document.createElement('span');
-                      quantitySpan.className = 'relative font-outlined-fill text-white';
-                      quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
+                      applySellQuantitySpanStyle(quantitySpan);
                       quantitySpan.setAttribute('translate', 'no');
                       
                       // Get quantity from inventory
@@ -3017,8 +2922,7 @@
                 quantityIndicator.className = 'revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5';
                 
                 const quantitySpan = document.createElement('span');
-                quantitySpan.className = 'relative font-outlined-fill text-white';
-                quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
+                applySellQuantitySpanStyle(quantitySpan);
                 quantitySpan.setAttribute('translate', 'no');
                 setQuantitySpanDisplay(quantitySpan, diceManipulatorQuantity);
                 
@@ -3235,6 +3139,10 @@
         if (quantityInput._betterYasirInputHandler) {
           quantityInput.removeEventListener('input', quantityInput._betterYasirInputHandler);
         }
+        if (quantityInput._betterYasirValidationTimer) {
+          clearTimeout(quantityInput._betterYasirValidationTimer);
+          quantityInput._betterYasirValidationTimer = null;
+        }
         if (actionButton._betterYasirButtonHandler) {
           actionButton.removeEventListener('click', actionButton._betterYasirButtonHandler);
         }
@@ -3251,6 +3159,7 @@
           if (validationTimeout) {
             clearTimeout(validationTimeout);
           }
+          quantityInput._betterYasirValidationTimer = null;
           
           // Basic validation for all input types
           if (value === '') {
@@ -3287,6 +3196,7 @@
           // For buy actions, do a delayed validation to update max if needed
           if (actionType === 'buy') {
             validationTimeout = setTimeout(() => {
+              quantityInput._betterYasirValidationTimer = null;
               // Get fresh resource data
               const currentDust = getPlayerDust();
               const currentGold = getPlayerGold();
@@ -3317,6 +3227,7 @@
                 }
               }
             }, 100); // Longer delay to avoid interfering with typing
+            quantityInput._betterYasirValidationTimer = validationTimeout;
           }
         };
         
@@ -3504,6 +3415,13 @@
             }
           });
           if (yasirActiveSettingsPanel) {
+            if (typeof yasirActiveSettingsPanel._betterYasirClosePoItemList === 'function') {
+              try {
+                yasirActiveSettingsPanel._betterYasirClosePoItemList();
+              } catch (_) {
+                /* ignore */
+              }
+            }
             yasirActiveSettingsPanel.remove();
             yasirActiveSettingsPanel = null;
           }
@@ -3931,7 +3849,7 @@
         if (!rec?.itemKey || !globalThis.state?.player?.getSnapshot) {
           return { ok: false, reason: 'no_state' };
         }
-        clearCaches();
+        clearItemKeyCache();
         const dailySnap = globalThis.state.daily?.getSnapshot?.()?.context;
         if (!dailySnap?.yasir?.location) {
           return { ok: false, reason: 'no_yasir' };
@@ -4000,7 +3918,7 @@
         if (!rec?.itemKey || !globalThis.state?.player?.getSnapshot) {
           return { ok: false, reason: 'no_state' };
         }
-        clearCaches();
+        clearItemKeyCache();
         const dailySnap = globalThis.state.daily?.getSnapshot?.()?.context;
         if (!dailySnap?.yasir?.location) {
           return { ok: false, reason: 'no_yasir' };
@@ -4124,7 +4042,7 @@
             : (rec) => validateYasirPurchaseOrderHeadless(rec);
         const mode = modalOrNull != null ? 'modal' : 'headless';
         
-        clearCaches();
+        clearItemKeyCache();
         const yasirSnap = getYasirShopData();
         const initialQueue = loadYasirPoOrdersFromStorage();
         betterYasirPoConsoleLog(`fulfillment start (${mode}) — queued purchase orders and Yasir context`, {
@@ -4144,7 +4062,7 @@
         let safety = 0;
         while (safety < 32) {
           safety++;
-          clearCaches();
+          clearItemKeyCache();
           const orders = loadYasirPoOrdersFromStorage();
           if (!orders.length) {
             break;
@@ -4229,7 +4147,7 @@
           }
         }
         
-        clearCaches();
+        clearItemKeyCache();
         const remaining = loadYasirPoOrdersFromStorage();
         betterYasirPoConsoleLog('fulfillment finished', {
           mode,
@@ -5037,7 +4955,7 @@
             yasirPoFillTotalWithCurrencyIcon(totalPreviewVal, null, ph);
             return;
           }
-          clearCaches();
+          clearItemKeyCache();
           const rule = YASIR_PO_PRICING[key];
           const priceArg = rule?.currency === 'dust' ? undefined : priceComposerInput.value;
           const parts = computeYasirPoOrderTotalParts(key, qtyComposerInput.value, priceArg);
@@ -5095,7 +5013,7 @@
           if (!itemKey) {
             return;
           }
-          clearCaches();
+          clearItemKeyCache();
           const qty = parseInt(card.dataset.poQty, 10);
           const lg = card.dataset.poListingGold;
           const rule = YASIR_PO_PRICING[itemKey];
@@ -5346,7 +5264,7 @@
             clampComposerPriceField({ type: 'blur' });
             goldRaw = priceComposerInput.value;
           }
-          clearCaches();
+          clearItemKeyCache();
           if (rule?.currency === 'gold') {
             const needGold = computeYasirPoOrderGoldTotalNumber(key, String(qty), goldRaw);
             if (needGold != null && getPlayerGold() < needGold) {
@@ -5480,6 +5398,7 @@
         panel.appendChild(mainContainer);
         
         panel._betterYasirRefreshPoAffordability = refreshPoOrdersAffordability;
+        panel._betterYasirClosePoItemList = pickerApi.closePoItemList;
         refreshPoOrdersAffordability();
         
         return panel;
@@ -5622,23 +5541,8 @@
         let modal = null;
         const buyLabel = t('mods.betterYasir.buy');
         const sellLabel = t('mods.betterYasir.sell');
-        const currentStockText = t('mods.betterYasir.currentStock');
-        const exchangeText = t('mods.betterYasir.exchangeItems');
         
-        const matchesYasirWidgetBottom = (w) => {
-          if (!w?.classList?.contains('widget-bottom') || !w.querySelector('table')) {
-            return false;
-          }
-          const text = w.textContent || '';
-          const hasYasir = text.includes('Yasir');
-          const hasBuySection = text.includes('Current stock') ||
-            text.includes(currentStockText) ||
-            text.includes(buyLabel);
-          const hasSellSection = text.includes('Exchange your items for dust') ||
-            text.includes(exchangeText) ||
-            text.includes(sellLabel);
-          return hasYasir && hasBuySection && hasSellSection;
-        };
+        const matchesYasirWidgetBottom = (w) => yasirSectionHeader.isYasirShopWidget(w);
         
         if (candidateWidget && matchesYasirWidgetBottom(candidateWidget)) {
           modal = candidateWidget;
@@ -5659,10 +5563,7 @@
               const dialog = titleH2.closest('[role="dialog"]');
               widgetBottom = dialog?.querySelector('.widget-bottom') || null;
             }
-            const widgetText = widgetBottom?.textContent || '';
-            const hasBuyMarkers = widgetText.includes('Current stock') ||
-              widgetText.includes(currentStockText) ||
-              widgetText.includes(buyLabel);
+            const { hasBuy: hasBuyMarkers } = yasirSectionHeader.shopSections(widgetBottom);
             if (widgetBottom && hasBuyMarkers) {
               modal = widgetBottom;
               console.log('[Better Yasir]', 'enhance: modal via method1 (title h2 + widget-bottom sibling)');
@@ -5738,17 +5639,12 @@
           sectionHeaders.forEach((header, index) => {
             const text = header.textContent?.trim();
             
-            const currentStockText = t('mods.betterYasir.currentStock');
-            const exchangeText = t('mods.betterYasir.exchangeItems');
-            
-            // Check for buy section
-            if (text === 'Current stock' || text === currentStockText) {
+            if (yasirSectionHeader.isBuy(text)) {
               header.textContent = t('mods.betterYasir.buy');
               header.style.textAlign = 'center';
               header.style.color = '#32cd32'; // Green color
             } 
-            // Check for sell section
-            else if (text === 'Exchange your items for dust' || text === exchangeText) {
+            else if (yasirSectionHeader.isSell(text)) {
               header.textContent = t('mods.betterYasir.sell');
               header.style.textAlign = 'center';
               header.style.color = '#ff4d4d'; // Red color
@@ -5901,16 +5797,13 @@
         } catch (e) { /* silent */ }
       }
     
-      // Clear DOM / item-key caches (game state is read fresh each call; no snapshot TTL cache).
-      function clearCaches() {
-        clearDomCache();
-        itemKeyCache = new WeakMap();
-      }
-      
-      // Clean up event listeners for better memory management
       function cleanupEventListeners() {
         const inputs = document.querySelectorAll('.better-yasir-quantity-input');
         inputs.forEach(input => {
+          if (input._betterYasirValidationTimer) {
+            clearTimeout(input._betterYasirValidationTimer);
+            delete input._betterYasirValidationTimer;
+          }
           if (input._betterYasirInputHandler) {
             input.removeEventListener('input', input._betterYasirInputHandler);
             delete input._betterYasirInputHandler;
@@ -6030,7 +5923,7 @@
           // Force UI refresh after state update with a longer delay to ensure state propagation
           setTimeout(() => {
             // Clear caches first to force fresh data
-            clearCaches();
+            clearItemKeyCache();
             refreshUIAfterAction();
           }, 200);
           
@@ -6110,7 +6003,7 @@
             // break enhanceYasirModal() detection on the same tick.
             const existingModal = document.querySelector(`${SELECTORS.YASIR_MODAL}[data-better-yasir-enhanced]`);
             if (!existingModal) {
-              clearCaches();
+              clearItemKeyCache();
               const widgetBottoms = document.querySelectorAll(SELECTORS.YASIR_MODAL);
               for (const widget of widgetBottoms) {
                 if (widget.querySelector('table') && !widget.dataset.betterYasirEnhanced) {
@@ -6216,7 +6109,9 @@
         teardownBetterYasirUi();
         yasirPoOrderPlacementGraceUntil = 0;
         
-        // Cleanup all event listeners
+        cleanupEventListeners();
+        
+        // Cleanup all managed event listeners (settings panel, PO dropdown, etc.)
         cleanupAllEventListeners();
         
         // Cleanup confirmation handler
@@ -6237,6 +6132,7 @@
         
         // Clear pending requests
         pendingRequests.clear();
+        clearItemKeyCache();
         
         // Remove styles
         const styleElement = document.getElementById('better-yasir-styles');

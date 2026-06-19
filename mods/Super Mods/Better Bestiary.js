@@ -95,6 +95,39 @@
     },
   ];
 
+  function isDepotCreatureFeaturesEnabled() {
+    return window.depotManager?.isCreatureDepotEnabled?.() === true;
+  }
+
+  function filtersHasDepotControls(filters) {
+    if (!filters) return false;
+    return !!filters.querySelector(`[${DEPOT_MULTISELECTOR_ATTR}]`)
+      || !!filters.querySelector(`[${SESSION_OVERLAY_ATTR}="showDepot"]`);
+  }
+
+  function filtersHasAllDepotControls(filters) {
+    if (!filters) return false;
+    return !!filters.querySelector(`[${DEPOT_MULTISELECTOR_ATTR}]`)
+      && !!filters.querySelector(`[${SESSION_OVERLAY_ATTR}="showDepot"]`);
+  }
+
+  function ensureDepotFiltersUpToDate(modal = findBestiaryModal()) {
+    const detailsCol = findBestiaryDetailsColumn(modal);
+    if (!detailsCol) return;
+
+    const filters = detailsCol.querySelector(`[${FILTERS_ATTR}="true"]`);
+    if (!filters) return;
+
+    const shouldHaveDepot = isDepotCreatureFeaturesEnabled();
+    if (shouldHaveDepot && !filtersHasAllDepotControls(filters)) {
+      ensureFiltersPanel(detailsCol);
+      return;
+    }
+    if (!shouldHaveDepot && filtersHasDepotControls(filters)) {
+      ensureFiltersPanel(detailsCol);
+    }
+  }
+
   let sessionOverlayState = { showDepot: false };
   let sessionOverlaySessionActive = false;
   let depotMultiselectorActive = false;
@@ -490,6 +523,7 @@
   function ensureModalObservers(modal) {
     ensureLayoutObserver(modal);
     attachGridObserver(modal);
+    ensureDepotFiltersUpToDate(modal);
     if (depotMultiselectorActive) {
       attachDepotMultiselectClickHandler(modal);
       syncDepotCustomSelectionVisuals(modal);
@@ -1097,7 +1131,7 @@
   }
 
   async function activateDepotMultiselector(modal = findBestiaryModal()) {
-    if (!modal || !window.depotManager?.isCreatureDepotEnabled?.()) return;
+    if (!modal || !isDepotCreatureFeaturesEnabled()) return;
 
     depotCustomSelectedIds.clear();
     depotMultiselectorActive = true;
@@ -1263,7 +1297,7 @@
     if (!sendBtn && !removeBtn) return;
 
     const { toDepot, toBestiary } = getSelectedDepotTransferPlan(modal);
-    const enabled = window.depotManager?.isCreatureDepotEnabled?.() === true && depotMultiselectorActive;
+    const enabled = isDepotCreatureFeaturesEnabled() && depotMultiselectorActive;
 
     if (sendBtn) {
       sendBtn.disabled = !enabled || toDepot.length === 0;
@@ -1280,7 +1314,7 @@
 
   async function transferDepotSelection(modal = findBestiaryModal(), mode = 'all') {
     const depotManager = window.depotManager;
-    if (!modal || !depotManager?.transferCreaturesDepot || !depotManager.isCreatureDepotEnabled?.()) return;
+    if (!modal || !depotManager?.transferCreaturesDepot || !isDepotCreatureFeaturesEnabled()) return;
 
     const { toDepot, toBestiary } = getSelectedDepotTransferPlan(modal);
     const entries = mode === 'toDepot'
@@ -1303,7 +1337,7 @@
   function ensureDepotFooterButtons(modal) {
     if (!modal) return;
 
-    if (!depotMultiselectorActive || !window.depotManager?.isCreatureDepotEnabled?.()) {
+    if (!depotMultiselectorActive || !isDepotCreatureFeaturesEnabled()) {
       removeDepotFooterButtons(modal);
       return;
     }
@@ -1368,7 +1402,7 @@
     panel.setAttribute(FILTERS_ATTR, 'true');
     panel.appendChild(createFiltersColumn('mods.betterBestiary.presetsColumnTitle', () => {
       const buttons = PRESET_KEYS.map((presetKey) => makePresetButton(presetKey));
-      if (window.depotManager?.isCreatureDepotEnabled?.()) {
+      if (isDepotCreatureFeaturesEnabled()) {
         buttons.push(makeDepotMultiselectorButton());
       }
       return buttons;
@@ -1376,7 +1410,7 @@
     panel.appendChild(createFiltersColumn('mods.betterBestiary.cosmeticsColumnTitle', () => [
       ...COSMETIC_TOGGLES.map(({ key }) => makeCosmeticToggleButton(key)),
       ...SESSION_OVERLAY_TOGGLES
-        .filter(({ key }) => key !== 'showDepot' || window.depotManager?.isCreatureDepotEnabled?.())
+        .filter(({ key }) => key !== 'showDepot' || isDepotCreatureFeaturesEnabled())
         .map(({ key }) => makeSessionOverlayToggleButton(key)),
     ]));
     return panel;
@@ -1395,13 +1429,13 @@
 
   function ensureFiltersPanel(detailsCol) {
     let filters = detailsCol.querySelector(`[${FILTERS_ATTR}="true"]`);
+    const depotEnabled = isDepotCreatureFeaturesEnabled();
     const needsRebuild = !filters
       || !filters.classList.contains('grid-cols-2')
       || !filters.querySelector(`[${COSMETIC_TOGGLE_ATTR}]`)
-      || !filters.querySelector(`[${SESSION_OVERLAY_ATTR}]`)
       || PRESET_KEYS.some((presetKey) => !filters.querySelector(`[${PRESET_ATTR}="${presetKey}"]`))
-      || (window.depotManager?.isCreatureDepotEnabled?.()
-        && !filters.querySelector(`[${DEPOT_MULTISELECTOR_ATTR}]`));
+      || (depotEnabled && !filtersHasAllDepotControls(filters))
+      || (!depotEnabled && filtersHasDepotControls(filters));
 
     if (needsRebuild) {
       const next = buildFiltersPanel();
@@ -1512,10 +1546,27 @@
       ?.remove();
   }
 
+  function syncDepotAvailability(modal = findBestiaryModal()) {
+    if (isDepotCreatureFeaturesEnabled()) return;
+
+    if (depotMultiselectorActive) {
+      void deactivateDepotMultiselector(modal);
+    } else if (modal) {
+      removeDepotFooterButtons(modal);
+    }
+
+    if (sessionOverlayState.showDepot) {
+      sessionOverlayState.showDepot = false;
+      syncBetterBestiaryShowDepotFlag();
+      if (modal) refreshDepotOverlayLayout(modal);
+    }
+  }
+
   function syncModalLayout(modal) {
     if (!modal || isSyncingLayout) return;
     isSyncingLayout = true;
     try {
+      syncDepotAvailability(modal);
       if (ensurePresetButtons(modal)) {
         refreshCosmeticToggleButtons(modal);
         refreshSessionOverlayToggleButtons(modal);
@@ -1715,6 +1766,7 @@
 
     if (isModalEnhancementReady(modal)) {
       ensureModalObservers(modal);
+      ensureDepotFiltersUpToDate(modal);
       if (!modal.hasAttribute(INITIAL_STYLED_ATTR) && hasModSettingsCreatureStylingEnabled()) {
         scheduleFullCreatureStyling(modal);
       }

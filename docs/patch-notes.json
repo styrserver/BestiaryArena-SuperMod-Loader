@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.2.7",
+      "changes": [
+        {
+          "mod": "Better Yasir",
+          "type": "changed",
+          "text": "Removed ineffective DOM query cache; kept WeakMap item-key memo only. Consolidated sell-quantity span styling and sell-row inventory updates. Mod unload and settings-panel close now detach shop input timers, PO dropdown listeners, and item-key cache."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Firebase run upload and local .txt export skip Cyclopedia \"might be invalid\" runs (faster than world record, faster than your best, worse rank than your best, level 1 creatures) and use the next valid entry instead; Season 2 world records are fetched once per upload."
+        },
+        {
+          "mod": "Better Bestiary",
+          "type": "fixed",
+          "text": "Depot overlay and depot multiselector buttons show again when Depot Manager creature depot is enabled (removed an over-strict mod-registry check; filter panel rebuilds when depot controls are missing or stale). Those buttons stay hidden when Depot Manager is unloaded or creature depot is disabled."
+        },
+        {
+          "mod": "Better Yasir",
+          "type": "fixed",
+          "text": "Portuguese shop: sell section header now rewrites to Vender (game uses \"dust\" not \"poeira\" in the exchange title). Buy/sell table detection uses shared EN/PT header matching instead of scattered exact-string checks."
+        }
+      ]
+    },
+    {
       "version": "4.2.6",
       "changes": [
         {
