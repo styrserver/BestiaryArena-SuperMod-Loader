@@ -98,6 +98,7 @@
   let modSettings = loadSettings();
   let openContextMenu = null;
   let restoreButton = null;
+  let modDisposed = false;
 
   function saveSettings() {
     modSettings = normalizeSettings(modSettings);
@@ -703,11 +704,68 @@
       RANK_TITLE: '#98fb98',
       FLOOR_TITLE: '#ff69b4',
       MAP_HEADER: '#ffd700',
+      LEGACY: '#ff6b6b',
     },
     MEDAL_POSITIONS: {
       1: 'GOLD',
       2: 'SILVER', 
       3: 'BRONZE'
+    }
+  };
+
+  const ASSETS = {
+    ACHIEVEMENT_ICON: 'https://bestiaryarena.com/assets/icons/achievement.png',
+    HIGHSCORE_ICON: 'https://bestiaryarena.com/assets/icons/highscore.png',
+    BACKGROUND: 'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png',
+    FRAME: 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png'
+  };
+
+  const SECTION_WRAPPER_STYLE = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '2px',
+    minWidth: 'auto',
+    flexShrink: '0',
+    whiteSpace: 'nowrap'
+  };
+
+  const ENTRY_SPAN_STYLE = {
+    fontSize: '10px',
+    fontWeight: 'bold',
+    marginRight: '2px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '2px'
+  };
+
+  const SCORE_ICON_STYLE = {
+    width: '11px',
+    height: '11px',
+    verticalAlign: 'middle',
+    display: 'inline-block'
+  };
+
+  const LEADERBOARD_SECTION_CONFIG = {
+    time: {
+      title: 'Ticks',
+      displayName: 'Time',
+      titleColor: UI_CONFIG.COLORS.TICK_TITLE,
+      isRank: false,
+      isFloor: false
+    },
+    rank: {
+      title: 'Rank',
+      displayName: 'Rank',
+      titleColor: UI_CONFIG.COLORS.RANK_TITLE,
+      isRank: true,
+      isFloor: false
+    },
+    floor: {
+      title: 'Floor',
+      displayName: 'Floor',
+      titleColor: UI_CONFIG.COLORS.FLOOR_TITLE,
+      isRank: false,
+      isFloor: true
     }
   };
 
@@ -767,6 +825,10 @@
       this.timeouts.push(timeoutId);
       return timeoutId;
     },
+
+    untrackTimeout(timeoutId) {
+      this.timeouts = this.timeouts.filter((id) => id !== timeoutId);
+    },
     
     // Helper function to clear all tracked timeouts
     clearTimeouts() {
@@ -782,13 +844,20 @@
   
   // Helper function to schedule a timeout and track it for cleanup
   function scheduleTimeout(fn, delay) {
-    return BetterHighscoresState.trackTimeout(setTimeout(fn, delay));
+    const timeoutId = setTimeout(() => {
+      BetterHighscoresState.untrackTimeout(timeoutId);
+      if (modDisposed) {
+        return;
+      }
+      fn();
+    }, delay);
+    return BetterHighscoresState.trackTimeout(timeoutId);
   }
   
   // Helper function to remove all leaderboard containers from DOM
   function removeExistingContainers() {
     const existingContainers = document.querySelectorAll('.better-highscores-container');
-    existingContainers.forEach(container => container.remove());
+    existingContainers.forEach((container) => detachLeaderboardContainer(container));
     return existingContainers.length;
   }
   
@@ -926,14 +995,18 @@
     try {
       console.log('[Better Highscores] Fetching leaderboard data for map:', mapCode);
       
-      const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
+      const [roomsHighscores, tickHighscores] = await Promise.all([
+        fetchTRPC('game.getRoomsHighscores'),
+        fetchTRPC('game.getTickHighscores')
+      ]);
       
-      console.log('[Better Highscores] Leaderboard response:', leaderboardData);
+      console.log('[Better Highscores] Leaderboard response:', { roomsHighscores, tickHighscores });
       
-      // Extract data from the correct structure
-      const tickData = leaderboardData?.ticks?.[mapCode] ? [leaderboardData.ticks[mapCode]] : [];
-      const rankData = leaderboardData?.rank?.[mapCode] ? [leaderboardData.rank[mapCode]] : [];
-      const floorData = leaderboardData?.floor?.[mapCode] ? [leaderboardData.floor[mapCode]] : [];
+      // Speedrun WR uses getTickHighscores; rank/floor use getRoomsHighscores
+      const tickEntry = tickHighscores?.[mapCode] || roomsHighscores?.ticks?.[mapCode];
+      const tickData = tickEntry ? [tickEntry] : [];
+      const rankData = roomsHighscores?.rank?.[mapCode] ? [roomsHighscores.rank[mapCode]] : [];
+      const floorData = roomsHighscores?.floor?.[mapCode] ? [roomsHighscores.floor[mapCode]] : [];
       
       console.log('[Better Highscores] Extracted tick data for map', mapCode, ':', tickData);
       console.log('[Better Highscores] Extracted rank data for map', mapCode, ':', rankData);
@@ -1473,6 +1546,46 @@
     return userScores?.bestTicks === wrEntry.ticks;
   }
 
+  function isServerWorldRecordHolder(wrEntry, playerUserId) {
+    return Boolean(
+      wrEntry &&
+      playerUserId !== null &&
+      playerUserId !== undefined &&
+      wrEntry.userId === playerUserId
+    );
+  }
+
+  function userStrictlyBeatsWorldRecord(userScores, wrEntry, config) {
+    if (!wrEntry || !userScores) {
+      return false;
+    }
+    return userBeatsOrTiesWorldRecord(userScores, wrEntry, config) &&
+      !scoresAreEqual(userScores, wrEntry, config);
+  }
+
+  function hasLocalScoreWithoutPublicRecord(config, userScores) {
+    if (!userScores) {
+      return false;
+    }
+    if (config.isFloor) {
+      const floor = userScores.bestFloor;
+      return floor !== null && floor !== undefined && floor > 0;
+    }
+    if (config.isRank) {
+      return userScores.bestRank !== null && userScores.bestRank !== undefined;
+    }
+    return userScores.bestTicks !== null && userScores.bestTicks !== undefined;
+  }
+
+  /** Local profile still has stats after a dev reset that cleared the public board (or beat a stale WR). */
+  function isLegacyHighscore(userScores, wrEntry, config, playerUserId) {
+    if (!wrEntry) {
+      return hasLocalScoreWithoutPublicRecord(config, userScores);
+    }
+    return userStrictlyBeatsWorldRecord(userScores, wrEntry, config) &&
+      !isServerWorldRecordHolder(wrEntry, playerUserId);
+  }
+
   function formatLeaderboardEntry(entry, index, isRankLeaderboard = false, isFloorLeaderboard = false, fallbackTick = null) {
     const medalColor = getMedalColor(index + 1);
     
@@ -1511,153 +1624,228 @@
 // =======================
 // MODULE 6: UI Components & Rendering
 // =======================
+  function createScoreIcon(src, alt, title, opacity = 1) {
+    const icon = document.createElement('img');
+    icon.src = src;
+    icon.alt = alt;
+    icon.title = title;
+    Object.assign(icon.style, SCORE_ICON_STYLE, opacity < 1 ? { opacity: String(opacity) } : {});
+    return icon;
+  }
+
+  function getLeaderboardRenderContext(tickData, rankData, floorData) {
+    const userScores = getUserBestScores();
+    const playerName = getPlayerSnapshot()?.context?.name;
+    const maxRankPoints = getMaxRankPoints();
+    const maxFloor = getMaxFloor();
+    const bestRankEntry = getBestLeaderboardEntry(rankData, { isRank: true });
+    const bestFloorEntry = getBestLeaderboardEntry(floorData, { isFloor: true });
+
+    return {
+      userScores,
+      playerName,
+      maxRankPoints,
+      maxFloor,
+      currentRankRecord: getUserProgressValue(userScores, bestRankEntry, { isRank: true }),
+      currentFloorRecord: getUserProgressValue(userScores, bestFloorEntry, { isFloor: true })
+    };
+  }
+
+  function createLeaderboardSections(tickData, rankData, floorData) {
+    const ctx = getLeaderboardRenderContext(tickData, rankData, floorData);
+
+    return {
+      tickSection: createLeaderboardSection(
+        tickData,
+        LEADERBOARD_SECTION_CONFIG.time,
+        ctx.userScores,
+        ctx.playerName
+      ),
+      rankSection: createLeaderboardSection(
+        rankData,
+        LEADERBOARD_SECTION_CONFIG.rank,
+        ctx.userScores,
+        ctx.playerName,
+        ctx.maxRankPoints,
+        ctx.currentRankRecord
+      ),
+      floorSection: createLeaderboardSection(
+        floorData,
+        LEADERBOARD_SECTION_CONFIG.floor,
+        ctx.userScores,
+        ctx.playerName,
+        ctx.maxFloor,
+        ctx.currentFloorRecord,
+        tickData
+      )
+    };
+  }
+
+  function getSectionUserValue(config, userScores) {
+    if (config.isFloor) {
+      return userScores?.bestFloor !== null && userScores?.bestFloor !== undefined
+        ? userScores.bestFloor
+        : 0;
+    }
+    if (config.isRank) {
+      return userScores?.bestRank;
+    }
+    return userScores?.bestTicks;
+  }
+
+  function createLegacyWarningIcon() {
+    const warningIcon = document.createElement('span');
+    warningIcon.innerHTML = '⚠️';
+    warningIcon.title = 'Legacy';
+    Object.assign(warningIcon.style, {
+      cursor: 'help',
+      fontSize: '10px',
+      lineHeight: '1',
+      flexShrink: '0'
+    });
+    return warningIcon;
+  }
+
+  function appendUserScoreEntry(section, config, userScores, { isLegacy, userTiesWorldRecord, userValue }) {
+    const userEntrySpan = document.createElement('span');
+    Object.assign(userEntrySpan.style, ENTRY_SPAN_STYLE, {
+      color: isLegacy ? UI_CONFIG.COLORS.LEGACY : (userTiesWorldRecord ? '#00ff00' : '#ffa500'),
+      cursor: isLegacy ? 'help' : 'default'
+    });
+    if (isLegacy) {
+      userEntrySpan.title = 'Legacy';
+      userEntrySpan.appendChild(createLegacyWarningIcon());
+    } else {
+      userEntrySpan.appendChild(createScoreIcon(
+        ASSETS.ACHIEVEMENT_ICON,
+        'You',
+        'Your personal best record'
+      ));
+    }
+
+    let userDisplayValue = userValue;
+    if (config.isFloor && userScores?.bestFloorTicks !== null && userScores?.bestFloorTicks !== undefined) {
+      userDisplayValue += ` (${userScores.bestFloorTicks})`;
+    } else if (config.isRank && userScores?.bestRankTicks !== null && userScores?.bestRankTicks !== undefined) {
+      userDisplayValue += ` (${userScores.bestRankTicks})`;
+    }
+    const valueText = document.createElement('span');
+    valueText.textContent = userDisplayValue;
+    userEntrySpan.appendChild(valueText);
+
+    section.appendChild(userEntrySpan);
+  }
+
+  function appendWorldRecordEntry(section, entry, config, tickData, index = 0) {
+    const bestTickEntry = tickData && tickData.length > 0 ? getBestLeaderboardEntry(tickData, {}) : null;
+    const fallbackTick = (config.isFloor && entry.floor === 0 && bestTickEntry)
+      ? bestTickEntry.ticks
+      : null;
+    const formattedEntry = formatLeaderboardEntry(entry, index, config.isRank, config.isFloor, fallbackTick);
+    const entrySpan = document.createElement('span');
+    Object.assign(entrySpan.style, ENTRY_SPAN_STYLE, {
+      color: formattedEntry.color,
+      fontWeight: formattedEntry.fontWeight
+    });
+
+    entrySpan.appendChild(createScoreIcon(
+      formattedEntry.isCurrentUser ? ASSETS.ACHIEVEMENT_ICON : ASSETS.HIGHSCORE_ICON,
+      formattedEntry.isCurrentUser ? 'You' : 'Top',
+      formattedEntry.isCurrentUser ? 'Your personal best record' : 'World record holder'
+    ));
+
+    const valueText = document.createElement('span');
+    valueText.textContent = formattedEntry.value;
+    entrySpan.appendChild(valueText);
+
+    section.appendChild(entrySpan);
+  }
+
+  function appendWorldRecordPlaceholder(section) {
+    const entrySpan = document.createElement('span');
+    Object.assign(entrySpan.style, ENTRY_SPAN_STYLE, { color: '#888' });
+
+    entrySpan.appendChild(createScoreIcon(
+      ASSETS.HIGHSCORE_ICON,
+      'Top',
+      'No public world record yet',
+      0.45
+    ));
+
+    const valueText = document.createElement('span');
+    valueText.textContent = '—';
+    entrySpan.appendChild(valueText);
+
+    section.appendChild(entrySpan);
+  }
+
   // Helper function to create a leaderboard section (tick, rank, or floor)
   function createLeaderboardSection(data, config, userScores, playerName, maxValue = null, currentValue = null, tickData = null) {
     const section = document.createElement('div');
-    Object.assign(section.style, {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '2px',
-      minWidth: 'auto',
-      flexShrink: '0',
-      whiteSpace: 'nowrap'
-    });
-    
-    if (data && data.length > 0) {
-      // Title text
-      const titleText = document.createElement('span');
-      Object.assign(titleText.style, {
-        fontWeight: 'bold',
-        color: config.titleColor,
-        fontSize: '10px'
-      });
-      titleText.textContent = config.displayName || config.title;
-      section.appendChild(titleText);
-      
-      // Add current/max display after title if maxValue and currentValue are provided
-      // For floor, show max display even when floor is 0 (it's still valid floor data)
-      const shouldShowMax = maxValue !== null && currentValue !== null;
-      
-      if (shouldShowMax) {
-        const maxDisplay = document.createElement('span');
-        const isMaxAchieved = currentValue === maxValue;
-        const maxColor = isMaxAchieved ? '#00ff00' : '#ff4444';
-        Object.assign(maxDisplay.style, {
-          fontSize: '10px',
-          color: maxColor,
-          fontWeight: 'bold'
-        });
-        maxDisplay.textContent = `(${currentValue}/${maxValue})`;
-        section.appendChild(maxDisplay);
-      }
-      
-      const wrEntry = getBestLeaderboardEntry(data, config);
+    Object.assign(section.style, SECTION_WRAPPER_STYLE);
 
-      // Get user and top values
-      let userValue, worldRecordValue;
-      if (config.isFloor) {
-        // Default to 0 if no floor data
-        userValue = userScores?.bestFloor !== null && userScores?.bestFloor !== undefined ? userScores.bestFloor : 0;
-        worldRecordValue = wrEntry.floor;
-      } else if (config.isRank) {
-        userValue = userScores?.bestRank;
-        worldRecordValue = wrEntry.rank;
-      } else {
-        userValue = userScores?.bestTicks;
-        worldRecordValue = wrEntry.ticks;
-      }
-      
-      const userHoldsWorldRecord = userBeatsOrTiesWorldRecord(userScores, wrEntry, config);
-      const userTiesWorldRecord = scoresAreEqual(userScores, wrEntry, config);
-      
-      // User's best score (display first, only if not world record holder)
-      // For floor, always show user value (defaults to 0 if no data)
-      const shouldShowUserValue = config.isFloor 
-        ? (!userHoldsWorldRecord)
-        : (userValue !== null && userValue !== undefined && !userHoldsWorldRecord);
-      
-      if (shouldShowUserValue) {
-        const userEntrySpan = document.createElement('span');
-        Object.assign(userEntrySpan.style, {
-          fontSize: '10px',
-          color: userTiesWorldRecord ? '#00ff00' : '#ffa500',
-          fontWeight: 'bold',
-          marginRight: '2px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '2px'
-        });
-        
-        // Add "You" icon
-        const youIcon = document.createElement('img');
-        youIcon.src = 'https://bestiaryarena.com/assets/icons/achievement.png';
-        youIcon.alt = 'You';
-        youIcon.title = 'Your personal best record';
-        Object.assign(youIcon.style, {
-          width: '11px',
-          height: '11px',
-          verticalAlign: 'middle',
-          display: 'inline-block'
-        });
-        userEntrySpan.appendChild(youIcon);
-        
-        // Add value text with ticks in parentheses
-        let userDisplayValue = userValue;
-        if (config.isFloor && userScores?.bestFloorTicks !== null && userScores?.bestFloorTicks !== undefined) {
-          userDisplayValue += ` (${userScores.bestFloorTicks})`;
-        } else if (config.isRank && userScores?.bestRankTicks !== null && userScores?.bestRankTicks !== undefined) {
-          userDisplayValue += ` (${userScores.bestRankTicks})`;
-        }
-        const valueText = document.createElement('span');
-        valueText.textContent = userDisplayValue;
-        userEntrySpan.appendChild(valueText);
-        
-        section.appendChild(userEntrySpan);
-      }
-      
-      // Top entry (display second) — use best API entry, or your score when you beat stale WR data
-      const topEntry = buildTopDisplayEntry(wrEntry, userScores, config, playerName);
-      [topEntry].filter(Boolean).forEach((entry, index) => {
-        const bestTickEntry = tickData && tickData.length > 0 ? getBestLeaderboardEntry(tickData, {}) : null;
-        const fallbackTick = (config.isFloor && entry.floor === 0 && bestTickEntry)
-          ? bestTickEntry.ticks
-          : null;
-        const formattedEntry = formatLeaderboardEntry(entry, index, config.isRank, config.isFloor, fallbackTick);
-        const entrySpan = document.createElement('span');
-        Object.assign(entrySpan.style, {
-          fontSize: '10px',
-          color: formattedEntry.color,
-          fontWeight: formattedEntry.fontWeight,
-          marginRight: '2px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '2px'
-        });
-        
-        // Add icon
-        const icon = document.createElement('img');
-        icon.src = formattedEntry.isCurrentUser
-          ? 'https://bestiaryarena.com/assets/icons/achievement.png'
-          : 'https://bestiaryarena.com/assets/icons/highscore.png';
-        icon.alt = formattedEntry.isCurrentUser ? 'You' : 'Top';
-        icon.title = formattedEntry.isCurrentUser ? 'Your personal best record' : 'World record holder';
-        Object.assign(icon.style, {
-          width: '11px',
-          height: '11px',
-          verticalAlign: 'middle',
-          display: 'inline-block'
-        });
-        entrySpan.appendChild(icon);
-        
-        // Add value text
-        const valueText = document.createElement('span');
-        valueText.textContent = formattedEntry.value;
-        entrySpan.appendChild(valueText);
-        
-        section.appendChild(entrySpan);
+    const titleText = document.createElement('span');
+    Object.assign(titleText.style, {
+      fontWeight: 'bold',
+      color: config.titleColor,
+      fontSize: '10px'
+    });
+    titleText.textContent = config.displayName || config.title;
+    section.appendChild(titleText);
+
+    const shouldShowMax = maxValue !== null && currentValue !== null;
+    if (shouldShowMax) {
+      const maxDisplay = document.createElement('span');
+      const isMaxAchieved = currentValue === maxValue;
+      Object.assign(maxDisplay.style, {
+        fontSize: '10px',
+        color: isMaxAchieved ? '#00ff00' : '#ff4444',
+        fontWeight: 'bold'
       });
+      maxDisplay.textContent = `(${currentValue}/${maxValue})`;
+      section.appendChild(maxDisplay);
     }
-    
+
+    const wrEntry = data && data.length > 0 ? getBestLeaderboardEntry(data, config) : null;
+    const userValue = getSectionUserValue(config, userScores);
+    const playerUserId = getPlayerSnapshot()?.context?.userId;
+    const isLegacy = isLegacyHighscore(userScores, wrEntry, config, playerUserId);
+
+    if (wrEntry) {
+      const userHoldsWorldRecord = userBeatsOrTiesWorldRecord(userScores, wrEntry, config) && !isLegacy;
+      const userTiesWorldRecord = scoresAreEqual(userScores, wrEntry, config);
+      const shouldShowUserValue = config.isFloor
+        ? (!userHoldsWorldRecord || isLegacy)
+        : (userValue !== null && userValue !== undefined && (!userHoldsWorldRecord || isLegacy));
+
+      if (shouldShowUserValue) {
+        appendUserScoreEntry(section, config, userScores, { isLegacy, userTiesWorldRecord, userValue });
+      }
+
+      const topEntry = isLegacy
+        ? wrEntry
+        : buildTopDisplayEntry(wrEntry, userScores, config, playerName);
+      if (topEntry) {
+        appendWorldRecordEntry(section, topEntry, config, tickData);
+      } else {
+        appendWorldRecordPlaceholder(section);
+      }
+    } else {
+      const shouldShowUserValue = config.isFloor
+        ? true
+        : (userValue !== null && userValue !== undefined);
+
+      if (shouldShowUserValue) {
+        appendUserScoreEntry(section, config, userScores, {
+          isLegacy,
+          userTiesWorldRecord: false,
+          userValue
+        });
+      }
+
+      appendWorldRecordPlaceholder(section);
+    }
+
     return section;
   }
 
@@ -1672,19 +1860,13 @@
     if (!contentDiv || !contentDiv.isConnected) {
       return false; // Can't find content container
     }
-    
-    // Get user data
-    const userScores = getUserBestScores();
-    const playerSnapshot = getPlayerSnapshot();
-    const playerName = playerSnapshot?.context?.name;
-    
-    // Get max values
-    const maxRankPoints = getMaxRankPoints();
-    const maxFloor = getMaxFloor();
-    const bestRankEntry = getBestLeaderboardEntry(rankData, { isRank: true });
-    const bestFloorEntry = getBestLeaderboardEntry(floorData, { isFloor: true });
-    const currentRankRecord = getUserProgressValue(userScores, bestRankEntry, { isRank: true });
-    const currentFloorRecord = getUserProgressValue(userScores, bestFloorEntry, { isFloor: true });
+
+    const renderCtx = getLeaderboardRenderContext(tickData, rankData, floorData);
+    const sectionPayloads = [
+      { key: 'time', data: tickData, config: LEADERBOARD_SECTION_CONFIG.time, maxValue: null, currentValue: null, tickFallback: null },
+      { key: 'rank', data: rankData, config: LEADERBOARD_SECTION_CONFIG.rank, maxValue: renderCtx.maxRankPoints, currentValue: renderCtx.currentRankRecord, tickFallback: null },
+      { key: 'floor', data: floorData, config: LEADERBOARD_SECTION_CONFIG.floor, maxValue: renderCtx.maxFloor, currentValue: renderCtx.currentFloorRecord, tickFallback: tickData }
+    ];
     
     // Get the three sections (tick, rank, floor)
     const sections = contentDiv.children;
@@ -1693,7 +1875,7 @@
     }
     
     // Helper to update a section
-    const updateSection = (section, visible, data, config, maxValue, currentValue, tickDataForFallback) => {
+    const updateSection = (section, visible, payload) => {
       if (!section || !section.isConnected) {
         return;
       }
@@ -1715,53 +1897,28 @@
         }
         section.removeChild(child);
       }
-      
-      if (data && data.length > 0) {
-        // Recreate section content using existing createLeaderboardSection logic
-        const newSection = createLeaderboardSection(data, config, userScores, playerName, maxValue, currentValue, tickDataForFallback);
-        
-        // Copy children from new section to existing section
-        while (newSection.firstChild) {
-          section.appendChild(newSection.firstChild);
-        }
-        
-        // Preserve section styling
-        Object.assign(section.style, {
-          display: 'flex',
-          alignItems: 'center',
-          gap: '2px',
-          minWidth: 'auto',
-          flexShrink: '0',
-          whiteSpace: 'nowrap'
-        });
+
+      const newSection = createLeaderboardSection(
+        payload.data || [],
+        payload.config,
+        renderCtx.userScores,
+        renderCtx.playerName,
+        payload.maxValue,
+        payload.currentValue,
+        payload.tickFallback
+      );
+
+      // Copy children from new section to existing section
+      while (newSection.firstChild) {
+        section.appendChild(newSection.firstChild);
       }
+
+      Object.assign(section.style, SECTION_WRAPPER_STYLE);
     };
     
-    // Update tick section (index 0)
-    updateSection(sections[0], isSectionVisible('time'), tickData, {
-      title: 'Ticks',
-      displayName: 'Time',
-      titleColor: UI_CONFIG.COLORS.TICK_TITLE,
-      isRank: false
-    }, null, null);
-    
-    // Update rank section (index 1)
-    updateSection(sections[1], isSectionVisible('rank'), rankData, {
-      title: 'Rank',
-      displayName: 'Rank',
-      titleColor: UI_CONFIG.COLORS.RANK_TITLE,
-      isRank: true,
-      isFloor: false
-    }, maxRankPoints, currentRankRecord);
-    
-    // Update floor section (index 2)
-    updateSection(sections[2], isSectionVisible('floor'), floorData, {
-      title: 'Floor',
-      displayName: 'Floor',
-      titleColor: UI_CONFIG.COLORS.FLOOR_TITLE,
-      isRank: false,
-      isFloor: true
-    }, maxFloor, currentFloorRecord, tickData);
+    sectionPayloads.forEach((payload, index) => {
+      updateSection(sections[index], isSectionVisible(payload.key), payload);
+    });
 
     applySectionVisibility(contentDiv);
     applyContentContainerStyles(contentDiv);
@@ -1803,68 +1960,20 @@
     // Create content container
     const container = document.createElement('div');
     applyContentContainerStyles(container);
-    
-    container.addEventListener('contextmenu', (e) => {
+
+    const onContextMenu = (e) => {
       e.preventDefault();
       e.stopPropagation();
       createBetterHighscoresContextMenu(wrapper, e.clientX, e.clientY);
-    });
+    };
+    container.addEventListener('contextmenu', onContextMenu);
     
     // Store references for opacity updates
     wrapper._backgroundDiv = backgroundDiv;
     wrapper._contentDiv = container;
+    wrapper._contextMenuHandler = onContextMenu;
     
-    // Get user data once
-    const userScores = getUserBestScores();
-    const playerSnapshot = getPlayerSnapshot();
-    const playerName = playerSnapshot?.context?.name;
-    
-    // Get max values for rank and floor
-    const maxRankPoints = getMaxRankPoints();
-    const maxFloor = getMaxFloor();
-    const bestRankEntry = getBestLeaderboardEntry(rankData, { isRank: true });
-    const bestFloorEntry = getBestLeaderboardEntry(floorData, { isFloor: true });
-    const currentRankRecord = getUserProgressValue(userScores, bestRankEntry, { isRank: true });
-    const currentFloorRecord = getUserProgressValue(userScores, bestFloorEntry, { isFloor: true });
-    
-    // Create tick leaderboard section
-    const tickSection = createLeaderboardSection(tickData, {
-      title: 'Ticks',
-      displayName: 'Time',
-      titleColor: UI_CONFIG.COLORS.TICK_TITLE,
-      iconUrl: 'https://bestiaryarena.com/assets/icons/speed.png',
-      iconWidth: 11,
-      iconHeight: 11,
-      isRank: false
-    }, userScores, playerName);
-    
-    // Create rank leaderboard section
-    const rankSection = createLeaderboardSection(rankData, {
-      title: 'Rank',
-      displayName: 'Rank',
-      titleColor: UI_CONFIG.COLORS.RANK_TITLE,
-      iconUrl: 'https://bestiaryarena.com/assets/icons/star-tier.png',
-      iconWidth: 9,
-      iconHeight: 10,
-      isRank: true,
-      isFloor: false
-    }, userScores, playerName, maxRankPoints, currentRankRecord);
-    
-    // Create floor leaderboard section
-    // Keep floor as 0 when it's 0 - the entry should already have its own ticks value
-    let floorDisplayData = floorData;
-    let floorCurrentValue = currentFloorRecord;
-    
-    const floorSection = createLeaderboardSection(floorDisplayData, {
-      title: 'Floor',
-      displayName: 'Floor',
-      titleColor: UI_CONFIG.COLORS.FLOOR_TITLE,
-      iconUrl: 'https://bestiaryarena.com/assets/UI/floor-15.png',
-      iconWidth: 14,
-      iconHeight: 7,
-      isRank: false,
-      isFloor: true
-    }, userScores, playerName, maxFloor, floorCurrentValue, tickData);
+    const { tickSection, rankSection, floorSection } = createLeaderboardSections(tickData, rankData, floorData);
     
     // Append all sections to container
     container.appendChild(tickSection);
@@ -1881,11 +1990,15 @@
 
   // Function to update leaderboards
   async function updateLeaderboards() {
+    if (modDisposed) {
+      return;
+    }
+
     console.log('[Better Highscores] updateLeaderboards called');
 
     if (isBetterHighscoresHidden()) {
       if (leaderboardContainer) {
-        leaderboardContainer.remove();
+        detachLeaderboardContainer(leaderboardContainer);
         leaderboardContainer = null;
       }
       removeExistingContainers();
@@ -1940,6 +2053,10 @@
       const shouldForceRefresh =
         Date.now() - BetterHighscoresState.lastBattleCompletionAt < DELAYS.POST_BATTLE_FRESH_WINDOW;
       const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, shouldForceRefresh);
+
+      if (modDisposed) {
+        return;
+      }
       
       // Check if we can update in place (same map, container exists in DOM)
       const mapChanged = mapCode !== currentMapCode;
@@ -1968,7 +2085,7 @@
       
       // Remove existing container and any duplicate containers
       if (leaderboardContainer) {
-        leaderboardContainer.remove();
+        detachLeaderboardContainer(leaderboardContainer);
         leaderboardContainer = null;
       }
       
@@ -2126,6 +2243,10 @@
     // Wait for game state to be available
     let checkGameStateTimeout = null;
     const checkGameState = () => {
+      if (modDisposed) {
+        return;
+      }
+
       if (globalThis.state && globalThis.state.board) {
         // Initial update
         updateLeaderboards();
@@ -2258,21 +2379,37 @@
     };
   }
 
+  function detachLeaderboardContainer(container) {
+    if (!container) {
+      return;
+    }
+
+    const contentDiv = container._contentDiv;
+    if (contentDiv && container._contextMenuHandler) {
+      contentDiv.removeEventListener('contextmenu', container._contextMenuHandler);
+      container._contextMenuHandler = null;
+    }
+
+    try {
+      container.remove();
+    } catch (error) {
+      console.warn('[Better Highscores] Error removing leaderboard container:', error);
+    }
+  }
+
   function cleanup() {
     console.log('[Better Highscores] Cleaning up...');
+    modDisposed = true;
 
     closeBetterHighscoresContextMenu();
     removeRestoreButton();
     removeHighscoresNavButton();
     
     // Remove leaderboard container
-    if (leaderboardContainer) {
-      try {
-        leaderboardContainer.remove();
-      } catch (error) {
-        console.warn('[Better Highscores] Error removing leaderboard container:', error);
-      }
-    }
+    detachLeaderboardContainer(leaderboardContainer);
+    leaderboardContainer = null;
+    currentMapCode = null;
+    roomNames = null;
     
     // Clean up state subscriptions
     BetterHighscoresState.subscriptions.forEach(unsubscribe => {
@@ -2287,9 +2424,6 @@
     
     // Reset state
     BetterHighscoresState.reset();
-    
-    // Clear cache
-    BetterHighscoresState.leaderboardCache.clear();
     
     // Clear all tracked timeouts
     BetterHighscoresState.clearTimeouts();

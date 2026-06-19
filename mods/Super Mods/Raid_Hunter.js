@@ -3961,6 +3961,9 @@ async function handleEventOrRaid(roomId) {
         
         // Navigate to the raid map
         console.log('[Raid Hunter] Navigating to raid map...');
+        if (typeof window.markModSettingsProgrammaticNavFloorGuard === 'function') {
+            window.markModSettingsProgrammaticNavFloorGuard('raid-hunter');
+        }
         globalThis.state.board.send({
             type: 'selectRoomById',
             roomId: roomId

@@ -176,7 +176,9 @@ let isNavigatingViaButton = false;
 let mapFloorSyncLastRoomId = null;
 let mapFloorSyncTimeoutId = null;
 const REPLAY_MAX_FLOOR_GUARD_MS = 5000;
+const PROGRAMMATIC_NAV_FLOOR_GUARD_MS = 5000;
 let replayMaxFloorGuardUntil = 0;
+let programmaticNavFloorGuardUntil = 0;
 let replayFloorGuardHookInstalled = false;
 let autoHideMonstersInProgress = false;
 let antiIdlePlayPromise = null;
@@ -13637,6 +13639,10 @@ function cleanupBetterUI() {
       delete window.betterUIConfig;
       console.log('[Mod Settings] Global config reference removed');
     }
+    if (window.markModSettingsProgrammaticNavFloorGuard) {
+      delete window.markModSettingsProgrammaticNavFloorGuard;
+    }
+    programmaticNavFloorGuardUntil = 0;
     initState.initialized = false;
     initState.inProgress = false;
     
@@ -13668,9 +13674,22 @@ function markReplayFloorGuard(replayConfig) {
   }
 }
 
+function markProgrammaticNavFloorGuard(source = 'programmatic-navigation') {
+  try {
+    programmaticNavFloorGuardUntil = Date.now() + PROGRAMMATIC_NAV_FLOOR_GUARD_MS;
+    console.log(`[Mod Settings] Programmatic nav floor guard active (${source})`);
+  } catch (error) {
+    console.warn('[Mod Settings] Could not mark programmatic nav floor guard:', error);
+  }
+}
+
 function shouldSkipMaxFloorSync(source = 'unknown') {
   if (Date.now() <= replayMaxFloorGuardUntil) {
     console.log(`[Mod Settings] Skipping max-floor sync during replay (${source})`);
+    return true;
+  }
+  if (Date.now() <= programmaticNavFloorGuardUntil) {
+    console.log(`[Mod Settings] Skipping max-floor sync during programmatic navigation (${source})`);
     return true;
   }
   return false;
@@ -13729,6 +13748,7 @@ function applyBestCompletedFloorForRoom(roomId, source = 'unknown') {
 
     mapFloorSyncTimeoutId = setTimeout(() => {
       mapFloorSyncTimeoutId = null;
+      if (shouldSkipMaxFloorSync(source)) return;
       try {
         globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: targetFloor }) });
         console.log(`[Mod Settings] Applied max floor ${targetFloor} for ${roomId} (${source})`);
@@ -13750,6 +13770,8 @@ function applyBestCompletedFloorForCurrentMap(source = 'unknown') {
     console.error('[Mod Settings] Error applying max floor for current map:', error);
   }
 }
+
+window.markModSettingsProgrammaticNavFloorGuard = markProgrammaticNavFloorGuard;
 
 // Load map history from localStorage
 const loadLastVisitedMap = () => {

@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.2.8",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Legacy personal bests (local profile after a dev reset — faster than the live WR or no public WR yet) show in red with a single ⚠️ icon and Legacy hover tooltip instead of the achievement icon; the public WR stays visible or shows — when empty. Time uses game.getTickHighscores. Refactored shared section config/render helpers; mod unload detaches context-menu listeners, clears pending timeouts/subscriptions, and ignores in-flight API updates."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "\"Always navigate max floor\" now skips max-floor sync during Raid Hunter, Better Boosted Maps, Better Tasker, and Stamina Optimizer navigation so each mod keeps its configured floor; uses the same guard pattern as replay setups, with a re-check before the delayed floor apply."
+        }
+      ]
+    },
+    {
       "version": "4.2.7",
       "changes": [
         {

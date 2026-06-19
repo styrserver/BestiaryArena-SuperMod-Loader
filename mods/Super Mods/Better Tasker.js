@@ -822,6 +822,9 @@ async function clearScrollLockIfNeeded() {
 
 function markProgrammaticNavigation() {
     programmaticNavigationUntil = Date.now() + PROGRAMMATIC_NAV_GUARD_MS;
+    if (typeof window.markModSettingsProgrammaticNavFloorGuard === 'function') {
+        window.markModSettingsProgrammaticNavFloorGuard('better-tasker');
+    }
 }
 
 function isProgrammaticNavigationActive() {

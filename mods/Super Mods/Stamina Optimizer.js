@@ -632,6 +632,9 @@ async function navigateToSpecificMap(mapId) {
         
         console.log(`[Stamina Optimizer] Navigating to map: ${mapId} (from ${currentMapId || 'unknown'})`);
         
+        if (typeof window.markModSettingsProgrammaticNavFloorGuard === 'function') {
+            window.markModSettingsProgrammaticNavFloorGuard('stamina-optimizer');
+        }
         globalThis.state.board.send({
             type: 'selectRoomById',
             roomId: mapId
