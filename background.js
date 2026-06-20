@@ -33,6 +33,35 @@ let registeredTabs = new Set(); // Track which tabs have received local mods
 
 const DEBUG = false; // Set to true for development
 
+const LOADER_ERROR_STORAGE_KEY = 'ba-loader-errors';
+const MAX_LOADER_ERRORS = 200;
+
+function appendBackgroundLoaderError(entry) {
+  if (!browserAPI?.storage?.local) return;
+  if ((entry.level || 'error') !== 'error') return;
+  const fullEntry = {
+    ts: Date.now(),
+    level: entry.level || 'error',
+    source: entry.source || 'background',
+    message: entry.message || '',
+    detail: entry.detail || undefined
+  };
+  browserAPI.storage.local.get([LOADER_ERROR_STORAGE_KEY], (result) => {
+    const existing = Array.isArray(result[LOADER_ERROR_STORAGE_KEY]) ? result[LOADER_ERROR_STORAGE_KEY] : [];
+    existing.push(fullEntry);
+    browserAPI.storage.local.set({ [LOADER_ERROR_STORAGE_KEY]: existing.slice(-MAX_LOADER_ERRORS) });
+  });
+}
+
+const originalBackgroundError = console.error;
+console.error = function(...args) {
+  originalBackgroundError.apply(console, args);
+  appendBackgroundLoaderError({
+    level: 'error',
+    message: args.map((arg) => (arg instanceof Error ? arg.message : String(arg))).join(' ')
+  });
+};
+
 function resolveMessageTabId(message, sender) {
   if (message && message.tabId != null) return message.tabId;
   if (sender && sender.tab && sender.tab.id != null) return sender.tab.id;
@@ -879,10 +908,22 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         })
         .catch(error => {
           console.error(`Background: Error fetching mod content:`, error);
+          appendBackgroundLoaderError({
+            level: 'error',
+            source: 'getModContent',
+            message: `Failed to fetch ${message.modName}`,
+            detail: error.message
+          });
           sendResponse({ success: false, error: error.message });
         });
     } catch (error) {
       console.error(`Background: Error getting mod URL:`, error);
+      appendBackgroundLoaderError({
+        level: 'error',
+        source: 'getModContent',
+        message: `Invalid mod path: ${message.modName}`,
+        detail: error.message
+      });
       sendResponse({ success: false, error: error.message });
     }
     return true;
@@ -1169,6 +1210,23 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     sendResponse({ success: true, counts: HARDCODED_MOD_COUNTS });
     return false;
+  }
+
+  if (message.action === 'getLoaderErrors') {
+    browserAPI.storage.local.get([LOADER_ERROR_STORAGE_KEY], (result) => {
+      sendResponse({
+        success: true,
+        errors: Array.isArray(result[LOADER_ERROR_STORAGE_KEY]) ? result[LOADER_ERROR_STORAGE_KEY] : []
+      });
+    });
+    return true;
+  }
+
+  if (message.action === 'clearLoaderErrors') {
+    browserAPI.storage.local.set({ [LOADER_ERROR_STORAGE_KEY]: [] }, () => {
+      sendResponse({ success: true });
+    });
+    return true;
   }
 });
 

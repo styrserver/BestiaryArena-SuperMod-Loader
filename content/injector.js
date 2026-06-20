@@ -19,6 +19,123 @@ console.log = function(...args) {
 
 // Match upstream Chrome: inject only in the top frame (game document), not ad/utility iframes.
 const IS_TOP_FRAME = window === window.top;
+
+const LOADER_ERROR_STORAGE_KEY = 'ba-loader-errors';
+const MAX_LOADER_ERRORS = 200;
+let loaderErrorBuffer = [];
+let loaderErrorFlushTimer = null;
+
+function formatLoaderErrorArgs(args) {
+  return args.map((arg) => {
+    if (arg instanceof Error) {
+      return `${arg.name}: ${arg.message}${arg.stack ? `\n${arg.stack}` : ''}`;
+    }
+    if (typeof arg === 'object') {
+      try {
+        return JSON.stringify(arg);
+      } catch {
+        return String(arg);
+      }
+    }
+    return String(arg);
+  }).join(' ');
+}
+
+function getLoaderErrorContext() {
+  const ua = navigator.userAgent || '';
+  return {
+    mobile: /iPhone|iPad|iPod|Android|Orion/i.test(ua),
+    ua: ua.slice(0, 120)
+  };
+}
+
+function appendLoaderError(entry) {
+  if (!IS_TOP_FRAME) return;
+  if ((entry.level || 'error') !== 'error') return;
+  try {
+    const fullEntry = {
+      ts: Date.now(),
+      level: entry.level || 'error',
+      source: entry.source || 'unknown',
+      message: entry.message || '',
+      detail: entry.detail || undefined,
+      ...getLoaderErrorContext()
+    };
+    loaderErrorBuffer.push(fullEntry);
+    if (loaderErrorBuffer.length > MAX_LOADER_ERRORS) {
+      loaderErrorBuffer = loaderErrorBuffer.slice(-MAX_LOADER_ERRORS);
+    }
+    scheduleLoaderErrorFlush();
+  } catch {
+    // ignore logging failures
+  }
+}
+
+function scheduleLoaderErrorFlush() {
+  if (loaderErrorFlushTimer) return;
+  loaderErrorFlushTimer = setTimeout(flushLoaderErrorsToStorage, 300);
+}
+
+function flushLoaderErrorsToStorage(callback) {
+  if (loaderErrorFlushTimer) {
+    clearTimeout(loaderErrorFlushTimer);
+    loaderErrorFlushTimer = null;
+  }
+  if (!browserAPI?.storage?.local) {
+    if (callback) callback(loaderErrorBuffer.slice());
+    return;
+  }
+  if (loaderErrorBuffer.length === 0) {
+    if (callback) {
+      browserAPI.storage.local.get([LOADER_ERROR_STORAGE_KEY], (result) => {
+        callback(Array.isArray(result[LOADER_ERROR_STORAGE_KEY]) ? result[LOADER_ERROR_STORAGE_KEY] : []);
+      });
+    }
+    return;
+  }
+  browserAPI.storage.local.get([LOADER_ERROR_STORAGE_KEY], (result) => {
+    const existing = Array.isArray(result[LOADER_ERROR_STORAGE_KEY]) ? result[LOADER_ERROR_STORAGE_KEY] : [];
+    const merged = [...existing, ...loaderErrorBuffer].slice(-MAX_LOADER_ERRORS);
+    loaderErrorBuffer = [];
+    browserAPI.storage.local.set({ [LOADER_ERROR_STORAGE_KEY]: merged }, () => {
+      if (callback) callback(merged);
+    });
+  });
+}
+
+function getMergedLoaderErrors(callback) {
+  flushLoaderErrorsToStorage((stored) => {
+    const merged = [...stored, ...loaderErrorBuffer].slice(-MAX_LOADER_ERRORS);
+    callback(merged);
+  });
+}
+
+function clearStoredLoaderErrors(callback) {
+  loaderErrorBuffer = [];
+  if (loaderErrorFlushTimer) {
+    clearTimeout(loaderErrorFlushTimer);
+    loaderErrorFlushTimer = null;
+  }
+  if (browserAPI?.storage?.local) {
+    browserAPI.storage.local.set({ [LOADER_ERROR_STORAGE_KEY]: [] }, callback || (() => {}));
+  } else if (callback) {
+    callback();
+  }
+}
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  if (event.data?.from === 'BA_LOADER_ERROR' && event.data.entry) {
+    appendLoaderError(event.data.entry);
+  }
+});
+
+const originalConsoleError = console.error;
+console.error = function(...args) {
+  originalConsoleError.apply(console, args);
+  appendLoaderError({ level: 'error', source: 'injector', message: formatLoaderErrorArgs(args) });
+};
+
 if (!IS_TOP_FRAME) {
   console.log('[Injector] Skipping subframe — mod loader runs in the top frame only');
 }
@@ -397,6 +514,20 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   
+  if (message.action === 'getLoaderErrors') {
+    getMergedLoaderErrors((errors) => {
+      sendResponse({ success: true, errors });
+    });
+    return true;
+  }
+
+  if (message.action === 'clearLoaderErrors') {
+    clearStoredLoaderErrors(() => {
+      sendResponse({ success: true });
+    });
+    return true;
+  }
+
   if (message.action === 'getStorageSizes') {
     // Calculate localStorage and IndexedDB sizes
     (async () => {

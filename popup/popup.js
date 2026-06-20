@@ -56,6 +56,7 @@ async function ensureGitHubHostAccess() {
 
 // Global Debug System for Mod Console Logs
 const DEBUG_STORAGE_KEY = 'bestiary-debug';
+const LOADER_ERROR_STORAGE_KEY = 'ba-loader-errors';
 let DEBUG_MODE = false;
 
 // Global Outfiter System
@@ -420,14 +421,13 @@ async function applyTranslations() {
   await applyT('#name-input', 'popup.scriptNamePlaceholder', 'placeholder');
   await applyT('#hash-form button[type="submit"]', 'popup.addButton');
   await applyT('.external-link a', 'popup.findMoreMods');
-  // Apply extras translation - find the second collapsible section
-  const collapsibleSections = document.querySelectorAll('.collapsible-section');
-  if (collapsibleSections.length > 1) {
-    const extrasHeader = collapsibleSections[1].querySelector('.collapsible-header span:first-child');
-    if (extrasHeader) {
-      const extrasText = await getT('popup.extras', 'Extras');
-      extrasHeader.textContent = extrasText;
-    }
+  const extrasHeader = document.querySelector('[data-section="extras"] .collapsible-header span:first-child');
+  if (extrasHeader) {
+    extrasHeader.textContent = await getT('popup.extras', 'Extras');
+  }
+  const debugHeader = document.querySelector('[data-section="debug"] .collapsible-header span:first-child');
+  if (debugHeader) {
+    debugHeader.textContent = await getT('popup.debug', 'Debug');
   }
   await applyT('label[for="debug-toggle"]', 'popup.debugMode');
   await applyT('#debug-status', 'popup.off');
@@ -442,6 +442,11 @@ async function applyTranslations() {
   await applyT('.setting-item:has(#show-patch-notes-btn) .setting-header label', 'popup.patchNotes');
   await applyT('#show-patch-notes-btn', 'popup.viewPatchNotes');
   await applyT('.setting-item:has(#show-patch-notes-btn) .setting-description', 'popup.patchNotesDescription');
+  await applyT('.setting-item:has(#error-log-panel) .setting-header label', 'popup.errorLog');
+  await applyT('#refresh-error-log-btn', 'popup.refreshErrorLog');
+  await applyT('#copy-error-log-btn', 'popup.copyErrorLog');
+  await applyT('#clear-error-log-btn', 'popup.clearErrorLog');
+  await applyT('.setting-item:has(#error-log-panel) .setting-description', 'popup.errorLogDescription');
   await applyT('.patch-notes-title', 'popup.patchNotesTitle');
   await applyT('.patch-notes-close', 'popup.closePatchNotes', 'aria-label');
   
@@ -602,6 +607,84 @@ async function updateStorageUsage() {
       storageElement.textContent = `${storageText} unavailable`;
     }
   }
+}
+
+function isLoaderErrorEntry(entry) {
+  return (entry?.level || 'error') === 'error';
+}
+
+function formatLoaderErrorEntry(entry) {
+  const time = new Date(entry.ts || Date.now()).toISOString();
+  const mobile = entry.mobile ? ' [mobile]' : '';
+  const detail = entry.detail ? `\n  ${entry.detail}` : '';
+  return `[${time}] ${(entry.level || 'error').toUpperCase()}${mobile} [${entry.source || 'unknown'}] ${entry.message || ''}${detail}`;
+}
+
+async function fetchLoaderErrors() {
+  try {
+    const tabs = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs[0];
+    if (tab?.id != null && tab.url && tab.url.includes('bestiaryarena.com')) {
+      const live = await window.browserAPI.tabs.sendMessage(tab.id, { action: 'getLoaderErrors' }).catch(() => null);
+      if (live?.success && Array.isArray(live.errors)) {
+        return live.errors;
+      }
+    }
+  } catch {
+    // ignore tab query failures
+  }
+
+  const background = await window.browserAPI.runtime.sendMessage({ action: 'getLoaderErrors' }).catch(() => null);
+  if (background?.success && Array.isArray(background.errors)) {
+    return background.errors;
+  }
+
+  return new Promise((resolve) => {
+    window.browserAPI.storage.local.get([LOADER_ERROR_STORAGE_KEY], (result) => {
+      resolve(Array.isArray(result[LOADER_ERROR_STORAGE_KEY]) ? result[LOADER_ERROR_STORAGE_KEY] : []);
+    });
+  });
+}
+
+async function refreshErrorLogPanel() {
+  const panel = document.getElementById('error-log-panel');
+  if (!panel) return;
+
+  panel.textContent = await getTranslation('popup.errorLogLoading', 'Loading errors...');
+  const errors = (await fetchLoaderErrors()).filter(isLoaderErrorEntry);
+
+  if (errors.length === 0) {
+    panel.textContent = await getTranslation('popup.errorLogEmpty', 'No errors recorded.');
+  } else {
+    panel.textContent = errors.map(formatLoaderErrorEntry).join('\n\n');
+  }
+}
+
+async function copyErrorLog() {
+  const panel = document.getElementById('error-log-panel');
+  if (!panel?.textContent) return;
+
+  try {
+    await navigator.clipboard.writeText(panel.textContent);
+    const copiedMsg = await getTranslation('popup.errorLogCopied', 'Error log copied to clipboard.');
+    originalConsoleLog(copiedMsg);
+  } catch (error) {
+    originalConsoleLog('Failed to copy error log:', error);
+  }
+}
+
+async function clearErrorLog() {
+  await new Promise((resolve) => {
+    window.browserAPI.storage.local.set({ [LOADER_ERROR_STORAGE_KEY]: [] }, resolve);
+  });
+
+  const tabId = await getActiveTabId();
+  if (tabId != null) {
+    await window.browserAPI.tabs.sendMessage(tabId, { action: 'clearLoaderErrors' }).catch(() => null);
+  }
+
+  await window.browserAPI.runtime.sendMessage({ action: 'clearLoaderErrors' }).catch(() => null);
+  await refreshErrorLogPanel();
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -975,6 +1058,30 @@ document.addEventListener('DOMContentLoaded', async () => {
           // Scroll to top to show patch notes
           patchNotesContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
+      }
+    });
+  }
+
+  const refreshErrorLogBtn = document.getElementById('refresh-error-log-btn');
+  if (refreshErrorLogBtn) {
+    refreshErrorLogBtn.addEventListener('click', refreshErrorLogPanel);
+  }
+
+  const copyErrorLogBtn = document.getElementById('copy-error-log-btn');
+  if (copyErrorLogBtn) {
+    copyErrorLogBtn.addEventListener('click', copyErrorLog);
+  }
+
+  const clearErrorLogBtn = document.getElementById('clear-error-log-btn');
+  if (clearErrorLogBtn) {
+    clearErrorLogBtn.addEventListener('click', clearErrorLog);
+  }
+
+  const debugSection = document.querySelector('[data-section="debug"]');
+  if (debugSection) {
+    debugSection.addEventListener('toggle', () => {
+      if (debugSection.open) {
+        refreshErrorLogPanel();
       }
     });
   }

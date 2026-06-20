@@ -909,6 +909,43 @@ footer {
   transform: scale(0.95);
 }
 
+.error-log-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.welcome-btn.secondary-btn {
+  background: var(--theme-card-bg, #2d2d2d);
+  color: var(--theme-text, #e6d7b0);
+  border: 1px solid var(--theme-border, #555);
+}
+
+.welcome-btn.secondary-btn:hover {
+  background: var(--theme-hover, #444);
+  transform: scale(1.02);
+}
+
+.error-log-panel {
+  background: #1a1a1a;
+  border: 1px solid var(--theme-border, #444);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 10px;
+  font-family: Consolas, Monaco, monospace;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #ff9999;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.error-log-panel:empty {
+  display: none;
+}
+
 /* === THEME VARIABLES AND RULES (copied from dashboard) === */
 :root {
   --theme-bg: #232323;

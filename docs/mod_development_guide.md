@@ -9,6 +9,7 @@ This guide provides comprehensive documentation on creating mods for Bestiary Ar
   - [Introduction](#introduction)
   - [Getting Started](#getting-started)
     - [Adding a New Built-in Mod to the Extension](#adding-a-new-built-in-mod-to-the-extension)
+    - [Debug System and Error Log](#debug-system)
     - [Basic Mod Template](#basic-mod-template)
   - [Mod Structure](#mod-structure)
     - [Context](#context)
@@ -111,6 +112,26 @@ The Mod Loader includes a **global debug system** that automatically controls al
 - **No manual checks needed**: Just use `console.log()` directly - the system handles debug control automatically
 
 **Important**: You do NOT need to wrap your console.log calls in `if (window.BESTIARY_DEBUG)` checks. The popup's debug toggle controls all console output globally through the content scripts.
+
+Toggle **Debug Mode** in popup **Extras** (above **Error Log**). Changes require a game tab refresh.
+
+### Error Log (popup Extras)
+
+Since **4.2.10**, the popup **Error Log** captures **errors only** for debugging without DevTools:
+
+| Captured | Not captured |
+|----------|----------------|
+| `console.error` | `console.warn` |
+| Uncaught errors | `console.log` (use Debug Mode) |
+| Unhandled promise rejections | |
+| Mod/loader load failures | |
+| Background mod fetch failures | |
+
+- Persists in extension storage (last 200 entries) until **Clear**
+- Expand **Extras** to auto-refresh; use **Copy** to share logs (e.g. from iOS)
+- Report from mods: `window.BestiaryLoaderErrorLog?.report(source, message, detail)`
+
+See [Mod Loading System — Error Log](mod_loading_optimizations.md#error-log-popup-extras) for architecture details.
 
 ### Basic Mod Template
 
@@ -225,7 +246,7 @@ try {
   
   // Process the result
 } catch (error) {
-  // Log the error
+  // Log the error (also appears in popup Extras → Error Log)
   console.error('Error in my mod:', error);
   
   // Show user-friendly error message
@@ -1233,6 +1254,7 @@ For more examples, check out the existing mods in the `mods` directory.
 
 ## Further Resources
 
+- [Mod Loading System](mod_loading_optimizations.md) - Loader order, mobile/relaxed path, and popup Error Log
 - [UI Management API](ui_management.md) - Detailed documentation on the UI Management API
 - [Game State API Documentation](game_state_api.md) - Detailed documentation on the Game State API
 - [Utility Functions Documentation](utility_functions.md) - Documentation for the utility functions API

@@ -83,30 +83,12 @@
     </div>
 
     <!-- Collapsible Extras Section -->
-    <details class="collapsible-section">
+    <details class="collapsible-section" data-section="extras">
       <summary class="collapsible-header">
         <span data-localize="popup.extras">Extras</span>
         <span class="collapse-icon">▼</span>
       </summary>
       <div class="collapsible-content">
-        <!-- Debug Mode -->
-        <div class="setting-item">
-          <div class="setting-header">
-            <label for="debug-toggle" data-localize="popup.debugMode">Debug Mode</label>
-            <div class="setting-control">
-              <span id="debug-status" data-localize="popup.off">OFF</span>
-              <label class="toggle-switch">
-                <input type="checkbox" id="debug-toggle">
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-          <p class="setting-description" data-localize="popup.debugModeDescription">
-            Enable to show console logs from all mods. Disable for a cleaner console. Changes require page refresh.
-          </p>
-          <p id="storage-usage" class="storage-usage" data-localize="popup.storageCalculating">Storage: calculating...</p>
-        </div>
-
         <!-- Outfiter -->
         <div class="setting-item">
           <div class="setting-header">
@@ -148,6 +130,49 @@
           <p class="setting-description" data-localize="popup.patchNotesDescription">
             View the latest changes and updates to the mod loader.
           </p>
+        </div>
+      </div>
+    </details>
+
+    <!-- Collapsible Debug Section -->
+    <details class="collapsible-section" data-section="debug">
+      <summary class="collapsible-header">
+        <span data-localize="popup.debug">Debug</span>
+        <span class="collapse-icon">▼</span>
+      </summary>
+      <div class="collapsible-content">
+        <!-- Debug Mode -->
+        <div class="setting-item">
+          <div class="setting-header">
+            <label for="debug-toggle" data-localize="popup.debugMode">Debug Mode</label>
+            <div class="setting-control">
+              <span id="debug-status" data-localize="popup.off">OFF</span>
+              <label class="toggle-switch">
+                <input type="checkbox" id="debug-toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+          <p class="setting-description" data-localize="popup.debugModeDescription">
+            Enable to show console logs from all mods. Disable for a cleaner console. Changes require page refresh.
+          </p>
+          <p id="storage-usage" class="storage-usage" data-localize="popup.storageCalculating">Storage: calculating...</p>
+        </div>
+
+        <!-- Error Log -->
+        <div class="setting-item">
+          <div class="setting-header">
+            <label data-localize="popup.errorLog">Error Log</label>
+            <div class="error-log-actions">
+              <button id="refresh-error-log-btn" class="welcome-btn secondary-btn" type="button" data-localize="popup.refreshErrorLog">Refresh</button>
+              <button id="copy-error-log-btn" class="welcome-btn secondary-btn" type="button" data-localize="popup.copyErrorLog">Copy</button>
+              <button id="clear-error-log-btn" class="welcome-btn secondary-btn" type="button" data-localize="popup.clearErrorLog">Clear</button>
+            </div>
+          </div>
+          <p class="setting-description" data-localize="popup.errorLogDescription">
+            Loader and mod errors only (warnings are not recorded). Useful for debugging on mobile.
+          </p>
+          <pre id="error-log-panel" class="error-log-panel" aria-live="polite"></pre>
         </div>
       </div>
     </details>

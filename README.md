@@ -60,10 +60,11 @@ The extension provides a modern, store-like popup interface for managing your mo
 - **Patch Notes System**: Automatically displays patch notes for new versions, with manual viewing option
 - **Storage Usage Display**: Monitor extension storage usage in real-time
 - **Extras Section**: Collapsible section containing:
-  - **Debug Mode**: Toggle console logging for all mods
   - **Outfiter**: Access all outfits in the outfit selector
   - **Welcome Page**: Enable/disable the welcome page on next load
   - **Patch Notes**: View latest changes and updates
+  - **Debug Mode**: Toggle `console.log` output from all mods (storage usage shown below the toggle)
+  - **Error Log**: Persisted loader and mod **errors only** (warnings are not recorded). Refresh, Copy, and Clear buttons; auto-refreshes when you expand Extras. Useful on mobile/iOS where DevTools is unavailable
 - **Add Script Section**: Collapsible section for importing mods from GitHub Gists (supports both hash and full URL)
 - **External Links**: Quick access to find more user-generated mods on the wiki
 
@@ -157,7 +158,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - `content/` - Content scripts that are injected into the game page
   - `platform.js` - Desktop vs mobile loader detection (`window.BestiaryPlatform`); injected into page context before `client.js`
   - `client.js` - Main client-side API and functionality
-  - `injector.js` - Main content script: injects `platform.js`, then page context scripts (client, mods, databases) at `document_start`
+  - `injector.js` - Main content script: injects `platform.js`, then page context scripts (client, mods, databases) at `document_start`; collects loader errors for the popup Error Log
   - `mod-coordination.mjs` - Global mod coordination system for managing mod states, priorities, and resource control
   - `local_mods.js` - Manages local mods
   - `mod-registry.js` - Central lists of database, official, super, and OT mod filenames (must stay in sync with `background.js` and `popup/popup.js`)
@@ -188,6 +189,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 ## Documentation
 
 - [Mod Development Guide](docs/mod_development_guide.md) - Comprehensive guide for mod developers
+- [Mod Loading System](docs/mod_loading_optimizations.md) - Loader architecture, mobile/relaxed path, and Error Log
 - [UI Management API](docs/ui_management.md) - Documentation for the UI Management API
 - [UI Components Documentation](docs/ui_components.md) - Documentation for the UI Components
 - [Client API Documentation](docs/client_api.md) - Complete reference for the game's Client API
@@ -587,6 +589,7 @@ Visit the [GitHub Issues page](https://github.com/styrserver/BestiaryArena-Super
 If you encounter any issues:
 
 - **Mods not appearing?** Make sure you're on the Bestiary Arena website and the extension is enabled.
+- **Mods not loading on mobile/iOS?** Open the popup → **Extras** → **Error Log** (expand Extras to refresh). Use **Copy** to share errors for debugging. Tap **Clear** to wipe stale entries. Enable **Debug Mode** and refresh the game tab if you need verbose `console.log` output in DevTools.
 - **Game performance issues?** Try using the Performance Mode mod to improve game speed.
 - **Extension not working after game update?** Check for extension updates on GitHub.
 - **Specific mod not working?** Disable and re-enable the mod, or refresh the page.

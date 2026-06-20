@@ -76,6 +76,43 @@ On **mobile WebExtensions** (e.g. Orion iOS), `content/platform.js` enables a **
 
 See also [`content/platform.js`](../content/platform.js) and [`content/local_mods.js`](../content/local_mods.js).
 
+## Error Log (popup Extras)
+
+Since **4.2.10**, the extension popup includes an **Error Log** under **Extras** for debugging without DevTools (especially on mobile WebExtensions such as Orion iOS).
+
+### Extras order
+
+Outfiter → Welcome Page → Patch Notes → **Debug Mode** → **Error Log**
+
+### What is captured
+
+- `console.error` from the game page, content script (`injector.js`), and background script
+- Uncaught errors and unhandled promise rejections
+- Mod batch load failures and loader-level completion errors
+- Background `getModContent` fetch failures
+
+### What is not captured
+
+- `console.warn` — not stored or shown (avoids noisy fallback warnings during startup)
+- `console.log` — use **Debug Mode** in Extras instead
+
+### Persistence and UI
+
+- Stored in `chrome.storage.local` under key `ba-loader-errors` (ring buffer, last **200** entries)
+- Survives page reloads until you tap **Clear**
+- **Refresh** reloads from the active Bestiary Arena tab when open, otherwise from storage
+- **Copy** copies the visible log text to the clipboard
+
+### Reporting from page-context code
+
+Mods and loader scripts can emit structured entries:
+
+```javascript
+window.BestiaryLoaderErrorLog?.report('My Mod', 'Short message', 'Optional detail');
+```
+
+Entries are sent to the content script via `postMessage` and merged into the same storage.
+
 ## Benefits
 
 1. **Performance**: Eliminates duplicate executions and reduces overhead

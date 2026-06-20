@@ -1268,6 +1268,15 @@ function sendCompletionSignal(results = []) {
   completionSignalSent = true;
   lastCompletionErrors = errors;
 
+  if (errors.length > 0 && window.BestiaryLoaderErrorLog) {
+    window.BestiaryLoaderErrorLog.report(
+      'loader',
+      `Load completed with ${errors.length} error(s)`,
+      errors.map((entry) => `${entry.mod}: ${entry.error}`).join('\n'),
+      'error'
+    );
+  }
+
   if (errors.length > 0) {
     window.BestiaryUIComponents?.handleLoaderLoadFailure?.(errors);
   } else {

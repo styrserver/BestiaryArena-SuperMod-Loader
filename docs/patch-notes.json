@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.2.10",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "added",
+          "text": "Error Log in popup Debug section: captures console errors, uncaught errors, unhandled rejections, mod load failures, and background mod fetch failures (warnings are not recorded). Persists across reloads (last 200 entries); Refresh, Copy, and Clear buttons. Useful for debugging on mobile without DevTools."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Popup: Debug Mode and Error Log moved from Extras into a dedicated Debug collapsible section (below Extras). Error Log records errors only — console.warn output is not stored or shown in the panel."
+        }
+      ]
+    },
+    {
       "version": "4.2.9",
       "changes": [
         {

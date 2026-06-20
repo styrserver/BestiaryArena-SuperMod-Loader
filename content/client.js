@@ -8,6 +8,80 @@ if (typeof browserAPI === 'undefined') {
   var browserAPI = (typeof browser !== 'undefined') ? browser : (typeof chrome !== 'undefined' ? chrome : null);
 }
 
+(function installLoaderErrorReporting() {
+  if (window.__BA_LOADER_ERROR_HOOKS__) return;
+  window.__BA_LOADER_ERROR_HOOKS__ = true;
+
+  function formatLoaderErrorArgs(args) {
+    return args.map((arg) => {
+      if (arg instanceof Error) {
+        return `${arg.name}: ${arg.message}${arg.stack ? `\n${arg.stack}` : ''}`;
+      }
+      if (typeof arg === 'object') {
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return String(arg);
+        }
+      }
+      return String(arg);
+    }).join(' ');
+  }
+
+  function reportLoaderError(entry) {
+    try {
+      window.postMessage({
+        from: 'BA_LOADER_ERROR',
+        entry: {
+          ts: Date.now(),
+          level: entry.level || 'error',
+          source: entry.source || 'page',
+          message: entry.message || '',
+          detail: entry.detail
+        }
+      }, '*');
+    } catch {
+      // ignore
+    }
+  }
+
+  window.BestiaryLoaderErrorLog = {
+    report(source, message, detail, level = 'error') {
+      reportLoaderError({
+        level,
+        source,
+        message: String(message),
+        detail: detail != null ? String(detail) : undefined
+      });
+    }
+  };
+
+  const originalPageError = console.error;
+  console.error = function(...args) {
+    originalPageError.apply(console, args);
+    reportLoaderError({ level: 'error', source: 'page', message: formatLoaderErrorArgs(args) });
+  };
+
+  window.addEventListener('error', (event) => {
+    reportLoaderError({
+      level: 'error',
+      source: 'window.error',
+      message: event.message || 'Unknown error',
+      detail: event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : undefined
+    });
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    reportLoaderError({
+      level: 'error',
+      source: 'unhandledrejection',
+      message: reason instanceof Error ? reason.message : String(reason),
+      detail: reason instanceof Error ? reason.stack : undefined
+    });
+  });
+})();
+
 (function() {
   if (window.BestiaryModAPI) return;
   
