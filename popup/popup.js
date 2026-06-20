@@ -443,7 +443,6 @@ async function applyTranslations() {
   await applyT('#show-patch-notes-btn', 'popup.viewPatchNotes');
   await applyT('.setting-item:has(#show-patch-notes-btn) .setting-description', 'popup.patchNotesDescription');
   await applyT('.setting-item:has(#error-log-panel) .setting-header label', 'popup.errorLog');
-  await applyT('#refresh-error-log-btn', 'popup.refreshErrorLog');
   await applyT('#copy-error-log-btn', 'popup.copyErrorLog');
   await applyT('#clear-error-log-btn', 'popup.clearErrorLog');
   await applyT('.setting-item:has(#error-log-panel) .setting-description', 'popup.errorLogDescription');
@@ -1129,11 +1128,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
     });
-  }
-
-  const refreshErrorLogBtn = document.getElementById('refresh-error-log-btn');
-  if (refreshErrorLogBtn) {
-    refreshErrorLogBtn.addEventListener('click', refreshErrorLogPanel);
   }
 
   const copyErrorLogBtn = document.getElementById('copy-error-log-btn');

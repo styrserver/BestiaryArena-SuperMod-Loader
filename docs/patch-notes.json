@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.3.1",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Error Log in popup Debug section: removed Refresh button (panel still reloads when expanding Debug). Shortened description text."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Maps tab Top 5 Speedruns/Ranks/Floors tables refresh when RunTracker saves a run for the selected map (no longer stale until re-selecting the map)."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "fixed",
+          "text": "Same-setup speedrun and rank entries no longer overwrite stored bests with slower or worse runs; only faster times or better rank scores update the row."
+        }
+      ]
+    },
+    {
       "version": "4.3.0",
       "changes": [
         {

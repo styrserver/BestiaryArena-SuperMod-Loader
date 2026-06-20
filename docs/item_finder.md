@@ -1,3 +1,8 @@
+# Item API discovery notes (maintainers)
+
+Internal console snippets for exploring item-related game APIs. Not end-user documentation — see [`inventory-database.js`](../database/inventory-database.js) for shipped tooltip data.
+
+```javascript
 // =======================
 // 0.5. Item Discovery Console Commands
 // =======================
@@ -205,3 +210,4 @@ tooltipElements.forEach((el, i) => {
     }
   }
 });
+```

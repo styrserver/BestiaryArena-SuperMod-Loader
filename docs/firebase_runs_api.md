@@ -11,6 +11,10 @@ The Firebase Best Runs API allows you to fetch and decrypt best runs data from F
 
 The data is encrypted client-side using a password, so only those with the password can decrypt and view the actual run data.
 
+### Interactive tool
+
+Open [`fetch-best-runs.html`](fetch-best-runs.html) in a browser for a simple UI that hashes a player name, fetches their Firebase entry, and decrypts runs with a password (no extension required).
+
 ## Firebase Endpoint Structure
 
 ### Base URL

@@ -40,13 +40,14 @@ User scripts stored in localStorage are automatically integrated:
 
 `injector.js` loads page scripts in this order:
 
-1. **`content/platform.js`** — sets `window.BestiaryPlatform` (desktop strict vs mobile relaxed loader)
-2. **`content/client.js`** — `BestiaryModAPI`, UI components
-3. **`content/mod-coordination.mjs`**
-4. **`content/custom-battles.js`**
-5. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
+1. **`content/extension-url.js`** — encodes extension URLs and maps logical mod paths (e.g. `Official Mods/`) to on-disk paths
+2. **`content/platform.js`** — sets `window.BestiaryPlatform` (desktop strict vs mobile relaxed loader)
+3. **`content/client.js`** — `BestiaryModAPI`, UI components
+4. **`content/mod-coordination.mjs`** — loaded as `text/javascript` (IIFE, not `type="module"`)
+5. **`content/custom-battles.js`**
+6. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
 
-`utility_injector.js` (at `document_idle`) also loads `ba-sandbox-utils.mjs` and may inject `custom-battles.js` again.
+`utility_injector.js` (at `document_idle`) also loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule) and may inject `custom-battles.js` again.
 
 ### Mod execution
 
@@ -76,31 +77,32 @@ On **mobile WebExtensions** (e.g. Orion iOS), `content/platform.js` enables a **
 
 See also [`content/platform.js`](../content/platform.js) and [`content/local_mods.js`](../content/local_mods.js). For Orion/WebKit platform constraints and extension URL encoding, see [Orion iOS Compatibility](orion_ios_compatibility.md).
 
-## Error Log (popup Extras)
+## Error Log (popup Debug)
 
-Since **4.2.10**, the extension popup includes an **Error Log** under **Extras** for debugging without DevTools (especially on mobile WebExtensions such as Orion iOS).
+Since **4.2.10**, the extension popup includes an **Error Log** under the **Debug** collapsible section (below **Extras**) for debugging without DevTools (especially on mobile WebExtensions such as Orion iOS).
 
-### Extras order
+### Debug section order
 
-Outfiter → Welcome Page → Patch Notes → **Debug Mode** → **Error Log**
+**Debug Mode** → **Error Log**
 
 ### What is captured
 
 - `console.error` from the game page, content script (`injector.js`), and background script
 - Uncaught errors and unhandled promise rejections
 - Mod batch load failures and loader-level completion errors
-- Background `getModContent` fetch failures
+- Background `getModContent` fetch failures (includes failed resource URL in detail)
 
 ### What is not captured
 
 - `console.warn` — not stored or shown (avoids noisy fallback warnings during startup)
-- `console.log` — use **Debug Mode** in Extras instead
+- `console.log` — use **Debug Mode** in the Debug section instead
 
 ### Persistence and UI
 
 - Stored in `chrome.storage.local` under key `ba-loader-errors` (ring buffer, last **200** entries)
 - Survives page reloads until you tap **Clear**
-- **Refresh** reloads from the active Bestiary Arena tab when open, otherwise from storage
+- Prepends a sticky **Device / Browser** header (extension version, browser, platform, device type, language, URL, user-agent, timestamp) that survives **Clear** and is included when copying; uses live page context when a bestiaryarena.com tab is active
+- Expanding the **Debug** section auto-refreshes the panel (no separate Refresh button since **4.3.1**)
 - **Copy** copies the visible log text to the clipboard
 
 ### Reporting from page-context code

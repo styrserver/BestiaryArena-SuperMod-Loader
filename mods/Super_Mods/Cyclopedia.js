@@ -2886,6 +2886,7 @@ const cyclopediaState = {
     this.searchDebounceTimer = null; this.lazyLoadQueue = []; this.isProcessingQueue = false;
     this.searchedUsername = null;
     this.refreshRankingsTable = null;
+    this.refreshLocalRunTables = null;
     const cacheStats = this.getCacheStats();
   }
 };
@@ -12883,6 +12884,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Function to populate speedrun table with local data
       async function populateSpeedrunTable() {
         try {
+          while (speedrunTable.children.length > 1) {
+            speedrunTable.removeChild(speedrunTable.lastChild);
+          }
           
           // Resolve the map name to ensure consistency with RunTracker
           const resolvedMapName = resolveMapName(selectedMap);
@@ -13873,6 +13877,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Function to populate rank points table with local data
       async function populateRankPointsTable() {
         try {
+          while (ranksTable.children.length > 1) {
+            ranksTable.removeChild(ranksTable.lastChild);
+          }
           
           // Resolve the map name to ensure consistency with RunTracker
           const resolvedMapName = resolveMapName(selectedMap);
@@ -14578,6 +14585,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           floorsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
         }
       });
+      
+      cyclopediaState.refreshLocalRunTables = async () => {
+        await populateSpeedrunTable();
+        await populateRankPointsTable();
+        await populateFloorsTable();
+      };
       
       return statsContainer;
     }
@@ -20234,12 +20247,26 @@ function setupEventHandlers() {
     }
   };
   document.addEventListener('click', headerClickHandler);
-  cyclopediaEventHandlers.push({ type: 'click', handler: headerClickHandler });
+  cyclopediaEventHandlers.push({ target: document, type: 'click', handler: headerClickHandler });
+
+  const runTrackerUpdateHandler = (e) => {
+    const detail = e.detail || {};
+    if (typeof cyclopediaState.refreshLocalRunTables !== 'function') return;
+    const activeMapId = cyclopediaState.mapsLastSelectedMapId;
+    if (detail.mapKey && activeMapId) {
+      const resolvedMapName = resolveMapName(activeMapId);
+      const currentMapKey = `map_${String(resolvedMapName).toLowerCase().replace(/\s+/g, '_')}`;
+      if (detail.mapKey !== currentMapKey) return;
+    }
+    cyclopediaState.refreshLocalRunTables();
+  };
+  window.addEventListener('runtracker:runsUpdated', runTrackerUpdateHandler);
+  cyclopediaEventHandlers.push({ target: window, type: 'runtracker:runsUpdated', handler: runTrackerUpdateHandler });
 }
 
 function removeCyclopediaEventListeners() {
-  cyclopediaEventHandlers.forEach(({ type, handler }) => {
-    document.removeEventListener(type, handler);
+  cyclopediaEventHandlers.forEach(({ target, type, handler }) => {
+    (target || document).removeEventListener(type, handler);
   });
   cyclopediaEventHandlers.length = 0;
 }

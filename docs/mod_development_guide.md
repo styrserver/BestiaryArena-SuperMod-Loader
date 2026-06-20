@@ -9,7 +9,8 @@ This guide provides comprehensive documentation on creating mods for Bestiary Ar
   - [Introduction](#introduction)
   - [Getting Started](#getting-started)
     - [Adding a New Built-in Mod to the Extension](#adding-a-new-built-in-mod-to-the-extension)
-    - [Debug System and Error Log](#debug-system)
+    - [Debug System](#debug-system)
+    - [Error Log](#error-log-popup-debug)
     - [Basic Mod Template](#basic-mod-template)
   - [Mod Structure](#mod-structure)
     - [Context](#context)
@@ -113,9 +114,9 @@ The Mod Loader includes a **global debug system** that automatically controls al
 
 **Important**: You do NOT need to wrap your console.log calls in `if (window.BESTIARY_DEBUG)` checks. The popup's debug toggle controls all console output globally through the content scripts.
 
-Toggle **Debug Mode** in popup **Extras** (above **Error Log**). Changes require a game tab refresh.
+Toggle **Debug Mode** in popup **Debug** (below **Extras**). Changes require a game tab refresh.
 
-### Error Log (popup Extras)
+### Error Log (popup Debug)
 
 Since **4.2.10**, the popup **Error Log** captures **errors only** for debugging without DevTools:
 
@@ -128,10 +129,11 @@ Since **4.2.10**, the popup **Error Log** captures **errors only** for debugging
 | Background mod fetch failures | |
 
 - Persists in extension storage (last 200 entries) until **Clear**
-- Expand **Extras** to auto-refresh; use **Copy** to share logs (e.g. from iOS)
+- Prepends a sticky Device / Browser header (survives **Clear**; included when copying)
+- Expand **Debug** to auto-refresh; use **Copy** to share logs (e.g. from iOS)
 - Report from mods: `window.BestiaryLoaderErrorLog?.report(source, message, detail)`
 
-See [Mod Loading System — Error Log](mod_loading_optimizations.md#error-log-popup-extras) for architecture details.
+See [Mod Loading System — Error Log](mod_loading_optimizations.md#error-log-popup-debug) for architecture details.
 
 ### Basic Mod Template
 
@@ -246,7 +248,7 @@ try {
   
   // Process the result
 } catch (error) {
-  // Log the error (also appears in popup Extras → Error Log)
+  // Log the error (also appears in popup Debug → Error Log)
   console.error('Error in my mod:', error);
   
   // Show user-friendly error message
@@ -1257,6 +1259,13 @@ For more examples, check out the existing mods in the `mods` directory.
 - [Mod Loading System](mod_loading_optimizations.md) - Loader order, mobile/relaxed path, and popup Error Log
 - [Orion iOS Compatibility](orion_ios_compatibility.md) - WebKit/Orion platform constraints and extension resource loading
 - [UI Management API](ui_management.md) - Detailed documentation on the UI Management API
+- [UI Components Documentation](ui_components.md) - Game-styled modal, portrait, and list components
+- [Client API Documentation](client_api.md) - Complete reference for the game's Client API
 - [Game State API Documentation](game_state_api.md) - Detailed documentation on the Game State API
 - [Utility Functions Documentation](utility_functions.md) - Documentation for the utility functions API
-- [Bestiary Arena Wiki](https://bestiaryarena.fandom.com/) - Information about the game mechanics 
+- [Custom Board Setups](custom_board_setups.md) - Board placement and game event examples
+- [Raid System API](raid_system_api.md) - Raid state machine reference for automation mods
+- [Firebase Best Runs API](firebase_runs_api.md) - Fetch and decrypt Mod Settings best-runs uploads
+- [Fetch Best Runs (HTML tool)](fetch-best-runs.html) - Browser UI for fetching and decrypting uploaded runs
+- [VIP List Chat](chat_documentation.md) - Private and All Chat via Firebase
+- [Bestiary Arena Wiki](https://bestiaryarena.wiki.gg/) - Information about the game mechanics 

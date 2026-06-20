@@ -60,11 +60,12 @@ The extension provides a modern, store-like popup interface for managing your mo
 - **Patch Notes System**: Automatically displays patch notes for new versions, with manual viewing option
 - **Storage Usage Display**: Monitor extension storage usage in real-time
 - **Extras Section**: Collapsible section containing:
-  - **Outfiter**: Access all outfits in the outfit selector
+  - **Outfiter**: Locally unlock all outfits in the outfit selector (requires page refresh)
   - **Welcome Page**: Enable/disable the welcome page on next load
   - **Patch Notes**: View latest changes and updates
+- **Debug Section**: Collapsible section (below Extras) containing:
   - **Debug Mode**: Toggle `console.log` output from all mods (storage usage shown below the toggle)
-  - **Error Log**: Persisted loader and mod **errors only** (warnings are not recorded). Refresh, Copy, and Clear buttons; auto-refreshes when you expand Extras. Useful on mobile/iOS where DevTools is unavailable
+  - **Error Log**: Persisted loader and mod **errors only** (warnings are not recorded). Includes a sticky Device / Browser header (extension version, platform, URL, user-agent). Copy and Clear buttons; auto-refreshes when you expand Debug. Useful on mobile/iOS where DevTools is unavailable
 - **Add Script Section**: Collapsible section for importing mods from GitHub Gists (supports both hash and full URL)
 - **External Links**: Quick access to find more user-generated mods on the wiki
 
@@ -156,6 +157,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `locales/` - Internationalization files
   - Additional folders under `assets/` (for example `depot/`, `equipment/`, `guild/`, `quests/`, `skills/`) hold mod-specific images and data; they are exposed via `web_accessible_resources` in the manifest as needed—not every folder is listed here.
 - `content/` - Content scripts that are injected into the game page
+  - `extension-url.js` - Encodes extension resource URLs and maps logical mod paths to on-disk paths (Orion iOS / WebKit); injected into page context first
   - `platform.js` - Desktop vs mobile loader detection (`window.BestiaryPlatform`); injected into page context before `client.js`
   - `client.js` - Main client-side API and functionality
   - `injector.js` - Main content script: injects `platform.js`, then page context scripts (client, mods, databases) at `document_start`; collects loader errors for the popup Error Log
@@ -195,6 +197,12 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - [UI Components Documentation](docs/ui_components.md) - Documentation for the UI Components
 - [Client API Documentation](docs/client_api.md) - Complete reference for the game's Client API
 - [Game State API Documentation](docs/game_state_api.md) - Complete reference for accessing and modifying game state
+- [Utility Functions](docs/utility_functions.md) - Board serialization, replay, and name/ID helpers
+- [Custom Board Setups](docs/custom_board_setups.md) - Examples for board placement and game events
+- [Raid System API](docs/raid_system_api.md) - Raid state machine reference for automation mods
+- [Firebase Best Runs API](docs/firebase_runs_api.md) - Fetch and decrypt Mod Settings best-runs uploads
+- [Fetch Best Runs (HTML tool)](docs/fetch-best-runs.html) - Browser UI for fetching and decrypting uploaded runs
+- [VIP List Chat](docs/chat_documentation.md) - Private and All Chat via Firebase
 - [Patch notes (JSON)](docs/patch-notes.json) - Machine-readable changelog consumed by the in-loader patch notes feature
 
 ### Wiki Lua export helpers

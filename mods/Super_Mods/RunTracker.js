@@ -1259,6 +1259,9 @@ async function addRun(runData) {
       
       // Queue save instead of immediate save
       StorageManager.queueSave();
+      window.dispatchEvent(new CustomEvent('runtracker:runsUpdated', {
+        detail: { mapKey: runData.mapKey, mapName: runData.mapName }
+      }));
     }
     
     return speedrunUpdated || rankUpdated || floorUpdated;
@@ -1304,11 +1307,12 @@ async function checkAndUpdateSpeedruns(runData) {
   });
   
   if (sameSetupRun) {
-    // Same setup found - update with new data while preserving category-specific info
+    if (runData.time >= sameSetupRun.time) {
+      console.log(`[RunTracker] Skipping speedrun update - time ${runData.time} not faster than existing ${sameSetupRun.time} for same setup`);
+      return false;
+    }
     const existingIndex = speedrunRuns.indexOf(sameSetupRun);
-    const updatedRun = { ...sameSetupRun, ...runData };
-    speedrunRuns[existingIndex] = updatedRun;
-    
+    speedrunRuns[existingIndex] = { ...sameSetupRun, ...runData };
     console.log(`[RunTracker] Updated speedrun for ${runData.mapName} with same setup: ${runData.time} (was ${sameSetupRun.time})`);
   } else {
     // Unique setup - add to top 5 in correct order
@@ -1375,11 +1379,14 @@ async function checkAndUpdateRankRuns(runData) {
   });
   
   if (sameSetupRun) {
-    // Same setup found - update with new data while preserving category-specific info
+    const isBetterRank = runData.points > sameSetupRun.points
+      || (runData.points === sameSetupRun.points && runData.time < sameSetupRun.time);
+    if (!isBetterRank) {
+      console.log(`[RunTracker] Skipping rank update - ${runData.points} points / ${runData.time} time not better than existing ${sameSetupRun.points} points / ${sameSetupRun.time} time for same setup`);
+      return false;
+    }
     const existingIndex = rankRuns.indexOf(sameSetupRun);
-    const updatedRun = { ...sameSetupRun, ...runData };
-    rankRuns[existingIndex] = updatedRun;
-    
+    rankRuns[existingIndex] = { ...sameSetupRun, ...runData };
     console.log(`[RunTracker] Updated rank run for ${runData.mapName} with same setup: ${runData.points} points, ${runData.time} time (was ${sameSetupRun.points} points, ${sameSetupRun.time} time)`);
   } else {
     // Unique setup - add to top 5 in correct order
