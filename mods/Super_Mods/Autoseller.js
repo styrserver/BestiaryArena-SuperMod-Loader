@@ -1,0 +1,9590 @@
+// =======================
+// 0. Version & Metadata
+// =======================
+
+(function() {
+    if (window.__autosellerLoaded) return;
+    window.__autosellerLoaded = true;
+    
+    console.log('[Autoseller] Script initialized');
+
+    // =======================
+    // 1. Configuration & Constants
+    // =======================
+    const modName = "Autoseller";
+    const modDescription = "Automatically sells and squeezes creatures based on gene thresholds and experience levels. Shiny creatures are protected.";
+    
+    // Core timing constants
+    const AUTOSELLER_MIN_DELAY_MS = 2000;
+    const PENDING_GAME_END_MAX_AGE_MS = 300000;
+    const PENDING_GAME_END_MAX_SYNC_ATTEMPTS = 4;
+    const PENDING_GAME_END_MAX_ACTION_ATTEMPTS = 3;
+    const PENDING_EQUIPMENT_MISS_TTL_MS = 8000;
+    const MAX_OBSERVER_ATTEMPTS = 10;
+    const OBSERVER_DEBOUNCE_MS = 100;
+    
+    // Rate limiting constants for all API operations
+    const SELL_RATE_LIMIT = {
+        MAX_MONSTERS_PER_10S: 15,
+        DELAY_BETWEEN_SELLS_MS: 300,
+        WINDOW_SIZE_MS: 10000,
+        BATCH_SIZE: 5,
+        BATCH_DELAY_MS: 1000
+    };
+    
+    // Operation delays for UI settling and processing
+    const OPERATION_DELAYS = {
+        // Common delay for UI settling before operations (used by sell, squeeze, disenchant, and dragon plant)
+        UI_SETTLE_MS: 500,
+        BEFORE_DRAGON_PLANT_ACTIVATE_MS: 300,  // Delay for activating Dragon Plant after game end
+        AFTER_GAME_END_BEFORE_ACTIVATE_MS: 200, // Delay after game end before checking Dragon Plant
+        
+        // Delay after operation before removing from local inventory
+        BEFORE_REMOVE_FROM_INVENTORY_MS: 100,  // Used for squeeze
+        
+        // Rate limit retry delay
+        RATE_LIMIT_RETRY_MS: 5000
+    };
+    
+    // UI Constants
+    const UI_CONSTANTS = {
+        MODAL_WIDTH: 530,
+        MODAL_HEIGHT: 390,
+        MODAL_CONTENT_HEIGHT: 310,
+        LEFT_COLUMN_WIDTH: 140,
+        RIGHT_COLUMN_WIDTH: 320,
+        INPUT_WIDTH: 48,
+        INPUT_STEP: 1,
+        SQUEEZE_GENE_MIN: 80,
+        SQUEEZE_GENE_MAX: 100,
+        SELL_GENE_MIN: 5,
+        SELL_GENE_MAX: 79,
+        /** When sell/devour sealed is allowed, tier-5 sealed use this band (cannot rely on squeeze 80–100). */
+        SEALED_SELL_GENE_MIN: 5,
+        SEALED_SELL_GENE_MAX: 100,
+        MAX_EXP_DEFAULT: 52251,
+        // Button colors
+        BUTTON_COLORS: {
+            ACTIVE_GREEN_BG: '#1a3a1a',
+            ACTIVE_RED_BG: '#3a1a1a',
+            INACTIVE_BG: '#1a1a1a',
+            ACTIVE_GREEN_TEXT: '#4CAF50',
+            ACTIVE_RED_TEXT: '#ff6b6b',
+            INACTIVE_TEXT: '#888888',
+            PRIMARY_TEXT: '#ffe066',
+            INPUT_BG: '#2a2a2a',
+            BORDER: '#555'
+        },
+        // Text shadows
+        TEXT_SHADOW: {
+            GREEN: '0 0 4px rgba(76, 175, 80, 0.5)',
+            RED: '0 0 4px rgba(255, 107, 107, 0.5)',
+            NONE: 'none'
+        },
+        // Button sizes
+        BUTTON_SIZES: {
+            WIDTH: '100px',
+            HEIGHT: '28px'
+        },
+        // Spacing
+        SPACING: {
+            GAP_SMALL: '4px',
+            GAP_MEDIUM: '8px',
+            GAP_LARGE: '12px',
+            MARGIN_BOTTOM_BUTTON: '10px'
+        },
+        // Input styles
+        INPUT_STYLES: {
+            WIDTH_SMALL: '40px',
+            WIDTH_MEDIUM: '48px',
+            PADDING: '2px 4px',
+            FONT_SIZE_SMALL: '12px',
+            FONT_SIZE_MEDIUM: '14px',
+            BACKGROUND: '#2a2a2a',
+            BORDER: '1px solid #555',
+            BORDER_RADIUS: '3px'
+        },
+        // Common styles
+        COMMON_STYLES: {
+            PIXEL_FONT: 'pixel-font-16',
+            PRIMARY_COLOR: '#ffe066',
+            SECONDARY_COLOR: '#cccccc',
+            BACKGROUND_COLOR: '#232323',
+            BORDER_RADIUS: '3px',
+            INPUT_BORDER: '1px solid #ffe066'
+        },
+        // CSS Classes
+        CSS_CLASSES: {
+            AUTOSELLER_NAV_BTN: 'autoseller-nav-btn',
+            AUTOSELLER_WIDGET: 'autoseller-session-widget',
+            AUTOSELLER_RESPONSIVE_STYLE: 'autoseller-responsive-style'
+        },
+        // DOM Selectors
+        SELECTORS: {
+            CREATURE_SLOTS: '[data-blip]',
+            DAYCARE_ICON: 'img[alt="daycare"][src="/assets/icons/atdaycare.png"]',
+            CREATURE_IMG: 'img[alt="creature"]'
+        }
+    };
+    
+    // API Constants
+    const API_CONSTANTS = {
+        RETRY_ATTEMPTS: 2,
+        RETRY_DELAY_BASE: 1000,
+        DUST_PER_CREATURE: 10
+    };
+    
+    // Cleanup references
+    let boardSubscription1 = null;
+    // Removed boardSubscription2 - all processing now happens at game end
+    let playerSubscription = null;
+    let debounceTimer = null;
+    
+    // Store latest serverResults from board subscription
+    let latestServerResults = null;
+    // Track the last processed serverResults seed to avoid processing the same results twice
+    let lastProcessedServerResultsSeed = null;
+    
+    // Event handler references for cleanup
+    let emitNewGameHandler1 = null;
+    let emitEndGameHandler1 = null;
+    let emitNewGameHandler2 = null; // Separate handler for setupGameEndListener
+    
+    // Global references for cleanup
+    let originalFetch = null;
+    let messageListener = null;
+    let menuColorObserver = null; // MutationObserver for menu color updates
+    let checkboxListeners = []; // Track checkbox event listeners for cleanup
+    let dragonPlantDebounceTimer = null; // Debounce timer for dragon plant observer
+    let openContextMenu = null; // Track currently open context menu { overlay, menu, closeMenu }
+    
+    // Timeout tracking for memory leak prevention
+    let timeoutIds = []; // Track all setTimeout calls for cleanup
+    let isCleaningUp = false; // Flag to prevent execution during cleanup
+    let gameEndSubscription = null; // Track game.world.onGameEnd subscription
+    const pendingGameEndBySeed = new Map(); // seed -> serverResults snapshot for retry after canRun block
+    const pendingGameEndMeta = new Map(); // seed -> { attempts, queuedAt, reasons[] }
+    let gameEndRetryTimer = null;
+    let pendingRewardsFlushTimer = null;
+    let lastBoardEquipHandledSeed = null;
+    let visibilityChangeHandler = null;
+    let pendingGameEndInventorySubscription = null;
+    
+    // Translation helper
+    const t = (key) => {
+        if (typeof api !== 'undefined' && api.i18n && api.i18n.t) {
+            return api.i18n.t(key);
+        }
+        // Fallback to key if translation API is not available
+        return key;
+    };
+    
+    // Helper for dynamic translation with placeholders
+    const tReplace = (key, replacements) => {
+        let text = t(key);
+        Object.entries(replacements).forEach(([placeholder, value]) => {
+            text = text.replace(`{${placeholder}}`, value);
+        });
+        return text;
+    };
+
+    // Dragon Plant Autocollect Constants
+    const DRAGON_PLANT_CONFIG = {
+        GOLD_THRESHOLD: 100000,        // Collect when >= 100k gold
+        ITEM_ID: '37021',              // Dragon Plant item ID
+        MAX_COLLECT_ITERATIONS: 100,   // Safety limit for collect loop (can collect up to 10M gold)
+        COOLDOWN_MS: 10000,            // 10 seconds cooldown between collections
+        TIMINGS: {
+            INVENTORY_OPEN: 400,       // Wait for inventory to open
+            ITEM_DETAILS_OPEN: 300,    // Wait for item details modal to open
+            AFTER_COLLECT: 500,        // Wait after clicking Collect (API rate limit: min 400ms)
+            ESC_BETWEEN: 150,          // Wait between ESC key presses
+            VERIFY_SUCCESS: 200        // Wait before verifying collection success
+        }
+    };
+
+    // Default Settings - All features default to disabled (off)
+    const DEFAULT_SETTINGS = {
+        autoMode: null, // 'autoplant' | 'autosell' | null (OFF - default disabled)
+        autoplantAutocollectChecked: false,
+        autosqueezeChecked: false, // Default disabled
+        autosqueezeGenesMin: UI_CONSTANTS.SQUEEZE_GENE_MIN,
+        autosqueezeGenesMax: UI_CONSTANTS.SQUEEZE_GENE_MAX,
+        autosqueezeMinCount: 1,
+        autosqueezeIgnoreList: [],
+        autosqueezeSellList: [],
+        autodusterChecked: false, // Default disabled
+        autodusterGenesMin: UI_CONSTANTS.SQUEEZE_GENE_MIN,
+        autodusterGenesMax: UI_CONSTANTS.SQUEEZE_GENE_MAX,
+        autodusterIgnoreList: [],
+        autodusterSellList: [],
+        autodusterKeepStats: {}, // Per-equipment stat types to keep: { "EquipmentName": { ad: true, ap: true, hp: true } }
+        // Shared ignore list for both autoplant and autosell
+        autoplantIgnoreList: [],
+        autoplantSellList: [],
+        // Shared gene thresholds for both autoplant and autosell
+        autoplantGenesMin: 80,
+        autoplantKeepGenesEnabled: true,
+        autoplantAlwaysDevourBelow: 49,
+        autoplantAlwaysDevourEnabled: false,
+        autoSellSealedCreaturesGlobal: false,
+        autoInjectSealedCreaturesGlobal: false,
+        protectSealedTier5: true,
+        sealedTier5SellAllowList: [],
+        sealedTier5SellDenyList: [],
+        sealedTier5InjectDenyList: [],
+        // Per-creature gene ranges to keep (prevents selling/devouring)
+        creatureKeepRanges: {}, // { "CreatureName": { min: number, max: number } }
+        // Per-creature upgrade ladder (sell-flow exceptions): keep N per gene band from full inventory
+        creatureKeepUpgradeLadder: {} // { "CreatureName": true }
+    };
+
+    const UPGRADE_LADDER_BANDS = [
+        { min: 50, max: 59, keep: 5 },
+        { min: 60, max: 69, keep: 4 },
+        { min: 70, max: 79, keep: 3 },
+        { min: 80, max: 100, keep: 2 }
+    ];
+    
+    // =======================
+    // 1.X Event Emission (Autoseller -> external listeners)
+    // =======================
+    function emitAutosellerEvent(type, detail) {
+        try {
+            window.dispatchEvent(new CustomEvent(`autoseller:${type}`, { detail }));
+        } catch (e) {
+            // never break Autoseller flow because of a listener error
+        }
+    }
+
+    // =======================
+    // 2. DOM Utilities & Settings
+    // =======================
+    
+    /**
+     * Gets button style object based on active state and color type
+     * @param {boolean} isActive - Whether the button is active
+     * @param {string} colorType - 'green' or 'red'
+     * @param {Object} options - Additional style options
+     * @returns {Object} Style object
+     */
+    function getButtonStyles(isActive, colorType = 'green', options = {}) {
+        const colors = UI_CONSTANTS.BUTTON_COLORS;
+        const shadows = UI_CONSTANTS.TEXT_SHADOW;
+        const sizes = UI_CONSTANTS.BUTTON_SIZES;
+        
+        let backgroundColor, color, textShadow;
+        if (isActive) {
+            if (colorType === 'red') {
+                backgroundColor = colors.ACTIVE_RED_BG;
+                color = colors.ACTIVE_RED_TEXT;
+                textShadow = shadows.RED;
+            } else {
+                backgroundColor = colors.ACTIVE_GREEN_BG;
+                color = colors.ACTIVE_GREEN_TEXT;
+                textShadow = shadows.GREEN;
+            }
+        } else {
+            backgroundColor = colors.INACTIVE_BG;
+            color = colors.INACTIVE_TEXT;
+            textShadow = shadows.NONE;
+        }
+        
+        return {
+            width: sizes.WIDTH,
+            height: sizes.HEIGHT,
+            border: `2px solid ${colors.BORDER}`,
+            borderRadius: '4px',
+            backgroundColor: backgroundColor,
+            color: color,
+            cursor: isActive ? 'default' : 'pointer',
+            fontSize: '12px',
+            fontWeight: 'bold',
+            transition: 'background-color 0.2s, color 0.2s',
+            textAlign: 'center',
+            padding: '0',
+            textShadow: textShadow,
+            ...options
+        };
+    }
+    
+    /**
+     * Applies button styles to an element
+     * @param {HTMLElement} button - Button element
+     * @param {boolean} isActive - Whether the button is active
+     * @param {string} colorType - 'green' or 'red'
+     * @param {Object} options - Additional style options
+     */
+    function applyButtonStyles(button, isActive, colorType = 'green', options = {}) {
+        const styles = getButtonStyles(isActive, colorType, options);
+        Object.assign(button.style, styles);
+    }
+    
+    /**
+     * Gets settings keys based on summary type
+     * @param {string} summaryType - 'Autosqueeze' or 'Autoduster'
+     * @returns {Object} Settings keys object
+     */
+    function getSettingsKeys(summaryType) {
+        const isAutoduster = summaryType === 'Autoduster';
+        return {
+            checked: isAutoduster ? 'autodusterChecked' : 'autosqueezeChecked',
+            genesMin: isAutoduster ? 'autodusterGenesMin' : 'autosqueezeGenesMin',
+            genesMax: isAutoduster ? 'autodusterGenesMax' : 'autosqueezeGenesMax',
+            ignoreList: isAutoduster ? 'autodusterIgnoreList' : 'autosqueezeIgnoreList'
+        };
+    }
+    
+    /**
+     * Validates and clamps a gene input value
+     * @param {number|string} value - Input value
+     * @param {number} min - Minimum value
+     * @param {number} max - Maximum value
+     * @param {number} defaultValue - Default value if invalid
+     * @returns {number} Validated value
+     */
+    function validateGeneInput(value, min, max, defaultValue) {
+        return Math.max(min, Math.min(max, parseInt(value, 10) || defaultValue));
+    }
+    
+    function queryElement(selector, context = document) {
+        return context.querySelector(selector);
+    }
+    
+    function queryAllElements(selector, context = document) {
+        return context.querySelectorAll(selector);
+    }
+
+    function showAutosellerToast(message, durationMs = 3500) {
+        try {
+            let mainContainer = document.getElementById('autoseller-toast-container');
+            if (!mainContainer) {
+                mainContainer = document.createElement('div');
+                mainContainer.id = 'autoseller-toast-container';
+                mainContainer.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
+                document.body.appendChild(mainContainer);
+            }
+
+            const existingToasts = mainContainer.querySelectorAll('.autoseller-toast-item');
+            const stackOffset = existingToasts.length * 44;
+
+            const flexContainer = document.createElement('div');
+            flexContainer.className = 'autoseller-toast-item';
+            flexContainer.style.cssText = `left:0;right:0;display:flex;position:absolute;transition:230ms cubic-bezier(0.21, 1.02, 0.73, 1);transform:translateY(-${stackOffset}px);bottom:0;justify-content:flex-end;`;
+
+            const toast = document.createElement('button');
+            toast.type = 'button';
+            toast.style.pointerEvents = 'auto';
+            toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+
+            const widgetTop = document.createElement('div');
+            widgetTop.className = 'widget-top h-2.5';
+            const widgetBottom = document.createElement('div');
+            widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+            const textLeft = document.createElement('div');
+            textLeft.className = 'text-left';
+            const paragraph = document.createElement('p');
+            paragraph.style.cssText = 'margin: 0; max-width: 28rem; white-space: pre-wrap;';
+            if (typeof message === 'string') {
+                paragraph.textContent = message;
+            } else if (message instanceof Node) {
+                paragraph.style.whiteSpace = 'normal';
+                paragraph.appendChild(message);
+            } else {
+                paragraph.textContent = String(message ?? '');
+            }
+
+            textLeft.appendChild(paragraph);
+            widgetBottom.appendChild(textLeft);
+            toast.appendChild(widgetTop);
+            toast.appendChild(widgetBottom);
+            flexContainer.appendChild(toast);
+            mainContainer.appendChild(flexContainer);
+
+            const remove = () => {
+                if (flexContainer && flexContainer.parentNode) {
+                    flexContainer.parentNode.removeChild(flexContainer);
+                    const toasts = mainContainer.querySelectorAll('.autoseller-toast-item');
+                    toasts.forEach((el, index) => {
+                        el.style.transform = `translateY(-${index * 44}px)`;
+                    });
+                }
+            };
+            toast.addEventListener('click', remove);
+            setTimeout(remove, Math.max(1000, durationMs));
+        } catch (error) {
+            console.warn('[Autoseller] Failed to show toast:', error);
+        }
+    }
+    
+    function getSettings() {
+        try {
+            const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
+            const settings = { ...DEFAULT_SETTINGS, ...stored };
+            if (!('protectSealedTier5' in stored)) {
+                settings.protectSealedTier5 = true;
+            }
+            
+            // Migration: Convert old autoplantChecked/autosellChecked to autoMode
+            // Only migrate if autoMode was never set (not if it's explicitly null)
+            if (!('autoMode' in stored)) {
+                if (stored.autoplantChecked === true) {
+                    settings.autoMode = 'autoplant';
+                } else if (stored.autosellChecked === true) {
+                    settings.autoMode = 'autosell';
+                } else if (stored.lastActiveMode) {
+                    // Use lastActiveMode as fallback
+                    settings.autoMode = stored.lastActiveMode === 'autoplant' ? 'autoplant' : 'autosell';
+                }
+                
+                // Save migrated settings directly to localStorage to avoid recursion
+                if (settings.autoMode !== null && settings.autoMode !== undefined) {
+                    const { autoplantChecked, autosellChecked, lastActiveMode, autosellGenesMin, autosellGenesMax, autosellMinCount, autosellMaxExp, ...cleanSettings } = settings;
+                    try {
+                        localStorage.setItem('autoseller-settings', JSON.stringify({ ...cleanSettings, autoMode: settings.autoMode }));
+                    } catch (e) {
+                        console.warn(`[${modName}][WARN][getSettings] Failed to save migrated settings`, e);
+                    }
+                }
+            }
+            
+            return settings;
+        } catch (e) { 
+            console.warn(`[${modName}][WARN][getSettings] Failed to parse settings from localStorage`, e);
+            return { ...DEFAULT_SETTINGS };
+        }
+    }
+    
+    function setSettings(newSettings) {
+        const oldSettings = getSettings();
+        const updatedSettings = { ...oldSettings, ...newSettings };
+        
+        // Save directly to localStorage (single source of truth)
+        try {
+            localStorage.setItem('autoseller-settings', JSON.stringify(updatedSettings));
+        } catch (e) {
+            console.warn(`[${modName}][WARN][setSettings] Failed to save settings to localStorage`, e);
+        }
+        
+        updateAutosellerNavButtonColor();
+        
+        // Manage widget if any tab setting changed (autoMode, autosqueeze, or autoduster)
+        const widgetNeedsUpdate = 
+            (newSettings.autoMode !== undefined && newSettings.autoMode !== oldSettings.autoMode) ||
+            (newSettings.autosqueezeChecked !== undefined && newSettings.autosqueezeChecked !== oldSettings.autosqueezeChecked) ||
+            (newSettings.autodusterChecked !== undefined && newSettings.autodusterChecked !== oldSettings.autodusterChecked);
+        
+        if (widgetNeedsUpdate) {
+            manageAutosellerWidget();
+        }
+
+        if (newSettings.autosqueezeChecked !== undefined &&
+            newSettings.autosqueezeChecked !== oldSettings.autosqueezeChecked &&
+            updatedSettings.autoMode === 'autoplant') {
+            updatePlantMonsterFilter(updatedSettings.autoplantIgnoreList || []);
+        }
+
+        if (newSettings.creatureKeepUpgradeLadder !== undefined) {
+            updatePlantMonsterFilter(updatedSettings.autoplantIgnoreList || []);
+        }
+        
+        updateAutosellerSessionWidget();
+        
+        // Update menu item colors if modal is open
+        if (typeof window.updateAutosellerMenuItemColors === 'function') {
+            window.updateAutosellerMenuItemColors();
+        }
+    }
+    
+    // Initialize localStorage with defaults if not exists
+    if (!localStorage.getItem('autoseller-settings')) {
+        localStorage.setItem('autoseller-settings', JSON.stringify(DEFAULT_SETTINGS));
+    }
+    
+    // =======================
+    // Creature Keep Range Helpers
+    // =======================
+    
+    /**
+     * Get the keep range for a creature
+     * @param {string} creatureName - Name of the creature
+     * @returns {Object|null} Keep range { min: number, max: number } or null
+     */
+    function getCreatureKeepRange(creatureName) {
+        const settings = getSettings();
+        const ranges = settings.creatureKeepRanges || {};
+        return ranges[creatureName] || null;
+    }
+    
+    /**
+     * Set the keep range for a creature
+     * @param {string} creatureName - Name of the creature
+     * @param {number} min - Minimum gene percentage
+     * @param {number} max - Maximum gene percentage
+     */
+    function setCreatureKeepRange(creatureName, min, max) {
+        const settings = getSettings();
+        const ranges = { ...(settings.creatureKeepRanges || {}) };
+        ranges[creatureName] = { min, max };
+        setSettings({ creatureKeepRanges: ranges });
+    }
+    
+    /**
+     * Clear the keep range for a creature
+     * @param {string} creatureName - Name of the creature
+     */
+    function clearCreatureKeepRange(creatureName) {
+        const settings = getSettings();
+        const ranges = { ...(settings.creatureKeepRanges || {}) };
+        delete ranges[creatureName];
+        setSettings({ creatureKeepRanges: ranges });
+    }
+
+    function isCreatureKeepUpgradeLadderEnabled(creatureName) {
+        const settings = getSettings();
+        return !!(creatureName && settings.creatureKeepUpgradeLadder?.[creatureName]);
+    }
+
+    function setCreatureKeepUpgradeLadder(creatureName, enabled) {
+        const settings = getSettings();
+        const ladder = { ...(settings.creatureKeepUpgradeLadder || {}) };
+        if (enabled) {
+            ladder[creatureName] = true;
+        } else {
+            delete ladder[creatureName];
+        }
+        setSettings({ creatureKeepUpgradeLadder: ladder });
+    }
+
+    function clearCreatureKeepUpgradeLadder(creatureName) {
+        setCreatureKeepUpgradeLadder(creatureName, false);
+    }
+
+    /**
+     * @param {Array} inventoryMonsters
+     * @param {Object} settings
+     * @returns {Set<string|number>}
+     */
+    function computeUpgradeLadderProtectedIds(inventoryMonsters, settings) {
+        const protectedIds = new Set();
+        const ladder = settings?.creatureKeepUpgradeLadder || {};
+        const enabledNames = Object.keys(ladder).filter((name) => ladder[name]);
+        if (enabledNames.length === 0 || !Array.isArray(inventoryMonsters)) {
+            return protectedIds;
+        }
+
+        for (const creatureName of enabledNames) {
+            const ofType = inventoryMonsters.filter((monster) => {
+                if (!monster || monster.locked || isShinyCreature(monster)) {
+                    return false;
+                }
+                return inventoryMonsterMatchesCreatureName(creatureName, monster);
+            });
+
+            for (const band of UPGRADE_LADDER_BANDS) {
+                const inBand = ofType.filter((monster) => {
+                    const genes = calculateTotalGenes(monster);
+                    return genes >= band.min && genes <= band.max;
+                });
+                const keepCount = Math.min(band.keep, inBand.length);
+                for (let i = 0; i < keepCount; i++) {
+                    if (inBand[i]?.id != null) {
+                        protectedIds.add(inBand[i].id);
+                    }
+                }
+            }
+        }
+
+        return protectedIds;
+    }
+
+    function getUpgradeLadderProtectedIds(inventoryOverride) {
+        const inventory = inventoryOverride ||
+            globalThis.state?.player?.getSnapshot?.()?.context?.monsters ||
+            [];
+        return computeUpgradeLadderProtectedIds(inventory, getSettings());
+    }
+
+    /**
+     * Check if a creature is explicitly allowed to be sold/devoured when Sealed (tier 5)
+     * @param {string} creatureName - Name of the creature
+     * @returns {boolean} True if allowed to sell/devour when sealed
+     */
+    function isSealedTier5SellAllowed(creatureName) {
+        const settings = getSettings();
+        if (creatureName) {
+            const denyList = settings.sealedTier5SellDenyList || [];
+            if (denyList.includes(creatureName)) return false;
+        }
+        if (settings.autoSellSealedCreaturesGlobal === true) return true;
+        if (!creatureName) return false;
+        const allowList = settings.sealedTier5SellAllowList || [];
+        return allowList.includes(creatureName);
+    }
+
+    /**
+     * Set sealed tier 5 sell/devour override for a specific creature
+     * @param {string} creatureName - Name of the creature
+     * @param {boolean} isAllowed - True to allow selling/devouring sealed creatures of this type
+     */
+    function setSealedTier5SellAllowed(creatureName, isAllowed) {
+        if (!creatureName) return;
+        const settings = getSettings();
+        const allowList = [...(settings.sealedTier5SellAllowList || [])];
+        const idx = allowList.indexOf(creatureName);
+
+        if (isAllowed && idx === -1) {
+            allowList.push(creatureName);
+        } else if (!isAllowed && idx !== -1) {
+            allowList.splice(idx, 1);
+        }
+
+        setSettings({ sealedTier5SellAllowList: allowList });
+    }
+
+    function hasPerCreatureSealedTier5SellOverride(creatureName) {
+        if (!creatureName) return false;
+        const settings = getSettings();
+        const allowList = settings.sealedTier5SellAllowList || [];
+        return allowList.includes(creatureName);
+    }
+
+    function isSealedTier5SellBlocked(creatureName) {
+        if (!creatureName) return false;
+        const settings = getSettings();
+        const denyList = settings.sealedTier5SellDenyList || [];
+        return denyList.includes(creatureName);
+    }
+
+    function setSealedTier5SellBlocked(creatureName, isBlocked) {
+        if (!creatureName) return;
+        const settings = getSettings();
+        const denyList = [...(settings.sealedTier5SellDenyList || [])];
+        const idx = denyList.indexOf(creatureName);
+        if (isBlocked && idx === -1) {
+            denyList.push(creatureName);
+        } else if (!isBlocked && idx !== -1) {
+            denyList.splice(idx, 1);
+        }
+        setSettings({ sealedTier5SellDenyList: denyList });
+    }
+
+    function isSealedTier5SqueezeAllowed(creatureName) {
+        if (!creatureName) return false;
+        const settings = getSettings();
+        const allowList = settings.sealedTier5SellAllowList || [];
+        return allowList.includes(creatureName);
+    }
+
+    /**
+     * Check if a creature is explicitly allowed to be auto-injected when Sealed (tier 5)
+     * @param {string} creatureName - Name of the creature
+     * @returns {boolean} True if allowed to auto-inject when sealed
+     */
+    function isSealedTier5InjectAllowed(creatureName) {
+        const settings = getSettings();
+        if (settings.autoInjectSealedCreaturesGlobal !== true) return false;
+        if (!creatureName) return true;
+        const denyList = settings.sealedTier5InjectDenyList || [];
+        return !denyList.includes(creatureName);
+    }
+
+    /**
+     * Set sealed tier 5 auto-inject override for a specific creature
+     * @param {string} creatureName - Name of the creature
+     * @param {boolean} isAllowed - True to allow auto-injecting sealed creatures of this type
+     */
+    function setSealedTier5InjectAllowed(creatureName, isAllowed) {
+        if (!creatureName) return;
+        const settings = getSettings();
+        const denyList = [...(settings.sealedTier5InjectDenyList || [])];
+        const idx = denyList.indexOf(creatureName);
+
+        if (!isAllowed && idx === -1) {
+            denyList.push(creatureName);
+        } else if (isAllowed && idx !== -1) {
+            denyList.splice(idx, 1);
+        }
+
+        setSettings({ sealedTier5InjectDenyList: denyList });
+    }
+    
+    /**
+     * Get autoduster stat settings for a specific equipment
+     * @param {string} equipmentName - Name of the equipment
+     * @returns {Object} Stat settings for the equipment
+     */
+    function getAutodusterKeepStats(equipmentName) {
+        const settings = getSettings();
+        const allKeepStats = settings.autodusterKeepStats || {};
+        return equipmentName && allKeepStats[equipmentName] 
+            ? allKeepStats[equipmentName] 
+            : { ad: false, ap: false, hp: false }; // Default: disenchant all (all checkboxes checked)
+    }
+    
+    /**
+     * Set autoduster stat settings for a specific equipment
+     * @param {string} equipmentName - Name of the equipment
+     * @param {Object} keepStats - Stat settings { ad: boolean, ap: boolean, hp: boolean }
+     */
+    function setAutodusterKeepStats(equipmentName, keepStats) {
+        const settings = getSettings();
+        const allKeepStats = { ...(settings.autodusterKeepStats || {}) };
+        allKeepStats[equipmentName] = keepStats;
+        setSettings({ autodusterKeepStats: allKeepStats });
+    }
+    
+    /**
+     * Clear autoduster stat settings for a specific equipment (reset to defaults)
+     * @param {string} equipmentName - Name of the equipment
+     */
+    function clearAutodusterKeepStats(equipmentName) {
+        const settings = getSettings();
+        const allKeepStats = { ...(settings.autodusterKeepStats || {}) };
+        delete allKeepStats[equipmentName];
+        setSettings({ autodusterKeepStats: allKeepStats });
+    }
+    
+    /**
+     * Check if autoduster stat settings are custom for a specific equipment (not all default)
+     * @param {string} equipmentName - Name of the equipment
+     * @returns {boolean} True if settings are custom
+     */
+    function hasCustomAutodusterStats(equipmentName) {
+        const settings = getSettings();
+        const allKeepStats = settings.autodusterKeepStats || {};
+        if (!equipmentName || !allKeepStats[equipmentName]) {
+            return false; // No custom settings for this equipment
+        }
+        const keepStats = allKeepStats[equipmentName];
+        // Check if any stat is not at default (all should be false by default - disenchant all)
+        return keepStats.ad !== false || keepStats.ap !== false || keepStats.hp !== false;
+    }
+    
+    /**
+     * Check if a creature should be kept based on its gene range
+     * @param {string} creatureName - Name of the creature
+     * @param {number} totalGenes - Total gene percentage
+     * @returns {boolean} True if creature should be kept
+     */
+    function shouldKeepCreatureByRange(creatureName, totalGenes) {
+        const keepRange = getCreatureKeepRange(creatureName);
+        if (!keepRange) return false;
+        return totalGenes >= keepRange.min && totalGenes <= keepRange.max;
+    }
+
+    // =======================
+    // 3. Core Utility Functions
+    // =======================
+    
+    function getGenes(m) {
+        return (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
+    }
+    
+    // Dragon Plant Helper Functions
+    const getPlantGold = () => globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.plant?.gold;
+    
+    const hasDragonPlant = () => {
+        const plant = globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.plant;
+        return plant !== undefined && plant !== null;
+    };
+    
+    const sendEscKey = () => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { 
+            key: 'Escape', 
+            code: 'Escape', 
+            keyCode: 27, 
+            bubbles: true 
+        }));
+    };
+    
+    const findButtonByText = (text, selector = 'button') => {
+        const buttons = document.querySelectorAll(selector);
+        for (const button of buttons) {
+            if (button.textContent.includes(text)) {
+                return button;
+            }
+        }
+        return null;
+    };
+    
+    const findDragonPlantCollectButton = () => {
+        // Find the Collect button with the plant SVG icon (more specific than just text)
+        const buttons = document.querySelectorAll('button.surface-green');
+        for (const button of buttons) {
+            const hasPlantIcon = button.querySelector('svg.lucide-sprout');
+            const hasCollectText = button.textContent.includes('Collect') || button.textContent.includes('Coletar');
+            const isNotDisabled = !button.hasAttribute('disabled');
+            
+            if (hasPlantIcon && hasCollectText && isNotDisabled) {
+                return button;
+            }
+        }
+        return null;
+    };
+    
+    function createLabel(text, options = {}) {
+        return createElement('span', {
+            text: text,
+            className: UI_CONSTANTS.COMMON_STYLES.PIXEL_FONT,
+            styles: {
+                color: options.color || UI_CONSTANTS.COMMON_STYLES.SECONDARY_COLOR,
+                fontSize: options.fontSize || '14px',
+                fontWeight: options.fontWeight || 'bold',
+                marginRight: options.marginRight || '6px',
+                ...options.styles
+            }
+        });
+    }
+    
+    // =======================
+    // 3.1. Shared serverResults extraction and filtering
+    // =======================
+    
+    /**
+     * Extract monsters and their server IDs from serverResults
+     * @param {Object} serverResults - The serverResults object from board context
+     * @returns {Object} { battleRewardMonsters: Array, rewardMonsterIds: Set }
+     */
+    function extractMonstersFromServerResults(serverResults) {
+        let battleRewardMonsters = [];
+        let rewardMonsterIds = new Set();
+        
+        // Try multiple possible paths to find monsters in serverResults
+        if (serverResults.rewardScreen) {
+            if (serverResults.rewardScreen.monsterDrop) {
+                const monsterDrop = serverResults.rewardScreen.monsterDrop;
+                if (Array.isArray(monsterDrop)) {
+                    battleRewardMonsters = monsterDrop;
+                } else if (monsterDrop && typeof monsterDrop === 'object') {
+                    battleRewardMonsters = [monsterDrop];
+                }
+            }
+            
+            if (battleRewardMonsters.length === 0 && serverResults.rewardScreen.loot) {
+                const loot = serverResults.rewardScreen.loot;
+                if (Array.isArray(loot)) {
+                    battleRewardMonsters = loot.filter(item => item && (item.type === 'monster' || item.monster || item.id));
+                } else if (loot && typeof loot === 'object' && (loot.type === 'monster' || loot.monster || loot.id)) {
+                    battleRewardMonsters = [loot];
+                }
+            }
+            
+            if (battleRewardMonsters.length === 0 && serverResults.rewardScreen.monsters) {
+                battleRewardMonsters = Array.isArray(serverResults.rewardScreen.monsters) 
+                    ? serverResults.rewardScreen.monsters 
+                    : [serverResults.rewardScreen.monsters];
+            }
+        }
+        
+        // Try other paths as fallback
+        if (battleRewardMonsters.length === 0) {
+            if (serverResults.monsters) {
+                battleRewardMonsters = Array.isArray(serverResults.monsters) 
+                    ? serverResults.monsters 
+                    : [serverResults.monsters];
+            } else if (serverResults.rewards && serverResults.rewards.monsters) {
+                battleRewardMonsters = Array.isArray(serverResults.rewards.monsters) 
+                    ? serverResults.rewards.monsters 
+                    : [serverResults.rewards.monsters];
+            }
+        }
+        
+        // Extract server IDs from battle reward monsters
+        if (battleRewardMonsters && battleRewardMonsters.length > 0) {
+            battleRewardMonsters.forEach((m) => {
+                if (m && typeof m === 'object') {
+                    const monster = m.monster || m;
+                    const serverId = monster.id || monster.databaseId;
+                    if (serverId) {
+                        rewardMonsterIds.add(serverId);
+                    }
+                    if (m.monsterId) {
+                        rewardMonsterIds.add(m.monsterId);
+                    }
+                }
+            });
+            // No logging needed - processing logs will show when items are actually processed
+        }
+        
+        return { battleRewardMonsters, rewardMonsterIds };
+    }
+
+    function battleRewardsIncludeSqueezeBandMonsters(battleRewardMonsters, settings) {
+        if (!settings?.autosqueezeChecked || !Array.isArray(battleRewardMonsters) || battleRewardMonsters.length === 0) {
+            return false;
+        }
+        const squeezeMinGenes = settings.autosqueezeGenesMin ?? UI_CONSTANTS.SQUEEZE_GENE_MIN;
+        const squeezeMaxGenes = settings.autosqueezeGenesMax ?? UI_CONSTANTS.SQUEEZE_GENE_MAX;
+        const ignoreList = settings.autosqueezeIgnoreList || [];
+        return battleRewardMonsters.some((drop) => {
+            const monster = drop?.monster || drop;
+            if (!monster || typeof monster !== 'object') return false;
+            if (isShinyCreature(monster) || isSealedTierFiveCreature(monster)) return false;
+            const creatureName = getCreatureNameFromMonster(monster) || monster?.name;
+            if (creatureName && ignoreList.includes(creatureName)) return false;
+            const totalGenes = calculateTotalGenes(monster);
+            return totalGenes >= squeezeMinGenes && totalGenes <= squeezeMaxGenes;
+        });
+    }
+
+    function battleRewardsIncludeSealedInjectCandidates(battleRewardMonsters, settings) {
+        if (settings?.autoInjectSealedCreaturesGlobal !== true || !Array.isArray(battleRewardMonsters) || battleRewardMonsters.length === 0) {
+            return false;
+        }
+        const keepList = settings.autoplantIgnoreList || [];
+        return battleRewardMonsters.some((drop) => {
+            const monster = drop?.monster || drop;
+            if (!monster || typeof monster !== 'object') return false;
+            if (isShinyCreature(monster) || !isSealedTierFiveCreature(monster)) return false;
+            const creatureName = getCreatureNameFromMonster(monster) || monster?.name;
+            if (creatureName && keepList.includes(creatureName)) return false;
+            return isSealedTier5InjectAllowed(creatureName);
+        });
+    }
+
+    function hasPendingInventorySyncGameEnds() {
+        for (const seed of pendingGameEndBySeed.keys()) {
+            const reasons = pendingGameEndMeta.get(seed)?.reasons;
+            if (Array.isArray(reasons) && reasons.some((reason) => isInventorySyncRetryReason(reason))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function schedulePendingGameEndDrainIfNeeded() {
+        if (isCleaningUp || pendingGameEndBySeed.size === 0 || gameEndRetryTimer) return;
+        scheduleGameEndRetry();
+    }
+
+    function isInventorySyncRetryReason(reason) {
+        return reason === 'inventory-sync' || reason === 'canRun-blocked';
+    }
+
+    function isActionRetryReason(reason) {
+        return reason === 'squeeze-incomplete' || reason === 'duster-incomplete';
+    }
+    
+    /**
+     * Filter inventory monsters to only include those from serverResults (by server ID match)
+     * @param {Array} inventorySnapshot - Full inventory snapshot
+     * @param {Set} rewardMonsterIds - Set of server IDs from serverResults
+     * @returns {Array} Filtered monsters matching server IDs
+     */
+    function filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds) {
+        if (!rewardMonsterIds || rewardMonsterIds.size === 0) {
+            return [];
+        }
+        
+        return inventorySnapshot.filter(invMonster => {
+            return rewardMonsterIds.has(invMonster.id);
+        });
+    }
+
+    /**
+     * Debug log creature drops for floor 11+ (Sealed can drop from floor 11)
+     * @param {Array} battleRewardMonsters - Monster drops extracted from server results
+     * @param {number|string} floor - Current floor number
+     */
+    function logCreatureDropsForFloor11Plus(battleRewardMonsters, floor) {
+        const floorNum = Number(floor);
+        if (!Number.isFinite(floorNum) || floorNum < 11) return;
+        if (!Array.isArray(battleRewardMonsters) || battleRewardMonsters.length === 0) {
+            console.log(`[Autoseller][DropDebug] Floor ${floorNum}: no creature drops in serverResults`);
+            return;
+        }
+
+        battleRewardMonsters.forEach((drop, index) => {
+            const monster = drop?.monster || drop || {};
+            const hp = Number(monster.hp ?? 0);
+            const ad = Number(monster.ad ?? 0);
+            const ap = Number(monster.ap ?? 0);
+            const armor = Number(monster.armor ?? 0);
+            const magicResist = Number(monster.magicResist ?? 0);
+            const genes = hp + ad + ap + armor + magicResist;
+            const tier = monster.tier ?? monster.metadata?.tier ?? 'unknown';
+            const serverId = monster.id || monster.databaseId || drop?.monsterId || 'unknown';
+            const gameId = monster.gameId ?? monster.metadata?.id ?? 'unknown';
+            const name = monster.name || monster.metadata?.name || `gameId:${gameId}`;
+
+            console.log(
+                `[Autoseller][DropDebug] Floor ${floorNum} drop #${index + 1}: ` +
+                `name=${name} id=${serverId} gameId=${gameId} tier=${tier} genes=${genes} ` +
+                `(hp=${hp} ad=${ad} ap=${ap} armor=${armor} mr=${magicResist}) exp=${monster.exp ?? 0}`
+            );
+        });
+    }
+    
+    function isEquipmentLikeDrop(item) {
+        if (!item || typeof item !== 'object') return false;
+        const equipment = item.equip || item;
+        return !!(equipment.stat && equipment.gameId && equipment.tier);
+    }
+
+    function getEquipmentDropSummary(item, source) {
+        const equipment = item?.equip || item || {};
+        let name = equipment.name || item?.tooltipKey || item?.name;
+        if (!name && equipment.gameId) {
+            try {
+                const fromGame = globalThis.state?.utils?.getEquipment?.(equipment.gameId);
+                name = fromGame?.metadata?.name;
+            } catch (_) { /* ignore */ }
+        }
+        const serverId = equipment.id || equipment.databaseId || item?.equipmentId || item?.id;
+        return {
+            source,
+            name: name || `gameId:${equipment.gameId ?? '?'}`,
+            id: serverId ?? null,
+            gameId: equipment.gameId,
+            stat: equipment.stat,
+            tier: equipment.tier
+        };
+    }
+
+    /**
+     * Debug-log all equipment-related paths in serverResults (equipDrop, loot.droppedItems, etc.)
+     * @param {Object} serverResults
+     * @param {string} contextLabel - e.g. 'gameEnd', 'canRun-blocked', 'board-update'
+     */
+    function logEquipmentDropDebug(serverResults, contextLabel) {
+        const seed = serverResults?.seed ?? '?';
+        if (!serverResults) {
+            console.log(`[Autoseller][EquipDrop] seed=? ${contextLabel}: serverResults is null`);
+            return;
+        }
+
+        const rewardScreen = serverResults.rewardScreen;
+        if (!rewardScreen) {
+            console.log(
+                `[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: no rewardScreen ` +
+                `(serverResults keys: ${Object.keys(serverResults).join(', ')})`
+            );
+            return;
+        }
+
+        console.log(
+            `[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: rewardScreen keys=[${Object.keys(rewardScreen).join(', ')}]`
+        );
+
+        if (rewardScreen.equipDrop) {
+            const summary = getEquipmentDropSummary(rewardScreen.equipDrop, 'equipDrop');
+            console.log(`[Autoseller][EquipDrop] seed=${seed} equipDrop:`, summary, rewardScreen.equipDrop);
+        } else {
+            console.log(`[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: rewardScreen.equipDrop is missing`);
+        }
+
+        const loot = rewardScreen.loot;
+        if (loot) {
+            const lootKeys = typeof loot === 'object' && !Array.isArray(loot) ? Object.keys(loot).join(', ') : '(array)';
+            const droppedItems = Array.isArray(loot?.droppedItems) ? loot.droppedItems : [];
+            const equipmentInLoot = droppedItems.filter(isEquipmentLikeDrop);
+            console.log(
+                `[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: loot present ` +
+                `(loot keys: ${lootKeys}, droppedItems=${droppedItems.length}, equipment-like=${equipmentInLoot.length})`
+            );
+            equipmentInLoot.forEach((item, index) => {
+                const summary = getEquipmentDropSummary(item, 'droppedItems');
+                console.log(`[Autoseller][EquipDrop] seed=${seed} droppedItems[${index}]:`, summary, item);
+            });
+            if (droppedItems.length > 0 && equipmentInLoot.length === 0) {
+                console.log(
+                    `[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: droppedItems sample (non-equipment):`,
+                    droppedItems.slice(0, 3)
+                );
+            }
+        } else {
+            console.log(`[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: no rewardScreen.loot`);
+        }
+    }
+
+    /**
+     * Extract equipment and their server IDs from serverResults
+     * @param {Object} serverResults - The serverResults object from board context
+     * @returns {Object} { battleRewardEquipment: Array, rewardEquipmentIds: Set }
+     */
+    function extractEquipmentFromServerResults(serverResults) {
+        let battleRewardEquipment = [];
+        let rewardEquipmentIds = new Set();
+        const seenDropKeys = new Set();
+
+        function addEquipmentDrop(equip, source) {
+            if (!equip || typeof equip !== 'object') return;
+            const equipment = equip.equip || equip;
+            const dropKey = `${source}:${equipment.id || equipment.databaseId || equip.equipmentId || equip.id || ''}:${equipment.gameId}:${equipment.stat}:${equipment.tier}`;
+            if (seenDropKeys.has(dropKey)) return;
+            seenDropKeys.add(dropKey);
+            battleRewardEquipment.push(equip);
+
+            const serverId = equipment.id || equipment.databaseId;
+            if (serverId) {
+                rewardEquipmentIds.add(serverId);
+            }
+            if (equip.equipmentId) {
+                rewardEquipmentIds.add(equip.equipmentId);
+            }
+            if (!serverId && !equip.equipmentId) {
+                const summary = getEquipmentDropSummary(equip, source);
+                console.log(
+                    `[Autoseller][EquipDrop] extract: ${summary.name} from ${source} has no server id yet ` +
+                    `(gameId=${summary.gameId} stat=${summary.stat} tier=${summary.tier})`
+                );
+            }
+        }
+
+        const rewardScreen = serverResults?.rewardScreen;
+        if (rewardScreen?.equipDrop && typeof rewardScreen.equipDrop === 'object') {
+            addEquipmentDrop(rewardScreen.equipDrop, 'equipDrop');
+        }
+
+        // Equipment can also appear in loot.droppedItems (see Hunt Analyzer)
+        const droppedItems = rewardScreen?.loot?.droppedItems;
+        if (Array.isArray(droppedItems)) {
+            droppedItems.forEach((item) => {
+                if (isEquipmentLikeDrop(item)) {
+                    addEquipmentDrop(item, 'droppedItems');
+                }
+            });
+        }
+
+        return { battleRewardEquipment, rewardEquipmentIds };
+    }
+
+    /**
+     * Match equipment drops that lack server ids to inventory entries (gameId + stat + tier).
+     * @param {Array} battleRewardEquipment
+     * @param {Array} inventoryEquipment
+     * @param {Set} rewardEquipmentIds - Mutated in place
+     */
+    function resolveEquipmentIdsFromInventory(battleRewardEquipment, inventoryEquipment, rewardEquipmentIds) {
+        if (!Array.isArray(battleRewardEquipment) || !Array.isArray(inventoryEquipment)) return;
+
+        for (const drop of battleRewardEquipment) {
+            const equipment = drop?.equip || drop || {};
+            const serverId = equipment.id || equipment.databaseId || drop?.equipmentId || drop?.id;
+            if (serverId && rewardEquipmentIds.has(serverId)) continue;
+
+            const gameId = equipment.gameId;
+            const stat = equipment.stat;
+            const tier = equipment.tier;
+            if (gameId == null || !stat || tier == null) continue;
+
+            const matches = inventoryEquipment.filter((inv) =>
+                inv &&
+                inv.gameId === gameId &&
+                inv.stat === stat &&
+                inv.tier === tier &&
+                inv.id &&
+                !rewardEquipmentIds.has(inv.id)
+            );
+
+            if (matches.length === 1) {
+                rewardEquipmentIds.add(matches[0].id);
+                const summary = getEquipmentDropSummary(drop, 'inventory-resolve');
+                console.log(
+                    `[Autoseller][EquipDrop] resolved ${summary.name} → inventory id=${matches[0].id} ` +
+                    `(gameId=${gameId} stat=${stat} tier=${tier})`
+                );
+            } else if (matches.length > 1) {
+                const summary = getEquipmentDropSummary(drop, 'inventory-resolve');
+                console.log(
+                    `[Autoseller][EquipDrop] ambiguous resolve for ${summary.name}: ${matches.length} inventory matches ` +
+                    `(ids: ${matches.map((m) => m.id).join(', ')})`
+                );
+            }
+        }
+    }
+    
+    /**
+     * Fetch equipment from player's inventory (from local state)
+     * @returns {Array} Array of equipment from player's inventory
+     */
+    async function fetchServerEquipment() {
+        try {
+            const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+            if (!playerContext || !playerContext.equips) {
+                return [];
+            }
+            
+            const userEquips = playerContext.equips || [];
+            return userEquips.filter(equip => equip && equip.id && equip.gameId);
+        } catch (error) {
+            console.warn(`[${modName}][WARN][fetchServerEquipment] Error fetching equipment:`, error);
+            return [];
+        }
+    }
+    
+    /**
+     * Filter inventory equipment to only include those from serverResults (by server ID match)
+     * @param {Array} inventoryEquipment - Full inventory equipment snapshot
+     * @param {Set} rewardEquipmentIds - Set of server IDs from serverResults
+     * @returns {Array} Filtered equipment matching server IDs
+     */
+    function filterEquipmentByServerIds(inventoryEquipment, rewardEquipmentIds) {
+        if (!rewardEquipmentIds || rewardEquipmentIds.size === 0) {
+            return [];
+        }
+        
+        return inventoryEquipment.filter(invEquipment => {
+            return rewardEquipmentIds.has(invEquipment.id);
+        });
+    }
+    
+    /**
+     * Get equipment details from equipment data (similar to Better Exaltation Chest)
+     * @param {Object} equipData - Equipment data from inventory or serverResults
+     * @returns {Object|null} Equipment details or null
+     */
+    function getEquipmentDetails(equipData) {
+        try {
+            if (!equipData || !equipData.gameId) {
+                return null;
+            }
+            
+            // Get equipment name from game data
+            let equipmentName = `Equipment ID ${equipData.gameId}`;
+            try {
+                const equipDataFromGame = globalThis.state?.utils?.getEquipment?.(equipData.gameId);
+                if (equipDataFromGame && equipDataFromGame.metadata && equipDataFromGame.metadata.name) {
+                    equipmentName = equipDataFromGame.metadata.name;
+                }
+            } catch (e) {
+                // Ignore errors
+            }
+            
+            // Calculate total genes (HP + AD + AP + Armor + Magic Resist)
+            // Equipment from inventory should have these properties
+            const hp = equipData.hp || 0;
+            const ad = equipData.ad || 0;
+            const ap = equipData.ap || 0;
+            const armor = equipData.armor || 0;
+            const magicResist = equipData.magicResist || 0;
+            const totalGenes = hp + ad + ap + armor + magicResist;
+            
+            return {
+                id: equipData.id,
+                name: equipmentName,
+                tier: equipData.tier || 1,
+                stat: equipData.stat || 'unknown',
+                gameId: equipData.gameId,
+                hp,
+                ad,
+                ap,
+                armor,
+                magicResist,
+                totalGenes
+            };
+        } catch (error) {
+            console.warn('[Autoseller] Error getting equipment details:', error);
+            return null;
+        }
+    }
+    
+    /**
+     * Check if equipment should be disenchanted based on autoduster settings
+     * @param {Object} equipment - Equipment details
+     * @param {Object} settings - Autoseller settings
+     * @returns {boolean} True if equipment should be disenchanted
+     */
+    function shouldDisenchantEquipment(equipment, settings) {
+        if (!equipment) {
+            return false;
+        }
+        
+        const ignoreList = settings.autodusterIgnoreList || [];
+        
+        // Check if equipment is in ignore list
+        if (equipment.name && ignoreList.includes(equipment.name)) {
+            return false;
+        }
+        
+        // Check if equipment stat type should be kept (per-equipment settings)
+        const equipmentStat = equipment.stat || 'unknown';
+        const allKeepStats = settings.autodusterKeepStats || {};
+        
+        // Get settings for this specific equipment, or use defaults (disenchant all)
+        const keepStats = equipment.name && allKeepStats[equipment.name] 
+            ? allKeepStats[equipment.name] 
+            : { ad: false, ap: false, hp: false };
+        
+        // Map stat types: 'ad' -> 'ad', 'ap' -> 'ap', 'hp' -> 'hp'
+        // Only check AD, AP, HP (ignore armor and magicResist)
+        if (equipmentStat === 'ad' || equipmentStat === 'ap' || equipmentStat === 'hp') {
+            if (keepStats[equipmentStat] === true) {
+                return false; // Keep this equipment
+            }
+        }
+        
+        // Equipment should be dusted
+        return true;
+    }
+    
+    /**
+     * Get reason why equipment is kept or dusted (for logging)
+     * @param {Object} equipment - Equipment details
+     * @param {Object} settings - Autoseller settings
+     * @returns {Object} { shouldDust: boolean, reason: string }
+     */
+    function getEquipmentDecisionReason(equipment, settings) {
+        if (!equipment) {
+            return { shouldDust: false, reason: 'Equipment details unavailable' };
+        }
+        
+        const ignoreList = settings.autodusterIgnoreList || [];
+        
+        // Check if equipment is in ignore list
+        if (equipment.name && ignoreList.includes(equipment.name)) {
+            return { shouldDust: false, reason: 'In ignore list' };
+        }
+        
+        // Check if equipment stat type should be kept (per-equipment settings)
+        const equipmentStat = equipment.stat || 'unknown';
+        const allKeepStats = settings.autodusterKeepStats || {};
+        
+        // Get settings for this specific equipment, or use defaults (disenchant all)
+        const keepStats = equipment.name && allKeepStats[equipment.name] 
+            ? allKeepStats[equipment.name] 
+            : { ad: false, ap: false, hp: false };
+        
+        const hasCustomSettings = equipment.name && allKeepStats[equipment.name];
+        
+        // Map stat types: 'ad' -> 'ad', 'ap' -> 'ap', 'hp' -> 'hp'
+        // Only check AD, AP, HP (ignore armor and magicResist)
+        if (equipmentStat === 'ad' || equipmentStat === 'ap' || equipmentStat === 'hp') {
+            if (keepStats[equipmentStat] === true) {
+                const statName = equipmentStat.toUpperCase();
+                const settingsNote = hasCustomSettings ? ' (custom settings)' : ' (default)';
+                return { shouldDust: false, reason: `Keep ${statName} stat${settingsNote}` };
+            } else {
+                const statName = equipmentStat.toUpperCase();
+                return { shouldDust: true, reason: `Dust ${statName} stat (not kept)` };
+            }
+        }
+        
+        // Equipment stat type not AD/AP/HP - always dust
+        return { shouldDust: true, reason: `Dust ${equipmentStat} stat (not AD/AP/HP)` };
+    }
+    
+    /**
+     * Disenchant equipment
+     * @param {string} equipmentId - Equipment server ID
+     * @returns {Promise<Object>} Result object with success status and dust gained
+     */
+    async function disenchantEquipment(equipmentId) {
+        logAutosellerDebug('Disenchant', `API equipToDust → equipmentId=${equipmentId}`);
+        try {
+            const payload = {
+                "0": {
+                    "json": equipmentId
+                }
+            };
+            
+            const url = 'https://bestiaryarena.com/api/trpc/game.equipToDust?batch=1';
+            const result = await apiRequest(url, { method: 'POST', body: payload });
+            
+            if (!result.success) {
+                if (result.status === 404) {
+                    logAutosellerDebug('Disenchant', `404 equipmentId=${equipmentId}`);
+                    return { success: false, status: 404, message: 'Equipment not found' };
+                }
+                if (result.status === 429) {
+                    logAutosellerDebug('Disenchant', `429 rate limited equipmentId=${equipmentId}`);
+                    return { success: false, status: 429, message: 'Rate limited' };
+                }
+                logAutosellerDebug('Disenchant', `API failed equipmentId=${equipmentId} HTTP ${result.status}`);
+                return { success: false, status: result.status, message: 'API request failed' };
+            }
+            
+            const apiResponse = result.data;
+            if (apiResponse && apiResponse[0]?.result?.data?.json?.dustDiff !== undefined) {
+                const dustGained = apiResponse[0].result.data.json.dustDiff;
+                logAutosellerDebug('Disenchant', `success equipmentId=${equipmentId} +${dustGained} dust`);
+                return {
+                    success: true,
+                    dustGained: dustGained
+                };
+            } else {
+                logAutosellerDebug('Disenchant', `invalid response equipmentId=${equipmentId}`);
+                return {
+                    success: false,
+                    error: 'Invalid response format'
+                };
+            }
+        } catch (error) {
+            logAutosellerDebug('Disenchant', `error equipmentId=${equipmentId}: ${error.message}`);
+            console.error(`[Autoseller] ❌ Error disenchanting equipment ${equipmentId}:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+    
+    async function getEligibleMonsters(settings, monsters) {
+        if (!Array.isArray(monsters) || monsters.length === 0) {
+            return { toSqueeze: [], toSell: [] };
+        }
+        
+        const sellEnabled = settings.autoMode === 'autosell' || settings.autosellChecked;
+        const squeezeEnabled = settings.autosqueezeChecked;
+        
+        if (!sellEnabled && !squeezeEnabled) {
+            return { toSqueeze: [], toSell: [] };
+        }
+        
+        const sellMinGenes = settings.autosellGenesMin ?? 5;
+        const sellMaxGenes = settings.autosellGenesMax ?? 79;
+        const squeezeMinGenes = settings.autosqueezeGenesMin ?? 80;
+        const squeezeMaxGenes = settings.autosqueezeGenesMax ?? 100;
+        const sellMinCount = settings.autosellMinCount ?? 1;
+        const squeezeMinCount = settings.autosqueezeMinCount ?? 1;
+        const maxExpThreshold = settings.autosellMaxExp ?? 52251;
+        const squeezeIgnoreList = settings.autosqueezeIgnoreList || [];
+        const protectSealedTier5 = settings.protectSealedTier5 === true;
+        
+        const toSqueeze = [];
+        const toSell = [];
+        
+        const monsterCount = monsters.length;
+        
+        const hasDaycare = hasDaycareIconInInventory();
+        let daycareMonsterIds = [];
+        
+        if (hasDaycare && (sellEnabled || squeezeEnabled)) {
+            daycareMonsterIds = await fetchDaycareData();
+        }
+        
+        for (let i = 0; i < monsterCount; i++) {
+            const monster = monsters[i];
+            const monsterName = monster?.metadata?.name || monster?.name;
+            
+            if (monster.locked) {
+                continue;
+            }
+            if (isSealedTierFiveCreature(monster)) {
+                const sellAllowedForSealed = isSealedTier5SellAllowed(monsterName);
+                const squeezeAllowedForSealed = isSealedTier5SqueezeAllowed(monsterName);
+                const mayProcessSealed =
+                    (sellEnabled && sellAllowedForSealed) ||
+                    (squeezeEnabled && squeezeAllowedForSealed);
+                if (!mayProcessSealed) continue;
+
+                const hp = monster.hp || 0;
+                const ad = monster.ad || 0;
+                const ap = monster.ap || 0;
+                const armor = monster.armor || 0;
+                const magicResist = monster.magicResist || 0;
+                const genes = hp + ad + ap + armor + magicResist;
+
+                // Sealed tier-5 cannot be autosqueezed (in-game squeeze does not apply). When sell/devour
+                // is allowed, use the full 5–100% band so 80–100% sealed are cleared instead of wrongly
+                // matching only the normal autosell cap (e.g. 79) or the squeeze queue.
+                if (sellEnabled && sellAllowedForSealed) {
+                    const sealedMin = UI_CONSTANTS.SEALED_SELL_GENE_MIN;
+                    const sealedMax = UI_CONSTANTS.SEALED_SELL_GENE_MAX;
+                    if (genes >= sealedMin && genes <= sealedMax) {
+                        if (!isShinyCreature(monster)) {
+                            const exp = monster.exp || 0;
+                            if (exp < maxExpThreshold) {
+                                if (!hasDaycare || !daycareMonsterIds.includes(monster.id)) {
+                                    toSell.push(monster);
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+
+            const hp = monster.hp || 0;
+            const ad = monster.ad || 0;
+            const ap = monster.ap || 0;
+            const armor = monster.armor || 0;
+            const magicResist = monster.magicResist || 0;
+            const genes = hp + ad + ap + armor + magicResist;
+
+            if (squeezeEnabled) {
+                if (genes >= squeezeMinGenes && genes <= squeezeMaxGenes) {
+                    // FAILSAFE: NEVER autosqueeze shiny creatures
+                    if (isShinyCreature(monster)) {
+                        continue;
+                    }
+                    if (hasDaycare && daycareMonsterIds.includes(monster.id)) {
+                        continue;
+                    }
+
+                    // Check ignore list
+                    const creatureName = monster.name || (monster.gameId && globalThis.state?.utils?.getMonster?.(monster.gameId)?.metadata?.name);
+                    if (creatureName && squeezeIgnoreList.includes(creatureName)) {
+                        continue;
+                    }
+
+                    toSqueeze.push(monster);
+                }
+            }
+            else if (sellEnabled && genes >= sellMinGenes && genes <= sellMaxGenes) {
+                // FAILSAFE: NEVER autosell shiny creatures
+                if (isShinyCreature(monster)) {
+                    continue;
+                }
+
+                const exp = monster.exp || 0;
+                if (exp < maxExpThreshold) {
+                    if (!hasDaycare || !daycareMonsterIds.includes(monster.id)) {
+                        toSell.push(monster);
+                    }
+                }
+            }
+        }
+        
+        const finalToSqueeze = toSqueeze.length >= squeezeMinCount ? toSqueeze : [];
+        const finalToSell = toSell.length >= sellMinCount ? toSell : [];
+        
+        return {
+            toSqueeze: finalToSqueeze,
+            toSell: finalToSell
+        };
+    }
+
+    // =======================
+    // 4. Data Management & Caching
+    // =======================
+    
+    // Mutex for API calls to prevent race conditions
+    const apiMutex = {
+        daycare: false,
+        monsters: false,
+        
+        async acquire(type) {
+            while (this[type]) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            this[type] = true;
+        },
+        
+        release(type) {
+            this[type] = false;
+        }
+    };
+    
+    // Cache for daycare data to reduce API calls
+    const daycareCache = {
+        data: null,
+        timestamp: 0,
+        ttl: 30000,
+        
+        isValid() {
+            return this.data && (Date.now() - this.timestamp) < this.ttl;
+        },
+        
+        set(data) {
+            this.data = data;
+            this.timestamp = Date.now();
+        },
+        
+        clear() {
+            this.data = null;
+            this.timestamp = 0;
+        }
+    };
+    
+    // Cache for server monsters to reduce API calls
+    const serverMonsterCache = {
+        data: null,
+        timestamp: 0,
+        ttl: 5000,
+        
+        isValid() {
+            return this.data && (Date.now() - this.timestamp) < this.ttl;
+        },
+        
+        set(data) {
+            this.data = data;
+            this.timestamp = Date.now();
+        },
+        
+        clear() {
+            this.data = null;
+            this.timestamp = 0;
+        }
+    };
+    
+    // Shared rate limiter for all API operations
+    const apiRateLimiter = {
+        requestTimes: [],
+        
+        canMakeRequest() {
+            const now = Date.now();
+            this.requestTimes = this.requestTimes.filter(time => now - time < SELL_RATE_LIMIT.WINDOW_SIZE_MS);
+            return this.requestTimes.length < SELL_RATE_LIMIT.MAX_MONSTERS_PER_10S;
+        },
+        
+        recordRequest() {
+            this.requestTimes.push(Date.now());
+        },
+        
+        async waitForSlot() {
+            while (!this.canMakeRequest()) {
+                const waitTime = SELL_RATE_LIMIT.WINDOW_SIZE_MS - (Date.now() - Math.min(...this.requestTimes)) + 100;
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+    };
+
+    // =======================
+    // 5. API Utilities
+    // =======================
+    
+    /**
+     * Failsafe check to NEVER process shiny creatures
+     * @param {Object} monster - Monster object to check
+     * @returns {boolean} - true if monster is shiny, false otherwise
+     */
+    function isShinyCreature(monster) {
+        if (!monster) return false;
+        // Check shiny property (primary method used across Super Mods)
+        if (monster.shiny === true) return true;
+        // Additional check: if monster has metadata, check there too
+        if (monster.metadata && monster.metadata.shiny === true) return true;
+        return false;
+    }
+
+    /**
+     * Detect Sealed creatures by tier (Tier 5)
+     * @param {Object} monster - Monster object to check
+     * @returns {boolean} - true if monster is tier 5, false otherwise
+     */
+    function isSealedTierFiveCreature(monster) {
+        if (!monster) return false;
+        const tier = monster.tier ?? monster.metadata?.tier;
+        return Number(tier) === 5;
+    }
+
+    /**
+     * Detect awakened creatures by flags/tier/level
+     * @param {Object} monster - Monster object to check
+     * @returns {boolean}
+     */
+    function isAwakenedCreature(monster) {
+        if (!monster) return false;
+        const tier = Number(monster.tier ?? monster.metadata?.tier);
+        if (tier === 6) return true;
+        // Keep flag fallbacks for compatibility with payload variants
+        return monster.awaken === true || monster.awakened === true || monster.isAwakened === true;
+    }
+
+    function isGazerMonster(monster) {
+        const db = window.creatureDatabase;
+        if (typeof db?.isGazerMonster === 'function') return db.isGazerMonster(monster);
+        const name = monster?.metadata?.name || getCreatureNameFromMonster(monster) || '';
+        return String(name).toLowerCase().includes('gazer');
+    }
+
+    /**
+     * Check if candidate creature has any higher gene stat than target.
+     * @param {Object} candidate - Sealed creature candidate
+     * @param {Object} target - Awakened target creature
+     * @returns {boolean}
+     */
+    function hasAnyHigherGeneStat(candidate, target) {
+        if (!candidate || !target) return false;
+        const candidateStats = getMonsterGeneStats(candidate);
+        const targetStats = getMonsterGeneStats(target);
+        return (
+            candidateStats.hp > targetStats.hp ||
+            candidateStats.ad > targetStats.ad ||
+            candidateStats.ap > targetStats.ap ||
+            candidateStats.armor > targetStats.armor ||
+            candidateStats.magicResist > targetStats.magicResist
+        );
+    }
+
+    /**
+     * Normalize gene stats from mixed monster payload shapes.
+     * Supports flat stats, nested genes/stats objects and mr alias.
+     * @param {Object} monster
+     * @returns {{hp:number, ad:number, ap:number, armor:number, magicResist:number}}
+     */
+    function getMonsterGeneStats(monster) {
+        if (!monster || typeof monster !== 'object') {
+            return { hp: 0, ad: 0, ap: 0, armor: 0, magicResist: 0 };
+        }
+        const genes = monster.genes || monster.stats || {};
+        const hp = Number(monster.hp ?? genes.hp ?? 0);
+        const ad = Number(monster.ad ?? genes.ad ?? 0);
+        const ap = Number(monster.ap ?? genes.ap ?? 0);
+        const armor = Number(monster.armor ?? genes.armor ?? 0);
+        const magicResist = Number(monster.magicResist ?? monster.mr ?? genes.magicResist ?? genes.mr ?? 0);
+        return { hp, ad, ap, armor, magicResist };
+    }
+
+    function syncInjectedAwakenedStatsLocally(awakenedMonsterId, targetBeforeStats, candidateStats) {
+        try {
+            const player = globalThis.state?.player;
+            if (!player || typeof player.send !== 'function') return false;
+
+            const expectedAfter = {
+                hp: Math.max(targetBeforeStats.hp, candidateStats.hp),
+                ad: Math.max(targetBeforeStats.ad, candidateStats.ad),
+                ap: Math.max(targetBeforeStats.ap, candidateStats.ap),
+                armor: Math.max(targetBeforeStats.armor, candidateStats.armor),
+                magicResist: Math.max(targetBeforeStats.magicResist, candidateStats.magicResist)
+            };
+
+            player.send({
+                type: 'setState',
+                fn: (prev) => {
+                    if (!prev || !Array.isArray(prev.monsters)) return prev;
+                    let changed = false;
+                    const nextMonsters = prev.monsters.map(monster => {
+                        if (String(monster?.id) !== String(awakenedMonsterId)) return monster;
+                        changed = true;
+                        const nextMonster = { ...monster };
+                        nextMonster.hp = Math.max(Number(monster?.hp) || 0, expectedAfter.hp);
+                        nextMonster.ad = Math.max(Number(monster?.ad) || 0, expectedAfter.ad);
+                        nextMonster.ap = Math.max(Number(monster?.ap) || 0, expectedAfter.ap);
+                        nextMonster.armor = Math.max(Number(monster?.armor) || 0, expectedAfter.armor);
+                        nextMonster.magicResist = Math.max(Number(monster?.magicResist) || 0, expectedAfter.magicResist);
+
+                        if (nextMonster.genes && typeof nextMonster.genes === 'object') {
+                            nextMonster.genes = {
+                                ...nextMonster.genes,
+                                hp: Math.max(Number(nextMonster.genes.hp) || 0, expectedAfter.hp),
+                                ad: Math.max(Number(nextMonster.genes.ad) || 0, expectedAfter.ad),
+                                ap: Math.max(Number(nextMonster.genes.ap) || 0, expectedAfter.ap),
+                                armor: Math.max(Number(nextMonster.genes.armor) || 0, expectedAfter.armor),
+                                magicResist: Math.max(Number(nextMonster.genes.magicResist) || 0, expectedAfter.magicResist)
+                            };
+                        }
+                        return nextMonster;
+                    });
+                    return changed ? { ...prev, monsters: nextMonsters } : prev;
+                }
+            });
+            return true;
+        } catch (error) {
+            console.warn(`[${modName}][WARN][syncInjectedAwakenedStatsLocally] Failed local awakened stat sync`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Check if a battle is currently running.
+     * @returns {boolean}
+     */
+    function isGameCurrentlyRunning() {
+        const gameState = globalThis.state?.gameTimer?.getSnapshot?.()?.context?.state;
+        return gameState === 'playing';
+    }
+
+    /**
+     * Check if a monster database ID is currently on the board.
+     * @param {string|number} monsterId
+     * @returns {boolean}
+     */
+    function isMonsterCurrentlyOnBoard(monsterId) {
+        if (!monsterId) return false;
+        const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+        if (!boardContext) return false;
+
+        const possiblePieceArrays = [
+            boardContext.boardConfig,
+            boardContext.board,
+            boardContext.pieces
+        ];
+
+        for (const pieceArray of possiblePieceArrays) {
+            if (!Array.isArray(pieceArray)) continue;
+            const found = pieceArray.some(piece => {
+                if (!piece || piece.type !== 'player') return false;
+                const pieceMonsterId = piece.databaseId ?? piece.monsterId ?? piece.id;
+                return String(pieceMonsterId) === String(monsterId);
+            });
+            if (found) return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Sort awakened inject targets (same gameId) strongest-first.
+     * Priority: higher level, then higher total genes, then earlier inventory index.
+     * @param {Array} matchingTargets - Awakened candidates with matching gameId
+     * @param {Array} inventoryMonsters - Full inventory list (defines tie-break order)
+     * @returns {Array}
+     */
+    function sortAwakenedInjectTargets(matchingTargets, inventoryMonsters) {
+        if (!Array.isArray(matchingTargets) || matchingTargets.length === 0) return [];
+
+        const inventoryOrder = new Map();
+        (inventoryMonsters || []).forEach((monster, index) => {
+            if (monster?.id != null) inventoryOrder.set(String(monster.id), index);
+        });
+
+        return [...matchingTargets].sort((a, b) => {
+            const levelA = Number(a?.level) || 0;
+            const levelB = Number(b?.level) || 0;
+            if (levelB !== levelA) return levelB - levelA;
+
+            const genesA = calculateTotalGenes(a);
+            const genesB = calculateTotalGenes(b);
+            if (genesB !== genesA) return genesB - genesA;
+
+            const orderA = inventoryOrder.get(String(a?.id)) ?? Number.MAX_SAFE_INTEGER;
+            const orderB = inventoryOrder.get(String(b?.id)) ?? Number.MAX_SAFE_INTEGER;
+            return orderA - orderB;
+        });
+    }
+
+    /**
+     * Attempt to inject sealed creatures into an awakened creature.
+     * @param {Array} monsters - Candidate monsters from current processing pass
+     * @returns {Promise<Set<string|number>>} Server IDs consumed via doctor
+     */
+    async function autoInjectEligibleSealedCreatures(monsters) {
+        const consumedServerIds = new Set();
+        const settings = getSettings();
+        const keepList = settings.autoplantIgnoreList || [];
+        if (!Array.isArray(monsters) || monsters.length === 0) {
+            console.log('[Autoseller][Inject] Skip: no monsters provided');
+            return consumedServerIds;
+        }
+
+        const localMonsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [];
+        if (!Array.isArray(localMonsters) || localMonsters.length === 0) {
+            console.log('[Autoseller][Inject] Skip: local inventory unavailable');
+            return consumedServerIds;
+        }
+
+        const awakenedCandidates = localMonsters.filter(m => m && m.id && isAwakenedCreature(m) && !isSealedTierFiveCreature(m) && !isGazerMonster(m));
+        if (awakenedCandidates.length === 0) {
+            console.log('[Autoseller][Inject] Skip: no awakened targets in inventory');
+            return consumedServerIds;
+        }
+
+        for (const monster of monsters) {
+            if (!monster || !monster.id) continue;
+            if (isShinyCreature(monster) || !isSealedTierFiveCreature(monster)) continue;
+            const creatureName = monster?.metadata?.name || monster?.name || getCreatureNameFromMonster(monster);
+            if (creatureName && keepList.includes(creatureName)) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: in Keep list`);
+                emitAutosellerEvent('inject:skip', { reason: 'keep-list', creatureName, gameId: Number(monster?.gameId ?? monster?.metadata?.id), candidate: { stats: getMonsterGeneStats(monster) } });
+                continue;
+            }
+            if (!isSealedTier5InjectAllowed(creatureName)) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: inject not enabled`);
+                emitAutosellerEvent('inject:skip', { reason: 'disabled', creatureName, gameId: Number(monster?.gameId ?? monster?.metadata?.id), candidate: { stats: getMonsterGeneStats(monster) } });
+                continue;
+            }
+            const sealedGameId = Number(monster?.gameId ?? monster?.metadata?.id);
+            const matchingAwakenedTargets = awakenedCandidates.filter(candidate => {
+                const candidateGameId = Number(candidate?.gameId ?? candidate?.metadata?.id);
+                return Number.isFinite(candidateGameId) && Number.isFinite(sealedGameId) && candidateGameId === sealedGameId;
+            });
+            const orderedAwakenedTargets = sortAwakenedInjectTargets(matchingAwakenedTargets, localMonsters);
+            if (orderedAwakenedTargets.length === 0) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: no awakened target with same gameId (${sealedGameId})`);
+                emitAutosellerEvent('inject:skip', { reason: 'no-target', creatureName, gameId: sealedGameId, candidate: { stats: getMonsterGeneStats(monster) } });
+                continue;
+            }
+
+            let injectSucceeded = false;
+            for (let targetIndex = 0; targetIndex < orderedAwakenedTargets.length; targetIndex++) {
+                if (isCleaningUp) return consumedServerIds;
+
+                const awakenedTarget = orderedAwakenedTargets[targetIndex];
+                if (!awakenedTarget?.id) continue;
+
+                const awakenedTargetName = awakenedTarget?.metadata?.name || awakenedTarget?.name || getCreatureNameFromMonster(awakenedTarget) || 'unknown';
+                const tryWeakerNext = targetIndex < orderedAwakenedTargets.length - 1;
+
+                if (String(monster.id) === String(awakenedTarget.id)) {
+                    console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: same as target ${awakenedTargetName} (${awakenedTarget.id})`);
+                    emitAutosellerEvent('inject:skip', { reason: 'same-id', creatureName, gameId: sealedGameId, candidate: { stats: getMonsterGeneStats(monster) } });
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                    continue;
+                }
+                if (!hasAnyHigherGeneStat(monster, awakenedTarget)) {
+                    const c = getMonsterGeneStats(monster);
+                    const t = getMonsterGeneStats(awakenedTarget);
+                    console.log(
+                        `[Autoseller][Inject][Skip] ${creatureName || monster.id}: no higher gene than target ${awakenedTargetName} (${awakenedTarget.id}) ` +
+                        `(candidate hp=${c.hp} ad=${c.ad} ap=${c.ap} armor=${c.armor} mr=${c.magicResist} | ` +
+                        `target hp=${t.hp} ad=${t.ad} ap=${t.ap} armor=${t.armor} mr=${t.magicResist})`
+                    );
+                    emitAutosellerEvent('inject:skip', {
+                        reason: 'no-higher-gene',
+                        creatureName,
+                        gameId: sealedGameId,
+                        candidate: { stats: c },
+                        target: { id: awakenedTarget.id, name: awakenedTargetName, stats: t }
+                    });
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                    continue;
+                }
+
+                if (isGameCurrentlyRunning() && isMonsterCurrentlyOnBoard(awakenedTarget.id)) {
+                    console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: awakened target ${awakenedTargetName} (${awakenedTarget.id}) is on board during active battle`);
+                    emitAutosellerEvent('inject:skip', {
+                        reason: 'on-board',
+                        creatureName,
+                        gameId: sealedGameId,
+                        target: { id: awakenedTarget.id, name: awakenedTargetName },
+                        candidate: { stats: getMonsterGeneStats(monster) }
+                    });
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                    continue;
+                }
+
+                console.log(
+                    `[Autoseller][Inject] Target selected (${targetIndex + 1}/${orderedAwakenedTargets.length}): ` +
+                    `${awakenedTargetName} (${awakenedTarget.id}) for drop ${creatureName || monster.id} (gameId=${sealedGameId})`
+                );
+
+                await apiRateLimiter.waitForSlot();
+                apiRateLimiter.recordRequest();
+
+                const result = await apiRequest('https://bestiaryarena.com/api/trpc/inventory.useDoctor?batch=1', {
+                    method: 'POST',
+                    body: { "0": { json: { awakenMonsterId: awakenedTarget.id, consumingMonsterId: monster.id } } }
+                });
+
+                const goldDiff = result?.data?.[0]?.result?.data?.json?.goldDiff;
+                if (result.success && goldDiff !== undefined && goldDiff !== null) {
+                const candidateStats = getMonsterGeneStats(monster);
+                const targetBeforeStats = getMonsterGeneStats(awakenedTarget);
+                console.log(`[Autoseller][Inject][Success] ${creatureName || monster.id} (${monster.id}) -> ${awakenedTargetName} (${awakenedTarget.id}), goldDiff=${goldDiff}`);
+                emitAutosellerEvent('inject:success', {
+                    creatureName,
+                    gameId: Number(monster?.gameId ?? monster?.metadata?.id),
+                    target: { id: awakenedTarget.id, name: awakenedTargetName },
+                    goldDiff
+                });
+                syncInjectedAwakenedStatsLocally(awakenedTarget.id, targetBeforeStats, candidateStats);
+
+                let targetAfterStats = targetBeforeStats;
+                // Player state can lag briefly behind useDoctor success; poll shortly for updated target stats.
+                for (let attempt = 0; attempt < 10; attempt++) {
+                    await new Promise(resolve => setTimeout(resolve, 120));
+                    const refreshedTarget = (globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [])
+                        .find(m => String(m?.id) === String(awakenedTarget.id));
+                    targetAfterStats = getMonsterGeneStats(refreshedTarget || awakenedTarget);
+
+                    const hasAnyDelta =
+                        targetAfterStats.hp !== targetBeforeStats.hp ||
+                        targetAfterStats.ad !== targetBeforeStats.ad ||
+                        targetAfterStats.ap !== targetBeforeStats.ap ||
+                        targetAfterStats.armor !== targetBeforeStats.armor ||
+                        targetAfterStats.magicResist !== targetBeforeStats.magicResist;
+                    if (hasAnyDelta) break;
+                }
+
+                const statLabelMap = {
+                    hp: 'HP',
+                    ad: 'AD',
+                    ap: 'AP',
+                    armor: 'ARM',
+                    magicResist: 'MR'
+                };
+                const statIconMap = {
+                    hp: '/assets/icons/heal.png',
+                    ad: '/assets/icons/attackdamage.png',
+                    ap: '/assets/icons/abilitypower.png',
+                    armor: '/assets/icons/armor.png',
+                    magicResist: '/assets/icons/magicresist.png'
+                };
+                const statKeys = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+
+                const gains = statKeys
+                    .map(key => ({ key, diff: targetAfterStats[key] - targetBeforeStats[key] }))
+                    .filter(item => item.diff > 0);
+
+                const inferredGains = statKeys
+                    .map(key => ({ key, diff: Math.max(0, candidateStats[key] - targetBeforeStats[key]) }))
+                    .filter(item => item.diff > 0);
+                const gainsTextList = gains.map(item => `+${item.diff} ${statLabelMap[item.key]}`);
+                const inferredGainsTextList = inferredGains.map(item => `+${item.diff} ${statLabelMap[item.key]}`);
+
+                console.log(
+                    `[Autoseller][Inject][Applied] ${awakenedTargetName} (${awakenedTarget.id}): ` +
+                    `${inferredGainsTextList.length > 0 ? inferredGainsTextList.join(', ') : 'no gain'}`
+                );
+                const gainsObject = { hp: 0, ad: 0, ap: 0, armor: 0, magicResist: 0 };
+                (gains.length > 0 ? gains : inferredGains).forEach(g => { gainsObject[g.key] = g.diff; });
+                emitAutosellerEvent('inject:applied', {
+                    creatureName,
+                    gameId: Number(monster?.gameId ?? monster?.metadata?.id),
+                    target: { id: awakenedTarget.id, name: awakenedTargetName },
+                    before: targetBeforeStats,
+                    after: targetAfterStats,
+                    gains: gainsObject,
+                    candidate: candidateStats
+                });
+                const gainsForToast = gains.length > 0
+                    ? gains
+                    : inferredGains;
+                const beforeTotalGenes = targetBeforeStats.hp + targetBeforeStats.ad + targetBeforeStats.ap + targetBeforeStats.armor + targetBeforeStats.magicResist;
+                const afterTotalGenes = targetAfterStats.hp + targetAfterStats.ad + targetAfterStats.ap + targetAfterStats.armor + targetAfterStats.magicResist;
+                if (gains.length === 0) {
+                    console.log(
+                        `[Autoseller][Inject] No target stat delta detected yet for ${awakenedTargetName} (${awakenedTarget.id}) ` +
+                        `(before hp=${targetBeforeStats.hp} ad=${targetBeforeStats.ad} ap=${targetBeforeStats.ap} armor=${targetBeforeStats.armor} mr=${targetBeforeStats.magicResist} | ` +
+                        `after hp=${targetAfterStats.hp} ad=${targetAfterStats.ad} ap=${targetAfterStats.ap} armor=${targetAfterStats.armor} mr=${targetAfterStats.magicResist})`
+                    );
+                }
+                const toastContent = document.createElement('span');
+                toastContent.style.display = 'inline-flex';
+                toastContent.style.alignItems = 'center';
+                toastContent.style.flexWrap = 'wrap';
+                toastContent.style.gap = '4px';
+
+                const introText = document.createElement('span');
+                introText.textContent = `Injected ${creatureName || 'creature'}`;
+                toastContent.appendChild(introText);
+
+                const numericGoldDiff = Number(goldDiff);
+                const hasGoldDiff = Number.isFinite(numericGoldDiff) && numericGoldDiff !== 0;
+                const hasTotalGenesTransition = Number.isFinite(beforeTotalGenes) && Number.isFinite(afterTotalGenes);
+                if (hasGoldDiff || gainsForToast.length > 0 || hasTotalGenesTransition) {
+                    const spacer = document.createElement('span');
+                    spacer.textContent = ' ';
+                    toastContent.appendChild(spacer);
+
+                    let badgeIndex = 0;
+                    const totalBadges = gainsForToast.length + (hasGoldDiff ? 1 : 0) + (hasTotalGenesTransition ? 1 : 0);
+                    if (hasGoldDiff) {
+                        const goldBadge = document.createElement('span');
+                        goldBadge.style.display = 'inline-flex';
+                        goldBadge.style.alignItems = 'center';
+                        goldBadge.style.gap = '3px';
+
+                        const goldValue = document.createElement('span');
+                        goldValue.textContent = numericGoldDiff > 0 ? `+${numericGoldDiff}` : `${numericGoldDiff}`;
+                        goldBadge.appendChild(goldValue);
+
+                        const goldIcon = document.createElement('img');
+                        goldIcon.src = 'https://bestiaryarena.com/assets/icons/goldpile.png';
+                        goldIcon.alt = 'Gold';
+                        goldIcon.style.width = '12px';
+                        goldIcon.style.height = '12px';
+                        goldIcon.style.verticalAlign = 'middle';
+                        goldBadge.appendChild(goldIcon);
+
+                        toastContent.appendChild(goldBadge);
+                        badgeIndex += 1;
+                        if (badgeIndex < totalBadges) {
+                            const comma = document.createElement('span');
+                            comma.textContent = ',';
+                            toastContent.appendChild(comma);
+                        }
+                    }
+
+                    gainsForToast.forEach((gain) => {
+                        const gainStat = gain.key;
+                        const gainBadge = document.createElement('span');
+                        gainBadge.style.display = 'inline-flex';
+                        gainBadge.style.alignItems = 'center';
+                        gainBadge.style.gap = '3px';
+
+                        const gainValue = document.createElement('span');
+                        gainValue.textContent = `+${gain.diff}`;
+                        gainBadge.appendChild(gainValue);
+
+                        const statIcon = document.createElement('img');
+                        statIcon.src = statIconMap[gainStat];
+                        statIcon.alt = statLabelMap[gainStat];
+                        statIcon.style.width = '12px';
+                        statIcon.style.height = '12px';
+                        statIcon.style.verticalAlign = 'middle';
+                        gainBadge.appendChild(statIcon);
+
+                        toastContent.appendChild(gainBadge);
+                        badgeIndex += 1;
+                        if (badgeIndex < totalBadges) {
+                            const comma = document.createElement('span');
+                            comma.textContent = ',';
+                            toastContent.appendChild(comma);
+                        }
+                    });
+
+                    if (hasTotalGenesTransition) {
+                        const totalGenesBadge = document.createElement('span');
+                        totalGenesBadge.textContent = `${beforeTotalGenes}% -> ${afterTotalGenes}%`;
+                        toastContent.appendChild(totalGenesBadge);
+                    }
+                }
+
+                showAutosellerToast(toastContent, 5000);
+                consumedServerIds.add(monster.id);
+                const removalResult = await removeMonstersFromLocalInventory([monster.id]);
+                if (removalResult.success) {
+                    stateManager.markProcessed([monster.id]);
+                    // Keep server cache fresh after successful doctor consume.
+                    serverMonsterCache.clear();
+                } else {
+                    console.warn(`[${modName}][WARN][autoInjectEligibleSealedCreatures] Inject succeeded but local inventory removal failed for ${monster.id}.`);
+                }
+                    injectSucceeded = true;
+                    break;
+                } else if (!result.success && result.status === 429) {
+                    console.log(`[Autoseller][Inject][Retry] ${creatureName || monster.id}: rate limited (429)`);
+                    await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
+                    break;
+                } else if (!result.success && result.status === 400) {
+                    console.warn(
+                        `[${modName}][WARN][autoInjectEligibleSealedCreatures] useDoctor failed for ${monster.id}: HTTP 400 ` +
+                        `(awakenMonsterId=${awakenedTarget.id}, consumingMonsterId=${monster.id})`,
+                        result?.data
+                    );
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                } else if (!result.success && result.status !== 404) {
+                    console.warn(`[${modName}][WARN][autoInjectEligibleSealedCreatures] useDoctor failed for ${monster.id}: HTTP ${result.status}`);
+                    if (tryWeakerNext) {
+                        console.log(`[Autoseller][Inject] Retrying on next awakened target (${targetIndex + 2}/${orderedAwakenedTargets.length})`);
+                    }
+                }
+
+                if (!injectSucceeded) {
+                    await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
+                }
+            }
+
+            if (!injectSucceeded && orderedAwakenedTargets.length > 0) {
+                console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: no injectable awakened target for gameId ${sealedGameId} after trying ${orderedAwakenedTargets.length} target(s)`);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
+            if (isCleaningUp) return consumedServerIds;
+        }
+
+        return consumedServerIds;
+    }
+    
+    async function apiRequest(url, options = {}, retries = API_CONSTANTS.RETRY_ATTEMPTS) {
+        const { method = 'GET', body, headers = {} } = options;
+        
+        // X-Game-Version header is required by the API - without it, requests return HTTP 400
+        const baseHeaders = {
+            'content-type': 'application/json',
+            'X-Game-Version': '1'
+        };
+        
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const requestOptions = {
+                    method,
+                    credentials: 'include',
+                    headers: { ...baseHeaders, ...headers },
+                    ...(body && { body: JSON.stringify(body) })
+                };
+                
+                const resp = await fetch(url, requestOptions);
+                const data = await resp.json().catch(() => null);
+                
+                if (!resp.ok) {
+                    if (resp.status === 404) {
+                        return { success: false, status: resp.status, data, isNotFound: true };
+                    }
+                    
+                    if (resp.status >= 500 && attempt < retries) {
+                        await new Promise(resolve => setTimeout(resolve, API_CONSTANTS.RETRY_DELAY_BASE * (attempt + 1)));
+                        continue;
+                    }
+                    
+                    return { success: false, status: resp.status, data };
+                }
+                
+                return { success: true, status: resp.status, data };
+                
+            } catch (e) {
+                if (attempt === retries) {
+                    return { success: false, error: e, data: null };
+                }
+                await new Promise(resolve => setTimeout(resolve, API_CONSTANTS.RETRY_DELAY_BASE * (attempt + 1)));
+            }
+        }
+    }
+    
+    async function fetchDaycareData() {
+        if (daycareCache.isValid()) {
+            return daycareCache.data;
+        }
+        
+        await apiMutex.acquire('daycare');
+        
+        try {
+            const myName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
+            if (!myName) {
+                console.warn(`[${modName}][WARN][fetchDaycareData] Could not determine player name.`);
+                return daycareCache.data || [];
+            }
+            
+            const url = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=${encodeURIComponent(JSON.stringify({"0":{json:myName}}))}`;
+            const result = await apiRequest(url);
+            
+            if (!result.success) {
+                stateManager.updateErrorStats('fetchErrors');
+                console.warn(`[${modName}][WARN][fetchDaycareData] API request failed, using cached data`);
+                return daycareCache.data || [];
+            }
+            
+            const profileData = result.data?.[0]?.result?.data?.json;
+            const daycareSlots = profileData?.daycareSlots || [];
+            
+            const daycareMonsterIds = [];
+            daycareSlots.forEach(slot => {
+                if (slot.monsterId) {
+                    daycareMonsterIds.push(slot.monsterId);
+                }
+            });
+            
+            daycareCache.set(daycareMonsterIds);
+            
+            return daycareMonsterIds;
+        } finally {
+            apiMutex.release('daycare');
+        }
+    }
+    
+    function hasDaycareIconInInventory() {
+        try {
+            const creatureSlots = queryAllElements(UI_CONSTANTS.SELECTORS.CREATURE_SLOTS);
+            
+            for (const slot of creatureSlots) {
+                const daycareIcon = slot.querySelector(UI_CONSTANTS.SELECTORS.DAYCARE_ICON);
+                if (daycareIcon) {
+                    return true;
+                }
+            }
+            
+            return false;
+        } catch (e) {
+            console.warn(`[${modName}][WARN][hasDaycareIconInInventory] Error checking for daycare icon in DOM`, e);
+            return false;
+        }
+    }
+    
+    async function isCreatureInDaycare(monsterId) {
+        try {
+            const creatureSlots = queryAllElements(UI_CONSTANTS.SELECTORS.CREATURE_SLOTS);
+            let foundDaycareIcon = false;
+            let foundMonsterInDaycare = false;
+            
+            for (const slot of creatureSlots) {
+                const daycareIcon = slot.querySelector(UI_CONSTANTS.SELECTORS.DAYCARE_ICON);
+                if (daycareIcon) {
+                    foundDaycareIcon = true;
+                    
+                    const creatureImg = slot.querySelector(UI_CONSTANTS.SELECTORS.CREATURE_IMG);
+                    if (creatureImg) {
+                        const srcMatch = creatureImg.src.match(/\/assets\/portraits\/(\d+)\.png$/);
+                        if (srcMatch) {
+                            const slotMonsterId = parseInt(srcMatch[1]);
+                            if (slotMonsterId === monsterId) {
+                                foundMonsterInDaycare = true;
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (foundDaycareIcon && !foundMonsterInDaycare) {
+                const daycareMonsterIds = await fetchDaycareData();
+                const isInDaycare = daycareMonsterIds.includes(monsterId);
+                return isInDaycare;
+            }
+            
+            return false;
+        } catch (e) {
+            console.warn(`[${modName}][WARN][isCreatureInDaycare] Error checking daycare status for monster ${monsterId}`, e);
+            return false;
+        }
+    }
+    
+    async function fetchServerMonsters() {
+        if (serverMonsterCache.isValid()) {
+            return serverMonsterCache.data;
+        }
+        
+        await apiMutex.acquire('monsters');
+        
+        try {
+            const myName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
+            if (!myName) {
+                console.warn(`[${modName}][WARN][fetchServerMonsters] Could not determine player name.`);
+                return serverMonsterCache.data || [];
+            }
+            
+            const url = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=${encodeURIComponent(JSON.stringify({"0":{json:myName}}))}`;
+            const result = await apiRequest(url);
+            
+            if (!result.success) {
+                stateManager.updateErrorStats('fetchErrors');
+                console.warn(`[${modName}][WARN][fetchServerMonsters] API request failed, using cached data`);
+                return serverMonsterCache.data || [];
+            }
+            
+            const monsters = result.data?.[0]?.result?.data?.json?.monsters || [];
+            
+            serverMonsterCache.set(monsters);
+            
+            return monsters;
+        } finally {
+            apiMutex.release('monsters');
+        }
+    }
+    
+    async function removeMonstersFromLocalInventory(idsToRemove, retryCount = 0, verificationRetryCount = 0) {
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 500;
+        const VERIFICATION_DELAY = 10; // ms - wait for state to update
+        const VERIFICATION_RETRY_DELAYS = [1000, 2000, 4000]; // ms - delays for verification retries
+        const MAX_VERIFICATION_RETRIES = 3;
+        
+        try {
+            // Validation
+            if (!Array.isArray(idsToRemove) || idsToRemove.length === 0) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Invalid or empty IDs array provided`);
+                return { success: false, removed: [] };
+            }
+            
+            // State checks
+            if (!globalThis.state?.player) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Player state not available`);
+                inventoryUpdateTracker.recordFailure();
+                return { success: false, removed: [] };
+            }
+            
+            const player = globalThis.state.player;
+            if (typeof player.send !== 'function' || typeof player.getSnapshot !== 'function') {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Player methods not available`);
+                inventoryUpdateTracker.recordFailure();
+                return { success: false, removed: [] };
+            }
+            
+            // Get pre-update state for verification
+            const preState = player.getSnapshot();
+            if (!preState?.context?.monsters || !Array.isArray(preState.context.monsters)) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Monsters array not available`);
+                inventoryUpdateTracker.recordFailure();
+                return { success: false, removed: [] };
+            }
+            
+            const preCount = preState.context.monsters.length;
+            const idsToRemoveSet = new Set(idsToRemove);
+            
+            // Removed verbose INFO log - only log on success/error
+            
+            // Perform state update
+            player.send({
+                type: "setState",
+                fn: (prev) => {
+                    if (!prev || !Array.isArray(prev.monsters)) {
+                        console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Invalid previous state`);
+                        return prev;
+                    }
+                    
+                    return {
+                        ...prev,
+                        monsters: prev.monsters.filter(m => !idsToRemoveSet.has(m.id))
+                    };
+                },
+            });
+            
+            // Wait for state to update (initial delay)
+            await new Promise(resolve => setTimeout(resolve, VERIFICATION_DELAY));
+            
+            // Verification with retry logic
+            let postState = player.getSnapshot();
+            let postCount = postState?.context?.monsters?.length ?? preCount;
+            let removedCount = preCount - postCount;
+            
+            // Wait 1000ms before first verification check
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Check if removal was successful
+            postState = player.getSnapshot();
+            if (!postState?.context?.monsters) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Could not verify update - state unavailable`);
+                inventoryUpdateTracker.recordFailure();
+                
+                // Retry if we haven't exceeded max retries
+                if (retryCount < MAX_RETRIES) {
+                    console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Retrying (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+                    return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1, 0);
+                }
+                
+                return { success: false, removed: [] };
+            }
+            
+            postCount = postState.context.monsters.length;
+            removedCount = preCount - postCount;
+            const remainingIds = new Set(postState.context.monsters.map(m => String(m?.id)));
+            const allIdsGone = idsToRemove.every(id => !remainingIds.has(String(id)));
+            
+            // If removal wasn't successful and we haven't exceeded verification retries, retry with increasing delays
+            if (!allIdsGone && removedCount === 0 && verificationRetryCount < MAX_VERIFICATION_RETRIES) {
+                const delay = VERIFICATION_RETRY_DELAYS[verificationRetryCount] || VERIFICATION_RETRY_DELAYS[VERIFICATION_RETRY_DELAYS.length - 1];
+                console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Verification failed, retrying verification after ${delay}ms (attempt ${verificationRetryCount + 1}/${MAX_VERIFICATION_RETRIES})...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return removeMonstersFromLocalInventory(idsToRemove, retryCount, verificationRetryCount + 1);
+            }
+            
+            if (allIdsGone || removedCount > 0) {
+                // Removed verbose success log - inventory updates are implicit in action logs
+                inventoryUpdateTracker.recordSuccess(Math.max(removedCount, idsToRemove.length));
+            } else if (verificationRetryCount >= MAX_VERIFICATION_RETRIES) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Verification failed after ${MAX_VERIFICATION_RETRIES} retries. Inventory count unchanged: ${preCount}`);
+                inventoryUpdateTracker.recordFailure();
+            }
+            
+            return { 
+                success: allIdsGone || removedCount > 0, 
+                removed: idsToRemove,
+                preCount,
+                postCount
+            };
+            
+        } catch (e) {
+            console.error(`[${modName}][ERROR][removeMonstersFromLocalInventory] Exception during update: ${e.message}`, e);
+            inventoryUpdateTracker.recordFailure();
+            
+            // Retry on exception if we haven't exceeded max retries
+            if (retryCount < MAX_RETRIES) {
+                console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Retrying after exception (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+                return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1, 0);
+            }
+            
+            return { success: false, removed: [], error: e.message };
+        }
+    }
+    
+    async function removeEquipmentFromLocalInventory(idsToRemove, retryCount = 0, verificationRetryCount = 0) {
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 500;
+        const VERIFICATION_DELAY = 10; // ms - wait for state to update
+        const VERIFICATION_RETRY_DELAYS = [1000, 2000, 4000]; // ms - delays for verification retries
+        const MAX_VERIFICATION_RETRIES = 3;
+        
+        try {
+            // Validation
+            if (!Array.isArray(idsToRemove) || idsToRemove.length === 0) {
+                console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Invalid or empty IDs array provided`);
+                return { success: false, removed: [] };
+            }
+            
+            // State checks
+            if (!globalThis.state?.player) {
+                console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Player state not available`);
+                return { success: false, removed: [] };
+            }
+            
+            const player = globalThis.state.player;
+            if (typeof player.send !== 'function' || typeof player.getSnapshot !== 'function') {
+                console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Player methods not available`);
+                return { success: false, removed: [] };
+            }
+            
+            // Get pre-update state for verification
+            const preState = player.getSnapshot();
+            if (!preState?.context?.equips || !Array.isArray(preState.context.equips)) {
+                console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Equipment array not available`);
+                return { success: false, removed: [] };
+            }
+            
+            const preCount = preState.context.equips.length;
+            const idsToRemoveSet = new Set(idsToRemove);
+            
+            // Removed verbose INFO log - only log on success/error
+            
+            // Perform state update
+            player.send({
+                type: "setState",
+                fn: (prev) => {
+                    if (!prev) {
+                        console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Invalid previous state`);
+                        return prev;
+                    }
+                    
+                    // Handle both possible state structures (like Better Forge does)
+                    if (prev?.equips && Array.isArray(prev.equips)) {
+                        return {
+                            ...prev,
+                            equips: prev.equips.filter(e => !idsToRemoveSet.has(e.id))
+                        };
+                    }
+                    
+                    if (prev?.context?.equips && Array.isArray(prev.context.equips)) {
+                        return {
+                            ...prev,
+                            context: {
+                                ...prev.context,
+                                equips: prev.context.equips.filter(e => !idsToRemoveSet.has(e.id))
+                            }
+                        };
+                    }
+                    
+                    console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Equipment array not found in state`);
+                    return prev;
+                },
+            });
+            
+            // Wait for state to update (initial delay)
+            await new Promise(resolve => setTimeout(resolve, VERIFICATION_DELAY));
+            
+            // Verification with retry logic
+            let postState = player.getSnapshot();
+            let postCount = (postState?.context?.equips?.length ?? postState?.equips?.length) ?? preCount;
+            let removedCount = preCount - postCount;
+            
+            // Wait 1000ms before first verification check
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Check if removal was successful
+            postState = player.getSnapshot();
+            if (!postState?.context?.equips && !postState?.equips) {
+                console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Could not verify update - state unavailable`);
+                
+                // Retry if we haven't exceeded max retries
+                if (retryCount < MAX_RETRIES) {
+                    console.log(`[${modName}][INFO][removeEquipmentFromLocalInventory] Retrying (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+                    return removeEquipmentFromLocalInventory(idsToRemove, retryCount + 1, 0);
+                }
+                
+                return { success: false, removed: [] };
+            }
+            
+            postCount = postState.context?.equips?.length ?? postState.equips?.length ?? preCount;
+            removedCount = preCount - postCount;
+            
+            // If removal wasn't successful and we haven't exceeded verification retries, retry with increasing delays
+            if (removedCount === 0 && verificationRetryCount < MAX_VERIFICATION_RETRIES) {
+                const delay = VERIFICATION_RETRY_DELAYS[verificationRetryCount] || VERIFICATION_RETRY_DELAYS[VERIFICATION_RETRY_DELAYS.length - 1];
+                console.log(`[${modName}][INFO][removeEquipmentFromLocalInventory] Verification failed, retrying verification after ${delay}ms (attempt ${verificationRetryCount + 1}/${MAX_VERIFICATION_RETRIES})...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return removeEquipmentFromLocalInventory(idsToRemove, retryCount, verificationRetryCount + 1);
+            }
+            
+            if (removedCount > 0) {
+                // Removed verbose success log - inventory updates are implicit in action logs
+            } else if (verificationRetryCount >= MAX_VERIFICATION_RETRIES) {
+                console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Verification failed after ${MAX_VERIFICATION_RETRIES} retries. Inventory count unchanged: ${preCount}`);
+            }
+            
+            return { 
+                success: removedCount > 0, 
+                removed: idsToRemove,
+                preCount,
+                postCount
+            };
+            
+        } catch (e) {
+            console.error(`[${modName}][ERROR][removeEquipmentFromLocalInventory] Exception during update: ${e.message}`, e);
+            
+            // Retry on exception if we haven't exceeded max retries
+            if (retryCount < MAX_RETRIES) {
+                console.log(`[${modName}][INFO][removeEquipmentFromLocalInventory] Retrying after exception (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+                return removeEquipmentFromLocalInventory(idsToRemove, retryCount + 1, 0);
+            }
+            
+            return { success: false, removed: [], error: e.message };
+        }
+    }
+
+    // =======================
+    // 6. UI Utilities & Components
+    // =======================
+    
+    function createElement(tag, options = {}) {
+        const element = document.createElement(tag);
+        
+        if (options.styles) {
+            Object.assign(element.style, options.styles);
+        }
+        
+        if (options.attributes) {
+            Object.entries(options.attributes).forEach(([key, value]) => {
+                element.setAttribute(key, value);
+            });
+        }
+        
+        if (options.className) {
+            element.className = options.className;
+        }
+        
+        if (options.text) {
+            element.textContent = options.text;
+        }
+        
+        if (options.html) {
+            element.innerHTML = options.html;
+        }
+        
+        if (options.events) {
+            Object.entries(options.events).forEach(([event, handler]) => {
+                element.addEventListener(event, handler);
+            });
+        }
+        
+        if (options.children) {
+            options.children.forEach(child => {
+                if (typeof child === 'string') {
+                    element.appendChild(document.createTextNode(child));
+                } else {
+                    element.appendChild(child);
+                }
+            });
+        }
+        
+        return element;
+    }
+    
+    function createInput(options = {}) {
+        const defaultStyles = {
+            width: options.width || 'auto',
+            marginRight: options.marginRight || '0',
+            textAlign: options.textAlign || 'left',
+            borderRadius: options.borderRadius || UI_CONSTANTS.COMMON_STYLES.BORDER_RADIUS,
+            border: options.border || UI_CONSTANTS.COMMON_STYLES.INPUT_BORDER,
+            background: options.background || UI_CONSTANTS.COMMON_STYLES.BACKGROUND_COLOR,
+            color: options.color || UI_CONSTANTS.COMMON_STYLES.PRIMARY_COLOR,
+            fontWeight: options.fontWeight || 'bold',
+            fontSize: options.fontSize || '16px',
+            ...options.styles
+        };
+        
+        return createElement('input', {
+            attributes: {
+                type: options.type || 'text',
+                ...(options.min !== undefined && { min: options.min }),
+                ...(options.max !== undefined && { max: options.max }),
+                ...(options.step !== undefined && { step: options.step }),
+                ...(options.id && { id: options.id }),
+                ...(options.autocomplete && { autocomplete: options.autocomplete })
+            },
+            styles: defaultStyles,
+            className: options.className || UI_CONSTANTS.COMMON_STYLES.PIXEL_FONT,
+            events: options.events || {},
+            ...options
+        });
+    }
+    
+    function createBox({title, content, icon = null, tabs = null, verticalAlign = 'space-between'}) {
+        const box = document.createElement('div');
+        box.style.flex = '1 1 0';
+        box.style.display = 'flex';
+        box.style.flexDirection = 'column';
+        box.style.margin = '0';
+        box.style.padding = '0';
+        box.style.minHeight = '0';
+        box.style.height = '100%';
+        box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        box.style.border = '4px solid transparent';
+        box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        box.style.borderRadius = '6px';
+        box.style.overflow = 'hidden';
+        
+        const titleEl = document.createElement('h2');
+        titleEl.className = 'widget-top widget-top-text pixel-font-16';
+        titleEl.style.margin = '0';
+        titleEl.style.padding = '2px 8px';
+        titleEl.style.textAlign = 'center';
+        titleEl.style.color = 'rgb(255, 255, 255)';
+        
+        // If tabs are provided, create tab navigation instead of simple title
+        if (tabs && tabs.length > 0) {
+            const tabContainer = document.createElement('div');
+            tabContainer.style.display = 'flex';
+            tabContainer.style.width = '100%';
+            tabContainer.style.height = '100%';
+            
+            tabs.forEach((tab, index) => {
+                const tabBtn = document.createElement('button');
+                tabBtn.className = 'pixel-font-16';
+                tabBtn.style.flex = '1';
+                tabBtn.style.margin = '0';
+                tabBtn.style.padding = '2px 4px';
+                tabBtn.style.textAlign = 'center';
+                tabBtn.style.color = 'rgb(255, 255, 255)';
+                tabBtn.style.display = 'flex';
+                tabBtn.style.alignItems = 'center';
+                tabBtn.style.justifyContent = 'center';
+                tabBtn.style.gap = '4px';
+                tabBtn.style.border = 'none';
+                tabBtn.style.background = 'transparent';
+                tabBtn.style.cursor = 'pointer';
+                tabBtn.style.borderBottom = index === 0 ? '2px solid #ffe066' : '2px solid transparent';
+                tabBtn.style.fontSize = '14px';
+                tabBtn.style.fontWeight = 'bold';
+                
+                if (tab.icon) {
+                    if (tab.icon.includes('plant.png')) {
+                        // Use SVG for plant icon
+                        const iconDiv = document.createElement('div');
+                        iconDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sprout"><path d="M7 20h10"></path><path d="M10 20c5.5-2.5.8-6.4 3-10"></path><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"></path><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"></path></svg>';
+                        iconDiv.style.color = 'currentColor';
+                        iconDiv.style.display = 'flex';
+                        iconDiv.style.alignItems = 'center';
+                        tabBtn.appendChild(iconDiv);
+                    } else {
+                        // Use regular img for other icons
+                        const iconImg = document.createElement('img');
+                        iconImg.src = tab.icon;
+                        iconImg.alt = 'Icon';
+                        iconImg.width = 12;
+                        iconImg.height = 12;
+                        iconImg.style.verticalAlign = 'middle';
+                        tabBtn.appendChild(iconImg);
+                    }
+                }
+                
+                const tabText = document.createElement('span');
+                tabText.textContent = tab.title;
+                tabBtn.appendChild(tabText);
+                
+                tabBtn.addEventListener('click', () => {
+                    // Update tab button styles
+                    tabs.forEach((_, i) => {
+                        const btn = tabContainer.children[i];
+                        btn.style.borderBottom = i === index ? '2px solid #ffe066' : '2px solid transparent';
+                        btn.style.color = i === index ? 'rgb(255, 255, 255)' : 'rgb(144, 144, 144)';
+                    });
+                    
+                    // Show/hide tab content
+                    const contentWrapper = box.querySelector('.column-content-wrapper');
+                    if (contentWrapper) {
+                        contentWrapper.innerHTML = '';
+                        // Apply tab-specific vertical alignment
+                        if (tab.verticalAlign) {
+                            contentWrapper.style.justifyContent = tab.verticalAlign;
+                        }
+                        if (tab.content instanceof HTMLElement) {
+                            contentWrapper.appendChild(tab.content);
+                        } else if (typeof tab.content === 'string') {
+                            contentWrapper.innerHTML = tab.content;
+                        }
+                    }
+                });
+                
+                tabContainer.appendChild(tabBtn);
+            });
+            
+            titleEl.appendChild(tabContainer);
+        } else {
+            // Original title logic for non-tabbed boxes
+            const p = document.createElement('p');
+            p.className = 'pixel-font-16';
+            p.style.margin = '0';
+            p.style.padding = '0';
+            p.style.textAlign = 'center';
+            p.style.color = 'rgb(255, 255, 255)';
+            p.style.display = 'flex';
+            p.style.alignItems = 'center';
+            p.style.justifyContent = 'center';
+            p.style.gap = '6px';
+            
+            if (icon) {
+                const iconImg = document.createElement('img');
+                iconImg.src = icon;
+                iconImg.alt = 'Icon';
+                iconImg.width = 16;
+                iconImg.height = 16;
+                iconImg.style.verticalAlign = 'middle';
+                p.appendChild(iconImg);
+            }
+            
+            const titleText = document.createElement('span');
+            titleText.textContent = title;
+            p.appendChild(titleText);
+            titleEl.appendChild(p);
+        }
+        
+        box.appendChild(titleEl);
+        
+        const contentWrapper = document.createElement('div');
+        contentWrapper.className = 'column-content-wrapper';
+        contentWrapper.style.flex = '1 1 0';
+        contentWrapper.style.height = '100%';
+        contentWrapper.style.minHeight = '0';
+        contentWrapper.style.overflowY = 'auto';
+        contentWrapper.style.display = 'flex';
+        contentWrapper.style.flexDirection = 'column';
+        contentWrapper.style.alignItems = 'flex-start';
+        contentWrapper.style.justifyContent = verticalAlign;
+        contentWrapper.style.padding = '10px';
+        
+        // Handle content based on whether it's tabbed or not
+        if (tabs && tabs.length > 0) {
+            // For tabbed content, show the first tab by default
+            // Apply first tab's vertical alignment if specified
+            if (tabs[0].verticalAlign) {
+                contentWrapper.style.justifyContent = tabs[0].verticalAlign;
+            }
+            if (tabs[0].content instanceof HTMLElement) {
+                contentWrapper.appendChild(tabs[0].content);
+            } else if (typeof tabs[0].content === 'string') {
+                contentWrapper.innerHTML = tabs[0].content;
+            }
+        } else {
+            // Original content logic
+            if (content instanceof HTMLElement && content.querySelector && content.querySelector('div[style*="color: #ffe066"]')) {
+                const statusArea = content.querySelector('div[style*="flex-direction: column"]');
+                const topContent = document.createElement('div');
+                Array.from(content.childNodes).forEach(child => {
+                    if (child !== statusArea) topContent.appendChild(child.cloneNode(true));
+                });
+                contentWrapper.appendChild(topContent);
+                if (statusArea) contentWrapper.appendChild(statusArea.cloneNode(true));
+            } else if (typeof content === 'string') {
+                contentWrapper.innerHTML = content;
+            } else if (content instanceof HTMLElement) {
+                contentWrapper.appendChild(content);
+            }
+        }
+        
+        box.appendChild(contentWrapper);
+        return box;
+    }
+    
+    function createDescriptionRow(description) {
+        return createElement('div', {
+            styles: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                margin: '6px 0 10px 0'
+            },
+            children: [
+                createLabel(description, { fontSize: '13px' })
+            ]
+        });
+    }
+    
+    function createWarningRow(warningText, showTooltip = false) {
+        // Handle both "ALL" (English) and "TODAS" (Portuguese)
+        const allWord = warningText.includes('TODAS') ? 'TODAS' : 'ALL';
+        const parts = warningText.split(allWord);
+        const beforeAll = parts[0];
+        const afterAll = parts[1];
+        
+        const allSpan = createElement('span', { 
+            text: allWord,
+            styles: { 
+                textDecoration: 'underline',
+                color: '#4A90E2',
+                cursor: showTooltip ? 'help' : 'default'
+            }
+        });
+        
+        if (showTooltip) {
+            // Check for both English "sell" and Portuguese "venderá"
+            const isAutosell = warningText.includes('sell') || warningText.includes('venderá');
+            const tooltipText = isAutosell 
+                ? t('mods.autoseller.tooltipSellAll')
+                : t('mods.autoseller.tooltipSqueezeAll');
+            
+            allSpan.title = tooltipText;
+            
+            allSpan.addEventListener('mouseenter', () => {
+                allSpan.style.textDecoration = 'underline double';
+                allSpan.style.color = '#87CEEB';
+            });
+            
+            allSpan.addEventListener('mouseleave', () => {
+                allSpan.style.textDecoration = 'underline';
+                allSpan.style.color = '#4A90E2';
+            });
+        }
+        
+        return createElement('div', {
+            styles: {
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                margin: '4px 0 8px 0'
+            },
+            children: [
+                createElement('span', {
+                    text: '⚠️',
+                    className: 'pixel-font-16',
+                    styles: {
+                        color: '#ff6b6b',
+                        fontSize: '13px',
+                        fontWeight: 'bold'
+                    }
+                }),
+                createElement('span', {
+                    className: 'pixel-font-16',
+                    styles: {
+                        color: '#ff6b6b',
+                        fontSize: '13px',
+                        fontWeight: 'bold'
+                    },
+                    children: [
+                        createElement('span', { text: beforeAll }),
+                        allSpan,
+                        createElement('span', { text: afterAll })
+                    ]
+                })
+            ]
+        });
+    }
+    
+    function createCheckboxRow(persistKey, label, icon = null) {
+        const checkbox = createInput({
+            type: 'checkbox',
+            id: persistKey + '-checkbox',
+            styles: {
+                marginRight: '8px'
+            }
+        });
+        
+        const labelEl = createElement('label', {
+            attributes: { htmlFor: checkbox.id },
+            className: 'pixel-font-16',
+            styles: {
+                fontWeight: 'bold',
+                fontSize: '14px',
+                color: '#ffffff',
+                marginRight: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+            }
+        });
+        
+        if (icon) {
+            const iconImg = createElement('img', {
+                attributes: {
+                    src: icon,
+                    alt: 'Icon',
+                    width: '14',
+                    height: '14'
+                },
+                styles: {
+                    verticalAlign: 'middle'
+                }
+            });
+            labelEl.appendChild(iconImg);
+        }
+        
+        const labelText = createElement('span', {
+            text: label
+        });
+        labelEl.appendChild(labelText);
+        
+        const row = createElement('div', {
+            styles: {
+                display: 'flex',
+                alignItems: 'center',
+                width: '100%',
+                marginBottom: '10px'
+            },
+            children: [checkbox, labelEl]
+        });
+        
+        return { row, checkbox, label: labelEl };
+    }
+    
+    function createGeneInputRow(opts) {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.width = '100%';
+        row.style.marginBottom = '12px';
+        
+        const inputLabel = document.createElement('span');
+        inputLabel.textContent = opts.inputLabel + ': ' + t('mods.autoseller.between');
+        inputLabel.className = 'pixel-font-16';
+        inputLabel.style.marginRight = '6px';
+        inputLabel.style.fontWeight = 'bold';
+        inputLabel.style.fontSize = '14px';
+        inputLabel.style.color = '#cccccc';
+        row.appendChild(inputLabel);
+        
+        const inputMin = document.createElement('input');
+        inputMin.type = 'number';
+        inputMin.min = opts.inputMin;
+        inputMin.max = opts.inputMax;
+        inputMin.value = opts.defaultMin;
+        inputMin.className = 'pixel-font-16';
+        inputMin.style.width = UI_CONSTANTS.INPUT_WIDTH + 'px';
+        inputMin.style.marginRight = '4px';
+        inputMin.style.textAlign = 'center';
+        inputMin.style.borderRadius = '3px';
+        inputMin.style.border = '1px solid #ffe066';
+        inputMin.style.background = '#232323';
+        inputMin.style.color = '#ffe066';
+        inputMin.style.fontWeight = 'bold';
+        inputMin.style.fontSize = '16px';
+        inputMin.step = UI_CONSTANTS.INPUT_STEP;
+        row.appendChild(inputMin);
+        
+        const andText = document.createElement('span');
+        andText.textContent = t('mods.autoseller.and');
+        andText.className = 'pixel-font-16';
+        andText.style.margin = '0 4px';
+        andText.style.color = '#cccccc';
+        row.appendChild(andText);
+        
+        const inputMax = document.createElement('input');
+        inputMax.type = 'number';
+        inputMax.min = opts.inputMin;
+        inputMax.max = opts.inputMax;
+        inputMax.value = opts.defaultMax;
+        inputMax.className = 'pixel-font-16';
+        inputMax.style.width = UI_CONSTANTS.INPUT_WIDTH + 'px';
+        inputMax.style.marginRight = '4px';
+        inputMax.style.textAlign = 'center';
+        inputMax.style.borderRadius = '3px';
+        inputMax.style.border = '1px solid #ffe066';
+        inputMax.style.background = '#232323';
+        inputMax.style.color = '#ffe066';
+        inputMax.style.fontWeight = 'bold';
+        inputMax.style.fontSize = '16px';
+        inputMax.step = UI_CONSTANTS.INPUT_STEP;
+        row.appendChild(inputMax);
+        
+        const percent = document.createElement('span');
+        percent.textContent = '%';
+        percent.className = 'pixel-font-16';
+        percent.style.fontWeight = 'bold';
+        percent.style.fontSize = '16px';
+        percent.style.color = '#cccccc';
+        row.appendChild(percent);
+        
+        return { row, inputMin, inputMax };
+    }
+    
+    /**
+     * Creates a segment container (for autoplant and autosqueeze buttons)
+     * @returns {HTMLElement} The segment container element
+     */
+    function createSegmentContainer() {
+        const container = document.createElement('div');
+        const colors = UI_CONSTANTS.BUTTON_COLORS;
+        const sizes = UI_CONSTANTS.BUTTON_SIZES;
+        container.style.display = 'flex';
+        container.style.alignItems = 'center';
+        container.style.justifyContent = 'flex-start';
+        container.style.gap = '0';
+        container.style.width = '100%';
+        container.style.height = sizes.HEIGHT;
+        container.style.border = `2px solid ${colors.BORDER}`;
+        container.style.borderRadius = '4px';
+        container.style.overflow = 'hidden';
+        container.style.backgroundColor = colors.INACTIVE_BG;
+        container.style.pointerEvents = 'auto';
+        container.style.position = 'relative';
+        return container;
+    }
+    
+    /**
+     * Creates a segment button (for autoplant and autosqueeze)
+     * @param {string} text - Button text
+     * @param {number} width - Button width in pixels
+     * @param {boolean} borderRight - Whether to show right border
+     * @returns {HTMLElement} The button element
+     */
+    function createSegmentButton(text, width, borderRight = true) {
+        const button = document.createElement('button');
+        button.className = 'pixel-font-14';
+        button.textContent = text;
+        button.type = 'button';
+        
+        // Common styles
+        Object.assign(button.style, {
+            flex: `0 0 ${width}px`,
+            flexGrow: '0',
+            flexShrink: '0',
+            flexBasis: `${width}px`,
+            height: '100%',
+            width: `${width}px`,
+            minWidth: `${width}px`,
+            maxWidth: `${width}px`,
+            border: 'none',
+            borderRight: borderRight ? `1px solid ${UI_CONSTANTS.BUTTON_COLORS.BORDER}` : 'none',
+            backgroundColor: UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG,
+            color: UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT,
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: 'bold',
+            transition: 'background-color 0.2s, color 0.2s, text-shadow 0.2s',
+            pointerEvents: 'auto',
+            position: 'relative',
+            zIndex: '10',
+            padding: '0',
+            textAlign: 'center',
+            userSelect: 'none'
+        });
+        
+        // Store original styles for hover effect
+        let isActive = false;
+        let originalBg = '#1a1a1a';
+        let originalColor = '#888888';
+        
+        // Add hover effect for inactive buttons
+        button.addEventListener('mouseenter', () => {
+            if (!isActive) {
+                button.style.backgroundColor = '#2a2a2a';
+                button.style.color = '#aaaaaa';
+            }
+        });
+        
+        button.addEventListener('mouseleave', () => {
+            if (!isActive) {
+                button.style.backgroundColor = originalBg;
+                button.style.color = originalColor;
+            }
+        });
+        
+        // Expose method to update active state
+        button._updateActiveState = (active, bg, color) => {
+            isActive = active;
+            originalBg = bg;
+            originalColor = color;
+        };
+        
+        return button;
+    }
+    
+    /**
+     * Creates a checkbox with label and optional number input row (for autoplant gene settings)
+     * @param {Object} options - Configuration options
+     * @param {string} options.checkboxId - ID for the checkbox
+     * @param {string} options.labelText - Label text
+     * @param {boolean} options.checked - Initial checked state
+     * @param {Function} options.onCheckboxChange - Callback when checkbox changes
+     * @param {Object} options.input - Optional input configuration { min, max, value, onChange, settingKey }
+     * @param {string} options.suffixText - Optional suffix text after input
+     * @returns {Object} { container, checkbox, label, input, suffix }
+     */
+    function createCheckboxLabelInputRow({ checkboxId, labelText, checked, onCheckboxChange, input, suffixText }) {
+        const container = document.createElement('div');
+        container.style.display = 'flex';
+        container.style.alignItems = 'center';
+        container.style.justifyContent = 'flex-start';
+        container.style.gap = '6px';
+        container.style.marginTop = '4px';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = checkboxId;
+        checkbox.checked = checked;
+        checkbox.style.cursor = 'pointer';
+        if (onCheckboxChange) {
+            checkbox.addEventListener('change', onCheckboxChange);
+        }
+        
+        const label = document.createElement('label');
+        label.className = 'pixel-font-14';
+        label.textContent = labelText;
+        const inputStyles = UI_CONSTANTS.INPUT_STYLES;
+        const colors = UI_CONSTANTS.BUTTON_COLORS;
+        label.style.fontSize = inputStyles.FONT_SIZE_MEDIUM;
+        label.style.color = colors.PRIMARY_TEXT;
+        label.style.cursor = 'pointer';
+        label.htmlFor = checkboxId;
+        
+        container.appendChild(checkbox);
+        container.appendChild(label);
+        
+        let inputElement = null;
+        let suffixElement = null;
+        
+        if (input) {
+            inputElement = document.createElement('input');
+            inputElement.type = 'number';
+            inputElement.min = input.min;
+            inputElement.max = input.max;
+            inputElement.step = '1';
+            inputElement.value = input.value;
+            Object.assign(inputElement.style, {
+                width: inputStyles.WIDTH_MEDIUM,
+                padding: inputStyles.PADDING,
+                fontSize: inputStyles.FONT_SIZE_SMALL,
+                textAlign: 'center',
+                backgroundColor: inputStyles.BACKGROUND,
+                color: colors.PRIMARY_TEXT,
+                border: inputStyles.BORDER,
+                borderRadius: inputStyles.BORDER_RADIUS
+            });
+            
+            if (input.onChange) {
+                inputElement.addEventListener('change', input.onChange);
+            }
+            
+            container.appendChild(inputElement);
+            
+            if (suffixText) {
+                suffixElement = document.createElement('span');
+                suffixElement.className = 'pixel-font-14';
+                suffixElement.textContent = suffixText;
+                suffixElement.style.fontSize = inputStyles.FONT_SIZE_MEDIUM;
+                suffixElement.style.color = colors.PRIMARY_TEXT;
+                container.appendChild(suffixElement);
+            }
+        }
+        
+        return { container, checkbox, label, input: inputElement, suffix: suffixElement };
+    }
+    
+    function createMinCountRow(opts) {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.width = '100%';
+        row.style.marginBottom = '12px';
+        
+        const minCountLabel = document.createElement('span');
+        minCountLabel.textContent = t('mods.autoseller.triggerWhen');
+        minCountLabel.className = 'pixel-font-16';
+        minCountLabel.style.marginRight = '6px';
+        minCountLabel.style.fontWeight = 'bold';
+        minCountLabel.style.fontSize = '14px';
+        minCountLabel.style.color = '#cccccc';
+        row.appendChild(minCountLabel);
+        
+        const minCountInput = document.createElement('input');
+        minCountInput.type = 'number';
+        minCountInput.min = 1;
+        minCountInput.max = 20;
+        minCountInput.value = opts.defaultMinCount || 1;
+        minCountInput.className = 'pixel-font-16';
+        minCountInput.style.width = '48px';
+        minCountInput.style.marginRight = '4px';
+        minCountInput.style.textAlign = 'center';
+        minCountInput.style.borderRadius = '3px';
+        minCountInput.style.border = '1px solid #ffe066';
+        minCountInput.style.background = '#232323';
+        minCountInput.style.color = '#ffe066';
+        minCountInput.style.fontWeight = 'bold';
+        minCountInput.style.fontSize = '16px';
+        minCountInput.step = '1';
+        
+        function validateMinCountInput() {
+            const val = Math.max(1, Math.min(20, parseInt(minCountInput.value, 10) || 1));
+            minCountInput.value = val;
+        }
+        
+        minCountInput.addEventListener('input', validateMinCountInput);
+        minCountInput.addEventListener('blur', validateMinCountInput);
+        row.appendChild(minCountInput);
+        
+        const minCountSuffix = document.createElement('span');
+        minCountSuffix.textContent = t('mods.autoseller.creaturesSuffix');
+        minCountSuffix.className = 'pixel-font-16';
+        minCountSuffix.style.color = '#cccccc';
+        row.appendChild(minCountSuffix);
+        
+        return { row, minCountInput, validateMinCountInput };
+    }
+    
+    function createAutplantPlaceholder() {
+        const placeholder = document.createElement('div');
+        placeholder.style.display = 'flex';
+        placeholder.style.flexDirection = 'column';
+        placeholder.style.height = '100%';
+        placeholder.style.minHeight = '0';
+        
+        // Mode selection container
+        const modeContainer = document.createElement('div');
+        modeContainer.style.display = 'flex';
+        modeContainer.style.flexDirection = 'row';
+        modeContainer.style.gap = UI_CONSTANTS.SPACING.GAP_MEDIUM;
+        modeContainer.style.marginBottom = UI_CONSTANTS.SPACING.MARGIN_BOTTOM_BUTTON;
+        modeContainer.style.alignItems = 'flex-start';
+        
+        // Set initial state from saved settings
+        let currentModeSettings = getSettings();
+        let currentMode = currentModeSettings.autoMode || null;
+        
+        // Function to create a toggle button (like autosqueeze/autoduster style)
+        const createToggleButton = (text, isActive, onClick, activeColor = 'green') => {
+            const button = document.createElement('button');
+            button.className = 'pixel-font-14';
+            button.type = 'button';
+            button.textContent = text;
+            
+            // Apply button styles using helper function
+            applyButtonStyles(button, isActive, activeColor, { marginBottom: '0' });
+            
+            button.addEventListener('click', onClick);
+            
+            return button;
+        };
+        
+        // Create individual toggle buttons
+        const isAutosellActive = currentMode === 'autosell';
+        const isOffActive = currentMode === null;
+        const isAutoplantActive = currentMode === 'autoplant';
+        const dragonPlantPurchased = hasDragonPlant();
+        
+        const autosellButton = createToggleButton(
+            t('mods.autoseller.autosellLabel'),
+            isAutosellActive,
+            () => handleModeChange('autosell'),
+            'green' // Green when active
+        );
+        
+        const offButton = createToggleButton(
+            t('mods.autoseller.off') || 'Off',
+            isOffActive,
+            () => handleModeChange(null),
+            'red' // Red when active
+        );
+        
+        const autoplantButton = createToggleButton(
+            t('mods.autoseller.autoplantLabel'),
+            isAutoplantActive,
+            () => handleModeChange('autoplant'),
+            'green' // Green when active
+        );
+        
+        // Disable and grey out autoplant button if dragon plant not purchased
+        if (!dragonPlantPurchased) {
+            autoplantButton.disabled = true;
+            autoplantButton.style.opacity = '0.5';
+            autoplantButton.style.cursor = 'not-allowed';
+            autoplantButton.title = 'Dragon Plant not purchased';
+        }
+        
+        // Function to update button appearance
+        const updateButtons = () => {
+            // Refresh current mode from settings
+            currentModeSettings = getSettings();
+            currentMode = currentModeSettings.autoMode || null;
+            
+            const isAutosellActive = currentMode === 'autosell';
+            const isOffActive = currentMode === null;
+            const isAutoplantActive = currentMode === 'autoplant';
+            const dragonPlantPurchased = hasDragonPlant();
+            
+            // If autoplant is enabled but dragon plant not purchased, disable it
+            if (isAutoplantActive && !dragonPlantPurchased) {
+                setSettings({ autoMode: null });
+                currentMode = null;
+            }
+            
+            // Update buttons using helper function
+            const buttonConfigs = [
+                { button: autosellButton, isActive: isAutosellActive, colorType: 'green' },
+                { button: offButton, isActive: currentMode === null, colorType: 'red' },
+                { button: autoplantButton, isActive: isAutoplantActive && dragonPlantPurchased, colorType: 'green' }
+            ];
+            buttonConfigs.forEach(config => applyButtonStyles(config.button, config.isActive, config.colorType, { marginBottom: '0' }));
+            
+            // Maintain disabled state for autoplant button
+            if (!dragonPlantPurchased) {
+                autoplantButton.disabled = true;
+                autoplantButton.style.opacity = '0.5';
+                autoplantButton.style.cursor = 'not-allowed';
+                autoplantButton.title = 'Dragon Plant not purchased';
+            } else {
+                autoplantButton.disabled = false;
+                autoplantButton.style.opacity = '1';
+                autoplantButton.style.cursor = 'pointer';
+                autoplantButton.title = '';
+            }
+        };
+        
+        // Function to handle mode change (will be updated after selectedCreatures is defined)
+        let handleModeChange = (newMode) => {
+            console.log('[Autoseller] handleModeChange called with:', newMode, 'currentMode:', currentMode);
+            // Prevent clicking if already active
+            if (currentMode === newMode) {
+                return;
+            }
+            
+            // Prevent enabling autoplant if dragon plant not purchased
+            if (newMode === 'autoplant' && !hasDragonPlant()) {
+                console.log('[Autoseller] Cannot enable autoplant - Dragon Plant not purchased');
+                return;
+            }
+            
+            setSettings({ autoMode: newMode });
+            currentMode = newMode;
+            updateButtons();
+            
+            if (newMode === 'autoplant') {
+                applyLocalStorageToGameCheckbox();
+            } else if (newMode === 'autosell') {
+                removePlantMonsterFilter();
+                applyLocalStorageToGameCheckbox();
+            } else {
+                // newMode is null (OFF)
+                removePlantMonsterFilter();
+                applyLocalStorageToGameCheckbox();
+            }
+            
+            updateAutosellerNavButtonColor();
+            manageAutosellerWidget();
+            updateAutosellerSessionWidget();
+        };
+        
+        modeContainer.appendChild(autosellButton);
+        modeContainer.appendChild(offButton);
+        modeContainer.appendChild(autoplantButton);
+        placeholder.appendChild(modeContainer);
+        
+        // Store references globally for compatibility
+        window.autoplantCheckbox = autoplantButton;
+        window.autosellCheckbox = autosellButton;
+
+        // Set initial state from saved settings
+        const autoplantSettings = getSettings();
+        
+        // Autocollect Dragon Plant checkbox
+        const autocollectRow = createCheckboxLabelInputRow({
+            checkboxId: 'autoplant-autocollect-checkbox',
+            labelText: t('mods.autoseller.autocollectDragonPlant'),
+            checked: autoplantSettings.autoplantAutocollectChecked !== undefined ? autoplantSettings.autoplantAutocollectChecked : false,
+            onCheckboxChange: () => {
+                setSettings({ autoplantAutocollectChecked: autocollectRow.checkbox.checked });
+            }
+        });
+        autocollectRow.container.style.marginBottom = '4px';
+        
+        // Disable and grey out autocollect checkbox if dragon plant not purchased
+        if (!dragonPlantPurchased) {
+            autocollectRow.checkbox.disabled = true;
+            autocollectRow.label.style.opacity = '0.5';
+            autocollectRow.label.style.cursor = 'not-allowed';
+            autocollectRow.container.style.opacity = '0.5';
+            autocollectRow.container.title = 'Dragon Plant not purchased';
+        }
+        
+        placeholder.appendChild(autocollectRow.container);
+
+        // Gene threshold inputs container
+        const genesMainContainer = document.createElement('div');
+        genesMainContainer.style.display = 'flex';
+        genesMainContainer.style.flexDirection = 'column';
+        genesMainContainer.style.gap = '6px';
+        genesMainContainer.style.marginBottom = '4px';
+
+        // Devour grey creatures checkbox (no input, fixed at 49%)
+        const devourGreyCreaturesRow = createCheckboxLabelInputRow({
+            checkboxId: 'autoplant-devour-grey-checkbox',
+            labelText: t('mods.autoseller.sellOrDevourGreyCreatures'),
+            checked: autoplantSettings.autoplantAlwaysDevourEnabled !== undefined ? autoplantSettings.autoplantAlwaysDevourEnabled : false,
+            onCheckboxChange: () => {
+                setSettings({ autoplantAlwaysDevourEnabled: devourGreyCreaturesRow.checkbox.checked });
+                updatePlantMonsterFilter(selectedCreatures);
+            }
+        });
+
+        genesMainContainer.appendChild(devourGreyCreaturesRow.container);
+
+        const sealedGlobalSellRow = createCheckboxLabelInputRow({
+            checkboxId: 'autoplant-sealed-global-sell-checkbox',
+            labelText: t('mods.autoseller.autoSellSealedCreatures') || 'Sell or devour sealed creatures',
+            checked: autoplantSettings.autoSellSealedCreaturesGlobal === true,
+            onCheckboxChange: () => {
+                setSettings({ autoSellSealedCreaturesGlobal: sealedGlobalSellRow.checkbox.checked });
+                updatePlantMonsterFilter(selectedCreatures);
+            }
+        });
+        genesMainContainer.appendChild(sealedGlobalSellRow.container);
+
+        const sealedGlobalInjectRow = createCheckboxLabelInputRow({
+            checkboxId: 'autoplant-sealed-global-inject-checkbox',
+            labelText: t('mods.autoseller.autoInjectSealedCreatures') || 'Auto-inject sealed creatures',
+            checked: autoplantSettings.autoInjectSealedCreaturesGlobal === true,
+            onCheckboxChange: () => {
+                setSettings({ autoInjectSealedCreaturesGlobal: sealedGlobalInjectRow.checkbox.checked });
+            }
+        });
+        const globalInjectWarningIcon = document.createElement('span');
+        globalInjectWarningIcon.textContent = '⚠️';
+        globalInjectWarningIcon.style.fontSize = '11px';
+        globalInjectWarningIcon.style.cursor = 'help';
+        globalInjectWarningIcon.title = t('mods.autoseller.autoInjectWarningTooltip') || 'Auto-inject first tries sealed creatures into awakened same-creature targets (costs gold), then auto-sell/devour only if genes do not increase the awakened creature.';
+        sealedGlobalInjectRow.container.insertBefore(globalInjectWarningIcon, sealedGlobalInjectRow.label);
+        genesMainContainer.appendChild(sealedGlobalInjectRow.container);
+        placeholder.appendChild(genesMainContainer);
+
+        // Add status bar under the columns (create first so we can insert columns before it)
+        const statusArea = document.createElement('div');
+        statusArea.style.display = 'flex';
+        statusArea.style.flexDirection = 'column';
+        statusArea.style.width = '100%';
+        statusArea.style.flexShrink = '0';
+
+        const separator = document.createElement('div');
+        separator.className = 'separator my-2.5';
+        separator.setAttribute('role', 'none');
+        separator.style.margin = '16px 0px 6px';
+
+        const summary = document.createElement('div');
+        summary.className = 'pixel-font-16';
+        summary.style.color = '#ffe066';
+        summary.style.fontSize = '13px';
+        summary.style.margin = '8px 0 0 0';
+        summary.id = 'autoplant-status';
+
+        statusArea.appendChild(separator);
+        statusArea.appendChild(summary);
+        placeholder.appendChild(statusArea);
+
+        // Create creature filter columns using shared function (insert before status area)
+        const creatureFilter = createCreatureFilterColumns({
+            container: placeholder,
+            settingKey: 'autoplantIgnoreList',
+            insertBefore: statusArea,
+            actionTitle: t('mods.autoseller.actionTitleSell'),
+            enableContextMenu: true, // Enable context menu for autoseller
+            showKeepRangeLock: true, // Show lock icon for autoseller
+            onUpdate: (selectedCreatures) => {
+                // Update plant monster filter with new ignore list (for autoplant mode)
+                const currentSettings = getSettings();
+                if (currentSettings.autoMode === 'autoplant') {
+                    updatePlantMonsterFilter(selectedCreatures);
+                }
+                // For autosell mode, ignore list is applied during processing
+                updateAutoplantStatus();
+            }
+        });
+        
+        // Get references for compatibility (use let so renderCreatureColumns can be reassigned)
+        const selectedCreatures = creatureFilter.selectedCreatures;
+        let renderCreatureColumns = creatureFilter.renderCreatureColumns;
+
+        // Store summary element globally for status updates
+        window.autoplantStatusSummary = summary;
+        
+        // Update status function
+        function updateAutoplantStatus() {
+            const ignoredCount = selectedCreatures.length;
+            const settings = getSettings();
+            const currentMode = settings.autoMode;
+            const isEnabled = currentMode === 'autoplant' || currentMode === 'autosell';
+            
+            let modeLabel = '';
+            if (currentMode === 'autoplant') {
+                modeLabel = t('mods.autoseller.autoplantLabel');
+            } else if (currentMode === 'autosell') {
+                modeLabel = t('mods.autoseller.autosellLabel');
+            } else {
+                modeLabel = t('mods.autoseller.autoseller') || 'Autoseller';
+            }
+            
+            const statusKey = isEnabled ? 'mods.autoseller.statusEnabled' : 'mods.autoseller.statusDisabled';
+            let statusText = tReplace(statusKey, { type: modeLabel });
+            
+            if (isEnabled && ignoredCount > 0) {
+                statusText += ' ' + tReplace('mods.autoseller.statusIgnoring', { count: ignoredCount });
+            }
+            
+            summary.textContent = statusText;
+            summary.style.color = isEnabled ? '#4CAF50' : '#ff6b6b'; // Green when enabled, red when disabled
+            
+            // Update segments if they exist
+            if (typeof updateSegments === 'function') {
+                updateSegments();
+            }
+        }
+        
+        // Store function globally so it can be called from sync logic
+        window.updateAutoplantStatus = updateAutoplantStatus;
+        
+        // Update handleModeChange to include updateAutoplantStatus and selectedCreatures
+        const originalHandleModeChange = handleModeChange;
+        handleModeChange = (newMode) => {
+            originalHandleModeChange(newMode);
+            // Now we can safely call updateAutoplantStatus and use selectedCreatures
+            updateAutoplantStatus();
+            if (newMode === 'autoplant') {
+                updatePlantMonsterFilter(selectedCreatures);
+            }
+        };
+
+        // Update status when creatures are moved
+        const originalRender = renderCreatureColumns;
+        renderCreatureColumns = function() {
+            originalRender();
+            updateAutoplantStatus();
+        };
+
+        // Initial status update
+        updateAutoplantStatus();
+        
+        // Initialize plant monster filter (only if autoplant mode is enabled and dragon plant is purchased)
+        const initialSettings = getSettings();
+        if (initialSettings.autoMode === 'autoplant' && hasDragonPlant()) {
+            updatePlantMonsterFilter(selectedCreatures);
+        } else if (initialSettings.autoMode === 'autoplant' && !hasDragonPlant()) {
+            // Disable autoplant if dragon plant not purchased
+            setSettings({ autoMode: null });
+            currentMode = null;
+            updateButtons();
+        }
+        
+        return placeholder;
+    }
+
+    // Helper function to get all creatures for Autoplant
+    function getAllAutoplantCreatures() {
+        const db = window.creatureDatabase;
+        if (typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function') {
+            return db.getAutoscrollAutosellerCreaturePickerNames();
+        }
+        if (typeof db?.getCreaturePickerNames === 'function') {
+            return db.getCreaturePickerNames().filter((name) => {
+                if (typeof db.isGazerCreatureName === 'function') {
+                    return !db.isGazerCreatureName(name);
+                }
+                return !String(name).toLowerCase().includes('gazer');
+            });
+        }
+        return (db?.ALL_CREATURES || []).filter((name) => !String(name).toLowerCase().includes('gazer'));
+    }
+
+    // Helper function to create creature boxes for Autoplant
+    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false, showKeepRangeLock = false, contextMenuType = 'creature', showAutodusterIndicator = false, sealedActionVerb = 'Sell', contextDefaultRangeMin = 0, contextDefaultRangeMax = 100}) {
+        const box = document.createElement('div');
+        box.style.display = 'flex';
+        box.style.flexDirection = 'column';
+        box.style.margin = '0';
+        box.style.padding = '0';
+        box.style.minHeight = '0';
+        box.style.height = '100%';
+        box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        box.style.border = '4px solid transparent';
+        box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        box.style.borderRadius = '6px';
+        box.style.overflow = 'hidden';
+        
+        const titleEl = document.createElement('h2');
+        titleEl.className = 'widget-top widget-top-text pixel-font-16';
+        titleEl.style.margin = '0';
+        titleEl.style.padding = '2px 8px';
+        titleEl.style.textAlign = 'center';
+        titleEl.style.color = 'rgb(255, 255, 255)';
+        
+        const p = document.createElement('p');
+        p.textContent = title;
+        p.className = 'pixel-font-16';
+        p.style.margin = '0';
+        p.style.padding = '0';
+        p.style.textAlign = 'center';
+        // Set color based on title: "Sell"/"Squeeze"/"Disenchant" = red, "Keep" = green, otherwise white
+        // Check against both English and translated versions for compatibility
+        const sellTitle = t('mods.autoseller.actionTitleSell');
+        const squeezeTitle = t('mods.autoseller.actionTitleSqueeze');
+        const disenchantTitle = t('mods.autoseller.actionTitleDisenchant');
+        const keepTitle = t('mods.autoseller.actionTitleKeep');
+        if (title === 'Sell' || title === 'Squeeze' || title === 'Disenchant' || 
+            title === sellTitle || title === squeezeTitle || title === disenchantTitle) {
+            p.style.color = 'rgb(255, 100, 100)'; // Red
+        } else if (title === 'Keep' || title === keepTitle) {
+            p.style.color = 'rgb(100, 255, 100)'; // Green
+        } else {
+            p.style.color = 'rgb(255, 255, 255)'; // White (default)
+        }
+        titleEl.appendChild(p);
+        box.appendChild(titleEl);
+        
+        const scrollContainer = document.createElement('div');
+        scrollContainer.style.flex = '1 1 0';
+        scrollContainer.style.minHeight = '0';
+        scrollContainer.style.overflowY = 'auto';
+        scrollContainer.style.padding = '4px';
+        let activeHoverTooltip = null;
+        let hoverTooltipTimer = null;
+        let hoverTooltipCleanupBound = false;
+
+        function hideHoverTooltip() {
+            if (hoverTooltipTimer) {
+                clearTimeout(hoverTooltipTimer);
+                hoverTooltipTimer = null;
+            }
+            if (activeHoverTooltip && activeHoverTooltip.parentNode) {
+                activeHoverTooltip.parentNode.removeChild(activeHoverTooltip);
+            }
+            activeHoverTooltip = null;
+        }
+
+        function bindHoverTooltipCleanupHandlers() {
+            if (hoverTooltipCleanupBound) return;
+            hoverTooltipCleanupBound = true;
+
+            const dismiss = () => hideHoverTooltip();
+            document.addEventListener('mousedown', dismiss, true);
+            document.addEventListener('scroll', dismiss, true);
+            window.addEventListener('blur', dismiss);
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') dismiss();
+            });
+        }
+
+        function showHoverTooltip(text, x, y) {
+            bindHoverTooltipCleanupHandlers();
+            hideHoverTooltip();
+            const tooltip = document.createElement('div');
+            tooltip.className = 'pixel-font-14';
+            tooltip.textContent = text;
+            tooltip.style.position = 'fixed';
+            tooltip.style.left = `${x + 12}px`;
+            tooltip.style.top = `${y + 12}px`;
+            tooltip.style.zIndex = '10020';
+            tooltip.style.maxWidth = '250px';
+            tooltip.style.padding = '8px';
+            tooltip.style.borderRadius = '4px';
+            tooltip.style.border = '1px solid #ffe066';
+            tooltip.style.background = 'rgba(20, 20, 20, 0.95)';
+            tooltip.style.color = '#e6d7b0';
+            tooltip.style.fontSize = '12px';
+            tooltip.style.lineHeight = '1.35';
+            tooltip.style.whiteSpace = 'normal';
+            tooltip.style.pointerEvents = 'none';
+            tooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.45)';
+            document.body.appendChild(tooltip);
+            activeHoverTooltip = tooltip;
+        }
+
+        function buildCreatureBehaviorTooltip(creatureName, isSqueezeContextForList) {
+            const settings = getSettings();
+            const inKeep = isIgnoreList === true;
+            const keepRange = getCreatureKeepRange(creatureName);
+
+            // Sealed-specific summary (uses global + per-creature rules)
+            const sellBlocked = isSealedTier5SellBlocked(creatureName);
+            const sellEnabled = isSealedTier5SellAllowed(creatureName);
+            const injectEnabled = isSealedTier5InjectAllowed(creatureName);
+            const onText = t('mods.autoseller.tooltipStateOn') || 'ON';
+            const offText = t('mods.autoseller.tooltipStateOff') || 'OFF';
+            const blockedText = t('mods.autoseller.tooltipBlockedForCreature') || 'blocked for this creature';
+            const actionSummary = inKeep
+                ? (t('mods.autoseller.tooltipHumanKeep') || 'In Keep, this creature is left alone.')
+                : (isSqueezeContextForList
+                    ? (t('mods.autoseller.tooltipHumanSqueeze') || 'This creature can be auto-squeezed if your squeeze rules match.')
+                    : (t('mods.autoseller.tooltipHumanSell') || 'This creature can be sold/devoured if your sell rules match.'));
+            const keepRangeText = keepRange
+                ? ` ${(t('mods.autoseller.tooltipHumanKeepRange') || 'Keep range')}: ${keepRange.min}-${keepRange.max}%.`
+                : '';
+            const upgradeLadderText = isCreatureKeepUpgradeLadderEnabled(creatureName)
+                ? ` ${t('mods.autoseller.tooltipUpgradeLadder') || 'Upgrade ladder: keeps 5/4/3/2 per gene band (50–59 / 60–69 / 70–79 / 80–100) from full inventory; excess is sold/squeezed.'}`
+                : '';
+            const sealedStatus = `${t('mods.autoseller.tooltipHumanSealedStatusPrefix') || 'Sealed'}: ${(t('mods.autoseller.tooltipHumanSellLabel') || 'sell/devour')} ${sellEnabled ? onText : offText}${sellBlocked ? ` (${blockedText})` : ''}, ${(t('mods.autoseller.tooltipHumanInjectLabel') || 'inject')} ${injectEnabled ? onText : offText}.`;
+            const priorityText = t('mods.autoseller.tooltipInjectPriority') || 'Priority: auto-inject runs first, then sell/devour only if genes do not improve the awakened target.';
+            return `${actionSummary}${keepRangeText}${upgradeLadderText} ${sealedStatus} ${priorityText}`.replace(/\s+/g, ' ').trim();
+        }
+        
+        items.forEach(name => {
+            const item = document.createElement('div');
+            item.className = 'pixel-font-14 autoplant-creature-item';
+            item.style.color = 'rgb(230, 215, 176)';
+            item.style.cursor = 'pointer';
+            item.style.padding = '2px 4px';
+            item.style.borderRadius = '2px';
+            item.style.textAlign = 'left';
+            item.style.marginBottom = '1px';
+            item.style.position = 'relative';
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '4px';
+            
+            // Add visual indicator if creature has a keep range (before the name)
+            // Show grey lock when in creatures list (inactive), colored when in ignore list (active)
+            // Only show lock for autoseller, not autosqueezer
+            if (showKeepRangeLock) {
+                const keepRange = getCreatureKeepRange(name);
+                if (keepRange) {
+                    const indicator = document.createElement('span');
+                    indicator.textContent = '🔒';
+                    const statusText = isIgnoreList ? 'Active' : 'Inactive';
+                    indicator.title = `Keep range: ${keepRange.min}-${keepRange.max}% (${statusText})`;
+                    indicator.style.fontSize = '10px';
+                    indicator.style.flexShrink = '0';
+                    // Grey when inactive (in creatures list), colored when active (in ignore list)
+                    if (!isIgnoreList) {
+                        indicator.style.opacity = '0.5';
+                        indicator.style.filter = 'grayscale(100%)';
+                    }
+                    item.appendChild(indicator);
+                }
+                if (isCreatureKeepUpgradeLadderEnabled(name)) {
+                    const ladderIndicator = document.createElement('span');
+                    ladderIndicator.textContent = '⬆';
+                    ladderIndicator.style.fontSize = '10px';
+                    ladderIndicator.style.flexShrink = '0';
+                    ladderIndicator.style.color = '#ffe066';
+                    if (isIgnoreList) {
+                        ladderIndicator.style.opacity = '0.5';
+                        ladderIndicator.style.filter = 'grayscale(100%)';
+                    }
+                    item.appendChild(ladderIndicator);
+                }
+            }
+
+            // Show tier-5 star indicator only in squeeze context where per-creature sealed behavior is used.
+            const squeezeActionTitleForList = String(t('mods.autoseller.actionTitleSqueeze') || 'Squeeze').toLowerCase();
+            const isSqueezeContextForList = String(sealedActionVerb || '').trim().toLowerCase() === squeezeActionTitleForList;
+            if (isSqueezeContextForList && hasPerCreatureSealedTier5SellOverride(name)) {
+                const sealedIndicator = document.createElement('img');
+                sealedIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
+                sealedIndicator.alt = 'Sealed override';
+                sealedIndicator.title = isIgnoreList
+                    ? 'Sealed sell/squeeze override (inactive in Keep list)'
+                    : 'Sealed sell/squeeze override (active)';
+                sealedIndicator.style.width = '12px';
+                sealedIndicator.style.height = '12px';
+                sealedIndicator.style.flexShrink = '0';
+                if (isIgnoreList) {
+                    sealedIndicator.style.opacity = '0.5';
+                    sealedIndicator.style.filter = 'grayscale(100%)';
+                }
+                item.appendChild(sealedIndicator);
+            }
+
+            // Show tier-5 star indicator whenever creature is excluded by per-creature "Don't sell/devour sealed creature".
+            if (!isSqueezeContextForList && isSealedTier5SellBlocked(name)) {
+                const sealedSellDenyIndicator = document.createElement('img');
+                sealedSellDenyIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-5.png';
+                sealedSellDenyIndicator.alt = 'Sealed sell/devour ignore';
+                sealedSellDenyIndicator.title = isIgnoreList
+                    ? 'Sell/devour ignored for this creature (inactive in Keep list)'
+                    : 'Sell/devour ignored for this creature';
+                sealedSellDenyIndicator.style.width = '12px';
+                sealedSellDenyIndicator.style.height = '12px';
+                sealedSellDenyIndicator.style.flexShrink = '0';
+                if (isIgnoreList) {
+                    sealedSellDenyIndicator.style.opacity = '0.5';
+                    sealedSellDenyIndicator.style.filter = 'grayscale(100%)';
+                }
+                item.appendChild(sealedSellDenyIndicator);
+            }
+
+            // Show tier-6 star indicator when global inject is ON and creature is excluded from auto-inject
+            if (getSettings().autoInjectSealedCreaturesGlobal === true && !isSealedTier5InjectAllowed(name)) {
+                const injectIndicator = document.createElement('img');
+                injectIndicator.src = 'https://bestiaryarena.com/assets/icons/star-tier-6.png';
+                injectIndicator.alt = 'Sealed inject ignore';
+                injectIndicator.title = isIgnoreList
+                    ? 'Auto-inject ignored for this creature (inactive in Keep list)'
+                    : 'Auto-inject ignored for this creature';
+                injectIndicator.style.width = '12px';
+                injectIndicator.style.height = '12px';
+                injectIndicator.style.flexShrink = '0';
+                if (isIgnoreList) {
+                    injectIndicator.style.opacity = '0.5';
+                    injectIndicator.style.filter = 'grayscale(100%)';
+                }
+                item.appendChild(injectIndicator);
+            }
+            
+            // Add visual indicator if autoduster has custom stat settings for this equipment
+            // Show grey lock when in Keep list (inactive), colored when in Disenchant list (active)
+            if (showAutodusterIndicator) {
+                if (hasCustomAutodusterStats(name)) {
+                    const indicator = document.createElement('span');
+                    indicator.textContent = '🔒';
+                    const statusText = isIgnoreList ? 'Inactive' : 'Active';
+                    indicator.title = `Custom stat type settings (${statusText})`;
+                    indicator.style.fontSize = '10px';
+                    indicator.style.flexShrink = '0';
+                    // Grey when inactive (in Keep list), colored when active (in Disenchant list)
+                    if (isIgnoreList) {
+                        indicator.style.opacity = '0.5';
+                        indicator.style.filter = 'grayscale(100%)';
+                    }
+                    item.appendChild(indicator);
+                }
+            }
+            
+            // Add creature name text
+            const nameText = document.createElement('span');
+            nameText.textContent = name;
+            item.appendChild(nameText);
+
+            const handleMouseEnter = () => {
+                item.style.background = 'rgba(255,255,255,0.08)';
+                if (contextMenuType === 'creature') {
+                    const rect = item.getBoundingClientRect();
+                    const tooltipText = buildCreatureBehaviorTooltip(name, isSqueezeContextForList);
+                    if (hoverTooltipTimer) {
+                        clearTimeout(hoverTooltipTimer);
+                    }
+                    hoverTooltipTimer = setTimeout(() => {
+                        showHoverTooltip(tooltipText, rect.right, rect.top);
+                        hoverTooltipTimer = null;
+                    }, 320);
+                }
+            };
+            
+            const handleMouseLeave = () => {
+                item.style.background = 'none';
+                hideHoverTooltip();
+            };
+            
+            const handleMouseDown = () => {
+                item.style.background = 'rgba(255,255,255,0.18)';
+            };
+            
+            const handleMouseUp = () => {
+                item.style.background = 'rgba(255,255,255,0.08)';
+            };
+            
+            const handleClick = () => {
+                // Call the onSelectCreature function immediately to move the creature
+                if (onSelectCreature) {
+                    onSelectCreature(name);
+                }
+            };
+            
+            item.addEventListener('mouseenter', handleMouseEnter);
+            item.addEventListener('mouseleave', handleMouseLeave);
+            item.addEventListener('mousedown', handleMouseDown);
+            item.addEventListener('mouseup', handleMouseUp);
+            item.addEventListener('click', handleClick);
+            item.addEventListener('mousemove', (e) => {
+                if (activeHoverTooltip) {
+                    activeHoverTooltip.style.left = `${e.clientX + 12}px`;
+                    activeHoverTooltip.style.top = `${e.clientY + 12}px`;
+                }
+            });
+            
+            // Add context menu based on type (creature for autoseller, autoduster for equipment)
+            if (enableContextMenu) {
+                const handleContextMenu = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    if (contextMenuType === 'autoduster') {
+                        // Show autoduster context menu for stat type selection
+                        createAutodusterContextMenu(name, e.clientX, e.clientY, () => {
+                            // Refresh the equipment columns to show updated indicators
+                            // Find the columns container by traversing up the DOM tree
+                            let currentElement = item;
+                            let columnsContainer = null;
+                            while (currentElement && !columnsContainer) {
+                                currentElement = currentElement.parentElement;
+                                if (currentElement && currentElement.classList && currentElement.classList.contains('equipment-columns-container')) {
+                                    columnsContainer = currentElement;
+                                }
+                            }
+                            
+                            if (columnsContainer) {
+                                // Find the parent function scope to call renderEquipmentColumns
+                                // We'll trigger a re-render by dispatching a custom event
+                                const refreshEvent = new CustomEvent('autodusterStatsUpdated', {
+                                    detail: { equipmentName: name }
+                                });
+                                columnsContainer.dispatchEvent(refreshEvent);
+                            }
+                        });
+                    } else {
+                        // Show creature context menu for gene keep ranges
+                        createCreatureContextMenu(name, e.clientX, e.clientY, () => {
+                            // Refresh the creature columns to show updated indicators
+                            // Find the columns container by traversing up the DOM tree
+                            let currentElement = item;
+                            let columnsContainer = null;
+                            while (currentElement && !columnsContainer) {
+                                currentElement = currentElement.parentElement;
+                                if (currentElement && currentElement.classList && currentElement.classList.contains('creature-columns-container')) {
+                                    columnsContainer = currentElement;
+                                }
+                            }
+                            
+                            if (columnsContainer) {
+                                // Trigger a custom event that the parent can listen to
+                                const refreshEvent = new CustomEvent('creatureKeepRangeUpdated', {
+                                    detail: { creatureName: name }
+                                });
+                                columnsContainer.dispatchEvent(refreshEvent);
+                                if (getSettings().autoMode === 'autoplant') {
+                                    updatePlantMonsterFilter(getSettings().autoplantIgnoreList || []);
+                                }
+                            }
+                        }, sealedActionVerb, contextDefaultRangeMin, contextDefaultRangeMax);
+                    }
+                };
+                
+                item.addEventListener('contextmenu', handleContextMenu);
+            }
+            
+            scrollContainer.appendChild(item);
+        });
+        
+        box.appendChild(scrollContainer);
+        return box;
+    }
+    
+    /**
+     * Creates a context menu for setting creature keep ranges
+     * @param {string} creatureName - Name of the creature
+     * @param {number} x - X position for the menu
+     * @param {number} y - Y position for the menu
+     * @param {Function} onClose - Callback when menu is closed
+     * @returns {HTMLElement} The context menu element
+     */
+    function createCreatureContextMenu(creatureName, x, y, onClose, sealedActionVerb = 'Sell', defaultRangeMin = 0, defaultRangeMax = 100) {
+        // Close any existing context menu before opening a new one
+        if (openContextMenu && openContextMenu.closeMenu) {
+            openContextMenu.closeMenu();
+        }
+        
+        const currentRange = getCreatureKeepRange(creatureName);
+        const sealedSellBlocked = isSealedTier5SellBlocked(creatureName);
+        const sealedInjectAllowed = isSealedTier5InjectAllowed(creatureName);
+        
+        // Create overlay to close menu on outside click
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.zIndex = '9998';
+        overlay.style.backgroundColor = 'transparent';
+        overlay.style.pointerEvents = 'auto';
+        overlay.style.cursor = 'default';
+        
+        // Create menu container
+        const menu = document.createElement('div');
+        menu.style.position = 'fixed';
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+        menu.style.zIndex = '9999';
+        menu.style.minWidth = '200px';
+        menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        menu.style.border = '4px solid transparent';
+        menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        menu.style.borderRadius = '6px';
+        menu.style.padding = '12px';
+        menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+        
+        // Title
+        const title = document.createElement('div');
+        title.className = 'pixel-font-16';
+        title.textContent = creatureName;
+        title.style.color = '#ffe066';
+        title.style.fontWeight = 'bold';
+        title.style.marginBottom = '8px';
+        title.style.textAlign = 'center';
+        menu.appendChild(title);
+        
+        // Description
+        const desc = document.createElement('div');
+        desc.className = 'pixel-font-14';
+        desc.textContent = t('mods.autoseller.keepRangeDescription') || 'Keep creatures with genes between:';
+        desc.style.color = '#cccccc';
+        desc.style.fontSize = '12px';
+        desc.style.marginBottom = '8px';
+        desc.style.textAlign = 'center';
+        menu.appendChild(desc);
+        
+        // Input container
+        const inputContainer = document.createElement('div');
+        inputContainer.style.display = 'flex';
+        inputContainer.style.alignItems = 'center';
+        inputContainer.style.gap = '6px';
+        inputContainer.style.marginBottom = '12px';
+        inputContainer.style.justifyContent = 'center';
+        
+        // Min input
+        const minInput = document.createElement('input');
+        minInput.type = 'number';
+        minInput.min = '0';
+        minInput.max = '100';
+        minInput.step = '1';
+        minInput.value = currentRange ? currentRange.min : String(defaultRangeMin);
+        minInput.className = 'pixel-font-14';
+        Object.assign(minInput.style, {
+            width: '50px',
+            padding: '4px',
+            fontSize: '12px',
+            textAlign: 'center',
+            backgroundColor: '#2a2a2a',
+            color: '#ffe066',
+            border: '1px solid #ffe066',
+            borderRadius: '3px'
+        });
+        
+        // Between text
+        const betweenText = document.createElement('span');
+        betweenText.className = 'pixel-font-14';
+        betweenText.textContent = t('mods.autoseller.and') || 'and';
+        betweenText.style.color = '#cccccc';
+        betweenText.style.fontSize = '12px';
+        
+        // Max input
+        const maxInput = document.createElement('input');
+        maxInput.type = 'number';
+        maxInput.min = '0';
+        maxInput.max = '100';
+        maxInput.step = '1';
+        maxInput.value = currentRange ? currentRange.max : String(defaultRangeMax);
+        maxInput.className = 'pixel-font-14';
+        Object.assign(maxInput.style, {
+            width: '50px',
+            padding: '4px',
+            fontSize: '12px',
+            textAlign: 'center',
+            backgroundColor: '#2a2a2a',
+            color: '#ffe066',
+            border: '1px solid #ffe066',
+            borderRadius: '3px'
+        });
+        
+        // Percent text
+        const percentText = document.createElement('span');
+        percentText.className = 'pixel-font-14';
+        percentText.textContent = '%';
+        percentText.style.color = '#cccccc';
+        percentText.style.fontSize = '12px';
+        
+        inputContainer.appendChild(minInput);
+        inputContainer.appendChild(betweenText);
+        inputContainer.appendChild(maxInput);
+        inputContainer.appendChild(percentText);
+        menu.appendChild(inputContainer);
+
+        const sealedToggleRow = document.createElement('div');
+        sealedToggleRow.style.display = 'flex';
+        sealedToggleRow.style.alignItems = 'center';
+        sealedToggleRow.style.justifyContent = 'flex-start';
+        sealedToggleRow.style.gap = '6px';
+        sealedToggleRow.style.marginBottom = '12px';
+
+        const sealedToggle = document.createElement('input');
+        sealedToggle.type = 'checkbox';
+        sealedToggle.style.cursor = 'pointer';
+
+        const sealedToggleLabel = document.createElement('label');
+        sealedToggleLabel.className = 'pixel-font-14';
+        const squeezeActionTitle = String(t('mods.autoseller.actionTitleSqueeze') || 'Squeeze').toLowerCase();
+        const normalizedSealedActionVerb = String(sealedActionVerb || '').trim().toLowerCase();
+        const isSqueezeContext = normalizedSealedActionVerb === squeezeActionTitle;
+        const sealedSellAllowed = isSqueezeContext
+            ? isSealedTier5SqueezeAllowed(creatureName)
+            : isSealedTier5SellAllowed(creatureName);
+        sealedToggle.checked = sealedSellAllowed;
+        let sealedInjectToggle = null;
+        sealedToggleLabel.textContent = normalizedSealedActionVerb === squeezeActionTitle
+            ? t('mods.autoseller.autoSqueezeSealedCreatures') || 'Auto-squeeze sealed creatures'
+            : t('mods.autoseller.autoSellSealedCreatures') || 'Sell or devour sealed creatures';
+        sealedToggleLabel.style.fontSize = '12px';
+        sealedToggleLabel.style.color = '#ffe066';
+        sealedToggleLabel.style.cursor = 'pointer';
+
+        sealedToggleLabel.addEventListener('click', () => {
+            sealedToggle.checked = !sealedToggle.checked;
+        });
+
+        if (isSqueezeContext) {
+            sealedToggleRow.appendChild(sealedToggle);
+            sealedToggleRow.appendChild(sealedToggleLabel);
+            menu.appendChild(sealedToggleRow);
+        }
+
+        let sealedSellDenyToggle = null;
+        if (!isSqueezeContext) {
+            const sealedSellDenyRow = document.createElement('div');
+            sealedSellDenyRow.style.display = 'flex';
+            sealedSellDenyRow.style.alignItems = 'center';
+            sealedSellDenyRow.style.justifyContent = 'flex-start';
+            sealedSellDenyRow.style.gap = '6px';
+            sealedSellDenyRow.style.marginBottom = '12px';
+
+            sealedSellDenyToggle = document.createElement('input');
+            sealedSellDenyToggle.type = 'checkbox';
+            sealedSellDenyToggle.checked = sealedSellBlocked;
+            sealedSellDenyToggle.style.cursor = 'pointer';
+
+            const sealedSellDenyLabel = document.createElement('label');
+            sealedSellDenyLabel.className = 'pixel-font-14';
+            sealedSellDenyLabel.textContent = t('mods.autoseller.dontAutoSellSealedCreature') || "Don't sell or devour sealed creature";
+            sealedSellDenyLabel.style.fontSize = '12px';
+            sealedSellDenyLabel.style.color = '#ffe066';
+            sealedSellDenyLabel.style.cursor = 'pointer';
+            sealedSellDenyLabel.addEventListener('click', () => {
+                sealedSellDenyToggle.checked = !sealedSellDenyToggle.checked;
+            });
+
+            sealedSellDenyRow.appendChild(sealedSellDenyToggle);
+            sealedSellDenyRow.appendChild(sealedSellDenyLabel);
+            menu.appendChild(sealedSellDenyRow);
+        }
+
+        if (!isSqueezeContext) {
+            const sealedInjectToggleRow = document.createElement('div');
+            sealedInjectToggleRow.style.display = 'flex';
+            sealedInjectToggleRow.style.alignItems = 'center';
+            sealedInjectToggleRow.style.justifyContent = 'flex-start';
+            sealedInjectToggleRow.style.gap = '6px';
+            sealedInjectToggleRow.style.marginBottom = '12px';
+
+            sealedInjectToggle = document.createElement('input');
+            sealedInjectToggle.type = 'checkbox';
+            sealedInjectToggle.checked = !sealedInjectAllowed;
+            sealedInjectToggle.style.cursor = 'pointer';
+
+            const sealedInjectToggleLabel = document.createElement('label');
+            sealedInjectToggleLabel.className = 'pixel-font-14';
+            sealedInjectToggleLabel.textContent = t('mods.autoseller.dontAutoInjectCreature') || "Don't auto-inject creature";
+            sealedInjectToggleLabel.style.fontSize = '12px';
+            sealedInjectToggleLabel.style.color = '#ffe066';
+            sealedInjectToggleLabel.style.cursor = 'pointer';
+
+            sealedInjectToggleLabel.addEventListener('click', () => {
+                sealedInjectToggle.checked = !sealedInjectToggle.checked;
+            });
+
+            sealedInjectToggleRow.appendChild(sealedInjectToggle);
+            sealedInjectToggleRow.appendChild(sealedInjectToggleLabel);
+            menu.appendChild(sealedInjectToggleRow);
+        }
+
+        let upgradeLadderToggle = null;
+        if (!isSqueezeContext) {
+            const upgradeLadderRow = document.createElement('div');
+            upgradeLadderRow.style.display = 'flex';
+            upgradeLadderRow.style.alignItems = 'center';
+            upgradeLadderRow.style.justifyContent = 'flex-start';
+            upgradeLadderRow.style.gap = '6px';
+            upgradeLadderRow.style.marginBottom = '12px';
+
+            upgradeLadderToggle = document.createElement('input');
+            upgradeLadderToggle.type = 'checkbox';
+            upgradeLadderToggle.checked = isCreatureKeepUpgradeLadderEnabled(creatureName);
+            upgradeLadderToggle.style.cursor = 'pointer';
+
+            const upgradeLadderLabel = document.createElement('label');
+            upgradeLadderLabel.className = 'pixel-font-14';
+            upgradeLadderLabel.textContent = t('mods.autoseller.keepUpgradeLadder') || 'Keep upgrades to level 50';
+            upgradeLadderLabel.style.fontSize = '12px';
+            upgradeLadderLabel.style.color = '#ffe066';
+            upgradeLadderLabel.style.cursor = 'pointer';
+            upgradeLadderLabel.addEventListener('click', () => {
+                upgradeLadderToggle.checked = !upgradeLadderToggle.checked;
+            });
+
+            upgradeLadderRow.appendChild(upgradeLadderToggle);
+            upgradeLadderRow.appendChild(upgradeLadderLabel);
+            menu.appendChild(upgradeLadderRow);
+        }
+        
+        // Button container
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '6px';
+        buttonContainer.style.justifyContent = 'center';
+        
+        // Save button
+        const saveButton = document.createElement('button');
+        saveButton.className = 'pixel-font-14';
+        saveButton.textContent = t('mods.autoseller.save') || 'Save';
+        applyButtonStyles(saveButton, true, 'green', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        // Add hover effect to Save button (active button)
+        saveButton.addEventListener('mouseenter', () => {
+            saveButton.style.backgroundColor = '#2a4a2a';
+            saveButton.style.borderColor = '#4CAF50';
+        });
+        saveButton.addEventListener('mouseleave', () => {
+            saveButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.ACTIVE_GREEN_BG;
+            saveButton.style.borderColor = UI_CONSTANTS.BUTTON_COLORS.BORDER;
+        });
+        
+        saveButton.addEventListener('click', () => {
+            const min = Math.max(0, Math.min(100, parseInt(minInput.value, 10) || 0));
+            const max = Math.max(0, Math.min(100, parseInt(maxInput.value, 10) || 100));
+            
+            // Ensure min <= max
+            const finalMin = Math.min(min, max);
+            const finalMax = Math.max(min, max);
+
+            // Don't create a keep-range lock for the default full range unless it already existed.
+            // This allows "sealed sell/squeeze" to be toggled without also showing a lock icon.
+            const isDefaultFullRange = finalMin === 0 && finalMax === 100;
+            if (isDefaultFullRange && !currentRange) {
+                clearCreatureKeepRange(creatureName);
+            } else {
+                setCreatureKeepRange(creatureName, finalMin, finalMax);
+            }
+            const finalSealedInjectAllowed = sealedInjectToggle ? !sealedInjectToggle.checked : sealedInjectAllowed;
+            const finalSealedSellAllowed = sealedToggle.checked;
+            if (isSqueezeContext) {
+                setSealedTier5SellAllowed(creatureName, finalSealedSellAllowed);
+            } else if (sealedSellDenyToggle) {
+                setSealedTier5SellBlocked(creatureName, sealedSellDenyToggle.checked);
+            }
+            setSealedTier5InjectAllowed(creatureName, finalSealedInjectAllowed);
+            if (upgradeLadderToggle) {
+                setCreatureKeepUpgradeLadder(creatureName, upgradeLadderToggle.checked);
+            }
+            closeMenu();
+        });
+        
+        // Clear button
+        const clearButton = document.createElement('button');
+        clearButton.className = 'pixel-font-14';
+        clearButton.textContent = t('mods.autoseller.clear') || 'Clear';
+        applyButtonStyles(clearButton, false, 'red', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        
+        // Add hover effect to Clear button (inactive button)
+        clearButton.addEventListener('mouseenter', () => {
+            clearButton.style.backgroundColor = '#2a2a2a';
+            clearButton.style.color = '#ff6b6b';
+            clearButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.RED;
+        });
+        clearButton.addEventListener('mouseleave', () => {
+            clearButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            clearButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            clearButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        
+        clearButton.addEventListener('click', () => {
+            clearCreatureKeepRange(creatureName);
+            clearCreatureKeepUpgradeLadder(creatureName);
+            setSealedTier5SellAllowed(creatureName, false);
+            setSealedTier5SellBlocked(creatureName, false);
+            setSealedTier5InjectAllowed(creatureName, true);
+            closeMenu();
+        });
+
+        // Reset button (resets fields to defaults without saving immediately)
+        const resetButton = document.createElement('button');
+        resetButton.className = 'pixel-font-14';
+        resetButton.textContent = t('mods.autoseller.reset') || 'Reset';
+        applyButtonStyles(resetButton, false, 'red', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        resetButton.addEventListener('mouseenter', () => {
+            resetButton.style.backgroundColor = '#2a2a2a';
+            resetButton.style.color = '#ff6b6b';
+            resetButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.RED;
+        });
+        resetButton.addEventListener('mouseleave', () => {
+            resetButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            resetButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            resetButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        resetButton.addEventListener('click', () => {
+            minInput.value = String(defaultRangeMin);
+            maxInput.value = String(defaultRangeMax);
+            if (isSqueezeContext) {
+                // Default: no per-creature sealed override in squeeze context.
+                sealedToggle.checked = false;
+            } else {
+                if (sealedSellDenyToggle) sealedSellDenyToggle.checked = false;
+                if (sealedInjectToggle) sealedInjectToggle.checked = false;
+                if (upgradeLadderToggle) upgradeLadderToggle.checked = false;
+            }
+        });
+        
+        // Cancel button
+        const cancelButton = document.createElement('button');
+        cancelButton.className = 'pixel-font-14';
+        cancelButton.textContent = t('mods.autoseller.cancel') || 'Cancel';
+        applyButtonStyles(cancelButton, false, 'green', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        
+        // Add hover effect to Cancel button (inactive button)
+        cancelButton.addEventListener('mouseenter', () => {
+            cancelButton.style.backgroundColor = '#2a2a2a';
+            cancelButton.style.color = '#4CAF50';
+            cancelButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.GREEN;
+        });
+        cancelButton.addEventListener('mouseleave', () => {
+            cancelButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            cancelButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            cancelButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        
+        cancelButton.addEventListener('click', closeMenu);
+        
+        buttonContainer.appendChild(saveButton);
+        if (currentRange || isCreatureKeepUpgradeLadderEnabled(creatureName)) {
+            buttonContainer.appendChild(clearButton);
+        }
+        buttonContainer.appendChild(resetButton);
+        buttonContainer.appendChild(cancelButton);
+        menu.appendChild(buttonContainer);
+        
+        // Close menu function
+        function closeMenu() {
+            // Remove event listeners before removing from DOM
+            overlay.removeEventListener('mousedown', overlayClickHandler);
+            overlay.removeEventListener('click', overlayClickHandler);
+            document.removeEventListener('keydown', escHandler);
+            
+            // Remove modal click handlers if they exist
+            if (openContextMenu && openContextMenu.modalClickHandler && openContextMenu.modalContent) {
+                openContextMenu.modalContent.removeEventListener('mousedown', openContextMenu.modalClickHandler);
+                openContextMenu.modalContent.removeEventListener('click', openContextMenu.modalClickHandler);
+            }
+            
+            if (overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+            }
+            if (menu.parentNode) {
+                menu.parentNode.removeChild(menu);
+            }
+            // Clear the global reference
+            if (openContextMenu && (openContextMenu.overlay === overlay || openContextMenu.menu === menu)) {
+                openContextMenu = null;
+            }
+            if (onClose) {
+                onClose();
+            }
+        }
+        
+        // Store reference to this menu
+        openContextMenu = {
+            overlay: overlay,
+            menu: menu,
+            closeMenu: closeMenu
+        };
+        
+        // Close on overlay click/mousedown (use mousedown for better reliability)
+        const overlayClickHandler = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeMenu();
+        };
+        
+        // Close on ESC key
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeMenu();
+            }
+        };
+        
+        // Append to document first (overlay first, then menu on top)
+        document.body.appendChild(overlay);
+        document.body.appendChild(menu);
+        
+        // Attach event listeners after elements are in DOM
+        overlay.addEventListener('mousedown', overlayClickHandler);
+        overlay.addEventListener('click', overlayClickHandler);
+        document.addEventListener('keydown', escHandler);
+        
+        // Also close menu when clicking inside the autoseller modal (but outside the menu)
+        const modalContent = document.querySelector('[role="dialog"][data-state="open"]');
+        if (modalContent) {
+            const modalClickHandler = (e) => {
+                // Only close if click is not on the menu itself
+                if (!menu.contains(e.target)) {
+                    closeMenu();
+                    modalContent.removeEventListener('mousedown', modalClickHandler);
+                    modalContent.removeEventListener('click', modalClickHandler);
+                }
+            };
+            modalContent.addEventListener('mousedown', modalClickHandler);
+            modalContent.addEventListener('click', modalClickHandler);
+            
+            // Store handler for cleanup
+            openContextMenu.modalClickHandler = modalClickHandler;
+            openContextMenu.modalContent = modalContent;
+        }
+        
+        // Prevent clicks on menu from closing it (stop propagation to overlay)
+        menu.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+        });
+        menu.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+        
+        // Adjust position if menu goes off screen
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            menu.style.left = `${window.innerWidth - rect.width - 10}px`;
+        }
+        if (rect.bottom > window.innerHeight) {
+            menu.style.top = `${window.innerHeight - rect.height - 10}px`;
+        }
+        
+        // Focus first input
+        minInput.focus();
+        minInput.select();
+        
+        return menu;
+    }
+    
+    /**
+     * Creates a context menu for autoduster stat type selection
+     * @param {string} equipmentName - Equipment name
+     * @param {number} x - X position for menu
+     * @param {number} y - Y position for menu
+     * @param {Function} onClose - Callback when menu closes
+     * @returns {HTMLElement} The context menu element
+     */
+    function createAutodusterContextMenu(equipmentName, x, y, onClose) {
+        // Close any existing context menu before opening a new one
+        if (openContextMenu && openContextMenu.closeMenu) {
+            openContextMenu.closeMenu();
+        }
+        
+        // Get settings for this specific equipment
+        const keepStats = getAutodusterKeepStats(equipmentName);
+        
+        // Create overlay to close menu on outside click
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.zIndex = '9998';
+        overlay.style.backgroundColor = 'transparent';
+        overlay.style.pointerEvents = 'auto';
+        overlay.style.cursor = 'default';
+        
+        // Create menu container
+        const menu = document.createElement('div');
+        menu.style.position = 'fixed';
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+        menu.style.zIndex = '9999';
+        menu.style.minWidth = '200px';
+        menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        menu.style.border = '4px solid transparent';
+        menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        menu.style.borderRadius = '6px';
+        menu.style.padding = '12px';
+        menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+        
+        // Title with equipment name
+        const title = document.createElement('div');
+        title.className = 'pixel-font-16';
+        title.textContent = equipmentName || 'Autoduster Settings';
+        title.style.color = '#ffe066';
+        title.style.fontWeight = 'bold';
+        title.style.marginBottom = '4px';
+        title.style.textAlign = 'center';
+        menu.appendChild(title);
+        
+        // Subtitle
+        const subtitle = document.createElement('div');
+        subtitle.className = 'pixel-font-14';
+        subtitle.textContent = 'Disenchant stat types:';
+        subtitle.style.color = '#cccccc';
+        subtitle.style.fontSize = '11px';
+        subtitle.style.marginBottom = '12px';
+        subtitle.style.textAlign = 'center';
+        menu.appendChild(subtitle);
+        
+        // Stat checkboxes container
+        const checkboxesContainer = document.createElement('div');
+        checkboxesContainer.style.display = 'flex';
+        checkboxesContainer.style.flexDirection = 'column';
+        checkboxesContainer.style.gap = '8px';
+        checkboxesContainer.style.marginBottom = '12px';
+        
+        // Stat types to show
+        const statTypes = [
+            { key: 'ad', label: 'Attack Damage', icon: 'https://bestiaryarena.com/assets/icons/attackdamage.png' },
+            { key: 'ap', label: 'Ability Power', icon: 'https://bestiaryarena.com/assets/icons/abilitypower.png' },
+            { key: 'hp', label: 'Health Points', icon: 'https://bestiaryarena.com/assets/icons/heal.png' }
+        ];
+        
+        const checkboxStates = {};
+        
+        statTypes.forEach(statType => {
+            const checkboxRow = document.createElement('div');
+            checkboxRow.style.display = 'flex';
+            checkboxRow.style.alignItems = 'center';
+            checkboxRow.style.gap = '8px';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `autoduster-stat-${statType.key}`;
+            // Inverted logic: checked = disenchant (keepStats[statType.key] === false), unchecked = keep (keepStats[statType.key] === true)
+            checkbox.checked = keepStats[statType.key] === false; // Default to false (unchecked = keep) if not set
+            checkboxStates[statType.key] = checkbox.checked;
+            
+            checkbox.style.width = '16px';
+            checkbox.style.height = '16px';
+            checkbox.style.cursor = 'pointer';
+            
+            // Create status indicator span
+            const statusIndicator = document.createElement('span');
+            statusIndicator.className = 'pixel-font-14';
+            statusIndicator.style.marginLeft = '4px';
+            
+            // Function to update status indicator
+            const updateStatusIndicator = (isChecked) => {
+                if (isChecked) {
+                    statusIndicator.textContent = '(Disenchant)';
+                    statusIndicator.style.color = '#ff6b6b'; // Red
+                } else {
+                    statusIndicator.textContent = '(Keep)';
+                    statusIndicator.style.color = '#4CAF50'; // Green
+                }
+            };
+            
+            // Initialize status indicator
+            updateStatusIndicator(checkbox.checked);
+            
+            checkbox.addEventListener('change', () => {
+                checkboxStates[statType.key] = checkbox.checked;
+                updateStatusIndicator(checkbox.checked);
+            });
+            
+            // Create icon
+            const icon = document.createElement('img');
+            icon.src = statType.icon;
+            icon.style.width = '11px';
+            icon.style.height = '11px';
+            icon.style.flexShrink = '0';
+            
+            const label = document.createElement('label');
+            label.htmlFor = `autoduster-stat-${statType.key}`;
+            label.className = 'pixel-font-14';
+            label.style.display = 'flex';
+            label.style.alignItems = 'center';
+            label.style.gap = '6px';
+            label.style.color = '#cccccc';
+            label.style.cursor = 'pointer';
+            label.style.userSelect = 'none';
+            
+            // Add icon and text to label
+            label.appendChild(icon);
+            const labelText = document.createElement('span');
+            labelText.textContent = statType.label;
+            label.appendChild(labelText);
+            label.appendChild(statusIndicator);
+            
+            checkboxRow.appendChild(checkbox);
+            checkboxRow.appendChild(label);
+            checkboxesContainer.appendChild(checkboxRow);
+        });
+        
+        menu.appendChild(checkboxesContainer);
+        
+        // Button container
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '6px';
+        buttonContainer.style.justifyContent = 'center';
+        
+        // Save button
+        const saveButton = document.createElement('button');
+        saveButton.className = 'pixel-font-14';
+        saveButton.textContent = t('mods.autoseller.save') || 'Save';
+        applyButtonStyles(saveButton, true, 'green', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        saveButton.addEventListener('mouseenter', () => {
+            saveButton.style.backgroundColor = '#2a4a2a';
+            saveButton.style.borderColor = '#4CAF50';
+        });
+        saveButton.addEventListener('mouseleave', () => {
+            saveButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.ACTIVE_GREEN_BG;
+            saveButton.style.borderColor = UI_CONSTANTS.BUTTON_COLORS.BORDER;
+        });
+        
+        saveButton.addEventListener('click', () => {
+            // Save the checkbox states for this specific equipment
+            // Inverted logic: checked = disenchant (false), unchecked = keep (true)
+            setAutodusterKeepStats(equipmentName, {
+                ad: !checkboxStates.ad,
+                ap: !checkboxStates.ap,
+                hp: !checkboxStates.hp
+            });
+            closeMenu();
+        });
+        
+        // Reset button (only show if this equipment has custom settings)
+        const resetButton = document.createElement('button');
+        resetButton.className = 'pixel-font-14';
+        resetButton.textContent = t('mods.autoseller.reset') || 'Reset';
+        applyButtonStyles(resetButton, false, 'red', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        resetButton.addEventListener('mouseenter', () => {
+            resetButton.style.backgroundColor = '#2a2a2a';
+            resetButton.style.color = '#ff6b6b';
+            resetButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.RED;
+        });
+        resetButton.addEventListener('mouseleave', () => {
+            resetButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            resetButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            resetButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        
+        resetButton.addEventListener('click', () => {
+            // Reset to default values (all checked = disenchant all) by clearing custom settings
+            clearAutodusterKeepStats(equipmentName);
+            closeMenu();
+        });
+        
+        // Cancel button
+        const cancelButton = document.createElement('button');
+        cancelButton.className = 'pixel-font-14';
+        cancelButton.textContent = t('mods.autoseller.cancel') || 'Cancel';
+        applyButtonStyles(cancelButton, false, 'green', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        cancelButton.addEventListener('mouseenter', () => {
+            cancelButton.style.backgroundColor = '#2a2a2a';
+            cancelButton.style.color = '#4CAF50';
+            cancelButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.GREEN;
+        });
+        cancelButton.addEventListener('mouseleave', () => {
+            cancelButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            cancelButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            cancelButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        
+        cancelButton.addEventListener('click', closeMenu);
+        
+        buttonContainer.appendChild(saveButton);
+        if (hasCustomAutodusterStats(equipmentName)) {
+            buttonContainer.appendChild(resetButton);
+        }
+        buttonContainer.appendChild(cancelButton);
+        menu.appendChild(buttonContainer);
+        
+        // Close menu function
+        function closeMenu() {
+            // Remove event listeners before removing from DOM
+            overlay.removeEventListener('mousedown', overlayClickHandler);
+            overlay.removeEventListener('click', overlayClickHandler);
+            document.removeEventListener('keydown', escHandler);
+            
+            // Remove modal click handlers if they exist
+            if (openContextMenu && openContextMenu.modalClickHandler && openContextMenu.modalContent) {
+                openContextMenu.modalContent.removeEventListener('mousedown', openContextMenu.modalClickHandler);
+                openContextMenu.modalContent.removeEventListener('click', openContextMenu.modalClickHandler);
+            }
+            
+            if (overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+            }
+            if (menu.parentNode) {
+                menu.parentNode.removeChild(menu);
+            }
+            // Clear the global reference
+            if (openContextMenu && (openContextMenu.overlay === overlay || openContextMenu.menu === menu)) {
+                openContextMenu = null;
+            }
+            if (onClose) {
+                onClose();
+            }
+        }
+        
+        // Store reference to this menu
+        openContextMenu = {
+            overlay: overlay,
+            menu: menu,
+            closeMenu: closeMenu
+        };
+        
+        // Close on overlay click/mousedown
+        const overlayClickHandler = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeMenu();
+        };
+        
+        // Close on ESC key
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeMenu();
+            }
+        };
+        
+        // Append to document first (overlay first, then menu on top)
+        document.body.appendChild(overlay);
+        document.body.appendChild(menu);
+        
+        // Attach event listeners after elements are in DOM
+        overlay.addEventListener('mousedown', overlayClickHandler);
+        overlay.addEventListener('click', overlayClickHandler);
+        document.addEventListener('keydown', escHandler);
+        
+        // Also close menu when clicking inside the autoseller modal (but outside the menu)
+        const modalContent = document.querySelector('[role="dialog"][data-state="open"]');
+        if (modalContent) {
+            const modalClickHandler = (e) => {
+                // Only close if click is not on the menu itself
+                if (!menu.contains(e.target)) {
+                    closeMenu();
+                    modalContent.removeEventListener('mousedown', modalClickHandler);
+                    modalContent.removeEventListener('click', modalClickHandler);
+                }
+            };
+            modalContent.addEventListener('mousedown', modalClickHandler);
+            modalContent.addEventListener('click', modalClickHandler);
+            openContextMenu.modalClickHandler = modalClickHandler;
+            openContextMenu.modalContent = modalContent;
+        }
+        
+        // Prevent clicks on menu from closing it (stop propagation to overlay)
+        menu.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+        });
+        menu.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+        
+        // Adjust position if menu goes off screen
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            menu.style.left = `${window.innerWidth - rect.width - 10}px`;
+        }
+        if (rect.bottom > window.innerHeight) {
+            menu.style.top = `${window.innerHeight - rect.height - 10}px`;
+        }
+        
+        return menu;
+    }
+
+    // =======================
+    // Shared Creature Filter Functions (for both autoplant and autosqueeze)
+    // =======================
+    
+    /**
+     * Helper function to load and migrate filter lists (shared between creatures and equipment)
+     * @param {string} settingKey - Settings key for ignore list (e.g., 'autoplantIgnoreList')
+     * @param {Array} allItems - All available items (creatures or equipment)
+     * @returns {Object} { keepList, sellList, sellListKey }
+     */
+    function loadAndMigrateFilterLists(settingKey, allItems) {
+        const sellListKey = settingKey.replace('IgnoreList', 'SellList');
+        
+        // Simple logic:
+        // 1. Fetch all creatures/items (allItems parameter)
+        // 2. Read the ignore list (keep list) from settings
+        // 3. If item is in ignore list -> keep, otherwise -> sell
+        
+        // Check if keys exist in localStorage (not just defaults)
+        let ignoreListExists = false;
+        let sellListExists = false;
+        try {
+            const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
+            ignoreListExists = settingKey in stored;
+            sellListExists = sellListKey in stored;
+        } catch (e) {
+            // If we can't parse, assume nothing exists
+        }
+        
+        const savedSettings = getSettings();
+        const savedIgnoreList = savedSettings[settingKey];
+        const savedSellList = savedSettings[sellListKey];
+        
+        let keepList = [];
+        let sellList = [];
+        
+        // If ignore list was saved, use it (even if empty - means all items should be sold)
+        if (ignoreListExists && savedIgnoreList && Array.isArray(savedIgnoreList)) {
+            keepList = savedIgnoreList.filter(item => allItems.includes(item));
+            sellList = allItems.filter(item => !keepList.includes(item));
+        } 
+        // Otherwise, if sell list was saved, use it
+        else if (sellListExists && savedSellList && Array.isArray(savedSellList)) {
+            sellList = savedSellList.filter(item => allItems.includes(item));
+            keepList = allItems.filter(item => !sellList.includes(item));
+        } 
+        // No saved lists: all items default to keep
+        else {
+            keepList = [...allItems];
+            sellList = [];
+        }
+        
+        // Add any new items (not in either list) to keep
+        const newItems = allItems.filter(item => 
+            !keepList.includes(item) && !sellList.includes(item)
+        );
+        if (newItems.length > 0) {
+            keepList = [...keepList, ...newItems];
+        }
+        
+        // Ensure both lists are sorted alphabetically
+        keepList.sort();
+        sellList.sort();
+        
+        return { keepList, sellList, sellListKey };
+    }
+    
+    /**
+     * Creates creature filter columns (Creatures and Ignore List) - shared between autoplant and autosqueeze
+     * @param {Object} options - Configuration options
+     * @param {HTMLElement} options.container - Container element to append columns to
+     * @param {string} options.settingKey - Settings key for ignore list (e.g., 'autoplantIgnoreList', 'autosqueezeIgnoreList')
+     * @param {Function} options.onUpdate - Callback when ignore list is updated
+     * @param {HTMLElement} options.insertBefore - Optional element to insert columns before
+     * @param {string} options.actionTitle - Title for the action column (e.g., 'Sell', 'Squeeze', 'Disenchant')
+     * @param {boolean} options.enableContextMenu - Whether to enable right-click context menu for gene keep ranges
+     * @returns {Object} { availableCreatures, selectedCreatures, renderCreatureColumns, saveIgnoreList }
+     */
+    function createCreatureFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false, showKeepRangeLock = false }) {
+        // Use translation if actionTitle not provided, otherwise use provided value
+        if (!actionTitle) {
+            actionTitle = t('mods.autoseller.actionTitleSell');
+        }
+        // Load and migrate filter lists
+        const allCreatures = [...getAllAutoplantCreatures()];
+        const { keepList, sellList, sellListKey } = loadAndMigrateFilterLists(settingKey, allCreatures);
+        let selectedCreatures = [...keepList];
+        let availableCreatures = [...sellList];
+        const isSqueezeContext = settingKey === 'autosqueezeIgnoreList';
+        const contextDefaultRangeMin = isSqueezeContext ? 80 : 0;
+        const contextDefaultRangeMax = 100;
+        
+        // Function to save both lists to settings
+        function saveIgnoreList() {
+            const settingsUpdate = {};
+            settingsUpdate[settingKey] = [...selectedCreatures];
+            settingsUpdate[sellListKey] = [...availableCreatures];
+            setSettings(settingsUpdate);
+            if (onUpdate) {
+                onUpdate(selectedCreatures);
+            }
+        }
+        
+        // Function to render the creature columns
+        function renderCreatureColumns() {
+            // Get or create the columns container
+            let columnsContainer = container.querySelector('.creature-columns-container');
+            
+            if (!columnsContainer) {
+                columnsContainer = document.createElement('div');
+                columnsContainer.className = 'creature-columns-container';
+                columnsContainer.style.display = 'flex';
+                columnsContainer.style.gap = '8px';
+                columnsContainer.style.justifyContent = 'center';
+                columnsContainer.style.flex = '1 1 0';
+                columnsContainer.style.minHeight = '0';
+                columnsContainer.style.width = '100%';
+                
+                // Insert before specified element if provided, otherwise append
+                if (insertBefore && insertBefore.parentElement) {
+                    container.insertBefore(columnsContainer, insertBefore);
+                } else {
+                    container.appendChild(columnsContainer);
+                }
+                
+                // Listen for keep range updates to refresh the display (only add once)
+                columnsContainer.addEventListener('creatureKeepRangeUpdated', () => {
+                    renderCreatureColumns();
+                });
+            } else {
+                columnsContainer.innerHTML = '';
+            }
+
+            // Available creatures column (keep ranges inactive here)
+            const availableBox = createAutoplantCreaturesBox({
+                title: actionTitle,
+                items: availableCreatures,
+                selectedCreature: null,
+                isIgnoreList: false,
+                enableContextMenu: enableContextMenu,
+                showKeepRangeLock: showKeepRangeLock,
+                sealedActionVerb: actionTitle,
+                contextDefaultRangeMin,
+                contextDefaultRangeMax,
+                onSelectCreature: (creatureName) => {
+                    console.log(`[Autoseller] Added to ignore list (${settingKey}):`, creatureName);
+                    availableCreatures = availableCreatures.filter(c => c !== creatureName);
+                    selectedCreatures.push(creatureName);
+                    selectedCreatures.sort();
+                    renderCreatureColumns();
+                    saveIgnoreList();
+                }
+            });
+            availableBox.style.width = '125px';
+            availableBox.style.flex = '1 1 0';
+            availableBox.style.minHeight = '0';
+
+            // Selected creatures column (keep ranges active here)
+            const selectedBox = createAutoplantCreaturesBox({
+                title: t('mods.autoseller.actionTitleKeep'),
+                items: selectedCreatures,
+                selectedCreature: null,
+                isIgnoreList: true,
+                enableContextMenu: enableContextMenu,
+                showKeepRangeLock: showKeepRangeLock,
+                sealedActionVerb: actionTitle,
+                contextDefaultRangeMin,
+                contextDefaultRangeMax,
+                onSelectCreature: (creatureName) => {
+                    console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, creatureName);
+                    selectedCreatures = selectedCreatures.filter(c => c !== creatureName);
+                    availableCreatures.push(creatureName);
+                    availableCreatures.sort();
+                    renderCreatureColumns();
+                    saveIgnoreList();
+                }
+            });
+            selectedBox.style.width = '125px';
+            selectedBox.style.flex = '1 1 0';
+            selectedBox.style.minHeight = '0';
+
+            columnsContainer.appendChild(selectedBox);
+            columnsContainer.appendChild(availableBox);
+        }
+        
+        // Initial render
+        renderCreatureColumns();
+        
+        return {
+            availableCreatures,
+            selectedCreatures,
+            renderCreatureColumns,
+            saveIgnoreList
+        };
+    }
+
+    /**
+     * Creates equipment filter columns (Equipment and Ignore List) - for autoduster
+     * @param {Object} options - Configuration options
+     * @param {HTMLElement} options.container - Container element to append columns to
+     * @param {string} options.settingKey - Settings key for ignore list (e.g., 'autodusterIgnoreList')
+     * @param {Function} options.onUpdate - Callback when ignore list is updated
+     * @param {HTMLElement} options.insertBefore - Optional element to insert columns before
+     * @param {string} options.actionTitle - Title for the action column (e.g., 'Sell', 'Disenchant')
+     * @param {boolean} options.enableContextMenu - Whether to enable right-click context menu for gene keep ranges
+     * @returns {Object} { availableEquipment, selectedEquipment, renderEquipmentColumns, saveIgnoreList }
+     */
+    function createEquipmentFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false }) {
+        // Use translation if actionTitle not provided, otherwise use provided value
+        if (!actionTitle) {
+            actionTitle = t('mods.autoseller.actionTitleSell');
+        }
+        // Get equipment list from equipment database (similar to Better Exaltation Chest)
+        function generateEquipmentList() {
+            const equipmentDatabase = window.equipmentDatabase;
+            if (equipmentDatabase && equipmentDatabase.ALL_EQUIPMENT && equipmentDatabase.ALL_EQUIPMENT.length > 0) {
+                return equipmentDatabase.ALL_EQUIPMENT;
+            }
+            return [];
+        }
+        
+        // Load and migrate filter lists
+        const allEquipment = [...generateEquipmentList()];
+        const { keepList, sellList, sellListKey } = loadAndMigrateFilterLists(settingKey, allEquipment);
+        let selectedEquipment = [...keepList];
+        let availableEquipment = [...sellList];
+        
+        // Function to save both lists to settings
+        function saveIgnoreList() {
+            const settingsUpdate = {};
+            settingsUpdate[settingKey] = [...selectedEquipment];
+            settingsUpdate[sellListKey] = [...availableEquipment];
+            setSettings(settingsUpdate);
+            if (onUpdate) {
+                onUpdate(selectedEquipment);
+            }
+        }
+        
+        // Function to render the equipment columns
+        function renderEquipmentColumns() {
+            // Get or create the columns container
+            let columnsContainer = container.querySelector('.equipment-columns-container');
+            
+            if (!columnsContainer) {
+                columnsContainer = document.createElement('div');
+                columnsContainer.className = 'equipment-columns-container';
+                columnsContainer.style.display = 'flex';
+                columnsContainer.style.gap = '8px';
+                columnsContainer.style.justifyContent = 'center';
+                columnsContainer.style.flex = '1 1 0';
+                columnsContainer.style.minHeight = '0';
+                columnsContainer.style.width = '100%';
+                
+                // Insert before specified element if provided, otherwise append
+                if (insertBefore && insertBefore.parentElement) {
+                    container.insertBefore(columnsContainer, insertBefore);
+                } else {
+                    container.appendChild(columnsContainer);
+                }
+                
+                // Listen for autoduster stat settings updates to refresh the display
+                columnsContainer.addEventListener('autodusterStatsUpdated', () => {
+                    renderEquipmentColumns();
+                });
+            } else {
+                columnsContainer.innerHTML = '';
+            }
+
+            // Available equipment column (keep ranges inactive here)
+            const availableBox = createAutoplantCreaturesBox({
+                title: actionTitle,
+                items: availableEquipment,
+                selectedCreature: null,
+                isIgnoreList: false,
+                enableContextMenu: enableContextMenu,
+                contextMenuType: 'autoduster',
+                showAutodusterIndicator: true,
+                onSelectCreature: (equipmentName) => {
+                    console.log(`[Autoseller] Added to ignore list (${settingKey}):`, equipmentName);
+                    availableEquipment = availableEquipment.filter(e => e !== equipmentName);
+                    selectedEquipment.push(equipmentName);
+                    selectedEquipment.sort();
+                    renderEquipmentColumns();
+                    saveIgnoreList();
+                }
+            });
+            availableBox.style.width = '125px';
+            availableBox.style.flex = '1 1 0';
+            availableBox.style.minHeight = '0';
+
+            // Selected equipment column (keep ranges active here)
+            const selectedBox = createAutoplantCreaturesBox({
+                title: t('mods.autoseller.actionTitleKeep'),
+                items: selectedEquipment,
+                selectedCreature: null,
+                isIgnoreList: true,
+                enableContextMenu: enableContextMenu,
+                contextMenuType: 'autoduster',
+                showAutodusterIndicator: true,
+                onSelectCreature: (equipmentName) => {
+                    console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, equipmentName);
+                    selectedEquipment = selectedEquipment.filter(e => e !== equipmentName);
+                    availableEquipment.push(equipmentName);
+                    availableEquipment.sort();
+                    renderEquipmentColumns();
+                    saveIgnoreList();
+                }
+            });
+            selectedBox.style.width = '125px';
+            selectedBox.style.flex = '1 1 0';
+            selectedBox.style.minHeight = '0';
+
+            columnsContainer.appendChild(selectedBox);
+            columnsContainer.appendChild(availableBox);
+        }
+        
+        // Initial render
+        renderEquipmentColumns();
+        
+        return {
+            availableEquipment,
+            selectedEquipment,
+            renderEquipmentColumns,
+            saveIgnoreList
+        };
+    }
+
+    // =======================
+    // Plant Monster Filter Functions
+    // =======================
+    
+    function setPlantMonsterFilter(ignoreList) {
+        if (!globalThis.state?.clientConfig?.trigger?.setState) {
+            console.warn('[Autoseller] clientConfig not available for plantMonsterFilter');
+            return;
+        }
+        
+        /*
+         * Reference shape for plantMonsterFilter(monster) payloads:
+         * {
+         *   id, gameId, createdAt, exp, tier, shiny, hundo, locked, hidden, level,
+         *   genes: { hp, ad, ap, armor, magicResist },
+         *   totalGenes, rarityLevel, isExpCapped,
+         *   metadata: { name, roles, queryTags, lookType, spriteId, corpseId, portraitTranslate, bloodColor, baseStats, skill }
+         * }
+         *
+         * Notes:
+         * - Some flows use flat stats (hp/ad/ap/armor/magicResist), others use genes.*.
+         * - Tier-5 ("Sealed") checks should read monster.tier (fallbacks handled in helpers).
+         */
+        
+        const settings = getSettings();
+        const minGenes = settings.autoplantGenesMin !== undefined ? settings.autoplantGenesMin : 80;
+        const keepGenesEnabled = true; // Always enabled - autosqueezer handles 80%+ creatures
+        const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow !== undefined ? settings.autoplantAlwaysDevourBelow : 49;
+        const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
+        const protectSealedTier5 = settings.protectSealedTier5 === true;
+        const autosqueezeEnabled = settings.autosqueezeChecked === true;
+        const squeezeMinGenes = settings.autosqueezeGenesMin ?? UI_CONSTANTS.SQUEEZE_GENE_MIN;
+        const squeezeMaxGenes = settings.autosqueezeGenesMax ?? UI_CONSTANTS.SQUEEZE_GENE_MAX;
+        const autosqueezeIgnoreList = settings.autosqueezeIgnoreList || [];
+        
+        try {
+            globalThis.state.clientConfig.trigger.setState({
+                fn: (prev) => {
+                    return {
+                        ...prev,
+                        plantMonsterFilter: (monster) => {
+                            const monsterName = monster?.metadata?.name || monster?.name;
+                            const totalGenes = calculateTotalGenes(monster);
+                            const upgradeLadderEnabled = isCreatureKeepUpgradeLadderEnabled(monsterName);
+                            const upgradeLadderProtected = upgradeLadderEnabled
+                                ? getUpgradeLadderProtectedIds()
+                                : null;
+                            
+                            // FAILSAFE: NEVER autoplant shiny creatures
+                            if (isShinyCreature(monster)) {
+                                return false;
+                            }
+                            if (isSealedTierFiveCreature(monster) && !isSealedTier5SellAllowed(monsterName)) {
+                                return false;
+                            }
+
+                            if (upgradeLadderEnabled && monster?.id && upgradeLadderProtected?.has(monster.id)) {
+                                return false;
+                            }
+                            
+                            // Always devour creatures below absolute threshold (OVERRIDES keep range and ignore list) - only if enabled
+                            if (alwaysDevourEnabled && totalGenes <= alwaysDevourBelow) {
+                                return true;
+                            }
+
+                            // Reserve autosqueeze band for squeeze at game end (don't devour first).
+                            // Sealed tier-5 cannot be autosqueezed — allow devour when sell/devour sealed is enabled.
+                            if (autosqueezeEnabled &&
+                                totalGenes >= squeezeMinGenes &&
+                                totalGenes <= squeezeMaxGenes &&
+                                !(monsterName && autosqueezeIgnoreList.includes(monsterName))) {
+                                const allowSealedDevourDespiteSqueezeBand =
+                                    isSealedTierFiveCreature(monster) && isSealedTier5SellAllowed(monsterName);
+                                if (!allowSealedDevourDespiteSqueezeBand) {
+                                    return false;
+                                }
+                            }
+                            
+                            // Keep creatures with minGenes or higher - only if enabled
+                            if (keepGenesEnabled && totalGenes >= minGenes) {
+                                if (upgradeLadderEnabled) {
+                                    // Excess above quota for this species may be devoured (unless reserved for squeeze above).
+                                } else {
+                                const sealedSellableInFullBand =
+                                    isSealedTierFiveCreature(monster) &&
+                                    isSealedTier5SellAllowed(monsterName) &&
+                                    totalGenes >= UI_CONSTANTS.SEALED_SELL_GENE_MIN &&
+                                    totalGenes <= UI_CONSTANTS.SEALED_SELL_GENE_MAX;
+                                if (!sealedSellableInFullBand) {
+                                    return false;
+                                }
+                                }
+                            }
+                            
+                            // For creatures between thresholds (or all if keep genes disabled), check ignore list
+                            if (monsterName && ignoreList.includes(monsterName)) {
+                                // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
+                                const keepRange = getCreatureKeepRange(monsterName);
+                                if (keepRange) {
+                                    // If creature has a keep range, only keep if within range, otherwise devour
+                                    if (shouldKeepCreatureByRange(monsterName, totalGenes)) {
+                                        return false; // Keep - within range
+                                    }
+                                    return true; // Devour - outside range
+                                }
+                                // No keep range set - normal ignore list behavior (keep it)
+                                return false;
+                            }
+                            
+                            return true;
+                        },
+                    };
+                },
+            });
+            // Filter set - no logging needed unless there's an issue
+        } catch (error) {
+            console.error('[Autoseller] Error setting plantMonsterFilter:', error);
+        }
+    }
+    
+    function removePlantMonsterFilter() {
+        if (!globalThis.state?.clientConfig?.trigger?.setState) {
+            console.warn('[Autoseller] clientConfig not available for plantMonsterFilter');
+            return;
+        }
+        
+        globalThis.state.clientConfig.trigger.setState({
+            fn: (prev) => ({ ...prev, plantMonsterFilter: undefined }),
+        });
+        
+        console.log('[Autoseller] Plant monster filter removed');
+    }
+    
+    function updatePlantMonsterFilter(selectedCreatures = []) {
+        const settings = getSettings();
+        
+        // Only set filter if autoplant is enabled
+        if (settings.autoMode === 'autoplant') {
+            // Use provided selectedCreatures, or fall back to saved ignore list from settings
+            const ignoreList = selectedCreatures.length > 0 ? selectedCreatures : (settings.autoplantIgnoreList || []);
+            setPlantMonsterFilter(ignoreList);
+        } else {
+            removePlantMonsterFilter();
+        }
+    }
+
+    function createSettingsSection(opts) {
+        const section = document.createElement('div');
+        // Make section a flex container to allow content to auto-fit
+        section.style.display = 'flex';
+        section.style.flexDirection = 'column';
+        section.style.height = '100%';
+        section.style.minHeight = '0';
+        
+        // Skip description and warning for autosqueeze and autoduster
+        if (opts.summaryType !== 'Autosqueeze' && opts.summaryType !== 'Autoduster') {
+            const descWrapper = createDescriptionRow(opts.desc);
+            section.appendChild(descWrapper);
+            
+            const warningText = opts.summaryType === 'Autosell' 
+                ? t('mods.autoseller.warningSellAll')
+                : t('mods.autoseller.warningSqueezeAll');
+            const warningWrapper = createWarningRow(warningText, true);
+            section.appendChild(warningWrapper);
+        }
+        
+        // For autosqueeze and autoduster, use a different layout structure to match autoplant
+        let contentArea, checkbox, label, inputMin, inputMax, minCountInput = null;
+        
+        if (opts.summaryType === 'Autosqueeze' || opts.summaryType === 'Autoduster') {
+            // Autosqueeze/Autoduster layout: enable/disable button and gene inputs at top, then creature columns with autofit
+            const settings = getSettings();
+            const isAutoduster = opts.summaryType === 'Autoduster';
+            const settingsKeys = getSettingsKeys(opts.summaryType);
+            const checkedKey = settingsKeys.checked;
+            const genesMinKey = settingsKeys.genesMin;
+            const genesMaxKey = settingsKeys.genesMax;
+            const isEnabled = settings[checkedKey] || false;
+            
+            // Create toggleable button - red when disabled, green when enabled
+            const toggleButton = document.createElement('button');
+            toggleButton.className = 'pixel-font-14';
+            toggleButton.type = 'button';
+            toggleButton.textContent = opts.label || (opts.summaryType === 'Autoduster' ? 'Autodust' : 'Autosqueeze');
+            
+            // Apply button styles using helper function
+            applyButtonStyles(toggleButton, isEnabled, 'green', { marginBottom: UI_CONSTANTS.SPACING.MARGIN_BOTTOM_BUTTON });
+            
+            toggleButton.addEventListener('click', () => {
+                const currentSettings = getSettings();
+                const newState = !currentSettings[checkedKey];
+                const settingsUpdate = {};
+                settingsUpdate[checkedKey] = newState;
+                setSettings(settingsUpdate);
+                
+                // Update button appearance using helper function
+                applyButtonStyles(toggleButton, newState, 'green', { marginBottom: UI_CONSTANTS.SPACING.MARGIN_BOTTOM_BUTTON });
+                
+                // Update widget immediately when tab is enabled/disabled
+                manageAutosellerWidget();
+                updateAutosellerSessionWidget();
+                
+                // Update summary if it exists
+                if (typeof updateSummary === 'function') {
+                    updateSummary();
+                }
+            });
+            
+            section.appendChild(toggleButton);
+            
+            // Create a dummy checkbox for compatibility with existing code
+            checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = opts.persistKey + '-checkbox';
+            checkbox.checked = isEnabled;
+            // Sync checkbox with button state
+            Object.defineProperty(checkbox, 'checked', {
+                get: () => {
+                    const settings = getSettings();
+                    return settings[checkedKey] || false;
+                },
+                set: (value) => {
+                    const settingsUpdate = {};
+                    settingsUpdate[checkedKey] = value;
+                    setSettings(settingsUpdate);
+                    // Update button appearance using helper function
+                    applyButtonStyles(toggleButton, value, 'green', { marginBottom: UI_CONSTANTS.SPACING.MARGIN_BOTTOM_BUTTON });
+                    // Update widget immediately when checkbox state changes
+                    manageAutosellerWidget();
+                    updateAutosellerSessionWidget();
+                }
+            });
+            
+            label = null; // No label needed for button
+            
+            // Create gene input row with same style as autoplant (skip for autoduster)
+            if (!isAutoduster) {
+                const genesContainer = document.createElement('div');
+                genesContainer.style.display = 'flex';
+                genesContainer.style.alignItems = 'center';
+                genesContainer.style.justifyContent = 'flex-start';
+                genesContainer.style.gap = '6px';
+                genesContainer.style.marginTop = UI_CONSTANTS.SPACING.GAP_SMALL;
+                genesContainer.style.marginBottom = UI_CONSTANTS.SPACING.GAP_SMALL;
+                
+                const genesLabel = document.createElement('label');
+                genesLabel.className = 'pixel-font-14';
+                genesLabel.textContent = t('mods.autoseller.squeezeGenesBetween');
+                genesLabel.style.fontSize = UI_CONSTANTS.INPUT_STYLES.FONT_SIZE_MEDIUM;
+                genesLabel.style.color = UI_CONSTANTS.BUTTON_COLORS.PRIMARY_TEXT;
+                
+                const inputStyles = UI_CONSTANTS.INPUT_STYLES;
+                const colors = UI_CONSTANTS.BUTTON_COLORS;
+                
+                const genesInputMin = document.createElement('input');
+                genesInputMin.type = 'number';
+                genesInputMin.min = opts.inputMin || 80;
+                genesInputMin.max = opts.inputMax || 100;
+                genesInputMin.step = '1';
+                genesInputMin.value = settings[genesMinKey] !== undefined ? settings[genesMinKey] : (opts.defaultMin || 80);
+                Object.assign(genesInputMin.style, {
+                    width: '50px',
+                    padding: inputStyles.PADDING,
+                    fontSize: inputStyles.FONT_SIZE_SMALL,
+                    textAlign: 'center',
+                    backgroundColor: inputStyles.BACKGROUND,
+                    color: colors.PRIMARY_TEXT,
+                    border: inputStyles.BORDER,
+                    borderRadius: inputStyles.BORDER_RADIUS
+                });
+                
+                const betweenText = document.createElement('span');
+                betweenText.className = 'pixel-font-14';
+                betweenText.textContent = 'and';
+                betweenText.style.fontSize = inputStyles.FONT_SIZE_MEDIUM;
+                betweenText.style.color = colors.PRIMARY_TEXT;
+                
+                const genesInputMax = document.createElement('input');
+                genesInputMax.type = 'number';
+                genesInputMax.min = opts.inputMin || 80;
+                genesInputMax.max = opts.inputMax || 100;
+                genesInputMax.step = '1';
+                genesInputMax.value = settings[genesMaxKey] !== undefined ? settings[genesMaxKey] : (opts.defaultMax || 100);
+                Object.assign(genesInputMax.style, {
+                    width: '50px',
+                    padding: inputStyles.PADDING,
+                    fontSize: inputStyles.FONT_SIZE_SMALL,
+                    textAlign: 'center',
+                    backgroundColor: inputStyles.BACKGROUND,
+                    color: colors.PRIMARY_TEXT,
+                    border: inputStyles.BORDER,
+                    borderRadius: inputStyles.BORDER_RADIUS
+                });
+                
+                // Validation function to ensure min <= max
+                function validateSqueezeInputs(e) {
+                    const inputMin = opts.inputMin || 80;
+                    const inputMax = opts.inputMax || 100;
+                    const defaultMin = opts.defaultMin || 80;
+                    const defaultMax = opts.defaultMax || 100;
+                    
+                    let minVal = validateGeneInput(genesInputMin.value, inputMin, inputMax, defaultMin);
+                    let maxVal = validateGeneInput(genesInputMax.value, inputMin, inputMax, defaultMax);
+                    
+                    if (e && e.target === genesInputMin && minVal >= maxVal) {
+                        maxVal = Math.min(inputMax, minVal + 1);
+                    } else if (e && e.target === genesInputMax && maxVal <= minVal) {
+                        minVal = Math.max(inputMin, maxVal - 1);
+                    }
+                    
+                    genesInputMin.value = minVal;
+                    genesInputMax.value = maxVal;
+                    const settingsUpdate = {};
+                    settingsUpdate[genesMinKey] = minVal;
+                    settingsUpdate[genesMaxKey] = maxVal;
+                    setSettings(settingsUpdate);
+                }
+                
+                genesInputMin.addEventListener('input', validateSqueezeInputs);
+                genesInputMax.addEventListener('input', validateSqueezeInputs);
+                genesInputMin.addEventListener('blur', validateSqueezeInputs);
+                genesInputMax.addEventListener('blur', validateSqueezeInputs);
+                
+                const genesPercent = document.createElement('span');
+                genesPercent.className = 'pixel-font-14';
+                genesPercent.textContent = '%';
+                genesPercent.style.fontSize = inputStyles.FONT_SIZE_MEDIUM;
+                genesPercent.style.color = colors.PRIMARY_TEXT;
+                
+                genesContainer.appendChild(genesLabel);
+                genesContainer.appendChild(genesInputMin);
+                genesContainer.appendChild(betweenText);
+                genesContainer.appendChild(genesInputMax);
+                genesContainer.appendChild(genesPercent);
+                section.appendChild(genesContainer);
+                
+                inputMin = genesInputMin;
+                inputMax = genesInputMax;
+            } else {
+                // For autoduster, set inputMin and inputMax to null since we don't have inputs
+                inputMin = null;
+                inputMax = null;
+            }
+        } else {
+            // Other sections use the original content area layout
+            contentArea = document.createElement('div');
+            contentArea.style.display = 'flex';
+            contentArea.style.flexDirection = 'column';
+            contentArea.style.flex = '1 1 0';
+            contentArea.style.minHeight = '0';
+            contentArea.style.justifyContent = 'center';
+            contentArea.style.gap = '12px';
+            
+            const { row: row1, checkbox: cb, label: lbl } = createCheckboxRow(opts.persistKey, opts.label, opts.icon);
+            checkbox = cb;
+            label = lbl;
+            
+            // Store reference to Autosell checkbox globally for mutual exclusivity
+            if (opts.persistKey === 'autosell') {
+                window.autosellCheckbox = checkbox;
+            }
+            contentArea.appendChild(row1);
+            
+            const { row: row2, inputMin: iMin, inputMax: iMax } = createGeneInputRow(opts);
+            inputMin = iMin;
+            inputMax = iMax;
+            contentArea.appendChild(row2);
+            
+            const { row: row3, minCountInput: minCount } = createMinCountRow(opts);
+            contentArea.appendChild(row3);
+            minCountInput = minCount;
+        }
+        
+        // Only add validateInputs for sections that have input fields (autosqueeze and autoduster have their own validation or no inputs)
+        if (opts.summaryType !== 'Autosqueeze' && opts.summaryType !== 'Autoduster' && inputMin && inputMax) {
+            function validateInputs(e) {
+                let minVal = Math.max(opts.inputMin, Math.min(opts.inputMax, parseInt(inputMin.value, 10) || opts.inputMin));
+                let maxVal = Math.max(opts.inputMin, Math.min(opts.inputMax, parseInt(inputMax.value, 10) || opts.inputMax));
+                
+                if (e && e.target === inputMin && minVal >= maxVal) {
+                    maxVal = Math.min(opts.inputMax, minVal + 1);
+                } else if (e && e.target === inputMax && maxVal <= minVal) {
+                    minVal = Math.max(opts.inputMin, maxVal - 1);
+                }
+                
+                inputMin.value = minVal;
+                inputMax.value = maxVal;
+            }
+            
+            inputMin.addEventListener('input', validateInputs);
+            inputMax.addEventListener('input', validateInputs);
+            inputMin.addEventListener('blur', validateInputs);
+            inputMax.addEventListener('blur', validateInputs);
+        }
+
+        const summary = document.createElement('div');
+        summary.className = 'pixel-font-16';
+        summary.style.color = '#ffe066';
+        summary.style.fontSize = '13px';
+        summary.style.margin = '8px 0 0 0';
+        
+        // Layout structure differs for autosqueeze and autoduster vs other sections
+        if (opts.summaryType === 'Autosqueeze' || opts.summaryType === 'Autoduster') {
+            // Autosqueeze/Autoduster: checkbox and inputs at top, then creature columns with autofit, then status at bottom
+            // Status area at bottom (create first so we can insert columns before it)
+            const statusArea = document.createElement('div');
+            statusArea.style.display = 'flex';
+            statusArea.style.flexDirection = 'column';
+            statusArea.style.width = '100%';
+            statusArea.style.flexShrink = '0';
+            
+            const separator = document.createElement('div');
+            separator.className = 'separator my-2.5';
+            separator.setAttribute('role', 'none');
+            separator.style.margin = '16px 0px 6px';
+            
+            statusArea.appendChild(separator);
+            statusArea.appendChild(summary);
+            section.appendChild(statusArea);
+            
+            // Add filter columns (insert before status area, with autofit)
+            const ignoreListKey = opts.summaryType === 'Autoduster' ? 'autodusterIgnoreList' : 'autosqueezeIgnoreList';
+            if (opts.summaryType === 'Autoduster') {
+                // Use equipment filter columns for autoduster
+                createEquipmentFilterColumns({
+                    container: section,
+                    settingKey: ignoreListKey,
+                    insertBefore: statusArea,
+                    actionTitle: t('mods.autoseller.actionTitleDisenchant'),
+                    enableContextMenu: true, // Enable context menu for autoduster stat selection
+                    onUpdate: () => {
+                        // Ignore list is applied during processing
+                        // Update summary to show ignore count
+                        if (typeof updateSummary === 'function') {
+                            updateSummary();
+                        }
+                    }
+                });
+            } else {
+                // Use creature filter columns for autosqueeze
+                createCreatureFilterColumns({
+                    container: section,
+                    settingKey: ignoreListKey,
+                    insertBefore: statusArea,
+                    actionTitle: t('mods.autoseller.actionTitleSqueeze'),
+                    enableContextMenu: true, // Enable right-click context menu for autosqueeze creatures
+                    showKeepRangeLock: false, // Don't show lock for autosqueeze
+                    onUpdate: () => {
+                        // Ignore list is applied during processing
+                        // Update summary to show ignore count
+                        if (typeof updateSummary === 'function') {
+                            updateSummary();
+                        }
+                    }
+                });
+            }
+        } else {
+            // Other sections: use original layout with content area
+            // First separator
+            const separator = document.createElement('div');
+            separator.className = 'separator my-2.5';
+            separator.setAttribute('role', 'none');
+            separator.style.margin = '6px 0px';
+            separator.style.flexShrink = '0';
+            section.appendChild(separator);
+            
+            // Add content area between separators
+            section.appendChild(contentArea);
+            
+            // Status area at bottom
+            const statusArea = document.createElement('div');
+            statusArea.style.display = 'flex';
+            statusArea.style.flexDirection = 'column';
+            statusArea.style.justifyContent = 'flex-end';
+            statusArea.style.flexShrink = '0';
+            statusArea.style.marginTop = 'auto';
+            const separator2 = document.createElement('div');
+            separator2.className = 'separator my-2.5';
+            separator2.setAttribute('role', 'none');
+            separator2.style.margin = '6px 0px';
+            statusArea.appendChild(separator2);
+            statusArea.appendChild(summary);
+            section.appendChild(statusArea);
+        }
+        
+        checkbox.tabIndex = 1;
+        if (label) {
+            label.htmlFor = checkbox.id;
+        }
+        if (inputMin && inputMax) {
+            inputMin.tabIndex = 2;
+            inputMax.tabIndex = 3;
+            inputMin.setAttribute('aria-label', tReplace('mods.autoseller.genesMinThreshold', { label: opts.label }));
+            inputMax.setAttribute('aria-label', tReplace('mods.autoseller.genesMaxThreshold', { label: opts.label }));
+            inputMin.setAttribute('autocomplete', 'off');
+            inputMax.setAttribute('autocomplete', 'off');
+        }
+        const focusableElements = [checkbox];
+        if (inputMin) focusableElements.push(inputMin);
+        if (inputMax) focusableElements.push(inputMax);
+        focusableElements.forEach(el => {
+            el.addEventListener('focus', () => {
+                el.style.boxShadow = '0 0 0 2px #ffe066, 0 0 8px #ffe06677';
+            });
+            el.addEventListener('blur', () => {
+                el.style.boxShadow = '';
+            });
+        });
+        focusableElements.forEach(el => {
+            el.addEventListener('change', () => {
+                el.style.boxShadow = '0 0 0 2px #ffe066, 0 0 8px #ffe06677';
+                setTimeout(() => { el.style.boxShadow = ''; }, 400);
+            });
+        });
+        const saved = getSettings();
+        if (typeof saved[opts.persistKey + 'Checked'] === 'boolean') checkbox.checked = saved[opts.persistKey + 'Checked'];
+        if (inputMin && typeof saved[opts.persistKey + 'GenesMin'] === 'number') inputMin.value = saved[opts.persistKey + 'GenesMin'];
+        if (inputMax && typeof saved[opts.persistKey + 'GenesMax'] === 'number') inputMax.value = saved[opts.persistKey + 'GenesMax'];
+        if (minCountInput && typeof saved[opts.persistKey + 'MinCount'] === 'number') minCountInput.value = saved[opts.persistKey + 'MinCount'];
+        function saveSettings() {
+            const settingsUpdate = {
+                [opts.persistKey + 'Checked']: checkbox.checked
+            };
+            
+            // Only save gene inputs if they exist (not for autoduster)
+            if (inputMin && inputMax) {
+                settingsUpdate[opts.persistKey + 'GenesMin'] = parseInt(inputMin.value, 10);
+                settingsUpdate[opts.persistKey + 'GenesMax'] = parseInt(inputMax.value, 10);
+            }
+            
+            // Only save minCount if the input exists (not for autosqueeze)
+            if (minCountInput) {
+                settingsUpdate[opts.persistKey + 'MinCount'] = parseInt(minCountInput.value, 10);
+            }
+            
+            // Track last active mode when autosell is checked
+            if (opts.persistKey === 'autosell' && checkbox.checked) {
+                settingsUpdate.lastActiveMode = 'autosell';
+            }
+            
+            setSettings(settingsUpdate);
+            
+            // Update widget visibility when checkbox state changes
+            // Don't reset stats when enabling/disabling features - preserve session stats
+            manageAutosellerWidget();
+            
+            // If Autosell is being checked, uncheck Autoplant
+            if (opts.persistKey === 'autosell' && checkbox.checked) {
+                setTimeout(() => {
+                    // Try to find the Autoplant checkbox using stored reference or DOM search
+                    let autoplantCheckbox = window.autoplantCheckbox;
+                    if (!autoplantCheckbox) {
+                        // Fallback to DOM search
+                        autoplantCheckbox = document.querySelector('input[id="autoplant-checkbox"]');
+                    }
+                    
+                    if (autoplantCheckbox && autoplantCheckbox.checked) {
+                        console.log('[Autoseller] Autosell enabled, disabling Autoplant (mutual exclusivity)');
+                        autoplantCheckbox.checked = false;
+                        autoplantCheckbox.dispatchEvent(new Event('change'));
+                    }
+                }, 0);
+            }
+        }
+        const settingsInputs = [checkbox];
+        if (inputMin) settingsInputs.push(inputMin);
+        if (inputMax) settingsInputs.push(inputMax);
+        if (minCountInput) {
+            settingsInputs.push(minCountInput);
+        }
+        settingsInputs.forEach(el => {
+            el.addEventListener('change', saveSettings);
+        });
+        async function safeGetCreatureCount(minThreshold, maxThreshold, enabled, summaryDiv, type) {
+            try {
+                if (!enabled) return 0;
+                
+                const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [];
+                if (!Array.isArray(monsters)) throw new Error('Creature list unavailable');
+                
+                if (type === 'Autosell') {
+                    const eligibleMonsters = [];
+                    for (const monster of monsters) {
+                        if (typeof monster.genes === 'number' && 
+                            monster.genes >= minThreshold && 
+                            monster.genes <= maxThreshold) {
+                            const inDaycare = await isCreatureInDaycare(monster.id);
+                            if (!inDaycare) {
+                                eligibleMonsters.push(monster);
+                            }
+                        }
+                    }
+                    return eligibleMonsters.length;
+                } else {
+                    return monsters.filter(m => 
+                        typeof m.genes === 'number' && 
+                        m.genes >= minThreshold && 
+                        m.genes <= maxThreshold
+                    ).length;
+                }
+            } catch (e) {
+                console.warn(`[${modName}][WARN][safeGetCreatureCount] Error getting creature count for ${type}: ${e?.message || 'Unknown error'}`, e);
+                summaryDiv.textContent = `${type} error: ${e?.message || 'Unknown error'}`;
+                summaryDiv.style.color = '#ff6b6b';
+                return null;
+            }
+        }
+        async function updateSummary() {
+            const settings = getSettings();
+            
+            if (opts.summaryType === 'Autoduster') {
+                // Autoduster doesn't have gene inputs, just show enabled/disabled status
+                if (checkbox.checked) {
+                    let statusText = t('mods.autoseller.summaryDisenchantingSimple') || 'Disenchanting equipment.';
+                    const ignoreList = settings.autodusterIgnoreList || [];
+                    if (ignoreList.length > 0) {
+                        const plural = ignoreList.length === 1 ? '' : 's';
+                        statusText += tReplace('mods.autoseller.ignoringEquipment', { count: ignoreList.length, plural });
+                    }
+                    summary.textContent = statusText;
+                } else {
+                    summary.textContent = tReplace('mods.autoseller.statusDisabled', { type: opts.summaryType });
+                }
+                summary.style.color = checkbox.checked ? '#4CAF50' : '#ff6b6b';
+                return;
+            }
+            
+            let minVal = inputMin ? parseInt(inputMin.value, 10) : 0;
+            let maxVal = inputMax ? parseInt(inputMax.value, 10) : 0;
+            let count = await safeGetCreatureCount(minVal, maxVal, checkbox.checked, summary, opts.summaryType);
+            if (typeof count === 'number') {
+                if (checkbox.checked) {
+                    if (opts.summaryType === 'Autosell') {
+                        const minCountVal = minCountInput ? parseInt(minCountInput.value, 10) : 1;
+                        summary.textContent = tReplace('mods.autoseller.summarySelling', { min: minVal, max: maxVal, minCount: minCountVal });
+                    } else if (opts.summaryType === 'Autosqueeze') {
+                        // Autosqueeze only processes serverResults, so no min count needed
+                        let statusText = tReplace('mods.autoseller.summarySqueezingFromRewards', { min: minVal, max: maxVal });
+                        const ignoreList = settings.autosqueezeIgnoreList || [];
+                        if (ignoreList.length > 0) {
+                            const plural = ignoreList.length === 1 ? '' : 's';
+                            statusText += tReplace('mods.autoseller.ignoringCreatures', { count: ignoreList.length, plural });
+                        }
+                        summary.textContent = statusText;
+                    } else {
+                        const minCountVal = minCountInput ? parseInt(minCountInput.value, 10) : 1;
+                        const plural = count === 1 ? '' : 's';
+                        // Portuguese pluralization: "será" (singular) vs "serão" (plural)
+                        const plural2 = count === 1 ? '' : 'ão';
+                        summary.textContent = tReplace('mods.autoseller.summaryCreatures', { 
+                            count: count, 
+                            plural: plural,
+                            plural2: plural2,
+                            type: opts.summaryType.toLowerCase(),
+                            minCount: minCountVal
+                        });
+                    }
+                } else {
+                    summary.textContent = tReplace('mods.autoseller.statusDisabled', { type: opts.summaryType });
+                }
+                summary.style.color = checkbox.checked ? '#4CAF50' : '#ff6b6b'; // Green when enabled, red when disabled
+            }
+        }
+        const summaryInputs = [checkbox];
+        if (inputMin) summaryInputs.push(inputMin);
+        if (inputMax) summaryInputs.push(inputMax);
+        if (minCountInput) {
+            summaryInputs.push(minCountInput);
+        }
+        summaryInputs.forEach(el => {
+            el.addEventListener('input', () => updateSummary());
+            el.addEventListener('change', () => updateSummary());
+        });
+        updateSummary();
+        section._checkbox = checkbox;
+        if (inputMin) section._inputMin = inputMin;
+        if (inputMax) section._inputMax = inputMax;
+        if (minCountInput) {
+            section._minCountInput = minCountInput;
+        }
+
+        return section;
+    }
+
+    // =======================
+    // 7. State Management & Processing Logic
+    // =======================
+
+    function logAutosellerDebug(channel, message) {
+        console.log(`[Autoseller][${channel}] ${message}`);
+    }
+
+    function formatMonsterForDebug(monster) {
+        if (!monster) return 'unknown';
+        const name = monster?.metadata?.name || monster?.name || `gameId:${monster?.gameId ?? '?'}`;
+        const stats = getMonsterGeneStats(monster);
+        const totalGenes = stats.hp + stats.ad + stats.ap + stats.armor + stats.magicResist;
+        return `${name} id=${monster.id ?? '?'} genes=${totalGenes} tier=${monster?.tier ?? '?'}`;
+    }
+    
+    // Monitor Dragon Plant API for devoured creatures
+    function setupDragonPlantAPIMonitor() {
+        if (!window.fetch) return;
+        
+        originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            const [url, options] = args;
+            
+            // Check if this is a Dragon Plant API call
+            if (typeof url === 'string' && url.includes('quest.plantEat')) {
+                let devourRequestCount = 0;
+                try {
+                    const requestBody = JSON.parse(options?.body || '{}');
+                    const monsterIds = requestBody[0]?.json?.monsterIds;
+                    if (Array.isArray(monsterIds)) {
+                        devourRequestCount = monsterIds.length;
+                        logAutosellerDebug('Devour', `plantEat request: ${devourRequestCount} creature(s) ids=${monsterIds.join(',')}`);
+                    } else {
+                        logAutosellerDebug('Devour', 'plantEat request (could not read monsterIds from body)');
+                    }
+                } catch (e) {
+                    logAutosellerDebug('Devour', `plantEat request (body parse failed: ${e.message})`);
+                }
+                return originalFetch.apply(this, args).then(response => {
+                    // Clone the response so we can read it without affecting the original
+                    const clonedResponse = response.clone();
+                    
+                    // Process the response asynchronously
+                    clonedResponse.json().then(data => {
+                        try {
+                            if (data && Array.isArray(data) && data[0]?.result?.data?.json) {
+                                const result = data[0].result.data.json;
+                                
+                                // Check if creatures were devoured and gold was received
+                                if (result.goldValue && result.goldValue > 0) {
+                                    // Count creatures from the request body
+                                    let devouredCount = 1; // Default to 1
+                                    try {
+                                        const requestBody = JSON.parse(options.body);
+                                        if (requestBody[0]?.json?.monsterIds && Array.isArray(requestBody[0].json.monsterIds)) {
+                                            devouredCount = requestBody[0].json.monsterIds.length;
+                                        }
+                                    } catch (e) {
+                                        console.warn('[Autoseller] Could not parse request body for creature count');
+                                    }
+                                    
+                                    const goldReceived = result.goldValue;
+                                    const currentPlantGold = getPlantGold();
+                                    const threshold = DRAGON_PLANT_CONFIG.GOLD_THRESHOLD;
+                                    const percentToThreshold = currentPlantGold ? Math.round((currentPlantGold / threshold) * 100) : 0;
+                                    
+                                    logAutosellerDebug('Devour', `plantEat success: +${goldReceived}g (${devouredCount} creatures) | plantGold=${currentPlantGold}/${threshold} (${percentToThreshold}%)`);
+                                    console.log(`[Autoseller] Plant: +${goldReceived}g (${devouredCount} creatures) | Total: ${currentPlantGold}/${threshold} (${percentToThreshold}%)`);
+                                    stateManager.updateSessionStats('devoured', devouredCount, goldReceived);
+                                    
+                                    // Check if we should autocollect now that plant gold has increased
+                                    checkDragonPlantAutocollect();
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[Autoseller] Error processing Dragon Plant API response:', e);
+                        }
+                    }).catch(e => {
+                        // Ignore JSON parsing errors
+                    });
+                    
+                    return response;
+                });
+            }
+            
+            return originalFetch.apply(this, args);
+        };
+        
+    }
+    
+    // Inventory update tracker for monitoring local inventory sync
+    const inventoryUpdateTracker = {
+        successCount: 0,
+        failureCount: 0,
+        consecutiveFailures: 0,
+        lastFailureTime: 0,
+        
+        reset() {
+            this.successCount = 0;
+            this.failureCount = 0;
+            this.consecutiveFailures = 0;
+        },
+        
+        recordSuccess(count) {
+            this.successCount += count;
+            this.consecutiveFailures = 0;
+        },
+        
+        recordFailure() {
+            this.failureCount++;
+            this.consecutiveFailures++;
+            this.lastFailureTime = Date.now();
+        },
+        
+        shouldForceRefresh() {
+            // Force refresh if 5 consecutive failures
+            return this.consecutiveFailures >= 5;
+        }
+    };
+    
+    function syncAutosellerCoordinationMetadata() {
+        try {
+            if (!window.ModCoordination) return;
+            const pendingCount = stateManager.pendingEquipmentIds?.size || 0;
+            window.ModCoordination.updateModState('Autoseller', {
+                metadata: {
+                    pendingDisenchantCount: pendingCount,
+                    pendingDisenchantActive: pendingCount > 0
+                }
+            });
+        } catch (_e) {
+            // Non-fatal: coordination metadata sync should never break autoseller flow.
+        }
+    }
+
+    const stateManager = {
+        sessionStats: {
+            soldCount: 0,
+            soldGold: 0,
+            devouredCount: 0,
+            devouredGold: 0,
+            squeezedCount: 0,
+            squeezedDust: 0,
+            disenchantedCount: 0,
+            disenchantedDust: 0
+        },
+        
+        processedIds: new Set(),
+        
+        pendingEquipmentIds: new Set(),
+        pendingEquipmentFirstSeenAt: new Map(),
+        
+        errorStats: {
+            fetchErrors: 0,
+            squeezeErrors: 0,
+            sellErrors: 0,
+            disenchantErrors: 0,
+            localStorageErrors: 0
+        },
+        
+        lastRun: 0,
+        lastDustFlushRun: 0,
+        
+        updateSessionStats(type, count, value) {
+            if (type === 'sold') {
+                this.sessionStats.soldCount += count;
+                this.sessionStats.soldGold += value;
+            } else if (type === 'devoured') {
+                this.sessionStats.devouredCount += count;
+                this.sessionStats.devouredGold += value;
+            } else if (type === 'squeezed') {
+                this.sessionStats.squeezedCount += count;
+                this.sessionStats.squeezedDust += value;
+            } else if (type === 'disenchanted') {
+                this.sessionStats.disenchantedCount += count;
+                this.sessionStats.disenchantedDust += value;
+            }
+            
+            this.notifyUIUpdate();
+        },
+        
+        markProcessed(ids) {
+            ids.forEach(id => this.processedIds.add(id));
+        },
+        
+        isProcessed(id) {
+            return this.processedIds.has(id);
+        },
+        
+        updateErrorStats(type) {
+            if (this.errorStats.hasOwnProperty(type)) {
+                this.errorStats[type]++;
+            }
+        },
+        
+        canRun() {
+            const now = Date.now();
+            const elapsed = now - this.lastRun;
+            const tabVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+            const minDelay = tabVisible ? 800 : AUTOSELLER_MIN_DELAY_MS;
+            if (elapsed < minDelay) {
+                logAutosellerDebug('GameEnd', `canRun blocked: ${elapsed}ms since last run (min ${minDelay}ms)`);
+                return false;
+            }
+            this.lastRun = now;
+            return true;
+        },
+
+        canFlushPendingDust() {
+            const now = Date.now();
+            const elapsed = now - this.lastDustFlushRun;
+            const minGap = 300;
+            if (elapsed < minGap) {
+                return false;
+            }
+            this.lastDustFlushRun = now;
+            return true;
+        },
+        
+        resetSession() {
+            this.sessionStats = {
+                soldCount: 0,
+                soldGold: 0,
+                devouredCount: 0,
+                devouredGold: 0,
+                squeezedCount: 0,
+                squeezedDust: 0,
+                disenchantedCount: 0,
+                disenchantedDust: 0
+            };
+            this.processedIds.clear();
+            this.pendingEquipmentIds.clear();
+            this.pendingEquipmentFirstSeenAt.clear();
+            this.notifyUIUpdate();
+        },
+        
+        clearProcessedIds() {
+            this.processedIds.clear();
+        },
+        
+        addPendingEquipment(id) {
+            if (id) {
+                // Safety limit to prevent memory leak (max 100 pending equipment)
+                if (this.pendingEquipmentIds.size >= 100) {
+                    console.warn('[Autoseller] Pending equipment list reached maximum size (100), clearing oldest entries');
+                    // Remove oldest entries (convert to array, remove first half, recreate set)
+                    const idsArray = Array.from(this.pendingEquipmentIds);
+                    const toKeep = idsArray.slice(Math.floor(idsArray.length / 2));
+                    this.pendingEquipmentIds.clear();
+                    this.pendingEquipmentFirstSeenAt.clear();
+                    toKeep.forEach(equipId => this.pendingEquipmentIds.add(equipId));
+                    const now = Date.now();
+                    toKeep.forEach(equipId => this.pendingEquipmentFirstSeenAt.set(equipId, now));
+                }
+                this.pendingEquipmentIds.add(id);
+                if (!this.pendingEquipmentFirstSeenAt.has(id)) {
+                    this.pendingEquipmentFirstSeenAt.set(id, Date.now());
+                }
+                syncAutosellerCoordinationMetadata();
+            }
+        },
+        
+        removePendingEquipment(id) {
+            if (id) {
+                this.pendingEquipmentIds.delete(id);
+                this.pendingEquipmentFirstSeenAt.delete(id);
+                syncAutosellerCoordinationMetadata();
+            }
+        },
+        
+        getPendingEquipmentIds() {
+            return new Set(this.pendingEquipmentIds);
+        },
+        
+        clearPendingEquipment() {
+            this.pendingEquipmentIds.clear();
+            this.pendingEquipmentFirstSeenAt.clear();
+            syncAutosellerCoordinationMetadata();
+        },
+
+        getPendingEquipmentAgeMs(id) {
+            const firstSeenAt = this.pendingEquipmentFirstSeenAt.get(id);
+            if (!firstSeenAt) return Infinity;
+            return Math.max(0, Date.now() - firstSeenAt);
+        },
+        
+        getSessionStats() {
+            return { ...this.sessionStats };
+        },
+        
+        getErrorStats() {
+            return { ...this.errorStats };
+        },
+        
+        notifyUIUpdate() {
+            updateAutosellerSessionWidget();
+            syncAutosellerCoordinationMetadata();
+        }
+    };
+    
+    async function processEligibleMonsters(monsters, type) {
+        const debugChannel = type === 'squeeze' ? 'Squeeze' : 'Sell';
+        const outcome = { incomplete: false, attempted: 0, succeeded: 0, skippedNoLocalMatch: 0 };
+        try {
+            const settings = getSettings();
+            logAutosellerDebug(debugChannel, `start: ${Array.isArray(monsters) ? monsters.length : 0} input monster(s)`);
+            
+            // Check if the feature is enabled before processing
+            if (type === 'sell' && settings.autoMode !== 'autosell') {
+                logAutosellerDebug('Sell', 'skip: autosell mode is off');
+                return outcome;
+            }
+            if (type === 'squeeze' && !settings.autosqueezeChecked) {
+                logAutosellerDebug('Squeeze', 'skip: autosqueeze is disabled');
+                return outcome;
+            }
+            
+            // Check if Monster Squeezer is unlocked before attempting to squeeze
+            if (type === 'squeeze') {
+                const playerFlags = globalThis.state?.player?.getSnapshot?.()?.context?.flags;
+                if (playerFlags !== undefined) {
+                    const flags = new globalThis.state.utils.Flags(playerFlags);
+                    if (!flags.isSet("monsterSqueezer")) {
+                        logAutosellerDebug('Squeeze', 'skip: Monster Squeezer not unlocked');
+                        console.log('[Autoseller] ℹ️ Monster Squeezer not unlocked. Visit the store to unlock it!');
+                        return outcome;
+                    }
+                }
+            }
+            
+            // For autosell and autosqueeze: STRICTLY only process the monsters passed in (from serverResults)
+            // Never fetch entire inventory to prevent accidental processing
+            if (type === 'sell') {
+                if (!Array.isArray(monsters) || monsters.length === 0) {
+                    logAutosellerDebug('Sell', 'skip: no monsters to process');
+                    return outcome;
+                }
+            } else if (type === 'squeeze') {
+                if (!Array.isArray(monsters) || monsters.length === 0) {
+                    logAutosellerDebug('Squeeze', 'skip: no monsters to process');
+                    return outcome;
+                }
+                // CRITICAL SAFETY CHECK: Verify all monsters have valid server IDs
+                const invalidMonsters = monsters.filter(m => !m || !m.id);
+                if (invalidMonsters.length > 0) {
+                    logAutosellerDebug('Squeeze', `skip: ${invalidMonsters.length} monster(s) missing server id`);
+                    outcome.incomplete = true;
+                    return outcome;
+                }
+            } else {
+                // For legacy/other modes: allow fallback to fetch entire inventory
+                if (!monsters) {
+                    monsters = await fetchServerMonsters();
+                }
+            }
+            
+            if (!Array.isArray(monsters)) {
+                console.warn(`[${modName}][WARN][processEligibleMonsters] Could not access monster list.`);
+                outcome.incomplete = type === 'squeeze';
+                return outcome;
+            }
+            
+            let toSell = [];
+            let toSqueeze = [];
+            
+            if (type === 'sell' && settings.autoMode === 'autosell') {
+                // For autosell mode, monsters are already filtered by battle rewards matching
+                // FAILSAFE: Filter out any shiny creatures that might have slipped through
+                toSell = monsters.filter(m => {
+                    if (stateManager.isProcessed(m.id) || isShinyCreature(m)) return false;
+                    if (!isSealedTierFiveCreature(m)) return true;
+                    const creatureName = m?.metadata?.name || m?.name || getCreatureNameFromMonster(m);
+                    // Allow sealed sell when explicitly enabled for this creature.
+                    // If inject is also enabled, inject pass runs first and removes successful ones;
+                    // remaining sealed creatures then fall back to sell.
+                    return isSealedTier5SellAllowed(creatureName);
+                });
+            } else if (type === 'squeeze' && settings.autosqueezeChecked) {
+                // For autosqueeze mode, monsters are already filtered by battle rewards matching
+                // FAILSAFE: Filter out any shiny creatures that might have slipped through
+                toSqueeze = monsters.filter(m =>
+                    !stateManager.isProcessed(m.id) &&
+                    !isShinyCreature(m) &&
+                    !isSealedTierFiveCreature(m)
+                );
+            } else {
+                // For legacy/other modes, use getEligibleMonsters
+                const result = await getEligibleMonsters(settings, monsters);
+                toSqueeze = result.toSqueeze;
+                toSell = result.toSell;
+                
+                if (type === 'sell') {
+                    toSell = toSell.filter(m => !stateManager.isProcessed(m.id));
+                }
+            }
+            
+            if (type === 'sell') {
+                const consumedByInjection = await autoInjectEligibleSealedCreatures(monsters);
+                if (consumedByInjection.size > 0) {
+                    logAutosellerDebug('Sell', `inject consumed ${consumedByInjection.size} sealed creature(s) before sell`);
+                    toSell = toSell.filter(monster => !consumedByInjection.has(monster?.id));
+                }
+
+                if (!toSell.length) {
+                    logAutosellerDebug('Sell', consumedByInjection.size > 0
+                        ? 'done: nothing left to sell after inject'
+                        : 'skip: no eligible monsters after filter');
+                    return outcome;
+                }
+
+                logAutosellerDebug('Sell', `selling ${toSell.length} monster(s): ${toSell.map(formatMonsterForDebug).join(' | ')}`);
+                
+                // Log will be combined with result
+                const batchSize = SELL_RATE_LIMIT.BATCH_SIZE;
+                for (let i = 0; i < toSell.length; i += batchSize) {
+                    const batch = toSell.slice(i, i + batchSize);
+                    
+                    for (const monster of batch) {
+                        // FAILSAFE: NEVER autosell shiny creatures
+                        if (isShinyCreature(monster)) {
+                            continue;
+                        }
+                        
+                        const id = monster.id;
+                        
+                        // Check if cleaning up before proceeding
+                        if (isCleaningUp) {
+                            logAutosellerDebug('Sell', `abort mid-batch: cleanup (monster ${id})`);
+                            return;
+                        }
+                        
+                        logAutosellerDebug('Sell', `API sellMonster → ${formatMonsterForDebug(monster)}`);
+                        
+                        // Delay before selling and removing (allows UI to settle)
+                        await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.UI_SETTLE_MS));
+                        if (isCleaningUp) return;
+                        
+                        await apiRateLimiter.waitForSlot();
+                        apiRateLimiter.recordRequest();
+                        
+                        const url = 'https://bestiaryarena.com/api/trpc/game.sellMonster?batch=1';
+                        const body = { "0": { json: id } };
+                        const result = await apiRequest(url, { method: 'POST', body });
+                    
+                        if (!result.success && result.status === 429) {
+                            logAutosellerDebug('Sell', `rate limited (429) for id=${id}, retrying after delay`);
+                            console.warn(`[${modName}][WARN][processEligibleMonsters] Rate limited (429) for monster ${id}, waiting...`);
+                            await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
+                            if (isCleaningUp) return;
+                            continue;
+                        }
+                        
+                        const apiResponse = result.data;
+                        
+                        if (
+                            apiResponse &&
+                            Array.isArray(apiResponse) &&
+                            apiResponse[0]?.result?.data?.json?.goldValue != null &&
+                            !stateManager.isProcessed(id)
+                        ) {
+                            const goldReceived = apiResponse[0].result.data.json.goldValue;
+                            
+                            logAutosellerDebug('Sell', `success id=${id} +${goldReceived}g`);
+                            stateManager.updateSessionStats('sold', 1, goldReceived);
+                            // Remove from local inventory and verify removal before marking as processed
+                            const removalResult = await removeMonstersFromLocalInventory([id]);
+                            if (removalResult.success) {
+                                // Only mark as processed after successful removal verification
+                                stateManager.markProcessed([id]);
+                            } else {
+                                logAutosellerDebug('Sell', `local inventory remove failed after sell id=${id}`);
+                                // Removal failed - log warning but don't mark as processed so it can be retried
+                                console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove monster ${id} from local inventory after selling. Will retry on next batch.`);
+                            }
+                        } else if (!result.success && result.status === 404) {
+                            logAutosellerDebug('Sell', `404 id=${id} (already gone on server), removing from local inventory`);
+                            // 404 means creature no longer exists on server - always remove from local inventory
+                            const removalResult = await removeMonstersFromLocalInventory([id]);
+                            if (removalResult.success) {
+                                // Only mark as processed after successful removal verification
+                                stateManager.markProcessed([id]);
+                            } else {
+                                logAutosellerDebug('Sell', `local inventory remove failed after 404 id=${id}`);
+                                // Removal failed - log warning but don't mark as processed so it can be retried
+                                console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove monster ${id} from local inventory (404). Will retry on next batch.`);
+                            }
+                        } else if (!result.success) {
+                            logAutosellerDebug('Sell', `API failed id=${id} HTTP ${result.status}`);
+                            console.warn(`[${modName}][WARN][processEligibleMonsters] Sell API failed for ID ${id}: HTTP ${result.status}`);
+                        } else if (stateManager.isProcessed(id)) {
+                            logAutosellerDebug('Sell', `skip id=${id}: already marked processed`);
+                        } else {
+                            logAutosellerDebug('Sell', `unexpected response id=${id}`);
+                        }
+                        
+                        await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
+                        if (isCleaningUp) return;
+                    }
+                    
+                    if (i + batchSize < toSell.length) {
+                        await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.BATCH_DELAY_MS));
+                        if (isCleaningUp) return;
+                    }
+                }
+            } else if (type === 'squeeze') {
+                if (!toSqueeze.length) {
+                    logAutosellerDebug('Squeeze', 'skip: no eligible monsters after filter (processed/shiny/sealed)');
+                    return outcome;
+                }
+
+                outcome.attempted = toSqueeze.length;
+                logAutosellerDebug('Squeeze', `squeezing ${toSqueeze.length} monster(s): ${toSqueeze.map(formatMonsterForDebug).join(' | ')}`);
+                
+                // Log will be combined with result
+                for (let i = 0; i < toSqueeze.length; i += SELL_RATE_LIMIT.BATCH_SIZE) {
+                    const batch = toSqueeze.slice(i, i + SELL_RATE_LIMIT.BATCH_SIZE);
+                    
+                    // CRITICAL SAFETY CHECK: Verify all monsters in batch have valid server IDs
+                    const invalidMonsters = batch.filter(m => !m || !m.id);
+                    if (invalidMonsters.length > 0) {
+                        continue;
+                    }
+                    
+                    // FAILSAFE: Filter out any shiny creatures from batch
+                    const nonShinyBatch = batch.filter(m => !isShinyCreature(m));
+                    if (nonShinyBatch.length === 0) {
+                        continue;
+                    }
+                    
+                    // Get IDs from LOCAL state, not server state
+                    // Match monsters by finding them in local state using gameId + stats
+                    const localState = globalThis.state?.player?.getSnapshot?.()?.context;
+                    const localMonsters = localState?.monsters || [];
+                    const ids = [];
+                    
+                    for (const serverMonster of nonShinyBatch) {
+                        // CRITICAL SAFETY CHECK: Verify server ID exists before processing
+                        if (!serverMonster || !serverMonster.id) {
+                            continue;
+                        }
+                        
+                        // Find matching monster in local state by gameId and stats
+                        const localMonster = localMonsters.find(m => 
+                            m.gameId === serverMonster.gameId &&
+                            m.hp === serverMonster.hp &&
+                            m.ad === serverMonster.ad &&
+                            m.ap === serverMonster.ap &&
+                            m.armor === serverMonster.armor &&
+                            m.magicResist === serverMonster.magicResist &&
+                            !m.locked
+                        );
+                        
+                        if (localMonster && localMonster.id) {
+                            ids.push(localMonster.id);
+                        } else {
+                            // Fallback: try to match by server ID if it exists in local state
+                            if (localMonsters.find(m => m.id === serverMonster.id)) {
+                                ids.push(serverMonster.id);
+                            }
+                        }
+                    }
+                    
+                    if (!ids.length) {
+                        outcome.skippedNoLocalMatch += nonShinyBatch.length;
+                        outcome.incomplete = true;
+                        logAutosellerDebug('Squeeze', `batch ${i / SELL_RATE_LIMIT.BATCH_SIZE + 1}: no local ids matched (${nonShinyBatch.length} server monster(s)) — inventory may not be synced yet`);
+                        continue;
+                    }
+                    
+                    // Check if cleaning up before proceeding
+                    if (isCleaningUp) {
+                        logAutosellerDebug('Squeeze', 'abort mid-batch: cleanup');
+                        outcome.incomplete = true;
+                        return outcome;
+                    }
+                    
+                    logAutosellerDebug('Squeeze', `API monsterSqueezer batch ${i / SELL_RATE_LIMIT.BATCH_SIZE + 1}: serverIds=[${nonShinyBatch.map(m => m.id).join(',')}] localIds=[${ids.join(',')}]`);
+                    
+                    // Delay before squeezing (allows UI to settle)
+                    await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.UI_SETTLE_MS));
+                    if (isCleaningUp) {
+                        outcome.incomplete = true;
+                        return outcome;
+                    }
+                    
+                    await apiRateLimiter.waitForSlot();
+                    apiRateLimiter.recordRequest();
+                    
+                    const url = 'https://bestiaryarena.com/api/trpc/inventory.monsterSqueezer?batch=1';
+                    // Use server IDs for API call (API expects server IDs)
+                    // CRITICAL SAFETY CHECK: Filter out any invalid IDs before API call
+                    const serverIds = nonShinyBatch.map(m => m?.id).filter(id => id && (typeof id === 'number' || typeof id === 'string'));
+                    
+                    // Final safety check: Ensure we have valid server IDs
+                    if (!serverIds || serverIds.length === 0) {
+                        continue;
+                    }
+                    const body = { "0": { json: serverIds } };
+                    
+                    const result = await apiRequest(url, { method: 'POST', body });
+                    
+                    const apiResponse = result.data;
+                    
+                    if (
+                        apiResponse &&
+                        Array.isArray(apiResponse) &&
+                        apiResponse[0]?.result?.data?.json?.dustDiff != null
+                    ) {
+                        const dustReceived = apiResponse[0].result.data.json.dustDiff;
+                        const squeezedCount = Math.floor(dustReceived / API_CONSTANTS.DUST_PER_CREATURE);
+                        outcome.succeeded += squeezedCount;
+                        
+                        logAutosellerDebug('Squeeze', `success: ${squeezedCount} monster(s) → ${dustReceived} dust`);
+                        if (dustReceived > 0) {
+                            console.log(`[Autoseller] Squeezed ${squeezedCount} monsters → ${dustReceived} dust`);
+                        }
+                        
+                        stateManager.updateSessionStats('squeezed', squeezedCount, dustReceived);
+                        
+                        // Remove using LOCAL state IDs (these are what exist in the UI)
+                        if (ids.length > 0) {
+                            await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.BEFORE_REMOVE_FROM_INVENTORY_MS));
+                            // Remove from local inventory and verify removal before marking as processed
+                            const removalResult = await removeMonstersFromLocalInventory(ids);
+                            if (removalResult.success) {
+                                // Only mark as processed after successful removal verification
+                                stateManager.markProcessed(serverIds);
+                            } else {
+                                outcome.incomplete = true;
+                                logAutosellerDebug('Squeeze', `local inventory remove failed after squeeze (${ids.length} id(s))`);
+                                // Removal failed - log warning but don't mark as processed so it can be retried
+                                console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove ${ids.length} monsters from local inventory after squeezing. Will retry on next batch.`);
+                            }
+                        } else {
+                            // No local IDs found, but API succeeded - mark as processed anyway
+                            logAutosellerDebug('Squeeze', 'API ok but no local ids to remove — marking server ids processed');
+                            stateManager.markProcessed(serverIds);
+                        }
+                    } else if (!result.success && result.status === 404) {
+                        logAutosellerDebug('Squeeze', `404 batch serverIds=[${serverIds.join(',')}] — removing from local inventory`);
+                        // 404 means creatures no longer exist on server - always remove from local inventory
+                        if (ids.length > 0) {
+                            const removalResult = await removeMonstersFromLocalInventory(ids);
+                            if (removalResult.success) {
+                                // Only mark as processed after successful removal verification
+                                stateManager.markProcessed(serverIds);
+                            } else {
+                                // Removal failed - log warning but don't mark as processed so it can be retried
+                                console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove ${ids.length} monsters from local inventory (404). Will retry on next batch.`);
+                            }
+                        } else {
+                            // No local IDs found, but 404 means they're gone - mark as processed anyway
+                            stateManager.markProcessed(serverIds);
+                        }
+                    } else if (!result.success) {
+                        outcome.incomplete = true;
+                        logAutosellerDebug('Squeeze', `API failed HTTP ${result.status} serverIds=[${serverIds.join(',')}]`);
+                        console.warn(`[${modName}][WARN][processEligibleMonsters] Squeeze API failed: HTTP ${result.status}`);
+                        continue;
+                    } else {
+                        outcome.incomplete = true;
+                        logAutosellerDebug('Squeeze', `unexpected API response serverIds=[${serverIds.join(',')}]`);
+                        console.warn(`[Autoseller] ⚠️ Unexpected squeeze API response structure`);
+                    }
+                
+                    if (i + SELL_RATE_LIMIT.BATCH_SIZE < toSqueeze.length) {
+                        await new Promise(res => setTimeout(res, SELL_RATE_LIMIT.BATCH_DELAY_MS));
+                        if (isCleaningUp) return outcome;
+                    }
+                }
+                if (outcome.attempted > 0 && outcome.succeeded < outcome.attempted) {
+                    outcome.incomplete = true;
+                }
+            }
+            return outcome;
+        } catch (e) {
+            console.error(`[${modName}][ERROR][processEligibleMonsters] Failed to ${type} monsters. Error: ${e.message}`, e);
+            stateManager.updateErrorStats(`${type}Errors`);
+            outcome.incomplete = type === 'squeeze';
+            return outcome;
+        }
+    }
+    
+    async function processEligibleEquipment(rewardEquipmentIds, inventoryEquipment, battleRewardEquipment = []) {
+        const outcome = { incomplete: false, pendingCount: 0 };
+        try {
+            const settings = getSettings();
+            logAutosellerDebug('Disenchant', `start: ${rewardEquipmentIds?.size ?? 0} reward equipment id(s), inventory=${Array.isArray(inventoryEquipment) ? inventoryEquipment.length : 0}`);
+            
+            // Check if autoduster is enabled
+            if (!settings.autodusterChecked) {
+                logAutosellerDebug('Disenchant', 'skip: autoduster is disabled');
+                return outcome;
+            }
+            
+            // Helper function to filter equipment that should be disenchanted
+            function filterEquipmentForDisenchant(inventoryEquipmentList, settings, rewardEquipmentIds = null, isPending = false) {
+                const toDisenchant = [];
+                const ignoreList = settings.autodusterIgnoreList || [];
+                
+                for (const invEquipment of inventoryEquipmentList) {
+                    const equipmentId = invEquipment?.id;
+                    
+                    // Skip if no ID
+                    if (!equipmentId) {
+                        continue;
+                    }
+                    
+                    // For new equipment: verify it's in rewardEquipmentIds
+                    if (rewardEquipmentIds && !rewardEquipmentIds.has(equipmentId)) {
+                        continue;
+                    }
+                    
+                    // Skip if already processed
+                    if (stateManager.isProcessed(equipmentId)) {
+                        if (isPending) {
+                            stateManager.removePendingEquipment(equipmentId);
+                        }
+                        continue;
+                    }
+                    
+                    // Get equipment details
+                    const equipment = getEquipmentDetails(invEquipment);
+                    if (!equipment) {
+                        if (isPending) {
+                            // Equipment details unavailable - remove from pending to prevent memory leak
+                            stateManager.removePendingEquipment(equipmentId);
+                        }
+                        continue;
+                    }
+                    
+                    // Check ignore list
+                    if (ignoreList.includes(equipment.name)) {
+                        const decision = getEquipmentDecisionReason(equipment, settings);
+                        console.log(`[Autoseller] 🔒 KEEP: ${equipment.name} (T${equipment.tier || '?'} ${equipment.stat || 'unknown'}) - ${decision.reason}`);
+                        if (isPending) {
+                            stateManager.removePendingEquipment(equipmentId);
+                        }
+                        continue;
+                    }
+                    
+                    // Check if equipment should be disenchanted
+                    const decision = getEquipmentDecisionReason(equipment, settings);
+                    if (!shouldDisenchantEquipment(equipment, settings)) {
+                        console.log(`[Autoseller] 🔒 KEEP: ${equipment.name} (T${equipment.tier || '?'} ${equipment.stat || 'unknown'}) - ${decision.reason}`);
+                        if (isPending) {
+                            stateManager.removePendingEquipment(equipmentId);
+                        }
+                        continue;
+                    }
+                    
+                    // Equipment will be dusted
+                    console.log(`[Autoseller] 💨 DUST: ${equipment.name} (T${equipment.tier || '?'} ${equipment.stat || 'unknown'}) - ${decision.reason}`);
+                    toDisenchant.push(equipment);
+                }
+                
+                return toDisenchant;
+            }
+            
+            // Helper function to process equipment disenchanting
+            async function processEquipmentDisenchant(equipmentId, isPending = false) {
+                logAutosellerDebug('Disenchant', `process equipmentId=${equipmentId}${isPending ? ' (pending retry)' : ''}`);
+                // Delay before disenchanting (allows UI to settle)
+                await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.UI_SETTLE_MS));
+                
+                // Wait for rate limiter slot
+                await apiRateLimiter.waitForSlot();
+                apiRateLimiter.recordRequest();
+                
+                // Disenchant the equipment
+                const result = await disenchantEquipment(equipmentId);
+                
+                if (result.success) {
+                    // Track equipment count (each equipment = 25 dust as per specification)
+                    stateManager.updateSessionStats('disenchanted', 1, 1);
+                    // Remove from local inventory and verify removal before marking as processed
+                    const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
+                    if (removalResult.success) {
+                        // Only mark as processed after successful removal verification
+                        stateManager.markProcessed([equipmentId]);
+                        // Remove from pending list on success
+                        stateManager.removePendingEquipment(equipmentId);
+                    } else {
+                        logAutosellerDebug('Disenchant', `local inventory remove failed after disenchant equipmentId=${equipmentId}`);
+                        // Removal failed - log warning but don't mark as processed so it can be retried
+                        console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory after disenchanting. Will retry on next batch.`);
+                        // Keep in pending list for retry
+                        if (!isPending) {
+                            stateManager.addPendingEquipment(equipmentId);
+                        }
+                    }
+                    // Return result for consolidated logging
+                    return { success: true, dustGained: result.dustGained || 0 };
+                } else if (result.status === 404) {
+                    // 404 means equipment no longer exists on server - always remove from local inventory
+                    const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
+                    if (removalResult.success) {
+                        // Only mark as processed after successful removal verification
+                        stateManager.markProcessed([equipmentId]);
+                    } else {
+                        // Removal failed - log warning but don't mark as processed so it can be retried
+                        console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory (404). Will retry on next batch.`);
+                    }
+                    // Remove from pending list on 404 (equipment doesn't exist)
+                    stateManager.removePendingEquipment(equipmentId);
+                    return { success: false, status: 404 };
+                } else if (result.status === 429) {
+                    await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
+                    // Keep in pending list for retry
+                    if (!isPending) {
+                        stateManager.addPendingEquipment(equipmentId);
+                    }
+                    return { success: false, status: 429 };
+                } else {
+                    // Other errors - keep in pending list for retry
+                    console.warn(`[Autoseller] Failed to disenchant equipment ${equipmentId}, will retry. Status: ${result.status || 'unknown'}`);
+                    if (!isPending) {
+                        stateManager.addPendingEquipment(equipmentId);
+                    }
+                    return { success: false, status: result.status };
+                }
+                
+                // Delay between disenchant operations
+                await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
+            }
+            
+            // Fast path: if serverResults already gives equipment ids, try disenchant immediately
+            // using drop metadata (no inventory round-trip needed) before fallback matching/retries.
+            if (rewardEquipmentIds && rewardEquipmentIds.size > 0 && Array.isArray(battleRewardEquipment) && battleRewardEquipment.length > 0) {
+                const immediateDropsById = new Map();
+                for (const drop of battleRewardEquipment) {
+                    const equipment = drop?.equip || drop || {};
+                    const serverId = equipment.id || equipment.databaseId || drop?.equipmentId || drop?.id;
+                    if (!serverId || !rewardEquipmentIds.has(serverId) || immediateDropsById.has(serverId)) continue;
+                    immediateDropsById.set(serverId, equipment);
+                }
+                if (immediateDropsById.size > 0) {
+                    let immediateAttempted = 0;
+                    let immediateSuccess = 0;
+                    let immediateDust = 0;
+                    for (const [equipmentId, dropEquipment] of immediateDropsById.entries()) {
+                        if (stateManager.isProcessed(equipmentId)) continue;
+                        const equipmentDetails = getEquipmentDetails(dropEquipment);
+                        if (!equipmentDetails) continue;
+                        const decision = getEquipmentDecisionReason(equipmentDetails, settings);
+                        if (!shouldDisenchantEquipment(equipmentDetails, settings)) {
+                            continue;
+                        }
+                        immediateAttempted++;
+                        stateManager.addPendingEquipment(equipmentId);
+                        logAutosellerDebug('Disenchant', `immediate attempt equipmentId=${equipmentId} (${decision.reason})`);
+                        const result = await processEquipmentDisenchant(equipmentId, false);
+                        if (result && result.success) {
+                            immediateSuccess++;
+                            immediateDust += result.dustGained || 0;
+                        }
+                    }
+                    if (immediateAttempted > 0) {
+                        logAutosellerDebug(
+                            'Disenchant',
+                            `immediate done: attempted=${immediateAttempted} success=${immediateSuccess} dust=${immediateDust}`
+                        );
+                    }
+                }
+            }
+
+            // Process new equipment from serverResults if available
+            if (rewardEquipmentIds && rewardEquipmentIds.size > 0) {
+                if (!Array.isArray(inventoryEquipment) || inventoryEquipment.length === 0) {
+                    logAutosellerDebug('Disenchant', `no inventory yet — queuing ${rewardEquipmentIds.size} equipment id(s) as pending`);
+                    // If no inventory, add all equipment IDs to pending for retry when inventory is available
+                    for (const equipmentId of rewardEquipmentIds) {
+                        if (!stateManager.isProcessed(equipmentId)) {
+                            stateManager.addPendingEquipment(equipmentId);
+                        }
+                    }
+                } else {
+                    // Match inventory equipment ONLY by exact server ID match
+                    const matchedEquipment = filterEquipmentByServerIds(inventoryEquipment, rewardEquipmentIds);
+                    
+                    // Track which equipment IDs from serverResults are not yet in inventory
+                    const matchedIds = new Set(matchedEquipment.map(eq => eq?.id).filter(Boolean));
+                    for (const equipmentId of rewardEquipmentIds) {
+                        if (!matchedIds.has(equipmentId) && !stateManager.isProcessed(equipmentId)) {
+                            logAutosellerDebug('Disenchant', `reward id ${equipmentId} not in inventory yet — pending`);
+                            // Equipment found in serverResults but not yet in inventory - add to pending for retry
+                            stateManager.addPendingEquipment(equipmentId);
+                        }
+                    }
+                    
+                    if (matchedEquipment.length > 0) {
+                        // CRITICAL SAFETY CHECK: Verify all matched equipment have valid server IDs that are in rewardEquipmentIds
+                        const invalidEquipment = matchedEquipment.filter(eq => !eq || !eq.id || !rewardEquipmentIds.has(eq.id));
+                        if (invalidEquipment.length === 0) {
+                            // Filter equipment that should be disenchanted
+                            const toDisenchant = filterEquipmentForDisenchant(matchedEquipment, settings, rewardEquipmentIds, false);
+                            
+                            if (toDisenchant.length > 0) {
+                                logAutosellerDebug('Disenchant', `disenchanting ${toDisenchant.length} matched equipment item(s)`);
+                                let disenchantedCount = 0;
+                                let totalDust = 0;
+                                
+                                // Process each equipment item
+                                for (const equipment of toDisenchant) {
+                                    const equipmentId = equipment.id;
+                                    
+                                    // CRITICAL SAFETY CHECK: Final verification before API call
+                                    if (!rewardEquipmentIds.has(equipmentId)) {
+                                        continue;
+                                    }
+                                    
+                                    // Add to pending list before attempting disenchant
+                                    stateManager.addPendingEquipment(equipmentId);
+                                    
+                                    const result = await processEquipmentDisenchant(equipmentId, false);
+                                    if (result && result.success) {
+                                        disenchantedCount++;
+                                        totalDust += result.dustGained || 0;
+                                    }
+                                }
+                                
+                                if (disenchantedCount > 0) {
+                                    console.log(`[Autoseller] Disenchanted ${disenchantedCount} equipment → ${totalDust} dust`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Check and retry pending equipment IDs (always check, even if no new equipment)
+            const pendingIds = stateManager.getPendingEquipmentIds();
+            if (pendingIds.size > 0) {
+                logAutosellerDebug('Disenchant', `retrying ${pendingIds.size} pending equipment id(s)`);
+                const rapidPendingRetryAttempts = 8;
+                const rapidPendingRetryDelayMs = 150;
+                for (let attempt = 0; attempt < rapidPendingRetryAttempts; attempt++) {
+                    const currentInventory = await fetchServerEquipment();
+                    const inventoryIds = new Set((currentInventory || []).map(eq => eq?.id).filter(Boolean));
+                    const pendingSnapshot = stateManager.getPendingEquipmentIds();
+
+                    // Remove pending IDs that are missing for too long (memory leak prevention)
+                    for (const pendingId of pendingSnapshot) {
+                        if (!inventoryIds.has(pendingId)) {
+                            const pendingAgeMs = stateManager.getPendingEquipmentAgeMs(pendingId);
+                            if (pendingAgeMs >= PENDING_EQUIPMENT_MISS_TTL_MS) {
+                                stateManager.removePendingEquipment(pendingId);
+                                logAutosellerDebug('Disenchant', `pending id ${pendingId} not in inventory for ${pendingAgeMs}ms — dropped`);
+                            }
+                        }
+                    }
+
+                    const remainingPendingIds = stateManager.getPendingEquipmentIds();
+                    if (remainingPendingIds.size === 0) {
+                        break;
+                    }
+                    if (!currentInventory || currentInventory.length === 0) {
+                        if (attempt < rapidPendingRetryAttempts - 1) {
+                            await new Promise(resolve => setTimeout(resolve, rapidPendingRetryDelayMs));
+                            continue;
+                        }
+                        break;
+                    }
+
+                    // Filter inventory to only include pending equipment IDs
+                    const pendingEquipment = currentInventory.filter(invEquipment =>
+                        invEquipment && invEquipment.id && remainingPendingIds.has(invEquipment.id)
+                    );
+
+                    if (pendingEquipment.length > 0) {
+                        // Filter equipment that should be disenchanted (with pending cleanup)
+                        const toDisenchant = filterEquipmentForDisenchant(pendingEquipment, settings, null, true);
+
+                        if (toDisenchant.length > 0) {
+                            let disenchantedCount = 0;
+                            let totalDust = 0;
+
+                            for (const equipment of toDisenchant) {
+                                const result = await processEquipmentDisenchant(equipment.id, true);
+                                if (result && result.success) {
+                                    disenchantedCount++;
+                                    totalDust += result.dustGained || 0;
+                                }
+                            }
+
+                            if (disenchantedCount > 0) {
+                                console.log(`[Autoseller] Retried ${disenchantedCount} pending equipment → ${totalDust} dust`);
+                            }
+                        }
+                    }
+
+                    if (stateManager.getPendingEquipmentIds().size === 0) {
+                        break;
+                    }
+                    if (attempt < rapidPendingRetryAttempts - 1) {
+                        await new Promise(resolve => setTimeout(resolve, rapidPendingRetryDelayMs));
+                    }
+                }
+                if (stateManager.getPendingEquipmentIds().size > 0) {
+                    schedulePendingRewardsFlush();
+                }
+            }
+            outcome.pendingCount = stateManager.getPendingEquipmentIds().size;
+            outcome.incomplete = outcome.pendingCount > 0;
+            return outcome;
+        } catch (e) {
+            console.error(`[${modName}][ERROR][processEligibleEquipment] Failed to disenchant equipment. Error: ${e.message}`, e);
+            stateManager.updateErrorStats('disenchantErrors');
+            outcome.pendingCount = stateManager.getPendingEquipmentIds().size;
+            outcome.incomplete = outcome.pendingCount > 0;
+            return outcome;
+        }
+    }
+
+    // =======================
+    // 8. Modal & Settings Management
+    // =======================
+    
+    function openAutosellerModal() {
+        if (typeof api !== 'undefined' && api && api.ui && api.ui.components && api.ui.components.createModal) {
+            // Create main content container with tabs (Mod Settings style)
+            const content = document.createElement('div');
+            
+            // Apply sizing and layout styles to content
+            const contentWidth = UI_CONSTANTS.MODAL_WIDTH - 30;
+            Object.assign(content.style, {
+                width: '100%',
+                height: '100%',
+                minWidth: `${contentWidth}px`,
+                maxWidth: `${contentWidth}px`,
+                minHeight: `${UI_CONSTANTS.MODAL_HEIGHT}px`,
+                maxHeight: `${UI_CONSTANTS.MODAL_HEIGHT}px`,
+                boxSizing: 'border-box',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                flex: '1 1 0',
+                border: '6px solid transparent',
+                borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
+                backgroundImage: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
+                padding: '8px'
+            });
+            
+            // Create main content container with 2-column layout
+            const mainContent = document.createElement('div');
+            Object.assign(mainContent.style, {
+                display: 'flex',
+                flexDirection: 'row',
+                gap: '8px',
+                height: '100%',
+                flex: '1 1 0'
+            });
+            
+            // Left column - Menu items (tabs)
+            const leftColumn = document.createElement('div');
+            Object.assign(leftColumn.style, {
+                width: `${UI_CONSTANTS.LEFT_COLUMN_WIDTH}px`,
+                minWidth: `${UI_CONSTANTS.LEFT_COLUMN_WIDTH}px`,
+                maxWidth: `${UI_CONSTANTS.LEFT_COLUMN_WIDTH}px`,
+                height: '100%',
+                flex: `0 0 ${UI_CONSTANTS.LEFT_COLUMN_WIDTH}px`,
+                display: 'flex',
+                flexDirection: 'column',
+                padding: '0px',
+                margin: '0px 10px 0px 0px',
+                borderRight: '6px solid transparent',
+                borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
+                overflowY: 'auto',
+                minHeight: '0px'
+            });
+            
+            // Right column - Content
+            const rightColumn = document.createElement('div');
+            Object.assign(rightColumn.style, {
+                width: `${UI_CONSTANTS.RIGHT_COLUMN_WIDTH}px`,
+                minWidth: `${UI_CONSTANTS.RIGHT_COLUMN_WIDTH}px`,
+                maxWidth: `${UI_CONSTANTS.RIGHT_COLUMN_WIDTH}px`,
+                flex: `0 0 ${UI_CONSTANTS.RIGHT_COLUMN_WIDTH}px`,
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                overflowY: 'auto',
+                padding: '2px'
+            });
+            
+            // Helper function to apply menu item styling
+            function applyMenuItemStyle(element, selected, enabled) {
+                if (selected) {
+                    element.style.border = '6px solid transparent';
+                    element.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 6 fill';
+                    element.style.backgroundColor = 'transparent';
+                } else {
+                    element.style.border = '6px solid transparent';
+                    element.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 6 fill';
+                    element.style.backgroundColor = 'transparent';
+                }
+                
+                // Apply color based on enabled/disabled state
+                const span = element.querySelector('span');
+                if (span) {
+                    if (enabled) {
+                        span.style.color = '#22c55e'; // Green when enabled
+                    } else {
+                        span.style.color = '#ef4444'; // Red when disabled
+                    }
+                }
+            }
+            
+            // Function to update menu item colors based on current settings
+            function updateMenuItemColors() {
+                const currentSettings = getSettings();
+                // Find menu items dynamically from DOM
+                const autoplantMenuItem = document.querySelector('[data-category="autoplant"]');
+                const autosqueezeMenuItem = document.querySelector('[data-category="autosqueeze"]');
+                const autodusterMenuItem = document.querySelector('[data-category="autoduster"]');
+                
+                if (autoplantMenuItem) {
+                    const isEnabled = currentSettings.autoMode === 'autoplant' || currentSettings.autoMode === 'autosell';
+                    const span = autoplantMenuItem.querySelector('span');
+                    if (span) {
+                        span.style.color = isEnabled ? '#22c55e' : '#ef4444';
+                    }
+                }
+                
+                if (autosqueezeMenuItem) {
+                    const isEnabled = currentSettings.autosqueezeChecked || false;
+                    const span = autosqueezeMenuItem.querySelector('span');
+                    if (span) {
+                        span.style.color = isEnabled ? '#22c55e' : '#ef4444';
+                    }
+                }
+                
+                if (autodusterMenuItem) {
+                    const isEnabled = currentSettings.autodusterChecked || false;
+                    const span = autodusterMenuItem.querySelector('span');
+                    if (span) {
+                        span.style.color = isEnabled ? '#22c55e' : '#ef4444';
+                    }
+                }
+            }
+            
+            // Store function globally so it can be called from outside the modal
+            window.updateAutosellerMenuItemColors = updateMenuItemColors;
+            
+            // Get initial settings for enabled state
+            const initialSettings = getSettings();
+            
+            // Create menu items for left column (Auto Mode, Autosqueeze, Autoduster)
+            // Note: Autosell is now part of the Auto Mode tab (consolidated with Autoplant)
+            const menuItems = [
+                { 
+                    id: 'autoplant', 
+                    label: t('mods.autoseller.autoseller') || 'Autoseller',
+                    icon: 'https://bestiaryarena.com/assets/icons/goldpile.png',
+                    iconSize: { width: 12, height: 12 },
+                    selected: true,
+                    enabled: initialSettings.autoMode === 'autoplant' || initialSettings.autoMode === 'autosell'
+                },
+                { 
+                    id: 'autosqueeze', 
+                    label: t('mods.autoseller.autosqueezeLabel'),
+                    icon: 'https://bestiaryarena.com/assets/icons/enemy.png',
+                    iconSize: { width: 11, height: 11 },
+                    selected: false,
+                    enabled: initialSettings.autosqueezeChecked || false
+                },
+                { 
+                    id: 'autoduster', 
+                    label: t('mods.autoseller.autodusterLabel') || 'Autoduster',
+                    icon: 'https://bestiaryarena.com/assets/icons/equips.png',
+                    iconSize: { width: 9, height: 9 },
+                    selected: false,
+                    enabled: initialSettings.autodusterChecked || false
+                }
+            ];
+            
+            // Function to update right column content based on selected category
+            function updateRightColumn(categoryId) {
+                rightColumn.innerHTML = '';
+                
+                let sectionContent = null;
+                // Create sections fresh each time to ensure event handlers work correctly
+                if (categoryId === 'autoplant') {
+                    // Autoplant tab now contains both autoplant and autosell mode selection (radio buttons)
+                    sectionContent = createAutplantPlaceholder();
+                } else if (categoryId === 'autosqueeze') {
+                    sectionContent = createSettingsSection({
+                        label: 'Autosqueeze',
+                        inputLabel: 'Genes',
+                        desc: '', // Description removed
+                        tooltip: 'When enabled, creatures with genes at or below the specified percentage will be squeezed automatically.',
+                        inputMin: 80,
+                        inputMax: 100,
+                        defaultMin: 80,
+                        defaultMax: 100,
+                        summaryType: 'Autosqueeze',
+                        persistKey: 'autosqueeze',
+                        icon: 'https://bestiaryarena.com/assets/icons/dust.png'
+                    });
+                } else if (categoryId === 'autoduster') {
+                    sectionContent = createSettingsSection({
+                        label: 'Autodust',
+                        inputLabel: 'Genes',
+                        desc: '', // Description removed
+                        tooltip: 'When enabled, creatures with genes at or below the specified percentage will be disenchanted automatically.',
+                        inputMin: 80,
+                        inputMax: 100,
+                        defaultMin: 80,
+                        defaultMax: 100,
+                        summaryType: 'Autoduster',
+                        persistKey: 'autoduster',
+                        icon: 'https://bestiaryarena.com/assets/icons/dust.png'
+                    });
+                }
+                
+                if (sectionContent) {
+                    rightColumn.appendChild(sectionContent);
+                    
+                    // Re-attach event handlers and apply settings
+                    setTimeout(() => {
+                        // Re-apply localStorage to mod checkbox when switching to autoplant tab
+                        if (categoryId === 'autoplant') {
+                            applyLocalStorageToModCheckbox();
+                        }
+                        
+                        // Set up checkbox/radio listeners for new content
+                        if (content._setupCheckboxListeners) {
+                            content._setupCheckboxListeners();
+                        }
+                        
+                        // Update menu item colors after content is rendered
+                        updateMenuItemColors();
+                    }, 0);
+                }
+            }
+            
+            menuItems.forEach(item => {
+                const menuItem = document.createElement('div');
+                menuItem.className = 'menu-item pixel-font-16';
+                menuItem.dataset.category = item.id;
+                Object.assign(menuItem.style, {
+                    cursor: 'pointer',
+                    padding: '2px 4px',
+                    borderRadius: '2px',
+                    textAlign: 'left',
+                    color: 'rgb(255, 255, 255)',
+                    background: 'none',
+                    filter: 'none'
+                });
+                
+                // Create inner flex container
+                const innerDiv = document.createElement('div');
+                Object.assign(innerDiv.style, {
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                });
+                
+                // Add icon if available
+                if (item.icon) {
+                    const iconImg = document.createElement('img');
+                    iconImg.src = item.icon;
+                    iconImg.alt = item.label;
+                    iconImg.className = 'pixelated';
+                    Object.assign(iconImg.style, {
+                        width: `${item.iconSize?.width || 12}px`,
+                        height: `${item.iconSize?.height || 12}px`,
+                        display: 'block'
+                    });
+                    innerDiv.appendChild(iconImg);
+                }
+                
+                const span = document.createElement('span');
+                span.textContent = item.label;
+                innerDiv.appendChild(span);
+                menuItem.appendChild(innerDiv);
+                
+                applyMenuItemStyle(menuItem, item.selected, item.enabled);
+                
+                menuItem.addEventListener('click', () => {
+                    // Update menu selection
+                    menuItems.forEach(mi => {
+                        mi.selected = (mi.id === item.id);
+                        const miElement = leftColumn.querySelector(`[data-category="${mi.id}"]`);
+                        if (miElement) {
+                            const currentSettings = getSettings();
+                            let isEnabled = false;
+                            if (mi.id === 'autoplant') {
+                                isEnabled = currentSettings.autoMode === 'autoplant';
+                            } else if (mi.id === 'autosell') {
+                                isEnabled = currentSettings.autoMode === 'autosell';
+                            } else if (mi.id === 'autosqueeze') {
+                                isEnabled = currentSettings.autosqueezeChecked || false;
+                            } else if (mi.id === 'autoduster') {
+                                isEnabled = currentSettings.autodusterChecked || false;
+                            }
+                            applyMenuItemStyle(miElement, mi.selected, isEnabled);
+                        }
+                    });
+                    
+                    // Update right column content
+                    updateRightColumn(item.id);
+                });
+                
+                // Add hover effect
+                menuItem.addEventListener('mouseenter', () => {
+                    const isSelected = menuItem.style.borderImage && menuItem.style.borderImage.includes('pressed');
+                    if (!isSelected) {
+                        menuItem.style.background = 'rgba(255,255,255,0.08)';
+                    }
+                });
+                menuItem.addEventListener('mouseleave', () => {
+                    const isSelected = menuItem.style.borderImage && menuItem.style.borderImage.includes('pressed');
+                    if (!isSelected) {
+                        menuItem.style.background = 'none';
+                    }
+                });
+                
+                leftColumn.appendChild(menuItem);
+            });
+            
+            // Initialize with Autoplant category selected
+            updateRightColumn('autoplant');
+            
+            // Add columns to main content
+            mainContent.appendChild(leftColumn);
+            mainContent.appendChild(rightColumn);
+            
+            // Add main content to content
+            content.appendChild(mainContent);
+            
+            // Set up observer to update menu item colors when checkboxes change
+            // This observer watches the entire right column for checkbox changes
+            // Use global menuColorObserver variable for proper cleanup
+            menuColorObserver = new MutationObserver((mutations) => {
+                let shouldUpdate = false;
+                mutations.forEach(mutation => {
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'checked') {
+                        shouldUpdate = true;
+                    } else if (mutation.type === 'childList') {
+                        // Check if a checkbox was added
+                        mutation.addedNodes.forEach(node => {
+                            if (node.nodeType === 1) {
+                                const checkbox = node.querySelector?.('input[type="checkbox"]');
+                                if (checkbox || node.tagName === 'INPUT' && node.type === 'checkbox') {
+                                    shouldUpdate = true;
+                                }
+                            }
+                        });
+                    }
+                });
+                if (shouldUpdate) {
+                    setTimeout(() => updateMenuItemColors(), 10);
+                }
+            });
+            
+            // Observe the right column for checkbox changes
+            menuColorObserver.observe(rightColumn, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['checked']
+            });
+            
+            // Also listen to change events on radio buttons and checkboxes directly
+            const setupCheckboxListeners = () => {
+                // Clean up existing listeners first
+                checkboxListeners.forEach(({ element, handler }) => {
+                    element.removeEventListener('change', handler);
+                });
+                checkboxListeners = [];
+                
+                const allInputs = [
+                    'autoplant-radio',
+                    'autosell-radio',
+                    'auto-none-radio',
+                    'autosqueeze-checkbox',
+                    'autoduster-checkbox'
+                ];
+                
+                allInputs.forEach(id => {
+                    const input = document.querySelector(`input[id="${id}"]`);
+                    if (input && !input.dataset.colorListenerAttached) {
+                        input.dataset.colorListenerAttached = 'true';
+                        const handler = () => {
+                            setTimeout(() => updateMenuItemColors(), 10);
+                        };
+                        input.addEventListener('change', handler);
+                        // Track listener for cleanup
+                        checkboxListeners.push({ element: input, handler });
+                    }
+                });
+            };
+            
+            // Set up listeners initially and after content updates
+            setTimeout(() => {
+                setupCheckboxListeners();
+                updateMenuItemColors();
+            }, 100);
+            
+            // Store observer on content for reuse (global reference already set above)
+            content._menuColorObserver = menuColorObserver;
+            content._setupCheckboxListeners = setupCheckboxListeners;
+            
+            let modalInstance = api.ui.components.createModal({
+                title: t('mods.autoseller.modalTitle'),
+                width: UI_CONSTANTS.MODAL_WIDTH,
+                height: UI_CONSTANTS.MODAL_HEIGHT,
+                content: content,
+                buttons: [
+                    {
+                        text: t('mods.autoseller.closeButton'),
+                        primary: true,
+                        className: 'diceroller-btn',
+                        style: {
+                            width: '120px',
+                            padding: '6px 28px',
+                            margin: '0 4px',
+                            boxSizing: 'border-box',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            border: '6px solid transparent',
+                            borderColor: '#ffe066',
+                            borderImage: 'url(https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png) 6 fill stretch',
+                            color: '#e6d7b0',
+                            background: 'url(https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png) repeat',
+                            borderRadius: '0',
+                            fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif"
+                        }
+                    }
+                ]
+            });
+            
+            if (modalInstance && typeof modalInstance.onClose === 'function') {
+                modalInstance.onClose(() => {
+                    // Modal cleanup handled automatically
+                });
+            }
+            
+            // Set static size for the modal dialog (non-resizable)
+            setTimeout(() => {
+                const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+                if (dialog) {
+                    dialog.style.width = `${UI_CONSTANTS.MODAL_WIDTH}px`;
+                    dialog.style.minWidth = `${UI_CONSTANTS.MODAL_WIDTH}px`;
+                    dialog.style.maxWidth = `${UI_CONSTANTS.MODAL_WIDTH}px`;
+                    dialog.style.height = `${UI_CONSTANTS.MODAL_HEIGHT}px`;
+                    dialog.style.minHeight = `${UI_CONSTANTS.MODAL_HEIGHT}px`;
+                    dialog.style.maxHeight = `${UI_CONSTANTS.MODAL_HEIGHT}px`;
+                    dialog.classList.remove('max-w-[300px]');
+                    
+                    // Style the content wrapper for proper flexbox layout
+                    let contentWrapper = null;
+                    const children = Array.from(dialog.children);
+                    for (const child of children) {
+                        if (child !== dialog.firstChild && child.tagName === 'DIV') {
+                            contentWrapper = child;
+                            break;
+                        }
+                    }
+                    if (!contentWrapper) {
+                        contentWrapper = dialog.querySelector(':scope > div');
+                    }
+                    if (contentWrapper) {
+                        contentWrapper.style.height = '100%';
+                        contentWrapper.style.display = 'flex';
+                        contentWrapper.style.flexDirection = 'column';
+                        contentWrapper.style.flex = '1 1 0';
+                    }
+                    
+                    // Apply localStorage to mod checkbox when modal opens (for autoplant mode)
+                    const currentSettings = getSettings();
+                    if (currentSettings.autoMode === 'autoplant') {
+                        applyLocalStorageToModCheckbox();
+                    }
+                    
+                    // Set up checkbox/radio listeners and update colors on modal open
+                    if (content._setupCheckboxListeners) {
+                        content._setupCheckboxListeners();
+                    }
+                    updateMenuItemColors();
+                }
+            }, 0);
+        }
+    }
+
+    // =======================
+    // 9. Navigation & UI Injection
+    // =======================
+    
+    function addAutosellerNavButton() {
+        function tryInsert() {
+            // Header/HUD nav selectors changed over time; try old + new variants
+            const headerSlot = document.getElementById('header-slot');
+            const nav =
+                headerSlot?.querySelector('nav') ||
+                queryElement('nav.shrink-0') ||
+                queryElement('nav.grow') ||
+                queryElement('div.z-floatingHud nav');
+            if (!nav) {
+                setTimeout(tryInsert, 500);
+                return;
+            }
+            
+            const ul = nav.querySelector('ul.flex.items-center');
+            if (!ul) {
+                setTimeout(tryInsert, 500);
+                return;
+            }
+            
+            if (ul.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`)) return;
+            
+            const li = document.createElement('li');
+            li.className = 'hover:text-whiteExp';
+            
+            const btn = document.createElement('button');
+            btn.className = `${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN} focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp sm:px-2 sm:py-0.5`;
+            btn.setAttribute('data-selected', 'false');
+            btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="${t('mods.autoseller.navButton')}" width="12" height="12" class="pixelated"><span class="hidden sm:inline">${t('mods.autoseller.navButton')}</span>`;
+            btn.onclick = openAutosellerModal;
+            
+            li.appendChild(btn);
+            ul.appendChild(li);
+            
+            // Ensure styles are injected before updating color
+            injectAutosellerWidgetStyles();
+            updateAutosellerNavButtonColor();
+        }
+        tryInsert();
+    }
+    
+    function updateAutosellerNavButtonColor() {
+        const btn = queryElement(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
+        if (!btn) return;
+        
+        const settings = getSettings();
+        // Green if ANY tabs are enabled (autosell, autoplant, autosqueeze, or autoduster)
+        const isActive = settings.autoMode === 'autoplant' || settings.autoMode === 'autosell' || settings.autosqueezeChecked || settings.autodusterChecked;
+        
+        // Check if selling, squeezing, AND disenchanting everything
+        // If the "keep" (ignore) list is empty for all three, everything is being processed
+        const isSellingEverything = (settings.autoMode === 'autosell' || settings.autoMode === 'autoplant') &&
+            Array.isArray(settings.autoplantIgnoreList) && settings.autoplantIgnoreList.length === 0;
+        
+        const isSqueezingEverything = settings.autosqueezeChecked &&
+            Array.isArray(settings.autosqueezeIgnoreList) && settings.autosqueezeIgnoreList.length === 0;
+        
+        const isDisenchantingEverything = settings.autodusterChecked &&
+            Array.isArray(settings.autodusterIgnoreList) && settings.autodusterIgnoreList.length === 0;
+
+        const hasAutosellActive = settings.autoMode === 'autosell' || settings.autoMode === 'autoplant';
+        const isSealedRiskWarning = hasAutosellActive && (
+            settings.autoSellSealedCreaturesGlobal === true ||
+            settings.autoInjectSealedCreaturesGlobal === true);
+        
+        // Apply rainbow animation if all three conditions are met
+        const shouldRainbow = isSellingEverything && isSqueezingEverything && isDisenchantingEverything;
+        // Find the text span (it has classes "hidden sm:inline")
+        const textSpan = Array.from(btn.querySelectorAll('span')).find(span => 
+            span.classList.contains('hidden') && span.classList.contains('sm:inline')
+        );
+        
+        if (isSealedRiskWarning) {
+            // Safety warning takes priority over rainbow/normal state coloring.
+            if (textSpan) {
+                textSpan.classList.remove('autoseller-rainbow-text');
+            }
+            btn.classList.remove('autoseller-rainbow-active');
+            btn.style.color = '#c678dd';
+            btn.style.textShadow = 'none';
+            const icon = btn.querySelector('img');
+            if (icon) {
+                icon.style.filter = '';
+            }
+        } else if (shouldRainbow) {
+            // Add rainbow animation class
+            if (textSpan) {
+                textSpan.classList.add('autoseller-rainbow-text');
+            }
+            btn.classList.add('autoseller-rainbow-active');
+            btn.style.textShadow = 'none';
+            const icon = btn.querySelector('img');
+            if (icon) {
+                icon.style.filter = '';
+            }
+        } else {
+            // Remove rainbow animation class
+            if (textSpan) {
+                textSpan.classList.remove('autoseller-rainbow-text');
+            }
+            btn.classList.remove('autoseller-rainbow-active');
+            btn.style.color = isActive ? '#22c55e' : '#ef4444';
+            btn.style.textShadow = 'none';
+            const icon = btn.querySelector('img');
+            if (icon) {
+                icon.style.filter = '';
+            }
+        }
+    }
+
+    // =======================
+    // 10. Session Widget & Display
+    // =======================
+
+    function formatCompactResourceAmount(num) {
+        const n = Number(num);
+        if (!Number.isFinite(n) || n < 0) return '0';
+        if (n < 1000) return String(Math.round(n));
+        const locale = 'sv-SE';
+        if (n < 1e6) {
+            const k = n / 1000;
+            const formatted = k % 1 === 0
+                ? k.toLocaleString(locale, { maximumFractionDigits: 0 })
+                : k.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+            return formatted + 'k';
+        }
+        const m = n / 1e6;
+        const formattedM = m % 1 === 0
+            ? m.toLocaleString(locale, { maximumFractionDigits: 0 })
+            : m.toLocaleString(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+        return formattedM + 'M';
+    }
+
+    function setCompactResourceDisplay(span, num) {
+        const n = Number(num);
+        const rounded = Math.round(Number.isFinite(n) ? n : 0);
+        span.textContent = formatCompactResourceAmount(rounded);
+        span.title = rounded >= 1000 ? String(rounded) : '';
+    }
+    
+    function injectAutosellerWidgetStyles() {
+        if (!document.getElementById('autoseller-widget-css')) {
+            const style = document.createElement('style');
+            style.id = 'autoseller-widget-css';
+            style.textContent = `
+            #autoseller-session-widget {
+                font-family: 'Satoshi', 'Trebuchet MS', Arial, sans-serif;
+                max-width: 360px;
+            }
+            #autoseller-session-widget .stat-row {
+                display: grid;
+                grid-template-columns: auto 1fr 1fr;
+                gap: 8px;
+                align-items: center;
+                width: 100%;
+                padding: 10px;
+                box-sizing: border-box;
+            }
+            #autoseller-session-widget .stat-row.single-tab {
+                padding-top: 12px;
+                padding-bottom: 12px;
+            }
+            #autoseller-session-widget .separator {
+                grid-column: 1 / -1;
+                height: 1px;
+                margin: 2px 0;
+                background: #ffe066;
+                opacity: 0.35;
+            }
+            #autoseller-session-widget .stat-label {
+                font-family: pixel-font-16, monospace;
+                font-size: 13px;
+                color: #fff;
+                font-weight: bold;
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                text-align: left;
+                width: 100%;
+            }
+            #autoseller-session-widget .stat-value {
+                font-family: pixel-font-16, monospace;
+                font-size: 12px;
+                color: #ffe066;
+                font-weight: bold;
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                text-align: left;
+                width: 100%;
+                gap: 4px;
+            }
+            #autoseller-session-widget .stat-icon {
+                flex-shrink: 0;
+                vertical-align: middle;
+            }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        // Inject rainbow animation styles for nav button
+        if (!document.getElementById('autoseller-rainbow-css')) {
+            const rainbowStyle = document.createElement('style');
+            rainbowStyle.id = 'autoseller-rainbow-css';
+            rainbowStyle.textContent = `
+            @keyframes autoseller-rainbow-gradient {
+                0% {
+                    background-position: 0% 50%;
+                }
+                100% {
+                    background-position: 200% 50%;
+                }
+            }
+            .autoseller-rainbow-text {
+                background: linear-gradient(90deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #9400d3, #ff0000, #ff7f00, #ffff00);
+                background-size: 200% 100%;
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                animation: autoseller-rainbow-gradient 3s linear infinite;
+            }
+            `;
+            document.head.appendChild(rainbowStyle);
+        }
+    }
+
+    function createAutosellerSessionWidget(resetStats = false) {
+        const settings = getSettings();
+        const shouldShowWidget = shouldShowAutosellerWidget();
+        
+        const existingWidget = queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
+        if (!shouldShowWidget) {
+            if (existingWidget && existingWidget.parentNode) {
+                existingWidget.parentNode.removeChild(existingWidget);
+                // Reset session stats when widget is removed
+                stateManager.resetSession();
+            }
+            return;
+        }
+        if (existingWidget) {
+            return;
+        }
+        
+        // Find the autoplay session container using the helper function
+        const autoplayContainer = findAutoplayContainer();
+        
+        if (!autoplayContainer) {
+            return;
+        }
+        const widget = document.createElement('div');
+        widget.className = 'mt-1.5';
+        widget.id = UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET;
+        
+        // Determine which tabs are enabled
+        const isAutosellEnabled = settings.autoMode === 'autosell';
+        const isAutoplantEnabled = settings.autoMode === 'autoplant';
+        const isAutosqueezeEnabled = settings.autosqueezeChecked;
+        const isAutodusterEnabled = settings.autodusterChecked;
+        
+        // Build widget HTML dynamically based on enabled tabs
+        const statRows = [];
+        const statEls = {};
+        let rowIndex = 1;
+        
+        // Autosell/Autoplant row
+        if (isAutosellEnabled || isAutoplantEnabled) {
+            const soldLabel = isAutoplantEnabled
+                ? t('mods.autoseller.devoured')
+                : t('mods.autoseller.sold');
+            statRows.push(`
+                <div class="stat-label" data-stat="sold">${soldLabel}</div>
+                <div class="stat-value" id="autoseller-session-sold-count" data-stat="sold">0</div>
+                <div class="stat-value" id="autoseller-session-sold-gold" data-stat="sold">
+                    <img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="Gold" class="stat-icon pixelated">
+                    <span>0</span>
+                </div>
+            `);
+            statEls.soldLabel = true;
+            statEls.soldCount = true;
+            statEls.soldGold = true;
+            rowIndex++;
+        }
+        
+        // Autosqueeze row
+        if (isAutosqueezeEnabled) {
+            if (statRows.length > 0) {
+                statRows.push('<div class="separator"></div>');
+            }
+            statRows.push(`
+                <div class="stat-label" data-stat="squeezed">${t('mods.autoseller.squeezed')}</div>
+                <div class="stat-value" id="autoseller-session-squeezed-count" data-stat="squeezed">0</div>
+                <div class="stat-value" id="autoseller-session-squeezed-dust" data-stat="squeezed">
+                    <img src="https://bestiaryarena.com/assets/icons/dust.png" alt="Dust" class="stat-icon pixelated">
+                    <span>0</span>
+                </div>
+            `);
+            statEls.squeezedCount = true;
+            statEls.squeezedDust = true;
+            rowIndex++;
+        }
+        
+        // Autoduster row
+        if (isAutodusterEnabled) {
+            if (statRows.length > 0) {
+                statRows.push('<div class="separator"></div>');
+            }
+            statRows.push(`
+                <div class="stat-label" data-stat="disenchanted">${t('mods.autoseller.dustingLabel')}</div>
+                <div class="stat-value" id="autoseller-session-disenchanted-count" data-stat="disenchanted">0</div>
+                <div class="stat-value" id="autoseller-session-disenchanted-dust" data-stat="disenchanted">
+                    <img src="https://bestiaryarena.com/assets/icons/dust.png" alt="Dust" class="stat-icon pixelated">
+                    <span>0</span>
+                </div>
+            `);
+            statEls.disenchantedCount = true;
+            statEls.disenchantedDust = true;
+        }
+        
+        // Count enabled tabs for height adjustment
+        const enabledTabCount = (isAutosellEnabled || isAutoplantEnabled ? 1 : 0) + 
+                                (isAutosqueezeEnabled ? 1 : 0) + 
+                                (isAutodusterEnabled ? 1 : 0);
+        const isSingleTab = enabledTabCount === 1;
+        const statRowClass = isSingleTab ? 'stat-row single-tab' : 'stat-row';
+        
+        // Build header (match Tick Tracker widget style)
+        const header = document.createElement('div');
+        header.className = 'widget-top widget-top-text flex items-center gap-1.5';
+        const headerIcon = document.createElement('img');
+        headerIcon.src = 'https://bestiaryarena.com/assets/icons/goldpile.png';
+        headerIcon.style.width = '12px';
+        headerIcon.style.height = '12px';
+        header.appendChild(headerIcon);
+        header.appendChild(document.createTextNode(t('mods.autoseller.widgetTitle')));
+
+        // Clear history/session stats button (matches Tick Tracker style)
+        const clearButton = document.createElement('button');
+        clearButton.className = 'ml-auto flex h-5 w-5 items-center justify-center rounded-md hover:bg-black/40';
+        clearButton.title = 'Clear session stats';
+        clearButton.innerHTML = '×';
+        clearButton.onclick = () => {
+            stateManager.resetSession();
+            updateAutosellerSessionWidget();
+        };
+        header.appendChild(clearButton);
+
+        widget.appendChild(header);
+
+        // Build body with stats
+        const body = document.createElement('div');
+        body.className = 'widget-bottom p-0';
+        const statWrapper = document.createElement('div');
+        statWrapper.className = statRowClass;
+        statWrapper.innerHTML = statRows.join('');
+        body.appendChild(statWrapper);
+        widget.appendChild(body);
+        
+        // Inject styles when widget is actually created
+        injectAutosellerWidgetStyles();
+        
+        // Reset session stats only if explicitly requested (e.g., first creation, not when switching modes)
+        if (resetStats) {
+            stateManager.resetSession();
+        }
+        
+        // Store references to stat elements for updates
+        widget._statEls = {
+            soldLabel: widget.querySelector('[data-stat="sold"].stat-label'),
+            soldCount: widget.querySelector('#autoseller-session-sold-count'),
+            soldGold: widget.querySelector('#autoseller-session-sold-gold'),
+            squeezedCount: widget.querySelector('#autoseller-session-squeezed-count'),
+            squeezedDust: widget.querySelector('#autoseller-session-squeezed-dust'),
+            disenchantedCount: widget.querySelector('#autoseller-session-disenchanted-count'),
+            disenchantedDust: widget.querySelector('#autoseller-session-disenchanted-dust')
+        };
+        
+        // Store enabled tabs for update function
+        widget._enabledTabs = {
+            autosell: isAutosellEnabled,
+            autoplant: isAutoplantEnabled,
+            autosqueeze: isAutosqueezeEnabled,
+            autoduster: isAutodusterEnabled
+        };
+        
+        // Insert widget at the end of the container (after Enable Dragon Plant checkbox)
+        autoplayContainer.appendChild(widget);
+
+    }
+
+
+    
+    function updateAutosellerSessionWidget() {
+        const widget = queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
+        if (!widget) return;
+        
+        const statEls = widget._statEls;
+        if (!statEls) return;
+        
+        const enabledTabs = widget._enabledTabs;
+        if (!enabledTabs) return;
+        
+        const currentValues = stateManager.getSessionStats();
+        const settings = getSettings();
+        // Update autosell/autoplant stats (only if enabled)
+        if (enabledTabs.autosell || enabledTabs.autoplant) {
+            const isShowingDevoured = enabledTabs.autoplant;
+            const soldLabel = isShowingDevoured
+                ? t('mods.autoseller.devoured')
+                : t('mods.autoseller.sold');
+            
+            if (statEls.soldLabel) {
+                statEls.soldLabel.textContent = soldLabel;
+            }
+            if (statEls.soldCount) {
+                const count = isShowingDevoured ? currentValues.devouredCount : currentValues.soldCount;
+                statEls.soldCount.textContent = `${count}`;
+            }
+            if (statEls.soldGold) {
+                const goldText = statEls.soldGold.querySelector('span');
+                if (goldText) {
+                    const gold = isShowingDevoured ? currentValues.devouredGold : currentValues.soldGold;
+                    setCompactResourceDisplay(goldText, gold);
+                }
+            }
+        }
+        
+        // Update autosqueeze stats (only if enabled)
+        if (enabledTabs.autosqueeze) {
+            if (statEls.squeezedCount) {
+                statEls.squeezedCount.textContent = `${currentValues.squeezedCount}`;
+            }
+            if (statEls.squeezedDust) {
+                const dustText = statEls.squeezedDust.querySelector('span');
+                if (dustText) {
+                    setCompactResourceDisplay(dustText, currentValues.squeezedDust);
+                }
+            }
+        }
+        
+        // Update autoduster stats (only if enabled)
+        if (enabledTabs.autoduster) {
+            if (statEls.disenchantedCount) {
+                statEls.disenchantedCount.textContent = `${currentValues.disenchantedCount}`;
+            }
+            if (statEls.disenchantedDust) {
+                const dustText = statEls.disenchantedDust.querySelector('span');
+                if (dustText) {
+                    // Each equipment = 25 dust (as per user specification)
+                    // disenchantedDust stores the count of equipment, multiply by 25 for total dust
+                    const totalDust = currentValues.disenchantedDust * 25;
+                    setCompactResourceDisplay(dustText, totalDust);
+                }
+            }
+        }
+    }
+
+    // =======================
+    // 11. Widget Lifecycle Management
+    // =======================
+    
+    // Event-driven widget management using game state API
+    function setupAutosellerWidgetObserver() {
+        // Listen for autoplay mode changes
+        if (globalThis.state && globalThis.state.board) {
+            boardSubscription1 = globalThis.state.board.subscribe((state) => {
+                const mode = state.context.mode;
+                
+                // Capture serverResults when available, but only update if it's actually different
+                if (state.context?.serverResults) {
+                    const newServerResults = state.context.serverResults;
+                    const newSeed = newServerResults.seed;
+                    const currentSeed = latestServerResults?.seed;
+                    
+                    const rs = newServerResults?.rewardScreen;
+                    const hasEquipDrop = !!(rs?.equipDrop);
+
+                    if (newSeed !== currentSeed) {
+                        latestServerResults = newServerResults;
+                        lastBoardEquipHandledSeed = null;
+                        if (hasEquipDrop) {
+                            logEquipmentDropDebug(newServerResults, 'board-update');
+                            queueEquipmentFromServerResults(newServerResults, 'board-update');
+                            lastBoardEquipHandledSeed = newSeed;
+                        }
+                    } else if (hasEquipDrop && lastBoardEquipHandledSeed !== newSeed) {
+                        // equipDrop arrived on a later board tick for the same seed (fast autoplay)
+                        logEquipmentDropDebug(newServerResults, 'board-update-late-equip');
+                        queueEquipmentFromServerResults(newServerResults, 'board-update-late-equip');
+                        lastBoardEquipHandledSeed = newSeed;
+                    }
+                }
+
+                schedulePendingGameEndDrainIfNeeded();
+                
+                if (mode === 'autoplay') {
+                    // Small delay to ensure autoplay UI is rendered
+                    const timeoutId = setTimeout(() => {
+                        if (isCleaningUp) return;
+                        // Manage widget based on current settings (autosell/autoplant/off)
+                        manageAutosellerWidget();
+                        updateAutosellerSessionWidget();
+                        
+                        // Apply localStorage to game checkbox when autoplay starts
+                        applyLocalStorageToGameCheckbox();
+                    }, 100);
+                    timeoutIds.push(timeoutId);
+                } else if (mode !== 'autoplay') {
+                    // Remove widget when not in autoplay mode
+                    const widget = getAutosellerWidget();
+                    if (widget && widget.parentNode) {
+                        widget.parentNode.removeChild(widget);
+                        console.log('[Autoseller] Widget removed - autoplay mode ended');
+                    }
+                }
+            });
+            
+            // Listen for game start/end events for additional widget updates
+            emitNewGameHandler1 = () => {
+                if (shouldShowAutosellerWidget()) {
+                    const timeoutId = setTimeout(() => {
+                        if (isCleaningUp) return;
+                        updateAutosellerSessionWidget();
+                    }, 100);
+                    timeoutIds.push(timeoutId);
+                }
+            };
+            globalThis.state.board.on('emitNewGame', emitNewGameHandler1);
+            
+            emitEndGameHandler1 = () => {
+                if (shouldShowAutosellerWidget()) {
+                    const timeoutId = setTimeout(() => {
+                        if (isCleaningUp) return;
+                        updateAutosellerSessionWidget();
+                    }, 100);
+                    timeoutIds.push(timeoutId);
+                }
+            };
+            globalThis.state.board.on('emitEndGame', emitEndGameHandler1);
+        } else {
+            console.warn(`[${modName}][WARN] Game state API not available for widget management`);
+        }
+    }
+    
+    // Helper function to check if widget should be shown
+    function shouldShowAutosellerWidget() {
+        const settings = getSettings();
+        // Widget should show when autosell, autoplant, autosqueeze, or autoduster is active
+        return settings.autoMode === 'autoplant' || settings.autoMode === 'autosell' || settings.autosqueezeChecked || settings.autodusterChecked;
+    }
+    
+    // Function to manage widget based on current mode
+    function manageAutosellerWidget() {
+        const shouldShow = shouldShowAutosellerWidget();
+        const widget = getAutosellerWidget();
+        const autoplayContainer = findAutoplayContainer();
+        
+        if (!shouldShow) {
+            // Remove widget if mode is OFF
+            if (widget && widget.parentNode) {
+                widget.parentNode.removeChild(widget);
+                console.log('[Autoseller] Widget removed - mode is OFF');
+                stateManager.resetSession();
+            }
+            return;
+        }
+        
+        // Check if widget needs to be recreated (settings changed)
+        const settings = getSettings();
+        const needsRecreate = !widget || !widget._enabledTabs || 
+            widget._enabledTabs.autosell !== (settings.autoMode === 'autosell') ||
+            widget._enabledTabs.autoplant !== (settings.autoMode === 'autoplant') ||
+            widget._enabledTabs.autosqueeze !== (settings.autosqueezeChecked) ||
+            widget._enabledTabs.autoduster !== (settings.autodusterChecked);
+        
+        if (needsRecreate) {
+            // Remove old widget if it exists
+            if (widget && widget.parentNode) {
+                widget.parentNode.removeChild(widget);
+            }
+            // Create new widget with updated settings (don't reset stats when switching modes)
+            if (autoplayContainer) {
+                createAutosellerSessionWidget(false);
+                updateAutosellerSessionWidget();
+            }
+        } else if (!widget && autoplayContainer) {
+            // Widget doesn't exist, create it (reset stats on first creation)
+            createAutosellerSessionWidget(true);
+            updateAutosellerSessionWidget();
+        }
+    }
+    
+    // Helper function to get existing widget
+    function getAutosellerWidget() {
+        return queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
+    }
+
+    // =======================
+    // 12. Dragon Plant Checkbox Control
+    // =======================
+    
+    let dragonPlantObserver = null;
+    let dragonPlantObserverAttempts = 0;
+    
+    // Apply localStorage state to game checkbox
+    // Helper function to find autoplay container (widget-bottom)
+    function findAutoplayContainer() {
+        // Try to find by data-autosetup first (old method)
+        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+        for (const session of autoplaySessions) {
+            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+            if (widgetBottom) return widgetBottom;
+        }
+        
+        // Find by autoplay icon (language-independent)
+        const autoplayButtons = Array.from(document.querySelectorAll('button.widget-top, button.widget-top-text'));
+        for (const button of autoplayButtons) {
+            const autoplayIcon = button.querySelector('img[alt="Autoplay"]');
+            if (autoplayIcon) {
+                const parent = button.parentElement;
+                if (parent) {
+                    const widgetBottom = parent.querySelector('.widget-bottom[data-minimized="false"]');
+                    if (widgetBottom) return widgetBottom;
+                }
+            }
+        }
+        
+        // Last resort: find any widget-bottom that has a loot section and is in a container with an autoplay icon
+        const allWidgetBottoms = document.querySelectorAll('.widget-bottom[data-minimized="false"]');
+        for (const wb of allWidgetBottoms) {
+            const hasLoot = wb.querySelector('.widget-top img[alt="loot"]');
+            if (hasLoot) {
+                let parent = wb.parentElement;
+                let foundAutoplay = false;
+                while (parent && parent !== document.body) {
+                    const buttons = parent.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        const autoplayIcon = btn.querySelector('img[alt="Autoplay"]');
+                        if (autoplayIcon) {
+                            foundAutoplay = true;
+                            break;
+                        }
+                    }
+                    if (foundAutoplay) return wb;
+                    parent = parent.parentElement;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    function applyLocalStorageToGameCheckbox() {
+        const settings = getSettings();
+        const savedState = settings.autoMode === 'autoplant';
+        
+        const widgetBottom = findAutoplayContainer();
+        if (widgetBottom) {
+            const gameCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
+            if (gameCheckbox) {
+                const isCurrentlyChecked = gameCheckbox.getAttribute('aria-checked') === 'true';
+                if (savedState !== isCurrentlyChecked) {
+                    console.log(`[${modName}] Applying localStorage (${savedState}) to game checkbox`);
+                    // Temporarily disable the click handler to prevent it from overriding our mode change
+                    window.__autosellerUpdatingCheckbox = true;
+                    gameCheckbox.click();
+                    setTimeout(() => {
+                        window.__autosellerUpdatingCheckbox = false;
+                    }, 100);
+                }
+            }
+        }
+    }
+    
+    // Apply localStorage state to mod slider
+    function applyLocalStorageToModCheckbox() {
+        // The slider position is updated automatically via updateSliderPosition()
+        // which reads from settings. We just need to trigger it if the slider exists.
+        const sliderTrack = document.querySelector('#autoseller-slider-track');
+        if (sliderTrack && typeof window.updateAutoplantStatus === 'function') {
+            // Trigger update by calling updateAutoplantStatus which will refresh the slider
+            window.updateAutoplantStatus();
+        }
+    }
+    
+    function setupDragonPlantObserver() {
+        if (dragonPlantObserver || dragonPlantObserverAttempts >= MAX_OBSERVER_ATTEMPTS) return;
+        
+        dragonPlantObserverAttempts++;
+        
+        if (typeof MutationObserver !== 'undefined') {
+            // Use global debounceTimer instead of local to allow cleanup
+            dragonPlantObserver = new MutationObserver((mutations) => {
+                const hasRelevantMutations = mutations.some(mutation => {
+                    return mutation.type === 'childList' || 
+                           (mutation.type === 'attributes' && 
+                            (mutation.attributeName === 'data-state' || 
+                             mutation.attributeName === 'aria-checked'));
+                });
+                
+                if (!hasRelevantMutations) return;
+                
+                if (dragonPlantDebounceTimer) {
+                    clearTimeout(dragonPlantDebounceTimer);
+                }
+                
+                dragonPlantDebounceTimer = setTimeout(() => {
+                    // When autoplay session appears/changes, apply localStorage to it
+                    applyLocalStorageToGameCheckbox();
+                }, OBSERVER_DEBOUNCE_MS);
+            });
+            
+            dragonPlantObserver.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['data-state', 'aria-checked']
+            });
+            
+            // Add click event listener for immediate response to user clicks
+            document.addEventListener('click', handleDragonPlantClick);
+            
+        } else {
+            console.warn(`[${modName}][WARN][setupDragonPlantObserver] MutationObserver not available`);
+        }
+    }
+    
+    function handleDragonPlantClick(event) {
+        // Ignore if we're programmatically updating the checkbox
+        if (window.__autosellerUpdatingCheckbox) {
+            return;
+        }
+        
+        // Check if the clicked element is a Dragon Plant checkbox in autoplay session
+        const target = event.target.closest('button[role="checkbox"]');
+        if (!target) return;
+        
+        // Find the autoplay container
+        const widgetBottom = findAutoplayContainer();
+        if (!widgetBottom || !widgetBottom.contains(target)) return;
+        
+        // Verify this is the Dragon Plant checkbox by checking if it's in the widget bottom
+        // and has a label (Dragon Plant checkbox is the only checkbox in autoplay container)
+        const label = widgetBottom.querySelector('label');
+        if (!label) return;
+        
+        console.log(`[${modName}] User clicked Dragon Plant checkbox in autoplay session`);
+        
+        // Use a small delay to let the game update the checkbox state first
+        const timeoutId = setTimeout(() => {
+            if (isCleaningUp) return;
+            const gameCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
+            if (gameCheckbox) {
+                const newState = gameCheckbox.getAttribute('aria-checked') === 'true';
+                console.log(`[${modName}] Game checkbox clicked, saving to localStorage: ${newState}`);
+                
+                // Save to localStorage - set autoMode to 'autoplant' if enabled, null if disabled
+                if (newState) {
+                    setSettings({ autoMode: 'autoplant' });
+                } else {
+                    setSettings({ autoMode: null });
+                }
+                
+                // Apply to mod radio buttons (if settings modal is open)
+                applyLocalStorageToModCheckbox();
+                
+                // Update filter and widget
+                const currentSettings = getSettings();
+                if (newState) {
+                    updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
+                } else {
+                    removePlantMonsterFilter();
+                }
+                // Don't reset stats when enabling/disabling autoplant - preserve session stats
+                manageAutosellerWidget();
+                updateAutosellerSessionWidget();
+            }
+        }, 50);
+        timeoutIds.push(timeoutId);
+    }
+    
+    function stopDragonPlantObserver() {
+        if (dragonPlantObserver) {
+            dragonPlantObserver.disconnect();
+            dragonPlantObserver = null;
+            console.log(`[${modName}] Dragon Plant observer stopped`);
+        }
+        
+        // Clear debounce timer
+        if (dragonPlantDebounceTimer) {
+            clearTimeout(dragonPlantDebounceTimer);
+            dragonPlantDebounceTimer = null;
+        }
+        
+        // Remove click event listener
+        document.removeEventListener('click', handleDragonPlantClick);
+    }
+    
+    // =======================
+    // 13. Game End Listener for Dragon Plant
+    // =======================
+    
+    // Helper function to get creature name from monster data
+    function getCreatureNameFromMonster(invMonster) {
+        if (!invMonster?.gameId) {
+            return null;
+        }
+        const db = window.creatureDatabase;
+        if (typeof db?.getDisplayNameForOwnedMonster === 'function') {
+            const displayName = db.getDisplayNameForOwnedMonster(invMonster);
+            if (displayName) return displayName;
+        }
+        if (!globalThis.state?.utils?.getMonster) {
+            return null;
+        }
+        try {
+            const monsterData = globalThis.state.utils.getMonster(invMonster.gameId);
+            return monsterData?.metadata?.name || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function inventoryMonsterMatchesCreatureName(creatureName, invMonster) {
+        const db = window.creatureDatabase;
+        if (typeof db?.monsterMatchesCreatureDisplay === 'function') {
+            return db.monsterMatchesCreatureDisplay(creatureName, invMonster);
+        }
+        return getCreatureNameFromMonster(invMonster) === creatureName;
+    }
+    
+    // Helper function to calculate total genes from monster stats
+    function calculateTotalGenes(invMonster) {
+        const s = getMonsterGeneStats(invMonster);
+        return s.hp + s.ad + s.ap + s.armor + s.magicResist;
+    }
+    
+    // Helper function to filter monsters for autosell
+    function filterMonstersForAutosell(matchedMonsters, settings, inventorySnapshot) {
+        if (settings.autoMode !== 'autosell' || matchedMonsters.length === 0) {
+            return [];
+        }
+        
+        const minGenes = settings.autoplantGenesMin ?? 80;
+        const keepGenesEnabled = true;
+        const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow ?? 49;
+        const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
+        const ignoreList = settings.autoplantIgnoreList || [];
+        const upgradeLadderProtected = computeUpgradeLadderProtectedIds(
+            inventorySnapshot || globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [],
+            settings
+        );
+        
+        const filteredMonsters = matchedMonsters.filter(invMonster => {
+            if (isShinyCreature(invMonster)) return false;
+            const creatureName = getCreatureNameFromMonster(invMonster);
+            const upgradeLadderEnabled = isCreatureKeepUpgradeLadderEnabled(creatureName);
+
+            if (upgradeLadderEnabled && invMonster?.id && upgradeLadderProtected.has(invMonster.id)) {
+                return false;
+            }
+
+            if (isSealedTierFiveCreature(invMonster)) {
+                const sealedSellAllowed = isSealedTier5SellAllowed(creatureName);
+                const sealedInjectAllowed = isSealedTier5InjectAllowed(creatureName);
+                // Keep sealed creatures in the pipeline when inject is enabled for them,
+                // so autoInjectEligibleSealedCreatures can process them before sell logic.
+                if (!sealedSellAllowed && !sealedInjectAllowed) return false;
+            }
+            
+            const totalGenes = calculateTotalGenes(invMonster);
+            
+            // Always sell creatures below absolute threshold (OVERRIDES keep range and ignore list) - only if enabled
+            if (alwaysDevourEnabled && totalGenes <= alwaysDevourBelow) {
+                return true;
+            }
+            
+            // Keep creatures with minGenes or higher (if enabled) - OVERRIDES ignore list
+            if (keepGenesEnabled && totalGenes >= minGenes) {
+                if (upgradeLadderEnabled) {
+                    // Excess copies above the per-band quota remain eligible for sell.
+                } else {
+                const sealedSellableInFullBand =
+                    isSealedTierFiveCreature(invMonster) &&
+                    isSealedTier5SellAllowed(creatureName) &&
+                    totalGenes >= UI_CONSTANTS.SEALED_SELL_GENE_MIN &&
+                    totalGenes <= UI_CONSTANTS.SEALED_SELL_GENE_MAX;
+                if (!sealedSellableInFullBand) {
+                    return false;
+                }
+                }
+            }
+
+            // Get creature name for keep range and ignore list check
+            if (creatureName && ignoreList.includes(creatureName)) {
+                // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
+                const keepRange = getCreatureKeepRange(creatureName);
+                if (keepRange) {
+                    // If creature has a keep range, only keep if within range, otherwise sell
+                    return !shouldKeepCreatureByRange(creatureName, totalGenes);
+                }
+                // No keep range set - normal ignore list behavior (keep it)
+                return false;
+            }
+            
+            return true;
+        });
+        
+        return filteredMonsters.slice(0, 1);
+    }
+    
+    // Helper function to filter monsters for autosqueeze
+    async function filterMonstersForAutosqueeze(matchedMonsters, settings, inventorySnapshot) {
+        if (!settings.autosqueezeChecked || matchedMonsters.length === 0) {
+            return [];
+        }
+        
+        const squeezeMinGenes = settings.autosqueezeGenesMin ?? 80;
+        const squeezeMaxGenes = settings.autosqueezeGenesMax ?? 100;
+        const ignoreList = settings.autosqueezeIgnoreList || [];
+        const upgradeLadderProtected = computeUpgradeLadderProtectedIds(
+            inventorySnapshot || globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [],
+            settings
+        );
+        const hasDaycare = hasDaycareIconInInventory();
+        let daycareMonsterIds = [];
+        
+        if (hasDaycare) {
+            daycareMonsterIds = await fetchDaycareData();
+        }
+        
+        const filterStats = {
+            total: matchedMonsters.length,
+            locked: 0,
+            shiny: 0,
+            inDaycare: 0,
+            inIgnoreList: 0,
+            upgradeLadder: 0,
+            geneRange: 0,
+            passed: 0
+        };
+        
+        const filteredMonsters = matchedMonsters.filter(invMonster => {
+            if (invMonster.locked) {
+                filterStats.locked++;
+                return false;
+            }
+            if (isShinyCreature(invMonster)) {
+                filterStats.shiny++;
+                return false;
+            }
+            const creatureName = getCreatureNameFromMonster(invMonster);
+            if (isSealedTierFiveCreature(invMonster)) {
+                return false;
+            }
+            if (hasDaycare && daycareMonsterIds.includes(invMonster.id)) {
+                filterStats.inDaycare++;
+                return false;
+            }
+            
+            if (creatureName && ignoreList.includes(creatureName)) {
+                filterStats.inIgnoreList++;
+                return false;
+            }
+
+            if (creatureName &&
+                isCreatureKeepUpgradeLadderEnabled(creatureName) &&
+                invMonster?.id &&
+                upgradeLadderProtected.has(invMonster.id)) {
+                filterStats.upgradeLadder++;
+                return false;
+            }
+            
+            const totalGenes = calculateTotalGenes(invMonster);
+            if (totalGenes < squeezeMinGenes || totalGenes > squeezeMaxGenes) {
+                filterStats.geneRange++;
+                return false;
+            }
+            
+            filterStats.passed++;
+            return true;
+        });
+
+        if (filterStats.passed === 0 && filterStats.total > 0) {
+            const geneSummary = matchedMonsters.map((invMonster) => {
+                const name = getCreatureNameFromMonster(invMonster) || `gameId:${invMonster?.gameId ?? '?'}`;
+                return `${name} genes=${calculateTotalGenes(invMonster)}`;
+            }).join(', ');
+            logAutosellerDebug(
+                'Squeeze',
+                `filter: 0/${filterStats.total} pass (band ${squeezeMinGenes}-${squeezeMaxGenes}; ` +
+                `locked=${filterStats.locked} shiny=${filterStats.shiny} daycare=${filterStats.inDaycare} ` +
+                `ignore=${filterStats.inIgnoreList} upgradeLadder=${filterStats.upgradeLadder} outsideBand=${filterStats.geneRange}; drops: ${geneSummary})`
+            );
+        }
+        
+        return filteredMonsters;
+    }
+
+    function cloneServerResults(serverResults) {
+        if (!serverResults) return null;
+        try {
+            return JSON.parse(JSON.stringify(serverResults));
+        } catch (_) {
+            return serverResults;
+        }
+    }
+
+    function queueEquipmentFromServerResults(serverResults, reason) {
+        const settings = getSettings();
+        if (!settings.autodusterChecked || !serverResults) return;
+        const { rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
+        if (rewardEquipmentIds.size === 0) return;
+        let newlyQueued = 0;
+        rewardEquipmentIds.forEach((id) => {
+            if (!id || stateManager.isProcessed(id) || stateManager.getPendingEquipmentIds().has(id)) {
+                return;
+            }
+            stateManager.addPendingEquipment(id);
+            newlyQueued++;
+        });
+        if (newlyQueued === 0) return;
+        logAutosellerDebug('Disenchant', `queued ${newlyQueued} equipment id(s) from ${reason} (seed=${serverResults.seed})`);
+        schedulePendingRewardsFlush();
+    }
+
+    function schedulePendingRewardsFlush() {
+        if (pendingRewardsFlushTimer || isCleaningUp) return;
+        pendingRewardsFlushTimer = setTimeout(async () => {
+            pendingRewardsFlushTimer = null;
+            if (isCleaningUp) return;
+            const settings = getSettings();
+            if (!settings.autodusterChecked) return;
+            if (!stateManager.canFlushPendingDust()) {
+                schedulePendingRewardsFlush();
+                return;
+            }
+            const pendingCount = stateManager.getPendingEquipmentIds().size;
+            if (pendingCount === 0) return;
+            logAutosellerDebug('Disenchant', `flushing ${pendingCount} pending equipment id(s)`);
+            const inventoryEquipment = await fetchServerEquipment();
+            await processEligibleEquipment(null, inventoryEquipment);
+        }, OPERATION_DELAYS.UI_SETTLE_MS);
+        timeoutIds.push(pendingRewardsFlushTimer);
+    }
+
+    function getCurrentBoardResultsSeed() {
+        return latestServerResults?.seed ??
+            globalThis.state?.board?.getSnapshot?.()?.context?.serverResults?.seed ??
+            null;
+    }
+
+    function finalizeProcessedGameEndSeed(seed) {
+        if (seed == null) return;
+        lastProcessedServerResultsSeed = seed;
+        pendingGameEndBySeed.delete(seed);
+        pendingGameEndMeta.delete(seed);
+    }
+
+    function prunePendingGameEndQueue(aggressive = false) {
+        const now = Date.now();
+        const boardSeed = getCurrentBoardResultsSeed();
+        let dropped = 0;
+
+        for (const seed of [...pendingGameEndBySeed.keys()]) {
+            const meta = pendingGameEndMeta.get(seed);
+            const age = now - (meta?.queuedAt ?? now);
+            const syncOnly = meta?.reasons?.length > 0 &&
+                meta.reasons.every((r) => isInventorySyncRetryReason(r));
+            const actionOnly = meta?.reasons?.length > 0 &&
+                meta.reasons.every((r) => isActionRetryReason(r));
+            const hasSyncOrCooldownReason = meta?.reasons?.some((r) => isInventorySyncRetryReason(r));
+            const tooOld = age > PENDING_GAME_END_MAX_AGE_MS && !hasSyncOrCooldownReason;
+            const tooManySyncAttempts = syncOnly && (meta?.inventorySyncAttempts ?? 0) >= PENDING_GAME_END_MAX_SYNC_ATTEMPTS;
+            const tooManyActionAttempts = actionOnly && (meta?.actionAttempts ?? 0) >= PENDING_GAME_END_MAX_ACTION_ATTEMPTS;
+            const notCurrentBattle = aggressive && boardSeed != null && seed !== boardSeed && !hasSyncOrCooldownReason;
+
+            if (tooOld || tooManySyncAttempts || tooManyActionAttempts || notCurrentBattle) {
+                pendingGameEndBySeed.delete(seed);
+                pendingGameEndMeta.delete(seed);
+                dropped++;
+            }
+        }
+
+        if (dropped > 0) {
+            logAutosellerDebug('GameEnd', `pruned ${dropped} stale queued battle(s) (aggressive=${aggressive}, remaining=${pendingGameEndBySeed.size})`);
+        }
+    }
+
+    function queueGameEndForRetry(serverResults, reason) {
+        const seed = serverResults?.seed;
+        if (seed == null) return;
+
+        const now = Date.now();
+        let meta = pendingGameEndMeta.get(seed);
+        if (!meta) {
+            meta = { attempts: 0, inventorySyncAttempts: 0, actionAttempts: 0, queuedAt: now, reasons: [] };
+        }
+        meta.attempts += 1;
+        if (reason === 'inventory-sync') {
+            meta.inventorySyncAttempts = (meta.inventorySyncAttempts ?? 0) + 1;
+        } else if (isActionRetryReason(reason)) {
+            meta.actionAttempts = (meta.actionAttempts ?? 0) + 1;
+            if (!meta.reasons.includes(reason)) {
+                meta.reasons.push(reason);
+            }
+        } else if (!meta.reasons.includes(reason)) {
+            meta.reasons.push(reason);
+        }
+        pendingGameEndMeta.set(seed, meta);
+        pendingGameEndBySeed.set(seed, cloneServerResults(serverResults));
+
+        prunePendingGameEndQueue(false);
+        if (!pendingGameEndBySeed.has(seed)) {
+            return;
+        }
+
+        logAutosellerDebug('GameEnd', `queued seed=${seed} for retry (${reason}, attempt ${meta.attempts})`);
+        scheduleGameEndRetry();
+    }
+
+    function recoverAutosellerAfterTabVisible() {
+        if (isCleaningUp) return;
+        logAutosellerDebug('GameEnd', 'tab visible — recovering pending game-end queue');
+        stateManager.lastRun = 0;
+        schedulePendingRewardsFlush();
+        prunePendingGameEndQueue(false);
+        schedulePendingGameEndDrainIfNeeded();
+    }
+
+    function setupAutosellerVisibilityRecovery() {
+        if (typeof document === 'undefined' || visibilityChangeHandler) return;
+        visibilityChangeHandler = () => {
+            if (document.visibilityState === 'visible') {
+                recoverAutosellerAfterTabVisible();
+            }
+        };
+        document.addEventListener('visibilitychange', visibilityChangeHandler);
+    }
+
+    function setupPendingGameEndInventoryWatcher() {
+        if (!globalThis.state?.player?.subscribe || pendingGameEndInventorySubscription) return;
+
+        pendingGameEndInventorySubscription = globalThis.state.player.subscribe(() => {
+            if (!hasPendingInventorySyncGameEnds()) return;
+            schedulePendingGameEndDrainIfNeeded();
+        });
+    }
+
+    function scheduleGameEndRetry() {
+        if (gameEndRetryTimer || isCleaningUp || pendingGameEndBySeed.size === 0) return;
+        const elapsed = Date.now() - stateManager.lastRun;
+        const tabVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+        const minGap = tabVisible ? 800 : AUTOSELLER_MIN_DELAY_MS;
+        const delay = Math.max(OPERATION_DELAYS.UI_SETTLE_MS, minGap - elapsed + 50);
+        gameEndRetryTimer = setTimeout(async () => {
+            gameEndRetryTimer = null;
+            await drainPendingGameEndQueue();
+        }, delay);
+        timeoutIds.push(gameEndRetryTimer);
+    }
+
+    async function drainPendingGameEndQueue() {
+        if (isCleaningUp || pendingGameEndBySeed.size === 0) return;
+        const settings = getSettings();
+        if (!settings.autoMode && !settings.autosqueezeChecked && !settings.autodusterChecked) return;
+
+        prunePendingGameEndQueue(false);
+        if (pendingGameEndBySeed.size === 0) return;
+
+        for (const [seed, serverResults] of pendingGameEndBySeed.entries()) {
+            if (seed === lastProcessedServerResultsSeed) {
+                pendingGameEndBySeed.delete(seed);
+                pendingGameEndMeta.delete(seed);
+                continue;
+            }
+            if (!stateManager.canRun()) {
+                scheduleGameEndRetry();
+                return;
+            }
+            const attemptNum = pendingGameEndMeta.get(seed)?.attempts ?? '?';
+            pendingGameEndBySeed.delete(seed);
+            logAutosellerDebug('GameEnd', `retry processing queued seed=${seed} (attempt ${attemptNum})`);
+            await processGameEndRewards(serverResults, 'queued-retry');
+            if (lastProcessedServerResultsSeed === seed && !pendingGameEndBySeed.has(seed)) {
+                pendingGameEndMeta.delete(seed);
+            }
+            if (pendingGameEndBySeed.size > 0) {
+                scheduleGameEndRetry();
+            }
+            return;
+        }
+    }
+
+    async function processGameEndRewards(serverResults, serverResultsSource) {
+        const settings = getSettings();
+
+        if (!settings.autoMode && !settings.autosqueezeChecked && !settings.autodusterChecked) {
+            logAutosellerDebug('GameEnd', 'skip: autosell/autosqueeze/autoduster all off');
+            return;
+        }
+
+        if (!serverResults) {
+            logAutosellerDebug('GameEnd', `no serverResults (source=${serverResultsSource})`);
+            console.warn('[Autoseller] Game end: No serverResults found - cannot process items');
+            return;
+        }
+
+        const currentSeed = serverResults.seed;
+        if (currentSeed === lastProcessedServerResultsSeed) {
+            logAutosellerDebug('GameEnd', `skip duplicate seed=${currentSeed}`);
+            queueEquipmentFromServerResults(serverResults, 'duplicate-seed-pending-equip');
+            return;
+        }
+
+        logAutosellerDebug('GameEnd', `processing (mode=${settings.autoMode || 'off'} squeeze=${!!settings.autosqueezeChecked} duster=${!!settings.autodusterChecked}) source=${serverResultsSource}`);
+
+        const { battleRewardMonsters, rewardMonsterIds } = extractMonstersFromServerResults(serverResults);
+        const { battleRewardEquipment, rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
+        logEquipmentDropDebug(serverResults, serverResultsSource);
+        logAutosellerDebug('GameEnd', `seed=${currentSeed} source=${serverResultsSource} rewardMonsters=${rewardMonsterIds.size} rewardEquipment=${rewardEquipmentIds.size} equipDropsParsed=${battleRewardEquipment.length}`);
+
+        const squeezeRewardExpected = battleRewardsIncludeSqueezeBandMonsters(battleRewardMonsters, settings);
+        const injectRewardExpected = battleRewardsIncludeSealedInjectCandidates(battleRewardMonsters, settings);
+        let needsActionRetry = false;
+        let actionRetryReason = null;
+
+        const boardState = globalThis.state?.board?.getSnapshot?.();
+        const floorFromServerResults = serverResults?.floor ?? serverResults?.rewardScreen?.floor;
+        const floorFromBoardState = boardState?.context?.floor ?? boardState?.context?.room?.floor;
+        logCreatureDropsForFloor11Plus(battleRewardMonsters, floorFromServerResults ?? floorFromBoardState);
+
+        const inventorySnapshot = await fetchServerMonsters();
+        logAutosellerDebug('GameEnd', `inventory fetch: ${Array.isArray(inventorySnapshot) ? inventorySnapshot.length : 0} monster(s)`);
+
+        if (rewardMonsterIds.size > 0) {
+            const matchedMonsters = filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds);
+            const keepList = settings.autoplantIgnoreList || [];
+            const sealedCandidateCount = matchedMonsters.filter(invMonster => {
+                const creatureName = getCreatureNameFromMonster(invMonster);
+                return isSealedTierFiveCreature(invMonster) &&
+                    isSealedTier5InjectAllowed(creatureName) &&
+                    !(creatureName && keepList.includes(creatureName));
+            }).length;
+            console.log(`[Autoseller][Inject] sealed candidates from rewards: ${sealedCandidateCount}`);
+            console.log(`[Autoseller][Inject] mode=${settings.autoMode || 'off'} matchedMonsters=${matchedMonsters.length}`);
+
+            if (matchedMonsters.length === 0 && rewardMonsterIds.size > 0) {
+                const rewardIds = [...rewardMonsterIds];
+                const alreadyHandled = rewardIds.length > 0 && rewardIds.every((id) => stateManager.isProcessed(id));
+                if (alreadyHandled) {
+                    logAutosellerDebug('GameEnd', `seed=${currentSeed}: reward creatures already processed (devoured/sold/squeezed), closing`);
+                    finalizeProcessedGameEndSeed(currentSeed);
+                    return;
+                }
+                const meta = pendingGameEndMeta.get(currentSeed);
+                const inventorySyncRetries = meta?.inventorySyncAttempts ?? 0;
+                if (settings.autoMode === 'autoplant' && inventorySyncRetries >= 1 && !squeezeRewardExpected && !injectRewardExpected) {
+                    logAutosellerDebug('GameEnd', `seed=${currentSeed}: reward not in inventory after ${inventorySyncRetries} sync wait(s) — likely devoured by plant, closing`);
+                    finalizeProcessedGameEndSeed(currentSeed);
+                    return;
+                }
+                if (inventorySyncRetries >= PENDING_GAME_END_MAX_SYNC_ATTEMPTS) {
+                    const squeezeHint = squeezeRewardExpected ? ' (was in autosqueeze gene band)' : '';
+                    logAutosellerDebug('GameEnd', `abandon seed=${currentSeed}: inventory never matched after ${inventorySyncRetries} sync retries${squeezeHint}`);
+                    finalizeProcessedGameEndSeed(currentSeed);
+                    return;
+                }
+                logAutosellerDebug('GameEnd', `0/${rewardMonsterIds.size} reward monsters matched in inventory — requeue when synced (sync retry ${inventorySyncRetries + 1})`);
+                queueGameEndForRetry(serverResults, 'inventory-sync');
+                return;
+            }
+
+            if (matchedMonsters.length > 0) {
+                if (settings.autoMode !== 'autosell' && sealedCandidateCount > 0) {
+                    console.log('[Autoseller][Inject] Running standalone inject pass (autosell mode is OFF)');
+                    await autoInjectEligibleSealedCreatures(matchedMonsters);
+                }
+
+                if (settings.autoMode === 'autosell') {
+                    const monstersToSell = filterMonstersForAutosell(matchedMonsters, settings, inventorySnapshot);
+                    const injectCandidates = matchedMonsters.filter(invMonster => {
+                        const creatureName = getCreatureNameFromMonster(invMonster);
+                        return isSealedTierFiveCreature(invMonster) &&
+                            isSealedTier5InjectAllowed(creatureName) &&
+                            !(creatureName && keepList.includes(creatureName));
+                    });
+                    if (monstersToSell.length > 0 || injectCandidates.length > 0) {
+                        console.log('[Autoseller] Processing autosell for', monstersToSell.length, 'monsters');
+                        await processEligibleMonsters(matchedMonsters, 'sell');
+                    }
+                }
+
+                if (settings.autosqueezeChecked) {
+                    const monstersToSqueeze = await filterMonstersForAutosqueeze(matchedMonsters, settings, inventorySnapshot);
+                    if (monstersToSqueeze.length > 0) {
+                        console.log('[Autoseller] Processing autosqueeze for', monstersToSqueeze.length, 'monsters');
+                        const squeezeResult = await processEligibleMonsters(monstersToSqueeze, 'squeeze');
+                        if (squeezeResult?.incomplete) {
+                            needsActionRetry = true;
+                            actionRetryReason = 'squeeze-incomplete';
+                            logAutosellerDebug(
+                                'GameEnd',
+                                `seed=${currentSeed}: squeeze incomplete (${squeezeResult.succeeded}/${squeezeResult.attempted} squeezed, ` +
+                                `localSyncMiss=${squeezeResult.skippedNoLocalMatch}) — will retry`
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if (settings.autodusterChecked) {
+            const inventoryEquipment = await fetchServerEquipment();
+            if (battleRewardEquipment.length > 0) {
+                const idsBeforeResolve = rewardEquipmentIds.size;
+                resolveEquipmentIdsFromInventory(battleRewardEquipment, inventoryEquipment, rewardEquipmentIds);
+                if (rewardEquipmentIds.size > idsBeforeResolve) {
+                    logAutosellerDebug('GameEnd', `equipment ids after inventory resolve: ${rewardEquipmentIds.size} (was ${idsBeforeResolve})`);
+                }
+            }
+            rewardEquipmentIds.forEach((id) => stateManager.addPendingEquipment(id));
+            if (rewardEquipmentIds.size > 0) {
+                console.log('[Autoseller] Processing autoduster for', rewardEquipmentIds.size, 'equipment');
+            }
+            const dusterResult = await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment, battleRewardEquipment);
+            if (dusterResult?.incomplete) {
+                needsActionRetry = true;
+                actionRetryReason = 'duster-incomplete';
+                logAutosellerDebug(
+                    'GameEnd',
+                    `seed=${currentSeed}: duster incomplete (${dusterResult.pendingCount} equipment still pending) — will retry`
+                );
+            }
+            if (rewardEquipmentIds.size === 0 && battleRewardEquipment.length > 0) {
+                console.log(
+                    `[Autoseller][EquipDrop] seed=${currentSeed}: ${battleRewardEquipment.length} equipment drop(s) in serverResults ` +
+                    'but no inventory ids resolved — queued via pending'
+                );
+                schedulePendingRewardsFlush();
+            }
+        }
+
+        if (needsActionRetry && actionRetryReason) {
+            const meta = pendingGameEndMeta.get(currentSeed);
+            const actionAttempts = meta?.actionAttempts ?? 0;
+            if (actionAttempts < PENDING_GAME_END_MAX_ACTION_ATTEMPTS) {
+                queueGameEndForRetry(serverResults, actionRetryReason);
+                return;
+            }
+            logAutosellerDebug(
+                'GameEnd',
+                `seed=${currentSeed}: abandoning ${actionRetryReason} after ${actionAttempts} action retry(s)`
+            );
+        }
+
+        finalizeProcessedGameEndSeed(currentSeed);
+        logAutosellerDebug('GameEnd', `done seed=${currentSeed}`);
+        if (serverResultsSource === 'queued-retry' && settings.autoMode === 'autoplant') {
+            checkAndActivateDragonPlant();
+        }
+    }
+
+    function setupGameEndListener() {
+        if (globalThis.state?.board?.on) {
+            emitNewGameHandler2 = (game) => {
+                if (window.ModCoordination?.isModActive('Board Analyzer')) {
+                    return;
+                }
+
+                game.world.onGameEnd.once(async () => {
+                    const capturedAtFire = cloneServerResults(
+                        globalThis.state?.board?.getSnapshot?.()?.context?.serverResults
+                    ) || cloneServerResults(latestServerResults);
+                    const capturedSeed = capturedAtFire?.seed ?? '?';
+
+                    logAutosellerDebug('GameEnd', `onGameEnd fired seed=${capturedSeed} (delay ${OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS}ms before processing)`);
+                    if (isCleaningUp) {
+                        logAutosellerDebug('GameEnd', 'skip: cleanup in progress');
+                        return;
+                    }
+
+                    const timeoutId = setTimeout(async () => {
+                        if (isCleaningUp) {
+                            logAutosellerDebug('GameEnd', 'skip: cleanup in progress (after delay)');
+                            return;
+                        }
+
+                        const settings = getSettings();
+                        if (!settings.autoMode && !settings.autosqueezeChecked && !settings.autodusterChecked) {
+                            logAutosellerDebug('GameEnd', 'skip: autosell/autosqueeze/autoduster all off');
+                            return;
+                        }
+
+                        if (!capturedAtFire) {
+                            logAutosellerDebug('GameEnd', 'no serverResults captured at onGameEnd');
+                            return;
+                        }
+
+                        if (!stateManager.canRun()) {
+                            logEquipmentDropDebug(capturedAtFire, 'canRun-blocked');
+                            queueGameEndForRetry(capturedAtFire, 'canRun-blocked');
+                            queueEquipmentFromServerResults(capturedAtFire, 'canRun-blocked');
+                            return;
+                        }
+
+                        await processGameEndRewards(capturedAtFire, 'captured-at-gameEnd');
+                        const pendingSeed = capturedAtFire?.seed;
+                        if (pendingSeed != null && pendingGameEndBySeed.has(pendingSeed)) {
+                            logAutosellerDebug('GameEnd', `deferring plant activation — pending retry for seed=${pendingSeed}`);
+                        } else {
+                            checkAndActivateDragonPlant();
+                        }
+                    }, OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS);
+                    timeoutIds.push(timeoutId);
+                });
+                gameEndSubscription = game.world.onGameEnd;
+            };
+            globalThis.state.board.on('newGame', emitNewGameHandler2);
+
+        } else {
+            console.warn(`[${modName}] Board state not available for game end listener`);
+        }
+    }
+    
+    function clickDragonPlantButton() {
+        // Find the autoplay container
+        const widgetBottom = findAutoplayContainer();
+        if (!widgetBottom) {
+            console.log('[Autoseller] Autoplay container not found for dragon plant click');
+            return false;
+        }
+        
+        // Find the Dragon Plant button (try Dragon Plant first, then Baby Dragon Plant)
+        let dragonPlantButton = null;
+        const allButtons = widgetBottom.querySelectorAll('button');
+        for (const button of allButtons) {
+            const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
+            
+            // First try Dragon Plant (ID 37022)
+            let img = button.querySelector('img[alt="37022"]');
+            if (img && isNotCheckbox) {
+                dragonPlantButton = button;
+                break;
+            }
+            
+            // If Dragon Plant not found, try Baby Dragon Plant (ID 28689)
+            if (!dragonPlantButton) {
+                img = button.querySelector('img[alt="28689"]');
+                if (img && isNotCheckbox) {
+                    dragonPlantButton = button;
+                    break;
+                }
+            }
+        }
+        
+        if (!dragonPlantButton) {
+            console.log('[Autoseller] Dragon Plant button not found');
+            return false;
+        }
+        
+        // Check if button is disabled before clicking
+        const isDisabled = dragonPlantButton.hasAttribute('disabled') || dragonPlantButton.getAttribute('data-disabled') === 'true';
+        
+        if (isDisabled) {
+            console.log('[Autoseller] Dragon Plant button is disabled, skipping click');
+            return false;
+        }
+        
+        // Click the dragon plant button (game will handle filtering)
+        // Use a more reliable click method that simulates user interaction
+        try {
+            // Scroll button into view if needed
+            dragonPlantButton.scrollIntoView({ behavior: 'auto', block: 'center' });
+            
+            // Dispatch mouse events in sequence to simulate a real click
+            const events = ['mousedown', 'mouseup', 'click'];
+            events.forEach(eventType => {
+                const event = new MouseEvent(eventType, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    buttons: 1
+                });
+                dragonPlantButton.dispatchEvent(event);
+            });
+            
+            // Also call the native click method as fallback
+            dragonPlantButton.click();
+            
+            console.log(`[Autoseller] Clicked Dragon Plant button after battle`);
+            
+            return true;
+        } catch (error) {
+            console.error('[Autoseller] Error clicking Dragon Plant button:', error);
+            return false;
+        }
+    }
+    
+    function checkAndActivateDragonPlant() {
+        const settings = getSettings();
+        
+        // Only proceed if autoplant is enabled
+        if (settings.autoMode !== 'autoplant') return;
+        
+        // Find the autoplay container
+        const widgetBottom = findAutoplayContainer();
+        if (!widgetBottom) return;
+        
+        // Find the Dragon Plant button (try Dragon Plant first, then Baby Dragon Plant)
+        let dragonPlantButton = null;
+        const allButtons = widgetBottom.querySelectorAll('button');
+        for (const button of allButtons) {
+            const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
+            
+            // First try Dragon Plant (ID 37022)
+            let img = button.querySelector('img[alt="37022"]');
+            if (img && isNotCheckbox) {
+                dragonPlantButton = button;
+                break;
+            }
+            
+            // If Dragon Plant not found, try Baby Dragon Plant (ID 28689)
+            if (!dragonPlantButton) {
+                img = button.querySelector('img[alt="28689"]');
+                if (img && isNotCheckbox) {
+                    dragonPlantButton = button;
+                    break;
+                }
+            }
+        }
+        
+        if (!dragonPlantButton) return;
+        
+        // Check if Dragon Plant is currently enabled
+        const isCurrentlyEnabled = dragonPlantButton.getAttribute('data-state') === 'open' && 
+                                 !dragonPlantButton.hasAttribute('disabled');
+        
+        // Only activate if not already enabled
+        if (!isCurrentlyEnabled) {
+            setTimeout(() => {
+                dragonPlantButton.click();
+            }, OPERATION_DELAYS.UI_SETTLE_MS);
+        }
+    }
+
+    // Dragon Plant Autocollect State
+    let lastAutocollectTime = 0;
+    let isCollecting = false; // Flag to prevent concurrent collection
+    
+    function checkDragonPlantAutocollect() {
+        const settings = getSettings();
+        
+        // Only proceed if autocollect is enabled
+        if (!settings.autoplantAutocollectChecked) return;
+        
+        // Skip if already collecting
+        if (isCollecting) {
+            console.log('[Autoseller] Collection already in progress, skipping');
+            return;
+        }
+        
+        // Skip if Board Analyzer is running
+        if (window.ModCoordination?.isModActive('Board Analyzer')) {
+            console.log('[Autoseller] Board Analyzer is running, skipping autocollect');
+            return;
+        }
+        
+        // Check cooldown
+        const now = Date.now();
+        if (now - lastAutocollectTime < DRAGON_PLANT_CONFIG.COOLDOWN_MS) {
+            console.log('[Autoseller] Autocollect on cooldown');
+            return;
+        }
+        
+    // Get current plant gold from game state
+    const plantGold = getPlantGold();
+    
+    if (plantGold === undefined || plantGold === null) {
+        console.log('[Autoseller] Could not get plant gold from game state');
+        return;
+    }
+        
+        // Check if gold is over threshold
+        if (plantGold >= DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) {
+            console.log(`[Autoseller] Dragon Plant ready to collect: ${plantGold} gold (threshold: ${DRAGON_PLANT_CONFIG.GOLD_THRESHOLD})`);
+            collectDragonPlant();
+        }
+    }
+    
+    // Helper: Open inventory via API or button click
+    const openInventory = () => {
+        // Check if inventory is already open
+        try {
+            const currentMode = globalThis.state?.menu?.getSnapshot?.()?.context?.mode;
+            if (currentMode === 'inventory') {
+                console.log('[Autoseller] Inventory already open');
+                return true;
+            }
+        } catch (error) {
+            // Continue to opening logic
+        }
+        
+        try {
+            if (globalThis.state?.menu?.send) {
+                console.log('[Autoseller] Opening inventory via Game State API');
+                globalThis.state.menu.send({
+                    type: 'setState',
+                    fn: (prev) => ({ ...prev, mode: 'inventory' })
+                });
+                return true;
+            }
+        } catch (error) {
+            console.log('[Autoseller] API method failed, using fallback:', error);
+        }
+        
+        // Fallback: Click inventory button
+        const inventoryButton = document.querySelector('button[data-selected="false"] img[alt="Inventory"]');
+        if (!inventoryButton) {
+            console.log('[Autoseller] Inventory button not found');
+            return false;
+        }
+        inventoryButton.closest('button').click();
+        return true;
+    };
+    
+    // Helper: Close dialogs with ESC keys
+    const closeDialogs = (onComplete) => {
+        sendEscKey();
+        
+        setTimeout(() => {
+            sendEscKey();
+            if (onComplete) {
+                setTimeout(onComplete, DRAGON_PLANT_CONFIG.TIMINGS.VERIFY_SUCCESS);
+            }
+        }, DRAGON_PLANT_CONFIG.TIMINGS.ESC_BETWEEN);
+    };
+    
+    function collectDragonPlant() {
+        // Set collecting flag
+        isCollecting = true;
+        
+        const initialGold = getPlantGold();
+        console.log('[Autoseller] Collecting Dragon Plant...', initialGold, 'gold');
+        
+        // Step 1: Open inventory
+        if (!openInventory()) {
+            console.log('[Autoseller] Failed to open inventory');
+            isCollecting = false; // Reset flag on error
+            return;
+        }
+        
+        // Step 2: Wait for inventory to open, then click Dragon Plant
+        const timeoutId1 = setTimeout(() => {
+            if (isCleaningUp) {
+                isCollecting = false;
+                return;
+            }
+            const dragonPlantItem = document.querySelector(`.sprite.item.id-${DRAGON_PLANT_CONFIG.ITEM_ID}`);
+            if (!dragonPlantItem) {
+                console.log('[Autoseller] Dragon Plant item not found in inventory');
+                sendEscKey();
+                isCollecting = false; // Reset flag on error
+                return;
+            }
+            
+            const itemButton = dragonPlantItem.closest('button');
+            if (!itemButton) {
+                console.log('[Autoseller] Dragon Plant item button not found');
+                sendEscKey();
+                isCollecting = false; // Reset flag on error
+                return;
+            }
+            
+            itemButton.click();
+            
+            // Step 3: Wait for item details, then start collect loop
+            const timeoutId2 = setTimeout(() => {
+                if (isCleaningUp) {
+                    isCollecting = false;
+                    return;
+                }
+                let collectCount = 0;
+                let retryCount = 0;
+                const MAX_RETRIES = 3;
+                
+                // Recursive function to collect multiple times
+                const collectLoop = () => {
+                    if (isCleaningUp) {
+                        isCollecting = false;
+                        return;
+                    }
+                    // Safety check: prevent infinite loops
+                    if (collectCount >= DRAGON_PLANT_CONFIG.MAX_COLLECT_ITERATIONS) {
+                        closeDialogs(() => verifyAndUpdateCooldown(initialGold, collectCount));
+                        return;
+                    }
+                    
+                    const collectButton = findDragonPlantCollectButton();
+                    
+                    if (!collectButton) {
+                        if (retryCount < MAX_RETRIES) {
+                            retryCount++;
+                            const timeoutId = setTimeout(collectLoop, 200);
+                            timeoutIds.push(timeoutId);
+                            return;
+                        }
+                        closeDialogs(() => verifyAndUpdateCooldown(initialGold, collectCount));
+                        return;
+                    }
+                    
+                    // Reset retry count on successful button find
+                    retryCount = 0;
+                    
+                    collectButton.click();
+                    collectCount++;
+                    
+                    // Step 4: Wait then check if we should collect again
+                    const timeoutId = setTimeout(() => {
+                        if (isCleaningUp) {
+                            isCollecting = false;
+                            return;
+                        }
+                        const currentGold = getPlantGold();
+                        
+                        if (currentGold !== undefined && currentGold !== null && currentGold >= DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) {
+                            collectLoop(); // Collect again
+                        } else {
+                            closeDialogs(() => verifyAndUpdateCooldown(initialGold, collectCount));
+                        }
+                    }, DRAGON_PLANT_CONFIG.TIMINGS.AFTER_COLLECT);
+                    timeoutIds.push(timeoutId);
+                };
+                
+                // Start the collect loop
+                collectLoop();
+            }, DRAGON_PLANT_CONFIG.TIMINGS.ITEM_DETAILS_OPEN);
+            timeoutIds.push(timeoutId2);
+        }, DRAGON_PLANT_CONFIG.TIMINGS.INVENTORY_OPEN);
+        timeoutIds.push(timeoutId1);
+    }
+    
+    // Helper: Verify collection success and update cooldown
+    const verifyAndUpdateCooldown = (initialGold, collectCount) => {
+        const finalGold = getPlantGold();
+        
+        if (finalGold !== undefined && finalGold < initialGold) {
+            console.log(`[Autoseller] Collection complete: ${initialGold} → ${finalGold} gold (${collectCount} collections)`);
+            lastAutocollectTime = Date.now();
+        } else {
+            console.log('[Autoseller] Collection may have failed - gold did not decrease');
+        }
+        
+        // Reset collecting flag
+        isCollecting = false;
+    };
+
+    function setupDragonPlantAutocollect() {
+        if (!globalThis.state || !globalThis.state.player || !globalThis.state.player.subscribe) {
+            console.log('[Autoseller] Player state not available for autocollect setup');
+            return;
+        }
+        
+        // Subscribe to player state changes as a backup check (in case plant gold increases from other sources)
+        playerSubscription = globalThis.state.player.subscribe(({ context }) => {
+            const settings = getSettings();
+            
+            // Only proceed if autocollect is enabled
+            if (!settings.autoplantAutocollectChecked) return;
+            
+            // Check if plant data exists
+            if (!context.questLog || !context.questLog.plant) return;
+            
+            const plantGold = context.questLog.plant.gold;
+            
+            // Check if gold is over threshold
+            if (plantGold >= DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) {
+                // Use the shared check function which has cooldown logic
+                checkDragonPlantAutocollect();
+            }
+        });
+        
+    }
+
+    // =======================
+    // 14. Initialization & Event Handlers
+    // =======================
+    
+    function initAutoseller() {
+        // Defer cleanup until databases are available
+        let cleanupRetryCount = 0;
+        const MAX_CLEANUP_RETRIES = 30; // 30 seconds max wait
+
+        function cleanupIgnoreListsWhenReady() {
+            // Check if databases are loaded
+            const db = window.creatureDatabase;
+            const availableCreatures = typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function'
+                ? db.getAutoscrollAutosellerCreaturePickerNames()
+                : typeof db?.getCreaturePickerNames === 'function'
+                    ? db.getCreaturePickerNames().filter((name) => (typeof db.isGazerCreatureName === 'function' ? !db.isGazerCreatureName(name) : !String(name).toLowerCase().includes('gazer')))
+                    : db?.ALL_CREATURES;
+            const availableEquipment = window.equipmentDatabase?.ALL_EQUIPMENT;
+
+            if (!availableCreatures || !availableEquipment || availableCreatures.length === 0 || availableEquipment.length === 0) {
+                cleanupRetryCount++;
+                if (cleanupRetryCount >= MAX_CLEANUP_RETRIES) {
+                    console.warn('[Autoseller] Database cleanup timed out after 30 seconds - skipping cleanup to prevent data loss');
+                    return;
+                }
+                // Databases not ready yet or empty, try again in 1 second
+                console.log('[Autoseller] Databases not ready or empty, waiting...');
+                setTimeout(cleanupIgnoreListsWhenReady, 1000);
+                return;
+            }
+
+            // Databases are loaded, proceed with cleanup
+            try {
+                const settings = getSettings();
+                let hasChanges = false;
+
+                // Clean autoplant lists
+                if (settings.autoplantIgnoreList && Array.isArray(settings.autoplantIgnoreList)) {
+                    const originalCount = settings.autoplantIgnoreList.length;
+                    settings.autoplantIgnoreList = settings.autoplantIgnoreList.filter(creature =>
+                        availableCreatures.includes(creature)
+                    );
+                    if (settings.autoplantIgnoreList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autoplant ignore list: ${originalCount} → ${settings.autoplantIgnoreList.length} creatures`);
+                    }
+                }
+                if (settings.autoplantSellList && Array.isArray(settings.autoplantSellList)) {
+                    const originalCount = settings.autoplantSellList.length;
+                    settings.autoplantSellList = settings.autoplantSellList.filter(creature =>
+                        availableCreatures.includes(creature)
+                    );
+                    if (settings.autoplantSellList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autoplant sell list: ${originalCount} → ${settings.autoplantSellList.length} creatures`);
+                    }
+                }
+
+                // Clean autosqueeze lists
+                if (settings.autosqueezeIgnoreList && Array.isArray(settings.autosqueezeIgnoreList)) {
+                    const originalCount = settings.autosqueezeIgnoreList.length;
+                    settings.autosqueezeIgnoreList = settings.autosqueezeIgnoreList.filter(creature =>
+                        availableCreatures.includes(creature)
+                    );
+                    if (settings.autosqueezeIgnoreList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autosqueeze ignore list: ${originalCount} → ${settings.autosqueezeIgnoreList.length} creatures`);
+                    }
+                }
+                if (settings.autosqueezeSellList && Array.isArray(settings.autosqueezeSellList)) {
+                    const originalCount = settings.autosqueezeSellList.length;
+                    settings.autosqueezeSellList = settings.autosqueezeSellList.filter(creature =>
+                        availableCreatures.includes(creature)
+                    );
+                    if (settings.autosqueezeSellList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autosqueeze sell list: ${originalCount} → ${settings.autosqueezeSellList.length} creatures`);
+                    }
+                }
+
+                // Clean autoduster lists
+                if (settings.autodusterIgnoreList && Array.isArray(settings.autodusterIgnoreList)) {
+                    const originalCount = settings.autodusterIgnoreList.length;
+                    settings.autodusterIgnoreList = settings.autodusterIgnoreList.filter(equipment =>
+                        availableEquipment.includes(equipment)
+                    );
+                    if (settings.autodusterIgnoreList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autoduster ignore list: ${originalCount} → ${settings.autodusterIgnoreList.length} equipment`);
+                    }
+                }
+                if (settings.autodusterSellList && Array.isArray(settings.autodusterSellList)) {
+                    const originalCount = settings.autodusterSellList.length;
+                    settings.autodusterSellList = settings.autodusterSellList.filter(equipment =>
+                        availableEquipment.includes(equipment)
+                    );
+                    if (settings.autodusterSellList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autoduster sell list: ${originalCount} → ${settings.autodusterSellList.length} equipment`);
+                    }
+                }
+
+                // Save cleaned settings if any changes were made
+                if (hasChanges) {
+                    const settingsUpdate = {};
+                    if (settings.autoplantIgnoreList) settingsUpdate.autoplantIgnoreList = settings.autoplantIgnoreList;
+                    if (settings.autoplantSellList) settingsUpdate.autoplantSellList = settings.autoplantSellList;
+                    if (settings.autosqueezeIgnoreList) settingsUpdate.autosqueezeIgnoreList = settings.autosqueezeIgnoreList;
+                    if (settings.autosqueezeSellList) settingsUpdate.autosqueezeSellList = settings.autosqueezeSellList;
+                    if (settings.autodusterIgnoreList) settingsUpdate.autodusterIgnoreList = settings.autodusterIgnoreList;
+                    if (settings.autodusterSellList) settingsUpdate.autodusterSellList = settings.autodusterSellList;
+                    setSettings(settingsUpdate);
+                    console.log('[Autoseller] Lists cleaned and saved');
+                } else {
+                    console.log('[Autoseller] Lists are already clean');
+                }
+
+            } catch (error) {
+                console.warn('[Autoseller] Error during ignore list cleanup:', error);
+            }
+        }
+
+        // Start cleanup process (will retry until databases are available)
+        cleanupIgnoreListsWhenReady();
+
+        // Register the mod with the coordination system
+        if (window.ModCoordination) {
+            window.ModCoordination.registerMod('Autoseller', { priority: 1 });
+            window.ModCoordination.updateModState('Autoseller', { enabled: true });
+        }
+        
+        addAutosellerNavButton();
+        setupAutosellerWidgetObserver();
+        setupDragonPlantObserver();
+        setupGameEndListener();
+        setupAutosellerVisibilityRecovery();
+        setupPendingGameEndInventoryWatcher();
+        setupDragonPlantAPIMonitor();
+        setupDragonPlantAutocollect();
+        
+        // Initialize plant monster filter with saved ignore list from localStorage
+        // (ignore mod loader config, use localStorage as single source of truth)
+        updatePlantMonsterFilter();
+        
+        const timeoutId = setTimeout(() => {
+            if (isCleaningUp) return;
+            updateAutosellerNavButtonColor();
+        }, 1000);
+        timeoutIds.push(timeoutId);
+        
+        // Removed boardSubscription2 - all processing now happens at game end when inventory is actually updated
+        // (see setupGameEndListener for processing logic)
+    }
+    
+    if (typeof window !== 'undefined' && window.registerMod) {
+        window.registerMod({
+            name: modName,
+            description: modDescription,
+            init: initAutoseller
+        });
+    } else {
+        initAutoseller();
+    }
+    
+    // Listen for mod disable events
+    messageListener = (event) => {
+        if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
+            const modName = event.data.message.name;
+            const enabled = event.data.message.enabled;
+            
+            if (modName === 'Super Mods/Autoseller.js' && !enabled) {
+                console.log('[Autoseller] Mod disabled, running cleanup...');
+                if (typeof exports !== 'undefined' && exports.cleanup) {
+                    exports.cleanup();
+                }
+            }
+        }
+    };
+    window.addEventListener('message', messageListener);
+    
+    if (typeof exports !== 'undefined') {
+        exports = {
+            openSettings: openAutosellerModal,
+            getErrorStats: () => stateManager.getErrorStats(),
+            getSessionStats: () => stateManager.getSessionStats(),
+            resetSession: () => stateManager.resetSession(),
+            clearAllCaches: () => {
+                serverMonsterCache.clear();
+                daycareCache.clear();
+                stateManager.clearProcessedIds();
+            },
+            enableDragonPlant: () => {
+                const currentSettings = getSettings();
+                
+                // Check if already enabled - don't toggle it
+                if (currentSettings.autoMode === 'autoplant') {
+                    return true;
+                }
+                
+                // Set to autoplant mode
+                setSettings({ autoMode: 'autoplant' });
+                
+                // Apply to game checkbox if in autoplay
+                applyLocalStorageToGameCheckbox();
+                
+                // Update plant monster filter
+                updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
+                
+                return true;
+            },
+            disableDragonPlant: () => {
+                console.log('[Autoseller] disableDragonPlant() called');
+                const currentSettings = getSettings();
+                
+                // Check if already disabled - don't toggle it
+                if (currentSettings.autoMode !== 'autoplant') {
+                    console.log('[Autoseller] Dragon Plant already disabled, skipping');
+                    return true;
+                }
+                
+                console.log('[Autoseller] Disabling Dragon Plant');
+                setSettings({ autoMode: null });
+                
+                // Apply to game checkbox if in autoplay
+                applyLocalStorageToGameCheckbox();
+                
+                // Remove plant monster filter
+                removePlantMonsterFilter();
+                
+                return true;
+            },
+            cleanup: function() {
+                console.log('[Autoseller] Starting cleanup...');
+                
+                try {
+                    // 1. Unsubscribe from board and player subscriptions
+                    if (boardSubscription1) {
+                        try {
+                            boardSubscription1.unsubscribe();
+                            boardSubscription1 = null;
+                        } catch (error) {
+                            console.warn('[Autoseller] Error unsubscribing board1:', error);
+                        }
+                    }
+                    
+                    // Removed boardSubscription2 cleanup - no longer used
+                    
+                    if (playerSubscription) {
+                        try {
+                            playerSubscription.unsubscribe();
+                            playerSubscription = null;
+                        } catch (error) {
+                            console.warn('[Autoseller] Error unsubscribing player:', error);
+                        }
+                    }
+
+                    if (pendingGameEndInventorySubscription) {
+                        try {
+                            pendingGameEndInventorySubscription.unsubscribe();
+                            pendingGameEndInventorySubscription = null;
+                        } catch (error) {
+                            console.warn('[Autoseller] Error unsubscribing pending game-end inventory watcher:', error);
+                        }
+                    }
+                    
+                    // 2. Set cleanup flag and clear all timers
+                    isCleaningUp = true;
+                    
+                    if (debounceTimer) {
+                        clearTimeout(debounceTimer);
+                        debounceTimer = null;
+                    }
+                    
+                    // Clear all tracked timeouts
+                    timeoutIds.forEach(id => {
+                        try {
+                            clearTimeout(id);
+                        } catch (error) {
+                            console.warn('[Autoseller] Error clearing timeout:', error);
+                        }
+                    });
+                    timeoutIds = [];
+                    pendingGameEndBySeed.clear();
+                    pendingGameEndMeta.clear();
+                    gameEndRetryTimer = null;
+                    pendingRewardsFlushTimer = null;
+                    lastBoardEquipHandledSeed = null;
+                    if (visibilityChangeHandler && typeof document !== 'undefined') {
+                        document.removeEventListener('visibilitychange', visibilityChangeHandler);
+                        visibilityChangeHandler = null;
+                    }
+                    
+                    // 3. Remove DOM elements
+                    const widget = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET);
+                    const navBtn = document.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
+                    const responsiveStyle = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_RESPONSIVE_STYLE);
+                    const widgetStyle = document.getElementById('autoseller-widget-css');
+                    
+                    if (widget && widget.parentNode) widget.parentNode.removeChild(widget);
+                    if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
+                    if (responsiveStyle && responsiveStyle.parentNode) responsiveStyle.parentNode.removeChild(responsiveStyle);
+                    if (widgetStyle && widgetStyle.parentNode) widgetStyle.parentNode.removeChild(widgetStyle);
+                    
+                    // Close any open context menu
+                    if (openContextMenu && openContextMenu.closeMenu) {
+                        try {
+                            openContextMenu.closeMenu();
+                        } catch (error) {
+                            console.warn('[Autoseller] Error closing context menu:', error);
+                        }
+                        openContextMenu = null;
+                    }
+                    
+                    // 4. Stop observers
+                    stopDragonPlantObserver();
+                    
+                    // 4.5. Clean up menu color observer
+                    if (menuColorObserver) {
+                        try {
+                            menuColorObserver.disconnect();
+                            menuColorObserver = null;
+                        } catch (error) {
+                            console.warn('[Autoseller] Error disconnecting menu color observer:', error);
+                        }
+                    }
+                    
+                    // 4.6. Clean up checkbox listeners
+                    checkboxListeners.forEach(({ element, handler }) => {
+                        try {
+                            element.removeEventListener('change', handler);
+                        } catch (error) {
+                            console.warn('[Autoseller] Error removing checkbox listener:', error);
+                        }
+                    });
+                    checkboxListeners = [];
+                    
+                    // 5. Remove game state event listeners and filters
+                    if (globalThis.state?.board?.off) {
+                        try {
+                            if (emitNewGameHandler1) {
+                                globalThis.state.board.off('newGame', emitNewGameHandler1);
+                                emitNewGameHandler1 = null;
+                            }
+                            if (emitNewGameHandler2) {
+                                globalThis.state.board.off('newGame', emitNewGameHandler2);
+                                emitNewGameHandler2 = null;
+                            }
+                            if (emitEndGameHandler1) {
+                                globalThis.state.board.off('emitEndGame', emitEndGameHandler1);
+                                emitEndGameHandler1 = null;
+                            }
+                        } catch (error) {
+                            console.warn('[Autoseller] Error removing game state event listeners:', error);
+                        }
+                    }
+                    
+                    // Remove plant monster filter
+                    if (globalThis.state?.clientConfig?.trigger?.setState) {
+                        try {
+                            globalThis.state.clientConfig.trigger.setState({
+                                fn: (prev) => ({ ...prev, plantMonsterFilter: undefined })
+                            });
+                        } catch (error) {
+                            console.warn('[Autoseller] Error removing plant monster filter:', error);
+                        }
+                    }
+                    
+                    // 6. Clear caches and reset state
+                    serverMonsterCache.clear();
+                    daycareCache.clear();
+                    stateManager.resetSession();
+                    
+                    // 7. Clear rate limiter state
+                    apiRateLimiter.requestTimes = [];
+                    
+                    // 7.5. Reset autocollect cooldown and flags
+                    lastAutocollectTime = 0;
+                    isCollecting = false;
+                    
+                    // 8. Restore global state
+                    if (originalFetch) {
+                        window.fetch = originalFetch;
+                        originalFetch = null;
+                    }
+                    if (messageListener) {
+                        window.removeEventListener('message', messageListener);
+                        messageListener = null;
+                    }
+                    delete window.autoplantCheckbox;
+                    delete window.autosellCheckbox;
+                    delete window.updateAutoplantStatus;
+                    delete window.autoplantStatusSummary;
+                    delete window.__autosellerLoaded;
+                    
+                    // 9. Unregister from mod coordination system
+                    if (window.ModCoordination) {
+                        try {
+                            window.ModCoordination.cleanupMod('Autoseller');
+                        } catch (error) {
+                            console.warn('[Autoseller] Error unregistering from ModCoordination:', error);
+                        }
+                    }
+                    
+                    // 10. Reset cleanup flag
+                    isCleaningUp = false;
+                    
+                    // 11. Verify cleanup was successful
+                    const remainingReferences = [
+                        boardSubscription1,
+                        playerSubscription,
+                        debounceTimer,
+                        dragonPlantDebounceTimer,
+                        dragonPlantObserver,
+                        emitNewGameHandler1,
+                        emitNewGameHandler2,
+                        emitEndGameHandler1,
+                        menuColorObserver,
+                        gameEndSubscription
+                    ].filter(Boolean);
+                    
+                    if (remainingReferences.length > 0) {
+                        console.warn('[Autoseller] Some references were not properly cleaned up:', remainingReferences.length);
+                    }
+                    
+                    console.log('[Autoseller] Cleanup completed');
+                    
+                } catch (error) {
+                    console.error('[Autoseller] Error during cleanup:', error);
+                }
+            }
+        };
+        
+        // Expose Autoseller API globally for other mods
+        window.autoseller = exports;
+    }
+
+})();

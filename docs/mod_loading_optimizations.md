@@ -67,14 +67,14 @@ On **desktop**, the loader uses the strict path: direct page fetch of extension 
 
 On **mobile WebExtensions** (e.g. Orion iOS), `content/platform.js` enables a **relaxed** path automatically (or when page extension fetch fails):
 
-- Background-first mod content via `getModContent`
+- Content-script fetch via injector bridge first, then page fetch, then background `getModContent`
 - Skip bulk HEAD probes; trust bundled registry lists
 - Shorter page-ready waits; hydration/game-state issues are logged but not fatal
 - No auto-refresh loop on loader warnings
 
 **Override (testing):** in the game tab console, `sessionStorage.setItem('ba-relaxed-loader', '1')` then reload (use `'0'` or remove the key to restore strict behavior).
 
-See also [`content/platform.js`](../content/platform.js) and [`content/local_mods.js`](../content/local_mods.js).
+See also [`content/platform.js`](../content/platform.js) and [`content/local_mods.js`](../content/local_mods.js). For Orion/WebKit platform constraints and extension URL encoding, see [Orion iOS Compatibility](orion_ios_compatibility.md).
 
 ## Error Log (popup Extras)
 

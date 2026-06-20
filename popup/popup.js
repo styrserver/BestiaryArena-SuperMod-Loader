@@ -613,6 +613,71 @@ function isLoaderErrorEntry(entry) {
   return (entry?.level || 'error') === 'error';
 }
 
+function parseBrowserName(userAgent) {
+  if (/Orion/i.test(userAgent)) return 'Orion';
+  if (/Firefox/i.test(userAgent)) return 'Firefox';
+  if (/Edg\//i.test(userAgent)) return 'Edge';
+  if (/Chrome/i.test(userAgent)) return 'Chrome';
+  if (/Safari/i.test(userAgent)) return 'Safari';
+  return 'Unknown';
+}
+
+async function fetchDeviceInfo() {
+  try {
+    const tabs = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs[0];
+    if (tab?.id != null && tab.url && tab.url.includes('bestiaryarena.com')) {
+      const live = await window.browserAPI.tabs.sendMessage(tab.id, { action: 'getDeviceInfo' }).catch(() => null);
+      if (live?.success && live.info) {
+        return live.info;
+      }
+    }
+    if (tab?.url) {
+      return {
+        userAgent: navigator.userAgent || '',
+        platform: navigator.platform || 'unknown',
+        language: navigator.language || '',
+        mobile: /iPhone|iPad|iPod|Android|Orion/i.test(navigator.userAgent || ''),
+        url: tab.url
+      };
+    }
+  } catch {
+    // fall through to popup context
+  }
+
+  return {
+    userAgent: navigator.userAgent || '',
+    platform: navigator.platform || 'unknown',
+    language: navigator.language || '',
+    mobile: /iPhone|iPad|iPod|Android|Orion/i.test(navigator.userAgent || ''),
+    url: 'n/a (no active game tab)'
+  };
+}
+
+async function formatErrorLogEnvironmentHeader() {
+  const info = await fetchDeviceInfo();
+  let extVersion = 'unknown';
+  try {
+    extVersion = (await window.browserAPI.runtime.getManifest()).version;
+  } catch {
+    // keep default
+  }
+
+  const lines = [
+    '--- Device / Browser ---',
+    `Extension: v${extVersion}`,
+    `Browser: ${parseBrowserName(info.userAgent)}`,
+    `Platform: ${info.platform}`,
+    `Device: ${info.mobile ? 'mobile' : 'desktop'}`,
+    `Language: ${info.language}`,
+    `URL: ${info.url}`,
+    `User-Agent: ${info.userAgent}`,
+    `Captured: ${new Date().toISOString()}`,
+    '---'
+  ];
+  return lines.join('\n');
+}
+
 function formatLoaderErrorEntry(entry) {
   const time = new Date(entry.ts || Date.now()).toISOString();
   const mobile = entry.mobile ? ' [mobile]' : '';
@@ -651,12 +716,16 @@ async function refreshErrorLogPanel() {
   if (!panel) return;
 
   panel.textContent = await getTranslation('popup.errorLogLoading', 'Loading errors...');
-  const errors = (await fetchLoaderErrors()).filter(isLoaderErrorEntry);
+  const [header, errors] = await Promise.all([
+    formatErrorLogEnvironmentHeader(),
+    fetchLoaderErrors().then((entries) => entries.filter(isLoaderErrorEntry))
+  ]);
 
   if (errors.length === 0) {
-    panel.textContent = await getTranslation('popup.errorLogEmpty', 'No errors recorded.');
+    const emptyMsg = await getTranslation('popup.errorLogEmpty', 'No errors recorded.');
+    panel.textContent = `${header}\n\n${emptyMsg}`;
   } else {
-    panel.textContent = errors.map(formatLoaderErrorEntry).join('\n\n');
+    panel.textContent = `${header}\n\n${errors.map(formatLoaderErrorEntry).join('\n\n')}`;
   }
 }
 

@@ -49,6 +49,19 @@ function getLoaderErrorContext() {
   };
 }
 
+function getDeviceInfo() {
+  const ua = navigator.userAgent || '';
+  const mobile = window.BestiaryPlatform?.isMobileWebExtension?.()
+    ?? /iPhone|iPad|iPod|Android|Orion/i.test(ua);
+  return {
+    userAgent: ua,
+    platform: navigator.platform || 'unknown',
+    language: navigator.language || '',
+    mobile,
+    url: location.href
+  };
+}
+
 function appendLoaderError(entry) {
   if (!IS_TOP_FRAME) return;
   if ((entry.level || 'error') !== 'error') return;
@@ -153,11 +166,51 @@ if (IS_TOP_FRAME && !window.__BA_HYDRATION_ERROR_LISTENER__) {
   });
 }
 
+function getExtensionUrlApi() {
+  return typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
+}
+
+async function fetchModContentInContentScript(modName) {
+  const extUrl = getExtensionUrlApi();
+  const getURL = browserAPI.runtime.getURL.bind(browserAPI.runtime);
+  const resourcePath = extUrl?.resolveBundledModPath
+    ? extUrl.resolveBundledModPath(modName)
+    : (modName.startsWith('database/') || modName.startsWith('mods/') ? modName : `mods/${modName}`);
+
+  if (extUrl?.fetchExtensionResourceText) {
+    return extUrl.fetchExtensionResourceText(getURL, resourcePath);
+  }
+
+  const modUrl = extUrl
+    ? extUrl.getExtensionResourceUrl(getURL, resourcePath)
+    : getURL(resourcePath);
+  const response = await fetch(modUrl);
+  if (!response.ok) {
+    throw new Error(`HTTP error! Status: ${response.status} (${modUrl})`);
+  }
+  return response.text();
+}
+
+function postExtensionBridgeResponse(requestId, response) {
+  window.postMessage({
+    from: 'BESTIARY_EXTENSION',
+    id: requestId,
+    response
+  }, '*');
+}
+
+function getInjectedScriptUrl(file) {
+  const extUrl = getExtensionUrlApi();
+  const getURL = browserAPI.runtime.getURL.bind(browserAPI.runtime);
+  return extUrl ? extUrl.getExtensionResourceUrl(getURL, file) : getURL(file);
+}
+
 function injectScript(file) {
   console.log(`Injecting script: ${file}`);
   const script = document.createElement('script');
-  const scriptUrl = browserAPI.runtime.getURL(file);
-  const scriptType = file.endsWith('.mjs') ? 'module' : 'text/javascript';
+  const scriptUrl = getInjectedScriptUrl(file);
+  const extUrl = getExtensionUrlApi();
+  const scriptType = extUrl ? extUrl.scriptLoadTypeForFile(file) : 'text/javascript';
   
   script.setAttribute('type', scriptType);
   script.setAttribute('src', scriptUrl);
@@ -174,9 +227,10 @@ function injectScript(file) {
     this.remove();
   };
   script.onerror = function(error) {
-    console.error(`[Injector] ✗ ERROR loading script ${file}:`, error);
+    const detail = extUrl ? extUrl.formatScriptLoadError(error, scriptUrl) : String(error);
+    console.error(`[Injector] ✗ ERROR loading script ${file}:`, detail);
     console.error(`[Injector] Script URL was: ${scriptUrl}`);
-    console.error(`Error loading script ${file}:`, error);
+    console.error(`Error loading script ${file}:`, detail);
   };
   (document.head || document.documentElement).appendChild(script);
   return script; // Return the script element
@@ -244,7 +298,7 @@ clientScript.onload = function() {
     modCoordinationScript.onload = function() {
       if (window.DEBUG) console.log('[Injector] mod-coordination.mjs script element loaded');
       
-      // ES modules execute asynchronously, check immediately and then with minimal delay
+      // IIFE scripts may execute asynchronously; poll briefly for window.ModCoordination
       let retries = 0;
       const checkModCoordination = setInterval(() => {
         retries++;
@@ -254,7 +308,6 @@ clientScript.onload = function() {
           // Load custom battles system before local_mods.js
           injectCustomBattles();
         } else if (retries >= 10) {
-          // Reduced from 30 retries (1.5s) to 10 retries (500ms) - ES modules should load faster
           clearInterval(checkModCoordination);
           // Continue anyway - the script may have loaded in a different context
           injectCustomBattles();
@@ -281,7 +334,9 @@ clientScript.onload = function() {
       }
     };
     modCoordinationScript.onerror = function(error) {
-      console.error('[Injector] ✗ ERROR loading mod-coordination.mjs:', error);
+      const extUrl = getExtensionUrlApi();
+      const detail = extUrl ? extUrl.formatScriptLoadError(error, getInjectedScriptUrl('content/mod-coordination.mjs')) : error;
+      console.error('[Injector] ✗ ERROR loading mod-coordination.mjs:', detail);
       // Continue anyway
       injectLocalMods();
     };
@@ -309,11 +364,24 @@ clientScript.onload = function() {
 };
 }
 
-const platformScript = injectScript('content/platform.js');
-platformScript.onload = startInjectionChain;
-platformScript.onerror = function(error) {
-  console.warn('[Injector] platform.js failed to load, continuing without platform detection:', error);
-  startInjectionChain();
+function beginPageInjection() {
+  const platformScript = injectScript('content/platform.js');
+  platformScript.onload = startInjectionChain;
+  platformScript.onerror = function(error) {
+    const extUrl = getExtensionUrlApi();
+    const detail = extUrl ? extUrl.formatScriptLoadError(error, getInjectedScriptUrl('content/platform.js')) : error;
+    console.warn('[Injector] platform.js failed to load, continuing without platform detection:', detail);
+    startInjectionChain();
+  };
+}
+
+const pageExtensionUrlScript = injectScript('content/extension-url.js');
+pageExtensionUrlScript.onload = beginPageInjection;
+pageExtensionUrlScript.onerror = function(error) {
+  const extUrl = getExtensionUrlApi();
+  const detail = extUrl ? extUrl.formatScriptLoadError(error, getInjectedScriptUrl('content/extension-url.js')) : error;
+  console.warn('[Injector] extension-url.js failed to load in page context, continuing:', detail);
+  beginPageInjection();
 };
 
 } // IS_TOP_FRAME (injection chain)
@@ -331,6 +399,30 @@ window.addEventListener('message', function(event) {
   if (message.action) {
     // Response-only messages from the page; not extension API requests
     if (message.action === 'gameLocalStorageResponse') {
+      return;
+    }
+
+    if (message.action === 'getModContent') {
+      if (!IS_TOP_FRAME) {
+        return;
+      }
+      fetchModContentInContentScript(message.modName)
+        .then((content) => {
+          postExtensionBridgeResponse(event.data.id, { success: true, content });
+        })
+        .catch((contentScriptError) => {
+          console.warn('[Injector] Content-script mod fetch failed, trying background:', contentScriptError);
+          browserAPI.runtime.sendMessage(message, function(response) {
+            if (browserAPI.runtime.lastError) {
+              postExtensionBridgeResponse(event.data.id, {
+                success: false,
+                error: browserAPI.runtime.lastError.message
+              });
+              return;
+            }
+            postExtensionBridgeResponse(event.data.id, response);
+          });
+        });
       return;
     }
 
@@ -514,6 +606,11 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   
+  if (message.action === 'getDeviceInfo') {
+    sendResponse({ success: true, info: getDeviceInfo() });
+    return false;
+  }
+
   if (message.action === 'getLoaderErrors') {
     getMergedLoaderErrors((errors) => {
       sendResponse({ success: true, errors });

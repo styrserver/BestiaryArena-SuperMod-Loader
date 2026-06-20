@@ -35,13 +35,24 @@ if (window.DEBUG) console.log('Content Script Injector initializing...');
 const modsBaseUrl = browserAPI.runtime.getURL('mods/');
 if (window.DEBUG) console.log('Mods base URL:', modsBaseUrl);
 
+function getExtensionUrlApi() {
+  return typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
+}
+
+function getInjectedScriptUrl(filePath) {
+  const extUrl = getExtensionUrlApi();
+  const getURL = browserAPI.runtime.getURL.bind(browserAPI.runtime);
+  return extUrl ? extUrl.getExtensionResourceUrl(getURL, filePath) : getURL(filePath);
+}
+
 // Script injection function
 function injectScript(filePath) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    const scriptUrl = browserAPI.runtime.getURL(filePath);
+    const extUrl = getExtensionUrlApi();
+    const scriptUrl = getInjectedScriptUrl(filePath);
     script.src = scriptUrl;
-    script.type = filePath.endsWith('.mjs') ? 'module' : 'text/javascript';
+    script.type = extUrl ? extUrl.scriptLoadTypeForFile(filePath) : 'text/javascript';
     
     console.warn(`[Content Injector] Injecting script: ${filePath}`);
     console.warn(`[Content Injector] Script URL: ${scriptUrl}`);
@@ -54,7 +65,8 @@ function injectScript(filePath) {
     };
     
     script.onerror = function(error) {
-      console.error(`[Content Injector] ✗ ERROR loading script ${filePath}:`, error);
+      const detail = extUrl ? extUrl.formatScriptLoadError(error, scriptUrl) : error;
+      console.error(`[Content Injector] ✗ ERROR loading script ${filePath}:`, detail);
       console.error(`[Content Injector] Script URL was: ${scriptUrl}`);
       console.error(`[Content Injector] Error details:`, {
         error,

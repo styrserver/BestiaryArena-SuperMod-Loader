@@ -169,7 +169,13 @@ if (typeof browserAPI === 'undefined') {
       // Use the extension's local copy instead of trying to fetch from bestiaryarena.com
       try {
         const runTime = browserAPI ? browserAPI.runtime : null;
-        script.src = runTime.getURL('assets/js/ui_components.js');
+        if (runTime) {
+          const extUrl = typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
+          const uiUrl = extUrl
+            ? extUrl.getExtensionResourceUrl(runTime.getURL.bind(runTime), 'assets/js/ui_components.js')
+            : runTime.getURL('assets/js/ui_components.js');
+          script.src = uiUrl;
+        }
       } catch (e) {
         console.log('Error loading UI Components:', e);
       }

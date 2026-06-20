@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "4.2.10",
+  "version": "4.3.0",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -42,6 +42,7 @@
         "*://*.bestiaryarena.com/seasons*"
       ],
       "js": [
+        "content/extension-url.js",
         "content/injector.js"
       ],
       "run_at": "document_start"
@@ -66,6 +67,7 @@
         "*://*.bestiaryarena.com/seasons*"
       ],
       "js": [
+        "content/extension-url.js",
         "content/utility_injector.js"
       ],
       "run_at": "document_idle"
@@ -92,6 +94,7 @@
   "web_accessible_resources": [
     {
       "resources": [
+        "content/extension-url.js",
         "content/platform.js",
         "content/client.js",
         "content/local_mods.js",
@@ -111,6 +114,9 @@
         "assets/challenges/*",
         "assets/skills/*",
         "mods/*",
+        "mods/Official_Mods/*",
+        "mods/Super_Mods/*",
+        "mods/OT_Mods/*",
         "database/*"
       ],
       "matches": [

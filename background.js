@@ -14,6 +14,14 @@
  * 
  * See documentation below for each function.
  */
+try {
+  if (typeof BestiaryExtensionUrl === 'undefined' && typeof importScripts === 'function') {
+    importScripts('content/extension-url.js');
+  }
+} catch (error) {
+  console.error('Background: Failed to load extension-url.js:', error);
+}
+
 // Polyfill for browser API (Firefox/Chromium separation)
 const browserAPI = (function() {
   if (typeof browser !== 'undefined') {
@@ -141,13 +149,20 @@ async function requestGitHubHostAccess() {
 
 /** Extension resource path for a bundled mod (database/* or mods/*). */
 function resolveModResourcePath(modName) {
+  if (typeof BestiaryExtensionUrl !== 'undefined' && BestiaryExtensionUrl.resolveBundledModPath) {
+    return BestiaryExtensionUrl.resolveBundledModPath(modName);
+  }
   if (!modName || typeof modName !== 'string') {
     throw new Error('Invalid mod name');
   }
-  if (modName.startsWith('database/') || modName.startsWith('mods/')) {
-    return modName;
+  const filesystemPath = String(modName)
+    .replace(/^Official Mods\//, 'Official_Mods/')
+    .replace(/^Super Mods\//, 'Super_Mods/')
+    .replace(/^OT Mods\//, 'OT_Mods/');
+  if (filesystemPath.startsWith('database/') || filesystemPath.startsWith('mods/')) {
+    return filesystemPath;
   }
-  return `mods/${modName}`;
+  return `mods/${filesystemPath}`;
 }
 
 function isServiceWorkerContext() {
@@ -197,7 +212,7 @@ const HARDCODED_MOD_COUNTS = {
 async function loadDefaultEnabledMods() {
   if (!isServiceWorkerContext()) {
     try {
-      const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
+      const registryUrl = getAssetUrl('content/mod-registry.js');
       const registry = await import(registryUrl);
       if (registry?.DEFAULT_ENABLED_MODS) {
         return registry.DEFAULT_ENABLED_MODS;
@@ -231,7 +246,7 @@ function parseModNamesFromRegistrySource(source) {
 async function loadBundledModPathsFromRegistry() {
   if (!isServiceWorkerContext()) {
     try {
-      const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
+      const registryUrl = getAssetUrl('content/mod-registry.js');
       const registry = await import(registryUrl);
       if (registry?.getAllMods) {
         return registry.getAllMods();
@@ -242,7 +257,7 @@ async function loadBundledModPathsFromRegistry() {
   }
 
   try {
-    const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
+    const registryUrl = getAssetUrl('content/mod-registry.js');
     const response = await fetch(registryUrl);
     if (!response.ok) return null;
     const paths = parseModNamesFromRegistrySource(await response.text());
@@ -890,41 +905,47 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'getModContent') {
-    try {
-      const resourcePath = resolveModResourcePath(message.modName);
-      const modUrl = browserAPI.runtime.getURL(resourcePath);
-      console.log(`Background: Fetching mod content from: ${modUrl}`);
-      
-      fetch(modUrl)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
-          }
-          return response.text();
-        })
-        .then(content => {
-          console.log(`Background: Successfully loaded mod content, length: ${content.length} bytes`);
-          sendResponse({ success: true, content });
-        })
-        .catch(error => {
-          console.error(`Background: Error fetching mod content:`, error);
-          appendBackgroundLoaderError({
-            level: 'error',
-            source: 'getModContent',
-            message: `Failed to fetch ${message.modName}`,
-            detail: error.message
-          });
-          sendResponse({ success: false, error: error.message });
-        });
-    } catch (error) {
-      console.error(`Background: Error getting mod URL:`, error);
+    const resourcePath = resolveModResourcePath(message.modName);
+    const getURL = browserAPI.runtime.getURL.bind(browserAPI.runtime);
+    const modUrl = BestiaryExtensionUrl?.getExtensionResourceUrl?.(getURL, resourcePath)
+      || getURL(resourcePath);
+    console.log(`Background: Fetching mod content from: ${modUrl}`);
+
+    const deliverContent = (content) => {
+      console.log(`Background: Successfully loaded mod content, length: ${content.length} bytes`);
+      sendResponse({ success: true, content });
+    };
+
+    const deliverError = (error) => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Background: Error fetching mod content:`, errorMessage);
       appendBackgroundLoaderError({
         level: 'error',
         source: 'getModContent',
-        message: `Invalid mod path: ${message.modName}`,
-        detail: error.message
+        message: `Failed to fetch ${message.modName}`,
+        detail: `${errorMessage} (${modUrl})`
       });
-      sendResponse({ success: false, error: error.message });
+      sendResponse({ success: false, error: errorMessage, url: modUrl });
+    };
+
+    try {
+      if (BestiaryExtensionUrl?.fetchExtensionResourceText) {
+        BestiaryExtensionUrl.fetchExtensionResourceText(getURL, resourcePath)
+          .then(deliverContent)
+          .catch(deliverError);
+      } else {
+        fetch(modUrl)
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.text();
+          })
+          .then(deliverContent)
+          .catch(deliverError);
+      }
+    } catch (error) {
+      deliverError(error);
     }
     return true;
   }
@@ -1194,7 +1215,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!isServiceWorkerContext()) {
       (async () => {
         try {
-          const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
+          const registryUrl = getAssetUrl('content/mod-registry.js');
           const registry = await import(registryUrl);
           if (registry?.getModCounts) {
             sendResponse({ success: true, counts: registry.getModCounts() });
@@ -1384,7 +1405,10 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Helper to get asset URL in extension context
 function getAssetUrl(path) {
   if (browserAPI && browserAPI.runtime && typeof browserAPI.runtime.getURL === 'function') {
-    return browserAPI.runtime.getURL(path);
+    return BestiaryExtensionUrl.getExtensionResourceUrl(
+      browserAPI.runtime.getURL.bind(browserAPI.runtime),
+      path
+    );
   }
   return path;
 }

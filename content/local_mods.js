@@ -162,6 +162,74 @@ function prefersRelaxedLoader() {
   return window.BestiaryPlatform?.prefersRelaxedLoader?.() ?? false;
 }
 
+function prefersDirectModFetchFirst() {
+  return window.BestiaryPlatform?.prefersDirectModFetchFirst?.() ?? false;
+}
+
+function getBrowserExtensionApi() {
+  return window.browserAPI || window.chrome || window.browser;
+}
+
+function getExtensionUrlApi() {
+  return typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
+}
+
+function encodeModPathFallback(relativePath) {
+  return String(relativePath).split('/').map((segment) => {
+    if (!segment) return segment;
+    try {
+      segment = decodeURIComponent(segment);
+    } catch {
+      // keep as-is
+    }
+    return encodeURIComponent(segment);
+  }).join('/');
+}
+
+function joinModBaseUrlFallback(baseUrl, relativePath) {
+  const path = encodeModPathFallback(String(relativePath).replace(/^\//, ''));
+  return baseUrl.endsWith('/') ? baseUrl + path : baseUrl + '/' + path;
+}
+
+function resolveBundledModPath(modName) {
+  const extUrl = getExtensionUrlApi();
+  if (extUrl?.resolveBundledModPath) {
+    return extUrl.resolveBundledModPath(modName);
+  }
+  let filesystemPath = String(modName || '')
+    .replace(/^Official Mods\//, 'Official_Mods/')
+    .replace(/^Super Mods\//, 'Super_Mods/')
+    .replace(/^OT Mods\//, 'OT_Mods/');
+  const parts = filesystemPath.split('/');
+  const file = parts.pop();
+  if (file) {
+    parts.push(file.replace(/ /g, '_'));
+  }
+  filesystemPath = parts.join('/');
+  if (filesystemPath.startsWith('database/') || filesystemPath.startsWith('mods/')) {
+    return filesystemPath;
+  }
+  return `mods/${filesystemPath}`;
+}
+
+function getModUrlFromExtensionApi(modName) {
+  const api = getBrowserExtensionApi();
+  if (!api?.runtime?.getURL) {
+    return null;
+  }
+  try {
+    const extUrl = getExtensionUrlApi();
+    const logicalPath = resolveBundledModPath(modName);
+    if (extUrl) {
+      return extUrl.getExtensionResourceUrl(api.runtime.getURL.bind(api.runtime), logicalPath);
+    }
+    return api.runtime.getURL(logicalPath);
+  } catch (error) {
+    console.warn('Error getting URL from browser API:', error);
+    return null;
+  }
+}
+
 function useStrictLoaderCompletion() {
   return window.BestiaryPlatform?.useStrictLoaderCompletion?.() ?? true;
 }
@@ -357,28 +425,25 @@ window.localModsAPI = {
 };
 
 function getModUrl(modName) {
-  if (modName.startsWith('database/')) {
-    // Try multiple ways to get the browser API first
-    const api = window.browserAPI || window.chrome || window.browser;
-    
-    if (api && api.runtime && api.runtime.getURL) {
-      try {
-        return api.runtime.getURL(modName);
-      } catch (error) {
-        console.warn('Error getting URL from browser API:', error);
-      }
-    }
-    
-    // Fallback: construct URL from modBaseUrl by removing 'mods/' and adding the database path
-    if (modBaseUrl) {
-      const baseUrl = modBaseUrl.endsWith('mods/') ? modBaseUrl.replace('mods/', '') : modBaseUrl;
-      return baseUrl + modName;
-    }
-    
-    console.warn('No base URL available for database file:', modName);
+  const extensionUrl = getModUrlFromExtensionApi(modName);
+  if (extensionUrl) {
+    return extensionUrl;
+  }
+
+  if (!modBaseUrl) {
+    console.warn('No base URL available for mod file:', modName);
     return null;
   }
-  return modBaseUrl + modName;
+
+  const extUrl = getExtensionUrlApi();
+  const resourcePath = resolveBundledModPath(modName);
+  if (resourcePath.startsWith('database/')) {
+    const baseUrl = modBaseUrl.endsWith('mods/') ? modBaseUrl.replace('mods/', '') : modBaseUrl;
+    return extUrl ? extUrl.joinExtensionBaseUrl(baseUrl, resourcePath) : joinModBaseUrlFallback(baseUrl, resourcePath);
+  }
+
+  const relativePath = resourcePath.startsWith('mods/') ? resourcePath.slice('mods/'.length) : resourcePath;
+  return extUrl ? extUrl.joinExtensionBaseUrl(modBaseUrl, relativePath) : joinModBaseUrlFallback(modBaseUrl, relativePath);
 }
 
 async function fetchModContentViaBackground(modName) {
@@ -453,16 +518,16 @@ async function getLocalModContent(modName) {
     if (prefersRelaxedLoader()) {
       try {
         const content = await fetchModContentViaBackground(modName);
-        console.log(`Mod content loaded via background bridge (relaxed), length: ${content.length} bytes`);
+        console.log(`Mod content loaded via content-script bridge (relaxed), length: ${content.length} bytes`);
         return content;
       } catch (bridgeError) {
-        console.warn(`Background bridge failed for ${modName} (relaxed), trying direct fetch:`, bridgeError);
+        console.warn(`Content-script bridge failed for ${modName} (relaxed):`, bridgeError);
       }
 
       if (modUrl) {
         try {
           const content = await tryDirectModFetch(modUrl);
-          console.log(`Mod content loaded via direct fetch (relaxed fallback), length: ${content.length} bytes`);
+          console.log(`Mod content loaded via direct fetch (relaxed), length: ${content.length} bytes`);
           return content;
         } catch (directError) {
           console.warn(`Direct fetch failed for ${modName} (relaxed):`, directError);
@@ -527,6 +592,10 @@ async function checkFileExists(modName) {
       if (isKnownBundledModPath(modName)) {
         console.log(`[Local Mods] Relaxed loader: assuming bundled mod exists: ${modName}`);
         return true;
+      }
+      if (prefersDirectModFetchFirst()) {
+        console.log(`[Local Mods] Mobile direct-fetch: skipping background existence probe for ${modName}`);
+        return false;
       }
       try {
         const content = await fetchModContentViaBackground(modName);
@@ -597,17 +666,24 @@ async function loadModRegistry() {
     // So we need to use getModUrl() which constructs URLs from modBaseUrl
     // The modBaseUrl is set by the injector before this script loads
     
-    let registryUrl;
-    
-    // Check if we have modBaseUrl set (this is the extension base URL)
-    if (modBaseUrl) {
-      // Construct the registry URL from the base URL
-      // modBaseUrl ends with 'mods/', so we need to go up one level
+    let registryUrl = getBrowserExtensionApi()?.runtime?.getURL?.('content/mod-registry.js') || null;
+
+    if (!registryUrl && modBaseUrl) {
       const baseUrl = modBaseUrl.replace(/mods\/$/, '');
-      registryUrl = baseUrl + 'content/mod-registry.js';
+      const extUrl = getExtensionUrlApi();
+      registryUrl = extUrl
+        ? extUrl.joinExtensionBaseUrl(baseUrl, 'content/mod-registry.js')
+        : baseUrl + 'content/mod-registry.js';
       console.log('[Mod Registry] Using modBaseUrl to construct registry path');
-    } else {
-      throw new Error('modBaseUrl not set - extension base URL not available');
+    }
+
+    if (!registryUrl) {
+      throw new Error('Extension base URL not available for mod registry');
+    }
+
+    const extUrl = getExtensionUrlApi();
+    if (extUrl) {
+      registryUrl = extUrl.normalizeExtensionResourceUrl(registryUrl);
     }
     
     console.log('[Mod Registry] Attempting to load from:', registryUrl);

@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "4.3.0",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Error Log in popup Debug section: prepends a sticky Device / Browser header (extension version, browser, platform, device type, language, URL, user-agent, timestamp) that survives Clear and is included when copying. Header uses live page context when a bestiaryarena.com tab is active."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "fixed",
+          "text": "Early activation no longer throws ReferenceError for BETTER_SETUPS_TOAST_DURATION (constant moved before init calls showSetupNotification)."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Firefox iOS / Orion / mobile WebExtensions: bundled mod loading fixed end-to-end. Shared extension-url.js encodes path segments for getURL/fetch/script injection (regex fallback when URL() rejects spaced paths). Logical paths and spaced filenames (Official Mods/, Turbo Mode.js) map to on-disk underscore folders/files via resolveBundledModPath; popup and storage keep spaced names. web_accessible_resources exposes underscore folder globs (mods/* alone missed nested WebKit subfolders). Injector content script loads mod text first (fetch + XHR); mobile relaxed loader tries page fetch, content-script bridge, then background getModContent; skips background existence probes that flooded Error Log. Firefox manifest loads extension-url.js in background; top-frame-only injection matches Chrome. ba-sandbox-utils.mjs and mod-coordination.mjs load as regular scripts (not type=module). Error Log includes failed resource URL in getModContent detail. Desktop Chrome/Firefox unchanged."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Firebase best-runs upload $replay region field uses canonical region names via maps-database (fixes Abdendriel vs Ab'Dendriel in uploaded solutions)."
+        },
+        {
+          "mod": "RunTracker",
+          "type": "fixed",
+          "text": "Stored run regionName uses maps-database resolution instead of title-casing the region id."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "fixed",
+          "text": "getRegionDisplayName() and getRegionDisplayNameFromRegion() prefer static REGION_NAME_MAP over game REGION_NAME / REGIONS[].name so replay and export region labels use canonical spellings (e.g. Ab'Dendriel instead of Abdendriel)."
+        }
+      ]
+    },
+    {
       "version": "4.2.10",
       "changes": [
         {

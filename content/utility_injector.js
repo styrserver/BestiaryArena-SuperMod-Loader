@@ -19,10 +19,16 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
   function injectSandboxUtils() {
     console.log('BA Utility Injector: Injecting sandbox utils from local file');
     
+    const extUrl = typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
+    const getURL = browserAPI.runtime.getURL.bind(browserAPI.runtime);
+    const scriptUrl = extUrl
+      ? extUrl.getExtensionResourceUrl(getURL, 'content/ba-sandbox-utils.mjs')
+      : getURL('content/ba-sandbox-utils.mjs');
+
     // Create and inject the script
     const script = document.createElement('script');
-    script.type = 'module';
-    script.src = browserAPI.runtime.getURL('content/ba-sandbox-utils.mjs');
+    script.type = extUrl ? extUrl.scriptLoadTypeForFile('content/ba-sandbox-utils.mjs') : 'text/javascript';
+    script.src = scriptUrl;
     
     // Handle script loading events
     script.onload = function() {
@@ -32,7 +38,8 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
     };
     
     script.onerror = function(error) {
-      console.error('BA Utility Injector: Error loading sandbox utils:', error);
+      const detail = extUrl ? extUrl.formatScriptLoadError(error, scriptUrl) : error;
+      console.error('BA Utility Injector: Error loading sandbox utils:', detail);
       // Still try to inject custom battles even if sandbox utils fails
       injectCustomBattles();
     };
@@ -44,10 +51,16 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
   function injectCustomBattles() {
     console.log('BA Utility Injector: Injecting custom battles system');
     
+    const extUrl = typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
+    const getURL = browserAPI.runtime.getURL.bind(browserAPI.runtime);
+    const scriptUrl = extUrl
+      ? extUrl.getExtensionResourceUrl(getURL, 'content/custom-battles.js')
+      : getURL('content/custom-battles.js');
+
     // Create and inject the script
     const script = document.createElement('script');
     script.type = 'text/javascript';
-    script.src = browserAPI.runtime.getURL('content/custom-battles.js');
+    script.src = scriptUrl;
     
     // Handle script loading events
     script.onload = function() {
@@ -59,8 +72,9 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
     };
     
     script.onerror = function(error) {
-      console.error('BA Utility Injector: ✗ ERROR loading custom battles system:', error);
-      console.error('BA Utility Injector: Script URL was:', browserAPI.runtime.getURL('content/custom-battles.js'));
+      const detail = extUrl ? extUrl.formatScriptLoadError(error, scriptUrl) : error;
+      console.error('BA Utility Injector: ✗ ERROR loading custom battles system:', detail);
+      console.error('BA Utility Injector: Script URL was:', scriptUrl);
     };
     
     document.head.appendChild(script);

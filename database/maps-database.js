@@ -159,13 +159,16 @@ function titleCaseRegionId(regionId) {
 
 /**
  * Resolve a region id to its display name.
- * Priority: state.utils.REGION_NAME → REGIONS[].name → static map → title case.
+ * Priority: static REGION_NAME_MAP → state.utils.REGION_NAME → REGIONS[].name → title case.
  * @param {string} regionId
  * @returns {string}
  */
 function getRegionDisplayName(regionId) {
   if (regionId == null || regionId === '') return 'Unknown Region';
   const key = String(regionId).toLowerCase();
+
+  if (REGION_NAME_MAP[key]) return REGION_NAME_MAP[key];
+  if (REGION_NAME_MAP[regionId]) return REGION_NAME_MAP[regionId];
 
   try {
     const regionNames = globalThis.state?.utils?.REGION_NAME;
@@ -185,8 +188,6 @@ function getRegionDisplayName(regionId) {
     }
   } catch (_) { /* ignore */ }
 
-  if (REGION_NAME_MAP[key]) return REGION_NAME_MAP[key];
-  if (REGION_NAME_MAP[regionId]) return REGION_NAME_MAP[regionId];
   return titleCaseRegionId(regionId);
 }
 
@@ -197,8 +198,9 @@ function getRegionDisplayName(regionId) {
  */
 function getRegionDisplayNameFromRegion(region) {
   if (!region) return 'Unknown Region';
+  if (region.id) return getRegionDisplayName(region.id);
   if (region.name) return region.name;
-  return getRegionDisplayName(region.id);
+  return 'Unknown Region';
 }
 
 /**

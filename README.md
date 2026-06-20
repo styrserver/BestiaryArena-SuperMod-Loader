@@ -190,6 +190,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 
 - [Mod Development Guide](docs/mod_development_guide.md) - Comprehensive guide for mod developers
 - [Mod Loading System](docs/mod_loading_optimizations.md) - Loader architecture, mobile/relaxed path, and Error Log
+- [Orion iOS Compatibility](docs/orion_ios_compatibility.md) - WebKit/Orion platform constraints and loader resource-loading rules
 - [UI Management API](docs/ui_management.md) - Documentation for the UI Management API
 - [UI Components Documentation](docs/ui_components.md) - Documentation for the UI Components
 - [Client API Documentation](docs/client_api.md) - Complete reference for the game's Client API
@@ -589,7 +590,7 @@ Visit the [GitHub Issues page](https://github.com/styrserver/BestiaryArena-Super
 If you encounter any issues:
 
 - **Mods not appearing?** Make sure you're on the Bestiary Arena website and the extension is enabled.
-- **Mods not loading on mobile/iOS?** Open the popup → **Extras** → **Error Log** (expand Extras to refresh). Use **Copy** to share errors for debugging. Tap **Clear** to wipe stale entries. Enable **Debug Mode** and refresh the game tab if you need verbose `console.log` output in DevTools.
+- **Mods not loading on mobile/iOS?** Open the popup → **Debug** → **Error Log** (expand Debug to refresh). Use **Copy** to share errors for debugging. Tap **Clear** to wipe stale entries. Enable **Debug Mode** and refresh the game tab if you need verbose `console.log` output in DevTools. See [Orion iOS Compatibility](docs/orion_ios_compatibility.md) for platform-specific loader notes.
 - **Game performance issues?** Try using the Performance Mode mod to improve game speed.
 - **Extension not working after game update?** Check for extension updates on GitHub.
 - **Specific mod not working?** Disable and re-enable the mod, or refresh the page.
