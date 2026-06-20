@@ -94,10 +94,11 @@ if (IS_TOP_FRAME) {
   injectExtensionURLs();
 }
 
-// Then inject client.js which contains the API
+// Then inject platform.js (loader behavior) and client.js which contains the API
 if (!IS_TOP_FRAME) {
   console.log('Bestiary Arena Mod Loader - Subframe skipped');
 } else {
+function startInjectionChain() {
 const clientScript = injectScript('content/client.js');
 clientScript.onload = function() {
   clientInjected = true;
@@ -189,8 +190,16 @@ clientScript.onload = function() {
   // Start checking immediately
   checkAPIReady();
 };
+}
 
-} // IS_TOP_FRAME
+const platformScript = injectScript('content/platform.js');
+platformScript.onload = startInjectionChain;
+platformScript.onerror = function(error) {
+  console.warn('[Injector] platform.js failed to load, continuing without platform detection:', error);
+  startInjectionChain();
+};
+
+} // IS_TOP_FRAME (injection chain)
 
 console.log('Bestiary Arena Mod Loader - Injection sequence initiated');
 

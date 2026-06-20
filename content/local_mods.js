@@ -158,6 +158,18 @@ function modRequiresGameState(modName) {
   return modName && !modName.startsWith('database/');
 }
 
+function prefersRelaxedLoader() {
+  return window.BestiaryPlatform?.prefersRelaxedLoader?.() ?? false;
+}
+
+function useStrictLoaderCompletion() {
+  return window.BestiaryPlatform?.useStrictLoaderCompletion?.() ?? true;
+}
+
+function getLoadReadySettleMs() {
+  return prefersRelaxedLoader() ? 250 : HYDRATION_SETTLE_MS;
+}
+
 function waitForGameState(maxWaitMs = GAME_STATE_MAX_WAIT_MS) {
   return new Promise((resolve) => {
     if (isGameStateReady()) {
@@ -185,11 +197,12 @@ function waitForLoadReady(maxWaitMs = GAME_STATE_MAX_WAIT_MS) {
     const start = Date.now();
     let gameStateSeenAt = null;
     let lastLogAt = 0;
+    const requiredSettleMs = getLoadReadySettleMs();
 
     const tick = () => {
       const elapsed = Date.now() - start;
 
-      if (hasReactHydrationError()) {
+      if (hasReactHydrationError() && useStrictLoaderCompletion()) {
         console.warn('[Local Mods] Aborting load-ready wait — React hydration error already detected');
         resolve(false);
         return;
@@ -204,10 +217,10 @@ function waitForLoadReady(maxWaitMs = GAME_STATE_MAX_WAIT_MS) {
       }
 
       const settleMs = gameStateSeenAt ? Date.now() - gameStateSeenAt : 0;
-      const settled = gameReady && docReady && gameStateSeenAt !== null && settleMs >= HYDRATION_SETTLE_MS;
+      const settled = gameReady && docReady && gameStateSeenAt !== null && settleMs >= requiredSettleMs;
 
       if (settled) {
-        console.log(`[Local Mods] Page load ready after ${elapsed}ms (game state + document complete + ${HYDRATION_SETTLE_MS}ms settle)`);
+        console.log(`[Local Mods] Page load ready after ${elapsed}ms (game state + document complete + ${requiredSettleMs}ms settle)`);
         resolve(true);
         return;
       }
@@ -216,11 +229,16 @@ function waitForLoadReady(maxWaitMs = GAME_STATE_MAX_WAIT_MS) {
         lastLogAt = elapsed;
         console.log(
           `[Local Mods] Still waiting for page ready... ${Math.round(elapsed / 1000)}s ` +
-          `(game: ${gameReady}, document: ${docReady}, settle: ${settleMs}ms/${HYDRATION_SETTLE_MS}ms)`
+          `(game: ${gameReady}, document: ${docReady}, settle: ${settleMs}ms/${requiredSettleMs}ms)`
         );
       }
 
       if (elapsed >= maxWaitMs) {
+        if (prefersRelaxedLoader()) {
+          console.warn(`[Local Mods] Relaxed loader: page ready timeout after ${maxWaitMs}ms — continuing`);
+          resolve(true);
+          return;
+        }
         console.warn(
           `[Local Mods] Page ready timeout after ${maxWaitMs}ms (game: ${gameReady}, document: ${docReady})`
         );
@@ -250,13 +268,34 @@ function whenModApiReady(callback) {
     callback();
     return;
   }
+
+  let done = false;
+  const runOnce = () => {
+    if (done) return;
+    done = true;
+    callback();
+  };
+
   const onReady = () => {
     document.removeEventListener('bestiary-mod-api-ready', onReady);
     if (isModApiReadyForExecution()) {
-      callback();
+      runOnce();
+    } else if (prefersRelaxedLoader() && window.BestiaryModAPI) {
+      console.warn('[Local Mods] Relaxed loader: proceeding without ui.addButton');
+      runOnce();
     }
   };
   document.addEventListener('bestiary-mod-api-ready', onReady);
+
+  if (prefersRelaxedLoader()) {
+    setTimeout(() => {
+      if (done) return;
+      if (isModApiReadyForExecution() || window.BestiaryModAPI) {
+        console.warn('[Local Mods] Relaxed loader: API wait timeout, proceeding');
+        runOnce();
+      }
+    }, 5000);
+  }
 }
 
 function scheduleInitExecutionFallback() {
@@ -411,6 +450,38 @@ async function getLocalModContent(modName) {
     const modUrl = getModUrl(modName);
     console.log(`Mod URL: ${modUrl}`);
 
+    if (prefersRelaxedLoader()) {
+      try {
+        const content = await fetchModContentViaBackground(modName);
+        console.log(`Mod content loaded via background bridge (relaxed), length: ${content.length} bytes`);
+        return content;
+      } catch (bridgeError) {
+        console.warn(`Background bridge failed for ${modName} (relaxed), trying direct fetch:`, bridgeError);
+      }
+
+      if (modUrl) {
+        try {
+          const content = await tryDirectModFetch(modUrl);
+          console.log(`Mod content loaded via direct fetch (relaxed fallback), length: ${content.length} bytes`);
+          return content;
+        } catch (directError) {
+          console.warn(`Direct fetch failed for ${modName} (relaxed):`, directError);
+        }
+      }
+
+      try {
+        const content = await tryRuntimeModFetch(modName);
+        if (content) {
+          console.log(`Mod content loaded via runtime.sendMessage (relaxed), length: ${content.length} bytes`);
+          return content;
+        }
+      } catch (runtimeError) {
+        console.warn(`Runtime getModContent failed for ${modName} (relaxed):`, runtimeError);
+      }
+
+      return null;
+    }
+
     // Desktop path: direct fetch from page (fastest when supported)
     if (modUrl) {
       try {
@@ -419,6 +490,7 @@ async function getLocalModContent(modName) {
         return content;
       } catch (directError) {
         console.warn(`Direct fetch failed for ${modName}, trying background:`, directError);
+        window.BestiaryPlatform?.setPageExtensionFetchWorks?.(false);
       }
     }
 
@@ -451,6 +523,20 @@ async function getLocalModContent(modName) {
 
 async function checkFileExists(modName) {
   try {
+    if (prefersRelaxedLoader()) {
+      if (isKnownBundledModPath(modName)) {
+        console.log(`[Local Mods] Relaxed loader: assuming bundled mod exists: ${modName}`);
+        return true;
+      }
+      try {
+        const content = await fetchModContentViaBackground(modName);
+        return !!content;
+      } catch (backgroundError) {
+        console.warn(`[Local Mods] Relaxed loader existence check failed for ${modName}:`, backgroundError);
+        return false;
+      }
+    }
+
     console.log(`Checking if file exists: ${modName}`);
     const modUrl = getModUrl(modName);
     console.log(`Checking URL: ${modUrl}`);
@@ -1108,17 +1194,18 @@ async function executeModsInOrder(mods, forceExecution = false) {
     await runModBatch(databaseMods, forceExecution, results);
 
     if (gameMods.length > 0) {
-      if (hasReactHydrationError()) {
+      if (hasReactHydrationError() && useStrictLoaderCompletion()) {
         console.warn('[Local Mods] Skipping game-dependent mods — React hydration error already detected');
       } else {
         console.log(`[Local Mods] Waiting for page ready before ${gameMods.length} game-dependent mod(s)...`);
-        const ready = await waitForLoadReady(GAME_STATE_MAX_WAIT_MS);
+        const maxWait = prefersRelaxedLoader() ? 5000 : GAME_STATE_MAX_WAIT_MS;
+        const ready = await waitForLoadReady(maxWait);
         if (!ready) {
           console.warn('[Local Mods] Page not ready after max wait — executing game mods anyway (Welcome may refresh)');
         } else {
           console.log('[Local Mods] Page ready — executing game-dependent mods');
         }
-        if (!hasReactHydrationError()) {
+        if (!hasReactHydrationError() || !useStrictLoaderCompletion()) {
           await runModBatch(gameMods, forceExecution, results);
         } else {
           console.warn('[Local Mods] Skipping game-dependent mods — React hydration error detected during wait');
@@ -1163,19 +1250,29 @@ function sendCompletionSignal(results = []) {
     .map(r => ({ mod: r.mod, error: r.error || 'Failed to load or execute' }));
 
   const ranGameMods = results.some(r => modRequiresGameState(r.mod));
-  if (ranGameMods && !isGameStateReady()) {
+  if (useStrictLoaderCompletion() && ranGameMods && !isGameStateReady()) {
     errors.push({ mod: 'loader', error: 'Game state not ready (board/player unavailable)' });
     console.warn('[Local Mods] Game state still not ready after mod batch — reporting to Welcome for refresh');
+  } else if (!useStrictLoaderCompletion() && ranGameMods && !isGameStateReady()) {
+    console.warn('[Local Mods] Relaxed loader: game state not ready at completion (non-fatal)');
   }
 
-  if (hasReactHydrationError()) {
+  if (useStrictLoaderCompletion() && hasReactHydrationError()) {
     errors.push({ mod: 'loader', error: 'React hydration error detected (#418/#423)' });
     console.warn('[Local Mods] React hydration error detected — reporting to Welcome for refresh');
+  } else if (!useStrictLoaderCompletion() && hasReactHydrationError()) {
+    console.warn('[Local Mods] Relaxed loader: hydration error detected at completion (non-fatal)');
   }
 
   console.log('[Local Mods] All mods completed - sending signal', errors.length ? `with ${errors.length} error(s)` : 'successfully');
   completionSignalSent = true;
   lastCompletionErrors = errors;
+
+  if (errors.length > 0) {
+    window.BestiaryUIComponents?.handleLoaderLoadFailure?.(errors);
+  } else {
+    window.BestiaryUIComponents?.resetModLoadRetryCount?.();
+  }
   
   window.postMessage({
     from: 'LOCAL_MODS_LOADER',
@@ -1191,6 +1288,7 @@ function sendCompletionSignal(results = []) {
 function resetCompletionSignal() {
   completionSignalSent = false;
   lastCompletionErrors = [];
+  window.BestiaryUIComponents?.resetLoaderFailureHandled?.();
   console.log('[Local Mods] Completion signal flag reset');
 }
 

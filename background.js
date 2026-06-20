@@ -39,23 +39,14 @@ function resolveMessageTabId(message, sender) {
   return null;
 }
 
-function queryActiveTabId(callback) {
-  browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    callback(tabs[0] && tabs[0].id != null ? tabs[0].id : null);
-  });
-}
-
 function sendMessageToResolvedTab(message, sender, payload) {
   const tabId = resolveMessageTabId(message, sender);
-  if (tabId != null) {
-    browserAPI.tabs.sendMessage(tabId, payload);
-    return;
+  if (tabId == null) {
+    console.warn('[Background] No tab context for tabs.sendMessage:', payload?.action);
+    return false;
   }
-  queryActiveTabId((activeTabId) => {
-    if (activeTabId != null) {
-      browserAPI.tabs.sendMessage(activeTabId, payload);
-    }
-  });
+  browserAPI.tabs.sendMessage(tabId, payload);
+  return true;
 }
 
 /** Push remote scripts + stored local mod states to a tab (once per page load). */
@@ -936,7 +927,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (tabId != null) {
       deliverScript(tabId);
     } else {
-      queryActiveTabId(deliverScript);
+      sendResponse({ success: false, error: 'No target tab found' });
     }
     return true;
   }
@@ -1004,11 +995,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       };
 
       const tabId = resolveMessageTabId(message, sender);
-      if (tabId != null) {
-        requestAutosellerConfig(tabId);
-      } else {
-        queryActiveTabId(requestAutosellerConfig);
-      }
+      requestAutosellerConfig(tabId);
       return true; // Keep the message channel open for async response
     } else if (message.modName === 'Official Mods/Turbo Mode.js') {
       browserAPI.storage.local.get('localModsConfig', (data) => {

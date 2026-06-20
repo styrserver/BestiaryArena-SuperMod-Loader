@@ -16,8 +16,7 @@
     
     // Core timing constants
     const AUTOSELLER_MIN_DELAY_MS = 2000;
-    const PENDING_GAME_END_MAX_QUEUE_SIZE = 10;
-    const PENDING_GAME_END_MAX_AGE_MS = 45000;
+    const PENDING_GAME_END_MAX_AGE_MS = 300000;
     const PENDING_GAME_END_MAX_SYNC_ATTEMPTS = 4;
     const PENDING_GAME_END_MAX_ACTION_ATTEMPTS = 3;
     const PENDING_EQUIPMENT_MISS_TTL_MS = 8000;
@@ -169,6 +168,7 @@
     let pendingRewardsFlushTimer = null;
     let lastBoardEquipHandledSeed = null;
     let visibilityChangeHandler = null;
+    let pendingGameEndInventorySubscription = null;
     
     // Translation helper
     const t = (key) => {
@@ -926,6 +926,36 @@
             const totalGenes = calculateTotalGenes(monster);
             return totalGenes >= squeezeMinGenes && totalGenes <= squeezeMaxGenes;
         });
+    }
+
+    function battleRewardsIncludeSealedInjectCandidates(battleRewardMonsters, settings) {
+        if (settings?.autoInjectSealedCreaturesGlobal !== true || !Array.isArray(battleRewardMonsters) || battleRewardMonsters.length === 0) {
+            return false;
+        }
+        const keepList = settings.autoplantIgnoreList || [];
+        return battleRewardMonsters.some((drop) => {
+            const monster = drop?.monster || drop;
+            if (!monster || typeof monster !== 'object') return false;
+            if (isShinyCreature(monster) || !isSealedTierFiveCreature(monster)) return false;
+            const creatureName = getCreatureNameFromMonster(monster) || monster?.name;
+            if (creatureName && keepList.includes(creatureName)) return false;
+            return isSealedTier5InjectAllowed(creatureName);
+        });
+    }
+
+    function hasPendingInventorySyncGameEnds() {
+        for (const seed of pendingGameEndBySeed.keys()) {
+            const reasons = pendingGameEndMeta.get(seed)?.reasons;
+            if (Array.isArray(reasons) && reasons.some((reason) => isInventorySyncRetryReason(reason))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function schedulePendingGameEndDrainIfNeeded() {
+        if (isCleaningUp || pendingGameEndBySeed.size === 0 || gameEndRetryTimer) return;
+        scheduleGameEndRetry();
     }
 
     function isInventorySyncRetryReason(reason) {
@@ -7829,6 +7859,8 @@
                         lastBoardEquipHandledSeed = newSeed;
                     }
                 }
+
+                schedulePendingGameEndDrainIfNeeded();
                 
                 if (mode === 'autoplay') {
                     // Small delay to ensure autoplay UI is rendered
@@ -8406,23 +8438,17 @@
                 meta.reasons.every((r) => isInventorySyncRetryReason(r));
             const actionOnly = meta?.reasons?.length > 0 &&
                 meta.reasons.every((r) => isActionRetryReason(r));
-            const tooOld = age > PENDING_GAME_END_MAX_AGE_MS;
+            const hasSyncOrCooldownReason = meta?.reasons?.some((r) => isInventorySyncRetryReason(r));
+            const tooOld = age > PENDING_GAME_END_MAX_AGE_MS && !hasSyncOrCooldownReason;
             const tooManySyncAttempts = syncOnly && (meta?.inventorySyncAttempts ?? 0) >= PENDING_GAME_END_MAX_SYNC_ATTEMPTS;
             const tooManyActionAttempts = actionOnly && (meta?.actionAttempts ?? 0) >= PENDING_GAME_END_MAX_ACTION_ATTEMPTS;
-            const notCurrentBattle = aggressive && boardSeed != null && seed !== boardSeed;
+            const notCurrentBattle = aggressive && boardSeed != null && seed !== boardSeed && !hasSyncOrCooldownReason;
 
             if (tooOld || tooManySyncAttempts || tooManyActionAttempts || notCurrentBattle) {
                 pendingGameEndBySeed.delete(seed);
                 pendingGameEndMeta.delete(seed);
                 dropped++;
             }
-        }
-
-        while (pendingGameEndBySeed.size > PENDING_GAME_END_MAX_QUEUE_SIZE) {
-            const oldestSeed = pendingGameEndBySeed.keys().next().value;
-            pendingGameEndBySeed.delete(oldestSeed);
-            pendingGameEndMeta.delete(oldestSeed);
-            dropped++;
         }
 
         if (dropped > 0) {
@@ -8465,12 +8491,10 @@
     function recoverAutosellerAfterTabVisible() {
         if (isCleaningUp) return;
         logAutosellerDebug('GameEnd', 'tab visible — recovering pending game-end queue');
-        prunePendingGameEndQueue(true);
         stateManager.lastRun = 0;
-        if (pendingGameEndBySeed.size > 0) {
-            scheduleGameEndRetry();
-        }
         schedulePendingRewardsFlush();
+        prunePendingGameEndQueue(false);
+        schedulePendingGameEndDrainIfNeeded();
     }
 
     function setupAutosellerVisibilityRecovery() {
@@ -8481,6 +8505,15 @@
             }
         };
         document.addEventListener('visibilitychange', visibilityChangeHandler);
+    }
+
+    function setupPendingGameEndInventoryWatcher() {
+        if (!globalThis.state?.player?.subscribe || pendingGameEndInventorySubscription) return;
+
+        pendingGameEndInventorySubscription = globalThis.state.player.subscribe(() => {
+            if (!hasPendingInventorySyncGameEnds()) return;
+            schedulePendingGameEndDrainIfNeeded();
+        });
     }
 
     function scheduleGameEndRetry() {
@@ -8557,6 +8590,7 @@
         logAutosellerDebug('GameEnd', `seed=${currentSeed} source=${serverResultsSource} rewardMonsters=${rewardMonsterIds.size} rewardEquipment=${rewardEquipmentIds.size} equipDropsParsed=${battleRewardEquipment.length}`);
 
         const squeezeRewardExpected = battleRewardsIncludeSqueezeBandMonsters(battleRewardMonsters, settings);
+        const injectRewardExpected = battleRewardsIncludeSealedInjectCandidates(battleRewardMonsters, settings);
         let needsActionRetry = false;
         let actionRetryReason = null;
 
@@ -8590,7 +8624,7 @@
                 }
                 const meta = pendingGameEndMeta.get(currentSeed);
                 const inventorySyncRetries = meta?.inventorySyncAttempts ?? 0;
-                if (settings.autoMode === 'autoplant' && inventorySyncRetries >= 1 && !squeezeRewardExpected) {
+                if (settings.autoMode === 'autoplant' && inventorySyncRetries >= 1 && !squeezeRewardExpected && !injectRewardExpected) {
                     logAutosellerDebug('GameEnd', `seed=${currentSeed}: reward not in inventory after ${inventorySyncRetries} sync wait(s) — likely devoured by plant, closing`);
                     finalizeProcessedGameEndSeed(currentSeed);
                     return;
@@ -9253,6 +9287,7 @@
         setupDragonPlantObserver();
         setupGameEndListener();
         setupAutosellerVisibilityRecovery();
+        setupPendingGameEndInventoryWatcher();
         setupDragonPlantAPIMonitor();
         setupDragonPlantAutocollect();
         
@@ -9369,6 +9404,15 @@
                             playerSubscription = null;
                         } catch (error) {
                             console.warn('[Autoseller] Error unsubscribing player:', error);
+                        }
+                    }
+
+                    if (pendingGameEndInventorySubscription) {
+                        try {
+                            pendingGameEndInventorySubscription.unsubscribe();
+                            pendingGameEndInventorySubscription = null;
+                        } catch (error) {
+                            console.warn('[Autoseller] Error unsubscribing pending game-end inventory watcher:', error);
                         }
                     }
                     

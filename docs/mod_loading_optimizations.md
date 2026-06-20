@@ -36,15 +36,45 @@ User scripts stored in localStorage are automatically integrated:
 
 ## Loading Order
 
+### Page injection (content script → page context)
+
+`injector.js` loads page scripts in this order:
+
+1. **`content/platform.js`** — sets `window.BestiaryPlatform` (desktop strict vs mobile relaxed loader)
+2. **`content/client.js`** — `BestiaryModAPI`, UI components
+3. **`content/mod-coordination.mjs`**
+4. **`content/custom-battles.js`**
+5. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
+
+`utility_injector.js` (at `document_idle`) also loads `ba-sandbox-utils.mjs` and may inject `custom-battles.js` again.
+
+### Mod execution
+
 The system follows this exact order:
 
-1. **Core Scripts**: `content/client.js`, `content/local_mods.js`, `content/ba-sandbox-utils.mjs`
+1. **Core page scripts** (above) before bundled mods run
 2. **Active Scripts** (remote/URL-based mods)
 3. **Local Mods** (in order):
+   - **Database scripts** (`database/*`)
    - **Official Mods**
    - **Super Mods**
    - **OT Mods**
    - **User-Generated Scripts** (from localStorage)
+
+### Desktop vs mobile (relaxed loader)
+
+On **desktop**, the loader uses the strict path: direct page fetch of extension URLs when possible, hydration/game-state checks, and auto-refresh on hard load failures (up to 3 times).
+
+On **mobile WebExtensions** (e.g. Orion iOS), `content/platform.js` enables a **relaxed** path automatically (or when page extension fetch fails):
+
+- Background-first mod content via `getModContent`
+- Skip bulk HEAD probes; trust bundled registry lists
+- Shorter page-ready waits; hydration/game-state issues are logged but not fatal
+- No auto-refresh loop on loader warnings
+
+**Override (testing):** in the game tab console, `sessionStorage.setItem('ba-relaxed-loader', '1')` then reload (use `'0'` or remove the key to restore strict behavior).
+
+See also [`content/platform.js`](../content/platform.js) and [`content/local_mods.js`](../content/local_mods.js).
 
 ## Benefits
 

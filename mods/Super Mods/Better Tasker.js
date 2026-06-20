@@ -34,28 +34,42 @@ const tReplace = (key, replacements) => {
 // Default settings constants
 const DEFAULT_TASK_START_DELAY = 3;
 
-// Creatures that cannot appear in tasker tasks
+// Unobtainable creatures shown disabled in settings (cannot appear in Paw and Fur tasks)
 const UNSELECTABLE_CREATURES = [
-    'Albino Gazer',
-    'Chubby Gazer',
-    'Dwarf Merrymancer',
     'Firestarter',
-    'Goblin Gumslinger',
-    'Goblin Saboteur',
-    'Grynch Clan Commander',
-    'Gummy Raider',
-    'Mystic Gazer',
     'Polar Bear',
-    'Psychic Gazer',
-    'Reindeer',
-    'Spiky Gazer',
-    'Sturdy Gazer',
     'Swamp Troll',
-    'The Percht Queen',
     'Tortoise',
-    'Unionized Goblin',
     'Yeti'
 ];
+
+function isGazerCreature(creatureName, gameId = null) {
+    const db = window.creatureDatabase;
+    if (gameId != null && db?.ALL_GAZER_GAME_IDS?.has(Number(gameId))) {
+        return true;
+    }
+    return typeof db?.isGazerCreatureName === 'function' && db.isGazerCreatureName(creatureName);
+}
+
+function isEventCreature(creatureName) {
+    const db = window.creatureDatabase;
+    if (typeof db?.isEventCreatureName === 'function') {
+        return db.isEventCreatureName(creatureName);
+    }
+    const norm = String(creatureName ?? '').trim().toLowerCase();
+    return Array.isArray(db?.EVENT_CREATURES) &&
+        db.EVENT_CREATURES.some((name) => name.toLowerCase() === norm);
+}
+
+function getTaskerPickerCreatures() {
+    const db = window.creatureDatabase;
+    if (typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function') {
+        return db.getAutoscrollAutosellerCreaturePickerNames();
+    }
+    return (db?.ALL_CREATURES || []).filter(
+        (name) => !isGazerCreature(name) && !isEventCreature(name)
+    );
+}
 
 // Tasker states
 const TASKER_STATES = {
@@ -68,16 +82,14 @@ const DEFAULT_TASKER_STATE = TASKER_STATES.DISABLED;
 /** Vanilla quest nav icon (fallback when originalState was never captured). */
 const DEFAULT_QUEST_ICON_SRC = 'https://bestiaryarena.com/assets/icons/quest.png';
 
-// Timing constants - Standardized across all mods
-const NAVIGATION_DELAY = 500;           // Reduced from 200ms for consistency
-const AUTO_SETUP_DELAY = 800;          // Reduced from 1000ms for faster response
-const AUTOPLAY_SETUP_DELAY = 500;      // Reduced from 1000ms for faster response
-const AUTOMATION_CHECK_DELAY = 300;    // New standardized delay
-const BESTIARY_INTEGRATION_DELAY = 300; // Reduced from 500ms for faster response
-const BESTIARY_RETRY_DELAY = 1500;     // Reduced from 2000ms for faster response
-const BESTIARY_INIT_WAIT = 2000;       // Reduced from 3000ms for faster response
-
-// Legacy constants removed - now using standardized timing constants
+// Timing constants
+const NAVIGATION_DELAY = 500;
+const AUTO_SETUP_DELAY = 800;
+const AUTOPLAY_SETUP_DELAY = 500;
+const AUTOMATION_CHECK_DELAY = 300;
+const BESTIARY_INTEGRATION_DELAY = 300;
+const BESTIARY_RETRY_DELAY = 1500;
+const BESTIARY_INIT_WAIT = 2000;
 
 // User-configurable delays
 const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
@@ -286,30 +298,22 @@ function getCreatureSettingsKey(creatureName) {
 function getCreatureGameIdByName(creatureName) {
     try {
         if (!creatureName) return null;
-        const target = String(creatureName).trim().toLowerCase();
-
-        if (typeof window.creatureDatabase?.findMonsterByName === 'function') {
-            const monster = window.creatureDatabase.findMonsterByName(creatureName);
-            const gameId = Number(monster?.gameId);
-            if (Number.isFinite(gameId)) return gameId;
-        }
-
-        const getMonster = globalThis.state?.utils?.getMonster;
-        if (typeof getMonster === 'function') {
-            for (let gameId = 1; gameId < 1000; gameId++) {
-                let monster = null;
-                try {
-                    monster = getMonster(gameId);
-                } catch (_) {
-                    break;
-                }
-                const name = String(monster?.metadata?.name || '').trim().toLowerCase();
-                if (name && name === target) {
-                    return gameId;
-                }
-            }
-        }
+        const monster = window.creatureDatabase?.findMonsterByName?.(creatureName);
+        const gameId = Number(monster?.gameId);
+        return Number.isFinite(gameId) ? gameId : null;
+    } catch (_) {
         return null;
+    }
+}
+
+function getCreatureNameByGameId(creatureId) {
+    try {
+        const id = Number(creatureId);
+        if (!Number.isFinite(id)) return null;
+        const monster = window.creatureDatabase?.findMonsterByGameId?.(id)
+            ?? globalThis.state?.utils?.getMonster?.(id);
+        const name = String(monster?.metadata?.name || '').trim();
+        return name || null;
     } catch (_) {
         return null;
     }
@@ -987,94 +991,6 @@ function scheduleTaskCompletionRetry(reason) {
     }, TASK_COMPLETION_RETRY_DELAY_MS);
 }
 
-// Show toast notification
-function showToast(message, duration = 5000) {
-    try {
-        // Use custom toast implementation (same as Welcome.js)
-        // Get or create the main toast container
-        let mainContainer = document.getElementById('bt-toast-container');
-        if (!mainContainer) {
-            mainContainer = document.createElement('div');
-            mainContainer.id = 'bt-toast-container';
-            mainContainer.style.cssText = `
-                position: fixed;
-                z-index: 9999;
-                inset: 16px 16px 64px;
-                pointer-events: none;
-            `;
-            document.body.appendChild(mainContainer);
-        }
-        
-        // Count existing toasts to calculate stacking position
-        const existingToasts = mainContainer.querySelectorAll('.toast-item');
-        const stackOffset = existingToasts.length * 46;
-        
-        // Create the flex container for this specific toast
-        const flexContainer = document.createElement('div');
-        flexContainer.className = 'toast-item';
-        flexContainer.style.cssText = `
-            left: 0px;
-            right: 0px;
-            display: flex;
-            position: absolute;
-            transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-            transform: translateY(-${stackOffset}px);
-            bottom: 0px;
-            justify-content: flex-end;
-        `;
-        
-        // Create toast button
-        const toast = document.createElement('button');
-        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-        
-        // Create widget structure
-        const widgetTop = document.createElement('div');
-        widgetTop.className = 'widget-top h-2.5';
-        
-        const widgetBottom = document.createElement('div');
-        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-        
-        // Add icon (taskrank icon for tasks)
-        const iconImg = document.createElement('img');
-        iconImg.alt = 'task';
-        iconImg.src = 'https://bestiaryarena.com/assets/icons/taskrank.png';
-        iconImg.className = 'pixelated';
-        iconImg.style.cssText = 'width: 16px; height: 16px;';
-        widgetBottom.appendChild(iconImg);
-        
-        // Add message
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'text-left';
-        messageDiv.textContent = message;
-        widgetBottom.appendChild(messageDiv);
-        
-        // Assemble toast
-        toast.appendChild(widgetTop);
-        toast.appendChild(widgetBottom);
-        flexContainer.appendChild(toast);
-        mainContainer.appendChild(flexContainer);
-        
-        console.log(`[Better Tasker] Toast shown: ${message}`);
-        
-        // Auto-remove after duration
-        setTimeout(() => {
-            if (flexContainer && flexContainer.parentNode) {
-                flexContainer.parentNode.removeChild(flexContainer);
-                
-                // Update positions of remaining toasts
-                const toasts = mainContainer.querySelectorAll('.toast-item');
-                toasts.forEach((toast, index) => {
-                    const offset = index * 46;
-                    toast.style.transform = `translateY(-${offset}px)`;
-                });
-            }
-        }, duration);
-        
-    } catch (error) {
-        console.error('[Better Tasker] Error showing toast:', error);
-    }
-}
-
 // ============================================================================
 // 1.2. STAMINA MONITORING FUNCTIONS
 // ============================================================================
@@ -1128,6 +1044,10 @@ function getCurrentMapStaminaCost() {
         console.error('[Better Tasker] Error getting stamina cost:', error);
         return DEFAULT_STAMINA_COST;
     }
+}
+
+function getStaminaCost() {
+    return getCurrentMapStaminaCost();
 }
 
 /**
@@ -1256,6 +1176,11 @@ function stopStaminaTooltipMonitoring() {
         window.betterTaskerStaminaInterval = null;
     }
 
+    if (window.betterTaskerDepletionInterval) {
+        clearInterval(window.betterTaskerDepletionInterval);
+        window.betterTaskerDepletionInterval = null;
+    }
+
     // Disconnect MutationObserver
     if (staminaTooltipObserver) {
         staminaTooltipObserver.disconnect();
@@ -1268,8 +1193,6 @@ function stopStaminaTooltipMonitoring() {
 
 function showToast(message, duration = 5000) {
     try {
-        // Use custom toast implementation (same as Better Boosted Maps)
-        // Get or create the main toast container
         let mainContainer = document.getElementById('better-tasker-toast-container');
         if (!mainContainer) {
             mainContainer = document.createElement('div');
@@ -1838,9 +1761,10 @@ let lastRaidHunterCheckTime = null; // Track when we first detected raids but no
 let lastRaidHunterActiveTime = 0; // Track when Raid Hunter was last active to prevent ping-pong
 let raidHunterFailureCount = 0; // Track consecutive Raid Hunter failures
 let gameStateUnsubscribers = [];
+let modCoordinationUnsubscribe = null;
 let automationInterval = null;
-let questLogInterval = null;
 let taskCheckTimeout = null;
+let creatureFilterCheckTimeout = null;
 
 // Board Analyzer coordination state
 let isBoardAnalyzerRunning = false;
@@ -1879,9 +1803,6 @@ let taskNavigationCompleted = false;
 let autoplayPausedByTasker = false;
 let pendingTaskCompletion = false;
 let taskOperationInProgress = false;
-let questBlipObserver = null;
-let questBlipCheckInterval = null;
-let lastQuestBlipTrigger = 0;
 
 // Session State
 let lastGameStateChange = 0;
@@ -1904,12 +1825,17 @@ const FINISH_BUTTON_MAX_ATTEMPTS = 20;
 const TASK_COMPLETION_RETRY_DELAY_MS = 3000;
 const FAILSAFE_DEBOUNCE_MS = 2000;
 const PAUSE_VERIFY_ATTEMPTS = 16;
+const PAUSE_BUTTON_MAX_RETRIES = 3;
+const PAUSE_BUTTON_RETRY_DELAY_MS = 500;
+const PAUSE_BUTTON_CLICK_DELAY_MS = 100;
+const PAUSE_BUTTON_UPDATE_DELAY_MS = 300;
 const NO_TASK_CHECK_DELAY = 30000;
 const STAMINA_CHECK_INTERVAL_MS = 10000;
 const BACKUP_POLL_INTERVAL_MS = 20000;
 const AUTOPLAY_TRANSITION_MAX_ATTEMPTS = 200; // 20s at 100ms intervals
 const SCHEDULER_COOLDOWN_CAP_MS = 600000;
 const SCHEDULER_ERROR_RETRY_MS = 120000;
+const CREATURE_FILTER_CHECK_DEBOUNCE_MS = 300;
 
 // Loop detection and auto-refresh
 let consecutiveFailures = 0;
@@ -1935,7 +1861,7 @@ function isSafeToReload() {
             return false;
         }
         
-        // CRITICAL: Check if user is actively playing a game
+        // Don't reload if user is actively playing a game
         if (boardContext.gameStarted) {
             console.log('[Better Tasker] User is in an active game - skipping reload to avoid interruption');
             return false;
@@ -2019,10 +1945,8 @@ function resetState(resetType = 'full') {
                     pendingTaskCompletion = false;
                     taskOperationInProgress = false;
                     lastNoTaskCheck = 0;
-                    // CRITICAL FIX: Reset quest button modification flag during session reset
-                    // This prevents the quest button from staying in modified state indefinitely
                     questButtonModifiedForTasking = false;
-                    // CRITICAL FIX: Do NOT clear taskingMapId during session reset - preserve it for map validation
+                    // Preserve taskingMapId during session reset for map validation
                     console.log('[Better Tasker] Session reset during task hunting - reset quest button modification flag but preserving tasking map ID');
                 }
                 // Don't reset taskHuntingOngoing during session reset - it should persist until task completion
@@ -2055,7 +1979,6 @@ function resetState(resetType = 'full') {
                 resetSessionFlags();
                 resetTaskHunting();
                 resetCommonFlags();
-                // Note: taskNavigationCompleted persists until user manually stops automation
                 console.log('[Better Tasker] Full state reset');
                 break;
         }
@@ -2161,70 +2084,156 @@ function cleanupTaskCompletionFailure(reason = 'unknown') {
 // 3. AUTOPLAY CONTROL FUNCTIONS
 // ============================================================================
 
+const AUTOPLAY_PAUSE_BUTTON_SELECTORS = [
+    'button:has(svg.lucide-pause)',
+    'button.frame-1-red[class*="pause"]',
+    'button.frame-1-red:has(svg.lucide-pause)',
+    'button[class*="surface-red"]:has(svg.lucide-pause)'
+];
+
+function findAutoplayPauseButton() {
+    let button = AUTOPLAY_PAUSE_BUTTON_SELECTORS.reduce(
+        (found, selector) => found || document.querySelector(selector),
+        null
+    );
+
+    if (!button) {
+        for (const flexContainer of document.querySelectorAll('div.flex')) {
+            const buttons = flexContainer.querySelectorAll('button');
+            if (buttons.length < 2) {
+                continue;
+            }
+            const secondButton = buttons[1];
+            if (secondButton.querySelector('svg.lucide-pause')) {
+                button = secondButton;
+                break;
+            }
+        }
+    }
+
+    return button;
+}
+
+function isAutoplayPauseButtonVisible() {
+    return !!findAutoplayPauseButton();
+}
+
+function isAutoplayIdleInDom() {
+    if (isAutoplayPauseButtonVisible()) {
+        return false;
+    }
+
+    const idleButtonTexts = ['Start', 'Iniciar', 'Resume', 'Retomar'];
+    const buttons = document.querySelectorAll('button');
+    for (const button of buttons) {
+        const text = button.textContent.trim();
+        if (idleButtonTexts.includes(text)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function isAutoplaySessionActiveByApi(boardContext) {
+    if (!boardContext || boardContext.mode !== 'autoplay') {
+        return false;
+    }
+    return !!(boardContext.gameStarted || boardContext.isRunning || boardContext.autoplayRunning);
+}
+
+function isAutoplaySessionActive(boardContext) {
+    if (!boardContext || boardContext.mode !== 'autoplay') {
+        return false;
+    }
+    if (isAutoplayPauseButtonVisible()) {
+        return true;
+    }
+    return isAutoplaySessionActiveByApi(boardContext);
+}
+
+function isAutoplaySessionStopped(boardContext) {
+    if (isAutoplayIdleInDom()) {
+        return true;
+    }
+    if (!isAutoplayPauseButtonVisible()) {
+        return true;
+    }
+    return !isAutoplaySessionActiveByApi(boardContext);
+}
+
 // Generic function to control autoplay with button clicks
 async function controlAutoplayWithButton(action) {
     try {
         const buttonLabel = action === 'play' ? 'Start' : action;
         console.log(`[Better Tasker] Looking for ${buttonLabel} button...`);
-        
-        let button = null;
-        
-        if (action === 'play') {
-            // Autoplay resume uses a green "Start" text button, not a lucide-play icon
-            button = findAutoplayStartButton();
-        } else {
-            const selectors = [
-                'button:has(svg.lucide-pause)',
-                'button.frame-1-red[class*="pause"]',
-                'button.frame-1-red:has(svg.lucide-pause)', // Red button with pause icon (more specific)
-                'button[class*="surface-red"]:has(svg.lucide-pause)' // Red button with pause icon only
-            ];
-            button = selectors.reduce((found, selector) =>
-                found || document.querySelector(selector), null);
+
+        if (action === 'pause') {
+            return await pauseAutoplayWithButton();
         }
-        
-        // Fallback: Look for pause button by structure (second button in flex container with pause icon)
-        if (!button && action === 'pause') {
-            const flexContainer = document.querySelector('div.flex');
-            if (flexContainer) {
-                const buttons = flexContainer.querySelectorAll('button');
-                if (buttons.length >= 2) {
-                    const secondButton = buttons[1]; // Second button (pause button)
-                    const hasPauseIcon = secondButton.querySelector('svg.lucide-pause');
-                    if (hasPauseIcon) {
-                        button = secondButton;
-                        console.log('[Better Tasker] Found pause button using structure fallback');
-                    }
-                }
-            }
-        }
-        
+
+        const button = findAutoplayStartButton();
         if (button) {
-            console.log(`[Better Tasker] Found ${buttonLabel} button, clicking to ${action === 'play' ? 'start' : action} autoplay...`);
-            
+            console.log(`[Better Tasker] Found ${buttonLabel} button, clicking to start autoplay...`);
+
             await closeQuestLogIfOpen();
             await clearScrollLockIfNeeded();
-            
+
             button.click();
-            
-            // Wait briefly for UI to update
-            await sleep(300);
-            console.log(`[Better Tasker] ${buttonLabel.charAt(0).toUpperCase() + buttonLabel.slice(1)} button clicked successfully`);
-            
+
+            await sleep(PAUSE_BUTTON_UPDATE_DELAY_MS);
+            console.log(`[Better Tasker] ${buttonLabel} button clicked successfully`);
+
             return true;
-        } else {
-            console.log(`[Better Tasker] ${buttonLabel.charAt(0).toUpperCase() + buttonLabel.slice(1)} button not found`);
-            return false;
         }
+
+        console.log(`[Better Tasker] ${buttonLabel} button not found`);
+        return false;
     } catch (error) {
         console.error(`[Better Tasker] Error clicking ${action} button:`, error);
         return false;
     }
 }
 
-// Find and click the pause button to pause autoplay
-async function pauseAutoplayWithButton() {
-    return await controlAutoplayWithButton('pause');
+async function pauseAutoplayWithButton(
+    maxRetries = PAUSE_BUTTON_MAX_RETRIES,
+    retryDelay = PAUSE_BUTTON_RETRY_DELAY_MS
+) {
+    try {
+        console.log('[Better Tasker] Looking for pause button...');
+
+        let button = null;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            button = findAutoplayPauseButton();
+            if (button) {
+                break;
+            }
+
+            if (attempt < maxRetries - 1) {
+                console.log(
+                    `[Better Tasker] Pause button not found, retrying in ${retryDelay}ms... (attempt ${attempt + 1}/${maxRetries})`
+                );
+                await sleep(retryDelay);
+            }
+        }
+
+        if (!button) {
+            console.log('[Better Tasker] Pause button not found after retries');
+            return false;
+        }
+
+        console.log('[Better Tasker] Found pause button, clicking to pause autoplay session...');
+        await closeQuestLogIfOpen();
+        clearModalsWithEscSync(1);
+        await sleep(PAUSE_BUTTON_CLICK_DELAY_MS);
+        button.click();
+        await sleep(PAUSE_BUTTON_UPDATE_DELAY_MS);
+        console.log('[Better Tasker] Pause button clicked successfully');
+        return true;
+    } catch (error) {
+        console.error('[Better Tasker] Error clicking pause button:', error);
+        return false;
+    }
 }
 
 // Find and click the play button to resume autoplay
@@ -2250,8 +2259,7 @@ function isRaidHunterRaiding() {
                 }
             }
             
-            // Fallback to old method for backward compatibility
-            // First check if Raid Hunter is actually enabled
+            // Raid Hunter localStorage / quest-button checks when ModCoordination is unavailable
             const raidHunterEnabled = localStorage.getItem('raidHunterAutomationEnabled');
             if (raidHunterEnabled !== 'true') {
                 return false;
@@ -2396,7 +2404,7 @@ function isRaidHunterRaiding() {
 }
 
 // Handle page visibility changes (foreground/background transitions)
-// CRITICAL: Immediately check Raid Hunter state when page becomes visible to prevent taking control during transitions
+// Sync Raid Hunter state when the page becomes visible
 function handlePageVisibilityChange() {
     try {
         const now = Date.now();
@@ -2410,8 +2418,6 @@ function handlePageVisibilityChange() {
         if (document.visibilityState === 'visible') {
             console.log('[Better Tasker] Page became visible - immediately checking Raid Hunter state');
             
-            // CRITICAL: Immediately sync Raid Hunter state when page becomes visible
-            // This prevents Better Tasker from taking control during foreground transitions
             const wasRaidHunterActive = isRaidHunterActive;
             isRaidHunterActive = isRaidHunterRaiding();
             
@@ -2579,8 +2585,7 @@ function setupRaidHunterCoordination() {
         }
         // Events are already subscribed in init()
     } else {
-        // Fallback to polling for backward compatibility
-        // Check Raid Hunter status every 10 seconds
+        // Poll Raid Hunter status when ModCoordination is unavailable
         raidHunterCoordinationInterval = setInterval(() => {
             const wasRaidHunterActive = isRaidHunterActive;
             isRaidHunterActive = isRaidHunterRaiding();
@@ -2996,148 +3001,6 @@ function insertButtons() {
 // 6. STATE MANAGEMENT FUNCTIONS
 // ============================================================================
 
-// Setup quest blip monitoring for "New Task Only" mode
-function setupQuestBlipMonitoring() {
-    if (questBlipObserver) {
-        console.log('[Better Tasker] Quest blip observer already exists');
-        return;
-    }
-    
-    console.log('[Better Tasker] Setting up quest blip monitoring...');
-    
-    // Check for existing quest blip immediately when setting up monitoring
-    if (taskerState === TASKER_STATES.NEW_TASK_ONLY) {
-        const existingQuestBlip = document.querySelector('#header-slot img[src*="quest-blip.png"]');
-        if (existingQuestBlip) {
-            console.log('[Better Tasker] Existing quest blip found during setup - triggering New Task Only mode');
-            handleNewTaskOnly();
-        }
-    }
-    
-    // Enhanced MutationObserver that watches for both node additions and attribute changes
-    questBlipObserver = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            // Check for newly added nodes
-            mutation.addedNodes.forEach((node) => {
-                if (node.nodeType === Node.ELEMENT_NODE && taskerState === TASKER_STATES.NEW_TASK_ONLY) {
-                    // Check if quest blip appeared
-                    const questBlipSelectors = [
-                        '#header-slot img[src*="quest-blip.png"]',
-                        '#header-slot img[src*="/assets/icons/quest-blip.png"]',
-                        '#header-slot img[alt="Quests"][src*="quest-blip"]',
-                        '#header-slot img[alt="Tasking"][src*="quest-blip"]',
-                        'img[src*="quest-blip.png"]', // Fallback
-                        'img[src*="/assets/icons/quest-blip.png"]' // Fallback
-                    ];
-                    
-                    let questBlip = null;
-                    for (const selector of questBlipSelectors) {
-                        questBlip = node.querySelector?.(selector) || 
-                                   (node.matches?.(selector) ? node : null);
-                        if (questBlip) break;
-                    }
-                    
-                    // Debug: Log what was added to help identify quest blip
-                    if (node.querySelector && node.querySelector('img[src*="quest"]')) {
-                        console.log('[Better Tasker] Debug - Quest-related image added:', node.querySelector('img[src*="quest"]').src);
-                    }
-                    
-                    if (questBlip) {
-                        console.log('[Better Tasker] Quest blip detected via node addition - triggering New Task Only mode');
-                        handleNewTaskOnly();
-                    }
-                }
-            });
-            
-            // Check for attribute changes (like src changes that transition quest.png to quest-blip.png)
-            if (mutation.type === 'attributes' && taskerState === TASKER_STATES.NEW_TASK_ONLY) {
-                const target = mutation.target;
-                
-                // Check if this is a quest image src change in the header navigation
-                if ((target.matches?.('#header-slot img[alt="Quests"]') || target.matches?.('#header-slot img[alt="Tasking"]')) && mutation.attributeName === 'src') {
-                    const newSrc = target.src;
-                    if (newSrc && newSrc.includes('quest-blip.png')) {
-                        console.log('[Better Tasker] Quest image src changed to quest-blip.png in header navigation - triggering New Task Only mode');
-                        handleNewTaskOnly();
-                        return;
-                    }
-                }
-                
-                // Check if the changed element or its parent contains a quest blip
-                const questBlipSelectors = [
-                    '#header-slot img[src*="quest-blip.png"]',
-                    '#header-slot img[src*="/assets/icons/quest-blip.png"]',
-                    '#header-slot img[alt="Quests"][src*="quest-blip"]',
-                    '#header-slot img[alt="Tasking"][src*="quest-blip"]',
-                    'img[src*="quest-blip.png"]', // Fallback
-                    'img[src*="/assets/icons/quest-blip.png"]' // Fallback
-                ];
-                
-                let questBlip = null;
-                for (const selector of questBlipSelectors) {
-                    questBlip = target.querySelector?.(selector) || 
-                               (target.matches?.(selector) ? target : null) ||
-                               target.closest?.('li')?.querySelector?.(selector);
-                    if (questBlip) break;
-                }
-                
-                if (questBlip) {
-                    console.log('[Better Tasker] Quest blip detected via attribute change - triggering New Task Only mode');
-                    handleNewTaskOnly();
-                }
-            }
-        });
-    });
-    
-    questBlipObserver.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['style', 'class', 'data-selected', 'src']
-    });
-    
-    // Also set up periodic checking as backup (every 30 seconds)
-    questBlipCheckInterval = setInterval(() => {
-        if (taskerState === TASKER_STATES.NEW_TASK_ONLY) {
-            const questBlipSelectors = [
-                '#header-slot img[src*="quest-blip.png"]',
-                '#header-slot img[src*="/assets/icons/quest-blip.png"]',
-                '#header-slot img[alt="Quests"][src*="quest-blip"]',
-                '#header-slot img[alt="Tasking"][src*="quest-blip"]',
-                'img[src*="quest-blip.png"]', // Fallback
-                'img[src*="/assets/icons/quest-blip.png"]' // Fallback
-            ];
-            
-            let questBlip = null;
-            for (const selector of questBlipSelectors) {
-                questBlip = document.querySelector(selector);
-                if (questBlip && questBlip.offsetParent !== null) { // Check if visible
-                    console.log(`[Better Tasker] Quest blip detected via periodic check with selector: ${selector} - triggering New Task Only mode`);
-                    handleNewTaskOnly();
-                    break;
-                }
-            }
-        }
-    }, BACKUP_POLL_INTERVAL_MS);
-    
-    console.log('[Better Tasker] Quest blip monitoring started (MutationObserver + periodic checks)');
-}
-
-// Stop quest blip monitoring
-function stopQuestBlipMonitoring() {
-    if (questBlipObserver) {
-        questBlipObserver.disconnect();
-        questBlipObserver = null;
-        console.log('[Better Tasker] Quest blip MutationObserver stopped');
-    }
-    
-    if (questBlipCheckInterval) {
-        clearInterval(questBlipCheckInterval);
-        questBlipCheckInterval = null;
-        console.log('[Better Tasker] Quest blip periodic checking stopped');
-    }
-}
-
 // Load tasker state from localStorage
 function loadTaskerState() {
     const saved = localStorage.getItem('betterTaskerState');
@@ -3176,73 +3039,6 @@ function saveTaskerState() {
     console.log('[Better Tasker] Saved tasker state to localStorage:', taskerState);
 }
 
-// Handle "New Task Only" functionality
-async function handleNewTaskOnly() {
-    try {
-        // Prevent infinite triggering with cooldown
-        const now = Date.now();
-        if (now - lastQuestBlipTrigger < 5000) { // 5 second cooldown
-            console.log('[Better Tasker] Quest blip trigger cooldown active, skipping...');
-            return;
-        }
-        lastQuestBlipTrigger = now;
-        
-        console.log('[Better Tasker] New Task Only mode - opening quest log...');
-        
-        // Check if quest log is already open
-        const existingQuestLog = document.querySelector('.widget-bottom .grid.h-\\[260px\\].items-start.gap-1');
-        if (existingQuestLog) {
-            console.log('[Better Tasker] Quest log already open, skipping quest blip click');
-            // Still proceed to look for New Task button
-        } else {
-            // 1. Find and click quest blip to open quest log
-        const questBlipSelectors = [
-            '#header-slot img[src*="quest-blip.png"]',
-            '#header-slot img[src*="/assets/icons/quest-blip.png"]',
-            '#header-slot img[alt="Quests"][src*="quest-blip"]',
-            '#header-slot img[alt="Tasking"][src*="quest-blip"]',
-            'img[src*="quest-blip.png"]', // Fallback
-            'img[src*="/assets/icons/quest-blip.png"]' // Fallback
-        ];
-        
-        let questBlip = null;
-        for (const selector of questBlipSelectors) {
-            questBlip = document.querySelector(selector);
-            if (questBlip) {
-                console.log(`[Better Tasker] Quest blip found with selector: ${selector}`);
-                break;
-            }
-        }
-        
-            if (!questBlip) {
-                console.log('[Better Tasker] No quest blip found');
-                return;
-            }
-            
-            console.log('[Better Tasker] Quest blip found, clicking it...');
-            questBlip.click();
-            await sleep(300); // Wait for quest log to open
-            console.log('[Better Tasker] Quest blip clicked, waiting for quest log to open...');
-        }
-        
-        // 2. Accept new task without creature filtering (New Task+ always accepts any task)
-        console.log('[Better Tasker] New Task+ mode - accepting task without filtering...');
-        const taskAccepted = await acceptNewTaskFromQuestLog(true); // Skip filtering
-        
-        // 3. Close quest log (scoped — do not dismiss unrelated modals)
-        await closeQuestLogIfOpen();
-        
-        if (taskAccepted) {
-            console.log('[Better Tasker] Quest log closed - New Task+ mode complete (task accepted)');
-        } else {
-            console.log('[Better Tasker] Quest log closed - New Task+ mode complete (no task found)');
-        }
-        
-    } catch (error) {
-        console.error('[Better Tasker] Error in New Task Only mode:', error);
-    }
-}
-
 // Toggle tasker through the 3 states
 function toggleTasker() {
     // Rotate through states: Enable → New Task+ → Disabled
@@ -3260,7 +3056,9 @@ function toggleTasker() {
             break;
         case TASKER_STATES.NEW_TASK_ONLY:
             taskerState = TASKER_STATES.DISABLED;
-            teardownManualPlayDetection();
+            teardownBetterTaskerRuntime();
+            cleanupRaidHunterCoordination();
+            cleanupBoardAnalyzerCoordination();
             // Clear scheduler when disabling
             if (taskCheckTimeout) {
                 clearTimeout(taskCheckTimeout);
@@ -3659,7 +3457,6 @@ function startQuestButtonValidation() {
                     
                     // Clear the saved tasking map ID since user switched maps
                     taskingMapId = null;
-                    // CRITICAL FIX: Reset quest button modification flag to match visual state
                     questButtonModifiedForTasking = false;
                     console.log('[Better Tasker] Cleared tasking map ID and quest button modification flag - quest button reset to normal state');
                 }
@@ -3671,13 +3468,12 @@ function startQuestButtonValidation() {
         
     } catch (error) {
         console.error('[Better Tasker] Error setting up board state subscription:', error);
-        // Fallback to old polling method if subscription fails
         console.log('[Better Tasker] Falling back to polling method');
         startQuestButtonValidationPolling();
     }
 }
 
-// Fallback polling method (only used if real-time subscription fails)
+// Poll map changes when board subscription is unavailable
 function startQuestButtonValidationPolling() {
     // Clear any existing interval
     if (questButtonValidationInterval) {
@@ -3712,7 +3508,6 @@ function startQuestButtonValidationPolling() {
                 
                 // Clear the saved tasking map ID since user switched maps
                 taskingMapId = null;
-                // CRITICAL FIX: Reset quest button modification flag to match visual state
                 questButtonModifiedForTasking = false;
                 console.log('[Better Tasker] Cleared tasking map ID and quest button modification flag - quest button reset to normal state');
                 // Don't stop the interval - keep monitoring in case they come back
@@ -3883,7 +3678,7 @@ function processMutations(mutations) {
             console.log('[Better Tasker] Quest log opened for task processing - checking for tasks...');
             // Small delay to let quest log fully load before checking
             setTimeout(() => {
-                checkQuestLogForTasks();
+                scheduleTaskCheck();
             }, 100);
         } else {
             console.log('[Better Tasker] Quest log opened but task operation already in progress - skipping task check');
@@ -4377,7 +4172,7 @@ function createMonsterSelectionSettings() {
     `;
     
     // Get creatures from the creature database
-    const creatures = window.creatureDatabase?.ALL_CREATURES || [];
+    const creatures = getTaskerPickerCreatures();
     const settings = loadSettings();
     
     if (creatures.length === 0) {
@@ -4589,7 +4384,7 @@ function loadSettings() {
         creatureOverrides: {},
         // Default all creatures to enabled, except unselectable ones
         ...Object.fromEntries(
-            (window.creatureDatabase?.ALL_CREATURES || []).map(creature => 
+            getTaskerPickerCreatures().map(creature => 
                 [`creature-${creature.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`, 
                  !UNSELECTABLE_CREATURES.includes(creature)]
             )
@@ -4631,6 +4426,7 @@ function autoSaveSettings() {
         // Save to localStorage
         localStorage.setItem('betterTaskerSettings', JSON.stringify(settings));
         console.log('[Better Tasker] Settings auto-saved:', settings);
+        scheduleCreatureFilterCheck();
     } catch (error) {
         console.error('[Better Tasker] Error auto-saving settings:', error);
     }
@@ -4693,7 +4489,7 @@ function loadAndApplySettings() {
         }
         
         // Apply creature selections from individual settings
-        const creatures = window.creatureDatabase?.ALL_CREATURES || [];
+        const creatures = getTaskerPickerCreatures();
         console.log('[Better Tasker] Loading creature settings:', {
             hasIndividualSettings: Object.keys(settings).some(key => key.startsWith('creature-'))
         });
@@ -4875,16 +4671,30 @@ function isQuestBlipAvailable() {
 
 function getActiveTaskCreatureNameFromGameState() {
     try {
-        const taskGameId = globalThis.state?.player?.get?.()?.context?.questLog?.task?.gameId;
+        const taskGameId = globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.task?.gameId
+            ?? globalThis.state?.player?.get?.()?.context?.questLog?.task?.gameId;
         if (taskGameId == null) return null;
-        const monster = globalThis.state?.utils?.getMonster?.(Number(taskGameId));
-        const name = String(monster?.metadata?.name || '').trim();
+        const name = getCreatureNameByGameId(taskGameId);
         if (!name) return null;
         console.log(`[Better Tasker] Resolved task creature from questLog.gameId ${taskGameId}: ${name}`);
         return name;
     } catch (error) {
         console.error('[Better Tasker] Error resolving task creature from game state:', error);
         return null;
+    }
+}
+
+function resolveCurrentTaskCreatureName() {
+    return getActiveTaskCreatureNameFromGameState() || extractCreatureFromTask();
+}
+
+function hasActiveQuestTask() {
+    try {
+        const activeTask = globalThis.state?.player?.activeTask;
+        const taskGameId = globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.task?.gameId;
+        return !!(activeTask || taskGameId);
+    } catch (_) {
+        return false;
     }
 }
 
@@ -4943,7 +4753,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             return false;
         }
 
-        // CRITICAL: Check if Raid Hunter is actively raiding BEFORE doing anything (HIGH priority raids take precedence)
         if (isRaidHunterRaiding()) {
             console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - aborting navigation (HIGH priority raid takes precedence)');
             return false;
@@ -5243,7 +5052,6 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 // Enable Bestiary Automator settings if configured (moved outside autoplay condition)
                 enableBestiaryAutomatorSettings(false, runtimeSettings);
                 
-                // CRITICAL FIX: Wait for Bestiary Automator to initialize (standardized timing)
                 console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
                 await sleep(BESTIARY_INIT_WAIT);
                 
@@ -5472,11 +5280,6 @@ async function waitForGameToEnd() {
     return false;
 }
 
-
-// Click Close buttons inside the quest log only (avoids closing map pickers and other UI)
-function clickAllCloseButtons() {
-    return clickQuestLogCloseButtons();
-}
 
 // ============================================================================
 // 12. BESTIARY AUTOMATOR INTEGRATION
@@ -5989,7 +5792,6 @@ async function stopAllAutomationsForTaskCompletion() {
             console.log('[Better Tasker] Coordinating with Raid Hunter to pause automation for task completion...');
             // Update exposed state to signal task completion is in progress
             updateExposedState();
-            // Note: Raid Hunter should detect this through our exposed state and pause its own automation
             raidHunterPaused = true;
         }
         
@@ -6023,52 +5825,69 @@ async function pauseAutoplay() {
     }
     
     try {
-        // Check if game is actually started and needs pausing
         const boardContext = globalThis.state.board.getSnapshot().context;
-        const gameStarted = boardContext.gameStarted;
-        const currentMode = boardContext.mode;
-        
-        console.log(`[Better Tasker] Current state - gameStarted: ${gameStarted}, mode: ${currentMode}`);
-        
-        if (gameStarted) {
-            // Game is running, need to pause it
-            console.log('[Better Tasker] Attempting to pause autoplay...');
-            
-            const paused = await pauseAutoplayWithButton();
-            if (paused) {
-                // Wait for game state to update (give it up to 3 seconds)
-                let verified = false;
-                for (let checkAttempt = 0; checkAttempt < PAUSE_VERIFY_ATTEMPTS; checkAttempt++) {
-                    await sleep(500);
-                    const newBoardContext = globalThis.state.board.getSnapshot().context;
-                    if (!newBoardContext.gameStarted) {
-                        verified = true;
-                        autoplayPausedByTasker = true;
-                        console.log(`[Better Tasker] Autoplay paused and verified (took ${(checkAttempt + 1) * 500}ms)`);
-                        return true;
-                    }
-                }
-                
-                if (!verified) {
-                    console.warn(`[Better Tasker] Pause button clicked but game still running after ${PAUSE_VERIFY_ATTEMPTS * 500}ms - continuing anyway`);
-                    autoplayPausedByTasker = false;
-                    return false;
-                }
-            } else {
-                console.warn('[Better Tasker] Pause button not found - game may still be running');
-                return false;
-            }
-        } else {
-            console.log('[Better Tasker] Game not started - no need to pause');
-            return true; // Already paused/not running
+        const pauseButtonVisible = isAutoplayPauseButtonVisible();
+        const sessionActive = isAutoplaySessionActive(boardContext);
+
+        console.log(
+            '[Better Tasker] Current state - gameStarted: ' +
+                boardContext.gameStarted +
+                ', isRunning: ' +
+                boardContext.isRunning +
+                ', autoplayRunning: ' +
+                boardContext.autoplayRunning +
+                ', mode: ' +
+                boardContext.mode +
+                ', pauseButtonVisible: ' +
+                pauseButtonVisible +
+                ', sessionActive: ' +
+                sessionActive
+        );
+
+        if (!sessionActive) {
+            console.log('[Better Tasker] Autoplay session not active - no need to pause');
+            return true;
         }
+
+        console.log('[Better Tasker] Attempting to pause autoplay...');
+
+        const paused = await pauseAutoplayWithButton();
+        if (paused) {
+            await sleep(PAUSE_BUTTON_UPDATE_DELAY_MS);
+
+            let verified = false;
+            for (let checkAttempt = 0; checkAttempt < PAUSE_VERIFY_ATTEMPTS; checkAttempt++) {
+                const newBoardContext = globalThis.state.board.getSnapshot().context;
+                if (isAutoplaySessionStopped(newBoardContext)) {
+                    verified = true;
+                    autoplayPausedByTasker = true;
+                    console.log(
+                        `[Better Tasker] Autoplay paused and verified (dom+api, took ${(checkAttempt + 1) * 500}ms)`
+                    );
+                    return true;
+                }
+
+                if (checkAttempt < PAUSE_VERIFY_ATTEMPTS - 1) {
+                    await sleep(500);
+                }
+            }
+
+            console.warn(
+                `[Better Tasker] Pause button clicked but autoplay session still active after ${PAUSE_VERIFY_ATTEMPTS * 500}ms`
+            );
+            autoplayPausedByTasker = false;
+            return false;
+        }
+
+        console.warn('[Better Tasker] Pause button not found - autoplay session may still be running');
+        return false;
     } finally {
         // Release control after operation
         window.AutoplayManager.releaseControl('Better Tasker');
     }
 }
 
-async function handleFinalRunPauseWithRetry() {
+async function handleFinalRunPauseWithRetry(retryDepth = 0) {
     try {
         const paused = await pauseAutoplay();
         if (!taskHuntingOngoing) {
@@ -6120,10 +5939,20 @@ async function handleFinalRunPauseWithRetry() {
         }
 
         if (!paused) {
-            // If pause could not be verified and we cannot read progress, fail open by continuing autoplay.
-            console.log('[Better Tasker] [runs-budget] final run pause not verified — resuming autoplay fail-open');
+            if (retryDepth < 1) {
+                console.log('[Better Tasker] [runs-budget] final run pause not verified — retrying pause (no fail-open resume)');
+                finalRunPauseIssued = false;
+                await sleep(500);
+                return handleFinalRunPauseWithRetry(retryDepth + 1);
+            }
+
+            console.warn('[Better Tasker] [runs-budget] final run pause failed after retry — not resuming past quota');
             finalRunPauseIssued = false;
-            await resumeAutoplay({ force: true, reason: 'final-run-pause-not-verified' });
+            if (isSafeToReload()) {
+                location.reload();
+            } else {
+                cleanupTaskCompletionFailure('final run pause not verified');
+            }
             return;
         }
 
@@ -6280,7 +6109,6 @@ async function resumeAutoplay(options = {}) {
 // Open quest log directly without relying on quest blip
 async function openQuestLogDirectly() {
     try {
-        // CRITICAL: Check if Raid Hunter is actively raiding BEFORE opening quest log (HIGH priority raids take precedence)
         if (isRaidHunterRaiding()) {
             console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - aborting quest log opening');
             return false;
@@ -6669,9 +6497,6 @@ async function handleTaskReadyCompletion() {
         
         if (isGameRunning) {
             console.log('[Better Tasker] Game is running, waiting for game to finish before completing task...');
-            // NOTE: Quest log opening and Finish button clicking will be handled 
-            // in the game end event handler, not here, to avoid opening quest log
-            // while game is still running
         } else {
             console.log('[Better Tasker] No game running, proceeding with task completion...');
             await handlePostGameTaskCompletion(true);
@@ -6811,6 +6636,28 @@ async function handleTaskFinishing() {
         // If check fails, continue with normal flow
     }
     
+    // Don't run task finishing if a task operation is already in progress
+    if (taskOperationInProgress) {
+        console.log('[Better Tasker] Task operation already in progress, skipping quest log check');
+        return;
+    }
+    
+    // Don't run task finishing if pending task completion is already set
+    if (pendingTaskCompletion) {
+        console.log('[Better Tasker] Pending task completion already set, skipping quest log check');
+        return;
+    }
+    
+    // Creature filtering runs before task-hunting/navigation early exits
+    const taskRemoved = await removeCurrentTaskIfNotAllowed();
+    if (taskRemoved) {
+        console.log('[Better Tasker] Task removed due to creature filtering, ending task finishing');
+        resetState('taskComplete');
+        await pauseAutoplay();
+        scheduleTaskCheck();
+        return;
+    }
+    
     // Check if new task is available (based on resetAt timestamp)
     const isQuestBlipReady = isQuestBlipAvailable();
     
@@ -6829,18 +6676,6 @@ async function handleTaskFinishing() {
         }
     }
     
-    // Don't run task finishing if a task operation is already in progress
-    if (taskOperationInProgress) {
-        console.log('[Better Tasker] Task operation already in progress, skipping quest log check');
-        return;
-    }
-    
-    // Don't run task finishing if pending task completion is already set
-    if (pendingTaskCompletion) {
-        console.log('[Better Tasker] Pending task completion already set, skipping quest log check');
-        return;
-    }
-    
     // Check if task navigation has already been completed for this session
     if (taskNavigationCompleted) {
         console.log('[Better Tasker] Task navigation already completed, skipping quest log check');
@@ -6849,13 +6684,6 @@ async function handleTaskFinishing() {
     
     // Load settings (autocomplete check moved to reward claiming functions only)
     const settings = loadSettings();
-    
-    // Check if current task should be removed due to creature filtering
-    const taskRemoved = await removeCurrentTaskIfNotAllowed();
-    if (taskRemoved) {
-        console.log('[Better Tasker] Task removed due to creature filtering, ending task finishing');
-        return;
-    }
     
     try {
         // Check if Game State API is available
@@ -7220,6 +7048,8 @@ const GAME_STATE_DEBOUNCE_MS = 1000; // 1 second debounce
 // Subscribe to board game state changes
 function subscribeToGameState() {
     try {
+        unsubscribeFromGameState();
+
         // Subscribe to board state changes for new game detection
         if (globalThis.state && globalThis.state.board) {
             // Consolidated new game handler with debouncing
@@ -7422,15 +7252,12 @@ function startAutomation() {
         return;
     }
     
-    // CRITICAL: Check if raids are available at startup - if yes, delay to let Raid Hunter claim priority
     const raidHunterEnabled = localStorage.getItem('raidHunterAutomationEnabled');
     const raidState = globalThis.state?.raids?.getSnapshot?.();
     const hasActiveRaids = raidState?.context?.list?.length > 0;
     
-    // Set up core automation interval (always set up, even during delay)
-    automationInterval = setInterval(runAutomationTasks, 5000); // Core automation every 5s
+    automationInterval = setInterval(runAutomationTasks, 5000);
     
-    // Check if we should delay initial run to let Raid Hunter claim priority
     if (raidHunterEnabled === 'true' && hasActiveRaids) {
         console.log('[Better Tasker] Raids available at startup - delaying 15 seconds to let Raid Hunter claim priority (extended for init)');
         setTimeout(() => {
@@ -7462,13 +7289,7 @@ function pauseAutomationDuringRaid() {
     // Clear main automation intervals (but keep game state monitoring)
     clearInterval(automationInterval);
     automationInterval = null;
-    
-    // Clear quest log interval (legacy)
-    if (questLogInterval) {
-        clearInterval(questLogInterval);
-        questLogInterval = null;
-    }
-    
+
     // DON'T clear task check timeout - we need it to wake up for new tasks during raids
     // DON'T unsubscribe from game state - we need it to accept new tasks during raids
     // DON'T clean up coordinators - they need to keep monitoring
@@ -7478,8 +7299,30 @@ function pauseAutomationDuringRaid() {
     console.log('[Better Tasker] Automation paused - game state monitoring and scheduler active for new task acceptance');
 }
 
-async function stopAutomation() {
+function teardownBetterTaskerRuntime() {
+    unsubscribeFromGameState();
     teardownManualPlayDetection();
+    stopStaminaTooltipMonitoring();
+    closeCreatureContextMenu();
+
+    if (taskCheckTimeout) {
+        clearTimeout(taskCheckTimeout);
+        taskCheckTimeout = null;
+    }
+
+    if (creatureFilterCheckTimeout) {
+        clearTimeout(creatureFilterCheckTimeout);
+        creatureFilterCheckTimeout = null;
+    }
+
+    if (mutationProcessTimer) {
+        clearTimeout(mutationProcessTimer);
+        mutationProcessTimer = null;
+    }
+}
+
+async function stopAutomation() {
+    teardownBetterTaskerRuntime();
 
     if (!automationInterval) return;
     
@@ -7494,25 +7337,7 @@ async function stopAutomation() {
     // Clear main intervals
     clearInterval(automationInterval);
     automationInterval = null;
-    
-    // Clear quest log interval (legacy)
-    if (questLogInterval) {
-        clearInterval(questLogInterval);
-        questLogInterval = null;
-    }
-    
-    // Clear task check timeout
-    if (taskCheckTimeout) {
-        clearTimeout(taskCheckTimeout);
-        taskCheckTimeout = null;
-    }
-    
-    // Unsubscribe from game state changes
-    unsubscribeFromGameState();
-    
-    // Stop stamina tooltip monitoring
-    stopStaminaTooltipMonitoring();
-    
+
     // Pause autoplay if we have control (using pause button)
     try {
         if (window.AutoplayManager.hasControl('Better Tasker')) {
@@ -7575,7 +7400,12 @@ function runAutomationTasks() {
             return;
         }
         
-        // Note: Stamina Optimizer check removed from here - it only blocks when enabling autoplay in ensureAutoplayMode()
+        // Stamina Optimizer blocks only when enabling autoplay in ensureAutoplayMode()
+        
+        // Creature filter runs even during active task hunting
+        if (isGameActive() && hasActiveQuestTask()) {
+            void runCreatureFilterCheck();
+        }
         
         // Don't run automation if task hunting is ongoing
         if (taskHuntingOngoing) {
@@ -7599,142 +7429,59 @@ function runAutomationTasks() {
 // 13.1. CREATURE FILTERING FUNCTIONS
 // ============================================================================
 
-// Extract creature name from task HTML (global search - kept for backward compatibility)
-function extractCreatureFromTask() {
+function extractCreatureNameFromDescription(root) {
+    const scope = root?.querySelectorAll ? root : document;
+    const taskDescriptions = scope.querySelectorAll('.pixel-font-14');
+    for (const desc of taskDescriptions) {
+        const text = desc.textContent;
+        if (!text || (!text.includes('kill count') && !text.includes('mortos'))) continue;
+        const killCountMatch = text.match(/^(.+?)\s+(?:kill\s+count|mortos?)/i);
+        if (killCountMatch) return killCountMatch[1].trim();
+    }
+    return null;
+}
+
+function extractCreatureFromRoot(root, logLabel = 'task') {
     try {
-        console.log('[Better Tasker] Extracting creature from task...');
-        
-        // Look for creature sprite with ID (e.g., id-52 for Winter Wolf)
-        const creatureSprite = document.querySelector('.sprite.outfit[class*="id-"]');
+        console.log(`[Better Tasker] Extracting creature from ${logLabel}...`);
+        const scope = root?.querySelector ? root : document;
+        const creatureSprite = scope.querySelector('.sprite.outfit[class*="id-"]');
         if (creatureSprite) {
-            const classList = Array.from(creatureSprite.classList);
-            const idClass = classList.find(cls => cls.startsWith('id-'));
+            const idClass = Array.from(creatureSprite.classList).find((cls) => cls.startsWith('id-'));
             if (idClass) {
                 const creatureId = idClass.replace('id-', '');
                 console.log('[Better Tasker] Found creature sprite with ID:', creatureId);
-                
-                // Try to get creature name from creature database
-                if (window.creatureDatabase?.CREATURE_ID_MAP) {
-                    const creatureName = window.creatureDatabase.CREATURE_ID_MAP[creatureId];
-                    if (creatureName) {
-                        console.log('[Better Tasker] Mapped creature ID to name:', creatureName);
-                        return creatureName;
-                    }
-                }
-
-                // Fallback: resolve directly from game state's monster metadata
-                const monsterName = globalThis.state?.utils?.getMonster?.(Number(creatureId))?.metadata?.name;
-                if (monsterName) {
-                    console.log('[Better Tasker] Mapped creature ID via state.utils.getMonster:', monsterName);
-                    return monsterName;
-                }
-                
-                // Fallback: try to extract from task description
-                const taskDescription = document.querySelector('.pixel-font-14');
-                if (taskDescription && taskDescription.textContent) {
-                    const text = taskDescription.textContent;
-                    console.log('[Better Tasker] Task description:', text);
-                    
-                    // Look for "kill count" pattern (English) or "mortos" pattern (Portuguese)
-                    const killCountMatch = text.match(/^(.+?)\s+(?:kill\s+count|mortos?)/i);
-                    if (killCountMatch) {
-                        const creatureName = killCountMatch[1].trim();
-                        console.log('[Better Tasker] Extracted creature from description:', creatureName);
-                        return creatureName;
-                    }
-                }
-            }
-        }
-        
-        // Alternative: Look for creature name in task description text
-        const taskDescriptions = document.querySelectorAll('.pixel-font-14');
-        for (const desc of taskDescriptions) {
-            if (desc.textContent && (desc.textContent.includes('kill count') || desc.textContent.includes('mortos'))) {
-                const text = desc.textContent;
-                const killCountMatch = text.match(/^(.+?)\s+(?:kill\s+count|mortos?)/i);
-                if (killCountMatch) {
-                    const creatureName = killCountMatch[1].trim();
-                    console.log('[Better Tasker] Extracted creature from description:', creatureName);
+                const creatureName = getCreatureNameByGameId(creatureId);
+                if (creatureName) {
+                    console.log('[Better Tasker] Mapped creature ID to name:', creatureName);
                     return creatureName;
                 }
+                const fromSpriteDescription = extractCreatureNameFromDescription(scope);
+                if (fromSpriteDescription) {
+                    console.log('[Better Tasker] Extracted creature from description:', fromSpriteDescription);
+                    return fromSpriteDescription;
+                }
             }
         }
-        
-        console.log('[Better Tasker] Could not extract creature name from task');
+        const fromDescription = extractCreatureNameFromDescription(scope);
+        if (fromDescription) {
+            console.log('[Better Tasker] Extracted creature from description:', fromDescription);
+            return fromDescription;
+        }
+        console.log(`[Better Tasker] Could not extract creature name from ${logLabel}`);
         return null;
     } catch (error) {
-        console.error('[Better Tasker] Error extracting creature from task:', error);
+        console.error(`[Better Tasker] Error extracting creature from ${logLabel}:`, error);
         return null;
     }
 }
 
-// Extract creature name from a specific section (new section-based approach)
-function extractCreatureFromSection(section) {
-    try {
-        console.log('[Better Tasker] Extracting creature from section...');
-        
-        // Look for creature sprite with ID within the specific section
-        const creatureSprite = section.querySelector('.sprite.outfit[class*="id-"]');
-        if (creatureSprite) {
-            const classList = Array.from(creatureSprite.classList);
-            const idClass = classList.find(cls => cls.startsWith('id-'));
-            if (idClass) {
-                const creatureId = idClass.replace('id-', '');
-                console.log('[Better Tasker] Found creature sprite with ID:', creatureId);
-                
-                // Try to get creature name from creature database
-                if (window.creatureDatabase?.CREATURE_ID_MAP) {
-                    const creatureName = window.creatureDatabase.CREATURE_ID_MAP[creatureId];
-                    if (creatureName) {
-                        console.log('[Better Tasker] Mapped creature ID to name:', creatureName);
-                        return creatureName;
-                    }
-                }
+function extractCreatureFromTask() {
+    return extractCreatureFromRoot(document, 'task');
+}
 
-                // Fallback: resolve directly from game state's monster metadata
-                const monsterName = globalThis.state?.utils?.getMonster?.(Number(creatureId))?.metadata?.name;
-                if (monsterName) {
-                    console.log('[Better Tasker] Mapped creature ID via state.utils.getMonster:', monsterName);
-                    return monsterName;
-                }
-                
-                // Fallback: try to extract from task description within the section
-                const taskDescription = section.querySelector('.pixel-font-14');
-                if (taskDescription && taskDescription.textContent) {
-                    const text = taskDescription.textContent;
-                    console.log('[Better Tasker] Task description:', text);
-                    
-                    // Look for "kill count" pattern (English) or "mortos" pattern (Portuguese)
-                    const killCountMatch = text.match(/^(.+?)\s+(?:kill\s+count|mortos?)/i);
-                    if (killCountMatch) {
-                        const creatureName = killCountMatch[1].trim();
-                        console.log('[Better Tasker] Extracted creature from description:', creatureName);
-                        return creatureName;
-                    }
-                }
-            }
-        }
-        
-        // Alternative: Look for creature name in task description text within the section
-        const taskDescriptions = section.querySelectorAll('.pixel-font-14');
-        for (const desc of taskDescriptions) {
-            if (desc.textContent && (desc.textContent.includes('kill count') || desc.textContent.includes('mortos'))) {
-                const text = desc.textContent;
-                const killCountMatch = text.match(/^(.+?)\s+(?:kill\s+count|mortos?)/i);
-                if (killCountMatch) {
-                    const creatureName = killCountMatch[1].trim();
-                    console.log('[Better Tasker] Extracted creature from description:', creatureName);
-                    return creatureName;
-                }
-            }
-        }
-        
-        console.log('[Better Tasker] Could not extract creature name from section');
-        return null;
-    } catch (error) {
-        console.error('[Better Tasker] Error extracting creature from section:', error);
-        return null;
-    }
+function extractCreatureFromSection(section) {
+    return extractCreatureFromRoot(section, 'section');
 }
 
 // Extract suggested map from a specific section
@@ -7797,12 +7544,49 @@ async function openQuestLogForTaskRemoval() {
     }
 }
 
+function scheduleCreatureFilterCheck() {
+    if (taskerState !== TASKER_STATES.ENABLED) {
+        return;
+    }
+    if (creatureFilterCheckTimeout) {
+        clearTimeout(creatureFilterCheckTimeout);
+    }
+    creatureFilterCheckTimeout = setTimeout(() => {
+        creatureFilterCheckTimeout = null;
+        void runCreatureFilterCheck();
+    }, CREATURE_FILTER_CHECK_DEBOUNCE_MS);
+}
+
+async function runCreatureFilterCheck() {
+    if (taskerState !== TASKER_STATES.ENABLED) {
+        return;
+    }
+    if (isManualPlayPaused()) {
+        return;
+    }
+    if (taskOperationInProgress || pendingTaskCompletion) {
+        return;
+    }
+    if (window.betterTaskerRemovingTask) {
+        return;
+    }
+    if (!isGameActive() || !hasActiveQuestTask()) {
+        return;
+    }
+
+    const taskRemoved = await removeCurrentTaskIfNotAllowed();
+    if (taskRemoved) {
+        console.log('[Better Tasker] Task removed due to creature filter');
+        resetState('taskComplete');
+        await pauseAutoplay();
+        scheduleTaskCheck();
+    }
+}
+
 // Remove current task if creature is not allowed
 async function removeCurrentTaskIfNotAllowed() {
     try {
-        // Get current active task
-        const activeTask = globalThis.state?.player?.activeTask;
-        if (!activeTask) {
+        if (!hasActiveQuestTask()) {
             return false;
         }
         
@@ -7815,10 +7599,9 @@ async function removeCurrentTaskIfNotAllowed() {
         // Set flag to prevent double-removal
         window.betterTaskerRemovingTask = true;
         
-        // Extract creature from current task
-        const creatureName = extractCreatureFromTask();
+        const creatureName = resolveCurrentTaskCreatureName();
         if (!creatureName) {
-            console.log('[Better Tasker] Could not extract creature from current task');
+            console.log('[Better Tasker] Could not resolve creature for current task');
             window.betterTaskerRemovingTask = false;
             return false;
         }
@@ -7988,11 +7771,13 @@ function isCreatureAllowed(creatureName) {
             console.log('[Better Tasker] No creature name provided for checking');
             return true; // Allow if we can't determine creature
         }
+
+        if (UNSELECTABLE_CREATURES.includes(creatureName) || isGazerCreature(creatureName) || isEventCreature(creatureName)) {
+            return false;
+        }
         
         const settings = loadSettings();
-        
-        // Convert creature name to settings key format (e.g., "Winter Wolf" -> "creature-winter-wolf")
-        const creatureKey = `creature-${creatureName.toLowerCase().replace(/\s+/g, '-')}`;
+        const creatureKey = getCreatureSettingsKey(creatureName);
         
         console.log('[Better Tasker] Checking if creature is allowed:', {
             creatureName,
@@ -8095,11 +7880,6 @@ function scheduleTaskCheck() {
     }
 }
 
-// Legacy function for compatibility (redirects to scheduler)
-function checkQuestLogForTasks() {
-    scheduleTaskCheck();
-}
-
 // Shared function to accept new task (used by both Enabled and New Task+ modes)
 async function acceptNewTaskFromQuestLog(skipCreatureFiltering = false) {
     try {
@@ -8141,8 +7921,8 @@ async function acceptNewTaskFromQuestLog(skipCreatureFiltering = false) {
         // Check creature filtering if not skipped
         if (!skipCreatureFiltering) {
             console.log('[Better Tasker] Checking creature filtering...');
-            const creatureName = extractCreatureFromTask();
-            console.log('[Better Tasker] Extracted creature name:', creatureName);
+            const creatureName = resolveCurrentTaskCreatureName();
+            console.log('[Better Tasker] Resolved creature name:', creatureName);
             
             if (creatureName && !isCreatureAllowed(creatureName)) {
                 console.log(`[Better Tasker] Task rejected - creature "${creatureName}" is not in allowed list`);
@@ -8258,7 +8038,7 @@ async function openQuestLogAndAcceptTask() {
         }
         
         // Don't set task operation in progress flag here - only set it when actually processing a task
-        // Note: We allow task acceptance during raids (non-invasive), but navigation is blocked at line 6707
+        // Task acceptance during raids is allowed; navigation is blocked in openQuestLogAndAcceptTask
         console.log('[Better Tasker] Opening quest log to check for tasks...');
         
         await closeQuestLogIfOpen();
@@ -8430,7 +8210,10 @@ function init() {
         });
         
         // Subscribe to mod state changes instead of polling
-        window.ModCoordination.on('modActiveChanged', (data) => {
+        if (modCoordinationUnsubscribe) {
+            modCoordinationUnsubscribe();
+        }
+        modCoordinationUnsubscribe = window.ModCoordination.on('modActiveChanged', (data) => {
             if (data.modName === 'Raid Hunter') {
                 handleRaidHunterStateChange(data.active);
             } else if (data.modName === 'Board Analyzer' || data.modName === 'Manual Runner') {
@@ -8501,12 +8284,15 @@ function cleanupBetterTasker() {
     try {
         stopNextTaskTimerUpdates();
 
-        // Stop automation
+        // Stop automation (runtime teardown + interval/autoplay cleanup)
         stopAutomation();
-        
+
         // Clean up Raid Hunter coordination
         cleanupRaidHunterCoordination();
-        
+
+        // Clean up Board Analyzer coordination
+        cleanupBoardAnalyzerCoordination();
+
         // Clean up modal if open
         if (activeTaskerModal) {
             try {
@@ -8526,10 +8312,7 @@ function cleanupBetterTasker() {
         // Clean up quest button validation and restore appearance
         stopQuestButtonValidation();
         restoreQuestButtonAppearance();
-        
-        // Clean up stamina tooltip monitoring
-        stopStaminaTooltipMonitoring();
-        
+
         // Clean up board state subscription
         if (isActiveStateSubscription(boardStateUnsubscribe)) {
             invokeStateSubscription(boardStateUnsubscribe);
@@ -8631,10 +8414,32 @@ function cleanupBetterTasker() {
         // Don't reset taskNavigationCompleted in cleanup - let it persist
         
         // Unregister from coordination system
+        if (modCoordinationUnsubscribe) {
+            try {
+                modCoordinationUnsubscribe();
+            } catch (coordError) {
+                console.warn('[Better Tasker] Error unsubscribing from ModCoordination:', coordError);
+            }
+            modCoordinationUnsubscribe = null;
+        }
         if (window.ModCoordination) {
             window.ModCoordination.unregisterMod('Better Tasker');
         }
-        
+
+        for (const toastContainerId of ['better-tasker-toast-container', 'bt-toast-container']) {
+            const toastContainer = document.getElementById(toastContainerId);
+            if (toastContainer) {
+                toastContainer.remove();
+            }
+        }
+
+        if (window.betterTaskerInitTime) {
+            delete window.betterTaskerInitTime;
+        }
+        if (window.betterTaskerRemovingTask) {
+            delete window.betterTaskerRemovingTask;
+        }
+
         console.log('[Better Tasker] Mod cleanup completed');
     } catch (error) {
         console.error('[Better Tasker] Error during mod cleanup:', error);

@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "4.2.9",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Full EN/PT localization (mods.awakenTracker): panel UI, tracker event logs and skip reasons, overview filters and badges, Farm Maps panel, and toolbar button. Clear All confirmation button now shows Confirm instead of Confirm clear all."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Creature picker and ID lookups use shared creature-database helpers (same gazer/event filter as Autoscroller, findMonsterByGameId/findMonsterByName). Merged duplicate quest-log creature extractors. Mod unload tears down subscriptions, timers, and coordination listeners; removed unused quest-blip helpers."
+        },
+        {
+          "mod": "Core",
+          "type": "changed",
+          "text": "Mod load failures show one loader summary toast (failed mod count and names, auto-retry up to 3 with page refresh) from ui_components via local_mods — not duplicate Welcome error toasts. Success and loading toasts stay in Welcome."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Replaced tabs permission with activeTab (avoids Chrome \"Read browsing history\" wording). Background no longer queries the active tab — delivery uses contentScriptReady and sender.tab.id; popup passes tabId for toggles and run. Injects content/platform.js before client.js."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Unchecked creatures now remove the active task reliably: resolves from questLog.gameId and game state (not only quest-log DOM), runs during task hunting and on settings change, and matches checkbox keys. Autoplay pauses reliably at max task kills with session-aware detection, DOM retries, and no resume past quota."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Mobile WebExtensions (e.g. Orion iOS): relaxed loader when platform detects mobile or page extension fetch fails — background-first mod content, skip bulk HEAD probes, shorter page-ready wait, API wait fallback, hydration/game-state warnings non-fatal (no auto-refresh loop). Desktop strict loader unchanged. Optional override: sessionStorage ba-relaxed-loader (1 or 0)."
+        }
+      ]
+    },
+    {
       "version": "4.2.8",
       "changes": [
         {

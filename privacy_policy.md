@@ -28,7 +28,8 @@ Our extension requires the following permissions:
 
 - **storage** / **unlimitedStorage**: To save your settings and local mod cache.
 - **scripting**: To inject mod code into the Bestiary Arena website.
-- **Host access to bestiaryarena.com**: To run mods on the game site and communicate with open Bestiary Arena tabs.
+- **activeTab**: When you open the extension popup, temporary access to the current tab so toggles and messages reach the open game tab (not broad browsing-history access).
+- **Host access to bestiaryarena.com**: To run mods on the game site and communicate with open Bestiary Arena tabs. Automatic mod loading uses the content script on game pages, not the `tabs` permission.
 
 **Optional host access** (requested only when you open the popup or import a remote mod):
 

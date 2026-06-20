@@ -18,6 +18,39 @@
     const GRID_ID = 'mod-awaken-tracker-grid';
     const TITLE_ID = 'mod-awaken-tracker-title';
 
+    function t(key, params) {
+        let text = key;
+        if (typeof api !== 'undefined' && api.i18n?.t) {
+            text = api.i18n.t(key);
+        } else if (typeof context !== 'undefined' && context.api?.i18n?.t) {
+            text = context.api.i18n.t(key);
+        }
+        if (params && typeof text === 'string') {
+            for (const [paramKey, value] of Object.entries(params)) {
+                text = text.replaceAll(`{${paramKey}}`, String(value));
+            }
+        }
+        return text;
+    }
+
+    function getSkipReasonLabel(reason) {
+        const key = `mods.awakenTracker.skipReason.${reason}`;
+        const label = t(key);
+        if (label !== key) return label;
+        return reason || t('mods.awakenTracker.unknown');
+    }
+
+    const OVERVIEW_VIEW_OPTIONS = [
+        ['all', 'viewAll'],
+        ['perfect', 'viewPerfect'],
+        ['awakened', 'viewAwakened'],
+        ['awakened-not-capped', 'viewAwakenedNotCapped'],
+        ['capped', 'viewCapped'],
+        ['missing-awaken', 'viewMissingAwaken'],
+        ['missing-cap', 'viewMissingCap'],
+        ['needs-both', 'viewNeedsBoth']
+    ];
+
     const STORAGE_KEY_DATA = 'awakenTrackerData';
     const STORAGE_KEY_PANEL = 'awakenTrackerPanel';
 
@@ -81,14 +114,6 @@
         // Hundo perfect: awakened + capped + lvl 99 AND NOT shiny.
         perfectHundo: 'https://bestiaryarena.com/assets/icons/star-tier-hundo.png',
         shiny: 'https://bestiaryarena.com/assets/icons/shiny-star.png'
-    };
-    const SKIP_REASON_LABELS = {
-        'no-higher-gene': 'no higher genes',
-        'keep-list': 'in keep list',
-        'disabled': 'inject disabled',
-        'no-target': 'no matching awaken',
-        'same-id': 'same monster (already injected)',
-        'on-board': 'awaken in battle'
     };
 
     // =======================
@@ -766,7 +791,7 @@
     function buildDragHandle(slot) {
         const handle = document.createElement('span');
         handle.textContent = '⋮⋮';
-        handle.title = 'Drag to reorder';
+        handle.title = t('mods.awakenTracker.dragToReorder');
         handle.style.cssText = 'cursor:grab;color:#777;font-size:14px;line-height:1;padding:0 2px;user-select:none;letter-spacing:-3px;flex:0 0 auto;';
         handle.addEventListener('mousedown', () => { slot.draggable = true; });
         handle.addEventListener('mouseup', () => { setTimeout(() => { slot.draggable = false; }, 50); });
@@ -778,7 +803,7 @@
     function buildToggleArrow(gameId, isCollapsed) {
         const arrow = document.createElement('span');
         arrow.textContent = isCollapsed ? '▶' : '▼';
-        arrow.title = isCollapsed ? 'Expand' : 'Collapse';
+        arrow.title = isCollapsed ? t('mods.awakenTracker.expand') : t('mods.awakenTracker.collapse');
         arrow.style.cssText = 'cursor:pointer;color:#aaa;font-size:9px;padding:0 2px;user-select:none;flex:0 0 auto;';
         arrow.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -799,7 +824,7 @@
         capToggleInput.style.cssText = 'margin:0;';
         if (!awakened) {
             capToggleInput.disabled = true;
-            capToggleLabel.title = 'Awaken this creature first';
+            capToggleLabel.title = t('mods.awakenTracker.awakenFirst');
             capToggleLabel.style.opacity = '0.4';
             capToggleLabel.style.cursor = 'not-allowed';
             capToggleInput.style.cursor = 'not-allowed';
@@ -812,12 +837,12 @@
             }
             capToggleInput.checked = false;
             capToggleInput.disabled = true;
-            capToggleLabel.title = 'Already fully capped — pause-on-cap has no effect';
+            capToggleLabel.title = t('mods.awakenTracker.alreadyFullyCapped');
             capToggleLabel.style.opacity = '0.4';
             capToggleLabel.style.cursor = 'not-allowed';
             capToggleInput.style.cursor = 'not-allowed';
         } else {
-            capToggleLabel.title = 'Pause game when all 5 stats reach 20';
+            capToggleLabel.title = t('mods.awakenTracker.pauseOnCap');
             capToggleLabel.style.opacity = isMarked ? '1' : '0.6';
             capToggleLabel.style.cursor = 'pointer';
             capToggleInput.style.cursor = 'pointer';
@@ -919,7 +944,7 @@
         // ===== Modo expandido: corpo completo =====
         if (!awakened) {
             const noAwaken = document.createElement('div');
-            noAwaken.textContent = '— no awaken';
+            noAwaken.textContent = t('mods.awakenTracker.noAwaken');
             noAwaken.style.cssText = 'opacity:0.6;font-size:12px;padding-left:4px;';
             slot.appendChild(noAwaken);
             return slot;
@@ -959,7 +984,7 @@
             const candidateLine = hasStats
                 ? STATS.map(renderCandidateStat).filter(Boolean).join(' ') +
                   ` <span style="color:${getStatTotalColor(candidateTotal)};font-weight:600;">(${candidateTotal}%)</span>`
-                : '<span style="opacity:0.6;">(stats unavailable)</span>';
+                : `<span style="opacity:0.6;">${t('mods.awakenTracker.statsUnavailable')}</span>`;
 
             const lastLine = document.createElement('div');
             lastLine.style.cssText = 'font-size:11px;line-height:1.6;border-top:1px dashed #444;margin-top:2px;padding-top:3px;';
@@ -968,13 +993,13 @@
                 const gainPairs = Object.entries(ev.gains || {}).filter(([, v]) => v > 0)
                     .map(([k, v]) => `<span style="display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtml(k, 11)}<span style="color:#7fde7f;font-weight:bold;">+${v}</span></span>`);
                 lastLine.innerHTML =
-                    `<span style="color:#7fde7f;">✓ injected:</span> ${gainPairs.join(' ') || '(no gain)'}` +
-                    `<div style="margin-top:2px;"><span style="opacity:0.6;">sealed:</span> ${candidateLine}</div>`;
+                    `<span style="color:#7fde7f;">${t('mods.awakenTracker.injected')}</span> ${gainPairs.join(' ') || t('mods.awakenTracker.noGain')}` +
+                    `<div style="margin-top:2px;"><span style="opacity:0.6;">${t('mods.awakenTracker.sealed')}</span> ${candidateLine}</div>`;
             } else {
-                const reasonLabel = SKIP_REASON_LABELS[ev.reason] || ev.reason || 'unknown';
+                const reasonLabel = getSkipReasonLabel(ev.reason);
                 lastLine.innerHTML =
-                    `<span style="color:#ff9966;">✗ skipped:</span> ${reasonLabel}` +
-                    `<div style="margin-top:2px;"><span style="opacity:0.6;">sealed:</span> ${candidateLine}</div>`;
+                    `<span style="color:#ff9966;">${t('mods.awakenTracker.skipped')}</span> ${reasonLabel}` +
+                    `<div style="margin-top:2px;"><span style="opacity:0.6;">${t('mods.awakenTracker.sealed')}</span> ${candidateLine}</div>`;
             }
             slot.appendChild(lastLine);
         }
@@ -983,7 +1008,7 @@
         counter.style.cssText = 'font-size:11px;color:#9ad;border-top:1px dashed #444;margin-top:2px;padding-top:3px;';
         const injects = entry?.injects || 0;
         const skips = entry?.skips || 0;
-        counter.innerHTML = `session injects: <span style="color:#7fde7f;">${injects} ✓</span> / <span style="color:#ff9966;">${skips} skipped</span>`;
+        counter.innerHTML = t('mods.awakenTracker.sessionInjectsHtml', { injects, skips });
         slot.appendChild(counter);
 
         const eventLog = Array.isArray(entry?.eventLog) ? entry.eventLog : [];
@@ -993,7 +1018,7 @@
             logDetails.style.cssText = 'border-top:1px dashed #444;margin-top:2px;padding-top:3px;';
             const logSummary = document.createElement('summary');
             logSummary.style.cssText = 'cursor:pointer;font-size:11px;color:#9ad;opacity:0.85;';
-            logSummary.textContent = `▸ View log (${eventLog.length})`;
+            logSummary.textContent = t('mods.awakenTracker.viewLog', { count: eventLog.length });
             logDetails.appendChild(logSummary);
 
             const renderLogStat = (key, v) =>
@@ -1016,20 +1041,20 @@
                 const sealedHtml = hasStats
                     ? STATS.map(k => renderLogStat(k, cs[k])).join(' ') +
                       ` <span style="color:${getStatTotalColor(sealedTotal)};font-weight:600;">(${sealedTotal}%)</span>`
-                    : '<span style="opacity:0.6;">(no stats)</span>';
+                    : `<span style="opacity:0.6;">${t('mods.awakenTracker.noStats')}</span>`;
 
                 if (logEv.type === 'applied') {
                     const gainPairs = Object.entries(logEv.gains || {}).filter(([, v]) => v > 0)
                         .map(([k, v]) => `<span style="display:inline-flex;align-items:center;gap:1px;">${renderStatIconHtml(k, 10)}<span style="color:#7fde7f;font-weight:bold;">+${v}</span></span>`)
                         .join(' ');
                     row.innerHTML =
-                        `<div><span style="opacity:0.5;">${hh}:${mm}:${ss}</span> <span style="color:#7fde7f;">✓</span> ${gainPairs || '<span style="opacity:0.6;">(no gain)</span>'}</div>` +
-                        `<div style="opacity:0.7;padding-left:6px;">sealed: ${sealedHtml}</div>`;
+                        `<div><span style="opacity:0.5;">${hh}:${mm}:${ss}</span> <span style="color:#7fde7f;">✓</span> ${gainPairs || `<span style="opacity:0.6;">${t('mods.awakenTracker.noGain')}</span>`}</div>` +
+                        `<div style="opacity:0.7;padding-left:6px;">${t('mods.awakenTracker.sealed')} ${sealedHtml}</div>`;
                 } else {
-                    const reasonLabel = SKIP_REASON_LABELS[logEv.reason] || logEv.reason || 'skip';
+                    const reasonLabel = getSkipReasonLabel(logEv.reason);
                     row.innerHTML =
                         `<div><span style="opacity:0.5;">${hh}:${mm}:${ss}</span> <span style="color:#ff9966;">✗</span> ${reasonLabel}</div>` +
-                        `<div style="opacity:0.7;padding-left:6px;">sealed: ${sealedHtml}</div>`;
+                        `<div style="opacity:0.7;padding-left:6px;">${t('mods.awakenTracker.sealed')} ${sealedHtml}</div>`;
                 }
                 logList.appendChild(row);
             }
@@ -1541,7 +1566,7 @@
 
         const closeBtn = document.createElement('button');
         closeBtn.textContent = '×';
-        closeBtn.title = 'Close';
+        closeBtn.title = t('mods.awakenTracker.close');
         closeBtn.className = 'at-icon-btn';
         closeBtn.addEventListener('click', closePanel);
         header.appendChild(closeBtn);
@@ -1553,7 +1578,11 @@
         const footerActions = document.createElement('div');
         footerActions.className = 'at-footer-actions';
 
-        const clearMapBtn = makeConfirmButton('Clear Map', 'Confirm clear map', 'Clear this map only, rebaseline its stats and clear its 🎯 marks (preserves other maps)', () => {
+        const clearMapBtn = makeConfirmButton(
+            t('mods.awakenTracker.clearMap'),
+            t('mods.awakenTracker.confirmClearMap'),
+            t('mods.awakenTracker.clearMapTooltip'),
+            () => {
             if (!state.currentRoomId) return;
             state.byMap.delete(state.currentRoomId);
             state.baselineByMap.delete(state.currentRoomId);
@@ -1564,7 +1593,11 @@
         });
         footerActions.appendChild(clearMapBtn);
 
-        const clearAllBtn = makeConfirmButton('Clear All', 'Confirm clear all', 'Clear ALL maps, rebaseline stats and clear ALL 🎯 marks', () => {
+        const clearAllBtn = makeConfirmButton(
+            t('mods.awakenTracker.clearAll'),
+            t('mods.awakenTracker.confirm'),
+            t('mods.awakenTracker.clearAllTooltip'),
+            () => {
             state.byMap.clear();
             state.baselineByMap.clear();
             state.pauseOnCapByMap.clear();
@@ -1577,7 +1610,7 @@
 
         const footerCredits = document.createElement('span');
         footerCredits.className = 'at-footer-credits';
-        footerCredits.innerHTML = 'Credits: <a href="https://bestiaryarena.com/profile/tinhozin" target="_blank">tinhozin</a>';
+        footerCredits.innerHTML = t('mods.awakenTracker.creditsHtml');
 
         footer.appendChild(footerActions);
         footer.appendChild(footerCredits);
@@ -1593,8 +1626,8 @@
         tabTrackerBtn.className = 'at-tab-btn';
         tabOverviewBtn.className = 'at-tab-btn';
 
-        tabTrackerBtn.textContent = 'Tracker';
-        tabOverviewBtn.textContent = 'Overview';
+        tabTrackerBtn.textContent = t('mods.awakenTracker.tabTracker');
+        tabOverviewBtn.textContent = t('mods.awakenTracker.tabOverview');
 
         const trackerBody = document.createElement('div');
         trackerBody.className = 'at-body';
@@ -1647,32 +1680,22 @@
 
         const overviewFilterInput = document.createElement('input');
         overviewFilterInput.type = 'text';
-        overviewFilterInput.placeholder = 'Filter by name…';
+        overviewFilterInput.placeholder = t('mods.awakenTracker.filterPlaceholder');
         overviewFilterInput.className = 'at-input';
         overviewFilterInput.style.cssText = 'flex:1;min-width:120px;';
 
         const overviewViewSelect = document.createElement('select');
         overviewViewSelect.className = 'at-input';
-        const viewOptions = [
-            ['all', 'All'],
-            ['perfect', 'Perfect (awakened + capped + lvl 99)'],
-            ['awakened', 'Awakened (any monster)'],
-            ['awakened-not-capped', 'Awakened, not capped'],
-            ['capped', 'Capped (any monster)'],
-            ['missing-awaken', 'Missing awaken'],
-            ['missing-cap', 'Missing cap'],
-            ['needs-both', 'Missing awaken AND cap']
-        ];
-        for (const [val, label] of viewOptions) {
+        for (const [val, labelKey] of OVERVIEW_VIEW_OPTIONS) {
             const opt = document.createElement('option');
             opt.value = val;
-            opt.textContent = label;
+            opt.textContent = t(`mods.awakenTracker.${labelKey}`);
             overviewViewSelect.appendChild(opt);
         }
 
         const farmToggleBtn = document.createElement('button');
-        farmToggleBtn.textContent = '🎯 Farm maps';
-        farmToggleBtn.title = 'Toggle the Farm Maps side panel';
+        farmToggleBtn.textContent = t('mods.awakenTracker.farmMaps');
+        farmToggleBtn.title = t('mods.awakenTracker.farmMapsToggle');
         farmToggleBtn.className = 'at-styled-btn';
         farmToggleBtn.style.cssText = 'flex-basis:100%;';
 
@@ -1689,17 +1712,17 @@
         const farmHeader = document.createElement('div');
         farmHeader.className = 'at-section';
         farmHeader.style.cssText = 'display:flex;align-items:center;gap:6px;';
-        farmHeader.innerHTML = '<strong style="color:var(--at-text-gold);font-size:12px;">🎯 Farm Maps</strong>';
+        farmHeader.innerHTML = `<strong style="color:var(--at-text-gold);font-size:12px;">${t('mods.awakenTracker.farmMapsTitle')}</strong>`;
 
         const hideRaidsLabel = document.createElement('label');
         hideRaidsLabel.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#b8b8b8;cursor:pointer;margin-left:auto;';
-        hideRaidsLabel.title = 'Hide maps that are raids (variable spawn times)';
+        hideRaidsLabel.title = t('mods.awakenTracker.hideRaidsTooltip');
         const hideRaidsInput = document.createElement('input');
         hideRaidsInput.type = 'checkbox';
         hideRaidsInput.checked = s.hideRaids === true;
         hideRaidsInput.style.cssText = 'margin:0;cursor:pointer;';
         const hideRaidsText = document.createElement('span');
-        hideRaidsText.textContent = 'Hide raids';
+        hideRaidsText.textContent = t('mods.awakenTracker.hideRaids');
         hideRaidsLabel.appendChild(hideRaidsInput);
         hideRaidsLabel.appendChild(hideRaidsText);
         farmHeader.appendChild(hideRaidsLabel);
@@ -1711,7 +1734,7 @@
 
         const farmCloseBtn = document.createElement('button');
         farmCloseBtn.textContent = '×';
-        farmCloseBtn.title = 'Close farm panel';
+        farmCloseBtn.title = t('mods.awakenTracker.closeFarmPanel');
         farmCloseBtn.className = 'at-icon-btn';
         farmHeader.appendChild(farmCloseBtn);
 
@@ -1754,7 +1777,7 @@
         function renderOverview() {
             const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters;
             if (!Array.isArray(monsters) || monsters.length === 0) {
-                overviewSummary.innerHTML = '<span style="color:#d87d7d;">No monsters found. Make sure you are logged in.</span>';
+                overviewSummary.innerHTML = `<span style="color:#d87d7d;">${t('mods.awakenTracker.noMonstersFound')}</span>`;
                 overviewGrid.innerHTML = '';
                 return;
             }
@@ -1845,16 +1868,19 @@
                 missingCap: groups.filter(g => !g.anyCapped).length
             };
             const skippedParts = [
-                skippedUnobtainable ? `${skippedUnobtainable} unobtainable` : '',
-                skippedNonAwakenable ? `${skippedNonAwakenable} event/gazer` : ''
+                skippedUnobtainable ? t('mods.awakenTracker.skippedUnobtainable', { count: skippedUnobtainable }) : '',
+                skippedNonAwakenable ? t('mods.awakenTracker.skippedEventGazer', { count: skippedNonAwakenable }) : ''
             ].filter(Boolean).join(' + ');
+            const skippedSuffix = skippedParts
+                ? t('mods.awakenTracker.skippedPrefix', { parts: skippedParts })
+                : '';
 
             const smIcon = (src, size = 12) => `<img src="${src}" style="display:inline !important;width:${size}px;height:${size}px;image-rendering:pixelated;vertical-align:-2px;" />`;
             overviewSummary.innerHTML =
-                `<div>${smIcon(BADGE_ICONS.awakened)} Awakened: <b>${counts.awakened}</b> · missing <b style="color:#d87d7d;">${counts.missingAwaken}</b></div>` +
-                `<div>${smIcon(BADGE_ICONS.capped)} Capped: <b>${counts.capped}</b> · missing <b style="color:#d87d7d;">${counts.missingCap}</b></div>` +
-                `<div style="color:#c084fc;margin-top:2px;">${smIcon(BADGE_ICONS.perfect)} Perfect (awakened + capped + lvl 99): <b>${counts.perfect}</b> · Awakened, not capped: <b>${counts.awakenedNotCapped}</b></div>` +
-                `<div style="color:#888;margin-top:2px;">${counts.total} awakenable creatures · ${counts.monsters} monsters${skippedParts ? ` · skipped: ${skippedParts}` : ''}</div>`;
+                `<div>${smIcon(BADGE_ICONS.awakened)} ${t('mods.awakenTracker.overviewAwakenedLine', { awakened: counts.awakened, missingAwaken: counts.missingAwaken })}</div>` +
+                `<div>${smIcon(BADGE_ICONS.capped)} ${t('mods.awakenTracker.overviewCappedLine', { capped: counts.capped, missingCap: counts.missingCap })}</div>` +
+                `<div style="color:#c084fc;margin-top:2px;">${smIcon(BADGE_ICONS.perfect)} ${t('mods.awakenTracker.overviewPerfectLine', { perfect: counts.perfect, awakenedNotCapped: counts.awakenedNotCapped })}</div>` +
+                `<div style="color:#888;margin-top:2px;">${t('mods.awakenTracker.overviewFooter', { total: counts.total, monsters: counts.monsters, skipped: skippedSuffix })}</div>`;
 
             overviewGrid.innerHTML = groups.map(renderOverviewCard).join('');
             applyOverviewFilter();
@@ -1874,18 +1900,18 @@
                 return `<span title="${STAT_LABELS[s]}" style="color:${color};display:inline-flex;align-items:center;gap:2px;">${renderStatIconHtml(s, 13, '-2px')}${v}</span>`;
             }).join('<span style="color:#444;margin:0 4px;">·</span>');
 
-            const awakenBadge = badgeImg(BADGE_ICONS.awakened, g.anyAwakened ? 'Awakened (tier 6)' : 'Not awakened', g.anyAwakened);
-            const capBadge = badgeImg(BADGE_ICONS.capped, g.anyCapped ? 'All stats at 20' : 'Not capped', g.anyCapped);
+            const awakenBadge = badgeImg(BADGE_ICONS.awakened, g.anyAwakened ? t('mods.awakenTracker.badgeAwakened') : t('mods.awakenTracker.badgeNotAwakened'), g.anyAwakened);
+            const capBadge = badgeImg(BADGE_ICONS.capped, g.anyCapped ? t('mods.awakenTracker.badgeAllStatsAt20') : t('mods.awakenTracker.badgeNotCapped'), g.anyCapped);
             // Pick perfect icon based on shiny status of the perfect creature.
             // Shiny perfect -> star-tier-shiny.png (purple), Hundo perfect (non-shiny) -> star-tier-hundo.png (light blue).
             const perfectIconSrc = g.anyPerfectShiny ? BADGE_ICONS.perfect : BADGE_ICONS.perfectHundo;
             const perfectTitle = !g.anyPerfect
-                ? 'Not perfect'
+                ? t('mods.awakenTracker.badgeNotPerfect')
                 : g.anyPerfectShiny
-                    ? 'Perfect shiny (awakened + capped + lvl 99 + shiny)'
-                    : 'Perfect hundo (awakened + capped + lvl 99)';
+                    ? t('mods.awakenTracker.badgePerfectShiny')
+                    : t('mods.awakenTracker.badgePerfectHundo');
             const perfectBadge = badgeImg(perfectIconSrc, perfectTitle, g.anyPerfect);
-            const shinyMark = g.anyShiny ? badgeImg(BADGE_ICONS.shiny, 'Has shiny', true, 12) : '';
+            const shinyMark = g.anyShiny ? badgeImg(BADGE_ICONS.shiny, t('mods.awakenTracker.badgeHasShiny'), true, 12) : '';
             const nameColor = g.anyPerfectShiny ? '#c084fc'
                 : g.anyPerfect ? '#A4D8FF'
                 : g.anyCapped ? '#facc15'
@@ -1930,8 +1956,8 @@
             const total = overviewGrid.querySelectorAll('.awaken-overview-row').length;
             const isFiltered = !(view === 'all' && !q);
             overviewVisibleCounter.textContent = isFiltered
-                ? `Visible: ${visible} / ${total}`
-                : `Total: ${total}`;
+                ? t('mods.awakenTracker.visibleCount', { visible, total })
+                : t('mods.awakenTracker.totalCount', { total });
             if (farmSection.style.display !== 'none') renderFarmMaps();
         }
 
@@ -1950,7 +1976,7 @@
                 return false;
             }
             const closeBtn = Array.from(document.querySelectorAll('button.pixel-font-14'))
-                .find(btn => btn.textContent.trim() === 'Close');
+                .find(btn => btn.textContent.trim() === t('common.close'));
             if (closeBtn) closeBtn.click();
             return true;
         }
@@ -1968,14 +1994,14 @@
             });
 
             if (wantedIds.size === 0) {
-                farmSummaryEl.innerHTML = '<span style="color:#888;">No creatures visible in current filter.</span>';
+                farmSummaryEl.innerHTML = `<span style="color:#888;">${t('mods.awakenTracker.noCreaturesInFilter')}</span>`;
                 farmListEl.innerHTML = '';
                 return;
             }
 
             const utils = globalThis.state?.utils;
             if (!utils?.REGIONS || typeof utils.getBoardMonstersFromRoomId !== 'function') {
-                farmSummaryEl.innerHTML = '<span style="color:#d87d7d;">state.utils.REGIONS / getBoardMonstersFromRoomId unavailable.</span>';
+                farmSummaryEl.innerHTML = `<span style="color:#d87d7d;">${t('mods.awakenTracker.utilsUnavailable')}</span>`;
                 farmListEl.innerHTML = '';
                 return;
             }
@@ -2062,23 +2088,23 @@
 
             const raidNote = raidCount > 0
                 ? (hideRaids
-                    ? ` · <span style="color:#d87d7d;">${raidCount} raid${raidCount > 1 ? 's' : ''} hidden</span>`
-                    : ` · <span style="color:#d87d7d;">${raidCount} raid${raidCount > 1 ? 's' : ''}</span>`)
+                    ? t(raidCount > 1 ? 'mods.awakenTracker.manyRaidsHidden' : 'mods.awakenTracker.oneRaidHidden', { count: raidCount })
+                    : t(raidCount > 1 ? 'mods.awakenTracker.manyRaidsShown' : 'mods.awakenTracker.oneRaidShown', { count: raidCount }))
                 : '';
 
             farmSummaryEl.innerHTML =
-                `<div>Searching for <b style="color:#88c8ff;">${wantedIds.size}</b> creatures across <b style="color:#88c8ff;">${visibleResults.length}</b> maps.${raidNote}</div>` +
-                `<div style="color:#777;margin-top:2px;">Targets: ${wantedSummary}</div>` +
-                `<div style="color:#777;margin-top:2px;">Sorted by variety → stamina efficiency · Click a map to navigate.</div>`;
+                `<div>${t('mods.awakenTracker.farmSearchingHtml', { creatureCount: wantedIds.size, mapCount: visibleResults.length, raidNote })}</div>` +
+                `<div style="color:#777;margin-top:2px;">${t('mods.awakenTracker.farmTargets', { summary: wantedSummary })}</div>` +
+                `<div style="color:#777;margin-top:2px;">${t('mods.awakenTracker.farmSortHint')}</div>`;
 
             if (visibleResults.length === 0) {
-                farmListEl.innerHTML = '<div style="grid-column:1/-1;padding:16px;color:#888;text-align:center;">No map contains the filtered creatures.</div>';
+                farmListEl.innerHTML = `<div style="grid-column:1/-1;padding:16px;color:#888;text-align:center;">${t('mods.awakenTracker.noMapsWithCreatures')}</div>`;
                 return;
             }
 
             farmListEl.innerHTML = visibleResults.slice(0, 60).map((r, idx) => {
                 const details = r.wantedDetails.map(d =>
-                    `<span style="color:#88c8ff;font-weight:bold;">${d.name}</span><span style="color:#888;">×${d.count} (lvl ${Math.round(d.avgLevel)})</span>`
+                    `<span style="color:#88c8ff;font-weight:bold;">${d.name}</span><span style="color:#888;">×${d.count} (${t('mods.awakenTracker.levelAbbrev', { level: Math.round(d.avgLevel) })})</span>`
                 ).join(' · ');
                 const otherDetails = (r.otherDetails || []).map(d =>
                     `<span style="color:#888;">${d.name}×${d.count}</span>`
@@ -2087,11 +2113,11 @@
                 const densityColor = densityPct >= 70 ? '#7dd87d' : densityPct >= 40 ? '#e0c060' : '#d87d7d';
                 const effStr = r.wantedPerStamina.toFixed(2);
                 const raidBadge = r.isRaid
-                    ? ` <span style="display:inline-block;background:#7a1f1f;color:#ffd6d6;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:3px;letter-spacing:0.5px;vertical-align:1px;" title="This map is a raid — variable spawn time">RAID</span>`
+                    ? ` <span style="display:inline-block;background:#7a1f1f;color:#ffd6d6;font-size:9px;font-weight:bold;padding:1px 5px;border-radius:3px;letter-spacing:0.5px;vertical-align:1px;" title="${t('mods.awakenTracker.raidBadgeTooltip')}">${t('mods.awakenTracker.raidBadge')}</span>`
                     : '';
                 const titleAttr = r.isRaid
-                    ? `${r.mapName} (RAID — appears at variable times)`
-                    : `Click to navigate to ${r.mapName}`;
+                    ? t('mods.awakenTracker.raidTitleAttr', { mapName: r.mapName })
+                    : t('mods.awakenTracker.clickToNavigate', { mapName: r.mapName });
                 return `<div class="at-row awaken-farm-row${r.isRaid ? ' is-raid' : ''}" data-room-id="${r.roomId}" title="${titleAttr}">` +
                     `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">` +
                         `<div style="flex:1;min-width:0;">` +
@@ -2100,12 +2126,12 @@
                             `<span style="color:#666;font-size:10px;">· ${r.regionName}</span>` +
                         `</div>` +
                         `<div style="font-size:10px;color:#999;white-space:nowrap;">` +
-                            `<span style="color:${densityColor};">${r.uniqueWanted} creat · ${r.wantedTotal}/${r.totalVillains} (${densityPct}%)</span>` +
+                            `<span style="color:${densityColor};">${r.uniqueWanted} ${t('mods.awakenTracker.creaturesAbbrev')} · ${r.wantedTotal}/${r.totalVillains} (${densityPct}%)</span>` +
                             ` · <span style="color:#88c8ff;">${effStr}/⚡</span> · ⚡${r.stamina}` +
                         `</div>` +
                     `</div>` +
                     `<div style="font-size:10px;margin-top:2px;line-height:1.5;">${details}</div>` +
-                    (otherDetails ? `<div style="font-size:9px;margin-top:1px;line-height:1.4;color:#666;">also: ${otherDetails}</div>` : '') +
+                    (otherDetails ? `<div style="font-size:9px;margin-top:1px;line-height:1.4;color:#666;">${t('mods.awakenTracker.alsoPrefix')} ${otherDetails}</div>` : '') +
                 `</div>`;
             }).join('');
 
@@ -2271,14 +2297,14 @@
         const roomId = state.currentRoomId;
         const roomName = roomId ? (globalThis.state?.utils?.ROOM_NAME?.[roomId] || roomId) : null;
         title.textContent = enemies.length === 0
-            ? 'no map loaded'
-            : `${roomName || 'current map'} (${enemies.length})`;
+            ? t('mods.awakenTracker.noMapLoaded')
+            : `${roomName || t('mods.awakenTracker.currentMap')} (${enemies.length})`;
 
         grid.innerHTML = '';
         if (enemies.length === 0) {
             const empty = document.createElement('div');
             empty.style.cssText = 'opacity:0.6;font-size:12px;padding:8px;text-align:center;';
-            empty.textContent = 'Enter a map to see enemy awakens.';
+            empty.textContent = t('mods.awakenTracker.enterMap');
             grid.appendChild(empty);
             return;
         }
@@ -2294,8 +2320,8 @@
         if (typeof api !== 'undefined' && api && api.ui && api.ui.addButton) {
             api.ui.addButton({
                 id: BUTTON_ID,
-                text: 'Awaken Tracker',
-                tooltip: 'Open the Awaken Tracker panel',
+                text: t('mods.awakenTracker.buttonText'),
+                tooltip: t('mods.awakenTracker.buttonTooltip'),
                 primary: false,
                 onClick: togglePanel
             });

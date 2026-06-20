@@ -256,9 +256,6 @@ let modsLoaded = false;
 let modLoadingObserver = null;
 let modalAborted = false; // Track if modal was aborted due to other modals
 
-const MOD_LOAD_RETRY_KEY = 'mod-load-retry-count';
-const MAX_MOD_LOAD_RETRIES = 3;
-const MOD_LOAD_REFRESH_DELAY = 3000;
 const MOD_LOAD_FALLBACK_DELAY = 15000;
 
 function isGameStateReadyForMods() {
@@ -283,28 +280,6 @@ function hasReactHydrationErrorForWelcome() {
 }
 
 let modLoadingFallbackTimer = null;
-
-function getModLoadRetryCount() {
-  try {
-    return parseInt(sessionStorage.getItem(MOD_LOAD_RETRY_KEY) || '0', 10) || 0;
-  } catch {
-    return 0;
-  }
-}
-
-function incrementModLoadRetryCount() {
-  const count = getModLoadRetryCount() + 1;
-  try {
-    sessionStorage.setItem(MOD_LOAD_RETRY_KEY, String(count));
-  } catch {}
-  return count;
-}
-
-function resetModLoadRetryCount() {
-  try {
-    sessionStorage.removeItem(MOD_LOAD_RETRY_KEY);
-  } catch {}
-}
 
 function clearModLoadingFallbackTimer() {
   if (modLoadingFallbackTimer) {
@@ -528,24 +503,6 @@ function showLoadingToast() {
   }
 }
 
-// Show error toast for mod loading failures
-function showModErrorToast(error) {
-  console.log('[Welcome] showModErrorToast called with error:', error);
-  
-  try {
-    const errorToast = createToast({
-      message: `<span class="text-red-400">Mod loading error:</span> ${error}`,
-      type: 'error',
-      duration: 5000, // Show for 5 seconds
-      icon: 'https://bestiaryarena.com/assets/logo.png' // Use the official Bestiary Arena logo
-    });
-
-    console.log('[Welcome] Error toast created:', !!errorToast);
-  } catch (toastError) {
-    console.error('[Welcome] Error creating error toast:', toastError);
-  }
-}
-
 // Handle mod loading finished — success only when there are no errors
 async function handleModLoadingFinished(errors = []) {
   console.log('[Welcome] handleModLoadingFinished called, errors:', errors);
@@ -567,17 +524,23 @@ async function handleModLoadingFinished(errors = []) {
   }
 
   let resolvedErrors = Array.isArray(errors) ? [...errors] : [];
-  if (resolvedErrors.length === 0 && !isGameStateReadyForMods()) {
+  const strictCompletion = window.BestiaryPlatform?.useStrictLoaderCompletion?.() ?? true;
+
+  if (strictCompletion && resolvedErrors.length === 0 && !isGameStateReadyForMods()) {
     const hasGameMods = window.localMods?.some(mod => mod.enabled && !mod.name.startsWith('database/'));
     if (hasGameMods) {
       resolvedErrors.push({ mod: 'loader', error: 'Game state not ready (board/player unavailable)' });
       console.warn('[Welcome] Mod batch reported success but game state is not ready — treating as load failure');
     }
+  } else if (!strictCompletion && resolvedErrors.length === 0 && !isGameStateReadyForMods()) {
+    console.warn('[Welcome] Relaxed loader: game state not ready at completion (non-fatal)');
   }
 
-  if (resolvedErrors.length === 0 && hasReactHydrationErrorForWelcome()) {
+  if (strictCompletion && resolvedErrors.length === 0 && hasReactHydrationErrorForWelcome()) {
     resolvedErrors.push({ mod: 'loader', error: 'React hydration error detected (#418/#423)' });
     console.warn('[Welcome] React hydration error detected — treating as load failure');
+  } else if (!strictCompletion && resolvedErrors.length === 0 && hasReactHydrationErrorForWelcome()) {
+    console.warn('[Welcome] Relaxed loader: hydration error at completion (non-fatal)');
   }
 
   const hasErrors = resolvedErrors.length > 0;
@@ -587,34 +550,18 @@ async function handleModLoadingFinished(errors = []) {
 
   if (hasErrors) {
     modsLoaded = false;
-    const retryCount = getModLoadRetryCount();
+    const incomingHadErrors = Array.isArray(errors) && errors.length > 0;
     const failedModNames = resolvedErrors.map(e => e.mod || 'unknown').join(', ');
-    console.log('[Welcome] Mod loading had errors:', failedModNames, `(retry ${retryCount}/${MAX_MOD_LOAD_RETRIES})`);
+    console.log('[Welcome] Mod loading had errors:', failedModNames);
 
-    if (retryCount < MAX_MOD_LOAD_RETRIES) {
-      const nextRetry = incrementModLoadRetryCount();
-      createToast({
-        message: `<span class="text-red-400">Mod loading incomplete.</span> Refreshing in 3s... (${nextRetry}/${MAX_MOD_LOAD_RETRIES})`,
-        type: 'error',
-        duration: MOD_LOAD_REFRESH_DELAY,
-        icon: 'https://bestiaryarena.com/assets/logo.png'
-      });
-      trackTimeout(setTimeout(() => {
-        window.location.reload();
-      }, MOD_LOAD_REFRESH_DELAY));
-    } else {
-      createToast({
-        message: `<span class="text-red-400">Mod loading incomplete.</span> Failed: ${failedModNames}. Auto-retry limit reached.`,
-        type: 'error',
-        duration: 8000,
-        icon: 'https://bestiaryarena.com/assets/logo.png'
-      });
+    if (!incomingHadErrors) {
+      window.BestiaryUIComponents?.handleLoaderLoadFailure?.(resolvedErrors);
     }
     return;
   }
 
   modsLoaded = true;
-  resetModLoadRetryCount();
+  window.BestiaryUIComponents?.resetModLoadRetryCount?.();
 
   try {
     createToast({
@@ -813,11 +760,6 @@ function setupModLoadingObserver() {
       handleModLoadingFinished(errors);
     }
     
-    // Listen for mod loading error message
-    if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'modLoadError') {
-      console.log('[Welcome] Received mod loading error signal:', event.data.error);
-      showModErrorToast(event.data.error);
-    }
   };
   
   trackEventListener(window, 'message', messageHandler);

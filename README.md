@@ -85,14 +85,15 @@ The extension requests only what it needs to run mods on Bestiary Arena. See [`p
 **Required (install time):**
 - `storage` / `unlimitedStorage` — settings, mod cache, and backups
 - `scripting` — inject mod code into the game
-- **bestiaryarena.com** — run mods and talk to open game tabs
+- `activeTab` — when you open the extension popup, access the current Bestiary Arena tab for toggles and messaging (not broad browsing-history access)
+- **bestiaryarena.com** — run mods and talk to open game tabs (automatic mod delivery uses `contentScriptReady`, not tab queries)
 - **bestiary-arena-ranking.vercel.app** — Cyclopedia Rankings API
 - **vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app** — optional Firebase-backed features (VIP List, Guilds, Quests, Challenges, Mod Settings best-runs sync)
 
 **Optional (on demand):**
 - **gist.githubusercontent.com** / **raw.githubusercontent.com** — prompted when you open the popup or import a remote Gist/GitHub mod
 
-The extension does **not** request `tabs`, `activeTab`, or browsing-history access. After a permission update, reload the extension in `chrome://extensions/` (or remove and re-add once) if Chrome still shows old prompts.
+The extension does **not** request the `tabs` permission (Chrome’s “Read browsing history” wording). After a permission update, reload the extension in `chrome://extensions/` (or remove and re-add once) if Chrome still shows old prompts.
 
 ## Mod Development
 
@@ -154,8 +155,9 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `locales/` - Internationalization files
   - Additional folders under `assets/` (for example `depot/`, `equipment/`, `guild/`, `quests/`, `skills/`) hold mod-specific images and data; they are exposed via `web_accessible_resources` in the manifest as needed—not every folder is listed here.
 - `content/` - Content scripts that are injected into the game page
+  - `platform.js` - Desktop vs mobile loader detection (`window.BestiaryPlatform`); injected into page context before `client.js`
   - `client.js` - Main client-side API and functionality
-  - `injector.js` - Main content script: injects page context scripts (client, mods, databases) at `document_start`
+  - `injector.js` - Main content script: injects `platform.js`, then page context scripts (client, mods, databases) at `document_start`
   - `mod-coordination.mjs` - Global mod coordination system for managing mod states, priorities, and resource control
   - `local_mods.js` - Manages local mods
   - `mod-registry.js` - Central lists of database, official, super, and OT mod filenames (must stay in sync with `background.js` and `popup/popup.js`)

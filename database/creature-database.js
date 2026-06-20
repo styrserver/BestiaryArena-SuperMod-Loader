@@ -312,6 +312,8 @@ function buildCreatureDatabase() {
       NON_AWAKENABLE_CREATURES: nonAwakenableCreatures,
       CYCLOPEDIA_EXTRA_CREATURES,
       MYSTIC_GAZER_GAME_ID,
+      ALL_GAZER_GAME_IDS,
+      GAZER_GAME_IDS_WITHOUT_SHINY,
       SHINY_ALIAS_CREATURES,
       getCyclopediaCreatureNames: () => getCyclopediaCreatureNames(obtainableCreatures),
       getCreaturePickerNames: () => getCyclopediaCreatureNames(obtainableCreatures),
@@ -500,6 +502,8 @@ function initializeDatabase() {
   creatureDatabase.EVENT_CREATURES = EVENT_CREATURES;
   creatureDatabase.isEventCreatureName = isEventCreatureName;
   creatureDatabase.isGazerCreatureName = isGazerCreatureName;
+  creatureDatabase.ALL_GAZER_GAME_IDS = ALL_GAZER_GAME_IDS;
+  creatureDatabase.MYSTIC_GAZER_GAME_ID = MYSTIC_GAZER_GAME_ID;
   creatureDatabase.isCreatureAwakenableName = isCreatureAwakenableName;
   creatureDatabase.isGazerMonster = isGazerMonster;
   creatureDatabase.getGazerCreatureNames = creatureDatabase.getGazerCreatureNames || (() => getGazerCreatureNames(creatureDatabase.ALL_CREATURES));
@@ -602,6 +606,8 @@ waitForGameState(() => {
     globalWindow.creatureDatabase.EVENT_CREATURES = EVENT_CREATURES;
     globalWindow.creatureDatabase.isEventCreatureName = isEventCreatureName;
     globalWindow.creatureDatabase.isGazerCreatureName = isGazerCreatureName;
+    globalWindow.creatureDatabase.ALL_GAZER_GAME_IDS = ALL_GAZER_GAME_IDS;
+    globalWindow.creatureDatabase.MYSTIC_GAZER_GAME_ID = MYSTIC_GAZER_GAME_ID;
     globalWindow.creatureDatabase.isCreatureAwakenableName = isCreatureAwakenableName;
     globalWindow.creatureDatabase.isGazerMonster = isGazerMonster;
     globalWindow.creatureDatabase.getGazerCreatureNames = creatureDatabase.getGazerCreatureNames;

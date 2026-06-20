@@ -752,6 +752,7 @@ For more details on the game state API, see the [Game State API Documentation](g
 
 - Test your mod with different game versions
 - Use the Mod Coordination System to prevent conflicts with other mods (see [Mod Coordination System](#mod-coordination-system))
+- **Mobile WebExtensions (Orion iOS, etc.):** The loader injects [`content/platform.js`](../content/platform.js) before other page scripts. It exposes `window.BestiaryPlatform` (`prefersRelaxedLoader()`, `useStrictLoaderCompletion()`). Mod authors normally need no changes; bundled mods still run in the same order. To test the relaxed path on desktop: `sessionStorage.setItem('ba-relaxed-loader', '1')` and reload the game tab. See [Mod Loading System](mod_loading_optimizations.md#desktop-vs-mobile-relaxed-loader).
 
 ## Mod Coordination System
 

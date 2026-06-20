@@ -76,14 +76,15 @@ The extension requests only what it needs to run mods on Bestiary Arena. See [ht
 '''Required (install time):'''
 * <code>storage</code> / <code>unlimitedStorage</code> — settings, mod cache, and backups
 * <code>scripting</code> — inject mod code into the game
-* '''bestiaryarena.com''' — run mods and talk to open game tabs
+* <code>activeTab</code> — when you open the extension popup, access the current Bestiary Arena tab for toggles and messaging (not broad browsing-history access)
+* '''bestiaryarena.com''' — run mods and talk to open game tabs (automatic mod delivery uses <code>contentScriptReady</code>, not tab queries)
 * '''bestiary-arena-ranking.vercel.app''' — Cyclopedia Rankings API
 * '''vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app''' — optional Firebase-backed features (VIP List, Guilds, Quests, Challenges, Mod Settings best-runs sync)
 
 '''Optional (on demand):'''
 * '''gist.githubusercontent.com''' / '''raw.githubusercontent.com''' — prompted when you open the popup or import a remote Gist/GitHub mod
 
-The extension does '''not''' request <code>tabs</code>, <code>activeTab</code>, or browsing-history access. After a permission update, reload the extension in <code>chrome://extensions/</code> (or remove and re-add once) if Chrome still shows old prompts.
+The extension does '''not''' request the <code>tabs</code> permission (Chrome’s “Read browsing history” wording). After a permission update, reload the extension in <code>chrome://extensions/</code> (or remove and re-add once) if Chrome still shows old prompts.
 
 == Mod Development ==
 Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the Mod Development Guide for detailed information on creating mods.
@@ -136,8 +137,9 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>locales/</code> - Internationalization files
 ** Additional folders under <code>assets/</code> (for example <code>depot/</code>, <code>equipment/</code>, <code>guild/</code>, <code>quests/</code>, <code>skills/</code>) hold mod-specific images and data; they are exposed via <code>web_accessible_resources</code> in the manifest as needed—not every folder is listed here.
 * <code>content/</code> - Content scripts that are injected into the game page
+** <code>platform.js</code> - Desktop vs mobile loader detection (<code>window.BestiaryPlatform</code>); injected into page context before <code>client.js</code>
 ** <code>client.js</code> - Main client-side API and functionality
-** <code>injector.js</code> - Main content script: injects page context scripts (client, mods, databases) at <code>document_start</code>
+** <code>injector.js</code> - Main content script: injects <code>platform.js</code>, then page context scripts (client, mods, databases) at <code>document_start</code>
 ** <code>mod-coordination.mjs</code> - Global mod coordination system for managing mod states, priorities, and resource control
 ** <code>local_mods.js</code> - Manages local mods
 ** <code>mod-registry.js</code> - Central lists of database, official, super, and OT mod filenames (must stay in sync with <code>background.js</code> and <code>popup/popup.js</code>)
