@@ -862,6 +862,125 @@ const DEBUG = false; // Set to true for development
     };
   }
 
+  const MOD_LOAD_RETRY_KEY = 'mod-load-retry-count';
+  const MAX_MOD_LOAD_RETRIES = 3;
+  const MOD_LOAD_REFRESH_DELAY_MS = 3000;
+  const LOADER_ERROR_TOAST_ICON = 'https://bestiaryarena.com/assets/logo.png';
+  let loaderFailureHandledThisLoad = false;
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function formatLoaderModLabel(modPath) {
+    if (!modPath) return 'unknown';
+    const name = String(modPath).split('/').pop() || modPath;
+    return name.replace(/\.js$/i, '');
+  }
+
+  function buildLoaderErrorSummaryMessage(errors, retryInfo = null) {
+    const labels = [...new Set(errors.map((entry) => formatLoaderModLabel(entry.mod)))];
+    let message = `<span class="text-red-400">Mod loading failed (${errors.length}):</span> ${escapeHtml(labels.join(', '))}`;
+
+    if (retryInfo?.willRetry) {
+      message += `. Refreshing in ${Math.round(MOD_LOAD_REFRESH_DELAY_MS / 1000)}s... (${retryInfo.attempt}/${retryInfo.max})`;
+    } else if (retryInfo?.limitReached) {
+      message += '. Auto-retry limit reached.';
+    }
+
+    return message;
+  }
+
+  function getModLoadRetryCount() {
+    try {
+      return parseInt(sessionStorage.getItem(MOD_LOAD_RETRY_KEY) || '0', 10) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function incrementModLoadRetryCount() {
+    const next = getModLoadRetryCount() + 1;
+    try {
+      sessionStorage.setItem(MOD_LOAD_RETRY_KEY, String(next));
+    } catch {
+      // ignore storage failures
+    }
+    return next;
+  }
+
+  function resetModLoadRetryCount() {
+    try {
+      sessionStorage.removeItem(MOD_LOAD_RETRY_KEY);
+    } catch {
+      // ignore storage failures
+    }
+  }
+
+  function showLoaderErrorSummary(errors, retryInfo = null) {
+    if (!Array.isArray(errors) || errors.length === 0) {
+      return null;
+    }
+
+    const duration = retryInfo?.willRetry
+      ? MOD_LOAD_REFRESH_DELAY_MS
+      : 8000;
+
+    return createToast({
+      message: buildLoaderErrorSummaryMessage(errors, retryInfo),
+      type: 'error',
+      duration,
+      icon: LOADER_ERROR_TOAST_ICON
+    });
+  }
+
+  function handleLoaderLoadFailure(errors) {
+    if (!Array.isArray(errors) || errors.length === 0) {
+      return false;
+    }
+    if (loaderFailureHandledThisLoad) {
+      return false;
+    }
+    loaderFailureHandledThisLoad = true;
+
+    const retryCount = getModLoadRetryCount();
+    const failedModNames = errors.map((entry) => entry.mod || 'unknown').join(', ');
+    console.warn(
+      `[Mod Loader] Load failure (${errors.length} error(s)): ${failedModNames}`,
+      `(retry ${retryCount}/${MAX_MOD_LOAD_RETRIES})`
+    );
+
+    if (window.BestiaryPlatform?.prefersRelaxedLoader?.()) {
+      console.warn('[Mod Loader] Relaxed loader: showing errors without auto-refresh');
+      showLoaderErrorSummary(errors, { limitReached: true });
+      return true;
+    }
+
+    if (retryCount < MAX_MOD_LOAD_RETRIES) {
+      const nextRetry = incrementModLoadRetryCount();
+      showLoaderErrorSummary(errors, {
+        willRetry: true,
+        attempt: nextRetry,
+        max: MAX_MOD_LOAD_RETRIES
+      });
+      setTimeout(() => {
+        window.location.reload();
+      }, MOD_LOAD_REFRESH_DELAY_MS);
+      return true;
+    }
+
+    showLoaderErrorSummary(errors, { limitReached: true });
+    return true;
+  }
+
+  function resetLoaderFailureHandled() {
+    loaderFailureHandledThisLoad = false;
+  }
+
   // Export UI components to global
   window.BestiaryUIComponents = {
     createModal,
@@ -870,6 +989,10 @@ const DEBUG = false; // Set to true for development
     createItemPortrait,
     createRoomListItem,
     createNavBreadcrumb,
-    createToast
+    createToast,
+    showLoaderErrorSummary,
+    handleLoaderLoadFailure,
+    resetModLoadRetryCount,
+    resetLoaderFailureHandled
   };
 })(); 
