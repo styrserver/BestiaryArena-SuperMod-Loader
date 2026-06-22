@@ -1436,7 +1436,6 @@
       "warningUnselected": "Mapas não selecionados serão ignorados",
       "autoRaidSettings": "Configurações padrão",
       "otherSettings": "Outras Configurações",
-      "raidMapSelectionDesc": "Selecione quais mapas de raid você quer auto-raidar quando detectados:",
       "settingsAutoSave": "✓ Configurações são salvas automaticamente quando alteradas",
       "event": "Evento",
       "lowPriority": "Baixa Prioridade",

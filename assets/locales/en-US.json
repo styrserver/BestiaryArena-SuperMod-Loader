@@ -1437,7 +1437,6 @@
       "warningUnselected": "Unselected maps will be skipped",
       "autoRaidSettings": "Default Settings",
       "otherSettings": "Other Settings",
-      "raidMapSelectionDesc": "Select which raid maps you want to auto-raid when detected:",
       "settingsAutoSave": "✓ Settings auto-save when changed",
       "event": "Event",
       "lowPriority": "Low Priority",
