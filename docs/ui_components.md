@@ -38,6 +38,8 @@ Creates a styled modal dialog.
     - `onClick` (Function, optional): Click handler, receives (event, modalObj)
     - `closeOnClick` (Boolean, optional): Whether to close the modal when clicked, default: true
 
+Modals also apply `max-width: 95vw` and `max-height: 95vh` so they stay on screen without extra code. For larger custom modals, prefer a `MODAL_CONFIG` with `viewportPadding` / `minWidth` / `minHeight` and a resize listener (see [Mod Development Guide](mod_development_guide.md#responsive-modals)).
+
 **Returns:**
 
 - Object with:
@@ -70,6 +72,8 @@ const modal = api.ui.components.createModal({
 // You can programmatically close the modal
 setTimeout(() => modal.close(), 5000); // Close after 5 seconds
 ```
+
+For mod **settings** dialogs, use `api.ui.createConfigPanel()` instead — shared **350×800** desktop max (configurable), viewport clamping, internal scroll, and resize handling are built in.
 
 ### Scrollable Containers
 

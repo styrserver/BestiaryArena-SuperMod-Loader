@@ -96,8 +96,14 @@ const MEDIA_URLS = {
 
 const SETTINGS_MODAL_CONFIG = {
   width: 350,
-  height: 400
+  height: 410,
+  contentInset: 30,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 280
 };
+
+let betterSetupsModalLayoutCleanup = null;
 
 const BETTER_SETUPS_SETTINGS_BUTTON_CLASS = {
   primary: 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-14',
@@ -1023,15 +1029,17 @@ function applyBoardSetup(boardData) {
 
 function showLoadSetupModal() {
   try {
+    clearBetterSetupsModalLayoutCleanup();
     let modalRef = null;
+    const modalDimensions = getBetterSetupsModalDimensions();
     const content = document.createElement('div');
+    content.className = 'better-setups-modal-root';
+    content.style.cssText = 'width:100%;height:100%;min-height:0;flex:1 1 0;display:flex;flex-direction:column;box-sizing:border-box;position:relative;border-radius:8px;overflow:hidden;';
     content.style.backgroundImage = `url("${MEDIA_URLS.BACKGROUND_BLUE}")`;
     content.style.backgroundSize = 'auto';
     content.style.backgroundPosition = 'top left';
     content.style.backgroundRepeat = 'repeat';
     content.style.padding = '10px';
-    content.style.borderRadius = '8px';
-    content.style.position = 'relative';
 
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; border-radius: 8px;';
@@ -1042,7 +1050,8 @@ function showLoadSetupModal() {
     content.appendChild(overlay);
 
     const contentContainer = document.createElement('div');
-    contentContainer.style.cssText = 'position: relative; z-index: 1; color: #fff; display: flex; flex-direction: column; gap: 10px;';
+    contentContainer.className = 'better-setups-load-content';
+    contentContainer.style.cssText = 'position: relative; z-index: 1; color: #fff; display: flex; flex-direction: column; gap: 10px; flex: 1 1 0; min-height: 0; height: 100%; box-sizing: border-box;';
 
     const description = document.createElement('p');
     description.style.cssText = 'margin: 0; font-size: 14px; line-height: 1.4;';
@@ -1050,8 +1059,9 @@ function showLoadSetupModal() {
     contentContainer.appendChild(description);
 
     const commandTextarea = document.createElement('textarea');
+    commandTextarea.className = 'better-setups-load-textarea';
     commandTextarea.placeholder = t('mods.betterSetups.loadSetupPlaceholder');
-    commandTextarea.style.cssText = 'width: 100%; height: 150px; min-height: 150px; max-height: 150px; background-color: rgba(0, 0, 0, 0.4); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; padding: 8px; font-family: monospace; font-size: 12px; resize: none; box-sizing: border-box; overflow-y: auto;';
+    commandTextarea.style.cssText = 'width: 100%; flex: 1 1 0; min-height: 120px; background-color: rgba(0, 0, 0, 0.4); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; padding: 8px; font-family: monospace; font-size: 12px; resize: none; box-sizing: border-box; overflow-y: auto;';
     contentContainer.appendChild(commandTextarea);
 
     const applyButton = createSetupButton(t('mods.betterSetups.applySetup'), 'add', () => {
@@ -1070,6 +1080,7 @@ function showLoadSetupModal() {
       }
     });
     applyButton.style.width = '100%';
+    applyButton.style.flexShrink = '0';
     contentContainer.appendChild(applyButton);
 
     content.appendChild(contentContainer);
@@ -1077,7 +1088,8 @@ function showLoadSetupModal() {
     modalRef = api.ui.components.createModal({
       title: t('mods.betterSetups.loadSetupTitle'),
       content: content,
-      width: SETTINGS_MODAL_CONFIG.width,
+      width: modalDimensions.width,
+      height: modalDimensions.height,
       buttons: [
         {
           text: t('mods.betterSetups.close'),
@@ -1086,8 +1098,12 @@ function showLoadSetupModal() {
             console.log('[Better Setups] Load setup modal closed');
           }
         }
-      ]
+      ],
+      onClose: () => {
+        clearBetterSetupsModalLayoutCleanup();
+      }
     });
+    setupBetterSetupsModalResponsiveLayout(modalRef, content);
   } catch (error) {
     console.error('[Better Setups] Error showing load setup modal:', error);
   }
@@ -1261,27 +1277,135 @@ function createSettingsActionButton(text, options = {}) {
   return button;
 }
 
-function applySettingsModalDialogSize() {
-  setTimeout(() => {
-    const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-    if (!dialog) return;
+function getBetterSetupsModalDimensions() {
+  const pad = SETTINGS_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      SETTINGS_MODAL_CONFIG.minWidth,
+      Math.min(SETTINGS_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      SETTINGS_MODAL_CONFIG.minHeight,
+      Math.min(SETTINGS_MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
 
-    dialog.style.width = `${SETTINGS_MODAL_CONFIG.width}px`;
-    dialog.style.minWidth = `${SETTINGS_MODAL_CONFIG.width}px`;
-    dialog.style.maxWidth = `${SETTINGS_MODAL_CONFIG.width}px`;
-    dialog.style.height = `${SETTINGS_MODAL_CONFIG.height}px`;
-    dialog.style.minHeight = `${SETTINGS_MODAL_CONFIG.height}px`;
-    dialog.style.maxHeight = `${SETTINGS_MODAL_CONFIG.height}px`;
-    dialog.classList.remove('max-w-[300px]');
+function getBetterSetupsDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
 
-    const contentWrapper = dialog.querySelector(':scope > div');
-    if (contentWrapper) {
-      contentWrapper.style.height = '100%';
-      contentWrapper.style.display = 'flex';
-      contentWrapper.style.flexDirection = 'column';
-      contentWrapper.style.flex = '1 1 0';
+function clearBetterSetupsModalLayoutCleanup() {
+  if (betterSetupsModalLayoutCleanup) {
+    betterSetupsModalLayoutCleanup();
+    betterSetupsModalLayoutCleanup = null;
+  }
+}
+
+function applyBetterSetupsModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getBetterSetupsDialog(modalRef);
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]');
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper) {
+    rootWrapper.style.height = '100%';
+    rootWrapper.style.display = 'flex';
+    rootWrapper.style.flexDirection = 'column';
+    rootWrapper.style.flex = '1 1 0';
+    rootWrapper.style.minHeight = '0';
+  }
+
+  const contentContainer = dialog.querySelector('.widget-bottom');
+  if (contentContainer) {
+    Object.assign(contentContainer.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflowY: 'hidden',
+      overflowX: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      height: '100%',
+      maxHeight: 'none',
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+
+    const settingsPanel = contentRoot.querySelector('#better-setups-settings-panel');
+    if (settingsPanel) {
+      Object.assign(settingsPanel.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        height: '100%',
+        overflow: 'hidden'
+      });
     }
-  }, 0);
+
+    const labelsList = contentRoot.querySelector('#better-setups-labels-list');
+    if (labelsList) {
+      Object.assign(labelsList.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        overflowY: 'auto'
+      });
+    }
+
+    const loadContainer = contentRoot.querySelector('.better-setups-load-content');
+    if (loadContainer) {
+      Object.assign(loadContainer.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        height: '100%',
+        overflow: 'hidden'
+      });
+    }
+
+    const loadTextarea = contentRoot.querySelector('.better-setups-load-textarea');
+    if (loadTextarea) {
+      Object.assign(loadTextarea.style, {
+        flex: '1 1 0',
+        minHeight: '120px',
+        maxHeight: 'none',
+        height: 'auto',
+        overflowY: 'auto'
+      });
+    }
+  }
+}
+
+function setupBetterSetupsModalResponsiveLayout(modalRef, contentRoot) {
+  clearBetterSetupsModalLayoutCleanup();
+  const apply = () => applyBetterSetupsModalLayout(modalRef, contentRoot, getBetterSetupsModalDimensions());
+  apply();
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  betterSetupsModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+  };
 }
 
 function getSettingsAutosaveText() {
@@ -1747,18 +1871,20 @@ function renderLabelsSettingsPanel(container) {
 
 function showSettingsModal() {
   try {
+    clearBetterSetupsModalLayoutCleanup();
     clearLabelRemoveConfirmationListener();
     console.log('[Better Setups] showSettingsModal() called');
 
+    const modalDimensions = getBetterSetupsModalDimensions();
     const content = document.createElement('div');
-    const contentWidth = SETTINGS_MODAL_CONFIG.width - 30;
+    content.className = 'better-setups-modal-root';
     Object.assign(content.style, {
       width: '100%',
       height: '100%',
-      minWidth: `${contentWidth}px`,
-      maxWidth: `${contentWidth}px`,
-      minHeight: `${SETTINGS_MODAL_CONFIG.height}px`,
-      maxHeight: `${SETTINGS_MODAL_CONFIG.height}px`,
+      minWidth: '0',
+      maxWidth: '100%',
+      minHeight: '0',
+      maxHeight: 'none',
       boxSizing: 'border-box',
       overflow: 'hidden',
       display: 'flex',
@@ -1786,10 +1912,10 @@ function showSettingsModal() {
     renderLabelsSettingsPanel(settingsPanel);
     content.appendChild(settingsPanel);
 
-    api.ui.components.createModal({
+    const modalRef = api.ui.components.createModal({
       title: t('mods.betterSetups.settingsTitle'),
-      width: SETTINGS_MODAL_CONFIG.width,
-      height: SETTINGS_MODAL_CONFIG.height,
+      width: modalDimensions.width,
+      height: modalDimensions.height,
       content: content,
       buttons: [
         {
@@ -1799,10 +1925,13 @@ function showSettingsModal() {
             console.log('[Better Setups] Settings modal closed');
           }
         }
-      ]
+      ],
+      onClose: () => {
+        clearBetterSetupsModalLayoutCleanup();
+      }
     });
 
-    applySettingsModalDialogSize();
+    setupBetterSetupsModalResponsiveLayout(modalRef, content);
     injectSettingsModalAutosaveFooter();
   } catch (error) {
     console.error('[Better Setups] Error showing settings modal:', error);
@@ -2880,6 +3009,7 @@ function getMapSetupData(mapId) {
       Object.assign(config, newConfig);
     },
     cleanup: () => {
+      clearBetterSetupsModalLayoutCleanup();
       hideSetupPreview();
       stopSetupInterfaceObserver();
     }

@@ -25,6 +25,116 @@ if (api) {
 // Map of room codes to names
 let ROOM_NAMES;
 
+const HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG = {
+  width: 500,
+  height: 550,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 320
+};
+
+let activeHighscoreImprovementsModal = null;
+let highscoreImprovementsModalLayoutCleanup = null;
+
+function getHighscoreImprovementsModalDimensions() {
+  const pad = HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.minWidth,
+      Math.min(HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.minHeight,
+      Math.min(HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
+
+function getHighscoreImprovementsDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearHighscoreImprovementsModalLayoutCleanup() {
+  if (highscoreImprovementsModalLayoutCleanup) {
+    highscoreImprovementsModalLayoutCleanup();
+    highscoreImprovementsModalLayoutCleanup = null;
+  }
+}
+
+function applyHighscoreImprovementsModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getHighscoreImprovementsDialog(modalRef);
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]', 'w-full');
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper) {
+    Object.assign(rootWrapper.style, {
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      minHeight: '0'
+    });
+  }
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    Object.assign(widgetBottom.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflowY: 'hidden',
+      overflowX: 'hidden'
+    });
+  }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      maxHeight: 'none',
+      width: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+}
+
+function setupHighscoreImprovementsModalResponsiveLayout(modalRef, contentRoot) {
+  clearHighscoreImprovementsModalLayoutCleanup();
+  activeHighscoreImprovementsModal = modalRef;
+  const apply = () => applyHighscoreImprovementsModalLayout(
+    modalRef,
+    contentRoot,
+    getHighscoreImprovementsModalDimensions()
+  );
+  requestAnimationFrame(() => apply());
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  highscoreImprovementsModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+    if (activeHighscoreImprovementsModal === modalRef) {
+      activeHighscoreImprovementsModal = null;
+    }
+  };
+}
+
 // Helper function to fetch data from TRPC API
 async function fetchTRPC(method) {
   try {
@@ -313,7 +423,7 @@ function createFloorContent(opportunities) {
 // Function to create tabs
 function createTabs(tickContent, rankContent, floorContent) {
   const container = document.createElement('div');
-  container.className = 'flex flex-col';
+  container.className = 'flex flex-col highscore-improvements-modal-content';
   container.style.height = '100%';
   container.style.minHeight = '0';
   
@@ -415,44 +525,6 @@ function createTabs(tickContent, rankContent, floorContent) {
   container.appendChild(floorTab);
   
   return container;
-}
-
-// Expand the improvements modal size to fit 3 tabs comfortably.
-function expandImprovementsModal(widthPx = 500, heightPx = 550) {
-  setTimeout(() => {
-    try {
-      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-      if (!dialog) return;
-      
-      const width = `${widthPx}px`;
-      const height = `${heightPx}px`;
-      dialog.style.width = width;
-      dialog.style.minWidth = width;
-      dialog.style.maxWidth = width;
-      dialog.style.height = height;
-      dialog.style.minHeight = height;
-      dialog.style.maxHeight = height;
-      dialog.classList.remove('max-w-[300px]');
-      
-      // Keep inner modal wrappers at full height so tab changes do not resize visual layout.
-      const rootWrapper = dialog.querySelector(':scope > div');
-      if (rootWrapper) {
-        rootWrapper.style.height = '100%';
-        rootWrapper.style.display = 'flex';
-        rootWrapper.style.flexDirection = 'column';
-      }
-      
-      const widgetBottom = dialog.querySelector('.widget-bottom');
-      if (widgetBottom) {
-        widgetBottom.style.display = 'flex';
-        widgetBottom.style.flexDirection = 'column';
-        widgetBottom.style.flex = '1 1 0';
-        widgetBottom.style.minHeight = '0';
-      }
-    } catch (error) {
-      console.warn('[Highscore Improvements] Failed to expand modal width:', error);
-    }
-  }, 50);
 }
 
 // Function to show improvement opportunities modal
@@ -669,19 +741,21 @@ async function showImprovementsModal() {
     // Create tabbed interface
     const tabbedContent = createTabs(tickContent, rankContent, floorContent);
     
-    // Show the new modal
-    api.showModal({
+    const modalDimensions = getHighscoreImprovementsModalDimensions();
+    const modalRef = api.ui.components.createModal({
       title: '🏆 Improvement Opportunities',
+      width: modalDimensions.width,
       content: tabbedContent,
       buttons: [
         {
           text: 'Close',
-          primary: true
+          primary: true,
+          onClick: () => clearHighscoreImprovementsModalLayoutCleanup()
         }
       ]
     });
-    
-    expandImprovementsModal(500, 550);
+
+    setupHighscoreImprovementsModalResponsiveLayout(modalRef, tabbedContent);
     
     if (window.DEBUG) console.log('Improvement opportunities modal displayed successfully');
   } catch (error) {
@@ -711,6 +785,8 @@ exports = {
 // Cleanup function for Highscore Improvements mod (exposed for mod system)
 exports.cleanup = function() {
   console.log('[Highscore Improvements] Running cleanup...');
+
+  clearHighscoreImprovementsModalLayoutCleanup();
   
   // Clear any cached data
   if (typeof ROOM_NAMES !== 'undefined') {

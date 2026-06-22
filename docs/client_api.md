@@ -150,7 +150,12 @@ const panel = api.ui.createConfigPanel({
   id: 'my-config-panel',
   title: 'Configuration',
   modId: 'my-mod',
-  content: '<p>Configuration options go here</p>', // String, HTMLElement, or function
+  content: '<p>Configuration options go here</p>', // String, HTMLElement, or function(scrollEl)
+  width: 350,   // Optional desktop max width (default 350)
+  height: 800,  // Optional desktop max height (default 800)
+  onOpen: () => {
+    // Optional: refresh fields when the panel opens
+  },
   buttons: [
     {
       text: 'Save',
@@ -165,7 +170,11 @@ const panel = api.ui.createConfigPanel({
     }
   ]
 });
+```
 
+Config panels auto-fit the viewport on phones (16px padding, 280×200 minimum). Tall content scrolls inside the panel; layout updates on resize.
+
+```javascript
 // Toggle a configuration panel
 api.ui.toggleConfigPanel('my-config-panel');
 

@@ -4,6 +4,171 @@
   },
   "notes": [
     {
+      "version": "4.3.2",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Settings modal max size is 530×500; on phones it auto-fits viewport width and height (desktop max unchanged). Main two-column panel fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Autoscroller",
+          "type": "changed",
+          "text": "Settings modal max size is 770×500; on phones it auto-fits viewport width and height (desktop max unchanged). Main three-column panel fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Settings modal max size is 700×500; on phones it auto-fits viewport width and height (desktop max unchanged). Main two-column panel fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "changed",
+          "text": "Settings panel max size is 500×500; on phones it auto-fits viewport width and height (desktop max unchanged). Opens beside the chest when there is room, otherwise below it and fills remaining viewport height. Equipment setup selectors keep usable minimum sizes; cramped rows scroll horizontally."
+        },
+        {
+          "mod": "Better Forge",
+          "type": "changed",
+          "text": "Settings modal max size is 620×500 (Arsenal 260px, Forge 320px); on phones it auto-fits viewport width and height (desktop max unchanged). Two-column panel fills remaining modal height and resizes on orientation change. Fixed missing Forge column border; Disenchant and Auto-upgrade tab content spans full column width."
+        },
+        {
+          "mod": "Better Rune Recycler",
+          "type": "changed",
+          "text": "Settings modal max size is 750×535; on phones it auto-fits viewport width and height (desktop max unchanged). Configuration and Statistics columns fill remaining modal height and resize on orientation change. Configuration rune grid expands to fill column height and scrolls when needed."
+        },
+        {
+          "mod": "Better Setups",
+          "type": "changed",
+          "text": "Load Setup and Settings modals max size is 350×410; on phones they auto-fit viewport width and height (desktop max unchanged). Settings label list and Load Setup textarea fill remaining modal height and scroll when needed."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Settings modal max size is 700×500; on phones it auto-fits viewport width and height (desktop max unchanged). Creature list fills remaining column height (expands when the unselected-creatures warning is hidden). Warning banner only shows when at least one creature is unchecked."
+        },
+        {
+          "mod": "Better Yasir",
+          "type": "changed",
+          "text": "Purchase-order settings panel max size is 350×500; on phones it auto-fits viewport width and height (desktop max unchanged). Panel is attached to the shop dialog so clicks work when placed below; opens beside the Yasir shop when there is room, otherwise directly below it with scrollable tab content. Tab content fills remaining panel height and resizes on orientation change."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Results and Running Analysis modals max width is 400px and height auto-fits content up to 700px; on phones they auto-fit viewport width and height (desktop max unchanged). Settings panel uses shared Mod Loader config panel (350×800 max). Stat grid uses game-style dividers with slightly looser row spacing. Results chart restored to full bar height; removed chart click tip and redundant “Sandbox mode enabled for analysis” note. Integer-snapped modal layout avoids blurry centered rendering; scroll only when content exceeds the cap."
+        },
+        {
+          "mod": "Challenges",
+          "type": "changed",
+          "text": "Main modal max size is 950×700; on phones it auto-fits viewport width and height (desktop max unchanged). Solo tab columns scale on narrow viewports; tab content fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Modal max size is 1000×660; on phones it auto-fits viewport width and height (desktop max unchanged). Main tab content panel under the subnav fills remaining modal height on all tabs instead of a fixed 500px."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "changed",
+          "text": "Depot modal max size is 530×500; on phones it auto-fits viewport width and height (desktop max unchanged). Creatures and Equipment columns fill remaining modal height; grids scroll inside each column when needed. Depot creature list sorts by level (highest first), species name (ignores nicknames), total genes, then unique id."
+        },
+        {
+          "mod": "Dice Roller",
+          "type": "changed",
+          "text": "Settings modal max size is 710×500; on phones it auto-fits viewport width and height (desktop max unchanged). Main three-column panel fills remaining modal height and resizes on orientation change. Empty Details placeholder is centered when no creature is selected."
+        },
+        {
+          "mod": "Guilds",
+          "type": "changed",
+          "text": "Guild browser (550×360), guild panel (650×460), equipment modals (510×480 / 250×510), and other guild dialogs auto-fit viewport width and height on phones (desktop max unchanged). Main modal content fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Hero Editor",
+          "type": "changed",
+          "text": "Edit Heroes modal max size is 420×420; on phones it auto-fits viewport width and height (desktop max unchanged). Allies and Details columns fill remaining modal height and resize on orientation change."
+        },
+        {
+          "mod": "Highscore Improvements",
+          "type": "changed",
+          "text": "Improvement Opportunities modal max size is 500×550; on phones it auto-fits viewport width and height (desktop max unchanged). Tab lists and stats footer fill remaining modal height and resize on orientation change."
+        },
+        {
+          "mod": "Item Tier List",
+          "type": "changed",
+          "text": "Tier list modal max size is 450×450; on phones it auto-fits viewport width and height (desktop max unchanged). Scrollable tier grid fills remaining modal height and resizes on orientation change. Item detail popups clamp width on narrow viewports."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Results modal max width is 400px and height fits content up to 500px; on phones it auto-fits viewport width and height (desktop max unchanged). Settings panel uses shared Mod Loader config panel (350×800 max). Tall results (charts) scroll inside the modal when needed."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Extension popup is 600×600 when the viewport allows; on phones it auto-fits viewport width and height (desktop max unchanged). Mod list and patch notes scroll inside the popup; patch notes keep a 250px minimum content height on desktop (scales down on short viewports). Shared mod configuration panels (Board Analyzer, Manual Runner, Tick Tracker, Bestiary Automator, Custom Display) max size is 350×800 with the same viewport clamping; tall settings scroll inside the panel. Firefox manifest (manifest_firefox.json): gecko_android added for Firefox for Android on AMO; data_collection_permissions declared (required none; optional websiteContent and technicalAndInteraction for optional Firebase sync and Debug Error Log)."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Settings modal max size is 600×500; on phones it auto-fits viewport width and height (desktop max unchanged). Main two-column panel fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Monster Tier List",
+          "type": "changed",
+          "text": "Tier list modal max size is 450×450; on phones it auto-fits viewport width and height (desktop max unchanged). Scrollable tier grid fills remaining modal height and resizes on orientation change. Monster detail popups clamp width on narrow viewports."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Quest Items (500×190), King Tibianus/Al Dee (450×500), and NPC chat modals (450×280) auto-fit viewport width and height on phones (desktop max unchanged). Chat message areas scale to available width beside the portrait; modal content fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "changed",
+          "text": "Settings modal max size is 700×500; on phones it auto-fits viewport width and height (desktop max unchanged). Raid map list fills remaining column height instead of a fixed max height; removed redundant map-selection description text."
+        },
+        {
+          "mod": "Room Hopper",
+          "type": "changed",
+          "text": "Room table modal max size is 750×600; on phones it auto-fits viewport width and height (desktop max unchanged). Room list fills remaining modal height and scrolls inside the table area."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "changed",
+          "text": "Setup Manager and notes modals max size is 500×550; on phones they auto-fit viewport width and height (desktop max unchanged). Main content fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Settings modal max size is 450×400; on phones it auto-fits viewport width and height (desktop max unchanged). Settings panel fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Team Copier",
+          "type": "changed",
+          "text": "Team Copier modal max size is 350×500; on phones it auto-fits viewport width and height (desktop max unchanged). Scrollable content fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "VIP List",
+          "type": "changed",
+          "text": "VIP List modal max size is 550×360; on phones it auto-fits viewport width and height (desktop max unchanged). VIP list content fills remaining modal height and resizes on orientation change."
+        },
+        {
+          "mod": "Welcome",
+          "type": "changed",
+          "text": "Welcome modal auto-fits browser width and height on phones (desktop max unchanged). Content scrolls on short viewports and resizes on orientation change."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "fixed",
+          "text": "Arsenal equipment IDs no longer shift when duplicate items are in depot; hidden depot tiles are matched to depot rows before visible arsenal buttons are assigned."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Advanced stats and ability hover tooltips on Bestiary and Arsenal stay correct when Depot Manager hides creatures or equipment in-place (no wrong stats past hidden depot slots)."
+        }
+      ]
+    },
+    {
       "version": "4.3.1",
       "changes": [
         {

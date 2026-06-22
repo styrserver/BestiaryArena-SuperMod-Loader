@@ -1648,6 +1648,7 @@ let activeRaidHunterModal = null;
 let raidHunterModalInProgress = false;
 let lastModalCall = 0;
 let modalCleanupObserver = null;
+let raidHunterModalLayoutCleanup = null;
 
 // State manager to prevent race conditions
 let stateManager = {
@@ -4802,6 +4803,7 @@ async function handleNewRaid(raid) {
 // Cleanup function for modal state (like Cyclopedia)
 function cleanupRaidHunterModal() {
     try {
+        clearRaidHunterModalLayoutCleanup();
         // Clear modal reference
         if (activeRaidHunterModal) {
             activeRaidHunterModal = null;
@@ -4834,9 +4836,138 @@ function cleanupRaidHunterModal() {
     }
 }
 
-// Constants for modal dimensions (matching Dice Roller)
-const RAID_HUNTER_MODAL_WIDTH = 700;
-const RAID_HUNTER_MODAL_HEIGHT = 400;
+const RAID_HUNTER_MODAL_CONFIG = {
+    width: 700,
+    height: 500,
+    leftColumnWidth: 200,
+    contentInset: 35,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 280
+};
+
+function getRaidHunterModalDimensions() {
+    const pad = RAID_HUNTER_MODAL_CONFIG.viewportPadding * 2;
+    return {
+        width: Math.max(
+            RAID_HUNTER_MODAL_CONFIG.minWidth,
+            Math.min(RAID_HUNTER_MODAL_CONFIG.width, window.innerWidth - pad)
+        ),
+        height: Math.max(
+            RAID_HUNTER_MODAL_CONFIG.minHeight,
+            Math.min(RAID_HUNTER_MODAL_CONFIG.height, window.innerHeight - pad)
+        )
+    };
+}
+
+function getRaidHunterColumnWidths(modalWidth) {
+    const contentWidth = modalWidth - RAID_HUNTER_MODAL_CONFIG.contentInset;
+    if (modalWidth >= RAID_HUNTER_MODAL_CONFIG.width) {
+        return {
+            contentWidth: RAID_HUNTER_MODAL_CONFIG.width - RAID_HUNTER_MODAL_CONFIG.contentInset,
+            leftWidth: RAID_HUNTER_MODAL_CONFIG.leftColumnWidth
+        };
+    }
+    const leftWidth = Math.min(
+        RAID_HUNTER_MODAL_CONFIG.leftColumnWidth,
+        Math.max(90, Math.floor(contentWidth * 0.28))
+    );
+    return { contentWidth, leftWidth };
+}
+
+function getRaidHunterDialog(modalRef) {
+    if (modalRef?.element) return modalRef.element;
+    if (modalRef instanceof HTMLElement) return modalRef;
+    return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearRaidHunterModalLayoutCleanup() {
+    if (raidHunterModalLayoutCleanup) {
+        raidHunterModalLayoutCleanup();
+        raidHunterModalLayoutCleanup = null;
+    }
+}
+
+function applyRaidHunterModalLayout(modalRef, contentRoot, dimensions) {
+    const dialog = getRaidHunterDialog(modalRef);
+    if (!dialog) return;
+
+    const { width, height } = dimensions;
+    const { contentWidth, leftWidth } = getRaidHunterColumnWidths(width);
+
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
+    dialog.classList.remove('max-w-[300px]');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+        rootWrapper.style.height = '100%';
+        rootWrapper.style.display = 'flex';
+        rootWrapper.style.flexDirection = 'column';
+        rootWrapper.style.flex = '1 1 0';
+        rootWrapper.style.minHeight = '0';
+    }
+
+    const contentContainer = dialog.querySelector('.widget-bottom');
+    if (contentContainer) {
+        Object.assign(contentContainer.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            overflowY: 'hidden',
+            overflowX: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+        });
+    }
+
+    if (contentRoot) {
+        Object.assign(contentRoot.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            height: '100%',
+            maxHeight: 'none',
+            minWidth: `${contentWidth}px`,
+            maxWidth: `${contentWidth}px`
+        });
+
+        const leftColumn = contentRoot.querySelector('.raid-hunter-modal-left');
+        const rightColumn = contentRoot.querySelector('.raid-hunter-modal-right');
+        if (leftColumn) {
+            Object.assign(leftColumn.style, {
+                width: `${leftWidth}px`,
+                minWidth: `${leftWidth}px`,
+                maxWidth: `${leftWidth}px`,
+                flex: `0 0 ${leftWidth}px`,
+                minHeight: '0'
+            });
+        }
+        if (rightColumn) {
+            Object.assign(rightColumn.style, {
+                flex: '1 1 0',
+                minWidth: '0',
+                minHeight: '0',
+                height: 'auto',
+                maxHeight: 'none'
+            });
+        }
+    }
+}
+
+function setupRaidHunterModalResponsiveLayout(modalRef, contentRoot) {
+    clearRaidHunterModalLayoutCleanup();
+    const apply = () => applyRaidHunterModalLayout(modalRef, contentRoot, getRaidHunterModalDimensions());
+    apply();
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    raidHunterModalLayoutCleanup = () => {
+        window.removeEventListener('resize', onResize);
+    };
+}
 
 // Open Raid Hunter Settings Modal (Cyclopedia-style robust implementation)
 function openRaidHunterSettingsModal() {
@@ -4847,6 +4978,7 @@ function openRaidHunterSettingsModal() {
         
         lastModalCall = now;
         raidHunterModalInProgress = true;
+        clearRaidHunterModalLayoutCleanup();
         
         (() => {
             try {
@@ -4861,19 +4993,27 @@ function openRaidHunterSettingsModal() {
                         try {
                             // Create settings content
                             const settingsContent = createSettingsContent();
-                            
-                            // Open modal using the same API as Cyclopedia
+                            const modalDimensions = getRaidHunterModalDimensions();
+
                             activeRaidHunterModal = context.api.ui.components.createModal({
                                 title: t('mods.raidHunter.modalTitle'),
-                                width: RAID_HUNTER_MODAL_WIDTH,
-                                height: RAID_HUNTER_MODAL_HEIGHT,
+                                width: modalDimensions.width,
+                                height: modalDimensions.height,
                                 content: settingsContent,
-                                buttons: [{ text: t('mods.raidHunter.closeButton'), primary: true }], // Add Close button like other mods
+                                buttons: [{ text: t('mods.raidHunter.closeButton'), primary: true }],
                                 onClose: () => {
                                     console.log('[Raid Hunter] Settings modal closed');
                                     cleanupRaidHunterModal();
                                 }
                             });
+
+                            const originalClose = activeRaidHunterModal?.close?.bind(activeRaidHunterModal);
+                            if (originalClose) {
+                                activeRaidHunterModal.close = () => {
+                                    clearRaidHunterModalLayoutCleanup();
+                                    originalClose();
+                                };
+                            }
                             
                             // Inject auto-save indicator into the existing modal footer
                             setTimeout(() => {
@@ -4928,16 +5068,10 @@ function openRaidHunterSettingsModal() {
                             
                             // Override modal size to ensure it's actually the correct size (matching Dice Roller approach)
                             setTimeout(() => {
-                                const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+                                const dialog = getRaidHunterDialog(activeRaidHunterModal);
                                 if (dialog) {
-                                    dialog.style.width = RAID_HUNTER_MODAL_WIDTH + 'px';
-                                    dialog.style.minWidth = RAID_HUNTER_MODAL_WIDTH + 'px';
-                                    dialog.style.maxWidth = RAID_HUNTER_MODAL_WIDTH + 'px';
-                                    dialog.style.height = RAID_HUNTER_MODAL_HEIGHT + 'px';
-                                    dialog.style.minHeight = RAID_HUNTER_MODAL_HEIGHT + 'px';
-                                    dialog.style.maxHeight = RAID_HUNTER_MODAL_HEIGHT + 'px';
-                                    
-                                    // Load and apply saved settings (with additional delay to ensure DOM is ready)
+                                    setupRaidHunterModalResponsiveLayout(activeRaidHunterModal, settingsContent);
+
                                     setTimeout(() => {
                                         loadAndApplySettings();
                                     }, 100);
@@ -4989,15 +5123,17 @@ function openRaidHunterSettingsModal() {
 function createSettingsContent() {
     // Main container with 2-column layout
     const mainContainer = document.createElement('div');
+    mainContainer.className = 'raid-hunter-modal-root';
     mainContainer.style.cssText = `
         display: flex;
         flex-direction: row;
         width: 100%;
         height: 100%;
-        min-width: 665px;
-        max-width: 700px;
-        min-height: 400px;
-        max-height: 400px;
+        min-width: 0;
+        max-width: 100%;
+        min-height: 0;
+        max-height: none;
+        flex: 1 1 auto;
         box-sizing: border-box;
         overflow: hidden;
         background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
@@ -5010,6 +5146,7 @@ function createSettingsContent() {
     
     // Left column - Auto-Raid Settings
     const leftColumn = document.createElement('div');
+    leftColumn.className = 'raid-hunter-modal-left';
     leftColumn.style.cssText = `
         width: 200px;
         min-width: 200px;
@@ -5026,6 +5163,7 @@ function createSettingsContent() {
     
     // Right column - Other Settings
     const rightColumn = document.createElement('div');
+    rightColumn.className = 'raid-hunter-modal-right';
     rightColumn.style.cssText = `
         flex: 1 1 0%;
         padding: 0;
@@ -5228,7 +5366,7 @@ function createOtherSettings() {
         box-sizing: border-box;
         gap: 20px;
         min-height: 0;
-        justify-content: center;
+        flex: 1 1 0;
     `;
     
     // Raid Map Selection
@@ -5247,7 +5385,8 @@ function createRaidMapSelection() {
         border: 1px solid ${COLOR_BORDER};
         border-radius: 5px;
         margin: 0;
-        flex: 1;
+        flex: 1 1 0;
+        min-height: 0;
         display: flex;
         flex-direction: column;
     `;
@@ -5259,6 +5398,7 @@ function createRaidMapSelection() {
         justify-content: space-between;
         align-items: center;
         margin: 0 0 15px 0;
+        flex-shrink: 0;
     `;
     
     const title = document.createElement('h3');
@@ -5338,25 +5478,15 @@ function createRaidMapSelection() {
     titleContainer.appendChild(helpIcon);
     section.appendChild(titleContainer);
     
-    const description = document.createElement('div');
-    description.textContent = t('mods.raidHunter.raidMapSelectionDesc');
-    description.className = 'pixel-font-16';
-    description.style.cssText = `
-        margin-bottom: 10px;
-        font-size: 12px;
-        color: ${COLOR_GRAY};
-        font-style: italic;
-    `;
-    section.appendChild(description);
-    
     // Create map selection container
     const mapContainer = document.createElement('div');
     mapContainer.style.cssText = `
         display: flex;
         flex-direction: column;
         gap: 8px;
-        flex: 1;
-        max-height: 255px;
+        flex: 1 1 0;
+        min-height: 0;
+        max-height: none;
         overflow-y: auto;
         border: 1px solid ${COLOR_BORDER_DARK};
         border-radius: 3px;

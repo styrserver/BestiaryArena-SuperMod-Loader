@@ -321,6 +321,74 @@ function onModBatchExecutionStarted() {
 let activeTimeouts = new Set();
 let activeEventListeners = new Map();
 let currentModal = null;
+let welcomeModalLayoutCleanup = null;
+
+const WELCOME_MODAL_SIZE = {
+  maxWidth: 900,
+  maxHeight: 600,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 360
+};
+
+function getWelcomeModalDimensions() {
+  const pad = WELCOME_MODAL_SIZE.viewportPadding * 2;
+  return {
+    width: Math.max(
+      WELCOME_MODAL_SIZE.minWidth,
+      Math.min(WELCOME_MODAL_SIZE.maxWidth, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      WELCOME_MODAL_SIZE.minHeight,
+      Math.min(WELCOME_MODAL_SIZE.maxHeight, window.innerHeight - pad)
+    )
+  };
+}
+
+function applyWelcomeModalLayout(dialog, dimensions) {
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+
+  const innerWrapper = dialog.querySelector(':scope > div');
+  if (innerWrapper) {
+    innerWrapper.style.height = '100%';
+    innerWrapper.style.display = 'flex';
+    innerWrapper.style.flexDirection = 'column';
+    innerWrapper.style.minHeight = '0';
+  }
+
+  const contentElem = dialog.querySelector('.widget-bottom, .modal-content, [data-content], .content, .modal-body');
+  if (contentElem) {
+    contentElem.style.flex = '1 1 auto';
+    contentElem.style.minHeight = '0';
+    contentElem.style.overflowY = 'auto';
+    contentElem.style.overflowX = 'hidden';
+    contentElem.style.display = 'flex';
+    contentElem.style.flexDirection = 'column';
+  }
+}
+
+function setupWelcomeModalResponsiveLayout(dialog) {
+  const apply = () => applyWelcomeModalLayout(dialog, getWelcomeModalDimensions());
+  apply();
+  trackEventListener(window, 'resize', apply);
+  return () => removeTrackedEventListener(window, 'resize', apply);
+}
+
+function clearWelcomeModalLayoutCleanup() {
+  if (welcomeModalLayoutCleanup) {
+    welcomeModalLayoutCleanup();
+    welcomeModalLayoutCleanup = null;
+  }
+}
 
 // Helper functions for cleanup tracking
 function trackTimeout(timeoutId) {
@@ -638,12 +706,15 @@ async function showWelcomeModal() {
     const superCount = modCounts?.super || 'Multiple';
     const otCount = modCounts?.ot || 'Multiple';
     
+    clearWelcomeModalLayoutCleanup();
+
+    const modalDimensions = getWelcomeModalDimensions();
     const modal = api.ui.components.createModal({
       title: 'Welcome to Bestiary Arena Mod Loader!',
-      width: 900,
-      height: 600,
+      width: modalDimensions.width,
+      height: modalDimensions.height,
       content: `
-        <div style="padding: 20px; text-align: center;">
+        <div style="padding: clamp(12px, 3vw, 20px); text-align: center; box-sizing: border-box;">
           <div style="margin-bottom: 20px;">
             <h2 style="color: #a6adc8; margin-bottom: 15px;">🎮 Bestiary Arena SuperMod Loader</h2>
             <p style="color: #a6adc8; line-height: 1.6; margin-bottom: 20px;">
@@ -665,12 +736,12 @@ async function showWelcomeModal() {
           </div>
           
           <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
-            <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 8px; padding: 15px; flex: 1; min-width: 300px; transition: all 0.2s ease;">
+            <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 8px; padding: 15px; flex: 1 1 200px; min-width: 0; transition: all 0.2s ease;">
               <p style="color: #a6adc8; margin: 0; font-size: 14px; text-align: center;">
                 <strong>✅ Safe & Approved:</strong> This mod loader is officially approved by the Bestiary Arena developer (Xandjiji) and designed for single-player enhancement only.
               </p>
             </div>
-            <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 8px; padding: 15px; flex: 1; min-width: 300px; transition: all 0.2s ease;">
+            <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 8px; padding: 15px; flex: 1 1 200px; min-width: 0; transition: all 0.2s ease;">
               <p style="color: #a6adc8; margin: 0; font-size: 14px;">
                 <strong>💡 Tip:</strong> Click the extension icon to open the popup where you can enable/disable mods. Official Mods are enabled by default, but Super Mods and OT Mods need to be manually enabled as needed!
               </p>
@@ -713,25 +784,23 @@ async function showWelcomeModal() {
     };
     trackEventListener(document, 'keydown', escHandler);
 
-    // Force the modal size to match Cyclopedia dimensions
     trackTimeout(setTimeout(() => {
-      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+      const dialog = modal?.element || document.querySelector('div[role="dialog"][data-state="open"]');
       if (dialog) {
-        dialog.style.width = '900px';
-        dialog.style.minWidth = '900px';
-        dialog.style.maxWidth = '900px';
-        dialog.style.height = '600px';
-        dialog.style.minHeight = '600px';
-        dialog.style.maxHeight = '600px';
-        const contentElem = dialog.querySelector('.modal-content, [data-content], .content, .modal-body');
-        if (contentElem) {
-          contentElem.style.width = '900px';
-          contentElem.style.height = '600px';
-          contentElem.style.display = 'flex';
-          contentElem.style.flexDirection = 'column';
-        }
+        welcomeModalLayoutCleanup = setupWelcomeModalResponsiveLayout(dialog);
       }
     }, 100));
+
+    const originalClose = modal.close?.bind(modal);
+    if (originalClose) {
+      modal.close = () => {
+        clearWelcomeModalLayoutCleanup();
+        originalClose();
+        if (currentModal === modal) {
+          currentModal = null;
+        }
+      };
+    }
 
     // Store modal reference for cleanup
     currentModal = modal;
@@ -850,6 +919,8 @@ function cleanup() {
     modLoadingObserver = null;
   }
   
+  clearWelcomeModalLayoutCleanup();
+
   // Close any open modal
   if (currentModal && typeof currentModal.close === 'function') {
     currentModal.close();

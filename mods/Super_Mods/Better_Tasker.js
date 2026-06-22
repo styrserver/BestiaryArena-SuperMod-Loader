@@ -1777,6 +1777,7 @@ let lastModalCall = 0;
 
 // Event listener management
 let escKeyListener = null;
+let taskerModalLayoutCleanup = null;
 let pageVisibilityHandler = null;
 let lastPageVisibilityChange = 0;
 let lastForegroundTaskRecheck = 0;
@@ -3755,6 +3756,7 @@ function stopQuestLogMonitoring() {
 // Cleanup function for modal state
 function cleanupTaskerModal() {
     try {
+        clearTaskerModalLayoutCleanup();
         // Clear modal reference
         if (activeTaskerModal) {
             activeTaskerModal = null;
@@ -3776,9 +3778,138 @@ function cleanupTaskerModal() {
     }
 }
 
-// Constants for modal dimensions
-const TASKER_MODAL_WIDTH = 700;
-const TASKER_MODAL_HEIGHT = 400;
+const TASKER_MODAL_CONFIG = {
+    width: 700,
+    height: 500,
+    leftColumnWidth: 200,
+    contentInset: 35,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 280
+};
+
+function getTaskerModalDimensions() {
+    const pad = TASKER_MODAL_CONFIG.viewportPadding * 2;
+    return {
+        width: Math.max(
+            TASKER_MODAL_CONFIG.minWidth,
+            Math.min(TASKER_MODAL_CONFIG.width, window.innerWidth - pad)
+        ),
+        height: Math.max(
+            TASKER_MODAL_CONFIG.minHeight,
+            Math.min(TASKER_MODAL_CONFIG.height, window.innerHeight - pad)
+        )
+    };
+}
+
+function getTaskerColumnWidths(modalWidth) {
+    const contentWidth = modalWidth - TASKER_MODAL_CONFIG.contentInset;
+    if (modalWidth >= TASKER_MODAL_CONFIG.width) {
+        return {
+            contentWidth: TASKER_MODAL_CONFIG.width - TASKER_MODAL_CONFIG.contentInset,
+            leftWidth: TASKER_MODAL_CONFIG.leftColumnWidth
+        };
+    }
+    const leftWidth = Math.min(
+        TASKER_MODAL_CONFIG.leftColumnWidth,
+        Math.max(90, Math.floor(contentWidth * 0.28))
+    );
+    return { contentWidth, leftWidth };
+}
+
+function getTaskerDialog(modalRef) {
+    if (modalRef?.element) return modalRef.element;
+    if (modalRef instanceof HTMLElement) return modalRef;
+    return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearTaskerModalLayoutCleanup() {
+    if (taskerModalLayoutCleanup) {
+        taskerModalLayoutCleanup();
+        taskerModalLayoutCleanup = null;
+    }
+}
+
+function applyTaskerModalLayout(modalRef, contentRoot, dimensions) {
+    const dialog = getTaskerDialog(modalRef);
+    if (!dialog) return;
+
+    const { width, height } = dimensions;
+    const { contentWidth, leftWidth } = getTaskerColumnWidths(width);
+
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
+    dialog.classList.remove('max-w-[300px]');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+        rootWrapper.style.height = '100%';
+        rootWrapper.style.display = 'flex';
+        rootWrapper.style.flexDirection = 'column';
+        rootWrapper.style.flex = '1 1 0';
+        rootWrapper.style.minHeight = '0';
+    }
+
+    const contentContainer = dialog.querySelector('.widget-bottom');
+    if (contentContainer) {
+        Object.assign(contentContainer.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            overflowY: 'hidden',
+            overflowX: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+        });
+    }
+
+    if (contentRoot) {
+        Object.assign(contentRoot.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            height: '100%',
+            maxHeight: 'none',
+            minWidth: `${contentWidth}px`,
+            maxWidth: `${contentWidth}px`
+        });
+
+        const leftColumn = contentRoot.querySelector('.better-tasker-modal-left');
+        const rightColumn = contentRoot.querySelector('.better-tasker-modal-right');
+        if (leftColumn) {
+            Object.assign(leftColumn.style, {
+                width: `${leftWidth}px`,
+                minWidth: `${leftWidth}px`,
+                maxWidth: `${leftWidth}px`,
+                flex: `0 0 ${leftWidth}px`,
+                minHeight: '0'
+            });
+        }
+        if (rightColumn) {
+            Object.assign(rightColumn.style, {
+                flex: '1 1 0',
+                minWidth: '0',
+                minHeight: '0',
+                height: 'auto',
+                maxHeight: 'none'
+            });
+        }
+    }
+}
+
+function setupTaskerModalResponsiveLayout(modalRef, contentRoot) {
+    clearTaskerModalLayoutCleanup();
+    const apply = () => applyTaskerModalLayout(modalRef, contentRoot, getTaskerModalDimensions());
+    apply();
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    taskerModalLayoutCleanup = () => {
+        window.removeEventListener('resize', onResize);
+    };
+}
 
 // Open Tasker Settings Modal
 function openTaskerSettingsModal() {
@@ -3789,6 +3920,7 @@ function openTaskerSettingsModal() {
         
         lastModalCall = now;
         taskerModalInProgress = true;
+        clearTaskerModalLayoutCleanup();
         
         (() => {
             try {
@@ -3803,12 +3935,12 @@ function openTaskerSettingsModal() {
                         try {
                             // Create settings content
                             const settingsContent = createSettingsContent();
-                            
-                            // Open modal
+                            const modalDimensions = getTaskerModalDimensions();
+
                             activeTaskerModal = context.api.ui.components.createModal({
                                 title: t('mods.betterTasker.modalTitle'),
-                                width: TASKER_MODAL_WIDTH,
-                                height: TASKER_MODAL_HEIGHT,
+                                width: modalDimensions.width,
+                                height: modalDimensions.height,
                                 content: settingsContent,
                                 buttons: [{ text: t('mods.betterTasker.closeButton'), primary: true }],
                                 onClose: () => {
@@ -3816,6 +3948,14 @@ function openTaskerSettingsModal() {
                                     cleanupTaskerModal();
                                 }
                             });
+
+                            const originalClose = activeTaskerModal?.close?.bind(activeTaskerModal);
+                            if (originalClose) {
+                                activeTaskerModal.close = () => {
+                                    clearTaskerModalLayoutCleanup();
+                                    originalClose();
+                                };
+                            }
                             
                             // Add ESC key support for closing modal
                             escKeyListener = (event) => {
@@ -3828,16 +3968,9 @@ function openTaskerSettingsModal() {
                             
                             // Override modal size and load settings
                             setTimeout(() => {
-                                const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+                                const dialog = getTaskerDialog(activeTaskerModal);
                                 if (dialog) {
-                                    dialog.style.width = TASKER_MODAL_WIDTH + 'px';
-                                    dialog.style.minWidth = TASKER_MODAL_WIDTH + 'px';
-                                    dialog.style.maxWidth = TASKER_MODAL_WIDTH + 'px';
-                                    dialog.style.height = TASKER_MODAL_HEIGHT + 'px';
-                                    dialog.style.minHeight = TASKER_MODAL_HEIGHT + 'px';
-                                    dialog.style.maxHeight = TASKER_MODAL_HEIGHT + 'px';
-                                    
-                                    // Load and apply saved settings
+                                    setupTaskerModalResponsiveLayout(activeTaskerModal, settingsContent);
                                     loadAndApplySettings();
                                 }
                             }, 50);
@@ -3904,15 +4037,17 @@ function openTaskerSettingsModal() {
 function createSettingsContent() {
     // Main container with 2-column layout
     const mainContainer = document.createElement('div');
+    mainContainer.className = 'better-tasker-modal-root';
     mainContainer.style.cssText = `
         display: flex;
         flex-direction: row;
         width: 100%;
         height: 100%;
-        min-width: 665px;
-        max-width: 700px;
-        min-height: 400px;
-        max-height: 400px;
+        min-width: 0;
+        max-width: 100%;
+        min-height: 0;
+        max-height: none;
+        flex: 1 1 auto;
         box-sizing: border-box;
         overflow: hidden;
         background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
@@ -3925,6 +4060,7 @@ function createSettingsContent() {
     
     // Left column - Auto-Task Settings
     const leftColumn = document.createElement('div');
+    leftColumn.className = 'better-tasker-modal-left';
     leftColumn.style.cssText = `
         width: 200px;
         min-width: 200px;
@@ -3941,6 +4077,7 @@ function createSettingsContent() {
     
     // Right column - Task Settings
     const rightColumn = document.createElement('div');
+    rightColumn.className = 'better-tasker-modal-right';
     rightColumn.style.cssText = `
         flex: 1 1 0%;
         padding: 0;
@@ -4107,7 +4244,7 @@ function createTaskSettings() {
         box-sizing: border-box;
         gap: 20px;
         min-height: 0;
-        justify-content: center;
+        flex: 1 1 0;
     `;
     
     // Monster Selection Settings
@@ -4126,7 +4263,8 @@ function createMonsterSelectionSettings() {
         border: 1px solid #444;
         border-radius: 5px;
         margin: 0;
-        flex: 1;
+        flex: 1 1 0;
+        min-height: 0;
         display: flex;
         flex-direction: column;
     `;
@@ -4139,6 +4277,7 @@ function createMonsterSelectionSettings() {
         color: #ffe066;
         font-weight: bold;
         text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        flex-shrink: 0;
     `;
     section.appendChild(title);
     
@@ -4154,6 +4293,8 @@ function createMonsterSelectionSettings() {
         color: #ffc107;
         font-weight: bold;
         text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        flex-shrink: 0;
+        display: none;
     `;
     
     // Create monster selection container first
@@ -4162,8 +4303,9 @@ function createMonsterSelectionSettings() {
         display: flex;
         flex-direction: column;
         gap: 8px;
-        flex: 1;
-        max-height: 215px;
+        flex: 1 1 0;
+        min-height: 0;
+        max-height: none;
         overflow-y: auto;
         border: 1px solid #555;
         border-radius: 3px;
@@ -4302,10 +4444,14 @@ function createMonsterSelectionSettings() {
         const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]:not(:disabled)');
         const totalCreatures = checkboxes.length;
         const selectedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
-        warning.textContent = tReplace('mods.betterTasker.warningUnselectedCreatures', {
-            selectedCount: selectedCount,
-            totalCreatures: totalCreatures
-        });
+        const hasUnselected = totalCreatures > 0 && selectedCount < totalCreatures;
+        warning.style.display = hasUnselected ? 'block' : 'none';
+        if (hasUnselected) {
+            warning.textContent = tReplace('mods.betterTasker.warningUnselectedCreatures', {
+                selectedCount: selectedCount,
+                totalCreatures: totalCreatures
+            });
+        }
     };
     
     // Add warning before monster container
@@ -4320,6 +4466,7 @@ function createMonsterSelectionSettings() {
         display: flex;
         gap: 10px;
         margin-top: 10px;
+        flex-shrink: 0;
     `);
     
     const selectAllBtn = createCustomStyledButton(

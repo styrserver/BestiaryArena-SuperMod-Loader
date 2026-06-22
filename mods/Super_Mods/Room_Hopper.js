@@ -24,6 +24,120 @@ const MOD_ID = 'room-hopper';
 const BUTTON_ID = `${MOD_ID}-button`;
 const MODAL_ID = `${MOD_ID}-modal`;
 
+const ROOM_HOPPER_MODAL_CONFIG = {
+  width: 750,
+  height: 600,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 280
+};
+
+let roomHopperModalLayoutCleanup = null;
+
+function getRoomHopperModalDimensions() {
+  const pad = ROOM_HOPPER_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      ROOM_HOPPER_MODAL_CONFIG.minWidth,
+      Math.min(ROOM_HOPPER_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      ROOM_HOPPER_MODAL_CONFIG.minHeight,
+      Math.min(ROOM_HOPPER_MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
+
+function getRoomHopperDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearRoomHopperModalLayoutCleanup() {
+  if (roomHopperModalLayoutCleanup) {
+    roomHopperModalLayoutCleanup();
+    roomHopperModalLayoutCleanup = null;
+  }
+}
+
+function applyRoomHopperModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getRoomHopperDialog(modalRef);
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]');
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper) {
+    rootWrapper.style.height = '100%';
+    rootWrapper.style.display = 'flex';
+    rootWrapper.style.flexDirection = 'column';
+    rootWrapper.style.flex = '1 1 0';
+    rootWrapper.style.minHeight = '0';
+  }
+
+  const contentContainer = dialog.querySelector('.widget-bottom');
+  if (contentContainer) {
+    Object.assign(contentContainer.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflowY: 'hidden',
+      overflowX: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      height: '100%',
+      maxHeight: 'none',
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px'
+    });
+
+    const tableWrap = contentRoot.querySelector(`#${MODAL_ID}-table`);
+    if (tableWrap) {
+      Object.assign(tableWrap.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        height: 'auto',
+        maxHeight: 'none',
+        overflowY: 'scroll',
+        overflowX: 'auto'
+      });
+    }
+  }
+}
+
+function setupRoomHopperModalResponsiveLayout(modalRef, contentRoot) {
+  clearRoomHopperModalLayoutCleanup();
+  const apply = () => applyRoomHopperModalLayout(modalRef, contentRoot, getRoomHopperModalDimensions());
+  apply();
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  roomHopperModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+  };
+}
+
 function resolveRegionName(regionId) {
     if (!regionId) return 'Unknown';
     if (typeof globalThis.mapsDatabase?.getRegionDisplayName === 'function') {
@@ -52,6 +166,7 @@ let modalEl = null;          // currently-open modal root
 
 function cleanupRoomHopper() {
     try {
+        clearRoomHopperModalLayoutCleanup();
         if (buildRetryTimer) {
             clearTimeout(buildRetryTimer);
             buildRetryTimer = null;
@@ -479,15 +594,19 @@ function openModal() {
         return;
     }
 
+    clearRoomHopperModalLayoutCleanup();
+    const modalDimensions = getRoomHopperModalDimensions();
+
     // Build content container before passing to createModal
     const root = document.createElement('div');
     root.id = `${MODAL_ID}-root`;
-    root.style.cssText = 'display: flex; flex-direction: column; gap: 8px; width: 100%;';
+    root.className = 'room-hopper-modal-root';
+    root.style.cssText = 'display: flex; flex-direction: column; gap: 8px; width: 100%; height: 100%; min-height: 0; flex: 1 1 0; box-sizing: border-box; overflow: hidden;';
 
     // Filter bar (populated in Task 12)
     const filterBar = document.createElement('div');
     filterBar.id = `${MODAL_ID}-filters`;
-    filterBar.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+    filterBar.style.cssText = 'display: flex; gap: 8px; align-items: center; flex-shrink: 0; flex-wrap: wrap;';
     root.appendChild(filterBar);
 
     // -- Search input --
@@ -552,8 +671,10 @@ function openModal() {
     const tableWrap = document.createElement('div');
     tableWrap.id = `${MODAL_ID}-table`;
     tableWrap.style.cssText = `
-        height: 420px;
+        flex: 1 1 0;
+        min-height: 0;
         overflow-y: scroll;
+        overflow-x: auto;
         border: 1px solid #2a2a2a;
         scrollbar-width: auto;
         scrollbar-color: #555 #1a1a1a;
@@ -588,11 +709,16 @@ function openModal() {
 
     const modalInstance = api.ui.components.createModal({
         title: 'Room Hopper',
-        width: 720,
+        width: modalDimensions.width,
+        height: modalDimensions.height,
         content: root,
         buttons: [
             { text: 'Close', primary: false }
-        ]
+        ],
+        onClose: () => {
+            clearRoomHopperModalLayoutCleanup();
+            modalEl = null;
+        }
     });
 
     // Keep the modal handle so cleanup/teleport can close it (removes modal + overlay)
@@ -603,6 +729,8 @@ function openModal() {
     } else {
         modalEl = modalInstance;
     }
+
+    setupRoomHopperModalResponsiveLayout(modalInstance, root);
 
     // Inject credits into the modal button row (same pattern as Mod Settings)
     setTimeout(() => {

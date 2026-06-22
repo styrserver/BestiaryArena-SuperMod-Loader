@@ -1,6 +1,160 @@
 // DOM Item Tier List mod for Bestiary Arena
 console.log('Item Tier List Pretty Mod initializing...');
 
+const ITEM_TIER_LIST_MODAL_CONFIG = {
+  width: 450,
+  height: 450,
+  detailWidth: 300,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 240
+};
+
+let itemTierListModalLayoutCleanup = null;
+
+function getItemTierListModalDimensions(maxWidth, maxHeight, minHeight = ITEM_TIER_LIST_MODAL_CONFIG.minHeight) {
+  const pad = ITEM_TIER_LIST_MODAL_CONFIG.viewportPadding * 2;
+  const dims = {
+    width: Math.max(
+      ITEM_TIER_LIST_MODAL_CONFIG.minWidth,
+      Math.min(maxWidth, window.innerWidth - pad)
+    )
+  };
+  if (maxHeight !== null && maxHeight !== undefined) {
+    dims.height = Math.max(
+      minHeight,
+      Math.min(maxHeight, window.innerHeight - pad)
+    );
+  }
+  return dims;
+}
+
+function getItemTierListDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearItemTierListModalLayoutCleanup() {
+  if (itemTierListModalLayoutCleanup) {
+    itemTierListModalLayoutCleanup();
+    itemTierListModalLayoutCleanup = null;
+  }
+}
+
+function applyItemTierListModalLayout(modalRef, contentRoot, scrollContainer, maxWidth, maxHeight) {
+  const dialog = getItemTierListDialog(modalRef);
+  if (!dialog) return;
+
+  const hasFixedHeight = maxHeight !== null && maxHeight !== undefined;
+  const dims = getItemTierListModalDimensions(maxWidth, hasFixedHeight ? maxHeight : null);
+
+  dialog.style.width = `${dims.width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${dims.width}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]', 'w-full');
+
+  if (hasFixedHeight) {
+    dialog.style.height = `${dims.height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${dims.height}px`;
+  }
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper && hasFixedHeight) {
+    Object.assign(rootWrapper.style, {
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      minHeight: '0'
+    });
+  }
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom && hasFixedHeight) {
+    Object.assign(widgetBottom.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflow: 'hidden'
+    });
+  }
+
+  if (contentRoot && hasFixedHeight) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      minWidth: '0',
+      height: '100%',
+      width: '100%',
+      maxWidth: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      boxSizing: 'border-box',
+      overflow: 'hidden'
+    });
+  }
+
+  if (scrollContainer?.element && hasFixedHeight) {
+    Object.assign(scrollContainer.element.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      height: 'auto',
+      width: '100%',
+      position: 'relative',
+      overflow: 'hidden'
+    });
+    const viewport = scrollContainer.scrollView ||
+      scrollContainer.element.querySelector('[data-radix-scroll-area-viewport]');
+    if (viewport) {
+      viewport.style.height = '100%';
+    }
+  }
+}
+
+function setupItemTierListModalResponsiveLayout(modalRef, contentRoot, scrollContainer, maxWidth, maxHeight) {
+  clearItemTierListModalLayoutCleanup();
+
+  const apply = () => applyItemTierListModalLayout(modalRef, contentRoot, scrollContainer, maxWidth, maxHeight);
+  requestAnimationFrame(() => apply());
+
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+
+  let modalCloseObserver = null;
+  const dialog = getItemTierListDialog(modalRef);
+  if (dialog) {
+    modalCloseObserver = new MutationObserver(() => {
+      if (!document.contains(dialog) || dialog.getAttribute('data-state') === 'closed') {
+        clearItemTierListModalLayoutCleanup();
+      }
+    });
+    modalCloseObserver.observe(dialog, { attributes: true, attributeFilter: ['data-state'] });
+    modalCloseObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  itemTierListModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+    if (modalCloseObserver) {
+      modalCloseObserver.disconnect();
+      modalCloseObserver = null;
+    }
+  };
+}
+
+function openItemTierListDetailModal({ title, content }) {
+  const { width } = getItemTierListModalDimensions(ITEM_TIER_LIST_MODAL_CONFIG.detailWidth, null);
+  api.ui.components.createModal({
+    title,
+    width,
+    content,
+    buttons: [{ text: 'Close', primary: true }]
+  });
+}
+
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
 
@@ -25,7 +179,8 @@ if (api) {
 // Function to show tier list modal
 function showItemTierListModal() {
   console.log('Showing item tier list modal...');
-  
+  clearItemTierListModalLayoutCleanup();
+
   try {
     const { equips, boardConfigs } = globalThis.state.player.getSnapshot().context;
     const equipLookup = new Map(equips.map(m => [m.id, m.gameId]));
@@ -83,14 +238,22 @@ function showItemTierListModal() {
 
     const labels = ['S', 'A', 'B', 'C'];
     
-    // Create content container for the modal
+  // Create content container for the modal
     const contentContainer = document.createElement('div');
     
-    // Create scrollable container for tier list
+    // Scrollable tier list fills remaining modal height
     const tierListScroll = api.ui.components.createScrollContainer({
-      height: 350,
+      height: '100%',
       padding: true,
       content: ''
+    });
+    Object.assign(tierListScroll.element.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      height: 'auto',
+      width: '100%',
+      position: 'relative',
+      overflow: 'hidden'
     });
     
     // Add tiers to the scroll container
@@ -169,16 +332,9 @@ function showItemTierListModal() {
             `;
             contentContainer.appendChild(statsContainer);
             
-            api.ui.components.createModal({
+            openItemTierListDetailModal({
               title: equipName || `Item #${item.gameId}`,
-              width: 300,
-              content: contentContainer,
-              buttons: [
-                {
-                  text: 'Close',
-                  primary: true
-                }
-              ]
+              content: contentContainer
             });
           }
         });
@@ -201,18 +357,32 @@ function showItemTierListModal() {
     // Add scroll container to content container
     contentContainer.appendChild(tierListScroll.element);
     
-    // Show the modal with the tier list
-    api.ui.components.createModal({
+    const modalDims = getItemTierListModalDimensions(
+      ITEM_TIER_LIST_MODAL_CONFIG.width,
+      ITEM_TIER_LIST_MODAL_CONFIG.height
+    );
+
+    const modal = api.ui.components.createModal({
       title: 'Item Usage Tier List',
-      width: 450,
+      width: modalDims.width,
+      height: modalDims.height,
       content: contentContainer,
       buttons: [
         {
           text: 'Close',
-          primary: true
+          primary: true,
+          onClick: () => clearItemTierListModalLayoutCleanup()
         }
       ]
     });
+
+    setupItemTierListModalResponsiveLayout(
+      modal,
+      contentContainer,
+      tierListScroll,
+      ITEM_TIER_LIST_MODAL_CONFIG.width,
+      ITEM_TIER_LIST_MODAL_CONFIG.height
+    );
     
     console.log('Item tier list modal displayed successfully');
   } catch (error) {
@@ -241,6 +411,7 @@ exports = {
 // Cleanup function for Item Tier List mod (exposed for mod system)
 exports.cleanup = function() {
   console.log('[Item Tier List] Running cleanup...');
+  clearItemTierListModalLayoutCleanup();
   
   // Remove any existing modals
   const existingModal = document.querySelector('#item-tier-list-modal');

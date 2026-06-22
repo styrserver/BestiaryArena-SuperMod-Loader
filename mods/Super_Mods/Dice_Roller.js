@@ -1951,6 +1951,14 @@
     if (!selectedGameId) {
       const div = document.createElement('div');
       div.innerText = 'Select a creature.';
+      div.style.display = 'flex';
+      div.style.alignItems = 'center';
+      div.style.justifyContent = 'center';
+      div.style.height = '100%';
+      div.style.width = '100%';
+      div.style.color = '#888888';
+      div.style.fontStyle = 'italic';
+      div.style.textAlign = 'center';
       return div;
     }
     try {
@@ -3977,9 +3985,170 @@
 // =======================
 // 6. Modal Management
 // =======================
+
+  let activeDiceRollerModal = null;
+  let diceRollerModalLayoutCleanup = null;
+
+  const DICE_ROLLER_MODAL_CONFIG = {
+    width: 710,
+    height: 500,
+    col1Width: 240,
+    col2Width: 230,
+    col3Width: 205,
+    contentInset: 35,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 280
+  };
+
+  function getDiceRollerModalDimensions() {
+    const pad = DICE_ROLLER_MODAL_CONFIG.viewportPadding * 2;
+    return {
+      width: Math.max(
+        DICE_ROLLER_MODAL_CONFIG.minWidth,
+        Math.min(DICE_ROLLER_MODAL_CONFIG.width, window.innerWidth - pad)
+      ),
+      height: Math.max(
+        DICE_ROLLER_MODAL_CONFIG.minHeight,
+        Math.min(DICE_ROLLER_MODAL_CONFIG.height, window.innerHeight - pad)
+      )
+    };
+  }
+
+  function getDiceRollerColumnWidths(modalWidth) {
+    const contentWidth = modalWidth - DICE_ROLLER_MODAL_CONFIG.contentInset;
+    const { col1Width, col2Width, col3Width } = DICE_ROLLER_MODAL_CONFIG;
+    const totalDesktop = col1Width + col2Width + col3Width;
+
+    if (modalWidth >= DICE_ROLLER_MODAL_CONFIG.width) {
+      return {
+        contentWidth: DICE_ROLLER_MODAL_CONFIG.width - DICE_ROLLER_MODAL_CONFIG.contentInset,
+        col1Width,
+        col2Width,
+        col3Width
+      };
+    }
+
+    const scale = contentWidth / totalDesktop;
+    const col1 = Math.max(90, Math.floor(col1Width * scale));
+    const col2 = Math.max(90, Math.floor(col2Width * scale));
+    const col3 = Math.max(80, contentWidth - col1 - col2);
+    return { contentWidth, col1Width: col1, col2Width: col2, col3Width: col3 };
+  }
+
+  function getDiceRollerDialog(modalRef) {
+    if (modalRef?.element) return modalRef.element;
+    if (modalRef instanceof HTMLElement) return modalRef;
+    return document.querySelector('div[role="dialog"][data-state="open"]');
+  }
+
+  function clearDiceRollerModalLayoutCleanup() {
+    if (diceRollerModalLayoutCleanup) {
+      diceRollerModalLayoutCleanup();
+      diceRollerModalLayoutCleanup = null;
+    }
+  }
+
+  function applyDiceRollerColumnStyles(column, width) {
+    if (!column) return;
+    Object.assign(column.style, {
+      width: `${width}px`,
+      minWidth: `${width}px`,
+      maxWidth: `${width}px`,
+      flex: `0 0 ${width}px`,
+      minHeight: '0',
+      height: '100%'
+    });
+  }
+
+  function applyDiceRollerModalLayout(modalRef, contentRoot, dimensions) {
+    const dialog = getDiceRollerDialog(modalRef);
+    if (!dialog) return;
+
+    const { width, height } = dimensions;
+    const { contentWidth, col1Width, col2Width, col3Width } = getDiceRollerColumnWidths(width);
+
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
+    dialog.classList.remove('max-w-[300px]');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+      rootWrapper.style.height = '100%';
+      rootWrapper.style.display = 'flex';
+      rootWrapper.style.flexDirection = 'column';
+      rootWrapper.style.flex = '1 1 0';
+      rootWrapper.style.minHeight = '0';
+    }
+
+    const contentContainer = dialog.querySelector('.widget-bottom');
+    if (contentContainer) {
+      Object.assign(contentContainer.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        overflowY: 'hidden',
+        overflowX: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      });
+    }
+
+    if (contentRoot) {
+      Object.assign(contentRoot.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        height: '100%',
+        maxHeight: 'none',
+        width: `${contentWidth}px`,
+        minWidth: `${contentWidth}px`,
+        maxWidth: `${contentWidth}px`,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'row',
+        gap: '0'
+      });
+
+      const columnsWrapper = contentRoot.querySelector('.dice-roller-modal-columns');
+      if (columnsWrapper) {
+        Object.assign(columnsWrapper.style, {
+          display: 'flex',
+          flexDirection: 'row',
+          justifyContent: 'flex-start',
+          alignItems: 'stretch',
+          width: '100%',
+          height: '100%',
+          minHeight: '0',
+          flex: '1 1 0'
+        });
+      }
+
+      applyDiceRollerColumnStyles(contentRoot.querySelector('.dice-roller-modal-col1'), col1Width);
+      applyDiceRollerColumnStyles(contentRoot.querySelector('.dice-roller-modal-col2'), col2Width);
+      applyDiceRollerColumnStyles(contentRoot.querySelector('.dice-roller-modal-col3'), col3Width);
+    }
+  }
+
+  function setupDiceRollerModalResponsiveLayout(modalRef, contentRoot) {
+    clearDiceRollerModalLayoutCleanup();
+    const apply = () => applyDiceRollerModalLayout(modalRef, contentRoot, getDiceRollerModalDimensions());
+    apply();
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    diceRollerModalLayoutCleanup = () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }
+
   function showAutoDiceModal() {
     // Inject CSS styles for cross-browser compatibility
     injectDiceRollerButtonStyles();
+    clearDiceRollerModalLayoutCleanup();
     
     for (let i = 0; i < 2; i++) {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
@@ -3989,18 +4158,17 @@
       let selectedDice = [1, 2, 3, 4, 5]; // Start with all activated
       let lastStatusMessage = '';
       const contentDiv = document.createElement('div');
+      contentDiv.className = 'dice-roller-modal-root';
       contentDiv.style.width = '100%';
       contentDiv.style.height = '100%';
-      contentDiv.style.minWidth = '710px';
-      contentDiv.style.maxWidth = '710px';
-      contentDiv.style.minHeight = '400px';
-      contentDiv.style.maxHeight = '400px';
       contentDiv.style.boxSizing = 'border-box';
       contentDiv.style.overflow = 'hidden';
       contentDiv.style.display = 'flex';
       contentDiv.style.flexDirection = 'row';
       contentDiv.style.gap = '0';
       contentDiv.style.flex = '1 1 0';
+      contentDiv.style.minHeight = '0';
+      contentDiv.style.minWidth = '0';
       function getSelectedDiceTier() {
         // Always use the selected dice tier, regardless of mode
         return selectedDice.length > 0 ? Math.min(...selectedDice) : 1;
@@ -4078,11 +4246,7 @@
           title: 'Creatures',
           content: getCreatureList(selectCreature, selectedDice, render, updateDetailsOnlyClosure, selectedGameId, getSelectedDiceTier, getAvailableStats, lastStatusMessage)
         });
-        col1.style.width = '240px';
-        col1.style.minWidth = '240px';
-        col1.style.maxWidth = '240px';
-        col1.style.height = '100%';
-        col1.style.flex = '0 0 240px';
+        col1.classList.add('dice-roller-modal-col1');
         col1.style.position = 'relative';
         col1.style.zIndex = '1';
         // col2: dice manipulators (row1), dice rules (row2), and checkboxes (row3)
@@ -4583,33 +4747,31 @@
             return col;
           })()
         });
-        col2.style.width = '230px';
-        col2.style.minWidth = '230px';
-        col2.style.maxWidth = '230px';
-        col2.style.height = '100%';
-        col2.style.flex = '0 0 230px';
+        col2.classList.add('dice-roller-modal-col2');
         // col3: creature details (row1), placeholder (row2)
         const col3 = createBox({
           title: 'Details',
           content: getCreatureDetailsCol(selectedGameId, getSelectedDiceTier, getAvailableStats, render, selectedDice, lastStatusMessage)
         });
-        col3.style.width = '205px';
-        col3.style.minWidth = '205px';
-        col3.style.maxWidth = '205px';
-        col3.style.height = '100%';
-        col3.style.flex = '0 0 205px';
+        col3.classList.add('dice-roller-modal-col3');
         // Create a wrapper for the columns without centering to avoid extra spacing
         const columnsWrapper = document.createElement('div');
+        columnsWrapper.className = 'dice-roller-modal-columns';
         columnsWrapper.style.display = 'flex';
         columnsWrapper.style.flexDirection = 'row';
         columnsWrapper.style.justifyContent = 'flex-start';
-        columnsWrapper.style.alignItems = 'center';
+        columnsWrapper.style.alignItems = 'stretch';
         columnsWrapper.style.width = '100%';
         columnsWrapper.style.height = '100%';
+        columnsWrapper.style.minHeight = '0';
         columnsWrapper.appendChild(col1);
         columnsWrapper.appendChild(col2);
         columnsWrapper.appendChild(col3);
         contentDiv.appendChild(columnsWrapper);
+
+        if (activeDiceRollerModal) {
+          applyDiceRollerModalLayout(activeDiceRollerModal, contentDiv, getDiceRollerModalDimensions());
+        }
         // --- Restore scroll position ---
         // Wait for the new scroll area to be in the DOM
         setTimeout(() => {
@@ -4620,45 +4782,28 @@
         }, 0);
       }
       render();
-      api.ui.components.createModal({
+      const modalDimensions = getDiceRollerModalDimensions();
+      activeDiceRollerModal = api.ui.components.createModal({
         title: 'Auto Dice Roller',
-        width: 710,
-        height: 400,
+        width: modalDimensions.width,
+        height: modalDimensions.height,
         content: contentDiv,
-        buttons: [{ text: 'Close', primary: true }]
-      });
-      setTimeout(() => {
-        const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-        if (dialog) {
-          dialog.style.width = '710px';
-          dialog.style.minWidth = '710px';
-          dialog.style.maxWidth = '710px';
-          dialog.style.height = '400px';
-          dialog.style.minHeight = '400px';
-          dialog.style.maxHeight = '400px';
-          dialog.classList.remove('max-w-[300px]');
-          let contentWrapper = null;
-          const children = Array.from(dialog.children);
-          for (const child of children) {
-            if (child !== dialog.firstChild && child.tagName === 'DIV') {
-              contentWrapper = child;
-              break;
-            }
-          }
-          if (!contentWrapper) {
-            contentWrapper = dialog.querySelector(':scope > div');
-          }
-          if (contentWrapper) {
-            contentWrapper.style.height = '100%';
-            contentWrapper.style.display = 'flex';
-            contentWrapper.style.flexDirection = 'column';
-            contentWrapper.style.flex = '1 1 0';
-          }
-          // Add version display
-          // versionDiv.textContent = 'v1.1.1';
-          // ... existing code ...
+        buttons: [{ text: 'Close', primary: true }],
+        onClose: () => {
+          clearDiceRollerModalLayoutCleanup();
+          activeDiceRollerModal = null;
         }
-      }, 0);
+      });
+
+      const originalClose = activeDiceRollerModal?.close?.bind(activeDiceRollerModal);
+      if (originalClose) {
+        activeDiceRollerModal.close = () => {
+          clearDiceRollerModalLayoutCleanup();
+          originalClose();
+        };
+      }
+
+      setupDiceRollerModalResponsiveLayout(activeDiceRollerModal, contentDiv);
     }, 50);
   }
 // =======================
@@ -4845,6 +4990,9 @@
   
   function cleanup() {
     try {
+      clearDiceRollerModalLayoutCleanup();
+      activeDiceRollerModal = null;
+
       // Clear tracked intervals
       trackedIntervals.forEach(id => {
         try {

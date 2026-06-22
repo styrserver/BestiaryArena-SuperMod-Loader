@@ -15,10 +15,17 @@
   
   const MOD_NAME = 'Better Rune Recycler';
   
-  const MODAL_WIDTH = 750;              // Main modal width in pixels (wide layout: col1 + col2)
-  const MODAL_HEIGHT = 500;             // Main modal height in pixels
-  const MODAL_PADDING_WIDTH = 30;       // Padding to subtract from width for content
-  const MODAL_PADDING_HEIGHT = 50;      // Padding to subtract from height for content
+  const RUNE_RECYCLER_MODAL_CONFIG = {
+    width: 750,
+    height: 535,
+    contentInset: 35,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 280
+  };
+
+  let runeRecyclerModalLayoutCleanup = null;
+  let activeRuneRecyclerModal = null;
 
   const inventoryDB = window.inventoryDatabase;
   if (!inventoryDB?.getRuneTypes || !inventoryDB.resolveItemKey || !inventoryDB.getInventoryItemCount) {
@@ -805,6 +812,127 @@
     return box;
   }
 
+  function getRuneRecyclerModalDimensions() {
+    const pad = RUNE_RECYCLER_MODAL_CONFIG.viewportPadding * 2;
+    return {
+      width: Math.max(
+        RUNE_RECYCLER_MODAL_CONFIG.minWidth,
+        Math.min(RUNE_RECYCLER_MODAL_CONFIG.width, window.innerWidth - pad)
+      ),
+      height: Math.max(
+        RUNE_RECYCLER_MODAL_CONFIG.minHeight,
+        Math.min(RUNE_RECYCLER_MODAL_CONFIG.height, window.innerHeight - pad)
+      )
+    };
+  }
+
+  function getRuneRecyclerDialog(modalRef) {
+    if (modalRef?.element) return modalRef.element;
+    if (modalRef instanceof HTMLElement) return modalRef;
+    return document.querySelector('div[role="dialog"][data-state="open"]');
+  }
+
+  function clearRuneRecyclerModalLayoutCleanup() {
+    if (runeRecyclerModalLayoutCleanup) {
+      runeRecyclerModalLayoutCleanup();
+      runeRecyclerModalLayoutCleanup = null;
+    }
+  }
+
+  function applyRuneRecyclerModalLayout(modalRef, contentRoot, dimensions) {
+    const dialog = getRuneRecyclerDialog(modalRef);
+    if (!dialog) return;
+
+    const { width, height } = dimensions;
+
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
+    dialog.classList.remove('max-w-[300px]');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+      rootWrapper.style.height = '100%';
+      rootWrapper.style.display = 'flex';
+      rootWrapper.style.flexDirection = 'column';
+      rootWrapper.style.flex = '1 1 0';
+      rootWrapper.style.minHeight = '0';
+    }
+
+    const contentContainer = dialog.querySelector('.widget-bottom');
+    if (contentContainer) {
+      Object.assign(contentContainer.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        overflowY: 'hidden',
+        overflowX: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      });
+    }
+
+    if (contentRoot) {
+      Object.assign(contentRoot.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        height: '100%',
+        maxHeight: 'none',
+        width: '100%',
+        minWidth: '0',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      });
+
+      const mainRow = contentRoot.querySelector('.better-rune-recycler-main-row');
+      if (mainRow) {
+        Object.assign(mainRow.style, {
+          flex: '1 1 0',
+          minHeight: '0',
+          height: 'auto',
+          maxHeight: 'none',
+          overflow: 'hidden'
+        });
+      }
+
+      contentRoot.querySelectorAll('.better-rune-recycler-config-col, .better-rune-recycler-stats-col').forEach((col) => {
+        Object.assign(col.style, {
+          flex: '1 1 0',
+          minWidth: '0',
+          minHeight: '0',
+          height: '100%'
+        });
+      });
+
+      contentRoot.querySelectorAll('.column-content-wrapper').forEach((wrapper) => {
+        Object.assign(wrapper.style, {
+          minHeight: '0',
+          flex: '1 1 0',
+          display: 'flex',
+          flexDirection: 'column',
+          overflowY: 'hidden'
+        });
+      });
+    }
+  }
+
+  function setupRuneRecyclerModalResponsiveLayout(modalRef, contentRoot) {
+    clearRuneRecyclerModalLayoutCleanup();
+    const apply = () => applyRuneRecyclerModalLayout(modalRef, contentRoot, getRuneRecyclerModalDimensions());
+    apply();
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    runeRecyclerModalLayoutCleanup = () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }
+
   /**
    * Open the Better Rune Recycler modal
    */
@@ -823,19 +951,21 @@
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
       }
       
+      clearRuneRecyclerModalLayoutCleanup();
+      activeRuneRecyclerModal = null;
+
       setTimeout(() => {
         try {
-          // Calculate content dimensions based on modal size and padding
-          const CONTENT_WIDTH = MODAL_WIDTH - MODAL_PADDING_WIDTH;
-          const CONTENT_HEIGHT = MODAL_HEIGHT - MODAL_PADDING_HEIGHT;
-          
+          const modalDimensions = getRuneRecyclerModalDimensions();
+
           const contentDiv = document.createElement('div');
+          contentDiv.className = 'better-rune-recycler-modal-root';
           contentDiv.style.width = '100%';
           contentDiv.style.height = '100%';
-          contentDiv.style.minWidth = `${CONTENT_WIDTH}px`;
-          contentDiv.style.maxWidth = `${CONTENT_WIDTH}px`;
-          contentDiv.style.minHeight = `${CONTENT_HEIGHT}px`;
-          contentDiv.style.maxHeight = `${CONTENT_HEIGHT}px`;
+          contentDiv.style.minWidth = '0';
+          contentDiv.style.maxWidth = '100%';
+          contentDiv.style.minHeight = '0';
+          contentDiv.style.maxHeight = 'none';
           contentDiv.style.boxSizing = 'border-box';
           contentDiv.style.overflow = 'hidden';
           contentDiv.style.display = 'flex';
@@ -845,13 +975,15 @@
           
           // Row wrapper: Configuration | Statistics (so "Created by" can sit below)
           const mainRow = document.createElement('div');
-          mainRow.style.cssText = 'display: flex; flex-direction: row; gap: 8px; flex: 1 1 0; min-height: 0; overflow: hidden;';
+          mainRow.className = 'better-rune-recycler-main-row';
+          mainRow.style.cssText = 'display: flex; flex-direction: row; gap: 8px; flex: 1 1 0; min-height: 0; overflow: hidden; width: 100%; box-sizing: border-box;';
           
           // Col1: Configuration
           const configBox = createBox({
             title: t('mods.betterRuneRecycler.configuration'),
             content: getConfigContent()
           });
+          configBox.classList.add('better-rune-recycler-config-col');
           configBox.style.flex = '1 1 0';
           configBox.style.minWidth = '0';
           configBox.style.height = '100%';
@@ -861,6 +993,7 @@
             title: t('mods.betterRuneRecycler.statistics'),
             content: getStatsContent()
           });
+          statsBox.classList.add('better-rune-recycler-stats-col');
           statsBox.style.flex = '1 1 0';
           statsBox.style.minWidth = '0';
           statsBox.style.height = '100%';
@@ -871,11 +1004,13 @@
           
           const modalInstance = api.ui.components.createModal({
             title: t('mods.betterRuneRecycler.modalTitle'),
-            width: MODAL_WIDTH,
-            height: MODAL_HEIGHT,
+            width: modalDimensions.width,
+            height: modalDimensions.height,
             content: contentDiv,
             buttons: [{ text: t('controls.close'), primary: true }],
             onClose: () => {
+              clearRuneRecyclerModalLayoutCleanup();
+              activeRuneRecyclerModal = null;
               // Force-stop recycling when modal is closed (by button, overlay, or Escape)
               if (recycleInProgress) {
                 stopRecycling();
@@ -883,47 +1018,19 @@
               console.log('[Better Rune Recycler] Modal closed');
             }
           });
+
+          activeRuneRecyclerModal = modalInstance;
+          setupRuneRecyclerModalResponsiveLayout(modalInstance, contentDiv);
           
           if (modalInstance && typeof modalInstance.onClose === 'function') {
             modalInstance.onClose(() => {
+              clearRuneRecyclerModalLayoutCleanup();
+              activeRuneRecyclerModal = null;
               if (recycleInProgress) {
                 stopRecycling();
               }
             });
           }
-          
-          setTimeout(() => {
-            try {
-              const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-              if (!dialog || !dialog.querySelector('#start-stop-btn')) return;
-              dialog.style.width = `${MODAL_WIDTH}px`;
-              dialog.style.minWidth = `${MODAL_WIDTH}px`;
-              dialog.style.maxWidth = `${MODAL_WIDTH}px`;
-              dialog.style.height = `${MODAL_HEIGHT}px`;
-              dialog.style.minHeight = `${MODAL_HEIGHT}px`;
-              dialog.style.maxHeight = `${MODAL_HEIGHT}px`;
-              dialog.classList.remove('max-w-[300px]');
-              let contentWrapper = null;
-              const children = Array.from(dialog.children);
-              for (const child of children) {
-                if (child !== dialog.firstChild && child.tagName === 'DIV') {
-                  contentWrapper = child;
-                  break;
-                }
-              }
-              if (!contentWrapper) {
-                contentWrapper = dialog.querySelector(':scope > div');
-              }
-              if (contentWrapper) {
-                contentWrapper.style.height = '100%';
-                contentWrapper.style.display = 'flex';
-                contentWrapper.style.flexDirection = 'column';
-                contentWrapper.style.flex = '1 1 0';
-              }
-            } catch (dialogError) {
-              console.error('[Better Rune Recycler] Error styling dialog:', dialogError);
-            }
-          }, 50);
           
           // Setup event listeners after modal is created (only if our modal is still open)
           setTimeout(() => {
@@ -956,17 +1063,19 @@
     const recyclableRunes = RECYCLABLE_RUNE_TYPES;
     
     const container = document.createElement('div');
-    container.style.cssText = 'padding: 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box;';
+    container.className = 'better-rune-recycler-config-content';
+    container.style.cssText = 'padding: 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; height: 100%; min-height: 0; box-sizing: border-box; flex: 1 1 0;';
     
     // Info text
     const infoText = document.createElement('div');
-    infoText.style.cssText = 'color: rgba(255,255,255,0.8); font-size: 15px; text-align: center; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 3px;';
+    infoText.style.cssText = 'color: rgba(255,255,255,0.8); font-size: 15px; text-align: center; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 3px; flex-shrink: 0;';
     infoText.textContent = t('mods.betterRuneRecycler.infoText');
     container.appendChild(infoText);
     
     // Rune config grid
     const runeGrid = document.createElement('div');
-    runeGrid.style.cssText = 'display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px;';
+    runeGrid.id = 'config-rune-grid';
+    runeGrid.style.cssText = 'display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; align-content: start;';
     
     recyclableRunes.forEach(rune => {
       const item = document.createElement('div');
@@ -1045,7 +1154,7 @@
     
     // Cycles input + Max checkbox
     const cyclesRow = document.createElement('div');
-    cyclesRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 6px 8px;';
+    cyclesRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 3px; padding: 6px 8px; flex-shrink: 0;';
     
     const cyclesLabel = document.createElement('span');
     cyclesLabel.style.cssText = 'font-size: 16px; color: rgb(255,255,255); font-weight: bold;';
@@ -1093,14 +1202,14 @@
     // Status message (above button) - always visible
     const statusMsg = document.createElement('div');
     statusMsg.id = 'status-message';
-    statusMsg.style.cssText = 'padding: 10px; border-radius: 3px; font-size: 15px; text-align: center; font-weight: bold; background: rgba(100,100,100,0.4); border: 1px solid rgba(140,140,140,0.6); color: rgba(255,255,255,0.9);';
+    statusMsg.style.cssText = 'padding: 10px; border-radius: 3px; font-size: 15px; text-align: center; font-weight: bold; background: rgba(100,100,100,0.4); border: 1px solid rgba(140,140,140,0.6); color: rgba(255,255,255,0.9); flex-shrink: 0;';
     statusMsg.textContent = t('mods.betterRuneRecycler.noRunesSelected');
     container.appendChild(statusMsg);
     
     // Start button
     const startBtn = document.createElement('button');
     startBtn.id = 'start-stop-btn';
-    startBtn.style.cssText = 'width: 100%; padding: 12px; background: linear-gradient(180deg, rgba(60,150,100,0.8) 0%, rgba(40,120,80,0.8) 100%); border: 2px solid rgba(80,180,120,0.6); border-radius: 4px; color: rgb(255,255,255); font-size: 17px; font-weight: bold; cursor: pointer; text-shadow: 1px 1px 2px rgba(0,0,0,0.8);';
+    startBtn.style.cssText = 'width: 100%; padding: 12px; background: linear-gradient(180deg, rgba(60,150,100,0.8) 0%, rgba(40,120,80,0.8) 100%); border: 2px solid rgba(80,180,120,0.6); border-radius: 4px; color: rgb(255, 255, 255); font-size: 17px; font-weight: bold; cursor: pointer; text-shadow: 1px 1px 2px rgba(0,0,0,0.8); flex-shrink: 0;';
     startBtn.textContent = t('mods.betterRuneRecycler.startRecycling');
     container.appendChild(startBtn);
     
@@ -1112,7 +1221,7 @@
    */
   function getStatsContent() {
     const container = document.createElement('div');
-    container.style.cssText = 'padding: 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; height: 100%;';
+    container.style.cssText = 'padding: 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; height: 100%; min-height: 0; flex: 1 1 0;';
     
     // Stats grid
     const statsGrid = document.createElement('div');
@@ -1483,6 +1592,9 @@
    * Cleanup function
    */
   function cleanup() {
+    clearRuneRecyclerModalLayoutCleanup();
+    activeRuneRecyclerModal = null;
+
     // Clear intervals
     if (buttonCheckInterval) {
       clearInterval(buttonCheckInterval);

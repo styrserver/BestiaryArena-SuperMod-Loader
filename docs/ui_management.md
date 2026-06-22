@@ -114,9 +114,16 @@ const panel = api.ui.createConfigPanel({
       onClick: null,           // Optional click handler
       closeOnClick: true       // Defaults to true
     }
-  ]
+  ],
+  width: 350,                  // Optional desktop max width (default 350)
+  height: 800,                 // Optional desktop max height (default 800)
+  onOpen: () => {              // Optional callback when the panel opens
+    // Refresh form fields from saved config
+  }
 });
 ```
+
+On desktop the panel opens at up to **350×800** (or your `width`/`height` caps). On narrow viewports it clamps to the available screen with 16px padding (minimum 280×200). Tall content scrolls inside the panel; layout updates on window resize and cleans up when the panel closes.
 
 Content can be:
 - An HTML string
@@ -351,36 +358,33 @@ BestiaryModAPI.ui.createConfigPanel(options)
 
 Parameters:
 - `options` (Object) - Configuration options for the panel
-  - `id` (String) - Unique identifier for the panel
+  - `id` (String) - Unique identifier for the panel (required for `toggleConfigPanel`)
   - `title` (String) - Panel title
-  - `fields` (Array) - Array of configuration field objects
-    - `id` (String) - Field identifier
-    - `type` (String) - Field type ('checkbox', 'select', 'text', 'color', 'slider')
-    - `label` (String) - Field label
-    - `value` (Any) - Current value
-    - `options` (Array, optional) - Options for select fields
-    - `min` (Number, optional) - Minimum value for sliders
-    - `max` (Number, optional) - Maximum value for sliders
-    - `step` (Number, optional) - Step value for sliders
-    - `onChange` (Function, optional) - Change handler
-  - `onSave` (Function) - Callback when settings are saved
-  - `onCancel` (Function, optional) - Callback when cancelled
+  - `modId` (String, optional) - Mod ID for grouping (`data-mod-id` on fallback panels)
+  - `content` (String|HTMLElement|Function) - Panel body; functions receive the scroll container element
+  - `buttons` (Array, optional) - Footer buttons (`text`, `primary`, `onClick`, `closeOnClick`)
+  - `width` (Number, optional) - Desktop max width in px (default **350**)
+  - `height` (Number, optional) - Desktop max height in px (default **800**)
+  - `onOpen` (Function, optional) - Called when the panel opens (e.g. refresh fields from saved config)
+
+The loader clamps size to the viewport on phones (16px padding, 280×200 minimum), wraps content in a scroll area, and re-applies layout on resize.
 
 ```javascript
-// Open a configuration panel
-BestiaryModAPI.ui.openConfigPanel(id)
+// Toggle a configuration panel (fallback panels in #bestiary-mod-configs)
+BestiaryModAPI.ui.toggleConfigPanel(id)
 ```
-
-Parameters:
-- `id` (String) - ID of the panel to open
 
 ```javascript
-// Close a configuration panel
-BestiaryModAPI.ui.closeConfigPanel(id)
+// Hide all configuration panels
+BestiaryModAPI.ui.hideAllConfigPanels()
 ```
 
-Parameters:
-- `id` (String) - ID of the panel to close
+```javascript
+// Remove a configuration panel
+BestiaryModAPI.ui.removeConfigPanel(id)
+```
+
+**Note:** `openConfigPanel` / `closeConfigPanel` and the `fields` / `onSave` schema are not part of the API — build form fields in `content` and handle save in button `onClick` handlers.
 
 ### Notification System
 

@@ -406,6 +406,24 @@ function syncDepotStateWithOwnedInventory() {
   }
 }
 
+function resolveDepotCreatureSpeciesName(monster, gameId) {
+  if (monster && typeof window !== 'undefined' && typeof window.creatureDatabase?.getDisplayNameForOwnedMonster === 'function') {
+    const fromDb = window.creatureDatabase.getDisplayNameForOwnedMonster(monster);
+    if (fromDb) return fromDb;
+  }
+  if (gameId != null) {
+    try {
+      const fromUtils = globalThis.state?.utils?.getMonster?.(Number(gameId))?.metadata?.name;
+      if (fromUtils) return fromUtils;
+    } catch (e) { /* ignore */ }
+    if (typeof window !== 'undefined' && typeof window.creatureDatabase?.findMonsterByGameId === 'function') {
+      const fromDbId = window.creatureDatabase.findMonsterByGameId(Number(gameId))?.metadata?.name;
+      if (fromDbId) return fromDbId;
+    }
+  }
+  return '';
+}
+
 function getDepotCreatureRows() {
   const monsters = getPlayerMonsters();
   const byId = new Map(monsters.map((m) => [String(m.id), m]));
@@ -434,6 +452,7 @@ function getDepotCreatureRows() {
       } catch (e) { /* ignore */ }
     }
     const name = resolvedName || `Unknown (${sid})`;
+    const speciesName = resolveDepotCreatureSpeciesName(monster, gameId) || name;
     const hp = monster?.hp ?? savedMeta?.hp ?? 0;
     const ad = monster?.ad ?? savedMeta?.ad ?? 0;
     const ap = monster?.ap ?? savedMeta?.ap ?? 0;
@@ -455,7 +474,7 @@ function getDepotCreatureRows() {
       resolvedTier >= 6 ||
       (level != null && level > GAME_CONSTANTS.MAX_LEVEL)
     );
-    return { id: sid, name, portrait, shiny, sealed, awakened, level, gameId, hp, ad, ap, armor, magicResist, genesTotal, rarity, tier };
+    return { id: sid, name, speciesName, portrait, shiny, sealed, awakened, level, gameId, hp, ad, ap, armor, magicResist, genesTotal, rarity, tier };
   });
 }
 
@@ -852,27 +871,33 @@ function logArsenalDiagnosisSnapshot(reason = 'unknown') {
   });
 }
 
-function assignEquipmentIdsToArsenalButtons() {
-  const buttons = getArsenalGridButtons();
-  if (buttons.length === 0) return;
-  // IMPORTANT: keep raw state order here; sorted order can mismatch arsenal DOM after tab remount.
-  const equipmentRows = getPlayerEquipmentRows({ sort: false });
-  if (equipmentRows.length === 0) {
-    return;
-  }
+function applyEquipmentRowToArsenalButton(btn, row, fallbackTier, fallbackStat) {
+  btn.setAttribute('data-equipment-id', String(row.id));
+  btn.setAttribute('data-tier', String(row.tier || fallbackTier || 1));
+  btn.setAttribute('data-stat', String(row.stat || fallbackStat || 'unknown'));
+  btn.setAttribute('data-equipment', String(row.name || ''));
+}
 
+function equipmentButtonMatchesRow(btn, row) {
+  const spriteId = getButtonSpriteId(btn);
+  const stat = getButtonStat(btn);
+  const tier = getButtonTier(btn) || 1;
+  const exactKey = `${spriteId}|${stat}|${tier}`;
+  const looseKey = `${spriteId}|${stat}`;
+  const rowSprite = String(row.spriteId || '');
+  const rowStat = normalizeEquipmentStat(row.stat || 'unknown');
+  const rowTier = Number(row.tier || 1);
+  return (
+    `${rowSprite}|${rowStat}|${rowTier}` === exactKey ||
+    `${rowSprite}|${rowStat}` === looseKey
+  );
+}
+
+/** Bucket-match buttons to equipment rows (DOM order). Used for non-depot arsenal tiles. */
+function assignEquipmentIdsFromBuckets(buttons, equipmentRows) {
   const exactBuckets = new Map();
   const looseBuckets = new Map();
-  const isInDepot = new Set(depotEquipmentState.ids.map(String));
-  const sortedRows = equipmentRows
-    .slice()
-    .sort((a, b) => {
-      const aInDepot = isInDepot.has(String(a.id));
-      const bInDepot = isInDepot.has(String(b.id));
-      if (aInDepot !== bInDepot) return aInDepot ? 1 : -1; // prioritize non-depot ids
-      return 0;
-    });
-  for (const row of sortedRows) {
+  for (const row of equipmentRows) {
     const spriteId = String(row.spriteId || '');
     const stat = normalizeEquipmentStat(row.stat || 'unknown');
     const tier = Number(row.tier || 1);
@@ -903,20 +928,90 @@ function assignEquipmentIdsToArsenalButtons() {
       unmatchedCount += 1;
       continue;
     }
-
-    btn.setAttribute('data-equipment-id', String(row.id));
-    btn.setAttribute('data-tier', String(row.tier || tier || 1));
-    btn.setAttribute('data-stat', String(row.stat || stat || 'unknown'));
-    btn.setAttribute('data-equipment', String(row.name || ''));
+    applyEquipmentRowToArsenalButton(btn, row, tier, stat);
     matchedCount += 1;
   }
-  const assignKey = `${buttons.length}|${equipmentRows.length}|${matchedCount}|${unmatchedCount}`;
+  return { matchedCount, unmatchedCount };
+}
+
+/**
+ * Assign `data-equipment-id` on arsenal buttons. When depot equipment is hidden in-place,
+ * assign depot ids to visually matching buttons first — otherwise bucket order consumes
+ * non-depot rows for hidden tiles and shifts every following visible id (tooltips, context menu).
+ */
+function assignEquipmentIdsToArsenalButtons() {
+  const buttons = getArsenalGridButtons();
+  if (buttons.length === 0) return;
+  // IMPORTANT: keep raw state order here; sorted order can mismatch arsenal DOM after tab remount.
+  const equipmentRows = getPlayerEquipmentRows({ sort: false });
+  if (equipmentRows.length === 0) {
+    return;
+  }
+
+  const isInDepot = new Set(depotEquipmentState.ids.map(String));
+  const hasDepotEquipment = depotEquipmentState.ids.length > 0;
+
+  let matchedCount = 0;
+  let unmatchedCount = 0;
+
+  if (!hasDepotEquipment) {
+    const result = assignEquipmentIdsFromBuckets(buttons, equipmentRows);
+    matchedCount = result.matchedCount;
+    unmatchedCount = result.unmatchedCount;
+  } else {
+    const byId = new Map(equipmentRows.map((r) => [String(r.id), r]));
+    const assignedButtons = new Set();
+    const remainingDepotCounts = new Map();
+    for (const rawSid of depotEquipmentState.ids) {
+      const sid = String(rawSid);
+      remainingDepotCounts.set(sid, (remainingDepotCounts.get(sid) || 0) + 1);
+    }
+
+    for (const rawSid of depotEquipmentState.ids) {
+      const sid = String(rawSid);
+      if ((remainingDepotCounts.get(sid) || 0) <= 0) continue;
+      const row = byId.get(sid);
+      if (!row) continue;
+
+      let bestBtn = null;
+      let bestDomIdx = Infinity;
+      for (let i = 0; i < buttons.length; i++) {
+        const btn = buttons[i];
+        if (assignedButtons.has(btn)) continue;
+        if (!equipmentButtonMatchesRow(btn, row)) continue;
+        if (i < bestDomIdx) {
+          bestDomIdx = i;
+          bestBtn = btn;
+        }
+      }
+      if (!bestBtn) continue;
+
+      applyEquipmentRowToArsenalButton(
+        bestBtn,
+        row,
+        getButtonTier(bestBtn) || 1,
+        getButtonStat(bestBtn)
+      );
+      assignedButtons.add(bestBtn);
+      remainingDepotCounts.set(sid, (remainingDepotCounts.get(sid) || 0) - 1);
+      matchedCount += 1;
+    }
+
+    const visibleRows = equipmentRows.filter((r) => !isInDepot.has(String(r.id)));
+    const unassignedButtons = buttons.filter((btn) => !assignedButtons.has(btn));
+    const result = assignEquipmentIdsFromBuckets(unassignedButtons, visibleRows);
+    matchedCount += result.matchedCount;
+    unmatchedCount = result.unmatchedCount;
+  }
+
+  const assignKey = `${buttons.length}|${equipmentRows.length}|${matchedCount}|${unmatchedCount}|${depotEquipmentState.ids.length}`;
   if (assignKey !== lastAssignSummaryKey) {
     depotDebug('arsenal assign', {
       buttons: buttons.length,
       rows: equipmentRows.length,
       matched: matchedCount,
-      unmatched: unmatchedCount
+      unmatched: unmatchedCount,
+      depotEquipment: depotEquipmentState.ids.length
     });
     lastAssignSummaryKey = assignKey;
   }
@@ -1122,9 +1217,163 @@ function attachDepotCreatureStatTooltip(targetEl, row) {
   targetEl.addEventListener('click', hide, true);
 }
 
+const DEPOT_MODAL_CONFIG = {
+  width: 530,
+  height: 500,
+  columnWidth: 245,
+  columnGap: 8,
+  contentInset: 35,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 280
+};
+
+let depotModalLayoutCleanup = null;
+
+function getDepotModalDimensions() {
+  const pad = DEPOT_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      DEPOT_MODAL_CONFIG.minWidth,
+      Math.min(DEPOT_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      DEPOT_MODAL_CONFIG.minHeight,
+      Math.min(DEPOT_MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
+
+function getDepotModalColumnWidths(modalWidth) {
+  const { columnWidth, columnGap, contentInset, width } = DEPOT_MODAL_CONFIG;
+  const contentWidth = modalWidth - contentInset;
+  const totalDesktop = columnWidth * 2 + columnGap;
+
+  if (modalWidth >= width) {
+    return {
+      contentWidth: width - contentInset,
+      columnWidth
+    };
+  }
+
+  const scale = contentWidth / totalDesktop;
+  const col = Math.max(120, Math.floor(columnWidth * scale));
+  return { contentWidth, columnWidth: col };
+}
+
+function getDepotDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearDepotModalLayoutCleanup() {
+  if (depotModalLayoutCleanup) {
+    depotModalLayoutCleanup();
+    depotModalLayoutCleanup = null;
+  }
+}
+
+function applyDepotModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getDepotDialog(modalRef);
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+  const { columnWidth } = getDepotModalColumnWidths(width);
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]');
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper) {
+    rootWrapper.style.height = '100%';
+    rootWrapper.style.display = 'flex';
+    rootWrapper.style.flexDirection = 'column';
+    rootWrapper.style.flex = '1 1 0';
+    rootWrapper.style.minHeight = '0';
+  }
+
+  const contentContainer = dialog.querySelector('.widget-bottom');
+  if (contentContainer) {
+    Object.assign(contentContainer.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflowY: 'hidden',
+      overflowX: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      height: '100%',
+      maxHeight: 'none',
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px'
+    });
+
+    const mainRow = contentRoot.querySelector('.depot-modal-main-row');
+    if (mainRow) {
+      Object.assign(mainRow.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        height: 'auto',
+        maxHeight: 'none',
+        overflow: 'hidden',
+        gap: `${DEPOT_MODAL_CONFIG.columnGap}px`
+      });
+    }
+
+    contentRoot.querySelectorAll('.depot-modal-column').forEach((col) => {
+      Object.assign(col.style, {
+        flex: `0 0 ${columnWidth}px`,
+        width: `${columnWidth}px`,
+        minWidth: `${columnWidth}px`,
+        maxWidth: `${columnWidth}px`,
+        minHeight: '0',
+        height: '100%'
+      });
+    });
+
+    contentRoot.querySelectorAll('.depot-modal-grid-area').forEach((area) => {
+      Object.assign(area.style, {
+        flex: '1 1 0',
+        minHeight: '0'
+      });
+    });
+  }
+}
+
+function setupDepotModalResponsiveLayout(modalRef, contentRoot) {
+  clearDepotModalLayoutCleanup();
+  const apply = () => applyDepotModalLayout(modalRef, contentRoot, getDepotModalDimensions());
+  apply();
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  depotModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+  };
+}
+
 function createDepotModalColumnFrame(titleText) {
   const frame = document.createElement('div');
-  frame.style.cssText = 'flex:0 0 245px;width:245px;min-width:245px;max-width:245px;display:flex;flex-direction:column;min-height:220px;background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;overflow:hidden;';
+  frame.className = 'depot-modal-column';
+  frame.style.cssText = 'flex:1 1 0;min-width:0;display:flex;flex-direction:column;min-height:0;height:100%;background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;overflow:hidden;';
   const titleEl = document.createElement('h2');
   titleEl.className = 'widget-top widget-top-text pixel-font-16';
   titleEl.style.cssText = 'margin:0;padding:2px 8px;height:24px;min-height:24px;max-height:24px;display:flex;align-items:center;justify-content:center;text-align:center;color:#fff;box-sizing:border-box;';
@@ -1145,7 +1394,8 @@ function createDepotModalSearchWrap() {
 
 function createDepotModalGridArea(uiConfig) {
   const area = document.createElement('div');
-  area.style.cssText = `flex:1 1 0;min-height:0;overflow-y:auto;padding:5px ${uiConfig.GRID_PAD_RIGHT}px 5px ${uiConfig.GRID_PAD_LEFT}px;background:rgba(40,40,40,0.96);display:grid;grid-template-columns:repeat(${uiConfig.COLUMNS},${uiConfig.CELL}px);grid-auto-rows:${uiConfig.CELL}px;gap:${uiConfig.GRID_GAP}px;justify-content:start;`;
+  area.className = 'depot-modal-grid-area';
+  area.style.cssText = `flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:auto;padding:5px ${uiConfig.GRID_PAD_RIGHT}px 5px ${uiConfig.GRID_PAD_LEFT}px;background:rgba(40,40,40,0.96);display:grid;grid-template-columns:repeat(${uiConfig.COLUMNS},${uiConfig.CELL}px);grid-auto-rows:${uiConfig.CELL}px;gap:${uiConfig.GRID_GAP}px;justify-content:start;`;
   return area;
 }
 
@@ -1268,6 +1518,7 @@ function showDepotModal() {
   for (let i = 0; i < 2; i++) {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
   }
+  clearDepotModalLayoutCleanup();
   setTimeout(() => {
     syncDepotStateWithOwnedInventory();
     const DEPOT_UI = {
@@ -1275,14 +1526,15 @@ function showDepotModal() {
       CELL: 34,
       GRID_GAP: 0,
       GRID_PAD_LEFT: 5,
-      GRID_PAD_RIGHT: 12,
-      MODAL_WIDTH: 530,
-      MODAL_HEIGHT: 420
+      GRID_PAD_RIGHT: 12
     };
+    const modalDimensions = getDepotModalDimensions();
     const content = document.createElement('div');
-    content.style.cssText = 'width:100%;height:320px;min-height:320px;display:flex;flex-direction:column;gap:8px;';
+    content.className = 'depot-modal-root';
+    content.style.cssText = 'width:100%;height:100%;min-height:0;flex:1 1 0;display:flex;flex-direction:column;gap:8px;box-sizing:border-box;';
     const columnsWrap = document.createElement('div');
-    columnsWrap.style.cssText = 'flex:1 1 auto;display:flex;gap:8px;min-height:220px;';
+    columnsWrap.className = 'depot-modal-main-row';
+    columnsWrap.style.cssText = 'flex:1 1 0;display:flex;gap:8px;min-height:0;width:100%;box-sizing:border-box;overflow:hidden;';
     content.appendChild(columnsWrap);
 
     const creatureFrame = createDepotModalColumnFrame('Depot Creatures');
@@ -1380,16 +1632,14 @@ function showDepotModal() {
         .filter((r) => matchesDepotSearchExpression(r, term))
         .filter((r) => matchesCreatureTier(r, filterLabel))
         .sort((a, b) => {
-          const nameCompare = String(a.name || '').localeCompare(String(b.name || ''));
-          if (nameCompare !== 0) return nameCompare;
           const levelA = Number(a.level || 0);
           const levelB = Number(b.level || 0);
           if (levelA !== levelB) return levelB - levelA;
+          const nameCompare = String(a.speciesName || a.name || '').localeCompare(String(b.speciesName || b.name || ''));
+          if (nameCompare !== 0) return nameCompare;
           const genesA = Number(a.genesTotal || 0);
           const genesB = Number(b.genesTotal || 0);
           if (genesA !== genesB) return genesB - genesA;
-          const gameIdCompare = String(a.gameId ?? '').localeCompare(String(b.gameId ?? ''));
-          if (gameIdCompare !== 0) return gameIdCompare;
           return String(a.id || '').localeCompare(String(b.id || ''));
         });
       creatureArea.innerHTML = '';
@@ -1508,13 +1758,17 @@ function showDepotModal() {
 
     renderCreatureRows();
     renderEquipmentRows();
-    api.ui.components.createModal({
+    const modalInstance = api.ui.components.createModal({
       title: 'Depot',
-      width: DEPOT_UI.MODAL_WIDTH,
-      height: DEPOT_UI.MODAL_HEIGHT,
+      width: modalDimensions.width,
+      height: modalDimensions.height,
       content,
-      buttons: [{ text: 'Close', primary: true }]
+      buttons: [{ text: 'Close', primary: true }],
+      onClose: () => {
+        clearDepotModalLayoutCleanup();
+      }
     });
+    setupDepotModalResponsiveLayout(modalInstance, content);
   }, 50);
 }
 
@@ -1806,6 +2060,10 @@ function shouldShowDepotInBetterBestiary() {
 
 function getDepotCreatureIdSet() {
   return new Set(depotCreatureState.ids.map((id) => String(id)));
+}
+
+function getDepotEquipmentIdSet() {
+  return new Set(depotEquipmentState.ids.map((id) => String(id)));
 }
 
 function addCreatureToDepot(liveSid, { imgEl = null, creatureName = null, lockCreature = true } = {}) {
@@ -4013,6 +4271,7 @@ function initDepotManager() {
     resetDepotCreatureIds,
     showDepotModal,
     getDepotCreatureIdSet,
+    getDepotEquipmentIdSet,
     sendCreaturesToDepot,
     transferCreaturesDepot,
     getBestiaryCreatureIdMap: getBestiaryCreatureIdMapForInterop
@@ -4024,6 +4283,7 @@ function initDepotManager() {
 }
 
 function cleanupDepotManager() {
+  clearDepotModalLayoutCleanup();
   depotInitialized = false;
   if (tabReapplyDebounceTimeout !== null) {
     clearTimeout(tabReapplyDebounceTimeout);

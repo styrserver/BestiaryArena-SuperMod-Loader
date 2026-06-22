@@ -38,6 +38,7 @@ let mapShortcutsMapId = null;
 
 // Add a reference to track active modals
 let activeModal = null;
+let setupManagerModalLayoutCleanup = null;
 let pendingDeleteConfirmation = null;
 
 // Helper function to safely access nested properties
@@ -664,8 +665,34 @@ function loadTeamAndNotify(mapId, setupName) {
 
 // ========== UI Functions ==========
 
-const SETUP_MANAGER_MODAL_WIDTH = 500;
-const SETUP_MANAGER_MODAL_HEIGHT = 550;
+const SETUP_MANAGER_MODAL_CONFIG = {
+  width: 500,
+  height: 550,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 280
+};
+
+function getSetupManagerModalDimensions() {
+  const pad = SETUP_MANAGER_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      SETUP_MANAGER_MODAL_CONFIG.minWidth,
+      Math.min(SETUP_MANAGER_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      SETUP_MANAGER_MODAL_CONFIG.minHeight,
+      Math.min(SETUP_MANAGER_MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
+
+function clearSetupManagerModalLayoutCleanup() {
+  if (setupManagerModalLayoutCleanup) {
+    setupManagerModalLayoutCleanup();
+    setupManagerModalLayoutCleanup = null;
+  }
+}
 const SETUP_MANAGER_EQUIPMENT_PORTRAIT_SIZE = 34;
 const SETUP_NAME_FIELD_HEIGHT_PX = 25;
 
@@ -766,32 +793,66 @@ function getSetupManagerDialog(modalRef) {
     document.querySelector('div[role="dialog"]');
 }
 
-function applySetupManagerExpandedLayout(modalRef) {
+function applySetupManagerExpandedLayout(modalRef, dimensions, contentRoot) {
   try {
     const dialog = getSetupManagerDialog(modalRef);
     if (!dialog) return;
 
+    const { width, height } = dimensions || getSetupManagerModalDimensions();
+
     dialog.classList.remove('w-full', 'max-w-[300px]');
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
 
     const rootWrapper = dialog.querySelector(':scope > div');
     if (rootWrapper) {
       rootWrapper.style.height = '100%';
       rootWrapper.style.display = 'flex';
       rootWrapper.style.flexDirection = 'column';
+      rootWrapper.style.minHeight = '0';
     }
 
     const widgetBottom = dialog.querySelector('.widget-bottom');
     if (widgetBottom) {
-      widgetBottom.style.display = 'flex';
-      widgetBottom.style.flexDirection = 'column';
-      widgetBottom.style.flex = '1 1 0';
-      widgetBottom.style.minHeight = '0';
+      Object.assign(widgetBottom.style, {
+        display: 'flex',
+        flexDirection: 'column',
+        flex: '1 1 auto',
+        minHeight: '0',
+        overflowY: 'hidden',
+        overflowX: 'hidden'
+      });
+    }
+
+    if (contentRoot) {
+      Object.assign(contentRoot.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        height: '100%',
+        maxHeight: 'none'
+      });
     }
 
     styleSetupManagerFooterButtons(dialog.querySelector('.flex.justify-end.gap-2'));
   } catch (error) {
     console.warn('[Setup Manager] Failed to apply expanded modal layout:', error);
   }
+}
+
+function setupSetupManagerModalResponsiveLayout(modalRef, contentRoot) {
+  clearSetupManagerModalLayoutCleanup();
+  const apply = () => applySetupManagerExpandedLayout(modalRef, getSetupManagerModalDimensions(), contentRoot);
+  apply();
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  setupManagerModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+  };
 }
 
 function addSetupManagerFooterBackButton(modalRef, onClick) {
@@ -1995,9 +2056,11 @@ function showSetupManagerModal() {
     
     const mapName = getCurrentMapName();
     
+    const modalDimensions = getSetupManagerModalDimensions();
+
     // Create modal content
     const content = document.createElement('div');
-    content.className = 'flex min-h-0 flex-1 flex-col';
+    content.className = 'setup-manager-modal-root flex min-h-0 flex-1 flex-col';
     content.style.height = '100%';
 
     const newSetupHeader = document.createElement('div');
@@ -2052,8 +2115,8 @@ function showSetupManagerModal() {
     // Create the modal
     activeModal = api.ui.components.createModal({
       title: `${t('mods.setupManager.setupManager')} - ${mapName}`,
-      width: SETUP_MANAGER_MODAL_WIDTH,
-      height: SETUP_MANAGER_MODAL_HEIGHT,
+      width: modalDimensions.width,
+      height: modalDimensions.height,
       content: content,
       buttons: [
         {
@@ -2063,7 +2126,7 @@ function showSetupManagerModal() {
       ]
     });
 
-    applySetupManagerExpandedLayout(activeModal);
+    setupSetupManagerModalResponsiveLayout(activeModal, content);
   } catch (error) {
     console.error('Error showing setup manager modal:', error);
     showNotification(t('common.error'), 'error');
@@ -2096,11 +2159,13 @@ function showNotesModal(mapId, setupName, setupData) {
     // Force close all open modals first
     forceCloseAllModals();
     
+    const modalDimensions = getSetupManagerModalDimensions();
+
     // Get current notes from setup data
     const currentNotes = (setupData && setupData.notes) ? setupData.notes : '';
     
     const content = document.createElement('div');
-    content.className = 'flex min-h-0 flex-1 flex-col';
+    content.className = 'setup-manager-modal-root flex min-h-0 flex-1 flex-col';
     content.style.height = '100%';
 
     const textareaContainer = document.createElement('div');
@@ -2129,8 +2194,8 @@ function showNotesModal(mapId, setupName, setupData) {
     // Create modal (matching setup manager modal structure)
     activeModal = api.ui.components.createModal({
       title: tReplace('mods.setupManager.notesModalTitle', { name: setupName }),
-      width: SETUP_MANAGER_MODAL_WIDTH,
-      height: SETUP_MANAGER_MODAL_HEIGHT,
+      width: modalDimensions.width,
+      height: modalDimensions.height,
       content: content,
       buttons: [
         {
@@ -2177,7 +2242,7 @@ function showNotesModal(mapId, setupName, setupData) {
       ]
     });
     
-    applySetupManagerExpandedLayout(activeModal);
+    setupSetupManagerModalResponsiveLayout(activeModal, content);
     addSetupManagerFooterBackButton(activeModal, () => showSetupManagerModal());
     textarea.focus();
     
@@ -3351,6 +3416,8 @@ function createCreatureEquipmentPair(monsterInfo, equipId, isCustom = false, exi
 // Function to force close all open modals
 function forceCloseAllModals() {
       console.log("Force closing all modals...");
+
+  clearSetupManagerModalLayoutCleanup();
   
   // Try to close the tracked activeModal first with the API
   if (activeModal && typeof activeModal.close === 'function') {

@@ -72,6 +72,7 @@
       let yasirSettingsResizeObserver = null;
       let yasirSettingsResizeObserverTarget = null;
       let yasirSettingsPanelCleanupLock = false;
+      let yasirSettingsDialogEl = null;
       let yasirPoOrderFulfillmentInProgress = false;
       let yasirPoAffordabilityUnsub = null;
       let yasirDailyPoUnsub = null;
@@ -232,6 +233,28 @@
         }
         .better-yasir-settings-tab-panel.better-yasir-settings-tab-panel--po-orders {
           overflow: hidden;
+        }
+        /* Below shop: scroll the whole tab — nested placed-scroll cannot get height on short viewports */
+        .better-yasir-settings-panel[data-placement="below"] .better-yasir-settings-tab-panel.better-yasir-settings-tab-panel--po-orders.is-active {
+          overflow-x: hidden;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+        .better-yasir-settings-panel[data-placement="below"] .better-yasir-po-composer {
+          flex: 0 0 auto;
+          height: auto;
+          min-height: 0;
+          max-height: none;
+          overflow: visible;
+        }
+        .better-yasir-settings-panel[data-placement="below"] .better-yasir-po-placed {
+          flex: 0 0 auto;
+          overflow: visible;
+        }
+        .better-yasir-settings-panel[data-placement="below"] .better-yasir-po-placed-scroll {
+          flex: 0 0 auto;
+          overflow: visible;
+          max-height: none;
         }
         .better-yasir-settings-tab-bar {
           display: flex;
@@ -3306,7 +3329,99 @@
     // 4. Core UI Functions (footer Settings + Exaltation-style side panel)
     // =======================
       
-      const YASIR_SETTINGS_PANEL_WIDTH = 350;
+      const YASIR_SETTINGS_PANEL_CONFIG = {
+        maxWidth: 350,
+        maxHeight: 500,
+        viewportPadding: 16,
+        minWidth: 280,
+        minHeight: 200
+      };
+      
+      function getYasirSettingsPanelDimensions() {
+        const pad = YASIR_SETTINGS_PANEL_CONFIG.viewportPadding * 2;
+        return {
+          width: Math.max(
+            YASIR_SETTINGS_PANEL_CONFIG.minWidth,
+            Math.min(YASIR_SETTINGS_PANEL_CONFIG.maxWidth, window.innerWidth - pad)
+          ),
+          height: Math.max(
+            YASIR_SETTINGS_PANEL_CONFIG.minHeight,
+            Math.min(YASIR_SETTINGS_PANEL_CONFIG.maxHeight, window.innerHeight - pad)
+          )
+        };
+      }
+      
+      function applyYasirSettingsPanelLayout(panel) {
+        if (!panel) return;
+        const isBelow = panel.dataset.placement === 'below';
+
+        Object.assign(panel.style, {
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          minHeight: '0'
+        });
+
+        const header = panel.querySelector('.better-yasir-settings-panel-header');
+        if (header) {
+          header.style.flexShrink = '0';
+        }
+
+        const main = panel.querySelector('.better-yasir-settings-main');
+        if (main) {
+          Object.assign(main.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            minWidth: '0',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+          });
+        }
+        const tabPanels = panel.querySelector('.better-yasir-settings-tab-panels');
+        if (tabPanels) {
+          Object.assign(tabPanels.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            minWidth: '0',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+          });
+        }
+
+        panel.querySelectorAll('.better-yasir-settings-tab-panel').forEach((tabPanel) => {
+          const isOrders = tabPanel.classList.contains('better-yasir-settings-tab-panel--po-orders');
+          const isActive = tabPanel.classList.contains('is-active');
+          Object.assign(tabPanel.style, {
+            flex: isActive ? '1 1 auto' : '0 0 auto',
+            minHeight: isActive ? '0' : '',
+            display: isActive ? 'flex' : 'none',
+            flexDirection: 'column',
+            overflowX: 'hidden',
+            overflowY: isActive && (!isOrders || isBelow) ? 'auto' : (isOrders ? 'hidden' : 'auto')
+          });
+        });
+
+        const placed = panel.querySelector('.better-yasir-po-placed');
+        const placedScroll = panel.querySelector('.better-yasir-po-placed-scroll');
+        if (!isBelow && placed && placedScroll) {
+          Object.assign(placed.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+          });
+          Object.assign(placedScroll.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            WebkitOverflowScrolling: 'touch'
+          });
+        }
+      }
       
       const YASIR_SETTINGS_BTN_BASE = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
       
@@ -3348,28 +3463,61 @@
       
       function positionYasirSettingsPanel(panel, dialogEl) {
         const modalRect = dialogEl.getBoundingClientRect();
+        const dialogWidth = dialogEl.offsetWidth;
+        const dialogHeight = dialogEl.offsetHeight;
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
-        const modalHeight = modalRect.height;
-        let left = modalRect.right;
-        let top = modalRect.top;
-        if (left + YASIR_SETTINGS_PANEL_WIDTH > viewportWidth) {
-          left = modalRect.left - YASIR_SETTINGS_PANEL_WIDTH;
-        }
-        if (top + modalHeight > viewportHeight) {
-          top = viewportHeight - modalHeight - 10;
-        }
-        if (top < 10) {
-          top = 10;
-        }
-        if (left < 10) {
-          left = 10;
-        }
+        const pad = YASIR_SETTINGS_PANEL_CONFIG.viewportPadding;
+        const { width: targetWidth, height: targetHeight } = getYasirSettingsPanelDimensions();
+        const spaceRight = viewportWidth - modalRect.right - pad;
+        const fitsRight = spaceRight >= YASIR_SETTINGS_PANEL_CONFIG.minWidth;
+
         panel.style.position = 'absolute';
-        panel.style.zIndex = '10001';
-        panel.style.left = (left - modalRect.left) + 'px';
-        panel.style.top = (top - modalRect.top) + 'px';
-        panel.style.height = modalHeight + 'px';
+        panel.style.zIndex = '2';
+        panel.style.boxSizing = 'border-box';
+        panel.style.minWidth = '0';
+
+        let panelWidth;
+        let panelHeight;
+        let left;
+        let top;
+
+        if (fitsRight) {
+          panel.dataset.placement = 'right';
+          panelWidth = Math.min(targetWidth, spaceRight);
+          left = dialogWidth;
+          top = 0;
+          panelHeight = Math.min(targetHeight, dialogHeight, viewportHeight - pad * 2);
+          const panelBottomVp = modalRect.top + top + panelHeight;
+          if (panelBottomVp > viewportHeight - pad) {
+            top = Math.max(0, viewportHeight - pad - panelHeight - modalRect.top);
+          }
+          if (modalRect.top + top < pad) {
+            top = Math.max(0, pad - modalRect.top);
+            panelHeight = Math.min(panelHeight, viewportHeight - pad * 2);
+          }
+        } else {
+          panel.dataset.placement = 'below';
+          panelWidth = Math.min(targetWidth, viewportWidth - pad * 2);
+
+          let leftVp = modalRect.left + (modalRect.width - panelWidth) / 2;
+          leftVp = Math.max(pad, Math.min(leftVp, viewportWidth - panelWidth - pad));
+          left = leftVp - modalRect.left;
+
+          top = dialogHeight;
+          const availableHeight = Math.max(0, viewportHeight - modalRect.bottom - pad);
+          panelHeight = Math.min(
+            targetHeight,
+            Math.max(YASIR_SETTINGS_PANEL_CONFIG.minHeight, availableHeight)
+          );
+        }
+
+        panel.style.width = `${panelWidth}px`;
+        panel.style.maxWidth = `${panelWidth}px`;
+        panel.style.height = `${panelHeight}px`;
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+        applyYasirSettingsPanelLayout(panel);
       }
       
       function cleanupYasirSettingsPanel() {
@@ -3378,6 +3526,11 @@
         }
         yasirSettingsPanelCleanupLock = true;
         try {
+          if (yasirSettingsDialogEl) {
+            yasirSettingsDialogEl.style.overflow = yasirSettingsDialogEl._yasirOverflowSaved ?? '';
+            delete yasirSettingsDialogEl._yasirOverflowSaved;
+            yasirSettingsDialogEl = null;
+          }
           detachYasirPoAffordabilityPlayerListener();
           if (yasirSettingsRepositionTimer) {
             clearTimeout(yasirSettingsRepositionTimer);
@@ -4380,7 +4533,6 @@
         panel.id = 'better-yasir-settings-panel';
         panel.classList.add('better-yasir-orders-typography');
         panel.style.cssText = `
-          width: ${YASIR_SETTINGS_PANEL_WIDTH}px;
           background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
           color: #fff;
           font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
@@ -4391,17 +4543,18 @@
           display: flex;
           flex-direction: column;
           overflow: hidden;
+          min-width: 0;
         `;
         
         const stopIfNonInteractive = (event) => {
           const target = event.target;
-          const interactive = target.tagName === 'SELECT' ||
+          const isInteractiveElement = target.tagName === 'SELECT' ||
             target.tagName === 'BUTTON' ||
             target.tagName === 'INPUT' ||
             target.closest('select') ||
             target.closest('button') ||
             target.closest('input');
-          if (!interactive) {
+          if (!isInteractiveElement) {
             event.stopPropagation();
             event.preventDefault();
           }
@@ -5381,6 +5534,7 @@
           } else {
             renderYasirPurchaseHistoryInto(histContainer);
           }
+          applyYasirSettingsPanelLayout(panel);
         }
         
         addManagedEventListener(tabBtnOrders, 'click', (e) => {
@@ -5428,7 +5582,10 @@
         }
         const panel = createYasirSettingsSidePanel();
         positionYasirSettingsPanel(panel, dialogEl);
-        widgetBottom.appendChild(panel);
+        yasirSettingsDialogEl = dialogEl;
+        dialogEl._yasirOverflowSaved = dialogEl.style.overflow;
+        dialogEl.style.overflow = 'visible';
+        dialogEl.appendChild(panel);
         refreshBetterYasirOrdersPanelTabCounts();
         yasirActiveSettingsPanel = panel;
         panel.setAttribute('data-modal-part', 'true');

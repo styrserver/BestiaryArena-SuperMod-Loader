@@ -937,6 +937,151 @@ if (typeof browserAPI === 'undefined') {
     document.body.appendChild(container);
     return container;
   }
+
+  const CONFIG_PANEL_MODAL_CONFIG = {
+    maxWidth: 350,
+    maxHeight: 800,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 200
+  };
+
+  function getConfigPanelModalDimensions(options = {}) {
+    const pad = CONFIG_PANEL_MODAL_CONFIG.viewportPadding * 2;
+    const maxWidth = options.width ?? CONFIG_PANEL_MODAL_CONFIG.maxWidth;
+    const maxHeight = options.height ?? CONFIG_PANEL_MODAL_CONFIG.maxHeight;
+    return {
+      width: Math.max(
+        CONFIG_PANEL_MODAL_CONFIG.minWidth,
+        Math.min(maxWidth, window.innerWidth - pad)
+      ),
+      height: Math.max(
+        CONFIG_PANEL_MODAL_CONFIG.minHeight,
+        Math.min(maxHeight, window.innerHeight - pad)
+      )
+    };
+  }
+
+  function getConfigPanelDialog(modalRef) {
+    return modalRef?.element || modalRef || null;
+  }
+
+  function applyConfigPanelModalLayout(modalRef, contentRoot, scrollArea, dimensions) {
+    const dialog = getConfigPanelDialog(modalRef);
+    if (!dialog) {
+      return;
+    }
+    const { width, height } = dimensions;
+    Object.assign(dialog.style, {
+      width: `${width}px`,
+      height: `${height}px`,
+      maxWidth: `${width}px`,
+      maxHeight: `${height}px`,
+      display: 'flex',
+      flexDirection: 'column',
+      boxSizing: 'border-box'
+    });
+    const innerContent = dialog.firstElementChild;
+    if (innerContent) {
+      Object.assign(innerContent.style, {
+        display: 'flex',
+        flexDirection: 'column',
+        flex: '1 1 auto',
+        minHeight: '0',
+        height: '100%',
+        boxSizing: 'border-box'
+      });
+    }
+    const widgetBottom = dialog.querySelector('.widget-bottom');
+    if (widgetBottom) {
+      Object.assign(widgetBottom.style, {
+        display: 'flex',
+        flexDirection: 'column',
+        flex: '1 1 auto',
+        minHeight: '0',
+        minWidth: '0',
+        overflow: 'hidden',
+        boxSizing: 'border-box'
+      });
+    }
+    if (contentRoot) {
+      Object.assign(contentRoot.style, {
+        display: 'flex',
+        flexDirection: 'column',
+        flex: '1 1 auto',
+        minHeight: '0',
+        minWidth: '0',
+        width: '100%',
+        overflow: 'hidden',
+        boxSizing: 'border-box'
+      });
+    }
+    if (scrollArea) {
+      Object.assign(scrollArea.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        minWidth: '0',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        WebkitOverflowScrolling: 'touch',
+        boxSizing: 'border-box'
+      });
+    }
+  }
+
+  function clearConfigPanelModalLayoutCleanup(modalRef) {
+    if (modalRef?._configPanelLayoutCleanup) {
+      modalRef._configPanelLayoutCleanup();
+      delete modalRef._configPanelLayoutCleanup;
+    }
+  }
+
+  function setupConfigPanelModalResponsiveLayout(modalRef, contentRoot, scrollArea, options) {
+    clearConfigPanelModalLayoutCleanup(modalRef);
+    const getDims = () => getConfigPanelModalDimensions(options);
+    const apply = () => applyConfigPanelModalLayout(modalRef, contentRoot, scrollArea, getDims());
+    requestAnimationFrame(() => apply());
+
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+
+    let modalCloseObserver = null;
+    const dialog = getConfigPanelDialog(modalRef);
+    if (dialog) {
+      modalCloseObserver = new MutationObserver(() => {
+        if (!document.contains(dialog)) {
+          clearConfigPanelModalLayoutCleanup(modalRef);
+        }
+      });
+      modalCloseObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    const originalClose = modalRef?.close?.bind(modalRef);
+    if (originalClose) {
+      modalRef.close = () => {
+        clearConfigPanelModalLayoutCleanup(modalRef);
+        originalClose();
+      };
+    }
+
+    modalRef._configPanelLayoutCleanup = () => {
+      window.removeEventListener('resize', onResize);
+      if (modalCloseObserver) {
+        modalCloseObserver.disconnect();
+        modalCloseObserver = null;
+      }
+    };
+  }
+
+  function populateConfigPanelScrollContent(scrollArea, content) {
+    if (typeof content === 'string') {
+      scrollArea.innerHTML = content;
+    } else if (content instanceof HTMLElement) {
+      scrollArea.appendChild(content);
+    } else if (typeof content === 'function') {
+      content(scrollArea);
+    }
+  }
   
   window.BestiaryModAPI = {
     showModal: function(options) {
@@ -1491,21 +1636,38 @@ if (typeof browserAPI === 'undefined') {
       createConfigPanel: function(options) {
         if (window.BestiaryUIComponents) {
           const contentEl = document.createElement('div');
-          
-          if (typeof options.content === 'string') {
-            contentEl.innerHTML = options.content;
-          } else if (options.content instanceof HTMLElement) {
-            contentEl.appendChild(options.content);
-          } else if (typeof options.content === 'function') {
-            options.content(contentEl);
-          }
-          
-          return window.BestiaryUIComponents.createModal({
+          contentEl.className = 'bestiary-config-panel-root';
+          const scrollArea = document.createElement('div');
+          scrollArea.className = 'bestiary-config-panel-scroll';
+          populateConfigPanelScrollContent(scrollArea, options.content);
+          contentEl.appendChild(scrollArea);
+
+          const dimensions = getConfigPanelModalDimensions(options);
+          const modal = window.BestiaryUIComponents.createModal({
             title: options.title || 'Configuration',
-            width: 350,
+            width: dimensions.width,
+            height: dimensions.height,
             content: contentEl,
             buttons: options.buttons || [{ text: 'Close', primary: true }]
           });
+
+          if (options.id && modal?.element) {
+            modal.element.id = options.id;
+          }
+
+          setupConfigPanelModalResponsiveLayout(modal, contentEl, scrollArea, options);
+
+          if (typeof options.onOpen === 'function') {
+            requestAnimationFrame(() => {
+              try {
+                options.onOpen();
+              } catch (error) {
+                console.error('[Mod Loader] Config panel onOpen failed:', error);
+              }
+            });
+          }
+
+          return modal;
         }
         
         // Fallback if UI Components aren't loaded
@@ -1533,30 +1695,26 @@ if (typeof browserAPI === 'undefined') {
           border: 1px solid #444;
           border-radius: 8px;
           padding: 15px;
-          width: 350px;
           box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
           display: none;
           z-index: 9999;
           position: relative;
+          box-sizing: border-box;
+          flex-direction: column;
+          overflow: hidden;
         `;
         
         if (title) {
           const titleEl = document.createElement('h3');
           titleEl.textContent = title;
-          titleEl.style.cssText = 'margin-top: 0; padding-bottom: 10px; border-bottom: 1px solid #333; color: white;';
+          titleEl.style.cssText = 'margin-top: 0; padding-bottom: 10px; border-bottom: 1px solid #333; color: white; flex-shrink: 0;';
           panel.appendChild(titleEl);
         }
         
         const contentEl = document.createElement('div');
-        contentEl.style.cssText = 'margin: 15px 0; color: white;';
-        
-        if (typeof content === 'string') {
-          contentEl.innerHTML = content;
-        } else if (content instanceof HTMLElement) {
-          contentEl.appendChild(content);
-        } else if (typeof content === 'function') {
-          content(contentEl);
-        }
+        contentEl.className = 'bestiary-config-panel-scroll';
+        contentEl.style.cssText = 'margin: 15px 0; color: white; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;';
+        populateConfigPanelScrollContent(contentEl, content);
         
         panel.appendChild(contentEl);
         
@@ -1590,28 +1748,77 @@ if (typeof browserAPI === 'undefined') {
         }
         
         container.appendChild(panel);
+
+        const applyFallbackLayout = () => {
+          const dimensions = getConfigPanelModalDimensions(options);
+          panel.style.width = `${dimensions.width}px`;
+          panel.style.maxWidth = `${dimensions.width}px`;
+          panel.style.maxHeight = `${dimensions.height}px`;
+          panel.style.display = panel.style.display === 'none' ? 'none' : 'flex';
+        };
+
+        let fallbackResizeListener = null;
+
+        const startFallbackLayout = () => {
+          applyFallbackLayout();
+          if (!fallbackResizeListener) {
+            fallbackResizeListener = () => applyFallbackLayout();
+            window.addEventListener('resize', fallbackResizeListener);
+          }
+        };
+
+        const stopFallbackLayout = () => {
+          if (fallbackResizeListener) {
+            window.removeEventListener('resize', fallbackResizeListener);
+            fallbackResizeListener = null;
+          }
+        };
         
         // Add click event to overlay to close the panel
         overlay.addEventListener('click', () => {
           panel.style.display = 'none';
           overlay.style.display = 'none';
+          stopFallbackLayout();
         });
         
         return {
           element: panel,
           show: () => { 
-            panel.style.display = 'block'; 
+            panel.style.display = 'flex';
             overlay.style.display = 'block';
+            startFallbackLayout();
+            if (typeof options.onOpen === 'function') {
+              try {
+                options.onOpen();
+              } catch (error) {
+                console.error('[Mod Loader] Config panel onOpen failed:', error);
+              }
+            }
           },
           hide: () => { 
             panel.style.display = 'none'; 
             overlay.style.display = 'none';
+            stopFallbackLayout();
           },
           toggle: () => { 
-            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-            overlay.style.display = overlay.style.display === 'none' ? 'block' : 'none';
+            const willShow = panel.style.display === 'none';
+            panel.style.display = willShow ? 'flex' : 'none';
+            overlay.style.display = willShow ? 'block' : 'none';
+            if (willShow) {
+              startFallbackLayout();
+              if (typeof options.onOpen === 'function') {
+                try {
+                  options.onOpen();
+                } catch (error) {
+                  console.error('[Mod Loader] Config panel onOpen failed:', error);
+                }
+              }
+            } else {
+              stopFallbackLayout();
+            }
           },
           remove: () => {
+            stopFallbackLayout();
             if (panel.parentNode) {
               panel.parentNode.removeChild(panel);
             }
@@ -1629,8 +1836,14 @@ if (typeof browserAPI === 'undefined') {
           return;
         }
         
-        const isVisible = panel.style.display === 'none';
-        panel.style.display = isVisible ? 'block' : 'none';
+        const isVisible = panel.style.display === 'none' || !panel.style.display;
+        panel.style.display = isVisible ? 'flex' : 'none';
+        if (isVisible) {
+          const dimensions = getConfigPanelModalDimensions({});
+          panel.style.width = `${dimensions.width}px`;
+          panel.style.maxWidth = `${dimensions.width}px`;
+          panel.style.maxHeight = `${dimensions.height}px`;
+        }
         
         // Find and toggle the overlay
         const overlays = document.querySelectorAll('div[style*="position: fixed"][style*="top: 0"][style*="left: 0"][style*="right: 0"][style*="bottom: 0"][style*="background: rgba(0, 0, 0, 0.5)"]');

@@ -54,12 +54,270 @@ const CHART_MAX_HEIGHT = 120;
 const CHART_MAX_BARS = 1000; // Limit chart to prevent performance issues with large analyses
 const CHART_BACKGROUND_STYLE = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
 
+const BOARD_ANALYZER_UI = {
+  CONTENT_PADDING: 2,
+  STATS_GRID_GAP: 8,
+  STATS_MARGIN_BOTTOM: 8,
+  PROGRESS_MARGIN_Y: 8,
+  NOTE_MARGIN_BOTTOM: 10,
+  CHART_MARGIN_TOP: 12,
+  CHART_PADDING: 8,
+  CHART_HEIGHT: 200,
+  CHART_SCROLL_HEIGHT: 150,
+  CHART_SORT_MARGIN_BOTTOM: 6,
+  BUTTON_MARGIN_Y: 6,
+  LIVE_STATS_FONT_SIZE: '0.85em'
+};
+
+function createBoardAnalyzerStatsDivider() {
+  const divider = document.createElement('div');
+  divider.className = 'separator my-2.5';
+  divider.setAttribute('role', 'none');
+  divider.style.gridColumn = '1 / -1';
+  return divider;
+}
+
 // Modal constants
 const MODAL_TYPES = {
   CONFIG: 'config',
   RUNNING: 'running',
   RESULTS: 'results'
 };
+
+const BOARD_ANALYZER_MODAL_CONFIG = {
+  width: 350,
+  maxHeight: 700,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 200
+};
+
+let boardAnalyzerModalLayoutCleanup = null;
+let boardAnalyzerActiveModalLayout = null;
+let boardAnalyzerModalLayoutRefreshTimer = null;
+
+function getBoardAnalyzerModalDimensions() {
+  const pad = BOARD_ANALYZER_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.round(Math.max(
+      BOARD_ANALYZER_MODAL_CONFIG.minWidth,
+      Math.min(BOARD_ANALYZER_MODAL_CONFIG.width, window.innerWidth - pad)
+    )),
+    maxHeight: Math.round(Math.max(
+      BOARD_ANALYZER_MODAL_CONFIG.minHeight,
+      Math.min(BOARD_ANALYZER_MODAL_CONFIG.maxHeight, window.innerHeight - pad)
+    ))
+  };
+}
+
+function snapBoardAnalyzerModalPx(value) {
+  const rounded = Math.round(value);
+  return rounded % 2 === 0 ? rounded : rounded + 1;
+}
+
+function applyBoardAnalyzerModalNaturalLayout(contentRoot) {
+  if (!contentRoot) return;
+  Object.assign(contentRoot.style, {
+    flex: '0 0 auto',
+    minHeight: '0',
+    height: 'auto',
+    maxHeight: 'none',
+    width: '100%',
+    minWidth: '0',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+    padding: `${BOARD_ANALYZER_UI.CONTENT_PADDING}px`,
+    overflowX: 'hidden',
+    overflowY: 'visible'
+  });
+}
+
+function applyBoardAnalyzerModalScrollLayout(rootWrapper, contentContainer, contentRoot) {
+  if (rootWrapper) {
+    Object.assign(rootWrapper.style, {
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      minHeight: '0',
+      gap: '0'
+    });
+  }
+  if (contentContainer) {
+    Object.assign(contentContainer.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      marginTop: '-1px',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      overflowX: 'hidden',
+      overflowY: 'auto'
+    });
+  }
+}
+
+function applyBoardAnalyzerModalCompactLayout(rootWrapper, contentContainer, contentRoot) {
+  if (rootWrapper) {
+    Object.assign(rootWrapper.style, {
+      height: 'auto',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '0 0 auto',
+      minHeight: '0',
+      gap: '0'
+    });
+  }
+  if (contentContainer) {
+    Object.assign(contentContainer.style, {
+      flex: '0 0 auto',
+      minHeight: '0',
+      marginTop: '-1px',
+      overflow: 'visible',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+  applyBoardAnalyzerModalNaturalLayout(contentRoot);
+}
+
+function measureBoardAnalyzerModalNaturalHeight(dialog, contentRoot) {
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper?.offsetHeight > 0) {
+    return rootWrapper.offsetHeight;
+  }
+
+  if (!contentRoot) return dialog.scrollHeight;
+
+  const title = dialog.querySelector('.widget-top');
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  const separator = widgetBottom?.querySelector('.separator');
+  const footer = widgetBottom?.querySelector('.flex.justify-end.gap-2');
+
+  let chrome = 0;
+  if (title) chrome += title.offsetHeight;
+  if (separator) chrome += separator.offsetHeight;
+  if (footer) chrome += footer.offsetHeight;
+  if (widgetBottom) {
+    const style = window.getComputedStyle(widgetBottom);
+    chrome += parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    chrome += parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+  }
+
+  return chrome + contentRoot.scrollHeight;
+}
+
+function getBoardAnalyzerDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearBoardAnalyzerModalLayoutCleanup() {
+  if (boardAnalyzerModalLayoutRefreshTimer) {
+    clearTimeout(boardAnalyzerModalLayoutRefreshTimer);
+    boardAnalyzerModalLayoutRefreshTimer = null;
+  }
+  if (boardAnalyzerModalLayoutCleanup) {
+    boardAnalyzerModalLayoutCleanup();
+    boardAnalyzerModalLayoutCleanup = null;
+  }
+  boardAnalyzerActiveModalLayout = null;
+}
+
+function applyBoardAnalyzerModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getBoardAnalyzerDialog(modalRef);
+  if (!dialog) return;
+
+  const { width, maxHeight } = dimensions;
+  const { minHeight } = BOARD_ANALYZER_MODAL_CONFIG;
+  const snappedWidth = snapBoardAnalyzerModalPx(width);
+
+  dialog.style.width = `${snappedWidth}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${snappedWidth}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]', 'w-full');
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  const contentContainer = dialog.querySelector('.widget-bottom');
+
+  dialog.style.height = 'auto';
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = 'none';
+
+  const widgetTop = dialog.querySelector('.widget-top');
+  if (widgetTop) {
+    widgetTop.style.margin = '0';
+    const titleText = widgetTop.querySelector('p');
+    if (titleText) titleText.style.margin = '0';
+  }
+
+  applyBoardAnalyzerModalCompactLayout(rootWrapper, contentContainer, contentRoot);
+
+  const naturalHeight = measureBoardAnalyzerModalNaturalHeight(dialog, contentRoot);
+  const needsScroll = naturalHeight > maxHeight;
+  const finalHeight = snapBoardAnalyzerModalPx(
+    needsScroll ? maxHeight : Math.max(minHeight, naturalHeight)
+  );
+
+  dialog.style.height = `${finalHeight}px`;
+  dialog.style.maxHeight = `${maxHeight}px`;
+
+  if (needsScroll) {
+    applyBoardAnalyzerModalScrollLayout(rootWrapper, contentContainer, contentRoot);
+  } else {
+    applyBoardAnalyzerModalCompactLayout(rootWrapper, contentContainer, contentRoot);
+  }
+}
+
+function scheduleBoardAnalyzerModalLayoutRefresh() {
+  if (!boardAnalyzerActiveModalLayout) return;
+  if (boardAnalyzerModalLayoutRefreshTimer) {
+    clearTimeout(boardAnalyzerModalLayoutRefreshTimer);
+  }
+  boardAnalyzerModalLayoutRefreshTimer = setTimeout(() => {
+    boardAnalyzerModalLayoutRefreshTimer = null;
+    if (!boardAnalyzerActiveModalLayout) return;
+    const { modalRef, contentRoot } = boardAnalyzerActiveModalLayout;
+    applyBoardAnalyzerModalLayout(modalRef, contentRoot, getBoardAnalyzerModalDimensions());
+  }, 120);
+}
+
+function attachBoardAnalyzerModalCloseCleanup(modalRef) {
+  if (!modalRef) return;
+
+  if (typeof modalRef.onClose === 'function') {
+    modalRef.onClose(() => clearBoardAnalyzerModalLayoutCleanup());
+  }
+
+  const originalClose = modalRef.close?.bind(modalRef);
+  if (originalClose) {
+    modalRef.close = () => {
+      clearBoardAnalyzerModalLayoutCleanup();
+      originalClose();
+    };
+  }
+}
+
+function setupBoardAnalyzerModalResponsiveLayout(modalRef, contentRoot) {
+  clearBoardAnalyzerModalLayoutCleanup();
+  boardAnalyzerActiveModalLayout = { modalRef, contentRoot };
+  const apply = () => applyBoardAnalyzerModalLayout(modalRef, contentRoot, getBoardAnalyzerModalDimensions());
+  requestAnimationFrame(() => apply());
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  boardAnalyzerModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+    boardAnalyzerActiveModalLayout = null;
+  };
+}
 
 // Analysis state constants
 const ANALYSIS_STATES = {
@@ -387,23 +645,13 @@ class ChartRenderer {
     try {
       // Create chart container
       const chartContainer = document.createElement('div');
-      chartContainer.style.cssText = `margin-top: 20px; border: 1px solid #555; padding: 10px; height: 200px; position: relative; overflow: hidden; box-sizing: border-box; background: ${CHART_BACKGROUND_STYLE}; background-size: auto;`;
+      chartContainer.style.cssText = `margin-top: ${BOARD_ANALYZER_UI.CHART_MARGIN_TOP}px; border: 1px solid #555; padding: ${BOARD_ANALYZER_UI.CHART_PADDING}px; height: ${BOARD_ANALYZER_UI.CHART_HEIGHT}px; position: relative; overflow: hidden; box-sizing: border-box; background: ${CHART_BACKGROUND_STYLE}; background-size: auto;`;
       this.chartContainer = chartContainer;
       
-      // Create all chart elements
-      const chartClickableNote = document.createElement('div');
-      chartClickableNote.textContent = t('mods.boardAnalyzer.chartTipMessage');
-      chartClickableNote.style.cssText = 'text-align: center; color: #3498db; margin-bottom: 15px; font-size: 0.9em; font-weight: 500;';
-      
-      const elementsToAppend = [chartClickableNote];
-      
-      // Create sorting buttons and scrollable chart area
       this.createSortButtons(chartContainer);
       this.createScrollableChart(chartContainer);
       
-      // Batch append all elements to container
-      elementsToAppend.push(chartContainer);
-      DOMOptimizer.batchAppend(this.container, elementsToAppend);
+      DOMOptimizer.batchAppend(this.container, [chartContainer]);
       
       // Initial render
       this.renderChart();
@@ -416,7 +664,7 @@ class ChartRenderer {
   
   createSortButtons(container) {
     const sortButtonsContainer = document.createElement('div');
-    sortButtonsContainer.style.cssText = 'display: flex; gap: 5px; margin-bottom: 10px; justify-content: center;';
+    sortButtonsContainer.style.cssText = `display: flex; gap: 4px; margin-bottom: ${BOARD_ANALYZER_UI.CHART_SORT_MARGIN_BOTTOM}px; justify-content: center;`;
     
     const buttons = [
       { text: t('mods.boardAnalyzer.allRunsButton'), sortType: 'runs' },
@@ -448,12 +696,12 @@ class ChartRenderer {
   
   createScrollableChart(container) {
     const barsContainer = document.createElement('div');
-    barsContainer.style.cssText = 'height: 150px; position: relative;';
+    barsContainer.style.cssText = `height: ${BOARD_ANALYZER_UI.CHART_SCROLL_HEIGHT}px; position: relative;`;
     
     const scrollWrapper = document.createElement('div');
     scrollWrapper.style.cssText = `
       width: 100%;
-      height: 150px;
+      height: ${BOARD_ANALYZER_UI.CHART_SCROLL_HEIGHT}px;
       overflow-x: auto;
       overflow-y: hidden;
       border: 1px solid #555;
@@ -3217,41 +3465,18 @@ function createConfigPanel(startAnalysisCallback) {
 
 // Add a global function to forcefully close all analysis modals
 function forceCloseAllModals() {
+  clearBoardAnalyzerModalLayoutCleanup();
   modalManager.closeAll();
 }
 
 // Helper function to close running modal specifically
 function closeRunningModal() {
   try {
+    clearBoardAnalyzerModalLayoutCleanup();
     modalManager.close('running-modal');
     activeRunningModal = null;
   } catch (error) {
     console.warn('[Board Analyzer] Error closing running modal:', error);
-  }
-}
-
-function applyRunningModalFrameFix(modalElement) {
-  const dialog = modalElement
-    || document.getElementById('board-analyzer-running-modal')
-    || document.querySelector('[data-analyzer-modal="running"]');
-  if (!dialog) return;
-
-  const rootWrapper = dialog.querySelector(':scope > div');
-  if (rootWrapper) {
-    rootWrapper.style.display = 'flex';
-    rootWrapper.style.flexDirection = 'column';
-    rootWrapper.style.gap = '0';
-  }
-
-  const widgetTop = dialog.querySelector('.widget-top');
-  const widgetBottom = dialog.querySelector('.widget-bottom');
-  if (widgetTop) {
-    widgetTop.style.margin = '0';
-    const titleText = widgetTop.querySelector('p');
-    if (titleText) titleText.style.margin = '0';
-  }
-  if (widgetBottom) {
-    widgetBottom.style.marginTop = '-1px';
   }
 }
 
@@ -3367,10 +3592,21 @@ function updateLiveStatsDisplay(status) {
 
   if (!status.hasStats) return;
 
+  let structureChanged = false;
   if (config.showAdvancedLiveStats) {
+    const breakdown = document.getElementById('analysis-live-splus-breakdown');
+    const expSection = document.getElementById('analysis-live-exp-section');
+    const prevBreakdownCount = breakdown?.childElementCount ?? 0;
+    const prevExpVisible = expSection?.style.display === 'contents';
     updateAdvancedLiveStatsDisplay(status);
+    structureChanged = (breakdown?.childElementCount ?? 0) !== prevBreakdownCount
+      || (expSection?.style.display === 'contents') !== prevExpVisible;
   } else {
     updateBasicLiveStatsDisplay(status);
+  }
+
+  if (structureChanged) {
+    scheduleBoardAnalyzerModalLayoutRefresh();
   }
 }
 
@@ -3420,19 +3656,19 @@ function createLiveStatsThrottler(onFlush, perf = null) {
 function appendBasicLiveStats(content) {
   const avgRunTimeInfo = document.createElement('p');
   avgRunTimeInfo.id = 'analysis-avg-run-time';
-  avgRunTimeInfo.style.cssText = 'margin-top: 8px; margin-bottom: 4px; font-size: 0.9em; color: #aaa;';
+  avgRunTimeInfo.style.cssText = 'margin-top: 6px; margin-bottom: 2px; font-size: 0.85em; color: #aaa;';
   avgRunTimeInfo.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} —`;
   content.appendChild(avgRunTimeInfo);
 
   const estimatedTimeInfo = document.createElement('p');
   estimatedTimeInfo.id = 'analysis-estimated-time';
-  estimatedTimeInfo.style.cssText = 'margin-top: 4px; margin-bottom: 4px; font-size: 0.9em; color: #aaa;';
+  estimatedTimeInfo.style.cssText = 'margin-top: 2px; margin-bottom: 2px; font-size: 0.85em; color: #aaa;';
   estimatedTimeInfo.textContent = `${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} —`;
   content.appendChild(estimatedTimeInfo);
 
   const completionRateInfo = document.createElement('p');
   completionRateInfo.id = 'analysis-completion-rate';
-  completionRateInfo.style.cssText = 'margin-top: 8px; margin-bottom: 4px; font-size: 0.9em; color: #aaa;';
+  completionRateInfo.style.cssText = 'margin-top: 6px; margin-bottom: 2px; font-size: 0.85em; color: #aaa;';
   completionRateInfo.textContent = `${t('mods.boardAnalyzer.completionRateLabel')} —`;
   content.appendChild(completionRateInfo);
 }
@@ -3440,7 +3676,7 @@ function appendBasicLiveStats(content) {
 function appendAdvancedLiveStats(content) {
   const statsContainer = document.createElement('div');
   statsContainer.id = 'analysis-live-stats';
-  statsContainer.style.cssText = 'display: grid; grid-template-columns: 130px auto; gap: 10px; margin-bottom: 12px; text-align: left; font-size: 0.9em;';
+  statsContainer.style.cssText = `display: grid; grid-template-columns: 130px auto; gap: ${BOARD_ANALYZER_UI.STATS_GRID_GAP}px; margin-bottom: ${BOARD_ANALYZER_UI.STATS_MARGIN_BOTTOM}px; text-align: left; font-size: ${BOARD_ANALYZER_UI.LIVE_STATS_FONT_SIZE};`;
 
   appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.sPlusRateLabel'), 'analysis-live-splus-rate', 'text-align: right; color: #FFD700;');
 
@@ -3482,9 +3718,7 @@ function appendAdvancedLiveStats(content) {
   appendLiveStatRow(expSection, t('mods.boardAnalyzer.totalEstimatedExpLabel'), 'analysis-live-total-exp', 'text-align: right; color: #9b59b6;');
   statsContainer.appendChild(expSection);
 
-  const divider = document.createElement('hr');
-  divider.style.cssText = 'grid-column: 1 / -1; margin: 4px 0; border: none; border-top: 1px solid #444;';
-  statsContainer.appendChild(divider);
+  statsContainer.appendChild(createBoardAnalyzerStatsDivider());
 
   appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.totalTimeLabel'), 'analysis-live-total-time');
   appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.avgRunTimeLabel'), 'analysis-live-avg-run-time');
@@ -3499,10 +3733,12 @@ function showRunningAnalysisModal(currentRun, totalRuns, liveStatus = null) {
   forceCloseAllModals();
   
   const content = document.createElement('div');
+  content.className = 'board-analyzer-modal-content';
   content.style.cssText = 'text-align: center;';
   
   const message = document.createElement('p');
   message.textContent = t('mods.boardAnalyzer.runningText');
+  message.style.cssText = 'margin: 0;';
   content.appendChild(message);
   
   const progress = document.createElement('p');
@@ -3510,9 +3746,7 @@ function showRunningAnalysisModal(currentRun, totalRuns, liveStatus = null) {
   progress.textContent = t('mods.boardAnalyzer.progressText')
     .replace('{current}', currentRun)
     .replace('{total}', totalRuns);
-  progress.style.cssText = config.showAdvancedLiveStats
-    ? 'margin-top: 12px; margin-bottom: 12px;'
-    : 'margin-top: 12px; margin-bottom: 8px;';
+  progress.style.cssText = `margin-top: ${BOARD_ANALYZER_UI.PROGRESS_MARGIN_Y}px; margin-bottom: ${BOARD_ANALYZER_UI.PROGRESS_MARGIN_Y}px;`;
   content.appendChild(progress);
 
   if (config.showAdvancedLiveStats) {
@@ -3530,8 +3764,11 @@ function showRunningAnalysisModal(currentRun, totalRuns, liveStatus = null) {
     modalTitle += ` ${t('mods.boardAnalyzer.resultTitleFloorSuffix').replace('{floor}', currentFloor)}`;
   }
   
+  const modalDimensions = getBoardAnalyzerModalDimensions();
+
   const modal = api.ui.components.createModal({
     title: modalTitle,
+    width: modalDimensions.width,
     content: content,
     buttons: [
       {
@@ -3570,8 +3807,9 @@ function showRunningAnalysisModal(currentRun, totalRuns, liveStatus = null) {
   // Register modal with modal manager for efficient management
   modal.type = MODAL_TYPES.RUNNING;
   modalManager.register('running-modal', modal);
-  
-  // Add a special identifier to the running modal
+
+  attachBoardAnalyzerModalCloseCleanup(modal);
+
   const runningModalElement = modal?.element
     || document.querySelector('div[role="dialog"][data-state="open"]');
   if (runningModalElement) {
@@ -3580,11 +3818,12 @@ function showRunningAnalysisModal(currentRun, totalRuns, liveStatus = null) {
     if (runningModalElement.classList) {
       runningModalElement.classList.add('board-analyzer-modal');
     }
-    applyRunningModalFrameFix(runningModalElement);
-  } else {
-    setTimeout(() => applyRunningModalFrameFix(), 0);
   }
-  
+
+  requestAnimationFrame(() => {
+    setupBoardAnalyzerModalResponsiveLayout(modal, content);
+  });
+
   activeRunningModal = modal;
   return modal;
 }
@@ -3594,6 +3833,7 @@ function showResultsModal(results) {
   // Small delay to ensure UI is clean
   setTimeout(() => {
     const content = document.createElement('div');
+    content.className = 'board-analyzer-modal-content';
     
     // Create EventManager for modal's event listeners
     const modalEventManager = new EventManager();
@@ -3603,21 +3843,13 @@ function showResultsModal(results) {
     if (results.summary.forceStopped) {
       const partialNote = document.createElement('div');
       partialNote.textContent = t('mods.boardAnalyzer.partialResultsNote');
-      partialNote.style.cssText = 'text-align: center; color: #e74c3c; margin-bottom: 15px;';
+      partialNote.style.cssText = `text-align: center; color: #e74c3c; margin-bottom: ${BOARD_ANALYZER_UI.NOTE_MARGIN_BOTTOM}px;`;
       content.appendChild(partialNote);
-    }
-    
-    // Indicate if the mode was switched to sandbox
-    if (results.summary.modeSwitched) {
-      const sandboxNote = document.createElement('div');
-      sandboxNote.textContent = t('mods.boardAnalyzer.sandboxModeEnabled');
-      sandboxNote.style.cssText = 'text-align: center; color: #3498db; margin-bottom: 15px;';
-      content.appendChild(sandboxNote);
     }
     
     // Create result statistics
     const statsContainer = document.createElement('div');
-    statsContainer.style.cssText = 'display: grid; grid-template-columns: 130px auto; gap: 10px; margin-bottom: 20px;';
+    statsContainer.style.cssText = `display: grid; grid-template-columns: 130px auto; gap: ${BOARD_ANALYZER_UI.STATS_GRID_GAP}px; margin-bottom: ${BOARD_ANALYZER_UI.STATS_MARGIN_BOTTOM}px;`;
     
     // S+ Rate
     const sPlusRateLabel = document.createElement('div');
@@ -3813,8 +4045,7 @@ function showResultsModal(results) {
     }
     
     // Add timing stats
-    statsContainer.appendChild(document.createElement('hr'));
-    statsContainer.appendChild(document.createElement('hr'));
+    statsContainer.appendChild(createBoardAnalyzerStatsDivider());
     statsContainer.appendChild(totalTimeLabel);
     statsContainer.appendChild(totalTimeValue);
     statsContainer.appendChild(avgRunTimeLabel);
@@ -3831,7 +4062,7 @@ function showResultsModal(results) {
       const copyTargetTicksButton = document.createElement('button');
       copyTargetTicksButton.textContent = t('mods.boardAnalyzer.copyTargetTicksReplayButton');
       copyTargetTicksButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-      copyTargetTicksButton.style.cssText = 'width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 20px;';
+      copyTargetTicksButton.style.cssText = `width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: ${BOARD_ANALYZER_UI.STATS_MARGIN_BOTTOM}px;`;
       
       // Add click handler using EventManager
       modalEventManager.addListener(copyTargetTicksButton, 'click', () => {
@@ -3916,6 +4147,8 @@ function showResultsModal(results) {
         return;
       }
       isCleanedUp = true;
+
+      clearBoardAnalyzerModalLayoutCleanup();
       
       // Clean up chart renderer event listeners
       if (chartRenderer) {
@@ -3990,7 +4223,7 @@ function showResultsModal(results) {
     const genNameButton = document.createElement('button');
     genNameButton.textContent = t('mods.boardAnalyzer.generateSetupNameButton');
     genNameButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-    genNameButton.style.cssText = 'width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 10px; margin-bottom: 10px;';
+    genNameButton.style.cssText = `width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: ${BOARD_ANALYZER_UI.BUTTON_MARGIN_Y}px; margin-bottom: ${BOARD_ANALYZER_UI.BUTTON_MARGIN_Y}px;`;
     
     modalEventManager.addListener(genNameButton, 'click', () => {
       const { success, setupName } = generateSetupName();
@@ -4008,9 +4241,10 @@ function showResultsModal(results) {
     if (currentFloor !== null && currentFloor !== undefined) {
       modalTitle += ` ${t('mods.boardAnalyzer.resultTitleFloorSuffix').replace('{floor}', currentFloor)}`;
     }
+    const modalDimensions = getBoardAnalyzerModalDimensions();
     const resultsModal = api.ui.components.createModal({
       title: modalTitle,
-      width: 400,
+      width: modalDimensions.width,
       content: content,
       buttons: [
         {
@@ -4019,6 +4253,12 @@ function showResultsModal(results) {
           onClick: cleanupResultsModal
         }
       ]
+    });
+
+    attachBoardAnalyzerModalCloseCleanup(resultsModal);
+
+    requestAnimationFrame(() => {
+      setupBoardAnalyzerModalResponsiveLayout(resultsModal, content);
     });
     
     // Register results modal with modal manager
@@ -4464,6 +4704,7 @@ context.exports = {
   // Cleanup function for modal manager
   cleanup: () => {
     uninstallXpDebugFetchHook();
+    clearBoardAnalyzerModalLayoutCleanup();
     modalManager.closeAll();
     // Unregister from coordination system
     if (window.ModCoordination) {

@@ -73,6 +73,64 @@ let WELCOME_ENABLED = true;
 const PATCH_NOTES_STORAGE_KEY = 'last-viewed-version';
 let PATCH_NOTES = [];
 
+const POPUP_LAYOUT_CONFIG = {
+  width: 600,
+  maxHeight: 600,
+  minWidth: 280,
+  minHeightCap: 280,
+  patchNotesHeaderHeight: 49,
+  patchNotesContentMinHeight: 250,
+  patchNotesMaxHeight: 360,
+  patchNotesReservedHeight: 120
+};
+
+let popupLayoutResizeHandler = null;
+
+function applyPopupResponsiveLayout() {
+  const width = Math.max(
+    POPUP_LAYOUT_CONFIG.minWidth,
+    Math.min(POPUP_LAYOUT_CONFIG.width, window.innerWidth)
+  );
+  const height = Math.max(
+    POPUP_LAYOUT_CONFIG.minHeightCap,
+    Math.min(POPUP_LAYOUT_CONFIG.maxHeight, window.innerHeight)
+  );
+  const root = document.documentElement;
+  root.style.setProperty('--popup-width', `${width}px`);
+  root.style.setProperty('--popup-height', `${height}px`);
+
+  const patchNotesCap = Math.min(
+    POPUP_LAYOUT_CONFIG.patchNotesMaxHeight,
+    Math.max(
+      POPUP_LAYOUT_CONFIG.patchNotesHeaderHeight + 80,
+      height - POPUP_LAYOUT_CONFIG.patchNotesReservedHeight
+    )
+  );
+  const contentMin = Math.min(
+    POPUP_LAYOUT_CONFIG.patchNotesContentMinHeight,
+    patchNotesCap - POPUP_LAYOUT_CONFIG.patchNotesHeaderHeight
+  );
+  root.style.setProperty('--patch-notes-max-height', `${patchNotesCap}px`);
+  root.style.setProperty(
+    '--patch-notes-content-min-height',
+    `${Math.max(80, contentMin)}px`
+  );
+}
+
+function setupPopupResponsiveLayout() {
+  applyPopupResponsiveLayout();
+  if (popupLayoutResizeHandler) {
+    window.removeEventListener('resize', popupLayoutResizeHandler);
+  }
+  popupLayoutResizeHandler = () => applyPopupResponsiveLayout();
+  window.addEventListener('resize', popupLayoutResizeHandler);
+}
+
+function setPatchNotesVisible(container, visible) {
+  if (!container) return;
+  container.classList.toggle('is-visible', visible);
+}
+
 // Load patch notes from JSON file
 async function loadPatchNotes() {
   try {
@@ -756,6 +814,8 @@ async function clearErrorLog() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  setupPopupResponsiveLayout();
+
   // Load translations first
   await loadAndApplyTranslations();
   
@@ -844,7 +904,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     );
 
     if (relevantNotes.length === 0) {
-      patchNotesContainer.style.display = 'none';
+      setPatchNotesVisible(patchNotesContainer, false);
       return;
     }
 
@@ -911,6 +971,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         detailsElement.hidden = isExpanded;
       });
     });
+
   }
 
   async function checkAndShowPatchNotes() {
@@ -927,7 +988,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await renderPatchNotes(currentVersion);
         const patchNotesContainer = document.getElementById('patch-notes');
         if (patchNotesContainer) {
-          patchNotesContainer.style.display = 'block';
+          setPatchNotesVisible(patchNotesContainer, true);
         }
       } else {
         // Still render but don't show (user can manually open if needed)
@@ -1103,7 +1164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     patchNotesClose.addEventListener('click', async () => {
       const patchNotesContainer = document.getElementById('patch-notes');
       if (patchNotesContainer) {
-        patchNotesContainer.style.display = 'none';
+        setPatchNotesVisible(patchNotesContainer, false);
         // Mark current version as viewed
         const currentVersion = await updateVersionDisplay();
         if (currentVersion) {
@@ -1119,10 +1180,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     showPatchNotesBtn.addEventListener('click', async () => {
       const currentVersion = await updateVersionDisplay();
       if (currentVersion) {
-        renderPatchNotes(currentVersion);
+        await renderPatchNotes(currentVersion);
         const patchNotesContainer = document.getElementById('patch-notes');
         if (patchNotesContainer) {
-          patchNotesContainer.style.display = 'block';
+          setPatchNotesVisible(patchNotesContainer, true);
           // Scroll to top to show patch notes
           patchNotesContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }

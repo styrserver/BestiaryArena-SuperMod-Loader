@@ -28,8 +28,15 @@
     FEEDBACK_DISPLAY_DURATION: 2000
   };
   
-  // Panel constants
-  const EXALTATION_PANEL_WIDTH = 450;
+  // Panel constants — desktop max 500×500; shrinks to fit viewport on phones
+  const EXALTATION_PANEL_CONFIG = {
+    width: 500,
+    height: 500,
+    leftColumnRatio: 0.35,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 280
+  };
   const DISENCHANT_DIM_OPACITY = '0.25';
   
   // Stat icons for disenchant messages (HP, AD, AP)
@@ -541,6 +548,7 @@
       border-radius: 2px;
       font-size: 10px;
       padding: 2px;
+      box-sizing: border-box;
     ` + customStyles;
   }
 
@@ -549,13 +557,43 @@
     const style = document.createElement('style');
     style.id = 'better-exaltation-equipment-select-styles';
     style.textContent = `
-      #equipment-setup-rows .better-exaltation-equipment-select {
-        flex: 1;
+      #equipment-setup-rows .better-exaltation-setup-row {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        padding: 4px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 3px;
         min-width: 0;
+        overflow-x: auto;
+      }
+      #equipment-setup-rows .better-exaltation-equipment-select {
+        flex: 1 1 72px;
+        min-width: 72px;
         max-width: 100%;
+        height: 24px;
+        min-height: 24px;
+        box-sizing: border-box;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      #equipment-setup-rows .better-exaltation-tier-select,
+      #equipment-setup-rows .better-exaltation-stat-select {
+        flex: 0 0 auto;
+        width: 50px;
+        min-width: 48px;
+        height: 24px;
+        min-height: 24px;
+        box-sizing: border-box;
+      }
+      #equipment-setup-rows .better-exaltation-stat-select {
+        min-width: 40px;
+      }
+      #equipment-setup-rows .better-exaltation-setup-remove {
+        flex: 0 0 auto;
+        min-width: 24px;
+        min-height: 24px;
       }
     `;
     document.head.appendChild(style);
@@ -1841,6 +1879,88 @@
   // =======================
   // 7. Settings Panel Functions
   // =======================
+
+  function getExaltationPanelDimensions() {
+    const pad = EXALTATION_PANEL_CONFIG.viewportPadding * 2;
+    return {
+      width: Math.max(
+        EXALTATION_PANEL_CONFIG.minWidth,
+        Math.min(EXALTATION_PANEL_CONFIG.width, window.innerWidth - pad)
+      ),
+      height: Math.max(
+        EXALTATION_PANEL_CONFIG.minHeight,
+        Math.min(EXALTATION_PANEL_CONFIG.height, window.innerHeight - pad)
+      )
+    };
+  }
+
+  function getExaltationPanelColumnWidths(panelWidth) {
+    const fullWidth = EXALTATION_PANEL_CONFIG.width;
+    if (panelWidth >= fullWidth) {
+      const leftWidth = Math.max(90, Math.floor(panelWidth * EXALTATION_PANEL_CONFIG.leftColumnRatio));
+      return { leftWidth };
+    }
+    const leftWidth = Math.min(
+      Math.max(90, Math.floor(panelWidth * EXALTATION_PANEL_CONFIG.leftColumnRatio)),
+      Math.floor(panelWidth * 0.42)
+    );
+    return { leftWidth };
+  }
+
+  function applyExaltationPanelLayout(panel, panelWidth) {
+    if (!panel) return;
+    const { leftWidth } = getExaltationPanelColumnWidths(panelWidth);
+
+    Object.assign(panel.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: '0',
+      boxSizing: 'border-box',
+      overflow: 'hidden'
+    });
+
+    const root = panel.querySelector('.better-exaltation-panel-root');
+    const leftColumn = panel.querySelector('.better-exaltation-panel-left');
+    const rightColumn = panel.querySelector('.better-exaltation-panel-right');
+
+    if (root) {
+      Object.assign(root.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        height: '100%',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'row',
+        overflow: 'hidden',
+        boxSizing: 'border-box'
+      });
+    }
+    if (leftColumn) {
+      Object.assign(leftColumn.style, {
+        width: `${leftWidth}px`,
+        minWidth: `${leftWidth}px`,
+        maxWidth: `${leftWidth}px`,
+        flex: `0 0 ${leftWidth}px`,
+        minHeight: '0',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        borderRight: '1px solid #444',
+        background: 'rgba(0, 0, 0, 0.2)'
+      });
+    }
+    if (rightColumn) {
+      Object.assign(rightColumn.style, {
+        flex: '1 1 0',
+        minWidth: '0',
+        minHeight: '0',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'rgba(0, 0, 0, 0.1)'
+      });
+    }
+  }
   
   // Cleanup function for panel state
   function cleanupExaltationPanel() {
@@ -2061,13 +2181,10 @@
     // Create the settings panel
     const panel = createExaltationSettingsPanel();
     
-    // Position the panel to the right of the modal (but as a child of the modal)
+    // Position the panel beside or below the modal (appended to body to avoid overflow clipping)
     positionPanelInsideModal(panel, modal);
     
-    // Insert the panel as a child of the modal's inner content
-    // This ensures it's treated as part of the modal's DOM tree
-    const modalContent = modal.querySelector('.widget-bottom') || modal;
-    modalContent.appendChild(panel);
+    document.body.appendChild(panel);
     activeExaltationPanel = panel;
     console.log('[Better Exaltation Chest] Panel created and activeExaltationPanel set');
     
@@ -2082,46 +2199,61 @@
     setupResizeListener(modal);
   }
   
-  // Position panel inside the modal but visually to the right
+  // Position panel with fixed viewport coords — right when it fits, otherwise below
   function positionPanelInsideModal(panel, modal) {
     const modalRect = modal.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    
-    // Match the modal height instead of using fixed height
-    const modalHeight = modalRect.height;
-    
-    // Calculate position to the right of the modal with no gap
-    let left = modalRect.right; // No gap - panel touches modal
-    let top = modalRect.top;
-    
-    // Ensure panel doesn't go off screen horizontally
-    if (left + EXALTATION_PANEL_WIDTH > viewportWidth) {
-      left = modalRect.left - EXALTATION_PANEL_WIDTH; // Position to the left instead
-    }
-    
-    // Ensure panel doesn't go off screen vertically
-    if (top + modalHeight > viewportHeight) {
-      top = viewportHeight - modalHeight - 10;
-    }
-    
-    if (top < 10) {
-      top = 10;
-    }
-    
-    // Ensure panel doesn't go off the left edge
-    if (left < 10) {
-      left = 10;
-    }
-    
-    // Position the panel absolutely within the modal but visually outside it
-    panel.style.position = 'absolute';
+    const pad = EXALTATION_PANEL_CONFIG.viewportPadding;
+    const { width: targetWidth, height: targetHeight } = getExaltationPanelDimensions();
+    const spaceRight = viewportWidth - modalRect.right - pad;
+    const fitsRight = spaceRight >= EXALTATION_PANEL_CONFIG.minWidth;
+
+    panel.style.position = 'fixed';
     panel.style.zIndex = '10001';
-    panel.style.left = (left - modalRect.left) + 'px'; // Relative to modal
-    panel.style.top = (top - modalRect.top) + 'px'; // Relative to modal
-    panel.style.height = modalHeight + 'px'; // Match modal height
-    
-    // Store reference to modal for repositioning
+
+    let panelWidth;
+    let panelHeight;
+
+    if (fitsRight) {
+      panel.dataset.placement = 'right';
+      panelWidth = Math.min(targetWidth, spaceRight);
+
+      let top = modalRect.top;
+      panelHeight = Math.min(targetHeight, modalRect.height, viewportHeight - pad * 2);
+      if (top + panelHeight > viewportHeight - pad) {
+        top = viewportHeight - panelHeight - pad;
+      }
+      if (top < pad) {
+        top = pad;
+        panelHeight = Math.min(panelHeight, viewportHeight - pad * 2);
+      }
+
+      panel.style.width = `${panelWidth}px`;
+      panel.style.height = `${panelHeight}px`;
+      panel.style.left = `${modalRect.right}px`;
+      panel.style.top = `${top}px`;
+    } else {
+      panel.dataset.placement = 'below';
+      panelWidth = Math.min(targetWidth, viewportWidth - pad * 2);
+
+      let panelLeft = modalRect.left + (modalRect.width - panelWidth) / 2;
+      panelLeft = Math.max(pad, Math.min(panelLeft, viewportWidth - panelWidth - pad));
+
+      const panelTop = modalRect.bottom;
+      const availableHeight = viewportHeight - panelTop - pad;
+      panelHeight = Math.min(
+        targetHeight,
+        Math.max(availableHeight, Math.min(EXALTATION_PANEL_CONFIG.minHeight, availableHeight))
+      );
+
+      panel.style.width = `${panelWidth}px`;
+      panel.style.height = `${panelHeight}px`;
+      panel.style.left = `${panelLeft}px`;
+      panel.style.top = `${panelTop}px`;
+    }
+
+    applyExaltationPanelLayout(panel, panelWidth);
     panel.dataset.attachedModal = modal.id || 'exaltation-modal';
   }
   
@@ -2223,7 +2355,6 @@
     const panel = document.createElement('div');
     panel.id = 'better-exaltation-settings-panel';
     panel.style.cssText = `
-      width: ${EXALTATION_PANEL_WIDTH}px;
       background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
       color: #fff;
       font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
@@ -2234,6 +2365,7 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      box-sizing: border-box;
     `;
     
     // Prevent clicks on the panel from bubbling up and closing it
@@ -2297,37 +2429,36 @@
   function createExaltationSettingsContent() {
     // Main container with 2-column layout
     const mainContainer = document.createElement('div');
+    mainContainer.className = 'better-exaltation-panel-root';
     mainContainer.style.cssText = `
       display: flex;
       flex-direction: row;
       width: 100%;
       height: 100%;
       flex: 1;
+      min-height: 0;
       box-sizing: border-box;
       overflow: hidden;
     `;
     
     // Left column
     const leftColumn = document.createElement('div');
+    leftColumn.className = 'better-exaltation-panel-left';
     leftColumn.style.cssText = `
-      width: 35%;
       min-width: 0;
       display: flex;
       flex-direction: column;
-      border-right: 1px solid #444;
       overflow-y: auto;
-      background: rgba(0, 0, 0, 0.2);
     `;
     
     // Right column
     const rightColumn = document.createElement('div');
+    rightColumn.className = 'better-exaltation-panel-right';
     rightColumn.style.cssText = `
-      width: 65%;
       min-width: 0;
       display: flex;
       flex-direction: column;
       overflow-y: auto;
-      background: rgba(0, 0, 0, 0.1);
     `;
     
     // Left column content
@@ -2667,31 +2798,20 @@
   // Add a new equipment setup row
   function addEquipmentSetupRow(container, setup = null, index = null) {
     const row = document.createElement('div');
-    row.style.cssText = `
-      display: flex;
-      gap: 4px;
-      align-items: center;
-      padding: 4px;
-      background: rgba(0, 0, 0, 0.3);
-      border-radius: 3px;
-    `;
+    row.className = 'better-exaltation-setup-row';
     
     // Equipment dropdown
     const equipmentSelect = document.createElement('select');
     equipmentSelect.className = 'better-exaltation-equipment-select';
-    equipmentSelect.style.cssText = createDropdownStyle(`
-      height: 24px;
-    `);
+    equipmentSelect.style.cssText = createDropdownStyle();
     
     // Populate equipment dropdown
     populateEquipmentDropdown(equipmentSelect);
     
     // Tier dropdown
     const tierSelect = document.createElement('select');
-    tierSelect.style.cssText = createDropdownStyle(`
-      width: 50px;
-      height: 24px;
-    `);
+    tierSelect.className = 'better-exaltation-tier-select';
+    tierSelect.style.cssText = createDropdownStyle();
     
     // Populate tier dropdown
     ['All', '≥T2', '≥T3', '≥T4', 'T5'].forEach(tier => {
@@ -2703,10 +2823,8 @@
     
     // Stat dropdown
     const statSelect = document.createElement('select');
-    statSelect.style.cssText = createDropdownStyle(`
-      width: 50px;
-      height: 24px;
-    `);
+    statSelect.className = 'better-exaltation-stat-select';
+    statSelect.style.cssText = createDropdownStyle();
     
     // Populate stat dropdown
     ['All', 'HP', 'AD', 'AP'].forEach(stat => {
@@ -2718,6 +2836,7 @@
     
     // Remove button
     const removeButton = document.createElement('button');
+    removeButton.className = 'better-exaltation-setup-remove';
     removeButton.textContent = '×';
     removeButton.style.cssText = createButtonStyle('red', `
       width: 24px;

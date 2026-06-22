@@ -486,6 +486,7 @@ const modState = {
     enabled: false,
     questLogObserver: null,
     activeModal: null,
+    modalLayoutCleanup: null,
     escKeyListener: null,
     modalInProgress: false,
     lastModalCall: 0,
@@ -1615,8 +1616,138 @@ function updateToggleButton() {
 // 6. Settings & Storage
 // =======================
 
-const MODAL_WIDTH = 700;
-const MODAL_HEIGHT = 400;
+const MODAL_CONFIG = {
+    width: 700,
+    height: 500,
+    leftColumnWidth: 200,
+    contentInset: 35,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 280
+};
+
+function getBoostedMapsModalDimensions() {
+    const pad = MODAL_CONFIG.viewportPadding * 2;
+    return {
+        width: Math.max(
+            MODAL_CONFIG.minWidth,
+            Math.min(MODAL_CONFIG.width, window.innerWidth - pad)
+        ),
+        height: Math.max(
+            MODAL_CONFIG.minHeight,
+            Math.min(MODAL_CONFIG.height, window.innerHeight - pad)
+        )
+    };
+}
+
+function getBoostedMapsColumnWidths(modalWidth) {
+    const contentWidth = modalWidth - MODAL_CONFIG.contentInset;
+    if (modalWidth >= MODAL_CONFIG.width) {
+        return {
+            contentWidth: MODAL_CONFIG.width - MODAL_CONFIG.contentInset,
+            leftWidth: MODAL_CONFIG.leftColumnWidth
+        };
+    }
+    const leftWidth = Math.min(
+        MODAL_CONFIG.leftColumnWidth,
+        Math.max(90, Math.floor(contentWidth * 0.28))
+    );
+    return { contentWidth, leftWidth };
+}
+
+function getBoostedMapsDialog(modalRef) {
+    if (modalRef?.element) return modalRef.element;
+    if (modalRef instanceof HTMLElement) return modalRef;
+    return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearBoostedMapsModalLayoutCleanup() {
+    if (modState.modalLayoutCleanup) {
+        modState.modalLayoutCleanup();
+        modState.modalLayoutCleanup = null;
+    }
+}
+
+function applyBoostedMapsModalLayout(modalRef, contentRoot, dimensions) {
+    const dialog = getBoostedMapsDialog(modalRef);
+    if (!dialog) return;
+
+    const { width, height } = dimensions;
+    const { contentWidth, leftWidth } = getBoostedMapsColumnWidths(width);
+
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
+    dialog.classList.remove('max-w-[300px]');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+        rootWrapper.style.height = '100%';
+        rootWrapper.style.display = 'flex';
+        rootWrapper.style.flexDirection = 'column';
+        rootWrapper.style.flex = '1 1 0';
+        rootWrapper.style.minHeight = '0';
+    }
+
+    const contentContainer = dialog.querySelector('.widget-bottom');
+    if (contentContainer) {
+        Object.assign(contentContainer.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            overflowY: 'hidden',
+            overflowX: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+        });
+    }
+
+    if (contentRoot) {
+        Object.assign(contentRoot.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            height: '100%',
+            maxHeight: 'none',
+            minWidth: `${contentWidth}px`,
+            maxWidth: `${contentWidth}px`
+        });
+
+        const leftColumn = contentRoot.querySelector('.better-boosted-maps-modal-left');
+        const rightColumn = contentRoot.querySelector('.better-boosted-maps-modal-right');
+        if (leftColumn) {
+            Object.assign(leftColumn.style, {
+                width: `${leftWidth}px`,
+                minWidth: `${leftWidth}px`,
+                maxWidth: `${leftWidth}px`,
+                flex: `0 0 ${leftWidth}px`,
+                minHeight: '0'
+            });
+        }
+        if (rightColumn) {
+            Object.assign(rightColumn.style, {
+                flex: '1 1 0',
+                minWidth: '0',
+                minHeight: '0',
+                height: 'auto',
+                maxHeight: 'none'
+            });
+        }
+    }
+}
+
+function setupBoostedMapsModalResponsiveLayout(modalRef, contentRoot) {
+    clearBoostedMapsModalLayoutCleanup();
+    const apply = () => applyBoostedMapsModalLayout(modalRef, contentRoot, getBoostedMapsModalDimensions());
+    apply();
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    modState.modalLayoutCleanup = () => {
+        window.removeEventListener('resize', onResize);
+    };
+}
 
 function loadBoostedMapsState() {
     const saved = localStorage.getItem('betterBoostedMapsEnabled');
@@ -3549,15 +3680,17 @@ function applyFloorSettings() {
 function createSettingsContent() {
     // Main container with 2-column layout
     const mainContainer = document.createElement('div');
+    mainContainer.className = 'better-boosted-maps-modal-root';
     mainContainer.style.cssText = `
         display: flex;
         flex-direction: row;
         width: 100%;
         height: 100%;
-        min-width: 665px;
-        max-width: 700px;
-        min-height: 400px;
-        max-height: 400px;
+        min-width: 0;
+        max-width: 100%;
+        min-height: 0;
+        max-height: none;
+        flex: 1 1 auto;
         box-sizing: border-box;
         overflow: hidden;
         background: ${BBM_CTX_PANEL_TEXTURE};
@@ -3570,6 +3703,7 @@ function createSettingsContent() {
     
     // Left column - Automation Settings
     const leftColumn = document.createElement('div');
+    leftColumn.className = 'better-boosted-maps-modal-left';
     leftColumn.style.cssText = `
         width: 200px;
         min-width: 200px;
@@ -3586,6 +3720,7 @@ function createSettingsContent() {
     
     // Right column - Additional Settings
     const rightColumn = document.createElement('div');
+    rightColumn.className = 'better-boosted-maps-modal-right';
     rightColumn.style.cssText = `
         flex: 1 1 0%;
         padding: 0;
@@ -4303,6 +4438,7 @@ function createDropdownSetting(id, label, description, value = 'Auto-setup', opt
 }
 
 function cleanupModal() {
+    clearBoostedMapsModalLayoutCleanup();
     if (modState.activeModal) {
         modState.activeModal = null;
     }
@@ -4321,6 +4457,7 @@ function openSettingsModal() {
         
         modState.lastModalCall = now;
         modState.modalInProgress = true;
+        clearBoostedMapsModalLayoutCleanup();
         
         (() => {
             try {
@@ -4334,11 +4471,12 @@ function openSettingsModal() {
                     if (typeof context !== 'undefined' && context.api && context.api.ui) {
                         try {
                             const settingsContent = createSettingsContent();
-                            
+                            const modalDimensions = getBoostedMapsModalDimensions();
+
                             modState.activeModal = context.api.ui.components.createModal({
                                 title: t('mods.betterBoostedMaps.modalTitle'),
-                                width: MODAL_WIDTH,
-                                height: MODAL_HEIGHT,
+                                width: modalDimensions.width,
+                                height: modalDimensions.height,
                                 content: settingsContent,
                                 buttons: [{ text: t('mods.betterBoostedMaps.closeButton'), primary: true }],
                                 onClose: () => {
@@ -4346,6 +4484,14 @@ function openSettingsModal() {
                                     cleanupModal();
                                 }
                             });
+
+                            const originalClose = modState.activeModal?.close?.bind(modState.activeModal);
+                            if (originalClose) {
+                                modState.activeModal.close = () => {
+                                    clearBoostedMapsModalLayoutCleanup();
+                                    originalClose();
+                                };
+                            }
                             
                             // Add ESC key support
                             modState.escKeyListener = (event) => {
@@ -4358,24 +4504,9 @@ function openSettingsModal() {
                             
                             // Set modal dimensions and apply settings
                             setTimeout(() => {
-                                const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+                                const dialog = getBoostedMapsDialog(modState.activeModal);
                                 if (dialog) {
-                                    dialog.style.width = MODAL_WIDTH + 'px';
-                                    dialog.style.minWidth = MODAL_WIDTH + 'px';
-                                    dialog.style.maxWidth = MODAL_WIDTH + 'px';
-                                    dialog.style.height = MODAL_HEIGHT + 'px';
-                                    dialog.style.minHeight = MODAL_HEIGHT + 'px';
-                                    dialog.style.maxHeight = MODAL_HEIGHT + 'px';
-                                    
-                                    const contentElem = dialog.querySelector('.modal-content, [data-content], .content, .modal-body');
-                                    if (contentElem) {
-                                        contentElem.style.width = '700px';
-                                        contentElem.style.height = '400px';
-                                        contentElem.style.display = 'flex';
-                                        contentElem.style.flexDirection = 'column';
-                                    }
-                                    
-                                    // Apply saved floor settings
+                                    setupBoostedMapsModalResponsiveLayout(modState.activeModal, settingsContent);
                                     applyFloorSettings();
                                 }
                             }, 50);

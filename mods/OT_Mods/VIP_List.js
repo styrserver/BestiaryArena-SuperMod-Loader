@@ -79,6 +79,16 @@ const MODAL_DIMENSIONS = {
   HEIGHT: 360
 };
 
+const VIP_LIST_MODAL_CONFIG = {
+  width: MODAL_DIMENSIONS.WIDTH,
+  height: MODAL_DIMENSIONS.HEIGHT,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 240
+};
+
+let vipListModalLayoutCleanup = null;
+
 // Panel dimensions
 const PANEL_DIMENSIONS = {
   WIDTH: 500,
@@ -10347,41 +10357,115 @@ function openVIPModal({ title, width, height, content, buttons }) {
   return null;
 }
 
-// Apply modal styles after creation (expand step — matches Highscore Improvements)
-function applyModalStyles(dialog, width, height) {
-  const w = width || MODAL_DIMENSIONS.WIDTH;
-  const h = height || MODAL_DIMENSIONS.HEIGHT;
+// Apply modal layout with viewport clamping (matches Highscore Improvements / Quests pattern)
+function getVIPListModalDimensions() {
+  const pad = VIP_LIST_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      VIP_LIST_MODAL_CONFIG.minWidth,
+      Math.min(VIP_LIST_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      VIP_LIST_MODAL_CONFIG.minHeight,
+      Math.min(VIP_LIST_MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
 
-  dialog.style.width = `${w}px`;
-  dialog.style.minWidth = `${w}px`;
-  dialog.style.maxWidth = `${w}px`;
-  dialog.style.height = `${h}px`;
-  dialog.style.minHeight = `${h}px`;
-  dialog.style.maxHeight = `${h}px`;
-  dialog.classList.remove('max-w-[300px]');
+function getVIPListDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return getOpenDialog();
+}
+
+function clearVIPListModalLayoutCleanup() {
+  if (vipListModalLayoutCleanup) {
+    vipListModalLayoutCleanup();
+    vipListModalLayoutCleanup = null;
+  }
+}
+
+function applyVIPListModalLayoutToDialog(dialog, contentRoot, dimensions) {
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]', 'w-full');
 
   const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
   if (innerWrapper) {
-    innerWrapper.style.display = 'flex';
-    innerWrapper.style.flexDirection = 'column';
-    innerWrapper.style.height = '100%';
-    innerWrapper.style.minHeight = '0';
+    Object.assign(innerWrapper.style, {
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      minHeight: '0'
+    });
   }
 
   const widgetBottom = dialog.querySelector('.widget-bottom');
   if (widgetBottom) {
-    widgetBottom.style.display = 'flex';
-    widgetBottom.style.flexDirection = 'column';
-    widgetBottom.style.flex = '1 1 0';
-    widgetBottom.style.minHeight = '0';
-    widgetBottom.style.height = '100%';
-    widgetBottom.style.overflow = 'hidden';
+    Object.assign(widgetBottom.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      overflow: 'hidden'
+    });
   }
 
   const separator = dialog.querySelector('.separator');
   if (separator) {
     separator.className = 'separator my-2.5';
   }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      minWidth: '0',
+      height: '100%',
+      maxHeight: '100%',
+      width: '100%',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'row'
+    });
+  }
+}
+
+function setupVIPListModalResponsiveLayout(modalRef, contentRoot, afterFirstLayout) {
+  clearVIPListModalLayoutCleanup();
+  let initialized = false;
+  const apply = () => {
+    const dialog = getVIPListDialog(modalRef);
+    if (dialog) {
+      vipListModalInstance = dialog;
+    }
+    applyVIPListModalLayoutToDialog(dialog, contentRoot, getVIPListModalDimensions());
+    if (!initialized && dialog) {
+      initialized = true;
+      if (typeof afterFirstLayout === 'function') {
+        afterFirstLayout(dialog);
+      }
+    }
+  };
+  requestAnimationFrame(() => apply());
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  vipListModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+  };
 }
 
 // Unified search input setup for both modal and panel
@@ -11945,6 +12029,8 @@ async function openVIPListModal() {
       
       const contentDiv = document.createElement('div');
       contentDiv.style.width = '100%';
+      contentDiv.style.maxWidth = '100%';
+      contentDiv.style.minWidth = '0';
       contentDiv.style.height = '100%';
       contentDiv.style.flex = '1 1 0';
       contentDiv.style.minHeight = '0';
@@ -11960,56 +12046,54 @@ async function openVIPListModal() {
         content: await getVIPListContent()
       });
       vipListBox.style.width = '100%';
+      vipListBox.style.maxWidth = '100%';
+      vipListBox.style.minWidth = '0';
       vipListBox.style.height = '100%';
       vipListBox.style.flex = '1 1 0';
       vipListBox.style.minHeight = '0';
       
       contentDiv.appendChild(vipListBox);
+
+      const modalDims = getVIPListModalDimensions();
       
       const modal = openVIPModal({
         title: t('mods.vipList.modalTitle'),
-        width: MODAL_DIMENSIONS.WIDTH,
-        height: MODAL_DIMENSIONS.HEIGHT,
+        width: modalDims.width,
+        height: modalDims.height,
         content: contentDiv,
         buttons: [{ 
           text: t('mods.vipList.closeButton'), 
           primary: true,
           onClick: () => {
             cleanupAutoRefresh();
+            clearVIPListModalLayoutCleanup();
             vipListModalInstance = null;
           }
         }]
       });
-      
-      const timeout1 = setTimeout(() => {
-        pendingTimeouts.delete(timeout1);
-        const dialog = getOpenDialog();
-        if (dialog) {
-          vipListModalInstance = dialog;
-          applyModalStyles(dialog, MODAL_DIMENSIONS.WIDTH, MODAL_DIMENSIONS.HEIGHT);
 
-          const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
-          if (buttonContainer) {
-            setupModalSearchInput(buttonContainer);
-          }
-
-          setupAutoRefresh('modal');
-
-          modalCloseObserver = new MutationObserver(() => {
-            if (!document.contains(dialog) || dialog.getAttribute('data-state') === 'closed') {
-              cleanupAutoRefresh();
-              vipListModalInstance = null;
-              if (modalCloseObserver) {
-                modalCloseObserver.disconnect();
-                modalCloseObserver = null;
-              }
-            }
-          });
-          modalCloseObserver.observe(dialog, { attributes: true, attributeFilter: ['data-state'] });
-          modalCloseObserver.observe(document.body, { childList: true, subtree: true });
+      setupVIPListModalResponsiveLayout(modal, contentDiv, (dialog) => {
+        const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
+        if (buttonContainer) {
+          setupModalSearchInput(buttonContainer);
         }
-      }, 50);
-      trackTimeout(timeout1);
+
+        setupAutoRefresh('modal');
+
+        modalCloseObserver = new MutationObserver(() => {
+          if (!document.contains(dialog) || dialog.getAttribute('data-state') === 'closed') {
+            cleanupAutoRefresh();
+            clearVIPListModalLayoutCleanup();
+            vipListModalInstance = null;
+            if (modalCloseObserver) {
+              modalCloseObserver.disconnect();
+              modalCloseObserver = null;
+            }
+          }
+        });
+        modalCloseObserver.observe(dialog, { attributes: true, attributeFilter: ['data-state'] });
+        modalCloseObserver.observe(document.body, { childList: true, subtree: true });
+      });
       
       console.log('[VIP List] Modal opened');
       return modal;
@@ -12368,6 +12452,8 @@ exports = {
         modalCloseObserver.disconnect();
         modalCloseObserver = null;
       }
+
+      clearVIPListModalLayoutCleanup();
       
       // 14. Clear modal instance reference
       vipListModalInstance = null;

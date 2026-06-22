@@ -13,11 +13,315 @@ const BUTTON_RETRY_MAX = 3;
 const BUTTON_RETRY_DELAY = 250;
 const OBSERVER_DEBOUNCE_DELAY = 250;
 const OBSERVER_MIN_INTERVAL = 100;
-const KING_TIBI_MODAL_WIDTH = 450;
-const KING_TIBI_MODAL_HEIGHT = 500;
-const COSTELLO_MODAL_HEIGHT = 200;
-const QUEST_ITEMS_MODAL_WIDTH = 500;
-const QUEST_ITEMS_MODAL_HEIGHT = 190;
+const QUESTS_MODAL_CONFIG = {
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 160,
+  kingTibianus: { width: 450, height: 500, minHeight: 320 },
+  npcChat: { width: 450, height: 280, minHeight: 240 },
+  questItems: { width: 450, height: 280, minHeight: 240 }
+};
+const KING_TIBI_MODAL_WIDTH = QUESTS_MODAL_CONFIG.kingTibianus.width;
+const KING_TIBI_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.kingTibianus.height;
+const COSTELLO_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.npcChat.height;
+const QUEST_ITEMS_MODAL_WIDTH = QUESTS_MODAL_CONFIG.questItems.width;
+const QUEST_ITEMS_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.questItems.height;
+
+let questsModalLayoutCleanup = null;
+
+function getQuestsModalDimensions(maxWidth, maxHeight, minHeight = QUESTS_MODAL_CONFIG.minHeight) {
+  const pad = QUESTS_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      QUESTS_MODAL_CONFIG.minWidth,
+      Math.min(maxWidth, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      minHeight,
+      Math.min(maxHeight, window.innerHeight - pad)
+    )
+  };
+}
+
+function getQuestsDialog(modalRef) {
+  if (modalRef && modalRef.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearQuestsModalLayoutCleanup() {
+  if (questsModalLayoutCleanup) {
+    questsModalLayoutCleanup();
+    questsModalLayoutCleanup = null;
+  }
+}
+
+function applyQuestsModalLayoutToDialog(dialog, contentRoot, maxWidth, maxHeight, minHeight) {
+  if (!dialog) return;
+
+  const { width, height } = getQuestsModalDimensions(maxWidth, maxHeight, minHeight);
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]', 'w-full');
+
+  let contentWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
+  if (contentWrapper) {
+    Object.assign(contentWrapper.style, {
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      minHeight: '0'
+    });
+  }
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    Object.assign(widgetBottom.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflow: 'hidden'
+    });
+  }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      maxHeight: '100%',
+      width: '100%',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden'
+    });
+    applyQuestsNpcChatContentLayout(contentRoot, height, width, dialog);
+    applyQuestsKingChatContentLayout(contentRoot, width, dialog);
+  }
+}
+
+function measureQuestsModalChromeHeight(dialog) {
+  if (!dialog) return 0;
+  let chrome = 0;
+  const title = dialog.querySelector('.widget-top');
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  const separator = widgetBottom?.querySelector('.separator');
+  const footer = widgetBottom?.querySelector('.flex.justify-end.gap-2');
+  if (title) chrome += title.offsetHeight;
+  if (separator) chrome += separator.offsetHeight;
+  if (footer) chrome += footer.offsetHeight;
+  if (widgetBottom) {
+    const style = window.getComputedStyle(widgetBottom);
+    chrome += parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  }
+  return chrome;
+}
+
+function getQuestsNpcChatContentWidth(dialog, dialogWidth) {
+  const widgetBottom = dialog?.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    const style = window.getComputedStyle(widgetBottom);
+    const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    return Math.max(160, dialogWidth - padX);
+  }
+  return Math.max(160, dialogWidth - 24);
+}
+
+function applyQuestsNpcChatContentLayout(contentRoot, dialogHeight, dialogWidth, dialog) {
+  if (!contentRoot?.classList.contains('quests-npc-chat-content')) return;
+
+  const contentWidth = contentRoot.clientWidth || getQuestsNpcChatContentWidth(dialog, dialogWidth);
+  const chrome = measureQuestsModalChromeHeight(dialog);
+  const availableHeight = Math.max(120, dialogHeight - chrome);
+  const inputRow = contentRoot.querySelector('.quests-npc-chat-input');
+  const inputHeight = inputRow?.offsetHeight || 28;
+  const rowHeight = Math.max(72, availableHeight - inputHeight - 12);
+  const blockHeight = Math.min(150, rowHeight);
+
+  const imageContainer = contentRoot.querySelector('.quests-npc-chat-image');
+  const messageContainer = contentRoot.querySelector('.quests-npc-chat-messages');
+  const chatRow = contentRoot.querySelector('.quests-npc-chat-row');
+  const chatBody = contentRoot.querySelector('.quests-npc-chat-body');
+
+  const rowGap = 12;
+  const messageMinWidth = 96;
+  const imageMaxWidth = 110;
+  let imageWidth = imageMaxWidth;
+  if (contentWidth < imageMaxWidth + messageMinWidth + rowGap) {
+    imageWidth = Math.max(64, contentWidth - messageMinWidth - rowGap);
+  }
+
+  if (chatBody) {
+    Object.assign(chatBody.style, {
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      boxSizing: 'border-box'
+    });
+  }
+
+  if (chatRow) {
+    Object.assign(chatRow.style, {
+      display: 'flex',
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      alignSelf: 'stretch',
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      gap: `${rowGap}px`,
+      flex: '1 1 0',
+      minHeight: '0',
+      maxHeight: `${blockHeight}px`,
+      overflow: 'hidden'
+    });
+  }
+  if (imageContainer) {
+    Object.assign(imageContainer.style, {
+      width: `${imageWidth}px`,
+      minWidth: `${imageWidth}px`,
+      maxWidth: `${imageWidth}px`,
+      flex: `0 0 ${imageWidth}px`,
+      height: `${blockHeight}px`,
+      minHeight: `${blockHeight}px`,
+      alignSelf: 'stretch'
+    });
+  }
+  if (messageContainer) {
+    Object.assign(messageContainer.style, {
+      height: `${blockHeight}px`,
+      minHeight: '0',
+      maxHeight: `${blockHeight}px`,
+      width: 'auto',
+      minWidth: '0',
+      maxWidth: 'none',
+      flex: '1 1 0',
+      overflowY: 'auto',
+      boxSizing: 'border-box'
+    });
+  }
+  if (inputRow) {
+    Object.assign(inputRow.style, {
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      boxSizing: 'border-box'
+    });
+    const textarea = inputRow.querySelector('textarea');
+    if (textarea) {
+      textarea.style.minWidth = '0';
+      textarea.style.flex = '1 1 0';
+    }
+  }
+}
+
+const QUESTS_KING_CHAT_ROW_HEIGHT = 90;
+
+function applyQuestsKingChatContentLayout(contentRoot, dialogWidth, dialog) {
+  if (!contentRoot?.classList.contains('quests-king-chat-content')) return;
+
+  const contentWidth = contentRoot.clientWidth || getQuestsNpcChatContentWidth(dialog, dialogWidth);
+  const chatRow = contentRoot.querySelector('.quests-king-chat-row');
+  const imageContainer = contentRoot.querySelector('.quests-king-chat-image');
+  const messageContainer = contentRoot.querySelector('.quests-king-chat-messages');
+  const modalBody = contentRoot.querySelector('.quests-king-chat-body');
+  const mainRow = contentRoot.querySelector('.quests-king-chat-main');
+
+  const rowGap = 12;
+  const messageMinWidth = 96;
+  const imageMaxWidth = 110;
+  let imageWidth = imageMaxWidth;
+  if (contentWidth < imageMaxWidth + messageMinWidth + rowGap) {
+    imageWidth = Math.max(64, contentWidth - messageMinWidth - rowGap);
+  }
+
+  if (modalBody) {
+    Object.assign(modalBody.style, {
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      boxSizing: 'border-box'
+    });
+  }
+
+  if (chatRow) {
+    Object.assign(chatRow.style, {
+      display: 'flex',
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      alignSelf: 'stretch',
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      gap: `${rowGap}px`
+    });
+  }
+
+  if (imageContainer) {
+    Object.assign(imageContainer.style, {
+      width: `${imageWidth}px`,
+      minWidth: `${imageWidth}px`,
+      maxWidth: `${imageWidth}px`,
+      flex: `0 0 ${imageWidth}px`,
+      height: `${QUESTS_KING_CHAT_ROW_HEIGHT}px`,
+      alignSelf: 'stretch'
+    });
+  }
+
+  if (messageContainer) {
+    Object.assign(messageContainer.style, {
+      height: `${QUESTS_KING_CHAT_ROW_HEIGHT}px`,
+      minHeight: `${QUESTS_KING_CHAT_ROW_HEIGHT}px`,
+      maxHeight: `${QUESTS_KING_CHAT_ROW_HEIGHT}px`,
+      width: 'auto',
+      minWidth: '0',
+      maxWidth: 'none',
+      flex: '1 1 0',
+      overflowY: 'auto',
+      boxSizing: 'border-box'
+    });
+  }
+
+  if (mainRow) {
+    Object.assign(mainRow.style, {
+      width: '100%',
+      maxWidth: '100%',
+      minWidth: '0',
+      alignSelf: 'stretch',
+      boxSizing: 'border-box'
+    });
+  }
+}
+
+function setupQuestsModalResponsiveLayout(modalRef, contentRoot, maxWidth, maxHeight, minHeight, afterFirstLayout) {
+  clearQuestsModalLayoutCleanup();
+  let initialized = false;
+  const apply = () => {
+    const dialog = getQuestsDialog(modalRef);
+    applyQuestsModalLayoutToDialog(dialog, contentRoot, maxWidth, maxHeight, minHeight);
+    if (!initialized) {
+      initialized = true;
+      if (dialog && typeof afterFirstLayout === 'function') {
+        afterFirstLayout(dialog);
+      }
+    }
+  };
+  requestAnimationFrame(() => apply());
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  questsModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+  };
+}
+
 const KING_GUILD_COIN_REWARD = 50;
 
 // Toast duration constants (in milliseconds)
@@ -2707,21 +3011,26 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   }
 
   // Helper to apply modal content div styles
-  function applyModalContentStyles(element, width, height) {
+  function applyModalContentStyles(element, maxWidth, maxHeight, isNpcChat = false) {
+    element.classList.add('quests-modal-content');
+    if (isNpcChat) {
+      element.classList.add('quests-npc-chat-content');
+    }
     Object.assign(element.style, {
       width: '100%',
       height: '100%',
-      maxWidth: `${width}px`,
-      minHeight: `${height}px`,
-      maxHeight: `${height}px`,
+      maxWidth: '100%',
+      minHeight: '0',
+      maxHeight: '100%',
       boxSizing: 'border-box',
       overflow: 'hidden',
       display: 'flex',
-      flexDirection: 'row',
+      flexDirection: isNpcChat ? 'column' : 'row',
       justifyContent: 'flex-start',
-      alignItems: 'flex-start',
+      alignItems: 'stretch',
       gap: '8px',
-      color: 'rgb(230, 215, 176)'
+      color: 'rgb(230, 215, 176)',
+      flex: '1 1 auto'
     });
   }
 
@@ -5968,31 +6277,8 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   // 6. Modal Management
   // =======================
 
-  function applyDialogStyles(dialog, width, height) {
-    dialog.style.width = `${width}px`;
-    dialog.style.minWidth = `${width}px`;
-    dialog.style.maxWidth = `${width}px`;
-    dialog.style.height = `${height}px`;
-    dialog.style.minHeight = `${height}px`;
-    dialog.style.maxHeight = `${height}px`;
-    
-    let contentWrapper = null;
-    const children = Array.from(dialog.children);
-    for (const child of children) {
-      if (child !== dialog.firstChild && child.tagName === 'DIV') {
-        contentWrapper = child;
-        break;
-      }
-    }
-    if (!contentWrapper) {
-      contentWrapper = dialog.querySelector(':scope > div');
-    }
-    if (contentWrapper) {
-      contentWrapper.style.height = '100%';
-      contentWrapper.style.display = 'flex';
-      contentWrapper.style.flexDirection = 'column';
-      contentWrapper.style.flex = '1 1 0';
-    }
+  function applyDialogStyles(dialog, width, height, contentRoot, minHeight) {
+    applyQuestsModalLayoutToDialog(dialog, contentRoot, width, height, minHeight);
   }
 
   function createBox({title, content}) {
@@ -6233,21 +6519,30 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       loadingDiv.style.cssText = 'width: 100%; text-align: center; padding: 20px; color: rgb(230, 215, 176);';
       contentDiv.appendChild(loadingDiv);
       
-      api.ui.components.createModal({
+      const questItemsDims = getQuestsModalDimensions(
+        QUEST_ITEMS_MODAL_WIDTH,
+        QUEST_ITEMS_MODAL_HEIGHT,
+        QUESTS_MODAL_CONFIG.questItems.minHeight
+      );
+      const questItemsModal = api.ui.components.createModal({
         title: 'Quest Items',
-        width: QUEST_ITEMS_MODAL_WIDTH,
-        height: QUEST_ITEMS_MODAL_HEIGHT,
+        width: questItemsDims.width,
+        height: questItemsDims.height,
         content: contentDiv,
-        buttons: [{ text: 'Close', primary: true }]
+        buttons: [{
+          text: 'Close',
+          primary: true,
+          onClick: () => clearQuestsModalLayoutCleanup()
+        }]
       });
-      
-      dialogTimeout = setTimeout(() => {
-        const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-        if (dialog) {
-          applyDialogStyles(dialog, QUEST_ITEMS_MODAL_WIDTH, QUEST_ITEMS_MODAL_HEIGHT);
-        }
-        dialogTimeout = null;
-      }, 0);
+
+      setupQuestsModalResponsiveLayout(
+        questItemsModal,
+        contentDiv,
+        QUEST_ITEMS_MODAL_WIDTH,
+        QUEST_ITEMS_MODAL_HEIGHT,
+        QUESTS_MODAL_CONFIG.questItems.minHeight
+      );
       
       // Fetch and display quest items (always fetch fresh from Firebase)
       try {
@@ -6872,39 +7167,38 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     modalTimeout = setTimeout(() => {
       const contentDiv = document.createElement('div');
       applyModalContentStyles(contentDiv, KING_TIBI_MODAL_WIDTH, KING_TIBI_MODAL_HEIGHT);
+      contentDiv.classList.add('quests-king-chat-content');
       
       const kingTibianusIconUrl = getQuestItemsAssetUrl('King_Tibianus.gif');
       
       // Create modal content with 3 rows
       const modalContent = document.createElement('div');
-      modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; height: 100%;';
+      modalContent.className = 'quests-king-chat-body';
+      modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; width: 100%; min-width: 0; height: 100%; box-sizing: border-box;';
       
       // Row 1: Top row with image and message
       const row1 = document.createElement('div');
-      row1.className = 'grid gap-3 sm:grid-cols-[min-content_1fr]';
-      row1.style.cssText = 'align-self: center;';
+      row1.className = 'quests-king-chat-row';
+      row1.style.cssText = 'display: flex; flex-direction: row; align-items: stretch; width: 100%; min-width: 0; gap: 12px; align-self: stretch;';
       
       const imageContainer = document.createElement('div');
-      imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
-      imageContainer.style.cssText = 'width: 110px; min-width: 110px; height: 100%; padding: 0; align-self: stretch;';
+      imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden quests-king-chat-image';
+      imageContainer.style.cssText = 'width: 110px; min-width: 110px; max-width: 110px; flex: 0 0 110px; height: 90px; padding: 0; align-self: stretch;';
       
       const kingImgWrapper = document.createElement('div');
-      kingImgWrapper.style.cssText = 'width: 110px; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
+      kingImgWrapper.style.cssText = 'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
       
       const kingImg = document.createElement('img');
       kingImg.src = kingTibianusIconUrl;
       kingImg.alt = 'King Tibianus';
       kingImg.className = 'pixelated';
-      kingImg.style.cssText = 'width: 96px; height: 64px; object-fit: contain; image-rendering: pixelated;';
+      kingImg.style.cssText = 'max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; image-rendering: pixelated;';
       kingImgWrapper.appendChild(kingImg);
       imageContainer.appendChild(kingImgWrapper);
       
       const messageContainer = document.createElement('div');
-      messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular';
-      messageContainer.style.width = '290px';
-      messageContainer.style.height = '90px';
-      messageContainer.style.maxHeight = '90px';
-      messageContainer.style.overflowY = 'auto';
+      messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular quests-king-chat-messages';
+      messageContainer.style.cssText = 'flex: 1 1 0; min-width: 0; width: auto; height: 90px; max-height: 90px; overflow-y: auto; box-sizing: border-box;';
       messageContainer.id = 'king-tibianus-messages';
       
       // Function to add message to conversation
@@ -6949,7 +7243,8 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       
       // Row 2: Middle row split into 2 columns
       const row2 = document.createElement('div');
-      row2.style.cssText = 'width: 410px; height: 300px; display: flex; gap: 12px; margin: auto 0; align-self: center;';
+      row2.className = 'quests-king-chat-main';
+      row2.style.cssText = 'width: 100%; max-width: 100%; min-width: 0; height: 300px; display: flex; gap: 12px; margin: auto 0; align-self: stretch; box-sizing: border-box;';
       
       // Column 1: First column (150px wide) using same background/frame as row1
       const col1 = document.createElement('div');
@@ -8275,23 +8570,28 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       
       contentDiv.appendChild(modalContent);
       
+      const kingDims = getQuestsModalDimensions(
+        KING_TIBI_MODAL_WIDTH,
+        KING_TIBI_MODAL_HEIGHT,
+        QUESTS_MODAL_CONFIG.kingTibianus.minHeight
+      );
       const modal = api.ui.components.createModal({
         title: 'King Tibianus',
-        width: KING_TIBI_MODAL_WIDTH,
-        height: KING_TIBI_MODAL_HEIGHT,
+        width: kingDims.width,
+        height: kingDims.height,
         content: contentDiv,
         buttons: []
       });
       modalRef = modal;
-      
-      dialogTimeout = setTimeout(() => {
-        const dialog = modal?.element || document.querySelector('div[role="dialog"][data-state="open"]');
-        if (dialog) {
-          applyDialogStyles(dialog, KING_TIBI_MODAL_WIDTH, KING_TIBI_MODAL_HEIGHT);
-          removeDefaultModalFooter(dialog);
-        }
-        dialogTimeout = null;
-      }, 0);
+
+      setupQuestsModalResponsiveLayout(
+        modal,
+        contentDiv,
+        KING_TIBI_MODAL_WIDTH,
+        KING_TIBI_MODAL_HEIGHT,
+        QUESTS_MODAL_CONFIG.kingTibianus.minHeight,
+        (dialog) => removeDefaultModalFooter(dialog)
+      );
       
       modalTimeout = null;
     }, 50);
@@ -8356,39 +8656,38 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     modalTimeout = setTimeout(() => {
       const contentDiv = document.createElement('div');
       applyModalContentStyles(contentDiv, KING_TIBI_MODAL_WIDTH, KING_TIBI_MODAL_HEIGHT);
+      contentDiv.classList.add('quests-king-chat-content');
 
       const alDeeIconUrl = getQuestItemsAssetUrl('Al_Dee.gif');
 
       // Create modal content with greeting message
       const modalContent = document.createElement('div');
-      modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; height: 100%;';
+      modalContent.className = 'quests-king-chat-body';
+      modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; width: 100%; min-width: 0; height: 100%; box-sizing: border-box;';
 
       // Row 1: Top row with image and message
       const row1 = document.createElement('div');
-      row1.className = 'grid gap-3 sm:grid-cols-[min-content_1fr]';
-      row1.style.cssText = 'align-self: center;';
+      row1.className = 'quests-king-chat-row';
+      row1.style.cssText = 'display: flex; flex-direction: row; align-items: stretch; width: 100%; min-width: 0; gap: 12px; align-self: stretch;';
 
       const imageContainer = document.createElement('div');
-      imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
-      imageContainer.style.cssText = 'width: 110px; min-width: 110px; height: 100%; padding: 0; align-self: stretch;';
+      imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden quests-king-chat-image';
+      imageContainer.style.cssText = 'width: 110px; min-width: 110px; max-width: 110px; flex: 0 0 110px; height: 90px; padding: 0; align-self: stretch;';
 
       const alDeeImgWrapper = document.createElement('div');
-      alDeeImgWrapper.style.cssText = 'width: 110px; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
+      alDeeImgWrapper.style.cssText = 'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
 
       const alDeeImg = document.createElement('img');
       alDeeImg.src = alDeeIconUrl;
       alDeeImg.alt = 'Al Dee';
       alDeeImg.className = 'pixelated';
-      alDeeImg.style.cssText = 'width: 96px; height: 64px; object-fit: contain; image-rendering: pixelated;';
+      alDeeImg.style.cssText = 'max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; image-rendering: pixelated;';
       alDeeImgWrapper.appendChild(alDeeImg);
       imageContainer.appendChild(alDeeImgWrapper);
 
       const messageContainer = document.createElement('div');
-      messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular';
-      messageContainer.style.width = '290px';
-      messageContainer.style.height = '90px';
-      messageContainer.style.maxHeight = '90px';
-      messageContainer.style.overflowY = 'auto';
+      messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular quests-king-chat-messages';
+      messageContainer.style.cssText = 'flex: 1 1 0; min-width: 0; width: auto; height: 90px; max-height: 90px; overflow-y: auto; box-sizing: border-box;';
       messageContainer.id = 'al-dee-messages';
 
       // Confusion responses for Al Dee (merchant style)
@@ -8447,7 +8746,8 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
       // Row 2: Shop interface
       const row2 = document.createElement('div');
-      row2.style.cssText = 'display: grid; grid-template-rows: repeat(auto-fill, 60px); align-items: start; gap: 8px; padding: 8px; background: rgba(0, 0, 0, 0.3); border-radius: 4px; flex: 1 1 0; min-height: 0; overflow-y: auto;';
+      row2.className = 'quests-king-chat-main';
+      row2.style.cssText = 'display: grid; grid-template-rows: repeat(auto-fill, 60px); align-items: start; gap: 8px; padding: 8px; background: rgba(0, 0, 0, 0.3); border-radius: 4px; flex: 1 1 0; min-height: 0; min-width: 0; width: 100%; max-width: 100%; overflow-y: auto; box-sizing: border-box;';
 
       // Function to create a shop item
       function createShopItem(iconName, itemName, price, displayName, itemId) {
@@ -9328,24 +9628,29 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       // Update guild coin display
       updateGuildCoinDisplay();
 
+      const alDeeDims = getQuestsModalDimensions(
+        KING_TIBI_MODAL_WIDTH,
+        KING_TIBI_MODAL_HEIGHT,
+        QUESTS_MODAL_CONFIG.kingTibianus.minHeight
+      );
       const modal = api.ui.components.createModal({
         title: 'Al Dee',
-        width: KING_TIBI_MODAL_WIDTH,
-        height: KING_TIBI_MODAL_HEIGHT,
+        width: alDeeDims.width,
+        height: alDeeDims.height,
         content: contentDiv,
         buttons: []
       });
 
       modalRef = modal;
 
-      dialogTimeout = setTimeout(() => {
-        const dialog = modal?.element || document.querySelector('div[role="dialog"][data-state="open"]');
-        if (dialog) {
-          applyDialogStyles(dialog, KING_TIBI_MODAL_WIDTH, KING_TIBI_MODAL_HEIGHT);
-          removeDefaultModalFooter(dialog);
-        }
-        dialogTimeout = null;
-      }, 0);
+      setupQuestsModalResponsiveLayout(
+        modal,
+        contentDiv,
+        KING_TIBI_MODAL_WIDTH,
+        KING_TIBI_MODAL_HEIGHT,
+        QUESTS_MODAL_CONFIG.kingTibianus.minHeight,
+        (dialog) => removeDefaultModalFooter(dialog)
+      );
 
       modalTimeout = null;
     }, 50);
@@ -9366,18 +9671,19 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     } = options;
 
     const contentDiv = document.createElement('div');
-    applyModalContentStyles(contentDiv, modalWidth, modalHeight);
+    applyModalContentStyles(contentDiv, modalWidth, modalHeight, true);
 
     const modalContent = document.createElement('div');
-    modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; height: 100%;';
+    modalContent.className = 'quests-npc-chat-body';
+    modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; width: 100%; min-width: 0; height: 100%; min-height: 0; flex: 1 1 auto; box-sizing: border-box;';
 
     const row1 = document.createElement('div');
-    row1.className = 'grid gap-3 sm:grid-cols-[min-content_1fr]';
-    row1.style.cssText = 'align-self: center; flex: 1 1 0; min-height: 0;';
+    row1.className = 'quests-npc-chat-row';
+    row1.style.cssText = 'display: flex; flex-direction: row; align-items: stretch; align-self: stretch; width: 100%; min-width: 0; gap: 12px; flex: 1 1 0; min-height: 0;';
 
     const imageContainer = document.createElement('div');
-    imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
-    imageContainer.style.cssText = 'width: 110px; min-width: 110px; height: 150px; min-height: 150px; padding: 0; align-self: stretch;';
+    imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden quests-npc-chat-image';
+    imageContainer.style.cssText = 'width: 110px; min-width: 110px; max-width: 110px; flex: 0 0 110px; height: 150px; min-height: 150px; padding: 0; align-self: stretch;';
 
     const imgWrapper = document.createElement('div');
     imgWrapper.style.cssText = 'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
@@ -9391,8 +9697,8 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     imageContainer.appendChild(imgWrapper);
 
     const messageContainer = document.createElement('div');
-    messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular';
-    messageContainer.style.cssText = 'width: 290px; height: 150px; min-height: 150px; max-height: 150px; overflow-y: auto; flex-shrink: 0; box-sizing: border-box;';
+    messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular quests-npc-chat-messages';
+    messageContainer.style.cssText = 'flex: 1 1 0; min-width: 0; width: auto; height: 150px; min-height: 150px; max-height: 150px; overflow-y: auto; box-sizing: border-box;';
     if (messageContainerId) messageContainer.id = messageContainerId;
 
     function addMessage(sender, text, isNpc) {
@@ -9411,11 +9717,12 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     modalContent.appendChild(row1);
 
     const inputRow = document.createElement('div');
-    inputRow.style.cssText = 'display: flex; gap: 6px; align-items: center; flex-shrink: 0;';
+    inputRow.className = 'quests-npc-chat-input';
+    inputRow.style.cssText = 'display: flex; gap: 6px; align-items: center; flex-shrink: 0; width: 100%; min-width: 0; box-sizing: border-box;';
     const textarea = document.createElement('textarea');
     textarea.setAttribute('wrap', 'off');
     textarea.placeholder = placeholder;
-    textarea.style.cssText = 'flex:1;height:28px;max-height:28px;min-height:28px;padding:4px 6px;background-color:#333;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;color:rgb(255,255,255);font-size:13px;resize:none;box-sizing:border-box;outline:none;';
+    textarea.style.cssText = 'flex:1 1 0;min-width:0;height:28px;max-height:28px;min-height:28px;padding:4px 6px;background-color:#333;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;color:rgb(255,255,255);font-size:13px;resize:none;box-sizing:border-box;outline:none;';
 
     const sendBtn = document.createElement('button');
     sendBtn.textContent = 'Send';
@@ -9673,32 +9980,30 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     modalTimeout = setTimeout(() => {
       const api = (typeof globalThis !== 'undefined' && globalThis.BestiaryModAPI) || (typeof window !== 'undefined' && window.BestiaryModAPI);
       if (api && api.ui && api.ui.components && api.ui.components.createModal) {
+        const costelloDims = getQuestsModalDimensions(
+          KING_TIBI_MODAL_WIDTH,
+          COSTELLO_MODAL_HEIGHT,
+          QUESTS_MODAL_CONFIG.npcChat.minHeight
+        );
         const modal = api.ui.components.createModal({
           title: 'Costello',
-          width: KING_TIBI_MODAL_WIDTH,
-          height: COSTELLO_MODAL_HEIGHT,
+          width: costelloDims.width,
+          height: costelloDims.height,
           content: contentDiv,
           buttons: []
         });
-        dialogTimeout = setTimeout(() => {
-          let dialog = modal?.element || document.querySelector('div[role="dialog"][data-state="open"]');
-          if (dialog) {
-            const dialogRoot = dialog.getAttribute?.('role') === 'dialog' ? dialog : (dialog.closest?.('[role="dialog"]') || dialog);
-            if (typeof applyDialogStyles === 'function') {
-              applyDialogStyles(dialogRoot, KING_TIBI_MODAL_WIDTH, COSTELLO_MODAL_HEIGHT);
-            }
-            dialogRoot.style.setProperty('width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
-            dialogRoot.style.setProperty('min-width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
-            dialogRoot.style.setProperty('max-width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
-            dialogRoot.style.setProperty('height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
-            dialogRoot.style.setProperty('min-height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
-            dialogRoot.style.setProperty('max-height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
+        setupQuestsModalResponsiveLayout(
+          modal,
+          contentDiv,
+          KING_TIBI_MODAL_WIDTH,
+          COSTELLO_MODAL_HEIGHT,
+          QUESTS_MODAL_CONFIG.npcChat.minHeight,
+          (dialog) => {
             if (typeof removeDefaultModalFooter === 'function') {
-              removeDefaultModalFooter(dialogRoot);
+              removeDefaultModalFooter(dialog);
             }
           }
-          dialogTimeout = null;
-        }, 0);
+        );
       }
       modalTimeout = null;
     }, 50);
@@ -9873,32 +10178,30 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     modalTimeout = setTimeout(() => {
       const api = (typeof globalThis !== 'undefined' && globalThis.BestiaryModAPI) || (typeof window !== 'undefined' && window.BestiaryModAPI);
       if (api && api.ui && api.ui.components && api.ui.components.createModal) {
+        const wydaDims = getQuestsModalDimensions(
+          KING_TIBI_MODAL_WIDTH,
+          COSTELLO_MODAL_HEIGHT,
+          QUESTS_MODAL_CONFIG.npcChat.minHeight
+        );
         const modal = api.ui.components.createModal({
           title: 'Wyda',
-          width: KING_TIBI_MODAL_WIDTH,
-          height: COSTELLO_MODAL_HEIGHT,
+          width: wydaDims.width,
+          height: wydaDims.height,
           content: contentDiv,
           buttons: []
         });
-        dialogTimeout = setTimeout(() => {
-          let dialog = modal?.element || document.querySelector('div[role="dialog"][data-state="open"]');
-          if (dialog) {
-            const dialogRoot = dialog.getAttribute?.('role') === 'dialog' ? dialog : (dialog.closest?.('[role="dialog"]') || dialog);
-            if (typeof applyDialogStyles === 'function') {
-              applyDialogStyles(dialogRoot, KING_TIBI_MODAL_WIDTH, COSTELLO_MODAL_HEIGHT);
-            }
-            dialogRoot.style.setProperty('width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
-            dialogRoot.style.setProperty('min-width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
-            dialogRoot.style.setProperty('max-width', KING_TIBI_MODAL_WIDTH + 'px', 'important');
-            dialogRoot.style.setProperty('height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
-            dialogRoot.style.setProperty('min-height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
-            dialogRoot.style.setProperty('max-height', COSTELLO_MODAL_HEIGHT + 'px', 'important');
+        setupQuestsModalResponsiveLayout(
+          modal,
+          contentDiv,
+          KING_TIBI_MODAL_WIDTH,
+          COSTELLO_MODAL_HEIGHT,
+          QUESTS_MODAL_CONFIG.npcChat.minHeight,
+          (dialog) => {
             if (typeof removeDefaultModalFooter === 'function') {
-              removeDefaultModalFooter(dialogRoot);
+              removeDefaultModalFooter(dialog);
             }
           }
-          dialogTimeout = null;
-        }, 0);
+        );
       }
       modalTimeout = null;
     }, 50);
@@ -14242,6 +14545,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   // =======================
 
   function cleanup() {
+    clearQuestsModalLayoutCleanup();
     if (inventoryObserver) {
       try { 
         inventoryObserver.disconnect(); 

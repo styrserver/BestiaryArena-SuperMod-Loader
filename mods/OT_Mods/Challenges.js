@@ -8,8 +8,15 @@ console.log('[Challenges Mod] Initializing...');
 // =======================
 
 // Same size as Cyclopedia modal (from Super Mods/Cyclopedia.js LAYOUT_CONSTANTS)
-const MODAL_WIDTH = 950;
-const MODAL_HEIGHT = 700;
+const CHALLENGES_MODAL_CONFIG = {
+  width: 950,
+  height: 700,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 360
+};
+const MODAL_WIDTH = CHALLENGES_MODAL_CONFIG.width;
+const MODAL_HEIGHT = CHALLENGES_MODAL_CONFIG.height;
 // Three-column layout (reference: Cyclopedia.js LAYOUT_CONSTANTS)
 const COLUMN_WIDTH = 270;
 const COL1_WIDTH = COLUMN_WIDTH - 30;
@@ -1239,8 +1246,167 @@ function createDeleteRunContextMenu(x, y, entry, onDelete, onClose) {
 // =======================
 
 function getChallengesOpenDialog() {
-  return document.querySelector('div[role="dialog"][data-state="open"]') ||
+  return document.querySelector('div[role="dialog"][data-challenges-dialog="1"]') ||
+    document.querySelector('div[role="dialog"][data-state="open"]') ||
     document.querySelector('div[role="dialog"]');
+}
+
+function getChallengesDialog(modalRef) {
+  if (modalRef && modalRef.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return getChallengesOpenDialog();
+}
+
+let activeChallengesModal = null;
+let challengesModalLayoutCleanup = null;
+let challengesModalChromeInitialized = false;
+
+function getChallengesModalDimensions() {
+  const pad = CHALLENGES_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      CHALLENGES_MODAL_CONFIG.minWidth,
+      Math.min(CHALLENGES_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      CHALLENGES_MODAL_CONFIG.minHeight,
+      Math.min(CHALLENGES_MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
+
+function getChallengesColumnWidths(modalWidth) {
+  const contentWidth = Math.max(200, modalWidth - 24);
+  const desktopTotal = COL1_WIDTH + COLUMN_WIDTH + COL3_WIDTH;
+  if (contentWidth >= desktopTotal) {
+    return { col1: COL1_WIDTH, col3: COL3_WIDTH, soloOverflowX: 'hidden' };
+  }
+  const scale = contentWidth / desktopTotal;
+  return {
+    col1: Math.max(72, Math.round(COL1_WIDTH * scale)),
+    col3: Math.max(90, Math.round(COL3_WIDTH * scale)),
+    soloOverflowX: 'auto'
+  };
+}
+
+function clearChallengesModalLayoutCleanup() {
+  if (challengesModalLayoutCleanup) {
+    challengesModalLayoutCleanup();
+    challengesModalLayoutCleanup = null;
+  }
+}
+
+function applyChallengesModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getChallengesDialog(modalRef);
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]', 'w-full');
+  dialog.setAttribute('data-challenges-dialog', '1');
+
+  const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
+  if (innerWrapper) {
+    Object.assign(innerWrapper.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      minHeight: '0',
+      flex: '1 1 0'
+    });
+  }
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    Object.assign(widgetBottom.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden'
+    });
+  }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      maxHeight: 'none',
+      width: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+
+  const tabContent = dialog.querySelector('[data-challenges-content]');
+  if (tabContent) {
+    Object.assign(tabContent.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+
+  const { col1, col3, soloOverflowX } = getChallengesColumnWidths(width);
+  const leftCol = dialog.querySelector('.challenges-col-left');
+  const rightCol = dialog.querySelector('.challenges-col-right');
+  const soloPanel = dialog.querySelector('.challenges-solo-panel');
+  if (leftCol) {
+    leftCol.style.width = `${col1}px`;
+    leftCol.style.minWidth = `${col1}px`;
+    leftCol.style.flex = `0 0 ${col1}px`;
+  }
+  if (rightCol) {
+    rightCol.style.width = `${col3}px`;
+    rightCol.style.minWidth = `${col3}px`;
+    rightCol.style.flex = `0 0 ${col3}px`;
+  }
+  if (soloPanel) {
+    soloPanel.style.overflowX = soloOverflowX;
+  }
+}
+
+function setupChallengesModalResponsiveLayout(modalRef, contentRoot, initChromeFn) {
+  clearChallengesModalLayoutCleanup();
+  activeChallengesModal = modalRef;
+  challengesModalChromeInitialized = false;
+  const apply = () => {
+    applyChallengesModalLayout(modalRef, contentRoot, getChallengesModalDimensions());
+    if (!challengesModalChromeInitialized) {
+      challengesModalChromeInitialized = true;
+      const dialog = getChallengesDialog(modalRef);
+      if (dialog && typeof initChromeFn === 'function') {
+        initChromeFn(dialog);
+      }
+    }
+  };
+  requestAnimationFrame(() => apply());
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  challengesModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+    if (activeChallengesModal === modalRef) {
+      activeChallengesModal = null;
+    }
+    challengesModalChromeInitialized = false;
+    if (window.__challengesFooterQueueIntervalId) {
+      clearInterval(window.__challengesFooterQueueIntervalId);
+      window.__challengesFooterQueueIntervalId = null;
+    }
+  };
 }
 
 function openModal(challengesApi, { title, width, height, content, buttons }) {
@@ -1248,41 +1414,13 @@ function openModal(challengesApi, { title, width, height, content, buttons }) {
   if (width != null) options.width = width;
   if (height != null && height !== undefined) options.height = height;
 
-  if (challengesApi && typeof challengesApi.showModal === 'function') {
-    return challengesApi.showModal(options);
-  }
   if (challengesApi && challengesApi.ui && challengesApi.ui.components && challengesApi.ui.components.createModal) {
     return challengesApi.ui.components.createModal(options);
   }
+  if (challengesApi && typeof challengesApi.showModal === 'function') {
+    return challengesApi.showModal(options);
+  }
   return null;
-}
-
-function applyChallengesModalShellStyles(dialog, widthPx, heightPx) {
-  dialog.style.width = widthPx + 'px';
-  dialog.style.minWidth = widthPx + 'px';
-  dialog.style.maxWidth = widthPx + 'px';
-  dialog.style.height = heightPx + 'px';
-  dialog.style.minHeight = heightPx + 'px';
-  dialog.style.maxHeight = heightPx + 'px';
-  dialog.classList.remove('max-w-[300px]');
-
-  const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
-  if (innerWrapper) {
-    innerWrapper.style.display = 'flex';
-    innerWrapper.style.flexDirection = 'column';
-    innerWrapper.style.height = '100%';
-    innerWrapper.style.minHeight = '0';
-  }
-
-  const widgetBottom = dialog.querySelector('.widget-bottom');
-  if (widgetBottom) {
-    widgetBottom.style.flex = '1 1 0';
-    widgetBottom.style.minHeight = '0';
-    widgetBottom.style.height = '100%';
-    widgetBottom.style.display = 'flex';
-    widgetBottom.style.flexDirection = 'column';
-    widgetBottom.style.overflow = 'hidden';
-  }
 }
 
 function openChallengesModal() {
@@ -1315,6 +1453,7 @@ function openChallengesModal() {
 
   // Outer wrapper: subnav at top, then tab content area (reference: Cyclopedia.js subnav)
   const wrapper = document.createElement('div');
+  wrapper.className = 'challenges-modal-content';
   Object.assign(wrapper.style, {
     display: 'flex',
     flexDirection: 'column',
@@ -1837,6 +1976,7 @@ function openChallengesModal() {
 
   // Solo panel: three-column layout (current challenge UI)
   const soloPanel = document.createElement('div');
+  soloPanel.className = 'challenges-solo-panel';
   Object.assign(soloPanel.style, {
     display: 'flex',
     flexDirection: 'row',
@@ -2185,6 +2325,7 @@ function openChallengesModal() {
 
   // Col1: Top = Maps, Bottom = Summary
   const leftCol = document.createElement('div');
+  leftCol.className = 'challenges-col-left';
   Object.assign(leftCol.style, {
     width: COL1_WIDTH + 'px',
     minWidth: COL1_WIDTH + 'px',
@@ -3030,6 +3171,7 @@ function openChallengesModal() {
 
   // Col3: Global top 10 + Personal top 10 (two boxes)
   const rightCol = document.createElement('div');
+  rightCol.className = 'challenges-col-right';
   Object.assign(rightCol.style, {
     width: COL3_WIDTH + 'px',
     minWidth: COL3_WIDTH + 'px',
@@ -3206,41 +3348,12 @@ function openChallengesModal() {
   updateChallengesStartButtonState();
 
   // Roll (map + creatures) / Start as modal footer buttons. Start: close modal then run challenge (sandbox + execute).
-  openModal(api, {
-    title: t('mods.challenges.title'),
-    width: MODAL_WIDTH,
-    height: MODAL_HEIGHT,
-    content: wrapper,
-    buttons: [
-      { text: t('mods.challenges.randomize'), primary: false, onClick: function(e, modalObj) {
-        if (challengesActiveTabIndex === 1 && typeof window !== 'undefined' && window.__challengesMultiplayerDispatch) {
-          window.__challengesMultiplayerDispatch();
-        } else {
-          rollMapAndCreaturesHandler(e, modalObj);
-        }
-      }, closeOnClick: false },
-      {
-        text: t('mods.challenges.start'),
-        primary: true,
-        onClick: function(e, modalObj) {
-          if (modalObj && typeof modalObj.close === 'function') modalObj.close();
-          startChallenge();
-        },
-        closeOnClick: false
-      },
-      { text: t('mods.challenges.close'), primary: false }
-    ]
-  });
-
-  // Force modal and inner content to use full size; style footer Randomize (blue) and Start (green) buttons
   var CHALLENGE_GREEN_BG = 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
   var CHALLENGE_BLUE_BG = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
   var CHALLENGE_RED_BG = 'https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png';
-  setTimeout(function() {
-    var dialog = getChallengesOpenDialog();
+
+  function initializeChallengesModalChrome(dialog) {
     if (!dialog) return;
-    dialog.setAttribute('data-challenges-dialog', '1');
-    applyChallengesModalShellStyles(dialog, MODAL_WIDTH, MODAL_HEIGHT);
     var footer = dialog.querySelector('.flex.justify-end.gap-2');
     if (footer) {
       var fb = footer.querySelectorAll('button');
@@ -3331,7 +3444,43 @@ function openChallengesModal() {
       };
     }
     updateChallengesStartButtonState();
-  }, 100);
+  }
+
+  const modalDimensions = getChallengesModalDimensions();
+  const modalRef = openModal(api, {
+    title: t('mods.challenges.title'),
+    width: modalDimensions.width,
+    height: modalDimensions.height,
+    content: wrapper,
+    buttons: [
+      { text: t('mods.challenges.randomize'), primary: false, onClick: function(e, modalObj) {
+        if (challengesActiveTabIndex === 1 && typeof window !== 'undefined' && window.__challengesMultiplayerDispatch) {
+          window.__challengesMultiplayerDispatch();
+        } else {
+          rollMapAndCreaturesHandler(e, modalObj);
+        }
+      }, closeOnClick: false },
+      {
+        text: t('mods.challenges.start'),
+        primary: true,
+        onClick: function(e, modalObj) {
+          clearChallengesModalLayoutCleanup();
+          if (modalObj && typeof modalObj.close === 'function') modalObj.close();
+          startChallenge();
+        },
+        closeOnClick: false
+      },
+      {
+        text: t('mods.challenges.close'),
+        primary: false,
+        onClick: function() {
+          clearChallengesModalLayoutCleanup();
+        }
+      }
+    ]
+  });
+
+  setupChallengesModalResponsiveLayout(modalRef, wrapper, initializeChallengesModalChrome);
 }
 
 // =======================
@@ -4808,6 +4957,7 @@ function observeInventory() {
 // =======================
 
 function cleanupChallenges() {
+  clearChallengesModalLayoutCleanup();
   if (observerDebounceTimeout) {
     clearTimeout(observerDebounceTimeout);
     observerDebounceTimeout = null;

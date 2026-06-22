@@ -2590,6 +2590,7 @@
     box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
     box.style.borderRadius = '6px';
     box.style.overflow = 'hidden';
+    box.style.boxSizing = 'border-box';
     
     const titleEl = document.createElement('h2');
     titleEl.className = 'widget-top widget-top-text pixel-font-16';
@@ -4000,6 +4001,189 @@
   // ============================================================================
   // 11. MODAL AND UI MANAGEMENT FUNCTIONS
   // ============================================================================
+
+  let activeBetterForgeModal = null;
+  let betterForgeModalLayoutCleanup = null;
+
+  const BETTER_FORGE_MODAL_CONFIG = {
+    width: 620,
+    height: 500,
+    leftWidth: 260,
+    rightWidth: 320,
+    columnGap: 8,
+    contentInset: 35,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 280
+  };
+
+  function getBetterForgeModalDimensions() {
+    const pad = BETTER_FORGE_MODAL_CONFIG.viewportPadding * 2;
+    return {
+      width: Math.max(
+        BETTER_FORGE_MODAL_CONFIG.minWidth,
+        Math.min(BETTER_FORGE_MODAL_CONFIG.width, window.innerWidth - pad)
+      ),
+      height: Math.max(
+        BETTER_FORGE_MODAL_CONFIG.minHeight,
+        Math.min(BETTER_FORGE_MODAL_CONFIG.height, window.innerHeight - pad)
+      )
+    };
+  }
+
+  function getBetterForgeColumnWidths(modalWidth) {
+    const { leftWidth, rightWidth, columnGap, contentInset, width } = BETTER_FORGE_MODAL_CONFIG;
+    const contentWidth = modalWidth - contentInset;
+    const totalDesktop = leftWidth + rightWidth;
+
+    if (modalWidth >= width) {
+      return {
+        contentWidth: width - contentInset,
+        leftWidth,
+        rightWidth
+      };
+    }
+
+    const available = contentWidth - columnGap;
+    const scale = available / totalDesktop;
+    const left = Math.max(120, Math.floor(leftWidth * scale));
+    const right = Math.max(140, available - left);
+    return { contentWidth, leftWidth: left, rightWidth: right };
+  }
+
+  function getBetterForgeDialog(modalRef) {
+    if (modalRef?.element) return modalRef.element;
+    if (modalRef instanceof HTMLElement) return modalRef;
+    return document.querySelector('div[role="dialog"][data-state="open"]');
+  }
+
+  function clearBetterForgeModalLayoutCleanup() {
+    if (betterForgeModalLayoutCleanup) {
+      betterForgeModalLayoutCleanup();
+      betterForgeModalLayoutCleanup = null;
+    }
+  }
+
+  function applyBetterForgeColumnStyles(column, width) {
+    if (!column) return;
+    Object.assign(column.style, {
+      width: `${width}px`,
+      minWidth: `${width}px`,
+      maxWidth: `${width}px`,
+      flex: `0 0 ${width}px`,
+      minHeight: '0',
+      height: '100%',
+      boxSizing: 'border-box'
+    });
+  }
+
+  function applyBetterForgeModalLayout(modalRef, contentRoot, dimensions) {
+    const dialog = getBetterForgeDialog(modalRef);
+    if (!dialog) return;
+
+    const { width, height } = dimensions;
+    const { contentWidth, leftWidth, rightWidth } = getBetterForgeColumnWidths(width);
+
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
+    dialog.classList.remove('max-w-[300px]');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+      rootWrapper.style.height = '100%';
+      rootWrapper.style.display = 'flex';
+      rootWrapper.style.flexDirection = 'column';
+      rootWrapper.style.flex = '1 1 0';
+      rootWrapper.style.minHeight = '0';
+    }
+
+    const contentContainer = dialog.querySelector('.widget-bottom');
+    if (contentContainer) {
+      Object.assign(contentContainer.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        overflowY: 'hidden',
+        overflowX: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      });
+    }
+
+    if (contentRoot) {
+      Object.assign(contentRoot.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        height: '100%',
+        maxHeight: 'none',
+        width: '100%',
+        minWidth: '0',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'row',
+        gap: `${BETTER_FORGE_MODAL_CONFIG.columnGap}px`
+      });
+
+      applyBetterForgeColumnStyles(contentRoot.querySelector('.better-forge-modal-left'), leftWidth);
+      applyBetterForgeColumnStyles(contentRoot.querySelector('.better-forge-modal-right'), rightWidth);
+
+      contentRoot.querySelectorAll('.better-forge-modal-left .column-content-wrapper, .better-forge-modal-right .column-content-wrapper').forEach((wrapper) => {
+        Object.assign(wrapper.style, {
+          alignItems: 'stretch',
+          justifyContent: 'flex-start',
+          width: '100%',
+          boxSizing: 'border-box'
+        });
+      });
+    }
+  }
+
+  function setupBetterForgeModalResponsiveLayout(modalRef, contentRoot) {
+    clearBetterForgeModalLayoutCleanup();
+    const apply = () => applyBetterForgeModalLayout(modalRef, contentRoot, getBetterForgeModalDimensions());
+    apply();
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    betterForgeModalLayoutCleanup = () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }
+
+  function handleBetterForgeModalClose() {
+    clearBetterForgeModalLayoutCleanup();
+    activeBetterForgeModal = null;
+
+    if (forgeState.isForgeConfirmationMode) {
+      console.log('[Better Forge] 🔄 Forge confirmation mode reset due to closing modal');
+    }
+    resetForgeConfirmationModeIfActive();
+
+    if (forgeState.isDisenchanting || forgeState.isDisenchantingInProgress || forgeState.isConfirmationMode) {
+      const disenchantBtn = getDisenchantButton();
+      if (disenchantBtn) {
+        stopDisenchanting(disenchantBtn);
+      } else {
+        forgeState.isDisenchanting = false;
+        forgeState.isDisenchantingInProgress = false;
+        forgeState.isConfirmationMode = false;
+        clearAllIntervals();
+        removeEscKeyHandler();
+      }
+    }
+
+    if (forgeState.isForging || forgeState.isForgingInProgress) {
+      stopForging();
+    }
+
+    resetBetterForgeModalSessionState();
+    cleanupDustDisplay();
+  }
   
      function showBetterForgeModal() {
        try {
@@ -4030,6 +4214,7 @@
          resetBetterForgeModalSessionState();
          
          injectBetterForgeButtonStyles();
+         clearBetterForgeModalLayoutCleanup();
          
          for (let i = 0; i < 2; i++) {
            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
@@ -4038,81 +4223,52 @@
          setTimeout(() => {
            try {
              const contentDiv = document.createElement('div');
+             contentDiv.className = 'better-forge-modal-root';
              contentDiv.style.width = '100%';
              contentDiv.style.height = '100%';
-             contentDiv.style.minWidth = '600px';
-             contentDiv.style.maxWidth = '600px';
-             contentDiv.style.minHeight = '400px';
-             contentDiv.style.maxHeight = '400px';
              contentDiv.style.boxSizing = 'border-box';
              contentDiv.style.overflow = 'hidden';
              contentDiv.style.display = 'flex';
              contentDiv.style.flexDirection = 'row';
              contentDiv.style.gap = '8px';
              contentDiv.style.flex = '1 1 0';
+             contentDiv.style.minHeight = '0';
+             contentDiv.style.minWidth = '0';
              
              const arsenalBox = createBox({
                title: 'Arsenal',
                content: getArsenalContent()
              });
-             arsenalBox.style.width = '250px';
-             arsenalBox.style.minWidth = '250px';
-             arsenalBox.style.maxWidth = '250px';
-             arsenalBox.style.height = '100%';
-             arsenalBox.style.flex = '0 0 250px';
+             arsenalBox.classList.add('better-forge-modal-left');
              
              const forgeBox = createBox({
                title: 'Forge',
                content: getForgeContent()
              });
-             forgeBox.style.width = '310px';
-             forgeBox.style.minWidth = '310px';
-             forgeBox.style.maxWidth = '310px';
-             forgeBox.style.height = '100%';
-             forgeBox.style.flex = '0 0 310px';
+             forgeBox.classList.add('better-forge-modal-right');
              
              contentDiv.appendChild(arsenalBox);
              contentDiv.appendChild(forgeBox);
              
-             const modalInstance = api.ui.components.createModal({
+             const modalDimensions = getBetterForgeModalDimensions();
+             activeBetterForgeModal = api.ui.components.createModal({
                title: 'Better Forge',
-               width: 600,
-               height: 400,
+               width: modalDimensions.width,
+               height: modalDimensions.height,
                content: contentDiv,
-               buttons: [{ text: 'Close', primary: true }]
+               buttons: [{ text: 'Close', primary: true }],
+               onClose: handleBetterForgeModalClose
              });
-             
-             if (modalInstance && typeof modalInstance.onClose === 'function') {
-               modalInstance.onClose(() => {
-                 // Reset forge confirmation mode when closing modal
-                 if (forgeState.isForgeConfirmationMode) {
-                   console.log('[Better Forge] 🔄 Forge confirmation mode reset due to closing modal');
-                 }
-                 resetForgeConfirmationModeIfActive();
-                 
-                 if (forgeState.isDisenchanting || forgeState.isDisenchantingInProgress || forgeState.isConfirmationMode) {
-                   const disenchantBtn = getDisenchantButton();
-                   if (disenchantBtn) {
-                     stopDisenchanting(disenchantBtn);
-                   } else {
-                     forgeState.isDisenchanting = false;
-                     forgeState.isDisenchantingInProgress = false;
-                     forgeState.isConfirmationMode = false;
-                     clearAllIntervals();
-                     removeEscKeyHandler();
-                   }
-                 }
-                 
-                 // Stop forging if in progress
-                 if (forgeState.isForging || forgeState.isForgingInProgress) {
-                   stopForging();
-                 }
-                 
-                 resetBetterForgeModalSessionState();
-                 
-                 cleanupDustDisplay();
-               });
+
+             const originalClose = activeBetterForgeModal?.close?.bind(activeBetterForgeModal);
+             if (originalClose) {
+               activeBetterForgeModal.close = () => {
+                 clearBetterForgeModalLayoutCleanup();
+                 originalClose();
+               };
              }
+
+             setupBetterForgeModalResponsiveLayout(activeBetterForgeModal, contentDiv);
              
             setTimeout(() => {
               injectDustDisplayIntoModal();
@@ -4156,42 +4312,6 @@
                 modalCleanupObserver.observe(dialog.parentNode, { childList: true });
               }
             }, 150);
-            
-            setTimeout(() => {
-               try {
-                 const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-                 if (dialog) {
-                   dialog.style.width = '600px';
-                   dialog.style.minWidth = '600px';
-                   dialog.style.maxWidth = '600px';
-                   dialog.style.height = '400px';
-                   dialog.style.minHeight = '400px';
-                   dialog.style.maxHeight = '400px';
-                   dialog.classList.remove('max-w-[300px]');
-                   
-                   let contentWrapper = null;
-                   const children = Array.from(dialog.children);
-                   for (const child of children) {
-                     if (child !== dialog.firstChild && child.tagName === 'DIV') {
-                       contentWrapper = child;
-                       break;
-                     }
-                   }
-                   if (!contentWrapper) {
-                     contentWrapper = dialog.querySelector(':scope > div');
-                   }
-                   if (contentWrapper) {
-                     contentWrapper.style.height = '100%';
-                     contentWrapper.style.display = 'flex';
-                     contentWrapper.style.flexDirection = 'column';
-                     contentWrapper.style.flex = '1 1 0';
-                   }
-                   
-                 }
-               } catch (dialogError) {
-                 handleError(dialogError, 'dialog styling', false);
-               }
-             }, 50);
            } catch (contentError) {
              handleError(contentError, 'modal content creation', true);
            }
@@ -4204,7 +4324,7 @@
                function getArsenalContent() {
                  try {
                    const div = document.createElement('div');
-                   div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 0; height: 100%;';
+                   div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 0; height: 100%; width: 100%; box-sizing: border-box;';
                    
                    const availableEquipment = getUserOwnedEquipment();
                    
@@ -4659,10 +4779,10 @@
    function getForgeContent() {
      try {
        const div = document.createElement('div');
-       div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 12px; height: 100%;';
+       div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 12px; height: 100%; width: 100%; box-sizing: border-box;';
        
        const tabContainer = document.createElement('div');
-       tabContainer.style.cssText = 'display: flex; gap: 0; margin: 0; padding: 0; height: auto;';
+       tabContainer.style.cssText = 'display: flex; gap: 0; margin: 0; padding: 0; height: auto; width: 100%; box-sizing: border-box;';
        
        const disenchantBtn = document.createElement('button');
        disenchantBtn.className = 'frame-pressed-1 surface-regular px-4 py-1 flex-1 tab-active';
@@ -4675,7 +4795,7 @@
        upgradeBtn.style.cssText = 'margin: 0; padding: 2px 8px; text-align: center; color: rgb(255, 255, 255); cursor: pointer; height: auto; font-size: 14px; font-weight: bold;';
        
        const contentArea = document.createElement('div');
-       contentArea.style.cssText = 'flex: 1; display: flex; flex-direction: column; max-width: 280px;';
+       contentArea.style.cssText = 'flex: 1 1 0; min-height: 0; min-width: 0; width: 100%; max-width: 100%; display: flex; flex-direction: column; box-sizing: border-box;';
        contentArea.id = 'forge-content-area';
        
        const disenchantContent = getDisenchantContent();
@@ -4764,17 +4884,17 @@
    function getDisenchantContent() {
      try {
        const div = document.createElement('div');
-       div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 12px; height: 100%;';
+       div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 12px; height: 100%; width: 100%; box-sizing: border-box;';
        
        const title = document.createElement('h3');
        title.style.cssText = 'margin: 0 0 10px 0; padding: 0; font-size: 16px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
        title.textContent = 'Disenchant Equipment';
        
        const columnContainer = document.createElement('div');
-       columnContainer.style.cssText = 'display: flex; flex-direction: column; flex: 1; min-height: 0;';
+       columnContainer.style.cssText = 'display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; min-width: 0; box-sizing: border-box;';
        
        const equipmentBox = document.createElement('div');
-       equipmentBox.style.cssText = 'display: flex; flex-direction: column; background: rgba(40,40,40,0.96); border: 2px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px; min-width: 260px; width: 260px; height: 140px; max-height: 140px; min-height: 0;';
+       equipmentBox.style.cssText = 'display: flex; flex-direction: column; background: rgba(40,40,40,0.96); border: 2px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px; width: 100%; max-width: 100%; min-width: 0; height: 140px; max-height: 140px; min-height: 0; box-sizing: border-box;';
        
        const colTitle = document.createElement('h4');
        colTitle.style.cssText = 'margin: 0 0 4px 0; padding: 0; font-size: 14px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
@@ -4791,7 +4911,7 @@
        }
        
        const disenchantControls = document.createElement('div');
-       disenchantControls.style.cssText = 'display: flex; align-items: center; gap: 8px; height: 40px; min-width: 260px; width: 260px;';
+       disenchantControls.style.cssText = 'display: flex; align-items: center; gap: 8px; height: 40px; width: 100%; min-width: 0; box-sizing: border-box;';
        
        const disenchantBtn = document.createElement('button');
       disenchantBtn.id = 'better-forge-disenchant-action-btn';
@@ -4846,7 +4966,7 @@
        statusSeparator.setAttribute('role', 'none');
        
        const statusRow = document.createElement('div');
-       statusRow.style.cssText = 'display: flex; align-items: center; justify-content: center; height: 20px; min-width: 260px; width: 260px;';
+       statusRow.style.cssText = 'display: flex; align-items: center; justify-content: center; height: 20px; width: 100%; min-width: 0; box-sizing: border-box;';
        
        const statusText = document.createElement('div');
        statusText.style.cssText = 'color: #e6d7b0; font-size: 12px; font-weight: bold; text-align: center;';
@@ -4902,22 +5022,22 @@
    function getAutoUpgradeContent() {
     try {
       const div = document.createElement('div');
-      div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 12px; height: 100%;';
+      div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 12px; height: 100%; width: 100%; box-sizing: border-box;';
       
       const title = document.createElement('h3');
       title.style.cssText = 'margin: 0 0 10px 0; padding: 0; font-size: 16px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
       title.textContent = 'Auto-upgrade Equipment';
       
       const columnContainer = document.createElement('div');
-      columnContainer.style.cssText = 'display: flex; flex-direction: column; flex: 1; min-height: 0;';
+      columnContainer.style.cssText = 'display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; min-width: 0; box-sizing: border-box;';
       
              // Three column boxes container
        const threeColumnContainer = document.createElement('div');
-       threeColumnContainer.style.cssText = 'display: flex; gap: 8px; height: 140px; justify-content: center; align-items: center;';
+       threeColumnContainer.style.cssText = 'display: flex; gap: 8px; height: 140px; width: 100%; min-width: 0; align-items: stretch; box-sizing: border-box;';
       
       // First box - Equipment list
       const equipmentBox = document.createElement('div');
-      equipmentBox.style.cssText = 'display: flex; flex-direction: column; background: rgba(40,40,40,0.96); border: 2px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px; width: 80px; min-width: 80px; max-width: 80px; height: 140px; max-height: 140px; min-height: 0;';
+      equipmentBox.style.cssText = 'display: flex; flex-direction: column; background: rgba(40,40,40,0.96); border: 2px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px; flex: 1 1 0; min-width: 0; height: 140px; max-height: 140px; min-height: 0; box-sizing: border-box;';
       
       const equipmentTitle = document.createElement('h4');
       equipmentTitle.style.cssText = 'margin: 0 0 4px 0; padding: 0; font-size: 14px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
@@ -4978,7 +5098,7 @@
       
              // Second box - Tiers and Stats (split into two rows)
        const tiersBox = document.createElement('div');
-       tiersBox.style.cssText = 'display: flex; flex-direction: column; background: rgba(40,40,40,0.96); border: 2px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px; width: 100px; min-width: 100px; max-width: 100px; height: 140px; max-height: 140px; min-height: 0;';
+       tiersBox.style.cssText = 'display: flex; flex-direction: column; background: rgba(40,40,40,0.96); border: 2px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px; flex: 1.2 1 0; min-width: 0; height: 140px; max-height: 140px; min-height: 0; box-sizing: border-box;';
        
        // Tiers row
        const tiersRow = document.createElement('div');
@@ -5062,7 +5182,7 @@
       
       // Third box - Details
       const detailsBox = document.createElement('div');
-      detailsBox.style.cssText = 'display: flex; flex-direction: column; background: rgba(40,40,40,0.96); border: 2px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px; width: 80px; min-width: 80px; max-width: 80px; height: 140px; max-height: 140px; min-height: 0;';
+      detailsBox.style.cssText = 'display: flex; flex-direction: column; background: rgba(40,40,40,0.96); border: 2px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 4px; flex: 1 1 0; min-width: 0; height: 140px; max-height: 140px; min-height: 0; box-sizing: border-box;';
       
       const detailsTitle = document.createElement('h4');
       detailsTitle.style.cssText = 'margin: 0 0 4px 0; padding: 0; font-size: 14px; font-weight: bold; color: rgb(255, 255, 255); text-align: center;';
@@ -5099,7 +5219,7 @@
       
       // Forge button and progress bar
       const forgeControls = document.createElement('div');
-      forgeControls.style.cssText = 'display: flex; align-items: center; gap: 8px; height: 40px;';
+      forgeControls.style.cssText = 'display: flex; align-items: center; gap: 8px; height: 40px; width: 100%; min-width: 0; box-sizing: border-box;';
       
       const forgeBtn = document.createElement('button');
       forgeBtn.id = 'auto-upgrade-forge-btn';
@@ -5157,7 +5277,7 @@
       
       // Status message
       const statusRow = document.createElement('div');
-      statusRow.style.cssText = 'display: flex; align-items: center; justify-content: center; height: 20px;';
+      statusRow.style.cssText = 'display: flex; align-items: center; justify-content: center; height: 20px; width: 100%; min-width: 0; box-sizing: border-box;';
       
       const statusText = document.createElement('div');
       statusText.style.cssText = 'color: #e6d7b0; font-size: 12px; font-weight: bold; text-align: center;';
@@ -5932,6 +6052,9 @@
   function cleanup() {
     try {
       console.log('[Better Forge] 🧹 Starting cleanup...');
+
+      clearBetterForgeModalLayoutCleanup();
+      activeBetterForgeModal = null;
       
       // Reset retry counters
       initRetryCount = 0;

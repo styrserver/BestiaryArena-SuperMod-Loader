@@ -17,6 +17,147 @@ const config = Object.assign({}, defaultConfig, context.config);
 const MOD_ID = 'team-copier';
 const BUTTON_ID = `${MOD_ID}-button`;
 
+const TEAM_COPIER_MODAL_CONFIG = {
+  width: 350,
+  height: 500,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 240
+};
+
+let teamCopierModalLayoutCleanup = null;
+let activeTeamCopierModal = null;
+
+function getTeamCopierModalDimensions() {
+  const pad = TEAM_COPIER_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      TEAM_COPIER_MODAL_CONFIG.minWidth,
+      Math.min(TEAM_COPIER_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      TEAM_COPIER_MODAL_CONFIG.minHeight,
+      Math.min(TEAM_COPIER_MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
+
+function getTeamCopierDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearTeamCopierModalLayoutCleanup() {
+  if (teamCopierModalLayoutCleanup) {
+    teamCopierModalLayoutCleanup();
+    teamCopierModalLayoutCleanup = null;
+  }
+}
+
+function applyTeamCopierModalLayout(modalRef, contentRoot, scrollContainer) {
+  const dialog = getTeamCopierDialog(modalRef);
+  if (!dialog) return;
+
+  const { width, height } = getTeamCopierModalDimensions();
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]', 'w-full');
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper) {
+    Object.assign(rootWrapper.style, {
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      minHeight: '0'
+    });
+  }
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    Object.assign(widgetBottom.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflow: 'hidden'
+    });
+  }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      minWidth: '0',
+      height: '100%',
+      width: '100%',
+      maxWidth: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      boxSizing: 'border-box',
+      overflow: 'hidden'
+    });
+  }
+
+  if (scrollContainer?.element) {
+    Object.assign(scrollContainer.element.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      height: 'auto',
+      width: '100%',
+      position: 'relative',
+      overflow: 'hidden'
+    });
+    const viewport = scrollContainer.scrollView ||
+      scrollContainer.element.querySelector('[data-radix-scroll-area-viewport]');
+    if (viewport) {
+      viewport.style.height = '100%';
+    }
+  }
+}
+
+function setupTeamCopierModalResponsiveLayout(modalRef, contentRoot, scrollContainer) {
+  clearTeamCopierModalLayoutCleanup();
+  activeTeamCopierModal = modalRef;
+
+  const apply = () => applyTeamCopierModalLayout(modalRef, contentRoot, scrollContainer);
+  requestAnimationFrame(() => apply());
+
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+
+  let modalCloseObserver = null;
+  const dialog = getTeamCopierDialog(modalRef);
+  if (dialog) {
+    modalCloseObserver = new MutationObserver(() => {
+      if (!document.contains(dialog) || dialog.getAttribute('data-state') === 'closed') {
+        clearTeamCopierModalLayoutCleanup();
+      }
+    });
+    modalCloseObserver.observe(dialog, { attributes: true, attributeFilter: ['data-state'] });
+    modalCloseObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  teamCopierModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+    if (modalCloseObserver) {
+      modalCloseObserver.disconnect();
+      modalCloseObserver = null;
+    }
+    if (activeTeamCopierModal === modalRef) {
+      activeTeamCopierModal = null;
+    }
+  };
+}
+
 // Translations
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
@@ -480,6 +621,8 @@ function showNotification(message, type = 'info', duration = 3000) {
 
 // Create the main Team Copier modal with scrollable vertical layout
 function showTeamCopierModal() {
+  clearTeamCopierModalLayoutCleanup();
+
   // Get board data once for all operations in the modal
   const boardData = serializeBoard();
   
@@ -489,11 +632,18 @@ function showTeamCopierModal() {
   // Create modal container
   const content = document.createElement('div');
   
-  // Create a scrollable container using the game's native component 
-  // instead of CSS overflow for consistent styling
+  // Scrollable content fills remaining modal height on all viewports
   const scrollContainer = api.ui.components.createScrollContainer({
-    height: 400,
+    height: '100%',
     padding: true
+  });
+  Object.assign(scrollContainer.element.style, {
+    flex: '1 1 0',
+    minHeight: '0',
+    height: 'auto',
+    width: '100%',
+    position: 'relative',
+    overflow: 'hidden'
   });
   
   // Create inner content to add to the scroll container
@@ -725,19 +875,28 @@ function showTeamCopierModal() {
   
   // Add scroll container to main content
   content.appendChild(scrollContainer.element);
-  
+
+  const modalDims = getTeamCopierModalDimensions();
+
   // Create and show the modal
-  return api.ui.components.createModal({
+  const modal = api.ui.components.createModal({
     title: t('mods.teamCopier.modalTitle'),
     content: content,
     buttons: [
       {
         text: t('mods.teamCopier.closeButton'),
-        primary: true
+        primary: true,
+        onClick: () => {
+          clearTeamCopierModalLayoutCleanup();
+        }
       }
     ],
-    width: 350 // Set a fixed width to avoid being too narrow
+    width: modalDims.width,
+    height: modalDims.height
   });
+
+  setupTeamCopierModalResponsiveLayout(modal, content, scrollContainer);
+  return modal;
   
   // Helper to create a section with title
   function createSection(title) {
@@ -860,7 +1019,8 @@ context.exports = {
   copyTeamSetup: copyTeamSetup,
   showModal: showTeamCopierModal,
   hideButton: hideButton,
-  showButton: showButton
+  showButton: showButton,
+  cleanup: clearTeamCopierModalLayoutCleanup
 };
 
 // Expose to window for inter-mod communication

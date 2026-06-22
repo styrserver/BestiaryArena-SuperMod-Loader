@@ -135,8 +135,11 @@ let runTrackerAPI = null;
 const LAYOUT_CONSTANTS = {
   COLUMN_WIDTH: '247px',
   LEFT_COLUMN_WIDTH: '200px',
-  MODAL_WIDTH: 900,
-  MODAL_HEIGHT: 600,
+  MODAL_WIDTH: 1000,
+  MODAL_HEIGHT: 660,
+  MODAL_VIEWPORT_PADDING: 16,
+  MODAL_MIN_WIDTH: 280,
+  MODAL_MIN_HEIGHT: 360,
   CHROME_HEIGHT: 70
 };
 
@@ -6160,8 +6163,87 @@ function stopContextMenuObserver() {
 // =======================
 
 let activeCyclopediaModal = null;
+let cyclopediaModalLayoutCleanup = null;
 let cyclopediaModalInProgress = false;
 let lastModalCall = 0;
+
+function getCyclopediaModalDimensions() {
+  const pad = LAYOUT_CONSTANTS.MODAL_VIEWPORT_PADDING * 2;
+  return {
+    width: Math.max(
+      LAYOUT_CONSTANTS.MODAL_MIN_WIDTH,
+      Math.min(LAYOUT_CONSTANTS.MODAL_WIDTH, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      LAYOUT_CONSTANTS.MODAL_MIN_HEIGHT,
+      Math.min(LAYOUT_CONSTANTS.MODAL_HEIGHT, window.innerHeight - pad)
+    )
+  };
+}
+
+function applyCyclopediaModalLayout(dialog, dimensions) {
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+
+  const innerWrapper = dialog.querySelector(':scope > div');
+  if (innerWrapper) {
+    innerWrapper.style.height = '100%';
+    innerWrapper.style.display = 'flex';
+    innerWrapper.style.flexDirection = 'column';
+    innerWrapper.style.minHeight = '0';
+  }
+
+  const contentElem = dialog.querySelector('.widget-bottom');
+  if (contentElem) {
+    contentElem.style.flex = '1 1 auto';
+    contentElem.style.minHeight = '0';
+    contentElem.style.overflowY = 'hidden';
+    contentElem.style.overflowX = 'hidden';
+    contentElem.style.display = 'flex';
+    contentElem.style.flexDirection = 'column';
+  }
+
+  const modalRoot = dialog.querySelector('.cyclopedia-modal-root');
+  if (modalRoot) {
+    modalRoot.style.flex = '1 1 auto';
+    modalRoot.style.minHeight = '0';
+    modalRoot.style.height = '100%';
+    modalRoot.style.overflow = 'hidden';
+    modalRoot.style.display = 'flex';
+    modalRoot.style.flexDirection = 'column';
+  }
+
+  const mainPanel = dialog.querySelector('.cyclopedia-main-panel');
+  if (mainPanel) {
+    mainPanel.style.flex = '1 1 0';
+    mainPanel.style.minHeight = '0';
+    mainPanel.style.height = 'auto';
+    mainPanel.style.maxHeight = 'none';
+    mainPanel.style.overflow = 'hidden';
+  }
+}
+
+function setupCyclopediaModalResponsiveLayout(dialog) {
+  const apply = () => applyCyclopediaModalLayout(dialog, getCyclopediaModalDimensions());
+  apply();
+  const resizeKey = EventHandlerManager.addHandler(window, 'resize', apply);
+  return () => EventHandlerManager.removeHandler(resizeKey);
+}
+
+function clearCyclopediaModalLayoutCleanup() {
+  if (cyclopediaModalLayoutCleanup) {
+    cyclopediaModalLayoutCleanup();
+    cyclopediaModalLayoutCleanup = null;
+  }
+}
 /** Set when opening on Home tab; cleared after start-page search input is focused or modal closes. */
 let cyclopediaPendingHomeSearchFocus = false;
 
@@ -6479,10 +6561,15 @@ function openCyclopediaModal(options) {
     buildCyclopediaMonsterNameMap();
 
     const content = document.createElement('div');
+    content.className = 'cyclopedia-modal-root';
     content.style.display = 'flex';
     content.style.flexDirection = 'column';
     content.style.height = '100%';
     content.style.width = '100%';
+    content.style.minHeight = '0';
+    content.style.flex = '1 1 auto';
+    content.style.boxSizing = 'border-box';
+    content.style.overflow = 'hidden';
 
     let activeTab = 0;
     let selectedCreature = null;
@@ -6530,6 +6617,8 @@ function openCyclopediaModal(options) {
           page.style.width = '100%';
           page.style.height = '100%';
           page.style.minWidth = '0';
+          page.style.minHeight = '0';
+          page.style.flex = '1 1 auto';
           page.style.boxSizing = 'border-box';
           try {
             mainContent.appendChild(page);
@@ -16274,6 +16363,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
     const tabButtons = [];
     const tabNav = document.createElement('nav');
     tabNav.className = 'cyclopedia-subnav';
+    tabNav.style.flexShrink = '0';
 
     tabNames.forEach((tab, i) => {
       const btn = document.createElement('button');
@@ -16317,14 +16407,16 @@ async function fetchWithDeduplication(url, key, priority = 0) {
     separator.className = 'separator my-2.5';
     separator.setAttribute('role', 'none');
     separator.style.margin = '10px 0';
+    separator.style.flexShrink = '0';
     content.appendChild(separator);
 
     const flexRow = document.createElement('div');
+    flexRow.className = 'cyclopedia-main-panel';
     flexRow.style.display = 'flex';
     flexRow.style.flexDirection = 'row';
-    flexRow.style.height = '500px';
-    flexRow.style.minHeight = '500px';
-    flexRow.style.maxHeight = '500px';
+    flexRow.style.flex = '1 1 0';
+    flexRow.style.minHeight = '0';
+    flexRow.style.height = 'auto';
     flexRow.style.boxSizing = 'border-box';
     flexRow.style.border = '6px solid transparent';
     flexRow.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
@@ -16343,6 +16435,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
     mainContent.style.width = '100%';
     mainContent.style.minWidth = '0';
     mainContent.style.overflow = 'hidden';
+    mainContent.style.boxSizing = 'border-box';
 
     defineSetActiveTab(tabButtons, mainContent, tabPages);
 
@@ -16469,10 +16562,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
     try {
   
       
+      clearCyclopediaModalLayoutCleanup();
+      const modalDimensions = getCyclopediaModalDimensions();
       activeCyclopediaModal = api.ui.components.createModal({
         title: 'Cyclopedia',
-        width: LAYOUT_CONSTANTS.MODAL_WIDTH,
-        height: LAYOUT_CONSTANTS.MODAL_HEIGHT,
+        width: modalDimensions.width,
+        height: modalDimensions.height,
         content: content,
         buttons: [],
         onClose: () => {
@@ -16482,12 +16577,22 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           cleanupCyclopediaModal();
         }
       });
+
+      const originalClose = activeCyclopediaModal.close?.bind(activeCyclopediaModal);
+      if (originalClose) {
+        activeCyclopediaModal.close = () => {
+          clearCyclopediaModalLayoutCleanup();
+          originalClose();
+        };
+      }
       
       // Fallback cleanup for when onClose doesn't work
       
       const modalCleanupTimeout = setTimeout(() => {
-        const modalElement = DOMCache.get('div[role="dialog"][data-state="open"]');
+        const modalElement = activeCyclopediaModal?.element
+          || DOMCache.get('div[role="dialog"][data-state="open"]');
         if (modalElement) {
+          cyclopediaModalLayoutCleanup = setupCyclopediaModalResponsiveLayout(modalElement);
   
           
           // Watch for modal removal
@@ -20287,6 +20392,7 @@ function cleanupAbilityTooltips() {
 
 function cleanupCyclopediaModal() {
   cyclopediaPendingHomeSearchFocus = false;
+  clearCyclopediaModalLayoutCleanup();
   // Note: This function is safe to call multiple times (idempotent)
   // Only clean up modal-specific resources, preserve global context menu observer
   

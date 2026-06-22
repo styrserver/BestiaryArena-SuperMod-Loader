@@ -49,7 +49,10 @@
     // UI Constants
     const UI_CONSTANTS = {
         MODAL_WIDTH: 530,
-        MODAL_HEIGHT: 390,
+        MODAL_HEIGHT: 500,
+        MODAL_VIEWPORT_PADDING: 16,
+        MODAL_MIN_WIDTH: 280,
+        MODAL_MIN_HEIGHT: 280,
         MODAL_CONTENT_HEIGHT: 310,
         LEFT_COLUMN_WIDTH: 140,
         RIGHT_COLUMN_WIDTH: 320,
@@ -154,6 +157,7 @@
     let originalFetch = null;
     let messageListener = null;
     let menuColorObserver = null; // MutationObserver for menu color updates
+    let autosellerModalLayoutCleanup = null;
     let checkboxListeners = []; // Track checkbox event listeners for cleanup
     let dragonPlantDebounceTimer = null; // Debounce timer for dragon plant observer
     let openContextMenu = null; // Track currently open context menu { overlay, menu, closeMenu }
@@ -6894,26 +6898,174 @@
     // =======================
     // 8. Modal & Settings Management
     // =======================
+
+    function getAutosellerModalDimensions() {
+        const pad = UI_CONSTANTS.MODAL_VIEWPORT_PADDING * 2;
+        return {
+            width: Math.max(
+                UI_CONSTANTS.MODAL_MIN_WIDTH,
+                Math.min(UI_CONSTANTS.MODAL_WIDTH, window.innerWidth - pad)
+            ),
+            height: Math.max(
+                UI_CONSTANTS.MODAL_MIN_HEIGHT,
+                Math.min(UI_CONSTANTS.MODAL_HEIGHT, window.innerHeight - pad)
+            )
+        };
+    }
+
+    function getAutosellerColumnWidths(modalWidth) {
+        const contentWidth = modalWidth - 30;
+        if (modalWidth >= UI_CONSTANTS.MODAL_WIDTH) {
+            return {
+                contentWidth: UI_CONSTANTS.MODAL_WIDTH - 30,
+                leftWidth: UI_CONSTANTS.LEFT_COLUMN_WIDTH,
+                rightWidth: UI_CONSTANTS.RIGHT_COLUMN_WIDTH
+            };
+        }
+        const leftWidth = Math.min(
+            UI_CONSTANTS.LEFT_COLUMN_WIDTH,
+            Math.max(90, Math.floor(contentWidth * 0.32))
+        );
+        const rightWidth = Math.max(120, contentWidth - leftWidth - 18);
+        return { contentWidth, leftWidth, rightWidth };
+    }
+
+    function getAutosellerDialog(modalRef) {
+        if (modalRef?.element) return modalRef.element;
+        if (modalRef instanceof HTMLElement) return modalRef;
+        return document.querySelector('div[role="dialog"][data-state="open"]');
+    }
+
+    function clearAutosellerModalLayoutCleanup() {
+        if (autosellerModalLayoutCleanup) {
+            autosellerModalLayoutCleanup();
+            autosellerModalLayoutCleanup = null;
+        }
+    }
+
+    function applyAutosellerModalLayout(modalRef, elements, dimensions) {
+        const dialog = getAutosellerDialog(modalRef);
+        if (!dialog) return;
+
+        const { width, height } = dimensions;
+        const { contentWidth, leftWidth, rightWidth } = getAutosellerColumnWidths(width);
+
+        dialog.style.width = `${width}px`;
+        dialog.style.minWidth = '0';
+        dialog.style.maxWidth = `${width}px`;
+        dialog.style.height = `${height}px`;
+        dialog.style.minHeight = '0';
+        dialog.style.maxHeight = `${height}px`;
+        dialog.style.boxSizing = 'border-box';
+        dialog.classList.remove('max-w-[300px]');
+
+        let contentWrapper = null;
+        const children = Array.from(dialog.children);
+        for (const child of children) {
+            if (child !== dialog.firstChild && child.tagName === 'DIV') {
+                contentWrapper = child;
+                break;
+            }
+        }
+        if (!contentWrapper) {
+            contentWrapper = dialog.querySelector(':scope > div');
+        }
+        if (contentWrapper) {
+            contentWrapper.style.height = '100%';
+            contentWrapper.style.display = 'flex';
+            contentWrapper.style.flexDirection = 'column';
+            contentWrapper.style.flex = '1 1 0';
+            contentWrapper.style.minHeight = '0';
+        }
+
+        const contentContainer = dialog.querySelector('.widget-bottom');
+        if (contentContainer) {
+            Object.assign(contentContainer.style, {
+                flex: '1 1 auto',
+                minHeight: '0',
+                overflowY: 'hidden',
+                overflowX: 'hidden',
+                display: 'flex',
+                flexDirection: 'column'
+            });
+        }
+
+        if (elements?.content) {
+            Object.assign(elements.content.style, {
+                flex: '1 1 auto',
+                minHeight: '0',
+                height: '100%',
+                maxHeight: 'none',
+                minWidth: `${contentWidth}px`,
+                maxWidth: `${contentWidth}px`
+            });
+        }
+
+        if (elements?.mainContent) {
+            Object.assign(elements.mainContent.style, {
+                flex: '1 1 0',
+                minHeight: '0',
+                height: 'auto',
+                maxHeight: 'none',
+                overflow: 'hidden'
+            });
+        }
+
+        if (elements?.leftColumn) {
+            Object.assign(elements.leftColumn.style, {
+                width: `${leftWidth}px`,
+                minWidth: `${leftWidth}px`,
+                maxWidth: `${leftWidth}px`,
+                flex: `0 0 ${leftWidth}px`
+            });
+        }
+
+        if (elements?.rightColumn) {
+            Object.assign(elements.rightColumn.style, {
+                width: `${rightWidth}px`,
+                minWidth: '0',
+                maxWidth: `${rightWidth}px`,
+                flex: `1 1 ${rightWidth}px`
+            });
+        }
+    }
+
+    function setupAutosellerModalResponsiveLayout(modalRef, elements) {
+        clearAutosellerModalLayoutCleanup();
+        const apply = () => applyAutosellerModalLayout(modalRef, elements, getAutosellerModalDimensions());
+        apply();
+        const onResize = () => apply();
+        window.addEventListener('resize', onResize);
+        autosellerModalLayoutCleanup = () => {
+            window.removeEventListener('resize', onResize);
+        };
+    }
     
     function openAutosellerModal() {
         if (typeof api !== 'undefined' && api && api.ui && api.ui.components && api.ui.components.createModal) {
+            clearAutosellerModalLayoutCleanup();
+
+            const modalDimensions = getAutosellerModalDimensions();
+            const columnWidths = getAutosellerColumnWidths(modalDimensions.width);
+
             // Create main content container with tabs (Mod Settings style)
             const content = document.createElement('div');
+            content.className = 'autoseller-modal-root';
             
             // Apply sizing and layout styles to content
-            const contentWidth = UI_CONSTANTS.MODAL_WIDTH - 30;
+            const contentWidth = columnWidths.contentWidth;
             Object.assign(content.style, {
                 width: '100%',
                 height: '100%',
                 minWidth: `${contentWidth}px`,
                 maxWidth: `${contentWidth}px`,
-                minHeight: `${UI_CONSTANTS.MODAL_HEIGHT}px`,
-                maxHeight: `${UI_CONSTANTS.MODAL_HEIGHT}px`,
+                minHeight: '0',
+                maxHeight: 'none',
                 boxSizing: 'border-box',
                 overflow: 'hidden',
                 display: 'flex',
                 flexDirection: 'column',
-                flex: '1 1 0',
+                flex: '1 1 auto',
                 border: '6px solid transparent',
                 borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
                 backgroundImage: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
@@ -6922,22 +7074,26 @@
             
             // Create main content container with 2-column layout
             const mainContent = document.createElement('div');
+            mainContent.className = 'autoseller-main-panel';
             Object.assign(mainContent.style, {
                 display: 'flex',
                 flexDirection: 'row',
                 gap: '8px',
-                height: '100%',
-                flex: '1 1 0'
+                height: 'auto',
+                flex: '1 1 0',
+                minHeight: '0',
+                maxHeight: 'none',
+                overflow: 'hidden'
             });
             
             // Left column - Menu items (tabs)
             const leftColumn = document.createElement('div');
             Object.assign(leftColumn.style, {
-                width: `${UI_CONSTANTS.LEFT_COLUMN_WIDTH}px`,
-                minWidth: `${UI_CONSTANTS.LEFT_COLUMN_WIDTH}px`,
-                maxWidth: `${UI_CONSTANTS.LEFT_COLUMN_WIDTH}px`,
+                width: `${columnWidths.leftWidth}px`,
+                minWidth: `${columnWidths.leftWidth}px`,
+                maxWidth: `${columnWidths.leftWidth}px`,
                 height: '100%',
-                flex: `0 0 ${UI_CONSTANTS.LEFT_COLUMN_WIDTH}px`,
+                flex: `0 0 ${columnWidths.leftWidth}px`,
                 display: 'flex',
                 flexDirection: 'column',
                 padding: '0px',
@@ -6951,10 +7107,10 @@
             // Right column - Content
             const rightColumn = document.createElement('div');
             Object.assign(rightColumn.style, {
-                width: `${UI_CONSTANTS.RIGHT_COLUMN_WIDTH}px`,
-                minWidth: `${UI_CONSTANTS.RIGHT_COLUMN_WIDTH}px`,
-                maxWidth: `${UI_CONSTANTS.RIGHT_COLUMN_WIDTH}px`,
-                flex: `0 0 ${UI_CONSTANTS.RIGHT_COLUMN_WIDTH}px`,
+                width: `${columnWidths.rightWidth}px`,
+                minWidth: '0',
+                maxWidth: `${columnWidths.rightWidth}px`,
+                flex: `1 1 ${columnWidths.rightWidth}px`,
                 height: '100%',
                 display: 'flex',
                 flexDirection: 'column',
@@ -7284,8 +7440,8 @@
             
             let modalInstance = api.ui.components.createModal({
                 title: t('mods.autoseller.modalTitle'),
-                width: UI_CONSTANTS.MODAL_WIDTH,
-                height: UI_CONSTANTS.MODAL_HEIGHT,
+                width: modalDimensions.width,
+                height: modalDimensions.height,
                 content: content,
                 buttons: [
                     {
@@ -7313,40 +7469,25 @@
             
             if (modalInstance && typeof modalInstance.onClose === 'function') {
                 modalInstance.onClose(() => {
-                    // Modal cleanup handled automatically
+                    clearAutosellerModalLayoutCleanup();
                 });
             }
+
+            const originalClose = modalInstance?.close?.bind(modalInstance);
+            if (originalClose) {
+                modalInstance.close = () => {
+                    clearAutosellerModalLayoutCleanup();
+                    originalClose();
+                };
+            }
+
+            const modalLayoutElements = { content, mainContent, leftColumn, rightColumn };
             
-            // Set static size for the modal dialog (non-resizable)
+            // Apply responsive layout and post-open setup
             setTimeout(() => {
-                const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+                const dialog = getAutosellerDialog(modalInstance);
                 if (dialog) {
-                    dialog.style.width = `${UI_CONSTANTS.MODAL_WIDTH}px`;
-                    dialog.style.minWidth = `${UI_CONSTANTS.MODAL_WIDTH}px`;
-                    dialog.style.maxWidth = `${UI_CONSTANTS.MODAL_WIDTH}px`;
-                    dialog.style.height = `${UI_CONSTANTS.MODAL_HEIGHT}px`;
-                    dialog.style.minHeight = `${UI_CONSTANTS.MODAL_HEIGHT}px`;
-                    dialog.style.maxHeight = `${UI_CONSTANTS.MODAL_HEIGHT}px`;
-                    dialog.classList.remove('max-w-[300px]');
-                    
-                    // Style the content wrapper for proper flexbox layout
-                    let contentWrapper = null;
-                    const children = Array.from(dialog.children);
-                    for (const child of children) {
-                        if (child !== dialog.firstChild && child.tagName === 'DIV') {
-                            contentWrapper = child;
-                            break;
-                        }
-                    }
-                    if (!contentWrapper) {
-                        contentWrapper = dialog.querySelector(':scope > div');
-                    }
-                    if (contentWrapper) {
-                        contentWrapper.style.height = '100%';
-                        contentWrapper.style.display = 'flex';
-                        contentWrapper.style.flexDirection = 'column';
-                        contentWrapper.style.flex = '1 1 0';
-                    }
+                    setupAutosellerModalResponsiveLayout(modalInstance, modalLayoutElements);
                     
                     // Apply localStorage to mod checkbox when modal opens (for autoplant mode)
                     const currentSettings = getSettings();
@@ -9468,6 +9609,7 @@
                     stopDragonPlantObserver();
                     
                     // 4.5. Clean up menu color observer
+                    clearAutosellerModalLayoutCleanup();
                     if (menuColorObserver) {
                         try {
                             menuColorObserver.disconnect();

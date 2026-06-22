@@ -2529,27 +2529,170 @@
 // =======================
 // MODULE 7: Modal UI & Rendering
 // =======================
+
+  let activeAutoscrollerModal = null;
+  let autoscrollerModalLayoutCleanup = null;
+
+  const AUTOSCROLLER_MODAL_CONFIG = {
+    width: 770,
+    height: 500,
+    col1Width: 190,
+    col2Width: 250,
+    col3Width: 280,
+    contentInset: 35,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 280
+  };
+
+  function getAutoscrollerModalDimensions() {
+    const pad = AUTOSCROLLER_MODAL_CONFIG.viewportPadding * 2;
+    return {
+      width: Math.max(
+        AUTOSCROLLER_MODAL_CONFIG.minWidth,
+        Math.min(AUTOSCROLLER_MODAL_CONFIG.width, window.innerWidth - pad)
+      ),
+      height: Math.max(
+        AUTOSCROLLER_MODAL_CONFIG.minHeight,
+        Math.min(AUTOSCROLLER_MODAL_CONFIG.height, window.innerHeight - pad)
+      )
+    };
+  }
+
+  function getAutoscrollerColumnWidths(modalWidth) {
+    const contentWidth = modalWidth - AUTOSCROLLER_MODAL_CONFIG.contentInset;
+    const { col1Width, col2Width, col3Width } = AUTOSCROLLER_MODAL_CONFIG;
+    const totalDesktop = col1Width + col2Width + col3Width;
+
+    if (modalWidth >= AUTOSCROLLER_MODAL_CONFIG.width) {
+      return {
+        contentWidth: AUTOSCROLLER_MODAL_CONFIG.width - AUTOSCROLLER_MODAL_CONFIG.contentInset,
+        col1Width,
+        col2Width,
+        col3Width
+      };
+    }
+
+    const scale = contentWidth / totalDesktop;
+    const col1 = Math.max(90, Math.floor(col1Width * scale));
+    const col2 = Math.max(100, Math.floor(col2Width * scale));
+    const col3 = Math.max(100, contentWidth - col1 - col2);
+    return { contentWidth, col1Width: col1, col2Width: col2, col3Width: col3 };
+  }
+
+  function getAutoscrollerDialog(modalRef) {
+    if (modalRef?.element) return modalRef.element;
+    if (modalRef instanceof HTMLElement) return modalRef;
+    return document.querySelector('div[role="dialog"][data-state="open"]');
+  }
+
+  function clearAutoscrollerModalLayoutCleanup() {
+    if (autoscrollerModalLayoutCleanup) {
+      autoscrollerModalLayoutCleanup();
+      autoscrollerModalLayoutCleanup = null;
+    }
+  }
+
+  function applyAutoscrollerColumnStyles(column, width) {
+    if (!column) return;
+    Object.assign(column.style, {
+      width: `${width}px`,
+      minWidth: `${width}px`,
+      maxWidth: `${width}px`,
+      flex: `0 0 ${width}px`,
+      minHeight: '0',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px'
+    });
+  }
+
+  function applyAutoscrollerModalLayout(modalRef, contentRoot, dimensions) {
+    const dialog = getAutoscrollerDialog(modalRef);
+    if (!dialog) return;
+
+    const { width, height } = dimensions;
+    const { contentWidth, col1Width, col2Width, col3Width } = getAutoscrollerColumnWidths(width);
+
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
+    dialog.classList.remove('max-w-[300px]');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+      rootWrapper.style.height = '100%';
+      rootWrapper.style.display = 'flex';
+      rootWrapper.style.flexDirection = 'column';
+      rootWrapper.style.flex = '1 1 0';
+      rootWrapper.style.minHeight = '0';
+    }
+
+    const contentContainer = dialog.querySelector('.widget-bottom');
+    if (contentContainer) {
+      Object.assign(contentContainer.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        overflowY: 'hidden',
+        overflowX: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      });
+    }
+
+    if (contentRoot) {
+      Object.assign(contentRoot.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        height: '100%',
+        maxHeight: 'none',
+        width: `${contentWidth}px`,
+        minWidth: `${contentWidth}px`,
+        maxWidth: `${contentWidth}px`
+      });
+
+      applyAutoscrollerColumnStyles(contentRoot.querySelector('.autoscroller-modal-col1'), col1Width);
+      applyAutoscrollerColumnStyles(contentRoot.querySelector('.autoscroller-modal-col2'), col2Width);
+      applyAutoscrollerColumnStyles(contentRoot.querySelector('.autoscroller-modal-col3'), col3Width);
+    }
+  }
+
+  function setupAutoscrollerModalResponsiveLayout(modalRef, contentRoot) {
+    clearAutoscrollerModalLayoutCleanup();
+    const apply = () => applyAutoscrollerModalLayout(modalRef, contentRoot, getAutoscrollerModalDimensions());
+    apply();
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    autoscrollerModalLayoutCleanup = () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }
+
   function showAutoscrollerModal() {
     injectAutoscrollerButtonStyles();
+    clearAutoscrollerModalLayoutCleanup();
     
     for (let i = 0; i < 2; i++) {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
     }
     setTimeout(() => {
       let lastStatusMessage = '';
-      const contentDiv = DOMUtils.createElement('div', '', {
+      const contentDiv = DOMUtils.createElement('div', 'autoscroller-modal-root', {
         width: '100%',
         height: '100%',
-        minWidth: '770px',
-        maxWidth: '770px',
-        minHeight: '400px',
-        maxHeight: '400px',
         boxSizing: 'border-box',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'row',
         gap: '8px',
-        flex: '1 1 0'
+        flex: '1 1 0',
+        minHeight: '0',
+        minWidth: '0'
       });
       
       // Load saved state first
@@ -2596,7 +2739,7 @@
         
         contentDiv.innerHTML = '';
         
-        const col1 = DOMUtils.createModalColumn('190px');
+        const col1 = DOMUtils.createModalColumn(`${AUTOSCROLLER_MODAL_CONFIG.col1Width}px`, 'autoscroller-modal-col1');
 
         const pickerCreatures = getAutoscrollPickerCreatures();
         const creaturesBox = createCreatureIconPicker({
@@ -2631,18 +2774,24 @@
           title: 'Rules',
           content: getRulesColumn()
         });
-        DOMUtils.applyModalColumnStyles(col2, '250px');
+        col2.classList.add('autoscroller-modal-col2');
+        DOMUtils.applyModalColumnStyles(col2, `${AUTOSCROLLER_MODAL_CONFIG.col2Width}px`);
         col2.style.justifyContent = 'center';
         
         const col3 = createBox({
           title: 'Autoscrolling',
           content: getAutoscrollingColumn()
         });
-        DOMUtils.applyModalColumnStyles(col3, '280px');
+        col3.classList.add('autoscroller-modal-col3');
+        DOMUtils.applyModalColumnStyles(col3, `${AUTOSCROLLER_MODAL_CONFIG.col3Width}px`);
         
         contentDiv.appendChild(col1);
         contentDiv.appendChild(col2);
         contentDiv.appendChild(col3);
+
+        if (activeAutoscrollerModal) {
+          applyAutoscrollerModalLayout(activeAutoscrollerModal, contentDiv, getAutoscrollerModalDimensions());
+        }
       }
       
       function getRulesColumn() {
@@ -3467,13 +3616,16 @@
         }
       }, 100);
       
-      api.ui.components.createModal({
+      const modalDimensions = getAutoscrollerModalDimensions();
+      activeAutoscrollerModal = api.ui.components.createModal({
         title: 'Auto Scroller',
-        width: 770,
-        height: 400,
+        width: modalDimensions.width,
+        height: modalDimensions.height,
         content: contentDiv,
         buttons: [{ text: 'Close', primary: true }],
         onClose: () => {
+          clearAutoscrollerModalLayoutCleanup();
+          activeAutoscrollerModal = null;
           // Force stop autoscrolling when modal is closed
           if (autoscrolling) {
             autoscrolling = false; // Force stop the loop
@@ -3493,6 +3645,17 @@
           resetAutoscrollState();
         }
       });
+
+      const originalClose = activeAutoscrollerModal?.close?.bind(activeAutoscrollerModal);
+      if (originalClose) {
+        activeAutoscrollerModal.close = () => {
+          clearAutoscrollerModalLayoutCleanup();
+          originalClose();
+        };
+      }
+
+      setupAutoscrollerModalResponsiveLayout(activeAutoscrollerModal, contentDiv);
+
       setTimeout(() => {
         // Add rainbow animation CSS
         const style = document.createElement('style');
@@ -3504,34 +3667,6 @@
           }
         `;
         document.head.appendChild(style);
-        
-        const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-        if (dialog) {
-          dialog.style.width = '770px';
-          dialog.style.minWidth = '770px';
-          dialog.style.maxWidth = '770px';
-      dialog.style.height = '400px';
-      dialog.style.minHeight = '400px';
-      dialog.style.maxHeight = '400px';
-      dialog.classList.remove('max-w-[300px]');
-          let contentWrapper = null;
-          const children = Array.from(dialog.children);
-          for (const child of children) {
-            if (child !== dialog.firstChild && child.tagName === 'DIV') {
-              contentWrapper = child;
-              break;
-            }
-          }
-          if (!contentWrapper) {
-            contentWrapper = dialog.querySelector(':scope > div');
-        }
-          if (contentWrapper) {
-            contentWrapper.style.height = '100%';
-            contentWrapper.style.display = 'flex';
-            contentWrapper.style.flexDirection = 'column';
-            contentWrapper.style.flex = '1 1 0';
-        }
-        }
       }, 0);
     }, 50);
   }
@@ -3818,6 +3953,9 @@
     if (autoscrolling) {
       stopAutoscroll();
     }
+
+    clearAutoscrollerModalLayoutCleanup();
+    activeAutoscrollerModal = null;
     
     // Update coordination system state
     if (window.ModCoordination) {

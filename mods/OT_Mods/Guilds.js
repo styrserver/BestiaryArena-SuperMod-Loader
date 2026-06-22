@@ -119,6 +119,150 @@ const MODAL_DIMENSIONS = {
   HEIGHT: 360
 };
 
+const GUILDS_MODAL_CONFIG = {
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 200
+};
+
+const guildsModalLayoutRegistry = new Map();
+let guildsModalResizeHandler = null;
+
+function getGuildsModalDimensions(maxWidth, maxHeight, minHeight = GUILDS_MODAL_CONFIG.minHeight) {
+  const pad = GUILDS_MODAL_CONFIG.viewportPadding * 2;
+  const dims = {
+    width: Math.max(
+      GUILDS_MODAL_CONFIG.minWidth,
+      Math.min(maxWidth, window.innerWidth - pad)
+    )
+  };
+  if (maxHeight !== null && maxHeight !== undefined) {
+    dims.height = Math.max(
+      minHeight,
+      Math.min(maxHeight, window.innerHeight - pad)
+    );
+  }
+  return dims;
+}
+
+function getGuildsOpenModalSize(width, height, minHeight = GUILDS_MODAL_CONFIG.minHeight) {
+  const maxW = width || MODAL_DIMENSIONS.WIDTH;
+  const hasFixedHeight = height !== null && height !== undefined;
+  const dims = getGuildsModalDimensions(maxW, hasFixedHeight ? height : null, minHeight);
+  return hasFixedHeight ? dims : { width: dims.width };
+}
+
+function pruneGuildsModalLayoutRegistry() {
+  for (const dialog of guildsModalLayoutRegistry.keys()) {
+    if (!document.contains(dialog)) {
+      guildsModalLayoutRegistry.delete(dialog);
+    }
+  }
+  if (guildsModalLayoutRegistry.size === 0 && guildsModalResizeHandler) {
+    window.removeEventListener('resize', guildsModalResizeHandler);
+    guildsModalResizeHandler = null;
+  }
+}
+
+function clearGuildsModalLayoutRegistry() {
+  guildsModalLayoutRegistry.clear();
+  if (guildsModalResizeHandler) {
+    window.removeEventListener('resize', guildsModalResizeHandler);
+    guildsModalResizeHandler = null;
+  }
+}
+
+function ensureGuildsModalResizeListener() {
+  if (guildsModalResizeHandler) return;
+  guildsModalResizeHandler = () => {
+    pruneGuildsModalLayoutRegistry();
+    for (const [dialog, entry] of guildsModalLayoutRegistry) {
+      applyGuildsModalLayoutToDialog(dialog, entry);
+    }
+  };
+  window.addEventListener('resize', guildsModalResizeHandler);
+}
+
+function applyGuildsModalLayoutToDialog(dialog, entry) {
+  if (!dialog || !entry) return;
+
+  const { maxWidth, maxHeight, hasFixedHeight, minHeight, contentRoot } = entry;
+  const maxW = maxWidth || MODAL_DIMENSIONS.WIDTH;
+  const dims = getGuildsModalDimensions(
+    maxW,
+    hasFixedHeight ? (maxHeight || MODAL_DIMENSIONS.HEIGHT) : null,
+    minHeight
+  );
+  const w = dims.width;
+
+  dialog.style.width = `${w}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${w}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]', 'w-full');
+
+  if (hasFixedHeight) {
+    const h = dims.height;
+    dialog.style.height = `${h}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${h}px`;
+  } else {
+    dialog.style.height = 'auto';
+    dialog.style.minHeight = 'auto';
+    dialog.style.maxHeight = 'none';
+  }
+
+  const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
+  if (innerWrapper) {
+    innerWrapper.style.display = 'flex';
+    innerWrapper.style.flexDirection = 'column';
+    if (hasFixedHeight) {
+      innerWrapper.style.height = '100%';
+      innerWrapper.style.minHeight = '0';
+      innerWrapper.style.flex = '1 1 0';
+    } else {
+      innerWrapper.style.height = '';
+      innerWrapper.style.minHeight = '';
+      innerWrapper.style.flex = '';
+    }
+  }
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    widgetBottom.style.display = 'flex';
+    widgetBottom.style.flexDirection = 'column';
+    widgetBottom.style.minHeight = '0';
+    if (hasFixedHeight) {
+      widgetBottom.style.flex = '1 1 auto';
+      widgetBottom.style.height = '100%';
+      widgetBottom.style.overflow = 'hidden';
+    } else {
+      widgetBottom.style.flex = '';
+      widgetBottom.style.height = 'auto';
+      widgetBottom.style.overflow = '';
+    }
+  }
+
+  const separator = dialog.querySelector('.separator');
+  if (separator) {
+    separator.className = 'separator my-2.5';
+  }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      minWidth: '0',
+      height: '100%',
+      maxHeight: '100%',
+      width: '100%',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden'
+    });
+  }
+}
+
 const GUILD_PANEL_DIMENSIONS = {
   WIDTH: 650,  // 550 + 100 (50px each side)
   HEIGHT: 460  // 360 + 100 (50px each side)
@@ -5374,10 +5518,15 @@ async function showPlayerEquipmentModal(playerName) {
       return;
     }
     
+    const playerEquipModalSize = getGuildsOpenModalSize(
+      PLAYER_EQUIPMENT_PANEL_DIMENSIONS.WIDTH,
+      PLAYER_EQUIPMENT_PANEL_DIMENSIONS.HEIGHT,
+      280
+    );
     const modal = openModal({
       title: `${playerName}'s Equipment`,
-      width: PLAYER_EQUIPMENT_PANEL_DIMENSIONS.WIDTH,
-      height: PLAYER_EQUIPMENT_PANEL_DIMENSIONS.HEIGHT,
+      width: playerEquipModalSize.width,
+      height: playerEquipModalSize.height,
       content: contentDiv,
       buttons: [{
         text: t('mods.guilds.close') || 'Close',
@@ -5392,7 +5541,13 @@ async function showPlayerEquipmentModal(playerName) {
     setTimeout(() => {
       const dialog = getOpenDialog();
       if (dialog) {
-        applyModalStyles(dialog, PLAYER_EQUIPMENT_PANEL_DIMENSIONS.WIDTH, PLAYER_EQUIPMENT_PANEL_DIMENSIONS.HEIGHT);
+        applyModalStyles(
+          dialog,
+          PLAYER_EQUIPMENT_PANEL_DIMENSIONS.WIDTH,
+          PLAYER_EQUIPMENT_PANEL_DIMENSIONS.HEIGHT,
+          contentDiv,
+          280
+        );
         setupEscKeyHandler(dialog, () => {
           dialog.remove();
         });
@@ -5438,15 +5593,22 @@ function openModal({ title, width, height, content, buttons }) {
 }
 
 // Create modal with automatic styling application
-function createStyledModal({ title, width, height, content, buttons, onAfterCreate }) {
+function createStyledModal({ title, width, height, content, buttons, onAfterCreate, minHeight = GUILDS_MODAL_CONFIG.minHeight }) {
   if (!ensureModalApi()) return null;
 
-  const modal = openModal({ title, width, height, content, buttons });
+  const openSize = getGuildsOpenModalSize(width, height, minHeight);
+  const modal = openModal({
+    title,
+    width: openSize.width,
+    height: openSize.height ?? height,
+    content,
+    buttons
+  });
 
   setTimeout(() => {
     const dialog = getOpenDialog();
     if (dialog) {
-      applyModalStyles(dialog, width, height);
+      applyModalStyles(dialog, width, height, content, minHeight);
       if (onAfterCreate) onAfterCreate(dialog);
     }
   }, 50);
@@ -5466,56 +5628,22 @@ function createCloseDialogButton(text, primary = false, onClick = null) {
   };
 }
 
-function applyModalStyles(dialog, width, height) {
-  const w = width || MODAL_DIMENSIONS.WIDTH;
+function applyModalStyles(dialog, width, height, contentRoot = null, minHeight = GUILDS_MODAL_CONFIG.minHeight) {
+  if (!dialog) return;
+
+  const maxWidth = width || MODAL_DIMENSIONS.WIDTH;
   const hasFixedHeight = height !== null && height !== undefined;
+  const maxHeight = hasFixedHeight ? (height || MODAL_DIMENSIONS.HEIGHT) : null;
 
-  dialog.style.width = `${w}px`;
-  dialog.style.minWidth = `${w}px`;
-  dialog.style.maxWidth = `${w}px`;
-  dialog.classList.remove('max-w-[300px]');
-
-  if (hasFixedHeight) {
-    const h = height || MODAL_DIMENSIONS.HEIGHT;
-    dialog.style.height = `${h}px`;
-    dialog.style.minHeight = `${h}px`;
-    dialog.style.maxHeight = `${h}px`;
-  } else {
-    dialog.style.height = 'auto';
-    dialog.style.minHeight = 'auto';
-    dialog.style.maxHeight = 'none';
-  }
-
-  const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
-  if (innerWrapper) {
-    innerWrapper.style.display = 'flex';
-    innerWrapper.style.flexDirection = 'column';
-    if (hasFixedHeight) {
-      innerWrapper.style.height = '100%';
-      innerWrapper.style.minHeight = '0';
-    }
-  }
-
-  const widgetBottom = dialog.querySelector('.widget-bottom');
-  if (widgetBottom) {
-    widgetBottom.style.display = 'flex';
-    widgetBottom.style.flexDirection = 'column';
-    widgetBottom.style.minHeight = '0';
-    if (hasFixedHeight) {
-      widgetBottom.style.flex = '1 1 0';
-      widgetBottom.style.height = '100%';
-      widgetBottom.style.overflow = 'hidden';
-    } else {
-      widgetBottom.style.flex = '';
-      widgetBottom.style.height = 'auto';
-      widgetBottom.style.overflow = '';
-    }
-  }
-
-  const separator = dialog.querySelector('.separator');
-  if (separator) {
-    separator.className = 'separator my-2.5';
-  }
+  guildsModalLayoutRegistry.set(dialog, {
+    maxWidth,
+    maxHeight,
+    hasFixedHeight,
+    minHeight,
+    contentRoot
+  });
+  ensureGuildsModalResizeListener();
+  applyGuildsModalLayoutToDialog(dialog, guildsModalLayoutRegistry.get(dialog));
 }
 
 function createButton(text, onClick, style = {}) {
@@ -5893,6 +6021,8 @@ async function showGuildBrowser() {
 
   const contentDiv = document.createElement('div');
   contentDiv.style.width = '100%';
+  contentDiv.style.maxWidth = '100%';
+  contentDiv.style.minWidth = '0';
   contentDiv.style.flex = '1 1 0';
   contentDiv.style.minHeight = '0';
   contentDiv.style.boxSizing = 'border-box';
@@ -6442,10 +6572,11 @@ async function showGuildBrowser() {
     buttonContainer.insertBefore(searchContainer, buttonContainer.firstChild);
   };
 
+  const browserModalSize = getGuildsOpenModalSize(MODAL_DIMENSIONS.WIDTH, MODAL_DIMENSIONS.HEIGHT, 240);
   const modal = openModal({
     title: t('mods.guilds.browserTitle'),
-    width: MODAL_DIMENSIONS.WIDTH,
-    height: MODAL_DIMENSIONS.HEIGHT,
+    width: browserModalSize.width,
+    height: browserModalSize.height,
     content: contentDiv,
     buttons: [{
       text: t('mods.guilds.close'),
@@ -6457,7 +6588,7 @@ async function showGuildBrowser() {
   setTimeout(async () => {
     const dialog = getOpenDialog();
     if (dialog) {
-      applyModalStyles(dialog, MODAL_DIMENSIONS.WIDTH, MODAL_DIMENSIONS.HEIGHT);
+      applyModalStyles(dialog, MODAL_DIMENSIONS.WIDTH, MODAL_DIMENSIONS.HEIGHT, contentDiv, 240);
       const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
       if (buttonContainer) {
         setupFooter(buttonContainer);
@@ -6700,6 +6831,8 @@ async function openGuildPanel(viewGuildId = null) {
 
   const contentDiv = document.createElement('div');
   contentDiv.style.width = '100%';
+  contentDiv.style.maxWidth = '100%';
+  contentDiv.style.minWidth = '0';
   contentDiv.style.flex = '1 1 0';
   contentDiv.style.minHeight = '0';
   contentDiv.style.boxSizing = 'border-box';
@@ -8245,10 +8378,15 @@ async function openGuildPanel(viewGuildId = null) {
   };
 
   const modalTitle = guild.abbreviation ? `${guild.name} [${guild.abbreviation}]` : guild.name;
+  const guildPanelModalSize = getGuildsOpenModalSize(
+    GUILD_PANEL_DIMENSIONS.WIDTH,
+    GUILD_PANEL_DIMENSIONS.HEIGHT,
+    320
+  );
   const modal = openModal({
     title: modalTitle,
-    width: GUILD_PANEL_DIMENSIONS.WIDTH,
-    height: GUILD_PANEL_DIMENSIONS.HEIGHT,
+    width: guildPanelModalSize.width,
+    height: guildPanelModalSize.height,
     content: contentDiv,
     buttons: [{
       text: t('mods.guilds.close'),
@@ -8260,7 +8398,13 @@ async function openGuildPanel(viewGuildId = null) {
   setTimeout(async () => {
     const dialog = getOpenDialog();
     if (dialog) {
-      applyModalStyles(dialog, GUILD_PANEL_DIMENSIONS.WIDTH, GUILD_PANEL_DIMENSIONS.HEIGHT);
+      applyModalStyles(
+        dialog,
+        GUILD_PANEL_DIMENSIONS.WIDTH,
+        GUILD_PANEL_DIMENSIONS.HEIGHT,
+        contentDiv,
+        320
+      );
       const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
       if (buttonContainer) {
         setupFooter(buttonContainer);
@@ -10925,6 +11069,7 @@ async function showEquipmentModal() {
     width: EQUIPMENT_CONFIG.MODAL_WIDTH,
     height: EQUIPMENT_CONFIG.MODAL_HEIGHT,
     content: contentDiv,
+    minHeight: 320,
     buttons: [{
       text: t('mods.guilds.close') || 'Close',
       primary: true,
@@ -11419,6 +11564,8 @@ exports = {
         clearInterval(cacheCleanupInterval);
         cacheCleanupInterval = null;
       }
+
+      clearGuildsModalLayoutRegistry();
 
       // Clear periodic guild background sync
       if (guildBackgroundSyncInterval) {

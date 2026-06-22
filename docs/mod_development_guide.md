@@ -334,7 +334,9 @@ api.ui.removeButton('my-button');
 const panel = api.ui.createConfigPanel({
   id: 'my-config',
   title: 'Configuration',
+  modId: context.hash,
   content: '<p>Configure your mod here</p>',
+  // width: 350, height: 800 — optional desktop max (defaults shown)
   buttons: [
     {
       text: 'Save',
@@ -516,9 +518,54 @@ const modal = api.ui.components.createModal({
 modal.close();
 ```
 
+### Responsive modals
+
+Since **4.3.2**, most bundled mods clamp modal size to the viewport on phones while keeping the desktop maximum unchanged. Use this pattern for custom `createModal` dialogs:
+
+```javascript
+const MODAL_CONFIG = {
+  width: 600,
+  height: 400,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 280
+};
+
+function getModalDimensions() {
+  const pad = MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      MODAL_CONFIG.minWidth,
+      Math.min(MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      MODAL_CONFIG.minHeight,
+      Math.min(MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
+```
+
+Open with clamped `width` / `height`, give the main content `flex: 1 1 auto; min-height: 0; overflow-y: auto`, and re-apply dimensions on `window` `resize` (remove the listener when the modal closes).
+
+For **settings panels**, prefer `api.ui.createConfigPanel()` — defaults to **350×800** max, viewport clamping, scroll, and resize cleanup are built in (see [UI Management](ui_management.md#configuration-panel-management)).
+
 ### Custom Modal Size Example
 
-To set a custom modal size (e.g., 700x400), set the width and height in createModal, then update the dialog and content element styles after creation:
+For `createModal` without the full responsive helper, pass explicit `width` / `height` and rely on the component’s `95vw` / `95vh` caps for basic phone safety. Avoid post-open `setTimeout` style forcing unless you also clamp to `window.innerWidth` / `innerHeight`:
+
+```javascript
+const { width, height } = getModalDimensions();
+const modal = api.ui.components.createModal({
+  title: 'Custom Modal',
+  width,
+  height,
+  content: contentDiv,
+  buttons: [{ text: 'Close', primary: true }]
+});
+```
+
+Legacy pattern (fixed pixel override after open — not recommended for new mods):
 
 ```javascript
 const contentDiv = document.createElement('div')

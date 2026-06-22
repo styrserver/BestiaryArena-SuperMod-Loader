@@ -300,10 +300,148 @@ const GAME_CONSTANTS = {
 // Modal dimensions
 const MODAL_CONFIG = {
   width: 600,
-  height: 400,
+  height: 500,
   leftColumnWidth: 140,
-  rightColumnWidth: 400
+  rightColumnWidth: 400,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 280
 };
+
+function getModSettingsModalDimensions() {
+  const pad = MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      MODAL_CONFIG.minWidth,
+      Math.min(MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      MODAL_CONFIG.minHeight,
+      Math.min(MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
+
+function getModSettingsColumnWidths(modalWidth) {
+  const contentWidth = modalWidth - 30;
+  if (modalWidth >= MODAL_CONFIG.width) {
+    return {
+      contentWidth: MODAL_CONFIG.width - 30,
+      leftWidth: MODAL_CONFIG.leftColumnWidth,
+      rightWidth: MODAL_CONFIG.rightColumnWidth
+    };
+  }
+  const leftWidth = Math.min(
+    MODAL_CONFIG.leftColumnWidth,
+    Math.max(90, Math.floor(contentWidth * 0.32))
+  );
+  const rightWidth = Math.max(120, contentWidth - leftWidth - 18);
+  return { contentWidth, leftWidth, rightWidth };
+}
+
+function applyModSettingsModalLayout(dialog, elements, dimensions) {
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+  const { contentWidth, leftWidth, rightWidth } = getModSettingsColumnWidths(width);
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]');
+
+  let contentWrapper = null;
+  const children = Array.from(dialog.children);
+  for (const child of children) {
+    if (child !== dialog.firstChild && child.tagName === 'DIV') {
+      contentWrapper = child;
+      break;
+    }
+  }
+  if (!contentWrapper) {
+    contentWrapper = dialog.querySelector(':scope > div');
+  }
+  if (contentWrapper) {
+    contentWrapper.style.height = '100%';
+    contentWrapper.style.display = 'flex';
+    contentWrapper.style.flexDirection = 'column';
+    contentWrapper.style.flex = '1 1 0';
+    contentWrapper.style.minHeight = '0';
+  }
+
+  const contentContainer = dialog.querySelector('.widget-bottom');
+  if (contentContainer) {
+    Object.assign(contentContainer.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflowY: 'hidden',
+      overflowX: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+
+  if (elements?.content) {
+    Object.assign(elements.content.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      maxHeight: 'none',
+      minWidth: `${contentWidth}px`,
+      maxWidth: `${contentWidth}px`
+    });
+  }
+
+  if (elements?.mainContent) {
+    Object.assign(elements.mainContent.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      height: 'auto',
+      maxHeight: 'none',
+      overflow: 'hidden'
+    });
+  }
+
+  if (elements?.leftColumn) {
+    Object.assign(elements.leftColumn.style, {
+      width: `${leftWidth}px`,
+      minWidth: `${leftWidth}px`,
+      maxWidth: `${leftWidth}px`,
+      flex: `0 0 ${leftWidth}px`
+    });
+  }
+
+  if (elements?.rightColumn) {
+    Object.assign(elements.rightColumn.style, {
+      width: `${rightWidth}px`,
+      minWidth: '0',
+      maxWidth: `${rightWidth}px`,
+      flex: `1 1 ${rightWidth}px`
+    });
+  }
+}
+
+function clearModSettingsModalLayoutCleanup() {
+  if (modSettingsModalLayoutCleanup) {
+    modSettingsModalLayoutCleanup();
+    modSettingsModalLayoutCleanup = null;
+  }
+}
+
+function setupModSettingsModalResponsiveLayout(dialog, elements) {
+  clearModSettingsModalLayoutCleanup();
+  const apply = () => applyModSettingsModalLayout(dialog, elements, getModSettingsModalDimensions());
+  apply();
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  modSettingsModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+  };
+}
 
 // Timer element styles
 const TIMER_STYLES = {
@@ -1244,6 +1382,8 @@ const DEPOT_MANAGER_MOD_NAME = 'Super Mods/Depot Manager.js';
 let modSettingsSelectCategoryHandler = null;
 /** @type {(() => void) | null} */
 let modSettingsFirebaseUploadStateUpdater = null;
+/** @type {(() => void) | null} */
+let modSettingsModalLayoutCleanup = null;
 
 function getLocalModByName(modName) {
   return Array.isArray(window.localMods)
@@ -5975,23 +6115,29 @@ function createSettingsDropdownHandler(configKey, onChangeCallback) {
 // Show settings modal
 function showSettingsModal() {
   try {
+    clearModSettingsModalLayoutCleanup();
+
+    const modalDimensions = getModSettingsModalDimensions();
+    const columnWidths = getModSettingsColumnWidths(modalDimensions.width);
+
     // Create main content container with tabs
     const content = document.createElement('div');
+    content.className = 'mod-settings-modal-root';
     
     // Apply sizing and layout styles to content (matching Autoscroller pattern)
-    const contentWidth = MODAL_CONFIG.width - 30;
+    const contentWidth = columnWidths.contentWidth;
     Object.assign(content.style, {
       width: '100%',
       height: '100%',
       minWidth: `${contentWidth}px`,
       maxWidth: `${contentWidth}px`,
-      minHeight: `${MODAL_CONFIG.height}px`,
-      maxHeight: `${MODAL_CONFIG.height}px`,
+      minHeight: '0',
+      maxHeight: 'none',
       boxSizing: 'border-box',
       overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column',
-      flex: '1 1 0',
+      flex: '1 1 auto',
       border: '6px solid transparent',
       borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
       backgroundImage: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
@@ -6000,12 +6146,16 @@ function showSettingsModal() {
     
     // Create main content container with 2-column layout
     const mainContent = document.createElement('div');
+    mainContent.className = 'mod-settings-main-panel';
     Object.assign(mainContent.style, {
       display: 'flex',
       flexDirection: 'row',
       gap: '8px',
-      height: '100%',
-      flex: '1 1 0'
+      height: 'auto',
+      flex: '1 1 0',
+      minHeight: '0',
+      maxHeight: 'none',
+      overflow: 'hidden'
     });
     
     // Left column - Options
@@ -6013,11 +6163,11 @@ function showSettingsModal() {
     leftColumn.id = 'mod-settings-left-menu';
     leftColumn.dataset.selectedCategory = 'creatures';
     Object.assign(leftColumn.style, {
-      width: `${MODAL_CONFIG.leftColumnWidth}px`,
-      minWidth: `${MODAL_CONFIG.leftColumnWidth}px`,
-      maxWidth: `${MODAL_CONFIG.leftColumnWidth}px`,
+      width: `${columnWidths.leftWidth}px`,
+      minWidth: `${columnWidths.leftWidth}px`,
+      maxWidth: `${columnWidths.leftWidth}px`,
       height: '100%',
-      flex: `0 0 ${MODAL_CONFIG.leftColumnWidth}px`,
+      flex: `0 0 ${columnWidths.leftWidth}px`,
       display: 'flex',
       flexDirection: 'column',
       padding: '0px',
@@ -6031,10 +6181,10 @@ function showSettingsModal() {
     // Right column - Checkboxes
     const rightColumn = document.createElement('div');
     Object.assign(rightColumn.style, {
-      width: `${MODAL_CONFIG.rightColumnWidth}px`,
-      minWidth: `${MODAL_CONFIG.rightColumnWidth}px`,
-      maxWidth: `${MODAL_CONFIG.rightColumnWidth}px`,
-      flex: `0 0 ${MODAL_CONFIG.rightColumnWidth}px`,
+      width: `${columnWidths.rightWidth}px`,
+      minWidth: '0',
+      maxWidth: `${columnWidths.rightWidth}px`,
+      flex: `1 1 ${columnWidths.rightWidth}px`,
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
@@ -8666,8 +8816,8 @@ function showSettingsModal() {
     // Create modal using the API
     modalRef = api.ui.components.createModal({
       title: t('mods.betterUI.settingsTitle'),
-      width: MODAL_CONFIG.width,
-      height: MODAL_CONFIG.height,
+      width: modalDimensions.width,
+      height: modalDimensions.height,
       content: content,
       buttons: [
         {
@@ -8676,6 +8826,7 @@ function showSettingsModal() {
           closeOnClick: true,
           onClick: () => {
             console.log('[Mod Settings] Settings modal closed');
+            clearModSettingsModalLayoutCleanup();
             modSettingsSelectCategoryHandler = null;
             modSettingsFirebaseUploadStateUpdater = null;
           }
@@ -8683,36 +8834,11 @@ function showSettingsModal() {
       ]
     });
     
-    // Set static size for the modal dialog (non-resizable)
+    const modalLayoutElements = { content, mainContent, leftColumn, rightColumn };
     scheduleTimeout(() => {
       const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
       if (dialog) {
-        dialog.style.width = `${MODAL_CONFIG.width}px`;
-        dialog.style.minWidth = `${MODAL_CONFIG.width}px`;
-        dialog.style.maxWidth = `${MODAL_CONFIG.width}px`;
-        dialog.style.height = `${MODAL_CONFIG.height}px`;
-        dialog.style.minHeight = `${MODAL_CONFIG.height}px`;
-        dialog.style.maxHeight = `${MODAL_CONFIG.height}px`;
-        dialog.classList.remove('max-w-[300px]');
-        
-        // Style the content wrapper for proper flexbox layout
-        let contentWrapper = null;
-        const children = Array.from(dialog.children);
-        for (const child of children) {
-          if (child !== dialog.firstChild && child.tagName === 'DIV') {
-            contentWrapper = child;
-            break;
-          }
-        }
-        if (!contentWrapper) {
-          contentWrapper = dialog.querySelector(':scope > div');
-        }
-        if (contentWrapper) {
-          contentWrapper.style.height = '100%';
-          contentWrapper.style.display = 'flex';
-          contentWrapper.style.flexDirection = 'column';
-          contentWrapper.style.flex = '1 1 0';
-        }
+        setupModSettingsModalResponsiveLayout(dialog, modalLayoutElements);
       }
     }, 0);
     
@@ -9633,7 +9759,10 @@ function resolveEquipmentGameIdFromInventoryButton(button) {
   const spriteId = getEquipmentSpriteIdFromInventoryButton(button);
   const tier = getEquipmentTierFromInventoryButton(button);
   const statNorm = getEquipmentStatFromInventoryButton(button);
-  const rows = getPlayerEquipmentRowsForHover();
+  const depotEquipSet = getDepotEquipmentIdSetForHover();
+  const rows = getPlayerEquipmentRowsForHover().filter(
+    (r) => !depotEquipSet || !depotEquipSet.has(String(r.id))
+  );
 
   if (spriteId) {
     const matches = rows.filter(
@@ -9642,7 +9771,23 @@ function resolveEquipmentGameIdFromInventoryButton(button) {
         Number(r.tier) === Number(tier) &&
         normalizeEquipmentStatForHover(r.stat) === statNorm
     );
-    if (matches.length > 0) return matches[0].gameId;
+    if (matches.length === 1) return matches[0].gameId;
+    if (matches.length > 1) {
+      const visibleButtons = getVisibleArsenalEquipmentButtonsForHover();
+      let sameVisualBefore = 0;
+      for (const btn of visibleButtons) {
+        if (btn === button) break;
+        if (
+          getEquipmentSpriteIdFromInventoryButton(btn) === spriteId &&
+          getEquipmentTierFromInventoryButton(btn) === tier &&
+          getEquipmentStatFromInventoryButton(btn) === statNorm
+        ) {
+          sameVisualBefore += 1;
+        }
+      }
+      const pick = matches[Math.min(sameVisualBefore, matches.length - 1)];
+      if (pick?.gameId != null) return pick.gameId;
+    }
   }
 
   const nameFromAttr = button?.getAttribute?.('data-equipment')?.trim() || '';
@@ -9701,12 +9846,35 @@ function isEquipmentHoverCandidateButton(button) {
   return true;
 }
 
+function getDepotCreatureIdSetForHover() {
+  return typeof window !== 'undefined' && typeof window.depotManager?.getDepotCreatureIdSet === 'function'
+    ? window.depotManager.getDepotCreatureIdSet()
+    : null;
+}
+
+function getDepotEquipmentIdSetForHover() {
+  return typeof window !== 'undefined' && typeof window.depotManager?.getDepotEquipmentIdSet === 'function'
+    ? window.depotManager.getDepotEquipmentIdSet()
+    : null;
+}
+
+function isArsenalEquipmentButtonVisibleForHover(button) {
+  if (!button) return false;
+  const slot = button.closest('div.flex[data-state]') || button;
+  if (slot.getAttribute('data-depot-equipment-hidden') === 'true') return false;
+  return window.getComputedStyle(slot).display !== 'none';
+}
+
 function getEquipmentHoverTargetButtons() {
   const grid = resolveEquipmentHoverGrid();
   if (!grid) return [];
   return Array.from(grid.querySelectorAll(':scope button')).filter(
     (btn) => isEquipmentHoverCandidateButton(btn) && grid.contains(btn)
   );
+}
+
+function getVisibleArsenalEquipmentButtonsForHover() {
+  return getEquipmentHoverTargetButtons().filter(isArsenalEquipmentButtonVisibleForHover);
 }
 
 /**
@@ -10191,8 +10359,14 @@ function scoreMatchMonsterForCreatureButton(button, monstersArg) {
   if (!creatureImg) return null;
   const gameId = getCreatureGameId(creatureImg);
   if (!gameId) return null;
-  const pool = Array.isArray(monstersArg) ? monstersArg.filter((m) => m.gameId === gameId) : [];
+  let pool = Array.isArray(monstersArg) ? monstersArg.filter((m) => m.gameId === gameId) : [];
   if (pool.length === 0) return null;
+
+  const depotSet = button.closest('#monster-scroll') ? getDepotCreatureIdSetForHover() : null;
+  if (depotSet && depotSet.size > 0) {
+    pool = pool.filter((m) => !depotSet.has(String(m.id)));
+    if (pool.length === 0) return null;
+  }
 
   const levelSpan = button.querySelector('span[translate="no"]');
   const displayedLevel = levelSpan ? parseInt(levelSpan.textContent, 10) : null;
@@ -10367,11 +10541,14 @@ function getMonsterInfoFromButton(button) {
   const creatureImg = button.querySelector('img[alt="creature"]');
   if (!creatureImg) return null;
 
-  // Best source when Depot Manager tagged the slot with unique creature id.
+  // Best source when Depot Manager tagged a hidden depot slot with unique creature id.
   const slotWithId = button.closest('div.flex[data-depot-creature-id]');
   const taggedId = slotWithId?.getAttribute('data-depot-creature-id');
+  const slotIsDepotHidden =
+    slotWithId?.getAttribute('data-depot-hidden') === 'true' ||
+    (slotWithId && window.getComputedStyle(slotWithId).display === 'none');
   const monsters = getPlayerMonsters();
-  if (taggedId && Array.isArray(monsters)) {
+  if (taggedId && slotIsDepotHidden && Array.isArray(monsters)) {
     const taggedMonster = monsters.find((m) => String(m.id) === String(taggedId));
     if (taggedMonster) {
       const gameIdTagged = getCreatureGameId(creatureImg);

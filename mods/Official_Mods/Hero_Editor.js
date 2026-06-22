@@ -152,68 +152,216 @@ function createHeroEditorScrollContainer() {
   return scrollContainer;
 }
 
-function expandHeroEditorModal(widthPx = 420, heightPx = 420) {
-  setTimeout(() => {
-    try {
-      const dialog = document.querySelector('div[role="dialog"][data-state="open"]') ||
-        document.querySelector('div[role="dialog"]');
-      if (!dialog) return;
+const HERO_EDITOR_MODAL_CONFIG = {
+  width: 420,
+  height: 420,
+  leftColumnWidth: 100,
+  contentInset: 35,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 280
+};
 
-      const width = `${widthPx}px`;
-      const height = `${heightPx}px`;
-      dialog.style.width = width;
-      dialog.style.minWidth = width;
-      dialog.style.maxWidth = width;
-      dialog.style.height = height;
-      dialog.style.minHeight = height;
-      dialog.style.maxHeight = height;
-      dialog.classList.remove('max-w-[300px]');
+let activeHeroEditorModal = null;
+let heroEditorModalLayoutCleanup = null;
 
-      const rootWrapper = dialog.querySelector(':scope > div');
-      if (rootWrapper) {
-        rootWrapper.style.height = '100%';
-        rootWrapper.style.display = 'flex';
-        rootWrapper.style.flexDirection = 'column';
-      }
+function getHeroEditorModalDimensions() {
+  const pad = HERO_EDITOR_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      HERO_EDITOR_MODAL_CONFIG.minWidth,
+      Math.min(HERO_EDITOR_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    height: Math.max(
+      HERO_EDITOR_MODAL_CONFIG.minHeight,
+      Math.min(HERO_EDITOR_MODAL_CONFIG.height, window.innerHeight - pad)
+    )
+  };
+}
 
-      const widgetBottom = dialog.querySelector('.widget-bottom');
-      if (widgetBottom) {
-        widgetBottom.style.display = 'flex';
-        widgetBottom.style.flexDirection = 'column';
-        widgetBottom.style.flex = '1 1 0';
-        widgetBottom.style.minHeight = '0';
-      }
+function getHeroEditorColumnWidths(modalWidth) {
+  const contentWidth = modalWidth - HERO_EDITOR_MODAL_CONFIG.contentInset;
+  if (modalWidth >= HERO_EDITOR_MODAL_CONFIG.width) {
+    return {
+      contentWidth: HERO_EDITOR_MODAL_CONFIG.width - HERO_EDITOR_MODAL_CONFIG.contentInset,
+      leftWidth: HERO_EDITOR_MODAL_CONFIG.leftColumnWidth
+    };
+  }
+  const leftWidth = Math.min(
+    HERO_EDITOR_MODAL_CONFIG.leftColumnWidth,
+    Math.max(70, Math.floor(contentWidth * 0.24))
+  );
+  return { contentWidth, leftWidth };
+}
 
-      const footer = dialog.querySelector('.flex.justify-end.gap-2');
-      if (footer && !footer.querySelector('.hero-editor-auto-save-indicator')) {
-        const autoSaveIndicator = document.createElement('div');
-        autoSaveIndicator.className = 'hero-editor-auto-save-indicator pixel-font-16';
-        autoSaveIndicator.style.cssText = `
-          font-size: 11px;
-          color: rgb(74, 222, 128);
-          font-style: italic;
-          margin-right: auto;
-        `;
-        autoSaveIndicator.textContent = t('mods.heroEditor.settingsAutoSave');
+function getHeroEditorDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
 
-        footer.style.cssText = `
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 8px;
-        `;
-        footer.insertBefore(autoSaveIndicator, footer.firstChild);
+function clearHeroEditorModalLayoutCleanup() {
+  if (heroEditorModalLayoutCleanup) {
+    heroEditorModalLayoutCleanup();
+    heroEditorModalLayoutCleanup = null;
+  }
+}
 
-        const closeButton = footer.querySelector('button');
-        if (closeButton) {
-          closeButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
-          closeButton.style.cssText = '';
-        }
-      }
-    } catch (error) {
-      console.warn('[Hero Editor] Failed to expand modal layout:', error);
+function injectHeroEditorModalAutosaveFooter(dialog) {
+  if (!dialog) return;
+
+  const footer = dialog.querySelector('.flex.justify-end.gap-2');
+  if (!footer || footer.querySelector('.hero-editor-auto-save-indicator')) return;
+
+  const autoSaveIndicator = document.createElement('div');
+  autoSaveIndicator.className = 'hero-editor-auto-save-indicator pixel-font-16';
+  autoSaveIndicator.style.cssText = `
+    font-size: 11px;
+    color: rgb(74, 222, 128);
+    font-style: italic;
+    margin-right: auto;
+  `;
+  autoSaveIndicator.textContent = t('mods.heroEditor.settingsAutoSave');
+
+  footer.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  `;
+  footer.insertBefore(autoSaveIndicator, footer.firstChild);
+
+  const closeButton = footer.querySelector('button');
+  if (closeButton) {
+    closeButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
+    closeButton.style.cssText = '';
+  }
+}
+
+function applyHeroEditorModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getHeroEditorDialog(modalRef);
+  if (!dialog) return;
+
+  const { width, height } = dimensions;
+  const { contentWidth, leftWidth } = getHeroEditorColumnWidths(width);
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.height = `${height}px`;
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${height}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]');
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper) {
+    Object.assign(rootWrapper.style, {
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      minHeight: '0'
+    });
+  }
+
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  if (widgetBottom) {
+    Object.assign(widgetBottom.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 auto',
+      minHeight: '0',
+      overflowY: 'hidden',
+      overflowX: 'hidden'
+    });
+  }
+
+  injectHeroEditorModalAutosaveFooter(dialog);
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      maxHeight: 'none',
+      minWidth: `${contentWidth}px`,
+      maxWidth: `${contentWidth}px`,
+      width: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+
+    const columnsContainer = contentRoot.querySelector('.hero-editor-modal-columns');
+    if (columnsContainer) {
+      Object.assign(columnsContainer.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        width: '100%',
+        display: 'flex',
+        overflow: 'hidden'
+      });
     }
-  }, 50);
+
+    const leftColumn = contentRoot.querySelector('.hero-editor-modal-left');
+    if (leftColumn) {
+      Object.assign(leftColumn.style, {
+        width: `${leftWidth}px`,
+        minWidth: `${leftWidth}px`,
+        maxWidth: `${leftWidth}px`,
+        flex: `0 0 ${leftWidth}px`,
+        minHeight: '0'
+      });
+    }
+
+    const rightColumn = contentRoot.querySelector('.hero-editor-modal-right');
+    if (rightColumn) {
+      Object.assign(rightColumn.style, {
+        flex: '1 1 0',
+        minWidth: '0',
+        minHeight: '0',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      });
+    }
+
+    const detailHost = contentRoot.querySelector('.hero-editor-detail-host');
+    if (detailHost) {
+      Object.assign(detailHost.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        overflowX: 'hidden',
+        overflowY: 'auto'
+      });
+    }
+
+    const listScroll = contentRoot.querySelector('.hero-editor-list-scroll');
+    if (listScroll) {
+      Object.assign(listScroll.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        width: '100%'
+      });
+    }
+  }
+}
+
+function setupHeroEditorModalResponsiveLayout(modalRef, contentRoot) {
+  clearHeroEditorModalLayoutCleanup();
+  activeHeroEditorModal = modalRef;
+  const apply = () => applyHeroEditorModalLayout(modalRef, contentRoot, getHeroEditorModalDimensions());
+  setTimeout(apply, 50);
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  heroEditorModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+    if (activeHeroEditorModal === modalRef) {
+      activeHeroEditorModal = null;
+    }
+  };
 }
 
 // Icon mapping for stats
@@ -1496,11 +1644,11 @@ function showHeroEditorModal(options) {
     contentContainer.style.height = '100%';
 
     const columnsContainer = document.createElement('div');
-    columnsContainer.className = 'flex min-h-0 w-full flex-1 gap-2';
+    columnsContainer.className = 'hero-editor-modal-columns flex min-h-0 w-full flex-1 gap-2';
     columnsContainer.style.flex = '1 1 0';
 
     const col1 = document.createElement('div');
-    col1.className = 'flex min-h-0 shrink-0 flex-col';
+    col1.className = 'hero-editor-modal-left flex min-h-0 shrink-0 flex-col';
     col1.style.width = '100px';
     col1.style.flex = '0 0 100px';
 
@@ -1509,6 +1657,7 @@ function showHeroEditorModal(options) {
     col1Header.textContent = 'Allies';
 
     const listScrollContainer = createHeroEditorScrollContainer();
+    listScrollContainer.element.classList.add('hero-editor-list-scroll');
     listScrollContainer.element.style.width = '100%';
     Object.assign(listScrollContainer.contentContainer.style, {
       width: '100%',
@@ -1522,7 +1671,7 @@ function showHeroEditorModal(options) {
     }
 
     const col2 = document.createElement('div');
-    col2.className = 'flex min-h-0 min-w-0 flex-1 flex-col';
+    col2.className = 'hero-editor-modal-right flex min-h-0 min-w-0 flex-1 flex-col';
     col2.style.flex = '1 1 0';
 
     const col2Header = document.createElement('div');
@@ -1530,7 +1679,7 @@ function showHeroEditorModal(options) {
     col2Header.textContent = 'Details';
 
     const detailHost = document.createElement('div');
-    detailHost.className = 'frame-pressed-1 surface-dark relative box-border min-h-0 flex-1 overflow-hidden';
+    detailHost.className = 'hero-editor-detail-host frame-pressed-1 surface-dark relative box-border min-h-0 flex-1 overflow-hidden';
     detailHost.style.padding = '5px';
     detailHost.style.flex = '1 1 0';
 
@@ -2434,15 +2583,16 @@ function showHeroEditorModal(options) {
     columnsContainer.appendChild(col2);
     contentContainer.appendChild(columnsContainer);
     
-    api.ui.components.createModal({
+    const modalRef = api.ui.components.createModal({
       title: 'Edit Heroes',
-      width: 420,
+      width: HERO_EDITOR_MODAL_CONFIG.width,
       content: contentContainer,
       buttons: [
         {
           text: 'Close',
           primary: true,
           onClick: () => {
+            clearHeroEditorModalLayoutCleanup();
             if (liveApplyTimer) {
               clearTimeout(liveApplyTimer);
               liveApplyTimer = null;
@@ -2453,7 +2603,7 @@ function showHeroEditorModal(options) {
       ]
     });
 
-    expandHeroEditorModal(420, 420);
+    setupHeroEditorModalResponsiveLayout(modalRef, contentContainer);
 
   } catch (error) {
     console.error('Error showing hero editor:', error);
@@ -2526,6 +2676,7 @@ if (typeof window !== 'undefined') {
 context.exports.cleanup = function() {
   console.log('[Hero Editor] Running cleanup...');
   
+  clearHeroEditorModalLayoutCleanup();
   closeHeroEditorBoardContextMenu();
   document.removeEventListener('contextmenu', handleHeroEditorBoardContextMenu, true);
   unsubscribeHeroEditorBoardUpdates();

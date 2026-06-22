@@ -105,6 +105,143 @@ const MODAL_TYPES = {
   RESULTS: 'results'
 };
 
+const MANUAL_RUNNER_RESULTS_MODAL_CONFIG = {
+  width: 400,
+  maxHeight: 500,
+  viewportPadding: 16,
+  minWidth: 280,
+  minHeight: 200
+};
+
+let manualRunnerModalLayoutCleanup = null;
+
+function getManualRunnerResultsModalDimensions() {
+  const pad = MANUAL_RUNNER_RESULTS_MODAL_CONFIG.viewportPadding * 2;
+  return {
+    width: Math.max(
+      MANUAL_RUNNER_RESULTS_MODAL_CONFIG.minWidth,
+      Math.min(MANUAL_RUNNER_RESULTS_MODAL_CONFIG.width, window.innerWidth - pad)
+    ),
+    maxHeight: Math.max(
+      MANUAL_RUNNER_RESULTS_MODAL_CONFIG.minHeight,
+      Math.min(MANUAL_RUNNER_RESULTS_MODAL_CONFIG.maxHeight, window.innerHeight - pad)
+    )
+  };
+}
+
+function getManualRunnerDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearManualRunnerModalLayoutCleanup() {
+  if (manualRunnerModalLayoutCleanup) {
+    manualRunnerModalLayoutCleanup();
+    manualRunnerModalLayoutCleanup = null;
+  }
+}
+
+function applyManualRunnerResultsModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getManualRunnerDialog(modalRef);
+  if (!dialog) return;
+
+  const { width, maxHeight } = dimensions;
+  const { minHeight } = MANUAL_RUNNER_RESULTS_MODAL_CONFIG;
+
+  dialog.style.width = `${width}px`;
+  dialog.style.minWidth = '0';
+  dialog.style.maxWidth = `${width}px`;
+  dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]');
+
+  const rootWrapper = dialog.querySelector(':scope > div');
+  const contentContainer = dialog.querySelector('.widget-bottom');
+
+  if (rootWrapper) {
+    Object.assign(rootWrapper.style, {
+      height: 'auto',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '0 0 auto',
+      minHeight: '0'
+    });
+  }
+
+  if (contentContainer) {
+    Object.assign(contentContainer.style, {
+      flex: '0 1 auto',
+      minHeight: '0',
+      overflowY: 'visible',
+      overflowX: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '0 0 auto',
+      minHeight: '0',
+      height: 'auto',
+      maxHeight: 'none',
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflowY: 'visible',
+      overflowX: 'hidden'
+    });
+  }
+
+  dialog.style.height = 'auto';
+  dialog.style.minHeight = '0';
+  dialog.style.maxHeight = `${maxHeight}px`;
+
+  const measuredHeight = dialog.offsetHeight;
+  const needsScroll = measuredHeight > maxHeight;
+  const finalHeight = needsScroll ? maxHeight : Math.max(minHeight, measuredHeight);
+
+  dialog.style.height = `${finalHeight}px`;
+  dialog.style.maxHeight = `${maxHeight}px`;
+
+  if (needsScroll) {
+    if (rootWrapper) {
+      Object.assign(rootWrapper.style, {
+        height: '100%',
+        flex: '1 1 0',
+        minHeight: '0'
+      });
+    }
+    if (contentContainer) {
+      Object.assign(contentContainer.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        overflowY: 'hidden'
+      });
+    }
+    if (contentRoot) {
+      Object.assign(contentRoot.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        overflowY: 'auto'
+      });
+    }
+  }
+}
+
+function setupManualRunnerResultsModalResponsiveLayout(modalRef, contentRoot) {
+  clearManualRunnerModalLayoutCleanup();
+  const apply = () => applyManualRunnerResultsModalLayout(modalRef, contentRoot, getManualRunnerResultsModalDimensions());
+  apply();
+  requestAnimationFrame(() => apply());
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  manualRunnerModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+  };
+}
+
 // Key/event and timing constants
 const ESC_KEY_EVENT_INIT = {
   key: 'Escape',
@@ -4211,7 +4348,11 @@ async function showResultsModal(results) {
   }
 
   setTimeout(() => {
+    clearManualRunnerModalLayoutCleanup();
+    const modalDimensions = getManualRunnerResultsModalDimensions();
     const content = document.createElement('div');
+    content.className = 'manual-runner-results-modal-root';
+    content.style.cssText = 'width:100%;height:auto;box-sizing:border-box;';
     
     // Add a note if stopped by user
     if (results.forceStopped && !results.success) {
@@ -4564,19 +4705,26 @@ async function showResultsModal(results) {
     
     const modal = api.ui.components.createModal({
       title: t('mods.manualRunner.resultsTitle'),
-      width: 400,
+      width: modalDimensions.width,
+      height: modalDimensions.maxHeight,
       content: content,
       buttons: [
         {
           text: t('controls.close'),
           primary: true,
           onClick: () => {
+            clearManualRunnerModalLayoutCleanup();
             // One more check for lingering modals when user closes results (like Board Analyzer)
             forceCloseAllModals();
           }
         }
-      ]
+      ],
+      onClose: () => {
+        clearManualRunnerModalLayoutCleanup();
+      }
     });
+
+    setupManualRunnerResultsModalResponsiveLayout(modal, content);
     
     // Handle modal - it might be a function (closeModal) or an object
     let modalObject = modal;
@@ -4823,6 +4971,7 @@ function cleanupManualRunner() {
   console.log('[Manual Runner] Starting cleanup...');
   
   try {
+    clearManualRunnerModalLayoutCleanup();
     if (analysisState.isRunning()) {
       console.log('[Manual Runner] Stopping running analysis during cleanup');
       analysisState.stop();

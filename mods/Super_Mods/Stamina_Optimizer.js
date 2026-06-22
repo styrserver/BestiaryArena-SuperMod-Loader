@@ -2060,9 +2060,108 @@ let activeModal = null;
 let modalInProgress = false;
 let lastModalCall = 0;
 let modalCleanupObserver = null;
+let staminaOptimizerModalLayoutCleanup = null;
 
-const MODAL_WIDTH = 450;
-const MODAL_HEIGHT = 300;
+const MODAL_CONFIG = {
+    width: 450,
+    height: 400,
+    contentInset: 30,
+    viewportPadding: 16,
+    minWidth: 280,
+    minHeight: 220
+};
+
+function getStaminaOptimizerModalDimensions() {
+    const pad = MODAL_CONFIG.viewportPadding * 2;
+    return {
+        width: Math.max(
+            MODAL_CONFIG.minWidth,
+            Math.min(MODAL_CONFIG.width, window.innerWidth - pad)
+        ),
+        height: Math.max(
+            MODAL_CONFIG.minHeight,
+            Math.min(MODAL_CONFIG.height, window.innerHeight - pad)
+        )
+    };
+}
+
+function getStaminaOptimizerContentWidth(modalWidth) {
+    return Math.max(240, modalWidth - MODAL_CONFIG.contentInset);
+}
+
+function getStaminaOptimizerDialog(modalRef) {
+    if (modalRef?.element) return modalRef.element;
+    if (modalRef instanceof HTMLElement) return modalRef;
+    return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function clearStaminaOptimizerModalLayoutCleanup() {
+    if (staminaOptimizerModalLayoutCleanup) {
+        staminaOptimizerModalLayoutCleanup();
+        staminaOptimizerModalLayoutCleanup = null;
+    }
+}
+
+function applyStaminaOptimizerModalLayout(modalRef, contentRoot, dimensions) {
+    const dialog = getStaminaOptimizerDialog(modalRef);
+    if (!dialog) return;
+
+    const { width, height } = dimensions;
+    const contentWidth = getStaminaOptimizerContentWidth(width);
+
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
+    dialog.classList.remove('max-w-[300px]');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+        rootWrapper.style.height = '100%';
+        rootWrapper.style.display = 'flex';
+        rootWrapper.style.flexDirection = 'column';
+        rootWrapper.style.flex = '1 1 0';
+        rootWrapper.style.minHeight = '0';
+    }
+
+    const contentContainer = dialog.querySelector('.widget-bottom');
+    if (contentContainer) {
+        Object.assign(contentContainer.style, {
+            flex: '1 1 auto',
+            minHeight: '0',
+            overflowY: 'hidden',
+            overflowX: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+        });
+    }
+
+    if (contentRoot) {
+        Object.assign(contentRoot.style, {
+            width: `${contentWidth}px`,
+            maxWidth: `${contentWidth}px`,
+            minWidth: '0',
+            flex: '1 1 auto',
+            minHeight: '0',
+            height: '100%',
+            maxHeight: 'none'
+        });
+    }
+}
+
+function setupStaminaOptimizerModalResponsiveLayout(modalRef, contentRoot) {
+    clearStaminaOptimizerModalLayoutCleanup();
+    const apply = () => applyStaminaOptimizerModalLayout(modalRef, contentRoot, getStaminaOptimizerModalDimensions());
+    apply();
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    staminaOptimizerModalLayoutCleanup = () => {
+        window.removeEventListener('resize', onResize);
+    };
+}
 
 // Create styled input element
 function createStyledInput(type, id, value, style, attributes = {}) {
@@ -2402,13 +2501,17 @@ function createSettingsRow(leftSetting, rightSetting = null) {
 // Create settings content
 function createSettingsContent() {
     const mainContainer = document.createElement('div');
+    mainContainer.className = 'stamina-optimizer-modal-root';
     mainContainer.style.cssText = `
         display: flex;
         flex-direction: column;
-        width: 420px;
-        height: 300px;
+        width: 100%;
         box-sizing: border-box;
         overflow-y: auto;
+        overflow-x: hidden;
+        min-height: 0;
+        max-height: none;
+        flex: 1 1 auto;
         background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
         color: ${COLOR_WHITE};
         font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
@@ -2611,6 +2714,7 @@ function createSettingsContent() {
 // Cleanup function for modal state
 function cleanupModal() {
     try {
+        clearStaminaOptimizerModalLayoutCleanup();
         modalTimeouts.forEach(timeout => clearTimeout(timeout));
         modalTimeouts = [];
         if (activeModal) {
@@ -2638,6 +2742,7 @@ function openSettingsModal() {
         
         lastModalCall = now;
         modalInProgress = true;
+        clearStaminaOptimizerModalLayoutCleanup();
         
         (() => {
             try {
@@ -2649,10 +2754,11 @@ function openSettingsModal() {
                     if (typeof context !== 'undefined' && context.api && context.api.ui) {
                         try {
                             const settingsContent = createSettingsContent();
+                            const modalDimensions = getStaminaOptimizerModalDimensions();
                             activeModal = context.api.ui.components.createModal({
                                 title: t('mods.staminaOptimizer.settingsTitle'),
-                                width: MODAL_WIDTH,
-                                height: MODAL_HEIGHT,
+                                width: modalDimensions.width,
+                                height: modalDimensions.height,
                                 content: settingsContent,
                                 buttons: [{ text: t('mods.staminaOptimizer.closeButton'), primary: true }],
                                 onClose: () => {
@@ -2660,6 +2766,14 @@ function openSettingsModal() {
                                     cleanupModal();
                                 }
                             });
+
+                            const originalClose = activeModal?.close?.bind(activeModal);
+                            if (originalClose) {
+                                activeModal.close = () => {
+                                    clearStaminaOptimizerModalLayoutCleanup();
+                                    originalClose();
+                                };
+                            }
                             const timeout2 = setTimeout(() => {
                                 const index2 = modalTimeouts.indexOf(timeout2);
                                 if (index2 > -1) modalTimeouts.splice(index2, 1);
@@ -2683,14 +2797,9 @@ function openSettingsModal() {
                             const timeout3 = setTimeout(() => {
                                 const index3 = modalTimeouts.indexOf(timeout3);
                                 if (index3 > -1) modalTimeouts.splice(index3, 1);
-                                const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+                                const dialog = getStaminaOptimizerDialog(activeModal);
                                 if (dialog) {
-                                    dialog.style.width = MODAL_WIDTH + 'px';
-                                    dialog.style.minWidth = MODAL_WIDTH + 'px';
-                                    dialog.style.maxWidth = MODAL_WIDTH + 'px';
-                                    dialog.style.height = MODAL_HEIGHT + 'px';
-                                    dialog.style.minHeight = MODAL_HEIGHT + 'px';
-                                    dialog.style.maxHeight = MODAL_HEIGHT + 'px';
+                                    setupStaminaOptimizerModalResponsiveLayout(activeModal, settingsContent);
                                     let footer = dialog.querySelector('div.flex.justify-end.gap-2');
                                     if (!footer) {
                                         const closeButton = Array.from(dialog.querySelectorAll('button')).find(
