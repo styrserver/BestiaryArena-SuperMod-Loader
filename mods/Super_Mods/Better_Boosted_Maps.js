@@ -697,6 +697,29 @@ function bbmRuleStatsMatchEquipment(ruleStatsNorm, actualStat) {
     return !!actualStat && r.includes(actualStat);
 }
 
+function bbmGetValidEquipmentRulesForMap(mapSettings) {
+    if (!mapSettings || typeof mapSettings !== 'object') return [];
+    return Array.isArray(mapSettings.equipmentRules)
+        ? mapSettings.equipmentRules.filter(
+            r => r && Array.isArray(r.equipmentNames) && r.equipmentNames.length > 0
+        )
+        : [];
+}
+
+function bbmMapHasEquipmentRules(roomId, settings) {
+    const ov = (settings?.mapSettings && settings.mapSettings[roomId]) || {};
+    return bbmGetValidEquipmentRulesForMap(ov).length > 0;
+}
+
+/** When a map has equipment rules, only the matching boost may be farmed; otherwise any boost is allowed. */
+function bbmBoostedEquipmentMatchesMapRules(roomId, equipId, equipStatHint, settings) {
+    const s = settings || loadSettings();
+    if (!bbmMapHasEquipmentRules(roomId, s)) {
+        return true;
+    }
+    return getMatchingEquipmentRuleAutomationSettings(roomId, s, equipId, equipStatHint) !== null;
+}
+
 // =======================
 // 3. Utility Functions
 // =======================
@@ -1261,6 +1284,25 @@ function shouldFarmBoostedMap() {
         if (!isEquipmentEnabled) {
             console.log(`[Better Boosted Maps] Equipment "${equipmentName}" is not enabled`);
             return { shouldFarm: false, reason: `Equipment "${equipmentName}" not enabled` };
+        }
+
+        if (!bbmBoostedEquipmentMatchesMapRules(
+            boostedData.roomId,
+            boostedData.equipId,
+            boostedData.equipStat,
+            settings
+        )) {
+            const ov = (settings.mapSettings || {})[boostedData.roomId] || {};
+            const ruleNames = bbmGetValidEquipmentRulesForMap(ov)
+                .flatMap(r => bbmNormalizeEquipmentRuleNames(r.equipmentNames));
+            console.log(
+                `[Better Boosted Maps] Map "${roomName}" has equipment rule(s) but boost is "${equipmentName}" ` +
+                `(allowed: [${ruleNames.join(', ')}]) — skipping`
+            );
+            return {
+                shouldFarm: false,
+                reason: `Boost equipment "${equipmentName}" does not match map equipment rule(s)`
+            };
         }
         
         console.log(`[Better Boosted Maps] Should farm: ${roomName} with ${equipmentName}`);
@@ -1920,8 +1962,8 @@ function getMatchingEquipmentRuleAutomationSettings(roomId, settings, equipId, e
             };
         }
         console.log(
-            `[Better Boosted Maps] No equipment rule matched for room ${roomId}; using fallback ` +
-            `(setup: "${ov.setupMethod || s.setupMethod || t('mods.betterBoostedMaps.autoSetup')}", floor: ${defaultFloor})`
+            `[Better Boosted Maps] No equipment rule matched for room ${roomId} ` +
+            `(allowed: [${bbmGetValidEquipmentRulesForMap(ov).flatMap(r => bbmNormalizeEquipmentRuleNames(r.equipmentNames)).join(', ')}])`
         );
     }
     return null;
@@ -1935,6 +1977,9 @@ function getEffectiveMapAutomationSettings(roomId, settings, equipId, equipStatH
     const matchedEquipmentRule = getMatchingEquipmentRuleAutomationSettings(roomId, s, equipId, equipStatHint);
     if (matchedEquipmentRule) {
         return matchedEquipmentRule;
+    }
+    if (bbmGetValidEquipmentRulesForMap(ov).length > 0) {
+        return null;
     }
     const setupMethod = ov.setupMethod || s.setupMethod || t('mods.betterBoostedMaps.autoSetup');
     const autoRefillStamina = ov.hasOwnProperty('autoRefillStamina')
@@ -1974,12 +2019,7 @@ function bbmGetGlobalDefaultSetupMethod(settings) {
 function bbmHasMeaningfulMapContextSettings(mapId, ms, settings) {
     if (!ms || typeof ms !== 'object') return false;
     const s = settings || loadSettings();
-    const validRules = Array.isArray(ms.equipmentRules)
-        ? ms.equipmentRules.filter(
-            r => r && Array.isArray(r.equipmentNames) && r.equipmentNames.length > 0
-        )
-        : [];
-    if (validRules.length > 0) return true;
+    if (bbmGetValidEquipmentRulesForMap(ms).length > 0) return true;
     const defaultAuto = bbmGetGlobalDefaultAutoRefillStamina(s);
     const defaultSetup = bbmGetGlobalDefaultSetupMethod(s);
     const auto = ms.hasOwnProperty('autoRefillStamina') ? !!ms.autoRefillStamina : defaultAuto;
@@ -4630,6 +4670,16 @@ async function startBoostedMapFarming(force = false) {
                 console.log('[Better Boosted Maps] Not farming:', farmCheck.reason);
                 return;
             }
+        }
+
+        if (!bbmBoostedEquipmentMatchesMapRules(
+            farmCheck.roomId,
+            farmCheck.equipId,
+            farmCheck.equipStat,
+            loadSettings()
+        )) {
+            console.log('[Better Boosted Maps] Not farming: boost equipment does not match map equipment rule(s)');
+            return;
         }
         
         // Check if automation is still enabled before starting

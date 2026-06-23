@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.3.3",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Major in-file refactor (~21k lines): ModalLifecycle teardown (tab cleanups, abort in-flight fetches, modal-scoped handlers/observers); soft cache refresh on open (60s TTL, Maps TRPC cache preserved); lazy tab init. CyclopediaApi unifies profile, rankings, and TRPC. All tab factories hoisted (Maps, Bestiary, Arsenal, Inventory, Characters); shared render components and createStartPage in dedicated sections; openCyclopediaModal reduced to orchestration (~370 lines). File reorganized into sections 1–12 (Formatting, Home Search, tabs, modal, exports). Database helpers replace local REGIONS/ROOMS/equipment scans; fallback paths trimmed (gazer/awaken guesses, REGION_NAME_MAP, INVENTORY_CONFIG empty object, equipment ID brute-force). window.Cyclopedia.close closes modal only; full disable via cleanup. Maps: flexible region panel, spawn levels grouped with golden ×count multiplier."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Cross-tab creature links (Maps/Arsenal → Bestiary) select the creature on the first click (lazy tab page getter). Characters Rankings header/body alignment stable with scrollbars. Maps local-run tables no longer duplicate rows from async repopulation; Floors horizontal scrollbar corrected. Maps Creature Information shows spawn list again (not map metadata only)."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "fixed",
+          "text": "When a map has per-map equipment rules, automation only starts if the daily boost matches one of those rules; no longer navigates or farms with generic fallback when the boosted equipment does not match."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Quest-log task removal no longer throws UI_TEXT is not defined — remaining Remove/Confirm/Suggested map lookups use getBothLanguages instead of removed UI_TEXT constants."
+        }
+      ]
+    },
+    {
       "version": "4.3.2",
       "changes": [
         {

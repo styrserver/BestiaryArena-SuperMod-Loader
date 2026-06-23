@@ -5679,7 +5679,8 @@ function getBothLanguages(key) {
         'controls.close': 'Fechar',
         'mods.betterTasker.newTask': 'Nova tarefa',
         'mods.betterTasker.remove': 'Remover',
-        'mods.betterTasker.confirm': 'Confirmar'
+        'mods.betterTasker.confirm': 'Confirmar',
+        'mods.betterTasker.suggestedMap': 'Mapa sugerido:'
     };
     const pt = ptMap[key] || current;
     return current === pt ? [current] : [current, pt];
@@ -5770,8 +5771,8 @@ function findConfirmationButton() {
     // Define confirmation button text mappings using centralized constants
     const confirmationTexts = [
         'Remove current task', 'Remover tarefa atual',
-        'Remove task', 'Remover tarefa', 
-        UI_TEXT.BUTTONS.CONFIRM, UI_TEXT.BUTTONS_PT.CONFIRM
+        'Remove task', 'Remover tarefa',
+        ...getBothLanguages('mods.betterTasker.confirm')
     ];
     
     return buttons.find(button => {
@@ -7638,9 +7639,9 @@ function extractSuggestedMapFromSection(section) {
         
         // Look for suggested map text within this section
         const allParagraphs = section.querySelectorAll('p.pixel-font-14');
-        const suggestedMapText = getLocalizedText(UI_TEXT.QUEST_TEXT.SUGGESTED_MAP, UI_TEXT.QUEST_TEXT_PT.SUGGESTED_MAP);
+        const suggestedMapLabels = getBothLanguages('mods.betterTasker.suggestedMap');
         for (const p of allParagraphs) {
-            if (p.textContent && p.textContent.includes(suggestedMapText)) {
+            if (p.textContent && suggestedMapLabels.some((label) => p.textContent.includes(label))) {
                 const suggestedMapElement = p.querySelector('span.action-link');
                 if (suggestedMapElement) {
                     console.log('[Better Tasker] Suggested map element found in section:', suggestedMapElement.textContent.trim());
@@ -7782,7 +7783,7 @@ async function removeCurrentTaskIfNotAllowed() {
             const trashIcon = btn.querySelector('svg.lucide-trash2');
             if (trashIcon && isElementVisible(btn)) {
                 // Use centralized function to check for remove button text
-                const possibleTexts = [UI_TEXT.BUTTONS.REMOVE, UI_TEXT.BUTTONS_PT.REMOVE];
+                const possibleTexts = getBothLanguages('mods.betterTasker.remove');
                 const buttonText = btn.textContent.trim();
                 if (possibleTexts.some(text => buttonText.includes(text))) {
                     removeButton = btn;
@@ -7852,7 +7853,7 @@ async function removeTaskDirectlyFromQuestLog() {
                 if (trashIcon && isElementVisible(btn)) {
                     const text = btn.textContent.trim().toLowerCase();
                     // More specific matching to avoid false positives
-                    const possibleTexts = [UI_TEXT.BUTTONS.REMOVE.toLowerCase(), UI_TEXT.BUTTONS_PT.REMOVE.toLowerCase()];
+                    const possibleTexts = getBothLanguages('mods.betterTasker.remove').map((s) => s.toLowerCase());
                     if (possibleTexts.some(possibleText => 
                         text === possibleText || 
                         text === `${possibleText} task` || 
