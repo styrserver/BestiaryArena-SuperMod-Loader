@@ -1400,7 +1400,7 @@ function applyBetterSetupsModalLayout(modalRef, contentRoot, dimensions) {
 function setupBetterSetupsModalResponsiveLayout(modalRef, contentRoot) {
   clearBetterSetupsModalLayoutCleanup();
   const apply = () => applyBetterSetupsModalLayout(modalRef, contentRoot, getBetterSetupsModalDimensions());
-  apply();
+  requestAnimationFrame(() => apply());
   const onResize = () => apply();
   window.addEventListener('resize', onResize);
   betterSetupsModalLayoutCleanup = () => {

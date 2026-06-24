@@ -193,9 +193,14 @@ The UI Components API provides access to game-styled UI components.
 // Access UI components through api.ui.components
 const modal = api.ui.components.createModal({
   title: 'Modal Title',
-  content: 'Modal content',
+  width: 600,
+  height: 400,
+  content: contentDiv,
   buttons: [{ text: 'OK', primary: true }]
 });
+// For multi-column / tabbed bodies, apply the responsive layout helper immediately
+// (see Mod Development Guide — Responsive modals). Numeric height modals flex-fill
+// the shell automatically; the helper re-clamps on resize.
 ```
 
 For detailed documentation on UI Components, see [UI Components Documentation](ui_components.md).

@@ -1362,7 +1362,7 @@ function applyDepotModalLayout(modalRef, contentRoot, dimensions) {
 function setupDepotModalResponsiveLayout(modalRef, contentRoot) {
   clearDepotModalLayoutCleanup();
   const apply = () => applyDepotModalLayout(modalRef, contentRoot, getDepotModalDimensions());
-  apply();
+  requestAnimationFrame(() => apply());
   const onResize = () => apply();
   window.addEventListener('resize', onResize);
   depotModalLayoutCleanup = () => {

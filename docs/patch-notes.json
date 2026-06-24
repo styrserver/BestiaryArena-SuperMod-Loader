@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.3.4",
+      "changes": [
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "createModal with explicit height flex-fills the inner wrapper and .widget-bottom on creation. Mod development guide documents the standard responsive modal pattern: open via createModal/showModal, call setupModalResponsiveLayout immediately, first layout pass in requestAnimationFrame, resize listener until close. Do not defer sizing with setTimeout. Extension popup patch notes min height reduced by 50px (content area 200px)."
+        },
+        {
+          "mod": "Welcome",
+          "type": "changed",
+          "text": "Renamed database mod file from Welcome.js to welcome.js across mod registry, manifests, and popup lists. database/welcome.js always loads as infrastructure (loading toast and completion listener); welcome-enabled / Never Show Again only controls the welcome modal. Welcome modal rebuilt with Cyclopedia-style layout (dedicated scroll area, responsive sizing, thin scrollbars). Compact two-column feature grid; emoji replaced with official bestiaryarena.com icons; body text at 14px. Never Show Again and Got It! use the createModal footer. welcome.js reorganized into numbered sections 1–11; modal copy updated for current popup features."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "New creatures and equipment now default to the Keep column when they are absent from both saved filter lists. Sell-all configs (empty keep list with a full sell list) no longer auto-sell, squeeze, or disenchant newly released content. Legacy keep-only configs, init migration, and runtime filter checks aligned so tri-state list logic is consistent in the UI and at game end."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Bundled mod dialogs no longer flash open at collapsed height before content fills the shell (4.3.2 responsive modals aligned with Challenges): Autoseller, Autoscroller, Better Boosted Maps, Better Forge, Better Rune Recycler, Better Setups, Better Tasker, Cyclopedia, Depot Manager, Dice Roller, Guilds, Hero Editor, Manual Runner, Mod Settings, Raid Hunter, Stamina Optimizer, Welcome; setup helpers use requestAnimationFrame instead of delayed apply. Extension popup opens at full 600×600 size in Edge (no longer clamps to 280px when the browser reports an uninitialized stub viewport on first paint)."
+        },
+        {
+          "mod": "Welcome",
+          "type": "fixed",
+          "text": "database/welcome.js stays enabled in stored mod states after the Welcome.js rename (legacy disabled entries no longer skip the loading toast). Welcome modal no longer permanently skips first load when another game modal is open at completion time; ESC close is retried instead of aborting all later show attempts. Viewport resize now matches Cyclopedia: getWelcomeDialog falls back to open dialogs, setup no longer overwrites the resize cleanup, and window resize listener is removed on close. Orphan Close footer removed (buttons passed to createModal instead of an in-content footer with buttons: [])."
+        }
+      ]
+    },
+    {
       "version": "4.3.3",
       "changes": [
         {

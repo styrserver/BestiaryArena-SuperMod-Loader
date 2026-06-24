@@ -5605,13 +5605,13 @@ function createStyledModal({ title, width, height, content, buttons, onAfterCrea
     buttons
   });
 
-  setTimeout(() => {
-    const dialog = getOpenDialog();
+  requestAnimationFrame(() => {
+    const dialog = modal?.element || getOpenDialog();
     if (dialog) {
       applyModalStyles(dialog, width, height, content, minHeight);
       if (onAfterCreate) onAfterCreate(dialog);
     }
-  }, 50);
+  });
 
   return modal;
 }

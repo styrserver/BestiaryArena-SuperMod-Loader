@@ -847,7 +847,7 @@ function applySetupManagerExpandedLayout(modalRef, dimensions, contentRoot) {
 function setupSetupManagerModalResponsiveLayout(modalRef, contentRoot) {
   clearSetupManagerModalLayoutCleanup();
   const apply = () => applySetupManagerExpandedLayout(modalRef, getSetupManagerModalDimensions(), contentRoot);
-  apply();
+  requestAnimationFrame(() => apply());
   const onResize = () => apply();
   window.addEventListener('resize', onResize);
   setupManagerModalLayoutCleanup = () => {

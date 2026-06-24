@@ -2665,7 +2665,7 @@
   function setupAutoscrollerModalResponsiveLayout(modalRef, contentRoot) {
     clearAutoscrollerModalLayoutCleanup();
     const apply = () => applyAutoscrollerModalLayout(modalRef, contentRoot, getAutoscrollerModalDimensions());
-    apply();
+    requestAnimationFrame(() => apply());
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
     autoscrollerModalLayoutCleanup = () => {

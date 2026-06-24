@@ -130,7 +130,7 @@ function applyRoomHopperModalLayout(modalRef, contentRoot, dimensions) {
 function setupRoomHopperModalResponsiveLayout(modalRef, contentRoot) {
   clearRoomHopperModalLayoutCleanup();
   const apply = () => applyRoomHopperModalLayout(modalRef, contentRoot, getRoomHopperModalDimensions());
-  apply();
+  requestAnimationFrame(() => apply());
   const onResize = () => apply();
   window.addEventListener('resize', onResize);
   roomHopperModalLayoutCleanup = () => {

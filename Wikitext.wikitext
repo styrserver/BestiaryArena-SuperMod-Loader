@@ -151,7 +151,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>utility_injector.js</code> - Utility injection system
 * <code>docs/</code> - Mod developer markdown guides and [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/patch-notes.json <code>patch-notes.json</code>] (version metadata used by the extension popup patch notes UI)
 * <code>database/</code> - Static tooltip and reference data used by mods
-** <code>Welcome.js</code> - Welcome screen data
+** <code>welcome.js</code> - Welcome screen data
 ** <code>inventory-database.js</code> - Inventory tooltip data
 ** <code>creature-database.js</code> - Creature reference data (lists, map boss stats, shiny/gazer helpers)
 ** <code>equipment-database.js</code> - Equipment reference data (boosted-map overrides shared with Cyclopedia)

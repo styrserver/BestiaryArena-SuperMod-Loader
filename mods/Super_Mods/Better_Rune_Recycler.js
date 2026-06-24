@@ -925,7 +925,7 @@
   function setupRuneRecyclerModalResponsiveLayout(modalRef, contentRoot) {
     clearRuneRecyclerModalLayoutCleanup();
     const apply = () => applyRuneRecyclerModalLayout(modalRef, contentRoot, getRuneRecyclerModalDimensions());
-    apply();
+    requestAnimationFrame(() => apply());
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
     runeRecyclerModalLayoutCleanup = () => {

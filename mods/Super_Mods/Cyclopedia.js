@@ -6714,6 +6714,32 @@ function getCyclopediaModalDimensions() {
   };
 }
 
+function getCyclopediaOpenDialog() {
+  return document.querySelector('div[role="dialog"][data-cyclopedia-dialog="1"]') ||
+    document.querySelector('div[role="dialog"][data-state="open"]') ||
+    document.querySelector('div[role="dialog"]');
+}
+
+function getCyclopediaDialog(modalRef) {
+  if (modalRef && modalRef.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return getCyclopediaOpenDialog();
+}
+
+function openCyclopediaModalDialog(cyclopediaApi, { title, width, height, content, buttons }) {
+  const options = { title, content, buttons: buttons || [] };
+  if (width != null) options.width = width;
+  if (height != null && height !== undefined) options.height = height;
+
+  if (cyclopediaApi?.ui?.components?.createModal) {
+    return cyclopediaApi.ui.components.createModal(options);
+  }
+  if (typeof cyclopediaApi?.showModal === 'function') {
+    return cyclopediaApi.showModal(options);
+  }
+  return null;
+}
+
 const CYCLOPEDIA_STACKABLE_COL_PROPS = [
   'display', 'flex', 'flexDirection', 'flexGrow', 'flexShrink', 'flexBasis',
   'width', 'minWidth', 'maxWidth', 'height', 'minHeight', 'maxHeight',
@@ -6889,7 +6915,8 @@ function createCyclopediaTabShell({ rightColRow = false, mountLeft, mountRight, 
   return { root, leftCol, rightCol };
 }
 
-function applyCyclopediaModalLayout(dialog, dimensions) {
+function applyCyclopediaModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getCyclopediaDialog(modalRef);
   if (!dialog) return;
 
   const { width, height } = dimensions;
@@ -6900,50 +6927,72 @@ function applyCyclopediaModalLayout(dialog, dimensions) {
   dialog.style.minHeight = '0';
   dialog.style.maxHeight = `${height}px`;
   dialog.style.boxSizing = 'border-box';
+  dialog.classList.remove('max-w-[300px]', 'w-full');
+  dialog.setAttribute('data-cyclopedia-dialog', '1');
 
-  const innerWrapper = dialog.querySelector(':scope > div');
+  const innerWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
   if (innerWrapper) {
-    innerWrapper.style.height = '100%';
-    innerWrapper.style.display = 'flex';
-    innerWrapper.style.flexDirection = 'column';
-    innerWrapper.style.minHeight = '0';
+    Object.assign(innerWrapper.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      minHeight: '0',
+      flex: '1 1 0'
+    });
   }
 
   const contentElem = dialog.querySelector('.widget-bottom');
   if (contentElem) {
-    contentElem.style.flex = '1 1 auto';
-    contentElem.style.minHeight = '0';
-    contentElem.style.overflowY = 'hidden';
-    contentElem.style.overflowX = 'hidden';
-    contentElem.style.display = 'flex';
-    contentElem.style.flexDirection = 'column';
+    Object.assign(contentElem.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      overflowY: 'hidden',
+      overflowX: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
   }
 
-  const modalRoot = dialog.querySelector('.cyclopedia-modal-root');
-  if (modalRoot) {
-    modalRoot.style.flex = '1 1 auto';
-    modalRoot.style.minHeight = '0';
-    modalRoot.style.height = '100%';
-    modalRoot.style.overflow = 'hidden';
-    modalRoot.style.display = 'flex';
-    modalRoot.style.flexDirection = 'column';
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      maxHeight: 'none',
+      width: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
   }
 
   const mainPanel = dialog.querySelector('.cyclopedia-main-panel');
   if (mainPanel) {
-    mainPanel.style.flex = '1 1 0';
-    mainPanel.style.minHeight = '0';
-    mainPanel.style.height = 'auto';
-    mainPanel.style.maxHeight = 'none';
-    mainPanel.style.overflow = 'hidden';
+    Object.assign(mainPanel.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      height: 'auto',
+      maxHeight: 'none',
+      overflow: 'hidden'
+    });
   }
 }
 
-function setupCyclopediaModalResponsiveLayout(dialog) {
-  const apply = () => applyCyclopediaModalLayout(dialog, getCyclopediaModalDimensions());
-  apply();
-  const resizeKey = registerModalHandler(window, 'resize', apply);
-  return () => EventHandlerManager.removeHandler(resizeKey);
+function setupCyclopediaModalResponsiveLayout(modalRef, contentRoot) {
+  clearCyclopediaModalLayoutCleanup();
+  activeCyclopediaModal = modalRef;
+  const apply = () => applyCyclopediaModalLayout(modalRef, contentRoot, getCyclopediaModalDimensions());
+  requestAnimationFrame(() => apply());
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  cyclopediaModalLayoutCleanup = () => {
+    window.removeEventListener('resize', onResize);
+    if (activeCyclopediaModal === modalRef) {
+      activeCyclopediaModal = null;
+    }
+  };
 }
 
 function clearCyclopediaModalLayoutCleanup() {
@@ -20531,39 +20580,30 @@ function openCyclopediaModal(options) {
     try {
   
       
-      clearCyclopediaModalLayoutCleanup();
+      const cyclopediaApi = (typeof context !== 'undefined' && context.api) || api;
       const modalDimensions = getCyclopediaModalDimensions();
-      activeCyclopediaModal = api.ui.components.createModal({
+      activeCyclopediaModal = openCyclopediaModalDialog(cyclopediaApi, {
         title: 'Cyclopedia',
         width: modalDimensions.width,
         height: modalDimensions.height,
         content: content,
-        buttons: [],
-        onClose: () => {
-          // Clean up creature list manager
-          CreatureListManager.cleanup();
-          
-          cleanupCyclopediaModal();
-        }
+        buttons: []
       });
 
-      const originalClose = activeCyclopediaModal.close?.bind(activeCyclopediaModal);
+      const originalClose = activeCyclopediaModal?.close?.bind(activeCyclopediaModal);
       if (originalClose) {
         activeCyclopediaModal.close = () => {
           clearCyclopediaModalLayoutCleanup();
           originalClose();
         };
       }
-      
-      // Fallback cleanup for when onClose doesn't work
-      
+
+      setupCyclopediaModalResponsiveLayout(activeCyclopediaModal, content);
+
+      // Fallback cleanup for when close path doesn't run
       const modalCleanupTimeout = setTimeout(() => {
-        const modalElement = activeCyclopediaModal?.element
-          || DOMCache.get('div[role="dialog"][data-state="open"]');
+        const modalElement = getCyclopediaDialog(activeCyclopediaModal);
         if (modalElement) {
-          cyclopediaModalLayoutCleanup = setupCyclopediaModalResponsiveLayout(modalElement);
-  
-          
           // Watch for modal removal
           const cleanupObserver = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {

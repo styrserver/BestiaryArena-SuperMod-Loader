@@ -176,8 +176,23 @@ function isServiceWorkerContext() {
 }
 
 // Keep in sync with content/mod-registry.js
+const WELCOME_MOD_PATH = 'database/welcome.js';
+const LEGACY_WELCOME_MOD_PATH = 'database/Welcome.js';
+
+function ensureWelcomeModAlwaysEnabled(mods) {
+  if (!Array.isArray(mods)) return false;
+  let changed = false;
+  for (const mod of mods) {
+    if (mod.name === WELCOME_MOD_PATH && !mod.enabled) {
+      mod.enabled = true;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 const HARDCODED_DEFAULT_ENABLED_MODS = [
-  'database/Welcome.js',
+  'database/welcome.js',
   'database/inventory-database.js',
   'database/creature-database.js',
   'database/equipment-database.js',
@@ -501,7 +516,12 @@ async function getLocalMods() {
     for (const man of convertedManualMods) {
       byName.set(man.name, man);
     }
-    return Array.from(byName.values());
+    const result = Array.from(byName.values());
+    if (ensureWelcomeModAlwaysEnabled(result)) {
+      await browserAPI.storage.sync.set({ localMods: result });
+      await browserAPI.storage.local.set({ localMods: result });
+    }
+    return result;
   } catch (error) {
     console.error('Error getting local mods:', error);
     return [];
@@ -841,6 +861,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
           content: mod.content,
           originalName: mod.originalName
         }));
+        ensureWelcomeModAlwaysEnabled(localMods);
         
         console.log('Background: Processed local mods with preserved states:', localMods);
         
@@ -854,7 +875,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.error('Background: Error loading default enabled mods:', error);
         // This should not happen since loadDefaultEnabledMods has its own fallback
         // But just in case, use a minimal fallback
-        const minimalFallback = ['database/Welcome.js'];
+        const minimalFallback = ['database/welcome.js'];
         
         // Process with minimal fallback
         localMods = newMods.map(mod => ({
@@ -866,6 +887,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
           content: mod.content,
           originalName: mod.originalName
         }));
+        ensureWelcomeModAlwaysEnabled(localMods);
         
         console.log('Background: Processed local mods with minimal fallback:', localMods);
         

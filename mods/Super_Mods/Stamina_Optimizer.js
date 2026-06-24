@@ -2155,7 +2155,7 @@ function applyStaminaOptimizerModalLayout(modalRef, contentRoot, dimensions) {
 function setupStaminaOptimizerModalResponsiveLayout(modalRef, contentRoot) {
     clearStaminaOptimizerModalLayoutCleanup();
     const apply = () => applyStaminaOptimizerModalLayout(modalRef, contentRoot, getStaminaOptimizerModalDimensions());
-    apply();
+    requestAnimationFrame(() => apply());
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
     staminaOptimizerModalLayoutCleanup = () => {
@@ -2774,10 +2774,29 @@ function openSettingsModal() {
                                     originalClose();
                                 };
                             }
+                            setupStaminaOptimizerModalResponsiveLayout(activeModal, settingsContent);
+                            requestAnimationFrame(() => {
+                                const dialog = getStaminaOptimizerDialog(activeModal);
+                                if (!dialog) return;
+                                let footer = dialog.querySelector('div.flex.justify-end.gap-2');
+                                if (!footer) {
+                                    const closeButton = Array.from(dialog.querySelectorAll('button')).find(
+                                        btn => btn.textContent.trim() === t('mods.staminaOptimizer.closeButton')
+                                    );
+                                    if (closeButton) {
+                                        footer = closeButton.closest('div.flex');
+                                    }
+                                }
+                                if (footer && window.staminaOptimizerAutoSaveIndicator) {
+                                    footer.insertBefore(window.staminaOptimizerAutoSaveIndicator, footer.firstChild);
+                                    delete window.staminaOptimizerAutoSaveIndicator;
+                                }
+                                loadAndApplySettings();
+                            });
                             const timeout2 = setTimeout(() => {
                                 const index2 = modalTimeouts.indexOf(timeout2);
                                 if (index2 > -1) modalTimeouts.splice(index2, 1);
-                                const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
+                                const modalElement = getStaminaOptimizerDialog(activeModal);
                                 if (modalElement) {
                                     modalCleanupObserver = new MutationObserver((mutations) => {
                                         mutations.forEach((mutation) => {
@@ -2794,29 +2813,6 @@ function openSettingsModal() {
                                 }
                             }, 100);
                             modalTimeouts.push(timeout2);
-                            const timeout3 = setTimeout(() => {
-                                const index3 = modalTimeouts.indexOf(timeout3);
-                                if (index3 > -1) modalTimeouts.splice(index3, 1);
-                                const dialog = getStaminaOptimizerDialog(activeModal);
-                                if (dialog) {
-                                    setupStaminaOptimizerModalResponsiveLayout(activeModal, settingsContent);
-                                    let footer = dialog.querySelector('div.flex.justify-end.gap-2');
-                                    if (!footer) {
-                                        const closeButton = Array.from(dialog.querySelectorAll('button')).find(
-                                            btn => btn.textContent.trim() === t('mods.staminaOptimizer.closeButton')
-                                        );
-                                        if (closeButton) {
-                                            footer = closeButton.closest('div.flex');
-                                        }
-                                    }
-                                    if (footer && window.staminaOptimizerAutoSaveIndicator) {
-                                        footer.insertBefore(window.staminaOptimizerAutoSaveIndicator, footer.firstChild);
-                                        delete window.staminaOptimizerAutoSaveIndicator;
-                                    }
-                                    loadAndApplySettings();
-                                }
-                            }, 50);
-                            modalTimeouts.push(timeout3);
                         } catch (error) {
                             console.error('[Stamina Optimizer] Error creating modal:', error);
                             modalInProgress = false;

@@ -35,7 +35,7 @@ let modBaseUrl = '';
 // Embedded fallback when dynamic import of mod-registry.js fails (e.g. Orion iOS).
 // Keep in sync with content/mod-registry.js
 const FALLBACK_DATABASE_MODS = [
-  'Welcome.js', 'inventory-database.js', 'creature-database.js', 'equipment-database.js',
+  'welcome.js', 'inventory-database.js', 'creature-database.js', 'equipment-database.js',
   'maps-database.js', 'equipment-lua-export.js', 'creature-lua-export.js', 'playereq-database.js', 'firebase-admins.js'
 ];
 const FALLBACK_OFFICIAL_MODS = [
@@ -52,8 +52,29 @@ const FALLBACK_SUPER_MODS = [
   'RunTracker.js', 'Stamina Optimizer.js', 'Awaken Tracker.js'
 ];
 const FALLBACK_OT_MODS = ['Challenges.js', 'Quests.js', 'Guilds.js', 'VIP List.js'];
+const WELCOME_MOD_PATH = 'database/welcome.js';
+const LEGACY_WELCOME_MOD_PATH = 'database/Welcome.js';
+
+function normalizeWelcomeModSavedStates(savedModStates) {
+  if (!savedModStates || typeof savedModStates !== 'object') return;
+  if (savedModStates[WELCOME_MOD_PATH] === undefined && savedModStates[LEGACY_WELCOME_MOD_PATH] === true) {
+    savedModStates[WELCOME_MOD_PATH] = true;
+  }
+  delete savedModStates[LEGACY_WELCOME_MOD_PATH];
+  savedModStates[WELCOME_MOD_PATH] = true;
+}
+
+function ensureWelcomeModAlwaysEnabled(mods) {
+  if (!Array.isArray(mods)) return;
+  for (const mod of mods) {
+    if (mod.name === WELCOME_MOD_PATH) {
+      mod.enabled = true;
+    }
+  }
+}
+
 const FALLBACK_DEFAULT_ENABLED_MODS = [
-  'database/Welcome.js', 'database/inventory-database.js', 'database/creature-database.js',
+  'database/welcome.js', 'database/inventory-database.js', 'database/creature-database.js',
   'database/equipment-database.js', 'database/maps-database.js', 'database/equipment-lua-export.js',
   'database/creature-lua-export.js',
   'database/playereq-database.js', 'database/firebase-admins.js',
@@ -710,7 +731,7 @@ async function listAllModFiles() {
 
 // List of mods to enable by default - can be overridden by registry
 let defaultEnabledMods = [
-  'database/Welcome.js',
+  'database/welcome.js',
   'database/inventory-database.js',
   'database/creature-database.js',
   'database/equipment-database.js',
@@ -863,6 +884,8 @@ async function initLocalMods() {
       } catch (error) {
         console.warn('[Local Mods] Could not load saved mod states:', error);
       }
+
+      normalizeWelcomeModSavedStates(savedModStates);
       
       let validMods = [];
       
@@ -873,9 +896,11 @@ async function initLocalMods() {
         console.log(`File ${file} exists: ${exists}`);
         if (exists) {
           // Use saved state if available, otherwise check defaultEnabledMods
-          const enabled = savedModStates.hasOwnProperty(file) 
-            ? savedModStates[file] 
-            : enabledByDefault.includes(file);
+          const enabled = file === WELCOME_MOD_PATH
+            ? true
+            : savedModStates.hasOwnProperty(file)
+              ? savedModStates[file]
+              : enabledByDefault.includes(file);
           console.log(`Mod ${file} enabled: ${enabled} (saved: ${savedModStates.hasOwnProperty(file)}, default: ${enabledByDefault.includes(file)})`);
           
           validMods.push({
@@ -919,6 +944,7 @@ async function initLocalMods() {
         content: mod.content,
         originalName: mod.originalName
       }));
+      ensureWelcomeModAlwaysEnabled(window.localMods);
       
       console.log('Local mods initialized:', window.localMods);
       console.log('Manual mods in initialized data:', 
@@ -1464,6 +1490,7 @@ window.addEventListener('message', function(event) {
         });
         
         window.localMods = sortedMods;
+        ensureWelcomeModAlwaysEnabled(window.localMods);
         
         console.log('Local mods merged and sorted with stored states:', window.localMods.map(m => `${m.name}: ${m.enabled}`));
         console.log('Manual mods in merged data:', 

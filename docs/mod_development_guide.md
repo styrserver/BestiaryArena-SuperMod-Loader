@@ -548,11 +548,45 @@ function getModalDimensions() {
 
 Open with clamped `width` / `height`, give the main content `flex: 1 1 auto; min-height: 0; overflow-y: auto`, and re-apply dimensions on `window` `resize` (remove the listener when the modal closes).
 
+`createModal` with a numeric `height` flex-fills the inner wrapper and `.widget-bottom` automatically. For multi-column or tabbed layouts, use the **standard responsive helper** (same pattern as Challenges):
+
+```javascript
+function openModal(api, { title, width, height, content, buttons }) {
+  const options = { title, content, buttons: buttons || [] };
+  if (width != null) options.width = width;
+  if (height != null) options.height = height;
+  if (api?.ui?.components?.createModal) return api.ui.components.createModal(options);
+  if (typeof api?.showModal === 'function') return api.showModal(options);
+  return null;
+}
+
+function setupModalResponsiveLayout(modalRef, contentRoot) {
+  const apply = () => applyModalLayout(modalRef, contentRoot, getModalDimensions());
+  requestAnimationFrame(() => apply());
+  const onResize = () => apply();
+  window.addEventListener('resize', onResize);
+  return () => window.removeEventListener('resize', onResize);
+}
+
+// After building content:
+const modalRef = openModal(api, {
+  title: 'My Mod',
+  width: dims.width,
+  height: dims.height,
+  content: wrapper,
+  buttons: [{ text: 'Close', primary: true }]
+});
+const stopLayout = setupModalResponsiveLayout(modalRef, wrapper);
+// Call stopLayout when the modal closes.
+```
+
+Call `setupModalResponsiveLayout` **immediately** after `createModal` — do not wrap it in `setTimeout`. Use `requestAnimationFrame` only inside the helper for the first paint. Reserve `setTimeout` for non-layout work (footer injection, observers).
+
 For **settings panels**, prefer `api.ui.createConfigPanel()` — defaults to **350×800** max, viewport clamping, scroll, and resize cleanup are built in (see [UI Management](ui_management.md#configuration-panel-management)).
 
 ### Custom Modal Size Example
 
-For `createModal` without the full responsive helper, pass explicit `width` / `height` and rely on the component’s `95vw` / `95vh` caps for basic phone safety. Avoid post-open `setTimeout` style forcing unless you also clamp to `window.innerWidth` / `innerHeight`:
+Pass explicit clamped `width` / `height`; the component applies `95vw` / `95vh` caps and flex-fills the body when `height` is numeric:
 
 ```javascript
 const { width, height } = getModalDimensions();
@@ -563,36 +597,16 @@ const modal = api.ui.components.createModal({
   content: contentDiv,
   buttons: [{ text: 'Close', primary: true }]
 });
+setupModalResponsiveLayout(modal, contentDiv);
 ```
 
-Legacy pattern (fixed pixel override after open — not recommended for new mods):
+**Deprecated** — do not use post-open `setTimeout` to force dialog size (causes a visible “opens small then expands” flash):
 
 ```javascript
-const contentDiv = document.createElement('div')
-const modal = api.ui.components.createModal({
-  title: 'Custom Modal',
-  width: 700,
-  height: 400,
-  content: contentDiv,
-  buttons: [{ text: 'Close', primary: true }]
-})
+// Legacy — not recommended
 setTimeout(() => {
   const dialog = document.querySelector('div[role="dialog"][data-state="open"]')
-  if (dialog) {
-    dialog.style.width = '700px'
-    dialog.style.minWidth = '700px'
-    dialog.style.maxWidth = '700px'
-    dialog.style.height = '400px'
-    dialog.style.minHeight = '400px'
-    dialog.style.maxHeight = '400px'
-    const contentElem = dialog.querySelector('.modal-content, [data-content], .content, .modal-body')
-    if (contentElem) {
-      contentElem.style.width = '700px'
-      contentElem.style.height = '400px'
-      contentElem.style.display = 'flex'
-      contentElem.style.flexDirection = 'column'
-    }
-  }
+  if (dialog) { /* manual width/height overrides */ }
 }, 100)
 ```
 

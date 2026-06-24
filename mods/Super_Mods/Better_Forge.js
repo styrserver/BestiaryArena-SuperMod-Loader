@@ -4147,7 +4147,7 @@
   function setupBetterForgeModalResponsiveLayout(modalRef, contentRoot) {
     clearBetterForgeModalLayoutCleanup();
     const apply = () => applyBetterForgeModalLayout(modalRef, contentRoot, getBetterForgeModalDimensions());
-    apply();
+    requestAnimationFrame(() => apply());
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
     betterForgeModalLayoutCleanup = () => {

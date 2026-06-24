@@ -22,7 +22,7 @@
 
 // Database mods - core functionality mods that load first
 export const DATABASE_MODS = [
-  'Welcome.js',
+  'welcome.js',
   'inventory-database.js',
   'creature-database.js',
   'equipment-database.js',
@@ -88,7 +88,7 @@ export const OT_MODS = [
 
 // Mods that are enabled by default for new users
 export const DEFAULT_ENABLED_MODS = [
-  'database/Welcome.js',
+  'database/welcome.js',
   'database/inventory-database.js',
   'database/creature-database.js',
   'database/equipment-database.js',
@@ -117,7 +117,7 @@ export const DEFAULT_ENABLED_MODS = [
 
 // Mods that should be hidden from the UI (utility/system mods)
 export const HIDDEN_MODS = [
-  'Welcome.js',
+  'welcome.js',
   'inventory-database.js',
   'creature-database.js',
   'equipment-database.js',
@@ -178,7 +178,7 @@ export function isDefaultEnabled(modPath) {
 
 /**
  * Check if a mod should be hidden from UI
- * @param {string} modName - Name of the mod file (e.g., "Welcome.js")
+ * @param {string} modName - Name of the mod file (e.g., "welcome.js")
  * @returns {boolean} True if mod should be hidden
  */
 export function isHiddenMod(modName) {

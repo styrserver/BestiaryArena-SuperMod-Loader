@@ -38,7 +38,7 @@ Creates a styled modal dialog.
     - `onClick` (Function, optional): Click handler, receives (event, modalObj)
     - `closeOnClick` (Boolean, optional): Whether to close the modal when clicked, default: true
 
-Modals also apply `max-width: 95vw` and `max-height: 95vh` so they stay on screen without extra code. For larger custom modals, prefer a `MODAL_CONFIG` with `viewportPadding` / `minWidth` / `minHeight` and a resize listener (see [Mod Development Guide](mod_development_guide.md#responsive-modals)).
+Modals also apply `max-width: 95vw` and `max-height: 95vh` so they stay on screen without extra code. When `height` is a number, `createModal` flex-fills the inner wrapper and `.widget-bottom` so content can use `height: 100%` / flex children. For larger custom modals, prefer a `MODAL_CONFIG` with `viewportPadding` / `minWidth` / `minHeight`, call `setupModalResponsiveLayout` immediately after open (`requestAnimationFrame` for first paint, `resize` listener until close — see [Mod Development Guide](mod_development_guide.md#responsive-modals)).
 
 **Returns:**
 

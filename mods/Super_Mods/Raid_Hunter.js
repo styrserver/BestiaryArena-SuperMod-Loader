@@ -1337,7 +1337,7 @@ function createDropdownSetting(id, label, description, value = 'Auto-setup', opt
 // Show toast notification
 function showToast(message, duration = 5000) {
     try {
-        // Use custom toast implementation (same as Welcome.js)
+        // Use custom toast implementation (same as welcome.js)
         // Get or create the main toast container
         let mainContainer = document.getElementById('rh-toast-container');
         if (!mainContainer) {
@@ -4961,7 +4961,7 @@ function applyRaidHunterModalLayout(modalRef, contentRoot, dimensions) {
 function setupRaidHunterModalResponsiveLayout(modalRef, contentRoot) {
     clearRaidHunterModalLayoutCleanup();
     const apply = () => applyRaidHunterModalLayout(modalRef, contentRoot, getRaidHunterModalDimensions());
-    apply();
+    requestAnimationFrame(() => apply());
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
     raidHunterModalLayoutCleanup = () => {
@@ -5066,17 +5066,8 @@ function openRaidHunterSettingsModal() {
                                 }
                             }, 100);
                             
-                            // Override modal size to ensure it's actually the correct size (matching Dice Roller approach)
-                            setTimeout(() => {
-                                const dialog = getRaidHunterDialog(activeRaidHunterModal);
-                                if (dialog) {
-                                    setupRaidHunterModalResponsiveLayout(activeRaidHunterModal, settingsContent);
-
-                                    setTimeout(() => {
-                                        loadAndApplySettings();
-                                    }, 100);
-                                }
-                            }, 50);
+                            setupRaidHunterModalResponsiveLayout(activeRaidHunterModal, settingsContent);
+                            requestAnimationFrame(() => loadAndApplySettings());
                         } catch (error) {
                             console.error('[Raid Hunter] Error creating modal:', error);
                             try {

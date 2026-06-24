@@ -1137,16 +1137,18 @@ if (typeof browserAPI === 'undefined') {
         if (heightCss) {
           modalStyle += ' height: ' + heightCss + '; min-height: ' + heightCss + '; max-height: ' + heightCss + ';';
         }
+        modalStyle += ' box-sizing: border-box;';
       }
-      // Patch: Exclude Cyclopedia modal from centering styles
-      if (title && title.toLowerCase().includes('cyclopedia')) {
-        modalEl.style.cssText = 'pointer-events: auto; position: fixed; z-index: 9999;';
-      } else {
-        modalEl.style.cssText = modalStyle;
-      }
+      modalEl.style.cssText = modalStyle;
       
       const innerContent = document.createElement('div');
       innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 0;';
+      const hasFixedHeight = typeof height === 'number' && height > 0;
+      if (hasFixedHeight) {
+        innerContent.style.height = '100%';
+        innerContent.style.minHeight = '0';
+        innerContent.style.flex = '1 1 0';
+      }
       
       // Create header with proper widget-top class
       const header = document.createElement('h2');
@@ -1162,12 +1164,15 @@ if (typeof browserAPI === 'undefined') {
       const contentContainer = document.createElement('div');
       contentContainer.className = 'widget-bottom pixel-font-16 p-3 text-whiteRegular';
       contentContainer.style.marginTop = '-1px';
-      // Cyclopedia modal: force contentContainer to fill modal
-      if (title && title.toLowerCase().includes('cyclopedia')) {
-        contentContainer.style.height = '100%';
-        contentContainer.style.flex = '1 1 0';
-        contentContainer.style.display = 'flex';
-        contentContainer.style.flexDirection = 'column';
+      if (hasFixedHeight) {
+        Object.assign(contentContainer.style, {
+          flex: '1 1 auto',
+          minHeight: '0',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden'
+        });
       }
       
       // Add content
@@ -1233,17 +1238,6 @@ if (typeof browserAPI === 'undefined') {
       
       // Add to document
       document.body.appendChild(modalEl);
-      
-      // --- Cyclopedia Modal Width Override ---
-      if (title && title.toLowerCase().includes('cyclopedia')) {
-        modalEl.classList.remove('max-w-[300px]');
-        modalEl.style.maxWidth = '970px';
-        modalEl.style.width = '970px';
-        modalEl.style.minWidth = '970px';
-        modalEl.style.height = '670px';
-        modalEl.style.minHeight = '670px';
-        modalEl.style.maxHeight = '670px';
-      }
       
       // Function to close the modal
       let isClosing = false;

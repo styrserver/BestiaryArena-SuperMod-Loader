@@ -233,7 +233,6 @@ function applyManualRunnerResultsModalLayout(modalRef, contentRoot, dimensions) 
 function setupManualRunnerResultsModalResponsiveLayout(modalRef, contentRoot) {
   clearManualRunnerModalLayoutCleanup();
   const apply = () => applyManualRunnerResultsModalLayout(modalRef, contentRoot, getManualRunnerResultsModalDimensions());
-  apply();
   requestAnimationFrame(() => apply());
   const onResize = () => apply();
   window.addEventListener('resize', onResize);

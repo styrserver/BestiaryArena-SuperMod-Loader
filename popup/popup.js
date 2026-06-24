@@ -79,7 +79,7 @@ const POPUP_LAYOUT_CONFIG = {
   minWidth: 280,
   minHeightCap: 280,
   patchNotesHeaderHeight: 49,
-  patchNotesContentMinHeight: 250,
+  patchNotesContentMinHeight: 200,
   patchNotesMaxHeight: 360,
   patchNotesReservedHeight: 120
 };
@@ -87,14 +87,26 @@ const POPUP_LAYOUT_CONFIG = {
 let popupLayoutResizeHandler = null;
 
 function applyPopupResponsiveLayout() {
-  const width = Math.max(
-    POPUP_LAYOUT_CONFIG.minWidth,
-    Math.min(POPUP_LAYOUT_CONFIG.width, window.innerWidth)
-  );
-  const height = Math.max(
-    POPUP_LAYOUT_CONFIG.minHeightCap,
-    Math.min(POPUP_LAYOUT_CONFIG.maxHeight, window.innerHeight)
-  );
+  const targetWidth = POPUP_LAYOUT_CONFIG.width;
+  const targetHeight = POPUP_LAYOUT_CONFIG.maxHeight;
+  const viewportW = window.innerWidth;
+  const viewportH = window.innerHeight;
+
+  // Extension popups should default to the designed size (600×600). Only shrink when the
+  // browser has already given a real viewport smaller than our target (e.g. mobile).
+  // Edge can report the minimum stub size on first paint; clamping to that locks the popup small.
+  const shrinkForViewport =
+    viewportW > POPUP_LAYOUT_CONFIG.minWidth &&
+    viewportH > POPUP_LAYOUT_CONFIG.minHeightCap &&
+    (viewportW < targetWidth || viewportH < targetHeight);
+
+  const width = shrinkForViewport
+    ? Math.max(POPUP_LAYOUT_CONFIG.minWidth, Math.min(targetWidth, viewportW))
+    : targetWidth;
+  const height = shrinkForViewport
+    ? Math.max(POPUP_LAYOUT_CONFIG.minHeightCap, Math.min(targetHeight, viewportH))
+    : targetHeight;
+
   const root = document.documentElement;
   root.style.setProperty('--popup-width', `${width}px`);
   root.style.setProperty('--popup-height', `${height}px`);
@@ -1375,7 +1387,7 @@ const otModNames = [
 const hiddenMods = [
   'inventory-database.js',
   'creature-database.js',
-  'Welcome.js',
+  'welcome.js',
   'equipment-database.js',
   'maps-database.js',
   'equipment-lua-export.js',

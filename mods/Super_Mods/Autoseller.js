@@ -920,13 +920,12 @@
         }
         const squeezeMinGenes = settings.autosqueezeGenesMin ?? UI_CONSTANTS.SQUEEZE_GENE_MIN;
         const squeezeMaxGenes = settings.autosqueezeGenesMax ?? UI_CONSTANTS.SQUEEZE_GENE_MAX;
-        const ignoreList = settings.autosqueezeIgnoreList || [];
         return battleRewardMonsters.some((drop) => {
             const monster = drop?.monster || drop;
             if (!monster || typeof monster !== 'object') return false;
             if (isShinyCreature(monster) || isSealedTierFiveCreature(monster)) return false;
             const creatureName = getCreatureNameFromMonster(monster) || monster?.name;
-            if (creatureName && ignoreList.includes(creatureName)) return false;
+            if (creatureName && isItemKeptByFilterList(creatureName, 'autosqueezeIgnoreList', settings)) return false;
             const totalGenes = calculateTotalGenes(monster);
             return totalGenes >= squeezeMinGenes && totalGenes <= squeezeMaxGenes;
         });
@@ -936,13 +935,12 @@
         if (settings?.autoInjectSealedCreaturesGlobal !== true || !Array.isArray(battleRewardMonsters) || battleRewardMonsters.length === 0) {
             return false;
         }
-        const keepList = settings.autoplantIgnoreList || [];
         return battleRewardMonsters.some((drop) => {
             const monster = drop?.monster || drop;
             if (!monster || typeof monster !== 'object') return false;
             if (isShinyCreature(monster) || !isSealedTierFiveCreature(monster)) return false;
             const creatureName = getCreatureNameFromMonster(monster) || monster?.name;
-            if (creatureName && keepList.includes(creatureName)) return false;
+            if (creatureName && isItemKeptByFilterList(creatureName, 'autoplantIgnoreList', settings)) return false;
             return isSealedTier5InjectAllowed(creatureName);
         });
     }
@@ -1295,10 +1293,8 @@
             return false;
         }
         
-        const ignoreList = settings.autodusterIgnoreList || [];
-        
-        // Check if equipment is in ignore list
-        if (equipment.name && ignoreList.includes(equipment.name)) {
+        // Check if equipment is in keep list (new releases default to keep)
+        if (equipment.name && isItemKeptByFilterList(equipment.name, 'autodusterIgnoreList', settings)) {
             return false;
         }
         
@@ -1334,10 +1330,8 @@
             return { shouldDust: false, reason: 'Equipment details unavailable' };
         }
         
-        const ignoreList = settings.autodusterIgnoreList || [];
-        
-        // Check if equipment is in ignore list
-        if (equipment.name && ignoreList.includes(equipment.name)) {
+        // Check if equipment is in keep list (new releases default to keep)
+        if (equipment.name && isItemKeptByFilterList(equipment.name, 'autodusterIgnoreList', settings)) {
             return { shouldDust: false, reason: 'In ignore list' };
         }
         
@@ -1440,7 +1434,6 @@
         const sellMinCount = settings.autosellMinCount ?? 1;
         const squeezeMinCount = settings.autosqueezeMinCount ?? 1;
         const maxExpThreshold = settings.autosellMaxExp ?? 52251;
-        const squeezeIgnoreList = settings.autosqueezeIgnoreList || [];
         const protectSealedTier5 = settings.protectSealedTier5 === true;
         
         const toSqueeze = [];
@@ -1485,6 +1478,9 @@
                     const sealedMax = UI_CONSTANTS.SEALED_SELL_GENE_MAX;
                     if (genes >= sealedMin && genes <= sealedMax) {
                         if (!isShinyCreature(monster)) {
+                            if (monsterName && isItemKeptByFilterList(monsterName, 'autoplantIgnoreList', settings)) {
+                                continue;
+                            }
                             const exp = monster.exp || 0;
                             if (exp < maxExpThreshold) {
                                 if (!hasDaycare || !daycareMonsterIds.includes(monster.id)) {
@@ -1516,7 +1512,7 @@
 
                     // Check ignore list
                     const creatureName = monster.name || (monster.gameId && globalThis.state?.utils?.getMonster?.(monster.gameId)?.metadata?.name);
-                    if (creatureName && squeezeIgnoreList.includes(creatureName)) {
+                    if (creatureName && isItemKeptByFilterList(creatureName, 'autosqueezeIgnoreList', settings)) {
                         continue;
                     }
 
@@ -1526,6 +1522,11 @@
             else if (sellEnabled && genes >= sellMinGenes && genes <= sellMaxGenes) {
                 // FAILSAFE: NEVER autosell shiny creatures
                 if (isShinyCreature(monster)) {
+                    continue;
+                }
+
+                const creatureName = monster.name || (monster.gameId && globalThis.state?.utils?.getMonster?.(monster.gameId)?.metadata?.name);
+                if (creatureName && isItemKeptByFilterList(creatureName, 'autoplantIgnoreList', settings)) {
                     continue;
                 }
 
@@ -1845,7 +1846,6 @@
     async function autoInjectEligibleSealedCreatures(monsters) {
         const consumedServerIds = new Set();
         const settings = getSettings();
-        const keepList = settings.autoplantIgnoreList || [];
         if (!Array.isArray(monsters) || monsters.length === 0) {
             console.log('[Autoseller][Inject] Skip: no monsters provided');
             return consumedServerIds;
@@ -1867,7 +1867,7 @@
             if (!monster || !monster.id) continue;
             if (isShinyCreature(monster) || !isSealedTierFiveCreature(monster)) continue;
             const creatureName = monster?.metadata?.name || monster?.name || getCreatureNameFromMonster(monster);
-            if (creatureName && keepList.includes(creatureName)) {
+            if (creatureName && isItemKeptByFilterList(creatureName, 'autoplantIgnoreList', settings)) {
                 console.log(`[Autoseller][Inject][Skip] ${creatureName || monster.id}: in Keep list`);
                 emitAutosellerEvent('inject:skip', { reason: 'keep-list', creatureName, gameId: Number(monster?.gameId ?? monster?.metadata?.id), candidate: { stats: getMonsterGeneStats(monster) } });
                 continue;
@@ -4873,6 +4873,59 @@
     // Shared Creature Filter Functions (for both autoplant and autosqueeze)
     // =======================
     
+    function arraysEqual(a, b) {
+        if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) return false;
+        }
+        return true;
+    }
+
+    function getFilterListStorageState(ignoreListKey) {
+        const sellListKey = ignoreListKey.replace('IgnoreList', 'SellList');
+        try {
+            const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
+            return {
+                ignoreListExists: ignoreListKey in stored,
+                sellListExists: sellListKey in stored,
+            };
+        } catch (e) {
+            return { ignoreListExists: false, sellListExists: false };
+        }
+    }
+
+    /**
+     * Whether an item is in the keep column for a sell/squeeze/disenchant filter.
+     * Fresh installs default to keep; legacy keep-only configs treat absence as sell;
+     * tri-state configs (both lists saved) default new releases to keep.
+     */
+    function isItemKeptByFilterList(itemName, ignoreListKey, settings) {
+        if (!itemName) return false;
+        const sellListKey = ignoreListKey.replace('IgnoreList', 'SellList');
+        const ignoreList = settings[ignoreListKey] || [];
+        const sellList = settings[sellListKey] || [];
+        const { ignoreListExists, sellListExists } = getFilterListStorageState(ignoreListKey);
+
+        if (!ignoreListExists && !sellListExists) {
+            return true;
+        }
+        if (ignoreList.includes(itemName)) return true;
+        if (!sellListExists) {
+            return false;
+        }
+        if (sellList.includes(itemName)) return false;
+        return true;
+    }
+
+    function isFilterListProcessingEverything(ignoreListKey, allItems, settings) {
+        if (!Array.isArray(allItems) || allItems.length === 0) {
+            const keepList = settings[ignoreListKey] || [];
+            const { sellListExists } = getFilterListStorageState(ignoreListKey);
+            return sellListExists && keepList.length === 0;
+        }
+        return allItems.every(item => !isItemKeptByFilterList(item, ignoreListKey, settings));
+    }
+
     /**
      * Helper function to load and migrate filter lists (shared between creatures and equipment)
      * @param {string} settingKey - Settings key for ignore list (e.g., 'autoplantIgnoreList')
@@ -4881,59 +4934,75 @@
      */
     function loadAndMigrateFilterLists(settingKey, allItems) {
         const sellListKey = settingKey.replace('IgnoreList', 'SellList');
-        
-        // Simple logic:
-        // 1. Fetch all creatures/items (allItems parameter)
-        // 2. Read the ignore list (keep list) from settings
-        // 3. If item is in ignore list -> keep, otherwise -> sell
-        
-        // Check if keys exist in localStorage (not just defaults)
-        let ignoreListExists = false;
-        let sellListExists = false;
-        try {
-            const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
-            ignoreListExists = settingKey in stored;
-            sellListExists = sellListKey in stored;
-        } catch (e) {
-            // If we can't parse, assume nothing exists
-        }
-        
+        const { ignoreListExists, sellListExists } = getFilterListStorageState(settingKey);
+
         const savedSettings = getSettings();
-        const savedIgnoreList = savedSettings[settingKey];
-        const savedSellList = savedSettings[sellListKey];
-        
+        const savedIgnoreList = Array.isArray(savedSettings[settingKey]) ? savedSettings[settingKey] : [];
+        const savedSellList = Array.isArray(savedSettings[sellListKey]) ? savedSettings[sellListKey] : [];
+
         let keepList = [];
         let sellList = [];
-        
-        // If ignore list was saved, use it (even if empty - means all items should be sold)
-        if (ignoreListExists && savedIgnoreList && Array.isArray(savedIgnoreList)) {
-            keepList = savedIgnoreList.filter(item => allItems.includes(item));
-            sellList = allItems.filter(item => !keepList.includes(item));
-        } 
-        // Otherwise, if sell list was saved, use it
-        else if (sellListExists && savedSellList && Array.isArray(savedSellList)) {
-            sellList = savedSellList.filter(item => allItems.includes(item));
-            keepList = allItems.filter(item => !sellList.includes(item));
-        } 
-        // No saved lists: all items default to keep
-        else {
+
+        if (!ignoreListExists && !sellListExists) {
             keepList = [...allItems];
             sellList = [];
+        } else {
+            let effectiveSellList = savedSellList;
+            if (!sellListExists) {
+                // Legacy configs only stored the keep list — snapshot the current catalog as sell.
+                effectiveSellList = allItems.filter(item => !savedIgnoreList.includes(item));
+            }
+
+            for (const item of allItems) {
+                if (savedIgnoreList.includes(item)) {
+                    keepList.push(item);
+                } else if (effectiveSellList.includes(item)) {
+                    sellList.push(item);
+                } else {
+                    keepList.push(item);
+                }
+            }
         }
-        
-        // Add any new items (not in either list) to keep
-        const newItems = allItems.filter(item => 
-            !keepList.includes(item) && !sellList.includes(item)
-        );
-        if (newItems.length > 0) {
-            keepList = [...keepList, ...newItems];
-        }
-        
-        // Ensure both lists are sorted alphabetically
+
         keepList.sort();
         sellList.sort();
-        
+
         return { keepList, sellList, sellListKey };
+    }
+
+    function buildFilterListMigrationUpdate(settings, availableCreatures, availableEquipment) {
+        const updates = {};
+        const listPairs = [
+            ['autoplantIgnoreList', availableCreatures],
+            ['autosqueezeIgnoreList', availableCreatures],
+            ['autodusterIgnoreList', availableEquipment],
+        ];
+
+        for (const [ignoreKey, allItems] of listPairs) {
+            if (!Array.isArray(allItems) || allItems.length === 0) continue;
+            const { keepList, sellList, sellListKey } = loadAndMigrateFilterLists(ignoreKey, allItems);
+            const currentKeep = settings[ignoreKey] || [];
+            const currentSell = settings[sellListKey] || [];
+            if (!arraysEqual(currentKeep, keepList) || !arraysEqual(currentSell, sellList)) {
+                updates[ignoreKey] = keepList;
+                updates[sellListKey] = sellList;
+            }
+        }
+
+        return updates;
+    }
+
+    function persistFilterListMigrationIfNeeded(settingKey, keepList, sellList, sellListKey) {
+        const savedSettings = getSettings();
+        const savedKeep = savedSettings[settingKey] || [];
+        const savedSell = savedSettings[sellListKey] || [];
+        if (arraysEqual(savedKeep, keepList) && arraysEqual(savedSell, sellList)) {
+            return;
+        }
+        const settingsUpdate = {};
+        settingsUpdate[settingKey] = keepList;
+        settingsUpdate[sellListKey] = sellList;
+        setSettings(settingsUpdate);
     }
     
     /**
@@ -4957,6 +5026,7 @@
         const { keepList, sellList, sellListKey } = loadAndMigrateFilterLists(settingKey, allCreatures);
         let selectedCreatures = [...keepList];
         let availableCreatures = [...sellList];
+        persistFilterListMigrationIfNeeded(settingKey, keepList, sellList, sellListKey);
         const isSqueezeContext = settingKey === 'autosqueezeIgnoreList';
         const contextDefaultRangeMin = isSqueezeContext ? 80 : 0;
         const contextDefaultRangeMax = 100;
@@ -5095,6 +5165,7 @@
         const { keepList, sellList, sellListKey } = loadAndMigrateFilterLists(settingKey, allEquipment);
         let selectedEquipment = [...keepList];
         let availableEquipment = [...sellList];
+        persistFilterListMigrationIfNeeded(settingKey, keepList, sellList, sellListKey);
         
         // Function to save both lists to settings
         function saveIgnoreList() {
@@ -5200,7 +5271,7 @@
     // Plant Monster Filter Functions
     // =======================
     
-    function setPlantMonsterFilter(ignoreList) {
+    function setPlantMonsterFilter() {
         if (!globalThis.state?.clientConfig?.trigger?.setState) {
             console.warn('[Autoseller] clientConfig not available for plantMonsterFilter');
             return;
@@ -5229,7 +5300,6 @@
         const autosqueezeEnabled = settings.autosqueezeChecked === true;
         const squeezeMinGenes = settings.autosqueezeGenesMin ?? UI_CONSTANTS.SQUEEZE_GENE_MIN;
         const squeezeMaxGenes = settings.autosqueezeGenesMax ?? UI_CONSTANTS.SQUEEZE_GENE_MAX;
-        const autosqueezeIgnoreList = settings.autosqueezeIgnoreList || [];
         
         try {
             globalThis.state.clientConfig.trigger.setState({
@@ -5266,7 +5336,7 @@
                             if (autosqueezeEnabled &&
                                 totalGenes >= squeezeMinGenes &&
                                 totalGenes <= squeezeMaxGenes &&
-                                !(monsterName && autosqueezeIgnoreList.includes(monsterName))) {
+                                !isItemKeptByFilterList(monsterName, 'autosqueezeIgnoreList', settings)) {
                                 const allowSealedDevourDespiteSqueezeBand =
                                     isSealedTierFiveCreature(monster) && isSealedTier5SellAllowed(monsterName);
                                 if (!allowSealedDevourDespiteSqueezeBand) {
@@ -5290,8 +5360,8 @@
                                 }
                             }
                             
-                            // For creatures between thresholds (or all if keep genes disabled), check ignore list
-                            if (monsterName && ignoreList.includes(monsterName)) {
+                            // For creatures between thresholds (or all if keep genes disabled), check keep list
+                            if (monsterName && isItemKeptByFilterList(monsterName, 'autoplantIgnoreList', settings)) {
                                 // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
                                 const keepRange = getCreatureKeepRange(monsterName);
                                 if (keepRange) {
@@ -5329,14 +5399,12 @@
         console.log('[Autoseller] Plant monster filter removed');
     }
     
-    function updatePlantMonsterFilter(selectedCreatures = []) {
+    function updatePlantMonsterFilter() {
         const settings = getSettings();
         
         // Only set filter if autoplant is enabled
         if (settings.autoMode === 'autoplant') {
-            // Use provided selectedCreatures, or fall back to saved ignore list from settings
-            const ignoreList = selectedCreatures.length > 0 ? selectedCreatures : (settings.autoplantIgnoreList || []);
-            setPlantMonsterFilter(ignoreList);
+            setPlantMonsterFilter();
         } else {
             removePlantMonsterFilter();
         }
@@ -6579,7 +6647,6 @@
             // Helper function to filter equipment that should be disenchanted
             function filterEquipmentForDisenchant(inventoryEquipmentList, settings, rewardEquipmentIds = null, isPending = false) {
                 const toDisenchant = [];
-                const ignoreList = settings.autodusterIgnoreList || [];
                 
                 for (const invEquipment of inventoryEquipmentList) {
                     const equipmentId = invEquipment?.id;
@@ -6613,7 +6680,7 @@
                     }
                     
                     // Check ignore list
-                    if (ignoreList.includes(equipment.name)) {
+                    if (isItemKeptByFilterList(equipment.name, 'autodusterIgnoreList', settings)) {
                         const decision = getEquipmentDecisionReason(equipment, settings);
                         console.log(`[Autoseller] 🔒 KEEP: ${equipment.name} (T${equipment.tier || '?'} ${equipment.stat || 'unknown'}) - ${decision.reason}`);
                         if (isPending) {
@@ -7033,7 +7100,7 @@
     function setupAutosellerModalResponsiveLayout(modalRef, elements) {
         clearAutosellerModalLayoutCleanup();
         const apply = () => applyAutosellerModalLayout(modalRef, elements, getAutosellerModalDimensions());
-        apply();
+        requestAnimationFrame(() => apply());
         const onResize = () => apply();
         window.addEventListener('resize', onResize);
         autosellerModalLayoutCleanup = () => {
@@ -7482,20 +7549,17 @@
             }
 
             const modalLayoutElements = { content, mainContent, leftColumn, rightColumn };
-            
-            // Apply responsive layout and post-open setup
+
+            setupAutosellerModalResponsiveLayout(modalInstance, modalLayoutElements);
+
+            // Post-open setup (checkbox listeners, menu colors)
             setTimeout(() => {
                 const dialog = getAutosellerDialog(modalInstance);
                 if (dialog) {
-                    setupAutosellerModalResponsiveLayout(modalInstance, modalLayoutElements);
-                    
-                    // Apply localStorage to mod checkbox when modal opens (for autoplant mode)
                     const currentSettings = getSettings();
                     if (currentSettings.autoMode === 'autoplant') {
                         applyLocalStorageToModCheckbox();
                     }
-                    
-                    // Set up checkbox/radio listeners and update colors on modal open
                     if (content._setupCheckboxListeners) {
                         content._setupCheckboxListeners();
                     }
@@ -7555,19 +7619,19 @@
         if (!btn) return;
         
         const settings = getSettings();
+        const creatureCatalog = getAllAutoplantCreatures();
+        const equipmentCatalog = window.equipmentDatabase?.ALL_EQUIPMENT || [];
         // Green if ANY tabs are enabled (autosell, autoplant, autosqueeze, or autoduster)
         const isActive = settings.autoMode === 'autoplant' || settings.autoMode === 'autosell' || settings.autosqueezeChecked || settings.autodusterChecked;
         
-        // Check if selling, squeezing, AND disenchanting everything
-        // If the "keep" (ignore) list is empty for all three, everything is being processed
         const isSellingEverything = (settings.autoMode === 'autosell' || settings.autoMode === 'autoplant') &&
-            Array.isArray(settings.autoplantIgnoreList) && settings.autoplantIgnoreList.length === 0;
+            isFilterListProcessingEverything('autoplantIgnoreList', creatureCatalog, settings);
         
         const isSqueezingEverything = settings.autosqueezeChecked &&
-            Array.isArray(settings.autosqueezeIgnoreList) && settings.autosqueezeIgnoreList.length === 0;
+            isFilterListProcessingEverything('autosqueezeIgnoreList', creatureCatalog, settings);
         
         const isDisenchantingEverything = settings.autodusterChecked &&
-            Array.isArray(settings.autodusterIgnoreList) && settings.autodusterIgnoreList.length === 0;
+            isFilterListProcessingEverything('autodusterIgnoreList', equipmentCatalog, settings);
 
         const hasAutosellActive = settings.autoMode === 'autosell' || settings.autoMode === 'autoplant';
         const isSealedRiskWarning = hasAutosellActive && (
@@ -8355,7 +8419,6 @@
         const keepGenesEnabled = true;
         const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow ?? 49;
         const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
-        const ignoreList = settings.autoplantIgnoreList || [];
         const upgradeLadderProtected = computeUpgradeLadderProtectedIds(
             inventorySnapshot || globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [],
             settings
@@ -8401,9 +8464,9 @@
                 }
             }
 
-            // Get creature name for keep range and ignore list check
-            if (creatureName && ignoreList.includes(creatureName)) {
-                // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
+            // Get creature name for keep range and keep-list check
+            if (creatureName && isItemKeptByFilterList(creatureName, 'autoplantIgnoreList', settings)) {
+                // Check per-creature keep range ONLY if creature is in keep list (keep range is only active there)
                 const keepRange = getCreatureKeepRange(creatureName);
                 if (keepRange) {
                     // If creature has a keep range, only keep if within range, otherwise sell
@@ -8427,7 +8490,6 @@
         
         const squeezeMinGenes = settings.autosqueezeGenesMin ?? 80;
         const squeezeMaxGenes = settings.autosqueezeGenesMax ?? 100;
-        const ignoreList = settings.autosqueezeIgnoreList || [];
         const upgradeLadderProtected = computeUpgradeLadderProtectedIds(
             inventorySnapshot || globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [],
             settings
@@ -8468,7 +8530,7 @@
                 return false;
             }
             
-            if (creatureName && ignoreList.includes(creatureName)) {
+            if (creatureName && isItemKeptByFilterList(creatureName, 'autosqueezeIgnoreList', settings)) {
                 filterStats.inIgnoreList++;
                 return false;
             }
@@ -8745,12 +8807,11 @@
 
         if (rewardMonsterIds.size > 0) {
             const matchedMonsters = filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds);
-            const keepList = settings.autoplantIgnoreList || [];
             const sealedCandidateCount = matchedMonsters.filter(invMonster => {
                 const creatureName = getCreatureNameFromMonster(invMonster);
                 return isSealedTierFiveCreature(invMonster) &&
                     isSealedTier5InjectAllowed(creatureName) &&
-                    !(creatureName && keepList.includes(creatureName));
+                    !isItemKeptByFilterList(creatureName, 'autoplantIgnoreList', settings);
             }).length;
             console.log(`[Autoseller][Inject] sealed candidates from rewards: ${sealedCandidateCount}`);
             console.log(`[Autoseller][Inject] mode=${settings.autoMode || 'off'} matchedMonsters=${matchedMonsters.length}`);
@@ -8793,7 +8854,7 @@
                         const creatureName = getCreatureNameFromMonster(invMonster);
                         return isSealedTierFiveCreature(invMonster) &&
                             isSealedTier5InjectAllowed(creatureName) &&
-                            !(creatureName && keepList.includes(creatureName));
+                            !isItemKeptByFilterList(creatureName, 'autoplantIgnoreList', settings);
                     });
                     if (monstersToSell.length > 0 || injectCandidates.length > 0) {
                         console.log('[Autoseller] Processing autosell for', monstersToSell.length, 'monsters');
@@ -9302,13 +9363,7 @@
         const MAX_CLEANUP_RETRIES = 30; // 30 seconds max wait
 
         function cleanupIgnoreListsWhenReady() {
-            // Check if databases are loaded
-            const db = window.creatureDatabase;
-            const availableCreatures = typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function'
-                ? db.getAutoscrollAutosellerCreaturePickerNames()
-                : typeof db?.getCreaturePickerNames === 'function'
-                    ? db.getCreaturePickerNames().filter((name) => (typeof db.isGazerCreatureName === 'function' ? !db.isGazerCreatureName(name) : !String(name).toLowerCase().includes('gazer')))
-                    : db?.ALL_CREATURES;
+            const availableCreatures = getAllAutoplantCreatures();
             const availableEquipment = window.equipmentDatabase?.ALL_EQUIPMENT;
 
             if (!availableCreatures || !availableEquipment || availableCreatures.length === 0 || availableEquipment.length === 0) {
@@ -9323,10 +9378,17 @@
                 return;
             }
 
-            // Databases are loaded, proceed with cleanup
+            // Databases are loaded, proceed with migration and cleanup
             try {
                 const settings = getSettings();
                 let hasChanges = false;
+
+                const migrationUpdates = buildFilterListMigrationUpdate(settings, availableCreatures, availableEquipment);
+                if (Object.keys(migrationUpdates).length > 0) {
+                    Object.assign(settings, migrationUpdates);
+                    hasChanges = true;
+                    console.log('[Autoseller] Migrated filter lists for new releases');
+                }
 
                 // Clean autoplant lists
                 if (settings.autoplantIgnoreList && Array.isArray(settings.autoplantIgnoreList)) {
@@ -9394,17 +9456,30 @@
                     }
                 }
 
-                // Save cleaned settings if any changes were made
+                const postCleanupMigration = buildFilterListMigrationUpdate(settings, availableCreatures, availableEquipment);
+                if (Object.keys(postCleanupMigration).length > 0) {
+                    Object.assign(settings, postCleanupMigration);
+                    hasChanges = true;
+                    console.log('[Autoseller] Re-migrated filter lists after cleanup');
+                }
+
+                // Save cleaned/migrated settings if any changes were made
                 if (hasChanges) {
                     const settingsUpdate = {};
-                    if (settings.autoplantIgnoreList) settingsUpdate.autoplantIgnoreList = settings.autoplantIgnoreList;
-                    if (settings.autoplantSellList) settingsUpdate.autoplantSellList = settings.autoplantSellList;
-                    if (settings.autosqueezeIgnoreList) settingsUpdate.autosqueezeIgnoreList = settings.autosqueezeIgnoreList;
-                    if (settings.autosqueezeSellList) settingsUpdate.autosqueezeSellList = settings.autosqueezeSellList;
-                    if (settings.autodusterIgnoreList) settingsUpdate.autodusterIgnoreList = settings.autodusterIgnoreList;
-                    if (settings.autodusterSellList) settingsUpdate.autodusterSellList = settings.autodusterSellList;
+                    const listKeys = [
+                        'autoplantIgnoreList', 'autoplantSellList',
+                        'autosqueezeIgnoreList', 'autosqueezeSellList',
+                        'autodusterIgnoreList', 'autodusterSellList',
+                    ];
+                    for (const key of listKeys) {
+                        if (Array.isArray(settings[key])) {
+                            settingsUpdate[key] = settings[key];
+                        }
+                    }
                     setSettings(settingsUpdate);
                     console.log('[Autoseller] Lists cleaned and saved');
+                    updatePlantMonsterFilter();
+                    updateAutosellerNavButtonColor();
                 } else {
                     console.log('[Autoseller] Lists are already clean');
                 }

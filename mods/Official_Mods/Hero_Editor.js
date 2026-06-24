@@ -353,7 +353,7 @@ function setupHeroEditorModalResponsiveLayout(modalRef, contentRoot) {
   clearHeroEditorModalLayoutCleanup();
   activeHeroEditorModal = modalRef;
   const apply = () => applyHeroEditorModalLayout(modalRef, contentRoot, getHeroEditorModalDimensions());
-  setTimeout(apply, 50);
+  requestAnimationFrame(() => apply());
   const onResize = () => apply();
   window.addEventListener('resize', onResize);
   heroEditorModalLayoutCleanup = () => {

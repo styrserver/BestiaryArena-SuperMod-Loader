@@ -3903,7 +3903,7 @@ function applyTaskerModalLayout(modalRef, contentRoot, dimensions) {
 function setupTaskerModalResponsiveLayout(modalRef, contentRoot) {
     clearTaskerModalLayoutCleanup();
     const apply = () => applyTaskerModalLayout(modalRef, contentRoot, getTaskerModalDimensions());
-    apply();
+    requestAnimationFrame(() => apply());
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
     taskerModalLayoutCleanup = () => {
@@ -3966,14 +3966,8 @@ function openTaskerSettingsModal() {
                             };
                             document.addEventListener('keydown', escKeyListener);
                             
-                            // Override modal size and load settings
-                            setTimeout(() => {
-                                const dialog = getTaskerDialog(activeTaskerModal);
-                                if (dialog) {
-                                    setupTaskerModalResponsiveLayout(activeTaskerModal, settingsContent);
-                                    loadAndApplySettings();
-                                }
-                            }, 50);
+                            setupTaskerModalResponsiveLayout(activeTaskerModal, settingsContent);
+                            requestAnimationFrame(() => loadAndApplySettings());
                             
                             // Inject auto-save indicator into the existing modal footer
                             setTimeout(() => {

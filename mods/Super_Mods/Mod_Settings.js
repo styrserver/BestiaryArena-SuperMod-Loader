@@ -432,10 +432,16 @@ function clearModSettingsModalLayoutCleanup() {
   }
 }
 
-function setupModSettingsModalResponsiveLayout(dialog, elements) {
+function getModSettingsDialog(modalRef) {
+  if (modalRef?.element) return modalRef.element;
+  if (modalRef instanceof HTMLElement) return modalRef;
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+function setupModSettingsModalResponsiveLayout(modalRef, elements) {
   clearModSettingsModalLayoutCleanup();
-  const apply = () => applyModSettingsModalLayout(dialog, elements, getModSettingsModalDimensions());
-  apply();
+  const apply = () => applyModSettingsModalLayout(getModSettingsDialog(modalRef), elements, getModSettingsModalDimensions());
+  requestAnimationFrame(() => apply());
   const onResize = () => apply();
   window.addEventListener('resize', onResize);
   modSettingsModalLayoutCleanup = () => {
@@ -8835,12 +8841,7 @@ function showSettingsModal() {
     });
     
     const modalLayoutElements = { content, mainContent, leftColumn, rightColumn };
-    scheduleTimeout(() => {
-      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-      if (dialog) {
-        setupModSettingsModalResponsiveLayout(dialog, modalLayoutElements);
-      }
-    }, 0);
+    setupModSettingsModalResponsiveLayout(modalRef, modalLayoutElements);
     
     // Inject auto-save indicator into the modal footer
     scheduleTimeout(() => {

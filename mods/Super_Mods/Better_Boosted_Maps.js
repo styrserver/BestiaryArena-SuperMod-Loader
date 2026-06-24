@@ -856,7 +856,7 @@ function clearModalsWithEsc(count = 1) {
 
 function showToast(message, duration = 5000) {
     try {
-        // Use custom toast implementation (same as Welcome.js)
+        // Use custom toast implementation (same as welcome.js)
         // Get or create the main toast container
         let mainContainer = document.getElementById('bbm-toast-container');
         if (!mainContainer) {
@@ -1783,7 +1783,7 @@ function applyBoostedMapsModalLayout(modalRef, contentRoot, dimensions) {
 function setupBoostedMapsModalResponsiveLayout(modalRef, contentRoot) {
     clearBoostedMapsModalLayoutCleanup();
     const apply = () => applyBoostedMapsModalLayout(modalRef, contentRoot, getBoostedMapsModalDimensions());
-    apply();
+    requestAnimationFrame(() => apply());
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
     modState.modalLayoutCleanup = () => {
@@ -4542,14 +4542,8 @@ function openSettingsModal() {
                             };
                             document.addEventListener('keydown', modState.escKeyListener);
                             
-                            // Set modal dimensions and apply settings
-                            setTimeout(() => {
-                                const dialog = getBoostedMapsDialog(modState.activeModal);
-                                if (dialog) {
-                                    setupBoostedMapsModalResponsiveLayout(modState.activeModal, settingsContent);
-                                    applyFloorSettings();
-                                }
-                            }, 50);
+                            setupBoostedMapsModalResponsiveLayout(modState.activeModal, settingsContent);
+                            requestAnimationFrame(() => applyFloorSettings());
                             
                             // Inject auto-save indicator into modal footer
                             setTimeout(() => {

@@ -169,7 +169,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `utility_injector.js` - Utility injection system
 - `docs/` - Mod developer markdown guides and [`patch-notes.json`](docs/patch-notes.json) (version metadata used by the extension popup patch notes UI)
 - `database/` - Static tooltip and reference data used by mods
-  - `Welcome.js` - Welcome screen data
+  - `welcome.js` - Welcome screen data
   - `inventory-database.js` - Inventory tooltip data
   - `creature-database.js` - Creature reference data (lists, map boss stats, shiny/gazer helpers)
   - `equipment-database.js` - Equipment reference data (boosted-map overrides shared with Cyclopedia)

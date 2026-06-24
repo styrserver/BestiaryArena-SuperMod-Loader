@@ -4137,7 +4137,7 @@
   function setupDiceRollerModalResponsiveLayout(modalRef, contentRoot) {
     clearDiceRollerModalLayoutCleanup();
     const apply = () => applyDiceRollerModalLayout(modalRef, contentRoot, getDiceRollerModalDimensions());
-    apply();
+    requestAnimationFrame(() => apply());
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
     diceRollerModalLayoutCleanup = () => {
