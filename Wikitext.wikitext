@@ -9,6 +9,23 @@ A browser extension that allows loading and managing custom mods for the Bestiar
 
 [https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd Chromium] installation.
 
+=== Mobile Installation ===
+For full mobile instructions, see [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mobile_installation.md Mobile Installation Guide].
+
+==== Android (Firefox) ====
+# Install Firefox for Android and open [https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/ this addon page].
+# Tap '''Add to Firefox''' and approve permissions.
+# Open [https://bestiaryarena.com/ Bestiary Arena] and refresh once.
+# Verify the extension is enabled in Firefox.
+
+==== iOS (Orion Browser) ====
+# Install Orion Browser from the App Store.
+# In Orion, open '''Settings -> Extensions''' and enable Firefox extension support.
+# Open [https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/ this addon page] in Orion.
+# Tap '''Add to Firefox''' and approve installation.
+# Open [https://bestiaryarena.com/ Bestiary Arena] and refresh once.
+# If mods fail to load, use popup '''Debug -> Error Log'''.
+
 == Alternative Installation ==
 
 === Firefox Installation (Alternative) ===
@@ -174,6 +191,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_development_guide.md Mod Development Guide] - Comprehensive guide for mod developers
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_loading_optimizations.md Mod Loading System] - Loader architecture, mobile/relaxed path, and Error Log
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/orion_ios_compatibility.md Orion iOS Compatibility] - WebKit/Orion platform constraints and loader resource-loading rules
+* [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mobile_installation.md Mobile Installation Guide] - Step-by-step setup for Android Firefox and Orion on iOS
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/ui_management.md UI Management API] - Documentation for the UI Management API
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/ui_components.md UI Components Documentation] - Documentation for the UI Components
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/client_api.md Client API Documentation] - Complete reference for the game's Client API

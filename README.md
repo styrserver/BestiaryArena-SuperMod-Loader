@@ -21,6 +21,26 @@ Firefox: https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-l
 
 Chromium: https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd
 
+### Mobile Installation
+
+For full mobile steps, see [Mobile Installation Guide](docs/mobile_installation.md).
+
+#### Android (Firefox)
+1. Install Firefox for Android and open:
+   - https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/
+2. Tap **Add to Firefox** and approve permissions.
+3. Open [Bestiary Arena](https://bestiaryarena.com/) and refresh once.
+4. Verify the extension is enabled in Firefox.
+
+#### iOS (Orion Browser)
+1. Install Orion Browser from the App Store.
+2. In Orion, open **Settings -> Extensions** and enable Firefox extension support.
+3. Open:
+   - https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/
+4. Tap **Add to Firefox** in Orion and approve installation.
+5. Open [Bestiary Arena](https://bestiaryarena.com/) and refresh once.
+6. If mods fail to load, use popup **Debug -> Error Log**.
+
 ## Alternative Installation
 
 ### Firefox Installation (Alternative)
@@ -193,6 +213,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - [Mod Development Guide](docs/mod_development_guide.md) - Comprehensive guide for mod developers
 - [Mod Loading System](docs/mod_loading_optimizations.md) - Loader architecture, mobile/relaxed path, and Error Log
 - [Orion iOS Compatibility](docs/orion_ios_compatibility.md) - WebKit/Orion platform constraints and loader resource-loading rules
+- [Mobile Installation Guide](docs/mobile_installation.md) - Step-by-step setup for Android Firefox and Orion on iOS
 - [UI Management API](docs/ui_management.md) - Documentation for the UI Management API
 - [UI Components Documentation](docs/ui_components.md) - Documentation for the UI Components
 - [Client API Documentation](docs/client_api.md) - Complete reference for the game's Client API
