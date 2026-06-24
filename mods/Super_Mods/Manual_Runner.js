@@ -861,48 +861,167 @@ function getMaxTeamSize(serverResults = null) {
   return 5;
 }
 
-// Find and click the start button
-function findStartButton() {
-  // Prefer board action buttons only (avoid clicking "Start" from other modals/tools).
-  const startTexts = ['start', 'fight', 'iniciar', 'lutar', 'jogar', 'começar'];
-  const candidates = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
+const BOARD_START_TEXTS = ['start', 'fight', 'iniciar', 'lutar', 'jogar', 'começar', 'resume', 'retomar'];
+const BOARD_NON_START_TEXTS = ['auto', 'parar', 'stop', 'skip', 'pular'];
+const BOARD_SKIP_TEXTS = ['skip', 'pular'];
+const BOARD_PAUSE_BUTTON_SELECTORS = [
+  'button:has(svg.lucide-pause)',
+  'button.frame-1-red:has(svg.lucide-pause)',
+  'button[class*="surface-red"]:has(svg.lucide-pause)'
+];
 
-  const isBoardStartButton = (button) => {
-    if (!button || button.disabled) return false;
-    const text = (button.textContent || '').trim().toLowerCase();
-    if (!startTexts.some((t) => text === t || text.includes(t))) return false;
+function normalizeBoardButtonText(button) {
+  return (button?.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
 
-    // Board controls are rendered under a container that includes class token "sm:order-3".
-    let node = button.parentElement;
-    while (node) {
-      if (node.classList && node.classList.contains('sm:order-3')) return true;
-      node = node.parentElement;
-    }
+function isBoardButtonVisible(button) {
+  if (!button) return false;
+  return !!(button.offsetWidth || button.offsetHeight || button.getClientRects().length);
+}
 
-    // Fallback heuristic: board control row usually includes the Manual mode icon next to Start.
-    const container = button.parentElement;
-    if (container && container.querySelector('img[alt="Manual"]')) {
-      return true;
-    }
+function hasBoardOrderAncestor(node) {
+  let current = node;
+  while (current) {
+    if (current.classList?.contains('sm:order-3')) return true;
+    current = current.parentElement;
+  }
+  return false;
+}
 
-    return false;
+function isBoardModeMenuButton(button) {
+  if (!button) return false;
+  return !!(
+    button.querySelector('img[alt="Manual"], img[alt="Autoplay"], img[src*="pointer.png"], img[src*="autoplay.png"]')
+    || button.querySelector('svg.lucide-pause')
+  );
+}
+
+function isBoardControlFlexRow(flexContainer) {
+  if (!flexContainer) return false;
+  const buttons = flexContainer.querySelectorAll(':scope > button');
+  if (buttons.length < 2) return false;
+  if (!isBoardModeMenuButton(buttons[1])) return false;
+  return hasBoardOrderAncestor(flexContainer);
+}
+
+function collectBoardControlFlexRows() {
+  const rows = [];
+  const seen = new Set();
+  const addRow = (flex) => {
+    if (!flex || seen.has(flex) || !isBoardControlFlexRow(flex)) return;
+    seen.add(flex);
+    rows.push(flex);
   };
 
+  for (const orderEl of document.querySelectorAll('div.sm\\:order-3')) {
+    addRow(orderEl.querySelector(':scope > div.flex'));
+  }
+
+  for (const flex of document.querySelectorAll('div.flex')) {
+    addRow(flex);
+  }
+
+  return rows;
+}
+
+function matchesBoardStartText(text) {
+  if (!text) return false;
+  if (BOARD_NON_START_TEXTS.some((t) => text === t || text.startsWith(`${t} `) || text.startsWith(`${t}(`))) {
+    return false;
+  }
+  return BOARD_START_TEXTS.some((t) => text === t || text.startsWith(`${t} `) || text.startsWith(`${t}(`));
+}
+
+function matchesBoardSkipText(text) {
+  return BOARD_SKIP_TEXTS.some((t) => text === t || text.startsWith(`${t} `) || text.startsWith(`${t}(`));
+}
+
+function isBoardStartButton(button) {
+  if (!button || button.disabled || !isBoardButtonVisible(button)) return false;
+  if (button.querySelector('svg.lucide-loader-circle')) return false;
+
+  const text = normalizeBoardButtonText(button);
+  if (!matchesBoardStartText(text)) return false;
+
+  const flexRow = button.parentElement;
+  if (flexRow && isBoardControlFlexRow(flexRow)) {
+    return flexRow.querySelector(':scope > button') === button;
+  }
+
+  if (hasBoardOrderAncestor(button)) return true;
+
+  const container = button.parentElement;
+  return !!(
+    container
+    && container.querySelector('img[alt="Manual"], img[alt="Autoplay"], img[src*="pointer.png"], img[src*="autoplay.png"]')
+  );
+}
+
+function isBoardSkipButton(button) {
+  if (!button || button.disabled || !isBoardButtonVisible(button)) return false;
+  if (!matchesBoardSkipText(normalizeBoardButtonText(button))) return false;
+  return hasBoardOrderAncestor(button);
+}
+
+// Find and click the start button
+function findStartButton() {
+  for (const flexRow of collectBoardControlFlexRows()) {
+    const startBtn = flexRow.querySelector(':scope > button');
+    if (isBoardStartButton(startBtn)) {
+      return startBtn;
+    }
+  }
+
+  const candidates = document.querySelectorAll('button[data-state="closed"]');
   for (const button of candidates) {
     if (isBoardStartButton(button)) {
       return button;
     }
   }
 
-  // Final fallback for UI variants: still require board-control context.
-  const allButtons = document.querySelectorAll('button');
-  for (const button of allButtons) {
+  for (const button of document.querySelectorAll('button')) {
     if (isBoardStartButton(button)) {
       return button;
     }
   }
 
   return null;
+}
+
+function findBoardPauseButton() {
+  for (const selector of BOARD_PAUSE_BUTTON_SELECTORS) {
+    try {
+      const button = document.querySelector(selector);
+      if (button && !button.disabled && isBoardButtonVisible(button) && hasBoardOrderAncestor(button)) {
+        return button;
+      }
+    } catch (_) {}
+  }
+
+  for (const flexRow of collectBoardControlFlexRows()) {
+    const buttons = flexRow.querySelectorAll(':scope > button');
+    if (buttons.length >= 2) {
+      const pauseBtn = buttons[1];
+      if (
+        pauseBtn.querySelector('svg.lucide-pause')
+        && !pauseBtn.disabled
+        && isBoardButtonVisible(pauseBtn)
+      ) {
+        return pauseBtn;
+      }
+    }
+  }
+
+  return null;
+}
+
+function clickBoardPauseButton() {
+  const button = findBoardPauseButton();
+  if (button) {
+    button.click();
+    return true;
+  }
+  return false;
 }
 
 // Get the player's team size from the current board setup
@@ -984,6 +1103,18 @@ async function clickStartButtonRobust(options = {}) {
         console.log(`[Manual Runner] Start button recovered after ${attempts} checks (${elapsed}ms)`);
       }
       return true;
+    }
+
+    // Autoplay pause can block Start/Iniciar — stop the session and re-lock manual mode.
+    if (findBoardPauseButton()) {
+      clickBoardPauseButton();
+      ensureManualMode();
+      await sleep(200);
+      if (clickStartButton()) {
+        const elapsed = Math.round(performance.now() - startTs);
+        console.log(`[Manual Runner] Start button found after pause (${attempts} checks, ${elapsed}ms)`);
+        return true;
+      }
     }
 
     // Close transient overlays/modals that may block board controls.
@@ -1556,33 +1687,25 @@ function shouldProcessAutoSkip(skipButton) {
 // Helper function to find skip button (from btlucas fix.js)
 function findSkipButton() {
   try {
-    // First, try the specific selector
-    const specificSkipButton = document.querySelector("#__next > div.flex.min-h-screen.flex-col > div > main > div > div.flex.flex-col.justify-center.gap-2.\\32 xl\\:flex-row > div.grid.grid-cols-2.gap-2.gap-y-1\\.5.sm\\:grid-cols-\\[1fr_min-content\\].sm\\:grid-rows-\\[3fr\\].sm\\:gap-y-2.\\32 xl\\:grid-cols-\\[min-content\\] > div.sm\\:order-3 > button");
-    if (specificSkipButton) {
-      const buttonText = specificSkipButton.textContent.trim();
-      if (buttonText.includes('Skip') || buttonText.includes('Pular')) {
-        return specificSkipButton;
+    for (const orderEl of document.querySelectorAll('div.sm\\:order-3')) {
+      const directButton = orderEl.querySelector(':scope > button');
+      if (isBoardSkipButton(directButton)) {
+        return directButton;
       }
     }
-    
-    // Fallback: Look for skip button by text content in all buttons
-    const skipButtons = document.querySelectorAll('button');
-    for (const button of skipButtons) {
-      const buttonText = button.textContent.trim();
-      if (buttonText.includes('Skip') || buttonText.includes('Pular')) {
+
+    for (const button of document.querySelectorAll('button[data-state="closed"]')) {
+      if (isBoardSkipButton(button)) {
         return button;
       }
     }
-    
-    // Additional fallback: Look for buttons with data attributes
-    const skipButtonsByAttr = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
-    for (const button of skipButtonsByAttr) {
-      const buttonText = button.textContent.trim();
-      if (buttonText.includes('Skip') || buttonText.includes('Pular')) {
+
+    for (const button of document.querySelectorAll('button')) {
+      if (isBoardSkipButton(button)) {
         return button;
       }
     }
-    
+
     return null;
   } catch (error) {
     console.error('[Manual Runner] Error finding skip button:', error);
@@ -1964,6 +2087,16 @@ async function ensureGameStopped(options = {}) {
     if (elapsed - lastEscNudgeAt >= 1000) {
       dispatchEsc();
       lastEscNudgeAt = elapsed;
+    }
+
+    if (findBoardPauseButton()) {
+      clickBoardPauseButton();
+      await sleep(250);
+      if (!isBoardGameRunning()) {
+        const elapsedMs = Math.round(performance.now() - startTs);
+        console.log(`[Manual Runner] Game stopped via pause after ${elapsedMs}ms (${checks} checks)${contextSuffix}`);
+        return true;
+      }
     }
 
     const remaining = deadline - performance.now();

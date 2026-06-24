@@ -79,7 +79,7 @@ const POPUP_LAYOUT_CONFIG = {
   minWidth: 280,
   minHeightCap: 280,
   patchNotesHeaderHeight: 49,
-  patchNotesContentMinHeight: 200,
+  patchNotesContentMinHeight: 100,
   patchNotesMaxHeight: 360,
   patchNotesReservedHeight: 120
 };
@@ -91,20 +91,31 @@ function applyPopupResponsiveLayout() {
   const targetHeight = POPUP_LAYOUT_CONFIG.maxHeight;
   const viewportW = window.innerWidth;
   const viewportH = window.innerHeight;
+  const isLikelyMobileViewport =
+    window.matchMedia('(pointer: coarse)').matches ||
+    /iPhone|iPad|iPod|Android|Mobile|Orion/i.test(navigator.userAgent || '');
 
   // Extension popups should default to the designed size (600×600). Only shrink when the
   // browser has already given a real viewport smaller than our target (e.g. mobile).
   // Edge can report the minimum stub size on first paint; clamping to that locks the popup small.
-  const shrinkForViewport =
-    viewportW > POPUP_LAYOUT_CONFIG.minWidth &&
-    viewportH > POPUP_LAYOUT_CONFIG.minHeightCap &&
-    (viewportW < targetWidth || viewportH < targetHeight);
+  const shrinkForViewport = isLikelyMobileViewport
+    ? (viewportW < targetWidth || viewportH < targetHeight)
+    : (
+      viewportW > POPUP_LAYOUT_CONFIG.minWidth &&
+      viewportH > POPUP_LAYOUT_CONFIG.minHeightCap &&
+      (viewportW < targetWidth || viewportH < targetHeight)
+    );
+
+  // Keep desktop min caps for popup UX, but allow true mobile viewports smaller than 280px
+  // so the popup can follow the actual host size.
+  const minWidthCap = isLikelyMobileViewport ? 0 : POPUP_LAYOUT_CONFIG.minWidth;
+  const minHeightCap = isLikelyMobileViewport ? 0 : POPUP_LAYOUT_CONFIG.minHeightCap;
 
   const width = shrinkForViewport
-    ? Math.max(POPUP_LAYOUT_CONFIG.minWidth, Math.min(targetWidth, viewportW))
+    ? Math.max(minWidthCap, Math.min(targetWidth, viewportW))
     : targetWidth;
   const height = shrinkForViewport
-    ? Math.max(POPUP_LAYOUT_CONFIG.minHeightCap, Math.min(targetHeight, viewportH))
+    ? Math.max(minHeightCap, Math.min(targetHeight, viewportH))
     : targetHeight;
 
   const root = document.documentElement;

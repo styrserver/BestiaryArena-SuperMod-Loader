@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.3.5",
+      "changes": [
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Start, pause, and Skip board buttons are found more reliably: structure-based detection for the sm:order-3 control row ([Start/Iniciar] + Manual/Autoplay/pause), pause is clicked when autoplay blocks Start, Skip matches the lone button under sm:order-3 (including stamina-cost skips with data-full=\"true\"), and loading Auto / Parar / Skip labels are no longer mistaken for Start."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Popup responsive sizing no longer regresses on mobile after the Edge first-paint viewport fix: mobile popup dimensions now always follow the real viewport size, while desktop Edge keeps the safeguard against locking to the initial stub viewport."
+        }
+      ]
+    },
+    {
       "version": "4.3.4",
       "changes": [
         {
