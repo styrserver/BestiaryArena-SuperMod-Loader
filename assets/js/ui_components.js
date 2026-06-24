@@ -147,6 +147,22 @@ const DEBUG = false; // Set to true for development
   }
 
   // Create a modal dialog that matches the game's style
+  function applyFixedModalShellLayout(modal, innerContent, contentContainer, height) {
+    if (typeof height !== 'number') return;
+    modal.style.boxSizing = 'border-box';
+    innerContent.style.height = '100%';
+    innerContent.style.minHeight = '0';
+    innerContent.style.flex = '1 1 0';
+    Object.assign(contentContainer.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden'
+    });
+  }
+
   function createModal({ title, width = 300, height = 'auto', content, buttons = [] }) {
     ensureStyles();
     
@@ -250,6 +266,7 @@ const DEBUG = false; // Set to true for development
     innerContent.appendChild(header);
     innerContent.appendChild(contentContainer);
     modal.appendChild(innerContent);
+    applyFixedModalShellLayout(modal, innerContent, contentContainer, height);
     
     // Add to document
     document.body.appendChild(modal);
