@@ -16945,7 +16945,61 @@ function createPlayerSearchBox(selectedCreature, selectedEquipment, selectedInve
     setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol: () => {}
   });
   Object.assign(playerSearchBox.style, { flex: '0.2 1 0', minHeight: '0' });
+  centerPlayerSearchBoxContent(playerSearchBox);
   return playerSearchBox;
+}
+
+function centerPlayerSearchBoxContent(playerSearchBox) {
+  if (!playerSearchBox) return;
+
+  const scrollRoot = playerSearchBox.querySelector('[data-bestiary-scroll-root]');
+  if (!scrollRoot) return;
+
+  const viewport = scrollRoot.querySelector('[data-radix-scroll-area-viewport]');
+  const contentGrid = scrollRoot.querySelector('[data-nopadding="true"]');
+  const input = scrollRoot.querySelector('input[type="text"]');
+  const button = scrollRoot.querySelector('button');
+
+  // Keep content centered and compact in the Player search box.
+  Object.assign(scrollRoot.style, {
+    display: 'flex',
+    justifyContent: 'center'
+  });
+  if (viewport) {
+    Object.assign(viewport.style, {
+      width: '100%',
+      display: 'flex',
+      justifyContent: 'center'
+    });
+  }
+  if (contentGrid) {
+    Object.assign(contentGrid.style, {
+      width: 'fit-content',
+      minWidth: '0',
+      maxWidth: '100%',
+      marginLeft: 'auto',
+      marginRight: 'auto',
+      alignItems: 'center'
+    });
+  }
+  if (input) {
+    Object.assign(input.style, {
+      width: 'auto',
+      minWidth: '220px',
+      maxWidth: '100%',
+      marginLeft: 'auto',
+      marginRight: 'auto'
+    });
+  }
+  if (button) {
+    Object.assign(button.style, {
+      width: 'auto',
+      minWidth: '220px',
+      maxWidth: '100%',
+      marginLeft: 'auto',
+      marginRight: 'auto'
+    });
+  }
 }
 
 function createCharactersTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
@@ -16955,23 +17009,47 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
     borderRight: '6px solid transparent',
     borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`
   };
+  const getCharactersIsStacked = () => sharedScrollContainer.clientWidth < LAYOUT_CONSTANTS.CREATURE_DETAIL_FLEX_COL_MIN * 2;
 
   function applyCharactersSplitColumnLayout() {
+    const isStacked = getCharactersIsStacked();
     col3.style.display = 'flex';
+    sharedScrollContainer.style.flexDirection = isStacked ? 'column' : 'row';
+    sharedScrollContainer.style.overflowY = 'hidden';
+    sharedScrollContainer.style.overflowX = 'hidden';
     col2.style.flex = '1 1 0';
-    col2.style.maxWidth = '50%';
-    col2.style.borderRight = charactersColFrameBorder.borderRight;
-    col2.style.borderImage = charactersColFrameBorder.borderImage;
+    col2.style.maxWidth = isStacked ? '100%' : '50%';
+    col2.style.height = '100%';
+    col2.style.borderRight = isStacked ? 'none' : charactersColFrameBorder.borderRight;
+    col2.style.borderImage = isStacked ? 'none' : charactersColFrameBorder.borderImage;
     col2.style.justifyContent = 'center';
     col2.style.alignItems = 'center';
     col2.style.overflow = '';
     col2.style.minHeight = '';
+    col3.style.maxWidth = isStacked ? '100%' : '50%';
+    col3.style.height = '100%';
+  }
+
+  function applyCharactersLeaderboardsColumnLayout() {
+    const isStacked = getCharactersIsStacked();
+    applyCharactersSplitColumnLayout();
+    // Use one shared scrollbar for both leaderboard columns.
+    sharedScrollContainer.style.flexDirection = isStacked ? 'column' : 'row';
+    sharedScrollContainer.style.overflowY = 'auto';
+    sharedScrollContainer.style.overflowX = 'hidden';
+    col2.style.height = 'auto';
+    col3.style.height = 'auto';
+    col2.style.overflow = 'visible';
+    col3.style.overflow = 'visible';
   }
 
   function applyCharactersRankingsColumnLayout() {
     col3.style.display = 'none';
+    sharedScrollContainer.style.overflowY = 'hidden';
+    sharedScrollContainer.style.overflowX = 'hidden';
     col2.style.flex = '1 1 0';
     col2.style.maxWidth = '100%';
+    col2.style.height = '100%';
     col2.style.borderRight = 'none';
     col2.style.borderImage = 'none';
     col2.style.justifyContent = 'flex-start';
@@ -17145,6 +17223,8 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
   }
 
   async function displayCombinedLeaderboardsData(playerState) {
+    // Leaderboards is always dual-column with one shared scrollbar.
+    applyCharactersLeaderboardsColumnLayout();
     try {
       const ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
       const roomsScoped = getYourRoomsForCyclopediaSeason(playerState.rooms || {});
@@ -19485,9 +19565,9 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         if (cyclopediaState.searchedUsername) {
           // Check if we have cached data for the searched user
           const cachedData = getCachedProfileData(cyclopediaState.searchedUsername);
-          if (cachedData === null) {
+          if (cachedData === null || !hasAnyProfileResult(cachedData)) {
             // Show red cross for null result
-            statusIndicator.innerHTML = '❌';
+            statusIndicator.innerHTML = 'X';
             statusIndicator.style.color = '#ff6b6b';
             statusIndicator.style.display = 'block';
           } else if (cachedData && cachedData.name) {
@@ -19521,6 +19601,37 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         });
 
         // Add search functionality with caching and debouncing
+        const hasAnyLeaderboardResult = (profileData) => {
+          if (!profileData || typeof profileData !== 'object') return false;
+          const scoped = narrowProfilePageDataForSeason(profileData, cyclopediaState.profileSeason || 1);
+          const rooms = scoped?.rooms || {};
+          return Object.values(rooms).some((room) => {
+            if (!room || typeof room !== 'object') return false;
+            const hasTicks = typeof room.ticks === 'number' && room.ticks > 0;
+            const hasRank = typeof room.rank === 'number' && room.rank > 0;
+            const hasFloor = typeof room.floor === 'number' && room.floor >= 0;
+            return hasTicks || hasRank || hasFloor;
+          });
+        };
+
+        const hasAnyProfileResult = (profileData) => {
+          if (!profileData || typeof profileData !== 'object') return false;
+          const name = typeof profileData.name === 'string' ? profileData.name.trim() : '';
+          if (!name || name.toLowerCase() === 'player') return false;
+
+          const scoped = narrowProfilePageDataForSeason(profileData, cyclopediaState.profileSeason || 1);
+          const rooms = scoped?.rooms || {};
+          const hasRoomData = Object.values(rooms).some((room) => {
+            if (!room || typeof room !== 'object') return false;
+            return [room.count, room.ticks, room.rank, room.rankTicks, room.floor, room.floorTicks]
+              .some((value) => typeof value === 'number' && Number.isFinite(value) && value > 0);
+          });
+          if (hasRoomData) return true;
+
+          const highscores = Array.isArray(scoped?.highscores) ? scoped.highscores : [];
+          return highscores.length > 0;
+        };
+
         const performSearch = async () => {
           const searchTerm = playerSearchInput.value.trim();
           if (!searchTerm) {
@@ -19621,7 +19732,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
             // Check if player doesn't exist (API returns json: null)
             if (searchedProfileData === null) {
               // Show red cross status indicator
-              statusIndicator.innerHTML = '❌';
+              statusIndicator.innerHTML = 'X';
               statusIndicator.style.color = '#ff6b6b';
               statusIndicator.style.display = 'block';
               
@@ -19632,6 +19743,21 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
                   <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Player doesn't exist</div>
                   <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not find player: ${truncatePlayerName(searchTerm)}</div>
                   <div style="font-size: 12px; color: #666;">Please check the spelling and try again.</div>
+                </div>
+              `;
+              return;
+            }
+
+            if (!hasAnyProfileResult(searchedProfileData)) {
+              statusIndicator.innerHTML = 'X';
+              statusIndicator.style.color = '#ff6b6b';
+              statusIndicator.style.display = 'block';
+              col3.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
+                  <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                  <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Invalid search result</div>
+                  <div style="font-size: 14px; margin-bottom: 16px; color: #888;">No usable profile data found for: ${truncatePlayerName(searchTerm)}</div>
+                  <div style="font-size: 12px; color: #666;">Try a different player name.</div>
                 </div>
               `;
               return;
@@ -19647,9 +19773,9 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
                 
                 displayCombinedLeaderboardsSearchResults(searchTerm, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
                 
-                // Show green checkmark for successful leaderboard search
-                statusIndicator.innerHTML = '✓';
-                statusIndicator.style.color = '#51cf66';
+                const hasLeaderboardData = hasAnyLeaderboardResult(searchedProfileData);
+                statusIndicator.innerHTML = hasLeaderboardData ? '✓' : 'X';
+                statusIndicator.style.color = hasLeaderboardData ? '#51cf66' : '#ff6b6b';
                 statusIndicator.style.display = 'block';
                 
               } catch (error) {
@@ -19664,7 +19790,7 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
                 `;
                 
                 // Show red cross for search error
-                statusIndicator.innerHTML = '❌';
+                statusIndicator.innerHTML = 'X';
                 statusIndicator.style.color = '#ff6b6b';
                 statusIndicator.style.display = 'block';
               }
@@ -19673,16 +19799,18 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
               displaySearchedPlayerStats(searchTerm, searchedProfileData, col3);
             }
             
-            // Show green checkmark for successful search
-            statusIndicator.innerHTML = '✓';
-            statusIndicator.style.color = '#51cf66';
+            // Keep Leaderboards "all-null" searches as invalid.
+            if (!(window.selectedCharacterItem === 'Leaderboards' && !hasAnyLeaderboardResult(searchedProfileData))) {
+              statusIndicator.innerHTML = '✓';
+              statusIndicator.style.color = '#51cf66';
+            }
             statusIndicator.style.display = 'block';
             
           } catch (error) {
             console.error('[Cyclopedia] Error searching for player:', error);
             
             // Show red cross for search error
-            statusIndicator.innerHTML = '❌';
+            statusIndicator.innerHTML = 'X';
             statusIndicator.style.color = '#ff6b6b';
             statusIndicator.style.display = 'block';
             
@@ -19978,8 +20106,8 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
             });
           }
           
-          // Show col3 again and reset col2 styling
-          applyCharactersSplitColumnLayout();
+          // Keep Leaderboards in shared-scroll dual-column layout.
+          applyCharactersLeaderboardsColumnLayout();
           
           // Check if we're returning from Rankings and need to restore search state
           if (cyclopediaState.previousTabState && cyclopediaState.previousTabState.hasSearchedData) {
@@ -20264,11 +20392,12 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         applyCharactersRankingsColumnLayout();
         return;
       }
-      const isStacked = sharedScrollContainer.clientWidth < LAYOUT_CONSTANTS.CREATURE_DETAIL_FLEX_COL_MIN * 2;
-      col3.style.display = 'flex';
-      if (!isStacked) {
-        applyCharactersSplitColumnLayout();
+      if (window.selectedCharacterItem === 'Leaderboards') {
+        applyCharactersLeaderboardsColumnLayout();
+        return;
       }
+      col3.style.display = 'flex';
+      applyCharactersSplitColumnLayout();
     }
   });
   

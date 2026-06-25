@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.3.6",
+      "changes": [
+        {
+          "mod": "Room Hopper",
+          "type": "changed",
+          "text": "Room Hopper modal resized to 900×700 (viewport-clamped), region filter now follows true game region order, and the room list gained sticky per-region headers in default view. Table layout was refined (Room 250px, XP/Stam 100px, Equipments 200px), map names wrap instead of ellipsis, creature portraits fill available space before +N, and sortable headers are centered with 3-state sorting (Room: asc/desc/default, XP/Stam: desc/asc/default) that restores default grouped sticky regions."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Playtime no longer ticks on init, reload, or idle time before hunting: the live clock stays at accumulated history (or 00:00:00 on a fresh start) until the first battle starts (newGame), then baselines sync so pre-battle idle is excluded."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Extension popup fills the full mobile sheet again (Firefox Android, Orion iOS): no 600px height cap on phones, ignores the 280×280 first-paint stub with rAF retries and visualViewport sizing, and mobile CSS uses 100% width/height with safe-area padding instead of fixed 600×600 / 280px min caps."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Characters tab (Player Information + Leaderboards) now stacks columns vertically on narrow modal widths and returns to side-by-side on wider layouts. Leaderboards uses a shared dual-column scroll flow again, player search box content is centered/auto-fit, and search validation now shows a red X for invalid/no-data hits (including placeholder profiles) and a green check only for valid results."
+        }
+      ]
+    },
+    {
       "version": "4.3.5",
       "changes": [
         {

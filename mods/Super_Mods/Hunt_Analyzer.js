@@ -1213,7 +1213,9 @@ const HuntAnalyzerState = {
     // Autoplay baseline to subtract when map changes so we don't double count
     autoplayBaselineMinutes: 0,
     // When true, skip the next autoplay reset accumulation (used after we already snapshot on map/mode change)
-    suppressNextAutoplayReset: false
+    suppressNextAutoplayReset: false,
+    // When true, playtime clock stays idle until the first newGame (battle start)
+    awaitingFirstBattle: true
   }
 };
 
@@ -1235,9 +1237,12 @@ function huntAnalyzerHasRecordedBattles() {
   return HuntAnalyzerState.data.sessions.length > 0;
 }
 
-// After the first completed hunt, align baselines so pre-battle idle time is not counted.
-function syncTimeTrackingAfterFirstRecordedBattle() {
-  if (HuntAnalyzerState.data.sessions.length !== 1) return;
+function huntAnalyzerTimerArmed() {
+  return !HuntAnalyzerState.timeTracking.awaitingFirstBattle;
+}
+
+// On first battle start, align baselines so pre-battle idle time is not counted.
+function armTimeTrackingAtBattleStart() {
   const mode = getCurrentMode();
   if (mode === 'autoplay') {
     const currentAutoplayTime = getAutoplaySessionTime();
@@ -1253,7 +1258,7 @@ function syncTimeTrackingAfterFirstRecordedBattle() {
 }
 
 function getLiveSessionMs() {
-  if (!huntAnalyzerHasRecordedBattles()) {
+  if (!huntAnalyzerTimerArmed()) {
     return 0;
   }
   const mode = getCurrentMode();
@@ -1279,7 +1284,7 @@ function getLiveSessionMs() {
 }
 
 function snapshotIntoTotals() {
-  if (!huntAnalyzerHasRecordedBattles()) {
+  if (!huntAnalyzerTimerArmed()) {
     return 0;
   }
   const liveMs = getLiveSessionMs();
@@ -1627,7 +1632,7 @@ function stopInternalClock() {
 // Update the internal clock by watching DOM autoplay timer
 function updateInternalClock() {
   const currentAutoplayTime = getAutoplaySessionTime();
-  if (!huntAnalyzerHasRecordedBattles()) {
+  if (!huntAnalyzerTimerArmed()) {
     HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
     return;
   }
@@ -2014,9 +2019,10 @@ HuntAnalyzerState.ui.selectedMapFilter = "ALL";
 // Do not resume manual timing after reload; require a fresh newGame or autoplay
 HuntAnalyzerState.timeTracking.manualActive = false;
 HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+HuntAnalyzerState.timeTracking.awaitingFirstBattle = true;
 
 // Initialize internal clock system
-// Do not start internal clock on init; it will start on first newGame/manual or autoplay detection
+// Clock stays idle until the first newGame; panel display still updates every second
 
 // Auto-reopen is handled during persistence initialization.
 
@@ -2497,6 +2503,7 @@ function applyHuntAnalyzerManifest(parsedData) {
         HuntAnalyzerState.timeTracking.lastAutoplayTime = parsedData.timeTracking.lastAutoplayTime || 0;
         HuntAnalyzerState.timeTracking.manualActive = false;
         HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+        HuntAnalyzerState.timeTracking.awaitingFirstBattle = true;
 
         if (parsedData.timeTracking.mapTimeMs && Array.isArray(parsedData.timeTracking.mapTimeMs)) {
             HuntAnalyzerState.timeTracking.mapTimeMs = new Map(parsedData.timeTracking.mapTimeMs);
@@ -4152,8 +4159,9 @@ class DataProcessor {
     this.state.data.sessions.push(sessionData);
     reconcilePendingCreatureSellEventsIntoSessions();
     reconcilePendingDisenchantDustEventsIntoSessions();
-    if (this.state.data.sessions.length === 1) {
-      syncTimeTrackingAfterFirstRecordedBattle();
+    if (this.state.data.sessions.length === 1 && HuntAnalyzerState.timeTracking.awaitingFirstBattle) {
+      HuntAnalyzerState.timeTracking.awaitingFirstBattle = false;
+      armTimeTrackingAtBattleStart();
     }
     
     // Consolidated session processing summary (single-line to avoid collapsed "Object" logs)
@@ -5915,6 +5923,7 @@ function resetHuntAnalyzerState() {
     HuntAnalyzerState.timeTracking.manualActive = false;
     HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
     HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
+    HuntAnalyzerState.timeTracking.awaitingFirstBattle = true;
     
     // Clear localStorage so "Clear All" permanently removes data
     // This ensures data doesn't reappear after refresh, regardless of persistence setting
@@ -6144,6 +6153,7 @@ function createAutoplayAnalyzerPanel() {
         HuntAnalyzerState.data.sessions = [];
         HuntAnalyzerState.data.aggregatedLoot.clear();
         HuntAnalyzerState.data.aggregatedCreatures.clear();
+        HuntAnalyzerState.timeTracking.awaitingFirstBattle = true;
     } else if (HuntAnalyzerState.data.sessions.length > 0) {
         rebuildAggregatesFromSessionsWithMerge();
     }
@@ -7310,14 +7320,18 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
         HuntAnalyzerState.session.count++;
         HuntAnalyzerState.session.isActive = true;
         HuntAnalyzerState.session.sessionStartTime = Date.now();
-        
+
+        if (HuntAnalyzerState.timeTracking.awaitingFirstBattle) {
+            HuntAnalyzerState.timeTracking.awaitingFirstBattle = false;
+            armTimeTrackingAtBattleStart();
+        }
         
         // Defer display update to avoid interfering with animations
         timeoutIds.push(setTimeout(() => {
             updatePanelDisplay();
         }, 0));
 
-    // Simplified: always ensure the internal clock is running on newGame
+    // Start the internal clock on first battle; keep it running for subsequent battles
     try {
         const mode = getCurrentMode();
         if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
@@ -7375,16 +7389,18 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
                 // Ensure clock keeps running after results, align manual flag only if not active
                 try {
                     const modeNow = getCurrentMode();
-                    if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
-                        startInternalClock('serverResults');
-                    }
-                    if (modeNow === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
-                        HuntAnalyzerState.timeTracking.manualActive = true;
-                        HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-                    }
-                    if (modeNow !== 'manual') {
-                        HuntAnalyzerState.timeTracking.manualActive = false;
-                        HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+                    if (huntAnalyzerTimerArmed()) {
+                        if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
+                            startInternalClock('serverResults');
+                        }
+                        if (modeNow === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
+                            HuntAnalyzerState.timeTracking.manualActive = true;
+                            HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+                        }
+                        if (modeNow !== 'manual') {
+                            HuntAnalyzerState.timeTracking.manualActive = false;
+                            HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+                        }
                     }
                 } catch (_e) { /* ignore */ }
 
@@ -7416,26 +7432,28 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
                     }
 
                     // Prepare new mode
-                    if (mode === 'autoplay') {
-                        // Set baseline to current DOM time, with validation
-                        const currentAutoplayTime = getAutoplaySessionTime();
-                        if (currentAutoplayTime && currentAutoplayTime > 0) {
-                            HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
-                        } else {
-                            // If DOM timer not ready, try again after a short delay
-                            setTimeout(() => {
-                                const retryTime = getAutoplaySessionTime();
-                                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = retryTime || 0;
-                            }, 100);
+                    if (huntAnalyzerTimerArmed()) {
+                        if (mode === 'autoplay') {
+                            // Set baseline to current DOM time, with validation
+                            const currentAutoplayTime = getAutoplaySessionTime();
+                            if (currentAutoplayTime && currentAutoplayTime > 0) {
+                                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
+                            } else {
+                                // If DOM timer not ready, try again after a short delay
+                                setTimeout(() => {
+                                    const retryTime = getAutoplaySessionTime();
+                                    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = retryTime || 0;
+                                }, 100);
+                            }
+                            // Ensure internal clock runs for UI updates
+                            if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
+                                startInternalClock('modeChange:autoplay');
+                            }
+                        } else if (mode === 'manual') {
+                            // Start manual session window
+                            HuntAnalyzerState.timeTracking.manualActive = true;
+                            HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
                         }
-                        // Ensure internal clock runs for UI updates
-                        if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
-                            startInternalClock('modeChange:autoplay');
-                        }
-                    } else if (mode === 'manual') {
-                        // Start manual session window
-                        HuntAnalyzerState.timeTracking.manualActive = true;
-                        HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
                     }
                     lastKnownMode = mode;
                 }

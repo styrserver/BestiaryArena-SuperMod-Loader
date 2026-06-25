@@ -85,43 +85,33 @@ const POPUP_LAYOUT_CONFIG = {
 };
 
 let popupLayoutResizeHandler = null;
+let popupLayoutRetryRafId = null;
+const POPUP_LAYOUT_MAX_RETRIES = 12;
 
-function applyPopupResponsiveLayout() {
-  const targetWidth = POPUP_LAYOUT_CONFIG.width;
-  const targetHeight = POPUP_LAYOUT_CONFIG.maxHeight;
-  const viewportW = window.innerWidth;
-  const viewportH = window.innerHeight;
-  const isLikelyMobileViewport =
+function isLikelyMobilePopupHost() {
+  return (
     window.matchMedia('(pointer: coarse)').matches ||
-    /iPhone|iPad|iPod|Android|Mobile|Orion/i.test(navigator.userAgent || '');
+    /iPhone|iPad|iPod|Android|Mobile|Orion/i.test(navigator.userAgent || '')
+  );
+}
 
-  // Extension popups should default to the designed size (600×600). Only shrink when the
-  // browser has already given a real viewport smaller than our target (e.g. mobile).
-  // Edge can report the minimum stub size on first paint; clamping to that locks the popup small.
-  const shrinkForViewport = isLikelyMobileViewport
-    ? (viewportW < targetWidth || viewportH < targetHeight)
-    : (
-      viewportW > POPUP_LAYOUT_CONFIG.minWidth &&
-      viewportH > POPUP_LAYOUT_CONFIG.minHeightCap &&
-      (viewportW < targetWidth || viewportH < targetHeight)
-    );
+function getPopupViewportSize() {
+  const visualViewport = window.visualViewport;
+  return {
+    width: Math.round(visualViewport?.width ?? window.innerWidth),
+    height: Math.round(visualViewport?.height ?? window.innerHeight)
+  };
+}
 
-  // Keep desktop min caps for popup UX, but allow true mobile viewports smaller than 280px
-  // so the popup can follow the actual host size.
-  const minWidthCap = isLikelyMobileViewport ? 0 : POPUP_LAYOUT_CONFIG.minWidth;
-  const minHeightCap = isLikelyMobileViewport ? 0 : POPUP_LAYOUT_CONFIG.minHeightCap;
+function isUninitializedPopupViewport(width, height) {
+  return (
+    width <= POPUP_LAYOUT_CONFIG.minWidth &&
+    height <= POPUP_LAYOUT_CONFIG.minHeightCap
+  );
+}
 
-  const width = shrinkForViewport
-    ? Math.max(minWidthCap, Math.min(targetWidth, viewportW))
-    : targetWidth;
-  const height = shrinkForViewport
-    ? Math.max(minHeightCap, Math.min(targetHeight, viewportH))
-    : targetHeight;
-
+function applyPopupPatchNotesLayout(height) {
   const root = document.documentElement;
-  root.style.setProperty('--popup-width', `${width}px`);
-  root.style.setProperty('--popup-height', `${height}px`);
-
   const patchNotesCap = Math.min(
     POPUP_LAYOUT_CONFIG.patchNotesMaxHeight,
     Math.max(
@@ -140,13 +130,72 @@ function applyPopupResponsiveLayout() {
   );
 }
 
+function applyPopupResponsiveLayout(retryAttempt = 0) {
+  const targetWidth = POPUP_LAYOUT_CONFIG.width;
+  const targetHeight = POPUP_LAYOUT_CONFIG.maxHeight;
+  const { width: viewportW, height: viewportH } = getPopupViewportSize();
+  const isLikelyMobileViewport = isLikelyMobilePopupHost();
+  const root = document.documentElement;
+  root.classList.toggle('popup-mobile-host', isLikelyMobileViewport);
+
+  let width;
+  let height;
+
+  if (isLikelyMobileViewport) {
+    // Mobile hosts (Firefox Android, Orion sheet, etc.) should fill the real viewport.
+    // Same 280×280 first-paint stub as desktop Edge — never lock to it; retry until real size.
+    if (isUninitializedPopupViewport(viewportW, viewportH)) {
+      if (retryAttempt < POPUP_LAYOUT_MAX_RETRIES && popupLayoutRetryRafId == null) {
+        popupLayoutRetryRafId = requestAnimationFrame(() => {
+          popupLayoutRetryRafId = null;
+          applyPopupResponsiveLayout(retryAttempt + 1);
+        });
+      }
+      return;
+    }
+    width = viewportW;
+    height = viewportH;
+  } else {
+    // Extension popups should default to the designed size (600×600). Only shrink when the
+    // browser has already given a real viewport smaller than our target (e.g. narrow window).
+    // Edge can report the minimum stub size on first paint; clamping to that locks the popup small.
+    const shrinkForViewport =
+      viewportW > POPUP_LAYOUT_CONFIG.minWidth &&
+      viewportH > POPUP_LAYOUT_CONFIG.minHeightCap &&
+      (viewportW < targetWidth || viewportH < targetHeight);
+
+    width = shrinkForViewport
+      ? Math.max(POPUP_LAYOUT_CONFIG.minWidth, Math.min(targetWidth, viewportW))
+      : targetWidth;
+    height = shrinkForViewport
+      ? Math.max(POPUP_LAYOUT_CONFIG.minHeightCap, Math.min(targetHeight, viewportH))
+      : targetHeight;
+  }
+
+  root.style.setProperty('--popup-width', `${width}px`);
+  root.style.setProperty('--popup-height', `${height}px`);
+  applyPopupPatchNotesLayout(height);
+}
+
 function setupPopupResponsiveLayout() {
+  if (popupLayoutRetryRafId != null) {
+    cancelAnimationFrame(popupLayoutRetryRafId);
+    popupLayoutRetryRafId = null;
+  }
   applyPopupResponsiveLayout();
+  requestAnimationFrame(() => applyPopupResponsiveLayout());
+
   if (popupLayoutResizeHandler) {
     window.removeEventListener('resize', popupLayoutResizeHandler);
+    window.visualViewport?.removeEventListener('resize', popupLayoutResizeHandler);
+    window.visualViewport?.removeEventListener('scroll', popupLayoutResizeHandler);
   }
   popupLayoutResizeHandler = () => applyPopupResponsiveLayout();
   window.addEventListener('resize', popupLayoutResizeHandler);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', popupLayoutResizeHandler);
+    window.visualViewport.addEventListener('scroll', popupLayoutResizeHandler);
+  }
 }
 
 function setPatchNotesVisible(container, visible) {

@@ -25,8 +25,8 @@ const BUTTON_ID = `${MOD_ID}-button`;
 const MODAL_ID = `${MOD_ID}-modal`;
 
 const ROOM_HOPPER_MODAL_CONFIG = {
-  width: 750,
-  height: 600,
+  width: 900,
+  height: 700,
   viewportPadding: 16,
   minWidth: 280,
   minHeight: 280
@@ -113,7 +113,7 @@ function applyRoomHopperModalLayout(modalRef, contentRoot, dimensions) {
       gap: '8px'
     });
 
-    const tableWrap = contentRoot.querySelector(`#${MODAL_ID}-table`);
+    const tableWrap = contentRoot.querySelector(`#${MODAL_ID}-table-scroll`);
     if (tableWrap) {
       Object.assign(tableWrap.style, {
         flex: '1 1 0',
@@ -360,13 +360,18 @@ function createOpenButton() {
     });
 }
 
-const CREATURES_MAX_VISIBLE = 6;
+const CREATURES_MIN_VISIBLE = 6;
 
 function renderCreatureCell(td, creatures) {
     if (!creatures || creatures.length === 0) return;
     const row = document.createElement('div');
     row.style.cssText = 'display: flex; gap: 4px; align-items: center;';
-    const visible = creatures.slice(0, CREATURES_MAX_VISIBLE);
+    // Show as many portraits as fit in the creatures column before falling back to +N.
+    // When width is not measurable yet, use a safe fallback based on current modal layout.
+    const measuredWidth = td.getBoundingClientRect().width || td.clientWidth || 340;
+    const maxVisibleByWidth = Math.max(1, Math.floor((measuredWidth - 28) / 36));
+    const maxVisible = Math.min(creatures.length, Math.max(CREATURES_MIN_VISIBLE, maxVisibleByWidth));
+    const visible = creatures.slice(0, maxVisible);
     for (const c of visible) {
         const wrap = document.createElement('div');
         wrap.style.cssText = 'position: relative; width: 32px; height: 32px; flex: none;';
@@ -388,11 +393,11 @@ function renderCreatureCell(td, creatures) {
         }
         row.appendChild(wrap);
     }
-    if (creatures.length > CREATURES_MAX_VISIBLE) {
+    if (creatures.length > maxVisible) {
         const more = document.createElement('span');
-        more.textContent = `+${creatures.length - CREATURES_MAX_VISIBLE}`;
+        more.textContent = `+${creatures.length - maxVisible}`;
         more.style.cssText = 'color: #aaa; font-size: 11px; margin-left: 4px;';
-        more.title = creatures.slice(CREATURES_MAX_VISIBLE).map(c => c.name).join(', ');
+        more.title = creatures.slice(maxVisible).map(c => c.name).join(', ');
         row.appendChild(more);
     }
     td.appendChild(row);
@@ -472,7 +477,32 @@ function teleportToRoom(roomId) {
     }
 }
 
-function renderRows(filteredIndex, tbodyEl) {
+function createRegionHeaderRow(regionName, mapCount) {
+    const tr = document.createElement('tr');
+    tr.dataset.regionHeader = 'true';
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.className = 'pixel-font-16';
+    Object.assign(td.style, {
+        position: 'sticky',
+        top: '0',
+        left: '0',
+        zIndex: '5',
+        padding: '6px 8px',
+        textAlign: 'center',
+        color: '#eee',
+        fontWeight: 'normal',
+        background: '#1a1a1a',
+        borderBottom: '1px solid #2a2a2a',
+        boxSizing: 'border-box',
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.35)'
+    });
+    td.textContent = `${regionName} (${mapCount} maps)`;
+    tr.appendChild(td);
+    return tr;
+}
+
+function renderRows(filteredIndex, tbodyEl, { groupByRegion = false } = {}) {
     tbodyEl.innerHTML = '';
     if (filteredIndex.length === 0) {
         const tr = document.createElement('tr');
@@ -482,7 +512,23 @@ function renderRows(filteredIndex, tbodyEl) {
     }
 
     let rowIdx = 0;
+    let currentRegionId = null;
+    const regionCounts = groupByRegion ? new Map() : null;
+    if (groupByRegion) {
+        for (const room of filteredIndex) {
+            regionCounts.set(room.regionId, (regionCounts.get(room.regionId) || 0) + 1);
+        }
+    }
+
     for (const room of filteredIndex) {
+        if (groupByRegion && room.regionId !== currentRegionId) {
+            currentRegionId = room.regionId;
+            tbodyEl.appendChild(createRegionHeaderRow(
+                room.regionName,
+                regionCounts.get(room.regionId)
+            ));
+        }
+
         const tr = document.createElement('tr');
         tr.dataset.roomId = room.id;
         const baseBg = rowIdx % 2 === 0 ? '#2a2a2a' : '#1f1f1f';
@@ -503,9 +549,9 @@ function renderRows(filteredIndex, tbodyEl) {
 
         // Column 1: Room (thumbnail + name)
         const tdRoom = document.createElement('td');
-        tdRoom.style.cssText = 'padding: 4px 8px; vertical-align: middle;';
+        tdRoom.style.cssText = 'padding: 4px 8px; vertical-align: middle; max-width: 250px; overflow: hidden;';
         const thumbWrap = document.createElement('span');
-        thumbWrap.style.cssText = 'display: inline-flex; align-items: center; gap: 8px;';
+        thumbWrap.style.cssText = 'display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0;';
         const thumb = document.createElement('img');
         thumb.src = `/assets/room-thumbnails/${room.id}.png`;
         thumb.alt = room.name;
@@ -523,6 +569,7 @@ function renderRows(filteredIndex, tbodyEl) {
         };
         const nameSpan = document.createElement('span');
         nameSpan.textContent = room.name;
+        nameSpan.style.cssText = 'white-space: normal; overflow-wrap: anywhere; word-break: break-word; line-height: 1.2; min-width: 0;';
         thumbWrap.appendChild(thumb);
         thumbWrap.appendChild(nameSpan);
         tdRoom.appendChild(thumbWrap);
@@ -538,7 +585,7 @@ function renderRows(filteredIndex, tbodyEl) {
         // Column 3: XP / Stam
         const tdXp = document.createElement('td');
         tdXp.className = 'pixel-font-14';
-        tdXp.style.cssText = 'padding: 4px 8px; vertical-align: middle; text-align: right; color: #ccc; white-space: nowrap; line-height: 1.3;';
+        tdXp.style.cssText = 'padding: 4px 8px; vertical-align: middle; text-align: center; color: #ccc; white-space: nowrap; line-height: 1.3; max-width: 100px;';
         tdXp.dataset.col = 'xp';
         if (room.expAvg > 0) {
             const xpFmt = room.expAvg.toLocaleString('pt-BR');
@@ -554,7 +601,7 @@ function renderRows(filteredIndex, tbodyEl) {
 
         // Column 4: Equips
         const tdEquips = document.createElement('td');
-        tdEquips.style.cssText = 'padding: 4px 8px; vertical-align: middle; text-align: right;';
+        tdEquips.style.cssText = 'padding: 4px 8px; vertical-align: middle; text-align: right; max-width: 200px; overflow: hidden;';
         tdEquips.dataset.col = 'equips';
         renderEquipCell(tdEquips, room.equips);
         tr.appendChild(tdEquips);
@@ -637,7 +684,20 @@ function openModal() {
     for (const r of roomIndex) {
         if (!seenRegions.has(r.regionId)) seenRegions.set(r.regionId, r.regionName);
     }
-    const sortedRegions = Array.from(seenRegions.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+    const sortedRegions = [];
+    const ordered = globalThis.mapsDatabase?.getRegionsInOrder?.();
+    if (Array.isArray(ordered)) {
+        for (const region of ordered) {
+            const label = seenRegions.get(region.id);
+            if (label !== undefined) {
+                sortedRegions.push([region.id, label]);
+                seenRegions.delete(region.id);
+            }
+        }
+    }
+    for (const [id, label] of seenRegions.entries()) {
+        sortedRegions.push([id, label]);
+    }
     for (const [id, label] of sortedRegions) {
         const opt = document.createElement('option');
         opt.value = id;
@@ -667,45 +727,82 @@ function openModal() {
     applyHideRaidsStyle();
     filterBar.appendChild(hideRaidsBtn);
 
-    // Table container (populated in Task 13)
-    const tableWrap = document.createElement('div');
-    tableWrap.id = `${MODAL_ID}-table`;
-    tableWrap.style.cssText = `
+    // Table shell: fixed column headers + scrollable body (reliable sticky region titles)
+    const tableShell = document.createElement('div');
+    tableShell.id = `${MODAL_ID}-table`;
+    tableShell.style.cssText = `
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid #2a2a2a;
+        overflow: hidden;
+    `;
+
+    const tableScroll = document.createElement('div');
+    tableScroll.id = `${MODAL_ID}-table-scroll`;
+    tableScroll.style.cssText = `
         flex: 1 1 0;
         min-height: 0;
         overflow-y: scroll;
         overflow-x: auto;
-        border: 1px solid #2a2a2a;
         scrollbar-width: auto;
         scrollbar-color: #555 #1a1a1a;
     `;
-    // Webkit scrollbar styling (Chrome/Edge) — apply via inline <style> scoped to this modal.
+
     const scrollStyle = document.createElement('style');
     scrollStyle.textContent = `
-        #${MODAL_ID}-table::-webkit-scrollbar { width: 12px; }
-        #${MODAL_ID}-table::-webkit-scrollbar-track { background: #1a1a1a; }
-        #${MODAL_ID}-table::-webkit-scrollbar-thumb { background: #555; border: 2px solid #1a1a1a; border-radius: 6px; }
-        #${MODAL_ID}-table::-webkit-scrollbar-thumb:hover { background: #777; }
+        #${MODAL_ID}-table-scroll::-webkit-scrollbar { width: 12px; }
+        #${MODAL_ID}-table-scroll::-webkit-scrollbar-track { background: #1a1a1a; }
+        #${MODAL_ID}-table-scroll::-webkit-scrollbar-thumb { background: #555; border: 2px solid #1a1a1a; border-radius: 6px; }
+        #${MODAL_ID}-table-scroll::-webkit-scrollbar-thumb:hover { background: #777; }
+        #${MODAL_ID}-table-scroll tr[data-region-header="true"] td {
+            position: sticky;
+            top: 0;
+        }
     `;
     root.appendChild(scrollStyle);
-    root.appendChild(tableWrap);
 
-    const table = document.createElement('table');
-    table.className = 'pixel-font-16 text-whiteRegular';
-    table.style.cssText = 'width: 100%; border-collapse: separate; border-spacing: 0;';
-    const thBase = 'position: sticky; top: 0; z-index: 10; background: #1a1a1a; padding: 6px 8px; border-bottom: 1px solid #2a2a2a; font-weight: normal; color: #bbb;';
-    table.innerHTML = `
+    const tableBaseStyle = 'width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed;';
+    const colgroupHtml = `
+        <colgroup>
+            <col style="width: 250px; max-width: 250px;">
+            <col>
+            <col style="width: 100px; max-width: 100px;">
+            <col style="width: 200px; max-width: 200px;">
+        </colgroup>
+    `;
+    const thBase = 'background: #1a1a1a; padding: 6px 8px; border-bottom: 1px solid #2a2a2a; font-weight: normal; color: #bbb;';
+
+    const headerTable = document.createElement('table');
+    headerTable.className = 'pixel-font-16 text-whiteRegular';
+    headerTable.style.cssText = tableBaseStyle;
+    headerTable.innerHTML = `
+        ${colgroupHtml}
         <thead class="pixel-font-14">
             <tr>
-                <th data-sort="name" style="${thBase} text-align: left; cursor: pointer; user-select: none;">Room <span class="sort-arrow"></span></th>
-                <th style="${thBase} text-align: left;">Creatures</th>
-                <th data-sort="expPerStamina" style="${thBase} text-align: right; cursor: pointer; user-select: none; white-space: nowrap;">XP / Stam <span class="sort-arrow"></span></th>
-                <th style="${thBase} text-align: right;">Equipments</th>
+                <th data-sort="name" style="${thBase} max-width: 250px; text-align: center; cursor: pointer; user-select: none;">Room <span class="sort-arrow"></span></th>
+                <th style="${thBase} text-align: center;">Creatures</th>
+                <th data-sort="expPerStamina" style="${thBase} max-width: 100px; text-align: center; cursor: pointer; user-select: none; white-space: nowrap;">XP / Stam <span class="sort-arrow"></span></th>
+                <th style="${thBase} max-width: 200px; text-align: center;">Equipments</th>
             </tr>
         </thead>
+    `;
+
+    const bodyTable = document.createElement('table');
+    bodyTable.className = 'pixel-font-16 text-whiteRegular';
+    bodyTable.style.cssText = tableBaseStyle;
+    bodyTable.innerHTML = `
+        ${colgroupHtml}
         <tbody id="${MODAL_ID}-tbody"></tbody>
     `;
-    tableWrap.appendChild(table);
+
+    tableScroll.appendChild(bodyTable);
+    tableShell.appendChild(headerTable);
+    tableShell.appendChild(tableScroll);
+    root.appendChild(tableShell);
+
+    const table = headerTable;
 
     const modalInstance = api.ui.components.createModal({
         title: 'Room Hopper',
@@ -767,11 +864,12 @@ function openModal() {
     }, 100);
 
     const tbody = root.querySelector(`#${MODAL_ID}-tbody`);
-    renderRows(roomIndex, tbody);
+
+    renderRows(roomIndex, tbody, { groupByRegion: true });
 
     let searchDebounceTimer = null;
     let sortKey = null;     // 'name' | 'expPerStamina' | null (natural order)
-    let sortDir = 'desc';   // 'desc' | 'asc'
+    let sortDir = 'asc';    // 'asc' | 'desc'
 
     const updateSortArrows = () => {
         table.querySelectorAll('th[data-sort]').forEach(th => {
@@ -803,7 +901,9 @@ function openModal() {
                 return ((va ?? 0) - (vb ?? 0)) * mul;
             });
         }
-        renderRows(filtered, tbody);
+        renderRows(filtered, tbody, {
+            groupByRegion: sortKey === null
+        });
     };
 
     searchInput.addEventListener('input', () => {
@@ -819,12 +919,18 @@ function openModal() {
     table.querySelectorAll('th[data-sort]').forEach(th => {
         th.addEventListener('click', () => {
             const key = th.dataset.sort;
-            if (sortKey === key) {
-                sortDir = sortDir === 'desc' ? 'asc' : 'desc';
-            } else {
+            const initialDir = key === 'expPerStamina' ? 'desc' : 'asc';
+            if (sortKey !== key) {
                 sortKey = key;
-                // Sensible default: text columns asc, numeric desc.
-                sortDir = (key === 'name') ? 'asc' : 'desc';
+                // First click: Room asc, XP/Stam desc.
+                sortDir = initialDir;
+            } else if (sortDir === initialDir) {
+                // Second click: opposite direction.
+                sortDir = initialDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                // Third click: return to default order (region-grouped with sticky headers).
+                sortKey = null;
+                sortDir = 'asc';
             }
             updateSortArrows();
             recompute();
