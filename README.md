@@ -170,7 +170,6 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 ## Project Structure
 
 - `assets/` - Static assets such as fonts, icons, and scripts
-  - `challenges/` - Assets for the Challenges mod (e.g. Exalted Core icon)
   - `fonts/` - Custom fonts used by the UI components
   - `icons/` - Icons used by the extension and mods
   - `js/` - JavaScript libraries, including UI components
@@ -470,7 +469,7 @@ These are community and social mods that enhance player interaction and communit
 
 #### Challenges
 Randomized challenge runs with leaderboards and replay sharing:
-- Clickable Exalted Core icon in the inventory opens the Challenges modal (Cyclopedia-sized three-column layout)
+- **Challenges** button in the top navigation opens the modal (Cyclopedia-sized three-column layout)
 - Roll random challenges: random map, villain creatures, and equipment via slot-reel UI, then start the run in CustomBattle
 - Scoring uses difficulty (allies vs enemies), ticks, and grade bonuses (S+, S, A, B, C, D); runs save $replay() links for sharing
 - Global top-20 leaderboard (Firebase) and personal records (localStorage) with load-setup from leaderboard or personal entries

@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.3.7",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Header nav icon scales up when the label is hidden (same responsive pattern as Inventory and Challenges)."
+        },
+        {
+          "mod": "Challenges",
+          "type": "changed",
+          "text": "Multiplayer tab uses the same three-column layout as Solo (map/summary, creatures, leaderboard). Pulsing queue-waiting header opens Multiplayer with a subtle colored pulse; help panel section titles and body text are slightly larger. Multiplayer in-battle victory modal shows opponent and a waiting-for-score message instead of solo global rank; final match outcome uses a win/lose/draw modal with both scores. Removed unused assets/challenges art and manifest/README references."
+        },
+        {
+          "mod": "VIP List",
+          "type": "changed",
+          "text": "VIP Chat header button icon scales up when the label is hidden (same responsive pattern as Inventory and Challenges)."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "Multiplayer Join queue footer works again after the layout refactor (handlers registered when the queue panel is created). Fixed false win-by-disconnect after a normal loss or when the opponent finished first; completed matches stay in Firebase briefly so both clients read final scores; forfeit is not shown after your score is submitted. Score toasts and result modals no longer swap player names when sorted matchId keys differ from join order. Board resets after closing victory/defeat OK (custom villains removed, Stop, room reloaded). Multiplayer victories no longer save to the solo leaderboard. Rahemos is excluded from random creature rolls."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Player online highscore no longer overwrites Firebase with a lower peak when the latest remote record could not be fetched (e.g. transient read failure); updates are skipped until a successful read confirms the current record."
+        }
+      ]
+    },
+    {
       "version": "4.3.6",
       "changes": [
         {

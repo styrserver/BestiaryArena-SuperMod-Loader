@@ -12183,6 +12183,25 @@ function getGameNavUlForChat() {
   return nav.querySelector('ul.flex.items-center') || null;
 }
 
+function applyChatHeaderButtonResponsiveIcon(btn) {
+  if (!btn) return;
+  const icon = btn.querySelector('img');
+  const textSpan = Array.from(btn.querySelectorAll('span')).find(function(span) {
+    return span.classList.contains('hidden') && span.classList.contains('sm:inline');
+  });
+  if (icon) {
+    icon.removeAttribute('width');
+    icon.removeAttribute('height');
+    icon.style.width = '';
+    icon.style.height = '';
+    icon.className = 'pixelated h-[22px] w-auto sm:h-[11px] sm:w-auto @[250px]:h-[11px] @[250px]:w-auto';
+  }
+  if (textSpan) {
+    textSpan.className = 'hidden @[250px]:inline sm:inline';
+  }
+  btn.className = 'vip-chat-header-btn focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp @[120px]:px-2 sm:px-2 sm:py-0.5';
+}
+
 // Create Chat button in header navigation
 function updateChatHeaderButtonVisibility() {
   const chatEnabled = getMessagingEnabled();
@@ -12205,7 +12224,7 @@ function createChatHeaderButton() {
     
     // Prevent duplicate button
     if (headerUl.querySelector('.vip-chat-header-btn')) {
-      // Update visibility if button already exists
+      applyChatHeaderButtonResponsiveIcon(headerUl.querySelector('.vip-chat-header-btn'));
       updateChatHeaderButtonVisibility();
       return;
     }
@@ -12223,23 +12242,20 @@ function createChatHeaderButton() {
     const li = document.createElement('li');
     li.className = 'hover:text-whiteExp';
     const btn = document.createElement('button');
-    btn.className = 'vip-chat-header-btn focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp sm:px-2 sm:py-0.5';
+    btn.className = 'vip-chat-header-btn focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp @[120px]:px-2 sm:px-2 sm:py-0.5';
     btn.setAttribute('data-selected', 'false');
     
-    // Add chat icon
+    // Add chat icon (larger when label hidden — same pattern as Inventory/Quests nav)
     const icon = document.createElement('img');
     icon.src = 'https://bestiaryarena.com/assets/icons/chat.png';
     icon.alt = 'Chat';
-    icon.width = 16;
-    icon.height = 14;
-    icon.className = 'pixelated';
-    icon.style.cssText = 'width: 16px; height: 14px;';
+    icon.className = 'pixelated h-[22px] w-auto sm:h-[11px] sm:w-auto @[250px]:h-[11px] @[250px]:w-auto';
     btn.appendChild(icon);
     
-    // Add text span (hidden on small screens, shown on larger screens)
+    // Add text span (hidden on small screens / narrow container, shown when wide enough)
     const textSpan = document.createElement('span');
     textSpan.textContent = 'Chat';
-    textSpan.className = 'hidden sm:inline';
+    textSpan.className = 'hidden @[250px]:inline sm:inline';
     btn.appendChild(textSpan);
     
     // Add unread message blip (initially hidden)

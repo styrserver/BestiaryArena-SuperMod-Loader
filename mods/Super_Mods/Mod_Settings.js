@@ -737,8 +737,7 @@ const EXPECTED_INVENTORY_MOD_BUTTON_CLASSES = [
   'autoscroller-inventory-button',
   'better-forge-inventory-button',
   'better-rune-recycler-inventory-button',
-  'depot-manager-inventory-button',
-  'challenges-inventory-button'
+  'depot-manager-inventory-button'
 ];
 
 const inventoryModButtonsState = {
@@ -2430,6 +2429,7 @@ const playercountState = {
   currentPlayerCount: null,
   lastUpdateTime: null,
   onlineRecord: null,
+  onlineRecordFetchSucceeded: false,
   updateInterval: null,
   recordCheckInterval: null
 };
@@ -6972,6 +6972,15 @@ function showSettingsModal() {
             </div>
             <div id="guild-skill-reset-status" style="font-size: 12px; color: #7f8fa4; min-height: 18px;"></div>
           </div>
+          <div id="challenges-admin-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display: none;">
+            <h4 style="margin: 0 0 10px 0; color: #ff6b6b; font-size: 14px;">Challenges admin</h4>
+            <p style="margin: 0 0 12px 0; font-size: 11px; color: #888;">Only names in Firebase <code>config/admins</code>. Clears Firebase challenge data for <strong>all players</strong>. Solo personal runs in localStorage are not affected.</p>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px;">
+              <button type="button" id="challenges-clear-solo-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto; color: #ffb4b4;">Clear solo global leaderboard</button>
+              <button type="button" id="challenges-clear-multiplayer-btn" class="btn btn-secondary" style="width: 100%; pointer-events: auto; color: #ffb4b4;">Clear multiplayer queue, matches &amp; ratings</button>
+            </div>
+            <div id="challenges-admin-status" style="font-size: 12px; color: #7f8fa4; min-height: 18px;"></div>
+          </div>
         `;
         rightColumn.appendChild(advancedContent);
       } else if (categoryId === 'hunt-analyzer') {
@@ -8397,6 +8406,74 @@ function showSettingsModal() {
           } finally {
             guildSkillResetBtn.disabled = false;
           }
+        });
+      }
+
+      const challengesAdminSection = content.querySelector('#challenges-admin-section');
+      const challengesClearSoloBtn = content.querySelector('#challenges-clear-solo-btn');
+      const challengesClearMultiplayerBtn = content.querySelector('#challenges-clear-multiplayer-btn');
+      const challengesAdminStatus = content.querySelector('#challenges-admin-status');
+      const showChallengesAdminTools = async () => {
+        if (!challengesAdminSection) return;
+        let allowed = false;
+        if (typeof window.Challenges?.canRunChallengesAdminToolsAsync === 'function') {
+          allowed = await window.Challenges.canRunChallengesAdminToolsAsync();
+        } else if (typeof window.Challenges?.canRunChallengesAdminTools === 'function') {
+          allowed = window.Challenges.canRunChallengesAdminTools();
+        }
+        challengesAdminSection.style.display = allowed ? 'block' : 'none';
+      };
+      showChallengesAdminTools();
+      if (challengesClearSoloBtn) applyAdvancedActionButtonStyle(challengesClearSoloBtn, { variant: 'red' });
+      if (challengesClearMultiplayerBtn) applyAdvancedActionButtonStyle(challengesClearMultiplayerBtn, { variant: 'red' });
+      const runChallengesAdminClear = async (btn, label, runFn, successTotal) => {
+        if (!window.Challenges || typeof runFn !== 'function') {
+          if (challengesAdminStatus) challengesAdminStatus.textContent = 'Challenges mod not loaded.';
+          return;
+        }
+        if (!confirm(`${label}?\n\nThis cannot be undone.`)) return;
+        const typed = prompt('Type RESET to confirm:');
+        if (typed !== 'RESET') {
+          if (challengesAdminStatus) challengesAdminStatus.textContent = 'Cancelled.';
+          return;
+        }
+        btn.disabled = true;
+        if (challengesAdminStatus) challengesAdminStatus.textContent = 'Running clear...';
+        try {
+          const result = await runFn.call(window.Challenges);
+          if (challengesAdminStatus) {
+            challengesAdminStatus.textContent = result.error
+              ? `Clear failed: ${result.error}`
+              : `Clear OK (${result.deleted}/${successTotal} Firebase trees deleted). Reload the game.`;
+          }
+        } catch (err) {
+          if (challengesAdminStatus) challengesAdminStatus.textContent = `Clear error: ${err.message}`;
+        } finally {
+          btn.disabled = false;
+        }
+      };
+      if (challengesClearSoloBtn) {
+        challengesClearSoloBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          await runChallengesAdminClear(
+            challengesClearSoloBtn,
+            'DELETE the solo challenges global leaderboard for ALL players',
+            window.Challenges?.runClearSoloRecordsIfAllowed,
+            1
+          );
+        });
+      }
+      if (challengesClearMultiplayerBtn) {
+        challengesClearMultiplayerBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          await runChallengesAdminClear(
+            challengesClearMultiplayerBtn,
+            'DELETE multiplayer queue, matches, player-match links, and ratings for ALL players',
+            window.Challenges?.runClearMultiplayerRecordsIfAllowed,
+            4
+          );
         });
       }
       
@@ -12848,12 +12925,14 @@ async function fetchPlayerOnlineHighscore() {
       'fetch player online highscore',
       null
     );
+    playercountState.onlineRecordFetchSucceeded = true;
     const normalized = normalizePlayerOnlineHighscore(data);
     if (normalized) {
       playercountState.onlineRecord = normalized;
     }
     return normalized;
   } catch (error) {
+    playercountState.onlineRecordFetchSucceeded = false;
     console.error('[Mod Settings] Error fetching player online highscore:', error);
     return playercountState.onlineRecord;
   }
@@ -12865,6 +12944,12 @@ async function updatePlayerOnlineHighscoreIfHigher(count) {
   }
 
   const latestRecord = await fetchPlayerOnlineHighscore();
+  const fetchSucceeded = playercountState.onlineRecordFetchSucceeded;
+  if (!fetchSucceeded && latestRecord == null) {
+    console.warn('[Mod Settings] Skipping player online highscore update because latest record could not be fetched');
+    return playercountState.onlineRecord;
+  }
+
   const newPeak = Math.max(count, latestRecord?.peak ?? 0);
   if (latestRecord && newPeak <= latestRecord.peak) {
     return latestRecord;
@@ -13096,12 +13181,22 @@ function addPlayercountHeaderButton() {
     
     li.appendChild(btn);
 
-    // Insert after Cyclopedia
+    // Insert after Challenges, else after Cyclopedia
+    const challengesLi = Array.from(headerUl.children).find(
+      el => el.querySelector('.challenges-header-btn')
+    );
     const cyclopediaLi = Array.from(headerUl.children).find(
       el => el.querySelector('.cyclopedia-header-btn')
     );
 
-    if (cyclopediaLi) {
+    if (challengesLi) {
+      if (challengesLi.nextSibling) {
+        headerUl.insertBefore(li, challengesLi.nextSibling);
+      } else {
+        headerUl.appendChild(li);
+      }
+      console.log('[Mod Settings] Playercount header button inserted after Challenges.');
+    } else if (cyclopediaLi) {
       if (cyclopediaLi.nextSibling) {
         headerUl.insertBefore(li, cyclopediaLi.nextSibling);
       } else {

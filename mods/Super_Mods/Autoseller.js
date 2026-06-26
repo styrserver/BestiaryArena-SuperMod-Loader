@@ -7593,15 +7593,31 @@
                 return;
             }
             
-            if (ul.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`)) return;
+            if (ul.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`)) {
+                const existingBtn = ul.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
+                const existingIcon = existingBtn?.querySelector('img');
+                const existingLabel = existingBtn && Array.from(existingBtn.querySelectorAll('span')).find(function(span) {
+                    return span.classList.contains('hidden') && span.classList.contains('sm:inline');
+                });
+                if (existingIcon) {
+                    existingIcon.removeAttribute('width');
+                    existingIcon.removeAttribute('height');
+                    existingIcon.className = 'pixelated sm:w-2.5 sm:h-[11px] w-5 h-[22px] @[250px]:w-2.5 @[250px]:h-[11px]';
+                }
+                if (existingLabel) {
+                    existingLabel.className = 'hidden @[250px]:inline sm:inline';
+                }
+                updateAutosellerNavButtonColor();
+                return;
+            }
             
             const li = document.createElement('li');
             li.className = 'hover:text-whiteExp';
             
             const btn = document.createElement('button');
-            btn.className = `${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN} focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp sm:px-2 sm:py-0.5`;
+            btn.className = `${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN} focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp @[120px]:px-2 sm:px-2 sm:py-0.5`;
             btn.setAttribute('data-selected', 'false');
-            btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="${t('mods.autoseller.navButton')}" width="12" height="12" class="pixelated"><span class="hidden sm:inline">${t('mods.autoseller.navButton')}</span>`;
+            btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="${t('mods.autoseller.navButton')}" class="pixelated sm:w-2.5 sm:h-[11px] w-5 h-[22px] @[250px]:w-2.5 @[250px]:h-[11px]"><span class="hidden @[250px]:inline sm:inline">${t('mods.autoseller.navButton')}</span>`;
             btn.onclick = openAutosellerModal;
             
             li.appendChild(btn);
@@ -7642,7 +7658,7 @@
         const shouldRainbow = isSellingEverything && isSqueezingEverything && isDisenchantingEverything;
         // Find the text span (it has classes "hidden sm:inline")
         const textSpan = Array.from(btn.querySelectorAll('span')).find(span => 
-            span.classList.contains('hidden') && span.classList.contains('sm:inline')
+            span.classList.contains('hidden') && (span.classList.contains('sm:inline') || span.classList.contains('@[250px]:inline'))
         );
         
         if (isSealedRiskWarning) {
