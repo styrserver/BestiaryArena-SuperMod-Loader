@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.3.8",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Autoplay Dragon Plant and Monster Squeezer show a centered green AUTO badge when autoplant or autosqueeze is enabled; fixed overlays follow each slot responsively (rAF, resize/mutation observers, viewport scroll). Clicking opens the Autoseller modal on the matching tab. Header nav icon copies Inventory responsive sizing (12×12 minimum)."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "AUTO badges no longer wrap autoplay buttons (fixes React removeChild crashes). Mod cleanup tears down badge trackers, debounce timers, injected styles, and globals with isCleaningUp guards so observers and rAF loops cannot run after disable."
+        },
+        {
+          "mod": "VIP List",
+          "type": "changed",
+          "text": "Chat header icon copies Quest/Store responsive sizing (12×12 minimum), synced from native nav icons when the bar is built or refreshed."
+        }
+      ]
+    },
+    {
       "version": "4.3.7",
       "changes": [
         {

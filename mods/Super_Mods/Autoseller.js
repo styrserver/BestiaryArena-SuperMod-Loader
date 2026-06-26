@@ -119,6 +119,7 @@
         // CSS Classes
         CSS_CLASSES: {
             AUTOSELLER_NAV_BTN: 'autoseller-nav-btn',
+            AUTOSELLER_NAV_ICON_FALLBACK: 'pixelated sm:w-2.5 sm:h-[11px] w-5 h-[22px] @[250px]:w-2.5 @[250px]:h-[11px]',
             AUTOSELLER_WIDGET: 'autoseller-session-widget',
             AUTOSELLER_RESPONSIVE_STYLE: 'autoseller-responsive-style'
         },
@@ -160,6 +161,20 @@
     let autosellerModalLayoutCleanup = null;
     let checkboxListeners = []; // Track checkbox event listeners for cleanup
     let dragonPlantDebounceTimer = null; // Debounce timer for dragon plant observer
+    const AUTO_BADGE_SLOTS = {
+        plant: { el: null, target: null },
+        squeezer: { el: null, target: null }
+    };
+    const AUTO_BADGE_MODAL_CATEGORIES = {
+        plant: 'autoplant',
+        squeezer: 'autosqueeze'
+    };
+    let autoBadgePositionHandler = null;
+    let autoBadgeResizeObserver = null;
+    let autoBadgeMutationObserver = null;
+    let autoBadgeTrackRafId = null;
+    let autoBadgePositionRafId = null;
+    let autoBadgeVisualViewportHandler = null;
     let openContextMenu = null; // Track currently open context menu { overlay, menu, closeMenu }
     
     // Timeout tracking for memory leak prevention
@@ -193,6 +208,12 @@
     };
 
     // Dragon Plant Autocollect Constants
+    const DRAGON_PLANT_BUTTON_SPRITE_IDS = ['37022', '28689'];
+    const MONSTER_SQUEEZER_IMG_SELECTORS = [
+        'img[alt="monster squeezer"]',
+        'img[src*="monster-squeezer-portrait-mini"]'
+    ];
+
     const DRAGON_PLANT_CONFIG = {
         GOLD_THRESHOLD: 100000,        // Collect when >= 100k gold
         ITEM_ID: '37021',              // Dragon Plant item ID
@@ -471,6 +492,7 @@
         }
         
         updateAutosellerNavButtonColor();
+        updateAutosellerAutoBadges();
         
         // Manage widget if any tab setting changed (autoMode, autosqueeze, or autoduster)
         const widgetNeedsUpdate = 
@@ -7108,7 +7130,23 @@
         };
     }
     
-    function openAutosellerModal() {
+    function selectAutosellerModalCategory(categoryId) {
+        const validCategoryIds = ['autoplant', 'autosqueeze', 'autoduster'];
+        const resolvedCategoryId = validCategoryIds.includes(categoryId) ? categoryId : 'autoplant';
+        const menuItem = document.querySelector(`.autoseller-modal-root [data-category="${resolvedCategoryId}"]`);
+        if (!menuItem) return false;
+        menuItem.click();
+        return true;
+    }
+
+    function openAutosellerModal(initialCategoryId = 'autoplant') {
+        const validCategoryIds = ['autoplant', 'autosqueeze', 'autoduster'];
+        const categoryId = validCategoryIds.includes(initialCategoryId) ? initialCategoryId : 'autoplant';
+
+        if (selectAutosellerModalCategory(categoryId)) {
+            return;
+        }
+
         if (typeof api !== 'undefined' && api && api.ui && api.ui.components && api.ui.components.createModal) {
             clearAutosellerModalLayoutCleanup();
 
@@ -7256,7 +7294,7 @@
                     label: t('mods.autoseller.autoseller') || 'Autoseller',
                     icon: 'https://bestiaryarena.com/assets/icons/goldpile.png',
                     iconSize: { width: 12, height: 12 },
-                    selected: true,
+                    selected: categoryId === 'autoplant',
                     enabled: initialSettings.autoMode === 'autoplant' || initialSettings.autoMode === 'autosell'
                 },
                 { 
@@ -7264,7 +7302,7 @@
                     label: t('mods.autoseller.autosqueezeLabel'),
                     icon: 'https://bestiaryarena.com/assets/icons/enemy.png',
                     iconSize: { width: 11, height: 11 },
-                    selected: false,
+                    selected: categoryId === 'autosqueeze',
                     enabled: initialSettings.autosqueezeChecked || false
                 },
                 { 
@@ -7272,7 +7310,7 @@
                     label: t('mods.autoseller.autodusterLabel') || 'Autoduster',
                     icon: 'https://bestiaryarena.com/assets/icons/equips.png',
                     iconSize: { width: 9, height: 9 },
-                    selected: false,
+                    selected: categoryId === 'autoduster',
                     enabled: initialSettings.autodusterChecked || false
                 }
             ];
@@ -7422,8 +7460,8 @@
                 leftColumn.appendChild(menuItem);
             });
             
-            // Initialize with Autoplant category selected
-            updateRightColumn('autoplant');
+            // Initialize with requested category selected
+            updateRightColumn(categoryId);
             
             // Add columns to main content
             mainContent.appendChild(leftColumn);
@@ -7572,6 +7610,32 @@
     // =======================
     // 9. Navigation & UI Injection
     // =======================
+
+    function getGameNavUl() {
+        const headerSlot = document.getElementById('header-slot');
+        const nav =
+            headerSlot?.querySelector('nav') ||
+            queryElement('nav.shrink-0') ||
+            queryElement('nav.grow') ||
+            queryElement('div.z-floatingHud nav');
+        return nav?.querySelector('ul.flex.items-center') || null;
+    }
+
+    function syncAutosellerNavIconSize(navUl) {
+        const ul = navUl || getGameNavUl();
+        if (!ul) return;
+
+        const btn = ul.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
+        const icon = btn?.querySelector('img');
+        if (!icon) return;
+
+        const ref = ul.querySelector('img[src$="inventory.png"]');
+        icon.className = ref?.className || UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_ICON_FALLBACK;
+        icon.removeAttribute('width');
+        icon.removeAttribute('height');
+        icon.style.width = '';
+        icon.style.height = '';
+    }
     
     function addAutosellerNavButton() {
         function tryInsert() {
@@ -7600,9 +7664,7 @@
                     return span.classList.contains('hidden') && span.classList.contains('sm:inline');
                 });
                 if (existingIcon) {
-                    existingIcon.removeAttribute('width');
-                    existingIcon.removeAttribute('height');
-                    existingIcon.className = 'pixelated sm:w-2.5 sm:h-[11px] w-5 h-[22px] @[250px]:w-2.5 @[250px]:h-[11px]';
+                    syncAutosellerNavIconSize(ul);
                 }
                 if (existingLabel) {
                     existingLabel.className = 'hidden @[250px]:inline sm:inline';
@@ -7617,12 +7679,13 @@
             const btn = document.createElement('button');
             btn.className = `${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN} focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp @[120px]:px-2 sm:px-2 sm:py-0.5`;
             btn.setAttribute('data-selected', 'false');
-            btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="${t('mods.autoseller.navButton')}" class="pixelated sm:w-2.5 sm:h-[11px] w-5 h-[22px] @[250px]:w-2.5 @[250px]:h-[11px]"><span class="hidden @[250px]:inline sm:inline">${t('mods.autoseller.navButton')}</span>`;
+            btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="${t('mods.autoseller.navButton')}" class="${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_ICON_FALLBACK}"><span class="hidden @[250px]:inline sm:inline">${t('mods.autoseller.navButton')}</span>`;
             btn.onclick = openAutosellerModal;
             
             li.appendChild(btn);
             ul.appendChild(li);
             
+            syncAutosellerNavIconSize(ul);
             // Ensure styles are injected before updating color
             injectAutosellerWidgetStyles();
             updateAutosellerNavButtonColor();
@@ -7812,6 +7875,53 @@
             }
             `;
             document.head.appendChild(rainbowStyle);
+        }
+
+        if (!document.getElementById('autoseller-nav-icon-css')) {
+            const navIconStyle = document.createElement('style');
+            navIconStyle.id = 'autoseller-nav-icon-css';
+            navIconStyle.textContent = `
+            .autoseller-nav-btn > img {
+                min-width: 12px;
+                min-height: 12px;
+            }
+            `;
+            document.head.appendChild(navIconStyle);
+        }
+
+        if (!document.getElementById('autoseller-dragon-plant-badge-css')) {
+            const badgeStyle = document.createElement('style');
+            badgeStyle.id = 'autoseller-dragon-plant-badge-css';
+            badgeStyle.textContent = `
+            .autoseller-auto-badge {
+                position: fixed;
+                transform: translate(-50%, -50%);
+                font-family: pixel-font-16, monospace;
+                font-size: 10px;
+                font-weight: bold;
+                line-height: 1.1;
+                padding: 1px 4px;
+                color: #22c55e;
+                background: rgba(0, 0, 0, 0.85);
+                border: 1px solid #22c55e;
+                border-radius: 2px;
+                text-shadow: 0 0 6px rgba(34, 197, 94, 0.95), 0 1px 0 #000;
+                pointer-events: auto;
+                cursor: pointer;
+                z-index: 9999;
+                will-change: left, top;
+                filter: none !important;
+                -webkit-filter: none !important;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                appearance: none;
+                -webkit-appearance: none;
+            }
+            .autoseller-auto-badge:hover {
+                opacity: 0.85;
+            }
+            `;
+            document.head.appendChild(badgeStyle);
         }
     }
 
@@ -8239,6 +8349,338 @@
         
         return null;
     }
+
+    function findDragonPlantButton(container = null) {
+        const widgetBottom = container || findAutoplayContainer();
+        if (!widgetBottom) return null;
+
+        for (const itemId of DRAGON_PLANT_BUTTON_SPRITE_IDS) {
+            const img = widgetBottom.querySelector(`button[data-manual] img[alt="${itemId}"]`);
+            if (img) return img.closest('button');
+        }
+
+        for (const button of widgetBottom.querySelectorAll('button')) {
+            if (button.getAttribute('role') === 'checkbox') continue;
+            for (const itemId of DRAGON_PLANT_BUTTON_SPRITE_IDS) {
+                if (button.querySelector(`img[alt="${itemId}"]`)) {
+                    return button;
+                }
+            }
+        }
+        return null;
+    }
+
+    function findMonsterSqueezerButton(container = null) {
+        const widgetBottom = container || findAutoplayContainer();
+        if (!widgetBottom) return null;
+
+        for (const selector of MONSTER_SQUEEZER_IMG_SELECTORS) {
+            const img = widgetBottom.querySelector(selector);
+            const button = img?.closest('button');
+            if (button && button.getAttribute('role') !== 'checkbox') {
+                return button;
+            }
+        }
+        return null;
+    }
+
+    function isManagedAutoBadge(badge) {
+        return Object.values(AUTO_BADGE_SLOTS).some((slot) => slot.el === badge);
+    }
+
+    function cleanupLegacyDragonPlantBadgeHosts() {
+        document.querySelectorAll('.autoseller-dragon-plant-badge-host').forEach((host) => {
+            try {
+                const button = host.querySelector('button');
+                const parent = host.parentElement;
+                if (!button || !parent || button.parentElement !== host) return;
+                parent.insertBefore(button, host);
+                host.remove();
+            } catch (_) {
+                // Avoid fighting React reconciliation on stale wrappers.
+            }
+        });
+        document.querySelectorAll('.autoseller-auto-badge, .autoseller-dragon-plant-auto-badge').forEach((badge) => {
+            if (!isManagedAutoBadge(badge)) {
+                badge.remove();
+            }
+        });
+    }
+
+    function createAutoBadgeButton(slotKey) {
+        const categoryId = AUTO_BADGE_MODAL_CATEGORIES[slotKey] || 'autoplant';
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'autoseller-auto-badge';
+        badge.textContent = 'auto';
+        badge.title = categoryId === 'autosqueeze'
+            ? t('mods.autoseller.autosqueezeLabel')
+            : t('mods.autoseller.navButton');
+        badge.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openAutosellerModal(categoryId);
+        });
+        document.body.appendChild(badge);
+        return badge;
+    }
+
+    function schedulePositionAutoBadges() {
+        if (autoBadgePositionRafId !== null) return;
+        autoBadgePositionRafId = requestAnimationFrame(() => {
+            autoBadgePositionRafId = null;
+            positionAutoBadges();
+        });
+    }
+
+    function startAutoBadgeTrackLoop() {
+        if (autoBadgeTrackRafId !== null) return;
+        const tick = () => {
+            if (isCleaningUp || !Object.values(AUTO_BADGE_SLOTS).some((slot) => slot.el)) {
+                autoBadgeTrackRafId = null;
+                return;
+            }
+            positionAutoBadges();
+            autoBadgeTrackRafId = requestAnimationFrame(tick);
+        };
+        autoBadgeTrackRafId = requestAnimationFrame(tick);
+    }
+
+    function stopAutoBadgeTrackLoop() {
+        if (autoBadgeTrackRafId !== null) {
+            cancelAnimationFrame(autoBadgeTrackRafId);
+            autoBadgeTrackRafId = null;
+        }
+        if (autoBadgePositionRafId !== null) {
+            cancelAnimationFrame(autoBadgePositionRafId);
+            autoBadgePositionRafId = null;
+        }
+    }
+
+    function refreshAutoBadgeTargets() {
+        if (isCleaningUp) return;
+
+        const settings = getSettings();
+        const widgetBottom = findAutoplayContainer();
+        let targetsChanged = false;
+
+        const slotConfigs = [
+            {
+                slotKey: 'plant',
+                enabled: settings.autoMode === 'autoplant',
+                findTarget: () => widgetBottom ? findDragonPlantButton(widgetBottom) : null
+            },
+            {
+                slotKey: 'squeezer',
+                enabled: settings.autosqueezeChecked === true,
+                findTarget: () => widgetBottom ? findMonsterSqueezerButton(widgetBottom) : null
+            }
+        ];
+
+        for (const config of slotConfigs) {
+            const slot = AUTO_BADGE_SLOTS[config.slotKey];
+            if (!slot.el) continue;
+
+            if (!config.enabled) {
+                stopAutoBadgeSlot(config.slotKey);
+                targetsChanged = true;
+                continue;
+            }
+
+            const currentTarget = slot.target;
+            const needsRebind = !currentTarget || !document.contains(currentTarget);
+            const nextTarget = needsRebind ? config.findTarget() : currentTarget;
+            if (nextTarget !== currentTarget) {
+                slot.target = nextTarget;
+                targetsChanged = true;
+            }
+        }
+
+        if (targetsChanged) {
+            syncAutoBadgeResizeObservers();
+        }
+    }
+
+    function positionAutoBadges() {
+        if (isCleaningUp) return;
+
+        refreshAutoBadgeTargets();
+
+        for (const slot of Object.values(AUTO_BADGE_SLOTS)) {
+            if (!slot.el) continue;
+
+            const target = slot.target;
+            if (!target || !document.contains(target)) {
+                slot.el.style.display = 'none';
+                continue;
+            }
+
+            const rect = target.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) {
+                slot.el.style.display = 'none';
+                continue;
+            }
+
+            slot.el.style.display = '';
+            slot.el.style.left = `${rect.left + rect.width / 2}px`;
+            slot.el.style.top = `${rect.top + rect.height / 2}px`;
+        }
+    }
+
+    function stopAutoBadgeSlot(slotKey) {
+        const slot = AUTO_BADGE_SLOTS[slotKey];
+        if (slot.el?.isConnected) {
+            slot.el.remove();
+        }
+        slot.el = null;
+        slot.target = null;
+    }
+
+    function stopAutosellerAutoBadgeTracking() {
+        stopAutoBadgeTrackLoop();
+
+        if (autoBadgePositionHandler) {
+            window.removeEventListener('resize', autoBadgePositionHandler);
+            window.removeEventListener('scroll', autoBadgePositionHandler, true);
+            autoBadgePositionHandler = null;
+        }
+        if (window.visualViewport && autoBadgeVisualViewportHandler) {
+            window.visualViewport.removeEventListener('resize', autoBadgeVisualViewportHandler);
+            window.visualViewport.removeEventListener('scroll', autoBadgeVisualViewportHandler);
+            autoBadgeVisualViewportHandler = null;
+        }
+        if (autoBadgeResizeObserver) {
+            autoBadgeResizeObserver.disconnect();
+            autoBadgeResizeObserver = null;
+        }
+        if (autoBadgeMutationObserver) {
+            autoBadgeMutationObserver.disconnect();
+            autoBadgeMutationObserver = null;
+        }
+        for (const slotKey of Object.keys(AUTO_BADGE_SLOTS)) {
+            stopAutoBadgeSlot(slotKey);
+        }
+    }
+
+    function syncAutoBadgeMutationObserver() {
+        const hasActiveBadges = Object.values(AUTO_BADGE_SLOTS).some((slot) => slot.el);
+        if (!hasActiveBadges) {
+            if (autoBadgeMutationObserver) {
+                autoBadgeMutationObserver.disconnect();
+                autoBadgeMutationObserver = null;
+            }
+            return;
+        }
+
+        const widgetBottom = findAutoplayContainer();
+        if (!widgetBottom) return;
+
+        if (!autoBadgeMutationObserver) {
+            autoBadgeMutationObserver = new MutationObserver(() => {
+                if (isCleaningUp) return;
+                refreshAutoBadgeTargets();
+                schedulePositionAutoBadges();
+            });
+        }
+
+        autoBadgeMutationObserver.disconnect();
+        autoBadgeMutationObserver.observe(widgetBottom, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'style', 'disabled', 'data-state', 'data-disabled', 'data-minimized', 'aria-checked']
+        });
+    }
+
+    function syncAutoBadgeResizeObservers() {
+        if (typeof ResizeObserver === 'undefined') return;
+
+        if (!autoBadgeResizeObserver) {
+            autoBadgeResizeObserver = new ResizeObserver(() => {
+                if (isCleaningUp) return;
+                schedulePositionAutoBadges();
+            });
+        }
+        autoBadgeResizeObserver.disconnect();
+
+        const widgetBottom = findAutoplayContainer();
+        if (widgetBottom) {
+            autoBadgeResizeObserver.observe(widgetBottom);
+        }
+
+        for (const slot of Object.values(AUTO_BADGE_SLOTS)) {
+            if (slot.target && document.contains(slot.target)) {
+                autoBadgeResizeObserver.observe(slot.target);
+                let parent = slot.target.parentElement;
+                let depth = 0;
+                while (parent && parent !== widgetBottom && depth < 4) {
+                    autoBadgeResizeObserver.observe(parent);
+                    parent = parent.parentElement;
+                    depth += 1;
+                }
+            }
+        }
+    }
+
+    function ensureAutoBadgeTracking() {
+        const hasActiveBadges = Object.values(AUTO_BADGE_SLOTS).some((slot) => slot.el);
+        if (!hasActiveBadges) {
+            stopAutosellerAutoBadgeTracking();
+            return;
+        }
+
+        if (!autoBadgePositionHandler) {
+            autoBadgePositionHandler = () => schedulePositionAutoBadges();
+            window.addEventListener('resize', autoBadgePositionHandler);
+            window.addEventListener('scroll', autoBadgePositionHandler, true);
+        }
+
+        if (window.visualViewport && !autoBadgeVisualViewportHandler) {
+            autoBadgeVisualViewportHandler = () => schedulePositionAutoBadges();
+            window.visualViewport.addEventListener('resize', autoBadgeVisualViewportHandler);
+            window.visualViewport.addEventListener('scroll', autoBadgeVisualViewportHandler);
+        }
+
+        syncAutoBadgeResizeObservers();
+        syncAutoBadgeMutationObserver();
+        startAutoBadgeTrackLoop();
+        positionAutoBadges();
+    }
+
+    function setAutoBadgeSlot(slotKey, enabled, target) {
+        const slot = AUTO_BADGE_SLOTS[slotKey];
+        if (!enabled || !target) {
+            stopAutoBadgeSlot(slotKey);
+            return;
+        }
+
+        if (!slot.el) {
+            slot.el = createAutoBadgeButton(slotKey);
+        }
+        slot.target = target;
+    }
+
+    function updateAutosellerAutoBadges() {
+        if (isCleaningUp) return;
+
+        injectAutosellerWidgetStyles();
+
+        const widgetBottom = findAutoplayContainer();
+        const settings = getSettings();
+
+        setAutoBadgeSlot(
+            'plant',
+            settings.autoMode === 'autoplant',
+            widgetBottom ? findDragonPlantButton(widgetBottom) : null
+        );
+        setAutoBadgeSlot(
+            'squeezer',
+            settings.autosqueezeChecked === true,
+            widgetBottom ? findMonsterSqueezerButton(widgetBottom) : null
+        );
+
+        ensureAutoBadgeTracking();
+    }
     
     function applyLocalStorageToGameCheckbox() {
         const settings = getSettings();
@@ -8289,14 +8731,21 @@
                 });
                 
                 if (!hasRelevantMutations) return;
+
+                if (!isCleaningUp) {
+                    schedulePositionAutoBadges();
+                    refreshAutoBadgeTargets();
+                }
                 
                 if (dragonPlantDebounceTimer) {
                     clearTimeout(dragonPlantDebounceTimer);
                 }
                 
                 dragonPlantDebounceTimer = setTimeout(() => {
+                    if (isCleaningUp) return;
                     // When autoplay session appears/changes, apply localStorage to it
                     applyLocalStorageToGameCheckbox();
+                    updateAutosellerAutoBadges();
                 }, OBSERVER_DEBOUNCE_MS);
             });
             
@@ -8370,6 +8819,8 @@
     }
     
     function stopDragonPlantObserver() {
+        stopAutosellerAutoBadgeTracking();
+
         if (dragonPlantObserver) {
             dragonPlantObserver.disconnect();
             dragonPlantObserver = null;
@@ -9018,29 +9469,7 @@
             return false;
         }
         
-        // Find the Dragon Plant button (try Dragon Plant first, then Baby Dragon Plant)
-        let dragonPlantButton = null;
-        const allButtons = widgetBottom.querySelectorAll('button');
-        for (const button of allButtons) {
-            const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
-            
-            // First try Dragon Plant (ID 37022)
-            let img = button.querySelector('img[alt="37022"]');
-            if (img && isNotCheckbox) {
-                dragonPlantButton = button;
-                break;
-            }
-            
-            // If Dragon Plant not found, try Baby Dragon Plant (ID 28689)
-            if (!dragonPlantButton) {
-                img = button.querySelector('img[alt="28689"]');
-                if (img && isNotCheckbox) {
-                    dragonPlantButton = button;
-                    break;
-                }
-            }
-        }
-        
+        const dragonPlantButton = findDragonPlantButton(widgetBottom);
         if (!dragonPlantButton) {
             console.log('[Autoseller] Dragon Plant button not found');
             return false;
@@ -9094,29 +9523,7 @@
         const widgetBottom = findAutoplayContainer();
         if (!widgetBottom) return;
         
-        // Find the Dragon Plant button (try Dragon Plant first, then Baby Dragon Plant)
-        let dragonPlantButton = null;
-        const allButtons = widgetBottom.querySelectorAll('button');
-        for (const button of allButtons) {
-            const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
-            
-            // First try Dragon Plant (ID 37022)
-            let img = button.querySelector('img[alt="37022"]');
-            if (img && isNotCheckbox) {
-                dragonPlantButton = button;
-                break;
-            }
-            
-            // If Dragon Plant not found, try Baby Dragon Plant (ID 28689)
-            if (!dragonPlantButton) {
-                img = button.querySelector('img[alt="28689"]');
-                if (img && isNotCheckbox) {
-                    dragonPlantButton = button;
-                    break;
-                }
-            }
-        }
-        
+        const dragonPlantButton = findDragonPlantButton(widgetBottom);
         if (!dragonPlantButton) return;
         
         // Check if Dragon Plant is currently enabled
@@ -9517,6 +9924,8 @@
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
         setupDragonPlantObserver();
+        cleanupLegacyDragonPlantBadgeHosts();
+        updateAutosellerAutoBadges();
         setupGameEndListener();
         setupAutosellerVisibilityRecovery();
         setupPendingGameEndInventoryWatcher();
@@ -9530,6 +9939,7 @@
         const timeoutId = setTimeout(() => {
             if (isCleaningUp) return;
             updateAutosellerNavButtonColor();
+            updateAutosellerAutoBadges();
         }, 1000);
         timeoutIds.push(timeoutId);
         
@@ -9655,6 +10065,11 @@
                         clearTimeout(debounceTimer);
                         debounceTimer = null;
                     }
+
+                    if (dragonPlantDebounceTimer) {
+                        clearTimeout(dragonPlantDebounceTimer);
+                        dragonPlantDebounceTimer = null;
+                    }
                     
                     // Clear all tracked timeouts
                     timeoutIds.forEach(id => {
@@ -9680,11 +10095,26 @@
                     const navBtn = document.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
                     const responsiveStyle = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_RESPONSIVE_STYLE);
                     const widgetStyle = document.getElementById('autoseller-widget-css');
+                    const dragonPlantBadgeStyle = document.getElementById('autoseller-dragon-plant-badge-css');
+                    const navIconStyle = document.getElementById('autoseller-nav-icon-css');
+                    const rainbowStyle = document.getElementById('autoseller-rainbow-css');
+                    
+                    stopAutosellerAutoBadgeTracking();
+                    cleanupLegacyDragonPlantBadgeHosts();
                     
                     if (widget && widget.parentNode) widget.parentNode.removeChild(widget);
                     if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
                     if (responsiveStyle && responsiveStyle.parentNode) responsiveStyle.parentNode.removeChild(responsiveStyle);
                     if (widgetStyle && widgetStyle.parentNode) widgetStyle.parentNode.removeChild(widgetStyle);
+                    if (dragonPlantBadgeStyle && dragonPlantBadgeStyle.parentNode) {
+                        dragonPlantBadgeStyle.parentNode.removeChild(dragonPlantBadgeStyle);
+                    }
+                    if (navIconStyle && navIconStyle.parentNode) {
+                        navIconStyle.parentNode.removeChild(navIconStyle);
+                    }
+                    if (rainbowStyle && rainbowStyle.parentNode) {
+                        rainbowStyle.parentNode.removeChild(rainbowStyle);
+                    }
                     
                     // Close any open context menu
                     if (openContextMenu && openContextMenu.closeMenu) {
@@ -9776,7 +10206,10 @@
                     delete window.autosellCheckbox;
                     delete window.updateAutoplantStatus;
                     delete window.autoplantStatusSummary;
+                    delete window.updateAutosellerMenuItemColors;
+                    delete window.__autosellerUpdatingCheckbox;
                     delete window.__autosellerLoaded;
+                    delete window.autoseller;
                     
                     // 9. Unregister from mod coordination system
                     if (window.ModCoordination) {
@@ -9797,11 +10230,18 @@
                         debounceTimer,
                         dragonPlantDebounceTimer,
                         dragonPlantObserver,
+                        autoBadgeTrackRafId,
+                        autoBadgePositionRafId,
+                        autoBadgeResizeObserver,
+                        autoBadgeMutationObserver,
+                        autoBadgePositionHandler,
+                        autoBadgeVisualViewportHandler,
                         emitNewGameHandler1,
                         emitNewGameHandler2,
                         emitEndGameHandler1,
                         menuColorObserver,
-                        gameEndSubscription
+                        gameEndSubscription,
+                        pendingGameEndInventorySubscription
                     ].filter(Boolean);
                     
                     if (remainingReferences.length > 0) {

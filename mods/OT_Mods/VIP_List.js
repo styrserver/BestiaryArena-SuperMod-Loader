@@ -528,6 +528,10 @@ function injectVIPListStyles() {
       color: ${CSS_CONSTANTS.COLORS.DUPLICATE} !important;
       font-style: italic;
     }
+    .vip-chat-header-btn > img {
+      min-width: 12px;
+      min-height: 12px;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -12172,6 +12176,16 @@ function stopAccountMenuObserver() {
 }
 
 // Same nav resolution as Autoseller / Mod Settings (mobile uses nav.grow + floating HUD).
+const VIP_CHAT_NAV_ICON_FALLBACK = 'pixelated h-[22px] w-auto sm:h-[11px] sm:w-auto @[250px]:h-[11px] @[250px]:w-auto';
+
+function questIconClassesToChatIconClasses(questClassName) {
+    if (!questClassName) return VIP_CHAT_NAV_ICON_FALLBACK;
+    return questClassName
+        .replace(/\bsm:size-(\[[^\]]+\])/g, 'sm:h-$1 sm:w-auto')
+        .replace(/@\[250px\]:size-(\[[^\]]+\])/g, '@[250px]:h-$1 @[250px]:w-auto')
+        .replace(/\bsize-(\[[^\]]+\])/g, 'h-$1 w-auto');
+}
+
 function getGameNavUlForChat() {
   const headerSlot = document.getElementById('header-slot');
   const nav =
@@ -12183,19 +12197,26 @@ function getGameNavUlForChat() {
   return nav.querySelector('ul.flex.items-center') || null;
 }
 
-function applyChatHeaderButtonResponsiveIcon(btn) {
-  if (!btn) return;
-  const icon = btn.querySelector('img');
-  const textSpan = Array.from(btn.querySelectorAll('span')).find(function(span) {
-    return span.classList.contains('hidden') && span.classList.contains('sm:inline');
-  });
-  if (icon) {
+function syncChatNavIconSize(btn, navUl) {
+    const icon = btn?.querySelector('img');
+    if (!icon) return;
+
+    const ul = navUl || getGameNavUlForChat();
+    const ref = ul?.querySelector('img[src$="quest.png"]') || ul?.querySelector('img[src$="store.png"]');
+    icon.className = questIconClassesToChatIconClasses(ref?.className);
     icon.removeAttribute('width');
     icon.removeAttribute('height');
     icon.style.width = '';
     icon.style.height = '';
-    icon.className = 'pixelated h-[22px] w-auto sm:h-[11px] sm:w-auto @[250px]:h-[11px] @[250px]:w-auto';
-  }
+}
+
+function applyChatHeaderButtonResponsiveIcon(btn) {
+  if (!btn) return;
+  injectVIPListStyles();
+  syncChatNavIconSize(btn);
+  const textSpan = Array.from(btn.querySelectorAll('span')).find(function(span) {
+    return span.classList.contains('hidden') && span.classList.contains('sm:inline');
+  });
   if (textSpan) {
     textSpan.className = 'hidden @[250px]:inline sm:inline';
   }
@@ -12215,6 +12236,7 @@ function updateChatHeaderButtonVisibility() {
 
 function createChatHeaderButton() {
   const tryInsert = () => {
+    injectVIPListStyles();
     const headerUl = getGameNavUlForChat();
     if (!headerUl) {
       const timeoutId = setTimeout(tryInsert, 500);
@@ -12249,9 +12271,10 @@ function createChatHeaderButton() {
     const icon = document.createElement('img');
     icon.src = 'https://bestiaryarena.com/assets/icons/chat.png';
     icon.alt = 'Chat';
-    icon.className = 'pixelated h-[22px] w-auto sm:h-[11px] sm:w-auto @[250px]:h-[11px] @[250px]:w-auto';
+    icon.className = VIP_CHAT_NAV_ICON_FALLBACK;
     btn.appendChild(icon);
     
+    syncChatNavIconSize(btn, headerUl);
     // Add text span (hidden on small screens / narrow container, shown when wide enough)
     const textSpan = document.createElement('span');
     textSpan.textContent = 'Chat';
