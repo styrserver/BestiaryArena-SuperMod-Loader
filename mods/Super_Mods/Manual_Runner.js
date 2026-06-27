@@ -113,6 +113,13 @@ const MANUAL_RUNNER_RESULTS_MODAL_CONFIG = {
   minHeight: 200
 };
 
+const MANUAL_RUNNER_RUNNING_MODAL_CONFIG = {
+  minWidth: 220,
+  maxWidth: 260,
+  maxHeight: 320,
+  viewportPadding: 12
+};
+
 let manualRunnerModalLayoutCleanup = null;
 
 function getManualRunnerResultsModalDimensions() {
@@ -300,8 +307,11 @@ function injectManualRunnerStyles() {
       border-radius: 6px;
       box-shadow: 0 0 15px rgba(0,0,0,0.7);
       padding: 0;
-      min-width: 220px;
-      max-width: 260px;
+      min-width: ${MANUAL_RUNNER_RUNNING_MODAL_CONFIG.minWidth}px;
+      max-width: ${MANUAL_RUNNER_RUNNING_MODAL_CONFIG.maxWidth}px;
+      max-height: min(${MANUAL_RUNNER_RUNNING_MODAL_CONFIG.maxHeight}px, calc(100vh - ${MANUAL_RUNNER_RUNNING_MODAL_CONFIG.viewportPadding * 2}px));
+      display: flex;
+      flex-direction: column;
       z-index: 2147483647;
       font-family: Inter, sans-serif;
       overflow: hidden;
@@ -315,6 +325,7 @@ function injectManualRunnerStyles() {
       border-image: var(--mr-frame-4);
       margin: 2px;
       padding: 4px;
+      flex: 0 0 auto;
       text-align: center;
       color: #E06C75;
       font-weight: bold;
@@ -330,11 +341,15 @@ function injectManualRunnerStyles() {
       border-image: var(--mr-frame-4);
       margin: 0 2px;
       padding: 4px;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
       box-sizing: border-box;
     }
     .manual-runner-modal-footer {
       display: flex;
       justify-content: center;
+      flex: 0 0 auto;
       border: 6px solid transparent;
       border-image: var(--mr-frame-4);
       background-image: url(/_next/static/media/background-regular.b0337118.png);

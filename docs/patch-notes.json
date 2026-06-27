@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.3.9",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "World records re-fetch when you set a new personal best or finish a battle (including autoplay and sandbox), with a follow-up retry for slow backend updates. Post-battle refreshes bypass the same-map throttle so stale tick/rank/floor WRs no longer linger after a highscore. Rapid map switching now keeps up: map changes use trailing debounce instead of a 1s throttle, in-flight updates queue a retry for the latest map, and stale fetches are discarded if you move again before data returns."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "changed",
+          "text": "Running progress overlay caps height at 320px (viewport-clamped); the body scrolls when content exceeds the limit while the header and Stop button stay fixed. Width and height limits live in MANUAL_RUNNER_RUNNING_MODAL_CONFIG (220–260px wide)."
+        }
+      ]
+    },
+    {
       "version": "4.3.8",
       "changes": [
         {

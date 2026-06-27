@@ -664,11 +664,12 @@
     BATTLE_REFRESH: 500,
     MUTATION_RESTORE: 50,
     RETRY: 1000,
-    MAP_CHANGE_THROTTLE: 1000,
-    CONTAINER_THROTTLE_NORMAL: 500,
-    CONTAINER_THROTTLE_AUTOPLAY: 200,
+    MAP_CHANGE_DEBOUNCE: 50,
+    CONTAINER_DEBOUNCE_NORMAL: 100,
+    CONTAINER_DEBOUNCE_AUTOPLAY: 50,
     UPDATE_THROTTLE: 100,
-    POST_BATTLE_FRESH_WINDOW: 8000
+    POST_BATTLE_FRESH_WINDOW: 8000,
+    HIGHSCORE_RETRY: 2500
   };
   
   const UI_CONFIG = {
@@ -784,9 +785,11 @@
     // Board analysis detection
     isBoardAnalyzing: false,
     
-    // Update throttling
-    lastMapChangeTime: 0,
-    lastContainerUpdateTime: 0,
+    // Debounced update scheduling
+    pendingMapCode: null,
+    mapChangeDebounceTimeout: null,
+    containerDebounceTimeout: null,
+    pendingUpdateAfterCurrent: false,
     lastNoContainerLog: 0,
     
     // Error state
@@ -818,6 +821,10 @@
       this.lastBattleCompletionAt = 0;
       this.subscriptions = [];
       this.timeouts = [];
+      this.pendingMapCode = null;
+      this.mapChangeDebounceTimeout = null;
+      this.containerDebounceTimeout = null;
+      this.pendingUpdateAfterCurrent = false;
     },
     
     // Helper function to track timeouts for cleanup
@@ -841,6 +848,8 @@
   let leaderboardContainer = null;
   let currentMapCode = null;
   let roomNames = null;
+  let lastTrackedMapCode = null;
+  let lastTrackedUserScores = null;
   
   // Helper function to schedule a timeout and track it for cleanup
   function scheduleTimeout(fn, delay) {
@@ -1069,6 +1078,91 @@
     }
   }
   
+  async function refreshLeaderboardForMap(mapCode) {
+    if (modDisposed || isBetterHighscoresHidden() || !mapCode || isBoardAnalyzing()) {
+      return false;
+    }
+
+    try {
+      const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, true);
+
+      if (modDisposed) {
+        return false;
+      }
+
+      if (leaderboardContainer && document.contains(leaderboardContainer)) {
+        const updated = updateLeaderboardData(tickData, rankData, floorData);
+        if (updated) {
+          BetterHighscoresState.lastUpdateTime = Date.now();
+          console.log('[Better Highscores] Leaderboard updated in place with fresh data');
+          return true;
+        }
+      }
+
+      const mapName = getMapName(mapCode);
+      const newContainer = createLeaderboardDisplay(tickData, rankData, floorData, mapName);
+      if (leaderboardContainer && document.contains(leaderboardContainer)) {
+        leaderboardContainer.replaceWith(newContainer);
+      } else {
+        const mainContainer = getMainContainer();
+        if (mainContainer) {
+          mainContainer.appendChild(newContainer);
+        }
+      }
+      leaderboardContainer = newContainer;
+      currentMapCode = mapCode;
+      BetterHighscoresState.lastUpdateTime = Date.now();
+      console.log('[Better Highscores] Leaderboard refreshed with fresh data');
+      return true;
+    } catch (error) {
+      console.warn('[Better Highscores] Failed to refresh leaderboard:', error);
+      return false;
+    }
+  }
+
+  function scheduleLeaderboardRefresh(mapCode, reason = 'refresh') {
+    if (!mapCode || isBetterHighscoresHidden()) {
+      return;
+    }
+
+    console.log(`[Better Highscores] Scheduling leaderboard refresh (${reason}) for map: ${mapCode}`);
+    BetterHighscoresState.lastBattleCompletionAt = Date.now();
+    BetterHighscoresState.leaderboardCache.delete(`leaderboard_${mapCode}`);
+
+    scheduleTimeout(() => {
+      refreshLeaderboardForMap(mapCode);
+    }, DELAYS.BATTLE_REFRESH);
+
+    scheduleTimeout(() => {
+      BetterHighscoresState.leaderboardCache.delete(`leaderboard_${mapCode}`);
+      refreshLeaderboardForMap(mapCode);
+    }, DELAYS.HIGHSCORE_RETRY);
+  }
+
+  function handlePlayerScoreUpdate() {
+    if (isBoardAnalyzing() || isBetterHighscoresHidden()) {
+      return;
+    }
+
+    const mapCode = getCurrentMapCode();
+    if (!mapCode) {
+      return;
+    }
+
+    const currentScores = snapshotUserScoresForMap(mapCode);
+    if (mapCode !== lastTrackedMapCode) {
+      resetTrackedUserScores(mapCode);
+      return;
+    }
+
+    if (hasUserScoreImproved(lastTrackedUserScores, currentScores)) {
+      console.log('[Better Highscores] Personal best improved, refreshing world records');
+      scheduleLeaderboardRefresh(mapCode, 'personal-best');
+    }
+
+    lastTrackedUserScores = currentScores;
+  }
+
   // Helper to handle battle completion (victory/defeat states)
   async function handleBattleCompletion() {
     if (isBetterHighscoresHidden()) {
@@ -1078,90 +1172,81 @@
     if (isSandboxMode()) {
       console.log('[Better Highscores] Battle completed in sandbox mode, restoring container');
       scheduleTimeout(() => restoreContainer(), DELAYS.RESTORE);
-      return;
-    }
-    
-    if (isAutoplayMode()) {
+    } else if (isAutoplayMode()) {
       console.log('[Better Highscores] Battle completed in autoplay mode, ensuring leaderboard is visible');
-      scheduleTimeout(() => updateLeaderboards(), DELAYS.UPDATE);
+    }
+
+    const mapCode = getCurrentMapCode();
+    if (mapCode) {
+      console.log('[Better Highscores] Battle completed, refreshing leaderboard data');
+      scheduleLeaderboardRefresh(mapCode, 'battle-complete');
+    }
+  }
+
+  function clearDebounceTimeout(timeoutKey) {
+    const timeoutId = BetterHighscoresState[timeoutKey];
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      BetterHighscoresState.untrackTimeout(timeoutId);
+      BetterHighscoresState[timeoutKey] = null;
+    }
+  }
+
+  function scheduleMapChangeUpdate(mapCode) {
+    BetterHighscoresState.pendingMapCode = mapCode;
+
+    clearDebounceTimeout('mapChangeDebounceTimeout');
+
+    BetterHighscoresState.mapChangeDebounceTimeout = scheduleTimeout(() => {
+      BetterHighscoresState.mapChangeDebounceTimeout = null;
+
+      const targetMap = getCurrentMapCode() || BetterHighscoresState.pendingMapCode;
+      BetterHighscoresState.pendingMapCode = null;
+
+      if (!targetMap) {
+        return;
+      }
+
+      console.log(`[Better Highscores] Map changed from ${currentMapCode} to ${targetMap}`);
+      resetTrackedUserScores(targetMap);
+      updateLeaderboards();
+    }, DELAYS.MAP_CHANGE_DEBOUNCE);
+  }
+
+  function scheduleContainerUpdate() {
+    if (isSandboxMode()) {
+      console.log('[Better Highscores] Main container changed in sandbox mode, skipping leaderboard re-application');
       return;
     }
-    
-    console.log('[Better Highscores] Battle completed, refreshing leaderboard data');
-    BetterHighscoresState.lastBattleCompletionAt = Date.now();
-    scheduleTimeout(async () => {
-      const mapCode = getCurrentMapCode();
-      if (mapCode) {
-        try {
-          // Clear this map's cache so fresh data can replace old records as soon as backend updates.
-          BetterHighscoresState.leaderboardCache.delete(`leaderboard_${mapCode}`);
-          const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, true);
-          
-          // Try to update in place first (no flickering)
-          if (leaderboardContainer && document.contains(leaderboardContainer)) {
-            const updated = updateLeaderboardData(tickData, rankData, floorData);
-            if (updated) {
-              console.log('[Better Highscores] Leaderboard updated in place with fresh battle data');
-              return;
-            }
-          }
-          
-          // Fallback to full update if in-place update failed
-          if (leaderboardContainer) {
-            const mapName = getMapName(mapCode);
-            const newContainer = createLeaderboardDisplay(tickData, rankData, floorData, mapName);
-            leaderboardContainer.replaceWith(newContainer);
-            leaderboardContainer = newContainer;
-            console.log('[Better Highscores] Leaderboard updated with fresh battle data');
-          }
-        } catch (error) {
-          console.warn('[Better Highscores] Failed to refresh leaderboard after battle:', error);
-        }
+
+    const debounceDelay = isAutoplayMode()
+      ? DELAYS.CONTAINER_DEBOUNCE_AUTOPLAY
+      : DELAYS.CONTAINER_DEBOUNCE_NORMAL;
+
+    clearDebounceTimeout('containerDebounceTimeout');
+
+    BetterHighscoresState.containerDebounceTimeout = scheduleTimeout(() => {
+      BetterHighscoresState.containerDebounceTimeout = null;
+
+      const mainContainer = getMainContainer();
+      if (!mainContainer || (leaderboardContainer && mainContainer.contains(leaderboardContainer))) {
+        return;
       }
-    }, DELAYS.BATTLE_REFRESH);
+
+      console.log('[Better Highscores] Main container changed, re-applying leaderboard');
+      updateLeaderboards();
+    }, debounceDelay);
   }
 
   // Shared handler for map changes and container updates
   function handleStateUpdate(detectedMapCode, mainContainer) {
-    // Handle map changes
     if (detectedMapCode && detectedMapCode !== currentMapCode) {
-      // Throttle map change updates to prevent spam
-      if (shouldThrottle(BetterHighscoresState.lastMapChangeTime, DELAYS.MAP_CHANGE_THROTTLE)) {
-        console.log(`[Better Highscores] Map change throttled: ${currentMapCode} to ${detectedMapCode}`);
-        return;
-      }
-      
-      console.log(`[Better Highscores] Map changed from ${currentMapCode} to ${detectedMapCode}`);
-      BetterHighscoresState.lastMapChangeTime = Date.now();
-      
-      // Update the current map code even in sandbox mode
-      currentMapCode = detectedMapCode;
-      
-      // Update the display regardless of sandbox mode
-      updateLeaderboards();
+      scheduleMapChangeUpdate(detectedMapCode);
+      return;
     }
-    
-    // Handle container updates
+
     if (mainContainer && (!leaderboardContainer || !mainContainer.contains(leaderboardContainer))) {
-      // More lenient throttling for autoplay mode
-      const throttleDelay = isAutoplayMode() ? DELAYS.CONTAINER_THROTTLE_AUTOPLAY : DELAYS.CONTAINER_THROTTLE_NORMAL;
-      
-      // Throttle container updates to prevent spam
-      if (shouldThrottle(BetterHighscoresState.lastContainerUpdateTime, throttleDelay)) {
-        console.log('[Better Highscores] Container update throttled');
-        return;
-      }
-      
-      // Skip container re-application if in sandbox mode
-      if (isSandboxMode()) {
-        console.log('[Better Highscores] Main container changed in sandbox mode, skipping leaderboard re-application');
-        return;
-      }
-      
-      console.log('[Better Highscores] Main container changed, re-applying leaderboard');
-      BetterHighscoresState.lastContainerUpdateTime = Date.now();
-      // Immediate re-application for fastest response
-      updateLeaderboards();
+      scheduleContainerUpdate();
     }
   }
 
@@ -1378,6 +1463,73 @@
       console.error('[Better Highscores] Error getting user best scores:', error);
       return null;
     }
+  }
+
+  function snapshotUserScoresForMap(mapCode) {
+    const playerSnapshot = getPlayerSnapshot();
+    const room = playerSnapshot?.context?.rooms?.[mapCode];
+    if (!room) {
+      return null;
+    }
+
+    return {
+      ticks: room.ticks ?? null,
+      rank: room.rank ?? null,
+      rankTicks: room.rankTicks ?? null,
+      floor: room.floor ?? null,
+      floorTicks: room.floorTicks ?? null
+    };
+  }
+
+  function resetTrackedUserScores(mapCode) {
+    lastTrackedMapCode = mapCode || null;
+    lastTrackedUserScores = mapCode ? snapshotUserScoresForMap(mapCode) : null;
+  }
+
+  function hasUserScoreImproved(previous, current) {
+    if (!current) {
+      return false;
+    }
+    if (!previous) {
+      return (
+        (current.ticks !== null && current.ticks !== undefined) ||
+        (current.rank !== null && current.rank !== undefined) ||
+        (current.floor !== null && current.floor !== undefined && current.floor > 0)
+      );
+    }
+
+    if (current.ticks !== null && current.ticks !== undefined &&
+        (previous.ticks === null || previous.ticks === undefined || current.ticks < previous.ticks)) {
+      return true;
+    }
+
+    const rankImproved = isRankBetterOrEqual(
+      current.rank,
+      current.rankTicks,
+      previous.rank,
+      previous.rankTicks
+    ) && (
+      previous.rank === null ||
+      previous.rank === undefined ||
+      current.rank !== previous.rank ||
+      current.rankTicks !== previous.rankTicks
+    );
+    if (rankImproved) {
+      return true;
+    }
+
+    const floorImproved = isFloorBetterOrEqual(
+      current.floor,
+      current.floorTicks,
+      previous.floor,
+      previous.floorTicks
+    ) && (
+      previous.floor === null ||
+      previous.floor === undefined ||
+      current.floor !== previous.floor ||
+      current.floorTicks !== previous.floorTicks
+    );
+    return floorImproved;
   }
 
   function getEntryFloorTicks(entry) {
@@ -2008,9 +2160,8 @@
 
     removeRestoreButton();
     
-    // Don't update if we're already updating
     if (BetterHighscoresState.isUpdating) {
-      console.log('[Better Highscores] Update already in progress, skipping');
+      BetterHighscoresState.pendingUpdateAfterCurrent = true;
       return;
     }
     
@@ -2038,10 +2189,14 @@
         console.log('[Better Highscores] No current map code found');
         return;
       }
+
+      const shouldForceRefresh =
+        Date.now() - BetterHighscoresState.lastBattleCompletionAt < DELAYS.POST_BATTLE_FRESH_WINDOW;
       
-      // Throttle updates to prevent spam
+      // Throttle updates to prevent spam, but never skip when fresh world-record data is needed.
       if (mapCode === currentMapCode && 
           leaderboardContainer && 
+          !shouldForceRefresh &&
           shouldThrottle(BetterHighscoresState.lastUpdateTime, DELAYS.UPDATE_THROTTLE)) {
         console.log('[Better Highscores] Skipping update - same map and recent data');
         return;
@@ -2049,12 +2204,16 @@
       
       const mapName = getMapName(mapCode);
       
-      // Use fresh reads shortly after battle completion to avoid stale cached records.
-      const shouldForceRefresh =
-        Date.now() - BetterHighscoresState.lastBattleCompletionAt < DELAYS.POST_BATTLE_FRESH_WINDOW;
       const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, shouldForceRefresh);
 
       if (modDisposed) {
+        return;
+      }
+
+      const latestMapCode = getCurrentMapCode();
+      if (latestMapCode && latestMapCode !== mapCode) {
+        console.log(`[Better Highscores] Map changed during fetch (${mapCode} -> ${latestMapCode}), scheduling retry`);
+        BetterHighscoresState.pendingUpdateAfterCurrent = true;
         return;
       }
       
@@ -2128,6 +2287,10 @@
       console.warn('[Better Highscores] Recoverable error occurred:', error.message);
     } finally {
       BetterHighscoresState.isUpdating = false;
+      if (BetterHighscoresState.pendingUpdateAfterCurrent) {
+        BetterHighscoresState.pendingUpdateAfterCurrent = false;
+        scheduleTimeout(() => updateLeaderboards(), 0);
+      }
     }
   }
 
@@ -2332,6 +2495,14 @@
           // Store subscription for cleanup
           BetterHighscoresState.subscriptions.push(gameTimerUnsubscribe);
         }
+
+        if (globalThis.state.player?.subscribe) {
+          const playerUnsubscribe = globalThis.state.player.subscribe(() => {
+            handlePlayerScoreUpdate();
+          });
+          BetterHighscoresState.subscriptions.push(playerUnsubscribe);
+          resetTrackedUserScores(getCurrentMapCode());
+        }
         
         // Set up MutationObserver to detect when leaderboard gets removed from DOM
         window.BetterHighscoresInternals = window.BetterHighscoresInternals || {};
@@ -2410,6 +2581,8 @@
     leaderboardContainer = null;
     currentMapCode = null;
     roomNames = null;
+    lastTrackedMapCode = null;
+    lastTrackedUserScores = null;
     
     // Clean up state subscriptions
     BetterHighscoresState.subscriptions.forEach(unsubscribe => {
@@ -2422,6 +2595,11 @@
       }
     });
     
+    clearDebounceTimeout('mapChangeDebounceTimeout');
+    clearDebounceTimeout('containerDebounceTimeout');
+    BetterHighscoresState.pendingMapCode = null;
+    BetterHighscoresState.pendingUpdateAfterCurrent = false;
+
     // Reset state
     BetterHighscoresState.reset();
     
