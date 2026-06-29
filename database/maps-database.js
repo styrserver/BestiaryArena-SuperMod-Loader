@@ -292,6 +292,87 @@ function isDynamicEventMap(mapId) {
   return !STATIC_RAID_EVENTS.includes(mapName);
 }
 
+const MAP_ORDER_UNKNOWN = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Canonical in-game map order: regions via getRegionsInOrder(), then each region's rooms array.
+ * Maps missing from REGIONS are appended in getAllMaps() order.
+ * @returns {Map<string, number>} mapId → ascending sort index
+ */
+function buildMapOrderIndex() {
+  const index = new Map();
+  const state = globalThis.state || window.state;
+  const regions = state?.utils?.REGIONS;
+
+  if (Array.isArray(regions)) {
+    const regionById = new Map();
+    for (const region of regions) {
+      if (region?.id) regionById.set(region.id, region);
+    }
+
+    const orderedRegionIds = [];
+    const seenRegionIds = new Set();
+    for (const region of getRegionsInOrder()) {
+      const id = region?.id;
+      if (!id || seenRegionIds.has(id)) continue;
+      seenRegionIds.add(id);
+      orderedRegionIds.push(id);
+    }
+    for (const region of regions) {
+      const id = region?.id;
+      if (!id || seenRegionIds.has(id)) continue;
+      seenRegionIds.add(id);
+      orderedRegionIds.push(id);
+    }
+
+    let order = 0;
+    for (const regionId of orderedRegionIds) {
+      const rooms = regionById.get(regionId)?.rooms;
+      if (!Array.isArray(rooms)) continue;
+      for (const room of rooms) {
+        const mapId = room?.id;
+        if (!mapId || index.has(mapId)) continue;
+        index.set(mapId, order++);
+      }
+    }
+  }
+
+  const allMaps = getAllMaps();
+  const roomList = Array.isArray(allMaps) ? allMaps : Object.values(allMaps || {});
+  let order = index.size;
+  for (const room of roomList) {
+    const mapId = room?.id;
+    if (!mapId || index.has(mapId)) continue;
+    index.set(mapId, order++);
+  }
+
+  return index;
+}
+
+/**
+ * Sort index for a map in canonical game order (lower = earlier).
+ * @param {string} mapId
+ * @returns {number}
+ */
+function getMapOrderIndex(mapId) {
+  if (mapId == null || mapId === '') return MAP_ORDER_UNKNOWN;
+  const index = buildMapOrderIndex();
+  return index.has(mapId) ? index.get(mapId) : MAP_ORDER_UNKNOWN;
+}
+
+/**
+ * Comparator helper for sorting map ids by canonical game order.
+ * @param {string} mapIdA
+ * @param {string} mapIdB
+ * @returns {number}
+ */
+function compareMapsByGameOrder(mapIdA, mapIdB) {
+  const orderA = getMapOrderIndex(mapIdA);
+  const orderB = getMapOrderIndex(mapIdB);
+  if (orderA !== orderB) return orderA - orderB;
+  return String(mapIdA).localeCompare(String(mapIdB));
+}
+
 /**
  * Regions in game display order (state.utils.REGIONS iteration order).
  * @returns {Array<{ id: string, name?: string }>}
@@ -326,6 +407,10 @@ mapsDatabase.isRaid = isRaid;
 mapsDatabase.isMapRaidComprehensive = isMapRaidComprehensive;
 mapsDatabase.isDynamicEventMap = isDynamicEventMap;
 mapsDatabase.getRegionsInOrder = getRegionsInOrder;
+mapsDatabase.buildMapOrderIndex = buildMapOrderIndex;
+mapsDatabase.getMapOrderIndex = getMapOrderIndex;
+mapsDatabase.compareMapsByGameOrder = compareMapsByGameOrder;
+mapsDatabase.MAP_ORDER_UNKNOWN = MAP_ORDER_UNKNOWN;
 mapsDatabase.REGION_NAME_MAP = { ...REGION_NAME_MAP };
 mapsDatabase.getRegionDisplayName = getRegionDisplayName;
 mapsDatabase.getRegionDisplayNameFromRegion = getRegionDisplayNameFromRegion;

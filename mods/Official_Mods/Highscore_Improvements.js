@@ -1,12 +1,12 @@
-// DOM Improved Highscore mod for Bestiary Arena
-if (window.DEBUG) console.log('Improved Highscore Mod initializing...');
+// Highscores mod for Bestiary Arena
+console.log('Highscores mod initializing...');
 
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
 
 // Create the Highscore button using the API
 if (api) {
-  if (window.DEBUG) console.log('BestiaryModAPI available in Improved Highscore Mod');
+  console.log('BestiaryModAPI available in Highscores mod');
   
   // Create button to show highscore modal
   window.highscoreButton = api.ui.addButton({
@@ -17,54 +17,81 @@ if (api) {
     onClick: showImprovementsModal
   });
   
-  if (window.DEBUG) console.log('Highscore improvement button added');
+  console.log('Highscores button added');
 } else {
-  console.error('BestiaryModAPI not available in Improved Highscore Mod');
+  console.error('BestiaryModAPI not available in Highscores mod');
 }
 
 // Map of room codes to names
 let ROOM_NAMES;
 
-const HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG = {
-  width: 500,
-  height: 550,
+const HIGHSCORES_MODAL_CONFIG = {
+  width: 550,
+  height: 636,
   viewportPadding: 16,
   minWidth: 280,
   minHeight: 320
 };
+const HIGHSCORES_MODAL_ID = 'highscores-modal';
 
-let activeHighscoreImprovementsModal = null;
-let highscoreImprovementsModalLayoutCleanup = null;
+let activeHighscoresModal = null;
+let highscoresModalLayoutCleanup = null;
 
-function getHighscoreImprovementsModalDimensions() {
-  const pad = HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.viewportPadding * 2;
+function tagHighscoresModalElement(modalRef) {
+  const dialog = getHighscoresDialog(modalRef);
+  if (dialog) {
+    dialog.id = HIGHSCORES_MODAL_ID;
+  }
+  return dialog;
+}
+
+function removeHighscoresModalElement(modalEl) {
+  if (!modalEl?.parentNode) return;
+  const prev = modalEl.previousElementSibling;
+  if (prev instanceof HTMLElement && prev.style.zIndex === '9998') {
+    prev.remove();
+  }
+  modalEl.remove();
+}
+
+function closeHighscoresModal() {
+  if (activeHighscoresModal?.close) {
+    activeHighscoresModal.close();
+  } else {
+    removeHighscoresModalElement(document.getElementById(HIGHSCORES_MODAL_ID));
+  }
+  clearHighscoresModalLayoutCleanup();
+}
+
+function getHighscoresModalDimensions() {
+  const pad = HIGHSCORES_MODAL_CONFIG.viewportPadding * 2;
   return {
     width: Math.max(
-      HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.minWidth,
-      Math.min(HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.width, window.innerWidth - pad)
+      HIGHSCORES_MODAL_CONFIG.minWidth,
+      Math.min(HIGHSCORES_MODAL_CONFIG.width, window.innerWidth - pad)
     ),
     height: Math.max(
-      HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.minHeight,
-      Math.min(HIGHSCORE_IMPROVEMENTS_MODAL_CONFIG.height, window.innerHeight - pad)
+      HIGHSCORES_MODAL_CONFIG.minHeight,
+      Math.min(HIGHSCORES_MODAL_CONFIG.height, window.innerHeight - pad)
     )
   };
 }
 
-function getHighscoreImprovementsDialog(modalRef) {
+function getHighscoresDialog(modalRef) {
   if (modalRef?.element) return modalRef.element;
   if (modalRef instanceof HTMLElement) return modalRef;
   return document.querySelector('div[role="dialog"][data-state="open"]');
 }
 
-function clearHighscoreImprovementsModalLayoutCleanup() {
-  if (highscoreImprovementsModalLayoutCleanup) {
-    highscoreImprovementsModalLayoutCleanup();
-    highscoreImprovementsModalLayoutCleanup = null;
+function clearHighscoresModalLayoutCleanup() {
+  if (highscoresModalLayoutCleanup) {
+    highscoresModalLayoutCleanup();
+    highscoresModalLayoutCleanup = null;
   }
 }
 
-function applyHighscoreImprovementsModalLayout(modalRef, contentRoot, dimensions) {
-  const dialog = getHighscoreImprovementsDialog(modalRef);
+function applyHighscoresModalLayout(modalRef, contentRoot, dimensions) {
+  const dialog = getHighscoresDialog(modalRef);
   if (!dialog) return;
 
   const { width, height } = dimensions;
@@ -116,21 +143,21 @@ function applyHighscoreImprovementsModalLayout(modalRef, contentRoot, dimensions
   }
 }
 
-function setupHighscoreImprovementsModalResponsiveLayout(modalRef, contentRoot) {
-  clearHighscoreImprovementsModalLayoutCleanup();
-  activeHighscoreImprovementsModal = modalRef;
-  const apply = () => applyHighscoreImprovementsModalLayout(
+function setupHighscoresModalResponsiveLayout(modalRef, contentRoot) {
+  clearHighscoresModalLayoutCleanup();
+  activeHighscoresModal = modalRef;
+  const apply = () => applyHighscoresModalLayout(
     modalRef,
     contentRoot,
-    getHighscoreImprovementsModalDimensions()
+    getHighscoresModalDimensions()
   );
   requestAnimationFrame(() => apply());
   const onResize = () => apply();
   window.addEventListener('resize', onResize);
-  highscoreImprovementsModalLayoutCleanup = () => {
+  highscoresModalLayoutCleanup = () => {
     window.removeEventListener('resize', onResize);
-    if (activeHighscoreImprovementsModal === modalRef) {
-      activeHighscoreImprovementsModal = null;
+    if (activeHighscoresModal === modalRef) {
+      activeHighscoresModal = null;
     }
   };
 }
@@ -159,6 +186,276 @@ async function fetchTRPC(method) {
   }
 }
 
+function compareImprovementsByMapOrder(a, b) {
+  const compare = globalThis.mapsDatabase?.compareMapsByGameOrder;
+  if (typeof compare === 'function') {
+    return compare(a.code, b.code);
+  }
+  return String(a.code).localeCompare(String(b.code));
+}
+
+function isMapUnlocked(code, rooms) {
+  if (!rooms || code == null) return false;
+  return Object.prototype.hasOwnProperty.call(rooms, code);
+}
+
+function compareImprovementsByUnlockStatus(a, b) {
+  const aUnlocked = Boolean(a.isUnlocked);
+  const bUnlocked = Boolean(b.isUnlocked);
+  if (aUnlocked === bUnlocked) return 0;
+  return aUnlocked ? -1 : 1;
+}
+
+function sortImprovementOpportunities(entries, withinGroupCompare) {
+  return entries.slice().sort((a, b) => {
+    const unlockOrder = compareImprovementsByUnlockStatus(a, b);
+    if (unlockOrder !== 0) return unlockOrder;
+    const ownOrder = compareOwnWrAtBottom(a, b);
+    if (ownOrder !== 0) return ownOrder;
+    if (typeof withinGroupCompare === 'function') {
+      const groupOrder = withinGroupCompare(a, b);
+      if (groupOrder !== 0) return groupOrder;
+    }
+    return compareImprovementsByMapOrder(a, b);
+  });
+}
+
+function compareOwnWrAtBottom(a, b) {
+  if (a.ownsWr !== b.ownsWr) return a.ownsWr ? 1 : -1;
+  return 0;
+}
+
+function formatOwnWrStatHtml(unit, youValue, youSubTicks) {
+  return `<span style="color:#8f8;">${formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null)} (You)</span>`;
+}
+
+function isOwnHighscoreRecord(record, you, yourName) {
+  if (!record) return false;
+  const recordName = (record.userName || '').trim().toLowerCase();
+  return (record.userId !== undefined && record.userId !== null && record.userId === you) ||
+    (recordName && yourName && recordName === yourName);
+}
+
+function normalizeYourFloorTicks(roomData) {
+  if (Number.isFinite(Number(roomData.floorTicks))) return Number(roomData.floorTicks);
+  if (Number.isFinite(Number(roomData.ticks))) return Number(roomData.ticks);
+  return null;
+}
+
+function normalizeBestFloorTicks(floorRecord) {
+  if (!floorRecord) return null;
+  if (Number.isFinite(Number(floorRecord.floorTicks))) return Number(floorRecord.floorTicks);
+  if (Number.isFinite(Number(floorRecord.ticks))) return Number(floorRecord.ticks);
+  return null;
+}
+
+// 10 minutes at 16 ticks/second — game timeout / no speedrun clear
+const SPEEDRUN_TIMEOUT_TICKS = 9600;
+
+function readYourTicks(roomData) {
+  const ticks = roomData?.ticks;
+  if (ticks === null || ticks === undefined) return null;
+  const n = Number(ticks);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+/** Valid speedrun time only (excludes timeout placeholder). */
+function normalizeYourTicks(roomData) {
+  const n = readYourTicks(roomData);
+  if (n === null || n >= SPEEDRUN_TIMEOUT_TICKS) return null;
+  return n;
+}
+
+function normalizeYourRank(roomData) {
+  const rank = roomData?.rank;
+  if (rank === null || rank === undefined) return null;
+  const n = Number(rank);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+function normalizeYourRankTicks(roomData) {
+  const rankTicks = roomData?.rankTicks;
+  if (rankTicks === null || rankTicks === undefined) return null;
+  const n = Number(rankTicks);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeYourFloor(roomData) {
+  const floor = roomData?.floor;
+  if (floor === null || floor === undefined) return null;
+  const n = Number(floor);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeYourFloorTicksForSummary(roomData) {
+  if (roomData?.floor === null || roomData?.floor === undefined) return null;
+  if (Number.isFinite(Number(roomData.floorTicks))) return Number(roomData.floorTicks);
+  return null;
+}
+
+/** Floor index 0 = 100% ascension; implied by any valid speedrun time on the map. */
+function getEffectiveYourFloor(roomData) {
+  const floor = normalizeYourFloor(roomData);
+  if (floor !== null) return floor;
+  if (normalizeYourTicks(roomData) !== null) return 0;
+  return null;
+}
+
+function getEffectiveYourFloorTicks(roomData) {
+  const fromFloorField = normalizeYourFloorTicksForSummary(roomData);
+  if (fromFloorField !== null) return fromFloorField;
+  if (normalizeYourFloor(roomData) !== null) return null;
+  const speedrunTicks = normalizeYourTicks(roomData);
+  return speedrunTicks !== null ? speedrunTicks : null;
+}
+
+function hasAnyPersonalMapData(roomData) {
+  return readYourTicks(roomData) !== null
+    || normalizeYourRank(roomData) !== null
+    || normalizeYourFloor(roomData) !== null;
+}
+
+function buildWorldRecordOnlyHtml(unit, playerName, theirValue, theirTicks) {
+  const showSubTicks = unit !== 'ticks' && theirTicks !== null && theirTicks !== undefined;
+  const safeName = escapeHtml(playerName || 'Unknown');
+  const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent((playerName || '').trim())}`;
+  const nameLink = `<a href="${profileUrl}" target="_blank" rel="noopener noreferrer" style="color: #ff8; text-decoration: underline; cursor: pointer;">${safeName}</a>`;
+  return `<span style="color:#888">—</span> → ${formatRecordValue(unit, theirValue, showSubTicks ? theirTicks : null)} (${nameLink})`;
+}
+
+function formatSummaryStatHtml(unit, youValue, youSubTicks, bestRecord, you, yourName) {
+  const missingYou = youValue === null || youValue === undefined;
+
+  if (!bestRecord) {
+    if (missingYou) {
+      return '<span style="color:#888">—</span>';
+    }
+    const yours = formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null);
+    return `<span style="color:#ccc">${yours}</span> <span style="color:#888">· No WR</span>`;
+  }
+
+  const theirValue = unit === 'ticks'
+    ? bestRecord.ticks
+    : unit === 'rank'
+      ? bestRecord.rank
+      : bestRecord.floor;
+  const theirTicks = unit === 'ticks'
+    ? null
+    : unit === 'rank'
+      ? (Number.isFinite(Number(bestRecord.ticks)) ? Number(bestRecord.ticks) : null)
+      : normalizeBestFloorTicks(bestRecord);
+
+  if (missingYou) {
+    if (isOwnHighscoreRecord(bestRecord, you, yourName)) {
+      return `<span style="color:#8f8;">${formatRecordValue(unit, theirValue, unit !== 'ticks' ? theirTicks : null)} (You)</span>`;
+    }
+    return buildWorldRecordOnlyHtml(unit, bestRecord.userName, theirValue, theirTicks);
+  }
+
+  if (isOwnHighscoreRecord(bestRecord, you, yourName)) {
+    return `<span style="color:#8f8;">${formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null)} (You)</span>`;
+  }
+
+  return buildRecordComparisonHtml(
+    unit,
+    youValue,
+    unit !== 'ticks' ? youSubTicks : null,
+    bestRecord.userName,
+    theirValue,
+    theirTicks
+  );
+}
+
+function getSummaryMapCodesInOrder(rooms) {
+  const codes = [];
+  const seen = new Set();
+  const index = globalThis.mapsDatabase?.buildMapOrderIndex?.();
+
+  if (index instanceof Map && index.size > 0) {
+    const sortedCodes = [...index.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .map(([code]) => code);
+    for (const code of sortedCodes) {
+      if (!isCountedRoomForImprovements(code)) continue;
+      codes.push(code);
+      seen.add(code);
+    }
+  }
+
+  const roomNames = ROOM_NAMES || globalThis.state?.utils?.ROOM_NAME || {};
+  for (const code of Object.keys(roomNames)) {
+    if (!seen.has(code) && isCountedRoomForImprovements(code)) {
+      codes.push(code);
+      seen.add(code);
+    }
+  }
+
+  for (const code of Object.keys(rooms || {})) {
+    if (!seen.has(code) && isCountedRoomForImprovements(code)) {
+      codes.push(code);
+    }
+  }
+
+  return codes;
+}
+
+function buildSummaryEntries(mapCodes, rooms, best, roomsHighscores, you, yourName) {
+  const entries = mapCodes.map((code) => {
+    const roomData = rooms?.[code] || {};
+    const tickBest = best[code];
+    const rankBest = roomsHighscores?.rank?.[code];
+    const floorBest = roomsHighscores?.floor?.[code];
+
+    const yourTicks = readYourTicks(roomData);
+    const yourRank = normalizeYourRank(roomData);
+    const yourRankTicks = normalizeYourRankTicks(roomData);
+    const yourFloor = getEffectiveYourFloor(roomData);
+    const yourFloorTicks = getEffectiveYourFloorTicks(roomData);
+
+    const ownsTickWr = isOwnHighscoreRecord(tickBest, you, yourName);
+    const ownsRankWr = isOwnHighscoreRecord(rankBest, you, yourName);
+    const ownsFloorWr = isOwnHighscoreRecord(floorBest, you, yourName);
+
+    const tickBehind = tickBest && yourTicks !== null && !ownsTickWr && yourTicks > tickBest.ticks;
+    const rankBehind = rankBest && yourRank !== null && !ownsRankWr && yourRank < rankBest.rank;
+    const floorBehind = floorBest && yourFloor !== null && !ownsFloorWr && yourFloor < floorBest.floor;
+    const sameFloorBehind = floorBest && yourFloor !== null && !ownsFloorWr &&
+      yourFloor === floorBest.floor &&
+      yourFloorTicks !== null &&
+      normalizeBestFloorTicks(floorBest) !== null &&
+      yourFloorTicks > normalizeBestFloorTicks(floorBest);
+
+    return {
+      code,
+      name: ROOM_NAMES[code] || code,
+      yourTicks,
+      yourRank,
+      yourRankTicks,
+      yourFloor,
+      yourFloorTicks,
+      tickBest,
+      rankBest,
+      floorBest,
+      ownsTickWr,
+      ownsRankWr,
+      ownsFloorWr,
+      hasImprovement: tickBehind || rankBehind || floorBehind || sameFloorBehind,
+      hasPersonalData: hasAnyPersonalMapData(roomData),
+      isUnlocked: isMapUnlocked(code, rooms)
+    };
+  }).filter((entry) =>
+    entry.yourTicks !== null ||
+    entry.yourRank !== null ||
+    entry.yourFloor !== null ||
+    entry.tickBest ||
+    entry.rankBest ||
+    entry.floorBest
+  );
+  return sortImprovementOpportunities(entries);
+}
+
 // Event maps (dynamic raids) should not count in time/rank improvement stats.
 function isCountedRoomForImprovements(roomCode) {
   try {
@@ -167,9 +464,20 @@ function isCountedRoomForImprovements(roomCode) {
       return false;
     }
   } catch (error) {
-    console.warn('[Highscore Improvements] Failed to classify room:', roomCode, error);
+    console.warn('[Highscores] Failed to classify room:', roomCode, error);
   }
   return true;
+}
+
+function getImprovementRoomCodes(rooms, extraCodes = []) {
+  const codes = new Set();
+  for (const code of Object.keys(rooms || {})) {
+    if (isCountedRoomForImprovements(code)) codes.add(code);
+  }
+  for (const code of extraCodes) {
+    if (isCountedRoomForImprovements(code)) codes.add(code);
+  }
+  return [...codes];
 }
 
 function formatTickImprovementText(tickDelta, yourTicks) {
@@ -182,6 +490,42 @@ function formatTickImprovementText(tickDelta, yourTicks) {
     return `${Math.abs(tickDelta)} ticks ahead`;
   }
   return 'Tied ticks';
+}
+
+function buildImprovementSummaryStats(tickOpportunities, rankOpportunities, floorOpportunities) {
+  const mapsWithRoom = new Set();
+
+  const tickGain = tickOpportunities.reduce((sum, o) => {
+    if (o.ownsWr || o.diff <= 0) return sum;
+    mapsWithRoom.add(o.code);
+    return sum + o.diff;
+  }, 0);
+
+  const rankGain = rankOpportunities.reduce((sum, o) => {
+    if (o.ownsWr) return sum;
+    const points = Math.max(0, Number(o.diff) || 0);
+    if (points > 0) mapsWithRoom.add(o.code);
+    return sum + points;
+  }, 0);
+
+  const floorGain = floorOpportunities.reduce((sum, o) => {
+    if (o.ownsWr) return sum;
+    const floors = Math.max(0, Number(o.floorDiff) || 0);
+    if (floors > 0) mapsWithRoom.add(o.code);
+    return sum + floors;
+  }, 0);
+
+  return {
+    mapsWithRoomToImprove: mapsWithRoom.size,
+    tickImprovement: -tickGain,
+    rankImprovement: rankGain,
+    floorImprovement: floorGain
+  };
+}
+
+function formatImprovementSummaryLine(stats) {
+  const ticksText = stats.tickImprovement === 0 ? '0' : String(stats.tickImprovement);
+  return `Improvements — Ticks: ${ticksText} · Rank: +${stats.rankImprovement} · Floor: +${stats.floorImprovement}`;
 }
 
 function escapeHtml(text) {
@@ -197,6 +541,56 @@ function floorIndexToAscensionPercent(floorIndex) {
     return null;
   }
   return 100 + Number(floorIndex) * 20;
+}
+
+const MAP_MAX_FLOOR_INDEX = 15;
+
+function getRoomDataByCode(code) {
+  const fromDb = globalThis.mapsDatabase?.getMapById?.(code);
+  if (fromDb) return fromDb;
+  const rooms = globalThis.state?.utils?.ROOMS;
+  if (Array.isArray(rooms)) return rooms.find((room) => room?.id === code) || null;
+  if (rooms && typeof rooms === 'object') return rooms[code] || null;
+  return null;
+}
+
+function getMapMaxRankPoints(code) {
+  const room = getRoomDataByCode(code);
+  const maxTeamSize = Number(room?.maxTeamSize);
+  if (!Number.isFinite(maxTeamSize) || maxTeamSize < 1) return null;
+  return (2 * maxTeamSize) - 1;
+}
+
+const MAX_INDICATOR_COLOR_AT_MAX = '#8f8';
+const MAX_INDICATOR_COLOR_BELOW_MAX = '#f88';
+
+function getMaxIndicatorColor(bestValue, maxValue) {
+  if (maxValue === null || maxValue === undefined) return MAX_INDICATOR_COLOR_AT_MAX;
+  return Number(bestValue) === Number(maxValue)
+    ? MAX_INDICATOR_COLOR_AT_MAX
+    : MAX_INDICATOR_COLOR_BELOW_MAX;
+}
+
+function formatMapMaxComparisonSuffix(unit, bestValue, maxValue) {
+  if (maxValue === null || maxValue === undefined) return '';
+  const color = getMaxIndicatorColor(bestValue, maxValue);
+  if (Number(bestValue) === Number(maxValue)) {
+    return ` <span style="color:${color};">(max)</span>`;
+  }
+  const maxLabel = unit === 'floor'
+    ? `${floorIndexToAscensionPercent(maxValue)}%`
+    : formatRecordValue(unit, maxValue, null);
+  return ` <span style="color:${color};">(max ${maxLabel})</span>`;
+}
+
+function buildRecordComparisonWithMaxHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks, maxValue) {
+  return buildRecordComparisonHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks) +
+    formatMapMaxComparisonSuffix(unit, theirValue, maxValue);
+}
+
+function buildOwnWrWithMaxHtml(unit, youValue, youSubTicks, maxValue) {
+  return formatOwnWrStatHtml(unit, youValue, youSubTicks) +
+    formatMapMaxComparisonSuffix(unit, youValue, maxValue);
 }
 
 function formatRecordValue(unit, value, subTicks) {
@@ -216,11 +610,132 @@ function formatRecordValue(unit, value, subTicks) {
 }
 
 function buildRecordComparisonHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks) {
-  const showSubTicks = unit !== 'ticks' && youValue === theirValue;
+  const missingYou = youValue === null || youValue === undefined;
+  const showSubTicks = !missingYou && unit !== 'ticks' && youValue === theirValue;
   const safeName = escapeHtml(playerName || 'Unknown');
   const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent((playerName || '').trim())}`;
   const nameLink = `<a href="${profileUrl}" target="_blank" rel="noopener noreferrer" style="color: #ff8; text-decoration: underline; cursor: pointer;">${safeName}</a>`;
-  return `${formatRecordValue(unit, youValue, showSubTicks ? youTicks : null)} → ${nameLink} ${formatRecordValue(unit, theirValue, showSubTicks ? theirTicks : null)}`;
+  const youPart = missingYou
+    ? '<span style="color:#888">—</span>'
+    : formatRecordValue(unit, youValue, showSubTicks ? youTicks : null);
+  return `${youPart} → ${formatRecordValue(unit, theirValue, showSubTicks ? theirTicks : null)} (${nameLink})`;
+}
+
+const HIGHSCORE_LIST_ITEM_CLASS = 'highscores-item';
+const HIGHSCORE_LIST_EMPTY_CLASS = 'highscores-empty';
+const HIGHSCORE_LIST_NO_RESULTS_CLASS = 'highscores-no-results';
+const HIGHSCORE_LIST_UNPLAYED_CLASS = 'highscores-item--unplayed';
+const HIGHSCORES_STYLE_ID = 'highscores-styles';
+
+function ensureHighscoresStyles() {
+  if (document.getElementById(HIGHSCORES_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = HIGHSCORES_STYLE_ID;
+  style.textContent = `
+    .highscores-item--unplayed {
+      opacity: 0.5;
+      filter: grayscale(0.4);
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function normalizeHighscoreSearchText(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function getMapRegionSearchLabel(code) {
+  try {
+    const regions = globalThis.state?.utils?.REGIONS;
+    if (!Array.isArray(regions)) return '';
+    for (const region of regions) {
+      if (!Array.isArray(region?.rooms)) continue;
+      if (region.rooms.some((room) => room?.id === code)) {
+        return globalThis.mapsDatabase?.getRegionDisplayName?.(region.id) || region.name || region.id || '';
+      }
+    }
+  } catch (_) { /* ignore */ }
+  return '';
+}
+
+function buildMapNameSearchText(code, name) {
+  return normalizeHighscoreSearchText(`${name} ${code} ${getMapRegionSearchLabel(code)}`);
+}
+
+function tagImprovementListItem(itemEl, { code, name, hasPersonalData } = {}) {
+  itemEl.classList.add(HIGHSCORE_LIST_ITEM_CLASS);
+  if (hasPersonalData === false) {
+    itemEl.classList.add(HIGHSCORE_LIST_UNPLAYED_CLASS);
+  }
+  itemEl.dataset.searchText = buildMapNameSearchText(code, name);
+  return itemEl;
+}
+
+function tagImprovementEmptyState(emptyEl) {
+  emptyEl.classList.add(HIGHSCORE_LIST_EMPTY_CLASS);
+  return emptyEl;
+}
+
+// Matches Cyclopedia.js search input styling (map name search only).
+function createHighscoreSearchBar(placeholder) {
+  const searchContainer = document.createElement('div');
+  searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; min-width: 0;';
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = placeholder;
+  searchInput.autocomplete = 'off';
+  searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1 1 0%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box; width: 100%;';
+
+  searchInput.addEventListener('focus', () => {
+    searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+  });
+  searchInput.addEventListener('blur', () => {
+    searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+  });
+
+  searchContainer.appendChild(searchInput);
+  return { searchContainer, searchInput };
+}
+
+function getImprovementListGrid(panel) {
+  return panel?.querySelector('.highscores-list');
+}
+
+function ensureImprovementNoResultsMessage(grid) {
+  let noResultsEl = grid.querySelector(`.${HIGHSCORE_LIST_NO_RESULTS_CLASS}`);
+  if (!noResultsEl) {
+    noResultsEl = document.createElement('div');
+    noResultsEl.className = `${HIGHSCORE_LIST_NO_RESULTS_CLASS} pixel-font-14`;
+    noResultsEl.textContent = 'No maps match your search.';
+    noResultsEl.style.cssText = 'display:none; text-align:center; color:#aaa; font-style:italic; padding:12px 8px;';
+    grid.appendChild(noResultsEl);
+  }
+  return noResultsEl;
+}
+
+function filterImprovementTabPanel(panel, query) {
+  const grid = getImprovementListGrid(panel);
+  if (!grid) return;
+
+  const q = normalizeHighscoreSearchText(query);
+  const items = grid.querySelectorAll(`.${HIGHSCORE_LIST_ITEM_CLASS}`);
+  const emptyState = grid.querySelector(`.${HIGHSCORE_LIST_EMPTY_CLASS}`);
+  const noResultsEl = ensureImprovementNoResultsMessage(grid);
+  let visibleCount = 0;
+
+  items.forEach((item) => {
+    const haystack = item.dataset.searchText || '';
+    const matches = !q || haystack.includes(q);
+    item.style.display = matches ? '' : 'none';
+    if (matches) visibleCount += 1;
+  });
+
+  if (emptyState) {
+    emptyState.style.display = q ? 'none' : '';
+  }
+
+  noResultsEl.style.display = q && visibleCount === 0 ? 'block' : 'none';
 }
 
 function createImprovementsScrollContainer() {
@@ -234,7 +749,65 @@ function createImprovementsScrollContainer() {
     minHeight: '0',
     height: 'auto'
   });
+  scrollContainer.contentContainer.classList.add('highscores-list');
   return scrollContainer;
+}
+
+function createSummaryContent(entries, you, yourName, improvementStats) {
+  const scrollContainer = createImprovementsScrollContainer();
+
+  if (entries.length > 0) {
+    entries.forEach((entry) => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'frame-1 surface-regular flex items-center gap-2 p-1';
+      itemEl.innerHTML = `
+        <div class="frame-pressed-1 shrink-0 cursor-pointer" style="width: 48px; height: 48px;">
+          <img
+            alt="${escapeHtml(entry.name)}"
+            class="pixelated size-full object-cover"
+            src="/assets/room-thumbnails/${entry.code}.png"
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${entry.code}' });" />
+        </div>
+        <div class="highscore-summary-card-body w-full" style="display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; min-width: 0;">
+          <div
+            class="text-whiteExp cursor-pointer"
+            style="grid-column: 1 / -1;"
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${entry.code}' });">
+              ${escapeHtml(entry.name)}
+            </div>
+          <span class="pixel-font-14" style="color:#aaa;">Ticks</span>
+          <span class="pixel-font-14" style="min-width: 0; word-break: break-word;">${formatSummaryStatHtml('ticks', entry.yourTicks, null, entry.tickBest, you, yourName)}</span>
+          <span class="pixel-font-14" style="color:#aaa;">Rank</span>
+          <span class="pixel-font-14" style="min-width: 0; word-break: break-word;">${formatSummaryStatHtml('rank', entry.yourRank, entry.yourRankTicks, entry.rankBest, you, yourName)}</span>
+          <span class="pixel-font-14" style="color:#aaa;">Floor</span>
+          <span class="pixel-font-14" style="min-width: 0; word-break: break-word;">${formatSummaryStatHtml('floor', entry.yourFloor, entry.yourFloorTicks, entry.floorBest, you, yourName)}</span>
+        </div>
+      `;
+      tagImprovementListItem(itemEl, { code: entry.code, name: entry.name, hasPersonalData: entry.hasPersonalData });
+      scrollContainer.addContent(itemEl);
+    });
+  } else {
+    const emptyEl = document.createElement('div');
+    emptyEl.style.cssText = 'text-align: center; color: #eee; padding: 20px;';
+    emptyEl.textContent = 'No map records found.';
+    scrollContainer.addContent(tagImprovementEmptyState(emptyEl));
+  }
+
+  const statsContainer = document.createElement('div');
+  statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
+  const tickWrCount = entries.filter((e) => e.ownsTickWr).length;
+  const rankWrCount = entries.filter((e) => e.ownsRankWr).length;
+  const floorWrCount = entries.filter((e) => e.ownsFloorWr).length;
+  statsContainer.innerHTML = `
+    <div>Maps with room to improve: ${improvementStats.mapsWithRoomToImprove}</div>
+    <div>${formatImprovementSummaryLine(improvementStats)}</div>
+    <div>Your WRs — Ticks: ${tickWrCount} · Rank: ${rankWrCount} · Floor: ${floorWrCount}</div>
+  `;
+
+  return {
+    scrollContainer,
+    statsContainer
+  };
 }
 
 // Helper function to create an item sprite element
@@ -262,7 +835,7 @@ function createItemSprite(itemId) {
 }
 
 // Helper function to create HTML content for tick improvements
-function createTickContent(opportunities, minTheo) {
+function createTickContent(opportunities, minTheo, hasTickWrData) {
   // Create scrollable container using the API
   const scrollContainer = createImprovementsScrollContainer();
   
@@ -286,25 +859,31 @@ function createTickContent(opportunities, minTheo) {
             onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });">
               ${o.name}
             </div>
-          <div class="pixel-font-14">${buildRecordComparisonHtml('ticks', o.yours, null, o.player, o.best, null)}</div>
-          <div class="pixel-font-14" style="color: #8f8;">+${o.diff} ticks (${o.pct}%)</div>
+          <div class="pixel-font-14">${o.ownsWr
+            ? formatOwnWrStatHtml('ticks', o.yours ?? o.best, null)
+            : buildRecordComparisonHtml('ticks', o.yours, null, o.player, o.best, null)}</div>
+          <div class="pixel-font-14" style="color: #8f8;">${o.ownsWr ? 'You hold the WR' : (o.yours == null ? `Up to ${o.best} ticks to WR` : `+${o.diff} ticks (${o.pct}%)`)}</div>
         </div>
       `;
+      tagImprovementListItem(itemEl, { code: o.code, name: o.name, hasPersonalData: o.hasPersonalData });
       scrollContainer.addContent(itemEl);
     });
   } else {
     const emptyEl = document.createElement('div');
     emptyEl.style.cssText = 'text-align: center; color: #eee; padding: 20px;';
-    emptyEl.textContent = 'You are already at the top in all rooms!';
-    scrollContainer.addContent(emptyEl);
+    emptyEl.textContent = hasTickWrData
+      ? 'You are already at the top in all rooms!'
+      : 'No tick highscores available yet.';
+    scrollContainer.addContent(tagImprovementEmptyState(emptyEl));
   }
   
   // Add stats footer
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
-  const totalTicksImprovement = opportunities.reduce((sum, o) => sum + o.diff, 0);
+  const totalTicksImprovement = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : o.diff), 0);
+  const tickImprovementRooms = opportunities.filter((o) => !o.ownsWr).length;
   statsContainer.innerHTML = `
-    <div>Rooms with ticks improvement: ${opportunities.length}</div>
+    <div>Rooms with ticks improvement: ${tickImprovementRooms}</div>
     <div>Total ticks improvement: ${totalTicksImprovement}</div>
     <div>Theoretical minimum: ${minTheo}</div>
   `;
@@ -316,7 +895,7 @@ function createTickContent(opportunities, minTheo) {
 }
 
 // Helper function to create HTML content for rank improvements
-function createRankContent(opportunities) {
+function createRankContent(opportunities, hasRankWrData) {
   // Create scrollable container using the API
   const scrollContainer = createImprovementsScrollContainer();
   
@@ -339,26 +918,32 @@ function createRankContent(opportunities) {
             onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" >
               ${o.name}
             </div>
-          <div class="pixel-font-14">${buildRecordComparisonHtml('rank', o.yourScore, o.yourRankTicks, o.player, o.bestScore, o.bestRankTicks)}</div>
+          <div class="pixel-font-14">${o.ownsWr
+            ? buildOwnWrWithMaxHtml('rank', o.yourScore ?? o.bestScore, o.yourRankTicks ?? o.bestRankTicks, getMapMaxRankPoints(o.code))
+            : buildRecordComparisonWithMaxHtml('rank', o.yourScore, o.yourRankTicks, o.player, o.bestScore, o.bestRankTicks, getMapMaxRankPoints(o.code))}</div>
           <div class="pixel-font-14" style="color: #8f8;">${o.improvementText}</div>
         </div>
       `;
+      tagImprovementListItem(itemEl, { code: o.code, name: o.name, hasPersonalData: o.hasPersonalData });
       scrollContainer.addContent(itemEl);
     });
   } else {
     const emptyEl = document.createElement('div');
     emptyEl.style.cssText = 'text-align: center; color: #eee; padding: 20px;';
-    emptyEl.textContent = 'You already have the maximum rank score in all rooms!';
-    scrollContainer.addContent(emptyEl);
+    emptyEl.textContent = hasRankWrData
+      ? 'You already have the maximum rank score in all rooms!'
+      : 'No rank highscores available yet.';
+    scrollContainer.addContent(tagImprovementEmptyState(emptyEl));
   }
   
   // Add stats footer
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
-  const rankPointGain = opportunities.reduce((sum, o) => sum + Math.max(0, Number(o.diff) || 0), 0);
-  const tickGain = opportunities.reduce((sum, o) => sum + Math.max(0, Number(o.tickDiff) || 0), 0);
+  const rankPointGain = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : Math.max(0, Number(o.diff) || 0)), 0);
+  const tickGain = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : Math.max(0, Number(o.tickDiff) || 0)), 0);
+  const rankImprovementRooms = opportunities.filter((o) => !o.ownsWr).length;
   statsContainer.innerHTML = `
-    <div>Rooms with rank improvement: ${opportunities.length}</div>
+    <div>Rooms with rank improvement: ${rankImprovementRooms}</div>
     <div>Total rank points to gain: ${rankPointGain}</div>
     <div>Same-rank tick gain: ${tickGain} ticks</div>
   `;
@@ -370,7 +955,7 @@ function createRankContent(opportunities) {
 }
 
 // Helper function to create HTML content for floor improvements
-function createFloorContent(opportunities) {
+function createFloorContent(opportunities, hasFloorWrData) {
   const scrollContainer = createImprovementsScrollContainer();
   
   if (opportunities.length > 0) {
@@ -391,25 +976,31 @@ function createFloorContent(opportunities) {
             onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" >
               ${o.name}
             </div>
-          <div class="pixel-font-14">${buildRecordComparisonHtml('floor', o.yourFloor, o.yourFloorTicks, o.player, o.bestFloor, o.bestFloorTicks)}</div>
+          <div class="pixel-font-14">${o.ownsWr
+            ? buildOwnWrWithMaxHtml('floor', o.yourFloor ?? o.bestFloor, o.yourFloorTicks ?? o.bestFloorTicks, MAP_MAX_FLOOR_INDEX)
+            : buildRecordComparisonWithMaxHtml('floor', o.yourFloor, o.yourFloorTicks, o.player, o.bestFloor, o.bestFloorTicks, MAP_MAX_FLOOR_INDEX)}</div>
           <div class="pixel-font-14" style="color: #8f8;">${o.improvementText}</div>
         </div>
       `;
+      tagImprovementListItem(itemEl, { code: o.code, name: o.name, hasPersonalData: o.hasPersonalData });
       scrollContainer.addContent(itemEl);
     });
   } else {
     const emptyEl = document.createElement('div');
     emptyEl.style.cssText = 'text-align: center; color: #eee; padding: 20px;';
-    emptyEl.textContent = 'You already have the best floor clear in all rooms!';
-    scrollContainer.addContent(emptyEl);
+    emptyEl.textContent = hasFloorWrData
+      ? 'You already have the best floor clear in all rooms!'
+      : 'No floor highscores available yet.';
+    scrollContainer.addContent(tagImprovementEmptyState(emptyEl));
   }
   
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
-  const floorGain = opportunities.reduce((sum, o) => sum + o.floorDiff, 0);
-  const tickGain = opportunities.reduce((sum, o) => sum + Math.max(0, Number(o.tickDiff) || 0), 0);
+  const floorGain = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : o.floorDiff), 0);
+  const tickGain = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : Math.max(0, Number(o.tickDiff) || 0)), 0);
+  const floorImprovementRooms = opportunities.filter((o) => !o.ownsWr).length;
   statsContainer.innerHTML = `
-    <div>Rooms with floor improvement: ${opportunities.length}</div>
+    <div>Rooms with floor improvement: ${floorImprovementRooms}</div>
     <div>Total floor gain: +${floorGain}</div>
     <div>Same-floor tick gain: ${tickGain} ticks</div>
   `;
@@ -420,123 +1011,163 @@ function createFloorContent(opportunities) {
   };
 }
 
+const HIGHSCORE_TAB_ICON_SIZE = 12;
+
+const HIGHSCORE_TAB_ICONS = {
+  // Same icon paths as Cyclopedia.js profile stats / explored maps
+  summary: { src: '/assets/icons/map.png', alt: 'Summary' },
+  ticks: { src: '/assets/icons/speed.png', alt: 'Ticks' },
+  rank: { src: '/assets/icons/star-tier.png', alt: 'Rank' },
+  floor: { src: '/assets/UI/floor-15.png', alt: 'Floor' }
+};
+
+function getTabButtonClassName(isActive) {
+  return isActive
+    ? 'frame-pressed-1 surface-regular px-2 py-1 flex-1 tab-active pixel-font-14'
+    : 'frame-pressed-1 surface-dark px-2 py-1 flex-1 pixel-font-14';
+}
+
+function setTabButtonLabel(button, iconDef, label) {
+  button.replaceChildren();
+
+  const iconWrap = document.createElement('span');
+  iconWrap.style.display = 'inline-flex';
+  iconWrap.style.alignItems = 'center';
+  iconWrap.style.justifyContent = 'center';
+  iconWrap.style.width = `${HIGHSCORE_TAB_ICON_SIZE}px`;
+  iconWrap.style.height = `${HIGHSCORE_TAB_ICON_SIZE}px`;
+  iconWrap.style.flexShrink = '0';
+
+  const img = document.createElement('img');
+  img.src = iconDef.src;
+  img.alt = iconDef.alt || label;
+  img.className = 'pixelated';
+  img.style.width = `${HIGHSCORE_TAB_ICON_SIZE}px`;
+  img.style.height = `${HIGHSCORE_TAB_ICON_SIZE}px`;
+  img.style.objectFit = 'contain';
+  img.style.display = 'block';
+  iconWrap.appendChild(img);
+  button.appendChild(iconWrap);
+
+  const text = document.createElement('span');
+  text.textContent = label;
+  text.style.lineHeight = '1';
+  button.appendChild(text);
+}
+
+function createTabButton(iconDef, label, isActive) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = getTabButtonClassName(isActive);
+  button.style.display = 'inline-flex';
+  button.style.alignItems = 'center';
+  button.style.justifyContent = 'center';
+  button.style.gap = '4px';
+  setTabButtonLabel(button, iconDef, label);
+  return button;
+}
+
 // Function to create tabs
-function createTabs(tickContent, rankContent, floorContent) {
+function createTabPanel(content) {
+  const panel = document.createElement('div');
+  panel.style.display = 'none';
+  panel.style.flexDirection = 'column';
+  panel.style.flex = '1 1 0';
+  panel.style.minHeight = '0';
+  panel.appendChild(content.scrollContainer.element);
+
+  const separator = document.createElement('div');
+  separator.setAttribute('role', 'none');
+  separator.className = 'separator my-2.5';
+  panel.appendChild(separator);
+  content.statsContainer.style.flexShrink = '0';
+  panel.appendChild(content.statsContainer);
+
+  return panel;
+}
+
+function createTabs(summaryContent, tickContent, rankContent, floorContent) {
   const container = document.createElement('div');
-  container.className = 'flex flex-col highscore-improvements-modal-content';
+  container.className = 'flex flex-col highscores-modal-content';
   container.style.height = '100%';
   container.style.minHeight = '0';
-  
-  // Create tab buttons
+
   const tabButtons = document.createElement('div');
   tabButtons.className = 'flex mb-2';
-  
-  const tickTabButton = document.createElement('button');
-  tickTabButton.className = 'frame-pressed-1 surface-regular px-4 py-1 flex-1 tab-active';
-  tickTabButton.textContent = 'Tick Improvements';
-  
-  const rankTabButton = document.createElement('button');
-  rankTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
-  rankTabButton.textContent = 'Rank Improvements';
-  
-  const floorTabButton = document.createElement('button');
-  floorTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
-  floorTabButton.textContent = 'Floor Improvements';
-  
-  tabButtons.appendChild(tickTabButton);
-  tabButtons.appendChild(rankTabButton);
-  tabButtons.appendChild(floorTabButton);
-  
-  // Create content containers
-  const tickTab = document.createElement('div');
-  tickTab.style.display = 'flex';
-  tickTab.style.flexDirection = 'column';
-  tickTab.style.flex = '1 1 0';
-  tickTab.style.minHeight = '0';
-  tickTab.appendChild(tickContent.scrollContainer.element);
-  
-  const separator1 = document.createElement('div');
-  separator1.setAttribute('role', 'none');
-  separator1.className = 'separator my-2.5';
-  tickTab.appendChild(separator1);
-  tickContent.statsContainer.style.flexShrink = '0';
-  tickTab.appendChild(tickContent.statsContainer);
-  
-  const rankTab = document.createElement('div');
-  rankTab.style.display = 'none';
-  rankTab.style.flexDirection = 'column';
-  rankTab.style.flex = '1 1 0';
-  rankTab.style.minHeight = '0';
-  rankTab.appendChild(rankContent.scrollContainer.element);
-  
-  const separator2 = document.createElement('div');
-  separator2.setAttribute('role', 'none');
-  separator2.className = 'separator my-2.5';
-  rankTab.appendChild(separator2);
-  rankContent.statsContainer.style.flexShrink = '0';
-  rankTab.appendChild(rankContent.statsContainer);
-  
-  const floorTab = document.createElement('div');
-  floorTab.style.display = 'none';
-  floorTab.style.flexDirection = 'column';
-  floorTab.style.flex = '1 1 0';
-  floorTab.style.minHeight = '0';
-  floorTab.appendChild(floorContent.scrollContainer.element);
-  
-  const separator3 = document.createElement('div');
-  separator3.setAttribute('role', 'none');
-  separator3.className = 'separator my-2.5';
-  floorTab.appendChild(separator3);
-  floorContent.statsContainer.style.flexShrink = '0';
-  floorTab.appendChild(floorContent.statsContainer);
-  
-  // Add event listeners to tab buttons
-  tickTabButton.addEventListener('click', () => {
-    tickTabButton.className = 'frame-pressed-1 surface-regular px-4 py-1 flex-1 tab-active';
-    rankTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
-    floorTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
-    tickTab.style.display = 'flex';
-    rankTab.style.display = 'none';
-    floorTab.style.display = 'none';
+
+  const tabDefs = [
+    { label: 'Summary', icon: HIGHSCORE_TAB_ICONS.summary, content: summaryContent },
+    { label: 'Ticks', icon: HIGHSCORE_TAB_ICONS.ticks, content: tickContent },
+    { label: 'Rank', icon: HIGHSCORE_TAB_ICONS.rank, content: rankContent },
+    { label: 'Floor', icon: HIGHSCORE_TAB_ICONS.floor, content: floorContent }
+  ];
+
+  const buttons = tabDefs.map((tab, index) => {
+    const button = createTabButton(tab.icon, tab.label, index === 0);
+    tabButtons.appendChild(button);
+    return button;
   });
-  
-  rankTabButton.addEventListener('click', () => {
-    tickTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
-    rankTabButton.className = 'frame-pressed-1 surface-regular px-4 py-1 flex-1 tab-active';
-    floorTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
-    tickTab.style.display = 'none';
-    rankTab.style.display = 'flex';
-    floorTab.style.display = 'none';
+
+  const panels = tabDefs.map((tab, index) => {
+    const panel = createTabPanel(tab.content);
+    if (index === 0) panel.style.display = 'flex';
+    return panel;
   });
-  
-  floorTabButton.addEventListener('click', () => {
-    tickTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
-    rankTabButton.className = 'frame-pressed-1 surface-dark px-4 py-1 flex-1';
-    floorTabButton.className = 'frame-pressed-1 surface-regular px-4 py-1 flex-1 tab-active';
-    tickTab.style.display = 'none';
-    rankTab.style.display = 'none';
-    floorTab.style.display = 'flex';
+
+  const { searchContainer, searchInput } = createHighscoreSearchBar('Search maps...');
+  searchContainer.style.flexShrink = '0';
+  searchContainer.style.marginBottom = '8px';
+
+  let activeTabIndex = 0;
+  let searchDebounceTimer = null;
+
+  const applySearch = () => {
+    filterImprovementTabPanel(panels[activeTabIndex], searchInput.value);
+  };
+
+  const activateTab = (index) => {
+    activeTabIndex = index;
+    buttons.forEach((button, i) => {
+      button.className = getTabButtonClassName(i === index);
+      panels[i].style.display = i === index ? 'flex' : 'none';
+    });
+    applySearch();
+  };
+
+  buttons.forEach((button, index) => {
+    button.addEventListener('click', () => activateTab(index));
   });
-  
-  // Add everything to the container
+
+  searchInput.addEventListener('input', () => {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(applySearch, 150);
+  });
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      applySearch();
+      searchInput.blur();
+    }
+  });
+
   container.appendChild(tabButtons);
-  container.appendChild(tickTab);
-  container.appendChild(rankTab);
-  container.appendChild(floorTab);
-  
+  container.appendChild(searchContainer);
+  panels.forEach((panel) => container.appendChild(panel));
+
   return container;
 }
 
-// Function to show improvement opportunities modal
+// Function to show Highscores modal
 async function showImprovementsModal() {
-  if (window.DEBUG) console.log('Showing improvement opportunities modal...');
+  console.log('Showing Highscores modal...');
+  ensureHighscoresStyles();
   
   try {
     ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
     
     // Show loading modal
     const loadingModal = api.showModal({
-      title: '🏆 Improvement Opportunities',
+      title: t('mods.highscore.title'),
       content: '<div style="text-align: center; padding: 20px;">Loading data...</div>',
       buttons: []
     });
@@ -554,46 +1185,132 @@ async function showImprovementsModal() {
       fetchTRPC('game.getRoomsHighscores')
     ]);
     
-    const countedRoomsEntries = Object.entries(rooms).filter(([code]) => isCountedRoomForImprovements(code));
+    const summaryMapCodes = getSummaryMapCodesInOrder(rooms);
+    const summaryEntries = buildSummaryEntries(summaryMapCodes, rooms, best, roomsHighscores, you, yourName);
+
+    const tickRoomCodes = getImprovementRoomCodes(rooms, Object.keys(best || {}));
+    const hasTickWrData = tickRoomCodes.some((code) => best[code]);
 
     // Process tick opportunities
-    const tickOpportunities = countedRoomsEntries.flatMap(([code, r]) => {
+    const tickOpportunities = sortImprovementOpportunities(
+      tickRoomCodes.flatMap((code) => {
+      const r = rooms?.[code] || {};
+      const hasPersonalData = hasAnyPersonalMapData(r);
+      const isUnlocked = isMapUnlocked(code, rooms);
       const b = best[code];
       if (!b) return [];
-      const d = r.ticks - b.ticks;
-      if (d <= 0 || b.userId === you) return [];
+      const ownsWr = isOwnHighscoreRecord(b, you, yourName);
+      const yourTicks = readYourTicks(r);
+
+      if (yourTicks === null) {
+        if (ownsWr) {
+          return [{
+            code,
+            name: ROOM_NAMES[code] || code,
+            yours: null,
+            best: b.ticks,
+            diff: 0,
+            pct: '0.0',
+            player: b.userName,
+            ownsWr: true,
+            hasPersonalData,
+            isUnlocked
+          }];
+        }
+        return [{
+          code,
+          name: ROOM_NAMES[code] || code,
+          yours: null,
+          best: b.ticks,
+          diff: b.ticks,
+          pct: '0.0',
+          player: b.userName,
+          ownsWr: false,
+          hasPersonalData,
+          isUnlocked
+        }];
+      }
+
+      const d = yourTicks - b.ticks;
+      if (!ownsWr && d <= 0) return [];
       return [{
-        code, 
-        name: ROOM_NAMES[code] || code, 
-        yours: r.ticks, 
-        best: b.ticks, 
-        diff: d, 
-        pct: ((d / r.ticks) * 100).toFixed(1), 
-        player: b.userName
+        code,
+        name: ROOM_NAMES[code] || code,
+        yours: yourTicks,
+        best: b.ticks,
+        diff: ownsWr ? 0 : d,
+        pct: ownsWr ? '0.0' : ((d / yourTicks) * 100).toFixed(1),
+        player: b.userName,
+        ownsWr,
+        hasPersonalData,
+        isUnlocked
       }];
-    }).sort((a, b) => b.diff - a.diff);
+    }),
+      (a, b) => (b.diff - a.diff)
+    );
     
-    const minTheo = countedRoomsEntries.reduce((s, [c, r]) =>
-      s + (best[c] ? Math.min(r.ticks, best[c].ticks) : r.ticks), 0);
+    const minTheo = tickRoomCodes.reduce((s, code) => {
+      const r = rooms?.[code] || {};
+      const yourTicks = readYourTicks(r);
+      const wrTicks = best[code]?.ticks;
+      if (!wrTicks) return s;
+      if (yourTicks === null) return s + wrTicks;
+      return s + Math.min(yourTicks, wrTicks);
+    }, 0);
     
+    const rankRoomCodes = getImprovementRoomCodes(rooms, Object.keys(roomsHighscores?.rank || {}));
+    const hasRankWrData = rankRoomCodes.some((code) => roomsHighscores?.rank?.[code]);
+
     // Process rank opportunities (higher rank is better; same-rank entries are always shown)
-    const rankOpportunities = countedRoomsEntries.flatMap(([code, r]) => {
-      if (!r.rank) return [];
-      
+    const rankOpportunities = sortImprovementOpportunities(
+      rankRoomCodes.flatMap((code) => {
+      const r = rooms?.[code] || {};
+      const hasPersonalData = hasAnyPersonalMapData(r);
+      const isUnlocked = isMapUnlocked(code, rooms);
       const topRank = roomsHighscores?.rank?.[code];
       if (!topRank) return [];
-      
-      const topRankName = (topRank.userName || '').trim().toLowerCase();
-      const isOwnRankWR =
-        (topRank.userId !== undefined && topRank.userId !== null && topRank.userId === you) ||
-        (topRankName && yourName && topRankName === yourName);
-      if (isOwnRankWR) return [];
-      
-      const yourRank = Number.isFinite(Number(r.rank)) ? Number(r.rank) : 0;
+
+      const ownsWr = isOwnHighscoreRecord(topRank, you, yourName);
+      const yourRank = normalizeYourRank(r);
+      const yourRankTicks = normalizeYourRankTicks(r);
       const bestRank = Number.isFinite(Number(topRank.rank)) ? Number(topRank.rank) : 0;
-      const yourRankTicks = Number.isFinite(Number(r.rankTicks)) ? Number(r.rankTicks) : null;
       const bestRankTicks = Number.isFinite(Number(topRank.ticks)) ? Number(topRank.ticks) : null;
-      
+
+      if (yourRank === null) {
+        if (ownsWr) {
+          return [{
+            code,
+            name: ROOM_NAMES[code] || code,
+            yourScore: null,
+            bestScore: bestRank,
+            diff: 0,
+            yourRankTicks: null,
+            bestRankTicks,
+            tickDiff: 0,
+            improvementText: 'You hold the WR',
+            player: topRank.userName,
+            ownsWr: true,
+            hasPersonalData,
+            isUnlocked
+          }];
+        }
+        return [{
+          code,
+          name: ROOM_NAMES[code] || code,
+          yourScore: null,
+          bestScore: bestRank,
+          diff: bestRank,
+          yourRankTicks: null,
+          bestRankTicks,
+          tickDiff: 0,
+          improvementText: `+${bestRank} rank point${bestRank > 1 ? 's' : ''}`,
+          player: topRank.userName,
+          ownsWr: false,
+          hasPersonalData,
+          isUnlocked
+        }];
+      }
+
       const rankDiff = bestRank - yourRank;
       const sameRankTickDelta = (
         rankDiff === 0 &&
@@ -603,13 +1320,15 @@ async function showImprovementsModal() {
       const sameRankTickGain = sameRankTickDelta !== null && sameRankTickDelta > 0
         ? sameRankTickDelta
         : 0;
-      
-      if (rankDiff < 0) return [];
-      
-      const improvementText = rankDiff > 0
-        ? `+${rankDiff} rank point${rankDiff > 1 ? 's' : ''}`
-        : formatTickImprovementText(sameRankTickDelta, yourRankTicks);
-      
+
+      if (!ownsWr && rankDiff < 0) return [];
+
+      const improvementText = ownsWr
+        ? 'You hold the WR'
+        : rankDiff > 0
+          ? `+${rankDiff} rank point${rankDiff > 1 ? 's' : ''}`
+          : formatTickImprovementText(sameRankTickDelta, yourRankTicks);
+
       return [{
         code,
         name: ROOM_NAMES[code] || code,
@@ -620,48 +1339,80 @@ async function showImprovementsModal() {
         bestRankTicks,
         tickDiff: sameRankTickGain,
         improvementText,
-        player: topRank.userName
+        player: topRank.userName,
+        ownsWr,
+        hasPersonalData,
+        isUnlocked
       }];
-    }).sort((a, b) => {
-      if (b.diff !== a.diff) return b.diff - a.diff;
-      return b.tickDiff - a.tickDiff;
-    });
+    }),
+      (a, b) => {
+        if (b.diff !== a.diff) return b.diff - a.diff;
+        return b.tickDiff - a.tickDiff;
+      }
+    );
     
-    console.log('[Highscore Improvements][Floor Debug] Starting floor opportunity processing');
-    console.log('[Highscore Improvements][Floor Debug] roomsHighscores.floor keys:', Object.keys(roomsHighscores?.floor || {}).length);
+    console.log('[Highscores][Floor Debug] Starting floor opportunity processing');
+    console.log('[Highscores][Floor Debug] roomsHighscores.floor keys:', Object.keys(roomsHighscores?.floor || {}).length);
     
+    const floorRoomCodes = getImprovementRoomCodes(rooms, Object.keys(roomsHighscores?.floor || {}));
+    const hasFloorWrData = floorRoomCodes.some((code) => roomsHighscores?.floor?.[code]);
+
     // Process floor opportunities (higher floor is better; same-floor entries are always shown)
-    const floorOpportunities = countedRoomsEntries.flatMap(([code, r]) => {
+    const floorOpportunities = sortImprovementOpportunities(
+      floorRoomCodes.flatMap((code) => {
+      const r = rooms?.[code] || {};
+      const hasPersonalData = hasAnyPersonalMapData(r);
+      const isUnlocked = isMapUnlocked(code, rooms);
       const topFloor = roomsHighscores?.floor?.[code];
       if (!topFloor) {
-        console.log('[Highscore Improvements][Floor Debug] Skipping room (no public floor WR):', code);
+        console.log('[Highscores][Floor Debug] Skipping room (no public floor WR):', code);
         return [];
       }
-      const topFloorName = (topFloor.userName || '').trim().toLowerCase();
-      const isOwnFloorWR =
-        (topFloor.userId !== undefined && topFloor.userId !== null && topFloor.userId === you) ||
-        (topFloorName && yourName && topFloorName === yourName);
-      if (isOwnFloorWR) {
-        console.log('[Highscore Improvements][Floor Debug] Skipping room (you own floor WR):', code, {
-          yourUserId: you,
-          topFloorUserId: topFloor.userId,
-          yourName: ctx.name,
-          topFloorUserName: topFloor.userName
-        });
-        return [];
-      }
-      
-      const yourFloor = Number.isFinite(Number(r.floor)) ? Number(r.floor) : 0;
+      const ownsWr = isOwnHighscoreRecord(topFloor, you, yourName);
+
+      const yourFloor = getEffectiveYourFloor(r);
       const bestFloor = Number.isFinite(Number(topFloor.floor)) ? Number(topFloor.floor) : 0;
-      
-      // Match Cyclopedia normalization: floorTicks first, then ticks.
-      const yourFloorTicks = Number.isFinite(Number(r.floorTicks))
-        ? Number(r.floorTicks)
-        : (Number.isFinite(Number(r.ticks)) ? Number(r.ticks) : null);
+
+      const yourFloorTicks = getEffectiveYourFloorTicks(r);
       const bestFloorTicks = Number.isFinite(Number(topFloor.floorTicks))
         ? Number(topFloor.floorTicks)
         : (Number.isFinite(Number(topFloor.ticks)) ? Number(topFloor.ticks) : null);
-      
+
+      if (yourFloor === null) {
+        if (ownsWr) {
+          return [{
+            code,
+            name: ROOM_NAMES[code] || code,
+            yourFloor: null,
+            yourFloorTicks: null,
+            bestFloor,
+            bestFloorTicks,
+            floorDiff: 0,
+            tickDiff: 0,
+            improvementText: 'You hold the WR',
+            player: topFloor.userName,
+            ownsWr: true,
+            hasPersonalData,
+            isUnlocked
+          }];
+        }
+        return [{
+          code,
+          name: ROOM_NAMES[code] || code,
+          yourFloor: null,
+          yourFloorTicks: null,
+          bestFloor,
+          bestFloorTicks,
+          floorDiff: bestFloor,
+          tickDiff: 0,
+          improvementText: `+${bestFloor} floor${bestFloor > 1 ? 's' : ''}`,
+          player: topFloor.userName,
+          ownsWr: false,
+          hasPersonalData,
+          isUnlocked
+        }];
+      }
+
       const floorDiff = bestFloor - yourFloor;
       const sameFloorTickDelta = (
         floorDiff === 0 &&
@@ -671,17 +1422,17 @@ async function showImprovementsModal() {
       const sameFloorTickGain = sameFloorTickDelta !== null && sameFloorTickDelta > 0
         ? sameFloorTickDelta
         : 0;
-      
-      if (floorDiff < 0) {
-        console.log('[Highscore Improvements][Floor Debug] Skipping room (your floor higher than WR floor):', code, {
+
+      if (!ownsWr && floorDiff < 0) {
+        console.log('[Highscores][Floor Debug] Skipping room (your floor higher than WR floor):', code, {
           yourFloor,
           bestFloor
         });
         return [];
       }
-      
+
       if (floorDiff === 0) {
-        console.log('[Highscore Improvements][Floor Debug] Same-floor room:', code, {
+        console.log('[Highscores][Floor Debug] Same-floor room:', code, {
           yourFloor,
           bestFloor,
           yourFloorTicks,
@@ -702,11 +1453,13 @@ async function showImprovementsModal() {
           } : null
         });
       }
-      
-      const improvementText = floorDiff > 0
-        ? `+${floorDiff} floor${floorDiff > 1 ? 's' : ''}`
-        : formatTickImprovementText(sameFloorTickDelta, yourFloorTicks);
-      
+
+      const improvementText = ownsWr
+        ? 'You hold the WR'
+        : floorDiff > 0
+          ? `+${floorDiff} floor${floorDiff > 1 ? 's' : ''}`
+          : formatTickImprovementText(sameFloorTickDelta, yourFloorTicks);
+
       return [{
         code,
         name: ROOM_NAMES[code] || code,
@@ -717,54 +1470,64 @@ async function showImprovementsModal() {
         floorDiff,
         tickDiff: sameFloorTickGain,
         improvementText,
-        player: topFloor.userName
+        player: topFloor.userName,
+        ownsWr,
+        hasPersonalData,
+        isUnlocked
       }];
-    }).sort((a, b) => {
-      if (b.floorDiff !== a.floorDiff) return b.floorDiff - a.floorDiff;
-      return b.tickDiff - a.tickDiff;
-    });
+    }),
+      (a, b) => (a.yourFloor ?? -1) - (b.yourFloor ?? -1)
+    );
     
-    console.log('[Highscore Improvements][Floor Debug] Final floor opportunities:', floorOpportunities.length);
+    console.log('[Highscores][Floor Debug] Final floor opportunities:', floorOpportunities.length);
     console.log(
-      '[Highscore Improvements][Floor Debug] Same-floor entries:',
+      '[Highscores][Floor Debug] Same-floor entries:',
       floorOpportunities.filter(o => o.floorDiff === 0).length
     );
     
+    const improvementStats = buildImprovementSummaryStats(
+      tickOpportunities,
+      rankOpportunities,
+      floorOpportunities
+    );
+
     // Close loading modal
     loadingModal();
     
     // Create content for all tabs
-    const tickContent = createTickContent(tickOpportunities, minTheo);
-    const rankContent = createRankContent(rankOpportunities);
-    const floorContent = createFloorContent(floorOpportunities);
+    const summaryContent = createSummaryContent(summaryEntries, you, yourName, improvementStats);
+    const tickContent = createTickContent(tickOpportunities, minTheo, hasTickWrData);
+    const rankContent = createRankContent(rankOpportunities, hasRankWrData);
+    const floorContent = createFloorContent(floorOpportunities, hasFloorWrData);
     
     // Create tabbed interface
-    const tabbedContent = createTabs(tickContent, rankContent, floorContent);
+    const tabbedContent = createTabs(summaryContent, tickContent, rankContent, floorContent);
     
-    const modalDimensions = getHighscoreImprovementsModalDimensions();
+    const modalDimensions = getHighscoresModalDimensions();
     const modalRef = api.ui.components.createModal({
-      title: '🏆 Improvement Opportunities',
+      title: t('mods.highscore.title'),
       width: modalDimensions.width,
       content: tabbedContent,
       buttons: [
         {
           text: 'Close',
           primary: true,
-          onClick: () => clearHighscoreImprovementsModalLayoutCleanup()
+          onClick: () => clearHighscoresModalLayoutCleanup()
         }
       ]
     });
 
-    setupHighscoreImprovementsModalResponsiveLayout(modalRef, tabbedContent);
+    tagHighscoresModalElement(modalRef);
+    setupHighscoresModalResponsiveLayout(modalRef, tabbedContent);
     
-    if (window.DEBUG) console.log('Improvement opportunities modal displayed successfully');
+    console.log('Highscores modal displayed successfully');
   } catch (error) {
-    console.error('Error showing improvement opportunities:', error);
+    console.error('Error showing Highscores modal:', error);
     
     // Show error modal
     api.showModal({
       title: 'Error',
-      content: '<p>Failed to load improvement opportunities. Please try again later.</p><p style="color: #999; font-size: 12px;">Error: ' + error.message + '</p>',
+      content: '<p>Failed to load Highscores. Please try again later.</p><p style="color: #999; font-size: 12px;">Error: ' + error.message + '</p>',
       buttons: [
         {
           text: 'OK',
@@ -775,34 +1538,28 @@ async function showImprovementsModal() {
   }
 }
 
-if (window.DEBUG) console.log('Improved Highscore Mod initialization complete');
+console.log('Highscores mod initialization complete');
 
 // Export control functions
 exports = {
   showImprovements: showImprovementsModal
 };
 
-// Cleanup function for Highscore Improvements mod (exposed for mod system)
+// Cleanup function for Highscores mod (exposed for mod system)
 exports.cleanup = function() {
-  console.log('[Highscore Improvements] Running cleanup...');
+  console.log('[Highscores] Running cleanup...');
 
-  clearHighscoreImprovementsModalLayoutCleanup();
+  closeHighscoresModal();
   
   // Clear any cached data
   if (typeof ROOM_NAMES !== 'undefined') {
     ROOM_NAMES = null;
   }
   
-  // Remove any existing modals
-  const existingModal = document.querySelector('#highscore-improvements-modal');
-  if (existingModal) {
-    existingModal.remove();
-  }
-  
   // Clear any global state
-  if (typeof window.highscoreImprovementsState !== 'undefined') {
-    delete window.highscoreImprovementsState;
+  if (typeof window.highscoresState !== 'undefined') {
+    delete window.highscoresState;
   }
   
-  console.log('[Highscore Improvements] Cleanup completed');
+  console.log('[Highscores] Cleanup completed');
 }; 

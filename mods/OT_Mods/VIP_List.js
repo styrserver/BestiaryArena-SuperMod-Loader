@@ -10346,7 +10346,7 @@ function createSearchInput(originalPlaceholder, forPanel = false) {
 // 11. Modal Styling
 // =======================
 
-// Open modal via api.showModal (Highscore Improvements pattern), with createModal fallback
+// Open modal via api.showModal (Highscores pattern), with createModal fallback
 function openVIPModal({ title, width, height, content, buttons }) {
   const options = { title, content, buttons: buttons || [] };
   if (width != null) options.width = width;
@@ -10361,7 +10361,7 @@ function openVIPModal({ title, width, height, content, buttons }) {
   return null;
 }
 
-// Apply modal layout with viewport clamping (matches Highscore Improvements / Quests pattern)
+// Apply modal layout with viewport clamping (matches Highscores / Quests pattern)
 function getVIPListModalDimensions() {
   const pad = VIP_LIST_MODAL_CONFIG.viewportPadding * 2;
   return {

@@ -903,9 +903,15 @@ async function initLocalMods() {
               : enabledByDefault.includes(file);
           console.log(`Mod ${file} enabled: ${enabled} (saved: ${savedModStates.hasOwnProperty(file)}, default: ${enabledByDefault.includes(file)})`);
           
+          const displayKey = file.replace('.js','').replace(/_/g,' ');
+          const normalizedPath = String(file).toLowerCase();
+          const key = normalizedPath === 'official mods/highscore_improvements.js'
+            ? 'Highscores'
+            : displayKey;
+
           validMods.push({
             name: file,
-            key: file.replace('.js','').replace(/_/g,' '),
+            key,
             enabled: enabled,
             type: 'file'
           });

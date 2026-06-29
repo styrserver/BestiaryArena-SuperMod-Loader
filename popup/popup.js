@@ -1366,7 +1366,7 @@ const modDescriptions = {
   'Board Analyzer': 'Simulates and analyzes board setups to evaluate strategies and performance.',
   'Custom Display': 'Performance Mode and map grid overlay; tune visuals for speed and planning.',
   'Hero Editor': 'Edit monster stats and equipment in-game; save and load custom setups for testing.',
-  'Highscore Improvements': 'Richer highscores with extra stats, sorting, and room-by-room breakdown.',
+  'Highscores': 'Richer highscores with extra stats, sorting, and room-by-room breakdown.',
   'Item tier list': 'Equipment stats and rankings; compare items and loadouts by tier and effectiveness.',
   'Monster tier list': 'Monster rankings and usage stats; sortable tiers and performance metrics.',
   'Setup Manager': 'Save, load, and manage multiple team setups per map with custom names.',

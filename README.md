@@ -535,7 +535,7 @@ A powerful tool that allows players to:
 - Save and load custom setups
 - Perfect for testing different monster and equipment combinations without having to collect and level them in-game
 
-#### Highscore Improvements
+#### Highscores
 Enhances the game's highscore display with additional statistics, improved sorting options, and visual enhancements:
 - Detailed performance analysis
 - Potential time improvements compared to top scores

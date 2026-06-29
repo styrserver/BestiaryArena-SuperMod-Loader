@@ -5577,7 +5577,7 @@ function ensureModalApi() {
   return true;
 }
 
-// Open modal via api.showModal (Highscore Improvements pattern), with createModal fallback
+// Open modal via api.showModal (Highscores pattern), with createModal fallback
 function openModal({ title, width, height, content, buttons }) {
   const options = { title, content, buttons: buttons || [] };
   if (width != null) options.width = width;

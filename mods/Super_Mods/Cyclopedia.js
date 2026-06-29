@@ -2697,6 +2697,10 @@ function clearCyclopediaApiPendingRequests() {
   cyclopediaApiPendingRequests.clear();
 }
 
+function isFetchAborted(error) {
+  return error?.name === 'AbortError';
+}
+
 async function fetchWithDeduplication(url, key, priority = 0, signal = null) {
   try {
     if (isCyclopediaRateLimited()) {
@@ -2730,7 +2734,9 @@ async function fetchWithDeduplication(url, key, priority = 0, signal = null) {
     cyclopediaApiPendingRequests.set(key, requestPromise);
     return await requestPromise;
   } catch (error) {
-    console.error(`[Cyclopedia] Error in fetchWithDeduplication for ${key}:`, error);
+    if (!isFetchAborted(error)) {
+      console.error(`[Cyclopedia] Error in fetchWithDeduplication for ${key}:`, error);
+    }
     throw error;
   }
 }
@@ -2789,6 +2795,7 @@ const CyclopediaApi = {
 
     const queryOptions = { season: effectiveSeason, qualified, limit, offset, sort, order };
     const listCacheKey = getRankingsListCacheKey(queryOptions);
+    const effectiveSignal = options.signal ?? null;
 
     const cachedPage = getCachedRankingsData(queryOptions);
     if (cachedPage) return cachedPage;
@@ -2815,7 +2822,7 @@ const CyclopediaApi = {
         fullListUrl,
         `rankings-fetch-full-s${effectiveSeason}-${sort}-${order}`,
         1,
-        activeModalLifecycle?.isActive ? getModalFetchSignal() : null
+        effectiveSignal
       );
 
       if (!fullListData || !Array.isArray(fullListData.rankings)) {
@@ -2858,7 +2865,7 @@ const CyclopediaApi = {
       apiUrl,
       `rankings-fetch-${getRankingsCacheKey(queryOptions)}`,
       1,
-      activeModalLifecycle?.isActive ? getModalFetchSignal() : null
+      effectiveSignal
     );
 
     if (!data || !Array.isArray(data.rankings)) {
@@ -3332,6 +3339,16 @@ function truncateListPlayerName(name) {
   return name.length > 6 ? name.substring(0, 6) + '...' : name;
 }
 
+function getCyclopediaCurrentPlayerName() {
+  try {
+    let name = globalThis.state?.player?.getSnapshot()?.context?.player?.name;
+    if (!name) name = globalThis.state?.player?.getSnapshot()?.context?.name;
+    return typeof name === 'string' ? name.trim() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
 function appendStatsWorldRecordPlayerLink(container, playerName, truncateStyle) {
   const slot = container.querySelector('[data-stats-player-slot]');
   if (!slot) return;
@@ -3344,13 +3361,18 @@ function appendStatsWorldRecordPlayerLink(container, playerName, truncateStyle) 
 
 function createStatsWorldRecordPlayerLink(playerName, truncateStyle) {
   const line = document.createElement('div');
-  line.style.cssText = `margin-bottom: 6px; font-size: 10px; color: #888; ${truncateStyle}`;
+  const currentPlayer = getCyclopediaCurrentPlayerName();
+  const isOwnRecord = currentPlayer && playerName && playerName !== 'Unknown'
+    && playerName.toLowerCase() === currentPlayer.toLowerCase();
+  const nameColor = isOwnRecord ? '#8f8' : '#888';
+
+  line.style.cssText = `margin-bottom: 6px; font-size: 10px; color: ${nameColor}; ${truncateStyle}`;
   line.title = playerName;
   line.textContent = playerName;
 
   if (playerName && playerName !== 'Unknown') {
     NavigationHandler.attachProfileNavigation(line, playerName);
-    line.style.color = '#888';
+    line.style.color = nameColor;
   }
 
   return line;
@@ -17690,6 +17712,15 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
         });
       }
 
+      async function fetchRankingsForTab(queryOptions) {
+        try {
+          return await CyclopediaApi.fetchRankings(queryOptions);
+        } catch (error) {
+          if (!isFetchAborted(error) || !dataRowsContainer.isConnected) throw error;
+          return await CyclopediaApi.fetchRankings({ ...queryOptions, signal: null });
+        }
+      }
+
       async function loadRankings() {
         if (isLoadingRankings) return;
         isLoadingRankings = true;
@@ -17703,10 +17734,15 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           let rankingsData = getCachedRankingsData(queryOptions);
           if (!rankingsData) {
             if (initialRankingsPromise && queryCacheKey === initialQueryCacheKey) {
-              rankingsData = await initialRankingsPromise;
+              try {
+                rankingsData = await initialRankingsPromise;
+              } catch (error) {
+                if (!isFetchAborted(error) || !dataRowsContainer.isConnected) throw error;
+                rankingsData = await fetchRankingsForTab(queryOptions);
+              }
               initialRankingsPromise = null;
             } else {
-              rankingsData = await CyclopediaApi.fetchRankings(queryOptions);
+              rankingsData = await fetchRankingsForTab(queryOptions);
             }
             setCachedRankingsData(queryOptions, rankingsData);
           }
@@ -17723,7 +17759,10 @@ function createCharactersTabPage(selectedCreature, selectedEquipment, selectedIn
           updatePaginationControls();
           updateTooltipContent();
         } catch (error) {
-          console.error('[Cyclopedia] Error loading rankings page:', error);
+          if (!isFetchAborted(error) || dataRowsContainer.isConnected) {
+            console.error('[Cyclopedia] Error loading rankings page:', error);
+          }
+          if (!dataRowsContainer.isConnected) return;
           dataRowsContainer.innerHTML = `
             <div style="grid-column: 1 / -1; padding: 24px; text-align: center; color: ${COLOR_CONSTANTS.ERROR}; font-size: 12px;">
               Failed to load rankings. Please try again.

@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.3.10",
+      "changes": [
+        {
+          "mod": "Hero Editor",
+          "type": "changed",
+          "text": "Awakened status follows level: below 50 is always normal, 51+ is always awakened, and level 50 can be either via the awaken toggle. Turning off Max Awakened Mode sets level to 50 and clears awakened."
+        },
+        {
+          "mod": "Highscores",
+          "type": "changed",
+          "text": "Renamed from Highscore Improvements to Highscores (popup, button, and modal title; no icon). Summary tab (default) lists all maps in maps-database order with tick/rank/floor rows, Cyclopedia-style tab icons, and map search. Footer shows maps with room to improve, aggregated Improvements (ticks/rank/floor totals), and Your WRs counts. Explored maps sort before locked WR-only entries; cards with no personal data are dimmed. Stored 9600-tick timeouts display as 9600 ticks (not —); a valid speedrun below timeout implies 100% floor when floor is unset. Tick/Rank/Floor tabs include maps with world records even when uncleared. Sort: unlocked, own WR at bottom, tab tiebreaks (tick/rank gain desc, floor asc), then map order. Rows compare you → WR (holder) with green/red max caps on rank and floor; Summary marks your records as (You)."
+        },
+        {
+          "mod": "Highscores",
+          "type": "fixed",
+          "text": "Summary and comparison rows show world records when your tick, rank, or floor is missing. Rank tab no longer claims max rank with zero rank runs; tick/floor tabs use accurate empty states when no WR data exists. Tick/Rank/Floor tab sort again prioritizes biggest improvement before map-order tiebreak. Mod cleanup closes the open modal and backdrop on disable."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "changed",
+          "text": "Added buildMapOrderIndex, getMapOrderIndex, and compareMapsByGameOrder for canonical region→room map order."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Rankings tab keeps loading when the modal lifecycle aborts other in-flight requests (e.g. ESC or background modal cleanup). Rankings fetches are no longer tied to modal teardown; aborted loads retry while the table is still mounted."
+        }
+      ]
+    },
+    {
       "version": "4.3.9",
       "changes": [
         {
@@ -247,9 +277,9 @@
           "text": "Edit Heroes modal max size is 420×420; on phones it auto-fits viewport width and height (desktop max unchanged). Allies and Details columns fill remaining modal height and resize on orientation change."
         },
         {
-          "mod": "Highscore Improvements",
+          "mod": "Highscores",
           "type": "changed",
-          "text": "Improvement Opportunities modal max size is 500×550; on phones it auto-fits viewport width and height (desktop max unchanged). Tab lists and stats footer fill remaining modal height and resize on orientation change."
+          "text": "Highscores modal max size is 500×550; on phones it auto-fits viewport width and height (desktop max unchanged). Tab lists and stats footer fill remaining modal height and resize on orientation change."
         },
         {
           "mod": "Item Tier List",
@@ -994,7 +1024,7 @@
         {
           "mod": "Setup Manager",
           "type": "changed",
-          "text": "Modal UI overhauled to match Hero Editor and Highscore Improvements: framed setup cards, inline save on the New Setup row, single-button delete confirmation (card turns red; button label Confirm), neutral Close button styling, Challenges-style toasts, Hero Editor–style creature/equipment portraits, and modal title shows room display name (e.g. Tomb Raver) instead of the internal map id. Saving or renaming to an existing name shows an error instead of overwriting. Full EN/PT strings for empty states and notes placeholder. Creature level badges match Better Setups (compact badge, 2px padding). Equipment portraits align stat icons with in-game layout; silent fallbacks when UI Components are unavailable."
+          "text": "Modal UI overhauled to match Hero Editor and Highscores: framed setup cards, inline save on the New Setup row, single-button delete confirmation (card turns red; button label Confirm), neutral Close button styling, Challenges-style toasts, Hero Editor–style creature/equipment portraits, and modal title shows room display name (e.g. Tomb Raver) instead of the internal map id. Saving or renaming to an existing name shows an error instead of overwriting. Full EN/PT strings for empty states and notes placeholder. Creature level badges match Better Setups (compact badge, 2px padding). Equipment portraits align stat icons with in-game layout; silent fallbacks when UI Components are unavailable."
         },
         {
           "mod": "Better Setups",
@@ -1452,9 +1482,9 @@
       "version": "3.9.13",
       "changes": [
         {
-          "mod": "Highscore Improvements",
+          "mod": "Highscores",
           "type": "changed",
-          "text": "Improvement Opportunities modal is 500×550px with flex-height tab lists. Tick Improvements footer reports rooms with tick improvement, total tick improvement, and theoretical minimum. Rank Improvements lists same-rank rooms and a Same-rank tick gain stat (aligned with Floor). Rows compare your record vs a profile-linked WR holder: tick tab as N ticks; rank as N points; floor as ascension % (100 + floor×20). Rank and floor show tick counts only when points or % match; same-rank and same-floor tick gains use +N ticks (pct%)."
+          "text": "Highscores modal is 500×550px with flex-height tab lists. Tick Improvements footer reports rooms with tick improvement, total tick improvement, and theoretical minimum. Rank Improvements lists same-rank rooms and a Same-rank tick gain stat (aligned with Floor). Rows compare your record vs a profile-linked WR holder: tick tab as N ticks; rank as N points; floor as ascension % (100 + floor×20). Rank and floor show tick counts only when points or % match; same-rank and same-floor tick gains use +N ticks (pct%)."
         }
       ]
     },
@@ -2132,9 +2162,9 @@
           "text": "Cyclopedia received a broader Bestiary/Equipment UX update: in-panel search with Name/Usage toggles, usage-based sorting with percentages, no-results messaging, better selection/reset behavior, and Player usage panels sourced from board configs (creatures use map-based percentage; equipment remains config-entry based)."
         },
         {
-          "mod": "Highscore Improvements",
+          "mod": "Highscores",
           "type": "changed",
-          "text": "Improvement Opportunities modal now includes a Floor Improvements tab with fixed 500x500 sizing, own-WR filtering, same-floor rows listed below floor gains, and Cyclopedia-aligned floor tick normalization (floorTicks, then ticks) for comparisons."
+          "text": "Highscores modal now includes a Floor Improvements tab with fixed 500x500 sizing, own-WR filtering, same-floor rows listed below floor gains, and Cyclopedia-aligned floor tick normalization (floorTicks, then ticks) for comparisons."
         },
         {
           "mod": "Mod Settings",
@@ -2678,7 +2708,7 @@
         },
         {
           "type": "fixed",
-          "mod": "Highscore Improvements",
+          "mod": "Highscores",
           "text": "Event maps are excluded from time and rank improvement calculations."
         }
       ]

@@ -958,7 +958,9 @@ function buildBoardPayloadFromControls(originalBoardData, controls, equipMap) {
 
     if (piece.monster) {
       const awakenControl = controls.find(c => c.type === 'awaken' && c.index === pieceIndex);
-      const awakenEnabled = awakenControl?.getValue ? awakenControl.getValue() : false;
+      const level = Number(piece.monster.level) || 1;
+      const userAwakened = awakenControl?.getValue ? awakenControl.getValue() : false;
+      const awakenEnabled = resolveHeroAwakenedForLevel(level, userAwakened);
 
       piece.monster.awaken = awakenEnabled;
       piece.monster.awakened = awakenEnabled;
@@ -1123,6 +1125,13 @@ function isHeroAwakened(monster, level) {
     monster.awakened === true ||
     monster.isAwakened === true ||
     Number(level) > 50;
+}
+
+function resolveHeroAwakenedForLevel(level, userAwakened) {
+  const parsedLevel = Number(level) || 1;
+  if (parsedLevel >= 51) return true;
+  if (parsedLevel < 50) return false;
+  return Boolean(userAwakened);
 }
 
 function applyHeroMonsterPortraitBorder(slot, monster, level) {
@@ -1768,9 +1777,10 @@ function showHeroEditorModal(options) {
       const { monsterName, monsterGameId, monsterLevel } = resolveHeroMonsterInfo(hero, boardContext, monsterMap);
       const { equipName, equipStat, equipTier, equipGameId, hasEquipment } = resolveHeroEquipmentInfo(hero, equipMap);
 
-      const initialAwakenEnabled = hero.monster.awaken === true ||
+      const initialAwakenFromFlags = hero.monster.awaken === true ||
         hero.monster.awakened === true ||
         hero.monster.isAwakened === true;
+      const initialAwakened = resolveHeroAwakenedForLevel(monsterLevel, initialAwakenFromFlags);
       const initialMaxGenesEnabled = monsterLevel === 99 &&
         Number(hero.monster.hp || 1) === 20 &&
         Number(hero.monster.ad || 1) === 20 &&
@@ -1779,9 +1789,9 @@ function showHeroEditorModal(options) {
         Number(hero.monster.magicResist || 1) === 20;
       const initialPortraitMonster = {
         ...hero.monster,
-        awaken: initialAwakenEnabled || initialMaxGenesEnabled,
-        awakened: initialAwakenEnabled || initialMaxGenesEnabled,
-        isAwakened: initialAwakenEnabled || initialMaxGenesEnabled
+        awaken: initialAwakened || initialMaxGenesEnabled,
+        awakened: initialAwakened || initialMaxGenesEnabled,
+        isAwakened: initialAwakened || initialMaxGenesEnabled
       };
       
       const detailPanel = document.createElement('div');
@@ -1874,11 +1884,12 @@ function showHeroEditorModal(options) {
       
       headerLeftContainer.appendChild(nameElement);
       
-      // Per-creature awakened toggle
-      let awakenEnabled = initialAwakenEnabled;
-      let activeTopMode = initialMaxGenesEnabled ? 'maxGenes' : (initialAwakenEnabled ? 'awaken' : 'normal');
-      if (initialMaxGenesEnabled) awakenEnabled = true;
+      // Per-creature awakened toggle (level <50 = normal, 50 = either, 51+ = awakened)
+      let awakenEnabled = initialAwakened || initialMaxGenesEnabled;
+      let activeTopMode = initialMaxGenesEnabled ? 'maxGenes' : (awakenEnabled ? 'awaken' : 'normal');
       const statInputs = {};
+
+      const getCurrentLevel = () => Number(statInputs.level?.value ?? monsterLevel);
 
       const getPortraitMonster = () => ({
         ...hero.monster,
@@ -1955,18 +1966,32 @@ function showHeroEditorModal(options) {
       const syncTopModeFromStats = () => {
         if (isMaxGenesPreset()) {
           activeTopMode = 'maxGenes';
+          awakenEnabled = true;
         } else {
-          activeTopMode = 'awaken';
+          const level = getCurrentLevel();
+          if (level >= 51) {
+            activeTopMode = 'awaken';
+            awakenEnabled = true;
+          } else if (level < 50) {
+            activeTopMode = 'normal';
+            awakenEnabled = false;
+          } else {
+            activeTopMode = awakenEnabled ? 'awaken' : 'normal';
+          }
         }
-        awakenEnabled = true;
         refreshTopButtons();
       };
       
       awakenButton.addEventListener('click', () => {
-        const willActivate = activeTopMode !== 'awaken';
-        activeTopMode = willActivate ? 'awaken' : 'normal';
-        awakenEnabled = willActivate;
-        refreshTopButtons();
+        const level = getCurrentLevel();
+        if (level === 50) {
+          const willActivate = activeTopMode !== 'awaken';
+          activeTopMode = willActivate ? 'awaken' : 'normal';
+          awakenEnabled = willActivate;
+          refreshTopButtons();
+        } else {
+          syncTopModeFromStats();
+        }
         refreshPortraitAppearance();
         scheduleLiveApply(true);
       });
@@ -1998,14 +2023,15 @@ function showHeroEditorModal(options) {
 
       maxGenesButton.addEventListener('click', () => {
         const willActivate = activeTopMode !== 'maxGenes';
-        activeTopMode = willActivate ? 'maxGenes' : 'normal';
-        awakenEnabled = willActivate;
 
         if (willActivate) {
           if (statInputs.level) statInputs.level.value = '99';
           ['hp', 'ad', 'ap', 'armor', 'magicResist'].forEach((statKey) => {
             if (statInputs[statKey]) statInputs[statKey].value = '20';
           });
+        } else {
+          if (statInputs.level) statInputs.level.value = '50';
+          awakenEnabled = false;
         }
         syncTopModeFromStats();
         refreshPortraitAppearance();
@@ -2027,16 +2053,10 @@ function showHeroEditorModal(options) {
         type: 'awaken',
         button: awakenButton,
         getValue: () => awakenEnabled,
-        setValue: (value) => {
-          awakenEnabled = Boolean(value);
-          if (awakenEnabled) {
-            syncTopModeFromStats();
-          } else {
-            activeTopMode = 'normal';
-            refreshTopButtons();
-          }
+        setValue: () => {
+          syncTopModeFromStats();
         },
-        initial: initialAwakenEnabled
+        initial: initialAwakened
       });
       
       const statsPanel = document.createElement('div');
