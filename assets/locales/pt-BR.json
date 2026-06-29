@@ -123,7 +123,7 @@
       "Board Analyzer": "Simula e analisa setups de tabuleiro para avaliar estratégias e desempenho.",
       "Custom Display": "Modo desempenho e grade no mapa; ajuste o visual para velocidade e planejamento.",
       "Hero Editor": "Edite stats de criaturas e equipamentos no jogo; salve e carregue setups de teste.",
-      "Highscore Improvements": "Highscores mais ricos, com stats extras, ordenação e detalhe por sala.",
+      "Highscores": "Highscores mais ricos, com stats extras, ordenação e detalhe por sala.",
       "Item tier list": "Stats e rankings de equipamentos; compare itens e builds por tier e eficácia.",
       "Monster tier list": "Rankings e estatísticas de uso de monstros; tiers ordenáveis e métricas.",
       "Setup Manager": "Salve, carregue e gerencie vários times por mapa com nomes personalizados.",
@@ -882,9 +882,9 @@
       "allTopRank": "Você já está no topo em todas as salas!"
     },
     "highscore": {
-      "title": "Oportunidades de Melhoria",
-      "buttonText": "Melhorias de Highscore",
-      "buttonTooltip": "Mostrar melhorias potenciais de ticks e rank",
+      "title": "Highscores",
+      "buttonText": "Highscores",
+      "buttonTooltip": "Mostrar highscores de ticks, rank e floor",
       "yourScore": "Seu {score}",
       "topScore": "Melhor {score}",
       "gainFormat": "+{ticks} ticks ({percent}%)",
