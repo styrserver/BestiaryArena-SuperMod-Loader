@@ -3942,7 +3942,7 @@ const CyclopediaHomeSearch = (() => {
   const MAX_META_MAPS = 30;
   const MAX_META_CREATURE_EQUIPS = 40;
   const MAX_META_EQUIP_EFFECT = 20;
-  const ABILITY_TEXT_CACHE_VERSION = 2;
+  const ABILITY_TEXT_CACHE_VERSION = 3;
 
   let baseEntries = null;
   let creatureEntries = null; // cached: baseEntries filtered to creatures
@@ -4715,6 +4715,44 @@ const CyclopediaHomeSearch = (() => {
     }
   }
 
+  function stripLoreFromAbilityTooltipRoot(root) {
+    try {
+      if (!root || typeof root.querySelectorAll !== 'function') return;
+      const loreBlocks = root.querySelectorAll('blockquote');
+      loreBlocks.forEach((loreBlock) => {
+        // Lore is rendered as a quote block at the end of tooltip prose.
+        const previous = loreBlock.previousElementSibling;
+        if (previous && previous.classList && previous.classList.contains('separator')) {
+          previous.remove();
+        }
+        loreBlock.remove();
+      });
+    } catch {
+      // ignore lore-stripping failures and continue with raw text
+    }
+  }
+
+  function stripLoreLinesFromText(rawText) {
+    try {
+      const text = String(rawText ?? '');
+      if (!text) return '';
+      const lines = text
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter((line) => {
+          // Lore in BA tooltips is usually standalone quote lines and optional attribution lines.
+          if (/^["'"`“”].*["'"`“”]$/.test(line)) return false;
+          if (/^[—-]\s*\w+/.test(line)) return false;
+          if (/tibia library/i.test(line)) return false;
+          return true;
+        });
+      return lines.join('\n');
+    } catch {
+      return String(rawText ?? '');
+    }
+  }
+
   function tryRenderTooltipContentToText(TooltipContent, props) {
     try {
       const createUIComponent = globalThis.state?.utils?.createUIComponent;
@@ -4737,6 +4775,7 @@ const CyclopediaHomeSearch = (() => {
       const component = props ? createUIComponent(root, TooltipContent, props) : createUIComponent(root, TooltipContent);
       if (component && typeof component.mount === 'function') component.mount();
 
+      stripLoreFromAbilityTooltipRoot(root);
       const text = root.textContent || '';
 
       if (component && typeof component.unmount === 'function') component.unmount();
@@ -4760,7 +4799,7 @@ const CyclopediaHomeSearch = (() => {
           // Best-effort: include any string metadata in skill object (cheap, helps search).
           const leaves = [];
           collectStringLeaves(skill, leaves);
-          const leafText = leaves.join('\n');
+          const leafText = stripLoreLinesFromText(leaves.join('\n'));
           if (leafText) prefixText += leafText + '\n';
         }
       } catch {
@@ -4799,6 +4838,7 @@ const CyclopediaHomeSearch = (() => {
         requestAnimationFrame(() => {
           let text = '';
           try {
+            stripLoreFromAbilityTooltipRoot(root);
             text = root.textContent || '';
           } catch {
             text = '';
@@ -4822,7 +4862,7 @@ const CyclopediaHomeSearch = (() => {
           }
           try { host.remove(); } catch { /* ignore */ }
 
-          const combined = `${prefixText || ''}${normalText || ''}\n${awakenedText || ''}`.trim();
+          const combined = stripLoreLinesFromText(`${prefixText || ''}${normalText || ''}\n${awakenedText || ''}`.trim());
           onDone(combined);
         });
       });
@@ -4851,7 +4891,7 @@ const CyclopediaHomeSearch = (() => {
         // Fast path: collect any string fields that might exist in skill metadata
         const leaves = [];
         collectStringLeaves(skill, leaves);
-        const leafText = leaves.join('\n');
+        const leafText = stripLoreLinesFromText(leaves.join('\n'));
         if (leafText) text += leafText + '\n';
 
         // TooltipContent is what renders the actual ability description in the UI
@@ -4869,7 +4909,7 @@ const CyclopediaHomeSearch = (() => {
       text = text || '';
     }
 
-    text = cyclopediaNormalizeSearchText(text);
+    text = cyclopediaNormalizeSearchText(stripLoreLinesFromText(text));
     cache.set(key, { v: ABILITY_TEXT_CACHE_VERSION, text });
     return text;
   }
@@ -8087,10 +8127,20 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
             currentAbilityContainer.appendChild(rootElement);
             currentTooltipComponent = tooltipComponent;
             
-            const blockquotes = rootElement.querySelectorAll('blockquote');
-            blockquotes.forEach(bq => {
-              bq.style.setProperty('font-size', '10px', 'important');
-            });
+            const removeLoreBlocks = () => {
+              const loreBlocks = rootElement.querySelectorAll('blockquote');
+              loreBlocks.forEach((loreBlock) => {
+                const previous = loreBlock.previousElementSibling;
+                if (previous && previous.classList && previous.classList.contains('separator')) {
+                  previous.remove();
+                }
+                loreBlock.remove();
+              });
+            };
+            // Some tooltip content renders asynchronously; run cleanup more than once.
+            removeLoreBlocks();
+            requestAnimationFrame(removeLoreBlocks);
+            setTimeout(removeLoreBlocks, 40);
             
             setTimeout(() => {
               let fontSize = 12;
@@ -8181,10 +8231,20 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
           tooltipComponent.mount();
           abilityContainer.appendChild(rootElement);
           
-          const blockquotes = rootElement.querySelectorAll('blockquote');
-          blockquotes.forEach(bq => {
-            bq.style.setProperty('font-size', '10px', 'important');
-          });
+          const removeLoreBlocks = () => {
+            const loreBlocks = rootElement.querySelectorAll('blockquote');
+            loreBlocks.forEach((loreBlock) => {
+              const previous = loreBlock.previousElementSibling;
+              if (previous && previous.classList && previous.classList.contains('separator')) {
+                previous.remove();
+              }
+              loreBlock.remove();
+            });
+          };
+          // Some tooltip content renders asynchronously; run cleanup more than once.
+          removeLoreBlocks();
+          requestAnimationFrame(removeLoreBlocks);
+          setTimeout(removeLoreBlocks, 40);
           
           setTimeout(() => {
             let fontSize = 12;

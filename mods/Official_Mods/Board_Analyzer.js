@@ -53,6 +53,7 @@ const CHART_MIN_HEIGHT = 20;
 const CHART_MAX_HEIGHT = 120;
 const CHART_MAX_BARS = 1000; // Limit chart to prevent performance issues with large analyses
 const CHART_BACKGROUND_STYLE = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+const SKIPPED_RUN_COLOR = '#9b59b6';
 
 const BOARD_ANALYZER_UI = {
   CONTENT_PADDING: 2,
@@ -593,6 +594,7 @@ class ChartRenderer {
       grade: r.grade,
       rankPoints: r.rankPoints,
       completed: r.completed,
+      skipped: !!r.skipped,
       seed: r.seed
     }));
     
@@ -750,19 +752,26 @@ class ChartRenderer {
   getSortedResults() {
     let sorted;
     const isSorted = this.currentSort !== 'runs';
+    const getOutcomeGroup = (result) => {
+      if (result.completed) return 0;
+      if (result.skipped) return 1;
+      return 2;
+    };
     
     switch (this.currentSort) {
       case 'time':
         sorted = [...this.displayData].sort((a, b) => {
-          // Wins first, defeats last (F grade can still be a completed win)
-          if (a.completed !== b.completed) return b.completed - a.completed;
+          // Wins first, then skipped runs, then regular defeats
+          const outcomeDiff = getOutcomeGroup(a) - getOutcomeGroup(b);
+          if (outcomeDiff !== 0) return outcomeDiff;
           return a.ticks - b.ticks;
         });
         break;
       case 'splus':
         sorted = [...this.displayData].sort((a, b) => {
-          // Defeats last; grade F on a win is still a win
-          if (a.completed !== b.completed) return b.completed - a.completed;
+          // Group by outcome first: wins, skipped, then regular defeats.
+          const outcomeDiff = getOutcomeGroup(a) - getOutcomeGroup(b);
+          if (outcomeDiff !== 0) return outcomeDiff;
           if (!a.completed && !b.completed) return a.ticks - b.ticks;
           
           if (a.grade === 'S+' && b.grade !== 'S+') return -1;
@@ -866,6 +875,9 @@ class ChartRenderer {
   }
   
   getBarColor(result) {
+    if (result.skipped) {
+      return SKIPPED_RUN_COLOR;
+    }
     if (result.completed) {
       if (result.grade === 'S+' && result.rankPoints) {
         // Use pre-calculated value instead of filtering every time
@@ -903,7 +915,10 @@ class ChartRenderer {
       tooltipText += result.grade;
     }
     
-    tooltipText += `, ${result.completed ? t('mods.boardAnalyzer.tooltipCompleted') : t('mods.boardAnalyzer.tooltipFailed')}`;
+    const outcomeText = result.skipped
+      ? 'Skipped'
+      : (result.completed ? t('mods.boardAnalyzer.tooltipCompleted') : t('mods.boardAnalyzer.tooltipFailed'));
+    tooltipText += `, ${outcomeText}`;
     if (currentFloor !== null && currentFloor !== undefined) {
       tooltipText += `, ${t('mods.boardAnalyzer.tooltipFloor').replace('{floor}', currentFloor)}`;
     }
@@ -1622,6 +1637,8 @@ class StatisticsCalculator {
   reset() {
     this.totalRuns = 0;
     this.completedRuns = 0;
+    this.skippedRuns = 0;
+    this.timedRuns = 0;
     this.sPlusCount = 0;
     this.sPlusMaxPointsCount = 0;
     this.maxRankPoints = 0;
@@ -1642,10 +1659,16 @@ class StatisticsCalculator {
     this.totalRuns++;
     this.runTimes.push(runTime);
     this.runTimesSum += runTime;
+
+    if (result.skipped) {
+      this.skippedRuns++;
+      return;
+    }
     
-    // Include all runs in time statistics (both completed and failed)
+    // Exclude skipped runs from tick metrics (min/max/median/average ticks)
     this.ticksArray.push(result.ticks);
     this.ticksSum += result.ticks;
+    this.timedRuns++;
     
     // Update min/max ticks for completed runs
     if (result.completed) {
@@ -1691,17 +1714,20 @@ class StatisticsCalculator {
   calculateStatistics() {
     const sPlusRate = this.totalRuns > 0 ? (this.sPlusCount / this.totalRuns * 100).toFixed(2) : '0.00';
     const completionRate = this.totalRuns > 0 ? (this.completedRuns / this.totalRuns * 100).toFixed(2) : '0.00';
+    const skippedRate = this.totalRuns > 0 ? (this.skippedRuns / this.totalRuns * 100).toFixed(2) : '0.00';
     const averageRunTime = this.runTimes.length > 0 ? this.runTimesSum / this.runTimes.length : 0;
-    const averageTicks = this.totalRuns > 0 ? this.ticksSum / this.totalRuns : 0;
+    const averageTicks = this.timedRuns > 0 ? this.ticksSum / this.timedRuns : 0;
     const medianTicks = this.calculateMedian(this.ticksArray);
     
     return {
       totalRuns: this.totalRuns,
       completedRuns: this.completedRuns,
+      skippedRuns: this.skippedRuns,
       sPlusCount: this.sPlusCount,
       sPlusMaxPointsCount: this.sPlusMaxPointsCount,
       sPlusRate,
       completionRate,
+      skippedRate,
       minTicks: isFinite(this.minTicks) ? this.minTicks : 0,
       maxTicks: this.maxTicks,
       minDefeatTicks: isFinite(this.minDefeatTicks) ? this.minDefeatTicks : 0,
@@ -1927,7 +1953,8 @@ const getLastTick = (analysisId = null) => {
             ticks: currentTick,
             grade: readableGrade,
             rankPoints: rankPoints,
-            completed: false
+            completed: false,
+            skipped: true
           });
         }
       }
@@ -2490,12 +2517,16 @@ async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, 
     // Handle both regular results and stop-triggering results
     if (typeof runResult === 'object' && runResult.shouldStop) {
       // This run triggered the stop condition, but we still want to include it
-      results.push(runResult.result);
+      if (!runResult.result?.skipped) {
+        results.push(runResult.result);
+      }
       updateStatusCallback(i, runs, statsCalculator, statusCallback, timing, perf);
       break; // Stop the analysis
     } else {
       // Regular run result
-      results.push(runResult);
+      if (!runResult?.skipped) {
+        results.push(runResult);
+      }
       updateStatusCallback(i, runs, statsCalculator, statusCallback, timing, perf);
     }
   }
@@ -2535,13 +2566,46 @@ function getSPlusRankTextColor(highestRankPoints, rankPoints) {
   }
 }
 
+function getSkippedRunStatus(statsCalculator) {
+  const totalRunsInStats = statsCalculator.totalRuns;
+  const skippedRuns = statsCalculator.skippedRuns;
+  const skippedRate = totalRunsInStats > 0
+    ? (skippedRuns / totalRunsInStats * 100).toFixed(2)
+    : '0.00';
+  return { skippedRuns, skippedRate, totalRunsInStats };
+}
+
+function getTimingStatus(currentRun, totalRuns, statsCalculator, timing = null) {
+  if (statsCalculator.totalRuns === 0) {
+    return {};
+  }
+
+  const averageRunTime = statsCalculator.runTimes.length > 0
+    ? statsCalculator.runTimesSum / statsCalculator.runTimes.length
+    : 0;
+  const remainingRuns = totalRuns - currentRun + 1;
+
+  return {
+    avgRunTime: averageRunTime.toFixed(0),
+    estimatedTimeRemaining: formatDurationWholeSeconds(averageRunTime * remainingRuns),
+    totalTimeFormatted: timing
+      ? formatDurationWholeSeconds(performance.now() - timing.startTime)
+      : null
+  };
+}
+
 function buildAnalysisStatus(currentRun, totalRuns, statsCalculator, timing = null) {
-  if (statsCalculator.runTimes.length === 0) {
+  const skippedStatus = getSkippedRunStatus(statsCalculator);
+  const timingStatus = getTimingStatus(currentRun, totalRuns, statsCalculator, timing);
+
+  if (statsCalculator.timedRuns === 0) {
     return {
       current: currentRun,
       total: totalRuns,
       status: 'running',
-      hasStats: false
+      hasStats: false,
+      ...skippedStatus,
+      ...timingStatus
     };
   }
 
@@ -2568,6 +2632,8 @@ function buildAnalysisStatus(currentRun, totalRuns, statsCalculator, timing = nu
     estimatedTimeRemaining: formatDurationWholeSeconds(estimatedTimeRemaining),
     totalTimeFormatted: timing ? formatDurationWholeSeconds(performance.now() - timing.startTime) : null,
     completionRate: stats.completionRate,
+    skippedRuns: stats.skippedRuns,
+    skippedRate: stats.skippedRate,
     completedRuns: stats.completedRuns,
     totalRunsInStats: stats.totalRuns,
     sPlusRate: stats.sPlusRate,
@@ -2625,12 +2691,15 @@ async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestR
       return null;
     }
     
-    // Add seed to result
-    result.seed = runSeed;
-    
-    // Estimate experience if enabled
-    if (config.estimateExperience) {
-      result.estimatedExp = estimateRunExperience(result.completed);
+    // Skipped runs should not persist data (ticks/replay/seed/exp).
+    if (!result.skipped) {
+      // Add seed to result
+      result.seed = runSeed;
+      
+      // Estimate experience if enabled
+      if (config.estimateExperience) {
+        result.estimatedExp = estimateRunExperience(result.completed);
+      }
     }
     
     const { ticks, grade, rankPoints, completed } = result;
@@ -2676,6 +2745,9 @@ async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestR
 // Helper function to process run results and update best runs
 function processRunResults(result, runIndex, statsCalculator, bestRuns) {
   const { ticks, grade, rankPoints, completed, seed } = result;
+  if (result.skipped) {
+    return false;
+  }
   
   if (completed) {
     // Update min ticks if this is a completed run with lower ticks
@@ -2853,10 +2925,12 @@ async function analyzeBoard(runs = config.runs, statusCallback = null, perfTrack
         runs,
         totalRuns: stats.totalRuns,
         completedRuns: stats.completedRuns,
+        skippedRuns: stats.skippedRuns,
         sPlusCount: stats.sPlusCount,
         sPlusMaxPointsCount: stats.sPlusMaxPointsCount,
         sPlusRate: stats.sPlusRate,
         completionRate: stats.completionRate,
+        skippedRate: stats.skippedRate,
         minTicks: stats.minTicks,
         maxTicks: stats.maxTicks,
         minDefeatTicks: stats.minDefeatTicks,
@@ -3305,7 +3379,7 @@ function createConfigPanel(startAnalysisCallback) {
   stopTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
   
   const stopTicksLabel = document.createElement('label');
-  stopTicksLabel.textContent = t('mods.boardAnalyzer.stopAfterTicksLabel');
+  stopTicksLabel.textContent = 'Skip runs over N ticks (0 to disable):';
   
   const stopTicksInput = document.createElement('input');
   stopTicksInput.type = 'number';
@@ -3494,17 +3568,67 @@ function appendLiveStatRow(container, labelText, valueId, valueStyle = 'text-ali
   container.appendChild(value);
 }
 
+function updateTimingStatsDisplay(status) {
+  if (status.totalTimeFormatted) {
+    const totalTimeEl = document.getElementById('analysis-live-total-time');
+    if (totalTimeEl) totalTimeEl.textContent = status.totalTimeFormatted;
+  }
+
+  if (status.avgRunTime != null) {
+    const avgRunTimeEl = document.getElementById('analysis-avg-run-time');
+    if (avgRunTimeEl) {
+      avgRunTimeEl.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${status.avgRunTime}ms`;
+    }
+
+    const liveAvgRunTimeEl = document.getElementById('analysis-live-avg-run-time');
+    if (liveAvgRunTimeEl) {
+      liveAvgRunTimeEl.textContent = `${status.avgRunTime}ms`;
+    }
+  }
+
+  if (status.estimatedTimeRemaining) {
+    const estimatedTimeEl = document.getElementById('analysis-estimated-time');
+    if (estimatedTimeEl) {
+      estimatedTimeEl.textContent = `${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${status.estimatedTimeRemaining}`;
+    }
+
+    const liveEstimatedTimeEl = document.getElementById('analysis-live-estimated-time');
+    if (liveEstimatedTimeEl) {
+      liveEstimatedTimeEl.textContent = status.estimatedTimeRemaining;
+    }
+  }
+}
+
+function updateSkippedRunsDisplay(status) {
+  const skippedRate = status.skippedRate ?? '0.00';
+  const skippedRuns = status.skippedRuns ?? 0;
+  const totalRunsInStats = status.totalRunsInStats ?? 0;
+  const showSkipped = skippedRuns > 0;
+
+  const skippedRunsEl = document.getElementById('analysis-skipped-runs');
+  if (skippedRunsEl) {
+    skippedRunsEl.style.display = showSkipped ? '' : 'none';
+    if (showSkipped) {
+      skippedRunsEl.style.color = SKIPPED_RUN_COLOR;
+      skippedRunsEl.textContent = `Skipped runs ${skippedRate}% (${skippedRuns}/${totalRunsInStats})`;
+    }
+  }
+
+  const skippedSection = document.getElementById('analysis-live-skipped-section');
+  if (skippedSection) {
+    skippedSection.style.display = showSkipped ? 'contents' : 'none';
+  }
+
+  const skippedEl = document.getElementById('analysis-live-skipped-runs');
+  if (skippedEl && showSkipped) {
+    skippedEl.textContent = `${skippedRate}% (${skippedRuns}/${totalRunsInStats})`;
+    skippedEl.style.color = SKIPPED_RUN_COLOR;
+  }
+}
+
 function updateBasicLiveStatsDisplay(status) {
-  const avgRunTimeEl = document.getElementById('analysis-avg-run-time');
-  const estimatedTimeEl = document.getElementById('analysis-estimated-time');
   const completionRateEl = document.getElementById('analysis-completion-rate');
 
-  if (avgRunTimeEl) {
-    avgRunTimeEl.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${status.avgRunTime}ms`;
-  }
-  if (estimatedTimeEl) {
-    estimatedTimeEl.textContent = `${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${status.estimatedTimeRemaining}`;
-  }
   if (completionRateEl) {
     const isComplete = parseFloat(status.completionRate) === 100;
     completionRateEl.style.color = isComplete ? '#2ecc71' : '#aaa';
@@ -3546,7 +3670,6 @@ function updateAdvancedLiveStatsDisplay(status) {
     completionEl.textContent = `${status.completionRate}% (${status.completedRuns}/${status.totalRunsInStats})`;
     completionEl.style.color = parseFloat(status.completionRate) === 100 ? '#2ecc71' : 'green';
   }
-
   const minLabelEl = document.getElementById('analysis-live-min-time-label');
   const maxLabelEl = document.getElementById('analysis-live-max-time-label');
   if (minLabelEl) {
@@ -3578,8 +3701,6 @@ function updateAdvancedLiveStatsDisplay(status) {
   if (status.totalTimeFormatted) {
     setText('analysis-live-total-time', status.totalTimeFormatted);
   }
-  setText('analysis-live-avg-run-time', `${status.avgRunTime}ms`);
-  setText('analysis-live-estimated-time', status.estimatedTimeRemaining);
 }
 
 function updateLiveStatsDisplay(status) {
@@ -3589,6 +3710,9 @@ function updateLiveStatsDisplay(status) {
       .replace('{current}', status.current)
       .replace('{total}', status.total);
   }
+
+  updateSkippedRunsDisplay(status);
+  updateTimingStatsDisplay(status);
 
   if (!status.hasStats) return;
 
@@ -3671,6 +3795,12 @@ function appendBasicLiveStats(content) {
   completionRateInfo.style.cssText = 'margin-top: 6px; margin-bottom: 2px; font-size: 0.85em; color: #aaa;';
   completionRateInfo.textContent = `${t('mods.boardAnalyzer.completionRateLabel')} —`;
   content.appendChild(completionRateInfo);
+
+  const skippedRunsInfo = document.createElement('p');
+  skippedRunsInfo.id = 'analysis-skipped-runs';
+  skippedRunsInfo.style.cssText = `display: none; margin-top: 2px; margin-bottom: 2px; font-size: 0.85em; color: ${SKIPPED_RUN_COLOR};`;
+  skippedRunsInfo.textContent = 'Skipped runs —';
+  content.appendChild(skippedRunsInfo);
 }
 
 function appendAdvancedLiveStats(content) {
@@ -3686,6 +3816,12 @@ function appendAdvancedLiveStats(content) {
   statsContainer.appendChild(sPlusBreakdown);
 
   appendLiveStatRow(statsContainer, t('mods.boardAnalyzer.completionRateLabel'), 'analysis-live-completion-rate', 'text-align: right; color: green;');
+
+  const skippedSection = document.createElement('div');
+  skippedSection.id = 'analysis-live-skipped-section';
+  skippedSection.style.cssText = 'display: none;';
+  appendLiveStatRow(skippedSection, 'Skipped runs', 'analysis-live-skipped-runs', `text-align: right; color: ${SKIPPED_RUN_COLOR};`);
+  statsContainer.appendChild(skippedSection);
 
   const minTimeLabel = document.createElement('div');
   minTimeLabel.id = 'analysis-live-min-time-label';
@@ -3906,6 +4042,14 @@ function showResultsModal(results) {
     const completionRateValue = document.createElement('div');
     completionRateValue.textContent = `${results.summary.completionRate}% (${results.summary.completedRuns}/${results.summary.totalRuns})`;
     completionRateValue.style.cssText = 'text-align: right; color: green;';
+
+    const skippedRateLabel = document.createElement('div');
+    skippedRateLabel.textContent = 'Skipped runs';
+    skippedRateLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+
+    const skippedRateValue = document.createElement('div');
+    skippedRateValue.textContent = `${results.summary.skippedRate}% (${results.summary.skippedRuns}/${results.summary.totalRuns})`;
+    skippedRateValue.style.cssText = `text-align: right; color: ${SKIPPED_RUN_COLOR};`;
     
     // Best Time (Min Time) - Dynamic label based on completion status
     const minTimeLabel = document.createElement('div');
@@ -3971,6 +4115,10 @@ function showResultsModal(results) {
     
     statsContainer.appendChild(completionRateLabel);
     statsContainer.appendChild(completionRateValue);
+    if (results.summary.skippedRuns > 0) {
+      statsContainer.appendChild(skippedRateLabel);
+      statsContainer.appendChild(skippedRateValue);
+    }
     statsContainer.appendChild(minTimeLabel);
     statsContainer.appendChild(minTimeValue);
     statsContainer.appendChild(maxTimeLabel);
@@ -4549,11 +4697,12 @@ async function runAnalysis() {
     
     // Run the analysis with status updates
     const results = await analyzeBoard(config.runs, (status) => {
-      const hasLiveStatsUi = document.getElementById('analysis-live-stats')
+      const hasLiveStatsUi = document.getElementById('analysis-progress')
+        || document.getElementById('analysis-live-stats')
         || document.getElementById('analysis-avg-run-time');
       if (hasLiveStatsUi) {
         liveStatsThrottler.schedule(status);
-      } else if (status.hasStats) {
+      } else if (analysisState.isRunning()) {
         liveStatsThrottler.cancel();
         if (runningModal && runningModal.close) {
           runningModal.close();

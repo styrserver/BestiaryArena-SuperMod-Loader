@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.3.11",
+      "changes": [
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "Skip runs over N ticks (0 to disable) cuts long runs at the tick ceiling and continues analysis without saving ticks or replay data for those runs. Skipped runs show as purple chart bars in a separate sort group, a live/results Skipped runs counter (hidden at 0), and are excluded from min/max/median win-time stats. Total Time, Avg Run Time, and Est. Remaining still update from wall-clock time while skips are active."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Creature ability tooltips and indexed ability search text no longer include lore quotes (blockquote blocks and preceding separators are stripped after render; metadata quote lines are filtered from search indexing)."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "fixed",
+          "text": "Dismissing the running analysis modal during skip-only stretches restores it on the next status update (previously waited for a non-skipped run)."
+        }
+      ]
+    },
+    {
       "version": "4.3.10",
       "changes": [
         {
