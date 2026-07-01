@@ -13899,19 +13899,6 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
     updateSpeedrunDisplay();
   };
 
-  if (allowGlobalWorldRecords) {
-    if (arguments.length >= 3) {
-      applyLeaderboardWRTicks(leaderboardData);
-    } else {
-      fetchMapsLeaderboardData().then(applyLeaderboardWRTicks).catch(error => {
-        console.error('[Cyclopedia] Error fetching leaderboard data for region statistics:', error);
-        updateSpeedrunDisplay();
-      });
-    }
-  } else {
-    updateSpeedrunDisplay();
-  }
-  
   // Function to update speedrun display (called after leaderboard data is fetched)
   function updateSpeedrunDisplay() {
     const speedrunValue = statsContainer.querySelector('.speedrun-total-ticks');
@@ -14089,6 +14076,21 @@ function createRegionStatisticsSection(regionId, mapsInRegion, leaderboardData) 
   statsGrid.appendChild(floorsDiv);
   
   statsContainer.appendChild(statsGrid);
+
+  // Apply WR ticks after speedrun DOM exists (updateSpeedrunDisplay queries .speedrun-* elements)
+  if (allowGlobalWorldRecords) {
+    if (arguments.length >= 3) {
+      applyLeaderboardWRTicks(leaderboardData);
+    } else {
+      fetchMapsLeaderboardData().then(applyLeaderboardWRTicks).catch(error => {
+        console.error('[Cyclopedia] Error fetching leaderboard data for region statistics:', error);
+        updateSpeedrunDisplay();
+      });
+    }
+  } else {
+    updateSpeedrunDisplay();
+  }
+
   return statsContainer;
 }
 

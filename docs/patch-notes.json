@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "4.3.13",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Maps tab region summary Speedrun row now shows world-record tick totals (season 2) after leaderboard data loads; WR values were previously stuck at — because the display updated before the DOM was built."
+        }
+      ]
+    },
+    {
       "version": "4.3.12",
       "changes": [
         {
