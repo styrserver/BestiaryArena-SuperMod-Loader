@@ -1,29 +1,29 @@
-// Highscores mod for Bestiary Arena
-console.log('Highscores mod initializing...');
-
-// Use shared translation system via API
-const t = (key) => api.i18n.t(key);
-
-// Create the Highscore button using the API
-if (api) {
-  console.log('BestiaryModAPI available in Highscores mod');
-  
-  // Create button to show highscore modal
-  window.highscoreButton = api.ui.addButton({
-    id: 'highscore-button',
-    text: t('mods.highscore.buttonText'),
-    tooltip: t('mods.highscore.buttonTooltip'),
-    primary: false,
-    onClick: showImprovementsModal
-  });
-  
-  console.log('Highscores button added');
-} else {
-  console.error('BestiaryModAPI not available in Highscores mod');
-}
-
-// Map of room codes to names
-let ROOM_NAMES;
+/**
+ * Highscore Improvements — personal WR gaps vs world records for Bestiary Arena.
+ *
+ * Required globals: mapsDatabase, globalThis.state, context.api
+ *
+ * Lifecycle: module load registers toolbar button → showImprovementsModal() → exports.cleanup()
+ *
+ * SECTION INDEX (line numbers shift as code moves):
+ *   1. Configuration & Constants
+ *   2. Global State
+ *   3. Modal Layout & Shell
+ *   4. Data Fetching & Map Classification
+ *   5. Sorting & Ordering
+ *   6. Player Stat Normalization
+ *   7. Record Formatting & Display HTML
+ *   8. Summary & Improvement Data
+ *   9. Map Search
+ *  10. Styles & List UI
+ *  11. Tab Content Builders
+ *  12. Tab Shell
+ *  13. Modal Orchestration
+ *  14. Entry Point & Exports
+ */
+// =======================
+// 1. Configuration
+// =======================
 
 const HIGHSCORES_MODAL_CONFIG = {
   width: 550,
@@ -33,9 +33,49 @@ const HIGHSCORES_MODAL_CONFIG = {
   minHeight: 320
 };
 const HIGHSCORES_MODAL_ID = 'highscores-modal';
+const HIGHSCORE_BUTTON_ID = 'highscore-button';
 
+// 10 minutes at 16 ticks/second — game timeout / no speedrun clear
+const SPEEDRUN_TIMEOUT_TICKS = 9600;
+const MAP_MAX_FLOOR_INDEX = 15;
+
+const MAX_INDICATOR_COLOR_AT_MAX = '#8f8';
+const MAX_INDICATOR_COLOR_BELOW_MAX = '#f88';
+
+const HIGHSCORE_LIST_ITEM_CLASS = 'highscores-item';
+const HIGHSCORE_LIST_EMPTY_CLASS = 'highscores-empty';
+const HIGHSCORE_LIST_NO_RESULTS_CLASS = 'highscores-no-results';
+const HIGHSCORE_LIST_UNPLAYED_CLASS = 'highscores-item--unplayed';
+const HIGHSCORES_STYLE_ID = 'highscores-styles';
+
+const HIGHSCORE_SEARCH_TOOLTIP =
+  'Map search:\n• Matches map name, region, and raid maps\n• Combine: rook AND raid, venore OR carlin\n• Operators: AND, OR (spaces required, case insensitive)';
+
+const HIGHSCORE_RAID_ICON = '/assets/icons/raid.png';
+
+const HIGHSCORE_TAB_ICON_SIZE = 12;
+const HIGHSCORE_TAB_ICONS = {
+  // Same icon paths as Cyclopedia.js profile stats / explored maps
+  summary: { src: '/assets/icons/map.png', alt: 'Summary' },
+  ticks: { src: '/assets/icons/speed.png', alt: 'Ticks' },
+  rank: { src: '/assets/icons/star-tier.png', alt: 'Rank' },
+  floor: { src: '/assets/UI/floor-15.png', alt: 'Floor' }
+};
+
+// =======================
+// 2. Global State
+// =======================
+
+const t = (key) => api.i18n.t(key);
+
+let ROOM_NAMES;
 let activeHighscoresModal = null;
 let highscoresModalLayoutCleanup = null;
+let highscoresModalTabsCleanup = null;
+
+// =======================
+// 3. Modal Layout & Shell
+// =======================
 
 function tagHighscoresModalElement(modalRef) {
   const dialog = getHighscoresDialog(modalRef);
@@ -60,7 +100,7 @@ function closeHighscoresModal() {
   } else {
     removeHighscoresModalElement(document.getElementById(HIGHSCORES_MODAL_ID));
   }
-  clearHighscoresModalLayoutCleanup();
+  clearHighscoresModalCleanup();
 }
 
 function getHighscoresModalDimensions() {
@@ -87,6 +127,36 @@ function clearHighscoresModalLayoutCleanup() {
   if (highscoresModalLayoutCleanup) {
     highscoresModalLayoutCleanup();
     highscoresModalLayoutCleanup = null;
+  }
+}
+
+function clearHighscoresModalTabsCleanup() {
+  if (highscoresModalTabsCleanup) {
+    highscoresModalTabsCleanup();
+    highscoresModalTabsCleanup = null;
+  }
+}
+
+function clearHighscoresModalCleanup() {
+  clearHighscoresModalTabsCleanup();
+  clearHighscoresModalLayoutCleanup();
+}
+
+function attachHighscoresModalCloseCleanup(modalRef) {
+  if (!modalRef) return;
+
+  const runCleanup = () => clearHighscoresModalCleanup();
+
+  if (typeof modalRef.onClose === 'function') {
+    modalRef.onClose(runCleanup);
+  }
+
+  const originalClose = modalRef.close?.bind(modalRef);
+  if (originalClose) {
+    modalRef.close = () => {
+      runCleanup();
+      originalClose();
+    };
   }
 }
 
@@ -162,6 +232,10 @@ function setupHighscoresModalResponsiveLayout(modalRef, contentRoot) {
   };
 }
 
+// =======================
+// 4. Data Fetching & Map Classification
+// =======================
+
 // Helper function to fetch data from TRPC API
 async function fetchTRPC(method) {
   try {
@@ -185,6 +259,57 @@ async function fetchTRPC(method) {
     throw error;
   }
 }
+
+function isMapRaid(mapId) {
+  const classify = globalThis.mapsDatabase?.isMapRaidComprehensive;
+  return typeof classify === 'function' ? classify(mapId) : false;
+}
+
+function isDynamicEventMap(mapId) {
+  try {
+    const classify = globalThis.mapsDatabase?.isDynamicEventMap;
+    return typeof classify === 'function' ? classify(mapId) : false;
+  } catch (error) {
+    console.warn('[Highscores] Failed to classify event map:', mapId, error);
+    return false;
+  }
+}
+
+// Event maps (dynamic raids) should not count in time/rank improvement stats.
+function isCountedRoomForImprovements(roomCode) {
+  return !isDynamicEventMap(roomCode);
+}
+
+function getImprovementRoomCodes(rooms, extraCodes = []) {
+  const codes = new Set();
+  for (const code of Object.keys(rooms || {})) {
+    if (isCountedRoomForImprovements(code)) codes.add(code);
+  }
+  for (const code of extraCodes) {
+    if (isCountedRoomForImprovements(code)) codes.add(code);
+  }
+  return [...codes];
+}
+
+function getRoomDataByCode(code) {
+  const fromDb = globalThis.mapsDatabase?.getMapById?.(code);
+  if (fromDb) return fromDb;
+  const rooms = globalThis.state?.utils?.ROOMS;
+  if (Array.isArray(rooms)) return rooms.find((room) => room?.id === code) || null;
+  if (rooms && typeof rooms === 'object') return rooms[code] || null;
+  return null;
+}
+
+function getMapMaxRankPoints(code) {
+  const room = getRoomDataByCode(code);
+  const maxTeamSize = Number(room?.maxTeamSize);
+  if (!Number.isFinite(maxTeamSize) || maxTeamSize < 1) return null;
+  return (2 * maxTeamSize) - 1;
+}
+
+// =======================
+// 5. Sorting & Ordering
+// =======================
 
 function compareImprovementsByMapOrder(a, b) {
   const compare = globalThis.mapsDatabase?.compareMapsByGameOrder;
@@ -225,9 +350,9 @@ function compareOwnWrAtBottom(a, b) {
   return 0;
 }
 
-function formatOwnWrStatHtml(unit, youValue, youSubTicks) {
-  return `<span style="color:#8f8;">${formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null)} (You)</span>`;
-}
+// =======================
+// 6. Player Stat Normalization
+// =======================
 
 function isOwnHighscoreRecord(record, you, yourName) {
   if (!record) return false;
@@ -248,9 +373,6 @@ function normalizeBestFloorTicks(floorRecord) {
   if (Number.isFinite(Number(floorRecord.ticks))) return Number(floorRecord.ticks);
   return null;
 }
-
-// 10 minutes at 16 ticks/second — game timeout / no speedrun clear
-const SPEEDRUN_TIMEOUT_TICKS = 9600;
 
 function readYourTicks(roomData) {
   const ticks = roomData?.ticks;
@@ -317,6 +439,29 @@ function hasAnyPersonalMapData(roomData) {
     || normalizeYourFloor(roomData) !== null;
 }
 
+// =======================
+// 7. Record Formatting & Display HTML
+// =======================
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function floorIndexToAscensionPercent(floorIndex) {
+  if (floorIndex === null || floorIndex === undefined || !Number.isFinite(Number(floorIndex))) {
+    return null;
+  }
+  return 100 + Number(floorIndex) * 20;
+}
+
+function formatOwnWrStatHtml(unit, youValue, youSubTicks) {
+  return `<span style="color:#8f8;">${formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null)} (You)</span>`;
+}
+
 function buildWorldRecordOnlyHtml(unit, playerName, theirValue, theirTicks) {
   const showSubTicks = unit !== 'ticks' && theirTicks !== null && theirTicks !== undefined;
   const safeName = escapeHtml(playerName || 'Unknown');
@@ -367,6 +512,67 @@ function formatSummaryStatHtml(unit, youValue, youSubTicks, bestRecord, you, you
     theirTicks
   );
 }
+
+function getMaxIndicatorColor(bestValue, maxValue) {
+  if (maxValue === null || maxValue === undefined) return MAX_INDICATOR_COLOR_AT_MAX;
+  return Number(bestValue) === Number(maxValue)
+    ? MAX_INDICATOR_COLOR_AT_MAX
+    : MAX_INDICATOR_COLOR_BELOW_MAX;
+}
+
+function formatMapMaxComparisonSuffix(unit, bestValue, maxValue) {
+  if (maxValue === null || maxValue === undefined) return '';
+  const color = getMaxIndicatorColor(bestValue, maxValue);
+  if (Number(bestValue) === Number(maxValue)) {
+    return ` <span style="color:${color};">(max)</span>`;
+  }
+  const maxLabel = unit === 'floor'
+    ? `${floorIndexToAscensionPercent(maxValue)}%`
+    : formatRecordValue(unit, maxValue, null);
+  return ` <span style="color:${color};">(max ${maxLabel})</span>`;
+}
+
+function buildRecordComparisonWithMaxHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks, maxValue) {
+  return buildRecordComparisonHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks) +
+    formatMapMaxComparisonSuffix(unit, theirValue, maxValue);
+}
+
+function buildOwnWrWithMaxHtml(unit, youValue, youSubTicks, maxValue) {
+  return formatOwnWrStatHtml(unit, youValue, youSubTicks) +
+    formatMapMaxComparisonSuffix(unit, youValue, maxValue);
+}
+
+function formatRecordValue(unit, value, subTicks) {
+  if (unit === 'ticks') {
+    return `${value} ticks`;
+  }
+  const subPart = subTicks !== null && subTicks !== undefined ? ` (${subTicks} ticks)` : '';
+  if (unit === 'rank') {
+    return `${value} points${subPart}`;
+  }
+  if (unit === 'floor') {
+    const pct = floorIndexToAscensionPercent(value);
+    if (pct === null) return `—${subPart}`;
+    return `${pct}%${subPart}`;
+  }
+  return `${value} ${unit}${subPart}`;
+}
+
+function buildRecordComparisonHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks) {
+  const missingYou = youValue === null || youValue === undefined;
+  const showSubTicks = !missingYou && unit !== 'ticks' && youValue === theirValue;
+  const safeName = escapeHtml(playerName || 'Unknown');
+  const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent((playerName || '').trim())}`;
+  const nameLink = `<a href="${profileUrl}" target="_blank" rel="noopener noreferrer" style="color: #ff8; text-decoration: underline; cursor: pointer;">${safeName}</a>`;
+  const youPart = missingYou
+    ? '<span style="color:#888">—</span>'
+    : formatRecordValue(unit, youValue, showSubTicks ? youTicks : null);
+  return `${youPart} → ${formatRecordValue(unit, theirValue, showSubTicks ? theirTicks : null)} (${nameLink})`;
+}
+
+// =======================
+// 8. Summary & Improvement Data
+// =======================
 
 function getSummaryMapCodesInOrder(rooms) {
   const codes = [];
@@ -456,30 +662,6 @@ function buildSummaryEntries(mapCodes, rooms, best, roomsHighscores, you, yourNa
   return sortImprovementOpportunities(entries);
 }
 
-// Event maps (dynamic raids) should not count in time/rank improvement stats.
-function isCountedRoomForImprovements(roomCode) {
-  try {
-    const isDynamicEventMap = globalThis.mapsDatabase?.isDynamicEventMap;
-    if (typeof isDynamicEventMap === 'function' && isDynamicEventMap(roomCode)) {
-      return false;
-    }
-  } catch (error) {
-    console.warn('[Highscores] Failed to classify room:', roomCode, error);
-  }
-  return true;
-}
-
-function getImprovementRoomCodes(rooms, extraCodes = []) {
-  const codes = new Set();
-  for (const code of Object.keys(rooms || {})) {
-    if (isCountedRoomForImprovements(code)) codes.add(code);
-  }
-  for (const code of extraCodes) {
-    if (isCountedRoomForImprovements(code)) codes.add(code);
-  }
-  return [...codes];
-}
-
 function formatTickImprovementText(tickDelta, yourTicks) {
   if (tickDelta === null) return 'Ticks unavailable';
   if (tickDelta > 0) {
@@ -528,120 +710,87 @@ function formatImprovementSummaryLine(stats) {
   return `Improvements — Ticks: ${ticksText} · Rank: +${stats.rankImprovement} · Floor: +${stats.floorImprovement}`;
 }
 
-function escapeHtml(text) {
-  return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function floorIndexToAscensionPercent(floorIndex) {
-  if (floorIndex === null || floorIndex === undefined || !Number.isFinite(Number(floorIndex))) {
-    return null;
-  }
-  return 100 + Number(floorIndex) * 20;
-}
-
-const MAP_MAX_FLOOR_INDEX = 15;
-
-function getRoomDataByCode(code) {
-  const fromDb = globalThis.mapsDatabase?.getMapById?.(code);
-  if (fromDb) return fromDb;
-  const rooms = globalThis.state?.utils?.ROOMS;
-  if (Array.isArray(rooms)) return rooms.find((room) => room?.id === code) || null;
-  if (rooms && typeof rooms === 'object') return rooms[code] || null;
-  return null;
-}
-
-function getMapMaxRankPoints(code) {
-  const room = getRoomDataByCode(code);
-  const maxTeamSize = Number(room?.maxTeamSize);
-  if (!Number.isFinite(maxTeamSize) || maxTeamSize < 1) return null;
-  return (2 * maxTeamSize) - 1;
-}
-
-const MAX_INDICATOR_COLOR_AT_MAX = '#8f8';
-const MAX_INDICATOR_COLOR_BELOW_MAX = '#f88';
-
-function getMaxIndicatorColor(bestValue, maxValue) {
-  if (maxValue === null || maxValue === undefined) return MAX_INDICATOR_COLOR_AT_MAX;
-  return Number(bestValue) === Number(maxValue)
-    ? MAX_INDICATOR_COLOR_AT_MAX
-    : MAX_INDICATOR_COLOR_BELOW_MAX;
-}
-
-function formatMapMaxComparisonSuffix(unit, bestValue, maxValue) {
-  if (maxValue === null || maxValue === undefined) return '';
-  const color = getMaxIndicatorColor(bestValue, maxValue);
-  if (Number(bestValue) === Number(maxValue)) {
-    return ` <span style="color:${color};">(max)</span>`;
-  }
-  const maxLabel = unit === 'floor'
-    ? `${floorIndexToAscensionPercent(maxValue)}%`
-    : formatRecordValue(unit, maxValue, null);
-  return ` <span style="color:${color};">(max ${maxLabel})</span>`;
-}
-
-function buildRecordComparisonWithMaxHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks, maxValue) {
-  return buildRecordComparisonHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks) +
-    formatMapMaxComparisonSuffix(unit, theirValue, maxValue);
-}
-
-function buildOwnWrWithMaxHtml(unit, youValue, youSubTicks, maxValue) {
-  return formatOwnWrStatHtml(unit, youValue, youSubTicks) +
-    formatMapMaxComparisonSuffix(unit, youValue, maxValue);
-}
-
-function formatRecordValue(unit, value, subTicks) {
-  if (unit === 'ticks') {
-    return `${value} ticks`;
-  }
-  const subPart = subTicks !== null && subTicks !== undefined ? ` (${subTicks} ticks)` : '';
-  if (unit === 'rank') {
-    return `${value} points${subPart}`;
-  }
-  if (unit === 'floor') {
-    const pct = floorIndexToAscensionPercent(value);
-    if (pct === null) return `—${subPart}`;
-    return `${pct}%${subPart}`;
-  }
-  return `${value} ${unit}${subPart}`;
-}
-
-function buildRecordComparisonHtml(unit, youValue, youTicks, playerName, theirValue, theirTicks) {
-  const missingYou = youValue === null || youValue === undefined;
-  const showSubTicks = !missingYou && unit !== 'ticks' && youValue === theirValue;
-  const safeName = escapeHtml(playerName || 'Unknown');
-  const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent((playerName || '').trim())}`;
-  const nameLink = `<a href="${profileUrl}" target="_blank" rel="noopener noreferrer" style="color: #ff8; text-decoration: underline; cursor: pointer;">${safeName}</a>`;
-  const youPart = missingYou
-    ? '<span style="color:#888">—</span>'
-    : formatRecordValue(unit, youValue, showSubTicks ? youTicks : null);
-  return `${youPart} → ${formatRecordValue(unit, theirValue, showSubTicks ? theirTicks : null)} (${nameLink})`;
-}
-
-const HIGHSCORE_LIST_ITEM_CLASS = 'highscores-item';
-const HIGHSCORE_LIST_EMPTY_CLASS = 'highscores-empty';
-const HIGHSCORE_LIST_NO_RESULTS_CLASS = 'highscores-no-results';
-const HIGHSCORE_LIST_UNPLAYED_CLASS = 'highscores-item--unplayed';
-const HIGHSCORES_STYLE_ID = 'highscores-styles';
-
-function ensureHighscoresStyles() {
-  if (document.getElementById(HIGHSCORES_STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = HIGHSCORES_STYLE_ID;
-  style.textContent = `
-    .highscores-item--unplayed {
-      opacity: 0.5;
-      filter: grayscale(0.4);
-    }
-  `;
-  document.head.appendChild(style);
-}
+// =======================
+// 9. Map Search
+// =======================
 
 function normalizeHighscoreSearchText(value) {
   return String(value ?? '').trim().toLowerCase();
+}
+
+function parseHighscoreSearchQuery(query) {
+  const raw = String(query ?? '').trim();
+  const hasBoolean = /\s+(and|or)\s+/i.test(raw);
+  if (hasBoolean) {
+    return {
+      qNorm: normalizeHighscoreSearchText(raw),
+      booleanExpression: raw,
+      isBooleanMode: true
+    };
+  }
+  return {
+    qNorm: normalizeHighscoreSearchText(raw),
+    booleanExpression: '',
+    isBooleanMode: false
+  };
+}
+
+function highscoreMatchesSingleSearchCondition(haystack, condition) {
+  if (!condition || !String(condition).trim()) return true;
+  const q = normalizeHighscoreSearchText(condition);
+  if (!q || q.length < 2) return false;
+  return haystack.includes(q);
+}
+
+/** AND/OR parsing (Cyclopedia / Dice_Roller SearchMatcher-style). OR splits before AND. */
+function highscoreParseSearchExpression(matchCondition, expression) {
+  const expr = String(expression ?? '').trim();
+  if (!expr) return true;
+
+  const handleIncompleteOperator = (conditions, operator, isAnd) => {
+    const hasEmpty = conditions.some((c) => c === '');
+    const endsWith =
+      expr.endsWith(` ${operator}`) ||
+      expr.endsWith(` ${operator} `) ||
+      expr.toLowerCase().endsWith(` ${operator}`);
+    if (hasEmpty || endsWith) {
+      const valid = conditions.filter((c) => c !== '');
+      if (valid.length === 0) return true;
+      const check = isAnd ? valid.every.bind(valid) : valid.some.bind(valid);
+      return check((c) => !c.trim() || highscoreParseSearchExpression(matchCondition, c));
+    }
+    return null;
+  };
+
+  if (/\s+or\s+/i.test(expr)) {
+    const parts = expr.split(/\s+or\s+/i).map((s) => s.trim());
+    const incomplete = handleIncompleteOperator(parts, 'or', false);
+    if (incomplete !== null) return incomplete;
+    return parts.some((p) => highscoreParseSearchExpression(matchCondition, p));
+  }
+  if (/\s+and\s+/i.test(expr)) {
+    const parts = expr.split(/\s+and\s+/i).map((s) => s.trim());
+    const incomplete = handleIncompleteOperator(parts, 'and', true);
+    if (incomplete !== null) return incomplete;
+    return parts.every((p) => highscoreParseSearchExpression(matchCondition, p));
+  }
+  return matchCondition(expr);
+}
+
+function highscoreHaystackMatchesQuery(haystack, parsed) {
+  if (parsed?.isBooleanMode && parsed.booleanExpression) {
+    return highscoreParseSearchExpression(
+      (cond) => highscoreMatchesSingleSearchCondition(haystack, cond),
+      parsed.booleanExpression
+    );
+  }
+  const q = parsed?.qNorm || '';
+  return !q || haystack.includes(q);
+}
+
+function hasActiveHighscoreSearchQuery(parsed) {
+  if (parsed?.isBooleanMode) return Boolean(parsed.booleanExpression?.trim());
+  return Boolean(parsed?.qNorm);
 }
 
 function getMapRegionSearchLabel(code) {
@@ -658,8 +807,32 @@ function getMapRegionSearchLabel(code) {
   return '';
 }
 
+function getMapTypeSearchMeta(code) {
+  return isMapRaid(code) ? 'raid raids' : '';
+}
+
 function buildMapNameSearchText(code, name) {
-  return normalizeHighscoreSearchText(`${name} ${code} ${getMapRegionSearchLabel(code)}`);
+  return normalizeHighscoreSearchText(`${name} ${code} ${getMapRegionSearchLabel(code)} ${getMapTypeSearchMeta(code)}`);
+}
+
+function decorateImprovementMapName(itemEl, code) {
+  if (!code || !isMapRaid(code)) return;
+  const nameEl = itemEl.querySelector('.text-whiteExp');
+  if (!nameEl) return;
+
+  const icon = document.createElement('img');
+  icon.src = HIGHSCORE_RAID_ICON;
+  icon.alt = 'raid';
+  icon.title = 'Raid map';
+  icon.className = 'pixelated';
+  icon.style.cssText = 'width:11px;height:11px;flex-shrink:0;';
+
+  Object.assign(nameEl.style, {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px'
+  });
+  nameEl.insertBefore(icon, nameEl.firstChild);
 }
 
 function tagImprovementListItem(itemEl, { code, name, hasPersonalData } = {}) {
@@ -668,6 +841,7 @@ function tagImprovementListItem(itemEl, { code, name, hasPersonalData } = {}) {
     itemEl.classList.add(HIGHSCORE_LIST_UNPLAYED_CLASS);
   }
   itemEl.dataset.searchText = buildMapNameSearchText(code, name);
+  decorateImprovementMapName(itemEl, code);
   return itemEl;
 }
 
@@ -676,14 +850,15 @@ function tagImprovementEmptyState(emptyEl) {
   return emptyEl;
 }
 
-// Matches Cyclopedia.js search input styling (map name search only).
 function createHighscoreSearchBar(placeholder) {
   const searchContainer = document.createElement('div');
+  searchContainer.title = HIGHSCORE_SEARCH_TOOLTIP;
   searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; margin-left: 0; margin-right: 0; box-sizing: border-box; min-width: 0;';
 
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.placeholder = placeholder;
+  searchInput.title = HIGHSCORE_SEARCH_TOOLTIP;
   searchInput.autocomplete = 'off';
   searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1 1 0%; min-width: 0; font-family: inherit; outline: none; box-sizing: border-box; width: 100%;';
 
@@ -718,7 +893,8 @@ function filterImprovementTabPanel(panel, query) {
   const grid = getImprovementListGrid(panel);
   if (!grid) return;
 
-  const q = normalizeHighscoreSearchText(query);
+  const parsed = parseHighscoreSearchQuery(query);
+  const hasQuery = hasActiveHighscoreSearchQuery(parsed);
   const items = grid.querySelectorAll(`.${HIGHSCORE_LIST_ITEM_CLASS}`);
   const emptyState = grid.querySelector(`.${HIGHSCORE_LIST_EMPTY_CLASS}`);
   const noResultsEl = ensureImprovementNoResultsMessage(grid);
@@ -726,16 +902,33 @@ function filterImprovementTabPanel(panel, query) {
 
   items.forEach((item) => {
     const haystack = item.dataset.searchText || '';
-    const matches = !q || haystack.includes(q);
+    const matches = highscoreHaystackMatchesQuery(haystack, parsed);
     item.style.display = matches ? '' : 'none';
     if (matches) visibleCount += 1;
   });
 
   if (emptyState) {
-    emptyState.style.display = q ? 'none' : '';
+    emptyState.style.display = hasQuery ? 'none' : '';
   }
 
-  noResultsEl.style.display = q && visibleCount === 0 ? 'block' : 'none';
+  noResultsEl.style.display = hasQuery && visibleCount === 0 ? 'block' : 'none';
+}
+
+// =======================
+// 10. Styles & List UI
+// =======================
+
+function ensureHighscoresStyles() {
+  if (document.getElementById(HIGHSCORES_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = HIGHSCORES_STYLE_ID;
+  style.textContent = `
+    .highscores-item--unplayed {
+      opacity: 0.5;
+      filter: grayscale(0.4);
+    }
+  `;
+  document.head.appendChild(style);
 }
 
 function createImprovementsScrollContainer() {
@@ -752,6 +945,10 @@ function createImprovementsScrollContainer() {
   scrollContainer.contentContainer.classList.add('highscores-list');
   return scrollContainer;
 }
+
+// =======================
+// 11. Tab Content Builders
+// =======================
 
 function createSummaryContent(entries, you, yourName, improvementStats) {
   const scrollContainer = createImprovementsScrollContainer();
@@ -1011,15 +1208,9 @@ function createFloorContent(opportunities, hasFloorWrData) {
   };
 }
 
-const HIGHSCORE_TAB_ICON_SIZE = 12;
-
-const HIGHSCORE_TAB_ICONS = {
-  // Same icon paths as Cyclopedia.js profile stats / explored maps
-  summary: { src: '/assets/icons/map.png', alt: 'Summary' },
-  ticks: { src: '/assets/icons/speed.png', alt: 'Ticks' },
-  rank: { src: '/assets/icons/star-tier.png', alt: 'Rank' },
-  floor: { src: '/assets/UI/floor-15.png', alt: 'Floor' }
-};
+// =======================
+// 12. Tab Shell
+// =======================
 
 function getTabButtonClassName(isActive) {
   return isActive
@@ -1154,19 +1345,32 @@ function createTabs(summaryContent, tickContent, rankContent, floorContent) {
   container.appendChild(searchContainer);
   panels.forEach((panel) => container.appendChild(panel));
 
-  return container;
+  return {
+    element: container,
+    cleanup: () => {
+      if (searchDebounceTimer) {
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = null;
+      }
+    }
+  };
 }
 
-// Function to show Highscores modal
+// =======================
+// 13. Modal Orchestration
+// =======================
+
 async function showImprovementsModal() {
   console.log('Showing Highscores modal...');
   ensureHighscoresStyles();
-  
+
+  let dismissLoading = null;
+
   try {
+    clearHighscoresModalCleanup();
     ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
-    
-    // Show loading modal
-    const loadingModal = api.showModal({
+
+    dismissLoading = api.showModal({
       title: t('mods.highscore.title'),
       content: '<div style="text-align: center; padding: 20px;">Loading data...</div>',
       buttons: []
@@ -1491,10 +1695,11 @@ async function showImprovementsModal() {
       floorOpportunities
     );
 
-    // Close loading modal
-    loadingModal();
-    
-    // Create content for all tabs
+    if (typeof dismissLoading === 'function') {
+      dismissLoading();
+      dismissLoading = null;
+    }
+
     const summaryContent = createSummaryContent(summaryEntries, you, yourName, improvementStats);
     const tickContent = createTickContent(tickOpportunities, minTheo, hasTickWrData);
     const rankContent = createRankContent(rankOpportunities, hasRankWrData);
@@ -1502,29 +1707,30 @@ async function showImprovementsModal() {
     
     // Create tabbed interface
     const tabbedContent = createTabs(summaryContent, tickContent, rankContent, floorContent);
-    
+
     const modalDimensions = getHighscoresModalDimensions();
     const modalRef = api.ui.components.createModal({
       title: t('mods.highscore.title'),
       width: modalDimensions.width,
-      content: tabbedContent,
+      content: tabbedContent.element,
       buttons: [
         {
           text: 'Close',
           primary: true,
-          onClick: () => clearHighscoresModalLayoutCleanup()
+          onClick: () => clearHighscoresModalCleanup()
         }
       ]
     });
 
     tagHighscoresModalElement(modalRef);
-    setupHighscoresModalResponsiveLayout(modalRef, tabbedContent);
+    highscoresModalTabsCleanup = tabbedContent.cleanup;
+    setupHighscoresModalResponsiveLayout(modalRef, tabbedContent.element);
+    attachHighscoresModalCloseCleanup(modalRef);
     
     console.log('Highscores modal displayed successfully');
   } catch (error) {
     console.error('Error showing Highscores modal:', error);
-    
-    // Show error modal
+
     api.showModal({
       title: 'Error',
       content: '<p>Failed to load Highscores. Please try again later.</p><p style="color: #999; font-size: 12px;">Error: ' + error.message + '</p>',
@@ -1535,31 +1741,56 @@ async function showImprovementsModal() {
         }
       ]
     });
+  } finally {
+    if (typeof dismissLoading === 'function') {
+      dismissLoading();
+    }
   }
+}
+
+// =======================
+// 14. Entry Point & Exports
+// =======================
+
+console.log('Highscores mod initializing...');
+
+if (api) {
+  console.log('BestiaryModAPI available in Highscores mod');
+
+  window.highscoreButton = api.ui.addButton({
+    id: HIGHSCORE_BUTTON_ID,
+    text: t('mods.highscore.buttonText'),
+    tooltip: t('mods.highscore.buttonTooltip'),
+    primary: false,
+    onClick: showImprovementsModal
+  });
+
+  console.log('Highscores button added');
+} else {
+  console.error('BestiaryModAPI not available in Highscores mod');
 }
 
 console.log('Highscores mod initialization complete');
 
-// Export control functions
 exports = {
   showImprovements: showImprovementsModal
 };
 
-// Cleanup function for Highscores mod (exposed for mod system)
 exports.cleanup = function() {
   console.log('[Highscores] Running cleanup...');
 
   closeHighscoresModal();
-  
-  // Clear any cached data
+
+  if (api?.ui?.removeButton) {
+    api.ui.removeButton(HIGHSCORE_BUTTON_ID);
+  }
+  if (typeof window.highscoreButton !== 'undefined') {
+    delete window.highscoreButton;
+  }
+
   if (typeof ROOM_NAMES !== 'undefined') {
     ROOM_NAMES = null;
   }
-  
-  // Clear any global state
-  if (typeof window.highscoresState !== 'undefined') {
-    delete window.highscoresState;
-  }
-  
+
   console.log('[Highscores] Cleanup completed');
 }; 

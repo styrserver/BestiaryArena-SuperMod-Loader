@@ -3816,7 +3816,8 @@ async function fetchUploadValidationLeaderboardData() {
   if (window.currentSpeedrunRankData?.best) {
     uploadValidationLeaderboardCache = {
       best: window.currentSpeedrunRankData.best,
-      yourRooms: window.currentSpeedrunRankData.yourRooms || getYourRoomsForUploadValidation()
+      yourRooms: window.currentSpeedrunRankData.yourRooms || getYourRoomsForUploadValidation(),
+      roomsHighscores: window.currentSpeedrunRankData.roomsHighscores || null
     };
     uploadValidationLeaderboardCacheTime = now;
     return uploadValidationLeaderboardCache;
@@ -3824,26 +3825,80 @@ async function fetchUploadValidationLeaderboardData() {
 
   try {
     const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ['undefined'] } } }));
-    const response = await fetch(`/api/trpc/game.getTickHighscores?batch=1&input=${inp}`, {
-      headers: { Accept: '*/*', 'Content-Type': 'application/json', 'X-Game-Version': '1' }
-    });
-    if (!response.ok) {
+    const headers = { Accept: '*/*', 'Content-Type': 'application/json', 'X-Game-Version': '1' };
+    const [tickResponse, roomsResponse] = await Promise.all([
+      fetch(`/api/trpc/game.getTickHighscores?batch=1&input=${inp}`, { headers }),
+      fetch(`/api/trpc/game.getRoomsHighscores?batch=1&input=${inp}`, { headers })
+    ]);
+    if (!tickResponse.ok) {
       console.warn('[Mod Settings] Could not fetch tick highscores for run validation');
-      return { best: {}, yourRooms: getYourRoomsForUploadValidation() };
+      return { best: {}, yourRooms: getYourRoomsForUploadValidation(), roomsHighscores: null };
     }
-    const json = await response.json();
-    const best = json[0]?.result?.data?.json || {};
-    uploadValidationLeaderboardCache = { best, yourRooms: getYourRoomsForUploadValidation() };
+    const tickJson = await tickResponse.json();
+    const best = tickJson[0]?.result?.data?.json || {};
+    let roomsHighscores = null;
+    if (roomsResponse.ok) {
+      const roomsJson = await roomsResponse.json();
+      roomsHighscores = roomsJson[0]?.result?.data?.json || null;
+    }
+    uploadValidationLeaderboardCache = {
+      best,
+      yourRooms: getYourRoomsForUploadValidation(),
+      roomsHighscores
+    };
     uploadValidationLeaderboardCacheTime = now;
     return uploadValidationLeaderboardCache;
   } catch (error) {
     console.warn('[Mod Settings] Error fetching tick highscores for run validation:', error);
-    return { best: {}, yourRooms: getYourRoomsForUploadValidation() };
+    return { best: {}, yourRooms: getYourRoomsForUploadValidation(), roomsHighscores: null };
   }
 }
 
 function runSetupHasLevel1Creature(run) {
   return Boolean(run?.setup?.pieces?.some((piece) => piece?.level === 1));
+}
+
+function normalizeUserFloorDataForUploadValidation(room) {
+  if (!room) return { floor: null, floorTicks: null };
+  let floor = room?.floor;
+  let floorTicks = room?.floorTicks;
+  if ((floor === undefined || floor === null) && (floorTicks === undefined || floorTicks === null)) {
+    floor = 0;
+    floorTicks = room?.ticks || 0;
+  }
+  return { floor, floorTicks };
+}
+
+function normalizeBestFloorDataForUploadValidation(roomKey, roomsHighscores, best) {
+  const bestFloorData = roomsHighscores?.floor?.[roomKey];
+  let floor = bestFloorData?.floor;
+  let floorTicks = bestFloorData?.floorTicks || bestFloorData?.ticks;
+  if ((floor === undefined || floor === null) && (floorTicks === undefined || floorTicks === null)) {
+    floor = 0;
+    floorTicks = best?.[roomKey]?.ticks || 0;
+  }
+  return { floor, floorTicks };
+}
+
+function getRunFloorCompareTicksForUploadValidation(run) {
+  if (!run) return null;
+  if (run.floorTicks !== undefined && run.floorTicks !== null) {
+    const floorTicks = Number(run.floorTicks);
+    if (Number.isFinite(floorTicks) && floorTicks > 0) return floorTicks;
+  }
+  if (run.time !== undefined && run.time !== null) {
+    const time = Number(run.time);
+    if (Number.isFinite(time) && time > 0) return time;
+  }
+  return null;
+}
+
+function shouldCompareFloorRunTicksForUploadValidation(run, benchmarkFloor) {
+  const runFloor = Number(run?.floor);
+  const bench = Number(benchmarkFloor);
+  if (!Number.isFinite(bench) || bench <= 0) return false;
+  if (!Number.isFinite(runFloor) || runFloor <= 0) return false;
+  return runFloor >= bench;
 }
 
 function resolveLeaderboardRoomKey(mapKey, mapName, mapData) {
@@ -3869,15 +3924,36 @@ function buildMapRunValidationContext(mapKey, mapName, mapData, leaderboardData,
   const roomKey = resolveLeaderboardRoomKey(mapKey, mapName, mapData);
   const yourRooms = leaderboardData?.yourRooms || {};
   const best = leaderboardData?.best || {};
+  const yourRoom = yourRooms?.[roomKey];
+  const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorDataForUploadValidation(yourRoom);
+  const { floor: wrFloor, floorTicks: wrFloorTicks } = normalizeBestFloorDataForUploadValidation(
+    roomKey,
+    leaderboardData?.roomsHighscores,
+    best
+  );
   return {
     season,
     yourTicks: yourRooms?.[roomKey]?.ticks || 0,
     yourBestRank: yourRooms?.[roomKey]?.rank || 0,
-    wrTicks: season >= 2 ? (best?.[roomKey]?.ticks || 0) : 0
+    wrTicks: season >= 2 ? (best?.[roomKey]?.ticks || 0) : 0,
+    yourFloor: Number(yourFloor) || 0,
+    yourFloorTicks: Number(yourFloorTicks) || 0,
+    wrFloor: Number(wrFloor) || 0,
+    wrFloorTicks: season >= 2 ? (Number(wrFloorTicks) || 0) : 0
   };
 }
 
-function getRunMightBeInvalidReasons(run, { season, category, yourTicks, wrTicks, yourBestRank }) {
+function getRunMightBeInvalidReasons(run, {
+  season,
+  category,
+  yourTicks,
+  wrTicks,
+  yourBestRank,
+  yourFloor,
+  yourFloorTicks,
+  wrFloor,
+  wrFloorTicks
+}) {
   if (season < 2) return [];
 
   const reasons = [];
@@ -3887,6 +3963,21 @@ function getRunMightBeInvalidReasons(run, { season, category, yourTicks, wrTicks
   }
   if (category === 'rank' && yourBestRank > 0 && run.points > yourBestRank) {
     reasons.push('worse rank than your best');
+  }
+  if (category === 'floor') {
+    const runTicks = getRunFloorCompareTicksForUploadValidation(run);
+    if (runTicks !== null) {
+      if (shouldCompareFloorRunTicksForUploadValidation(run, yourFloor)
+        && yourFloorTicks > 0
+        && runTicks < yourFloorTicks) {
+        reasons.push('faster than your best floor time');
+      }
+      if (shouldCompareFloorRunTicksForUploadValidation(run, wrFloor)
+        && wrFloorTicks > 0
+        && runTicks < wrFloorTicks) {
+        reasons.push('faster than floor world record');
+      }
+    }
   }
   if (runSetupHasLevel1Creature(run)) reasons.push('has level 1 creatures');
   return reasons;

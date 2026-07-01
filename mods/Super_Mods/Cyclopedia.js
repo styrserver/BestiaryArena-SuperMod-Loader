@@ -3447,11 +3447,35 @@ function runSetupHasLevel1Creature(run) {
   return Boolean(run?.setup?.pieces?.some((piece) => piece?.level === 1));
 }
 
+/** Ticks used for floor highscore comparison (floorTicks preferred, else total gameTicks). */
+function getCyclopediaRunFloorCompareTicks(run) {
+  if (!run) return null;
+  if (run.floorTicks !== undefined && run.floorTicks !== null) {
+    const floorTicks = Number(run.floorTicks);
+    if (Number.isFinite(floorTicks) && floorTicks > 0) return floorTicks;
+  }
+  if (run.time !== undefined && run.time !== null) {
+    const time = Number(run.time);
+    if (Number.isFinite(time) && time > 0) return time;
+  }
+  return null;
+}
+
+function shouldCompareCyclopediaFloorRunTicks(run, benchmarkFloor) {
+  const runFloor = Number(run?.floor);
+  const bench = Number(benchmarkFloor);
+  if (!Number.isFinite(bench) || bench <= 0) return false;
+  if (!Number.isFinite(runFloor) || runFloor <= 0) return false;
+  return runFloor >= bench;
+}
+
 function getCyclopediaRunWarningReasons(run, options = {}) {
   const reasons = [];
   if (options.isTimeInvalid) reasons.push('faster than your best time');
   if (options.isWorldRecordInvalid) reasons.push('faster than world record');
   if (options.isRankInvalid) reasons.push('worse rank than your best');
+  if (options.isFloorTimeInvalid) reasons.push('faster than your best floor time');
+  if (options.isFloorWorldRecordInvalid) reasons.push('faster than floor world record');
   if (runSetupHasLevel1Creature(run)) reasons.push('has level 1 creatures');
   return reasons;
 }
@@ -11341,6 +11365,8 @@ function createStatisticsSection(selectedMap, leaderboardData) {
   // Store yourRooms and WR data for warning icon comparisons
   let currentYourRooms = null;
   let currentWorldRecordTicks = 0;
+  let currentWorldRecordFloor = 0;
+  let currentWorldRecordFloorTicks = 0;
   let speedrunPopulateGen = 0;
   let ranksPopulateGen = 0;
   let floorsPopulateGen = 0;
@@ -12013,7 +12039,19 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         floorCell.style.gap = '4px';
         floorCell.style.position = 'relative';
         
-        const warningState = getCyclopediaRunWarningState(run);
+        const yourRoom = currentYourRooms?.[selectedMap];
+        const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
+        const runFloorTicks = getCyclopediaRunFloorCompareTicks(run);
+        const warningState = getCyclopediaRunWarningState(run, {
+          isFloorTimeInvalid: shouldCompareCyclopediaFloorRunTicks(run, yourFloor)
+            && yourFloorTicks > 0
+            && runFloorTicks !== null
+            && runFloorTicks < yourFloorTicks,
+          isFloorWorldRecordInvalid: shouldCompareCyclopediaFloorRunTicks(run, currentWorldRecordFloor)
+            && currentWorldRecordFloorTicks > 0
+            && runFloorTicks !== null
+            && runFloorTicks < currentWorldRecordFloorTicks
+        });
 
         if (run.floor !== undefined && run.floor !== null) {
           const floorText = document.createElement('span');
@@ -12021,12 +12059,7 @@ function createStatisticsSection(selectedMap, leaderboardData) {
           if (Array.isArray(run.floorHistory) && run.floorHistory.length > 1) {
             floorText.title = `Floors cleared with this setup: ${getFloorCoverageLabel(run)}`;
           }
-
-          if (warningState.shouldWarn) {
-            decorateCyclopediaRunWarningCell(floorCell, floorText, row, warningState);
-          } else {
-            floorCell.appendChild(floorText);
-          }
+          floorCell.appendChild(floorText);
         } else {
           floorCell.textContent = 'N/A';
           
@@ -12040,10 +12073,18 @@ function createStatisticsSection(selectedMap, leaderboardData) {
         timeCell.style.display = 'flex';
         timeCell.style.alignItems = 'center';
         timeCell.style.justifyContent = 'center';
-        if (run.time !== undefined && run.time !== null) {
-          const timeValue = FormatUtils.ticks(run.time).replace(/\s*ticks?\s*/i, '');
-          timeCell.textContent = timeValue;
-          
+        timeCell.style.gap = '4px';
+        timeCell.style.position = 'relative';
+        const displayTicks = run.floorTicks !== undefined && run.floorTicks !== null ? run.floorTicks : run.time;
+        if (displayTicks !== undefined && displayTicks !== null) {
+          const timeText = document.createElement('span');
+          const timeValue = FormatUtils.ticks(displayTicks).replace(/\s*ticks?\s*/i, '');
+          timeText.textContent = timeValue;
+          if (warningState.shouldWarn) {
+            decorateCyclopediaRunWarningCell(timeCell, timeText, row, warningState);
+          } else {
+            timeCell.appendChild(timeText);
+          }
         } else {
           timeCell.textContent = '-';
           
@@ -12917,6 +12958,9 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       // Store yourRooms data for warning icon comparisons (season-scoped when profile is loaded)
       currentYourRooms = yourRooms;
       currentWorldRecordTicks = allowGlobalWorldRecords ? (best?.[selectedMap]?.ticks || 0) : 0;
+      const wrFloorData = normalizeBestFloorData(selectedMap, roomsHighscores, best);
+      currentWorldRecordFloor = wrFloorData.floor !== undefined && wrFloorData.floor !== null ? Number(wrFloorData.floor) : 0;
+      currentWorldRecordFloorTicks = allowGlobalWorldRecords ? (Number(wrFloorData.floorTicks) || 0) : 0;
       // Re-render tables so warning icons can use fetched WR data.
       speedrunTable.innerHTML = '';
       speedrunTable.appendChild(speedrunHeader);

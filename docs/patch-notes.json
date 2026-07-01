@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.3.12",
+      "changes": [
+        {
+          "mod": "Better Setups",
+          "type": "changed",
+          "text": "Load Setup for inventory scripts places all matching creatures and applies equipment with fallback (same item: tiers 5→1, then AD and HP) before skipping. Warning/error toasts use red text for 10s and report substitutions or missing gear; success uses the default 5s toast. Monster-missing and invalid-format errors show specific messages."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Maps tab floor runs show floorTicks in the Time column (falls back to total game ticks). Rows faster than your profile floor time or the floor world record show the same ⚠️ invalid-run warning as speedrun/rank (season 2)."
+        },
+        {
+          "mod": "Highscores",
+          "type": "changed",
+          "text": "Map search supports AND/OR operators (e.g. rook AND raid, venore OR carlin); hover the search bar for syntax help. Raid maps show a raid icon beside the map name in all tabs."
+        },
+        {
+          "mod": "Highscores",
+          "type": "fixed",
+          "text": "Modal cleanup clears the resize listener on any dismiss path (overlay, ESC, Close), cancels pending search debounce, always dismisses the loading dialog on fetch errors, and removes the toolbar button when the mod is disabled."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Firebase run upload and text export skip invalid floor runs (faster than your best or floor world record, level-1 creatures) using the same validation as Cyclopedia."
+        }
+      ]
+    },
+    {
       "version": "4.3.11",
       "changes": [
         {

@@ -144,6 +144,7 @@ const STORAGE_KEYS = {
 };
 
 const BETTER_SETUPS_TOAST_DURATION = 5000;
+const BETTER_SETUPS_WARNING_TOAST_DURATION = 10000;
 const BETTER_SETUPS_TOAST_CONTAINER_ID = 'better-setups-toast-container';
 
 // =======================
@@ -871,7 +872,7 @@ function showBetterSetupsToast(message, options = {}) {
     messageDiv.className = 'text-left';
     messageDiv.style.flex = '1 1 auto';
     if (safeMsg.indexOf('\n') !== -1) messageDiv.style.whiteSpace = 'pre-line';
-    messageDiv.style.color = '#fff';
+    messageDiv.style.color = (options.type === 'error' || options.type === 'warning') ? '#e74c3c' : '#fff';
     messageDiv.textContent = safeMsg;
 
     widgetBottom.appendChild(messageDiv);
@@ -901,8 +902,13 @@ function normalizeToastMessage(message, type = 'info') {
   return `${trimmed}.`;
 }
 
-function showSetupNotification(message, type = 'info', duration = BETTER_SETUPS_TOAST_DURATION) {
-  showBetterSetupsToast(normalizeToastMessage(message, type), { duration });
+function showSetupNotification(message, type = 'info', duration) {
+  const resolvedDuration = duration ?? (
+    (type === 'error' || type === 'warning')
+      ? BETTER_SETUPS_WARNING_TOAST_DURATION
+      : BETTER_SETUPS_TOAST_DURATION
+  );
+  showBetterSetupsToast(normalizeToastMessage(message, type), { duration: resolvedDuration, type });
 }
 
 function isStructuredSetupCommand(commandText) {
@@ -952,9 +958,254 @@ function parseBoardSetupCommand(commandText) {
   return JSON.parse(trimmed);
 }
 
+function buildSetupRoomNameToIdMap() {
+  const map = new Map();
+  const roomNames = globalThis.state?.utils?.ROOM_NAME;
+  if (!roomNames) return map;
+  for (const [roomId, roomName] of Object.entries(roomNames)) {
+    map.set(roomName, roomId);
+  }
+  return map;
+}
+
+function buildSetupNameToGameIdMap(getEntity) {
+  const map = new Map();
+  if (typeof getEntity !== 'function') return map;
+  let gameId = 1;
+  do {
+    try {
+      const name = getEntity(gameId).metadata.name.toLowerCase();
+      map.set(name, gameId);
+    } catch {
+      break;
+    }
+    gameId++;
+  } while (true);
+  return map;
+}
+
+function parseInventoryAutoSetupScript(commandText) {
+  const trimmed = commandText.trim();
+  if (!trimmed.includes('autoSetupBoard') || !trimmed.includes('selectRoomById')) {
+    return null;
+  }
+
+  const match = trimmed.match(
+    /\}\s*\)\s*\(\s*(["'])((?:\\.|(?!\1)[^\\])*)\1\s*,\s*(\d+)\s*,\s*(\[[\s\S]*\])\s*(?:,\s*(true|false))?\s*\)\s*;?\s*$/
+  );
+  if (!match) return null;
+
+  try {
+    const roomName = match[2].replace(/\\'/g, "'").replace(/\\"/g, '"');
+    const floor = Number(match[3]);
+    const pieces = JSON.parse(match[4]);
+    const preferAwakened = match[5] === 'true';
+    if (!roomName || !Number.isFinite(floor) || !Array.isArray(pieces)) return null;
+    return { roomName, floor, pieces, preferAwakened };
+  } catch {
+    return null;
+  }
+}
+
+function resolveInventorySetupMonster(monsterSpec, monsters, monsterNameToGameId, preferAwakened) {
+  const level = monsterSpec.level ?? 50;
+  const needsExactLevel = level < 50;
+  const needsAwakened = level > 50 || Boolean(monsterSpec.awakened);
+  let minExp = 0;
+  let maxExp = 0;
+  if (needsExactLevel) {
+    minExp = globalThis.state.utils.expAtLevel(level);
+    maxExp = globalThis.state.utils.expAtLevel(level + 1) - 1;
+  }
+
+  const monsterGameId = monsterNameToGameId.get(String(monsterSpec.name || '').toLowerCase());
+  let statMatch = null;
+  let awakenedMatch = null;
+
+  for (const monster of monsters) {
+    if (needsExactLevel && !(minExp <= monster.exp && monster.exp <= maxExp)) continue;
+    if (monster.gameId !== monsterGameId) continue;
+    if (monster.tier === 6) {
+      awakenedMatch = monster;
+      break;
+    }
+    const statsMatch = monster.hp === monsterSpec.hp
+      && monster.ad === monsterSpec.ad
+      && monster.ap === monsterSpec.ap
+      && monster.armor === monsterSpec.armor
+      && monster.magicResist === monsterSpec.magicResist;
+    if (statsMatch && !statMatch) {
+      statMatch = monster;
+    }
+  }
+
+  if (needsAwakened && !awakenedMatch) {
+    throw new Error(`No awakened ${monsterSpec.name} found matching ${JSON.stringify(monsterSpec)}`);
+  }
+
+  const selectedMonster = needsAwakened || (preferAwakened && awakenedMatch)
+    ? awakenedMatch
+    : statMatch;
+  if (!selectedMonster) {
+    throw new Error(`No monster found matching ${JSON.stringify(monsterSpec)}`);
+  }
+  return selectedMonster.id;
+}
+
+const SETUP_EQUIPMENT_TIER_FALLBACK_ORDER = [5, 4, 3, 2, 1];
+const SETUP_EQUIPMENT_STAT_FALLBACK_ORDER = ['ad', 'ap', 'hp'];
+
+function formatSetupEquipmentStatLabel(stat) {
+  return String(stat || '').toLowerCase() === 'ad' ? 'AD' : String(stat || '').toUpperCase();
+}
+
+function getSetupEquipmentStatSearchOrder(requestedStat) {
+  const normalized = String(requestedStat || '').toLowerCase();
+  const orderedStats = [normalized];
+  for (const stat of SETUP_EQUIPMENT_STAT_FALLBACK_ORDER) {
+    if (stat !== normalized) {
+      orderedStats.push(stat);
+    }
+  }
+  return orderedStats;
+}
+
+function findAvailableInventoryEquipment(equips, equipmentGameId, stat, tier, usedEquipIds) {
+  return equips.find((entry) => (
+    !usedEquipIds.has(entry.id)
+    && entry.gameId === equipmentGameId
+    && entry.stat === stat
+    && entry.tier === tier
+  )) || null;
+}
+
+function resolveInventorySetupEquipment(equipmentSpec, equips, equipmentNameToGameId, usedEquipIds, allowFallback) {
+  const equipmentName = String(equipmentSpec?.name || '').toLowerCase();
+  const equipmentGameId = equipmentNameToGameId.get(equipmentName);
+  if (!equipmentGameId) {
+    if (allowFallback) {
+      return { equipId: null, missing: equipmentSpec, substituted: null };
+    }
+    throw new Error(`No equipment found matching ${JSON.stringify(equipmentSpec)}`);
+  }
+
+  const exactMatch = findAvailableInventoryEquipment(
+    equips,
+    equipmentGameId,
+    equipmentSpec.stat,
+    equipmentSpec.tier,
+    usedEquipIds
+  );
+  if (exactMatch) {
+    usedEquipIds.add(exactMatch.id);
+    return { equipId: exactMatch.id, missing: null, substituted: null };
+  }
+
+  if (!allowFallback) {
+    throw new Error(`No equipment found matching ${JSON.stringify(equipmentSpec)}`);
+  }
+
+  const requestedStat = String(equipmentSpec.stat || '').toLowerCase();
+  const requestedTier = equipmentSpec.tier;
+  for (const stat of getSetupEquipmentStatSearchOrder(requestedStat)) {
+    for (const tier of SETUP_EQUIPMENT_TIER_FALLBACK_ORDER) {
+      if (stat === requestedStat && tier === requestedTier) {
+        continue;
+      }
+
+      const fallbackMatch = findAvailableInventoryEquipment(
+        equips,
+        equipmentGameId,
+        stat,
+        tier,
+        usedEquipIds
+      );
+      if (!fallbackMatch) {
+        continue;
+      }
+
+      usedEquipIds.add(fallbackMatch.id);
+      return {
+        equipId: fallbackMatch.id,
+        missing: null,
+        substituted: {
+          requested: equipmentSpec,
+          used: {
+            name: equipmentSpec.name,
+            stat: fallbackMatch.stat,
+            tier: fallbackMatch.tier
+          }
+        }
+      };
+    }
+  }
+
+  return { equipId: null, missing: equipmentSpec, substituted: null };
+}
+
+function applyInventoryAutoSetup(parsed, { allowEquipmentFallback = false } = {}) {
+  const roomId = buildSetupRoomNameToIdMap().get(parsed.roomName);
+  if (!roomId) {
+    throw new Error(`No room found matching "${parsed.roomName}"`);
+  }
+
+  const playerSnapshot = globalThis.state.player.getSnapshot();
+  const { monsters, equips } = playerSnapshot.context;
+  const monsterNameToGameId = buildSetupNameToGameIdMap(globalThis.state?.utils?.getMonster);
+  const equipmentNameToGameId = buildSetupNameToGameIdMap(globalThis.state?.utils?.getEquipment);
+  const usedEquipIds = new Set();
+  const missingEquipment = [];
+  const substitutedEquipment = [];
+
+  const setup = parsed.pieces.map((piece) => {
+    const boardPiece = {
+      tileIndex: piece.tile,
+      monsterId: resolveInventorySetupMonster(
+        piece.monster,
+        monsters,
+        monsterNameToGameId,
+        parsed.preferAwakened
+      )
+    };
+
+    if (piece.equipment) {
+      const { equipId, missing, substituted } = resolveInventorySetupEquipment(
+        piece.equipment,
+        equips,
+        equipmentNameToGameId,
+        usedEquipIds,
+        allowEquipmentFallback
+      );
+      if (substituted) {
+        substitutedEquipment.push(substituted);
+      } else if (missing) {
+        missingEquipment.push(missing);
+      }
+      if (equipId != null) {
+        boardPiece.equipId = equipId;
+      }
+    }
+
+    return boardPiece;
+  });
+
+  globalThis.state.board.send({ type: 'selectRoomById', roomId });
+  globalThis.state.board.trigger.setState({
+    fn: (prev) => ({ ...prev, floor: parsed.floor })
+  });
+  globalThis.state.board.send({ type: 'autoSetupBoard', setup });
+
+  return { missingEquipment, substitutedEquipment };
+}
+
 function executeSetupScript(commandText) {
   if (!looksLikeSetupScript(commandText)) {
     rejectInvalidSetupInput();
+  }
+
+  const parsed = parseInventoryAutoSetupScript(commandText);
+  if (parsed) {
+    return applyInventoryAutoSetup(parsed, { allowEquipmentFallback: true });
   }
 
   if (typeof window.executeCommand === 'function') {
@@ -982,11 +1233,110 @@ const LOAD_SETUP_USER_ERROR_KEYS = [
   'mods.betterSetups.errors.noConfigureBoardFunction'
 ];
 
+function titleCaseSetupName(value) {
+  return String(value).replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function parseSetupScriptErrorPayload(message) {
+  const jsonSuffixMatch = message.match(/ matching (.+)$/);
+  if (!jsonSuffixMatch) return null;
+  try {
+    return JSON.parse(jsonSuffixMatch[1]);
+  } catch {
+    return null;
+  }
+}
+
+function formatSetupMonsterMissingDetails(monster) {
+  const parts = [];
+  if (monster.level != null) {
+    parts.push(tReplace('mods.betterSetups.toast.monsterLevel', { level: String(monster.level) }));
+  }
+  if (monster.awakened) {
+    parts.push(t('mods.betterSetups.toast.monsterAwakened'));
+  }
+  if (!parts.length) return '';
+  return ` (${parts.join(', ')})`;
+}
+
+function formatMissingEquipmentDescription(equipment) {
+  return tReplace('mods.betterSetups.toast.missingEquipmentListItem', {
+    name: titleCaseSetupName(equipment.name),
+    stat: formatSetupEquipmentStatLabel(equipment.stat),
+    tier: String(equipment.tier ?? '?')
+  });
+}
+
+function formatEquipmentSubstitutionDescription(substitution) {
+  return tReplace('mods.betterSetups.toast.equipmentSubstitutionListItem', {
+    usedName: titleCaseSetupName(substitution.used.name),
+    usedStat: formatSetupEquipmentStatLabel(substitution.used.stat),
+    usedTier: String(substitution.used.tier ?? '?'),
+    requestedName: titleCaseSetupName(substitution.requested.name),
+    requestedStat: formatSetupEquipmentStatLabel(substitution.requested.stat),
+    requestedTier: String(substitution.requested.tier ?? '?')
+  });
+}
+
+function formatSetupLoadEquipmentNotice({ missingEquipment, substitutedEquipment }) {
+  const parts = [];
+  if (substitutedEquipment.length > 0) {
+    parts.push(tReplace('mods.betterSetups.toast.setupLoadedWithSubstitutedEquipment', {
+      items: substitutedEquipment.map(formatEquipmentSubstitutionDescription).join(', ')
+    }));
+  }
+  if (missingEquipment.length > 0) {
+    parts.push(tReplace('mods.betterSetups.toast.setupLoadedWithMissingEquipment', {
+      items: missingEquipment.map(formatMissingEquipmentDescription).join(', ')
+    }));
+  }
+  return parts.join(' ');
+}
+
 function getLoadSetupErrorMessage(error) {
   const message = error?.message;
-  if (message && LOAD_SETUP_USER_ERROR_KEYS.some((key) => message === t(key))) {
+  if (!message) {
+    return t('mods.betterSetups.toast.invalidConfigFormat');
+  }
+
+  if (message === 'INVALID_SETUP_INPUT') {
+    return t('mods.betterSetups.toast.pasteValidConfig');
+  }
+
+  if (LOAD_SETUP_USER_ERROR_KEYS.some((key) => message === t(key))) {
     return message;
   }
+
+  if (message.startsWith('No equipment found matching ')) {
+    const equipment = parseSetupScriptErrorPayload(message);
+    if (equipment?.name) {
+      return tReplace('mods.betterSetups.toast.missingEquipment', {
+        name: titleCaseSetupName(equipment.name),
+        stat: formatSetupEquipmentStatLabel(equipment.stat),
+        tier: String(equipment.tier ?? '?')
+      });
+    }
+  }
+
+  const awakenedMatch = message.match(/^No awakened (.+?) found matching /);
+  if (awakenedMatch) {
+    const monster = parseSetupScriptErrorPayload(message);
+    return tReplace('mods.betterSetups.toast.missingAwakenedMonster', {
+      name: titleCaseSetupName(awakenedMatch[1]),
+      details: monster ? formatSetupMonsterMissingDetails(monster) : ''
+    });
+  }
+
+  if (message.startsWith('No monster found matching ')) {
+    const monster = parseSetupScriptErrorPayload(message);
+    if (monster?.name) {
+      return tReplace('mods.betterSetups.toast.missingMonster', {
+        name: titleCaseSetupName(monster.name),
+        details: formatSetupMonsterMissingDetails(monster)
+      });
+    }
+  }
+
   return t('mods.betterSetups.toast.invalidConfigFormat');
 }
 
@@ -1001,8 +1351,17 @@ function applySetupCommand(commandText) {
     return;
   }
 
-  executeSetupScript(trimmed);
-  showSetupNotification(getSetupLoadedMessage(), 'success', 4000);
+  const result = executeSetupScript(trimmed);
+  const missingEquipment = result?.missingEquipment || [];
+  const substitutedEquipment = result?.substitutedEquipment || [];
+  if (missingEquipment.length > 0 || substitutedEquipment.length > 0) {
+    showSetupNotification(
+      formatSetupLoadEquipmentNotice({ missingEquipment, substitutedEquipment }),
+      'warning'
+    );
+    return;
+  }
+  showSetupNotification(getSetupLoadedMessage(), 'success');
 }
 
 function applyBoardSetup(boardData) {
@@ -1024,7 +1383,7 @@ function applyBoardSetup(boardData) {
     }
   }
 
-  showSetupNotification(getSetupLoadedMessage(), 'success', 4000);
+  showSetupNotification(getSetupLoadedMessage(), 'success');
 }
 
 function showLoadSetupModal() {
