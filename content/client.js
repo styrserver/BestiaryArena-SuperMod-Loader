@@ -563,7 +563,7 @@ if (typeof browserAPI === 'undefined') {
     let translation = translations[useLocale];
     
     for (const k of keys) {
-      if (!translation || !translation[k]) {
+      if (translation == null || translation[k] === undefined) {
         console.warn('[BestiaryModAPI] Translation key not found:', key, 'at segment:', k, 'locale:', useLocale);
         return key;
       }

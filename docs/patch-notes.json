@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.4.1",
+      "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "changed",
+          "text": "Modal UI polish: 400px max width, streamlined labels (Fetch Player / Replace Profile / Restore Original Profile), profile-first status copy, 110px status area, centered Status heading, and yellow note for hidden-creature limits. Player fetches are rate-limited to 400ms. While viewing an imported profile, a persistent toast shows a clickable bestiaryarena.com/profile link. Full en-US and pt-BR translations."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "i18n no longer treats empty translation strings as missing keys (fixes raw locale keys appearing in UI when a translation value is intentionally blank)."
+        }
+      ]
+    },
+    {
       "version": "4.4.0",
       "changes": [
         {

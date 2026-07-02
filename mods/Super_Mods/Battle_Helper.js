@@ -12,7 +12,7 @@ const BUTTON_ID = 'battle-helper-button';
 const PROFILE_API_BASE = 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData';
 
 const MODAL_CONFIG = {
-  width: 500,
+  width: 400,
   viewportPadding: 16,
   minWidth: 280,
   minHeight: 200
@@ -25,16 +25,58 @@ const BATTLE_HELPER_BUTTON_CLASS = {
 
 const BATTLE_HELPER_BUTTON_IMPORTED_CLASS = 'battle-helper-button-imported';
 const BATTLE_HELPER_BUTTON_STYLE_ID = 'battle-helper-button-styles';
-const BATTLE_HELPER_DEFAULT_TOOLTIP = 'Import another player arsenal for sandbox drag/drop testing';
-const BATTLE_HELPER_IMPORTED_TOOLTIP = 'Using another player\'s arsenal — open to restore yours';
 const BATTLE_HELPER_FIELD_HEIGHT_PX = 25;
-const BATTLE_HELPER_OUTPUT_HEIGHT_PX = 120;
+const BATTLE_HELPER_OUTPUT_HEIGHT_PX = 110;
 const BATTLE_HELPER_SCROLLBAR_GUTTER_PX = 12;
+const BATTLE_HELPER_FETCH_MIN_INTERVAL_MS = 400;
+const BATTLE_HELPER_TOAST_CONTAINER_ID = 'battle-helper-toast-container';
+const BATTLE_HELPER_PROFILE_URL_BASE = 'https://bestiaryarena.com/profile/';
 
 const DEFAULT_MONSTER_STAT = 1;
 const DEFAULT_MONSTER_EXP = 0;
 const DEFAULT_EQUIP_STAT = 'ad';
 const VALID_EQUIP_STATS = new Set(['ad', 'ap', 'hp']);
+
+const t = (key) => {
+  if (typeof api !== 'undefined' && api.i18n?.t) {
+    return api.i18n.t(key);
+  }
+  if (typeof context !== 'undefined' && context.api?.i18n?.t) {
+    return context.api.i18n.t(key);
+  }
+  return key;
+};
+
+const tReplace = (key, replacements) => {
+  let text = t(key);
+  Object.entries(replacements).forEach(([placeholder, value]) => {
+    text = text.replace(new RegExp(`\\{${placeholder}\\}`, 'g'), value);
+  });
+  return text;
+};
+
+function formatProfileDisplayName(name) {
+  const raw = String(name || '').trim();
+  return raw || t('mods.battleHelper.unknown');
+}
+
+function getProfileReplacedOutput() {
+  return `${t('mods.battleHelper.output.profileReplaced')}\n${t('mods.battleHelper.output.dragDropHint')}`;
+}
+
+function getNoProfileFetchedOutput() {
+  return `${t('mods.battleHelper.output.ready')}\n${t('mods.battleHelper.output.noProfileFetched')}`;
+}
+
+function getEnterUsernameFirstOutput() {
+  return `${t('mods.battleHelper.output.enterUsernameFirst')}\n${t('mods.battleHelper.output.noProfileFetched')}`;
+}
+
+function getFetchFailedOutput(error) {
+  return `${tReplace('mods.battleHelper.output.fetchFailed', {
+    error: String(error?.message || error)
+  })}\n${t('mods.battleHelper.output.noProfileFetched')}`;
+}
 
 // =======================
 // 2. Utilities & Validation Helpers
@@ -161,7 +203,7 @@ function normalizeProfileArsenal(profile) {
   const monsters = normalizeMonsters(monstersInput, equipIdSet);
 
   return {
-    profileName: String(profile?.name || 'Unknown'),
+    profileName: String(profile?.name || '').trim(),
     monsters,
     equips
   };
@@ -179,11 +221,12 @@ const sessionState = {
 };
 let activeBattleHelperModal = null;
 let battleHelperModalLayoutCleanup = null;
+let battleHelperPersistentToastHandle = null;
 
 function getPlayerContext() {
   const ctx = globalThis.state?.player?.getSnapshot?.()?.context;
   if (!ctx) {
-    throw new Error('Player state not available.');
+    throw new Error(t('mods.battleHelper.errors.playerStateUnavailable'));
   }
   return ctx;
 }
@@ -199,21 +242,42 @@ function makePlayerBackup() {
 // =======================
 // 4. API Layer
 // =======================
-async function fetchProfileByUsername(username) {
-  const response = await fetch(buildProfileRequestUrl(username), {
-    method: 'GET',
-    headers: { 'Accept': 'application/json' }
-  });
-  if (!response.ok) {
-    throw new Error(`Profile request failed (${response.status}).`);
-  }
+let lastProfileFetchStartedAt = 0;
+let profileFetchSlot = Promise.resolve();
 
-  const payload = await response.json();
-  const profile = payload?.[0]?.result?.data?.json ?? null;
-  if (!profile) {
-    throw new Error('Profile not found.');
-  }
-  return profile;
+function scheduleProfileFetch(task) {
+  const scheduled = profileFetchSlot.then(async () => {
+    const now = Date.now();
+    const waitMs = Math.max(0, BATTLE_HELPER_FETCH_MIN_INTERVAL_MS - (now - lastProfileFetchStartedAt));
+    if (waitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    lastProfileFetchStartedAt = Date.now();
+    return task();
+  });
+  profileFetchSlot = scheduled.catch(() => {});
+  return scheduled;
+}
+
+async function fetchProfileByUsername(username) {
+  return scheduleProfileFetch(async () => {
+    const response = await fetch(buildProfileRequestUrl(username), {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!response.ok) {
+      throw new Error(tReplace('mods.battleHelper.errors.profileRequestFailed', {
+        status: String(response.status)
+      }));
+    }
+
+    const payload = await response.json();
+    const profile = payload?.[0]?.result?.data?.json ?? null;
+    if (!profile) {
+      throw new Error(t('mods.battleHelper.errors.profileNotFound'));
+    }
+    return profile;
+  });
 }
 
 // =======================
@@ -221,10 +285,10 @@ async function fetchProfileByUsername(username) {
 // =======================
 function validateNormalizedArsenal(normalized) {
   if (!Array.isArray(normalized.monsters) || normalized.monsters.length === 0) {
-    throw new Error('Profile has no usable creatures.');
+    throw new Error(t('mods.battleHelper.errors.noUsableCreatures'));
   }
   if (!Array.isArray(normalized.equips) || normalized.equips.length === 0) {
-    throw new Error('Profile has no usable equipment.');
+    throw new Error(t('mods.battleHelper.errors.noUsableEquipment'));
   }
 }
 
@@ -248,11 +312,12 @@ function applyArsenalReplacement(normalized) {
   sessionState.lastNormalized = normalized;
   sessionState.replaced = true;
   syncBattleHelperButtonState();
+  startBattleHelperViewingProfileToast(normalized.profileName, sessionState.lastUsername);
 }
 
 function restoreOriginalArsenal() {
   if (!sessionState.backup) {
-    throw new Error('No backup available to restore.');
+    throw new Error(t('mods.battleHelper.errors.noBackupAvailable'));
   }
 
   globalThis.state.player.send({
@@ -266,6 +331,144 @@ function restoreOriginalArsenal() {
 
   sessionState.replaced = false;
   syncBattleHelperButtonState();
+  stopBattleHelperViewingProfileToast();
+}
+
+// =======================
+// 6.5 Toast
+// =======================
+function getBattleHelperToastContainer() {
+  if (typeof document === 'undefined') return null;
+  let container = document.getElementById(BATTLE_HELPER_TOAST_CONTAINER_ID);
+  if (!container) {
+    container = document.createElement('div');
+    container.id = BATTLE_HELPER_TOAST_CONTAINER_ID;
+    container.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
+function updateBattleHelperToastPositions(container) {
+  if (!container) return;
+  const toasts = container.querySelectorAll('.battle-helper-toast-item');
+  toasts.forEach((toast, index) => {
+    toast.style.transform = `translateY(-${index * 46}px)`;
+  });
+}
+
+function buildBattleHelperProfileUrl(username) {
+  const slug = encodeURIComponent(normalizeUsername(username));
+  return `${BATTLE_HELPER_PROFILE_URL_BASE}${slug}`;
+}
+
+function populateBattleHelperToastMessage(messageDiv, profileName, username) {
+  const displayName = formatProfileDisplayName(profileName || username);
+  const profileSlug = normalizeUsername(username) || displayName;
+
+  messageDiv.textContent = '';
+
+  const lead = document.createElement('span');
+  lead.textContent = t('mods.battleHelper.toast.viewingLead');
+
+  const profileLink = document.createElement('a');
+  profileLink.href = buildBattleHelperProfileUrl(profileSlug);
+  profileLink.target = '_blank';
+  profileLink.rel = 'noopener noreferrer';
+  const suffix = t('mods.battleHelper.toast.viewingNameSuffix');
+  profileLink.textContent = `${displayName}${suffix}`;
+  profileLink.style.cssText = 'color: #ffe066; text-decoration: underline; pointer-events: auto;';
+
+  const tail = document.createElement('span');
+  const tailText = t('mods.battleHelper.toast.viewingTail');
+  if (tailText) {
+    tail.textContent = tailText;
+    messageDiv.appendChild(lead);
+    messageDiv.appendChild(profileLink);
+    messageDiv.appendChild(tail);
+    return;
+  }
+
+  messageDiv.appendChild(lead);
+  messageDiv.appendChild(profileLink);
+}
+
+function removeBattleHelperPersistentToast() {
+  if (battleHelperPersistentToastHandle?.remove) {
+    battleHelperPersistentToastHandle.remove();
+  }
+  battleHelperPersistentToastHandle = null;
+}
+
+function showBattleHelperPersistentToast(profileName, username) {
+  try {
+    const container = getBattleHelperToastContainer();
+    if (!container) return null;
+
+    removeBattleHelperPersistentToast();
+
+    const existingToasts = container.querySelectorAll('.battle-helper-toast-item');
+    const stackOffset = existingToasts.length * 46;
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'battle-helper-toast-item';
+    flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
+
+    const toast = document.createElement('div');
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    toast.setAttribute('role', 'presentation');
+    toast.style.pointerEvents = 'auto';
+    toast.style.cursor = 'default';
+
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'text-left';
+    messageDiv.style.flex = '1 1 auto';
+    populateBattleHelperToastMessage(messageDiv, profileName, username);
+
+    widgetBottom.appendChild(messageDiv);
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    container.appendChild(flexContainer);
+    updateBattleHelperToastPositions(container);
+
+    const handle = {
+      updateProfile(nextProfileName, nextUsername) {
+        populateBattleHelperToastMessage(messageDiv, nextProfileName, nextUsername);
+      },
+      remove() {
+        if (flexContainer.parentNode) {
+          flexContainer.parentNode.removeChild(flexContainer);
+          updateBattleHelperToastPositions(container);
+        }
+        if (battleHelperPersistentToastHandle === handle) {
+          battleHelperPersistentToastHandle = null;
+        }
+      }
+    };
+    battleHelperPersistentToastHandle = handle;
+    return handle;
+  } catch (error) {
+    console.warn('[Battle Helper] showBattleHelperPersistentToast:', error);
+    return null;
+  }
+}
+
+function startBattleHelperViewingProfileToast(profileName, username) {
+  if (battleHelperPersistentToastHandle?.updateProfile) {
+    battleHelperPersistentToastHandle.updateProfile(profileName, username);
+    return;
+  }
+  showBattleHelperPersistentToast(profileName, username);
+}
+
+function stopBattleHelperViewingProfileToast() {
+  removeBattleHelperPersistentToast();
 }
 
 // =======================
@@ -284,9 +487,13 @@ function createActionButton(label, onClick, options = {}) {
   return button;
 }
 
-function createSectionLabel(title) {
+function createSectionLabel(title, options = {}) {
   const label = document.createElement('div');
   label.className = 'pixel-font-12 text-whiteRegular mb-1 shrink-0';
+  if (options.centered) {
+    label.style.textAlign = 'center';
+    label.style.width = '100%';
+  }
   label.textContent = title;
   return label;
 }
@@ -308,7 +515,7 @@ function createUsernameInput(initialValue = '') {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'frame-pressed-1 surface-dark w-full p-1 text-whiteRegular pixel-font-16';
-  input.placeholder = 'Enter profile name';
+  input.placeholder = t('mods.battleHelper.usernamePlaceholder');
   input.value = initialValue;
   input.style.maxWidth = '100%';
   input.style.boxSizing = 'border-box';
@@ -319,13 +526,16 @@ function createUsernameInput(initialValue = '') {
   return input;
 }
 
-function createInfoNote(text) {
+function createInfoNote(text, options = {}) {
   const notesBlock = document.createElement('div');
   notesBlock.className = 'frame-pressed-1 surface-dark w-full min-w-0 shrink-0 p-1';
 
   const notesText = document.createElement('p');
-  notesText.className = 'pixel-font-14 text-whiteRegular italic m-0';
+  notesText.className = options.yellow ? 'pixel-font-14 italic m-0' : 'pixel-font-14 text-whiteRegular italic m-0';
   notesText.style.cssText = 'line-height: 1.35; word-break: break-word; white-space: pre-line;';
+  if (options.yellow) {
+    notesText.style.color = '#ffe066';
+  }
   notesText.textContent = text;
   notesBlock.appendChild(notesText);
 
@@ -405,26 +615,32 @@ function styleBattleHelperFooterButtons(footer) {
 
 function formatFetchedProfileOutput(normalized, { includeSandboxNote = false } = {}) {
   const lines = [
-    'Profile loaded. You can now replace arsenal.',
+    tReplace('mods.battleHelper.output.profileLine', {
+      name: formatProfileDisplayName(normalized.profileName)
+    }),
+    tReplace('mods.battleHelper.output.creaturesLine', {
+      count: String(normalized.monsters.length)
+    }),
+    tReplace('mods.battleHelper.output.equipmentLine', {
+      count: String(normalized.equips.length)
+    }),
     '',
-    `Profile: ${normalized.profileName}`,
-    `Creatures: ${normalized.monsters.length}`,
-    `Equipment: ${normalized.equips.length}`
+    t('mods.battleHelper.output.canReplaceProfile')
   ];
   if (includeSandboxNote) {
-    lines.push('', 'Switched to sandbox mode.');
+    lines.push('', t('mods.battleHelper.output.switchedToSandbox'));
   }
   return lines.join('\n');
 }
 
 function getInitialModalOutputText() {
   if (sessionState.replaced) {
-    return 'Arsenal replaced.\nYou can now drag/drop imported creatures.';
+    return getProfileReplacedOutput();
   }
   if (sessionState.lastNormalized) {
     return formatFetchedProfileOutput(sessionState.lastNormalized);
   }
-  return 'Ready.\nNo profile fetched.';
+  return getNoProfileFetchedOutput();
 }
 
 function buildModalContent(onContentChange) {
@@ -437,14 +653,12 @@ function buildModalContent(onContentChange) {
 
   const profileColumn = document.createElement('div');
   profileColumn.style.cssText = 'display: flex; flex-direction: column; flex: 1 1 0; min-width: 0;';
-  profileColumn.appendChild(createSectionLabel('Target Profile'));
   const profileCard = createSectionCard({ flex: true });
   const usernameInput = createUsernameInput(sessionState.lastUsername);
   profileCard.appendChild(usernameInput);
 
   const actionsColumn = document.createElement('div');
   actionsColumn.style.cssText = 'display: flex; flex-direction: column; flex: 1 1 0; min-width: 0;';
-  actionsColumn.appendChild(createSectionLabel('Actions'));
   const actionsCard = createSectionCard({ flex: true });
   let replaceButton;
   let restoreButton;
@@ -468,14 +682,14 @@ function buildModalContent(onContentChange) {
     restoreButton.disabled = !sessionState.replaced;
   }
 
-  const fetchButton = createActionButton('Fetch Preview', async () => {
+  const fetchButton = createActionButton(t('mods.battleHelper.fetchPlayer'), async () => {
     const username = normalizeUsername(usernameInput.value);
     if (!username) {
-      setOutput('Enter a username first.\nNo profile fetched.');
+      setOutput(getEnterUsernameFirstOutput());
       return;
     }
     try {
-      setOutput(`Fetching profile "${username}"...`);
+      setOutput(tReplace('mods.battleHelper.output.fetchingProfile', { username }));
       const profile = await fetchProfileByUsername(username);
       sessionState.lastProfileRaw = profile;
       const normalized = normalizeProfileArsenal(profile);
@@ -489,36 +703,40 @@ function buildModalContent(onContentChange) {
     } catch (error) {
       sessionState.lastProfileRaw = null;
       sessionState.lastNormalized = null;
-      setOutput(`Fetch failed: ${error?.message || error}\nNo profile fetched.`);
+      setOutput(getFetchFailedOutput(error));
       syncButtons();
     }
   });
   profileCard.appendChild(fetchButton);
   profileColumn.appendChild(profileCard);
 
-  replaceButton = createActionButton('Replace Arsenal', () => {
+  replaceButton = createActionButton(t('mods.battleHelper.replaceProfile'), () => {
     try {
       if (!isSandboxEnabled()) {
-        throw new Error('Sandbox mode is required.');
+        throw new Error(t('mods.battleHelper.errors.sandboxRequired'));
       }
       if (!sessionState.lastNormalized) {
-        throw new Error('Fetch a valid profile first.');
+        throw new Error(t('mods.battleHelper.errors.fetchValidProfileFirst'));
       }
       applyArsenalReplacement(sessionState.lastNormalized);
-      setOutput('Arsenal replaced.\nYou can now drag/drop imported creatures.');
+      setOutput(getProfileReplacedOutput());
       syncButtons();
     } catch (error) {
-      setOutput(`Replace failed: ${error?.message || error}`);
+      setOutput(tReplace('mods.battleHelper.output.replaceFailed', {
+        error: String(error?.message || error)
+      }));
     }
   }, { disabled: true, primary: true });
 
-  restoreButton = createActionButton('Restore Original Arsenal', () => {
+  restoreButton = createActionButton(t('mods.battleHelper.restoreOriginalProfile'), () => {
     try {
       restoreOriginalArsenal();
-      setOutput('Original arsenal restored.');
+      setOutput(t('mods.battleHelper.output.originalProfileRestored'));
       syncButtons();
     } catch (error) {
-      setOutput(`Restore failed: ${error?.message || error}`);
+      setOutput(tReplace('mods.battleHelper.output.restoreFailed', {
+        error: String(error?.message || error)
+      }));
     }
   }, { disabled: true });
 
@@ -529,8 +747,8 @@ function buildModalContent(onContentChange) {
   topRow.appendChild(profileColumn);
   topRow.appendChild(actionsColumn);
   root.appendChild(topRow);
-  root.appendChild(createInfoNote('Hidden creatures are not fetched — only publicly visible creatures from the profile are included.'));
-  root.appendChild(createSectionLabel('Status & Preview'));
+  root.appendChild(createInfoNote(t('mods.battleHelper.hiddenCreaturesNote'), { yellow: true }));
+  root.appendChild(createSectionLabel(t('mods.battleHelper.statusLabel'), { centered: true }));
   root.appendChild(outputScroll.element);
 
   syncButtons();
@@ -575,10 +793,10 @@ function syncBattleHelperButtonState() {
 
   if (sessionState.replaced) {
     button.classList.add(BATTLE_HELPER_BUTTON_IMPORTED_CLASS);
-    button.title = BATTLE_HELPER_IMPORTED_TOOLTIP;
+    button.title = t('mods.battleHelper.importedTooltip');
   } else {
     button.classList.remove(BATTLE_HELPER_BUTTON_IMPORTED_CLASS);
-    button.title = BATTLE_HELPER_DEFAULT_TOOLTIP;
+    button.title = t('mods.battleHelper.defaultTooltip');
   }
 }
 
@@ -802,11 +1020,11 @@ function openBattleHelperModal() {
   const content = buildModalContent(refitLayout);
   const dims = getModalDimensions();
   modalRef = api.ui.components.createModal({
-    title: 'Battle Helper',
+    title: t('mods.battleHelper.title'),
     width: dims.width,
     content,
     buttons: [{
-      text: 'Close',
+      text: t('mods.battleHelper.close'),
       primary: true,
       onClick: () => clearBattleHelperModalCleanup()
     }]
@@ -821,9 +1039,9 @@ function openBattleHelperModal() {
 api.ui.addButton({
   id: BUTTON_ID,
   modId: MOD_ID,
-  text: 'Battle Helper',
+  text: t('mods.battleHelper.title'),
   icon: '🧬',
-  tooltip: BATTLE_HELPER_DEFAULT_TOOLTIP,
+  tooltip: t('mods.battleHelper.defaultTooltip'),
   primary: false,
   onClick: openBattleHelperModal
 });
@@ -849,6 +1067,7 @@ context.exports = {
     sessionState.lastUsername = '';
     sessionState.replaced = false;
     sessionState.backup = null;
+    stopBattleHelperViewingProfileToast();
     clearBattleHelperModalCleanup();
     syncBattleHelperButtonState();
   }
