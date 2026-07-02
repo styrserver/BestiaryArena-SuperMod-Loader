@@ -130,6 +130,7 @@
       "Team Copier": "Share setups as JSON or links; optional seeds for replays; recent history.",
       "Tick Tracker": "Tracks ticks per session (optional ms), with history and copy for speedruns.",
       "Turbo Mode": "Speed up gameplay with customizable multipliers and tick display for testing and grinding.",
+      "Battle Helper": "Fetch another player profile arsenal and temporarily replace your sandbox creatures/equipment with one-click restore.",
       "Autoseller": "Sells or squeezes creatures by gene thresholds; session widget for gold, dust, and counts.",
       "Autoscroller": "Automates summon scroll usage to hunt target creatures; tiers, stop conditions, and rate-limited speed.",
       "Better Analytics": "DPS in the impact analyzer plus sandbox panel: units, battle log, filters, and fight speed control.",
