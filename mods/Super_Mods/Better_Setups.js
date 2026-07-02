@@ -78,6 +78,10 @@ let globalClickHandler = null;
 
 // Track pending label remove confirmation in settings (one at a time)
 let activeLabelRemoveConfirmation = null;
+let missingEquipmentAuditBadgeCache = {
+  timestamp: 0,
+  count: 0
+};
 
 // Game UI media URLs (loaded from bestiaryarena.com CDN)
 const MEDIA_URLS = {
@@ -96,7 +100,7 @@ const MEDIA_URLS = {
 
 const SETTINGS_MODAL_CONFIG = {
   width: 350,
-  height: 410,
+  height: 500,
   contentInset: 30,
   viewportPadding: 16,
   minWidth: 280,
@@ -527,6 +531,7 @@ function injectEditLabelsButton(setupContainer) {
     showSettingsModal();
   });
   settingsButton.classList.add('settings-btn');
+  updateSettingsMissingEquipmentWarningBadge(settingsButton);
   
   const utilityContainer = document.createElement('div');
   utilityContainer.className = 'flex items-center gap-2 better-setups-utility-container';
@@ -537,6 +542,60 @@ function injectEditLabelsButton(setupContainer) {
   
   console.log('[Better Setups] Injected Load Setup and Settings buttons at the end');
   return true;
+}
+
+function getCachedMissingEquipmentSetupCount() {
+  const now = Date.now();
+  if (now - missingEquipmentAuditBadgeCache.timestamp < 2500) {
+    return missingEquipmentAuditBadgeCache.count;
+  }
+
+  try {
+    const { results } = findSetupsWithMissingEquipment();
+    const count = Array.isArray(results) ? results.length : 0;
+    missingEquipmentAuditBadgeCache = {
+      timestamp: now,
+      count
+    };
+    return count;
+  } catch (error) {
+    console.warn('[Better Setups] Could not compute missing equipment badge count:', error);
+    return 0;
+  }
+}
+
+function updateSettingsMissingEquipmentWarningBadge(settingsButton) {
+  if (!settingsButton) return;
+  const settingsText = t('mods.betterSetups.settings');
+  const missingCount = getCachedMissingEquipmentSetupCount();
+
+  if (missingCount > 0) {
+    settingsButton.innerHTML = `
+      <span aria-hidden="true" style="display:inline-flex;align-items:center;color:#f4d35e;">&#9888;</span>
+      <span>${settingsText}</span>
+    `;
+    settingsButton.title = `${missingCount} setup${missingCount === 1 ? '' : 's'} missing equipment`;
+  } else {
+    settingsButton.textContent = settingsText;
+    settingsButton.removeAttribute('title');
+  }
+}
+
+function updateMissingEquipmentAuditButtonWarningBadge(button) {
+  if (!button) return;
+  const missingCount = getCachedMissingEquipmentSetupCount();
+  const label = 'Show setups with missing equipment';
+
+  if (missingCount > 0) {
+    button.innerHTML = `
+      <span aria-hidden="true" style="display:inline-flex;align-items:center;color:#f4d35e;">&#9888;</span>
+      <span>${label}</span>
+    `;
+    button.title = `${missingCount} setup${missingCount === 1 ? '' : 's'} missing equipment`;
+  } else {
+    button.textContent = label;
+    button.removeAttribute('title');
+  }
 }
 
 // Function to process setup interface and inject buttons
@@ -2226,6 +2285,321 @@ function renderLabelsSettingsPanel(container) {
   addRow.appendChild(addInput);
   addRow.appendChild(addBtn);
   container.appendChild(addRow);
+
+  const actionsRow = document.createElement('div');
+  actionsRow.style.cssText = 'display: flex; align-items: center; gap: 6px; margin: 8px 0 0 0; flex-shrink: 0;';
+
+  const auditMissingEquipmentBtn = createSettingsActionButton('Show setups with missing equipment', { variant: 'secondary' });
+  auditMissingEquipmentBtn.style.width = '100%';
+  updateMissingEquipmentAuditButtonWarningBadge(auditMissingEquipmentBtn);
+  auditMissingEquipmentBtn.onclick = () => {
+    showMissingEquipmentAuditModal();
+  };
+  actionsRow.appendChild(auditMissingEquipmentBtn);
+  container.appendChild(actionsRow);
+}
+
+function buildSetupEquipmentRequirementKey(gameId, stat, tier) {
+  return `${String(gameId)}|${String(stat || 'ad').toLowerCase()}|${String(Number(tier) || 1)}`;
+}
+
+function getPieceEquipmentRequirement(piece) {
+  if (!piece || typeof piece !== 'object') return null;
+
+  if (piece.type === 'custom' && piece.equip?.gameId) {
+    return {
+      gameId: piece.equip.gameId,
+      stat: piece.equip.stat || 'ad',
+      tier: piece.equip.tier || 1,
+      source: 'custom'
+    };
+  }
+
+  if (piece.equipment?.name) {
+    const serializedEquip = getSetupPreviewEquipmentInfoFromSerialized(piece.equipment);
+    if (serializedEquip?.gameId) {
+      return {
+        gameId: serializedEquip.gameId,
+        stat: serializedEquip.stat || 'ad',
+        tier: serializedEquip.tier || 1,
+        source: 'serialized',
+        name: piece.equipment.name
+      };
+    }
+  }
+
+  if (piece.equipId) {
+    return {
+      equipId: piece.equipId,
+      source: 'equipId'
+    };
+  }
+
+  return null;
+}
+
+function buildCurrentEquipmentAvailability() {
+  const bySpec = new Map();
+  const byId = new Set();
+  try {
+    const playerContext = globalThis.state.player.getSnapshot()?.context;
+    const equips = Array.isArray(playerContext?.equips) ? playerContext.equips : [];
+    equips.forEach((equip) => {
+      if (equip?.id != null) {
+        byId.add(equip.id);
+      }
+      if (!equip?.gameId) return;
+      const key = buildSetupEquipmentRequirementKey(equip.gameId, equip.stat, equip.tier);
+      bySpec.set(key, (bySpec.get(key) || 0) + 1);
+    });
+  } catch (error) {
+    console.warn('[Better Setups] Could not read current equipment availability:', error);
+  }
+  return { bySpec, byId };
+}
+
+function analyzeSetupMissingEquipment(pieces, availability) {
+  const allyPieces = filterAllySetupPreviewPieces(pieces) || [];
+  const remainingBySpec = new Map(availability.bySpec);
+  const missing = [];
+
+  allyPieces.forEach((piece) => {
+    const requirement = getPieceEquipmentRequirement(piece);
+    if (!requirement) return;
+
+    if (requirement.equipId != null) {
+      if (!availability.byId.has(requirement.equipId)) {
+        missing.push({
+          reason: 'missingById',
+          equipId: requirement.equipId
+        });
+      }
+      return;
+    }
+
+    const key = buildSetupEquipmentRequirementKey(requirement.gameId, requirement.stat, requirement.tier);
+    const availableCount = remainingBySpec.get(key) || 0;
+    if (availableCount <= 0) {
+      missing.push({
+        reason: 'missingBySpec',
+        gameId: requirement.gameId,
+        stat: requirement.stat,
+        tier: requirement.tier,
+        name: requirement.name || null
+      });
+      return;
+    }
+    remainingBySpec.set(key, availableCount - 1);
+  });
+
+  return missing;
+}
+
+function collectStoredSetupEntriesForAudit() {
+  const labels = getCurrentLabels();
+  const setupEntries = [];
+  const seenKeys = new Set();
+
+  labels.forEach((label) => {
+    const keys = getSetupKeysForLabel(label);
+    keys.forEach((key) => {
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+      const pieces = tryGetStoredSetupPiecesFromKey(key);
+      if (!pieces?.length) return;
+      setupEntries.push({
+        label,
+        key,
+        pieces
+      });
+    });
+  });
+
+  return setupEntries;
+}
+
+function extractMapIdFromSetupStorageKey(label, key) {
+  const normalizedLabel = String(label || '').trim();
+  const normalizedKey = String(key || '').trim();
+  if (!normalizedLabel || !normalizedKey.startsWith(`${normalizedLabel}-`)) {
+    return null;
+  }
+
+  let suffix = normalizedKey.slice(normalizedLabel.length + 1);
+  suffix = suffix.replace(/-floor\d+$/i, '');
+  suffix = suffix.replace(/-f\d+$/i, '');
+  return suffix || null;
+}
+
+function getMapOrderIndexForAudit(mapId) {
+  if (!mapId) return Number.MAX_SAFE_INTEGER;
+  try {
+    if (window.mapsDatabase?.getMapOrderIndex) {
+      return window.mapsDatabase.getMapOrderIndex(mapId);
+    }
+  } catch (error) {
+    // Fall through to local ordering fallback.
+  }
+
+  try {
+    const regions = globalThis.state?.utils?.REGIONS;
+    if (!Array.isArray(regions)) return Number.MAX_SAFE_INTEGER;
+    let order = 0;
+    for (const region of regions) {
+      const rooms = region?.rooms;
+      if (!Array.isArray(rooms)) continue;
+      for (const room of rooms) {
+        if (room?.id === mapId) return order;
+        order += 1;
+      }
+    }
+  } catch (error) {
+    // Ignore and fallback to unknown ordering.
+  }
+
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function compareSetupEntriesForAudit(a, b) {
+  const orderA = getMapOrderIndexForAudit(a.mapId);
+  const orderB = getMapOrderIndexForAudit(b.mapId);
+  if (orderA !== orderB) return orderA - orderB;
+  return String(a.key || '').localeCompare(String(b.key || ''));
+}
+
+function navigateToSetupMapFromAudit(entry) {
+  const mapId = entry?.mapId;
+  if (!mapId) {
+    showSetupNotification('Could not detect map id for this setup key.', 'warning');
+    return;
+  }
+
+  try {
+    globalThis.state.board.send({ type: 'selectRoomById', roomId: mapId });
+    const mapName = globalThis.state?.utils?.ROOM_NAME?.[mapId] || mapId;
+    showSetupNotification(`Navigated to ${mapName}`, 'success');
+  } catch (error) {
+    console.error('[Better Setups] Failed to navigate to setup map:', error);
+    showSetupNotification('Failed to navigate to map.', 'error');
+  }
+}
+
+function formatMissingEquipmentAuditItem(item) {
+  if (item.reason === 'missingById') {
+    return `Unknown equipment (saved id: ${item.equipId})`;
+  }
+
+  const statLabel = formatSetupEquipmentStatLabel(item.stat);
+  const tierLabel = String(item.tier ?? '?');
+  if (item.name) {
+    return `${titleCaseSetupName(item.name)} ${statLabel} T${tierLabel}`;
+  }
+  return `Equipment #${item.gameId} ${statLabel} T${tierLabel}`;
+}
+
+function findSetupsWithMissingEquipment() {
+  const availability = buildCurrentEquipmentAvailability();
+  const setupEntries = collectStoredSetupEntriesForAudit();
+  const results = [];
+
+  setupEntries.forEach((entry) => {
+    const missingItems = analyzeSetupMissingEquipment(entry.pieces, availability);
+    if (!missingItems.length) return;
+    const mapId = extractMapIdFromSetupStorageKey(entry.label, entry.key);
+    const mapName = mapId ? (globalThis.state?.utils?.ROOM_NAME?.[mapId] || mapId) : 'Unknown Map';
+    results.push({
+      ...entry,
+      mapId,
+      mapName,
+      missingItems
+    });
+  });
+
+  results.sort(compareSetupEntriesForAudit);
+
+  return {
+    results,
+    totalScanned: setupEntries.length
+  };
+}
+
+function showMissingEquipmentAuditModal() {
+  try {
+    clearBetterSetupsModalLayoutCleanup();
+    const modalDimensions = getBetterSetupsModalDimensions();
+    const { results, totalScanned } = findSetupsWithMissingEquipment();
+
+    const content = document.createElement('div');
+    content.className = 'better-setups-modal-root';
+    content.style.cssText = 'width:100%;height:100%;min-height:0;flex:1 1 0;display:flex;flex-direction:column;box-sizing:border-box;position:relative;border-radius:8px;overflow:hidden;padding:10px;gap:8px;';
+    content.style.backgroundImage = `url("${MEDIA_URLS.BACKGROUND_DARK}")`;
+    content.style.backgroundSize = 'auto';
+    content.style.backgroundPosition = 'top left';
+    content.style.backgroundRepeat = 'repeat';
+
+    const description = document.createElement('p');
+    description.style.cssText = 'margin:0;color:#fff;font-size:12px;line-height:1.4;';
+    description.textContent = `Scanned ${totalScanned} saved setup${totalScanned === 1 ? '' : 's'}. Found ${results.length} setup${results.length === 1 ? '' : 's'} with missing equipment.`;
+    content.appendChild(description);
+
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:6px;flex:1 1 0;min-height:0;overflow-y:auto;padding-right:2px;';
+
+    if (!results.length) {
+      const emptyState = document.createElement('div');
+      emptyState.style.cssText = 'color:#8fd18f;font-size:12px;padding:8px;border:1px solid rgba(143,209,143,0.35);background:rgba(10,45,10,0.35);border-radius:4px;';
+      emptyState.textContent = 'No missing equipment found in your saved setups.';
+      list.appendChild(emptyState);
+    } else {
+      results.forEach((entry) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(0,0,0,0.28);border-radius:4px;color:#fff;';
+
+        const title = document.createElement('button');
+        title.type = 'button';
+        title.style.cssText = 'font-size:12px;font-weight:700;line-height:1.3;text-align:left;color:#9dd2ff;background:transparent;border:none;padding:0;cursor:pointer;text-decoration:underline;';
+        title.textContent = `${entry.label} (${entry.key})`;
+        title.title = `Navigate to ${entry.mapName}`;
+        title.onclick = () => navigateToSetupMapFromAudit(entry);
+        row.appendChild(title);
+
+        const mapLine = document.createElement('div');
+        mapLine.style.cssText = 'font-size:11px;color:#b8c7d9;line-height:1.3;';
+        mapLine.textContent = `Map: ${entry.mapName}`;
+        row.appendChild(mapLine);
+
+        const missingLine = document.createElement('div');
+        missingLine.style.cssText = 'font-size:11px;color:#ffb3b3;line-height:1.4;';
+        missingLine.textContent = `Missing: ${entry.missingItems.map(formatMissingEquipmentAuditItem).join(', ')}`;
+        row.appendChild(missingLine);
+
+        list.appendChild(row);
+      });
+    }
+
+    content.appendChild(list);
+
+    const modalRef = api.ui.components.createModal({
+      title: 'Setups Missing Equipment',
+      width: modalDimensions.width,
+      height: modalDimensions.height,
+      content,
+      buttons: [
+        {
+          text: t('mods.betterSetups.close'),
+          primary: true
+        }
+      ],
+      onClose: () => {
+        clearBetterSetupsModalLayoutCleanup();
+      }
+    });
+
+    setupBetterSetupsModalResponsiveLayout(modalRef, content);
+  } catch (error) {
+    console.error('[Better Setups] Error showing missing equipment audit modal:', error);
+    showSetupNotification('Failed to scan setups for missing equipment.', 'error');
+  }
 }
 
 function showSettingsModal() {

@@ -148,6 +148,7 @@
   
   // Panel state
   let activeExaltationPanel = null;
+  let activeExaltationModal = null;
   let escKeyListener = null;
   let resizeListener = null;
   let exaltationPanelInProgress = false;
@@ -1984,6 +1985,9 @@
       
       // Stop auto-opening when panel is closed
       stopAutoOpening();
+
+      // Panel is mounted inside modal DOM, so no outside-click override is needed.
+      activeExaltationModal = null;
       
       // Clean up ResizeObserver BEFORE removing the panel
       if (activeExaltationPanel) {
@@ -2060,16 +2064,20 @@
         console.log('[Better Exaltation Chest] Modal click-outside behavior disabled');
       }
       
-      // Add global click interceptor to prevent modal closing when clicking on our panel
+      // Add global outside-interceptor to prevent modal closing when interacting with our panel.
+      // Radix dialogs usually dismiss on pointer/focus outside events, not only click.
       const globalClickInterceptor = (event) => {
         const target = event.target;
         const settingsPanel = document.getElementById('better-exaltation-settings-panel');
         
         // If click is on our settings panel or its children, prevent modal closing
         if (settingsPanel && (target === settingsPanel || settingsPanel.contains(target))) {
+          if (typeof event.stopImmediatePropagation === 'function') {
+            event.stopImmediatePropagation();
+          }
           event.stopPropagation();
           event.preventDefault();
-          console.log('[Better Exaltation Chest] Click on settings panel intercepted');
+          console.log(`[Better Exaltation Chest] ${event.type} on settings panel intercepted`);
           return false;
         }
       };
@@ -2077,8 +2085,34 @@
       // Store reference for cleanup
       modal._globalClickInterceptor = globalClickInterceptor;
       modal._globalClickInterceptorKeys = [
+        addManagedEventListener(document, 'pointerdown', globalClickInterceptor, true),
         addManagedEventListener(document, 'click', globalClickInterceptor, true),
-        addManagedEventListener(document, 'mousedown', globalClickInterceptor, true)
+        addManagedEventListener(document, 'mousedown', globalClickInterceptor, true),
+        addManagedEventListener(document, 'focusin', globalClickInterceptor, true)
+      ];
+
+      // Radix dialogs dispatch cancellable custom outside events on dialog content.
+      // Cancelling these is the most reliable way to keep the modal open when a
+      // detached settings panel is clicked/focused.
+      const radixOutsideInterceptor = (event) => {
+        const settingsPanel = document.getElementById('better-exaltation-settings-panel');
+        const originalTarget = event?.detail?.originalEvent?.target || event.target;
+        if (settingsPanel && originalTarget && (originalTarget === settingsPanel || settingsPanel.contains(originalTarget))) {
+          if (typeof event.stopImmediatePropagation === 'function') {
+            event.stopImmediatePropagation();
+          }
+          event.stopPropagation();
+          event.preventDefault();
+          console.log(`[Better Exaltation Chest] ${event.type} prevented for settings panel interaction`);
+          return false;
+        }
+      };
+
+      modal._radixOutsideInterceptor = radixOutsideInterceptor;
+      modal._radixOutsideInterceptorKeys = [
+        addManagedEventListener(modal, 'pointerdownoutside', radixOutsideInterceptor, true),
+        addManagedEventListener(modal, 'focusoutside', radixOutsideInterceptor, true),
+        addManagedEventListener(modal, 'interactoutside', radixOutsideInterceptor, true)
       ];
       
     } catch (error) {
@@ -2089,6 +2123,18 @@
   // Re-enable modal's click-outside behavior
   function enableModalClickOutside(modal) {
     try {
+      // Remove Radix outside-event interceptor
+      if (modal._radixOutsideInterceptor) {
+        if (modal._radixOutsideInterceptorKeys) {
+          modal._radixOutsideInterceptorKeys.forEach(key => {
+            removeManagedEventListener(key);
+          });
+          delete modal._radixOutsideInterceptorKeys;
+        }
+        delete modal._radixOutsideInterceptor;
+        console.log('[Better Exaltation Chest] Radix outside-event interceptor removed');
+      }
+
       // Remove global click interceptor
       if (modal._globalClickInterceptor) {
         if (modal._globalClickInterceptorKeys) {
@@ -2148,6 +2194,9 @@
       }
       
       console.log('[Better Exaltation Chest] Found exaltation chest modal');
+
+      // Keep reference for panel lifecycle only (outside interception not needed).
+      activeExaltationModal = exaltationModal;
       
       // Insert the settings panel next to the modal
       insertSettingsPanelNextToModal(exaltationModal);
@@ -2181,10 +2230,12 @@
     // Create the settings panel
     const panel = createExaltationSettingsPanel();
     
-    // Position the panel beside or below the modal (appended to body to avoid overflow clipping)
+    // Position the panel relative to the modal so it remains part of dialog DOM tree
     positionPanelInsideModal(panel, modal);
     
-    document.body.appendChild(panel);
+    // IMPORTANT: append inside modal content so clicks are treated as "inside" the dialog.
+    const modalContent = modal.querySelector('.widget-bottom') || modal;
+    modalContent.appendChild(panel);
     activeExaltationPanel = panel;
     console.log('[Better Exaltation Chest] Panel created and activeExaltationPanel set');
     
@@ -2199,59 +2250,46 @@
     setupResizeListener(modal);
   }
   
-  // Position panel with fixed viewport coords — right when it fits, otherwise below
+  // Position panel inside modal but visually next to it
   function positionPanelInsideModal(panel, modal) {
     const modalRect = modal.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    const pad = EXALTATION_PANEL_CONFIG.viewportPadding;
     const { width: targetWidth, height: targetHeight } = getExaltationPanelDimensions();
-    const spaceRight = viewportWidth - modalRect.right - pad;
-    const fitsRight = spaceRight >= EXALTATION_PANEL_CONFIG.minWidth;
+    const modalHeight = Math.max(0, modalRect.height);
+    const panelWidth = Math.min(targetWidth, Math.max(240, viewportWidth - 20));
+    const panelHeight = Math.max(
+      EXALTATION_PANEL_CONFIG.minHeight,
+      Math.min(targetHeight, modalHeight || targetHeight)
+    );
 
-    panel.style.position = 'fixed';
-    panel.style.zIndex = '10001';
+    // Default to placing panel to the right of modal.
+    let viewportLeft = modalRect.right;
+    let viewportTop = modalRect.top;
 
-    let panelWidth;
-    let panelHeight;
-
-    if (fitsRight) {
-      panel.dataset.placement = 'right';
-      panelWidth = Math.min(targetWidth, spaceRight);
-
-      let top = modalRect.top;
-      panelHeight = Math.min(targetHeight, modalRect.height, viewportHeight - pad * 2);
-      if (top + panelHeight > viewportHeight - pad) {
-        top = viewportHeight - panelHeight - pad;
-      }
-      if (top < pad) {
-        top = pad;
-        panelHeight = Math.min(panelHeight, viewportHeight - pad * 2);
-      }
-
-      panel.style.width = `${panelWidth}px`;
-      panel.style.height = `${panelHeight}px`;
-      panel.style.left = `${modalRect.right}px`;
-      panel.style.top = `${top}px`;
-    } else {
-      panel.dataset.placement = 'below';
-      panelWidth = Math.min(targetWidth, viewportWidth - pad * 2);
-
-      let panelLeft = modalRect.left + (modalRect.width - panelWidth) / 2;
-      panelLeft = Math.max(pad, Math.min(panelLeft, viewportWidth - panelWidth - pad));
-
-      const panelTop = modalRect.bottom;
-      const availableHeight = viewportHeight - panelTop - pad;
-      panelHeight = Math.min(
-        targetHeight,
-        Math.max(availableHeight, Math.min(EXALTATION_PANEL_CONFIG.minHeight, availableHeight))
-      );
-
-      panel.style.width = `${panelWidth}px`;
-      panel.style.height = `${panelHeight}px`;
-      panel.style.left = `${panelLeft}px`;
-      panel.style.top = `${panelTop}px`;
+    // If no space on the right, place on the left.
+    if (viewportLeft + panelWidth > viewportWidth - 10) {
+      viewportLeft = modalRect.left - panelWidth;
     }
+
+    // Clamp viewport placement.
+    if (viewportTop + panelHeight > viewportHeight - 10) {
+      viewportTop = viewportHeight - panelHeight - 10;
+    }
+    if (viewportTop < 10) viewportTop = 10;
+    if (viewportLeft < 10) viewportLeft = 10;
+
+    // Convert viewport coords to modal-relative coords.
+    const relativeLeft = viewportLeft - modalRect.left;
+    const relativeTop = viewportTop - modalRect.top;
+
+    panel.style.position = 'absolute';
+    panel.style.zIndex = '10001';
+    panel.dataset.placement = viewportLeft >= modalRect.right ? 'right' : 'left';
+    panel.style.width = `${panelWidth}px`;
+    panel.style.height = `${panelHeight}px`;
+    panel.style.left = `${relativeLeft}px`;
+    panel.style.top = `${relativeTop}px`;
 
     applyExaltationPanelLayout(panel, panelWidth);
     panel.dataset.attachedModal = modal.id || 'exaltation-modal';

@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.3.14",
+      "changes": [
+        {
+          "mod": "Better Setups",
+          "type": "changed",
+          "text": "Settings adds \"Show setups with missing equipment\" audit: opens a popup list of affected saved setups, sorted by region→map order, and clicking an entry navigates to that map. Settings and audit buttons show a Cyclopedia-style warning icon when any setup is missing gear; settings modal height increased to 500px and audit action moved below the new-label row."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "fixed",
+          "text": "Settings panel is mounted inside the Exaltation Chest modal tree again, so clicking controls no longer closes the modal and panel buttons/selects respond normally."
+        }
+      ]
+    },
+    {
       "version": "4.3.13",
       "changes": [
         {
