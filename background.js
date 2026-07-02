@@ -220,7 +220,7 @@ const HARDCODED_DEFAULT_ENABLED_MODS = [
 const HARDCODED_MOD_COUNTS = {
   database: 9,
   official: 11,
-  super: 26,
+  super: 27,
   ot: 4
 };
 
@@ -294,6 +294,24 @@ function buildBundledModEntry(modPath, defaultEnabledMods) {
   };
 }
 
+function getModOrder(modName) {
+  if (modName.startsWith('database/')) return 0;
+  if (modName.startsWith('Official Mods/')) return 1;
+  if (modName.startsWith('Super Mods/')) return 2;
+  if (modName.startsWith('OT Mods/')) return 3;
+  if (modName.startsWith('User Mods/')) return 4;
+  return 5;
+}
+
+function sortLocalModsList(mods) {
+  return [...mods].sort((a, b) => {
+    const orderA = getModOrder(a.name);
+    const orderB = getModOrder(b.name);
+    if (orderA !== orderB) return orderA - orderB;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 async function mergeMissingBundledMods(storedMods) {
   const bundledPaths = await loadBundledModPathsFromRegistry();
   if (!bundledPaths?.length) return storedMods;
@@ -311,7 +329,7 @@ async function mergeMissingBundledMods(storedMods) {
 
   if (!changed) return storedMods;
 
-  const merged = Array.from(byName.values());
+  const merged = sortLocalModsList(Array.from(byName.values()));
   await browserAPI.storage.sync.set({ localMods: merged });
   await browserAPI.storage.local.set({ localMods: merged });
   console.log('[Background] Merged missing bundled mods from mod-registry into storage');
@@ -516,7 +534,7 @@ async function getLocalMods() {
     for (const man of convertedManualMods) {
       byName.set(man.name, man);
     }
-    const result = Array.from(byName.values());
+    const result = sortLocalModsList(Array.from(byName.values()));
     if (ensureWelcomeModAlwaysEnabled(result)) {
       await browserAPI.storage.sync.set({ localMods: result });
       await browserAPI.storage.local.set({ localMods: result });

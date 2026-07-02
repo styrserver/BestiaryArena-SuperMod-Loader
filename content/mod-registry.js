@@ -52,6 +52,7 @@ export const OFFICIAL_MODS = [
 export const SUPER_MODS = [
   'Autoseller.js',
   'Autoscroller.js',
+  'Battle_Helper.js',
   'Better Analytics.js',
   'Better Bestiary.js',
   'Better Boosted Maps.js',

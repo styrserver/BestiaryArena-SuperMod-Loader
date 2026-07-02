@@ -4,8 +4,13 @@
   },
   "notes": [
     {
-      "version": "4.3.14",
+      "version": "4.4.0",
       "changes": [
+        {
+          "mod": "Battle Helper",
+          "type": "added",
+          "text": "Super Mod to test with another player's public arsenal in sandbox: fetch a profile by username, preview monster/equipment counts, then temporarily replace your local monsters and equips with one-click restore from an in-session backup. Automatically switches to sandbox play mode after a successful fetch. Hidden creatures are not imported. Setup Manager–style modal UI; mod bar button cycles colors while an imported arsenal is active."
+        },
         {
           "mod": "Better Setups",
           "type": "changed",
@@ -15,6 +20,11 @@
           "mod": "Better Exaltation Chest",
           "type": "fixed",
           "text": "Settings panel is mounted inside the Exaltation Chest modal tree again, so clicking controls no longer closes the modal and panel buttons/selects respond normally."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Maps tab Floor runs now sort time correctly when floors are equal, even if saved run data mixes string and numeric floor/tick values."
         }
       ]
     },

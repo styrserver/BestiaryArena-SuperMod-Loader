@@ -11913,13 +11913,23 @@ function createStatisticsSection(selectedMap, leaderboardData) {
       // Sort floor data: 1. Floor (descending), 2. FloorTicks (ascending), 3. Date (newest first)
       if (localRuns && localRuns.length > 0) {
         localRuns.sort((a, b) => {
+          // Normalize numeric values before comparison so mixed string/number
+          // values (e.g. "15" vs 15) don't short-circuit tie-breakers.
+          const floorA = Number(a.floor);
+          const floorB = Number(b.floor);
+          const normalizedFloorA = Number.isFinite(floorA) ? floorA : 0;
+          const normalizedFloorB = Number.isFinite(floorB) ? floorB : 0;
           // First priority: Floor (higher is better)
-          if (a.floor !== b.floor) {
-            return (b.floor || 0) - (a.floor || 0);
+          if (normalizedFloorA !== normalizedFloorB) {
+            return normalizedFloorB - normalizedFloorA;
           }
+          const compareTicksA = getCyclopediaRunFloorCompareTicks(a);
+          const compareTicksB = getCyclopediaRunFloorCompareTicks(b);
+          const normalizedTicksA = compareTicksA ?? Infinity;
+          const normalizedTicksB = compareTicksB ?? Infinity;
           // Second priority: FloorTicks (lower is better)
-          if (a.floorTicks !== b.floorTicks) {
-            return (a.floorTicks || Infinity) - (b.floorTicks || Infinity);
+          if (normalizedTicksA !== normalizedTicksB) {
+            return normalizedTicksA - normalizedTicksB;
           }
           // Third priority: Date (newer is better)
           const dateA = a.date || a.timestamp || 0;

@@ -2296,7 +2296,7 @@
         const enemies = getOrderedEnemies();
         const roomId = state.currentRoomId;
         const roomName = roomId ? (globalThis.state?.utils?.ROOM_NAME?.[roomId] || roomId) : null;
-        title.textContent = enemies.length === 0
+        title.textContent = !roomId
             ? t('mods.awakenTracker.noMapLoaded')
             : `${roomName || t('mods.awakenTracker.currentMap')} (${enemies.length})`;
 
@@ -2304,7 +2304,9 @@
         if (enemies.length === 0) {
             const empty = document.createElement('div');
             empty.style.cssText = 'opacity:0.6;font-size:12px;padding:8px;text-align:center;';
-            empty.textContent = t('mods.awakenTracker.enterMap');
+            empty.textContent = roomId
+                ? 'No creature drops on this map.'
+                : t('mods.awakenTracker.enterMap');
             grid.appendChild(empty);
             return;
         }

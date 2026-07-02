@@ -255,7 +255,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 26 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 27 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -265,6 +265,14 @@ Automates summon scroll usage to collect specific creatures:
 - Configurable autoscroll speed with rate-limit protection
 - Real-time tracking of found creatures and scroll usage
 
+#### Autoseller
+Automatically sells or squeezes creatures based on gene thresholds and user settings:
+- Configurable gene thresholds for selling and squeezing
+- Minimum count triggers for batch actions
+- Session widget displaying sold/squeezed counts and rewards
+- Integrated with the mod loader's configuration system
+- Real-time tracking of gold and dust earnings
+
 #### Awaken Tracker
 Tracks per-map awaken gene progress for every enemy creature (by [tinhozin](https://bestiaryarena.com/profile/tinhozin)):
 - Draggable, resizable floating panel showing all enemy creatures on the current map
@@ -273,13 +281,13 @@ Tracks per-map awaken gene progress for every enemy creature (by [tinhozin](http
 - Collapse/expand and drag-to-reorder slots with persistent order per map
 - Optional pause-on-cap: pauses autoplay when all marked creatures reach 20 in every stat
 
-#### Autoseller
-Automatically sells or squeezes creatures based on gene thresholds and user settings:
-- Configurable gene thresholds for selling and squeezing
-- Minimum count triggers for batch actions
-- Session widget displaying sold/squeezed counts and rewards
-- Integrated with the mod loader's configuration system
-- Real-time tracking of gold and dust earnings
+#### Battle Helper
+Import another player's public arsenal for sandbox drag-and-drop testing:
+- Fetch a player profile by username from the public profile API (visible monsters and equipment)
+- Preview monster and equipment counts in the modal before replacing your sandbox arsenal
+- **Replace Arsenal** temporarily swaps your local monsters/equips; **Restore Original Arsenal** reverts from an in-session backup
+- Automatically switches to sandbox play mode after a successful fetch; hidden creatures are not included in imports
+- Mod bar button cycles orange, blue, and purple while an imported arsenal is active
 
 #### Better Analytics
 DPS tracking for the impact analyzer plus a sandbox analytics panel (toolbar **Sandbox** button):
@@ -303,14 +311,6 @@ Automates daily boosted map farming with intelligent coordination:
 - Auto-setup and autoplay integration for seamless execution
 - Configurable settings including stamina refill, faster autoplay, and autoplant
 
-#### Better Exaltation Chest
-Enhances the Exaltation Chest interface with automated opening and intelligent equipment management:
-- Auto-opening functionality with configurable speed and disenchanting settings
-- Equipment filtering by tier, stat requirements, and customizable criteria
-- Automatic disenchanting of unwanted equipment based on user preferences
-- Real-time dust tracking with animated counters and session statistics
-- Equipment statistics tracking (kept, disenchanted, dust gained) with comprehensive settings panel
-
 #### Better Cauldron
 Enhances the native Monstrous Cauldron interface with powerful search and filter functionality:
 - Real-time search through all monsters in your cauldron
@@ -318,6 +318,14 @@ Enhances the native Monstrous Cauldron interface with powerful search and filter
 - Game-styled UI controls that integrate seamlessly with the existing interface
 - Automatic detection and enhancement of the cauldron modal
 - Efficient filtering system for managing large monster collections
+
+#### Better Exaltation Chest
+Enhances the Exaltation Chest interface with automated opening and intelligent equipment management:
+- Auto-opening functionality with configurable speed and disenchanting settings
+- Equipment filtering by tier, stat requirements, and customizable criteria
+- Automatic disenchanting of unwanted equipment based on user preferences
+- Real-time dust tracking with animated counters and session statistics
+- Equipment statistics tracking (kept, disenchanted, dust gained) with comprehensive settings panel
 
 #### Better Forge
 Comprehensive equipment management system with advanced disenchanting capabilities:
@@ -351,14 +359,6 @@ Automates rune recycling with batch processing and comprehensive statistics (by 
 - Batch processing with progress tracking and automatic inventory updates
 - Comprehensive statistics tracking (consumed runes, created runes, gold spent)
 
-#### Better Yasir
-Enhances Yasir's traveling merchant shop with bulk transaction capabilities and smart pricing:
-- Adds quantity input fields for bulk buying and selling items
-- Real-time price calculations and resource availability checks
-- Confirmation prompts with total cost display for safe transactions
-- Automatic inventory and currency updates after purchases
-- Smart handling of different item types (dice manipulators, exaltation chests, stones of insight)
-
 #### Better Setups
 Comprehensive setup label management system for organizing team configurations:
 - Activates and manages setup labels (Farm, Speedrun, Rank Points, Boosted Map, Other)
@@ -374,6 +374,14 @@ Advanced quest automation system that streamlines task completion and management
 - Pauses all automations when tasks are ready to be claimed
 - Smart quest button management with visual tasking indicators
 - Integration with Raid Hunter for seamless automation switching
+
+#### Better Yasir
+Enhances Yasir's traveling merchant shop with bulk transaction capabilities and smart pricing:
+- Adds quantity input fields for bulk buying and selling items
+- Real-time price calculations and resource availability checks
+- Confirmation prompts with total cost display for safe transactions
+- Automatic inventory and currency updates after purchases
+- Smart handling of different item types (dice manipulators, exaltation chests, stones of insight)
 
 #### Cyclopedia
 A comprehensive game data viewer and player profile manager with advanced features:
@@ -483,14 +491,6 @@ Social guild system for creating and managing player communities:
 - Guild browser to search and discover available guilds
 - Transfer leadership and edit guild information with comprehensive settings
 
-#### VIP List
-Player management system for tracking favorite players:
-- Add players to your VIP list via search functionality
-- Display player information including level, status, rank points, and time sum with sortable columns
-- Quick access to player profiles and Cyclopedia from dropdown menu
-- Automatic data refresh when opening the VIP list modal
-- Accessible from the account menu for convenient management
-
 #### Quests
 Comprehensive quest system that enhances the game's quest mechanics and NPC interactions:
 - Enhanced quest tracking and mission management
@@ -498,6 +498,14 @@ Comprehensive quest system that enhances the game's quest mechanics and NPC inte
 - Quest item management and trading system with proper UI integration
 - Firebase integration for mission progress tracking across sessions
 - Interactive quest dialogs with completion tracking
+
+#### VIP List
+Player management system for tracking favorite players:
+- Add players to your VIP list via search functionality
+- Display player information including level, status, rank points, and time sum with sortable columns
+- Quick access to player profiles and Cyclopedia from dropdown menu
+- Automatic data refresh when opening the VIP list modal
+- Accessible from the account menu for convenient management
 
 ### Official Mods
 
