@@ -130,7 +130,7 @@
       "Team Copier": "Share setups as JSON or links; optional seeds for replays; recent history.",
       "Tick Tracker": "Tracks ticks per session (optional ms), with history and copy for speedruns.",
       "Turbo Mode": "Speed up gameplay with customizable multipliers and tick display for testing and grinding.",
-      "Battle Helper": "Fetch another player profile arsenal and temporarily replace your sandbox creatures/equipment with one-click restore.",
+      "Battle Helper": "Fetch another player profile and temporarily replace your sandbox creatures/equipment with one-click restore.",
       "Autoseller": "Sells or squeezes creatures by gene thresholds; session widget for gold, dust, and counts.",
       "Autoscroller": "Automates summon scroll usage to hunt target creatures; tiers, stop conditions, and rate-limited speed.",
       "Better Analytics": "DPS in the impact analyzer plus sandbox panel: units, battle log, filters, and fight speed control.",
@@ -1772,6 +1772,51 @@
       "emptyState": "No quest items yet. Defeat Dragon Lord to obtain them!",
       "errorLoading": "Error loading quest items. Please try again.",
       "productObtained": "{productName} obtained! (+{amount})"
+    },
+    "battleHelper": {
+      "title": "Battle Helper",
+      "close": "Close",
+      "defaultTooltip": "Import another player profile for sandbox drag/drop testing",
+      "importedTooltip": "Using another player's profile — open to restore yours",
+      "unknown": "Unknown",
+      "usernamePlaceholder": "Enter profile name",
+      "hiddenCreaturesNote": "Hidden creatures are not fetched — only publicly visible creatures from the profile are included.",
+      "statusLabel": "Status",
+      "fetchPlayer": "Fetch Player",
+      "replaceProfile": "Replace Profile",
+      "restoreOriginalProfile": "Restore Original Profile",
+      "toast": {
+        "viewingLead": "Viewing ",
+        "viewingNameSuffix": "'s",
+        "viewingTail": " profile"
+      },
+      "output": {
+        "profileLine": "Profile: {name}",
+        "creaturesLine": "Creatures: {count}",
+        "equipmentLine": "Equipment: {count}",
+        "canReplaceProfile": "You can now replace profile.",
+        "switchedToSandbox": "Switched to sandbox mode.",
+        "profileReplaced": "Profile replaced.",
+        "dragDropHint": "You can now drag/drop imported creatures.",
+        "ready": "Ready.",
+        "noProfileFetched": "No profile fetched.",
+        "enterUsernameFirst": "Enter a username first.",
+        "fetchingProfile": "Fetching profile \"{username}\"...",
+        "fetchFailed": "Fetch failed: {error}",
+        "replaceFailed": "Replace failed: {error}",
+        "restoreFailed": "Restore failed: {error}",
+        "originalProfileRestored": "Original profile restored."
+      },
+      "errors": {
+        "playerStateUnavailable": "Player state not available.",
+        "profileRequestFailed": "Profile request failed ({status}).",
+        "profileNotFound": "Profile not found.",
+        "noUsableCreatures": "Profile has no usable creatures.",
+        "noUsableEquipment": "Profile has no usable equipment.",
+        "noBackupAvailable": "No backup available to restore.",
+        "sandboxRequired": "Sandbox mode is required.",
+        "fetchValidProfileFirst": "Fetch a valid profile first."
+      }
     },
     "challenges": {
       "title": "Challenges",

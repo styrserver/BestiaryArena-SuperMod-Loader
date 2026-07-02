@@ -130,7 +130,7 @@
       "Team Copier": "Compartilhe setups em JSON ou links; sementes opcionais para replays; histórico recente.",
       "Tick Tracker": "Conta ticks por sessão (ms opcional), com histórico e cópia para speedruns.",
       "Turbo Mode": "Acelere o jogo com multiplicadores e exibição de ticks para testes e farm.",
-      "Battle Helper": "Busca o arsenal do perfil de outro jogador e substitui temporariamente suas criaturas/equipamentos no sandbox com restauração em um clique.",
+      "Battle Helper": "Busca o perfil de outro jogador e substitui temporariamente suas criaturas/equipamentos no sandbox com restauração em um clique.",
       "Autoseller": "Vende ou espreme criaturas por genes; widget de sessão com ouro, poeira e contadores.",
       "Autoscroller": "Automatiza pergaminhos de invocação para buscar criaturas alvo; tiers, paradas e velocidade limitada.",
       "Better Analytics": "DPS no analisador de impacto mais painel sandbox: unidades, battle log, filtros e controle de velocidade.",
@@ -1771,6 +1771,51 @@
       "emptyState": "Ainda não há itens de missão. Derrote o Dragon Lord para obtê-los!",
       "errorLoading": "Erro ao carregar itens de missão. Tente novamente.",
       "productObtained": "{productName} obtido! (+{amount})"
+    },
+    "battleHelper": {
+      "title": "Battle Helper",
+      "close": "Fechar",
+      "defaultTooltip": "Importa o perfil de outro jogador para testes de arrastar/soltar no sandbox",
+      "importedTooltip": "Usando o perfil de outro jogador — abra para restaurar o seu",
+      "unknown": "Desconhecido",
+      "usernamePlaceholder": "Digite o nome do perfil",
+      "hiddenCreaturesNote": "Criaturas ocultas não são buscadas — apenas criaturas publicamente visíveis do perfil são incluídas.",
+      "statusLabel": "Status",
+      "fetchPlayer": "Buscar jogador",
+      "replaceProfile": "Substituir perfil",
+      "restoreOriginalProfile": "Restaurar perfil original",
+      "toast": {
+        "viewingLead": "Visualizando o perfil de ",
+        "viewingNameSuffix": "",
+        "viewingTail": ""
+      },
+      "output": {
+        "profileLine": "Perfil: {name}",
+        "creaturesLine": "Criaturas: {count}",
+        "equipmentLine": "Equipamentos: {count}",
+        "canReplaceProfile": "Agora você pode substituir o perfil.",
+        "switchedToSandbox": "Modo sandbox ativado.",
+        "profileReplaced": "Perfil substituído.",
+        "dragDropHint": "Agora você pode arrastar/soltar criaturas importadas.",
+        "ready": "Pronto.",
+        "noProfileFetched": "Nenhum perfil buscado.",
+        "enterUsernameFirst": "Digite um nome de usuário primeiro.",
+        "fetchingProfile": "Buscando perfil \"{username}\"...",
+        "fetchFailed": "Falha na busca: {error}",
+        "replaceFailed": "Falha na substituição: {error}",
+        "restoreFailed": "Falha na restauração: {error}",
+        "originalProfileRestored": "Perfil original restaurado."
+      },
+      "errors": {
+        "playerStateUnavailable": "Estado do jogador indisponível.",
+        "profileRequestFailed": "Falha na requisição do perfil ({status}).",
+        "profileNotFound": "Perfil não encontrado.",
+        "noUsableCreatures": "O perfil não tem criaturas utilizáveis.",
+        "noUsableEquipment": "O perfil não tem equipamentos utilizáveis.",
+        "noBackupAvailable": "Nenhum backup disponível para restaurar.",
+        "sandboxRequired": "O modo sandbox é obrigatório.",
+        "fetchValidProfileFirst": "Busque um perfil válido primeiro."
+      }
     },
     "challenges": {
       "title": "Desafios",
