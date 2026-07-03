@@ -893,7 +893,8 @@
       "totalScore": "Total",
       "theoreticalMinimum": "Mínimo teórico",
       "possibleGain": "Ganho possível",
-      "ticksSuffix": "ticks"
+      "ticksSuffix": "ticks",
+      "viewInCyclopedia": "Ver no Cyclopedia"
     },
     "itemTierList": {
       "buttonText": "Tier de Itens",
