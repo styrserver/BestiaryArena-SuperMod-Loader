@@ -4,6 +4,41 @@
   },
   "notes": [
     {
+      "version": "4.4.2",
+      "changes": [
+        {
+          "mod": "Room Hopper",
+          "type": "changed",
+          "text": "Modal keyboard shortcuts: Esc closes, Up/Down moves selection through the filtered map list (highlighted row scrolls into view), Enter teleports to the selected map or the first match when none is selected."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Patch Notes popup header adds left/right arrows to browse previous and next versions without closing the modal."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Removed unused helper paths and redundant mutation scanning, inlined stamina-cost wrappers, and trimmed duplicate cleanup calls to reduce overhead without changing tasking behavior."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Toolbar button now toggles the panel open and closed (matching Awaken Tracker and Better Analytics), instead of only opening it."
+        },
+        {
+          "mod": "Highscores",
+          "type": "added",
+          "text": "Right-click a map card for a View in Cyclopedia context menu (Cyclopedia mod must be enabled); opens the Maps tab on that map and closes the Highscores modal first."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Maps tab no longer shows a squashed layout on first navigation to a map (e.g. from Highscores View in Cyclopedia): stale region leaderboard fetch callbacks are ignored once a map is selected, map home-search navigation waits for the Maps list, and column layout relayouts after map stats render."
+        }
+      ]
+    },
+    {
       "version": "4.4.1",
       "changes": [
         {

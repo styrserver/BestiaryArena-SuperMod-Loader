@@ -361,6 +361,8 @@ function createOpenButton() {
 }
 
 const CREATURES_MIN_VISIBLE = 6;
+const ROW_HOVER_BG = '#3a3a4a';
+const ROW_SELECTED_BG = '#4a4a6a';
 
 function renderCreatureCell(td, creatures) {
     if (!creatures || creatures.length === 0) return;
@@ -502,7 +504,7 @@ function createRegionHeaderRow(regionName, mapCount) {
     return tr;
 }
 
-function renderRows(filteredIndex, tbodyEl, { groupByRegion = false } = {}) {
+function renderRows(filteredIndex, tbodyEl, { groupByRegion = false, selectedRoomId = null } = {}) {
     tbodyEl.innerHTML = '';
     if (filteredIndex.length === 0) {
         const tr = document.createElement('tr');
@@ -532,10 +534,15 @@ function renderRows(filteredIndex, tbodyEl, { groupByRegion = false } = {}) {
         const tr = document.createElement('tr');
         tr.dataset.roomId = room.id;
         const baseBg = rowIdx % 2 === 0 ? '#2a2a2a' : '#1f1f1f';
-        tr.style.cssText = `cursor: pointer; border-bottom: 1px solid #111; background: ${baseBg};`;
+        tr.dataset.baseBg = baseBg;
+        const isSelected = selectedRoomId === room.id;
+        if (isSelected) tr.classList.add('room-hopper-selected');
+        tr.style.cssText = `cursor: pointer; border-bottom: 1px solid #111; background: ${isSelected ? ROW_SELECTED_BG : baseBg};`;
 
-        tr.addEventListener('mouseenter', () => { tr.style.background = '#3a3a4a'; });
-        tr.addEventListener('mouseleave', () => { tr.style.background = baseBg; });
+        tr.addEventListener('mouseenter', () => { tr.style.background = ROW_HOVER_BG; });
+        tr.addEventListener('mouseleave', () => {
+            tr.style.background = tr.classList.contains('room-hopper-selected') ? ROW_SELECTED_BG : tr.dataset.baseBg;
+        });
         tr.addEventListener('click', () => {
             if (boardIsInRun()) {
                 showInlineToast(tbodyEl.closest('div'), 'Finish the current run first');
@@ -804,6 +811,19 @@ function openModal() {
 
     const table = headerTable;
 
+    let selectedRoomId = null;
+    let currentFilteredRooms = roomIndex;
+    let keydownHandler = null;
+
+    const handleModalClose = () => {
+        clearRoomHopperModalLayoutCleanup();
+        if (keydownHandler) {
+            document.removeEventListener('keydown', keydownHandler);
+            keydownHandler = null;
+        }
+        modalEl = null;
+    };
+
     const modalInstance = api.ui.components.createModal({
         title: 'Room Hopper',
         width: modalDimensions.width,
@@ -812,10 +832,7 @@ function openModal() {
         buttons: [
             { text: 'Close', primary: false }
         ],
-        onClose: () => {
-            clearRoomHopperModalLayoutCleanup();
-            modalEl = null;
-        }
+        onClose: handleModalClose
     });
 
     // Keep the modal handle so cleanup/teleport can close it (removes modal + overlay)
@@ -825,6 +842,14 @@ function openModal() {
         modalEl = { close: modalInstance };
     } else {
         modalEl = modalInstance;
+    }
+
+    const originalClose = modalEl?.close?.bind(modalEl);
+    if (originalClose) {
+        modalEl.close = () => {
+            handleModalClose();
+            originalClose();
+        };
     }
 
     setupRoomHopperModalResponsiveLayout(modalInstance, root);
@@ -865,6 +890,85 @@ function openModal() {
 
     const tbody = root.querySelector(`#${MODAL_ID}-tbody`);
 
+    const setSelectedRoom = (roomId) => {
+        selectedRoomId = roomId || null;
+        tbody.querySelectorAll('tr[data-room-id]').forEach(tr => {
+            const selected = tr.dataset.roomId === roomId;
+            tr.classList.toggle('room-hopper-selected', selected);
+            tr.style.background = selected ? ROW_SELECTED_BG : tr.dataset.baseBg;
+        });
+        if (!roomId) return;
+        const escapedId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(roomId) : roomId;
+        const row = tbody.querySelector(`tr[data-room-id="${escapedId}"]`);
+        if (row) {
+            if (tableScroll && typeof tableScroll.scrollTop === 'number') {
+                const rowTop = row.offsetTop;
+                const rowBottom = rowTop + row.offsetHeight;
+                const viewTop = tableScroll.scrollTop;
+                const viewBottom = viewTop + tableScroll.clientHeight;
+                if (rowTop < viewTop) {
+                    tableScroll.scrollTop = rowTop;
+                } else if (rowBottom > viewBottom) {
+                    tableScroll.scrollTop = rowBottom - tableScroll.clientHeight;
+                }
+            } else {
+                row.scrollIntoView({ block: 'nearest' });
+            }
+        }
+    };
+
+    const goToRoom = (roomId) => {
+        if (boardIsInRun()) {
+            showInlineToast(root, 'Finish the current run first');
+            return;
+        }
+        if (teleportToRoom(roomId) && modalEl && typeof modalEl.close === 'function') {
+            modalEl.close();
+        }
+    };
+
+    const moveSelection = (direction) => {
+        const ids = currentFilteredRooms.map(room => room.id);
+        if (ids.length === 0) return;
+        let idx = selectedRoomId ? ids.indexOf(selectedRoomId) : -1;
+        if (direction === 'down') {
+            idx = idx < ids.length - 1 ? idx + 1 : 0;
+        } else {
+            idx = idx > 0 ? idx - 1 : ids.length - 1;
+        }
+        setSelectedRoom(ids[idx]);
+    };
+
+    keydownHandler = (e) => {
+        if (!modalEl) return;
+
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (modalEl && typeof modalEl.close === 'function') {
+                modalEl.close();
+            }
+            return;
+        }
+
+        if (e.target === regionSelect) return;
+
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            moveSelection(e.key === 'ArrowDown' ? 'down' : 'up');
+            return;
+        }
+
+        if (e.key === 'Enter') {
+            if (e.target.tagName === 'BUTTON') return;
+            const targetId = selectedRoomId || currentFilteredRooms[0]?.id;
+            if (!targetId) return;
+            e.preventDefault();
+            goToRoom(targetId);
+        }
+    };
+    document.addEventListener('keydown', keydownHandler);
+
     renderRows(roomIndex, tbody, { groupByRegion: true });
 
     let searchDebounceTimer = null;
@@ -901,8 +1005,13 @@ function openModal() {
                 return ((va ?? 0) - (vb ?? 0)) * mul;
             });
         }
+        currentFilteredRooms = filtered;
+        if (selectedRoomId && !filtered.some(room => room.id === selectedRoomId)) {
+            selectedRoomId = null;
+        }
         renderRows(filtered, tbody, {
-            groupByRegion: sortKey === null
+            groupByRegion: sortKey === null,
+            selectedRoomId
         });
     };
 

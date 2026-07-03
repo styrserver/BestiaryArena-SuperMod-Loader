@@ -959,7 +959,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     return 0;
   }
 
-  async function renderPatchNotes(currentVersion) {
+  function getSortedPatchNoteVersions() {
+    return [...new Set(PATCH_NOTES.map(note => note.version).filter(Boolean))]
+      .sort((a, b) => compareVersions(b, a));
+  }
+
+  function updatePatchNotesVersionNavigationUI(versions, activeIndex) {
+    const versionLabel = document.getElementById('patch-notes-version-label');
+    const prevButton = document.getElementById('patch-notes-prev');
+    const nextButton = document.getElementById('patch-notes-next');
+    if (!versionLabel || !prevButton || !nextButton) return;
+
+    const versionText = getTranslationSync('popup.version', 'Version');
+    const activeVersion = versions[activeIndex];
+    versionLabel.textContent = activeVersion ? `${versionText} ${activeVersion}` : `${versionText} -`;
+    prevButton.disabled = activeIndex >= versions.length - 1;
+    nextButton.disabled = activeIndex <= 0;
+  }
+
+  let patchNoteVersions = [];
+  let currentPatchNotesVersionIndex = 0;
+
+  async function renderPatchNotes(currentVersion, requestedVersion = null) {
     const patchNotesContainer = document.getElementById('patch-notes');
     const patchNotesContent = document.getElementById('patch-notes-content');
     
@@ -970,10 +991,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       await loadPatchNotes();
     }
 
-    // Get patch notes for current version only
-    const relevantNotes = PATCH_NOTES.filter(note => 
-      note.version === currentVersion
-    );
+    patchNoteVersions = getSortedPatchNoteVersions();
+    if (patchNoteVersions.length === 0) {
+      updatePatchNotesVersionNavigationUI([], 0);
+      setPatchNotesVisible(patchNotesContainer, false);
+      return;
+    }
+
+    const defaultVersion = patchNoteVersions.includes(currentVersion)
+      ? currentVersion
+      : patchNoteVersions[0];
+    const activeVersion = requestedVersion && patchNoteVersions.includes(requestedVersion)
+      ? requestedVersion
+      : defaultVersion;
+    currentPatchNotesVersionIndex = Math.max(0, patchNoteVersions.indexOf(activeVersion));
+    updatePatchNotesVersionNavigationUI(patchNoteVersions, currentPatchNotesVersionIndex);
+
+    // Get patch notes for selected version only
+    const relevantNotes = PATCH_NOTES.filter(note => note.version === activeVersion);
 
     if (relevantNotes.length === 0) {
       setPatchNotesVisible(patchNotesContainer, false);
@@ -1044,6 +1079,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     });
 
+  }
+
+  async function navigatePatchNotesVersion(delta) {
+    if (!patchNoteVersions.length) return;
+    const targetIndex = currentPatchNotesVersionIndex + delta;
+    if (targetIndex < 0 || targetIndex >= patchNoteVersions.length) return;
+    currentPatchNotesVersionIndex = targetIndex;
+    const currentVersion = await updateVersionDisplay();
+    await renderPatchNotes(currentVersion || patchNoteVersions[0], patchNoteVersions[currentPatchNotesVersionIndex]);
   }
 
   async function checkAndShowPatchNotes() {
@@ -1260,6 +1304,20 @@ document.addEventListener('DOMContentLoaded', async () => {
           patchNotesContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
       }
+    });
+  }
+
+  const patchNotesPrevBtn = document.getElementById('patch-notes-prev');
+  if (patchNotesPrevBtn) {
+    patchNotesPrevBtn.addEventListener('click', async () => {
+      await navigatePatchNotesVersion(1);
+    });
+  }
+
+  const patchNotesNextBtn = document.getElementById('patch-notes-next');
+  if (patchNotesNextBtn) {
+    patchNotesNextBtn.addEventListener('click', async () => {
+      await navigatePatchNotesVersion(-1);
     });
   }
 

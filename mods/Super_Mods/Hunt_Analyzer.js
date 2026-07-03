@@ -2708,7 +2708,7 @@ function saveHuntAnalyzerState() {
         isMinimized: HuntAnalyzerState.ui.isMinimized,
         displayMode: HuntAnalyzerState.ui.displayMode,
         selectedMapFilter: HuntAnalyzerState.ui.selectedMapFilter,
-        closedManually: false
+        closedManually: HuntAnalyzerState.ui.closedManually === true
     };
     
     return saveToStorage(HUNT_ANALYZER_STATE_KEY, stateToSave);
@@ -2722,6 +2722,7 @@ function loadHuntAnalyzerState() {
         HuntAnalyzerState.ui.isMinimized = parsedState.isMinimized || false;
         HuntAnalyzerState.ui.displayMode = parsedState.displayMode || 'vertical';
         HuntAnalyzerState.ui.selectedMapFilter = parsedState.selectedMapFilter || "ALL";
+        HuntAnalyzerState.ui.closedManually = parsedState.closedManually === true;
         return parsedState;
     }
     return null;
@@ -5685,8 +5686,10 @@ function handleMinimizeButtonClick(panel, styleButton, minimizeBtn) {
     savePanelSettings(panel);
 }
 
-// Handles the close button click
-function handleCloseButtonClick(panel) {
+function closeHuntAnalyzerPanel() {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) return;
+
     // Save panel settings before closing
     savePanelSettings(panel);
     
@@ -5722,8 +5725,27 @@ function handleCloseButtonClick(panel) {
     }
     // Remove resize listener
     window.removeEventListener('resize', updatePanelPosition);
-    // Remove the panel
+
+    HuntAnalyzerState.ui.isOpen = false;
+    HuntAnalyzerState.ui.closedManually = true;
+    if (HuntAnalyzerState.settings.persistData) {
+        saveHuntAnalyzerState();
+    }
+
     panel.remove();
+}
+
+// Handles the close button click
+function handleCloseButtonClick(panel) {
+    closeHuntAnalyzerPanel();
+}
+
+function toggleHuntAnalyzerPanel() {
+    if (document.getElementById(PANEL_ID)) {
+        closeHuntAnalyzerPanel();
+    } else {
+        createAutoplayAnalyzerPanel();
+    }
 }
 
 // Handles panel resize mouse move
@@ -7513,9 +7535,7 @@ function createHuntAnalyzerButton() {
             text: t('mods.huntAnalyzer.buttonText'),
             tooltip: t('mods.huntAnalyzer.buttonTooltip'),
             primary: false,
-            onClick: () => {
-                createAutoplayAnalyzerPanel();
-            }
+            onClick: toggleHuntAnalyzerPanel
         });
     }
 }

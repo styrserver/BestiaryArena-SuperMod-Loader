@@ -72,6 +72,8 @@ let ROOM_NAMES;
 let activeHighscoresModal = null;
 let highscoresModalLayoutCleanup = null;
 let highscoresModalTabsCleanup = null;
+let highscoresOpenContextMenu = null;
+let highscoresCyclopediaNavigatePollId = null;
 
 // =======================
 // 3. Modal Layout & Shell
@@ -138,6 +140,11 @@ function clearHighscoresModalTabsCleanup() {
 }
 
 function clearHighscoresModalCleanup() {
+  closeHighscoresMapContextMenu();
+  if (highscoresCyclopediaNavigatePollId) {
+    clearTimeout(highscoresCyclopediaNavigatePollId);
+    highscoresCyclopediaNavigatePollId = null;
+  }
   clearHighscoresModalTabsCleanup();
   clearHighscoresModalLayoutCleanup();
 }
@@ -807,6 +814,187 @@ function getMapRegionSearchLabel(code) {
   return '';
 }
 
+function getMapRegionId(code) {
+  try {
+    const regions = globalThis.state?.utils?.REGIONS;
+    if (!Array.isArray(regions)) return '';
+    for (const region of regions) {
+      if (!Array.isArray(region?.rooms)) continue;
+      if (region.rooms.some((room) => room?.id === code)) {
+        return region.id || '';
+      }
+    }
+  } catch (_) { /* ignore */ }
+  return '';
+}
+
+function isCyclopediaModEnabled() {
+  return typeof window.__cyclopediaOpen === 'function'
+    || typeof window.Cyclopedia?.show === 'function'
+    || !!document.querySelector('.cyclopedia-header-btn');
+}
+
+function getViewInCyclopediaLabel() {
+  const localized = t('mods.highscore.viewInCyclopedia');
+  return localized === 'mods.highscore.viewInCyclopedia' ? 'View in Cyclopedia' : localized;
+}
+
+function buildCyclopediaMapNavigateTarget(code, name) {
+  return {
+    type: 'map',
+    regionId: getMapRegionId(code),
+    regionName: getMapRegionSearchLabel(code),
+    mapId: code,
+    mapName: name || globalThis.state?.utils?.ROOM_NAME?.[code] || code
+  };
+}
+
+function navigateToMapInCyclopedia(code, name) {
+  if (!isCyclopediaModEnabled()) return false;
+
+  const target = buildCyclopediaMapNavigateTarget(code, name);
+  const tryNavigate = () => {
+    if (typeof window.cyclopediaHomeSearchNavigate !== 'function') return false;
+    window.cyclopediaHomeSearchNavigate(target);
+    return true;
+  };
+
+  if (tryNavigate()) return true;
+
+  if (highscoresCyclopediaNavigatePollId) {
+    clearTimeout(highscoresCyclopediaNavigatePollId);
+    highscoresCyclopediaNavigatePollId = null;
+  }
+
+  try {
+    if (typeof window.__cyclopediaOpen === 'function') {
+      window.__cyclopediaOpen({ fromHomeSearch: true, force: true });
+    } else if (typeof window.Cyclopedia?.show === 'function') {
+      window.Cyclopedia.show({ fromHomeSearch: true, force: true });
+    } else {
+      const cyclopediaButton = document.querySelector('.cyclopedia-header-btn');
+      if (!cyclopediaButton) return false;
+      cyclopediaButton.click();
+    }
+  } catch {
+    return false;
+  }
+
+  const startedAt = Date.now();
+  const poll = () => {
+    highscoresCyclopediaNavigatePollId = null;
+    if (tryNavigate()) return;
+    if (Date.now() - startedAt > 5000) return;
+    highscoresCyclopediaNavigatePollId = setTimeout(poll, 50);
+  };
+  highscoresCyclopediaNavigatePollId = setTimeout(poll, 50);
+  return true;
+}
+
+function closeHighscoresMapContextMenu() {
+  if (highscoresOpenContextMenu?.closeMenu) {
+    highscoresOpenContextMenu.closeMenu();
+  }
+}
+
+function createHighscoresMapContextMenu(x, y, code, name) {
+  closeHighscoresMapContextMenu();
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:10000000;background:transparent;pointer-events:auto;cursor:default;';
+
+  const menu = document.createElement('div');
+  menu.style.cssText = `
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 10000001;
+    min-width: 180px;
+    background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+    border: 4px solid transparent;
+    border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
+    border-radius: 6px;
+    padding: 10px 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  `;
+
+  const viewBtn = document.createElement('button');
+  viewBtn.className = 'pixel-font-14';
+  viewBtn.textContent = getViewInCyclopediaLabel();
+  viewBtn.style.cssText = 'display:block;width:100%;padding:8px 12px;text-align:center;background:#1a1a1a;color:#e5c07b;border:1px solid #555;border-radius:3px;cursor:pointer;font-size:13px;font-weight:bold;box-sizing:border-box;';
+  viewBtn.addEventListener('mouseenter', () => {
+    viewBtn.style.backgroundColor = '#2a2a2a';
+    viewBtn.style.borderColor = '#e5c07b';
+  });
+  viewBtn.addEventListener('mouseleave', () => {
+    viewBtn.style.backgroundColor = '#1a1a1a';
+    viewBtn.style.borderColor = '#555';
+  });
+
+  const documentClickHandler = (e) => {
+    if (!menu.contains(e.target)) closeMenu();
+  };
+
+  function closeMenu() {
+    overlay.removeEventListener('mousedown', overlayClickHandler);
+    overlay.removeEventListener('click', overlayClickHandler);
+    document.removeEventListener('keydown', escHandler);
+    document.removeEventListener('mousedown', documentClickHandler, true);
+    menu.remove();
+    overlay.remove();
+    if (highscoresOpenContextMenu?.overlay === overlay || highscoresOpenContextMenu?.menu === menu) {
+      highscoresOpenContextMenu = null;
+    }
+  }
+
+  viewBtn.addEventListener('click', () => {
+    closeMenu();
+    closeHighscoresModal();
+    navigateToMapInCyclopedia(code, name);
+  });
+
+  const overlayClickHandler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMenu();
+  };
+  const escHandler = (e) => {
+    if (e.key === 'Escape') closeMenu();
+  };
+
+  menu.appendChild(viewBtn);
+  document.body.appendChild(overlay);
+  document.body.appendChild(menu);
+
+  const padding = 8;
+  const menuRect = menu.getBoundingClientRect();
+  const left = Math.max(padding, Math.min(x, window.innerWidth - menuRect.width - padding));
+  const top = Math.max(padding, Math.min(y, window.innerHeight - menuRect.height - padding));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+
+  overlay.addEventListener('mousedown', overlayClickHandler);
+  overlay.addEventListener('click', overlayClickHandler);
+  document.addEventListener('keydown', escHandler);
+  document.addEventListener('mousedown', documentClickHandler, true);
+  menu.addEventListener('mousedown', (e) => e.stopPropagation());
+  menu.addEventListener('click', (e) => e.stopPropagation());
+
+  highscoresOpenContextMenu = { overlay, menu, closeMenu };
+}
+
+function attachMapCardContextMenu(itemEl, code, name) {
+  if (!isCyclopediaModEnabled() || !itemEl || !code) return;
+
+  const handler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    createHighscoresMapContextMenu(e.clientX, e.clientY, code, name);
+  };
+  itemEl.addEventListener('contextmenu', handler);
+  itemEl._highscoresContextMenuHandler = handler;
+}
+
 function getMapTypeSearchMeta(code) {
   return isMapRaid(code) ? 'raid raids' : '';
 }
@@ -842,6 +1030,7 @@ function tagImprovementListItem(itemEl, { code, name, hasPersonalData } = {}) {
   }
   itemEl.dataset.searchText = buildMapNameSearchText(code, name);
   decorateImprovementMapName(itemEl, code);
+  attachMapCardContextMenu(itemEl, code, name);
   return itemEl;
 }
 

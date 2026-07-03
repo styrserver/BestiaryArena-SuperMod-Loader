@@ -126,6 +126,43 @@ header {
   margin: 0;
 }
 
+.patch-notes-version-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.patch-notes-version-label {
+  min-width: 92px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--theme-text, #e6d7b0);
+  font-weight: 700;
+}
+
+.patch-notes-nav-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--theme-border, #555);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--theme-text, #e6d7b0);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 14px;
+}
+
+.patch-notes-nav-btn:hover:not(:disabled) {
+  border-color: var(--theme-accent, #ffe066);
+  color: var(--theme-accent, #ffe066);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.patch-notes-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .patch-notes-close {
   background: transparent;
   border: none;

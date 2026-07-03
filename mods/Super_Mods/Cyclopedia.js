@@ -7238,7 +7238,7 @@ function cyclopediaNavigateFromHome(target, { setActiveTab, tabPages }) {
       const clickMapTimeout = setTimeout(() => {
         const mapsBox = cyclopediaFindBoxByTitle(mapsTab, 'Maps') || mapsTab;
         cyclopediaClickListItem(mapsBox, target.mapName);
-      }, 0);
+      }, 50);
       TimerManager.addTimeout(clickMapTimeout, 'homeSearchMapSelect');
       return ok;
     }
@@ -14516,23 +14516,35 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
             updateRightCol();
           };
 
+          const regionViewCategory = selectedCategory;
+          const isRegionViewStillActive = () =>
+            selectedCategory === regionViewCategory && !selectedMap;
+
           fetchMapsLeaderboardData().then((bundle) => {
             MapsTabDOMOptimizer.leaderboardBundle = bundle;
+            if (!isRegionViewStillActive()) return;
+            const regionCol2 = col2.querySelector('.maps-content-area');
+            const regionCol3 = col3.querySelector('.maps-content-area');
+            if (!regionCol2 || !regionCol3) return;
             const regionMapsDiv = createRegionMapsSection(
               mapsInRegion, selectedCategory, onRegionMapSelect, bundle
             );
-            col3Content.appendChild(regionMapsDiv);
+            regionCol3.appendChild(regionMapsDiv);
 
             const statsContainer = createRegionStatisticsSection(
               selectedCategory, mapsInRegion, bundle
             );
-            col2Content.appendChild(statsContainer);
+            regionCol2.appendChild(statsContainer);
           }).catch((error) => {
             console.error('[Cyclopedia] Error fetching region leaderboard bundle:', error);
-            col3Content.appendChild(
+            if (!isRegionViewStillActive()) return;
+            const regionCol2 = col2.querySelector('.maps-content-area');
+            const regionCol3 = col3.querySelector('.maps-content-area');
+            if (!regionCol2 || !regionCol3) return;
+            regionCol3.appendChild(
               createRegionMapsSection(mapsInRegion, selectedCategory, onRegionMapSelect, null)
             );
-            col2Content.appendChild(
+            regionCol2.appendChild(
               createRegionStatisticsSection(selectedCategory, mapsInRegion, null)
             );
           });
@@ -14600,6 +14612,9 @@ function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventor
         col3Content.appendChild(statsContainer);
         
         // Tables are populated automatically when createStatisticsSection is called
+        requestAnimationFrame(() => {
+          rightCol._relayoutStackableColumns?.();
+        });
       } else {
         // No map selected - show placeholder messages
         const col2Msg = document.createElement('div');
