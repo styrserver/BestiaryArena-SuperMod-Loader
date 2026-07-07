@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.4.3",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "added",
+          "text": "Tibia Ball League (wcfield) Event Competition: join to submit floor PBs to Firebase (floors 1–14; floors 0 and 15 use game highscores). Floor bar tracks the selected ascension floor; modal shows every floor (you vs leader), raid timer, participants, 500 Beast Coins prize, and top-player standings with a 9600-tick penalty per missing floor in tiebreakers. Locked floors are greyscaled and not clickable; PBs show a toast and refresh the floor bar. Cached bundled Firebase reads and full en-US/pt-BR translations."
+        },
+        {
+          "mod": "Better Exaltation Chest",
+          "type": "changed",
+          "text": "Equipment setup dropdown excludes Grey Tome and Rainbow Shield (not obtainable from exaltation chests); equipment-lua-export EXALTATION_CHEST_EXCLUDED kept in sync."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "changed",
+          "text": "Football Elemental added to EVENT_CREATURES (World Cup event creature excluded from awakening, Autoscroller/Autoseller pickers, and shiny progress)."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Bag Outfits progress max updated to 201."
+        },
+        {
+          "mod": "equipment-database.js",
+          "type": "changed",
+          "text": "Grey Tome added to EVENT_EQUIPMENT so BIS Equipments max stays 141 (World Cup event alternate of Spellbook of Ancient Arcana; Rainbow Shield still counts)."
+        },
+        {
+          "mod": "Highscores",
+          "type": "changed",
+          "text": "Floor tab sorts by floor gain first; when floor is tied, same-floor tick improvement is highest first."
+        },
+        {
+          "mod": "Stamina Optimizer",
+          "type": "changed",
+          "text": "Specific Map picker excludes raid and dynamic event maps via maps-database."
+        }
+      ]
+    },
+    {
       "version": "4.4.2",
       "changes": [
         {

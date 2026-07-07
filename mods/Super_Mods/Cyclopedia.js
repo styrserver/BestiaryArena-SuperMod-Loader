@@ -411,7 +411,7 @@ const CYCLOPEDIA_SETTINGS = {
     perfectCreatures: 75,
     bisEquipments: 126,
     exploredMaps: 73,
-    bagOutfits: 202,
+    bagOutfits: 201,
     raids: 16
   }
 };

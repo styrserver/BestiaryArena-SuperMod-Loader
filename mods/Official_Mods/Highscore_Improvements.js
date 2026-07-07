@@ -1869,7 +1869,10 @@ async function showImprovementsModal() {
         isUnlocked
       }];
     }),
-      (a, b) => (a.yourFloor ?? -1) - (b.yourFloor ?? -1)
+      (a, b) => {
+        if (b.floorDiff !== a.floorDiff) return b.floorDiff - a.floorDiff;
+        return b.tickDiff - a.tickDiff;
+      }
     );
     
     console.log('[Highscores][Floor Debug] Final floor opportunities:', floorOpportunities.length);

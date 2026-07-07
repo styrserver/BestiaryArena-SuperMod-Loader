@@ -27,11 +27,17 @@
     showFloor: true
   };
 
-  const t = (key) => {
+  const t = (key, params) => {
+    let value = key;
     if (typeof context !== 'undefined' && context.api && context.api.i18n && context.api.i18n.t) {
-      return context.api.i18n.t(key);
+      value = context.api.i18n.t(key);
     }
-    return key;
+    if (params && typeof value === 'string') {
+      Object.entries(params).forEach(([paramKey, paramValue]) => {
+        value = value.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), String(paramValue));
+      });
+    }
+    return value;
   };
 
   function normalizeSettings(settings) {
@@ -771,6 +777,2380 @@
   };
 
 // =======================
+// MODULE 1b: Tibia Ball League (wcfield) floor-ticks community leaderboard
+// =======================
+  const TBL_ROOM_ID = 'wcfield';
+  const TBL_FIREBASE_BASE = 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app/events';
+  // Leaderboard: /events/scores/{floor}/{playerHash} — name, ticks, date, updatedAt (lean)
+  // Replays (admin): /events/replays/{floor}/{playerHash} — replay ($replay string) + metadata
+  // Participants: /events/participants/{playerHash} — name, joinedAt, highscoreFloorTicks {0, 15} for tiebreaker
+  const TBL_JOIN_STORAGE_KEY = 'better-highscores-tbl-joined';
+  const TBL_LEADERBOARD_TOP = 10;
+  const TBL_MIN_FLOOR = 0;
+  const TBL_MAX_FLOOR = 15;
+  const TBL_FIREBASE_FLOOR_MIN = 1;
+  const TBL_FIREBASE_FLOOR_MAX = 14;
+  const TBL_HIGHSCORE_FLOORS = new Set([0, 15]);
+  const TBL_MISSING_FLOOR_TICKS = 9600;
+  const TBL_EVENT_TIMER_INTERVAL_MS = 1000;
+  const TBL_EVENT_PRIZE_BEAST_COINS = 500;
+  const TBL_SUBMIT_MIN_INTERVAL_MS = 2000;
+  const TBL_FETCH_CACHE_TTL_MS = 60000;
+  const TBL_FETCH_MIN_INTERVAL_MS = 15000;
+  const TBL_JOIN_STATE_CACHE_TTL_MS = 120000;
+  const TBL_PARTICIPANTS_CACHE_TTL_MS = 60000;
+  const TBL_PARTICIPANT_SYNC_MIN_INTERVAL_MS = 60000;
+  const TBL_PARTICIPANTS_PATH = `${TBL_FIREBASE_BASE}/participants`;
+  const TBL_SCORES_PATH = `${TBL_FIREBASE_BASE}/scores`;
+
+  const TBL_MODAL_ID = 'better-highscores-tbl-modal';
+  const TBL_STYLES_ID = 'better-highscores-tbl-styles';
+  const TBL_MODAL_WIDTH = 550;
+  const TBL_MODAL_HEIGHT = 550;
+  const TBL_MODAL_VIEWPORT_PADDING = 16;
+  const TBL_MODAL_MIN_WIDTH = 280;
+  const TBL_MODAL_MIN_HEIGHT = 320;
+  const TBL_TOAST_DURATION_MS = 10000;
+  const TBL_TOAST_CONTAINER_ID = 'better-highscores-tbl-toast-container';
+
+  const TblFloorLeagueState = {
+    joined: false,
+    joinChecked: false,
+    joinedAt: 0,
+    playerHash: null,
+    modalRef: null,
+    layoutCleanup: null,
+    lastSubmitAt: 0,
+    lastProcessedSeed: null,
+    myEventScores: {},
+    boardUnsubscribe: null,
+    fetchRestore: null,
+    runTrackerTrigger: null,
+    eventTimerInterval: null,
+    raidsUnsubscribe: null,
+    eventNextCheckEndTime: null,
+    floorBarRows: null,
+    floorBarCacheAt: 0,
+    lastBarFloor: null,
+    trackedBattleSetup: null,
+    playerTotalTicks: null,
+    participantCount: 0,
+    fetchCache: new Map(),
+    fetchInFlight: new Map(),
+    fullLoadInFlight: null,
+    lastFullLoadAt: 0,
+    lastParticipantSyncAt: 0,
+    joinStateCachedAt: 0
+  };
+
+  const TblFirebase = {
+    get(path, defaultReturn = null) {
+      return fetch(`${path}.json`).then((r) => {
+        if (!r.ok) return r.status === 404 ? defaultReturn : Promise.reject(new Error(`GET ${r.status}`));
+        return r.json();
+      }).catch((err) => {
+        console.warn('[Better Highscores][TBL] Firebase GET error:', err);
+        return defaultReturn;
+      });
+    },
+    put(path, data) {
+      return fetch(`${path}.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      }).then((r) => {
+        if (!r.ok) return Promise.reject(new Error(`PUT ${r.status}`));
+        return r.json();
+      });
+    }
+  };
+
+  function tblFirebaseGetCached(path, options = {}) {
+    const {
+      ttl = TBL_FETCH_CACHE_TTL_MS,
+      defaultReturn = null,
+      force = false
+    } = options;
+    const now = Date.now();
+
+    if (!force) {
+      const cached = TblFloorLeagueState.fetchCache.get(path);
+      if (cached && now - cached.at < ttl) {
+        return Promise.resolve(cached.data);
+      }
+      const inFlight = TblFloorLeagueState.fetchInFlight.get(path);
+      if (inFlight) {
+        return inFlight;
+      }
+    }
+
+    const request = TblFirebase.get(path, defaultReturn)
+      .then((data) => {
+        TblFloorLeagueState.fetchCache.set(path, { data, at: Date.now() });
+        return data;
+      })
+      .finally(() => {
+        TblFloorLeagueState.fetchInFlight.delete(path);
+      });
+
+    TblFloorLeagueState.fetchInFlight.set(path, request);
+    return request;
+  }
+
+  function invalidateTblFetchCache(paths) {
+    if (!paths) {
+      TblFloorLeagueState.fetchCache.clear();
+      invalidateTblFloorBarCache();
+      return;
+    }
+    const pathList = Array.isArray(paths) ? paths : [paths];
+    pathList.forEach((path) => {
+      TblFloorLeagueState.fetchCache.delete(path);
+    });
+    invalidateTblFloorBarCache();
+  }
+
+  function buildTblParticipantHighscoreMap(participants) {
+    const map = new Map();
+    if (!participants || typeof participants !== 'object') {
+      return map;
+    }
+    Object.values(participants).forEach((participant) => {
+      if (!participant?.name) {
+        return;
+      }
+      const highscores = { 0: null, 15: null };
+      const stored = participant.highscoreFloorTicks;
+      if (stored && typeof stored === 'object') {
+        if (Number.isFinite(Number(stored[0]))) {
+          highscores[0] = Number(stored[0]);
+        }
+        if (Number.isFinite(Number(stored[15]))) {
+          highscores[15] = Number(stored[15]);
+        }
+      }
+      map.set(participant.name, highscores);
+    });
+    return map;
+  }
+
+  async function loadTblParticipantsBundle(force = false) {
+    const participants = await tblFirebaseGetCached(TBL_PARTICIPANTS_PATH, {
+      ttl: TBL_PARTICIPANTS_CACHE_TTL_MS,
+      defaultReturn: {},
+      force
+    });
+    const count = !participants || typeof participants !== 'object'
+      ? 0
+      : Object.values(participants).filter((entry) => entry && entry.name).length;
+    return {
+      participants: participants && typeof participants === 'object' ? participants : {},
+      count,
+      highscoreMap: buildTblParticipantHighscoreMap(participants)
+    };
+  }
+
+  function tblScoresPath(floor) {
+    return `${TBL_SCORES_PATH}/${floor}`;
+  }
+
+  function isTblMapActive(mapCode = getCurrentMapCode()) {
+    return mapCode === TBL_ROOM_ID;
+  }
+
+  function getTblPlayerName() {
+    const snapshot = getPlayerSnapshot();
+    return snapshot?.context?.name || snapshot?.context?.playerName || null;
+  }
+
+  async function hashTblPlayerName(username) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(String(username).toLowerCase());
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function getTblPlayerHash() {
+    if (TblFloorLeagueState.playerHash) {
+      return TblFloorLeagueState.playerHash;
+    }
+    const name = getTblPlayerName();
+    if (!name) {
+      return null;
+    }
+    TblFloorLeagueState.playerHash = await hashTblPlayerName(name);
+    return TblFloorLeagueState.playerHash;
+  }
+
+  function readTblJoinedLocal() {
+    try {
+      return localStorage.getItem(TBL_JOIN_STORAGE_KEY) === '1';
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function writeTblJoinedLocal(joined) {
+    try {
+      if (joined) {
+        localStorage.setItem(TBL_JOIN_STORAGE_KEY, '1');
+      } else {
+        localStorage.removeItem(TBL_JOIN_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.warn('[Better Highscores][TBL] Could not persist join state:', error);
+    }
+  }
+
+  async function refreshTblJoinState(force = false) {
+    const name = getTblPlayerName();
+    if (!name) {
+      TblFloorLeagueState.joined = false;
+      TblFloorLeagueState.joinChecked = true;
+      return false;
+    }
+    const hash = await getTblPlayerHash();
+    if (!hash) {
+      TblFloorLeagueState.joined = false;
+      TblFloorLeagueState.joinChecked = true;
+      return false;
+    }
+
+    const now = Date.now();
+    if (
+      !force &&
+      TblFloorLeagueState.joinChecked &&
+      now - TblFloorLeagueState.joinStateCachedAt < TBL_JOIN_STATE_CACHE_TTL_MS
+    ) {
+      return TblFloorLeagueState.joined;
+    }
+
+    const participantPath = `${TBL_PARTICIPANTS_PATH}/${hash}`;
+    const remote = await tblFirebaseGetCached(participantPath, {
+      ttl: TBL_JOIN_STATE_CACHE_TTL_MS,
+      defaultReturn: null,
+      force
+    });
+    const joined = Boolean(remote && remote.name);
+    TblFloorLeagueState.joined = joined;
+    TblFloorLeagueState.joinedAt = joined ? (Number(remote.joinedAt) || 0) : 0;
+    TblFloorLeagueState.joinChecked = true;
+    TblFloorLeagueState.joinStateCachedAt = now;
+    writeTblJoinedLocal(joined);
+    return joined;
+  }
+
+  async function joinTblFloorLeague() {
+    const name = getTblPlayerName();
+    if (!name) {
+      console.warn('[Better Highscores][TBL] Cannot join without player name');
+      return false;
+    }
+    const hash = await getTblPlayerHash();
+    if (!hash) {
+      return false;
+    }
+    const joinedAt = Date.now();
+    await TblFirebase.put(
+      `${TBL_PARTICIPANTS_PATH}/${hash}`,
+      buildTblParticipantRecord(null, name, joinedAt)
+    );
+    invalidateTblFetchCache(TBL_PARTICIPANTS_PATH);
+    invalidateTblFetchCache(`${TBL_PARTICIPANTS_PATH}/${hash}`);
+    TblFloorLeagueState.joined = true;
+    TblFloorLeagueState.joinedAt = joinedAt;
+    TblFloorLeagueState.joinChecked = true;
+    writeTblJoinedLocal(true);
+    invalidateTblFloorBarCache();
+    refreshTblFloorBarSection().catch(() => {});
+    await refreshTblFloorLeagueModalIfOpen();
+    updateLeaderboards();
+    return true;
+  }
+
+  function getTblRoomIdFromServerResults(serverResults) {
+    return serverResults?.rewardScreen?.roomId || serverResults?.roomId || null;
+  }
+
+  function getTblFloorTicksFromServerResults(serverResults) {
+    const reward = serverResults?.rewardScreen;
+    if (!reward) {
+      return null;
+    }
+    const candidates = [
+      reward.floorTicks,
+      serverResults.floorTicks,
+      reward.gameTicks,
+      serverResults.time
+    ];
+    for (const value of candidates) {
+      const ticks = Number(value);
+      if (Number.isFinite(ticks) && ticks > 0) {
+        return ticks;
+      }
+    }
+    return null;
+  }
+
+  function isTblPlayerBoardPiece(piece) {
+    return piece?.type === 'player' || piece?.type === 'custom';
+  }
+
+  function getTblInventoryMonster(databaseId) {
+    if (!databaseId) {
+      return null;
+    }
+    const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters;
+    if (!Array.isArray(monsters)) {
+      return null;
+    }
+    return monsters.find((monster) => monster.id === databaseId) || null;
+  }
+
+  function getTblInventoryEquipment(equipId) {
+    if (equipId === null || equipId === undefined) {
+      return null;
+    }
+    const equips = globalThis.state?.player?.getSnapshot?.()?.context?.equips;
+    if (!Array.isArray(equips)) {
+      return null;
+    }
+    return equips.find((equip) => String(equip.id) === String(equipId)) || null;
+  }
+
+  function serializeTblBoardPiece(piece) {
+    const boardPiece = {
+      tile: piece.tileIndex,
+      monsterId: piece.monsterId || piece.gameId || piece.databaseId || null,
+      databaseId: piece.databaseId || null,
+      level: piece.level || 50
+    };
+
+    if (piece.monster?.name) {
+      boardPiece.monsterName = piece.monster.name;
+      boardPiece.monsterStats = {
+        hp: piece.monster.hp ?? 20,
+        ad: piece.monster.ad ?? 20,
+        ap: piece.monster.ap ?? 20,
+        armor: piece.monster.armor ?? 20,
+        magicResist: piece.monster.magicResist ?? 20
+      };
+    } else if (piece.monsterName) {
+      boardPiece.monsterName = piece.monsterName;
+    } else if (piece.name) {
+      boardPiece.monsterName = piece.name;
+    }
+
+    const inventoryMonster = getTblInventoryMonster(piece.databaseId);
+    if (inventoryMonster) {
+      if (globalThis.state?.utils?.expToCurrentLevel) {
+        boardPiece.level = globalThis.state.utils.expToCurrentLevel(inventoryMonster.exp);
+      }
+      boardPiece.monsterStats = {
+        hp: inventoryMonster.hp,
+        ad: inventoryMonster.ad,
+        ap: inventoryMonster.ap,
+        armor: inventoryMonster.armor,
+        magicResist: inventoryMonster.magicResist
+      };
+      if (inventoryMonster.genes) {
+        boardPiece.genes = inventoryMonster.genes;
+      }
+    } else if (
+      piece.hp !== undefined ||
+      piece.ad !== undefined ||
+      piece.ap !== undefined ||
+      piece.armor !== undefined ||
+      piece.magicResist !== undefined
+    ) {
+      boardPiece.monsterStats = {
+        hp: piece.hp ?? 20,
+        ad: piece.ad ?? 20,
+        ap: piece.ap ?? 20,
+        armor: piece.armor ?? 20,
+        magicResist: piece.magicResist ?? 20
+      };
+    }
+
+    const equipSource = piece.equip || piece.equipment;
+    if (equipSource) {
+      boardPiece.equipId = equipSource.gameId ?? equipSource.id ?? piece.equipId ?? null;
+      boardPiece.equipmentName = equipSource.name || null;
+      boardPiece.equipmentStat = equipSource.stat || 'ap';
+      boardPiece.equipmentTier = equipSource.tier || 5;
+    } else if (piece.equipId) {
+      boardPiece.equipId = piece.equipId;
+      const inventoryEquip = getTblInventoryEquipment(piece.equipId);
+      if (inventoryEquip) {
+        boardPiece.equipmentStat = inventoryEquip.stat || 'ap';
+        boardPiece.equipmentTier = inventoryEquip.tier || 5;
+      }
+    }
+
+    return boardPiece;
+  }
+
+  function buildTblSetupFromBoardConfig(boardConfig) {
+    if (!Array.isArray(boardConfig)) {
+      return null;
+    }
+
+    const pieces = boardConfig
+      .filter(isTblPlayerBoardPiece)
+      .map(serializeTblBoardPiece)
+      .sort((a, b) => a.tile - b.tile);
+
+    if (!pieces.length) {
+      return null;
+    }
+
+    return {
+      mapId: TBL_ROOM_ID,
+      pieces
+    };
+  }
+
+  function getTblSetupFromCurrentBoard() {
+    const boardConfig = globalThis.state?.board?.getSnapshot?.()?.context?.boardConfig;
+    return buildTblSetupFromBoardConfig(boardConfig);
+  }
+
+  function trackTblBattleSetup(context) {
+    if (!isTblMapActive() || context?.serverResults?.rewardScreen) {
+      return;
+    }
+
+    const setup = buildTblSetupFromBoardConfig(context?.boardConfig);
+    if (setup?.pieces?.length) {
+      TblFloorLeagueState.trackedBattleSetup = setup;
+    }
+  }
+
+  function getTblSetupForSubmission() {
+    const setup = TblFloorLeagueState.trackedBattleSetup || getTblSetupFromCurrentBoard();
+    TblFloorLeagueState.trackedBattleSetup = null;
+    return setup?.pieces?.length ? setup : null;
+  }
+
+  function parseTblSerializedBoard() {
+    if (typeof window.$serializeBoard === 'function') {
+      try {
+        return JSON.parse(window.$serializeBoard());
+      } catch (error) {
+        // Fall through to BestiaryModAPI
+      }
+    }
+    if (window.BestiaryModAPI?.utility?.serializeBoard) {
+      try {
+        return JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
+      } catch (error) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function buildTblReplayBoardFromSetup(setup) {
+    if (!setup?.pieces?.length) {
+      return [];
+    }
+
+    return setup.pieces.map((piece) => {
+      const boardPiece = {
+        tile: piece.tile || 0
+      };
+      const level = piece.level || 1;
+      const stats = piece.monsterStats || {};
+      const monster = {
+        name: String(piece.monsterName || piece.monsterId || 'unknown').toLowerCase(),
+        level,
+        hp: stats.hp ?? 20,
+        ad: stats.ad ?? 20,
+        ap: stats.ap ?? 20,
+        armor: stats.armor ?? 20,
+        magicResist: stats.magicResist ?? 20
+      };
+      if (level > 50) {
+        monster.awakened = true;
+      }
+      boardPiece.monster = monster;
+
+      if (piece.equipmentName || piece.equipId) {
+        boardPiece.equipment = {
+          name: String(piece.equipmentName || piece.equipId || 'unknown').toLowerCase(),
+          stat: piece.equipmentStat || 'ap',
+          tier: piece.equipmentTier || 5
+        };
+      }
+
+      return boardPiece;
+    });
+  }
+
+  function buildTblReplayString(serverResults, floor, setup) {
+    if (!serverResults || serverResults.seed === undefined || serverResults.seed === null) {
+      return '';
+    }
+
+    const boardJson = parseTblSerializedBoard();
+    const replayData = {};
+
+    if (boardJson?.board) {
+      if (boardJson.region) {
+        replayData.region = boardJson.region;
+      }
+      replayData.map = boardJson.map || TBL_ROOM_ID;
+      replayData.floor = Number.isFinite(floor) ? floor : (boardJson.floor ?? 0);
+      replayData.board = boardJson.board;
+    } else if (setup?.pieces?.length) {
+      replayData.map = TBL_ROOM_ID;
+      replayData.floor = Number.isFinite(floor) ? floor : 0;
+      replayData.board = buildTblReplayBoardFromSetup(setup);
+    } else {
+      return '';
+    }
+
+    if (!replayData.region) {
+      const boardSnapshot = globalThis.state?.board?.getSnapshot?.()?.context;
+      const regionName = boardSnapshot?.selectedMap?.selectedRegion?.name
+        || boardSnapshot?.selectedMap?.selectedRegion?.id;
+      if (regionName) {
+        replayData.region = regionName;
+      }
+    }
+
+    replayData.seed = serverResults.seed;
+    return `$replay(${JSON.stringify(replayData)})`;
+  }
+
+  async function buildTblReplayStringWithRetry(serverResults, floor, setup, maxAttempts = 5) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const replay = buildTblReplayString(serverResults, floor, setup);
+      if (replay) {
+        return replay;
+      }
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => scheduleTimeout(resolve, (attempt + 1) * 200));
+      }
+    }
+    return '';
+  }
+
+  function getTblToastContainer() {
+    if (typeof document === 'undefined') {
+      return null;
+    }
+    let container = document.getElementById(TBL_TOAST_CONTAINER_ID);
+    if (!container) {
+      container = document.createElement('div');
+      container.id = TBL_TOAST_CONTAINER_ID;
+      container.style.cssText = 'position: fixed; z-index: 9999; inset: 16px 16px 64px; pointer-events: none;';
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
+  function updateTblToastPositions(container) {
+    if (!container) {
+      return;
+    }
+    container.querySelectorAll('.tbl-event-toast-item').forEach((toast, index) => {
+      toast.style.transform = `translateY(-${index * 46}px)`;
+    });
+  }
+
+  function showTblEventToast(message, options = {}) {
+    const safeMessage = message != null && message !== '' ? String(message).replace(/</g, '&lt;') : '';
+    if (!safeMessage) {
+      return;
+    }
+
+    try {
+      const container = getTblToastContainer();
+      if (!container) {
+        return;
+      }
+
+      const duration = typeof options.duration === 'number' && options.duration > 0
+        ? options.duration
+        : TBL_TOAST_DURATION_MS;
+      const existingToasts = container.querySelectorAll('.tbl-event-toast-item');
+      const stackOffset = existingToasts.length * 46;
+      const flexContainer = document.createElement('div');
+      flexContainer.className = 'tbl-event-toast-item';
+      flexContainer.style.cssText = `display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-${stackOffset}px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;`;
+
+      const toast = document.createElement('button');
+      toast.type = 'button';
+      toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+      toast.style.pointerEvents = 'auto';
+
+      const widgetTop = document.createElement('div');
+      widgetTop.className = 'widget-top h-2.5';
+      const widgetBottom = document.createElement('div');
+      widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'text-left';
+      messageDiv.style.flex = '1 1 auto';
+      if (safeMessage.indexOf('\n') !== -1) {
+        messageDiv.style.whiteSpace = 'pre-line';
+      }
+      if (options.messageColor) {
+        messageDiv.style.color = options.messageColor;
+      }
+      messageDiv.textContent = safeMessage;
+      widgetBottom.appendChild(messageDiv);
+
+      toast.appendChild(widgetTop);
+      toast.appendChild(widgetBottom);
+      flexContainer.appendChild(toast);
+      container.appendChild(flexContainer);
+
+      const removeToast = () => {
+        if (flexContainer.parentNode) {
+          flexContainer.parentNode.removeChild(flexContainer);
+          updateTblToastPositions(container);
+        }
+      };
+
+      toast.addEventListener('click', removeToast);
+      scheduleTimeout(removeToast, duration);
+    } catch (error) {
+      console.warn('[Better Highscores][TBL] Toast failed:', error);
+    }
+  }
+
+  function getTblEventRaidEntry() {
+    const list = globalThis.state?.raids?.getSnapshot?.()?.context?.list || [];
+    return list.find((raid) => raid.roomId === TBL_ROOM_ID) || null;
+  }
+
+  function getTblEventTimerState() {
+    const now = Date.now();
+    const raid = getTblEventRaidEntry();
+    if (raid?.expiresAt && Number(raid.expiresAt) > now) {
+      TblFloorLeagueState.eventNextCheckEndTime = null;
+      return {
+        active: true,
+        msRemaining: Number(raid.expiresAt) - now
+      };
+    }
+
+    const raidContext = globalThis.state?.raids?.getSnapshot?.()?.context;
+    const willUpdateAt = Number(raidContext?.willUpdateAt) || 0;
+    const msUntilUpdate = Number(raidContext?.msUntilNextUpdate) || 0;
+
+    if (willUpdateAt > now) {
+      TblFloorLeagueState.eventNextCheckEndTime = willUpdateAt;
+    } else if (msUntilUpdate > 0) {
+      if (!TblFloorLeagueState.eventNextCheckEndTime || TblFloorLeagueState.eventNextCheckEndTime <= now) {
+        TblFloorLeagueState.eventNextCheckEndTime = now + msUntilUpdate;
+      }
+    } else {
+      TblFloorLeagueState.eventNextCheckEndTime = null;
+    }
+
+    return {
+      active: false,
+      msRemaining: TblFloorLeagueState.eventNextCheckEndTime
+        ? Math.max(0, TblFloorLeagueState.eventNextCheckEndTime - now)
+        : 0
+    };
+  }
+
+  function formatTblEventTimer(msRemaining) {
+    const totalSeconds = Math.max(0, Math.ceil(msRemaining / 1000));
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (days > 0) {
+      return `${days}d ${hours}h ${minutes}m`;
+    }
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    if (minutes > 0) {
+      return `${minutes}m ${seconds}s`;
+    }
+    return `${seconds}s`;
+  }
+
+  function getTblEventTimerColor(msRemaining, active) {
+    if (!active) {
+      return '#ccc';
+    }
+    if (msRemaining < 60000) {
+      return '#f88';
+    }
+    if (msRemaining < 300000) {
+      return '#ff8';
+    }
+    return '#8f8';
+  }
+
+  function updateTblEventTimerDisplay() {
+    if (modDisposed) {
+      return;
+    }
+    const valueEl = document.querySelector('.tbl-event-timer-value');
+    if (!valueEl) {
+      return;
+    }
+
+    const { active, msRemaining } = getTblEventTimerState();
+    if (active && msRemaining > 0) {
+      valueEl.textContent = t('mods.betterUI.tblLeagueEventEndsIn', {
+        time: formatTblEventTimer(msRemaining)
+      });
+      valueEl.style.color = getTblEventTimerColor(msRemaining, true);
+      return;
+    }
+
+    if (msRemaining > 0) {
+      valueEl.textContent = t('mods.betterUI.tblLeagueEventInactiveCheck', {
+        time: formatTblEventTimer(msRemaining)
+      });
+      valueEl.style.color = '#ccc';
+      return;
+    }
+
+    valueEl.textContent = t('mods.betterUI.tblLeagueEventInactive');
+    valueEl.style.color = '#ccc';
+  }
+
+  function unsubscribeTblSubscription(subscription) {
+    if (!subscription) {
+      return;
+    }
+    if (typeof subscription === 'function') {
+      subscription();
+      return;
+    }
+    if (typeof subscription.unsubscribe === 'function') {
+      subscription.unsubscribe();
+    }
+  }
+
+  function clearTblEventTimerUpdates() {
+    if (TblFloorLeagueState.eventTimerInterval) {
+      clearInterval(TblFloorLeagueState.eventTimerInterval);
+      TblFloorLeagueState.eventTimerInterval = null;
+    }
+    unsubscribeTblSubscription(TblFloorLeagueState.raidsUnsubscribe);
+    TblFloorLeagueState.raidsUnsubscribe = null;
+  }
+
+  function setupTblEventTimerUpdates() {
+    clearTblEventTimerUpdates();
+    TblFloorLeagueState.eventNextCheckEndTime = null;
+    updateTblEventTimerDisplay();
+    TblFloorLeagueState.eventTimerInterval = setInterval(
+      updateTblEventTimerDisplay,
+      TBL_EVENT_TIMER_INTERVAL_MS
+    );
+    if (globalThis.state?.raids?.subscribe) {
+      TblFloorLeagueState.raidsUnsubscribe = globalThis.state.raids.subscribe(() => {
+        TblFloorLeagueState.eventNextCheckEndTime = null;
+        updateTblEventTimerDisplay();
+      });
+    }
+  }
+
+  function createTblEventCompetitionButton() {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = [
+      'tbl-event-competition-btn',
+      'focus-style-visible',
+      'flex',
+      'items-center',
+      'justify-center',
+      'tracking-wide',
+      'text-whiteRegular',
+      'frame-1',
+      'active:frame-pressed-1',
+      'surface-regular',
+      'gap-1',
+      'px-1',
+      'py-0',
+      'pb-[2px]',
+      'pixel-font-14'
+    ].join(' ');
+    button.title = t('mods.betterUI.tblLeagueOpenHint');
+    Object.assign(button.style, {
+      marginLeft: '2px',
+      cursor: 'pointer',
+      flexShrink: '0',
+      lineHeight: '1'
+    });
+
+    const icon = document.createElement('img');
+    icon.src = 'https://bestiaryarena.com/assets/icons/wc-mini-icon.png';
+    icon.alt = '';
+    icon.className = 'pixelated';
+    Object.assign(icon.style, {
+      width: '11px',
+      height: '11px',
+      objectFit: 'contain',
+      flexShrink: '0'
+    });
+    button.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.className = 'tbl-event-competition-btn-label';
+    label.style.whiteSpace = 'nowrap';
+    label.textContent = TblFloorLeagueState.joined
+      ? t('mods.betterUI.tblLeagueBoard')
+      : t('mods.betterUI.tblLeagueJoin');
+    if (!TblFloorLeagueState.joined) {
+      label.style.color = '#ffd700';
+    }
+    button.appendChild(label);
+
+    return button;
+  }
+
+  function getSelectedBoardFloor() {
+    const raw = globalThis.state?.board?.getSnapshot?.()?.context?.floor;
+    const floor = Number(raw);
+    if (!Number.isFinite(floor)) {
+      return TBL_MIN_FLOOR;
+    }
+    return Math.min(TBL_MAX_FLOOR, Math.max(TBL_MIN_FLOOR, floor));
+  }
+
+  function getTblFloorBarRow(floor) {
+    return TblFloorLeagueState.floorBarRows?.find((row) => row.floor === floor) || null;
+  }
+
+  function invalidateTblFloorBarCache() {
+    TblFloorLeagueState.floorBarCacheAt = 0;
+    TblFloorLeagueState.floorBarRows = null;
+  }
+
+  async function ensureTblFloorBarData(force = false) {
+    const rows = await loadTblAllFloorData(force);
+    TblFloorLeagueState.floorBarRows = rows;
+    TblFloorLeagueState.floorBarCacheAt = Date.now();
+    return rows;
+  }
+
+  async function refreshTblFloorBarSection(force = false) {
+    if (modDisposed || !isTblMapActive() || !leaderboardContainer?.isConnected) {
+      return;
+    }
+
+    await ensureTblFloorBarData(force);
+
+    const contentDiv = leaderboardContainer._contentDiv
+      || leaderboardContainer.querySelector('div[style*="position: relative"]');
+    if (!contentDiv || contentDiv.children.length < 3) {
+      return;
+    }
+
+    const selectedFloor = getSelectedBoardFloor();
+    TblFloorLeagueState.lastBarFloor = selectedFloor;
+    const oldSection = contentDiv.children[2];
+    const newSection = createTblFloorLeaderboardSection();
+    oldSection.replaceWith(newSection);
+  }
+
+  function scheduleTblFloorBarRefresh() {
+    if (modDisposed || !isTblMapActive()) {
+      return;
+    }
+    ensureTblFloorBarData().then(() => {
+      if (modDisposed || !isTblMapActive()) {
+        return;
+      }
+      refreshTblFloorBarSection();
+    }).catch(() => {});
+  }
+
+  function removeTblBoardSubscription() {
+    if (!TblFloorLeagueState.boardUnsubscribe) {
+      return;
+    }
+    const subscription = TblFloorLeagueState.boardUnsubscribe;
+    TblFloorLeagueState.boardUnsubscribe = null;
+    unsubscribeTblSubscription(subscription);
+    const index = BetterHighscoresState.subscriptions.indexOf(subscription);
+    if (index >= 0) {
+      BetterHighscoresState.subscriptions.splice(index, 1);
+    }
+  }
+
+  function cleanupTblToastContainer() {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const container = document.getElementById(TBL_TOAST_CONTAINER_ID);
+    if (container) {
+      container.remove();
+    }
+  }
+
+  function appendTblSelectedFloorUserEntry(section, floor, yourTicks, youLead) {
+    const userEntrySpan = document.createElement('span');
+    const hasTicks = yourTicks !== null && yourTicks !== undefined;
+    Object.assign(userEntrySpan.style, ENTRY_SPAN_STYLE, {
+      color: youLead ? '#00ff00' : (hasTicks ? '#ffa500' : '#888'),
+      cursor: 'default'
+    });
+    userEntrySpan.appendChild(createScoreIcon(
+      ASSETS.ACHIEVEMENT_ICON,
+      'You',
+      'Your time on this floor'
+    ));
+
+    const valueText = document.createElement('span');
+    valueText.textContent = hasTicks
+      ? `${floor} (${yourTicks})`
+      : `${floor} (${TBL_MISSING_FLOOR_TICKS})`;
+    userEntrySpan.appendChild(valueText);
+    section.appendChild(userEntrySpan);
+  }
+
+  function appendTblSelectedFloorLeaderEntry(section, floor, leader, playerName) {
+    const isYou = Boolean(playerName && leader?.name === playerName);
+    const entry = {
+      userName: leader.name,
+      floor,
+      floorTicks: leader.ticks,
+      ticks: leader.ticks
+    };
+    const formattedEntry = formatLeaderboardEntry(entry, 0, false, true, null);
+    const entrySpan = document.createElement('span');
+    Object.assign(entrySpan.style, ENTRY_SPAN_STYLE, {
+      color: isYou ? '#00ff00' : formattedEntry.color,
+      fontWeight: formattedEntry.fontWeight
+    });
+
+    entrySpan.appendChild(createScoreIcon(
+      isYou ? ASSETS.ACHIEVEMENT_ICON : ASSETS.HIGHSCORE_ICON,
+      isYou ? 'You' : 'Top',
+      isYou ? 'You lead this floor' : 'Floor leader'
+    ));
+
+    const valueText = document.createElement('span');
+    valueText.textContent = formattedEntry.value;
+    entrySpan.appendChild(valueText);
+    section.appendChild(entrySpan);
+  }
+
+  function createTblFloorLeaderboardSection() {
+    const config = LEADERBOARD_SECTION_CONFIG.floor;
+    const section = document.createElement('div');
+    section.className = 'tbl-dynamic-floor-section';
+    Object.assign(section.style, SECTION_WRAPPER_STYLE);
+
+    const titleText = document.createElement('span');
+    Object.assign(titleText.style, {
+      fontWeight: 'bold',
+      color: config.titleColor,
+      fontSize: '10px'
+    });
+    titleText.textContent = config.displayName || config.title;
+    section.appendChild(titleText);
+
+    const selectedFloor = getSelectedBoardFloor();
+    TblFloorLeagueState.lastBarFloor = selectedFloor;
+    const maxFloor = getMaxFloor();
+    const row = getTblFloorBarRow(selectedFloor);
+    const userScores = getTblUserScoresForMap();
+    const playerName = getTblPlayerName();
+    const yourTicks = row?.yourTicks ?? getTblYourTicksForFloor(
+      selectedFloor,
+      TblFloorLeagueState.myEventScores,
+      userScores
+    );
+    const hasTicks = yourTicks !== null && yourTicks !== undefined;
+
+    const maxDisplay = document.createElement('span');
+    Object.assign(maxDisplay.style, {
+      fontSize: '10px',
+      color: hasTicks ? '#00ff00' : '#ff4444',
+      fontWeight: 'bold'
+    });
+    maxDisplay.textContent = `(${selectedFloor}/${maxFloor})`;
+    section.appendChild(maxDisplay);
+
+    appendTblSelectedFloorUserEntry(section, selectedFloor, yourTicks, row?.youLead);
+
+    if (row?.leader && row.leaderTicks !== null && row.leaderTicks !== undefined) {
+      appendTblSelectedFloorLeaderEntry(section, selectedFloor, row.leader, playerName);
+    } else {
+      appendWorldRecordPlaceholder(section);
+    }
+
+    decorateTblFloorSection(section, getUserBestScores());
+
+    if (!TblFloorLeagueState.floorBarRows) {
+      scheduleTblFloorBarRefresh();
+    }
+
+    return section;
+  }
+
+  function isTblFirebaseFloor(floor) {
+    return floor >= TBL_FIREBASE_FLOOR_MIN && floor <= TBL_FIREBASE_FLOOR_MAX;
+  }
+
+  function isTblHighscoreFloor(floor) {
+    return TBL_HIGHSCORE_FLOORS.has(floor);
+  }
+
+  function getTblUserScoresForMap() {
+    const room = getPlayerSnapshot()?.context?.rooms?.[TBL_ROOM_ID];
+    if (!room) {
+      return null;
+    }
+    return {
+      bestTicks: room.ticks ?? null,
+      bestFloor: room.floor !== undefined && room.floor !== null ? room.floor : 0,
+      bestFloorTicks: room.floorTicks ?? null
+    };
+  }
+
+  function hasTblYourRun(yourTicks) {
+    return yourTicks !== null && yourTicks !== undefined;
+  }
+
+  function getTblEffectiveYourTicks(yourTicks) {
+    return hasTblYourRun(yourTicks) ? yourTicks : TBL_MISSING_FLOOR_TICKS;
+  }
+
+  function getTblBestCompletedFloor() {
+    const room = getPlayerSnapshot()?.context?.rooms?.[TBL_ROOM_ID];
+    if (!room) {
+      return null;
+    }
+    if (room.floor !== undefined && room.floor !== null && Number.isFinite(Number(room.floor))) {
+      return Math.min(TBL_MAX_FLOOR, Math.max(TBL_MIN_FLOOR, Number(room.floor)));
+    }
+    if (room.ticks !== undefined && room.ticks !== null && Number.isFinite(Number(room.ticks))) {
+      return 0;
+    }
+    return -1;
+  }
+
+  function getTblMaxUnlockedFloor() {
+    const bestCompleted = getTblBestCompletedFloor();
+    if (bestCompleted === null) {
+      return null;
+    }
+    if (bestCompleted < 0) {
+      return TBL_MIN_FLOOR;
+    }
+    return Math.min(TBL_MAX_FLOOR, bestCompleted + 1);
+  }
+
+  function isTblFloorUnlocked(floor) {
+    const maxUnlocked = getTblMaxUnlockedFloor();
+    if (maxUnlocked === null) {
+      return false;
+    }
+    return floor <= maxUnlocked;
+  }
+
+  function getTblYourTicksForFloor(floor, myEventScores, userScores) {
+    if (floor === 0) {
+      if (userScores?.bestFloor === 0) {
+        return userScores.bestFloorTicks ?? userScores.bestTicks ?? null;
+      }
+      return userScores?.bestTicks ?? null;
+    }
+    if (floor === 15) {
+      if (userScores?.bestFloor === 15) {
+        return userScores.bestFloorTicks ?? null;
+      }
+      return null;
+    }
+    return myEventScores[floor] ?? null;
+  }
+
+  function getTblParticipantHighscoreTicksByFloor() {
+    const userScores = getTblUserScoresForMap();
+    if (!userScores) {
+      return { 0: null, 15: null };
+    }
+    return {
+      0: getTblYourTicksForFloor(0, {}, userScores),
+      15: getTblYourTicksForFloor(15, {}, userScores)
+    };
+  }
+
+  function buildTblParticipantRecord(existing, name, joinedAt) {
+    const highscoreFloorTicks = getTblParticipantHighscoreTicksByFloor();
+    return {
+      ...(existing || {}),
+      name,
+      joinedAt: existing?.joinedAt || joinedAt || Date.now(),
+      highscoreFloorTicks: {
+        0: highscoreFloorTicks[0],
+        15: highscoreFloorTicks[15]
+      }
+    };
+  }
+
+  function tblParticipantRecordMatches(existing, name) {
+    if (!existing) {
+      return false;
+    }
+    const next = getTblParticipantHighscoreTicksByFloor();
+    const prev = existing.highscoreFloorTicks || {};
+    const floor0Match = (prev[0] ?? null) === (next[0] ?? null);
+    const floor15Match = (prev[15] ?? null) === (next[15] ?? null);
+    return floor0Match && floor15Match && existing.name === name;
+  }
+
+  async function updateTblParticipantHighscoreTicks(force = false) {
+    const hash = await getTblPlayerHash();
+    const name = getTblPlayerName();
+    if (!hash || !name) {
+      return;
+    }
+    const now = Date.now();
+    if (
+      !force &&
+      now - TblFloorLeagueState.lastParticipantSyncAt < TBL_PARTICIPANT_SYNC_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+    const participantPath = `${TBL_PARTICIPANTS_PATH}/${hash}`;
+    const existing = await tblFirebaseGetCached(participantPath, {
+      ttl: TBL_PARTICIPANTS_CACHE_TTL_MS,
+      defaultReturn: null,
+      force
+    });
+    if (tblParticipantRecordMatches(existing, name)) {
+      TblFloorLeagueState.lastParticipantSyncAt = now;
+      return;
+    }
+    await TblFirebase.put(
+      participantPath,
+      buildTblParticipantRecord(existing, name, existing?.joinedAt)
+    );
+    TblFloorLeagueState.lastParticipantSyncAt = now;
+    invalidateTblFetchCache([TBL_PARTICIPANTS_PATH, participantPath]);
+  }
+
+  async function loadTblHighscoreFloorLeaders() {
+    try {
+      const { tickData, floorData } = await fetchLeaderboardData(TBL_ROOM_ID);
+      const tickEntry = tickData?.[0] || null;
+      const floorEntry = getBestLeaderboardEntry(floorData, { isFloor: true });
+      const leaders = {};
+
+      if (tickEntry?.userName && Number.isFinite(Number(tickEntry.ticks))) {
+        leaders[0] = {
+          name: tickEntry.userName,
+          ticks: Number(tickEntry.ticks)
+        };
+      }
+
+      if (floorEntry?.userName && Number(floorEntry.floor) >= 15) {
+        const ticks = getEntryFloorTicks(floorEntry);
+        if (Number.isFinite(ticks)) {
+          leaders[15] = {
+            name: floorEntry.userName,
+            ticks
+          };
+        }
+      }
+
+      return leaders;
+    } catch (error) {
+      console.warn('[Better Highscores][TBL] Failed to load highscore floors:', error);
+      return {};
+    }
+  }
+
+  function buildTblFloorRow(floor, entries, myEventScores, userScores, playerName) {
+    const leader = entries[0] || null;
+    const yourTicks = getTblYourTicksForFloor(floor, myEventScores, userScores);
+    const leaderTicks = leader ? Number(leader.ticks) : null;
+    const youLead = Boolean(
+      playerName &&
+      yourTicks !== null &&
+      (
+        leaderTicks === null ||
+        yourTicks < leaderTicks ||
+        (leader?.name === playerName && yourTicks === leaderTicks)
+      )
+    );
+    let gap = null;
+    if (yourTicks !== null && leaderTicks !== null && !youLead) {
+      gap = yourTicks - leaderTicks;
+    }
+    return {
+      floor,
+      ascension: tblFloorToAscensionPercent(floor),
+      yourTicks,
+      leader,
+      leaderTicks,
+      entries,
+      youLead,
+      gap,
+      fromHighscores: isTblHighscoreFloor(floor),
+      unlocked: isTblFloorUnlocked(floor)
+    };
+  }
+
+  function parseTblFloorRunFromServerResults(serverResults) {
+    if (!serverResults?.rewardScreen) {
+      return null;
+    }
+
+    const roomId = getTblRoomIdFromServerResults(serverResults);
+    if (roomId !== TBL_ROOM_ID) {
+      return null;
+    }
+
+    if (!serverResults.rewardScreen.victory) {
+      return null;
+    }
+
+    const floor = Number(serverResults.rewardScreen.floor ?? serverResults.floor);
+    const floorTicks = getTblFloorTicksFromServerResults(serverResults);
+    if (!Number.isFinite(floor) || !isTblFirebaseFloor(floor) || floorTicks === null) {
+      return null;
+    }
+
+    return {
+      floor,
+      floorTicks,
+      date: new Date().toISOString().slice(0, 10)
+    };
+  }
+
+  async function submitTblFloorScoreIfBetter(floor, ticks, date, runMeta = {}) {
+    if (!TblFloorLeagueState.joined || !isTblFirebaseFloor(floor)) {
+      return false;
+    }
+    if (!Number.isFinite(ticks) || ticks <= 0) {
+      return false;
+    }
+    const now = Date.now();
+    if (now - TblFloorLeagueState.lastSubmitAt < TBL_SUBMIT_MIN_INTERVAL_MS) {
+      return false;
+    }
+    const hash = await getTblPlayerHash();
+    const name = getTblPlayerName();
+    if (!hash || !name) {
+      return false;
+    }
+    const scorePath = `${TBL_FIREBASE_BASE}/scores/${floor}/${hash}`;
+    const existing = await tblFirebaseGetCached(scorePath, {
+      defaultReturn: null,
+      force: true
+    });
+    const previousTicks = existing && Number.isFinite(Number(existing.ticks))
+      ? Number(existing.ticks)
+      : null;
+    if (previousTicks !== null && previousTicks <= ticks) {
+      return false;
+    }
+    const scoreDate = date || new Date().toISOString().slice(0, 10);
+    const scorePayload = {
+      name,
+      ticks,
+      date: scoreDate,
+      updatedAt: now
+    };
+    const writes = [TblFirebase.put(scorePath, scorePayload)];
+    if (typeof runMeta.replay === 'string' && runMeta.replay.startsWith('$replay(')) {
+      writes.push(TblFirebase.put(`${TBL_FIREBASE_BASE}/replays/${floor}/${hash}`, {
+        name,
+        ticks,
+        date: scoreDate,
+        updatedAt: now,
+        replay: runMeta.replay
+      }));
+    }
+    await Promise.all(writes);
+    await updateTblParticipantHighscoreTicks(true);
+    invalidateTblFetchCache([TBL_SCORES_PATH, tblScoresPath(floor), scorePath, TBL_PARTICIPANTS_PATH]);
+    TblFloorLeagueState.lastSubmitAt = now;
+    TblFloorLeagueState.myEventScores[floor] = ticks;
+    invalidateTblFloorBarCache();
+    console.log(`[Better Highscores][TBL] Submitted floor ${floor}: ${ticks} ticks`);
+    refreshTblFloorBarSection(true).catch(() => {});
+    return true;
+  }
+
+  async function handleTblServerResults(serverResults, seed) {
+    if (!TblFloorLeagueState.joined || isSandboxMode()) {
+      return false;
+    }
+
+    if (seed === TblFloorLeagueState.lastProcessedSeed) {
+      return false;
+    }
+
+    const run = parseTblFloorRunFromServerResults(serverResults);
+    if (!run) {
+      return false;
+    }
+
+    TblFloorLeagueState.lastProcessedSeed = seed;
+    const setup = getTblSetupForSubmission();
+    const replay = await buildTblReplayStringWithRetry(serverResults, run.floor, setup);
+    if (!replay) {
+      console.warn('[Better Highscores][TBL] Could not build $replay for submitted run');
+    }
+    const submitted = await submitTblFloorScoreIfBetter(run.floor, run.floorTicks, run.date, {
+      replay
+    });
+    if (submitted) {
+      showTblEventToast(
+        t('mods.betterUI.tblLeagueScoreSubmitted', { floor: run.floor, ticks: run.floorTicks })
+      );
+    }
+    return submitted;
+  }
+
+  function getTblServerResultsFromBoard() {
+    return globalThis.state?.board?.getSnapshot?.()?.context?.serverResults || null;
+  }
+
+  async function trySubmitTblAfterBattle(maxAttempts = 6) {
+    if (!TblFloorLeagueState.joined || !isTblMapActive() || isSandboxMode()) {
+      return;
+    }
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => scheduleTimeout(resolve, attempt * 250));
+      }
+
+      const serverResults = getTblServerResultsFromBoard();
+      if (!serverResults?.rewardScreen || typeof serverResults.seed === 'undefined') {
+        continue;
+      }
+
+      const submitted = await handleTblServerResults(serverResults, serverResults.seed);
+      if (submitted || serverResults.seed === TblFloorLeagueState.lastProcessedSeed) {
+        return;
+      }
+    }
+  }
+
+  async function processTblNetworkServerResults(responseData) {
+    if (modDisposed || !TblFloorLeagueState.joined || isSandboxMode()) {
+      return;
+    }
+
+    let data = responseData;
+    if (Array.isArray(responseData) && responseData[0]?.result?.data) {
+      data = responseData[0].result.data.json ?? responseData[0].result.data;
+    }
+
+    if (!data?.rewardScreen || typeof data.seed === 'undefined') {
+      return;
+    }
+
+    await handleTblServerResults(data, data.seed);
+  }
+
+  function setupTblNetworkListener() {
+    if (TblFloorLeagueState.fetchRestore) {
+      return;
+    }
+
+    const previousFetch = window.fetch.bind(window);
+    TblFloorLeagueState.fetchRestore = previousFetch;
+
+    window.fetch = async function tblFloorLeagueFetch(...args) {
+      const response = await previousFetch(...args);
+      if (modDisposed) {
+        return response;
+      }
+      const url = args[0];
+      if (typeof url === 'string' && (url.includes('gameServer?batch=1') || url.includes('game.gameServer?batch=1'))) {
+        try {
+          const cloned = response.clone();
+          const responseData = await cloned.json();
+          processTblNetworkServerResults(responseData).catch((err) => {
+            console.warn('[Better Highscores][TBL] Network results handling failed:', err);
+          });
+        } catch (error) {
+          // Ignore parse errors on unrelated responses
+        }
+      }
+      return response;
+    };
+  }
+
+  function sanitizeTblLeaderboardEntry(entry) {
+    if (!entry || !Number.isFinite(Number(entry.ticks))) {
+      return null;
+    }
+    return {
+      name: entry.name,
+      ticks: Number(entry.ticks),
+      date: entry.date,
+      updatedAt: entry.updatedAt
+    };
+  }
+
+  function parseTblFirebaseScoresBundle(allScores, playerHash) {
+    const rawEntriesByFloor = new Map();
+    const myScores = {};
+
+    for (let floor = TBL_FIREBASE_FLOOR_MIN; floor <= TBL_FIREBASE_FLOOR_MAX; floor++) {
+      const entries = [];
+      const floorData = allScores?.[floor];
+      if (floorData && typeof floorData === 'object') {
+        Object.entries(floorData).forEach(([entryHash, entry]) => {
+          const sanitized = sanitizeTblLeaderboardEntry(entry);
+          if (!sanitized) {
+            return;
+          }
+          entries.push(sanitized);
+          if (playerHash && entryHash === playerHash) {
+            myScores[floor] = sanitized.ticks;
+          }
+        });
+      }
+      rawEntriesByFloor.set(floor, entries);
+    }
+
+    return { rawEntriesByFloor, myScores };
+  }
+
+  async function loadTblAllFirebaseScores(force = false) {
+    const allScores = await tblFirebaseGetCached(TBL_SCORES_PATH, {
+      defaultReturn: {},
+      force
+    });
+    return allScores && typeof allScores === 'object' ? allScores : {};
+  }
+
+  function buildTblPlayerTotalTicks(
+    entriesByFloor,
+    participantHighscoresByName = new Map(),
+    highscoreFloorLeaders = {}
+  ) {
+    const players = new Set();
+    const floorTicksByPlayer = new Map();
+
+    const ensurePlayer = (name) => {
+      if (!name) {
+        return null;
+      }
+      players.add(name);
+      if (!floorTicksByPlayer.has(name)) {
+        floorTicksByPlayer.set(name, new Map());
+      }
+      return floorTicksByPlayer.get(name);
+    };
+
+    const setFloorTick = (name, floor, ticks) => {
+      if (!name || !Number.isFinite(ticks)) {
+        return;
+      }
+      const floors = ensurePlayer(name);
+      if (!floors) {
+        return;
+      }
+      const existing = floors.get(floor);
+      if (existing === undefined || ticks < existing) {
+        floors.set(floor, ticks);
+      }
+    };
+
+    participantHighscoresByName.forEach((_, name) => {
+      ensurePlayer(name);
+    });
+
+    for (let floor = TBL_FIREBASE_FLOOR_MIN; floor <= TBL_FIREBASE_FLOOR_MAX; floor++) {
+      (entriesByFloor.get(floor) || []).forEach((entry) => {
+        setFloorTick(entry.name, floor, Number(entry.ticks));
+      });
+    }
+
+    participantHighscoresByName.forEach((highscores, name) => {
+      if (Number.isFinite(highscores[0])) {
+        setFloorTick(name, 0, highscores[0]);
+      }
+      if (Number.isFinite(highscores[15])) {
+        setFloorTick(name, 15, highscores[15]);
+      }
+    });
+
+    [0, 15].forEach((floor) => {
+      const leader = highscoreFloorLeaders[floor];
+      if (leader?.name && Number.isFinite(Number(leader.ticks))) {
+        setFloorTick(leader.name, floor, Number(leader.ticks));
+      }
+    });
+
+    const totals = new Map();
+    players.forEach((name) => {
+      const floors = floorTicksByPlayer.get(name) || new Map();
+      let total = 0;
+      for (let floor = TBL_MIN_FLOOR; floor <= TBL_MAX_FLOOR; floor++) {
+        const ticks = floors.get(floor);
+        total += Number.isFinite(ticks) ? ticks : TBL_MISSING_FLOOR_TICKS;
+      }
+      totals.set(name, total);
+    });
+
+    return totals;
+  }
+
+  function compareTblLeaderboardEntries(a, b, playerTotalTicks) {
+    if (a.ticks !== b.ticks) {
+      return a.ticks - b.ticks;
+    }
+    const totalA = playerTotalTicks.get(a.name)
+      ?? ((TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS);
+    const totalB = playerTotalTicks.get(b.name)
+      ?? ((TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS);
+    if (totalA !== totalB) {
+      return totalA - totalB;
+    }
+    return String(a.name).localeCompare(String(b.name));
+  }
+
+  function rankTblLeaderboardEntries(entries, playerTotalTicks) {
+    return [...entries]
+      .sort((a, b) => compareTblLeaderboardEntries(a, b, playerTotalTicks))
+      .slice(0, TBL_LEADERBOARD_TOP);
+  }
+
+  function getTblApi() {
+    return typeof context !== 'undefined' ? context.api : null;
+  }
+
+  function escapeTblHtml(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function tblFloorToAscensionPercent(floor) {
+    if (!Number.isFinite(Number(floor))) {
+      return null;
+    }
+    return 100 + Number(floor) * 20;
+  }
+
+  function formatTblProfileLink(playerName) {
+    const safeName = escapeTblHtml(playerName || 'Unknown');
+    const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent(String(playerName || '').trim())}`;
+    return `<a href="${profileUrl}" target="_blank" rel="noopener noreferrer" style="color:#ff8;text-decoration:underline;cursor:pointer;">${safeName}</a>`;
+  }
+
+  function formatTblTicksComparison(yourTicks, leaderTicks, leaderName, youLead = false) {
+    const hasRun = hasTblYourRun(yourTicks);
+    const displayTicks = getTblEffectiveYourTicks(yourTicks);
+    const youPart = hasRun
+      ? `<span>${displayTicks} ticks</span>`
+      : `<span style="color:#888;">${displayTicks} ticks</span>`;
+    if (youLead) {
+      return youPart;
+    }
+    if (leaderTicks === null || leaderTicks === undefined) {
+      return `${youPart} <span style="color:#888;">${escapeTblHtml(t('mods.betterUI.tblLeagueNoLeaderYet'))}</span>`;
+    }
+    return `${youPart} → <span>${leaderTicks} ticks</span> (${formatTblProfileLink(leaderName)})`;
+  }
+
+  function ensureTblLeagueStyles() {
+    if (document.getElementById(TBL_STYLES_ID)) {
+      return;
+    }
+    const style = document.createElement('style');
+    style.id = TBL_STYLES_ID;
+    style.textContent = `
+      .tbl-league-item--empty {
+        opacity: 0.55;
+      }
+      .tbl-league-item--locked {
+        opacity: 0.5;
+        filter: grayscale(0.8);
+        position: relative;
+        cursor: not-allowed;
+      }
+      .tbl-league-item--locked::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+        background-size: 6px 6px;
+        z-index: 2;
+      }
+      .tbl-league-item--clickable {
+        cursor: pointer;
+      }
+      .tbl-league-item--clickable:hover {
+        filter: brightness(1.08);
+      }
+      .tbl-league-floor-thumb {
+        width: 48px;
+        height: 48px;
+        flex-shrink: 0;
+        position: relative;
+        overflow: hidden;
+      }
+      .tbl-league-floor-thumb-bg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .tbl-league-floor-thumb-overlay {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.42);
+      }
+      .tbl-league-modal-content {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .tbl-league-summary-grid {
+        display: grid;
+        grid-template-columns: 40% auto 60%;
+        gap: 12px;
+        align-items: stretch;
+      }
+      .tbl-league-summary-col {
+        min-width: 0;
+      }
+      .tbl-league-summary-separator {
+        width: 1px;
+        align-self: stretch;
+        background: rgba(255, 255, 255, 0.2);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function getTblModalDialog(modalRef) {
+    if (modalRef?.element) {
+      return modalRef.element;
+    }
+    if (modalRef instanceof HTMLElement) {
+      return modalRef;
+    }
+    return document.getElementById(TBL_MODAL_ID)
+      || document.querySelector('div[role="dialog"][data-state="open"]');
+  }
+
+  function getTblModalDimensions() {
+    const pad = TBL_MODAL_VIEWPORT_PADDING * 2;
+    return {
+      width: Math.max(TBL_MODAL_MIN_WIDTH, Math.min(TBL_MODAL_WIDTH, window.innerWidth - pad)),
+      height: Math.max(TBL_MODAL_MIN_HEIGHT, Math.min(TBL_MODAL_HEIGHT, window.innerHeight - pad))
+    };
+  }
+
+  function clearTblModalLayoutCleanup() {
+    if (TblFloorLeagueState.layoutCleanup) {
+      TblFloorLeagueState.layoutCleanup();
+      TblFloorLeagueState.layoutCleanup = null;
+    }
+  }
+
+  function applyTblModalLayout(modalRef, contentRoot) {
+    const dialog = getTblModalDialog(modalRef);
+    if (!dialog) {
+      return;
+    }
+
+    const { width, height } = getTblModalDimensions();
+    dialog.id = TBL_MODAL_ID;
+    dialog.style.width = `${width}px`;
+    dialog.style.minWidth = '0';
+    dialog.style.maxWidth = `${width}px`;
+    dialog.style.height = `${height}px`;
+    dialog.style.minHeight = '0';
+    dialog.style.maxHeight = `${height}px`;
+    dialog.style.boxSizing = 'border-box';
+    dialog.classList.remove('max-w-[300px]', 'w-full');
+
+    const rootWrapper = dialog.querySelector(':scope > div');
+    if (rootWrapper) {
+      Object.assign(rootWrapper.style, {
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        flex: '1 1 0',
+        minHeight: '0'
+      });
+    }
+
+    const widgetBottom = dialog.querySelector('.widget-bottom');
+    if (widgetBottom) {
+      Object.assign(widgetBottom.style, {
+        display: 'flex',
+        flexDirection: 'column',
+        flex: '1 1 auto',
+        minHeight: '0',
+        overflowY: 'hidden',
+        overflowX: 'hidden'
+      });
+    }
+
+    if (contentRoot) {
+      Object.assign(contentRoot.style, {
+        flex: '1 1 auto',
+        minHeight: '0',
+        height: '100%',
+        maxHeight: '100%',
+        width: '100%',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      });
+    }
+  }
+
+  function setupTblModalResponsiveLayout(modalRef, contentRoot) {
+    clearTblModalLayoutCleanup();
+    const apply = () => applyTblModalLayout(modalRef, contentRoot);
+    apply();
+    requestAnimationFrame(() => apply());
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    TblFloorLeagueState.layoutCleanup = () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }
+
+  function createTblScrollContainer() {
+    const api = getTblApi();
+    if (api?.ui?.components?.createScrollContainer) {
+      const scrollContainer = api.ui.components.createScrollContainer({
+        height: '100%',
+        padding: true,
+        content: ''
+      });
+      Object.assign(scrollContainer.element.style, {
+        flex: '1 1 0',
+        minHeight: '0',
+        height: 'auto',
+        overflow: 'hidden'
+      });
+      scrollContainer.contentContainer.classList.add('highscores-list');
+      return scrollContainer;
+    }
+
+    const fallback = document.createElement('div');
+    fallback.className = 'highscores-list';
+    Object.assign(fallback.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      overflowY: 'auto',
+      padding: '4px'
+    });
+    return {
+      element: fallback,
+      contentContainer: fallback,
+      addContent(node) {
+        fallback.appendChild(node);
+      }
+    };
+  }
+
+  function createTblStatsPanel(html) {
+    const statsContainer = document.createElement('div');
+    statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
+    statsContainer.style.flexShrink = '0';
+    statsContainer.innerHTML = html;
+    return statsContainer;
+  }
+
+  function sortTblOverallStandings(standings) {
+    const playerTotalTicks = TblFloorLeagueState.playerTotalTicks || new Map();
+    const missingTotal = (TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS;
+
+    return [...standings].sort((a, b) => {
+      if (b.floorsLed !== a.floorsLed) {
+        return b.floorsLed - a.floorsLed;
+      }
+      const totalA = playerTotalTicks.get(a.name) ?? missingTotal;
+      const totalB = playerTotalTicks.get(b.name) ?? missingTotal;
+      if (totalA !== totalB) {
+        return totalA - totalB;
+      }
+      return String(a.name).localeCompare(String(b.name));
+    });
+  }
+
+  function buildTblOverallStandings(floorRows, ensurePlayerName = null) {
+    const standings = new Map();
+
+    floorRows.forEach((row) => {
+      const leaderName = row.leader?.name;
+      if (!leaderName) {
+        return;
+      }
+
+      const existing = standings.get(leaderName) || {
+        name: leaderName,
+        floorsLed: 0
+      };
+      existing.floorsLed += 1;
+      standings.set(leaderName, existing);
+    });
+
+    if (ensurePlayerName && !standings.has(ensurePlayerName)) {
+      standings.set(ensurePlayerName, {
+        name: ensurePlayerName,
+        floorsLed: 0
+      });
+    }
+
+    return sortTblOverallStandings(Array.from(standings.values()));
+  }
+
+  function getTblPlayerTotalTicks(playerName) {
+    return (TblFloorLeagueState.playerTotalTicks || new Map()).get(playerName)
+      ?? (TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS;
+  }
+
+  function formatTblOverallStandingLine(player, rank, viewerName, { showRank = true } = {}) {
+    const isYou = Boolean(viewerName && player.name === viewerName);
+    const nameHtml = isYou
+      ? escapeTblHtml(player.name)
+      : formatTblProfileLink(player.name);
+    const standingLabel = escapeTblHtml(t('mods.betterUI.tblLeaguePlayerStanding', {
+      count: player.floorsLed,
+      ticks: getTblPlayerTotalTicks(player.name)
+    }));
+    const rankPrefix = showRank && rank ? `#${rank} ` : '';
+    const color = isYou ? ' style="color:#8f8;"' : '';
+    return `<div${color}>${rankPrefix}${nameHtml} — ${standingLabel}</div>`;
+  }
+
+  function computeTblOverallTopPlayers(floorRows, limit = 3) {
+    return buildTblOverallStandings(floorRows).slice(0, limit);
+  }
+
+  async function loadTblAllFloorData(force = false) {
+    if (modDisposed) {
+      return TblFloorLeagueState.floorBarRows || [];
+    }
+
+    const now = Date.now();
+    if (
+      !force &&
+      TblFloorLeagueState.floorBarRows &&
+      now - TblFloorLeagueState.floorBarCacheAt < TBL_FETCH_CACHE_TTL_MS
+    ) {
+      return TblFloorLeagueState.floorBarRows;
+    }
+    if (
+      !force &&
+      TblFloorLeagueState.floorBarRows &&
+      now - TblFloorLeagueState.lastFullLoadAt < TBL_FETCH_MIN_INTERVAL_MS
+    ) {
+      return TblFloorLeagueState.floorBarRows;
+    }
+    if (TblFloorLeagueState.fullLoadInFlight) {
+      return TblFloorLeagueState.fullLoadInFlight;
+    }
+
+    TblFloorLeagueState.fullLoadInFlight = (async () => {
+      try {
+        if (modDisposed) {
+          return TblFloorLeagueState.floorBarRows || [];
+        }
+
+        const userScores = getTblUserScoresForMap();
+        const playerName = getTblPlayerName();
+        const playerHash = await getTblPlayerHash();
+        if (TblFloorLeagueState.joined) {
+          await updateTblParticipantHighscoreTicks(force);
+        }
+
+        const allScores = await loadTblAllFirebaseScores(force);
+        const { rawEntriesByFloor, myScores: loadedMyScores } = parseTblFirebaseScoresBundle(
+          allScores,
+          playerHash
+        );
+        const myScores = { ...TblFloorLeagueState.myEventScores, ...loadedMyScores };
+
+        const [highscoreLeaders, participantBundle] = await Promise.all([
+          loadTblHighscoreFloorLeaders(),
+          loadTblParticipantsBundle(force)
+        ]);
+
+        if (modDisposed) {
+          return TblFloorLeagueState.floorBarRows || [];
+        }
+
+        TblFloorLeagueState.myEventScores = myScores;
+        TblFloorLeagueState.participantCount = participantBundle.count;
+
+        const playerTotalTicks = buildTblPlayerTotalTicks(
+          rawEntriesByFloor,
+          participantBundle.highscoreMap,
+          highscoreLeaders
+        );
+        TblFloorLeagueState.playerTotalTicks = playerTotalTicks;
+
+        const firebaseByFloor = new Map();
+        for (let floor = TBL_FIREBASE_FLOOR_MIN; floor <= TBL_FIREBASE_FLOOR_MAX; floor++) {
+          firebaseByFloor.set(
+            floor,
+            rankTblLeaderboardEntries(rawEntriesByFloor.get(floor) || [], playerTotalTicks)
+          );
+        }
+
+        const floorRows = [];
+        for (let floor = TBL_MIN_FLOOR; floor <= TBL_MAX_FLOOR; floor++) {
+          let entries = [];
+          if (isTblHighscoreFloor(floor)) {
+            const leader = highscoreLeaders[floor];
+            entries = leader ? [leader] : [];
+          } else {
+            entries = firebaseByFloor.get(floor) || [];
+          }
+          floorRows.push(buildTblFloorRow(floor, entries, myScores, userScores, playerName));
+        }
+
+        TblFloorLeagueState.lastFullLoadAt = Date.now();
+        return floorRows;
+      } finally {
+        TblFloorLeagueState.fullLoadInFlight = null;
+      }
+    })();
+
+    return TblFloorLeagueState.fullLoadInFlight;
+  }
+
+  function createTblLeagueSummaryPanel(floorRows, participantCount = 0) {
+    const playerName = getTblPlayerName();
+    const standings = buildTblOverallStandings(floorRows, playerName);
+    const topPlayers = standings.slice(0, 3);
+
+    let leftCol = `<div class="tbl-event-timer-row pixel-font-14" style="margin-bottom:6px;"><span class="tbl-event-timer-value" style="color:#ccc;">—</span></div>`;
+    leftCol += `<div style="margin-bottom:6px;">${escapeTblHtml(t('mods.betterUI.tblLeagueParticipants', { count: participantCount }))}</div>`;
+    leftCol += `<div class="tbl-event-prize-row pixel-font-14" style="margin-bottom:6px;display:flex;align-items:center;gap:4px;color:#ffd700;">
+      <img src="/assets/icons/beastcoin.png" alt="Beast Coins" class="pixelated" style="width:12px;height:12px;object-fit:contain;flex-shrink:0;" />
+      <span>${escapeTblHtml(t('mods.betterUI.tblLeaguePrize', { amount: TBL_EVENT_PRIZE_BEAST_COINS }))}</span>
+    </div>`;
+
+    let rightCol = `<div style="color:#ccc;">${escapeTblHtml(t('mods.betterUI.tblLeagueTopPlayers'))}</div>`;
+    if (topPlayers.length > 0) {
+      topPlayers.forEach((player, index) => {
+        rightCol += formatTblOverallStandingLine(player, index + 1, playerName);
+      });
+
+      if (playerName) {
+        const topNames = new Set(topPlayers.map((player) => player.name));
+        if (!topNames.has(playerName)) {
+          const playerIndex = standings.findIndex((player) => player.name === playerName);
+          if (playerIndex >= 0) {
+            rightCol += `<div style="margin-top:4px;">${formatTblOverallStandingLine(standings[playerIndex], playerIndex + 1, playerName, { showRank: false })}</div>`;
+          }
+        }
+      }
+    } else {
+      rightCol += `<div style="color:#888;margin-top:4px;">${escapeTblHtml(t('mods.betterUI.tblLeagueNoRuns', { ticks: TBL_MISSING_FLOOR_TICKS }))}</div>`;
+    }
+
+    const html = `<div class="tbl-league-summary-grid">
+      <div class="tbl-league-summary-col">${leftCol}</div>
+      <div class="tbl-league-summary-separator" role="none"></div>
+      <div class="tbl-league-summary-col">${rightCol}</div>
+    </div>`;
+
+    return createTblStatsPanel(html);
+  }
+
+  async function navigateTblToFloor(floor) {
+    const targetFloor = Math.min(TBL_MAX_FLOOR, Math.max(TBL_MIN_FLOOR, Number(floor)));
+    if (!Number.isFinite(targetFloor) || !globalThis.state?.board?.send) {
+      return;
+    }
+    if (!isTblFloorUnlocked(targetFloor)) {
+      return;
+    }
+
+    try {
+      const mapCode = getCurrentMapCode();
+      if (mapCode !== TBL_ROOM_ID) {
+        globalThis.state.board.send({
+          type: 'selectRoomById',
+          roomId: TBL_ROOM_ID
+        });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+
+      globalThis.state?.board?.trigger?.setState?.({
+        fn: (prev) => ({ ...prev, floor: targetFloor })
+      });
+
+      TblFloorLeagueState.lastBarFloor = targetFloor;
+      closeTblFloorLeagueModal();
+      setTimeout(() => {
+        refreshTblFloorBarSection().catch(() => {});
+      }, 100);
+    } catch (error) {
+      console.warn('[Better Highscores][TBL] Failed to navigate to floor:', error);
+    }
+  }
+
+  function buildTblImprovementText(row) {
+    if (!row.unlocked) {
+      return t('mods.betterUI.tblLeagueFloorLocked');
+    }
+    if (row.youLead) {
+      return t('mods.betterUI.tblLeagueYouLead');
+    }
+    if (row.yourTicks === null || row.yourTicks === undefined) {
+      const penaltyTicks = TBL_MISSING_FLOOR_TICKS;
+      if (row.fromHighscores) {
+        return row.leaderTicks !== null
+          ? t('mods.betterUI.tblLeagueNoPersonalBest', { ticks: penaltyTicks })
+          : t('mods.betterUI.tblLeagueNoRuns', { ticks: penaltyTicks });
+      }
+      return row.leaderTicks !== null
+        ? t('mods.betterUI.tblLeagueNoRunYet', { ticks: penaltyTicks })
+        : t('mods.betterUI.tblLeagueNoRuns', { ticks: penaltyTicks });
+    }
+    if (row.gap !== null && row.gap > 0) {
+      return t('mods.betterUI.tblLeagueTicksBehind', { ticks: row.gap });
+    }
+    if (row.gap === 0) {
+      return t('mods.betterUI.tblLeagueTied');
+    }
+    return t('mods.betterUI.tblLeagueNoRuns', { ticks: TBL_MISSING_FLOOR_TICKS });
+  }
+
+  function buildTblFloorThumbHtml(floor) {
+    return `
+      <div class="tbl-league-floor-thumb frame-pressed-1 shrink-0">
+        <img
+          src="/assets/room-thumbnails/${TBL_ROOM_ID}.png"
+          alt="Tibia Ball League"
+          class="pixelated tbl-league-floor-thumb-bg" />
+        <div class="tbl-league-floor-thumb-overlay">
+          <img src="/assets/UI/floor-15.png" alt="Floor" class="pixelated" style="width:22px;height:11px;object-fit:contain;" />
+          <span class="pixel-font-14" style="line-height:1;color:#fff;text-shadow:0 1px 2px #000;">${floor}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function createTblLeagueModalContent(floorRows, participantCount = 0) {
+    const summaryPanel = createTblLeagueSummaryPanel(floorRows, participantCount);
+    const scrollContainer = createTblScrollContainer();
+
+    floorRows.forEach((row) => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'frame-1 surface-regular flex items-center gap-2 p-1';
+      if (!row.unlocked) {
+        itemEl.classList.add('tbl-league-item--locked');
+      } else {
+        itemEl.classList.add('tbl-league-item--clickable');
+        if (row.yourTicks === null || row.yourTicks === undefined) {
+          itemEl.classList.add('tbl-league-item--empty');
+        }
+        itemEl.addEventListener('click', () => {
+          navigateTblToFloor(row.floor);
+        });
+      }
+      itemEl.title = row.unlocked
+        ? t('mods.betterUI.tblLeagueGoToFloor', { floor: row.floor })
+        : t('mods.betterUI.tblLeagueFloorLocked');
+      const statusColor = row.unlocked ? '#8f8' : '#888';
+      itemEl.innerHTML = `
+        ${buildTblFloorThumbHtml(row.floor)}
+        <div class="grid w-full gap-1">
+          <div class="text-whiteExp">${escapeTblHtml(t('mods.betterUI.tblLeagueFloorRowTitle', { floor: row.floor, ascension: row.ascension }))}</div>
+          <div class="pixel-font-14">${formatTblTicksComparison(row.yourTicks, row.leaderTicks, row.leader?.name, row.youLead)}</div>
+          <div class="pixel-font-14" style="color:${statusColor};">${escapeTblHtml(buildTblImprovementText(row))}</div>
+        </div>
+      `;
+      scrollContainer.addContent(itemEl);
+    });
+
+    const container = document.createElement('div');
+    container.className = 'flex flex-col tbl-league-modal-content';
+    Object.assign(container.style, {
+      height: '100%',
+      minHeight: '0',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      overflow: 'hidden'
+    });
+    container.appendChild(summaryPanel);
+
+    const separator = document.createElement('div');
+    separator.setAttribute('role', 'none');
+    separator.className = 'separator my-2.5';
+    separator.style.flexShrink = '0';
+    container.appendChild(separator);
+    container.appendChild(scrollContainer.element);
+
+    return { element: container };
+  }
+
+  function closeTblFloorLeagueModal() {
+    clearTblModalLayoutCleanup();
+    clearTblEventTimerUpdates();
+    if (TblFloorLeagueState.modalRef?.close) {
+      TblFloorLeagueState.modalRef.close();
+    } else {
+      getTblModalDialog()?.remove();
+    }
+    TblFloorLeagueState.modalRef = null;
+  }
+
+  async function refreshTblFloorLeagueModalIfOpen() {
+    if (!TblFloorLeagueState.modalRef) {
+      return;
+    }
+    closeTblFloorLeagueModal();
+    await openTblFloorLeagueModal(true);
+  }
+
+  async function openTblFloorLeagueModal(forceRefresh = false) {
+    const api = getTblApi();
+    if (!api?.ui?.components?.createModal) {
+      console.warn('[Better Highscores][TBL] Modal API unavailable');
+      return;
+    }
+
+    closeTblFloorLeagueModal();
+    ensureTblLeagueStyles();
+
+    if (!TblFloorLeagueState.joinChecked) {
+      await refreshTblJoinState(forceRefresh);
+    }
+
+    let dismissLoading = null;
+    try {
+      dismissLoading = api.showModal?.({
+        title: t('mods.betterUI.tblLeagueTitle'),
+        content: `<div style="text-align:center;padding:20px;">${escapeTblHtml(t('mods.betterUI.tblLeagueLoading'))}</div>`,
+        buttons: []
+      });
+
+      const floorRows = await loadTblAllFloorData(forceRefresh);
+      if (modDisposed) {
+        return;
+      }
+      TblFloorLeagueState.floorBarRows = floorRows;
+      TblFloorLeagueState.floorBarCacheAt = Date.now();
+      const modalContent = createTblLeagueModalContent(
+        floorRows,
+        TblFloorLeagueState.participantCount || 0
+      );
+
+      if (typeof dismissLoading === 'function') {
+        dismissLoading();
+        dismissLoading = null;
+      }
+
+      const modalButtons = [
+        {
+          text: t('mods.betterUI.betterHighscoresContextMenuClose'),
+          primary: true,
+          onClick: () => closeTblFloorLeagueModal()
+        }
+      ];
+      if (!TblFloorLeagueState.joined) {
+        modalButtons.unshift({
+          text: t('mods.betterUI.tblLeagueJoin'),
+          primary: false,
+          onClick: () => joinTblFloorLeague()
+        });
+      }
+
+      const modalDimensions = getTblModalDimensions();
+      const modalRef = api.ui.components.createModal({
+        title: t('mods.betterUI.tblLeagueTitle'),
+        width: modalDimensions.width,
+        height: modalDimensions.height,
+        content: modalContent.element,
+        buttons: modalButtons
+      });
+
+      TblFloorLeagueState.modalRef = modalRef;
+      setupTblModalResponsiveLayout(modalRef, modalContent.element);
+      setupTblEventTimerUpdates();
+
+      const originalClose = modalRef.close?.bind(modalRef);
+      if (originalClose) {
+        modalRef.close = () => {
+          closeTblFloorLeagueModal();
+          originalClose();
+        };
+      }
+    } catch (error) {
+      console.warn('[Better Highscores][TBL] Failed to open league modal:', error);
+      api.ui?.components?.createModal?.({
+        title: t('common.error'),
+        content: `<p>${escapeTblHtml(t('mods.betterUI.tblLeagueLoadError'))}</p>`,
+        buttons: [{ text: t('controls.ok'), primary: true }]
+      });
+    } finally {
+      if (typeof dismissLoading === 'function') {
+        dismissLoading();
+      }
+    }
+  }
+
+  function decorateTblFloorSection(section, userScores) {
+    if (!isTblMapActive()) {
+      return;
+    }
+
+    section.style.cursor = 'pointer';
+    section.title = t('mods.betterUI.tblLeagueOpenHint');
+
+    const existingBtn = section.querySelector('.tbl-event-competition-btn');
+    if (existingBtn) {
+      existingBtn.remove();
+    }
+
+    const eventBtn = createTblEventCompetitionButton();
+    eventBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!TblFloorLeagueState.joined) {
+        joinTblFloorLeague().then((joined) => {
+          if (joined) {
+            openTblFloorLeagueModal();
+          }
+        });
+        return;
+      }
+      openTblFloorLeagueModal();
+    });
+    section.appendChild(eventBtn);
+
+    section.addEventListener('click', (e) => {
+      if (e.target.closest('button')) {
+        return;
+      }
+      openTblFloorLeagueModal();
+    });
+  }
+
+  function setupTblBoardListener() {
+    if (TblFloorLeagueState.boardUnsubscribe || !globalThis.state?.board?.subscribe) {
+      return;
+    }
+
+    TblFloorLeagueState.boardUnsubscribe = globalThis.state.board.subscribe(({ context }) => {
+      if (modDisposed) {
+        return;
+      }
+      if (isTblMapActive()) {
+        const selectedFloor = getSelectedBoardFloor();
+        if (selectedFloor !== TblFloorLeagueState.lastBarFloor) {
+          TblFloorLeagueState.lastBarFloor = selectedFloor;
+          refreshTblFloorBarSection().catch(() => {});
+        }
+        trackTblBattleSetup(context);
+      }
+
+      const serverResults = context?.serverResults;
+      if (!serverResults?.rewardScreen || typeof serverResults.seed === 'undefined') {
+        return;
+      }
+
+      const seed = serverResults.seed;
+      if (seed === TblFloorLeagueState.lastProcessedSeed) {
+        return;
+      }
+
+      scheduleTimeout(() => {
+        const freshResults = getTblServerResultsFromBoard();
+        if (!freshResults?.rewardScreen || freshResults.seed !== seed) {
+          trySubmitTblAfterBattle();
+          return;
+        }
+        handleTblServerResults(freshResults, seed).catch((err) => {
+          console.warn('[Better Highscores][TBL] Server results handling failed:', err);
+        });
+      }, 0);
+    });
+    BetterHighscoresState.subscriptions.push(TblFloorLeagueState.boardUnsubscribe);
+  }
+
+  function setupTblRunTrackerTrigger() {
+    if (TblFloorLeagueState.runTrackerTrigger) {
+      return;
+    }
+    TblFloorLeagueState.runTrackerTrigger = () => {
+      trySubmitTblAfterBattle(4);
+    };
+    window.addEventListener('runtracker:runsUpdated', TblFloorLeagueState.runTrackerTrigger);
+  }
+
+  function initTblFloorLeague() {
+    TblFloorLeagueState.joined = readTblJoinedLocal();
+    refreshTblJoinState().catch(() => {});
+    setupTblNetworkListener();
+    setupTblBoardListener();
+    setupTblRunTrackerTrigger();
+  }
+
+  function cleanupTblFloorLeague() {
+    closeTblFloorLeagueModal();
+    clearTblModalLayoutCleanup();
+    clearTblEventTimerUpdates();
+    cleanupTblToastContainer();
+    removeTblBoardSubscription();
+    if (TblFloorLeagueState.fetchRestore) {
+      window.fetch = TblFloorLeagueState.fetchRestore;
+      TblFloorLeagueState.fetchRestore = null;
+    }
+    if (TblFloorLeagueState.runTrackerTrigger) {
+      window.removeEventListener('runtracker:runsUpdated', TblFloorLeagueState.runTrackerTrigger);
+      TblFloorLeagueState.runTrackerTrigger = null;
+    }
+    TblFloorLeagueState.joined = false;
+    TblFloorLeagueState.joinChecked = false;
+    TblFloorLeagueState.joinedAt = 0;
+    TblFloorLeagueState.playerHash = null;
+    TblFloorLeagueState.lastProcessedSeed = null;
+    TblFloorLeagueState.myEventScores = {};
+    TblFloorLeagueState.eventNextCheckEndTime = null;
+    TblFloorLeagueState.floorBarRows = null;
+    TblFloorLeagueState.floorBarCacheAt = 0;
+    TblFloorLeagueState.lastBarFloor = null;
+    TblFloorLeagueState.trackedBattleSetup = null;
+    TblFloorLeagueState.playerTotalTicks = null;
+    TblFloorLeagueState.participantCount = 0;
+    TblFloorLeagueState.fetchCache.clear();
+    TblFloorLeagueState.fetchInFlight.clear();
+    TblFloorLeagueState.fullLoadInFlight = null;
+    TblFloorLeagueState.lastFullLoadAt = 0;
+    TblFloorLeagueState.lastParticipantSyncAt = 0;
+    TblFloorLeagueState.joinStateCachedAt = 0;
+  }
+
+// =======================
 // MODULE 2: State Management
 // =======================
   const BetterHighscoresState = {
@@ -1181,6 +3561,8 @@
       console.log('[Better Highscores] Battle completed, refreshing leaderboard data');
       scheduleLeaderboardRefresh(mapCode, 'battle-complete');
     }
+
+    trySubmitTblAfterBattle();
   }
 
   function clearDebounceTimeout(timeoutKey) {
@@ -1933,6 +4315,10 @@
 
   // Helper function to create a leaderboard section (tick, rank, or floor)
   function createLeaderboardSection(data, config, userScores, playerName, maxValue = null, currentValue = null, tickData = null) {
+    if (config.isFloor && isTblMapActive()) {
+      return createTblFloorLeaderboardSection();
+    }
+
     const section = document.createElement('div');
     Object.assign(section.style, SECTION_WRAPPER_STYLE);
 
@@ -1996,6 +4382,10 @@
       }
 
       appendWorldRecordPlaceholder(section);
+    }
+
+    if (config.isFloor) {
+      decorateTblFloorSection(section, userScores);
     }
 
     return section;
@@ -2231,6 +4621,9 @@
           applyContainerStyles(leaderboardContainer);
           currentMapCode = mapCode;
           BetterHighscoresState.lastUpdateTime = Date.now();
+          if (isTblMapActive()) {
+            scheduleTblFloorBarRefresh();
+          }
           handleSuccess();
           return;
         }
@@ -2533,6 +4926,7 @@
         });
         
         console.log('[Better Highscores] Initialization complete');
+        initTblFloorLeague();
       } else {
         // Retry after a short delay
         checkGameStateTimeout = scheduleTimeout(checkGameState, DELAYS.RETRY);
@@ -2572,6 +4966,7 @@
     console.log('[Better Highscores] Cleaning up...');
     modDisposed = true;
 
+    cleanupTblFloorLeague();
     closeBetterHighscoresContextMenu();
     removeRestoreButton();
     removeHighscoresNavButton();

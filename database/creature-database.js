@@ -119,6 +119,7 @@ function getCreaturePickerNames(obtainableCreatures) {
 /** Seasonal / event creatures — cannot awaken (see NON_AWAKENABLE). */
 const EVENT_CREATURES = [
   'Dwarf Merrymancer',
+  'Football Elemental',
   'Goblin Gumslinger',
   'Goblin Saboteur',
   'Gummy Raider',

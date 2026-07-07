@@ -240,6 +240,26 @@ function findBestiaryAutomator() {
 // 4. MAP, SETUP AND FLOOR MANAGEMENT
 // ============================================================================
 
+// Exclude raid and dynamic event maps from stamina farming options (maps-database)
+function isExcludedMap(roomId) {
+    if (!roomId) return true;
+    try {
+        const mapsDb = globalThis.mapsDatabase;
+        if (typeof mapsDb?.isRaid === 'function' && mapsDb.isRaid(roomId)) {
+            return true;
+        }
+        if (typeof mapsDb?.isDynamicEventMap === 'function' && mapsDb.isDynamicEventMap(roomId)) {
+            return true;
+        }
+        const room = typeof mapsDb?.getMapById === 'function'
+            ? mapsDb.getMapById(roomId)
+            : (globalThis.state?.utils?.ROOMS || []).find((r) => r?.id === roomId);
+        return room?.raid === true;
+    } catch (_) {
+        return false;
+    }
+}
+
 // Get region display name from region id (uses maps-database)
 function getRealRegionName(region) {
     if (!region) return 'Unknown Region';
@@ -287,11 +307,13 @@ function getAllMapsInDatabaseOrder(roomNames) {
         || [];
     if (Array.isArray(rooms) && rooms.length > 0) {
         return rooms
-            .filter(room => room?.id && roomNames[room.id])
+            .filter(room => room?.id && roomNames[room.id] && !isExcludedMap(room.id))
             .map(room => ({ id: room.id, name: roomNames[room.id] }));
     }
     return sortMapsByDatabaseOrder(
-        Object.entries(roomNames).map(([id, name]) => ({ id, name }))
+        Object.entries(roomNames)
+            .filter(([id]) => !isExcludedMap(id))
+            .map(([id, name]) => ({ id, name }))
     );
 }
 
@@ -315,7 +337,7 @@ function organizeMapsByRegion() {
             
             region.rooms.forEach(room => {
                 const roomCode = room.id;
-                if (roomNames[roomCode]) {
+                if (roomNames[roomCode] && !isExcludedMap(roomCode)) {
                     regionMaps.push({
                         id: roomCode,
                         name: roomNames[roomCode]
@@ -337,7 +359,7 @@ function organizeMapsByRegion() {
         
         const remainingMaps = sortMapsByDatabaseOrder(
             Object.entries(roomNames)
-                .filter(([id]) => !processedRoomCodes.has(id))
+                .filter(([id]) => !processedRoomCodes.has(id) && !isExcludedMap(id))
                 .map(([id, name]) => ({ id, name }))
         );
         

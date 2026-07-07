@@ -55,9 +55,11 @@
     'Amazon Shield',
     'Earthborn Titan Armor',
     'Fireborn Giant Armor',
+    'Grey Tome',
     'Hailstorm Rod',
     'Orclops Santa',
     'Paladin Armor',
+    'Rainbow Shield',
     'Windborn Colossus Armor',
     'Witch Hat'
   ];
