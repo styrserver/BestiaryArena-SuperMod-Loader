@@ -4,6 +4,16 @@
   },
   "notes": [
     {
+      "version": "4.4.5",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Tibia Ball League Event Competition: modal now has Ticks | Rank tabs (Ticks default) with separate 500 Beast Coin prizes (icon after amount), Current Leader line, and auto-submit on victory; overall standings use total ticks or rank points across floors 0–15 (9600-tick penalty per missing floor) with records or rank-tick tiebreakers. Top #1–#3 players shown in an Excel-style comparison grid with gold/silver/bronze medal headers (Records on Ticks; Rank omits redundant Floors row); summary uses a 35/60 layout with improved centering and font size. After the event ends the timer reads “Event ended”, new submissions are blocked, and Firebase scores are retained for review. Floor bar polish: no duplicate You/leader row when you lead, consistent Time | Rank | Floor separators after refresh, Floor 0 counter without /max or parentheses, and floor numbers use in-game floor scale colors."
+        }
+      ]
+    },
+    {
       "version": "4.4.4",
       "changes": [
         {

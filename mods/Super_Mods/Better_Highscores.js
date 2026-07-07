@@ -781,7 +781,9 @@
 // =======================
   const TBL_ROOM_ID = 'wcfield';
   const TBL_FIREBASE_BASE = 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app/events';
+  // Event competition data is retained in Firebase after the event ends; never auto-deleted.
   // Leaderboard: /events/scores/{floor}/{playerHash} — name, ticks, date, updatedAt (lean)
+  // Rank board: /events/rank-scores/{floor}/{playerHash} — name, rank, ticks, date, updatedAt
   // Replays (admin): /events/replays/{floor}/{playerHash} — replay ($replay string) + metadata
   // Participants: /events/participants/{playerHash} — name, joinedAt, highscoreFloorTicks {0, 15} for tiebreaker
   const TBL_JOIN_STORAGE_KEY = 'better-highscores-tbl-joined';
@@ -791,7 +793,9 @@
   const TBL_FIREBASE_FLOOR_MIN = 1;
   const TBL_FIREBASE_FLOOR_MAX = 14;
   const TBL_HIGHSCORE_FLOORS = new Set([0, 15]);
+  const TBL_HIGHSCORE_RANK_FLOORS = new Set([0]);
   const TBL_MISSING_FLOOR_TICKS = 9600;
+  const TBL_COMPETITION_TAB = { RANK: 'rank', FLOOR: 'floor' };
   const TBL_EVENT_TIMER_INTERVAL_MS = 1000;
   const TBL_EVENT_PRIZE_BEAST_COINS = 500;
   const TBL_SUBMIT_MIN_INTERVAL_MS = 2000;
@@ -802,6 +806,7 @@
   const TBL_PARTICIPANT_SYNC_MIN_INTERVAL_MS = 60000;
   const TBL_PARTICIPANTS_PATH = `${TBL_FIREBASE_BASE}/participants`;
   const TBL_SCORES_PATH = `${TBL_FIREBASE_BASE}/scores`;
+  const TBL_RANK_SCORES_PATH = `${TBL_FIREBASE_BASE}/rank-scores`;
 
   const TBL_MODAL_ID = 'better-highscores-tbl-modal';
   const TBL_STYLES_ID = 'better-highscores-tbl-styles';
@@ -812,6 +817,17 @@
   const TBL_MODAL_MIN_HEIGHT = 320;
   const TBL_TOAST_DURATION_MS = 10000;
   const TBL_TOAST_CONTAINER_ID = 'better-highscores-tbl-toast-container';
+  // Matches /assets/UI/floor-{n}.png accent colors (mint → green → gold → red).
+  const TBL_FLOOR_SCALE_COLORS = [
+    '#97f7bc', '#65f19b', '#3acb71', '#4dcb7e', '#28d269',
+    '#27b45d', '#9b8a41', '#c2ad51', '#c3a937', '#b99e22',
+    '#ae900a', '#b85151', '#c74848', '#cc2e2e', '#d01616', '#e80202'
+  ];
+  const TBL_LEAGUE_TAB_ICON_SIZE = 12;
+  const TBL_LEAGUE_TAB_ICONS = {
+    rank: { src: '/assets/icons/star-tier.png', alt: 'Rank' },
+    floor: { src: '/assets/icons/speed.png', alt: 'Ticks' }
+  };
 
   const TblFloorLeagueState = {
     joined: false,
@@ -821,8 +837,11 @@
     modalRef: null,
     layoutCleanup: null,
     lastSubmitAt: 0,
+    lastRankSubmitAt: 0,
     lastProcessedSeed: null,
     myEventScores: {},
+    myEventRankScores: {},
+    myEventRankTicks: {},
     boardUnsubscribe: null,
     fetchRestore: null,
     runTrackerTrigger: null,
@@ -831,14 +850,22 @@
     eventNextCheckEndTime: null,
     floorBarRows: null,
     floorBarCacheAt: 0,
+    rankBarRows: null,
+    rankBarCacheAt: 0,
+    activeModalTab: TBL_COMPETITION_TAB.FLOOR,
     lastBarFloor: null,
     trackedBattleSetup: null,
     playerTotalTicks: null,
+    playerTotalRanks: null,
+    playerTotalRankTicks: null,
+    eventWasActive: false,
     participantCount: 0,
     fetchCache: new Map(),
     fetchInFlight: new Map(),
     fullLoadInFlight: null,
+    rankFullLoadInFlight: null,
     lastFullLoadAt: 0,
+    lastRankFullLoadAt: 0,
     lastParticipantSyncAt: 0,
     joinStateCachedAt: 0
   };
@@ -911,15 +938,19 @@
   }
 
   function buildTblParticipantHighscoreMap(participants) {
-    const map = new Map();
+    const tickMap = new Map();
+    const rankMap = new Map();
+    const rankTickMap = new Map();
     if (!participants || typeof participants !== 'object') {
-      return map;
+      return { tickMap, rankMap, rankTickMap };
     }
     Object.values(participants).forEach((participant) => {
       if (!participant?.name) {
         return;
       }
       const highscores = { 0: null, 15: null };
+      const highscoreRanks = { 0: null };
+      const highscoreRankTicks = { 0: null };
       const stored = participant.highscoreFloorTicks;
       if (stored && typeof stored === 'object') {
         if (Number.isFinite(Number(stored[0]))) {
@@ -929,9 +960,19 @@
           highscores[15] = Number(stored[15]);
         }
       }
-      map.set(participant.name, highscores);
+      const storedRanks = participant.highscoreFloorRanks;
+      if (storedRanks && typeof storedRanks === 'object' && Number.isFinite(Number(storedRanks[0]))) {
+        highscoreRanks[0] = Number(storedRanks[0]);
+      }
+      const storedRankTicks = participant.highscoreFloorRankTicks;
+      if (storedRankTicks && typeof storedRankTicks === 'object' && Number.isFinite(Number(storedRankTicks[0]))) {
+        highscoreRankTicks[0] = Number(storedRankTicks[0]);
+      }
+      tickMap.set(participant.name, highscores);
+      rankMap.set(participant.name, highscoreRanks);
+      rankTickMap.set(participant.name, highscoreRankTicks);
     });
-    return map;
+    return { tickMap, rankMap, rankTickMap };
   }
 
   async function loadTblParticipantsBundle(force = false) {
@@ -943,15 +984,22 @@
     const count = !participants || typeof participants !== 'object'
       ? 0
       : Object.values(participants).filter((entry) => entry && entry.name).length;
+    const { tickMap, rankMap, rankTickMap } = buildTblParticipantHighscoreMap(participants);
     return {
       participants: participants && typeof participants === 'object' ? participants : {},
       count,
-      highscoreMap: buildTblParticipantHighscoreMap(participants)
+      highscoreMap: tickMap,
+      highscoreRankMap: rankMap,
+      highscoreRankTickMap: rankTickMap
     };
   }
 
   function tblScoresPath(floor) {
     return `${TBL_SCORES_PATH}/${floor}`;
+  }
+
+  function tblRankScoresPath(floor) {
+    return `${TBL_RANK_SCORES_PATH}/${floor}`;
   }
 
   function isTblMapActive(mapCode = getCurrentMapCode()) {
@@ -1091,6 +1139,47 @@
       }
     }
     return null;
+  }
+
+  function getTblRankFromServerResults(serverResults) {
+    const reward = serverResults?.rewardScreen;
+    if (!reward) {
+      return null;
+    }
+    const rank = Number(reward.rank);
+    if (!Number.isFinite(rank) || rank <= 0) {
+      return null;
+    }
+    return rank;
+  }
+
+  function isTblFirebaseRankFloor(floor) {
+    return floor >= 1 && floor <= TBL_MAX_FLOOR;
+  }
+
+  function isTblHighscoreRankFloor(floor) {
+    return TBL_HIGHSCORE_RANK_FLOORS.has(floor);
+  }
+
+  function isTblRankScoreBetter(candidateRank, candidateTicks, existing) {
+    if (!existing || !Number.isFinite(Number(existing.rank))) {
+      return true;
+    }
+    const previousRank = Number(existing.rank);
+    const previousTicks = Number.isFinite(Number(existing.ticks)) ? Number(existing.ticks) : null;
+    if (candidateRank > previousRank) {
+      return true;
+    }
+    if (candidateRank < previousRank) {
+      return false;
+    }
+    if (candidateTicks === null || candidateTicks === undefined) {
+      return false;
+    }
+    if (previousTicks === null || previousTicks === undefined) {
+      return true;
+    }
+    return candidateTicks < previousTicks;
   }
 
   function isTblPlayerBoardPiece(piece) {
@@ -1427,6 +1516,10 @@
     return list.find((raid) => raid.roomId === TBL_ROOM_ID) || null;
   }
 
+  function isTblEventCompetitionActive() {
+    return getTblEventTimerState().active;
+  }
+
   function getTblEventTimerState() {
     const now = Date.now();
     const raid = getTblEventRaidEntry();
@@ -1496,30 +1589,41 @@
     if (modDisposed) {
       return;
     }
-    const valueEl = document.querySelector('.tbl-event-timer-value');
-    if (!valueEl) {
+    const valueEls = document.querySelectorAll('.tbl-event-timer-value');
+    if (!valueEls.length) {
       return;
     }
 
     const { active, msRemaining } = getTblEventTimerState();
-    if (active && msRemaining > 0) {
-      valueEl.textContent = t('mods.betterUI.tblLeagueEventEndsIn', {
-        time: formatTblEventTimer(msRemaining)
-      });
-      valueEl.style.color = getTblEventTimerColor(msRemaining, true);
-      return;
+    if (active) {
+      TblFloorLeagueState.eventWasActive = true;
     }
+    valueEls.forEach((valueEl) => {
+      if (active && msRemaining > 0) {
+        valueEl.textContent = t('mods.betterUI.tblLeagueEventEndsIn', {
+          time: formatTblEventTimer(msRemaining)
+        });
+        valueEl.style.color = getTblEventTimerColor(msRemaining, true);
+        return;
+      }
 
-    if (msRemaining > 0) {
-      valueEl.textContent = t('mods.betterUI.tblLeagueEventInactiveCheck', {
-        time: formatTblEventTimer(msRemaining)
-      });
+      if (TblFloorLeagueState.eventWasActive) {
+        valueEl.textContent = t('mods.betterUI.tblLeagueEventEnded');
+        valueEl.style.color = '#ccc';
+        return;
+      }
+
+      if (msRemaining > 0) {
+        valueEl.textContent = t('mods.betterUI.tblLeagueEventInactiveCheck', {
+          time: formatTblEventTimer(msRemaining)
+        });
+        valueEl.style.color = '#ccc';
+        return;
+      }
+
+      valueEl.textContent = t('mods.betterUI.tblLeagueEventInactive');
       valueEl.style.color = '#ccc';
-      return;
-    }
-
-    valueEl.textContent = t('mods.betterUI.tblLeagueEventInactive');
-    valueEl.style.color = '#ccc';
+    });
   }
 
   function unsubscribeTblSubscription(subscription) {
@@ -1630,6 +1734,8 @@
   function invalidateTblFloorBarCache() {
     TblFloorLeagueState.floorBarCacheAt = 0;
     TblFloorLeagueState.floorBarRows = null;
+    TblFloorLeagueState.rankBarCacheAt = 0;
+    TblFloorLeagueState.rankBarRows = null;
   }
 
   async function ensureTblFloorBarData(force = false) {
@@ -1657,6 +1763,7 @@
     const oldSection = contentDiv.children[2];
     const newSection = createTblFloorLeaderboardSection();
     oldSection.replaceWith(newSection);
+    applySectionVisibility(contentDiv);
   }
 
   function scheduleTblFloorBarRefresh() {
@@ -1742,6 +1849,19 @@
     section.appendChild(entrySpan);
   }
 
+  function shouldShowTblFloorLeaderEntry(row, yourTicks, playerName) {
+    if (!row?.leader || row.leaderTicks === null || row.leaderTicks === undefined) {
+      return false;
+    }
+    const samePlayer = Boolean(playerName && row.leader?.name === playerName);
+    const sameTicks = yourTicks !== null && yourTicks !== undefined && Number(yourTicks) === Number(row.leaderTicks);
+    // Avoid duplicate "You" entries when the user is also the floor leader.
+    if (samePlayer && sameTicks) {
+      return false;
+    }
+    return true;
+  }
+
   function createTblFloorLeaderboardSection() {
     const config = LEADERBOARD_SECTION_CONFIG.floor;
     const section = document.createElement('div');
@@ -1759,7 +1879,6 @@
 
     const selectedFloor = getSelectedBoardFloor();
     TblFloorLeagueState.lastBarFloor = selectedFloor;
-    const maxFloor = getMaxFloor();
     const row = getTblFloorBarRow(selectedFloor);
     const userScores = getTblUserScoresForMap();
     const playerName = getTblPlayerName();
@@ -1768,22 +1887,22 @@
       TblFloorLeagueState.myEventScores,
       userScores
     );
-    const hasTicks = yourTicks !== null && yourTicks !== undefined;
 
     const maxDisplay = document.createElement('span');
     Object.assign(maxDisplay.style, {
       fontSize: '10px',
-      color: hasTicks ? '#00ff00' : '#ff4444',
-      fontWeight: 'bold'
+      fontWeight: 'bold',
+      ...buildTblFloorScaleTextStyle(selectedFloor)
     });
-    maxDisplay.textContent = `(${selectedFloor}/${maxFloor})`;
+    maxDisplay.textContent = `${selectedFloor}`;
     section.appendChild(maxDisplay);
 
     appendTblSelectedFloorUserEntry(section, selectedFloor, yourTicks, row?.youLead);
 
-    if (row?.leader && row.leaderTicks !== null && row.leaderTicks !== undefined) {
+    const hasLeaderData = Boolean(row?.leader && row.leaderTicks !== null && row.leaderTicks !== undefined);
+    if (shouldShowTblFloorLeaderEntry(row, yourTicks, playerName)) {
       appendTblSelectedFloorLeaderEntry(section, selectedFloor, row.leader, playerName);
-    } else {
+    } else if (!hasLeaderData) {
       appendWorldRecordPlaceholder(section);
     }
 
@@ -1811,6 +1930,8 @@
     }
     return {
       bestTicks: room.ticks ?? null,
+      bestRank: room.rank ?? null,
+      bestRankTicks: room.rankTicks ?? null,
       bestFloor: room.floor !== undefined && room.floor !== null ? room.floor : 0,
       bestFloorTicks: room.floorTicks ?? null
     };
@@ -1873,6 +1994,20 @@
     return myEventScores[floor] ?? null;
   }
 
+  function getTblYourRankForFloor(floor, myEventRankScores, userScores) {
+    if (floor === 0) {
+      return userScores?.bestRank ?? null;
+    }
+    return myEventRankScores[floor] ?? null;
+  }
+
+  function getTblYourRankTicksForFloor(floor, myEventRankTicks, userScores) {
+    if (floor === 0) {
+      return userScores?.bestRankTicks ?? null;
+    }
+    return myEventRankTicks[floor] ?? null;
+  }
+
   function getTblParticipantHighscoreTicksByFloor() {
     const userScores = getTblUserScoresForMap();
     if (!userScores) {
@@ -1884,8 +2019,30 @@
     };
   }
 
+  function getTblParticipantHighscoreRanksByFloor() {
+    const userScores = getTblUserScoresForMap();
+    if (!userScores) {
+      return { 0: null };
+    }
+    return {
+      0: getTblYourRankForFloor(0, {}, userScores)
+    };
+  }
+
+  function getTblParticipantHighscoreRankTicksByFloor() {
+    const userScores = getTblUserScoresForMap();
+    if (!userScores) {
+      return { 0: null };
+    }
+    return {
+      0: getTblYourRankTicksForFloor(0, {}, userScores)
+    };
+  }
+
   function buildTblParticipantRecord(existing, name, joinedAt) {
     const highscoreFloorTicks = getTblParticipantHighscoreTicksByFloor();
+    const highscoreFloorRanks = getTblParticipantHighscoreRanksByFloor();
+    const highscoreFloorRankTicks = getTblParticipantHighscoreRankTicksByFloor();
     return {
       ...(existing || {}),
       name,
@@ -1893,6 +2050,12 @@
       highscoreFloorTicks: {
         0: highscoreFloorTicks[0],
         15: highscoreFloorTicks[15]
+      },
+      highscoreFloorRanks: {
+        0: highscoreFloorRanks[0]
+      },
+      highscoreFloorRankTicks: {
+        0: highscoreFloorRankTicks[0]
       }
     };
   }
@@ -1901,11 +2064,17 @@
     if (!existing) {
       return false;
     }
-    const next = getTblParticipantHighscoreTicksByFloor();
-    const prev = existing.highscoreFloorTicks || {};
-    const floor0Match = (prev[0] ?? null) === (next[0] ?? null);
-    const floor15Match = (prev[15] ?? null) === (next[15] ?? null);
-    return floor0Match && floor15Match && existing.name === name;
+    const nextTicks = getTblParticipantHighscoreTicksByFloor();
+    const nextRanks = getTblParticipantHighscoreRanksByFloor();
+    const nextRankTicks = getTblParticipantHighscoreRankTicksByFloor();
+    const prevTicks = existing.highscoreFloorTicks || {};
+    const prevRanks = existing.highscoreFloorRanks || {};
+    const prevRankTicks = existing.highscoreFloorRankTicks || {};
+    const floor0Match = (prevTicks[0] ?? null) === (nextTicks[0] ?? null);
+    const floor15Match = (prevTicks[15] ?? null) === (nextTicks[15] ?? null);
+    const rank0Match = (prevRanks[0] ?? null) === (nextRanks[0] ?? null);
+    const rankTick0Match = (prevRankTicks[0] ?? null) === (nextRankTicks[0] ?? null);
+    return floor0Match && floor15Match && rank0Match && rankTick0Match && existing.name === name;
   }
 
   async function updateTblParticipantHighscoreTicks(force = false) {
@@ -1967,6 +2136,27 @@
       return leaders;
     } catch (error) {
       console.warn('[Better Highscores][TBL] Failed to load highscore floors:', error);
+      return {};
+    }
+  }
+
+  async function loadTblHighscoreRankLeaders() {
+    try {
+      const { rankData } = await fetchLeaderboardData(TBL_ROOM_ID, true);
+      const rankEntry = getBestLeaderboardEntry(rankData, { isRank: true });
+      const leaders = {};
+
+      if (rankEntry?.userName && Number.isFinite(Number(rankEntry.rank))) {
+        leaders[0] = {
+          name: rankEntry.userName,
+          rank: Number(rankEntry.rank),
+          ticks: Number.isFinite(Number(rankEntry.ticks)) ? Number(rankEntry.ticks) : null
+        };
+      }
+
+      return leaders;
+    } catch (error) {
+      console.warn('[Better Highscores][TBL] Failed to load highscore rank floor:', error);
       return {};
     }
   }
@@ -2033,6 +2223,9 @@
     if (!TblFloorLeagueState.joined || !isTblFirebaseFloor(floor)) {
       return false;
     }
+    if (!isTblEventCompetitionActive()) {
+      return false;
+    }
     if (!Number.isFinite(ticks) || ticks <= 0) {
       return false;
     }
@@ -2084,6 +2277,155 @@
     return true;
   }
 
+  function buildTblRankRow(floor, entries, myEventRankScores, myEventRankTicks, userScores, playerName) {
+    const leader = entries[0] || null;
+    const yourRank = getTblYourRankForFloor(floor, myEventRankScores, userScores);
+    const yourTicks = getTblYourRankTicksForFloor(floor, myEventRankTicks, userScores);
+    const leaderRank = leader && Number.isFinite(Number(leader.rank)) ? Number(leader.rank) : null;
+    const leaderTicks = leader && Number.isFinite(Number(leader.ticks)) ? Number(leader.ticks) : null;
+    const youLead = Boolean(
+      playerName &&
+      yourRank !== null &&
+      (
+        leaderRank === null ||
+        yourRank > leaderRank ||
+        (
+          yourRank === leaderRank &&
+          yourTicks !== null &&
+          leaderTicks !== null &&
+          yourTicks < leaderTicks
+        ) ||
+        (
+          leader?.name === playerName &&
+          yourRank === leaderRank &&
+          yourTicks === leaderTicks
+        )
+      )
+    );
+    let gap = null;
+    let gapType = 'rank';
+    if (yourRank !== null && leaderRank !== null && !youLead) {
+      if (yourRank < leaderRank) {
+        gap = leaderRank - yourRank;
+        gapType = 'rank';
+      } else if (
+        yourRank === leaderRank &&
+        yourTicks !== null &&
+        leaderTicks !== null &&
+        yourTicks > leaderTicks
+      ) {
+        gap = yourTicks - leaderTicks;
+        gapType = 'ticks';
+      } else if (yourRank === leaderRank) {
+        gap = 0;
+        gapType = 'rank';
+      }
+    }
+    return {
+      floor,
+      ascension: tblFloorToAscensionPercent(floor),
+      yourRank,
+      yourTicks,
+      leader,
+      leaderRank,
+      leaderTicks,
+      entries,
+      youLead,
+      gap,
+      gapType,
+      fromHighscores: isTblHighscoreRankFloor(floor),
+      unlocked: isTblFloorUnlocked(floor)
+    };
+  }
+
+  function parseTblRankRunFromServerResults(serverResults) {
+    if (!serverResults?.rewardScreen) {
+      return null;
+    }
+
+    const roomId = getTblRoomIdFromServerResults(serverResults);
+    if (roomId !== TBL_ROOM_ID) {
+      return null;
+    }
+
+    if (!serverResults.rewardScreen.victory) {
+      return null;
+    }
+
+    const floor = Number(serverResults.rewardScreen.floor ?? serverResults.floor);
+    const rank = getTblRankFromServerResults(serverResults);
+    const ticks = getTblFloorTicksFromServerResults(serverResults);
+    if (!Number.isFinite(floor) || !isTblFirebaseRankFloor(floor) || rank === null) {
+      return null;
+    }
+
+    return {
+      floor,
+      rank,
+      ticks,
+      date: new Date().toISOString().slice(0, 10)
+    };
+  }
+
+  async function submitTblRankScoreIfBetter(floor, rank, ticks, date, runMeta = {}) {
+    if (!TblFloorLeagueState.joined || !isTblFirebaseRankFloor(floor)) {
+      return false;
+    }
+    if (!isTblEventCompetitionActive()) {
+      return false;
+    }
+    if (!Number.isFinite(rank) || rank <= 0) {
+      return false;
+    }
+    const now = Date.now();
+    if (now - TblFloorLeagueState.lastRankSubmitAt < TBL_SUBMIT_MIN_INTERVAL_MS) {
+      return false;
+    }
+    const hash = await getTblPlayerHash();
+    const name = getTblPlayerName();
+    if (!hash || !name) {
+      return false;
+    }
+    const scorePath = `${TBL_RANK_SCORES_PATH}/${floor}/${hash}`;
+    const existing = await tblFirebaseGetCached(scorePath, {
+      defaultReturn: null,
+      force: true
+    });
+    if (!isTblRankScoreBetter(rank, ticks, existing)) {
+      return false;
+    }
+    const scoreDate = date || new Date().toISOString().slice(0, 10);
+    const scorePayload = {
+      name,
+      rank,
+      ticks: Number.isFinite(ticks) ? ticks : null,
+      date: scoreDate,
+      updatedAt: now
+    };
+    const writes = [TblFirebase.put(scorePath, scorePayload)];
+    if (typeof runMeta.replay === 'string' && runMeta.replay.startsWith('$replay(')) {
+      writes.push(TblFirebase.put(`${TBL_FIREBASE_BASE}/rank-replays/${floor}/${hash}`, {
+        name,
+        rank,
+        ticks: scorePayload.ticks,
+        date: scoreDate,
+        updatedAt: now,
+        replay: runMeta.replay
+      }));
+    }
+    await Promise.all(writes);
+    await updateTblParticipantHighscoreTicks(true);
+    invalidateTblFetchCache([TBL_RANK_SCORES_PATH, tblRankScoresPath(floor), scorePath, TBL_PARTICIPANTS_PATH]);
+    TblFloorLeagueState.lastRankSubmitAt = now;
+    TblFloorLeagueState.myEventRankScores[floor] = rank;
+    if (Number.isFinite(ticks)) {
+      TblFloorLeagueState.myEventRankTicks[floor] = ticks;
+    }
+    invalidateTblFloorBarCache();
+    console.log(`[Better Highscores][TBL] Submitted rank floor ${floor}: ${rank} points`);
+    return true;
+  }
+
   async function handleTblServerResults(serverResults, seed) {
     if (!TblFloorLeagueState.joined || isSandboxMode()) {
       return false;
@@ -2093,24 +2435,52 @@
       return false;
     }
 
-    const run = parseTblFloorRunFromServerResults(serverResults);
-    if (!run) {
+    const floorRun = parseTblFloorRunFromServerResults(serverResults);
+    const rankRun = parseTblRankRunFromServerResults(serverResults);
+    if (!floorRun && !rankRun) {
       return false;
     }
 
     TblFloorLeagueState.lastProcessedSeed = seed;
     const setup = getTblSetupForSubmission();
-    const replay = await buildTblReplayStringWithRetry(serverResults, run.floor, setup);
+    const replayFloor = floorRun?.floor ?? rankRun?.floor;
+    const replay = await buildTblReplayStringWithRetry(serverResults, replayFloor, setup);
     if (!replay) {
       console.warn('[Better Highscores][TBL] Could not build $replay for submitted run');
     }
-    const submitted = await submitTblFloorScoreIfBetter(run.floor, run.floorTicks, run.date, {
-      replay
-    });
-    if (submitted) {
-      showTblEventToast(
-        t('mods.betterUI.tblLeagueScoreSubmitted', { floor: run.floor, ticks: run.floorTicks })
+
+    let submitted = false;
+    if (floorRun) {
+      const floorSubmitted = await submitTblFloorScoreIfBetter(
+        floorRun.floor,
+        floorRun.floorTicks,
+        floorRun.date,
+        { replay }
       );
+      if (floorSubmitted) {
+        showTblEventToast(
+          t('mods.betterUI.tblLeagueScoreSubmitted', { floor: floorRun.floor, ticks: floorRun.floorTicks })
+        );
+        submitted = true;
+      }
+    }
+    if (rankRun) {
+      const rankSubmitted = await submitTblRankScoreIfBetter(
+        rankRun.floor,
+        rankRun.rank,
+        rankRun.ticks,
+        rankRun.date,
+        { replay }
+      );
+      if (rankSubmitted) {
+        showTblEventToast(
+          t('mods.betterUI.tblLeagueRankScoreSubmitted', { floor: rankRun.floor, points: rankRun.rank })
+        );
+        submitted = true;
+      }
+    }
+    if (submitted) {
+      refreshTblFloorBarSection(true).catch(() => {});
     }
     return submitted;
   }
@@ -2232,6 +2602,223 @@
     return allScores && typeof allScores === 'object' ? allScores : {};
   }
 
+  function sanitizeTblRankLeaderboardEntry(entry) {
+    if (!entry || !Number.isFinite(Number(entry.rank))) {
+      return null;
+    }
+    const rank = Number(entry.rank);
+    if (rank <= 0) {
+      return null;
+    }
+    return {
+      name: entry.name,
+      rank,
+      ticks: Number.isFinite(Number(entry.ticks)) ? Number(entry.ticks) : null,
+      date: entry.date,
+      updatedAt: entry.updatedAt
+    };
+  }
+
+  function parseTblFirebaseRankScoresBundle(allScores, playerHash) {
+    const rawEntriesByFloor = new Map();
+    const myScores = {};
+    const myTicks = {};
+
+    for (let floor = 1; floor <= TBL_MAX_FLOOR; floor++) {
+      const entries = [];
+      const floorData = allScores?.[floor];
+      if (floorData && typeof floorData === 'object') {
+        Object.entries(floorData).forEach(([entryHash, entry]) => {
+          const sanitized = sanitizeTblRankLeaderboardEntry(entry);
+          if (!sanitized) {
+            return;
+          }
+          entries.push(sanitized);
+          if (playerHash && entryHash === playerHash) {
+            myScores[floor] = sanitized.rank;
+            if (sanitized.ticks !== null) {
+              myTicks[floor] = sanitized.ticks;
+            }
+          }
+        });
+      }
+      rawEntriesByFloor.set(floor, entries);
+    }
+
+    return { rawEntriesByFloor, myScores, myTicks };
+  }
+
+  async function loadTblAllFirebaseRankScores(force = false) {
+    const allScores = await tblFirebaseGetCached(TBL_RANK_SCORES_PATH, {
+      defaultReturn: {},
+      force
+    });
+    return allScores && typeof allScores === 'object' ? allScores : {};
+  }
+
+  function buildTblPlayerTotalRanks(
+    entriesByFloor,
+    participantHighscoreRanksByName = new Map(),
+    highscoreRankLeaders = {}
+  ) {
+    const players = new Set();
+    const floorRanksByPlayer = new Map();
+
+    const ensurePlayer = (name) => {
+      if (!name) {
+        return null;
+      }
+      players.add(name);
+      if (!floorRanksByPlayer.has(name)) {
+        floorRanksByPlayer.set(name, new Map());
+      }
+      return floorRanksByPlayer.get(name);
+    };
+
+    const setFloorRank = (name, floor, rank) => {
+      if (!name || !Number.isFinite(rank)) {
+        return;
+      }
+      const floors = ensurePlayer(name);
+      if (!floors) {
+        return;
+      }
+      const existing = floors.get(floor);
+      if (existing === undefined || rank > existing) {
+        floors.set(floor, rank);
+      }
+    };
+
+    participantHighscoreRanksByName.forEach((_, name) => {
+      ensurePlayer(name);
+    });
+
+    for (let floor = 1; floor <= TBL_MAX_FLOOR; floor++) {
+      (entriesByFloor.get(floor) || []).forEach((entry) => {
+        setFloorRank(entry.name, floor, Number(entry.rank));
+      });
+    }
+
+    participantHighscoreRanksByName.forEach((highscores, name) => {
+      if (Number.isFinite(highscores[0])) {
+        setFloorRank(name, 0, highscores[0]);
+      }
+    });
+
+    const floor0Leader = highscoreRankLeaders[0];
+    if (floor0Leader?.name && Number.isFinite(Number(floor0Leader.rank))) {
+      setFloorRank(floor0Leader.name, 0, Number(floor0Leader.rank));
+    }
+
+    const totals = new Map();
+    players.forEach((name) => {
+      const floors = floorRanksByPlayer.get(name) || new Map();
+      let total = 0;
+      for (let floor = TBL_MIN_FLOOR; floor <= TBL_MAX_FLOOR; floor++) {
+        const rank = floors.get(floor);
+        total += Number.isFinite(rank) ? rank : 0;
+      }
+      totals.set(name, total);
+    });
+
+    return totals;
+  }
+
+  function buildTblPlayerTotalRankTicks(
+    entriesByFloor,
+    participantHighscoreRankTicksByName = new Map(),
+    highscoreRankLeaders = {}
+  ) {
+    const players = new Set();
+    const floorRankTicksByPlayer = new Map();
+
+    const ensurePlayer = (name) => {
+      if (!name) {
+        return null;
+      }
+      players.add(name);
+      if (!floorRankTicksByPlayer.has(name)) {
+        floorRankTicksByPlayer.set(name, new Map());
+      }
+      return floorRankTicksByPlayer.get(name);
+    };
+
+    const setFloorRankTicks = (name, floor, ticks) => {
+      if (!name || !Number.isFinite(ticks)) {
+        return;
+      }
+      const floors = ensurePlayer(name);
+      if (!floors) {
+        return;
+      }
+      const existing = floors.get(floor);
+      if (existing === undefined || ticks < existing) {
+        floors.set(floor, ticks);
+      }
+    };
+
+    participantHighscoreRankTicksByName.forEach((_, name) => {
+      ensurePlayer(name);
+    });
+
+    for (let floor = 1; floor <= TBL_MAX_FLOOR; floor++) {
+      (entriesByFloor.get(floor) || []).forEach((entry) => {
+        if (Number.isFinite(Number(entry.ticks))) {
+          setFloorRankTicks(entry.name, floor, Number(entry.ticks));
+        }
+      });
+    }
+
+    participantHighscoreRankTicksByName.forEach((highscoreRankTicks, name) => {
+      if (Number.isFinite(highscoreRankTicks[0])) {
+        setFloorRankTicks(name, 0, highscoreRankTicks[0]);
+      }
+    });
+
+    const floor0Leader = highscoreRankLeaders[0];
+    if (floor0Leader?.name && Number.isFinite(Number(floor0Leader.ticks))) {
+      setFloorRankTicks(floor0Leader.name, 0, Number(floor0Leader.ticks));
+    }
+
+    const totals = new Map();
+    players.forEach((name) => {
+      const floors = floorRankTicksByPlayer.get(name) || new Map();
+      let total = 0;
+      for (let floor = TBL_MIN_FLOOR; floor <= TBL_MAX_FLOOR; floor++) {
+        const ticks = floors.get(floor);
+        total += Number.isFinite(ticks) ? ticks : TBL_MISSING_FLOOR_TICKS;
+      }
+      totals.set(name, total);
+    });
+
+    return totals;
+  }
+
+  function compareTblRankLeaderboardEntries(a, b, playerTotalRankTicks) {
+    if (a.rank !== b.rank) {
+      return b.rank - a.rank;
+    }
+    const ticksA = Number.isFinite(a.ticks) ? a.ticks : Number.POSITIVE_INFINITY;
+    const ticksB = Number.isFinite(b.ticks) ? b.ticks : Number.POSITIVE_INFINITY;
+    if (ticksA !== ticksB) {
+      return ticksA - ticksB;
+    }
+    const totalA = playerTotalRankTicks.get(a.name)
+      ?? ((TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS);
+    const totalB = playerTotalRankTicks.get(b.name)
+      ?? ((TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS);
+    if (totalA !== totalB) {
+      return totalA - totalB;
+    }
+    return String(a.name).localeCompare(String(b.name));
+  }
+
+  function rankTblRankLeaderboardEntries(entries, playerTotalRankTicks) {
+    return [...entries]
+      .sort((a, b) => compareTblRankLeaderboardEntries(a, b, playerTotalRankTicks))
+      .slice(0, TBL_LEADERBOARD_TOP);
+  }
+
   function buildTblPlayerTotalTicks(
     entriesByFloor,
     participantHighscoresByName = new Map(),
@@ -2344,6 +2931,27 @@
     return 100 + Number(floor) * 20;
   }
 
+  function getTblFloorScaleColor(floor) {
+    const index = Math.min(TBL_MAX_FLOOR, Math.max(TBL_MIN_FLOOR, Math.round(Number(floor) || 0)));
+    return TBL_FLOOR_SCALE_COLORS[index] || TBL_FLOOR_SCALE_COLORS[0];
+  }
+
+  function buildTblFloorScaleTextStyle(floor) {
+    const color = getTblFloorScaleColor(floor);
+    return {
+      color,
+      textShadow: floor >= 11
+        ? `0 0 3px ${color}80, 0 1px 2px #000`
+        : '0 1px 2px #000'
+    };
+  }
+
+  function formatTblFloorRowTitleHtml(floor, ascension) {
+    const text = t('mods.betterUI.tblLeagueFloorRowTitle', { floor, ascension });
+    const style = buildTblFloorScaleTextStyle(floor);
+    return `<span style="color:${style.color};text-shadow:${style.textShadow};">${escapeTblHtml(text)}</span>`;
+  }
+
   function formatTblProfileLink(playerName) {
     const safeName = escapeTblHtml(playerName || 'Unknown');
     const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent(String(playerName || '').trim())}`;
@@ -2363,6 +2971,22 @@
       return `${youPart} <span style="color:#888;">${escapeTblHtml(t('mods.betterUI.tblLeagueNoLeaderYet'))}</span>`;
     }
     return `${youPart} → <span>${leaderTicks} ticks</span> (${formatTblProfileLink(leaderName)})`;
+  }
+
+  function formatTblRankComparison(yourRank, yourTicks, leaderRank, leaderTicks, leaderName, youLead = false) {
+    const hasRun = yourRank !== null && yourRank !== undefined;
+    const tickSuffix = hasRun && yourTicks !== null && yourTicks !== undefined ? ` (${yourTicks} ticks)` : '';
+    const youPart = hasRun
+      ? `<span>${yourRank} points${tickSuffix}</span>`
+      : `<span style="color:#888;">0 points</span>`;
+    if (youLead) {
+      return youPart;
+    }
+    if (leaderRank === null || leaderRank === undefined) {
+      return `${youPart} <span style="color:#888;">${escapeTblHtml(t('mods.betterUI.tblLeagueNoLeaderYet'))}</span>`;
+    }
+    const leaderTickSuffix = leaderTicks !== null && leaderTicks !== undefined ? ` (${leaderTicks} ticks)` : '';
+    return `${youPart} → <span>${leaderRank} points${leaderTickSuffix}</span> (${formatTblProfileLink(leaderName)})`;
   }
 
   function ensureTblLeagueStyles() {
@@ -2432,17 +3056,120 @@
       }
       .tbl-league-summary-grid {
         display: grid;
-        grid-template-columns: 40% auto 60%;
-        gap: 12px;
-        align-items: stretch;
+        grid-template-columns: minmax(0, 35%) auto minmax(0, 60%);
+        gap: 8px;
+        align-items: center;
       }
       .tbl-league-summary-col {
         min-width: 0;
+        overflow: hidden;
+      }
+      .tbl-league-standings-col {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .tbl-league-top-players {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        margin: 0 auto;
+      }
+      .tbl-league-top-players-title {
+        color: #ccc;
+        text-align: center;
+        margin-bottom: 4px;
+        font-size: 14px;
       }
       .tbl-league-summary-separator {
         width: 1px;
         align-self: stretch;
         background: rgba(255, 255, 255, 0.2);
+      }
+      .tbl-league-top-grid {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 13px;
+      }
+      .tbl-league-top-grid th,
+      .tbl-league-top-grid td {
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        padding: 3px 5px;
+        text-align: center;
+        vertical-align: middle;
+        min-width: 0;
+      }
+      .tbl-league-top-grid-corner,
+      .tbl-league-top-grid-label {
+        color: #999;
+        background: rgba(0, 0, 0, 0.28);
+        text-align: left;
+        white-space: nowrap;
+        width: 58px;
+      }
+      .tbl-league-top-grid-header {
+        color: #ccc;
+        background: rgba(0, 0, 0, 0.28);
+        font-weight: normal;
+      }
+      .tbl-league-top-grid-medal-header {
+        padding: 4px 2px;
+      }
+      .tbl-league-top-grid-medal {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1px;
+        line-height: 1;
+      }
+      .tbl-league-top-grid-medal-icon {
+        display: block;
+        filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.65));
+      }
+      .tbl-league-top-grid-cell {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .tbl-league-top-grid-name a {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 100%;
+      }
+      .tbl-league-top-grid-you-cell {
+        color: #8f8;
+      }
+      .tbl-league-top-grid-footer td,
+      .tbl-league-top-grid-footer th {
+        color: #8f8;
+        background: rgba(0, 0, 0, 0.18);
+      }
+      .tbl-league-top-grid-footer .tbl-league-top-grid-cell {
+        text-align: left;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tbl-league-top-grid-footer a {
+        display: inline-block;
+        max-width: 38%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
+      }
+      .tbl-league-list-panel {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: hidden;
       }
     `;
     document.head.appendChild(style);
@@ -2584,28 +3311,52 @@
     return statsContainer;
   }
 
-  function sortTblOverallStandings(standings) {
+  function sortTblOverallStandings(standings, competitionMode = TBL_COMPETITION_TAB.FLOOR) {
+    if (competitionMode === TBL_COMPETITION_TAB.RANK) {
+      const playerTotalRanks = TblFloorLeagueState.playerTotalRanks || new Map();
+      const playerTotalRankTicks = TblFloorLeagueState.playerTotalRankTicks || new Map();
+      const missingRankTicks = (TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS;
+      return [...standings].sort((a, b) => {
+        const totalA = playerTotalRanks.get(a.name) ?? 0;
+        const totalB = playerTotalRanks.get(b.name) ?? 0;
+        if (totalB !== totalA) {
+          return totalB - totalA;
+        }
+        const rankTicksA = playerTotalRankTicks.get(a.name) ?? missingRankTicks;
+        const rankTicksB = playerTotalRankTicks.get(b.name) ?? missingRankTicks;
+        if (rankTicksA !== rankTicksB) {
+          return rankTicksA - rankTicksB;
+        }
+        if (b.floorsLed !== a.floorsLed) {
+          return b.floorsLed - a.floorsLed;
+        }
+        return String(a.name).localeCompare(String(b.name));
+      });
+    }
+
     const playerTotalTicks = TblFloorLeagueState.playerTotalTicks || new Map();
     const missingTotal = (TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS;
 
     return [...standings].sort((a, b) => {
-      if (b.floorsLed !== a.floorsLed) {
-        return b.floorsLed - a.floorsLed;
-      }
       const totalA = playerTotalTicks.get(a.name) ?? missingTotal;
       const totalB = playerTotalTicks.get(b.name) ?? missingTotal;
       if (totalA !== totalB) {
         return totalA - totalB;
       }
+      if (b.floorsLed !== a.floorsLed) {
+        return b.floorsLed - a.floorsLed;
+      }
       return String(a.name).localeCompare(String(b.name));
     });
   }
 
-  function buildTblOverallStandings(floorRows, ensurePlayerName = null) {
+  function buildTblOverallStandings(rows, ensurePlayerName = null, competitionMode = TBL_COMPETITION_TAB.FLOOR) {
     const standings = new Map();
-    const playerTotalTicks = TblFloorLeagueState.playerTotalTicks || new Map();
+    const playerTotals = competitionMode === TBL_COMPETITION_TAB.RANK
+      ? (TblFloorLeagueState.playerTotalRanks || new Map())
+      : (TblFloorLeagueState.playerTotalTicks || new Map());
 
-    playerTotalTicks.forEach((_, name) => {
+    playerTotals.forEach((_, name) => {
       if (!name) {
         return;
       }
@@ -2615,7 +3366,7 @@
       });
     });
 
-    floorRows.forEach((row) => {
+    rows.forEach((row) => {
       const leaderName = row.leader?.name;
       if (!leaderName) {
         return;
@@ -2636,7 +3387,26 @@
       });
     }
 
-    return sortTblOverallStandings(Array.from(standings.values()));
+    return sortTblOverallStandings(Array.from(standings.values()), competitionMode);
+  }
+
+  function getTblOverallLeaderName(rows, competitionMode = TBL_COMPETITION_TAB.FLOOR) {
+    const standings = buildTblOverallStandings(rows, null, competitionMode);
+    return standings[0]?.name || null;
+  }
+
+  function buildTblLeagueCurrentLeaderRowHtml(rows, competitionMode = TBL_COMPETITION_TAB.FLOOR) {
+    const leaderName = getTblOverallLeaderName(rows, competitionMode);
+    const viewerName = getTblPlayerName();
+    let nameHtml;
+    if (!leaderName) {
+      nameHtml = `<span style="color:#888;">${escapeTblHtml(t('mods.betterUI.tblLeagueNoCurrentLeader'))}</span>`;
+    } else if (viewerName && leaderName === viewerName) {
+      nameHtml = `<span style="color:#8f8;">${escapeTblHtml(leaderName)}</span>`;
+    } else {
+      nameHtml = formatTblProfileLink(leaderName);
+    }
+    return `${escapeTblHtml(t('mods.betterUI.tblLeagueCurrentLeaderLabel'))} ${nameHtml}`;
   }
 
   function getTblPlayerTotalTicks(playerName) {
@@ -2644,18 +3414,145 @@
       ?? (TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS;
   }
 
-  function formatTblOverallStandingLine(player, rank, viewerName, { showRank = true } = {}) {
+  function getTblPlayerTotalRankPoints(playerName) {
+    return (TblFloorLeagueState.playerTotalRanks || new Map()).get(playerName) ?? 0;
+  }
+
+  function getTblPlayerTotalRankTicks(playerName) {
+    return (TblFloorLeagueState.playerTotalRankTicks || new Map()).get(playerName)
+      ?? (TBL_MAX_FLOOR - TBL_MIN_FLOOR + 1) * TBL_MISSING_FLOOR_TICKS;
+  }
+
+  function formatTblTopGridNameCell(player, viewerName) {
+    if (!player?.name) {
+      return '<td class="tbl-league-top-grid-cell">—</td>';
+    }
     const isYou = Boolean(viewerName && player.name === viewerName);
     const nameHtml = isYou
       ? escapeTblHtml(player.name)
       : formatTblProfileLink(player.name);
-    const standingLabel = escapeTblHtml(t('mods.betterUI.tblLeaguePlayerStanding', {
-      count: player.floorsLed,
-      ticks: getTblPlayerTotalTicks(player.name)
-    }));
-    const rankPrefix = showRank && rank ? `#${rank} ` : '';
-    const color = isYou ? ' style="color:#8f8;"' : '';
-    return `<div${color}>${rankPrefix}${nameHtml} — ${standingLabel}</div>`;
+    const nameTitle = escapeTblHtml(player.name);
+    const youClass = isYou ? ' tbl-league-top-grid-you-cell' : '';
+    return `<td class="tbl-league-top-grid-cell tbl-league-top-grid-name${youClass}" title="${nameTitle}">${nameHtml}</td>`;
+  }
+
+  function formatTblTopGridValueCell(value, viewerName, playerName, { isYou: forceYou = false } = {}) {
+    const isYou = forceYou || Boolean(viewerName && playerName && viewerName === playerName);
+    const youClass = isYou ? ' tbl-league-top-grid-you-cell' : '';
+    const display = value === null || value === undefined ? '—' : escapeTblHtml(String(value));
+    return `<td class="tbl-league-top-grid-cell${youClass}">${display}</td>`;
+  }
+
+  function formatTblTopGridMedalHeader(position) {
+    const rank = Math.min(3, Math.max(1, Number(position) || 1));
+    const medalColor = getMedalColor(rank);
+    const label = `#${rank}`;
+    return `<th class="tbl-league-top-grid-header tbl-league-top-grid-medal-header" title="${label}" aria-label="${label}">
+      <span class="tbl-league-top-grid-medal" style="color:${medalColor};">
+        <svg class="tbl-league-top-grid-medal-icon" viewBox="0 0 20 24" width="16" height="19" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M5.5 1.5 7.8 9.2 10 2.2 12.2 9.2 14.5 1.5H5.5z"/>
+          <circle cx="10" cy="15.5" r="7" fill="currentColor"/>
+          <circle cx="10" cy="15.5" r="5.6" fill="none" stroke="rgba(0,0,0,0.35)" stroke-width="1"/>
+          <text x="10" y="17.1" text-anchor="middle" fill="rgba(0,0,0,0.55)" font-size="7" font-weight="bold" font-family="monospace">${rank}</text>
+        </svg>
+      </span>
+    </th>`;
+  }
+
+  function buildTblLeagueTopPlayersGridHtml(topThree, competitionMode, viewerName, yourRow = null) {
+    const slots = [0, 1, 2].map((index) => topThree[index] || null);
+    const isRank = competitionMode === TBL_COMPETITION_TAB.RANK;
+
+    let html = '<table class="tbl-league-top-grid"><thead><tr>';
+    html += `<th class="tbl-league-top-grid-corner"></th>`;
+    slots.forEach((entry, index) => {
+      const position = entry?.rank ?? (index + 1);
+      html += formatTblTopGridMedalHeader(position);
+    });
+    html += '</tr></thead><tbody>';
+
+    html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(t('mods.betterUI.tblLeagueGridName'))}</th>`;
+    slots.forEach((entry) => {
+      html += entry
+        ? formatTblTopGridNameCell(entry.player, viewerName)
+        : '<td class="tbl-league-top-grid-cell">—</td>';
+    });
+    html += '</tr>';
+
+    if (isRank) {
+      html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(t('mods.betterUI.tblLeagueGridPoints'))}</th>`;
+      slots.forEach((entry) => {
+        html += entry
+          ? formatTblTopGridValueCell(
+            getTblPlayerTotalRankPoints(entry.player.name),
+            viewerName,
+            entry.player.name
+          )
+          : '<td class="tbl-league-top-grid-cell">—</td>';
+      });
+      html += '</tr>';
+    }
+
+    html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(t('mods.betterUI.tblLeagueGridTicks'))}</th>`;
+    slots.forEach((entry) => {
+      if (!entry) {
+        html += '<td class="tbl-league-top-grid-cell">—</td>';
+        return;
+      }
+      const ticks = isRank
+        ? getTblPlayerTotalRankTicks(entry.player.name)
+        : getTblPlayerTotalTicks(entry.player.name);
+      html += formatTblTopGridValueCell(ticks, viewerName, entry.player.name);
+    });
+    html += '</tr>';
+
+    if (!isRank) {
+      html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(t('mods.betterUI.tblLeagueGridRecords'))}</th>`;
+      slots.forEach((entry) => {
+        html += entry
+          ? formatTblTopGridValueCell(entry.player.floorsLed, viewerName, entry.player.name)
+          : '<td class="tbl-league-top-grid-cell">—</td>';
+      });
+      html += '</tr>';
+    }
+
+    if (yourRow?.player) {
+      html += formatTblOverallStandingGridFooterRow(
+        yourRow.player,
+        yourRow.rank,
+        viewerName,
+        competitionMode
+      );
+    }
+
+    html += '</tbody></table>';
+    return html;
+  }
+
+  function formatTblOverallStandingGridFooterRow(player, rank, viewerName, competitionMode) {
+    const isYou = Boolean(viewerName && player.name === viewerName);
+    const nameHtml = isYou
+      ? escapeTblHtml(player.name)
+      : formatTblProfileLink(player.name);
+    const standingLabel = escapeTblHtml(formatTblOverallStandingStats(player, competitionMode));
+    const nameTitle = escapeTblHtml(player.name);
+    const rankLabel = rank ? `#${rank}` : '—';
+    return `<tr class="tbl-league-top-grid-footer">
+      <th class="tbl-league-top-grid-label">${rankLabel}</th>
+      <td class="tbl-league-top-grid-cell" colspan="3" title="${nameTitle}">${nameHtml} — ${standingLabel}</td>
+    </tr>`;
+  }
+
+  function formatTblOverallStandingStats(player, competitionMode = TBL_COMPETITION_TAB.FLOOR) {
+    return competitionMode === TBL_COMPETITION_TAB.RANK
+      ? t('mods.betterUI.tblLeaguePlayerStandingRank', {
+        points: getTblPlayerTotalRankPoints(player.name),
+        ticks: getTblPlayerTotalRankTicks(player.name)
+      })
+      : t('mods.betterUI.tblLeaguePlayerStanding', {
+        count: player.floorsLed,
+        ticks: getTblPlayerTotalTicks(player.name)
+      });
   }
 
   function computeTblOverallTopPlayers(floorRows, limit = 3) {
@@ -2755,42 +3652,290 @@
     return TblFloorLeagueState.fullLoadInFlight;
   }
 
-  function createTblLeagueSummaryPanel(floorRows, participantCount = 0) {
-    const playerName = getTblPlayerName();
-    const standings = buildTblOverallStandings(floorRows, playerName);
-
-    let leftCol = `<div class="tbl-event-timer-row pixel-font-14" style="margin-bottom:6px;"><span class="tbl-event-timer-value" style="color:#ccc;">—</span></div>`;
-    leftCol += `<div style="margin-bottom:6px;">${escapeTblHtml(t('mods.betterUI.tblLeagueParticipants', { count: participantCount }))}</div>`;
-    leftCol += `<div class="tbl-event-prize-row pixel-font-14" style="margin-bottom:6px;display:flex;align-items:center;gap:4px;color:#ffd700;">
-      <img src="/assets/icons/beastcoin.png" alt="Beast Coins" class="pixelated" style="width:12px;height:12px;object-fit:contain;flex-shrink:0;" />
-      <span>${escapeTblHtml(t('mods.betterUI.tblLeaguePrize', { amount: TBL_EVENT_PRIZE_BEAST_COINS }))}</span>
-    </div>`;
-
-    let rightCol = `<div style="color:#ccc;">${escapeTblHtml(t('mods.betterUI.tblLeagueTopPlayers'))}</div>`;
-    if (standings.length > 0) {
-      const standingsWithRank = standings.map((player, index) => ({ player, rank: index + 1 }));
-      const rowsToShow = standingsWithRank.slice(0, 3);
-      const yourRow = playerName
-        ? standingsWithRank.find((entry) => entry.player?.name === playerName) || null
-        : null;
-      if (yourRow && yourRow.rank > 3) {
-        rowsToShow.push(yourRow);
-      }
-
-      rowsToShow.forEach(({ player, rank }) => {
-        rightCol += formatTblOverallStandingLine(player, rank, playerName);
-      });
-    } else {
-      rightCol += `<div style="color:#888;margin-top:4px;">${escapeTblHtml(t('mods.betterUI.tblLeagueNoRuns', { ticks: TBL_MISSING_FLOOR_TICKS }))}</div>`;
+  async function loadTblAllRankData(force = false) {
+    if (modDisposed) {
+      return TblFloorLeagueState.rankBarRows || [];
     }
 
+    const now = Date.now();
+    if (
+      !force &&
+      TblFloorLeagueState.rankBarRows &&
+      now - TblFloorLeagueState.rankBarCacheAt < TBL_FETCH_CACHE_TTL_MS
+    ) {
+      return TblFloorLeagueState.rankBarRows;
+    }
+    if (
+      !force &&
+      TblFloorLeagueState.rankBarRows &&
+      now - TblFloorLeagueState.lastRankFullLoadAt < TBL_FETCH_MIN_INTERVAL_MS
+    ) {
+      return TblFloorLeagueState.rankBarRows;
+    }
+    if (TblFloorLeagueState.rankFullLoadInFlight) {
+      return TblFloorLeagueState.rankFullLoadInFlight;
+    }
+
+    TblFloorLeagueState.rankFullLoadInFlight = (async () => {
+      try {
+        if (modDisposed) {
+          return TblFloorLeagueState.rankBarRows || [];
+        }
+
+        const userScores = getTblUserScoresForMap();
+        const playerName = getTblPlayerName();
+        const playerHash = await getTblPlayerHash();
+        if (TblFloorLeagueState.joined) {
+          await updateTblParticipantHighscoreTicks(force);
+        }
+
+        const allScores = await loadTblAllFirebaseRankScores(force);
+        const {
+          rawEntriesByFloor,
+          myScores: loadedMyScores,
+          myTicks: loadedMyTicks
+        } = parseTblFirebaseRankScoresBundle(allScores, playerHash);
+        const myRankScores = { ...TblFloorLeagueState.myEventRankScores, ...loadedMyScores };
+        const myRankTicks = { ...TblFloorLeagueState.myEventRankTicks, ...loadedMyTicks };
+
+        const [highscoreRankLeaders, participantBundle] = await Promise.all([
+          loadTblHighscoreRankLeaders(),
+          loadTblParticipantsBundle(force)
+        ]);
+
+        if (modDisposed) {
+          return TblFloorLeagueState.rankBarRows || [];
+        }
+
+        TblFloorLeagueState.myEventRankScores = myRankScores;
+        TblFloorLeagueState.myEventRankTicks = myRankTicks;
+
+        const playerTotalRanks = buildTblPlayerTotalRanks(
+          rawEntriesByFloor,
+          participantBundle.highscoreRankMap,
+          highscoreRankLeaders
+        );
+        const playerTotalRankTicks = buildTblPlayerTotalRankTicks(
+          rawEntriesByFloor,
+          participantBundle.highscoreRankTickMap,
+          highscoreRankLeaders
+        );
+        TblFloorLeagueState.playerTotalRanks = playerTotalRanks;
+        TblFloorLeagueState.playerTotalRankTicks = playerTotalRankTicks;
+
+        const firebaseByFloor = new Map();
+        for (let floor = 1; floor <= TBL_MAX_FLOOR; floor++) {
+          firebaseByFloor.set(
+            floor,
+            rankTblRankLeaderboardEntries(rawEntriesByFloor.get(floor) || [], playerTotalRankTicks)
+          );
+        }
+
+        const rankRows = [];
+        for (let floor = TBL_MIN_FLOOR; floor <= TBL_MAX_FLOOR; floor++) {
+          let entries = [];
+          if (isTblHighscoreRankFloor(floor)) {
+            const leader = highscoreRankLeaders[floor];
+            entries = leader ? [leader] : [];
+          } else {
+            entries = firebaseByFloor.get(floor) || [];
+          }
+          rankRows.push(buildTblRankRow(
+            floor,
+            entries,
+            myRankScores,
+            myRankTicks,
+            userScores,
+            playerName
+          ));
+        }
+
+        TblFloorLeagueState.lastRankFullLoadAt = Date.now();
+        return rankRows;
+      } finally {
+        TblFloorLeagueState.rankFullLoadInFlight = null;
+      }
+    })();
+
+    return TblFloorLeagueState.rankFullLoadInFlight;
+  }
+
+  function createTblLeagueSummaryPanel(rows, participantCount = 0, competitionMode = TBL_COMPETITION_TAB.FLOOR) {
+    const leftCol = buildTblLeagueSummaryLeftColHtml(participantCount, competitionMode);
+    const rightCol = buildTblLeagueSummaryStandingsHtml(rows, competitionMode);
     const html = `<div class="tbl-league-summary-grid">
       <div class="tbl-league-summary-col">${leftCol}</div>
       <div class="tbl-league-summary-separator" role="none"></div>
-      <div class="tbl-league-summary-col">${rightCol}</div>
+      <div class="tbl-league-summary-col tbl-league-standings-col">${rightCol}</div>
     </div>`;
 
     return createTblStatsPanel(html);
+  }
+
+  function getTblLeaguePrizeText(competitionMode = TBL_COMPETITION_TAB.FLOOR) {
+    return competitionMode === TBL_COMPETITION_TAB.RANK
+      ? t('mods.betterUI.tblLeagueRankPrize', { amount: TBL_EVENT_PRIZE_BEAST_COINS })
+      : t('mods.betterUI.tblLeagueFloorPrize', { amount: TBL_EVENT_PRIZE_BEAST_COINS });
+  }
+
+  function buildTblLeagueSummaryLeftColHtml(participantCount = 0, competitionMode = TBL_COMPETITION_TAB.FLOOR) {
+    let leftCol = `<div class="tbl-event-timer-row pixel-font-14" style="margin-bottom:6px;"><span class="tbl-event-timer-value" style="color:#ccc;">—</span></div>`;
+    leftCol += `<div style="margin-bottom:6px;">${escapeTblHtml(t('mods.betterUI.tblLeagueParticipants', { count: participantCount }))}</div>`;
+    leftCol += `<div class="tbl-event-prize-row pixel-font-14" style="margin-bottom:6px;display:flex;align-items:center;gap:4px;color:#ffd700;">
+      <span class="tbl-league-prize-label">${escapeTblHtml(getTblLeaguePrizeText(competitionMode))}</span>
+      <img src="/assets/icons/beastcoin.png" alt="Beast Coins" class="pixelated" style="width:12px;height:12px;object-fit:contain;flex-shrink:0;" />
+    </div>`;
+    leftCol += `<div class="tbl-league-current-leader-row pixel-font-14" style="margin-bottom:6px;">${buildTblLeagueCurrentLeaderRowHtml([], competitionMode)}</div>`;
+    return leftCol;
+  }
+
+  function updateTblLeagueSummaryPrize(prizeEl, competitionMode) {
+    if (!prizeEl) {
+      return;
+    }
+    prizeEl.textContent = getTblLeaguePrizeText(competitionMode);
+  }
+
+  function updateTblLeagueSummaryCurrentLeader(leaderEl, rows, competitionMode) {
+    if (!leaderEl) {
+      return;
+    }
+    leaderEl.innerHTML = buildTblLeagueCurrentLeaderRowHtml(rows, competitionMode);
+  }
+
+  function buildTblLeagueSummaryStandingsHtml(rows, competitionMode = TBL_COMPETITION_TAB.FLOOR) {
+    const playerName = getTblPlayerName();
+    const standings = buildTblOverallStandings(rows, playerName, competitionMode);
+
+    let rightCol = `<div class="tbl-league-top-players"><div class="tbl-league-top-players-title">${escapeTblHtml(
+      competitionMode === TBL_COMPETITION_TAB.RANK
+        ? t('mods.betterUI.tblLeagueTopRankPlayers')
+        : t('mods.betterUI.tblLeagueTopFloorPlayers')
+    )}</div>`;
+    if (standings.length > 0) {
+      const standingsWithRank = standings.map((player, index) => ({ player, rank: index + 1 }));
+      const topThree = standingsWithRank.slice(0, 3);
+      const yourRow = playerName
+        ? standingsWithRank.find((entry) => entry.player?.name === playerName) || null
+        : null;
+
+      rightCol += buildTblLeagueTopPlayersGridHtml(
+        topThree,
+        competitionMode,
+        playerName,
+        yourRow && yourRow.rank > 3 ? yourRow : null
+      );
+    } else {
+      rightCol += competitionMode === TBL_COMPETITION_TAB.RANK
+        ? `<div style="color:#888;margin-top:4px;text-align:center;">${escapeTblHtml(t('mods.betterUI.tblLeagueRankNoRuns'))}</div>`
+        : `<div style="color:#888;margin-top:4px;text-align:center;">${escapeTblHtml(t('mods.betterUI.tblLeagueNoRuns', { ticks: TBL_MISSING_FLOOR_TICKS }))}</div>`;
+    }
+    rightCol += '</div>';
+    return rightCol;
+  }
+
+  function updateTblLeagueSummaryStandings(standingsCol, rows, competitionMode) {
+    if (!standingsCol) {
+      return;
+    }
+    standingsCol.innerHTML = buildTblLeagueSummaryStandingsHtml(rows, competitionMode);
+  }
+
+  function createTblLeagueSharedSummary(participantCount) {
+    const html = `<div class="tbl-league-summary-grid">
+      <div class="tbl-league-summary-col">${buildTblLeagueSummaryLeftColHtml(participantCount)}</div>
+      <div class="tbl-league-summary-separator" role="none"></div>
+      <div class="tbl-league-summary-col tbl-league-standings-col"></div>
+    </div>`;
+    const panel = createTblStatsPanel(html);
+    panel.style.flexShrink = '0';
+    return {
+      panel,
+      standingsCol: panel.querySelector('.tbl-league-standings-col'),
+      prizeLabel: panel.querySelector('.tbl-league-prize-label'),
+      leaderRow: panel.querySelector('.tbl-league-current-leader-row')
+    };
+  }
+
+  function getTblLeagueTabButtonClassName(isActive) {
+    return isActive
+      ? 'frame-pressed-1 surface-regular px-2 py-1 flex-1 tab-active pixel-font-14'
+      : 'frame-pressed-1 surface-dark px-2 py-1 flex-1 pixel-font-14';
+  }
+
+  function setTblLeagueTabButtonLabel(button, iconDef, label) {
+    button.replaceChildren();
+
+    const iconWrap = document.createElement('span');
+    Object.assign(iconWrap.style, {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: `${TBL_LEAGUE_TAB_ICON_SIZE}px`,
+      height: `${TBL_LEAGUE_TAB_ICON_SIZE}px`,
+      flexShrink: '0'
+    });
+
+    const img = document.createElement('img');
+    img.src = iconDef.src;
+    img.alt = iconDef.alt || label;
+    img.className = 'pixelated';
+    Object.assign(img.style, {
+      width: `${TBL_LEAGUE_TAB_ICON_SIZE}px`,
+      height: `${TBL_LEAGUE_TAB_ICON_SIZE}px`,
+      objectFit: 'contain',
+      display: 'block'
+    });
+    iconWrap.appendChild(img);
+    button.appendChild(iconWrap);
+
+    const text = document.createElement('span');
+    text.textContent = label;
+    text.style.lineHeight = '1';
+    button.appendChild(text);
+  }
+
+  function createTblLeagueTabButton(iconDef, label, tabId, isActive, onTabChange) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.tab = tabId;
+    button.className = getTblLeagueTabButtonClassName(isActive);
+    Object.assign(button.style, {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '4px',
+      cursor: 'pointer'
+    });
+    setTblLeagueTabButtonLabel(button, iconDef, label);
+    button.addEventListener('click', () => onTabChange(tabId));
+    return button;
+  }
+
+  function createTblLeagueTabBar(activeTab, onTabChange) {
+    const bar = document.createElement('div');
+    bar.className = 'flex mb-2';
+    bar.style.flexShrink = '0';
+
+    const tabDefs = [
+      { id: TBL_COMPETITION_TAB.FLOOR, label: t('mods.betterUI.tblLeagueTabFloor'), icon: TBL_LEAGUE_TAB_ICONS.floor },
+      { id: TBL_COMPETITION_TAB.RANK, label: t('mods.betterUI.tblLeagueTabRank'), icon: TBL_LEAGUE_TAB_ICONS.rank }
+    ];
+
+    const buttons = tabDefs.map(({ id, label, icon }) => {
+      const button = createTblLeagueTabButton(icon, label, id, id === activeTab, onTabChange);
+      bar.appendChild(button);
+      return button;
+    });
+
+    return { bar, buttons, tabDefs };
+  }
+
+  function createTblLeagueListPanel(scrollContainer) {
+    const panel = document.createElement('div');
+    panel.className = 'tbl-league-list-panel';
+    panel.appendChild(scrollContainer.element);
+    return panel;
   }
 
   async function navigateTblToFloor(floor) {
@@ -2853,33 +3998,51 @@
     return t('mods.betterUI.tblLeagueNoRuns', { ticks: TBL_MISSING_FLOOR_TICKS });
   }
 
-  function buildTblFloorThumbHtml(floor) {
-    return `
-      <div class="tbl-league-floor-thumb frame-pressed-1 shrink-0">
-        <img
-          src="/assets/room-thumbnails/${TBL_ROOM_ID}.png"
-          alt="Tibia Ball League"
-          class="pixelated tbl-league-floor-thumb-bg" />
-        <div class="tbl-league-floor-thumb-overlay">
-          <img src="/assets/UI/floor-15.png" alt="Floor" class="pixelated" style="width:22px;height:11px;object-fit:contain;" />
-          <span class="pixel-font-14" style="line-height:1;color:#fff;text-shadow:0 1px 2px #000;">${floor}</span>
-        </div>
-      </div>
-    `;
+  function buildTblRankImprovementText(row) {
+    if (!row.unlocked) {
+      return t('mods.betterUI.tblLeagueFloorLocked');
+    }
+    if (row.youLead) {
+      return t('mods.betterUI.tblLeagueYouLead');
+    }
+    if (row.yourRank === null || row.yourRank === undefined) {
+      if (row.fromHighscores) {
+        return row.leaderRank !== null
+          ? t('mods.betterUI.tblLeagueRankNoPersonalBest')
+          : t('mods.betterUI.tblLeagueRankNoRuns');
+      }
+      return row.leaderRank !== null
+        ? t('mods.betterUI.tblLeagueRankNoRunYet')
+        : t('mods.betterUI.tblLeagueRankNoRuns');
+    }
+    if (row.gap !== null && row.gap > 0) {
+      if (row.gapType === 'ticks') {
+        return t('mods.betterUI.tblLeagueTicksBehind', { ticks: row.gap });
+      }
+      return t('mods.betterUI.tblLeaguePointsBehind', { points: row.gap });
+    }
+    if (row.gap === 0) {
+      return t('mods.betterUI.tblLeagueTied');
+    }
+    return t('mods.betterUI.tblLeagueRankNoRuns');
   }
 
-  function createTblLeagueModalContent(floorRows, participantCount = 0) {
-    const summaryPanel = createTblLeagueSummaryPanel(floorRows, participantCount);
+  function buildTblLeagueRowList(rows, competitionMode) {
     const scrollContainer = createTblScrollContainer();
+    const isRankMode = competitionMode === TBL_COMPETITION_TAB.RANK;
 
-    floorRows.forEach((row) => {
+    rows.forEach((row) => {
       const itemEl = document.createElement('div');
       itemEl.className = 'frame-1 surface-regular flex items-center gap-2 p-1';
+      const hasYourScore = isRankMode
+        ? (row.yourRank !== null && row.yourRank !== undefined)
+        : (row.yourTicks !== null && row.yourTicks !== undefined);
+
       if (!row.unlocked) {
         itemEl.classList.add('tbl-league-item--locked');
       } else {
         itemEl.classList.add('tbl-league-item--clickable');
-        if (row.yourTicks === null || row.yourTicks === undefined) {
+        if (!hasYourScore) {
           itemEl.classList.add('tbl-league-item--empty');
         }
         itemEl.addEventListener('click', () => {
@@ -2890,16 +4053,60 @@
         ? t('mods.betterUI.tblLeagueGoToFloor', { floor: row.floor })
         : t('mods.betterUI.tblLeagueFloorLocked');
       const statusColor = row.unlocked ? '#8f8' : '#888';
+      const comparisonHtml = isRankMode
+        ? formatTblRankComparison(
+          row.yourRank,
+          row.yourTicks,
+          row.leaderRank,
+          row.leaderTicks,
+          row.leader?.name,
+          row.youLead
+        )
+        : formatTblTicksComparison(row.yourTicks, row.leaderTicks, row.leader?.name, row.youLead);
+      const statusText = isRankMode
+        ? buildTblRankImprovementText(row)
+        : buildTblImprovementText(row);
+
       itemEl.innerHTML = `
-        ${buildTblFloorThumbHtml(row.floor)}
+        ${buildTblLeagueThumbHtml(row.floor, competitionMode)}
         <div class="grid w-full gap-1">
-          <div class="text-whiteExp">${escapeTblHtml(t('mods.betterUI.tblLeagueFloorRowTitle', { floor: row.floor, ascension: row.ascension }))}</div>
-          <div class="pixel-font-14">${formatTblTicksComparison(row.yourTicks, row.leaderTicks, row.leader?.name, row.youLead)}</div>
-          <div class="pixel-font-14" style="color:${statusColor};">${escapeTblHtml(buildTblImprovementText(row))}</div>
+          <div>${formatTblFloorRowTitleHtml(row.floor, row.ascension)}</div>
+          <div class="pixel-font-14">${comparisonHtml}</div>
+          <div class="pixel-font-14" style="color:${statusColor};">${escapeTblHtml(statusText)}</div>
         </div>
       `;
       scrollContainer.addContent(itemEl);
     });
+
+    return scrollContainer;
+  }
+
+  function buildTblLeagueThumbHtml(floor, competitionMode = TBL_COMPETITION_TAB.FLOOR) {
+    const floorIndex = Math.min(TBL_MAX_FLOOR, Math.max(TBL_MIN_FLOOR, Math.round(Number(floor) || 0)));
+    const floorStyle = buildTblFloorScaleTextStyle(floorIndex);
+    const isRankMode = competitionMode === TBL_COMPETITION_TAB.RANK;
+    const overlayIcon = isRankMode
+      ? `<img src="/assets/icons/star-tier.png" alt="Rank" class="pixelated" width="18" height="20" style="filter:drop-shadow(rgb(255,255,255) 0px 0px 2px);object-fit:contain;" />`
+      : `<img src="/assets/icons/speed.png" alt="Ticks" class="pixelated" width="22" height="22" style="filter:drop-shadow(0 0 2px #fff);object-fit:contain;" />`;
+    return `
+      <div class="tbl-league-floor-thumb frame-pressed-1 shrink-0">
+        <img
+          src="/assets/room-thumbnails/${TBL_ROOM_ID}.png"
+          alt="Tibia Ball League"
+          class="pixelated tbl-league-floor-thumb-bg" />
+        <div class="tbl-league-floor-thumb-overlay">
+          ${overlayIcon}
+          <span class="pixel-font-14" style="line-height:1;color:${floorStyle.color};text-shadow:${floorStyle.textShadow};">${floorIndex}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function createTblLeagueModalContent(floorRows, rankRows, participantCount = 0) {
+    const activeTab = TblFloorLeagueState.activeModalTab || TBL_COMPETITION_TAB.FLOOR;
+    const { panel: summaryPanel, standingsCol, prizeLabel, leaderRow } = createTblLeagueSharedSummary(participantCount);
+    const rankListPanel = createTblLeagueListPanel(buildTblLeagueRowList(rankRows, TBL_COMPETITION_TAB.RANK));
+    const floorListPanel = createTblLeagueListPanel(buildTblLeagueRowList(floorRows, TBL_COMPETITION_TAB.FLOOR));
 
     const container = document.createElement('div');
     container.className = 'flex flex-col tbl-league-modal-content';
@@ -2911,14 +4118,41 @@
       flex: '1 1 0',
       overflow: 'hidden'
     });
-    container.appendChild(summaryPanel);
 
-    const separator = document.createElement('div');
-    separator.setAttribute('role', 'none');
-    separator.className = 'separator my-2.5';
-    separator.style.flexShrink = '0';
-    container.appendChild(separator);
-    container.appendChild(scrollContainer.element);
+    let tabButtons = [];
+
+    const setActiveTab = (tab) => {
+      TblFloorLeagueState.activeModalTab = tab;
+      const isRank = tab === TBL_COMPETITION_TAB.RANK;
+      updateTblLeagueSummaryStandings(
+        standingsCol,
+        isRank ? rankRows : floorRows,
+        isRank ? TBL_COMPETITION_TAB.RANK : TBL_COMPETITION_TAB.FLOOR
+      );
+      updateTblLeagueSummaryPrize(
+        prizeLabel,
+        isRank ? TBL_COMPETITION_TAB.RANK : TBL_COMPETITION_TAB.FLOOR
+      );
+      updateTblLeagueSummaryCurrentLeader(
+        leaderRow,
+        isRank ? rankRows : floorRows,
+        isRank ? TBL_COMPETITION_TAB.RANK : TBL_COMPETITION_TAB.FLOOR
+      );
+      rankListPanel.style.display = isRank ? 'flex' : 'none';
+      floorListPanel.style.display = isRank ? 'none' : 'flex';
+      tabButtons.forEach((button) => {
+        button.className = getTblLeagueTabButtonClassName(button.dataset.tab === tab);
+      });
+    };
+
+    const { bar: tabBar, buttons } = createTblLeagueTabBar(activeTab, setActiveTab);
+    tabButtons = buttons;
+
+    container.appendChild(summaryPanel);
+    container.appendChild(tabBar);
+    container.appendChild(floorListPanel);
+    container.appendChild(rankListPanel);
+    setActiveTab(activeTab);
 
     return { element: container };
   }
@@ -2964,14 +4198,20 @@
         buttons: []
       });
 
-      const floorRows = await loadTblAllFloorData(forceRefresh);
+      const [floorRows, rankRows] = await Promise.all([
+        loadTblAllFloorData(forceRefresh),
+        loadTblAllRankData(forceRefresh)
+      ]);
       if (modDisposed) {
         return;
       }
       TblFloorLeagueState.floorBarRows = floorRows;
       TblFloorLeagueState.floorBarCacheAt = Date.now();
+      TblFloorLeagueState.rankBarRows = rankRows;
+      TblFloorLeagueState.rankBarCacheAt = Date.now();
       const modalContent = createTblLeagueModalContent(
         floorRows,
+        rankRows,
         TblFloorLeagueState.participantCount || 0
       );
 
@@ -3145,17 +4385,27 @@
     TblFloorLeagueState.playerHash = null;
     TblFloorLeagueState.lastProcessedSeed = null;
     TblFloorLeagueState.myEventScores = {};
+    TblFloorLeagueState.myEventRankScores = {};
+    TblFloorLeagueState.myEventRankTicks = {};
     TblFloorLeagueState.eventNextCheckEndTime = null;
+    TblFloorLeagueState.eventWasActive = false;
     TblFloorLeagueState.floorBarRows = null;
     TblFloorLeagueState.floorBarCacheAt = 0;
+    TblFloorLeagueState.rankBarRows = null;
+    TblFloorLeagueState.rankBarCacheAt = 0;
+    TblFloorLeagueState.activeModalTab = TBL_COMPETITION_TAB.FLOOR;
     TblFloorLeagueState.lastBarFloor = null;
     TblFloorLeagueState.trackedBattleSetup = null;
     TblFloorLeagueState.playerTotalTicks = null;
+    TblFloorLeagueState.playerTotalRanks = null;
+    TblFloorLeagueState.playerTotalRankTicks = null;
     TblFloorLeagueState.participantCount = 0;
     TblFloorLeagueState.fetchCache.clear();
     TblFloorLeagueState.fetchInFlight.clear();
     TblFloorLeagueState.fullLoadInFlight = null;
+    TblFloorLeagueState.rankFullLoadInFlight = null;
     TblFloorLeagueState.lastFullLoadAt = 0;
+    TblFloorLeagueState.lastRankFullLoadAt = 0;
     TblFloorLeagueState.lastParticipantSyncAt = 0;
     TblFloorLeagueState.joinStateCachedAt = 0;
   }
