@@ -587,9 +587,9 @@ function skipInvalidRaidAndRetry(reason, allowInterrupt = false) {
 const HALLOWEEN_MANSION_RAID = 'Halloween Mansion';
 const JOLLY_AXEMAN_RAIDS = ['Jolly Axeman Tavern', 'Dog Raceway', "Ruprecht's Hut", 'White Wave Cellar'];
 
-// Centralized static raid/event definitions from maps-database.js.
-const EVENT_TEXTS = globalThis.mapsDatabase?.STATIC_RAID_EVENTS || [];
 const EVENT_TO_ROOM_MAPPING = globalThis.mapsDatabase?.EVENT_TO_ROOM_MAPPING || {};
+// Centralized static raid/event definitions from maps-database.js.
+const EVENT_TEXTS = Object.keys(EVENT_TO_ROOM_MAPPING);
 if (!EVENT_TEXTS.length) {
     console.warn('[Raid Hunter] mapsDatabase static raid definitions unavailable; event lists are empty.');
 }

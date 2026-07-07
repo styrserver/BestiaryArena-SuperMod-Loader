@@ -3660,21 +3660,76 @@
         return placeholder;
     }
 
+    function getActiveRaidRoomIds() {
+        try {
+            const raidSnapshot = globalThis.state?.raids?.getSnapshot?.();
+            const activeRaids = raidSnapshot?.context?.list || [];
+            return activeRaids
+                .map((raid) => String(raid?.roomId || '').trim())
+                .filter(Boolean);
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function getAutosellerActiveRaidEventCreatures() {
+        const activeRoomIds = getActiveRaidRoomIds();
+        if (activeRoomIds.length === 0) return [];
+
+        const state = globalThis.state;
+        const mapsDb = globalThis.mapsDatabase;
+        const db = window.creatureDatabase;
+        if (!Array.isArray(db?.EVENT_CREATURES)) return [];
+        if (!state?.utils || typeof state.utils.getBoardMonstersFromRoomId !== 'function') return [];
+
+        const isEventName = new Set(
+            db.EVENT_CREATURES
+                .filter((name) => typeof name === 'string' && name.trim().length > 0)
+                .map((name) => name.toLowerCase())
+        );
+        if (isEventName.size === 0) return [];
+
+        const activeEventCreatures = new Set();
+        for (const roomId of activeRoomIds) {
+            if (typeof mapsDb?.isDynamicEventMap === 'function' && !mapsDb.isDynamicEventMap(roomId)) {
+                continue;
+            }
+            const roomMonsters = state.utils.getBoardMonstersFromRoomId(roomId) || [];
+            for (const roomMonster of roomMonsters) {
+                const creatureName = roomMonster?.metadata?.name
+                    || roomMonster?.name
+                    || (roomMonster?.gameId && state.utils.getMonster?.(roomMonster.gameId)?.metadata?.name)
+                    || getCreatureNameFromMonster(roomMonster)
+                    || '';
+                const normName = String(creatureName).trim().toLowerCase();
+                if (normName && isEventName.has(normName)) {
+                    activeEventCreatures.add(creatureName);
+                }
+            }
+        }
+
+        return [...activeEventCreatures];
+    }
+
     // Helper function to get all creatures for Autoplant
     function getAllAutoplantCreatures() {
         const db = window.creatureDatabase;
+        const activeRaidEventCreatures = getAutosellerActiveRaidEventCreatures();
         if (typeof db?.getAutoscrollAutosellerCreaturePickerNames === 'function') {
-            return db.getAutoscrollAutosellerCreaturePickerNames();
+            const pickerNames = db.getAutoscrollAutosellerCreaturePickerNames();
+            return [...new Set([...(Array.isArray(pickerNames) ? pickerNames : []), ...activeRaidEventCreatures])].sort((a, b) => a.localeCompare(b));
         }
         if (typeof db?.getCreaturePickerNames === 'function') {
-            return db.getCreaturePickerNames().filter((name) => {
+            const pickerNames = db.getCreaturePickerNames().filter((name) => {
                 if (typeof db.isGazerCreatureName === 'function') {
                     return !db.isGazerCreatureName(name);
                 }
                 return !String(name).toLowerCase().includes('gazer');
             });
+            return [...new Set([...(Array.isArray(pickerNames) ? pickerNames : []), ...activeRaidEventCreatures])].sort((a, b) => a.localeCompare(b));
         }
-        return (db?.ALL_CREATURES || []).filter((name) => !String(name).toLowerCase().includes('gazer'));
+        const pickerNames = (db?.ALL_CREATURES || []).filter((name) => !String(name).toLowerCase().includes('gazer'));
+        return [...new Set([...(Array.isArray(pickerNames) ? pickerNames : []), ...activeRaidEventCreatures])].sort((a, b) => a.localeCompare(b));
     }
 
     // Helper function to create creature boxes for Autoplant
@@ -4948,6 +5003,54 @@
         return allItems.every(item => !isItemKeptByFilterList(item, ignoreListKey, settings));
     }
 
+    function isCreatureFilterListKey(settingKey) {
+        return settingKey === 'autoplantIgnoreList' || settingKey === 'autosqueezeIgnoreList';
+    }
+
+    function getEventCreatureNameSet() {
+        const eventNames = window.creatureDatabase?.EVENT_CREATURES;
+        if (!Array.isArray(eventNames)) return new Set();
+        return new Set(
+            eventNames
+                .filter((name) => typeof name === 'string' && name.trim().length > 0)
+                .map((name) => name.toLowerCase())
+        );
+    }
+
+    function mergeHiddenEventCreatureSelections(settingKey, keepList, sellList) {
+        if (!isCreatureFilterListKey(settingKey)) {
+            return { keepList: [...keepList], sellList: [...sellList] };
+        }
+
+        const eventNames = getEventCreatureNameSet();
+        if (eventNames.size === 0) {
+            return { keepList: [...keepList], sellList: [...sellList] };
+        }
+
+        const savedSettings = getSettings();
+        const sellListKey = settingKey.replace('IgnoreList', 'SellList');
+        const savedKeep = Array.isArray(savedSettings[settingKey]) ? savedSettings[settingKey] : [];
+        const savedSell = Array.isArray(savedSettings[sellListKey]) ? savedSettings[sellListKey] : [];
+
+        const catalogSet = new Set([...keepList, ...sellList].map((name) => String(name).toLowerCase()));
+        const hiddenSavedKeep = savedKeep.filter((name) => {
+            const norm = String(name ?? '').trim().toLowerCase();
+            return norm && eventNames.has(norm) && !catalogSet.has(norm);
+        });
+        const hiddenSavedSell = savedSell.filter((name) => {
+            const norm = String(name ?? '').trim().toLowerCase();
+            return norm && eventNames.has(norm) && !catalogSet.has(norm);
+        });
+
+        const mergedKeep = [...new Set([...(keepList || []), ...hiddenSavedKeep])];
+        const mergedSell = [...new Set([...(sellList || []), ...hiddenSavedSell])]
+            .filter((name) => !mergedKeep.includes(name));
+        mergedKeep.sort();
+        mergedSell.sort();
+
+        return { keepList: mergedKeep, sellList: mergedSell };
+    }
+
     /**
      * Helper function to load and migrate filter lists (shared between creatures and equipment)
      * @param {string} settingKey - Settings key for ignore list (e.g., 'autoplantIgnoreList')
@@ -5015,15 +5118,18 @@
     }
 
     function persistFilterListMigrationIfNeeded(settingKey, keepList, sellList, sellListKey) {
+        const mergedLists = mergeHiddenEventCreatureSelections(settingKey, keepList, sellList);
+        const keepListToSave = mergedLists.keepList;
+        const sellListToSave = mergedLists.sellList;
         const savedSettings = getSettings();
         const savedKeep = savedSettings[settingKey] || [];
         const savedSell = savedSettings[sellListKey] || [];
-        if (arraysEqual(savedKeep, keepList) && arraysEqual(savedSell, sellList)) {
+        if (arraysEqual(savedKeep, keepListToSave) && arraysEqual(savedSell, sellListToSave)) {
             return;
         }
         const settingsUpdate = {};
-        settingsUpdate[settingKey] = keepList;
-        settingsUpdate[sellListKey] = sellList;
+        settingsUpdate[settingKey] = keepListToSave;
+        settingsUpdate[sellListKey] = sellListToSave;
         setSettings(settingsUpdate);
     }
     
@@ -5055,9 +5161,10 @@
         
         // Function to save both lists to settings
         function saveIgnoreList() {
+            const mergedLists = mergeHiddenEventCreatureSelections(settingKey, selectedCreatures, availableCreatures);
             const settingsUpdate = {};
-            settingsUpdate[settingKey] = [...selectedCreatures];
-            settingsUpdate[sellListKey] = [...availableCreatures];
+            settingsUpdate[settingKey] = [...mergedLists.keepList];
+            settingsUpdate[sellListKey] = [...mergedLists.sellList];
             setSettings(settingsUpdate);
             if (onUpdate) {
                 onUpdate(selectedCreatures);
@@ -9805,6 +9912,11 @@
             try {
                 const settings = getSettings();
                 let hasChanges = false;
+                const eventCreatureNames = getEventCreatureNameSet();
+                const isPreservedEventCreature = (name) => {
+                    const norm = String(name ?? '').trim().toLowerCase();
+                    return norm && eventCreatureNames.has(norm);
+                };
 
                 const migrationUpdates = buildFilterListMigrationUpdate(settings, availableCreatures, availableEquipment);
                 if (Object.keys(migrationUpdates).length > 0) {
@@ -9817,7 +9929,7 @@
                 if (settings.autoplantIgnoreList && Array.isArray(settings.autoplantIgnoreList)) {
                     const originalCount = settings.autoplantIgnoreList.length;
                     settings.autoplantIgnoreList = settings.autoplantIgnoreList.filter(creature =>
-                        availableCreatures.includes(creature)
+                        availableCreatures.includes(creature) || isPreservedEventCreature(creature)
                     );
                     if (settings.autoplantIgnoreList.length !== originalCount) {
                         hasChanges = true;
@@ -9827,7 +9939,7 @@
                 if (settings.autoplantSellList && Array.isArray(settings.autoplantSellList)) {
                     const originalCount = settings.autoplantSellList.length;
                     settings.autoplantSellList = settings.autoplantSellList.filter(creature =>
-                        availableCreatures.includes(creature)
+                        availableCreatures.includes(creature) || isPreservedEventCreature(creature)
                     );
                     if (settings.autoplantSellList.length !== originalCount) {
                         hasChanges = true;
@@ -9839,7 +9951,7 @@
                 if (settings.autosqueezeIgnoreList && Array.isArray(settings.autosqueezeIgnoreList)) {
                     const originalCount = settings.autosqueezeIgnoreList.length;
                     settings.autosqueezeIgnoreList = settings.autosqueezeIgnoreList.filter(creature =>
-                        availableCreatures.includes(creature)
+                        availableCreatures.includes(creature) || isPreservedEventCreature(creature)
                     );
                     if (settings.autosqueezeIgnoreList.length !== originalCount) {
                         hasChanges = true;
@@ -9849,7 +9961,7 @@
                 if (settings.autosqueezeSellList && Array.isArray(settings.autosqueezeSellList)) {
                     const originalCount = settings.autosqueezeSellList.length;
                     settings.autosqueezeSellList = settings.autosqueezeSellList.filter(creature =>
-                        availableCreatures.includes(creature)
+                        availableCreatures.includes(creature) || isPreservedEventCreature(creature)
                     );
                     if (settings.autosqueezeSellList.length !== originalCount) {
                         hasChanges = true;

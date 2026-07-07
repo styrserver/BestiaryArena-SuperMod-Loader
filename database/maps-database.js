@@ -235,27 +235,8 @@ function isMapRaidComprehensive(mapId) {
   return false;
 }
 
-// Static raid list (maps outside this list but marked raid are treated as dynamic event maps)
-const STATIC_RAID_EVENTS = [
-  'Rat Plague',
-  'Buzzing Madness',
-  'Monastery Catacombs',
-  'Ghostlands Boneyard',
-  'Permafrosted Hole',
-  'Jammed Mailbox',
-  'Frosted Bunker',
-  'Hedge Maze Trap',
-  'Tower of Whitewatch (Shield)',
-  'Tower of Whitewatch (Helmet)',
-  'Tower of Whitewatch (Armor)',
-  'Orcish Barricade',
-  'Poacher Cave (Bear)',
-  'Poacher Cave (Wolf)',
-  'Dwarven Bank Heist',
-  'An Arcanist Ritual'
-];
-
 // Static event-name to room-id mapping for backward compatibility fallbacks.
+// This is the single source of truth for static raid events.
 const EVENT_TO_ROOM_MAPPING = {
   'Rat Plague': 'rkcent',
   'Buzzing Madness': 'crwasp',
@@ -289,7 +270,7 @@ function isDynamicEventMap(mapId) {
   const mapName = state?.utils?.ROOM_NAME?.[mapId];
   if (!mapName) return false;
 
-  return !STATIC_RAID_EVENTS.includes(mapName);
+  return !Object.prototype.hasOwnProperty.call(EVENT_TO_ROOM_MAPPING, mapName);
 }
 
 const MAP_ORDER_UNKNOWN = Number.MAX_SAFE_INTEGER;
@@ -414,7 +395,6 @@ mapsDatabase.MAP_ORDER_UNKNOWN = MAP_ORDER_UNKNOWN;
 mapsDatabase.REGION_NAME_MAP = { ...REGION_NAME_MAP };
 mapsDatabase.getRegionDisplayName = getRegionDisplayName;
 mapsDatabase.getRegionDisplayNameFromRegion = getRegionDisplayNameFromRegion;
-mapsDatabase.STATIC_RAID_EVENTS = STATIC_RAID_EVENTS.slice();
 mapsDatabase.EVENT_TO_ROOM_MAPPING = { ...EVENT_TO_ROOM_MAPPING };
 
 // Export for use in other mods

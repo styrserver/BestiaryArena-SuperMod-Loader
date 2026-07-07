@@ -1941,7 +1941,8 @@
 
   async function loadTblHighscoreFloorLeaders() {
     try {
-      const { tickData, floorData } = await fetchLeaderboardData(TBL_ROOM_ID);
+      // Event competition highscores (floor 0 and 15) should always come from a fresh game API fetch.
+      const { tickData, floorData } = await fetchLeaderboardData(TBL_ROOM_ID, true);
       const tickEntry = tickData?.[0] || null;
       const floorEntry = getBestLeaderboardEntry(floorData, { isFloor: true });
       const leaders = {};
@@ -2602,6 +2603,17 @@
 
   function buildTblOverallStandings(floorRows, ensurePlayerName = null) {
     const standings = new Map();
+    const playerTotalTicks = TblFloorLeagueState.playerTotalTicks || new Map();
+
+    playerTotalTicks.forEach((_, name) => {
+      if (!name) {
+        return;
+      }
+      standings.set(name, {
+        name,
+        floorsLed: 0
+      });
+    });
 
     floorRows.forEach((row) => {
       const leaderName = row.leader?.name;
@@ -2746,7 +2758,6 @@
   function createTblLeagueSummaryPanel(floorRows, participantCount = 0) {
     const playerName = getTblPlayerName();
     const standings = buildTblOverallStandings(floorRows, playerName);
-    const topPlayers = standings.slice(0, 3);
 
     let leftCol = `<div class="tbl-event-timer-row pixel-font-14" style="margin-bottom:6px;"><span class="tbl-event-timer-value" style="color:#ccc;">—</span></div>`;
     leftCol += `<div style="margin-bottom:6px;">${escapeTblHtml(t('mods.betterUI.tblLeagueParticipants', { count: participantCount }))}</div>`;
@@ -2756,20 +2767,19 @@
     </div>`;
 
     let rightCol = `<div style="color:#ccc;">${escapeTblHtml(t('mods.betterUI.tblLeagueTopPlayers'))}</div>`;
-    if (topPlayers.length > 0) {
-      topPlayers.forEach((player, index) => {
-        rightCol += formatTblOverallStandingLine(player, index + 1, playerName);
-      });
-
-      if (playerName) {
-        const topNames = new Set(topPlayers.map((player) => player.name));
-        if (!topNames.has(playerName)) {
-          const playerIndex = standings.findIndex((player) => player.name === playerName);
-          if (playerIndex >= 0) {
-            rightCol += `<div style="margin-top:4px;">${formatTblOverallStandingLine(standings[playerIndex], playerIndex + 1, playerName, { showRank: false })}</div>`;
-          }
-        }
+    if (standings.length > 0) {
+      const standingsWithRank = standings.map((player, index) => ({ player, rank: index + 1 }));
+      const rowsToShow = standingsWithRank.slice(0, 3);
+      const yourRow = playerName
+        ? standingsWithRank.find((entry) => entry.player?.name === playerName) || null
+        : null;
+      if (yourRow && yourRow.rank > 3) {
+        rowsToShow.push(yourRow);
       }
+
+      rowsToShow.forEach(({ player, rank }) => {
+        rightCol += formatTblOverallStandingLine(player, rank, playerName);
+      });
     } else {
       rightCol += `<div style="color:#888;margin-top:4px;">${escapeTblHtml(t('mods.betterUI.tblLeagueNoRuns', { ticks: TBL_MISSING_FLOOR_TICKS }))}</div>`;
     }

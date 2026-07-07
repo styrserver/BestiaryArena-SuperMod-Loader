@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.4.4",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Event creatures now appear in creature pickers only when their raid map is currently active (from raid state + room monsters); inactive event creatures remain preserved in autosell/autosqueeze keep/sell lists so saved configs restore when events return."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Tibia Ball League Event Competition: Top players now always shows #1-#3 plus your own row only when you are outside top 3; floor 0 and 15 leaderboard fetches still bypass local rate limiting/cache so event highscores stay live from the game API."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "changed",
+          "text": "STATIC_RAID_EVENTS was removed as a separate export; EVENT_TO_ROOM_MAPPING is now the single source of truth for static raids, and dynamic-event detection checks mapping keys directly (Raid Hunter derives event names from the same mapping)."
+        }
+      ]
+    },
+    {
       "version": "4.4.3",
       "changes": [
         {
