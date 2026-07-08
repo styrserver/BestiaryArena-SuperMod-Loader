@@ -184,8 +184,9 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `local_mods.js` - Manages local mods
   - `mod-registry.js` - Central lists of database, official, super, and OT mod filenames (must stay in sync with `background.js` and `popup/popup.js`)
   - `custom-battles.js` - Custom battle runtime (`CustomBattle`) for configurable fights (used by mods such as Challenges)
+  - `event-competition.js` - Config-driven community event leaderboard framework (`window.EventCompetition`) for Firebase-backed floor/rank competitions (used by Better Highscores for Tibia Ball League)
   - `ba-sandbox-utils.mjs` - Sandbox utility functions
-  - `utility_injector.js` - Utility injection system
+  - `utility_injector.js` - Utility injection system (`ba-sandbox-utils.mjs`, `custom-battles.js`, `event-competition.js`)
 - `docs/` - Mod developer markdown guides and [`patch-notes.json`](docs/patch-notes.json) (version metadata used by the extension popup patch notes UI)
 - `database/` - Static tooltip and reference data used by mods
   - `welcome.js` - Welcome screen data

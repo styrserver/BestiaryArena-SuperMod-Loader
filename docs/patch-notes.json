@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.4.6",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Tibia Ball League Event Competition now excludes Firebase admins from joining/submitting/standings and purges their Firebase event records (participants, scores/rank-scores, replays) while keeping a view-only experience. Floors 0/15 now persist and fallback correctly for both ticks and rank/rankTicks when filtered game-API leaders are ineligible. Admin UI polish: no personal/penalty baselines, no \"no run yet\" status lines, non-clickable floor section, and dedicated right-side Event Competition button with matching frame styling and animated label. On wcfield, rank and floor bar sections both update when changing floors."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Prevented accidental active-task deletion when a new task signal appears during delayed or stale state updates: active tasks are now preserved by default in the new-task accept flow and are only removed when creature filtering explicitly rejects the current task."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "event-competition.js injected after custom-battles.js (injector, utility_injector, content_injector) and added to web_accessible_resources; Firefox manifest now also lists custom-battles.js for parity with Chrome. README, Wikitext, mod_loading_optimizations, and mod_development_guide updated."
+        }
+      ]
+    },
+    {
       "version": "4.4.5",
       "changes": [
         {

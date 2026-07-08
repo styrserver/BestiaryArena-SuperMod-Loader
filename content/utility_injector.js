@@ -69,6 +69,7 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
       // may not be visible here, but mods (which run in page context) will be able to see it.
       // The script logs show it IS executing and setting window.CustomBattles in the page context.
       console.log('BA Utility Injector: custom-battles.js loaded - mods will be able to access window.CustomBattles');
+      injectEventCompetition();
     };
     
     script.onerror = function(error) {
@@ -77,6 +78,31 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
       console.error('BA Utility Injector: Script URL was:', scriptUrl);
     };
     
+    document.head.appendChild(script);
+  }
+
+  function injectEventCompetition() {
+    console.log('BA Utility Injector: Injecting event competition framework');
+
+    const extUrl = typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
+    const getURL = browserAPI.runtime.getURL.bind(browserAPI.runtime);
+    const scriptUrl = extUrl
+      ? extUrl.getExtensionResourceUrl(getURL, 'content/event-competition.js')
+      : getURL('content/event-competition.js');
+
+    const script = document.createElement('script');
+    script.type = 'text/javascript';
+    script.src = scriptUrl;
+
+    script.onload = function() {
+      console.log('BA Utility Injector: event-competition.js loaded - mods will be able to access window.EventCompetition');
+    };
+
+    script.onerror = function(error) {
+      const detail = extUrl ? extUrl.formatScriptLoadError(error, scriptUrl) : error;
+      console.error('BA Utility Injector: ✗ ERROR loading event competition framework:', detail);
+    };
+
     document.head.appendChild(script);
   }
   

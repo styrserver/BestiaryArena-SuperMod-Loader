@@ -174,6 +174,23 @@ async function loadScripts() {
       console.error('[Content Injector] ✗ CRITICAL: Failed to inject custom-battles.js:', error);
       console.error('[Content Injector] Error stack:', error?.stack);
     }
+
+    try {
+      await injectScript('content/event-competition.js');
+      let eventRetries = 0;
+      while (!window.EventCompetition && eventRetries < 20) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        eventRetries++;
+      }
+      if (window.EventCompetition) {
+        console.warn('[Content Injector] ✓ EventCompetition framework verified and ready');
+      } else {
+        console.error('[Content Injector] ✗ EventCompetition framework NOT available after injection!');
+      }
+    } catch (error) {
+      console.error('[Content Injector] ✗ CRITICAL: Failed to inject event-competition.js:', error);
+      console.error('[Content Injector] Error stack:', error?.stack);
+    }
     
     // Send mod base URL and browser API info after scripts are loaded
     window.postMessage({

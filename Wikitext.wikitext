@@ -163,8 +163,9 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>local_mods.js</code> - Manages local mods
 ** <code>mod-registry.js</code> - Central lists of database, official, super, and OT mod filenames (must stay in sync with <code>background.js</code> and <code>popup/popup.js</code>)
 ** <code>custom-battles.js</code> - Custom battle runtime (<code>CustomBattle</code>) for configurable fights (used by mods such as Challenges)
+** <code>event-competition.js</code> - Config-driven community event leaderboard framework (<code>window.EventCompetition</code>) for Firebase-backed floor/rank competitions (used by Better Highscores for Tibia Ball League)
 ** <code>ba-sandbox-utils.mjs</code> - Sandbox utility functions
-** <code>utility_injector.js</code> - Utility injection system
+** <code>utility_injector.js</code> - Utility injection system (<code>ba-sandbox-utils.mjs</code>, <code>custom-battles.js</code>, <code>event-competition.js</code>)
 * <code>docs/</code> - Mod developer markdown guides and [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/patch-notes.json <code>patch-notes.json</code>] (version metadata used by the extension popup patch notes UI)
 * <code>database/</code> - Static tooltip and reference data used by mods
 ** <code>welcome.js</code> - Welcome screen data

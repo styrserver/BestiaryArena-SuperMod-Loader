@@ -8103,65 +8103,21 @@ async function openQuestLogAndAcceptTask() {
         const taskGameId = playerContext?.questLog?.task?.gameId;
         
         if (activeTask || taskGameId) {
-            console.log('[Better Tasker] Active task detected (activeTask:', !!activeTask, ', gameId:', taskGameId, ') - must remove current task before accepting new one');
-            
-            // Check if we're in cooldown after too many removal failures
-            const timeSinceLastAttempt = Date.now() - lastTaskRemovalAttempt;
-            if (taskRemovalRetryCount >= MAX_TASK_REMOVAL_RETRIES && timeSinceLastAttempt < TASK_REMOVAL_RETRY_COOLDOWN) {
-                const remainingCooldown = Math.ceil((TASK_REMOVAL_RETRY_COOLDOWN - timeSinceLastAttempt) / 1000);
-                console.log(`[Better Tasker] Task removal retry limit reached (${taskRemovalRetryCount}/${MAX_TASK_REMOVAL_RETRIES}). Cooldown active: ${remainingCooldown}s remaining. Stopping to prevent loop.`);
+            console.log('[Better Tasker] Active task detected (activeTask:', !!activeTask, ', gameId:', taskGameId, ') - preserving current task');
+
+            // Safety guard: never remove active tasks while handling "new task available",
+            // unless creature filtering explicitly marks the current task as disallowed.
+            const taskRemovedByFilter = await removeCurrentTaskIfNotAllowed({ forceRecheck: true });
+            if (!taskRemovedByFilter) {
+                console.log('[Better Tasker] Current task is still valid - skipping new task accept to prevent accidental removal');
                 releaseTaskOperation();
-                // Schedule next check after cooldown expires
-                const cooldownRemaining = TASK_REMOVAL_RETRY_COOLDOWN - timeSinceLastAttempt;
-                taskCheckTimeout = setTimeout(() => {
-                    // Reset counter after cooldown
-                    taskRemovalRetryCount = 0;
-                    scheduleTaskCheck();
-                }, cooldownRemaining);
+                // Recheck soon in case server state catches up and active task clears.
+                taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), 3000);
                 return;
             }
-            
-            // Reset counter if enough time has passed since last attempt
-            if (timeSinceLastAttempt > TASK_REMOVAL_RESET_TIME) {
-                taskRemovalRetryCount = 0;
-                console.log('[Better Tasker] Task removal retry counter reset (enough time passed)');
-            }
-            
-            lastTaskRemovalAttempt = Date.now();
-            
-            // First, try to remove the task if creature is not allowed
-            let taskRemoved = await removeCurrentTaskIfNotAllowed();
-            
-            // If that didn't work and there's still an active task, try to remove it directly
-            if (!taskRemoved && (activeTask || taskGameId)) {
-                console.log('[Better Tasker] Active task still exists - attempting direct removal...');
-                const questLogOpened = await openQuestLogForTaskRemoval();
-                if (questLogOpened) {
-                    await sleep(500);
-                    taskRemoved = await removeTaskDirectlyFromQuestLog();
-                    if (taskRemoved) {
-                        await sleep(1000);
-                        await closeQuestLogIfOpen();
-                    }
-                }
-            }
-            
-            if (!taskRemoved) {
-                taskRemovalRetryCount++;
-                console.log(`[Better Tasker] Could not remove active task (retry ${taskRemovalRetryCount}/${MAX_TASK_REMOVAL_RETRIES}) - will retry later`);
-                releaseTaskOperation();
-                
-                // Use exponential backoff: 5s, 10s, 20s
-                const backoffDelay = Math.min(5000 * Math.pow(2, taskRemovalRetryCount - 1), 20000);
-                console.log(`[Better Tasker] Scheduling retry with exponential backoff: ${backoffDelay}ms`);
-                taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), backoffDelay);
-                return;
-            } else {
-                // Success - reset counter
-                taskRemovalRetryCount = 0;
-                console.log('[Better Tasker] Task removal successful - retry counter reset');
-            }
-            // Wait a bit for the task removal to process and state to update
+
+            console.log('[Better Tasker] Active task removed by creature filter (disallowed creature) - proceeding to claim new task');
+            taskRemovalRetryCount = 0;
             await sleep(2000);
         }
         

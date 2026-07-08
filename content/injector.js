@@ -323,12 +323,24 @@ clientScript.onload = function() {
           // may not be visible here, but mods (which run in page context) will be able to see it.
           // The script IS executing in the page context as evidenced by the logs.
           console.log('[Injector] custom-battles.js loaded - mods will be able to access window.CustomBattles');
-          // Continue with local_mods.js injection
-          injectLocalMods();
+          injectEventCompetition();
         };
         customBattlesScript.onerror = function(error) {
           console.error('[Injector] ✗ ERROR loading custom-battles.js:', error);
           // Continue anyway
+          injectEventCompetition();
+        };
+      }
+
+      function injectEventCompetition() {
+        console.log('[Injector] Loading event-competition.js');
+        const eventCompetitionScript = injectScript('content/event-competition.js');
+        eventCompetitionScript.onload = function() {
+          console.log('[Injector] event-competition.js loaded - mods will be able to access window.EventCompetition');
+          injectLocalMods();
+        };
+        eventCompetitionScript.onerror = function(error) {
+          console.error('[Injector] ✗ ERROR loading event-competition.js:', error);
           injectLocalMods();
         };
       }

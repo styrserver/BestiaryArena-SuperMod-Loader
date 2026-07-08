@@ -45,9 +45,10 @@ User scripts stored in localStorage are automatically integrated:
 3. **`content/client.js`** — `BestiaryModAPI`, UI components
 4. **`content/mod-coordination.mjs`** — loaded as `text/javascript` (IIFE, not `type="module"`)
 5. **`content/custom-battles.js`**
-6. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
+6. **`content/event-competition.js`**
+7. **`content/local_mods.js`** — mod discovery, batch execution, completion signal
 
-`utility_injector.js` (at `document_idle`) also loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule) and may inject `custom-battles.js` again.
+`utility_injector.js` (at `document_idle`) also loads `ba-sandbox-utils.mjs` (same IIFE / non-module rule) and may inject `custom-battles.js` and `event-competition.js` again.
 
 ### Mod execution
 
