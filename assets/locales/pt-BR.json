@@ -144,6 +144,7 @@
       "Better Rune Recycler": "Reciclagem de runas em lotes, validação e rastreamento de ouro/stats.",
       "Better Setups": "Rótulos de setup (Farm, Speedrun etc.), edição na UI, integração com Configurator.",
       "Better Tasker": "Automação de quests: log, aceitar tarefas, mapas; pausa quando há recompensas.",
+      "Better Teleporter": "Melhora o diálogo nativo de seleção de mapas do teleporter.",
       "Better Yasir": "Compra e venda em massa no Yasir com preços ao vivo e confirmações.",
       "Cyclopedia": "Bases de monstros e equipamentos, perfis, rankings por temporada e RunTracker.",
       "Dice Roller": "Rola dados automaticamente até atingir os stats desejados.",
@@ -152,7 +153,6 @@
       "Hunt Analyzer": "Estatísticas de sessão no autoplay: ouro, poeira, drops, resumos e exportação.",
       "Raid Hunter": "Automação de raids: detectar e entrar, setup, autoplay, stamina e filas.",
       "Manual Runner": "Repete runs manuais até vitória, S+ alvo ou andar máximo; stats e cópia de replay.",
-      "Room Hopper": "Lista de mapas pesquisável com filtros de criatura/equipamento, XP por stamina e teleporte.",
       "Awaken Tracker": "Progresso de genes de despertar por mapa com deltas ao vivo, logs de eventos e pausa no cap.",
       "Depot Manager": "Fileiras de depósito de criaturas e equipamentos, favoritos e envio rápido ao depósito.",
       "Stamina Optimizer": "Inicia ou para o jogo nos limites de stamina; coordena com outros mods de farm.",
@@ -433,7 +433,6 @@
       "hotkeyLabelMonsterSqueezer": "Espremedor de Monstros",
       "hotkeyLabelMonstrousCauldron": "Caldeirão Monstruoso",
       "hotkeyLabelReturnToMap": "Voltar ao mapa",
-      "hotkeyLabelRoomHopper": "Room Hopper",
       "hotkeyLabelCyclopedia": "Ciclopédia",
       "hotkeyLabelResetCurrentMapDefault": "Resetar mapa",
       "hotkeyResetBinding": "Redefinir",
@@ -1539,6 +1538,16 @@
       "tasking": "Em tarefa",
       "setupMethod": "Método de configuração",
       "monsterSelectionTitle": "Seleção de Monstros"
+    },
+    "betterTeleporter": {
+      "activated": "Better Teleporter ativado!",
+      "hideRaidsAndEvents": "Ocultar raids e eventos",
+      "allRegions": "Todas as regiões",
+      "xpStam": "XP / Stam",
+      "xpLabel": "xp",
+      "stamSuffix": "/ stam",
+      "searchKeywordsRaid": "raid,raids",
+      "searchKeywordsEvent": "event,events,evento,eventos"
     },
     "betterAnalytics": {
       "modName": "Better Analytics",
