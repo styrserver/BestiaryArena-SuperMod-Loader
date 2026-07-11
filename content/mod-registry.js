@@ -64,6 +64,7 @@ export const SUPER_MODS = [
   'Better Rune Recycler.js',
   'Better Setups.js',
   'Better Tasker.js',
+  'Better Teleporter.js',
   'Better Yasir.js',
   'Cyclopedia.js',
   'Dice_Roller.js',
@@ -73,7 +74,6 @@ export const SUPER_MODS = [
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
-  'Room Hopper.js',
   'RunTracker.js',
   'Stamina Optimizer.js',
   'Awaken Tracker.js'

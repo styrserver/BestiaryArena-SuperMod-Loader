@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.5.0",
+      "changes": [
+        {
+          "mod": "Better Teleporter",
+          "type": "added",
+          "text": "New Super Mod: enhances the native map teleporter with a 750×550 layout and green activated title. Adds an XP/Stam column, 3-state sort on Map and XP/Stam, sticky region headers, raid (red) and dynamic event (green) row colors, inline region filter and Hide raids & events beside search, search keywords raid/raids and event/events (plus evento/eventos in pt-BR), and creature/equipment hover tooltips. Detects the teleporter by dialog structure instead of English-only strings so it works in Portuguese and other game locales; mod UI strings are localized in en-US.json and pt-BR.json."
+        },
+        {
+          "mod": "Room Hopper",
+          "type": "removed",
+          "text": "Retired and unregistered from the mod loader; map browsing features are superseded by Better Teleporter. Room_Hopper.js remains in the repo for reference only."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Characters tab: pressing Esc no longer clears modal content while the Cyclopedia dialog is still open; fallback cleanup now runs only after the modal is actually closed or removed."
+        }
+      ]
+    },
+    {
       "version": "4.4.6",
       "changes": [
         {

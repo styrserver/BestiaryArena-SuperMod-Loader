@@ -20921,7 +20921,17 @@ function openCyclopediaModal(options) {
           // Also watch for ESC key and clicks outside
           const handleKeyDown = (e) => {
             if (e.key === 'Escape') {
-              cleanupCyclopediaModal();
+              // Let native modal ESC handling run first; only force cleanup
+              // when the dialog is actually gone (or no longer open).
+              const fallbackCleanupCheck = setTimeout(() => {
+                const currentDialog = getCyclopediaDialog(activeCyclopediaModal);
+                const isGone = !currentDialog || !document.body.contains(currentDialog);
+                const isClosed = currentDialog?.getAttribute?.('data-state') !== 'open';
+                if (isGone || isClosed) {
+                  cleanupCyclopediaModal();
+                }
+              }, 0);
+              TimerManager.addTimeout(fallbackCleanupCheck, 'modalEscapeFallbackCleanupCheck');
             }
           };
 

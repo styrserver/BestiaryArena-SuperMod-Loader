@@ -47,8 +47,8 @@ const FALLBACK_SUPER_MODS = [
   'Autoseller.js', 'Autoscroller.js', 'Battle_Helper.js', 'Better Analytics.js', 'Better Bestiary.js', 'Better Boosted Maps.js',
   'Better Cauldron.js', 'Better Exaltation Chest.js', 'Better Forge.js', 'Better Highscores.js',
   'Better Hy\'genie.js', 'Better Rune Recycler.js', 'Better Setups.js', 'Better Tasker.js',
-  'Better Yasir.js', 'Cyclopedia.js', 'Dice_Roller.js', 'Depot Manager.js', 'Hunt Analyzer.js',
-  'Mod Settings.js', 'Outfiter.js', 'Raid_Hunter.js', 'Manual Runner.js', 'Room Hopper.js',
+  'Better Teleporter.js', 'Better Yasir.js', 'Cyclopedia.js', 'Dice_Roller.js', 'Depot Manager.js', 'Hunt Analyzer.js',
+  'Mod Settings.js', 'Outfiter.js', 'Raid_Hunter.js', 'Manual Runner.js',
   'RunTracker.js', 'Stamina Optimizer.js', 'Awaken Tracker.js'
 ];
 const FALLBACK_OT_MODS = ['Challenges.js', 'Quests.js', 'Guilds.js', 'VIP List.js'];

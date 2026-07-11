@@ -376,6 +376,14 @@ Advanced quest automation system that streamlines task completion and management
 - Smart quest button management with visual tasking indicators
 - Integration with Raid Hunter for seamless automation switching
 
+#### Better Teleporter
+Enhances the native in-game map teleporter dialog:
+- Resizes the dialog to 750×550 with a green “Better Teleporter activated!” title
+- Adds an XP/Stam column with 3-state sort on Map and XP/Stam, plus sticky per-region headers
+- Colors raid maps red and dynamic event maps green for quick identification
+- Inline region filter and Hide raids & events controls beside the search box
+- Search keywords `raid`/`raids` and `event`/`events`; hover tooltips on creature and equipment portraits
+
 #### Better Yasir
 Enhances Yasir's traveling merchant shop with bulk transaction capabilities and smart pricing:
 - Adds quantity input fields for bulk buying and selling items
@@ -448,13 +456,6 @@ Advanced raid automation system for Bestiary Arena:
 - Stamina monitoring and auto-refill integration with Bestiary Automator
 - Real-time raid status monitoring with countdown timers and queue system for multiple raids
 - Comprehensive settings panel for customization and raid map selection
-
-#### Room Hopper
-Searchable world map browser for quick navigation and farming research:
-- Header button opens a sortable table of every room with thumbnail, enemy creatures, and equip drops
-- Search by map name, region, creature, or equipment; filter by region and hide raids/dynamic events
-- Shows average XP and XP per stamina per room; sort by name or efficiency
-- One-click teleport to any room; blocks travel while a run is in progress
 
 #### RunTracker
 Local run data tracking and storage system:

@@ -611,7 +611,6 @@ if (typeof browserAPI === 'undefined') {
     'highscore-button': '🏆',
     'bestiary-automator-config-button': '🤖',
     'team-copier-button': '📋',
-    'room-hopper-button': '🗺️',
     'manual-runner-button': '🏃',
     'manual-runner': '🏃',
     'mod-autoplay-button': '📈',

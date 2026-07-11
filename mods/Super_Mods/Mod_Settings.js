@@ -70,7 +70,6 @@ const defaultConfig = {
   hotkeyNextMap: 'k',
   hotkeyStartOrSkip: 'z',
   hotkeyToggleTurboMode: 'y',
-  hotkeyOpenRoomHopper: 'p',
   hotkeySetupSlot1: 'f1',
   hotkeySetupSlot2: 'f2',
   hotkeySetupSlot3: 'f3',
@@ -143,7 +142,6 @@ if (config.hotkeyPreviousMap === undefined) config.hotkeyPreviousMap = 'j';
 if (config.hotkeyNextMap === undefined) config.hotkeyNextMap = 'k';
 if (config.hotkeyStartOrSkip === undefined) config.hotkeyStartOrSkip = 'z';
 if (config.hotkeyToggleTurboMode === undefined) config.hotkeyToggleTurboMode = 'y';
-if (config.hotkeyOpenRoomHopper === undefined) config.hotkeyOpenRoomHopper = 'p';
 config.hotkeyFloorUp = sanitizeStoredHotkey(config.hotkeyFloorUp, '');
 config.hotkeyFloorDown = sanitizeStoredHotkey(config.hotkeyFloorDown, '');
 config.hotkeyCycleBestiaryEquipmentTab = sanitizeStoredHotkey(config.hotkeyCycleBestiaryEquipmentTab, '');
@@ -153,7 +151,7 @@ config.hotkeyPreviousMap = sanitizeStoredHotkey(config.hotkeyPreviousMap, '');
 config.hotkeyNextMap = sanitizeStoredHotkey(config.hotkeyNextMap, '');
 config.hotkeyStartOrSkip = sanitizeStoredHotkey(config.hotkeyStartOrSkip, '');
 config.hotkeyToggleTurboMode = sanitizeStoredHotkey(config.hotkeyToggleTurboMode, '');
-config.hotkeyOpenRoomHopper = sanitizeStoredHotkey(config.hotkeyOpenRoomHopper, '');
+delete config.hotkeyOpenRoomHopper;
 config.hotkeyOpenCyclopedia = sanitizeStoredHotkey(config.hotkeyOpenCyclopedia, '');
 for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
   const setupKey = `hotkeySetupSlot${setupSlot}`;
@@ -1561,7 +1559,6 @@ function syncModDependentSettingsAvailability() {
   updateReturnToMapHotkeyAvailability();
   updateTurboModeHotkeyAvailability();
   updateTurboSpeedSettingsAvailability();
-  updateRoomHopperHotkeyAvailability();
   updateCyclopediaHotkeyAvailability();
   updateRunTrackerSettingsAvailability();
   updateFirebaseRunsSettingsAvailability();
@@ -1635,28 +1632,6 @@ function triggerToggleTurboModeFromHotkey() {
   }
 
   console.warn('[Mod Settings] Turbo Mode toggle hotkey pressed but Turbo Mode button was not available');
-}
-
-function isRoomHopperModEnabled() {
-  return !!window.__roomHopperLoaded
-    && (typeof window.__roomHopperOpen === 'function' || !!document.getElementById('room-hopper-button'));
-}
-
-function openRoomHopperFromHotkey() {
-  if (!isRoomHopperModEnabled()) {
-    console.warn('[Mod Settings] Room Hopper hotkey pressed but Room Hopper mod is disabled');
-    return;
-  }
-  if (typeof window.__roomHopperOpen === 'function') {
-    window.__roomHopperOpen();
-    return;
-  }
-  const roomHopperButton = document.getElementById('room-hopper-button');
-  if (roomHopperButton && typeof roomHopperButton.click === 'function' && !roomHopperButton.disabled) {
-    roomHopperButton.click();
-    return;
-  }
-  console.warn('[Mod Settings] Room Hopper hotkey pressed but Room Hopper button was not available');
 }
 
 function isCyclopediaModEnabled() {
@@ -1952,13 +1927,6 @@ function handleGlobalHotkeys(event) {
     triggerToggleTurboModeFromHotkey();
     return;
   }
-  const openRoomHopperId = sanitizeStoredHotkey(config.hotkeyOpenRoomHopper, '');
-  if (openRoomHopperId && pressedId === openRoomHopperId) {
-    event.preventDefault();
-    event.stopPropagation();
-    openRoomHopperFromHotkey();
-    return;
-  }
   const openCyclopediaId = sanitizeStoredHotkey(config.hotkeyOpenCyclopedia, '');
   if (openCyclopediaId && pressedId === openCyclopediaId) {
     event.preventDefault();
@@ -2006,8 +1974,6 @@ const RETURN_TO_MAP_HOTKEY_DISABLED_TITLE =
   'Enable "Show Return to Map Button" in Interface for this hotkey to work.';
 const TURBO_MODE_HOTKEY_DISABLED_TITLE =
   'Enable the Turbo Mode mod for this hotkey to work.';
-const ROOM_HOPPER_HOTKEY_DISABLED_TITLE =
-  'Enable the Room Hopper mod for this hotkey to work.';
 const CYCLOPEDIA_HOTKEY_DISABLED_TITLE =
   'Enable the Cyclopedia mod for this hotkey to work.';
 
@@ -2070,12 +2036,6 @@ const MODS_HOTKEY_UI_ROWS = [
     configKey: 'hotkeyToggleTurboMode',
     captureId: 'hotkey-toggle-turbo-mode-capture-btn',
     resetId: 'hotkey-toggle-turbo-mode-reset-btn',
-    displayFallback: ''
-  },
-  {
-    configKey: 'hotkeyOpenRoomHopper',
-    captureId: 'hotkey-open-room-hopper-capture-btn',
-    resetId: 'hotkey-open-room-hopper-reset-btn',
     displayFallback: ''
   },
   {
@@ -2209,41 +2169,6 @@ function updateTurboModeHotkeyAvailability() {
     resetButton.disabled = false;
     resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
     resetButton.title = disabled ? TURBO_MODE_HOTKEY_DISABLED_TITLE : '';
-    resetButton.style.cursor = disabled ? 'not-allowed' : '';
-    resetButton.style.opacity = disabled ? '0.65' : '';
-  }
-}
-
-function updateRoomHopperHotkeyAvailability() {
-  const label = document.getElementById('hotkey-open-room-hopper-label');
-  const warning = document.getElementById('hotkey-open-room-hopper-unavailable-warning');
-  const captureButton = document.getElementById('hotkey-open-room-hopper-capture-btn');
-  const resetButton = document.getElementById('hotkey-open-room-hopper-reset-btn');
-  const disabled = !isRoomHopperModEnabled();
-
-  if (label) {
-    label.style.color = disabled ? '#888' : '#ccc';
-    label.title = disabled ? ROOM_HOPPER_HOTKEY_DISABLED_TITLE : '';
-  }
-  if (warning) {
-    warning.hidden = !disabled;
-    warning.title = ROOM_HOPPER_HOTKEY_DISABLED_TITLE;
-    warning.style.display = disabled ? 'inline-flex' : 'none';
-    warning.style.color = '#f0c36d';
-    warning.style.opacity = '1';
-    warning.style.filter = 'none';
-  }
-  if (captureButton) {
-    captureButton.disabled = false;
-    captureButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    captureButton.title = disabled ? ROOM_HOPPER_HOTKEY_DISABLED_TITLE : t('mods.betterUI.hotkeyCaptureTitle');
-    captureButton.style.cursor = disabled ? 'not-allowed' : '';
-    captureButton.style.opacity = disabled ? '0.65' : '';
-  }
-  if (resetButton) {
-    resetButton.disabled = false;
-    resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    resetButton.title = disabled ? ROOM_HOPPER_HOTKEY_DISABLED_TITLE : '';
     resetButton.style.cursor = disabled ? 'not-allowed' : '';
     resetButton.style.opacity = disabled ? '0.65' : '';
   }
@@ -6885,18 +6810,6 @@ function showSettingsModal() {
                   ${t('mods.betterUI.hotkeyResetBinding')}
                 </button>
               </div>
-              <div id="hotkey-open-room-hopper-row" class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-                <span id="hotkey-open-room-hopper-label" style="${hotkeyLabelStyle}">
-                  <span id="hotkey-open-room-hopper-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
-                  ${t('mods.betterUI.hotkeyLabelRoomHopper')}
-                </span>
-                <button type="button" id="hotkey-open-room-hopper-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                  P
-                </button>
-                <button type="button" id="hotkey-open-room-hopper-reset-btn" style="pointer-events: auto;">
-                  ${t('mods.betterUI.hotkeyResetBinding')}
-                </button>
-              </div>
               <div id="hotkey-open-cyclopedia-row" class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
                 <span id="hotkey-open-cyclopedia-label" style="${hotkeyLabelStyle}">
                   <span id="hotkey-open-cyclopedia-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
@@ -7769,13 +7682,6 @@ function showSettingsModal() {
         content.querySelector('#hotkey-toggle-turbo-mode-reset-btn'),
         'hotkeyToggleTurboMode',
         'y',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-room-hopper-capture-btn'),
-        content.querySelector('#hotkey-open-room-hopper-reset-btn'),
-        'hotkeyOpenRoomHopper',
-        'p',
         ''
       );
       bindHotkeyConfigRowInModal(
