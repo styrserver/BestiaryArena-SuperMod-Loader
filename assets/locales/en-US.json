@@ -1543,12 +1543,18 @@
     "betterTeleporter": {
       "activated": "Better Teleporter activated!",
       "hideRaidsAndEvents": "Hide raids & events",
+      "reset": "Reset",
       "allRegions": "All regions",
       "xpStam": "XP / Stam",
       "xpLabel": "xp",
       "stamSuffix": "/ stam",
       "searchKeywordsRaid": "raid,raids",
-      "searchKeywordsEvent": "event,events,evento,eventos"
+      "searchKeywordsEvent": "event,events,evento,eventos",
+      "contextMenuSubtitle": "Open in Cyclopedia:",
+      "contextMenuMap": "Map",
+      "contextMenuCreatures": "Creatures",
+      "contextMenuEquipment": "Equipment",
+      "contextMenuCancel": "Cancel"
     },
     "betterAnalytics": {
       "modName": "Better Analytics",
