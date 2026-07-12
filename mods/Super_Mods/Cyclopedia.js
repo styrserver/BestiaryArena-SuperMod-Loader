@@ -7286,8 +7286,16 @@ function createStartPageManager() {
       return container;
     }
 
+    applyContainerLayout(extraStyles = {}) {
+      const preservedDisplay = this.container.style.display;
+      Object.assign(this.container.style, CYCLOPEDIA_TAB_LAYOUT.container, extraStyles);
+      if (preservedDisplay === 'none') {
+        this.container.style.display = 'none';
+      }
+    }
+
     showLoading() {
-      Object.assign(this.container.style, CYCLOPEDIA_TAB_LAYOUT.container, {
+      this.applyContainerLayout({
         alignItems: 'stretch',
         justifyContent: 'center'
       });
@@ -7355,7 +7363,7 @@ function createStartPageManager() {
         cyclopediaState.lastStartupProfileData = unwrapProfilePageJson(profileData);
         refreshLeaderboardCacheYourRoomsForSeason();
 
-        Object.assign(this.container.style, CYCLOPEDIA_TAB_LAYOUT.container);
+        this.applyContainerLayout();
         this.container.innerHTML = '';
 
         const leftCol = document.createElement('div');
@@ -20635,6 +20643,8 @@ function openCyclopediaModal(options) {
     cyclopediaModalInProgress = true;
     const creatureToSelect = options.creature;
     const equipmentToSelect = options.equipment;
+    const mapToSelect = options.map;
+    const regionToSelect = options.region || options.regionName;
     const isFromHeader = options.fromHeader === true;
   
   (() => {
@@ -20706,6 +20716,10 @@ function openCyclopediaModal(options) {
         window.cyclopediaSelectedEquipment = foundEquipment;
       }
       activeTab = 2;
+    }
+
+    if (mapToSelect && regionToSelect) {
+      activeTab = 4;
     }
 
     let setActiveTab;
@@ -20948,6 +20962,16 @@ function openCyclopediaModal(options) {
       
       setActiveTab(activeTab);
       cyclopediaPendingHomeSearchFocus = activeTab === 0;
+
+      if (mapToSelect && regionToSelect) {
+        const openMapNavTimeout = setTimeout(() => {
+          cyclopediaNavigateFromHome(
+            { type: 'map', mapName: mapToSelect, regionName: regionToSelect },
+            { setActiveTab, tabPages }
+          );
+        }, 0);
+        TimerManager.addTimeout(openMapNavTimeout, 'openMapNav');
+      }
       
     } catch (modalError) {
       console.error('[Cyclopedia] Error creating modal with API:', modalError);

@@ -33,6 +33,7 @@
   const SEARCH_SYNC_ATTR = `data-${NS}-search-sync`;
   const SEARCH_RESET_ATTR = `data-${NS}-search-reset`;
   const ROW_CONTEXT_BOUND_ATTR = `data-${NS}-row-context-bound`;
+  const KEYBOARD_NAV_BOUND_ATTR = `data-${NS}-keyboard-nav-bound`;
   const CONTEXT_MENU_ID = `${NS}-context-menu`;
   const CONTEXT_MENU_OVERLAY_ID = `${NS}-context-menu-overlay`;
   const CONTEXT_MENU_HOST_ATTR = `data-${NS}-context-menu-host`;
@@ -124,8 +125,10 @@
   const dialogFilterState = new WeakMap();
   const filterControlHandlers = new WeakMap();
   const rowContextHandlers = new WeakMap();
+  const dialogKeyboardNavState = new WeakMap();
   const roomBoardMetaCache = new Map();
   let openRowContextMenu = null;
+  let teleporterKeyboardHandler = null;
   let processModalsRaf = null;
 
   const DEFAULT_SESSION_PREFERENCES = {
@@ -847,6 +850,7 @@
     }
 
     teardownTeleporterFilters(dialog);
+    unbindTeleporterKeyboardNav(dialog);
     if (activeDialog === dialog) clearModalLayoutCleanup();
     revertTeleporterModalLayout(dialog);
   }
@@ -868,6 +872,248 @@
 
   function findTeleporterDialogs() {
     return [...document.querySelectorAll('div[role="dialog"]')].filter(matchesTeleporterForLayout);
+  }
+
+  function focusTeleporterSearchInput(dialog = findOpenTeleporterDialog()) {
+    const searchInput = getTeleporterSearchInput(dialog);
+    if (!searchInput) return false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        try {
+          searchInput.focus({ preventScroll: true });
+        } catch (_) {}
+      });
+    });
+    return true;
+  }
+
+  function findTeleporterGotoButton() {
+    for (const img of document.querySelectorAll('button img[src*="goto.png"]')) {
+      const btn = img.closest('button');
+      if (!btn || btn.disabled || btn.closest('[role="dialog"]')) continue;
+      return btn;
+    }
+    return null;
+  }
+
+  function scheduleFocusTeleporterSearchAfterOpen() {
+    let attempts = 24;
+    const tick = () => {
+      const dialog = findOpenTeleporterDialog();
+      if (dialog && focusTeleporterSearchInput(dialog)) return;
+      attempts -= 1;
+      if (attempts <= 0) return;
+      setTimeout(tick, 50);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  function openNativeTeleporter() {
+    const existing = findOpenTeleporterDialog();
+    if (existing) {
+      focusTeleporterSearchInput(existing);
+      return;
+    }
+
+    const gotoButton = findTeleporterGotoButton();
+    if (gotoButton && typeof gotoButton.click === 'function') {
+      gotoButton.click();
+      scheduleFocusTeleporterSearchAfterOpen();
+      return;
+    }
+
+    console.warn('[Better Teleporter] Native teleporter open failed: goto button not found');
+  }
+
+  function getDialogKeyboardNavState(dialog) {
+    if (!dialogKeyboardNavState.has(dialog)) {
+      dialogKeyboardNavState.set(dialog, { selectedRoomId: null });
+    }
+    return dialogKeyboardNavState.get(dialog);
+  }
+
+  function getKeyboardSelectedRoomId(dialog) {
+    return getDialogKeyboardNavState(dialog).selectedRoomId;
+  }
+
+  function isKeyboardNavTargetBlocked(target, { forEnter = false } = {}) {
+    if (!target || !(target instanceof Element)) return false;
+    const tag = target.tagName;
+    if (tag === 'SELECT' || tag === 'TEXTAREA') return true;
+    if (forEnter && tag === 'BUTTON') return true;
+    if (target.closest(`#${CONTEXT_MENU_ID}, #${CONTEXT_MENU_OVERLAY_ID}`)) return true;
+    return false;
+  }
+
+  function getVisibleRoomRowsFromTable(table) {
+    const tbody = table?.querySelector('tbody');
+    if (!tbody) return [];
+
+    const rows = [];
+    for (const tr of tbody.querySelectorAll(':scope > tr')) {
+      if (isRegionHeaderRow(tr)) continue;
+      if (!isRowShownInDom(tr)) continue;
+      const roomId = extractRoomIdFromRow(tr);
+      if (roomId) rows.push({ tr, roomId });
+    }
+    return rows;
+  }
+
+  function getTableScrollContainer(table) {
+    return table.closest('[data-radix-scroll-area-viewport]')
+      || table.closest('.scroll-view')
+      || table.parentElement;
+  }
+
+  function scrollRoomRowIntoView(tr, table) {
+    const container = getTableScrollContainer(table);
+    if (container && typeof container.scrollTop === 'number') {
+      const rowTop = tr.offsetTop;
+      const rowBottom = rowTop + tr.offsetHeight;
+      const viewTop = container.scrollTop;
+      const viewBottom = viewTop + container.clientHeight;
+      if (rowTop < viewTop) {
+        container.scrollTop = rowTop;
+      } else if (rowBottom > viewBottom) {
+        container.scrollTop = rowBottom - container.clientHeight;
+      }
+      return;
+    }
+    tr.scrollIntoView({ block: 'nearest' });
+  }
+
+  function setKeyboardSelectedRoom(dialog, roomId) {
+    const state = getDialogKeyboardNavState(dialog);
+    state.selectedRoomId = roomId || null;
+
+    const table = dialog.querySelector('table');
+    if (table) syncTeleporterRowHighlights(table, dialog);
+    if (!roomId || !table) return;
+
+    const match = getVisibleRoomRowsFromTable(table).find((row) => row.roomId === roomId);
+    if (match) scrollRoomRowIntoView(match.tr, table);
+  }
+
+  function moveKeyboardSelection(dialog, direction) {
+    const table = dialog.querySelector('table');
+    if (!table) return;
+
+    const visible = getVisibleRoomRowsFromTable(table);
+    if (!visible.length) return;
+
+    const state = getDialogKeyboardNavState(dialog);
+    let idx = state.selectedRoomId
+      ? visible.findIndex((row) => row.roomId === state.selectedRoomId)
+      : -1;
+
+    if (direction === 'down') {
+      idx = idx < visible.length - 1 ? idx + 1 : 0;
+    } else {
+      idx = idx > 0 ? idx - 1 : visible.length - 1;
+    }
+
+    setKeyboardSelectedRoom(dialog, visible[idx].roomId);
+  }
+
+  function travelToKeyboardSelectedRoom(dialog) {
+    const table = dialog.querySelector('table');
+    if (!table) return;
+
+    const visible = getVisibleRoomRowsFromTable(table);
+    if (!visible.length) return;
+
+    const state = getDialogKeyboardNavState(dialog);
+    const roomId = state.selectedRoomId || visible[0].roomId;
+    const match = visible.find((row) => row.roomId === roomId) || visible[0];
+    if (!match?.tr) return;
+
+    match.tr.click();
+  }
+
+  function ensureKeyboardSelectionStillVisible(dialog) {
+    if (dialog.getAttribute(KEYBOARD_NAV_BOUND_ATTR) !== 'true') return;
+
+    const table = dialog.querySelector('table');
+    if (!table) return;
+
+    const state = getDialogKeyboardNavState(dialog);
+    const visible = getVisibleRoomRowsFromTable(table);
+    if (!visible.length) {
+      state.selectedRoomId = null;
+      syncTeleporterRowHighlights(table, dialog);
+      return;
+    }
+
+    const currentRoomId = getCurrentRoomId();
+    if (!state.selectedRoomId) {
+      const preferredRoomId = currentRoomId && visible.some((row) => row.roomId === currentRoomId)
+        ? currentRoomId
+        : visible[0].roomId;
+      setKeyboardSelectedRoom(dialog, preferredRoomId);
+      return;
+    }
+
+    if (!visible.some((row) => row.roomId === state.selectedRoomId)) {
+      setKeyboardSelectedRoom(dialog, visible[0].roomId);
+      return;
+    }
+
+    syncTeleporterRowHighlights(table, dialog);
+  }
+
+  function handleTeleporterKeyboardNav(event) {
+    const dialog = findOpenTeleporterDialog();
+    if (!dialog || dialog.getAttribute('data-state') !== 'open') return;
+    if (openRowContextMenu) return;
+    if (event.repeat) return;
+    if (event.isTrusted === false) return;
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (isKeyboardNavTargetBlocked(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      moveKeyboardSelection(dialog, event.key === 'ArrowDown' ? 'down' : 'up');
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      if (isKeyboardNavTargetBlocked(event.target, { forEnter: true })) return;
+      event.preventDefault();
+      event.stopPropagation();
+      travelToKeyboardSelectedRoom(dialog);
+    }
+  }
+
+  function bindTeleporterKeyboardNav(dialog) {
+    if (dialog.getAttribute(KEYBOARD_NAV_BOUND_ATTR) === 'true') {
+      ensureKeyboardSelectionStillVisible(dialog);
+      return;
+    }
+
+    dialog.setAttribute(KEYBOARD_NAV_BOUND_ATTR, 'true');
+    if (!teleporterKeyboardHandler) {
+      teleporterKeyboardHandler = handleTeleporterKeyboardNav;
+      document.addEventListener('keydown', teleporterKeyboardHandler, true);
+    }
+    ensureKeyboardSelectionStillVisible(dialog);
+  }
+
+  function unbindTeleporterKeyboardNav(dialog) {
+    if (!dialog) return;
+    dialog.removeAttribute(KEYBOARD_NAV_BOUND_ATTR);
+    dialogKeyboardNavState.delete(dialog);
+
+    const anyBound = document.querySelector(`div[role="dialog"][${KEYBOARD_NAV_BOUND_ATTR}="true"]`);
+    if (!anyBound && teleporterKeyboardHandler) {
+      document.removeEventListener('keydown', teleporterKeyboardHandler, true);
+      teleporterKeyboardHandler = null;
+    }
+  }
+
+  function detachTeleporterKeyboardNavListener() {
+    if (!teleporterKeyboardHandler) return;
+    document.removeEventListener('keydown', teleporterKeyboardHandler, true);
+    teleporterKeyboardHandler = null;
   }
 
   // ============================================================================
@@ -1498,7 +1744,8 @@
       const table = dialog.querySelector('table');
       if (!table) return;
       syncRegionHeaderVisibility(table, dialog);
-      syncTeleporterRowHighlights(table);
+      syncTeleporterRowHighlights(table, dialog);
+      ensureKeyboardSelectionStillVisible(dialog);
     });
   }
 
@@ -1544,7 +1791,8 @@
     });
 
     syncRegionHeaderVisibility(table, dialog);
-    syncTeleporterRowHighlights(table);
+    syncTeleporterRowHighlights(table, dialog);
+    ensureKeyboardSelectionStillVisible(dialog);
   }
 
   function styleHideRaidsButton(button, active) {
@@ -1868,13 +2116,16 @@
     }
   }
 
-  function syncTeleporterRowHighlights(table) {
+  function syncTeleporterRowHighlights(table, dialog = table?.closest?.('div[role="dialog"]') || null) {
     if (!table) return;
 
     const tbody = table.querySelector('tbody');
     if (!tbody) return;
 
     const currentRoomId = getCurrentRoomId();
+    const keyboardRoomId = dialog?.getAttribute(KEYBOARD_NAV_BOUND_ATTR) === 'true'
+      ? getKeyboardSelectedRoomId(dialog)
+      : null;
 
     runWithoutMutationObserver(() => {
       for (const tr of tbody.querySelectorAll(':scope > tr')) {
@@ -1883,7 +2134,10 @@
         const roomId = extractRoomIdFromRow(tr);
         if (!roomId) continue;
 
-        tr.setAttribute('data-highlight', currentRoomId && roomId === currentRoomId ? 'true' : 'false');
+        const highlight = keyboardRoomId
+          ? roomId === keyboardRoomId
+          : Boolean(currentRoomId && roomId === currentRoomId);
+        tr.setAttribute('data-highlight', highlight ? 'true' : 'false');
       }
     });
   }
@@ -2065,6 +2319,7 @@
     const tbody = table.querySelector('tbody');
     if (!tbody) return;
 
+    const dialog = table.closest('div[role="dialog"]');
     const state = getTableSortState(table);
 
     runWithoutMutationObserver(() => {
@@ -2124,9 +2379,7 @@
       updateSortArrows(table);
     });
 
-    syncTeleporterRowHighlights(table);
-
-    const dialog = table.closest('div[role="dialog"]');
+    syncTeleporterRowHighlights(table, dialog);
     if (dialog) applyTeleporterFilters(dialog);
   }
 
@@ -2395,8 +2648,9 @@
       }
     }
 
-    syncTeleporterRowHighlights(table);
+    syncTeleporterRowHighlights(table, dialog);
     restoreSessionSort(table);
+    bindTeleporterKeyboardNav(dialog);
   }
 
   // ============================================================================
@@ -2407,6 +2661,12 @@
     const init = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true };
     document.dispatchEvent(new KeyboardEvent('keydown', init));
     document.dispatchEvent(new KeyboardEvent('keyup', init));
+  }
+
+  function isCyclopediaModEnabled() {
+    return typeof window.__cyclopediaOpen === 'function'
+      || typeof window.Cyclopedia?.show === 'function'
+      || !!document.querySelector('.cyclopedia-header-btn');
   }
 
   function isCyclopediaOpen() {
@@ -2469,7 +2729,10 @@
       if (mode === 'map') {
         const { mapName, regionName } = getRoomMapNavigationTarget(roomId);
         if (!mapName || !regionName) return;
-        if (!isCyclopediaOpen()) openCyclopediaModal();
+        if (!isCyclopediaOpen()) {
+          openCyclopediaModal({ map: mapName, region: regionName });
+          return;
+        }
         runWhenCyclopediaReady(() => {
           window.cyclopediaHomeSearchNavigate?.({ type: 'map', mapName, regionName });
         });
@@ -2784,6 +3047,11 @@
   }
 
   function showRowContextMenu(x, y, roomId) {
+    if (!isCyclopediaModEnabled()) {
+      debugContextMenu('open failed', { roomId, reason: 'cyclopedia mod disabled' });
+      return;
+    }
+
     closeRowContextMenu();
 
     const host = findOpenTeleporterDialog();
@@ -2915,6 +3183,7 @@
 
   function bindRowContextMenu(tr, roomId) {
     if (!roomId || tr.getAttribute(ROW_CONTEXT_BOUND_ATTR) === 'true') return;
+    if (!isCyclopediaModEnabled()) return;
 
     const onContextMenu = (event) => {
       event.preventDefault();
@@ -3052,6 +3321,7 @@
       attributeFilter: ['data-state'],
     });
     processTeleporterModals();
+    window.__betterTeleporterOpen = openNativeTeleporter;
     console.log('[Better Teleporter] initialized');
   }
 
@@ -3062,6 +3332,7 @@
     }
 
     closeRowContextMenu();
+    detachTeleporterKeyboardNavListener();
     if (processModalsRaf != null) {
       cancelAnimationFrame(processModalsRaf);
       processModalsRaf = null;
@@ -3100,6 +3371,7 @@
     document.getElementById(STYLE_ID)?.remove();
     document.getElementById(TABLE_STYLE_ID)?.remove();
 
+    delete window.__betterTeleporterOpen;
     console.log('[Better Teleporter] cleaned up');
   }
 

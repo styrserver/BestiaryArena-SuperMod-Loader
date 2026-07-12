@@ -70,6 +70,7 @@ const defaultConfig = {
   hotkeyNextMap: 'k',
   hotkeyStartOrSkip: 'z',
   hotkeyToggleTurboMode: 'y',
+  hotkeyOpenBetterTeleporter: 'p',
   hotkeySetupSlot1: 'f1',
   hotkeySetupSlot2: 'f2',
   hotkeySetupSlot3: 'f3',
@@ -151,6 +152,10 @@ config.hotkeyPreviousMap = sanitizeStoredHotkey(config.hotkeyPreviousMap, '');
 config.hotkeyNextMap = sanitizeStoredHotkey(config.hotkeyNextMap, '');
 config.hotkeyStartOrSkip = sanitizeStoredHotkey(config.hotkeyStartOrSkip, '');
 config.hotkeyToggleTurboMode = sanitizeStoredHotkey(config.hotkeyToggleTurboMode, '');
+if (config.hotkeyOpenBetterTeleporter === undefined) {
+  config.hotkeyOpenBetterTeleporter = config.hotkeyOpenRoomHopper ?? 'p';
+}
+config.hotkeyOpenBetterTeleporter = sanitizeStoredHotkey(config.hotkeyOpenBetterTeleporter, '');
 delete config.hotkeyOpenRoomHopper;
 config.hotkeyOpenCyclopedia = sanitizeStoredHotkey(config.hotkeyOpenCyclopedia, '');
 for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
@@ -1376,6 +1381,7 @@ function triggerStartOrSkipFromHotkey() {
 }
 
 const TURBO_MODE_MOD_NAME = 'Official Mods/Turbo Mode.js';
+const BETTER_TELEPORTER_MOD_NAME = 'Super Mods/Better Teleporter.js';
 const RUN_TRACKER_MOD_NAME = 'Super Mods/RunTracker.js';
 const HUNT_ANALYZER_MOD_NAME = 'Super Mods/Hunt Analyzer.js';
 const VIP_LIST_MOD_NAME = 'OT Mods/VIP List.js';
@@ -1560,6 +1566,7 @@ function syncModDependentSettingsAvailability() {
   updateTurboModeHotkeyAvailability();
   updateTurboSpeedSettingsAvailability();
   updateCyclopediaHotkeyAvailability();
+  updateBetterTeleporterHotkeyAvailability();
   updateRunTrackerSettingsAvailability();
   updateFirebaseRunsSettingsAvailability();
   updateBackupModExportAvailability();
@@ -1654,6 +1661,23 @@ function openCyclopediaFromHotkey() {
     return;
   }
   console.warn('[Mod Settings] Cyclopedia hotkey pressed but Cyclopedia button was not available');
+}
+
+function isBetterTeleporterModEnabled() {
+  return isLocalModEnabledInRegistry(BETTER_TELEPORTER_MOD_NAME)
+    || !!window.__betterTeleporterLoaded;
+}
+
+function openBetterTeleporterFromHotkey() {
+  if (!isBetterTeleporterModEnabled()) {
+    console.warn('[Mod Settings] Better Teleporter hotkey pressed but Better Teleporter mod is disabled');
+    return;
+  }
+  if (typeof window.__betterTeleporterOpen === 'function') {
+    window.__betterTeleporterOpen();
+    return;
+  }
+  console.warn('[Mod Settings] Better Teleporter hotkey pressed but teleporter open handler was not available');
 }
 
 /**
@@ -1934,6 +1958,13 @@ function handleGlobalHotkeys(event) {
     openCyclopediaFromHotkey();
     return;
   }
+  const openBetterTeleporterId = sanitizeStoredHotkey(config.hotkeyOpenBetterTeleporter, '');
+  if (openBetterTeleporterId && pressedId === openBetterTeleporterId) {
+    event.preventDefault();
+    event.stopPropagation();
+    openBetterTeleporterFromHotkey();
+    return;
+  }
   for (let i = 0; i < 8; i++) {
     const setupCfgKey = `hotkeySetupSlot${i + 1}`;
     const setupKeyId = sanitizeStoredHotkey(config[setupCfgKey], '');
@@ -1976,6 +2007,8 @@ const TURBO_MODE_HOTKEY_DISABLED_TITLE =
   'Enable the Turbo Mode mod for this hotkey to work.';
 const CYCLOPEDIA_HOTKEY_DISABLED_TITLE =
   'Enable the Cyclopedia mod for this hotkey to work.';
+const BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE =
+  'Enable the Better Teleporter mod for this hotkey to work.';
 
 const MODS_HOTKEY_UI_ROWS = [
   {
@@ -2042,6 +2075,12 @@ const MODS_HOTKEY_UI_ROWS = [
     configKey: 'hotkeyOpenCyclopedia',
     captureId: 'hotkey-open-cyclopedia-capture-btn',
     resetId: 'hotkey-open-cyclopedia-reset-btn',
+    displayFallback: ''
+  },
+  {
+    configKey: 'hotkeyOpenBetterTeleporter',
+    captureId: 'hotkey-open-better-teleporter-capture-btn',
+    resetId: 'hotkey-open-better-teleporter-reset-btn',
     displayFallback: ''
   }
 ];
@@ -2204,6 +2243,41 @@ function updateCyclopediaHotkeyAvailability() {
     resetButton.disabled = false;
     resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
     resetButton.title = disabled ? CYCLOPEDIA_HOTKEY_DISABLED_TITLE : '';
+    resetButton.style.cursor = disabled ? 'not-allowed' : '';
+    resetButton.style.opacity = disabled ? '0.65' : '';
+  }
+}
+
+function updateBetterTeleporterHotkeyAvailability() {
+  const label = document.getElementById('hotkey-open-better-teleporter-label');
+  const warning = document.getElementById('hotkey-open-better-teleporter-unavailable-warning');
+  const captureButton = document.getElementById('hotkey-open-better-teleporter-capture-btn');
+  const resetButton = document.getElementById('hotkey-open-better-teleporter-reset-btn');
+  const disabled = !isBetterTeleporterModEnabled();
+
+  if (label) {
+    label.style.color = disabled ? '#888' : '#ccc';
+    label.title = disabled ? BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE : '';
+  }
+  if (warning) {
+    warning.hidden = !disabled;
+    warning.title = BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE;
+    warning.style.display = disabled ? 'inline-flex' : 'none';
+    warning.style.color = '#f0c36d';
+    warning.style.opacity = '1';
+    warning.style.filter = 'none';
+  }
+  if (captureButton) {
+    captureButton.disabled = false;
+    captureButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    captureButton.title = disabled ? BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE : t('mods.betterUI.hotkeyCaptureTitle');
+    captureButton.style.cursor = disabled ? 'not-allowed' : '';
+    captureButton.style.opacity = disabled ? '0.65' : '';
+  }
+  if (resetButton) {
+    resetButton.disabled = false;
+    resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    resetButton.title = disabled ? BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE : '';
     resetButton.style.cursor = disabled ? 'not-allowed' : '';
     resetButton.style.opacity = disabled ? '0.65' : '';
   }
@@ -6822,6 +6896,18 @@ function showSettingsModal() {
                   ${t('mods.betterUI.hotkeyResetBinding')}
                 </button>
               </div>
+              <div id="hotkey-open-better-teleporter-row" class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
+                <span id="hotkey-open-better-teleporter-label" style="${hotkeyLabelStyle}">
+                  <span id="hotkey-open-better-teleporter-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
+                  ${t('mods.betterUI.hotkeyLabelBetterTeleporter')}
+                </span>
+                <button type="button" id="hotkey-open-better-teleporter-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                  P
+                </button>
+                <button type="button" id="hotkey-open-better-teleporter-reset-btn" style="pointer-events: auto;">
+                  ${t('mods.betterUI.hotkeyResetBinding')}
+                </button>
+              </div>
             </div>
           </div>
           <div id="hotkeys-setups-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
@@ -7689,6 +7775,13 @@ function showSettingsModal() {
         content.querySelector('#hotkey-open-cyclopedia-reset-btn'),
         'hotkeyOpenCyclopedia',
         'c',
+        ''
+      );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-open-better-teleporter-capture-btn'),
+        content.querySelector('#hotkey-open-better-teleporter-reset-btn'),
+        'hotkeyOpenBetterTeleporter',
+        'p',
         ''
       );
       for (let slot = 1; slot <= 8; slot++) {

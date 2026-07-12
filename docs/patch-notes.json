@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.5.2",
+      "changes": [
+        {
+          "mod": "Better Teleporter",
+          "type": "changed",
+          "text": "Modal keyboard shortcuts: Up/Down moves selection through the filtered map list (highlighted row scrolls into view), Enter travels to the selected map or the first visible match. Hotkey support opens the native teleporter via the board goto button and focuses search (window.__betterTeleporterOpen)."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "fixed",
+          "text": "Cyclopedia map navigation now opens directly on the Maps tab with the target region and map selected, matching creature and equipment behavior. Right-click Cyclopedia context menu on map rows is only available when the Cyclopedia mod is enabled."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Maps tab no longer shows a half Home page (player profile and search) stacked above map content when navigating from Better Teleporter or switching tabs while the Home profile is still loading; Home tab layout updates now preserve display:none when the tab is inactive."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Hotkeys tab → Mods: configurable key to open Better Teleporter (default P; migrates saved Room Hopper binding on first load). Shows a warning when Better Teleporter is disabled."
+        }
+      ]
+    },
+    {
       "version": "4.5.1",
       "changes": [
         {
