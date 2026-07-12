@@ -935,7 +935,7 @@ const GAME_DATA = {
 
 function renderCyclopediaProfileLoadingHtml() {
   return `
-      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1 1 0; width: 100%; min-width: 0; min-height: 0; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px; box-sizing: border-box;">
         <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
         <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${CYCLOPEDIA_UI.loadingTitle}</div>
         <div style="font-size: 14px; color: #888;">${CYCLOPEDIA_UI.loadingSubtitle}</div>
@@ -7287,6 +7287,10 @@ function createStartPageManager() {
     }
 
     showLoading() {
+      Object.assign(this.container.style, CYCLOPEDIA_TAB_LAYOUT.container, {
+        alignItems: 'stretch',
+        justifyContent: 'center'
+      });
       this.container.innerHTML = HTML_TEMPLATES.loading();
     }
 
@@ -7351,6 +7355,7 @@ function createStartPageManager() {
         cyclopediaState.lastStartupProfileData = unwrapProfilePageJson(profileData);
         refreshLeaderboardCacheYourRoomsForSeason();
 
+        Object.assign(this.container.style, CYCLOPEDIA_TAB_LAYOUT.container);
         this.container.innerHTML = '';
 
         const leftCol = document.createElement('div');

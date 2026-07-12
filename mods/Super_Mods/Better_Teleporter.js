@@ -10,8 +10,6 @@
 
   const NS = 'better-teleporter';
   const ENHANCED_ATTR = `data-${NS}-enhanced`;
-  const TABLE_ENHANCED_ATTR = `data-${NS}-table-enhanced`;
-  const ROW_ENHANCED_ATTR = `data-${NS}-row-enhanced`;
   const XP_STAM_ATTR = `data-${NS}-xp-stam`;
   const REGION_ENHANCED_ATTR = `data-${NS}-region-enhanced`;
   const LAYOUT_ENHANCED_ATTR = `data-${NS}-layout-enhanced`;
@@ -23,20 +21,71 @@
   const REGION_HEADER_ATTR = `data-${NS}-region-header`;
   const TABLE_STYLE_ID = `${NS}-table-styles`;
   const THEAD_HEIGHT_VAR = `--${NS}-thead-height`;
+  const MAP_COLUMN_WIDTH_PX = 180;
   const ROOM_TYPE_ATTR = `data-${NS}-room-type`;
   const TOOLTIP_ATTR = `data-${NS}-tooltip`;
   const FILTERS_ATTR = `data-${NS}-filters`;
   const REGION_SELECT_ATTR = `data-${NS}-region-select`;
   const HIDE_RAIDS_ATTR = `data-${NS}-hide-raids`;
+  const RESET_FILTERS_ATTR = `data-${NS}-reset-filters`;
   const FILTERS_BOUND_ATTR = `data-${NS}-filters-bound`;
   const FILTER_ROW_ATTR = `data-${NS}-filter-row`;
   const SEARCH_SYNC_ATTR = `data-${NS}-search-sync`;
   const SEARCH_RESET_ATTR = `data-${NS}-search-reset`;
+  const ROW_CONTEXT_BOUND_ATTR = `data-${NS}-row-context-bound`;
+  const CONTEXT_MENU_ID = `${NS}-context-menu`;
+  const CONTEXT_MENU_OVERLAY_ID = `${NS}-context-menu-overlay`;
+  const CONTEXT_MENU_HOST_ATTR = `data-${NS}-context-menu-host`;
   const SEARCH_INPUT_CAPTURE = true;
   const RAID_TEXT_COLOR = '#ff6b6b';
   const EVENT_TEXT_COLOR = 'rgb(50, 205, 50)';
   const ACTIVATED_TITLE_COLOR = 'rgb(50, 205, 50)';
   const ORIGINAL_TITLE_ATTR = `data-${NS}-original-title`;
+  const NATIVE_TELEPORTER_TITLES = new Set(['Select a map', 'Escolher mapa']);
+  const TELEPORTER_OPEN_ANIMATION_CLASSES = [
+    'animate-in',
+    'fade-in',
+    'zoom-in-95',
+    'slide-in-from-top',
+    'slide-in-from-bottom',
+    'max-w-lg',
+    'max-w-md',
+    'max-w-sm',
+    'max-w-xl',
+    'max-w-[300px]',
+    'w-full',
+    'w-screen',
+  ];
+  const TELEPORTER_GRAY_CONTROL_CLASS = 'pixel-font-14 frame-1 surface-regular bg-grayRegular px-2 py-0.5 text-whiteRegular';
+  const TELEPORTER_TOGGLE_BUTTON_CLASS = 'focus-style-visible frame-1 active:frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px] pixel-font-14 text-whiteRegular';
+  const CONTEXT_MENU_PANEL_MEDIA = {
+    BACKGROUND: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png',
+    FRAME: 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png',
+  };
+  const CONTEXT_MENU_SHIELD_EVENTS = ['mousedown', 'click', 'pointerdown'];
+  const CONTEXT_MENU_BUTTON_LAYOUT = {
+    width: '100%',
+    textAlign: 'left',
+    cursor: 'pointer',
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
+    lineHeight: '1.25',
+    minHeight: '24px',
+    boxSizing: 'border-box',
+    display: 'block',
+  };
+  const CONTEXT_MENU_UI = {
+    OVERLAY_Z: 9998,
+    MENU_Z: 9999,
+    MAX_WIDTH: 200,
+    ITEM_BASE_CLASS: 'focus-style-visible tracking-wide px-2 py-0.5 pb-[3px] pixel-font-14',
+    ENTRY_CLASSES: {
+      map: 'frame-1-red active:frame-pressed-1-red surface-red text-whiteHighlight',
+      creature: 'frame-1-green active:frame-pressed-1-green surface-green text-whiteHighlight',
+      equipment: 'frame-1-blue active:frame-pressed-1-blue surface-blue text-whiteHighlight',
+    },
+    CANCEL_CLASS: `focus-style-visible active:frame-pressed-1 ${TELEPORTER_GRAY_CONTROL_CLASS}`,
+  };
   const MODAL_CONFIG = {
     width: 750,
     height: 550,
@@ -47,6 +96,18 @@
   const UNOBTAINABLE_FOR_XP = new Set(['beer barrel', 'orc', 'sweaty cyclops']);
   const BUILD_RETRY_MS = 500;
   const BUILD_MAX_DURATION_MS = 30000;
+  const TELEPORTER_CENTERED_TRANSFORM = 'translate(-50%, -50%) scale(1)';
+  const TELEPORTER_TITLE_SELECTOR = 'h2.widget-top-text p, .widget-top.widget-top-text p, h2.widget-top:not(.sr-only) p';
+  const ROOM_NAME_SELECTOR = 'p.hidden.sm\\:line-clamp-2, p.sm\\:line-clamp-2';
+  const DIALOG_LAYOUT_REVERT_PROPS = [
+    'width', 'minWidth', 'maxWidth', 'height', 'minHeight', 'maxHeight',
+    'boxSizing', 'animation', 'transform', 'transition', 'willChange',
+  ];
+  const LAYOUT_CHILD_REVERT_PROPS = [
+    'animation', 'transform', 'transition', 'width', 'minWidth', 'maxWidth',
+    'height', 'display', 'flex', 'flexDirection', 'minHeight',
+    'overflowY', 'overflowX', 'maxHeight',
+  ];
 
   // ============================================================================
   // 2. STATE
@@ -62,16 +123,52 @@
   const tableSortHandlers = new WeakMap();
   const dialogFilterState = new WeakMap();
   const filterControlHandlers = new WeakMap();
+  const rowContextHandlers = new WeakMap();
   const roomBoardMetaCache = new Map();
+  let openRowContextMenu = null;
+  let processModalsRaf = null;
 
-  function t(key, params) {
-    let text = window.BestiaryModAPI?.i18n?.t?.(key) ?? key;
-    if (params && typeof text === 'string') {
-      for (const [paramKey, value] of Object.entries(params)) {
-        text = text.replaceAll(`{${paramKey}}`, String(value));
-      }
-    }
-    return text;
+  const DEFAULT_SESSION_PREFERENCES = {
+    regionId: '',
+    hideRaids: false,
+    searchType: null,
+    searchValue: '',
+    sortKey: null,
+    sortDir: 'asc',
+  };
+
+  let sessionPreferences = { ...DEFAULT_SESSION_PREFERENCES };
+
+  function resetSessionPreferences() {
+    sessionPreferences = { ...DEFAULT_SESSION_PREFERENCES };
+  }
+
+  function captureSessionPreferences(dialog) {
+    if (!dialog || dialog.getAttribute(FILTERS_BOUND_ATTR) !== 'true') return;
+
+    const filterState = dialogFilterState.get(dialog);
+    const searchInput = getTeleporterSearchInput(dialog)
+      || filterControlHandlers.get(dialog)?.searchInput;
+    const table = dialog.querySelector('table');
+    const sortState = table ? getTableSortState(table) : null;
+
+    sessionPreferences = {
+      regionId: filterState?.regionId || '',
+      hideRaids: Boolean(filterState?.hideRaids),
+      searchType: filterState?.searchType ?? null,
+      searchValue: searchInput?.value || '',
+      sortKey: sortState?.sortKey ?? null,
+      sortDir: sortState?.sortDir || 'asc',
+    };
+  }
+
+  function tf(key, fallback) {
+    const value = t(key);
+    return value === key ? fallback : value;
+  }
+
+  function t(key) {
+    return window.BestiaryModAPI?.i18n?.t?.(key) ?? key;
   }
 
   function getActivatedTitle() {
@@ -92,13 +189,335 @@
   // 3. DIALOG DETECTION & MODAL LAYOUT
   // ============================================================================
 
-  function injectLayoutStyles() {
-    if (document.getElementById(STYLE_ID)) return;
+  function getTeleporterTitleElement(dialog) {
+    return dialog?.querySelector(TELEPORTER_TITLE_SELECTOR) || null;
+  }
 
+  function getRegionHeaderCell(tr) {
+    return tr?.querySelector('td[colspan]') || null;
+  }
+
+  function isRegionHeaderRow(tr) {
+    return Boolean(tr && (tr.getAttribute(REGION_HEADER_ATTR) === 'true' || getRegionHeaderCell(tr)));
+  }
+
+  function getRowSnapshotKey(tr) {
+    if (!tr) return null;
+    if (isRegionHeaderRow(tr)) {
+      const regionId = getRegionIdByDisplayName(getRegionNameFromHeaderRow(tr));
+      if (regionId) return `region:${regionId}`;
+      const name = getRegionNameFromHeaderRow(tr);
+      return name ? `region-name:${name}` : null;
+    }
+    const roomId = extractRoomIdFromRow(tr);
+    return roomId ? `room:${roomId}` : null;
+  }
+
+  function captureTableRowOrder(tbody) {
+    if (!tbody) return [];
+    return [...tbody.querySelectorAll(':scope > tr')]
+      .map(getRowSnapshotKey)
+      .filter(Boolean);
+  }
+
+  function restoreTableRowOrder(table, orderKeys) {
+    const tbody = table?.querySelector('tbody');
+    if (!tbody || !orderKeys?.length) return false;
+
+    const rowByKey = new Map();
+    for (const tr of tbody.querySelectorAll(':scope > tr')) {
+      const key = getRowSnapshotKey(tr);
+      if (key && !rowByKey.has(key)) rowByKey.set(key, tr);
+    }
+
+    const fragment = document.createDocumentFragment();
+    const placed = new Set();
+    let missing = false;
+
+    for (const key of orderKeys) {
+      const tr = rowByKey.get(key);
+      if (!tr) {
+        missing = true;
+        continue;
+      }
+      fragment.appendChild(tr);
+      placed.add(tr);
+    }
+
+    for (const tr of tbody.querySelectorAll(':scope > tr')) {
+      if (!placed.has(tr)) fragment.appendChild(tr);
+    }
+
+    tbody.appendChild(fragment);
+    return !missing;
+  }
+
+  function syncSessionSortFromTable(table) {
+    const state = getTableSortState(table);
+    sessionPreferences.sortKey = state.sortKey;
+    sessionPreferences.sortDir = state.sortDir;
+  }
+
+  function regionHeaderHasFollowingVisibleRooms(tr, filterState) {
+    let sibling = tr.nextElementSibling;
+    while (sibling) {
+      if (isRegionHeaderRow(sibling)) return false;
+      const roomId = extractRoomIdFromRow(sibling);
+      if (roomId && isRowShownInDom(sibling) && isRoomRowVisible(roomId, filterState)) {
+        return true;
+      }
+      sibling = sibling.nextElementSibling;
+    }
+    return false;
+  }
+
+  function isRegionLayoutBroken(tbody) {
+    if (!tbody) return false;
+
+    const rows = [...tbody.querySelectorAll(':scope > tr')];
+    let consecutiveHeaders = 0;
+    let sawRoom = false;
+
+    for (const tr of rows) {
+      if (!isRegionHeaderRow(tr)) {
+        if (extractRoomIdFromRow(tr)) sawRoom = true;
+        consecutiveHeaders = 0;
+        continue;
+      }
+
+      if (sawRoom) return true;
+      consecutiveHeaders += 1;
+      if (consecutiveHeaders > 1) return true;
+    }
+
+    return false;
+  }
+
+  function isValidNativeLayout(tbody) {
+    if (!tbody || isRegionLayoutBroken(tbody)) return false;
+
+    let currentRegionId = null;
+    for (const tr of tbody.querySelectorAll(':scope > tr')) {
+      if (isRegionHeaderRow(tr)) {
+        currentRegionId = getRegionIdByDisplayName(getRegionNameFromHeaderRow(tr));
+        continue;
+      }
+
+      const roomId = extractRoomIdFromRow(tr);
+      if (!roomId || !currentRegionId) continue;
+
+      const { regionId } = getRoomRegion(roomId);
+      if (regionId && regionId !== currentRegionId) return false;
+    }
+
+    return true;
+  }
+
+  function buildNativeOrderFromRegions() {
+    const canonical = globalThis.mapsDatabase?.getCanonicalTableRowOrder?.();
+    if (canonical?.length) return canonical;
+
+    const keys = [];
+    const regions = globalThis.mapsDatabase?.getRegionsInOrder?.()
+      || globalThis.state?.utils?.REGIONS
+      || [];
+
+    for (const region of regions) {
+      const regionId = region?.id;
+      if (!regionId) continue;
+      keys.push(`region:${regionId}`);
+      for (const room of region.rooms || []) {
+        if (room?.id) keys.push(`room:${room.id}`);
+      }
+    }
+
+    return keys.length ? keys : null;
+  }
+
+  function unhideAllTableRows(tbody) {
+    if (!tbody) return;
+    for (const tr of tbody.querySelectorAll(':scope > tr')) {
+      tr.style.removeProperty('display');
+      tr.hidden = false;
+      tr.removeAttribute('hidden');
+    }
+  }
+
+  function showRoomRow(tr) {
+    if (!tr || isRegionHeaderRow(tr)) return;
+    tr.style.removeProperty('display');
+    tr.hidden = false;
+    tr.removeAttribute('hidden');
+  }
+
+  function syncNativeOrderState(table, order) {
+    const tbody = table?.querySelector('tbody');
+    const state = getTableSortState(table);
+    if (!tbody || !order?.length) return;
+
+    state.nativeOrder = order;
+    state.snapshotOrder = order;
+    state.snapshot = [...tbody.querySelectorAll(':scope > tr')];
+  }
+
+  function captureNativeOrder(table) {
+    const tbody = table?.querySelector('tbody');
+    const state = getTableSortState(table);
+    if (!tbody || state.sortKey || !isValidNativeLayout(tbody)) return false;
+
+    const order = captureTableRowOrder(tbody);
+    if (!order.length) return false;
+
+    syncNativeOrderState(table, order);
+    return true;
+  }
+
+  function ensureNativeOrder(table) {
+    const state = getTableSortState(table);
+    if (state.nativeOrder?.length) return true;
+
+    const order = buildNativeOrderFromRegions();
+    if (order?.length) {
+      state.nativeOrder = order;
+      return true;
+    }
+
+    return captureNativeOrder(table);
+  }
+
+  function restoreToNativeOrder(table, { canonical = false } = {}) {
+    const tbody = table?.querySelector('tbody');
+    const state = getTableSortState(table);
+    if (!tbody) return false;
+
+    const canonicalOrder = buildNativeOrderFromRegions();
+    const orders = canonical
+      ? [canonicalOrder].filter((order) => order?.length)
+      : [
+        canonicalOrder,
+        state.nativeOrder,
+        state.snapshotOrder,
+      ].filter((order) => order?.length);
+
+    let restored = false;
+    runWithoutMutationObserver(() => {
+      for (const order of orders) {
+        restoreTableRowOrder(table, order);
+        unhideAllTableRows(tbody);
+        if (canonical || isValidNativeLayout(tbody)) {
+          syncNativeOrderState(table, order);
+          restored = true;
+          break;
+        }
+      }
+    });
+
+    return restored;
+  }
+
+  function getDialogRootWrapper(dialog) {
+    return dialog?.querySelector(':scope > div') || null;
+  }
+
+  function getDialogScrollArea(dialog) {
+    return dialog?.querySelector('[data-radix-scroll-area-viewport]')?.parentElement || null;
+  }
+
+  function getDialogContentContainer(dialog) {
+    return dialog?.querySelector('.widget-bottom') || null;
+  }
+
+  function setImportantStyles(el, styles) {
+    if (!el) return;
+    for (const [prop, value] of styles) {
+      el.style.setProperty(prop, value, 'important');
+    }
+  }
+
+  function clearInlineStyles(el, props) {
+    if (!el) return;
+    for (const prop of props) {
+      el.style.removeProperty(prop);
+    }
+  }
+
+  function removeAnimationClasses(...elements) {
+    for (const el of elements) {
+      if (!el) continue;
+      for (const cls of TELEPORTER_OPEN_ANIMATION_CLASSES) {
+        el.classList.remove(cls);
+      }
+    }
+  }
+
+  function buildModalWidthStyles(width) {
+    return [
+      ['width', `${width}px`],
+      ['min-width', '0'],
+      ['max-width', `${width}px`],
+    ];
+  }
+
+  function buildModalHeightStyles(height) {
+    return [
+      ['height', `${height}px`],
+      ['min-height', '0'],
+      ['max-height', `${height}px`],
+    ];
+  }
+
+  function isTeleporterTitle(dialog) {
+    const titleEl = getTeleporterTitleElement(dialog);
+    if (!titleEl) return false;
+
+    const trimmed = String(titleEl.textContent || '').trim();
+    if (trimmed && (NATIVE_TELEPORTER_TITLES.has(trimmed) || trimmed === getActivatedTitle())) {
+      return true;
+    }
+    return titleEl.hasAttribute(ORIGINAL_TITLE_ATTR);
+  }
+
+  function scheduleProcessTeleporterModals() {
+    if (processModalsRaf != null) return;
+    processModalsRaf = requestAnimationFrame(() => {
+      processModalsRaf = null;
+      processTeleporterModals();
+    });
+  }
+
+  function matchesTeleporterForLayout(dialog) {
+    if (!dialog || dialog.getAttribute('role') !== 'dialog') return false;
+    if (isForeignModDialog(dialog)) return false;
+    if (!isTeleporterTitle(dialog)) return false;
+
+    const state = dialog.getAttribute('data-state');
+    if (state === 'closed') return false;
+    return true;
+  }
+
+  function matchesTeleporterContent(dialog) {
+    if (!matchesTeleporterForLayout(dialog)) return false;
+    return dialog.getAttribute('data-state') === 'open';
+  }
+
+  function isForeignModDialog(dialog) {
+    if (!dialog) return true;
+    if (dialog.hasAttribute('data-cyclopedia-dialog')) return true;
+    if (dialog.hasAttribute('data-challenges-dialog')) return true;
+    if (dialog.hasAttribute('data-better-bestiary-enhanced')) return true;
+    if (dialog.querySelector('.cyclopedia-modal-root')) return true;
+    return false;
+  }
+
+  function injectLayoutStyles() {
     const { width, height, viewportPadding } = MODAL_CONFIG;
     const pad = viewportPadding * 2;
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
+    let style = document.getElementById(STYLE_ID);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = STYLE_ID;
+      document.head.appendChild(style);
+    }
     style.textContent = `
       div[role="dialog"][${TARGET_ATTR}] {
         width: min(${width}px, calc(100vw - ${pad}px)) !important;
@@ -107,12 +526,41 @@
         max-height: min(${height}px, calc(100vh - ${pad}px)) !important;
         min-width: 0 !important;
         animation: none !important;
+        transform: ${TELEPORTER_CENTERED_TRANSFORM} !important;
+        transition: none !important;
       }
-      div[role="dialog"][${TARGET_ATTR}] > div {
+      div[role="dialog"][${TARGET_ATTR}] > div:not(#${CONTEXT_MENU_ID}):not(#${CONTEXT_MENU_OVERLAY_ID}) {
+        width: min(${width}px, calc(100vw - ${pad}px)) !important;
+        max-width: min(${width}px, calc(100vw - ${pad}px)) !important;
+        min-width: 0 !important;
         animation: none !important;
+        transform: none !important;
+        transition: none !important;
+      }
+      #${CONTEXT_MENU_ID} {
+        width: ${CONTEXT_MENU_UI.MAX_WIDTH}px !important;
+        max-width: ${CONTEXT_MENU_UI.MAX_WIDTH}px !important;
+        min-width: 0 !important;
+        height: auto !important;
+        max-height: none !important;
+        transform: none !important;
+      }
+      #${CONTEXT_MENU_ID} button {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        transform: none !important;
+        box-sizing: border-box !important;
+        border-radius: 2px !important;
+      }
+      #${CONTEXT_MENU_OVERLAY_ID} {
+        width: auto !important;
+        max-width: none !important;
+        height: auto !important;
+        max-height: none !important;
+        transform: none !important;
       }
     `;
-    document.head.appendChild(style);
   }
 
   function injectTableStyles() {
@@ -121,6 +569,12 @@
     const style = document.createElement('style');
     style.id = TABLE_STYLE_ID;
     style.textContent = `
+      div[role="dialog"][${TARGET_ATTR}] table thead tr > th:first-child,
+      div[role="dialog"][${TARGET_ATTR}] table tbody tr > td:first-child {
+        width: ${MAP_COLUMN_WIDTH_PX}px !important;
+        min-width: ${MAP_COLUMN_WIDTH_PX}px !important;
+        max-width: ${MAP_COLUMN_WIDTH_PX}px !important;
+      }
       div[role="dialog"][${TARGET_ATTR}] tr[${REGION_HEADER_ATTR}] > td[colspan] {
         position: sticky;
         top: var(${THEAD_HEIGHT_VAR}, 24px);
@@ -137,78 +591,89 @@
     table.style.setProperty(THEAD_HEIGHT_VAR, `${Math.ceil(height || 24)}px`);
   }
 
-  function isRegionHeaderRow(tr) {
-    const regionCell = tr.querySelector('td[colspan]');
-    if (!regionCell) return false;
-    return regionCell.querySelector('img[src*="/assets/icons/map.png"]') != null;
-  }
-
-  function hasTeleporterTableStructure(dialog) {
-    const table = dialog?.querySelector('table');
-    if (!table) return false;
-
-    const headerCells = table.querySelectorAll('thead tr th');
-    if (headerCells.length < 2) return false;
-
-    const tbody = table.querySelector('tbody');
-    if (!tbody) return false;
-
-    let hasRegionHeader = false;
-    let hasRoomRow = false;
-    for (const tr of tbody.querySelectorAll(':scope > tr')) {
-      if (isRegionHeaderRow(tr)) hasRegionHeader = true;
-      else if (extractRoomIdFromRow(tr)) hasRoomRow = true;
-      if (hasRegionHeader && hasRoomRow) return true;
-    }
-    return false;
-  }
-
-  function findTeleporterSearchInput(dialog) {
+  function findTeleporterSearchInputCandidate(dialog) {
     if (!dialog) return null;
 
-    for (const input of dialog.querySelectorAll('.widget-bottom input[placeholder]')) {
+    for (const input of dialog.querySelectorAll('.widget-bottom input')) {
       if (input.closest('[data-radix-scroll-area-viewport]')) continue;
       return input;
     }
 
-    return dialog.querySelector('.widget-bottom input[placeholder]');
+    return null;
   }
 
-  function matchesTeleporterContent(dialog) {
-    if (!dialog || dialog.getAttribute('role') !== 'dialog') return false;
-    if (dialog.hasAttribute(TARGET_ATTR) || dialog.getAttribute(LAYOUT_ENHANCED_ATTR) === 'true') {
-      return true;
+  function getTeleporterSearchInput(dialog) {
+    const candidate = findTeleporterSearchInputCandidate(dialog);
+    if (candidate?.hasAttribute('placeholder')) return candidate;
+
+    for (const input of dialog?.querySelectorAll('.widget-bottom input[placeholder]') || []) {
+      if (input.closest('[data-radix-scroll-area-viewport]')) continue;
+      return input;
     }
 
-    const titleEl = dialog.querySelector('h2.widget-top-text p, .widget-top.widget-top-text p');
-    if (titleEl?.textContent?.trim() === getActivatedTitle()) return true;
-
-    return hasTeleporterTableStructure(dialog) && Boolean(findTeleporterSearchInput(dialog));
+    return dialog?.querySelector('.widget-bottom input[placeholder]') || null;
   }
 
-  function isTeleporterDialogOpen(dialog) {
-    return matchesTeleporterContent(dialog) && dialog.getAttribute('data-state') === 'open';
+  function isTeleporterProcessingComplete(dialog) {
+    if (!dialog?.hasAttribute(LAYOUT_ENHANCED_ATTR)) return false;
+    if (!matchesTeleporterContent(dialog)) return true;
+
+    const titleEl = getTeleporterTitleElement(dialog);
+    if (titleEl?.getAttribute(ENHANCED_ATTR) !== 'true') return false;
+
+    const searchInput = findTeleporterSearchInputCandidate(dialog);
+    if (searchInput && dialog.getAttribute(FILTERS_BOUND_ATTR) !== 'true') return false;
+
+    const table = dialog.querySelector('table');
+    if (!table) return true;
+    if (table.getAttribute(SORT_BOUND_ATTR) !== 'true') return false;
+    if (tableNeedsEnhancement(table)) return false;
+
+    return true;
+  }
+
+  function markAndEnhanceTeleporterDialog(dialog) {
+    if (!matchesTeleporterForLayout(dialog)) return false;
+    if (isTeleporterProcessingComplete(dialog)) return true;
+
+    const needsLayoutSetup = !dialog.hasAttribute(LAYOUT_ENHANCED_ATTR);
+
+    if (needsLayoutSetup) {
+      runWithoutMutationObserver(() => {
+        dialog.setAttribute(TARGET_ATTR, '');
+        applyTeleporterModalLayout(dialog);
+      });
+      setupTeleporterModalLayout(dialog);
+    }
+
+    if (!matchesTeleporterContent(dialog)) return true;
+
+    enhanceTeleporterTitle(dialog);
+    ensureTeleporterFilters(dialog);
+
+    return true;
+  }
+
+  function collectTeleporterDialogsFromNode(node) {
+    const dialogs = new Set();
+    if (!(node instanceof Element)) return dialogs;
+
+    if (node.matches?.('div[role="dialog"]')) dialogs.add(node);
+
+    for (const dialog of node.querySelectorAll?.('div[role="dialog"]') || []) {
+      dialogs.add(dialog);
+    }
+
+    const hostDialog = node.closest?.('div[role="dialog"]');
+    if (hostDialog) dialogs.add(hostDialog);
+
+    return dialogs;
   }
 
   function scanNodeForTeleporter(node) {
-    if (!(node instanceof Element)) return;
-
-    if (node.matches?.('div[role="dialog"]') && matchesTeleporterContent(node)) {
-      node.setAttribute(TARGET_ATTR, '');
-      applyTeleporterModalLayout(node);
-      setupTeleporterModalLayout(node);
-      enhanceTeleporterTitle(node);
-      ensureTeleporterFilters(node);
-      return;
-    }
-
-    for (const dialog of node.querySelectorAll?.('div[role="dialog"]') || []) {
-      if (!matchesTeleporterContent(dialog)) continue;
-      dialog.setAttribute(TARGET_ATTR, '');
-      applyTeleporterModalLayout(dialog);
-      setupTeleporterModalLayout(dialog);
-      enhanceTeleporterTitle(dialog);
-      ensureTeleporterFilters(dialog);
+    for (const dialog of collectTeleporterDialogsFromNode(node)) {
+      if (dialog.hasAttribute(LAYOUT_ENHANCED_ATTR)) continue;
+      markAndEnhanceTeleporterDialog(dialog);
     }
   }
 
@@ -234,36 +699,49 @@
     activeDialog = null;
   }
 
+  function clearTeleporterWidthConstraints(dialog) {
+    removeAnimationClasses(dialog, getDialogRootWrapper(dialog));
+  }
+
   function applyTeleporterModalLayout(dialog) {
-    if (!dialog || !matchesTeleporterContent(dialog)) return;
+    if (!dialog || isForeignModDialog(dialog) || !matchesTeleporterForLayout(dialog)) return;
 
-    dialog.setAttribute(TARGET_ATTR, '');
     const { width, height } = getModalDimensions();
+    const rootWrapper = getDialogRootWrapper(dialog);
 
-    dialog.style.width = `${width}px`;
-    dialog.style.minWidth = '0';
-    dialog.style.maxWidth = `${width}px`;
-    dialog.style.height = `${height}px`;
-    dialog.style.minHeight = '0';
-    dialog.style.maxHeight = `${height}px`;
-    dialog.style.boxSizing = 'border-box';
-    dialog.style.animation = 'none';
-    dialog.classList.remove('max-w-lg', 'max-w-[300px]');
-    dialog.setAttribute(LAYOUT_ENHANCED_ATTR, 'true');
+    clearTeleporterWidthConstraints(dialog);
 
-    const rootWrapper = dialog.querySelector(':scope > div');
-    if (rootWrapper) {
-      rootWrapper.style.animation = 'none';
-      Object.assign(rootWrapper.style, {
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        flex: '1 1 0',
-        minHeight: '0',
-      });
-    }
+    runWithoutMutationObserver(() => {
+      dialog.setAttribute(TARGET_ATTR, '');
+      setImportantStyles(dialog, [
+        ...buildModalWidthStyles(width),
+        ...buildModalHeightStyles(height),
+        ['box-sizing', 'border-box'],
+        ['animation', 'none'],
+        ['transform', TELEPORTER_CENTERED_TRANSFORM],
+        ['transition', 'none'],
+        ['will-change', 'auto'],
+      ]);
+      dialog.setAttribute(LAYOUT_ENHANCED_ATTR, 'true');
 
-    const contentContainer = dialog.querySelector('.widget-bottom');
+      if (rootWrapper) {
+        setImportantStyles(rootWrapper, [
+          ...buildModalWidthStyles(width),
+          ['animation', 'none'],
+          ['transform', 'none'],
+          ['transition', 'none'],
+        ]);
+        Object.assign(rootWrapper.style, {
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          flex: '1 1 0',
+          minHeight: '0',
+        });
+      }
+    });
+
+    const contentContainer = getDialogContentContainer(dialog);
     if (contentContainer) {
       Object.assign(contentContainer.style, {
         flex: '1 1 auto',
@@ -275,7 +753,7 @@
       });
     }
 
-    const scrollArea = contentContainer?.querySelector('[data-radix-scroll-area-viewport]')?.parentElement;
+    const scrollArea = getDialogScrollArea(dialog);
     if (scrollArea) {
       Object.assign(scrollArea.style, {
         flex: '1 1 0',
@@ -288,7 +766,7 @@
 
   function setupTeleporterModalLayout(dialog) {
     const apply = () => {
-      if (!dialog.isConnected || !matchesTeleporterContent(dialog)) {
+      if (!dialog.isConnected || !matchesTeleporterForLayout(dialog)) {
         if (activeDialog === dialog) clearModalLayoutCleanup();
         return;
       }
@@ -304,7 +782,13 @@
     activeDialog = dialog;
 
     apply();
-    requestAnimationFrame(apply);
+    let burstFrames = 0;
+    const burstApply = () => {
+      apply();
+      burstFrames += 1;
+      if (burstFrames < 4) requestAnimationFrame(burstApply);
+    };
+    requestAnimationFrame(burstApply);
 
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
@@ -315,42 +799,75 @@
   }
 
   function revertTeleporterModalLayout(dialog) {
-    if (!dialog || dialog.getAttribute(LAYOUT_ENHANCED_ATTR) !== 'true') return;
+    if (!dialog) return;
+    if (dialog.getAttribute(LAYOUT_ENHANCED_ATTR) !== 'true' && !dialog.hasAttribute(TARGET_ATTR)) return;
 
-    for (const prop of ['width', 'minWidth', 'maxWidth', 'height', 'minHeight', 'maxHeight', 'boxSizing', 'animation']) {
-      dialog.style.removeProperty(prop);
-    }
+    clearInlineStyles(dialog, DIALOG_LAYOUT_REVERT_PROPS);
     dialog.removeAttribute(LAYOUT_ENHANCED_ATTR);
     dialog.removeAttribute(TARGET_ATTR);
 
-    for (const el of [
-      dialog.querySelector(':scope > div'),
-      dialog.querySelector('.widget-bottom'),
-      dialog.querySelector('[data-radix-scroll-area-viewport]')?.parentElement,
-    ]) {
-      if (!el) continue;
-      el.style.removeProperty('animation');
-      el.style.removeProperty('height');
-      el.style.removeProperty('display');
-      el.style.removeProperty('flex');
-      el.style.removeProperty('flexDirection');
-      el.style.removeProperty('minHeight');
-      el.style.removeProperty('overflowY');
-      el.style.removeProperty('overflowX');
-      el.style.removeProperty('maxHeight');
+    for (const el of [getDialogRootWrapper(dialog), getDialogContentContainer(dialog), getDialogScrollArea(dialog)]) {
+      clearInlineStyles(el, LAYOUT_CHILD_REVERT_PROPS);
     }
   }
 
-  function findOpenTeleporterDialog(root = document) {
-    const dialogs = root.querySelectorAll('div[role="dialog"]');
-    for (const dialog of dialogs) {
-      if (isTeleporterDialogOpen(dialog)) return dialog;
+  function teardownTeleporterTableEnhancements(dialog) {
+    const table = dialog?.querySelector('table');
+    if (!table) return;
+
+    for (const tr of table.querySelectorAll('tbody tr')) {
+      teardownRowContextMenu(tr);
+      clearRoomRowAccent(tr);
+    }
+
+    teardownSortableHeaders(table);
+    releaseTableSortState(table);
+  }
+
+  function releaseTableSortState(table) {
+    const state = tableSortState.get(table);
+    if (!state) return;
+
+    state.sortKey = null;
+    state.sortDir = 'asc';
+    state.snapshot = null;
+    state.snapshotOrder = null;
+    state.tbody = null;
+  }
+
+  function teardownTeleporterDialogEnhancements(dialog) {
+    if (!dialog) return;
+
+    if (openRowContextMenu?.host === dialog) {
+      closeRowContextMenu();
+    } else if (dialog.hasAttribute(CONTEXT_MENU_HOST_ATTR)) {
+      document.getElementById(CONTEXT_MENU_OVERLAY_ID)?.remove();
+      document.getElementById(CONTEXT_MENU_ID)?.remove();
+      dialog.removeAttribute(CONTEXT_MENU_HOST_ATTR);
+    }
+
+    teardownTeleporterFilters(dialog);
+    if (activeDialog === dialog) clearModalLayoutCleanup();
+    revertTeleporterModalLayout(dialog);
+  }
+
+  function handleTeleporterDialogStateChange(dialog) {
+    if (dialog.getAttribute('data-state') === 'closed') {
+      teardownTeleporterDialogEnhancements(dialog);
+      return;
+    }
+    markAndEnhanceTeleporterDialog(dialog);
+  }
+
+  function findOpenTeleporterDialog() {
+    for (const dialog of document.querySelectorAll('div[role="dialog"]')) {
+      if (matchesTeleporterContent(dialog)) return dialog;
     }
     return null;
   }
 
-  function findTeleporterDialogs(root = document) {
-    return [...root.querySelectorAll('div[role="dialog"]')].filter(matchesTeleporterContent);
+  function findTeleporterDialogs() {
+    return [...document.querySelectorAll('div[role="dialog"]')].filter(matchesTeleporterForLayout);
   }
 
   // ============================================================================
@@ -516,7 +1033,11 @@
 
   function getFilterState(dialog) {
     if (!dialogFilterState.has(dialog)) {
-      dialogFilterState.set(dialog, { regionId: '', hideRaids: false, searchType: null });
+      dialogFilterState.set(dialog, {
+        regionId: sessionPreferences.regionId,
+        hideRaids: sessionPreferences.hideRaids,
+        searchType: sessionPreferences.searchType,
+      });
     }
     return dialogFilterState.get(dialog);
   }
@@ -554,7 +1075,15 @@
     const tbody = dialog.querySelector('tbody');
     if (!tbody) return 0;
     return [...tbody.querySelectorAll(':scope > tr')].filter(
-      (tr) => !tr.querySelector('td[colspan]') && extractRoomIdFromRow(tr)
+      (tr) => !isRegionHeaderRow(tr) && extractRoomIdFromRow(tr),
+    ).length;
+  }
+
+  function countVisibleRoomRowsInTable(dialog) {
+    const tbody = dialog.querySelector('tbody');
+    if (!tbody) return 0;
+    return [...tbody.querySelectorAll(':scope > tr')].filter(
+      (tr) => extractRoomIdFromRow(tr) && isRowShownInDom(tr),
     ).length;
   }
 
@@ -570,17 +1099,113 @@
   function needsNativeSearchReset(dialog) {
     const expected = getExpectedRoomRowCount();
     if (!expected) return false;
-    return countRoomRowsInTable(dialog) < Math.max(8, Math.floor(expected * 0.75));
+    const threshold = Math.max(8, Math.floor(expected * 0.75));
+    return countVisibleRoomRowsInTable(dialog) < threshold
+      || countRoomRowsInTable(dialog) < threshold;
   }
 
-  function restoreNativeSearchResults(searchInput) {
+  function getTeleporterSearchClearButton(dialog) {
+    const searchInput = getTeleporterSearchInput(dialog);
+    if (!searchInput) return null;
+    const frame = searchInput.closest('.frame-pressed-1');
+    const button = frame?.querySelector('button');
+    if (!button || button.disabled) return null;
+    return button;
+  }
+
+  function dispatchNativeSearchInput(searchInput, value, inputType) {
     searchInput.setAttribute(SEARCH_RESET_ATTR, 'true');
-    setNativeInputValue(searchInput, '');
+    setNativeInputValue(searchInput, value);
     searchInput.dispatchEvent(new InputEvent('input', {
       bubbles: true,
-      inputType: 'deleteContentBackward',
+      cancelable: true,
+      inputType,
+      data: value,
     }));
+    searchInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
     searchInput.removeAttribute(SEARCH_RESET_ATTR);
+  }
+
+  function pulseNativeSearchRefresh(searchInput) {
+    searchInput.setAttribute(SEARCH_RESET_ATTR, 'true');
+    setNativeInputValue(searchInput, ' ');
+    searchInput.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: ' ',
+    }));
+
+    requestAnimationFrame(() => {
+      setNativeInputValue(searchInput, '');
+      searchInput.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'deleteContentBackward',
+      }));
+      searchInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      searchInput.removeAttribute(SEARCH_RESET_ATTR);
+    });
+  }
+
+  function waitForNativeSearchCleared(dialog, maxFrames = 40) {
+    return new Promise((resolve) => {
+      let frames = 0;
+      let retried = false;
+
+      const step = () => {
+        if (!document.contains(dialog)) {
+          resolve(false);
+          return;
+        }
+
+        if (!needsNativeSearchReset(dialog)) {
+          resolve(true);
+          return;
+        }
+
+        frames += 1;
+        if (!retried && frames >= Math.floor(maxFrames / 2)) {
+          retried = true;
+          const searchInput = getTeleporterSearchInput(dialog);
+          if (searchInput) pulseNativeSearchRefresh(searchInput);
+        }
+
+        if (frames >= maxFrames) {
+          resolve(false);
+          return;
+        }
+
+        requestAnimationFrame(step);
+      };
+
+      requestAnimationFrame(step);
+    });
+  }
+
+  function restoreNativeSearchResults(dialogOrInput) {
+    const searchInput = dialogOrInput?.tagName === 'INPUT'
+      ? dialogOrInput
+      : getTeleporterSearchInput(dialogOrInput);
+    const dialog = searchInput?.closest('div[role="dialog"]') || dialogOrInput;
+    if (!searchInput || !dialog) return Promise.resolve(false);
+
+    searchInput.removeAttribute(SEARCH_SYNC_ATTR);
+
+    const staleFilteredTable = needsNativeSearchReset(dialog);
+    const clearButton = getTeleporterSearchClearButton(dialog);
+
+    if (clearButton && searchInput.value.trim()) {
+      searchInput.setAttribute(SEARCH_RESET_ATTR, 'true');
+      clearButton.click();
+      searchInput.removeAttribute(SEARCH_RESET_ATTR);
+    } else if (staleFilteredTable && !searchInput.value.trim()) {
+      pulseNativeSearchRefresh(searchInput);
+    } else {
+      dispatchNativeSearchInput(searchInput, '', 'deleteContentBackward');
+    }
+
+    return waitForNativeSearchCleared(dialog);
   }
 
   function scheduleKeywordFilterApply(dialog, searchInput, displayValue, resetNative) {
@@ -590,6 +1215,28 @@
       }
       applyTeleporterFilters(dialog);
     });
+  }
+
+  function isTableSearchActive(dialog) {
+    const searchInput = getTeleporterSearchInput(dialog);
+    const value = searchInput?.value?.trim();
+    if (!value) return false;
+    return true;
+  }
+
+  function prepareTableForNativeSearch(dialog) {
+    const table = dialog.querySelector('table');
+    if (!table) return false;
+
+    const sortState = getTableSortState(table);
+    if (!sortState.sortKey) return false;
+
+    sortState.sortKey = null;
+    sortState.sortDir = 'asc';
+    sessionPreferences.sortKey = null;
+    sessionPreferences.sortDir = 'asc';
+    applyTableSort(table);
+    return true;
   }
 
   function handleSearchInput(event, dialog, searchInput) {
@@ -602,9 +1249,14 @@
     const prevKeyword = searchInput.getAttribute(SEARCH_SYNC_ATTR) || '';
 
     if (!searchType) {
+      prepareTableForNativeSearch(dialog);
       searchInput.removeAttribute(SEARCH_SYNC_ATTR);
       state.searchType = null;
       if (prevSearchType !== null || state.regionId || state.hideRaids) {
+        applyTeleporterFilters(dialog);
+      } else if (searchInput.value.trim()) {
+        scheduleRegionHeaderSync(dialog);
+      } else {
         applyTeleporterFilters(dialog);
       }
       return;
@@ -622,9 +1274,13 @@
 
     const displayValue = searchInput.value;
     searchInput.setAttribute(SEARCH_SYNC_ATTR, keyword);
+    prepareTableForNativeSearch(dialog);
     const resetNative = needsNativeSearchReset(dialog);
     if (resetNative) {
-      restoreNativeSearchResults(searchInput);
+      restoreNativeSearchResults(dialog).then(() => {
+        scheduleKeywordFilterApply(dialog, searchInput, displayValue, resetNative);
+      });
+      return;
     }
     scheduleKeywordFilterApply(dialog, searchInput, displayValue, resetNative);
   }
@@ -655,7 +1311,7 @@
   }
 
   function getRegionNameFromHeaderRow(tr) {
-    const td = tr.querySelector('td[colspan]');
+    const td = getRegionHeaderCell(tr);
     if (!td) return '';
     const clone = td.cloneNode(true);
     clone.querySelectorAll('img').forEach((img) => img.remove());
@@ -691,6 +1347,161 @@
     return true;
   }
 
+  function restoreSessionSearchInput(dialog) {
+    const searchInput = getTeleporterSearchInput(dialog);
+    if (!searchInput) return;
+
+    const { searchValue, searchType } = sessionPreferences;
+    const state = getFilterState(dialog);
+    state.searchType = searchType;
+
+    if (!searchValue) return;
+
+    prepareTableForNativeSearch(dialog);
+
+    if (searchType) {
+      const keyword = searchValue.trim().toLowerCase();
+      searchInput.setAttribute(SEARCH_SYNC_ATTR, keyword);
+      const resetNative = needsNativeSearchReset(dialog);
+      if (resetNative) {
+        restoreNativeSearchResults(dialog).then(() => {
+          setNativeInputValue(searchInput, searchValue);
+          applyTeleporterFilters(dialog);
+        });
+        return;
+      }
+      setNativeInputValue(searchInput, searchValue);
+      return;
+    }
+
+    searchInput.removeAttribute(SEARCH_SYNC_ATTR);
+    setNativeInputValue(searchInput, searchValue);
+    searchInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  }
+
+  function restoreSessionSort(table) {
+    const dialog = table.closest('div[role="dialog"]');
+    if (isTableSearchActive(dialog)) return;
+
+    const { sortKey, sortDir } = sessionPreferences;
+    const state = getTableSortState(table);
+
+    if (!sortKey) {
+      if (state.sortKey) {
+        state.sortKey = null;
+        state.sortDir = 'asc';
+        applyTableSort(table);
+      }
+      return;
+    }
+
+    if (state.sortKey === sortKey && state.sortDir === sortDir) {
+      if (state.sortKey) applyTableSort(table);
+      return;
+    }
+
+    state.sortKey = sortKey;
+    state.sortDir = sortDir;
+    applyTableSort(table);
+  }
+
+  function clearTeleporterSearchInput(dialog, { force = false } = {}) {
+    const searchInput = getTeleporterSearchInput(dialog);
+    if (!searchInput) return Promise.resolve(false);
+
+    searchInput.removeAttribute(SEARCH_SYNC_ATTR);
+    prepareTableForNativeSearch(dialog);
+
+    if (force || searchInput.value.trim() || needsNativeSearchReset(dialog)) {
+      return restoreNativeSearchResults(dialog);
+    }
+
+    return Promise.resolve(true);
+  }
+
+  function resetTeleporterFilterSettings(dialog) {
+    resetSessionPreferences();
+
+    const state = getFilterState(dialog);
+    state.regionId = '';
+    state.hideRaids = false;
+    state.searchType = null;
+
+    const handlers = filterControlHandlers.get(dialog);
+    if (handlers?.regionSelect) handlers.regionSelect.value = '';
+    if (handlers?.hideRaidsBtn) styleHideRaidsButton(handlers.hideRaidsBtn, false);
+
+    const table = dialog.querySelector('table');
+    if (table) {
+      const sortState = getTableSortState(table);
+      sortState.sortKey = null;
+      sortState.sortDir = 'asc';
+      sessionPreferences.sortKey = null;
+      sessionPreferences.sortDir = 'asc';
+    }
+
+    clearTeleporterSearchInput(dialog, { force: true }).then(() => {
+      if (table) {
+        restoreToNativeOrder(table, { canonical: true });
+        updateSortArrows(table);
+      }
+      applyTeleporterFilters(dialog);
+    });
+  }
+
+  function isRowShownInDom(tr) {
+    if (!tr || tr.hidden) return false;
+    if (tr.hasAttribute('hidden')) return false;
+    if (tr.style.display === 'none') return false;
+    return true;
+  }
+
+  function syncRegionHeaderVisibility(table, dialog) {
+    const tbody = table?.querySelector('tbody');
+    if (!tbody) return;
+
+    const sortState = getTableSortState(table);
+    if (sortState.sortKey) {
+      runWithoutMutationObserver(() => {
+        for (const tr of tbody.querySelectorAll(':scope > tr')) {
+          if (!isRegionHeaderRow(tr)) continue;
+          tr.style.display = 'none';
+          tr.hidden = true;
+        }
+      });
+      return;
+    }
+
+    const filterState = getFilterState(dialog);
+
+    runWithoutMutationObserver(() => {
+      for (const tr of tbody.querySelectorAll(':scope > tr')) {
+        if (!isRegionHeaderRow(tr)) continue;
+
+        const hasFollowingRooms = regionHeaderHasFollowingVisibleRooms(tr, filterState);
+
+        if (hasFollowingRooms) {
+          tr.style.removeProperty('display');
+          tr.hidden = false;
+          tr.removeAttribute('hidden');
+        } else {
+          tr.style.display = 'none';
+          tr.hidden = true;
+          tr.setAttribute('hidden', '');
+        }
+      }
+    });
+  }
+
+  function scheduleRegionHeaderSync(dialog) {
+    requestAnimationFrame(() => {
+      const table = dialog.querySelector('table');
+      if (!table) return;
+      syncRegionHeaderVisibility(table, dialog);
+      syncTeleporterRowHighlights(table);
+    });
+  }
+
   function applyTeleporterFilters(dialog) {
     syncFilterStateFromSearch(dialog);
     const table = dialog.querySelector('table');
@@ -700,67 +1511,40 @@
     const filterState = getFilterState(dialog);
     const hasKeywordSearch = Boolean(filterState.searchType);
     const hasModFilters = Boolean(filterState.regionId || filterState.hideRaids);
-    const isSorted = Boolean(getTableSortState(table).sortKey);
+    const sortState = getTableSortState(table);
 
-    if (!hasKeywordSearch && !hasModFilters) {
-      runWithoutMutationObserver(() => {
-        for (const tr of tbody.querySelectorAll(':scope > tr')) {
-          tr.style.removeProperty('display');
-          tr.hidden = false;
-          tr.removeAttribute('hidden');
-        }
-      });
-      return;
+    if (!hasKeywordSearch && !hasModFilters && !sortState.sortKey) {
+      if (!isValidNativeLayout(tbody)) {
+        runWithoutMutationObserver(() => {
+          restoreToNativeOrder(table);
+        });
+      }
     }
 
     runWithoutMutationObserver(() => {
-      let pendingRegionHeader = null;
-      let visibleRoomsInRegion = 0;
-
-      const finishRegionHeader = () => {
-        if (!pendingRegionHeader) return;
-        pendingRegionHeader.style.display = visibleRoomsInRegion > 0 ? '' : 'none';
-        pendingRegionHeader = null;
-        visibleRoomsInRegion = 0;
-      };
-
       for (const tr of tbody.querySelectorAll(':scope > tr')) {
-        if (tr.querySelector('td[colspan]')) {
-          if (isSorted) {
-            tr.style.display = 'none';
-            continue;
-          }
-
-          finishRegionHeader();
-          const regionId = getRegionIdByDisplayName(getRegionNameFromHeaderRow(tr));
-          pendingRegionHeader = tr;
-
-          if (filterState.regionId && regionId !== filterState.regionId) {
-            tr.style.display = 'none';
-            pendingRegionHeader = null;
-          } else {
-            tr.style.display = '';
-          }
-          continue;
-        }
+        if (getRegionHeaderCell(tr)) continue;
 
         const roomId = extractRoomIdFromRow(tr);
         if (!roomId) continue;
 
-        const visible = isRoomRowVisible(roomId, filterState);
-        if (hasKeywordSearch) {
-          setRowFilterVisibility(tr, visible);
-        } else if (!visible) {
-          tr.style.display = 'none';
+        if (hasKeywordSearch || hasModFilters) {
+          const visible = isRoomRowVisible(roomId, filterState);
+          if (hasKeywordSearch) {
+            setRowFilterVisibility(tr, visible);
+          } else if (!visible) {
+            tr.style.display = 'none';
+          } else {
+            showRoomRow(tr);
+          }
         } else {
-          tr.style.removeProperty('display');
+          showRoomRow(tr);
         }
-
-        if (visible && pendingRegionHeader) visibleRoomsInRegion += 1;
       }
-
-      finishRegionHeader();
     });
+
+    syncRegionHeaderVisibility(table, dialog);
+    syncTeleporterRowHighlights(table);
   }
 
   function styleHideRaidsButton(button, active) {
@@ -806,67 +1590,121 @@
     select.dataset.regionOptionsKey = optionsKey;
   }
 
-  function getTeleporterSearchInput(dialog) {
-    return findTeleporterSearchInput(dialog);
+  function getFilterInsertAnchor(searchInput) {
+    if (!searchInput) return null;
+    return searchInput.closest('.frame-pressed-1') || searchInput.parentElement;
   }
 
-  function getFilterInsertAnchor(searchInput) {
-    return searchInput.closest('.frame-pressed-1') || searchInput.parentElement;
+  function clearFilterGridChildStyles(parent, searchFrame, filters) {
+    if (!parent) return;
+    for (const child of parent.children) {
+      if (child === searchFrame || child === filters) continue;
+      child.style.removeProperty('grid-column');
+      child.style.removeProperty('grid-row');
+    }
+    searchFrame?.style.removeProperty('grid-column');
+    searchFrame?.style.removeProperty('grid-row');
+    searchFrame?.style.removeProperty('flex');
+    searchFrame?.style.removeProperty('minWidth');
+    searchFrame?.style.removeProperty('width');
+    filters?.style.removeProperty('grid-column');
+    filters?.style.removeProperty('grid-row');
+  }
+
+  function restoreBrokenWidgetBottomFilterHost(widgetBottom, searchFrame, filters) {
+    if (!widgetBottom) return;
+
+    const restoreStyle = (prop, datasetKey) => {
+      const prev = widgetBottom.dataset[datasetKey];
+      if (prev) widgetBottom.style.setProperty(prop, prev);
+      else widgetBottom.style.removeProperty(prop);
+      delete widgetBottom.dataset[datasetKey];
+    };
+
+    clearFilterGridChildStyles(widgetBottom, searchFrame, filters);
+    restoreStyle('display', 'betterTeleporterPrevDisplay');
+    restoreStyle('grid-template-columns', 'betterTeleporterPrevGridTemplateColumns');
+    restoreStyle('column-gap', 'betterTeleporterPrevColumnGap');
+    restoreStyle('align-items', 'betterTeleporterPrevAlignItems');
+    restoreStyle('gap', 'betterTeleporterPrevGap');
+    restoreStyle('width', 'betterTeleporterPrevWidth');
+    restoreStyle('min-width', 'betterTeleporterPrevMinWidth');
+    widgetBottom.removeAttribute(FILTER_ROW_ATTR);
   }
 
   function mountTeleporterFilters(searchFrame, filters) {
     if (!searchFrame?.isConnected || !filters) return false;
 
-    let row = searchFrame.closest(`[${FILTER_ROW_ATTR}]`);
-    if (!row) {
-      const parent = searchFrame.parentElement;
-      if (!parent) return false;
+    const parent = searchFrame.parentElement;
+    if (!parent?.isConnected) return false;
 
-      row = document.createElement('div');
-      row.setAttribute(FILTER_ROW_ATTR, 'true');
-      row.style.cssText = 'display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0;';
-
-      parent.insertBefore(row, searchFrame);
-      row.appendChild(searchFrame);
-
-      searchFrame.style.flex = '1 1 0';
-      searchFrame.style.minWidth = '0';
-      searchFrame.style.width = 'auto';
+    const widgetBottom = searchFrame.closest('.widget-bottom');
+    if (widgetBottom?.getAttribute(FILTER_ROW_ATTR) === 'true') {
+      restoreBrokenWidgetBottomFilterHost(widgetBottom, searchFrame, filters);
     }
 
+    let toolbar = searchFrame.closest(`[${FILTER_ROW_ATTR}]`);
+    if (!toolbar) {
+      toolbar = document.createElement('div');
+      toolbar.setAttribute(FILTER_ROW_ATTR, 'true');
+      toolbar.style.cssText = 'display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; flex: 0 0 auto;';
+      parent.insertBefore(toolbar, searchFrame);
+      toolbar.appendChild(searchFrame);
+    }
+
+    searchFrame.style.flex = '1 1 0';
+    searchFrame.style.minWidth = '0';
+    searchFrame.style.width = 'auto';
+
     filters.style.cssText = 'display: flex; gap: 8px; align-items: center; flex: 0 0 auto; flex-wrap: nowrap; margin: 0; width: auto;';
-    if (filters.parentElement !== row) {
-      row.appendChild(filters);
+    if (filters.parentElement !== toolbar) {
+      toolbar.appendChild(filters);
     }
 
     return true;
   }
 
-  function unmountTeleporterFilterRow(dialog) {
-    const searchFrame = getFilterInsertAnchor(getTeleporterSearchInput(dialog));
-    const row = searchFrame?.closest(`[${FILTER_ROW_ATTR}]`);
-    if (!row?.parentElement || !searchFrame) return;
+  function unmountTeleporterFilterRow(dialog, { preserveDom = false } = {}) {
+    if (preserveDom) return;
 
-    row.parentElement.insertBefore(searchFrame, row);
-    row.remove();
+    dialog.querySelector(`[${FILTERS_ATTR}]`)?.remove();
 
-    searchFrame.style.removeProperty('flex');
-    searchFrame.style.removeProperty('minWidth');
-    searchFrame.style.removeProperty('width');
+    const handlers = filterControlHandlers.get(dialog);
+    const searchInput = getTeleporterSearchInput(dialog) || handlers?.searchInput;
+    const searchFrame = getFilterInsertAnchor(searchInput);
+
+    const widgetBottom = dialog.querySelector('.widget-bottom');
+    if (widgetBottom?.getAttribute(FILTER_ROW_ATTR) === 'true') {
+      restoreBrokenWidgetBottomFilterHost(widgetBottom, searchFrame, dialog.querySelector(`[${FILTERS_ATTR}]`));
+    }
+
+    const toolbar = dialog.querySelector(`[${FILTER_ROW_ATTR}]`);
+    if (!toolbar?.parentElement) return;
+
+    if (searchFrame?.isConnected && toolbar.contains(searchFrame)) {
+      toolbar.parentElement.insertBefore(searchFrame, toolbar);
+      searchFrame.style.removeProperty('flex');
+      searchFrame.style.removeProperty('minWidth');
+      searchFrame.style.removeProperty('width');
+      searchFrame.style.removeProperty('grid-column');
+      searchFrame.style.removeProperty('grid-row');
+    }
+
+    toolbar.remove();
   }
 
-  function resetTeleporterFilterBinding(dialog) {
+  function resetTeleporterFilterBinding(dialog, { preserveDom = false } = {}) {
     const handlers = filterControlHandlers.get(dialog);
     if (handlers) {
       handlers.regionSelect?.removeEventListener('change', handlers.onRegionChange);
       handlers.hideRaidsBtn?.removeEventListener('click', handlers.onHideRaidsClick);
+      handlers.resetBtn?.removeEventListener('click', handlers.onResetClick);
       handlers.searchInput?.removeEventListener('input', handlers.onSearchInput, SEARCH_INPUT_CAPTURE);
       filterControlHandlers.delete(dialog);
     }
     dialog.removeAttribute(FILTERS_BOUND_ATTR);
-    dialog.querySelector(`[${FILTERS_ATTR}]`)?.remove();
-    unmountTeleporterFilterRow(dialog);
-    getTeleporterSearchInput(dialog)?.removeAttribute(SEARCH_SYNC_ATTR);
+    unmountTeleporterFilterRow(dialog, { preserveDom });
+    (getTeleporterSearchInput(dialog) || handlers?.searchInput)?.removeAttribute(SEARCH_SYNC_ATTR);
   }
 
   function ensureTeleporterFilters(dialog) {
@@ -902,18 +1740,26 @@
 
     const regionSelect = document.createElement('select');
     regionSelect.setAttribute(REGION_SELECT_ATTR, 'true');
-    regionSelect.className = 'pixel-font-14 frame-1 surface-regular bg-grayRegular px-2 py-0.5 text-whiteRegular';
-    regionSelect.style.minWidth = '140px';
+    regionSelect.className = TELEPORTER_GRAY_CONTROL_CLASS;
+    regionSelect.style.minWidth = '120px';
 
     const hideRaidsBtn = document.createElement('button');
     hideRaidsBtn.type = 'button';
     hideRaidsBtn.setAttribute(HIDE_RAIDS_ATTR, 'true');
     hideRaidsBtn.textContent = t('mods.betterTeleporter.hideRaidsAndEvents');
-    hideRaidsBtn.className = 'focus-style-visible frame-1 active:frame-pressed-1 surface-regular px-2 py-0.5 pb-[3px] pixel-font-14 text-whiteRegular';
-    styleHideRaidsButton(hideRaidsBtn, false);
+    hideRaidsBtn.className = TELEPORTER_TOGGLE_BUTTON_CLASS;
+    styleHideRaidsButton(hideRaidsBtn, sessionPreferences.hideRaids);
 
     filters.appendChild(regionSelect);
     filters.appendChild(hideRaidsBtn);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.setAttribute(RESET_FILTERS_ATTR, 'true');
+    resetBtn.textContent = t('mods.betterTeleporter.reset');
+    resetBtn.className = TELEPORTER_TOGGLE_BUTTON_CLASS;
+
+    filters.appendChild(resetBtn);
 
     const onRegionChange = () => {
       getFilterState(dialog).regionId = regionSelect.value || '';
@@ -925,35 +1771,42 @@
       styleHideRaidsButton(hideRaidsBtn, state.hideRaids);
       applyTeleporterFilters(dialog);
     };
+    const onResetClick = () => resetTeleporterFilterSettings(dialog);
     const onSearchInput = (event) => handleSearchInput(event, dialog, searchInput);
 
     regionSelect.addEventListener('change', onRegionChange);
     hideRaidsBtn.addEventListener('click', onHideRaidsClick);
+    resetBtn.addEventListener('click', onResetClick);
     searchInput.addEventListener('input', onSearchInput, SEARCH_INPUT_CAPTURE);
     filterControlHandlers.set(dialog, {
       onRegionChange,
       onHideRaidsClick,
+      onResetClick,
       onSearchInput,
       regionSelect,
       hideRaidsBtn,
+      resetBtn,
       searchInput,
     });
 
     runWithoutMutationObserver(() => {
       mountTeleporterFilters(anchor, filters);
-      ensureRegionSelectOptions(regionSelect, '');
+      ensureRegionSelectOptions(regionSelect, sessionPreferences.regionId);
     });
 
     dialog.setAttribute(FILTERS_BOUND_ATTR, 'true');
+    restoreSessionSearchInput(dialog);
     applyTeleporterFilters(dialog);
   }
 
   function teardownTeleporterFilters(dialog) {
-    resetTeleporterFilterBinding(dialog);
+    captureSessionPreferences(dialog);
+    resetTeleporterFilterBinding(dialog, { preserveDom: true });
     dialogFilterState.delete(dialog);
 
-    for (const tr of dialog.querySelectorAll('tbody tr')) {
-      tr.style.removeProperty('display');
+    if (dialog.isConnected && dialog.getAttribute('data-state') !== 'closed') {
+      const tbody = dialog.querySelector('tbody');
+      if (tbody) unhideAllTableRows(tbody);
     }
   }
 
@@ -963,7 +1816,7 @@
 
   function clearRoomRowAccent(tr) {
     tr.removeAttribute(ROOM_TYPE_ATTR);
-    for (const el of tr.querySelectorAll('p.hidden.sm\\:line-clamp-2, p.sm\\:line-clamp-2')) {
+    for (const el of tr.querySelectorAll(ROOM_NAME_SELECTOR)) {
       el.style.removeProperty('color');
     }
     const xpCell = tr.querySelector(`td[${XP_STAM_ATTR}]`);
@@ -989,7 +1842,7 @@
     }
 
     tr.setAttribute(ROOM_TYPE_ATTR, type);
-    for (const el of tr.querySelectorAll('p.hidden.sm\\:line-clamp-2, p.sm\\:line-clamp-2')) {
+    for (const el of tr.querySelectorAll(ROOM_NAME_SELECTOR)) {
       el.style.color = color;
     }
 
@@ -1002,6 +1855,37 @@
     if (!img) return null;
     const match = String(img.getAttribute('src') || img.src || '').match(/\/assets\/room-thumbnails\/([^.?]+)\.png/);
     return match ? match[1] : null;
+  }
+
+  function getCurrentRoomId() {
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+      return boardContext?.selectedMap?.selectedRoom?.id
+        || boardContext?.selectedMap?.roomId
+        || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function syncTeleporterRowHighlights(table) {
+    if (!table) return;
+
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+
+    const currentRoomId = getCurrentRoomId();
+
+    runWithoutMutationObserver(() => {
+      for (const tr of tbody.querySelectorAll(':scope > tr')) {
+        if (getRegionHeaderCell(tr)) continue;
+
+        const roomId = extractRoomIdFromRow(tr);
+        if (!roomId) continue;
+
+        tr.setAttribute('data-highlight', currentRoomId && roomId === currentRoomId ? 'true' : 'false');
+      }
+    });
   }
 
   function parsePortraitGameId(src) {
@@ -1048,14 +1932,6 @@
       }
     } catch (_) {}
     return { gameId, spriteId: gameId, name: `#${gameId}` };
-  }
-
-  function formatEquipTitle(equip) {
-    if (!equip?.name) return null;
-    if (equip.stat) {
-      return `${equip.name} (${String(equip.stat).toUpperCase()} T${equip.tier ?? 1})`;
-    }
-    return equip.name;
   }
 
   function getRoomBoardMeta(roomId) {
@@ -1131,7 +2007,7 @@
 
       const spriteId = parseEquipmentSpriteId(portrait);
       const equip = meta.equips?.find((entry) => entry.spriteId === spriteId || entry.gameId === spriteId);
-      let title = equip ? formatEquipTitle(equip) : null;
+      let title = equip?.name || null;
       if (!title && Number.isFinite(spriteId)) {
         title = resolveEquipmentMeta(spriteId)?.name || null;
       }
@@ -1140,7 +2016,7 @@
   }
 
   function getRoomNameFromRow(tr) {
-    const nameEl = tr.querySelector('p.hidden.sm\\:line-clamp-2, p.sm\\:line-clamp-2');
+    const nameEl = tr.querySelector(ROOM_NAME_SELECTOR);
     const text = nameEl?.textContent?.trim();
     if (text) return text;
     const roomId = extractRoomIdFromRow(tr);
@@ -1153,6 +2029,8 @@
         sortKey: null,
         sortDir: 'asc',
         snapshot: null,
+        snapshotOrder: null,
+        nativeOrder: null,
         tbody: null,
       });
     }
@@ -1174,13 +2052,6 @@
     }
   }
 
-  function rowsMatchSnapshot(tbody, snapshot) {
-    if (!tbody || !snapshot?.length) return false;
-    const current = tbody.querySelectorAll(':scope > tr');
-    if (current.length !== snapshot.length) return false;
-    return [...current].every((tr, index) => tr === snapshot[index]);
-  }
-
   function runWithoutMutationObserver(fn) {
     suppressMutations = true;
     try {
@@ -1198,21 +2069,29 @@
 
     runWithoutMutationObserver(() => {
       if (!state.sortKey) {
-        if (state.snapshot?.length && !rowsMatchSnapshot(tbody, state.snapshot)) {
-          for (const tr of state.snapshot) tbody.appendChild(tr);
-        }
+        restoreToNativeOrder(table);
         updateSortArrows(table);
         return;
       }
 
-      if (!state.snapshot) {
-        state.snapshot = [...tbody.querySelectorAll(':scope > tr')];
+      if (!state.nativeOrder) {
+        ensureNativeOrder(table);
       }
 
+      if (!state.snapshotOrder?.length) {
+        if (!state.snapshot?.length) {
+          state.snapshot = [...tbody.querySelectorAll(':scope > tr')];
+        }
+        state.snapshotOrder = state.snapshot.map(getRowSnapshotKey).filter(Boolean);
+      }
+
+      const headerFragment = document.createDocumentFragment();
       const roomRows = [];
       for (const tr of [...tbody.querySelectorAll(':scope > tr')]) {
-        if (tr.querySelector('td[colspan]')) {
-          tr.remove();
+        if (isRegionHeaderRow(tr)) {
+          tr.style.display = 'none';
+          tr.hidden = true;
+          headerFragment.appendChild(tr);
           continue;
         }
 
@@ -1235,27 +2114,79 @@
         return (a.expPerStamina - b.expPerStamina) * mul;
       });
 
+      if (headerFragment.childNodes.length) {
+        tbody.insertBefore(headerFragment, tbody.firstChild);
+      }
+
       const fragment = document.createDocumentFragment();
       for (const { tr } of roomRows) fragment.appendChild(tr);
       tbody.appendChild(fragment);
       updateSortArrows(table);
     });
+
+    syncTeleporterRowHighlights(table);
+
+    const dialog = table.closest('div[role="dialog"]');
+    if (dialog) applyTeleporterFilters(dialog);
+  }
+
+  function restoreTableBeforeSort(table) {
+    const state = getTableSortState(table);
+    if (state.sortKey) {
+      state.sortKey = null;
+      state.sortDir = 'asc';
+      syncSessionSortFromTable(table);
+    }
+
+    restoreToNativeOrder(table);
+    const dialog = table.closest('div[role="dialog"]');
+    if (dialog) syncRegionHeaderVisibility(table, dialog);
+  }
+
+  function clearSearchWithoutSortClear(dialog) {
+    const searchInput = getTeleporterSearchInput(dialog);
+    if (!searchInput) return;
+
+    const state = getFilterState(dialog);
+    searchInput.removeAttribute(SEARCH_SYNC_ATTR);
+    state.searchType = null;
+    if (!searchInput.value) return;
+
+    if (needsNativeSearchReset(dialog)) {
+      restoreNativeSearchResults(dialog);
+      return;
+    }
+
+    dispatchNativeSearchInput(searchInput, '', 'deleteContentBackward');
   }
 
   function handleSortClick(table, sortKey) {
     const state = getTableSortState(table);
+    const dialog = table.closest('div[role="dialog"]');
     const initialDir = sortKey === 'expPerStamina' ? 'desc' : 'asc';
 
+    let nextSortKey = state.sortKey;
+    let nextSortDir = state.sortDir;
+
     if (state.sortKey !== sortKey) {
-      state.sortKey = sortKey;
-      state.sortDir = initialDir;
+      nextSortKey = sortKey;
+      nextSortDir = initialDir;
     } else if (state.sortDir === initialDir) {
-      state.sortDir = initialDir === 'asc' ? 'desc' : 'asc';
+      nextSortKey = sortKey;
+      nextSortDir = initialDir === 'asc' ? 'desc' : 'asc';
     } else {
-      state.sortKey = null;
-      state.sortDir = 'asc';
+      nextSortKey = null;
+      nextSortDir = 'asc';
     }
 
+    if (nextSortKey && isTableSearchActive(dialog)) {
+      restoreTableBeforeSort(table);
+      clearSearchWithoutSortClear(dialog);
+    }
+
+    state.sortKey = nextSortKey;
+    state.sortDir = nextSortDir;
+    syncSessionSortFromTable(table);
     applyTableSort(table);
   }
 
@@ -1359,11 +2290,10 @@
     th.textContent = t('mods.betterTeleporter.xpStam');
     prepareSortableHeader(th, 'expPerStamina');
     headerRow.appendChild(th);
-    table.setAttribute(TABLE_ENHANCED_ATTR, 'true');
   }
 
   function enhanceRegionHeaderRow(tr, table) {
-    const regionCell = tr.querySelector('td[colspan]');
+    const regionCell = getRegionHeaderCell(tr);
     if (!regionCell) return;
 
     if (regionCell.getAttribute(REGION_ENHANCED_ATTR) !== 'true') {
@@ -1388,17 +2318,19 @@
       state.sortKey = null;
       state.sortDir = 'asc';
       state.snapshot = null;
+      state.snapshotOrder = null;
+      state.nativeOrder = null;
       state.tbody = tbody;
       updateSortArrows(table);
     }
 
     if (!state.sortKey) {
-      state.snapshot = [...tbody.querySelectorAll(':scope > tr')];
+      ensureNativeOrder(table);
     }
   }
 
   function rowNeedsEnhancement(tr) {
-    const regionCell = tr.querySelector('td[colspan]');
+    const regionCell = getRegionHeaderCell(tr);
     if (regionCell) {
       return regionCell.getAttribute(REGION_ENHANCED_ATTR) !== 'true'
         || tr.getAttribute(REGION_HEADER_ATTR) !== 'true';
@@ -1429,7 +2361,7 @@
 
       let addedRows = false;
       for (const tr of table.querySelectorAll('tbody tr')) {
-        if (tr.querySelector('td[colspan]')) {
+        if (getRegionHeaderCell(tr)) {
           enhanceRegionHeaderRow(tr, table);
           continue;
         }
@@ -1439,7 +2371,6 @@
         if (tr.querySelector(`td[${XP_STAM_ATTR}]`)) continue;
 
         tr.appendChild(createXpStamCell(getRoomById(roomId)));
-        tr.setAttribute(ROW_ENHANCED_ATTR, 'true');
         applyRoomRowAccent(tr, roomId);
         addedRows = true;
       }
@@ -1456,26 +2387,578 @@
     }
 
     for (const tr of table.querySelectorAll('tbody tr')) {
-      if (tr.querySelector('td[colspan]')) continue;
+      if (getRegionHeaderCell(tr)) continue;
       const roomId = extractRoomIdFromRow(tr);
-      if (roomId) enhanceRowPortraitTooltips(tr, roomId);
+      if (roomId) {
+        enhanceRowPortraitTooltips(tr, roomId);
+        bindRowContextMenu(tr, roomId);
+      }
     }
+
+    syncTeleporterRowHighlights(table);
+    restoreSessionSort(table);
+  }
+
+  // ============================================================================
+  // 6b. ROW CONTEXT MENU & CYCLOPEDIA
+  // ============================================================================
+
+  function dispatchEscapePress() {
+    const init = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true };
+    document.dispatchEvent(new KeyboardEvent('keydown', init));
+    document.dispatchEvent(new KeyboardEvent('keyup', init));
+  }
+
+  function isCyclopediaOpen() {
+    return Boolean(document.querySelector('.cyclopedia-modal-root')?.closest('[role="dialog"][data-state="open"]'));
+  }
+
+  function openCyclopediaModal(options = {}) {
+    if (typeof window.__cyclopediaOpen === 'function') {
+      window.__cyclopediaOpen({ fromHeader: true, force: true, ...options });
+      return;
+    }
+    window.Cyclopedia?.show?.({ force: true, ...options });
+  }
+
+  function runWhenCyclopediaReady(callback, attempts = 12) {
+    if (typeof window.cyclopediaHomeSearchNavigate === 'function') {
+      callback();
+      return;
+    }
+    if (attempts <= 0) {
+      callback();
+      return;
+    }
+    setTimeout(() => runWhenCyclopediaReady(callback, attempts - 1), 50);
+  }
+
+  function closeTeleporterIfOpen(run) {
+    if (findOpenTeleporterDialog()) {
+      dispatchEscapePress();
+      setTimeout(run, 50);
+      return;
+    }
+    run();
+  }
+
+  function getRoomMapNavigationTarget(roomId) {
+    const room = getRoomById(roomId);
+    const region = getRoomRegion(roomId);
+    return {
+      mapName: room?.name || globalThis.state?.utils?.ROOM_NAME?.[roomId] || roomId || '',
+      regionName: room?.regionName || resolveRegionName(region.regionId),
+    };
+  }
+
+  function getBoardEntryNames(roomId, kind) {
+    const list = getRoomBoardMeta(roomId)[kind === 'creature' ? 'creatures' : 'equips'] || [];
+    const seen = new Set();
+    const names = [];
+    for (const entry of [...list].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.name || seen.has(entry.name)) continue;
+      seen.add(entry.name);
+      names.push(entry.name);
+    }
+    return names;
+  }
+
+  function navigateCyclopediaFromRoom(roomId, mode, entryName = null) {
+    debugContextMenu('navigate', { roomId, mode, entryName });
+    closeTeleporterIfOpen(() => {
+      if (mode === 'map') {
+        const { mapName, regionName } = getRoomMapNavigationTarget(roomId);
+        if (!mapName || !regionName) return;
+        if (!isCyclopediaOpen()) openCyclopediaModal();
+        runWhenCyclopediaReady(() => {
+          window.cyclopediaHomeSearchNavigate?.({ type: 'map', mapName, regionName });
+        });
+        return;
+      }
+
+      const name = entryName || getBoardEntryNames(roomId, mode)[0];
+      if (!name) return;
+
+      if (isCyclopediaOpen()) {
+        window.cyclopediaHomeSearchNavigate?.({ type: mode, name });
+        return;
+      }
+      openCyclopediaModal(mode === 'creature' ? { creature: name } : { equipment: name });
+    });
+  }
+
+  function debugContextMenu(event, data = {}) {
+    console.log(`[Better Teleporter] context menu ${event}`, data);
+  }
+
+  function stopContextMenuEvent(event) {
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+  }
+
+  function restoreContextMenuHost(host, hostPosition, hostOverflow) {
+    if (!host?.isConnected) return;
+    host.style.position = hostPosition;
+    host.style.overflow = hostOverflow;
+    host.removeAttribute(CONTEXT_MENU_HOST_ATTR);
+  }
+
+  function prepareContextMenuHost(host) {
+    const hostPosition = host.style.position;
+    const hostOverflow = host.style.overflow;
+    if (getComputedStyle(host).position === 'static') {
+      host.style.position = 'relative';
+    }
+    host.style.overflow = 'visible';
+    host.setAttribute(CONTEXT_MENU_HOST_ATTR, 'true');
+    return { hostPosition, hostOverflow };
+  }
+
+  function getContextMenuButtonClassName(kind) {
+    const entryClass = CONTEXT_MENU_UI.ENTRY_CLASSES[kind] || 'frame-1 surface-regular text-whiteRegular';
+    return `${CONTEXT_MENU_UI.ITEM_BASE_CLASS} ${entryClass}`;
+  }
+
+  function applyContextMenuEntryChrome(button) {
+    Object.assign(button.style, {
+      border: 'none',
+      borderImage: '',
+      background: '',
+      backgroundImage: '',
+      backgroundColor: '',
+      color: '',
+    });
+  }
+
+  function bindContextMenuHoverBrightness(button, { activeColor, idleColor } = {}) {
+    button.addEventListener('mouseenter', () => {
+      if (activeColor) button.style.color = activeColor;
+      button.style.filter = 'brightness(1.12)';
+    });
+    button.addEventListener('mouseleave', () => {
+      if (idleColor) button.style.color = idleColor;
+      button.style.filter = '';
+    });
+  }
+
+  function bindContextMenuActivation(button, onActivate) {
+    button.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      stopContextMenuEvent(event);
+      onActivate();
+    });
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+  }
+
+  function createContextMenuSeparator() {
+    const separator = document.createElement('div');
+    separator.setAttribute('aria-hidden', 'true');
+    separator.style.height = '1px';
+    separator.style.background = '#555';
+    separator.style.margin = '2px 0';
+    separator.style.opacity = '0.75';
+    separator.style.flexShrink = '0';
+    return separator;
+  }
+
+  function createContextMenuActionButton(label, { kind, roomId = null, onClick = null } = {}) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = getContextMenuButtonClassName(kind);
+    button.textContent = label;
+    applyContextMenuEntryChrome(button);
+    Object.assign(button.style, CONTEXT_MENU_BUTTON_LAYOUT);
+    bindContextMenuHoverBrightness(button);
+    bindContextMenuActivation(button, () => {
+      debugContextMenu('item selected', { label, roomId, kind });
+      closeRowContextMenu();
+      onClick?.();
+    });
+    return button;
+  }
+
+  function createContextMenuText(className, text, style = {}) {
+    const el = document.createElement('div');
+    el.className = className;
+    el.textContent = text;
+    Object.assign(el.style, style);
+    return el;
+  }
+
+  function createContextMenuOverlay() {
+    const overlay = document.createElement('div');
+    overlay.id = CONTEXT_MENU_OVERLAY_ID;
+    overlay.style.position = 'absolute';
+    overlay.style.inset = '0';
+    overlay.style.zIndex = String(CONTEXT_MENU_UI.OVERLAY_Z);
+    overlay.style.backgroundColor = 'transparent';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.cursor = 'default';
+    setImportantStyles(overlay, [
+      ['width', 'auto'],
+      ['max-width', 'none'],
+      ['height', 'auto'],
+      ['max-height', 'none'],
+      ['transform', 'none'],
+    ]);
+    return overlay;
+  }
+
+  function createContextMenuPanel() {
+    const menu = document.createElement('div');
+    menu.id = CONTEXT_MENU_ID;
+    menu.style.zIndex = String(CONTEXT_MENU_UI.MENU_Z);
+    menu.style.pointerEvents = 'auto';
+    menu.style.boxSizing = 'border-box';
+    setImportantStyles(menu, [
+      ['width', `${CONTEXT_MENU_UI.MAX_WIDTH}px`],
+      ['max-width', `${CONTEXT_MENU_UI.MAX_WIDTH}px`],
+      ['min-width', '0'],
+      ['height', 'auto'],
+      ['max-height', 'none'],
+      ['transform', 'none'],
+    ]);
+    menu.style.background = `url('${CONTEXT_MENU_PANEL_MEDIA.BACKGROUND}') repeat`;
+    menu.style.border = '4px solid transparent';
+    menu.style.borderImage = `url("${CONTEXT_MENU_PANEL_MEDIA.FRAME}") 6 fill stretch`;
+    menu.style.borderRadius = '6px';
+    menu.style.padding = '12px';
+    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+    return menu;
+  }
+
+  function createContextMenuActionsContainer() {
+    const actionsContainer = document.createElement('div');
+    actionsContainer.style.display = 'flex';
+    actionsContainer.style.flexDirection = 'column';
+    actionsContainer.style.gap = '8px';
+    actionsContainer.style.marginBottom = '12px';
+    actionsContainer.style.width = '100%';
+    actionsContainer.style.maxWidth = '100%';
+    actionsContainer.style.boxSizing = 'border-box';
+    return actionsContainer;
+  }
+
+  function populateContextMenuActions(container, { roomId, mapEnabled, mapName, creatureNames, equipmentNames }) {
+    let hasSection = false;
+    const appendSeparatorIfNeeded = () => {
+      if (!hasSection) return;
+      container.appendChild(createContextMenuSeparator());
+    };
+
+    if (mapEnabled) {
+      container.appendChild(createContextMenuActionButton(mapName, {
+        kind: 'map',
+        roomId,
+        onClick: () => navigateCyclopediaFromRoom(roomId, 'map'),
+      }));
+      hasSection = true;
+    }
+
+    if (creatureNames.length) {
+      appendSeparatorIfNeeded();
+      for (const creatureName of creatureNames) {
+        container.appendChild(createContextMenuActionButton(creatureName, {
+          kind: 'creature',
+          roomId,
+          onClick: () => navigateCyclopediaFromRoom(roomId, 'creature', creatureName),
+        }));
+      }
+      hasSection = true;
+    }
+
+    if (equipmentNames.length) {
+      appendSeparatorIfNeeded();
+      for (const equipmentName of equipmentNames) {
+        container.appendChild(createContextMenuActionButton(equipmentName, {
+          kind: 'equipment',
+          roomId,
+          onClick: () => navigateCyclopediaFromRoom(roomId, 'equipment', equipmentName),
+        }));
+      }
+      hasSection = true;
+    }
+
+    if (!hasSection) {
+      container.appendChild(createContextMenuText('pixel-font-14', '—', {
+        color: '#888',
+        fontSize: '11px',
+        textAlign: 'center',
+      }));
+    }
+  }
+
+  function createContextMenuCancelButton(roomId, onCancel) {
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = CONTEXT_MENU_UI.CANCEL_CLASS;
+    cancelButton.textContent = tf('mods.betterTeleporter.contextMenuCancel', 'Cancel');
+    cancelButton.style.width = '70px';
+    cancelButton.style.minHeight = '24px';
+    cancelButton.style.textAlign = 'center';
+    cancelButton.style.cursor = 'pointer';
+    cancelButton.style.color = '#888';
+    bindContextMenuHoverBrightness(cancelButton, { activeColor: '#ccc', idleColor: '#888' });
+    bindContextMenuActivation(cancelButton, () => {
+      debugContextMenu('dismiss cancel', { roomId });
+      onCancel();
+    });
+    return cancelButton;
+  }
+
+  function detachContextMenuListeners(menuState) {
+    if (!menuState) return;
+
+    const {
+      overlay,
+      escHandler,
+      overlayClickHandler,
+      modalClickHandler,
+      modalContent,
+    } = menuState;
+
+    overlay?.removeEventListener('mousedown', overlayClickHandler);
+    overlay?.removeEventListener('click', overlayClickHandler);
+    if (escHandler) document.removeEventListener('keydown', escHandler);
+    if (modalClickHandler && modalContent) {
+      modalContent.removeEventListener('mousedown', modalClickHandler);
+      modalContent.removeEventListener('click', modalClickHandler);
+    }
+  }
+
+  function closeRowContextMenu() {
+    const menuState = openRowContextMenu;
+    if (menuState?.closeMenu) {
+      menuState.closeMenu();
+      return;
+    }
+
+    detachContextMenuListeners(menuState);
+    menuState?.overlay?.remove();
+    menuState?.menu?.remove();
+    if (menuState) {
+      restoreContextMenuHost(menuState.host, menuState.hostPosition, menuState.hostOverflow);
+      openRowContextMenu = null;
+    }
+
+    document.getElementById(CONTEXT_MENU_ID)?.remove();
+    document.getElementById(CONTEXT_MENU_OVERLAY_ID)?.remove();
+  }
+
+  function positionContextMenuInHost(menu, host, x, y) {
+    const hostRect = host.getBoundingClientRect();
+    menu.style.position = 'absolute';
+    menu.style.left = `${x - hostRect.left}px`;
+    menu.style.top = `${y - hostRect.top}px`;
+
+    const rect = menu.getBoundingClientRect();
+    const pad = 10;
+    let left = parseFloat(menu.style.left);
+    let top = parseFloat(menu.style.top);
+
+    if (rect.right > window.innerWidth - pad) {
+      left -= rect.right - (window.innerWidth - pad);
+    }
+    if (rect.bottom > window.innerHeight - pad) {
+      top -= rect.bottom - (window.innerHeight - pad);
+    }
+    if (rect.left < pad) {
+      left += pad - rect.left;
+    }
+    if (rect.top < pad) {
+      top += pad - rect.top;
+    }
+
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  function shieldContextMenuEvents(menu) {
+    for (const eventName of CONTEXT_MENU_SHIELD_EVENTS) {
+      menu.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      });
+    }
+  }
+
+  function showRowContextMenu(x, y, roomId) {
+    closeRowContextMenu();
+
+    const host = findOpenTeleporterDialog();
+    if (!host) {
+      debugContextMenu('open failed', { roomId, reason: 'no teleporter dialog' });
+      return;
+    }
+
+    const creatureNames = getBoardEntryNames(roomId, 'creature');
+    const equipmentNames = getBoardEntryNames(roomId, 'equipment');
+    const { mapName, regionName } = getRoomMapNavigationTarget(roomId);
+    const mapEnabled = Boolean(mapName && regionName);
+
+    debugContextMenu('open', {
+      roomId,
+      x,
+      y,
+      mapName,
+      regionName,
+      creatureNames,
+      equipmentNames,
+      mapEnabled,
+      hostTag: host.tagName,
+    });
+
+    const { hostPosition, hostOverflow } = prepareContextMenuHost(host);
+    const overlay = createContextMenuOverlay();
+    const menu = createContextMenuPanel();
+
+    menu.appendChild(createContextMenuText('pixel-font-16', mapName || roomId, {
+      color: '#ffe066',
+      fontWeight: 'bold',
+      marginBottom: '4px',
+      textAlign: 'center',
+      wordBreak: 'break-word',
+      lineHeight: '1.25',
+    }));
+    menu.appendChild(createContextMenuText('pixel-font-14', tf('mods.betterTeleporter.contextMenuSubtitle', 'Open in Cyclopedia:'), {
+      color: '#cccccc',
+      fontSize: '11px',
+      marginBottom: '12px',
+      textAlign: 'center',
+    }));
+
+    const actionsContainer = createContextMenuActionsContainer();
+    populateContextMenuActions(actionsContainer, {
+      roomId,
+      mapEnabled,
+      mapName,
+      creatureNames,
+      equipmentNames,
+    });
+    menu.appendChild(actionsContainer);
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.justifyContent = 'center';
+    buttonContainer.style.gap = '8px';
+
+    const menuState = {
+      host,
+      overlay,
+      menu,
+      hostPosition,
+      hostOverflow,
+      escHandler: null,
+      overlayClickHandler: null,
+      modalClickHandler: null,
+      modalContent: host,
+      closeMenu: null,
+    };
+
+    function closeMenu() {
+      detachContextMenuListeners(menuState);
+      overlay.remove();
+      menu.remove();
+      restoreContextMenuHost(host, hostPosition, hostOverflow);
+      if (openRowContextMenu === menuState) {
+        openRowContextMenu = null;
+      }
+    }
+
+    menuState.closeMenu = closeMenu;
+    menuState.overlayClickHandler = (event) => {
+      if (event.target !== overlay) return;
+      stopContextMenuEvent(event);
+      debugContextMenu('dismiss overlay', { roomId });
+      closeMenu();
+    };
+    menuState.escHandler = (event) => {
+      if (event.key === 'Escape') {
+        debugContextMenu('dismiss escape', { roomId });
+        closeMenu();
+      }
+    };
+    menuState.modalClickHandler = (event) => {
+      if (menu.contains(event.target) || overlay.contains(event.target)) return;
+      debugContextMenu('dismiss modal click', { roomId, target: event.target?.tagName });
+      closeMenu();
+    };
+
+    buttonContainer.appendChild(createContextMenuCancelButton(roomId, closeMenu));
+    menu.appendChild(buttonContainer);
+
+    host.appendChild(overlay);
+    host.appendChild(menu);
+    positionContextMenuInHost(menu, host, x, y);
+    shieldContextMenuEvents(menu);
+
+    overlay.addEventListener('mousedown', menuState.overlayClickHandler);
+    overlay.addEventListener('click', menuState.overlayClickHandler);
+    document.addEventListener('keydown', menuState.escHandler);
+    host.addEventListener('mousedown', menuState.modalClickHandler);
+    host.addEventListener('click', menuState.modalClickHandler);
+
+    openRowContextMenu = menuState;
+
+    debugContextMenu('mounted', {
+      roomId,
+      mountedIn: 'teleporter-dialog',
+      menuRect: {
+        x: Math.round(menu.getBoundingClientRect().x),
+        y: Math.round(menu.getBoundingClientRect().y),
+        w: Math.round(menu.getBoundingClientRect().width),
+        h: Math.round(menu.getBoundingClientRect().height),
+      },
+    });
+  }
+
+  function bindRowContextMenu(tr, roomId) {
+    if (!roomId || tr.getAttribute(ROW_CONTEXT_BOUND_ATTR) === 'true') return;
+
+    const onContextMenu = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      debugContextMenu('row contextmenu', { roomId, x: event.clientX, y: event.clientY });
+      showRowContextMenu(event.clientX, event.clientY, roomId);
+    };
+
+    tr.addEventListener('contextmenu', onContextMenu);
+    rowContextHandlers.set(tr, onContextMenu);
+    tr.setAttribute(ROW_CONTEXT_BOUND_ATTR, 'true');
+  }
+
+  function teardownRowContextMenu(tr) {
+    const handler = rowContextHandlers.get(tr);
+    if (handler) {
+      tr.removeEventListener('contextmenu', handler);
+      rowContextHandlers.delete(tr);
+    }
+    tr.removeAttribute(ROW_CONTEXT_BOUND_ATTR);
   }
 
   // ============================================================================
   // 7. MODAL PROCESSING
   // ============================================================================
 
+  function revertTeleporterTitle(dialog) {
+    const titleEl = getTeleporterTitleElement(dialog);
+    if (!titleEl?.hasAttribute(ORIGINAL_TITLE_ATTR)) return;
+    titleEl.textContent = titleEl.getAttribute(ORIGINAL_TITLE_ATTR);
+    titleEl.removeAttribute(ORIGINAL_TITLE_ATTR);
+    titleEl.removeAttribute(ENHANCED_ATTR);
+    titleEl.style.removeProperty('color');
+  }
+
   function enhanceTeleporterTitle(dialog) {
-    const titleEl = dialog.querySelector('h2.widget-top-text p, .widget-top.widget-top-text p');
-    if (!titleEl) return false;
-    if (titleEl.getAttribute(ENHANCED_ATTR) === 'true') return true;
+    const titleEl = getTeleporterTitleElement(dialog);
+    if (!titleEl || titleEl.getAttribute(ENHANCED_ATTR) === 'true') return;
 
     const current = titleEl.textContent.trim();
     const activatedTitle = getActivatedTitle();
     if (current === activatedTitle) {
       titleEl.setAttribute(ENHANCED_ATTR, 'true');
-      return true;
+      return;
     }
 
     if (!titleEl.hasAttribute(ORIGINAL_TITLE_ATTR)) {
@@ -1485,10 +2968,22 @@
     titleEl.textContent = activatedTitle;
     titleEl.style.color = ACTIVATED_TITLE_COLOR;
     titleEl.setAttribute(ENHANCED_ATTR, 'true');
-    return true;
+  }
+
+  function revertMisTaggedTeleporterDialogs() {
+    for (const dialog of document.querySelectorAll(`div[role="dialog"][${TARGET_ATTR}], div[role="dialog"][${LAYOUT_ENHANCED_ATTR}]`)) {
+      if (matchesTeleporterForLayout(dialog)) continue;
+      teardownTeleporterDialogEnhancements(dialog);
+
+      const titleEl = getTeleporterTitleElement(dialog);
+      if (!titleEl?.hasAttribute(ORIGINAL_TITLE_ATTR)) continue;
+      if (NATIVE_TELEPORTER_TITLES.has(titleEl.getAttribute(ORIGINAL_TITLE_ATTR))) continue;
+      revertTeleporterTitle(dialog);
+    }
   }
 
   function processTeleporterModals() {
+    revertMisTaggedTeleporterDialogs();
     const dialogs = findTeleporterDialogs();
     if (dialogs.length === 0) {
       clearModalLayoutCleanup();
@@ -1496,24 +2991,46 @@
     }
 
     for (const dialog of dialogs) {
-      dialog.setAttribute(TARGET_ATTR, '');
-      applyTeleporterModalLayout(dialog);
-      setupTeleporterModalLayout(dialog);
-      enhanceTeleporterTitle(dialog);
-      ensureTeleporterFilters(dialog);
-      enhanceTeleporterTable(dialog);
+      if (isTeleporterProcessingComplete(dialog)) continue;
+
+      markAndEnhanceTeleporterDialog(dialog);
+      if (matchesTeleporterContent(dialog)) {
+        enhanceTeleporterTable(dialog);
+      }
     }
   }
 
   function onDocumentMutation(mutations) {
     if (suppressMutations) return;
 
+    let shouldSchedule = false;
+
     for (const mutation of mutations) {
+      if (mutation.type === 'attributes' && mutation.target instanceof Element) {
+        if (mutation.target.matches('div[role="dialog"]') && mutation.attributeName === 'data-state') {
+          handleTeleporterDialogStateChange(mutation.target);
+          shouldSchedule = mutation.target.getAttribute('data-state') !== 'closed';
+        }
+        continue;
+      }
+
       for (const node of mutation.addedNodes) {
+        if (!(node instanceof Element)) continue;
+
+        const hostDialog = node.closest?.('div[role="dialog"]');
+        if (hostDialog?.hasAttribute(TARGET_ATTR)) {
+          if (!isTeleporterProcessingComplete(hostDialog)) {
+            shouldSchedule = true;
+          }
+          continue;
+        }
+
         scanNodeForTeleporter(node);
+        shouldSchedule = true;
       }
     }
-    processTeleporterModals();
+
+    if (shouldSchedule) scheduleProcessTeleporterModals();
   }
 
   // ============================================================================
@@ -1522,15 +3039,17 @@
 
   function initialize() {
     if (observer) return;
+    resetSessionPreferences();
     injectLayoutStyles();
     injectTableStyles();
+    revertMisTaggedTeleporterDialogs();
     tryBuildIndex();
     observer = new MutationObserver(onDocumentMutation);
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-state', 'colspan', 'placeholder'],
+      attributeFilter: ['data-state'],
     });
     processTeleporterModals();
     console.log('[Better Teleporter] initialized');
@@ -1542,6 +3061,11 @@
       buildRetryTimer = null;
     }
 
+    closeRowContextMenu();
+    if (processModalsRaf != null) {
+      cancelAnimationFrame(processModalsRaf);
+      processModalsRaf = null;
+    }
     clearModalLayoutCleanup();
     observer?.disconnect();
     observer = null;
@@ -1549,20 +3073,15 @@
     roomBoardMetaCache.clear();
 
     for (const dialog of document.querySelectorAll(`div[role="dialog"][${TARGET_ATTR}], div[role="dialog"][${LAYOUT_ENHANCED_ATTR}]`)) {
-      teardownTeleporterFilters(dialog);
-      revertTeleporterModalLayout(dialog);
+      teardownTeleporterTableEnhancements(dialog);
+      teardownTeleporterDialogEnhancements(dialog);
     }
 
-    document.getElementById(STYLE_ID)?.remove();
-    document.getElementById(TABLE_STYLE_ID)?.remove();
+    resetSessionPreferences();
 
-    for (const titleEl of document.querySelectorAll(`p[${ENHANCED_ATTR}="true"]`)) {
-      const dialog = titleEl.closest('div[role="dialog"]');
-      if (!dialog || !matchesTeleporterContent(dialog)) continue;
-      titleEl.textContent = titleEl.getAttribute(ORIGINAL_TITLE_ATTR) || titleEl.textContent;
-      titleEl.removeAttribute(ORIGINAL_TITLE_ATTR);
-      titleEl.style.removeProperty('color');
-      titleEl.removeAttribute(ENHANCED_ATTR);
+    for (const dialog of document.querySelectorAll('div[role="dialog"]')) {
+      if (!matchesTeleporterForLayout(dialog) && !dialog.hasAttribute(TARGET_ATTR)) continue;
+      revertTeleporterTitle(dialog);
     }
 
     for (const td of document.querySelectorAll(`td[${XP_STAM_ATTR}]`)) td.remove();
@@ -1574,19 +3093,12 @@
       regionCell.removeAttribute(REGION_ENHANCED_ATTR);
     }
 
-    for (const tr of document.querySelectorAll(`tr[${ROW_ENHANCED_ATTR}]`)) {
-      clearRoomRowAccent(tr);
-      tr.removeAttribute(ROW_ENHANCED_ATTR);
-    }
-
     for (const tr of document.querySelectorAll(`tr[${REGION_HEADER_ATTR}]`)) {
       tr.removeAttribute(REGION_HEADER_ATTR);
     }
 
-    for (const table of document.querySelectorAll(`table[${TABLE_ENHANCED_ATTR}], table[${SORT_BOUND_ATTR}]`)) {
-      teardownSortableHeaders(table);
-      table.removeAttribute(TABLE_ENHANCED_ATTR);
-    }
+    document.getElementById(STYLE_ID)?.remove();
+    document.getElementById(TABLE_STYLE_ID)?.remove();
 
     console.log('[Better Teleporter] cleaned up');
   }
@@ -1595,6 +3107,5 @@
 
   exports = {
     cleanup,
-    refresh: processTeleporterModals,
   };
 })();

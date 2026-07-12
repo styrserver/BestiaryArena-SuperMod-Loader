@@ -373,6 +373,63 @@ function getRegionsInOrder() {
   return out;
 }
 
+/**
+ * Canonical teleporter table row keys: region headers then rooms per buildMapOrderIndex().
+ * Keys match Better Teleporter snapshot format: `region:<id>` and `room:<mapId>`.
+ * @returns {string[]}
+ */
+function getCanonicalTableRowOrder() {
+  const state = globalThis.state || window.state;
+  const regions = state?.utils?.REGIONS;
+  if (!Array.isArray(regions) || !regions.length) return [];
+
+  const regionById = new Map();
+  for (const region of regions) {
+    if (region?.id) regionById.set(region.id, region);
+  }
+
+  const orderedRegionIds = [];
+  const seenRegionIds = new Set();
+  for (const region of getRegionsInOrder()) {
+    const id = region?.id;
+    if (!id || seenRegionIds.has(id)) continue;
+    seenRegionIds.add(id);
+    orderedRegionIds.push(id);
+  }
+  for (const region of regions) {
+    const id = region?.id;
+    if (!id || seenRegionIds.has(id)) continue;
+    seenRegionIds.add(id);
+    orderedRegionIds.push(id);
+  }
+
+  const keys = [];
+  const placedRooms = new Set();
+
+  for (const regionId of orderedRegionIds) {
+    keys.push(`region:${regionId}`);
+    const rooms = regionById.get(regionId)?.rooms;
+    if (!Array.isArray(rooms)) continue;
+    for (const room of rooms) {
+      const mapId = room?.id;
+      if (!mapId || placedRooms.has(mapId)) continue;
+      keys.push(`room:${mapId}`);
+      placedRooms.add(mapId);
+    }
+  }
+
+  const allMaps = getAllMaps();
+  const roomList = Array.isArray(allMaps) ? allMaps : Object.values(allMaps || {});
+  for (const room of roomList) {
+    const mapId = room?.id;
+    if (!mapId || placedRooms.has(mapId)) continue;
+    keys.push(`room:${mapId}`);
+    placedRooms.add(mapId);
+  }
+
+  return keys;
+}
+
 // Build the database dynamically
 const mapsDatabase = buildMapsDatabase();
 
@@ -388,6 +445,7 @@ mapsDatabase.isRaid = isRaid;
 mapsDatabase.isMapRaidComprehensive = isMapRaidComprehensive;
 mapsDatabase.isDynamicEventMap = isDynamicEventMap;
 mapsDatabase.getRegionsInOrder = getRegionsInOrder;
+mapsDatabase.getCanonicalTableRowOrder = getCanonicalTableRowOrder;
 mapsDatabase.buildMapOrderIndex = buildMapOrderIndex;
 mapsDatabase.getMapOrderIndex = getMapOrderIndex;
 mapsDatabase.compareMapsByGameOrder = compareMapsByGameOrder;

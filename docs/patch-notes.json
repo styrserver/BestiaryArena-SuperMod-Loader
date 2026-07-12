@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.5.1",
+      "changes": [
+        {
+          "mod": "Better Teleporter",
+          "type": "fixed",
+          "text": "Modal now resizes to 750×550 on the first frame when opened instead of waiting ~500ms for the search input placeholder; centering is preserved after width changes and the open animation is suppressed as soon as the teleporter structure appears. Title-only detection avoids enhancing Cyclopedia and other mod dialogs. Mutation observer no longer causes tab freezes from layout/sort re-entry loops. Context menu clicks work reliably (menu mounted inside the teleporter dialog) and the menu stays at 200px wide instead of inheriting the 750px dialog child rule. Row highlight syncs to your current map after sort/filter DOM changes so the first map (e.g. Sewers) no longer stays falsely selected. Reset fully clears native text search, region filter, hide raids, and column sort—including when the search box is already empty but filtered rows remain—and waits for all maps to return before restoring canonical region/map order from maps-database.js (fixes scrambled grouping after search + sort + reset). Clearing column sort restores native region headers instead of leaving them clustered with globally sorted rooms. Toggling Hide raids & events off while XP/Stam sort is still active re-shows raid and event rows that stayed hidden."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "added",
+          "text": "Right-click a map row to open a Cyclopedia context menu with the map name and every creature/equipment on that board as separate entries. Map (red), creature (green), and equipment (blue) use in-game frame button styling with separators between sections; each opens Maps, Bestiary, or Arsenal for that entry. Reset button clears region filter, hide raids, search, and column sort. Sort and filter preferences persist when you close and reopen the teleporter in the same session (defaults on mod init). Localized in en-US.json and pt-BR.json."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "changed",
+          "text": "Equipment hover tooltips now show the item name only (tier and stat removed). Region filter dropdown min-width reduced from 140px to 120px. Map column width increased to 180px (from 69px/130px responsive)."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "fixed",
+          "text": "Home tab loading state (\"Loading Cyclopedia...\") is now centered in the modal content area instead of sitting at the top-left."
+        }
+      ]
+    },
+    {
       "version": "4.5.0",
       "changes": [
         {
