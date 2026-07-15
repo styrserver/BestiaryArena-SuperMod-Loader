@@ -325,11 +325,82 @@ function setupQuestsModalResponsiveLayout(modalRef, contentRoot, maxWidth, maxHe
 const KING_GUILD_COIN_REWARD = 50;
 
 // Toast duration constants (in milliseconds)
-const TOAST_DURATION_DEFAULT = 5000;      // 5 seconds - general notifications
-const TOAST_DURATION_IMPORTANT = 10000;   // 10 seconds - important quest milestones
+const TOAST_DURATION_DEFAULT = 5000; // fallback when variant is unknown
 
-// NPC chat: delay (ms) before showing response after player types. Used by all NPCs (Costello, Wyda, Al Dee, King Tibianus).
+const TOAST_VARIANT_COLORS = {
+  nothing: '#b0b0b0',   // grey — empty, not found, missing
+  quest: '#6ee07a',     // green — new quest discovered / accepted
+  found: '#7eb8ff',     // blue — found or received something
+  completed: '#e8c060', // gold — mission, task, or seal completed
+  warning: '#ffb070',   // orange — blocked, error, danger
+  info: '#c8c8ff'       // lavender — travel, toggles, hints, battle status
+};
+
+const TOAST_VARIANT_DURATIONS = {
+  nothing: 2000,   // shortest — found nothing, not found, missing
+  info: 3000,      // travel, toggles, battle status
+  warning: 4000,   // blocked, errors
+  found: 5000,     // received/found items
+  quest: 8000,     // new quest discovered/accepted
+  completed: 10000 // longest — mission/task/seal completed
+};
+
+const TOAST_MESSAGES = {
+  questDiscovered: (title) => `New quest discovered: ${title}`,
+  questAccepted: (title) => `New quest: ${title}`,
+  questCompleted: (title) => `Mission completed: ${title}`,
+  questCompletedWithCoins: (title, coins) => `Mission completed: ${title}. Received ${coins} guild coins!`,
+  taskCompletedWithCoins: (title, coins) => `The ${title} task is complete. Received ${coins} guild coins!`,
+  itemReceived: (name) => `Received ${name}!`,
+  deliveredTo: (recipient) => `Delivered to ${recipient}!`,
+  returnedTo: (recipient) => `Returned to ${recipient}!`,
+  diaryReturned: 'Castello\'s diary has been returned.',
+  sealCompleted: (ordinal) => `${ordinal} seal completed`,
+  copperKeyFound: 'Found Copper Key!',
+  mapReceived: 'Received Map!',
+  navigatedToMines: 'Navigated to the mines!',
+  kingTookCoin: 'King Tibianus took your coin!',
+  frightenedHole: 'You feel frightened and unprepared to go down the hole.',
+  fishingEnabled: 'Fishing enabled!',
+  fishingDisabled: 'Fishing disabled!',
+  shovelEnabled: 'Shovel enabled!',
+  shovelDisabled: 'Shovel disabled!',
+  minedOre: 'You mined some ore!',
+  travelingAbDendriel: 'Traveling to Ab\'Dendriel Hive...',
+  teleportedAlDee: 'Teleported to Al Dee!',
+  teleportAlDeeFailed: 'Failed to teleport to Al Dee',
+  bansheeLastRoomNotFound: 'Banshee\'s Last Room not found.',
+  travelingBansheeLastRoom: 'Traveling to Banshee\'s Last Room...',
+  bansheeLastRoomBattleHere: 'Banshee\'s Last Room battle starting here.',
+  spiderLairNotFound: 'Spider Lair not found.',
+  enteringSpiderLair: 'Entering Old Widow\'s Lair...',
+  spiderLairBattleHere: 'Spider Lair battle starting here.',
+  putridChamberNotStrongEnough: 'You are not strong enough.',
+  travelingPutridChamber: 'The floor gives way — you are pulled into the Putrid Chamber!',
+  fishingFoundAxe: 'You found a Small Axe with your Magnet!',
+  fishingFoundNothingMagnet: 'You found nothing. Maybe a magnet would help?',
+  fishingFoundNothing: 'You found nothing.',
+  fishingMagnetHint: 'Seems as a magnet will help here.',
+  fishingError: 'Something went wrong while fishing.',
+  desertDigNothing: 'You dig in the sand but find nothing.',
+  desertDigSandsEmpty: 'The sands feel empty.',
+  desertDigNeedMission: 'The sands yield nothing. Perhaps the king knows what to seek here.',
+  missingDestroyFieldRune: 'You are missing a Destroy Field Rune.',
+  alreadyHaveDestroyFieldRune: 'You already carry a destroy field rune.'
+};
+
+const BATTLE_TOAST_LOG = {
+  mornenion: '[Quests Mod][Mornenion]',
+  bansheeLastRoom: '[Quests Mod][Banshee Last Room]',
+  spiderLair: '[Quests Mod][Spider Lair]',
+  putridChamber: '[Quests Mod][Putrid Chamber]'
+};
+
+// NPC chat: 1s before a single-line reply; 2s before each line of a multi-line reply.
 const NPC_CHAT_RESPONSE_DELAY_MS = 1000;
+const NPC_CHAT_MULTI_LINE_DELAY_MS = 2000;
+// Delay (ms) after the final farewell line before closing an NPC chat modal.
+const NPC_MODAL_CLOSE_DELAY_MS = 1000;
 
 // Mornenion quest messages
 const MORNENION_DEFEATED_MESSAGE = 'The cave entrance is sealed. Mornenion has been defeated.';
@@ -360,6 +431,112 @@ const MINING_CONFIG = {
   ANIMATION_SIZE: 64,
   ANIMATION_DURATION: 500 // milliseconds
 };
+
+const DESERT_DIGGING_CONFIG = {
+  TARGET_MAP: 'Darama Oasis',
+  DESERT_SPRITE_ID: '231',
+  SCARAB_COIN_TILE: 46,
+  POOF_EFFECT_URL: 'https://bestiaryarena.com/assets/EFFECT/3.png',
+  POOF_FRAME_COUNT: 7,
+  POOF_FRAME_MS: 60
+};
+
+const LOOT_EFFECT_CONFIG = {
+  filename: 'Loot_Effect.gif',
+  size: 48,
+  durationMs: 1000
+};
+
+const MEETING_WITH_TESHA_MISSION = {
+  id: 'meeting_with_tesha',
+  title: 'Meeting with Tesha',
+  hidden: true,
+  objectiveLine1: 'Show the scarab coin to Tesha in Darama Oasis.',
+  objectiveLine2: 'Speak with Tesha about the scarab coin.',
+  hint: 'Tesha is rumoured to know the meaning of scarab coins.',
+  askForCoin: 'Have you brought me a scarab coin from the desert? Show it to me if you have one.',
+  noCoin: 'You do not have a scarab coin with you.',
+  alreadyCompleted: 'You have already shown me a scarab coin. May enlightenment guide you, Player.',
+  rewardCoins: 100,
+  completeLines: [
+    'A scarab coin from the desert sands! The priests say they are sacred beings, although ... <whispers>I find them scary!',
+    'They are not mere curios — these coins are offerings for the tomb warps. The priests use them to open the paths to ascension.',
+    'Thank you for bringing it to me, Player. I shall keep it safe.'
+  ],
+  completeCoinLine: 'Here are {coins} guild coins for your trouble, Player.'
+};
+
+const SERPENTINE_TOWER_MISSION = {
+  id: 'serpentine_tower',
+  title: 'Serpentine Tower Quest',
+  requiresMeetingWithTesha: 'First bring me the scarab coin from the desert sands. Then we may speak of other matters.',
+  prompt: 'There is a matter I would ask of you, Player. Beneath the Serpentine Tower, in the basement, there is a lever. I need someone to go and use it — but be prepared for danger. Will you undertake this task?',
+  accept: 'Descend to the Serpentine Tower basement and use the lever. Be warned — great peril awaits those who are not ready.',
+  answerYesNo: 'Answer yes or no: will you undertake this task?',
+  alreadyActive: 'You have already accepted this task. Go to the Serpentine Tower basement and use the lever — but be prepared for danger.',
+  alreadyCompleted: 'You have already braved what lies beneath the Serpentine Tower. My thanks.',
+  putridChamberReturnObjective: 'Return to Tesha in Darama Oasis to receive your reward.',
+  putridChamberVictoryToast: 'You survived the Putrid Chamber. Return to Tesha in Darama Oasis.',
+  teshaRewardLines: [
+    'You have braved the Putrid Chamber. Take this Scorpion Sceptre — may it serve you well, Player.',
+    'A hermit near Carlin might be able to tell you more about it.'
+  ],
+  destroyFieldRuneHint: 'The destroy field rune you seek lies upon the corpse of a magic elf, Player.',
+  destroyFieldRuneAlreadyHave: 'You already carry the destroy field rune, Player. Use it upon the energy fields that block your path.',
+  objectiveLine1: 'Find the Serpentine Tower basement.',
+  objectiveLine2: 'Use the lever and be prepared for danger.',
+  hint: 'Tesha spoke of a lever in the Serpentine Tower basement.'
+};
+
+const SCARAB_COIN_CONFIG = {
+  productName: 'Scarab Coin',
+  icon: 'Scarab_Coin.gif',
+  description: 'You see a scarab coin.',
+  rarity: 3,
+  maxCount: 1
+};
+
+const TESHA_TILE_INDEX = 157;
+const TESHA_ARROW_CLASS = 'quests-tesha-arrow';
+
+const SERPENTINE_TOWER_BASEMENT_ROOM_NAME = 'Serpentine Tower Basement';
+const DESTROY_FIELD_RUNE_ITEM_NAME = 'Destroy Field Rune';
+const DESTROY_FIELD_RUNE_CONFIG = {
+  productName: DESTROY_FIELD_RUNE_ITEM_NAME,
+  icon: 'Destroy_Field_Rune.gif',
+  description: 'You see a destroy field rune ("adito grav").',
+  rarity: 3,
+  maxCount: 1
+};
+const SCORPION_SCEPTRE_CONFIG = {
+  productName: 'Scorpion Sceptre',
+  icon: 'Scorpion_Sceptre.gif',
+  description: 'A hermit near Carlin might be able to tell you more about it.',
+  rarity: 5,
+  maxCount: 1
+};
+const SERPENTINE_FIELD_SPRITE_ID = 2122;
+const SERPENTINE_FIELD_SPRITE_SELECTOR = `.sprite.item.relative.id-${SERPENTINE_FIELD_SPRITE_ID}`;
+const SERPENTINE_RUNE_PICKUP_SPRITE_IDS = [6011, 2886];
+const SERPENTINE_LEVER_TILE = 64;
+const SERPENTINE_LEVER_SPRITE = { from: '2772', to: '2773' };
+const PUTRID_CHAMBER_ROOM_NAME = 'Putrid Chamber';
+const PUTRID_CHAMBER_BACKGROUND_SCENE_ID = 'background-scene';
+const PUTRID_CHAMBER_FLOOR_BELOW_SPRITE_IDS = [4680, 4683, 4684, 4686, 4687, 4688, 4689, 4690, 4738, 4739, 4740, 4743, 4744];
+const PUTRID_CHAMBER_FLOOR_BELOW_REPLACEMENT_SPRITE_ID = 838;
+const PUTRID_CHAMBER_FLOOR_BELOW_4394_REPLACEMENT_SPRITE_ID = 410;
+const PUTRID_CHAMBER_SPRITE_2127_REPLACEMENT_ID = 2137;
+const PUTRID_CHAMBER_SCENE_SPRITE_REPLACEMENTS = {
+  rootId: PUTRID_CHAMBER_BACKGROUND_SCENE_ID,
+  rules: [
+    { sourceIds: PUTRID_CHAMBER_FLOOR_BELOW_SPRITE_IDS, replacementId: PUTRID_CHAMBER_FLOOR_BELOW_REPLACEMENT_SPRITE_ID, scope: 'background' },
+    { sourceIdRange: { from: 4394, to: 4410 }, replacementId: PUTRID_CHAMBER_FLOOR_BELOW_4394_REPLACEMENT_SPRITE_ID, scope: 'tile' },
+    { sourceIds: [2127], replacementId: PUTRID_CHAMBER_SPRITE_2127_REPLACEMENT_ID, makeRelative: true, scope: 'tile' }
+  ]
+};
+const SERPENTINE_LEVER_WARP_NAV_DELAY_MS = 200;
+const PUTRID_CHAMBER_VILLAIN_SETUP_ATTEMPT_DELAYS_MS = [0, 100, 250];
+const PUTRID_CHAMBER_SCENE_SPRITE_ATTEMPT_DELAYS_MS = [0, 100, 250, 500, 800, 1200];
 
 const KING_COPPER_KEY_MISSION = {
   id: 'king_copper_key',
@@ -432,6 +609,23 @@ const KING_MONKS_STUDY_MISSION = {
   objectiveLine2: 'Search for Costello within the monastery.',
   hint: 'The White Raven Monastery lies somewhere beyond the realm. Look for Costello there.',
   rewardCoins: KING_GUILD_COIN_REWARD
+};
+
+const KING_SCARAB_COIN_MISSION = {
+  id: 'king_scarab_coin',
+  title: 'Lost in the Sands',
+  prompt: 'Rumour speaks of a lost valuable buried somewhere in the desert sands of Darama. Journey to the oasis and search the dunes — will you undertake this hunt?',
+  accept: 'Search the desert sands of Darama Oasis for the lost valuable. Dig where the lone sand tiles lie.',
+  askForCoin: 'Have you found the lost valuable in the desert?',
+  complete: 'Splendid! You unearthed what was lost in the sands. Seek out Tesha in the oasis — she may know its worth.',
+  missingCoin: 'You claim yes but carry nothing from the sands. Return when you have dug up the valuable.',
+  keepSearching: 'Then keep searching the desert and return when you find it.',
+  answerYesNo: 'Answer yes or no: have you found the lost valuable?',
+  alreadyCompleted: 'You have already recovered what was lost in the sands. Seek Tesha in Darama Oasis if you have not yet shown it to her.',
+  alreadyActive: 'You are already searching the desert sands of Darama Oasis for the lost valuable.',
+  objectiveLine1: 'Search the desert sands of Darama Oasis for a lost valuable.',
+  hint: 'Lore tells that the valuable was lost while fighting where the stairs are that lead to Port Hope.',
+  rewardCoins: 0
 };
 
 const AL_DEE_FISHING_MISSION = {
@@ -801,6 +995,69 @@ const WYDA_RESPONSES = {
   'goodbye': ['Good luck on your journeys.', "NO! Don't go! I need someone to entertain me!"]
 };
 
+const TESHA_RESPONSES = {
+  "akh'rah uthun": 'I don\'t really understand this concept, but from what I know it is the three components that make up every being.',
+  'akh rah uthun': 'I don\'t really understand this concept, but from what I know it is the three components that make up every being.',
+  'oldpharaoh': 'This poor man could not comprehend his son\'s wisdom. Perhaps he has spelled his own eternal doom.',
+  'ab\'dendriel': 'Most elves lack the sincerity to strive for ascension. At least that\'s what the priests are telling us.',
+  'false gods': 'These greedy beings are trying to devour us all. May the pharaoh thwart their evil plans and free us from their reign of terror!',
+  'ankrahmun': 'This city is both a refuge and centre of learning for the believers of the true faith taught by his divine majesty the pharaoh.',
+  'kazordoon': 'Dwarves have a strong Akh. This makes them arrogant and deaf to the true creed.',
+  'darashia': 'Those poor souls there might still be saved if only they listened.',
+  'daraman': 'He was a great man. If he had left his mortal existence behind he might have become one of the greatest prophets of the true faith, second only to the pharaoh himself.',
+  'mortality': 'Mortality can be overcome. It is a sickness, but it can be cured through undeath.',
+  'ascension': 'Oh, I am not asking for much, you know. I mean, I really don\'t have to be a god or something. All I wish for is a bit of the wisdom that comes with ascension.',
+  'pharaoh': [
+    'He is the benevolent father of this nation. Blessed be our saviour.',
+    'The pharaoh has such amazing patience with us puny mortals. He is truly a caring father of this nation.'
+  ],
+  'dwarves': 'Dwarves have a strong Akh. This makes them arrogant and deaf to the true creed.',
+  'dwarfes': 'Dwarves have a strong Akh. This makes them arrogant and deaf to the true creed.',
+  'carlin': 'Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.',
+  'thais': 'Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.',
+  'edron': 'Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.',
+  'venore': 'Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.',
+  'scarab': 'The priests say they are sacred beings, although ... <whispers>I find them scary!',
+  'chosen': 'I can only hope my humble work for our community and for the temple will make me worthy one day to be elevated to the rank of a chosen one. One to whom the path of ascension is opened up through undeath.',
+  'temple': 'The temple can offer us guidance and solace in our mortal existence.',
+  'palace': 'Isn\'t the palace magnificent to behold? It is so impressive!',
+  'undead': 'Undeath is the reward for a life of faith and service.',
+  'darama': 'In the desert the lines of life and death are clearly drawn. Because of this it is easier for us, its children, to focus on them. In the jungle those lines are fuzzy and blurred, and people easily fall victim to temptation.',
+  'tibia': 'The world is so huge, and I have seen so little. Perhaps if I am chosen one day I will travel and see it all.',
+  'elfes': 'Most elves lack the sincerity to strive for ascension. At least that\'s what the priests are telling us.',
+  'elves': 'Most elves lack the sincerity to strive for ascension. At least that\'s what the priests are telling us.',
+  'pearl': 'There are white and black pearls you can buy or sell, as well as giant green and brown pearls which you can sell.',
+  'jewel': 'Currently you can purchase wedding rings, golden amulets, and ruby necklaces. We also buy gold ingots.',
+  'arena': 'Look for it in the eastern part of the city.',
+  'mourn': 'The dead mourn our tempted existence, and we mourn ourselves.',
+  'talon': 'We don\'t trade with them.',
+  'uthun': 'The Uthun is all we learned in life.',
+  'goodbye': 'May enlightenment be your path, Player.',
+  'hello': 'Be mourned pilgrim in flesh, Player. Welcome to the bank and jewel store.',
+  'name': 'I am the mourned Tesha.',
+  'time': 'Time is yet another burden that lies heavy on our mortal bodies.',
+  'tesha': 'I am the mourned Tesha.',
+  'bye': 'May enlightenment be your path, Player.',
+  'gem': 'You can buy and sell small diamonds, sapphires, rubies, emeralds and amethysts or sell topazes.',
+  'job': 'I sell and buy scarab coins, gems and jewelry. Also I can take care of your bank business.',
+  'rah': 'The Rah is our essence. The spiritual bond that keep the other parts of the Akh\'rah Uthun together.',
+  'akh': 'Our body. The only physical part of the Akh\'rah Uthun.',
+  'hi': 'Be mourned pilgrim in flesh, Player. Welcome to the bank and jewel store.'
+};
+
+function getTeshaResponse(message, playerName = 'Player') {
+  const lowerMessage = message.toLowerCase().trim();
+  const sortedKeys = Object.keys(TESHA_RESPONSES).sort((a, b) => b.length - a.length);
+  for (const keyword of sortedKeys) {
+    if (lowerMessage.includes(keyword)) {
+      const response = TESHA_RESPONSES[keyword];
+      const lines = Array.isArray(response) ? response : [response];
+      return lines.map(line => line.replace(/Player/g, playerName));
+    }
+  }
+  return ['I don\'t understand. Ask me about gems, jewels, scarab coins, or the pharaoh.'];
+}
+
 function getWydaResponse(message, playerName = 'Player') {
   const lowerMessage = message.toLowerCase().trim();
   const sortedKeys = Object.keys(WYDA_RESPONSES).sort((a, b) => b.length - a.length);
@@ -874,6 +1131,15 @@ function getAlDeeResponse(message, playerName = 'Player') {
   // Default response if no match found - also replace Player with actual name
   let defaultResponse = 'Hello, hello, Player! Please come in, look, and buy! I\'m a specialist for all sorts of tools. Just ask me for a trade to see my offers!';
   return defaultResponse.replace(/Player/g, playerName);
+}
+
+function isNpcFarewellMessage(message) {
+  const lower = String(message ?? '').toLowerCase().trim();
+  if (!lower) return false;
+  if (lower.includes('goodbye') || lower.includes('good bye') || lower.includes('farewell') || lower.includes('see you')) {
+    return true;
+  }
+  return /\bbye\b/.test(lower);
 }
 
 // =======================
@@ -961,58 +1227,71 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 /**
  * Creates a reusable cooldown manager for NPC conversations.
  * Prevents multiple rapid messages from causing multiple responses.
- * @param {number} cooldownMs - Cooldown delay in milliseconds (default: 1000)
+ * Multi-line replies use NPC_CHAT_MULTI_LINE_DELAY_MS between each line; single lines use NPC_CHAT_RESPONSE_DELAY_MS.
  * @returns {Object} Cooldown manager with methods to handle message responses
  */
-function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
-  let pendingResponseTimeout = null;
+function createNPCCooldownManager() {
+  let pendingResponseTimeouts = [];
   let latestMessage = null;
+
+  function clearAllPendingTimeouts() {
+    pendingResponseTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+    pendingResponseTimeouts = [];
+  }
 
   return {
     /**
-     * Clears any pending response timeout (call when a new message arrives)
+     * Clears any pending response timeouts (call when a new message arrives)
      */
     clearPendingResponse() {
-      if (pendingResponseTimeout) {
-        clearTimeout(pendingResponseTimeout);
-        pendingResponseTimeout = null;
-      }
+      clearAllPendingTimeouts();
     },
 
     /**
      * Queues an NPC response with cooldown protection.
-     * Only responds if this is still the latest message after the cooldown period.
+     * Accepts a single line or an array. Single-line replies wait 1s; multi-line replies wait 1s for the first line, then 2s between each following line.
+     * Only responds if this is still the latest message when each line is due.
      * @param {string} messageText - The original player message text
-     * @param {string} responseText - The NPC's response text
+     * @param {string|string[]} responseText - One or more NPC response lines
      * @param {Function} addMessageCallback - Function to add message to conversation (npcName, text, isNPC)
      * @param {string} npcName - Name of the NPC
-     * @param {Function} [onResponseCallback] - Optional callback to execute after response is shown
+     * @param {Function} [onResponseCallback] - Optional callback after the final line is shown
      */
     queueResponse(messageText, responseText, addMessageCallback, npcName, onResponseCallback = null) {
-      // Clear any pending response
       this.clearPendingResponse();
 
-      // Store the latest message
+      const lines = Array.isArray(responseText) ? responseText : [responseText];
+      if (lines.length === 0) return;
+
       latestMessage = {
         text: messageText,
-        response: responseText
+        lines
       };
 
-      // Set timeout for response
-      pendingResponseTimeout = setTimeout(() => {
-        // Only respond if this is still the latest message
-        if (latestMessage && latestMessage.text === messageText) {
-          addMessageCallback(npcName, latestMessage.response, true);
-          
-          // Execute optional callback (e.g., for closing modal on "bye")
-          if (onResponseCallback) {
-            onResponseCallback();
+      const isMultiLine = lines.length > 1;
+
+      lines.forEach((line, index) => {
+        const delayMs = isMultiLine
+          ? NPC_CHAT_RESPONSE_DELAY_MS + index * NPC_CHAT_MULTI_LINE_DELAY_MS
+          : NPC_CHAT_RESPONSE_DELAY_MS;
+
+        const timeoutId = setTimeout(() => {
+          if (!latestMessage || latestMessage.text !== messageText) return;
+
+          addMessageCallback(npcName, line, true);
+
+          if (index === lines.length - 1) {
+            if (onResponseCallback) {
+              onResponseCallback();
+            }
+            if (latestMessage && latestMessage.text === messageText) {
+              latestMessage = null;
+            }
           }
-          
-          latestMessage = null;
-        }
-        pendingResponseTimeout = null;
-      }, cooldownMs);
+        }, delayMs);
+
+        pendingResponseTimeouts.push(timeoutId);
+      });
     },
 
     /**
@@ -1077,6 +1356,9 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     progressMotherOfAllSpiders: { accepted: false, completed: false },
     progressAlDeeFishing: { accepted: false, completed: false },
     progressAlDeeGoldenRope: { accepted: false, completed: false },
+    progressMeetingWithTesha: { accepted: false, completed: false },
+    progressScarabHunt: { accepted: false, completed: false },
+    progressSerpentineTower: { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false },
     costelloVisited: false,
     mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
     sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
@@ -1092,6 +1374,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   const miningState = {
     enabled: false,
     manuallyDisabled: false, // Track if user manually disabled mining (prevents automatic re-enabling)
+    rightClickEnabled: false,
     contextMenu: null,
     subscriptions: {
       board: null,
@@ -1108,6 +1391,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   const fishingState = {
     enabled: false,
     manuallyDisabled: false, // Track if user manually disabled fishing (prevents automatic re-enabling)
+    rightClickEnabled: false,
     contextMenu: null,
     subscriptions: {
       board: null,
@@ -1142,6 +1426,9 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   let tile83WydaRightClickEnabled = false;
   let tile83WydaContextMenu = null;
   let tile83WydaBoardSubscription = null;
+  let teshaArrowBoardSubscription = null;
+  let teshaArrowGameTimerSubscription = null;
+  let teshaArrowVisible = false;
   let sevenSealsBoardSubscription = null; // Queen Banshees: track visits to seven seals of Ghostlands
 
   // Sixth Seal (Demonrage Seal levers)
@@ -1161,18 +1448,22 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   let playerUsedPortalToBansheeLastRoom = false;
   let bansheeLastRoomBattle = null;
   let tile126PortalRightClickEnabled = false;
-  let bansheeVillainSetupDone = false; // one-time villain setup when entering Banshee's Last Room (like Mornenion)
 
   // Spider Lair (Mother of All Spiders: tile 77 in A Secluded Herb → Spider Lair custom battle)
   let playerUsedTile77ToSpiderLair = false;
   let spiderLairBattle = null;
-  let spiderLairVillainSetupDone = false;
   let spiderLairReinitTriggered = false; // avoid re-initing every tick after defeat
   // After defeat modal: allow one re-init when re-entering Spider Lair from map (tile 77 not required). Cleared on abandon or after re-init.
   let spiderLairRetryWithoutTile77 = false;
   let lastOverlayHiderRoomName = null; // track previous room so we only remove originals when entering Spider Lair via quest
   let tile77SpiderLairRightClickEnabled = false;
   let tile77SpiderLairBoardSubscription = null;
+
+  // Putrid Chamber (Serpentine Tower Quest: basement lever → custom battle)
+  let playerUsedSerpentineLeverToPutridChamber = false;
+  let putridChamberBattle = null;
+  let putridChamberReinitTriggered = false;
+  let putridChamberRetryAfterDefeat = false;
 
   // =======================
   // Quest Log System State
@@ -1553,11 +1844,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       victoryDefeat: {
         onVictory: async () => {
           await setSealCompleted(SEVENTH_SEAL, true).catch((err) => console.error('[Quests Mod][Banshee Last Room] Error saving seventh seal:', err));
-          showToast({
-            message: 'Seventh seal completed',
-            duration: TOAST_DURATION_IMPORTANT,
-            logPrefix: '[Quests Mod][Banshee Last Room]'
-          });
+          showSealCompletedToast('Seventh', BATTLE_TOAST_LOG.bansheeLastRoom);
         },
         onDefeat: () => {},
         onClose: (isVictory) => {
@@ -1709,6 +1996,361 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     return createSpiderLairBattleInstance(roomId);
   }
 
+  function buildVillainEquip(equipmentName, stat, tier) {
+    const gameId = getEquipmentGameIdByName(equipmentName);
+    if (gameId == null) return null;
+    return { gameId, stat, tier };
+  }
+
+  function buildSerpentineTowerProgress(patch = {}) {
+    const current = getMissionProgress(SERPENTINE_TOWER_MISSION);
+    return {
+      accepted: patch.accepted ?? current.accepted ?? false,
+      completed: patch.completed ?? current.completed ?? false,
+      destroyFieldRuneTaken: patch.destroyFieldRuneTaken ?? current.destroyFieldRuneTaken ?? false,
+      putridChamberComplete: patch.putridChamberComplete ?? current.putridChamberComplete ?? false
+    };
+  }
+
+  function isSerpentineTowerBasementGameplayActive() {
+    const progress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+    return !!progress?.accepted && !progress?.completed && !progress?.putridChamberComplete;
+  }
+
+  async function removeSerpentineDestroyFieldRuneFromInventory() {
+    const questItems = await getQuestItems(false);
+    const runeCount = questItems?.[DESTROY_FIELD_RUNE_CONFIG.productName] || 0;
+    if (runeCount <= 0) return false;
+
+    await consumeQuestItem(DESTROY_FIELD_RUNE_CONFIG.productName, runeCount);
+    console.log(`[Quests Mod][Serpentine Tower] Removed ${runeCount} Destroy Field Rune(s) after Putrid Chamber completion`);
+    return true;
+  }
+
+  async function finalizeSerpentineTowerAfterPutridChamber() {
+    await removeSerpentineDestroyFieldRuneFromInventory();
+
+    const progress = buildSerpentineTowerProgress({
+      accepted: true,
+      completed: false,
+      putridChamberComplete: true,
+      destroyFieldRuneTaken: false
+    });
+    setMissionProgress(SERPENTINE_TOWER_MISSION, progress);
+    kingChatState.progressSerpentineTower = { ...progress };
+
+    putridChamberRetryAfterDefeat = false;
+    resetSerpentineBasementSessionState();
+    serpentineRunePickupRightClickSystem.cleanup();
+    updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
+  }
+
+  async function markPutridChamberCompleteInFirebase() {
+    const progress = buildSerpentineTowerProgress({
+      accepted: true,
+      completed: false,
+      putridChamberComplete: true,
+      destroyFieldRuneTaken: false
+    });
+    setMissionProgress(SERPENTINE_TOWER_MISSION, progress);
+    kingChatState.progressSerpentineTower = { ...progress };
+    const playerName = getCurrentPlayerName();
+    if (playerName) {
+      await saveKingTibianusProgress(playerName, getAllMissionProgress());
+    }
+    await finalizeSerpentineTowerAfterPutridChamber();
+  }
+
+  async function completeSerpentineTowerQuestWithTeshaReward() {
+    const progress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+    if (!progress.putridChamberComplete || progress.completed) {
+      return false;
+    }
+
+    const questItems = await getQuestItems(false);
+    const hasSceptre = (questItems?.[SCORPION_SCEPTRE_CONFIG.productName] || 0) >= 1;
+    if (!hasSceptre) {
+      await addQuestItem(SCORPION_SCEPTRE_CONFIG.productName, 1);
+    }
+
+    const completedProgress = buildSerpentineTowerProgress({
+      accepted: true,
+      completed: true,
+      putridChamberComplete: true
+    });
+    setMissionProgress(SERPENTINE_TOWER_MISSION, completedProgress);
+    kingChatState.progressSerpentineTower = { ...completedProgress };
+
+    const playerName = getCurrentPlayerName();
+    if (playerName) {
+      await saveKingTibianusProgress(playerName, getAllMissionProgress());
+    }
+
+    showQuestItemNotification(SCORPION_SCEPTRE_CONFIG.productName, 1);
+    NotificationService.showQuestCompleted(SERPENTINE_TOWER_MISSION, '[Quests Mod][Tesha]', {
+      productName: SCORPION_SCEPTRE_CONFIG.productName
+    });
+    updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
+    return true;
+  }
+
+  function getPutridChamberVillains() {
+    const thalasGameId = getGameIdByCreatureName('Thalas', 1);
+    const cobraStatueGameId = getGameIdByCreatureName('Cobra Statue', 1);
+    const genesDefault = { hp: 30, ad: 30, ap: 30, armor: 30, magicResist: 30 };
+    const thalasGenes = { hp: 30, ad: 0, ap: 0, armor: 30, magicResist: 30 };
+    const steelBootsEquip = buildVillainEquip('Steel Boots', 'ap', 5);
+    const spellbookEquip = buildVillainEquip('Spellbook of Ancient Arcana', 'ap', 5);
+
+    const villains = [
+      {
+        nickname: 'Thalas',
+        keyPrefix: 'putrid-thalas-tile-20-',
+        tileIndex: 20,
+        gameId: thalasGameId,
+        shiny: true,
+        level: 200,
+        tier: 4,
+        direction: 'south',
+        genes: thalasGenes,
+        ...(steelBootsEquip && { equip: steelBootsEquip })
+      },
+      {
+        nickname: 'Thalas',
+        keyPrefix: 'putrid-thalas-tile-23-',
+        tileIndex: 23,
+        gameId: thalasGameId,
+        shiny: true,
+        level: 200,
+        tier: 4,
+        direction: 'south',
+        genes: thalasGenes,
+        ...(steelBootsEquip && { equip: steelBootsEquip })
+      },
+      {
+        nickname: 'Thalas',
+        keyPrefix: 'putrid-thalas-tile-108-',
+        tileIndex: 108,
+        gameId: thalasGameId,
+        shiny: true,
+        level: 200,
+        tier: 4,
+        direction: 'south',
+        genes: thalasGenes,
+        ...(steelBootsEquip && { equip: steelBootsEquip })
+      },
+      {
+        nickname: 'Thalas',
+        keyPrefix: 'putrid-thalas-tile-116-',
+        tileIndex: 116,
+        gameId: thalasGameId,
+        shiny: true,
+        level: 200,
+        tier: 4,
+        direction: 'south',
+        genes: thalasGenes,
+        ...(steelBootsEquip && { equip: steelBootsEquip })
+      },
+      {
+        nickname: 'Cobra Statue',
+        keyPrefix: 'putrid-cobra-statue-tile-4-',
+        tileIndex: 4,
+        gameId: cobraStatueGameId,
+        level: 100,
+        tier: 4,
+        direction: 'south',
+        genes: genesDefault,
+        ...(spellbookEquip && { equip: spellbookEquip })
+      },
+      {
+        nickname: 'Cobra Statue',
+        keyPrefix: 'putrid-cobra-statue-tile-9-',
+        tileIndex: 9,
+        gameId: cobraStatueGameId,
+        level: 100,
+        tier: 4,
+        direction: 'south',
+        genes: genesDefault,
+        ...(spellbookEquip && { equip: spellbookEquip })
+      }
+    ];
+
+    console.log('[Quests Mod][Putrid Chamber] Villains:', villains.map(v => ({
+      nickname: v.nickname,
+      tileIndex: v.tileIndex,
+      level: v.level,
+      shiny: !!v.shiny,
+      equip: v.equip || null
+    })));
+    return villains;
+  }
+
+  function createPutridChamberBattleInstance(roomId) {
+    if (!window.CustomBattles) {
+      console.error('[Quests Mod][Putrid Chamber] CustomBattles still not available');
+      return null;
+    }
+    if (!roomId) {
+      console.error('[Quests Mod][Putrid Chamber] Missing roomId for battle instance');
+      return null;
+    }
+
+    const villains = getPutridChamberVillains();
+
+    const putridConfig = {
+      name: PUTRID_CHAMBER_ROOM_NAME,
+      roomId,
+      villains,
+      allyLimit: 5,
+      preventVillainMovement: true,
+      hideVillainSprites: true,
+      sceneSpriteReplacements: PUTRID_CHAMBER_SCENE_SPRITE_REPLACEMENTS,
+      entrySetup: {
+        attemptDelays: PUTRID_CHAMBER_VILLAIN_SETUP_ATTEMPT_DELAYS_MS,
+        sceneSpriteAttemptDelays: PUTRID_CHAMBER_SCENE_SPRITE_ATTEMPT_DELAYS_MS
+      },
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerUsedSerpentineLeverToPutridChamber;
+      },
+      victoryDefeat: {
+        onVictory: async () => {
+          try {
+            await markPutridChamberCompleteInFirebase();
+            NotificationService.showImportant(
+              SERPENTINE_TOWER_MISSION.putridChamberVictoryToast,
+              BATTLE_TOAST_LOG.putridChamber
+            );
+          } catch (error) {
+            console.error('[Quests Mod][Putrid Chamber] Error saving Putrid Chamber completion:', error);
+          }
+        },
+        onDefeat: () => {},
+        onClose: (isVictory) => {
+          putridChamberRetryAfterDefeat = !isVictory;
+          cleanupPutridChamberQuest();
+          setTimeout(() => navigateToSerpentineTowerBasement(), 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: 'You survived the horrors of the Putrid Chamber. Return to Tesha in Darama Oasis.',
+        defeatMessage: 'The creatures of the Putrid Chamber were too strong.',
+        showItems: false,
+        items: []
+      }
+    };
+
+    console.log('[Quests Mod][Putrid Chamber] Creating battle instance for roomId:', roomId, 'villains:', villains.map(v => ({ nickname: v.nickname, tileIndex: v.tileIndex })));
+    return window.CustomBattles.create(putridConfig);
+  }
+
+  function initializePutridChamberBattle(roomId) {
+    if (!window.CustomBattles) {
+      console.warn('[Quests Mod][Putrid Chamber] CustomBattles not available, waiting...');
+      const scriptCheck = document.querySelector('script[src*="custom-battles.js"]');
+      if (!scriptCheck) {
+        console.error('[Quests Mod][Putrid Chamber] custom-battles.js not found');
+        return null;
+      }
+      return new Promise((resolve) => {
+        let retries = 0;
+        const maxRetries = 40;
+        const interval = setInterval(() => {
+          retries++;
+          if (window.CustomBattles) {
+            clearInterval(interval);
+            resolve(createPutridChamberBattleInstance(roomId));
+          } else if (retries >= maxRetries) {
+            clearInterval(interval);
+            resolve(null);
+          }
+        }, 50);
+      });
+    }
+    return createPutridChamberBattleInstance(roomId);
+  }
+
+  function setupPutridChamberBattleInstance(battle) {
+    if (!battle) return false;
+    putridChamberBattle = battle;
+    putridChamberBattle.setup(
+      () => playerUsedSerpentineLeverToPutridChamber,
+      NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.putridChamber)
+    );
+    putridChamberBattle.resetSandboxBattleState();
+    showCustomBattleStatusToast({ battleName: 'Thalas', allyLimit: 5, logPrefix: BATTLE_TOAST_LOG.putridChamber });
+    putridChamberBattle.scheduleEntryVillainSetup({
+      isActiveCheck: () => playerUsedSerpentineLeverToPutridChamber,
+      onComplete: () => {
+        hideQuestOverlays();
+        hideHeroEditorButton();
+        putridChamberRetryAfterDefeat = false;
+        putridChamberReinitTriggered = false;
+        putridChamberBattle.scheduleSceneSpriteReplacementsForEntry({ force: true });
+      }
+    });
+    return true;
+  }
+
+  function ensurePutridChamberBattleInitialized(roomId) {
+    if (!isSerpentineTowerBasementGameplayActive()) return false;
+    if (!playerUsedSerpentineLeverToPutridChamber || putridChamberBattle || !roomId) return false;
+
+    const initResult = initializePutridChamberBattle(roomId);
+    if (initResult && initResult.then) {
+      initResult.then((battle) => {
+        if (setupPutridChamberBattleInstance(battle)) {
+          console.log('[Quests Mod][Putrid Chamber] Battle initialized (async)');
+        } else {
+          console.error('[Quests Mod][Putrid Chamber] Failed to initialize battle after waiting');
+        }
+      }).catch((err) => console.error('[Quests Mod][Putrid Chamber] Error initializing battle:', err));
+      return true;
+    }
+    if (setupPutridChamberBattleInstance(initResult)) {
+      console.log('[Quests Mod][Putrid Chamber] Battle initialized (sync)');
+      return true;
+    }
+    console.error('[Quests Mod][Putrid Chamber] CustomBattles not available');
+    return false;
+  }
+
+  function enterPutridChamberFromSerpentineLever({ sourceTile = null } = {}) {
+    if (serpentineLeverWarpPending) return;
+    if (!isSerpentineTowerBasementGameplayActive()) {
+      console.log('[Quests Mod][Serpentine Lever] Putrid Chamber already completed — lever re-entry blocked');
+      return;
+    }
+
+    const roomId = getRoomIdByRoomName(PUTRID_CHAMBER_ROOM_NAME);
+    if (!roomId) {
+      showToast({ message: TOAST_MESSAGES.putridChamberNotStrongEnough, logPrefix: BATTLE_TOAST_LOG.putridChamber });
+      return;
+    }
+
+    const navigate = () => {
+      serpentineLeverWarpPending = false;
+      playerUsedSerpentineLeverToPutridChamber = true;
+      putridChamberReinitTriggered = false;
+      if (putridChamberBattle) {
+        putridChamberBattle.cleanup(restoreBoardSetupPutridChamber, showQuestOverlays);
+        putridChamberBattle = null;
+      }
+
+      console.log('[Quests Mod][Putrid Chamber] Serpentine lever activated — traveling to roomId:', roomId);
+      globalThis.state.board.send({ type: 'selectRoomById', roomId });
+      showToast({ message: TOAST_MESSAGES.travelingPutridChamber, logPrefix: BATTLE_TOAST_LOG.putridChamber });
+    };
+
+    if (sourceTile) {
+      serpentineLeverWarpPending = true;
+      createPoofAnimation(sourceTile);
+      setTimeout(navigate, SERPENTINE_LEVER_WARP_NAV_DELAY_MS);
+      return;
+    }
+
+    navigate();
+  }
+
   // =======================
   // Creature Placement Tracker
   // =======================
@@ -1754,7 +2396,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
           // Rescan for mining tiles if mining is enabled
           if (miningState.enabled) {
-            setTimeout(() => updateMiningState(), MINING_CONFIG.ANIMATION_DURATION);
+            setTimeout(() => updateMiningState(), FISHING_CONFIG.MAP_SWITCH_DELAY);
           }
         }
       });
@@ -1781,35 +2423,75 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   // Digging system functions
   // =======================
 
-  // Helper function to find digging tiles (tile 82 on Hedge Maze)
-  function findMiningTiles() {
-    // Only enable mining on Ab'Dendriel Hive
+  // Helper function to find digging tiles (Hedge Maze tile 82 or Darama Oasis desert tiles)
+  function getCurrentMapName() {
     const roomNames = globalThis.state?.utils?.ROOM_NAME;
     const currentRoomId = getCurrentRoomId();
-    const currentMapName = roomNames && currentRoomId ? roomNames[currentRoomId] : null;
+    return roomNames && currentRoomId ? roomNames[currentRoomId] : null;
+  }
 
-    if (currentMapName !== MINING_CONFIG.TARGET_MAP) {
-      return [];
+  function getTileItemSprites(tile) {
+    if (!tile) return [];
+    return Array.from(tile.querySelectorAll('.sprite.item.relative')).filter(sprite =>
+      [...sprite.classList].some(className => /^id-\d+$/.test(className))
+    );
+  }
+
+  function isDesertDiggingTile(tile) {
+    if (!tile) return false;
+    const itemSprites = getTileItemSprites(tile);
+    if (itemSprites.length !== 1) return false;
+    return itemSprites[0].classList.contains(`id-${DESERT_DIGGING_CONFIG.DESERT_SPRITE_ID}`);
+  }
+
+  function getDesertDigTileIndex(tile) {
+    const match = (tile?.id || '').match(/^tile-index-(\d+)$/);
+    return match ? Number(match[1]) : null;
+  }
+
+  function isScarabCoinDesertTile(tile) {
+    return getDesertDigTileIndex(tile) === DESERT_DIGGING_CONFIG.SCARAB_COIN_TILE;
+  }
+
+  function findMiningTiles() {
+    const currentMapName = getCurrentMapName();
+    const miningTileElements = [];
+
+    if (currentMapName === MINING_CONFIG.TARGET_MAP) {
+      const targetTile = document.getElementById(`tile-index-${MINING_CONFIG.TARGET_TILE_ID}`);
+      if (targetTile) {
+        const targetSprite = targetTile.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM.from}`);
+        if (targetSprite) {
+          miningTileElements.push(targetTile);
+        }
+      }
     }
 
-    // Find tile 82 specifically
-    const targetTile = document.getElementById(`tile-index-${MINING_CONFIG.TARGET_TILE_ID}`);
-    if (!targetTile) {
-      return [];
+    if (currentMapName === DESERT_DIGGING_CONFIG.TARGET_MAP) {
+      const desertSprites = document.querySelectorAll(`.sprite.item.relative.id-${DESERT_DIGGING_CONFIG.DESERT_SPRITE_ID}`);
+      for (const sprite of desertSprites) {
+        const tileContainer = sprite.closest('[id^="tile-index-"]');
+        if (tileContainer && isDesertDiggingTile(tileContainer) && !miningTileElements.includes(tileContainer)) {
+          miningTileElements.push(tileContainer);
+        }
+      }
     }
 
-    // Check if the tile contains the target sprite (id-1822) - not the transformed one (id-385)
-    const targetSprite = targetTile.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM.from}`);
-    if (!targetSprite) {
-      return [];
-    }
-
-    return [targetTile];
+    return miningTileElements;
   }
 
   // Enable right-clicking on digging tiles
   function enableMiningTileRightClick() {
     const miningTileElements = findMiningTiles();
+    const validTiles = new Set(miningTileElements);
+
+    for (const tile of miningState.tiles) {
+      if (!validTiles.has(tile)) {
+        tile.style.pointerEvents = '';
+        miningState.tiles.delete(tile);
+      }
+    }
+
     miningTileElements.forEach(tile => {
       if (!miningState.tiles.has(tile)) {
         tile.style.pointerEvents = 'auto';
@@ -1823,6 +2505,15 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     setTilePointerEvents(miningState.tiles, false);
     miningState.tiles.clear();
   }
+
+  const miningRightClickSystem = createRightClickTileSystem({
+    id: 'Digging',
+    state: miningState,
+    getTiles: findMiningTiles,
+    shouldEnableListener: () => !!(miningState.enabled && hasLightShovelInInventory()),
+    shouldEnablePointerEvents: () => !!(miningState.enabled && hasLightShovelInInventory()),
+    onTileRightClick: (event) => createMiningContextMenu(event.clientX, event.clientY)
+  });
 
   // Update digging functionality based on state
   async function updateMiningState(manualToggle = false) {
@@ -1852,27 +2543,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
       // Digging state is controlled manually by the toggle button
       if (shouldBeEnabled) {
-        // Only enable if not already enabled (avoid duplicate listeners)
-        if (!isCurrentlyActive) {
-          // Enable digging - add document listener and enable pointer events
-          document.addEventListener('contextmenu', handleMiningRightClickDocument, true); // Use capture phase on document
-          enableMiningTileRightClick();
-          console.log('[Quests Mod][Digging] Mining enabled - document listener added and pointer events enabled');
-        }
+        miningRightClickSystem.update(globalThis.state?.board?.getSnapshot?.()?.context);
       } else {
-        // Only disable if currently enabled (avoid duplicate logs)
-        if (isCurrentlyActive) {
-          // Disable digging - remove document listener and restore tile pointer events
-          document.removeEventListener('contextmenu', handleMiningRightClickDocument, true);
-          disableMiningTileRightClick();
-
-          // Close any open context menu
-          if (miningState.contextMenu && miningState.contextMenu.closeMenu) {
-            miningState.contextMenu.closeMenu();
-          }
-
-          console.log('[Quests Mod][Digging] Mining disabled - document listener removed and pointer events disabled');
-        }
+        miningRightClickSystem.cleanup();
+        if (miningState.contextMenu && miningState.contextMenu.closeMenu) miningState.contextMenu.closeMenu();
       }
     } catch (error) {
       console.error('[Quests Mod][Digging] Error in updateMiningState:', error);
@@ -1894,100 +2568,25 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     return false;
   }
 
-  // Handle right-click events on document and check if they originated from digging tiles
-  function handleMiningRightClickDocument(event) {
-    // Check if the event target is inside any mining tile
-    for (const miningTile of miningState.tiles) {
-      if (miningTile.contains(event.target)) {
-        // Store the clicked tile for animation positioning
-        miningState.clickedTile = miningTile;
-
-        // Be very aggressive about preventing the browser context menu
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        event.stopPropagation();
-
-        // Create our custom context menu
-        createMiningContextMenu(event.clientX, event.clientY);
-
-        return false;
-      }
-    }
-  }
+  // handleMiningRightClickDocument was replaced by miningRightClickSystem (createRightClickTileSystem)
 
   // Create digging context menu
   function createMiningContextMenu(x, y) {
+    if (miningState.contextMenu && miningState.contextMenu.closeMenu) miningState.contextMenu.closeMenu();
 
-    // Close any existing context menu
-    if (miningState.contextMenu && miningState.contextMenu.closeMenu) {
-      miningState.contextMenu.closeMenu();
-    }
-
-    // Create overlay to close menu on outside click
-    const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.zIndex = '9998';
-    overlay.style.backgroundColor = 'transparent';
-    overlay.style.pointerEvents = 'auto';
-    overlay.style.cursor = 'default';
-
-    // Create menu container
-    const menu = document.createElement('div');
-    menu.style.position = 'fixed';
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-    menu.style.zIndex = '9999';
-    menu.style.minWidth = '120px';
-    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
-    menu.style.border = '4px solid transparent';
-    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
-    menu.style.borderRadius = '6px';
-    menu.style.padding = '8px';
-    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
-
-    // Button container
-    const buttonContainer = document.createElement('div');
-    buttonContainer.style.display = 'flex';
-    buttonContainer.style.justifyContent = 'center';
-
-    // "Use Shovel" button
-    const useShovelButton = document.createElement('button');
-    useShovelButton.className = 'pixel-font-14';
-    useShovelButton.textContent = 'Use Shovel';
-    useShovelButton.style.width = '140px';
-    useShovelButton.style.height = '28px';
-    useShovelButton.style.fontSize = '12px';
-    useShovelButton.style.backgroundColor = '#4a3c28'; // Brown-ish color for digging
-    useShovelButton.style.color = '#D4AF37';
-    useShovelButton.style.border = '1px solid #D4AF37';
-    useShovelButton.style.borderRadius = '4px';
-    useShovelButton.style.cursor = 'pointer';
-    useShovelButton.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
-    useShovelButton.style.fontWeight = 'bold';
-
-    // Note: We don't disable the button here - we check when the button is clicked
-    // and when accessing the hole, to allow normal digging but prevent Mornenion access
-
-    // Add hover effects (only if not disabled)
-    useShovelButton.addEventListener('mouseenter', () => {
-      if (!useShovelButton.disabled) {
-        useShovelButton.style.backgroundColor = '#2a1c08';
-        useShovelButton.style.borderColor = '#F4C430';
-      }
-    });
-    useShovelButton.addEventListener('mouseleave', () => {
-      if (!useShovelButton.disabled) {
-        useShovelButton.style.backgroundColor = '#4a3c28';
-        useShovelButton.style.borderColor = '#D4AF37';
-      }
-    });
-
-    // Handle click - transform the sprite
-    useShovelButton.addEventListener('click', async () => {
+    const menuObj = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      buttons: [
+        {
+          text: 'Use Shovel',
+          backgroundColor: '#4a3c28',
+          color: '#D4AF37',
+          border: '1px solid #D4AF37',
+          hoverBackgroundColor: '#2a1c08',
+          hoverBorderColor: '#F4C430',
+          onClick: async () => {
       // Note: We allow the shovel to be used normally, but check when accessing the hole
 
       // Get the digging tile position for the animation
@@ -1998,9 +2597,54 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         animationY = tileRect.top + tileRect.height / 2;
       } else {
         // Fallback to menu position if tile not found
-        const rect = menu.getBoundingClientRect();
+        const rect = menuObj.menu.getBoundingClientRect();
         animationX = rect.left + rect.width / 2;
         animationY = rect.top + rect.height / 2;
+      }
+
+      const clickedTile = miningState.clickedTile;
+      const isDesertDig = isDesertDiggingTile(clickedTile) && getCurrentMapName() === DESERT_DIGGING_CONFIG.TARGET_MAP;
+
+      if (isDesertDig) {
+        if (clickedTile) {
+          createPoofAnimation(clickedTile);
+        }
+
+        try {
+          const questItems = await getQuestItems(false);
+          const scarabCount = questItems?.[SCARAB_COIN_CONFIG.productName] || 0;
+          const meetingCompleted = getMissionProgress(MEETING_WITH_TESHA_MISSION).completed;
+          const alreadyFoundScarab = scarabCount >= SCARAB_COIN_CONFIG.maxCount || meetingCompleted;
+          const huntProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
+
+          if (!huntProgress.accepted) {
+            showToast({
+              message: TOAST_MESSAGES.desertDigNeedMission,
+              logPrefix: '[Quests Mod][Desert Digging]'
+            });
+          } else if (!alreadyFoundScarab && isScarabCoinDesertTile(clickedTile)) {
+            playRightClickLootEffect(clickedTile);
+            await addQuestItem(SCARAB_COIN_CONFIG.productName, 1);
+            await capScarabCoinInventory();
+            showQuestItemNotification(SCARAB_COIN_CONFIG.productName, 1);
+            await completeScarabHuntMission();
+            await activateMeetingWithTeshaQuest();
+            updateTeshaArrowState();
+            console.log('[Quests Mod][Digging] Scarab Coin found on Darama Oasis tile', DESERT_DIGGING_CONFIG.SCARAB_COIN_TILE);
+          } else {
+            showToast({
+              message: alreadyFoundScarab ? TOAST_MESSAGES.desertDigSandsEmpty : TOAST_MESSAGES.desertDigNothing,
+              logPrefix: '[Quests Mod][Desert Digging]'
+            });
+          }
+        } catch (error) {
+          console.error('[Quests Mod][Digging] Error awarding Scarab Coin:', error);
+        }
+
+        if (miningState.contextMenu && miningState.contextMenu.closeMenu) {
+          miningState.contextMenu.closeMenu();
+        }
+        return;
       }
 
       // Create the circular digging animation
@@ -2038,7 +2682,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                 const goldenRopeAccepted = progress?.alDeeGoldenRope?.accepted;
                 if (!goldenRopeAccepted) {
                   console.log('[Quests Mod][Digging] Golden rope mission not accepted - hole access disabled');
-                  showToast({ message: 'You feel frightened and unprepared to go down the hole.', type: 'error' });
+                  showToast({ message: TOAST_MESSAGES.frightenedHole, logPrefix: '[Quests Mod][Digging]' });
                   return;
                 }
               }
@@ -2046,7 +2690,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
               // Check if Mornenion has been defeated - if so, prevent navigation
               const mornenionDefeated = await isMornenionDefeated();
               if (mornenionDefeated) {
-                showToast({ message: MORNENION_DEFEATED_MESSAGE, type: 'error' });
+                showToast({ message: MORNENION_DEFEATED_MESSAGE, logPrefix: '[Quests Mod][Digging]' });
                 return;
               }
 
@@ -2076,13 +2720,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                           mornenionBattle = battle;
                           mornenionBattle.setup(
                             () => playerUsedHoleToMornenion,
-                            (toastData) => {
-                              showToast({ 
-                                message: toastData.message, 
-                                duration: toastData.duration || 3000, 
-                                logPrefix: '[Quests Mod][Mornenion]' 
-                              });
-                            }
+                            NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                           );
                           setupMornenionTileRestrictions();
                           showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
@@ -2098,13 +2736,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                       mornenionBattle = initResult;
                       mornenionBattle.setup(
                         () => playerUsedHoleToMornenion,
-                        (toastData) => {
-                          showToast({ 
-                            message: toastData.message, 
-                            duration: toastData.duration || 3000, 
-                            logPrefix: '[Quests Mod][Mornenion]' 
-                          });
-                        }
+                        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                       );
                       setupMornenionTileRestrictions();
                       showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
@@ -2119,13 +2751,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                     });
 
                     // Show navigation message
-                    if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.showToast) {
-                      api.ui.components.showToast({
-                        message: 'Traveling to Ab\'Dendriel Hive...',
-                        type: 'info',
-                        duration: TOAST_DURATION_DEFAULT
-                      });
-                    }
+                    showToast({
+                      message: TOAST_MESSAGES.travelingAbDendriel,
+                      logPrefix: '[Quests Mod][Digging]'
+                    });
                     break;
                   }
                 }
@@ -2146,59 +2775,199 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       }
 
       // Show success message
-      if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.showToast) {
-        api.ui.components.showToast({
-          message: 'You mined some ore!',
-          type: 'success',
-          duration: TOAST_DURATION_DEFAULT
-        });
-      }
+      showToast({
+        message: TOAST_MESSAGES.minedOre,
+        logPrefix: '[Quests Mod][Digging]'
+      });
+          }
+        }
+      ]
     });
 
-    // Add button to container
-    buttonContainer.appendChild(useShovelButton);
-    menu.appendChild(buttonContainer);
-
-    // ESC key handler
-    const escHandler = (event) => {
-      if (event.key === 'Escape') {
-        closeMenu();
-      }
-    };
-
-    // Close menu function
-    const closeMenu = () => {
-      console.log('[Quests Mod][Digging] Closing mining context menu');
-      
-      // Remove event listeners
-      overlay.removeEventListener('mousedown', closeMenu);
-      overlay.removeEventListener('click', closeMenu);
-      document.removeEventListener('keydown', escHandler);
-      
-      if (overlay.parentNode) {
-        overlay.parentNode.removeChild(overlay);
-      }
-      if (menu.parentNode) {
-        menu.parentNode.removeChild(menu);
-      }
-
-      // Clear reference
-      miningState.contextMenu = null;
-    };
-
-    // Add event listeners
-    overlay.addEventListener('mousedown', closeMenu);
-    overlay.addEventListener('click', closeMenu);
-    document.addEventListener('keydown', escHandler);
-
-    // Add to DOM
-    document.body.appendChild(overlay);
-    document.body.appendChild(menu);
-
-    // Store reference
-    miningState.contextMenu = { overlay, menu, closeMenu };
-
+    miningState.contextMenu = menuObj;
     return miningState.contextMenu;
+  }
+
+  // Create poof sprite animation sized to match the clicked tile (Darama Oasis desert digging)
+  function createPoofAnimation(tileElement, { scale = 1 } = {}) {
+    if (!tileElement) return;
+
+    const tileRect = tileElement.getBoundingClientRect();
+    const frameCount = DESERT_DIGGING_CONFIG.POOF_FRAME_COUNT;
+    const duration = DESERT_DIGGING_CONFIG.POOF_FRAME_MS * frameCount;
+    const tileWidth = tileRect.width;
+    const tileHeight = tileRect.height;
+    const poofScale = Math.max(1, Number(scale) || 1);
+    const displayWidth = tileWidth * poofScale;
+    const displayHeight = tileHeight * poofScale;
+
+    if (tileWidth <= 0 || tileHeight <= 0) return;
+
+    const animationContainer = document.createElement('div');
+    animationContainer.style.cssText = [
+      'position:fixed',
+      `left:${tileRect.left + (tileWidth - displayWidth) / 2}px`,
+      `top:${tileRect.top + (tileHeight - displayHeight) / 2}px`,
+      `width:${displayWidth}px`,
+      `height:${displayHeight}px`,
+      'overflow:hidden',
+      'pointer-events:none',
+      'z-index:10000'
+    ].join(';');
+
+    const img = document.createElement('img');
+    img.src = DESERT_DIGGING_CONFIG.POOF_EFFECT_URL;
+    img.alt = 'poof';
+    img.className = 'pixelated';
+    img.style.cssText = [
+      'display:block',
+      `width:${displayWidth}px`,
+      `height:${displayHeight * frameCount}px`,
+      'image-rendering:pixelated',
+      'will-change:transform'
+    ].join(';');
+    animationContainer.appendChild(img);
+    document.body.appendChild(animationContainer);
+
+    const animation = img.animate(
+      [
+        { transform: 'translateY(0)' },
+        { transform: `translateY(-${displayHeight * (frameCount - 1)}px)` }
+      ],
+      {
+        duration,
+        easing: `steps(${frameCount})`,
+        fill: 'forwards'
+      }
+    );
+
+    const removeAnimation = () => {
+      if (animationContainer.parentNode) {
+        animationContainer.parentNode.removeChild(animationContainer);
+      }
+    };
+
+    animation.addEventListener('finish', removeAnimation);
+    setTimeout(removeAnimation, duration + 100);
+  }
+
+  async function capDestroyFieldRuneInventory() {
+    const questItems = await getQuestItems(false);
+    const runeCount = questItems?.[DESTROY_FIELD_RUNE_CONFIG.productName] || 0;
+    const excess = runeCount - DESTROY_FIELD_RUNE_CONFIG.maxCount;
+    if (excess > 0) {
+      await consumeQuestItem(DESTROY_FIELD_RUNE_CONFIG.productName, excess);
+      console.log(`[Quests Mod][Serpentine Rune] Removed ${excess} excess Destroy Field Rune(s); max ${DESTROY_FIELD_RUNE_CONFIG.maxCount} per player`);
+    }
+  }
+
+  async function capScarabCoinInventory() {
+    const questItems = await getQuestItems(false);
+    const scarabCount = questItems?.[SCARAB_COIN_CONFIG.productName] || 0;
+    const excess = scarabCount - SCARAB_COIN_CONFIG.maxCount;
+    if (excess > 0) {
+      await consumeQuestItem(SCARAB_COIN_CONFIG.productName, excess);
+      console.log(`[Quests Mod][Tesha] Removed ${excess} excess Scarab Coin(s); max ${SCARAB_COIN_CONFIG.maxCount} per player`);
+    }
+  }
+
+  async function completeScarabHuntMission({ showCompletionToast = true } = {}) {
+    const progress = getMissionProgress(KING_SCARAB_COIN_MISSION);
+    if (progress.completed) return false;
+
+    setMissionProgress(KING_SCARAB_COIN_MISSION, { accepted: true, completed: true });
+
+    const playerName = getCurrentPlayerName();
+    if (playerName) {
+      try {
+        await saveKingTibianusProgress(playerName, getAllMissionProgress());
+      } catch (error) {
+        console.error('[Quests Mod][Scarab Hunt] Error saving quest completion:', error);
+      }
+    }
+
+    if (showCompletionToast) {
+      NotificationService.showQuestCompleted(KING_SCARAB_COIN_MISSION, '[Quests Mod][King Tibianus]');
+    }
+
+    console.log('[Quests Mod][Scarab Hunt] King scarab coin hunt completed');
+    return true;
+  }
+
+  async function syncScarabHuntFromInventory() {
+    try {
+      const progress = getMissionProgress(KING_SCARAB_COIN_MISSION);
+      if (progress.completed) return;
+      if (!(await hasScarabCoinInInventory())) return;
+
+      if (!progress.accepted) {
+        setMissionProgress(KING_SCARAB_COIN_MISSION, { accepted: true, completed: false });
+      }
+      await completeScarabHuntMission({ showCompletionToast: false });
+    } catch (error) {
+      console.error('[Quests Mod][Scarab Hunt] Error syncing hunt from inventory:', error);
+    }
+  }
+
+  async function activateMeetingWithTeshaQuest({ showDiscoveryToast = true } = {}) {
+    const progress = getMissionProgress(MEETING_WITH_TESHA_MISSION);
+    if (progress.accepted || progress.completed) {
+      return false;
+    }
+
+    setMissionProgress(MEETING_WITH_TESHA_MISSION, { accepted: true, completed: false });
+
+    const playerName = getCurrentPlayerName();
+    if (playerName) {
+      try {
+        await saveKingTibianusProgress(playerName, getAllMissionProgress());
+      } catch (error) {
+        console.error('[Quests Mod][Tesha] Error saving Meeting with Tesha quest progress:', error);
+      }
+    }
+
+    if (showDiscoveryToast) {
+      NotificationService.showQuestDiscovered(MEETING_WITH_TESHA_MISSION.title, '[Quests Mod][Tesha]');
+    }
+
+    console.log('[Quests Mod][Tesha] Hidden quest activated: Meeting with Tesha');
+    return true;
+  }
+
+  async function syncMeetingWithTeshaQuestFromInventory() {
+    try {
+      await capScarabCoinInventory();
+      const questItems = await getQuestItems(false);
+      if (!questItems || !(questItems[SCARAB_COIN_CONFIG.productName] > 0)) {
+        return;
+      }
+      await activateMeetingWithTeshaQuest({ showDiscoveryToast: false });
+    } catch (error) {
+      console.error('[Quests Mod][Tesha] Error syncing quest from Scarab Coin inventory:', error);
+    }
+  }
+
+  function syncSerpentineTowerQuestPrerequisites() {
+    const meetingProgress = getMissionProgress(MEETING_WITH_TESHA_MISSION);
+    const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+    if (meetingProgress.completed || (!serpentineProgress.accepted && !serpentineProgress.completed)) {
+      return false;
+    }
+
+    setMissionProgress(SERPENTINE_TOWER_MISSION, {
+      accepted: false,
+      completed: false,
+      destroyFieldRuneTaken: false,
+      putridChamberComplete: false
+    });
+    kingChatState.progressSerpentineTower = {
+      accepted: false,
+      completed: false,
+      destroyFieldRuneTaken: false,
+      putridChamberComplete: false
+    };
+    console.log('[Quests Mod][Tesha] Reset Serpentine Tower quest — Meeting with Tesha not completed');
+    return true;
   }
 
   // Create circular digging animation at the specified coordinates
@@ -2313,6 +3082,51 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     // Last resort: return path
     console.warn('[Quests Mod] Could not determine extension runtime URL, using relative path:', imagePath);
     return imagePath;
+  }
+
+  function playRightClickLootEffect(tileElement, { x, y } = {}) {
+    let centerX;
+    let centerY;
+
+    if (tileElement) {
+      const tileRect = tileElement.getBoundingClientRect();
+      if (tileRect.width <= 0 || tileRect.height <= 0) return;
+      centerX = tileRect.left + tileRect.width / 2;
+      centerY = tileRect.top + tileRect.height / 2;
+    } else if (typeof x === 'number' && typeof y === 'number') {
+      centerX = x;
+      centerY = y;
+    } else {
+      return;
+    }
+
+    const size = LOOT_EFFECT_CONFIG.size;
+    const animationContainer = document.createElement('div');
+    animationContainer.style.cssText = [
+      'position:fixed',
+      `left:${centerX - size / 2}px`,
+      `top:${centerY - size / 2}px`,
+      `width:${size}px`,
+      `height:${size}px`,
+      'pointer-events:none',
+      'z-index:10000'
+    ].join(';');
+
+    const img = document.createElement('img');
+    img.src = getQuestItemsAssetUrl(LOOT_EFFECT_CONFIG.filename);
+    img.alt = 'loot';
+    img.className = 'pixelated';
+    img.style.cssText = 'width:100%;height:100%;image-rendering:pixelated;';
+    animationContainer.appendChild(img);
+    document.body.appendChild(animationContainer);
+
+    const removeAnimation = () => {
+      if (animationContainer.parentNode) {
+        animationContainer.parentNode.removeChild(animationContainer);
+      }
+    };
+
+    setTimeout(removeAnimation, LOOT_EFFECT_CONFIG.durationMs);
   }
 
   // Helper to clear timeouts/intervals
@@ -2519,6 +3333,116 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     });
   }
 
+  function createRightClickTileSystem({
+    id,
+    state,
+    getTiles,
+    shouldEnableListener,
+    shouldEnablePointerEvents,
+    onTileRightClick,
+    removePointerEventsNone = false,
+    pointerEventsNoneDatasetKey = 'questsRemovedPointerEventsNone'
+  }) {
+    const logPrefix = `[Quests Mod][${id}]`;
+
+    function restoreTileDefaults(tile) {
+      if (!tile) return;
+      if (removePointerEventsNone && tile.dataset?.[pointerEventsNoneDatasetKey] === '1') {
+        tile.classList.add('pointer-events-none');
+        delete tile.dataset[pointerEventsNoneDatasetKey];
+      }
+      tile.style.pointerEvents = '';
+    }
+
+    function applyTileEnabled(tile) {
+      if (!tile) return;
+      if (removePointerEventsNone && tile.classList.contains('pointer-events-none')) {
+        tile.classList.remove('pointer-events-none');
+        tile.dataset[pointerEventsNoneDatasetKey] = '1';
+      }
+      tile.style.pointerEvents = 'auto';
+    }
+
+    function refreshTrackedTiles() {
+      const tiles = Array.isArray(getTiles?.()) ? getTiles() : [];
+      const valid = new Set(tiles);
+
+      for (const t of state.tiles) {
+        if (!valid.has(t)) {
+          restoreTileDefaults(t);
+          state.tiles.delete(t);
+        }
+      }
+
+      for (const t of tiles) {
+        if (!state.tiles.has(t)) {
+          applyTileEnabled(t);
+          state.tiles.add(t);
+        } else {
+          // keep enabled if it was already tracked
+          applyTileEnabled(t);
+        }
+      }
+    }
+
+    function disableTrackedTiles() {
+      for (const t of state.tiles) {
+        restoreTileDefaults(t);
+      }
+      state.tiles.clear();
+    }
+
+    function handleDocumentContextMenu(event) {
+      for (const t of state.tiles) {
+        if (t.contains(event.target)) {
+          state.clickedTile = t;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          event.stopPropagation();
+          try {
+            onTileRightClick(event, t);
+          } catch (e) {
+            console.error(`${logPrefix} Error in onTileRightClick:`, e);
+          }
+          return false;
+        }
+      }
+    }
+
+    function update(boardContext = null) {
+      const enableListener = !!(shouldEnableListener ? shouldEnableListener(boardContext) : shouldEnablePointerEvents(boardContext));
+      const enablePointer = !!(shouldEnablePointerEvents ? shouldEnablePointerEvents(boardContext) : enableListener);
+
+      if (enableListener && !state.rightClickEnabled) {
+        document.addEventListener('contextmenu', handleDocumentContextMenu, true);
+        state.rightClickEnabled = true;
+      } else if (!enableListener && state.rightClickEnabled) {
+        document.removeEventListener('contextmenu', handleDocumentContextMenu, true);
+        state.rightClickEnabled = false;
+      }
+
+      if (enablePointer) {
+        refreshTrackedTiles();
+      } else {
+        disableTrackedTiles();
+      }
+    }
+
+    function cleanup() {
+      try {
+        if (state.rightClickEnabled) {
+          document.removeEventListener('contextmenu', handleDocumentContextMenu, true);
+        }
+      } catch (e) {
+        // ignore
+      }
+      state.rightClickEnabled = false;
+      disableTrackedTiles();
+    }
+
+    return { update, cleanup, refreshTrackedTiles, disableTrackedTiles };
+  }
+
   // Enable right-clicking on all water tiles
   function enableWaterTileRightClick() {
     const waterTileElements = findWaterTiles();
@@ -2535,6 +3459,17 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     setTilePointerEvents(fishingState.tiles, false);
     fishingState.tiles.clear();
   }
+
+  const waterFishingRightClickSystem = createRightClickTileSystem({
+    id: 'Water Fishing',
+    state: fishingState,
+    getTiles: findWaterTiles,
+    shouldEnableListener: () => !!(fishingState.enabled && shouldEnableWaterFishing()),
+    shouldEnablePointerEvents: () => !!(fishingState.enabled && shouldEnableWaterFishing()),
+    onTileRightClick: (event) => createWaterFishingContextMenu(event.clientX, event.clientY),
+    removePointerEventsNone: true,
+    pointerEventsNoneDatasetKey: 'questsWaterFishingRemovedPointerEventsNone'
+  });
 
   // Animate the key sprite with a funky animation
   function animateCopperKey(tileIndex) {
@@ -2943,6 +3878,36 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     }
     if (!productDefinitions.find(p => p.name === elvenhairRopeDef.name)) {
       productDefinitions.push(elvenhairRopeDef);
+    }
+
+    const scarabCoinDef = {
+      name: SCARAB_COIN_CONFIG.productName,
+      icon: SCARAB_COIN_CONFIG.icon,
+      description: SCARAB_COIN_CONFIG.description,
+      rarity: SCARAB_COIN_CONFIG.rarity
+    };
+    if (!productDefinitions.find(p => p.name === scarabCoinDef.name)) {
+      productDefinitions.push(scarabCoinDef);
+    }
+
+    const destroyFieldRuneDef = {
+      name: DESTROY_FIELD_RUNE_CONFIG.productName,
+      icon: DESTROY_FIELD_RUNE_CONFIG.icon,
+      description: DESTROY_FIELD_RUNE_CONFIG.description,
+      rarity: DESTROY_FIELD_RUNE_CONFIG.rarity
+    };
+    if (!productDefinitions.find(p => p.name === destroyFieldRuneDef.name)) {
+      productDefinitions.push(destroyFieldRuneDef);
+    }
+
+    const scorpionSceptreDef = {
+      name: SCORPION_SCEPTRE_CONFIG.productName,
+      icon: SCORPION_SCEPTRE_CONFIG.icon,
+      description: SCORPION_SCEPTRE_CONFIG.description,
+      rarity: SCORPION_SCEPTRE_CONFIG.rarity
+    };
+    if (!productDefinitions.find(p => p.name === scorpionSceptreDef.name)) {
+      productDefinitions.push(scorpionSceptreDef);
     }
 
     // Add The Holy Tible (reward for completing Al Dee's golden rope mission)
@@ -4025,7 +4990,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'progressFollowerOfZathroth',
     [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'progressMotherOfAllSpiders',
     [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
-    [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope'
+    [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope',
+    [MEETING_WITH_TESHA_MISSION.id]: 'progressMeetingWithTesha',
+    [KING_SCARAB_COIN_MISSION.id]: 'progressScarabHunt',
+    [SERPENTINE_TOWER_MISSION.id]: 'progressSerpentineTower'
   };
 
   const MISSION_FIREBASE_KEY_MAP = {
@@ -4037,7 +5005,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'followerOfZathroth',
     [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'motherOfAllSpiders',
     [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
-    [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope'
+    [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope',
+    [MEETING_WITH_TESHA_MISSION.id]: 'meetingWithTesha',
+    [KING_SCARAB_COIN_MISSION.id]: 'scarabHunt',
+    [SERPENTINE_TOWER_MISSION.id]: 'serpentineTower'
   };
 
   // Helper: Get all mission progress from kingChatState using registry
@@ -4631,7 +5602,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         'Castello\'s diary',
         'Blessed Ankh',
         'Spider Silk',
-        'Spool of Yarn'
+        'Spool of Yarn',
+        SCARAB_COIN_CONFIG.productName,
+        DESTROY_FIELD_RUNE_CONFIG.productName,
+        SCORPION_SCEPTRE_CONFIG.productName
       ].includes(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
@@ -5178,7 +6152,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           await markCopperKeyReceived(currentPlayer);
           
           // Show special "Found Copper Key!" toast
-          showCopperKeyFoundToast();
+          NotificationService.showImportant(TOAST_MESSAGES.copperKeyFound, '[Quests Mod][Copper Key]');
           
           // Animate the key sprite with funky animation, then explode it, then remove
           setTimeout(() => {
@@ -5216,12 +6190,70 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   // =======================
   // Notification Service
   // =======================
+
+  const TOAST_MESSAGE_VARIANTS = {
+    [TOAST_MESSAGES.frightenedHole]: 'warning',
+    [TOAST_MESSAGES.fishingEnabled]: 'info',
+    [TOAST_MESSAGES.fishingDisabled]: 'info',
+    [TOAST_MESSAGES.shovelEnabled]: 'info',
+    [TOAST_MESSAGES.shovelDisabled]: 'info',
+    [TOAST_MESSAGES.minedOre]: 'found',
+    [TOAST_MESSAGES.travelingAbDendriel]: 'info',
+    [TOAST_MESSAGES.teleportedAlDee]: 'info',
+    [TOAST_MESSAGES.teleportAlDeeFailed]: 'warning',
+    [TOAST_MESSAGES.bansheeLastRoomNotFound]: 'nothing',
+    [TOAST_MESSAGES.travelingBansheeLastRoom]: 'info',
+    [TOAST_MESSAGES.bansheeLastRoomBattleHere]: 'info',
+    [TOAST_MESSAGES.spiderLairNotFound]: 'nothing',
+    [TOAST_MESSAGES.enteringSpiderLair]: 'info',
+    [TOAST_MESSAGES.spiderLairBattleHere]: 'info',
+    [TOAST_MESSAGES.putridChamberNotStrongEnough]: 'warning',
+    [TOAST_MESSAGES.travelingPutridChamber]: 'info',
+    [TOAST_MESSAGES.fishingFoundAxe]: 'found',
+    [TOAST_MESSAGES.fishingFoundNothingMagnet]: 'nothing',
+    [TOAST_MESSAGES.fishingFoundNothing]: 'nothing',
+    [TOAST_MESSAGES.fishingMagnetHint]: 'info',
+    [TOAST_MESSAGES.fishingError]: 'warning',
+    [TOAST_MESSAGES.desertDigNothing]: 'nothing',
+    [TOAST_MESSAGES.desertDigSandsEmpty]: 'nothing',
+    [TOAST_MESSAGES.desertDigNeedMission]: 'info',
+    [TOAST_MESSAGES.missingDestroyFieldRune]: 'nothing',
+    [TOAST_MESSAGES.alreadyHaveDestroyFieldRune]: 'nothing',
+    [TOAST_MESSAGES.copperKeyFound]: 'found',
+    [TOAST_MESSAGES.mapReceived]: 'found',
+    [TOAST_MESSAGES.navigatedToMines]: 'found',
+    [TOAST_MESSAGES.kingTookCoin]: 'warning',
+    [TOAST_MESSAGES.diaryReturned]: 'completed',
+    [MORNENION_DEFEATED_MESSAGE]: 'completed'
+  };
+
+  function resolveToastVariant(message) {
+    if (!message || typeof message !== 'string') return 'info';
+
+    if (TOAST_MESSAGE_VARIANTS[message]) {
+      return TOAST_MESSAGE_VARIANTS[message];
+    }
+
+    if (message.startsWith('New quest discovered:') || message.startsWith('New quest:')) return 'quest';
+    if (message.startsWith('Mission completed:')) return 'completed';
+    if (message.includes(' task is complete.')) return 'completed';
+    if (message.endsWith(' seal completed')) return 'completed';
+    if (message.startsWith('Received ') || message.startsWith('Found ')) return 'found';
+    if (message.startsWith('Delivered to ') || message.startsWith('Returned to ')) return 'found';
+    if (message.startsWith('Navigated to ')) return 'found';
+    if (/ obtained! \(\+/.test(message) || / obtido! \(\+/.test(message)) return 'found';
+    if (message.startsWith('Battling ')) return 'info';
+    if (message.includes('can only be placed on tiles')) return 'warning';
+
+    return 'info';
+  }
+
+  function resolveToastDuration(message, variant) {
+    const resolvedVariant = variant || resolveToastVariant(message);
+    return TOAST_VARIANT_DURATIONS[resolvedVariant] ?? TOAST_DURATION_DEFAULT;
+  }
   
   const NotificationService = {
-    /**
-     * Get or create toast container
-     * @returns {HTMLElement} Toast container element
-     */
     getContainer() {
       let mainContainer = document.getElementById('quest-items-toast-container');
       if (!mainContainer) {
@@ -5238,10 +6270,6 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       return mainContainer;
     },
 
-    /**
-     * Update toast positions after removal
-     * @param {HTMLElement} container - Toast container
-     */
     updatePositions(container) {
       const toasts = container.querySelectorAll('.toast-item');
       toasts.forEach((toast, index) => {
@@ -5250,19 +6278,13 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       });
     },
 
-    /**
-     * Show a generic toast notification
-     * @param {Object} options - Toast options
-     * @param {string} [options.productName] - Product name for icon
-     * @param {string} options.message - Message to display
-     * @param {number} [options.duration=5000] - Duration in milliseconds
-     * @param {string} [options.logPrefix='[Quests Mod]'] - Log prefix
-     */
-    show({ productName, message, duration = TOAST_DURATION_DEFAULT, logPrefix = '[Quests Mod]' }) {
+    show({ productName, message, duration, logPrefix = '[Quests Mod]', variant }) {
       try {
         const mainContainer = this.getContainer();
         const existingToasts = mainContainer.querySelectorAll('.toast-item');
         const stackOffset = existingToasts.length * 46;
+        const resolvedVariant = variant || resolveToastVariant(message);
+        const resolvedDuration = duration ?? resolveToastDuration(message, resolvedVariant);
 
         const flexContainer = document.createElement('div');
         flexContainer.className = 'toast-item';
@@ -5286,7 +6308,6 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         const widgetBottom = document.createElement('div');
         widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
 
-        // Add product icon if productName provided
         if (productName) {
           const productDef = buildProductDefinitions().find(p => p.name === productName);
           if (productDef) {
@@ -5300,6 +6321,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         if (typeof message === 'string' && message.indexOf('\n') !== -1) {
           messageDiv.style.whiteSpace = 'pre-line';
         }
+        messageDiv.style.color = TOAST_VARIANT_COLORS[resolvedVariant] || TOAST_VARIANT_COLORS.info;
         messageDiv.textContent = message;
         widgetBottom.appendChild(messageDiv);
 
@@ -5310,7 +6332,6 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
         console.log(`${logPrefix} Toast shown: ${message}`);
 
-        // Add click event listener for dismissal
         toast.addEventListener('click', () => {
           if (flexContainer && flexContainer.parentNode) {
             flexContainer.parentNode.removeChild(flexContainer);
@@ -5318,61 +6339,102 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           }
         });
 
-        // Auto-remove after duration
         setTimeout(() => {
           if (flexContainer && flexContainer.parentNode) {
             flexContainer.parentNode.removeChild(flexContainer);
             this.updatePositions(mainContainer);
           }
-        }, duration);
+        }, resolvedDuration);
 
       } catch (error) {
         console.error(`${logPrefix} Error showing toast:`, error);
       }
     },
 
-    /**
-     * Show quest item notification
-     * @param {string} productName - Product name
-     * @param {number} amount - Amount obtained
-     */
-    showQuestItem(productName, amount) {
+    showImportant(message, logPrefix = '[Quests Mod]', productName, variant) {
+      this.show({ productName, message, logPrefix, variant });
+    },
+
+    showQuestDiscovered(mission, logPrefix = '[Quests Mod]') {
+      const title = typeof mission === 'string' ? mission : mission.title;
+      this.showImportant(TOAST_MESSAGES.questDiscovered(title), logPrefix);
+    },
+
+    showQuestAccepted(mission, logPrefix = '[Quests Mod]') {
+      this.showImportant(TOAST_MESSAGES.questAccepted(mission.title), logPrefix);
+    },
+
+    showQuestCompleted(mission, logPrefix = '[Quests Mod]', { rewardCoins, productName, message } = {}) {
+      let resolvedMessage = message;
+      if (!resolvedMessage) {
+        resolvedMessage = rewardCoins != null
+          ? TOAST_MESSAGES.questCompletedWithCoins(mission.title, rewardCoins)
+          : TOAST_MESSAGES.questCompleted(mission.title);
+      }
+      this.show({ productName, message: resolvedMessage, logPrefix });
+    },
+
+    showTaskCompletedWithCoins(mission, logPrefix = '[Quests Mod]') {
+      this.showImportant(
+        TOAST_MESSAGES.taskCompletedWithCoins(mission.title, mission.rewardCoins),
+        logPrefix
+      );
+    },
+
+    showItemReceived(productName, logPrefix = '[Quests Mod]', message) {
       this.show({
         productName,
-        message: tReplace('mods.quests.productObtained', { productName, amount }),
-        duration: TOAST_DURATION_DEFAULT
+        message: message || TOAST_MESSAGES.itemReceived(productName),
+        logPrefix
       });
     },
 
-    /**
-     * Show mission completion notification
-     * @param {Object} mission - Mission object
-     */
-    showMissionComplete(mission) {
+    showSealCompleted(ordinal, logPrefix = '[Quests Mod]') {
+      this.showImportant(TOAST_MESSAGES.sealCompleted(ordinal), logPrefix);
+    },
+
+    showBattleToast(toastData, logPrefix = '[Quests Mod]') {
       this.show({
-        message: `Mission completed: ${mission.title}`,
-        duration: TOAST_DURATION_IMPORTANT
+        message: toastData.message,
+        duration: toastData.duration,
+        logPrefix
+      });
+    },
+
+    createBattleToastCallback(logPrefix) {
+      return (toastData) => this.showBattleToast(toastData, logPrefix);
+    },
+
+    showQuestItem(productName, amount) {
+      this.show({
+        productName,
+        message: tReplace('mods.quests.productObtained', { productName, amount })
       });
     }
   };
 
   // =======================
-  // Notification System (Legacy Functions)
+  // Notification System
   // =======================
 
-  // Helper to get or create toast container
-  function getToastContainer() {
-    return NotificationService.getContainer();
+  function showToast({ productName, message, duration, logPrefix = '[Quests Mod]', variant }) {
+    NotificationService.show({ productName, message, duration, logPrefix, variant });
   }
 
-  // Helper to update toast positions after removal
-  function updateToastPositions(container) {
-    NotificationService.updatePositions(container);
+  function showQuestItemNotification(productName, amount) {
+    NotificationService.showQuestItem(productName, amount);
   }
 
-  // Generic toast notification function
-  function showToast({ productName, message, duration = TOAST_DURATION_DEFAULT, logPrefix = '[Quests Mod]' }) {
-    NotificationService.show({ productName, message, duration, logPrefix });
+  function showSealCompletedToast(ordinal, logPrefix) {
+    NotificationService.showSealCompleted(ordinal, logPrefix);
+  }
+
+  function showQueenBansheesCompletionToasts() {
+    NotificationService.showItemReceived(
+      COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName,
+      '[Quests Mod][Costello]'
+    );
+    NotificationService.showImportant(TOAST_MESSAGES.diaryReturned, '[Quests Mod][Costello]');
   }
 
   let customBattleStatusToastHandle = null;
@@ -5426,6 +6488,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
     messageDiv.style.whiteSpace = 'pre-line';
+    messageDiv.style.color = TOAST_VARIANT_COLORS[resolveToastVariant(text)] || TOAST_VARIANT_COLORS.info;
     messageDiv.textContent = text;
     widgetBottom.appendChild(messageDiv);
 
@@ -5446,90 +6509,6 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     };
 
     console.log(`${logPrefix} Battle status toast shown: ${text}`);
-  }
-
-  function showQuestItemNotification(productName, amount) {
-    NotificationService.showQuestItem(productName, amount);
-  }
-
-  function showCopperKeyFoundToast() {
-    showToast({
-      message: 'Found Copper Key!',
-      duration: TOAST_DURATION_IMPORTANT,
-      logPrefix: '[Quests Mod][Copper Key]'
-    });
-  }
-
-  function showMapReceivedToast() {
-    showToast({
-      productName: MAP_COLOUR_CONFIG.productName,
-      message: 'Received Map!',
-      duration: TOAST_DURATION_IMPORTANT,
-      logPrefix: '[Quests Mod][King Tibianus]'
-    });
-  }
-
-  function showCoinReceivedToast() {
-    showToast({
-      productName: SILVER_TOKEN_CONFIG.productName,
-      message: 'King Tibianus took your coin!',
-      duration: TOAST_DURATION_DEFAULT,
-      logPrefix: '[Quests Mod][King Tibianus]'
-    });
-  }
-
-  function showMineNavigationToast() {
-    showToast({
-      productName: MAP_COLOUR_CONFIG.productName,
-      message: 'Navigated to the mines!',
-      duration: TOAST_DURATION_DEFAULT,
-      logPrefix: '[Quests Mod][Map Navigation]'
-    });
-  }
-
-  function showDragonClawReceivedToast() {
-    showToast({
-      productName: 'Dragon Claw',
-      message: 'Received Dragon Claw!',
-      duration: TOAST_DURATION_DEFAULT,
-      logPrefix: '[Quests Mod][King Tibianus]'
-    });
-  }
-
-  function showObsidianKnifeReceivedToast() {
-    showToast({
-      productName: 'Obsidian Knife',
-      message: 'Received Obsidian Knife!',
-      duration: TOAST_DURATION_DEFAULT,
-      logPrefix: '[Quests Mod][King Tibianus]'
-    });
-  }
-
-  function showStampedLetterReceivedToast() {
-    showToast({
-      productName: 'Stamped Letter',
-      message: 'Received Stamped Letter!',
-      duration: TOAST_DURATION_DEFAULT,
-      logPrefix: '[Quests Mod][King Tibianus]'
-    });
-  }
-
-  function showStampedLetterDeliveredToast() {
-    showToast({
-      productName: 'Stamped Letter',
-      message: 'Delivered to Al Dee!',
-      duration: TOAST_DURATION_DEFAULT,
-      logPrefix: '[Quests Mod][Al Dee]'
-    });
-  }
-
-  function showSmallAxeReturnedToast() {
-    showToast({
-      productName: 'Small Axe',
-      message: 'Returned to Al Dee!',
-      duration: TOAST_DURATION_DEFAULT,
-      logPrefix: '[Quests Mod][Al Dee]'
-    });
   }
 
   function clearAllTimeouts() {
@@ -5696,7 +6675,16 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
    * @param {string} [options.logPrefix='[Quests Mod]'] - Log prefix
    * @returns {Object} Menu object with {overlay, menu, closeMenu}
    */
-  function createContextMenu({ x, y, buttons, onClose = null, logPrefix = '[Quests Mod]' }) {
+  function createContextMenu({
+    x,
+    y,
+    buttons,
+    onClose = null,
+    logPrefix = '[Quests Mod]',
+    minWidth = '120px',
+    layout = 'column', // 'column' | 'center'
+    gap = '4px'
+  }) {
     // Create overlay to close menu on outside click
     const overlay = document.createElement('div');
     overlay.style.position = 'fixed';
@@ -5715,7 +6703,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
     menu.style.zIndex = '9999';
-    menu.style.minWidth = '120px';
+    menu.style.minWidth = minWidth;
     menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
     menu.style.border = '4px solid transparent';
     menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
@@ -5726,8 +6714,12 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     // Button container
     const buttonContainer = document.createElement('div');
     buttonContainer.style.display = 'flex';
-    buttonContainer.style.flexDirection = 'column';
-    buttonContainer.style.gap = '4px';
+    if (layout === 'center') {
+      buttonContainer.style.justifyContent = 'center';
+    } else {
+      buttonContainer.style.flexDirection = 'column';
+      buttonContainer.style.gap = gap;
+    }
 
     // Create buttons
     buttons.forEach((buttonConfig) => {
@@ -6058,6 +7050,16 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           }
         }
       }, delay);
+    },
+
+    /**
+     * Returns an onResponse callback that closes the modal after a farewell message.
+     * @param {string} message - Player message text
+     * @returns {Function|null}
+     */
+    getFarewellCloseCallback(message) {
+      if (!isNpcFarewellMessage(message)) return null;
+      return () => this.closeModal(NPC_MODAL_CLOSE_DELAY_MS);
     }
   };
 
@@ -6696,7 +7698,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                   }
 
                   // Show navigation toast
-                  showMineNavigationToast();
+                  NotificationService.showItemReceived(MAP_COLOUR_CONFIG.productName, '[Quests Mod][Map Navigation]', TOAST_MESSAGES.navigatedToMines);
                 }, 200);
 
                 return true;
@@ -6783,36 +7785,23 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
             // Add click handler to toggle
             toggleButton.addEventListener('click', () => {
+              let toastMessage = null;
               if (productDef.name === 'Fishing Rod') {
                 fishingState.enabled = !fishingState.enabled;
                 fishingState.manuallyDisabled = !fishingState.enabled;
                 updateButtonState();
-
-                // Update fishing functionality based on new state (manual toggle)
                 updateWaterFishingState(true);
-
-                // Show toast notification
-                const toastMessage = fishingState.enabled ? 'Fishing enabled!' : 'Fishing disabled!';
-                const toastType = fishingState.enabled ? 'success' : 'info';
+                toastMessage = fishingState.enabled ? TOAST_MESSAGES.fishingEnabled : TOAST_MESSAGES.fishingDisabled;
               } else if (productDef.name === 'Light Shovel') {
                 miningState.enabled = !miningState.enabled;
                 miningState.manuallyDisabled = !miningState.enabled;
                 updateButtonState();
-
-                // Update mining functionality based on new state (manual toggle)
                 updateMiningState(true);
-
-                // Show toast notification
-                const toastMessage = miningState.enabled ? 'Shovel enabled!' : 'Shovel disabled!';
-                const toastType = miningState.enabled ? 'success' : 'info';
+                toastMessage = miningState.enabled ? TOAST_MESSAGES.shovelEnabled : TOAST_MESSAGES.shovelDisabled;
               }
 
-              if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.showToast) {
-                api.ui.components.showToast({
-                  message: toastMessage,
-                  type: toastType,
-                  duration: TOAST_DURATION_DEFAULT
-                });
+              if (toastMessage) {
+                showToast({ message: toastMessage, logPrefix: '[Quests Mod][Tools]' });
               }
             });
 
@@ -7186,13 +8175,13 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       imageContainer.style.cssText = 'width: 110px; min-width: 110px; max-width: 110px; flex: 0 0 110px; height: 90px; padding: 0; align-self: stretch;';
       
       const kingImgWrapper = document.createElement('div');
-      kingImgWrapper.style.cssText = 'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
+      kingImgWrapper.style.cssText = 'width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0; box-sizing: border-box;';
       
       const kingImg = document.createElement('img');
       kingImg.src = kingTibianusIconUrl;
       kingImg.alt = 'King Tibianus';
       kingImg.className = 'pixelated';
-      kingImg.style.cssText = 'max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; image-rendering: pixelated;';
+      kingImg.style.cssText = 'width: 106px; height: 64px; object-fit: contain; image-rendering: pixelated;';
       kingImgWrapper.appendChild(kingImg);
       imageContainer.appendChild(kingImgWrapper);
       
@@ -7283,7 +8272,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
       // kingChatState is now defined globally
       // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = display order in Quest Log (Monks Study after The search for the Light; Queen Banshees after Monks Study; Follower of Zathroth after Queen Banshees).
-      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION, KING_MONKS_STUDY_MISSION, COSTELLO_QUEEN_BANSHEES_MISSION, FOLLOWER_OF_ZATHROTH_MISSION, MOTHER_OF_ALL_SPIDERS_MISSION];
+      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION, KING_MONKS_STUDY_MISSION, KING_SCARAB_COIN_MISSION, COSTELLO_QUEEN_BANSHEES_MISSION, FOLLOWER_OF_ZATHROTH_MISSION, MOTHER_OF_ALL_SPIDERS_MISSION, MEETING_WITH_TESHA_MISSION, SERPENTINE_TOWER_MISSION];
 
       // Mission Registry: Maps mission IDs to their state property names in kingChatState
       // This centralizes mission-to-state mapping for easier maintenance
@@ -7296,7 +8285,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'progressFollowerOfZathroth',
         [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'progressMotherOfAllSpiders',
         [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
-        [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope'
+        [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope',
+    [MEETING_WITH_TESHA_MISSION.id]: 'progressMeetingWithTesha',
+    [KING_SCARAB_COIN_MISSION.id]: 'progressScarabHunt',
+    [SERPENTINE_TOWER_MISSION.id]: 'progressSerpentineTower'
       };
 
       // Mission Firebase Key Map: Maps mission IDs to their Firebase property names
@@ -7309,7 +8301,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'followerOfZathroth',
         [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'motherOfAllSpiders',
         [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
-        [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope'
+        [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope',
+    [MEETING_WITH_TESHA_MISSION.id]: 'meetingWithTesha',
+    [KING_SCARAB_COIN_MISSION.id]: 'scarabHunt',
+    [SERPENTINE_TOWER_MISSION.id]: 'serpentineTower'
       };
 
       // Random responses when Tibianus doesn't understand the player's input
@@ -7331,21 +8326,20 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
       // getMissionProgress and setMissionProgress are defined globally for Tile 79 functionality
 
-      function areAllMissionsCompleted() {
-        // Only check King Tibianus missions for completion status
+      function getKingMissionChain() {
         const hasHolyTible = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
         const kingMissions = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION];
         if (hasHolyTible) kingMissions.push(KING_MONKS_STUDY_MISSION);
-        return kingMissions.every(mission => getMissionProgress(mission).completed);
+        kingMissions.push(KING_SCARAB_COIN_MISSION);
+        return kingMissions;
+      }
+
+      function areAllMissionsCompleted() {
+        return getKingMissionChain().every(mission => getMissionProgress(mission).completed);
       }
 
       function currentMission() {
-        // Return the first incomplete King Tibianus mission, or null if all are completed
-        // The Monks Study is only available after completing the search for the Light (player has Holy Tible)
-        const hasHolyTible = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
-        const kingMissions = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION];
-        if (hasHolyTible) kingMissions.push(KING_MONKS_STUDY_MISSION);
-        for (const mission of kingMissions) {
+        for (const mission of getKingMissionChain()) {
           if (!getMissionProgress(mission).completed) {
             return mission;
           }
@@ -7363,7 +8357,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       let modalRef = null;
 
       // Create cooldown manager for Tibianus conversation
-      const tibianusCooldown = createNPCCooldownManager(NPC_CHAT_RESPONSE_DELAY_MS);
+      const tibianusCooldown = createNPCCooldownManager();
 
       function buildStrings(mission) {
         // Handle case where all missions are completed (mission is null)
@@ -7662,6 +8656,12 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             line2.textContent = selectedMission.rewardCoins ? `Reward: ${selectedMission.rewardCoins} guild coins.` : 'Bring the Blessed Ankh to Wyda in the swamps of Venore.';
           } else if (selectedMission.id === MOTHER_OF_ALL_SPIDERS_MISSION.id) {
             line2.textContent = 'Reward: Spool of Yarn.';
+          } else if (selectedMission.id === MEETING_WITH_TESHA_MISSION.id) {
+            line2.textContent = `Reward: ${selectedMission.rewardCoins} guild coins.`;
+          } else if (selectedMission.id === KING_SCARAB_COIN_MISSION.id) {
+            line2.textContent = 'Seek Tesha in Darama Oasis once you have recovered the valuable.';
+          } else if (selectedMission.id === SERPENTINE_TOWER_MISSION.id) {
+            line2.textContent = `Reward: ${SCORPION_SCEPTRE_CONFIG.productName}.`;
           } else {
             line2.textContent = selectedMission.rewardCoins ? `Reward: ${selectedMission.rewardCoins} guild coins.` : '';
           }
@@ -7733,15 +8733,39 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
               line3.textContent = selectedMission.hint;
               hintBlock.appendChild(line3);
             }
+          } else if (selectedMission.id === SERPENTINE_TOWER_MISSION.id) {
+            const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+            const line1 = document.createElement('p');
+            if (serpentineProgress.putridChamberComplete) {
+              line1.textContent = selectedMission.putridChamberReturnObjective;
+              descBlock.appendChild(line1);
+            } else {
+              line1.textContent = selectedMission.objectiveLine1;
+              descBlock.appendChild(line1);
+              const line2 = document.createElement('p');
+              line2.textContent = selectedMission.objectiveLine2;
+              descBlock.appendChild(line2);
+            }
+
+            const line3 = document.createElement('p');
+            line3.style.color = '#b0b0b0';
+            line3.style.fontStyle = 'italic';
+            line3.style.marginTop = '6px';
+            line3.textContent = serpentineProgress.putridChamberComplete
+              ? SCORPION_SCEPTRE_CONFIG.description
+              : selectedMission.hint;
+            hintBlock.appendChild(line3);
           } else {
             // For other missions, always show both objectives
             const line1 = document.createElement('p');
             line1.textContent = selectedMission.objectiveLine1;
             descBlock.appendChild(line1);
-            
-            const line2 = document.createElement('p');
-            line2.textContent = selectedMission.objectiveLine2;
-            descBlock.appendChild(line2);
+
+            if (selectedMission.objectiveLine2) {
+              const line2 = document.createElement('p');
+              line2.textContent = selectedMission.objectiveLine2;
+              descBlock.appendChild(line2);
+            }
 
             const line3 = document.createElement('p');
             line3.style.color = '#b0b0b0';
@@ -7867,6 +8891,8 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             kingChatState.progressLetter.accepted = true;
           } else if (mission.id === KING_MONKS_STUDY_MISSION.id) {
             kingChatState.progressMonksStudy.accepted = true;
+          } else if (mission.id === KING_SCARAB_COIN_MISSION.id) {
+            kingChatState.progressScarabHunt.accepted = true;
           } else if (mission.id === FOLLOWER_OF_ZATHROTH_MISSION.id) {
             kingChatState.progressFollowerOfZathroth.accepted = true;
             if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
@@ -7892,7 +8918,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           if (mission.id === KING_COPPER_KEY_MISSION.id) {
             try {
               await addQuestItem(MAP_COLOUR_CONFIG.productName, 1);
-              showMapReceivedToast();
+              NotificationService.showImportant(TOAST_MESSAGES.mapReceived, '[Quests Mod][King Tibianus]', MAP_COLOUR_CONFIG.productName);
               console.log('[Quests Mod][King Tibianus] Awarded Map (Colour) for copper key mission');
               // Set up Copper Key system now that mission is accepted
               setupCopperKeySystem();
@@ -7905,7 +8931,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           if (mission.id === KING_RED_DRAGON_MISSION.id) {
             try {
               await addQuestItem('Obsidian Knife', 1);
-              showObsidianKnifeReceivedToast();
+              NotificationService.showItemReceived('Obsidian Knife', '[Quests Mod][King Tibianus]');
               console.log('[Quests Mod][King Tibianus] Awarded Obsidian Knife for red dragon mission');
             } catch (err) {
               console.error('[Quests Mod][King Tibianus] Error awarding Obsidian Knife:', err);
@@ -7914,6 +8940,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
           if (mission.id === KING_MONKS_STUDY_MISSION.id && typeof updateTile53CostelloRightClickState === 'function') {
             updateTile53CostelloRightClickState();
+          }
+
+          if (mission.id === KING_SCARAB_COIN_MISSION.id) {
+            NotificationService.showQuestAccepted(KING_SCARAB_COIN_MISSION, '[Quests Mod][King Tibianus]');
           }
 
           // Exchange Letter from Al Dee for Stamped Letter when letter mission is accepted
@@ -7947,7 +8977,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                 // Update cache
                 cachedQuestItems = updatedProducts;
 
-                showStampedLetterReceivedToast();
+                NotificationService.showItemReceived('Stamped Letter', '[Quests Mod][King Tibianus]');
                 console.log('[Quests Mod][King Tibianus] Exchanged Letter from Al Dee for Stamped Letter');
 
                 // Update tile 79 right-click state (will enable if player is in sewers)
@@ -8013,7 +9043,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           if (shouldAwardDragonClaw) {
             try {
               await addQuestItem('Dragon Claw', 1);
-              showDragonClawReceivedToast();
+              NotificationService.showItemReceived('Dragon Claw', '[Quests Mod][King Tibianus]');
               console.log('[Quests Mod][King Tibianus] Awarded Dragon Claw for dragon mission completion');
             } catch (err) {
               console.error('[Quests Mod][King Tibianus] Error awarding Dragon Claw:', err);
@@ -8186,7 +9216,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         const mentionsDragon = lowerText.includes('dragon') || lowerText.includes('scale') || lowerText.includes('leather');
         const mentionsLetter = lowerText.includes('letter') || lowerText.includes('scroll');
         const mentionsMonks = lowerText.includes('costello') || lowerText.includes('monastery') || lowerText.includes('monks') || lowerText.includes('white raven');
-        // Monks Study is only available after completing the search for the Light (player must have Holy Tible in quest inventory)
+        const mentionsScarab = lowerText.includes('scarab') || lowerText.includes('desert') || lowerText.includes('darama') || lowerText.includes('valuable') || lowerText.includes('sands');
         const hasHolyTible = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
 
         if (areAllMissionsCompleted()) {
@@ -8201,6 +9231,8 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           return MISSIONS.find(m => m.id === KING_RED_DRAGON_MISSION.id) || activeMission;
         } else if (mentionsMonks && hasHolyTible) {
           return MISSIONS.find(m => m.id === KING_MONKS_STUDY_MISSION.id) || activeMission;
+        } else if (mentionsScarab) {
+          return MISSIONS.find(m => m.id === KING_SCARAB_COIN_MISSION.id) || activeMission;
         }
         return activeMission;
       }
@@ -8228,15 +9260,27 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           } else if (activeMission.id === KING_MONKS_STUDY_MISSION.id) {
             // Completion can be set when player finds Costello (e.g. via Costello NPC); until then keep searching
             hasItems = false;
+          } else if (activeMission.id === KING_SCARAB_COIN_MISSION.id) {
+            hasItems = await hasScarabCoinInInventory();
           }
 
           if (hasItems) {
+            const completingScarabHunt = activeMission.id === KING_SCARAB_COIN_MISSION.id;
             queueKingReply(kingStrings.keyComplete, { onDone: async () => {
-              if (activeMission.rewardCoins > 0) {
-                await awardGuildCoins(activeMission.rewardCoins);
-                await updateGuildCoinDisplay();
+              if (completingScarabHunt) {
+                await completeScarabHuntMission({ showCompletionToast: false });
+                await activateMeetingWithTeshaQuest({ showDiscoveryToast: false });
+                updateTeshaArrowState();
+                activeMission = currentMission();
+                kingStrings = buildStrings(activeMission);
+                renderKingQuestUI();
+              } else {
+                if (activeMission.rewardCoins > 0) {
+                  await awardGuildCoins(activeMission.rewardCoins);
+                  await updateGuildCoinDisplay();
+                }
+                await completeKingTibianusQuest();
               }
-              await completeKingTibianusQuest();
             } });
           } else {
             queueKingReply(kingStrings.keyScoldNoKey, { closeAfterMs: 2000 });
@@ -8344,6 +9388,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         const mentionsDragon = lowerText.includes('dragon') || lowerText.includes('scale') || lowerText.includes('leather');
         const mentionsLetter = lowerText.includes('letter') || lowerText.includes('scroll');
         const mentionsMonks = lowerText.includes('costello') || lowerText.includes('monastery') || lowerText.includes('monks') || lowerText.includes('white raven');
+        const mentionsScarab = lowerText.includes('scarab') || lowerText.includes('desert') || lowerText.includes('darama') || lowerText.includes('valuable') || lowerText.includes('sands');
 
         // Determine target mission based on what player mentioned
         const targetMission = determineTargetMission(lowerText, activeMission);
@@ -8368,13 +9413,13 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           kingResponse = starterCoinResponse;
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
-          showCoinReceivedToast();
+          NotificationService.showItemReceived(SILVER_TOKEN_CONFIG.productName, '[Quests Mod][King Tibianus]', TOAST_MESSAGES.kingTookCoin);
         } else if (areAllMissionsCompleted() && (mentionsKey || mentionsDragon || mentionsMonks || lowerText.includes('mission') || lowerText.includes('quest'))) {
           // All missions completed, tell player to come back later
           kingResponse = 'All missions have been completed. Come back later for more tasks.';
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
-        } else if (mentionsKey || mentionsDragon || mentionsLetter || mentionsMonks) {
+        } else if (mentionsKey || mentionsDragon || mentionsLetter || mentionsMonks || mentionsScarab) {
           const hasHolyTibleForMonks = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
           if (mentionsMonks && !hasHolyTibleForMonks) {
             kingResponse = 'You must first complete the search for the Light and possess the Holy Tible before I can entrust you with that task.';
@@ -8415,7 +9460,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                   );
                   
                   cachedQuestItems = updatedProducts;
-                  showStampedLetterReceivedToast();
+                  NotificationService.showItemReceived('Stamped Letter', '[Quests Mod][King Tibianus]');
                   console.log('[Quests Mod][King Tibianus] Exchanged Letter from Al Dee for Stamped Letter (return visit)');
                   
                   // Update tile 79 right-click state
@@ -8484,13 +9529,12 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         }
         
         // Queue response with cooldown
-        const isBye = text.toLowerCase().includes('bye');
         tibianusCooldown.queueResponse(
           text,
           kingResponse,
           addMessageToConversation,
           'King Tibianus',
-          isBye ? () => ModalHelpers.closeModal(1000) : null
+          ModalHelpers.getFarewellCloseCallback(text)
         );
         
         // Clear input
@@ -8710,7 +9754,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       };
 
       // Create cooldown manager for Al Dee conversation
-      const alDeeCooldown = createNPCCooldownManager(NPC_CHAT_RESPONSE_DELAY_MS);
+      const alDeeCooldown = createNPCCooldownManager();
 
       // Function to add message to conversation
       function addMessageToConversation(sender, text, isAlDee = false) {
@@ -9017,7 +10061,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
               console.log('[Quests Mod][Al Dee] Stamped Letter delivered, consuming from inventory');
 
               // Show delivery toast
-              showStampedLetterDeliveredToast();
+              NotificationService.showItemReceived('Stamped Letter', '[Quests Mod][Al Dee]', TOAST_MESSAGES.deliveredTo('Al Dee'));
 
               // Award guild coins
               const coinsAdder = globalThis.addGuildCoins ||
@@ -9096,7 +10140,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             if (hasSmallAxe) {
               // Remove the Small Axe from inventory
               await consumeQuestItem('Small Axe', 1);
-              showSmallAxeReturnedToast();
+              NotificationService.showItemReceived('Small Axe', '[Quests Mod][Al Dee]', TOAST_MESSAGES.returnedTo('Al Dee'));
               console.log('[Quests Mod][Al Dee] Small Axe returned, consuming from inventory');
 
               // Award Light Shovel
@@ -9491,16 +10535,12 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         // The default greeting response should be preserved for unrecognized but reasonable messages
         // Confusion should only be used for messages that don't make any sense in context
 
-        // Check if this is a bye message to close the modal
-        const isBye = lowerText.includes('bye');
-        
-        // Queue response with cooldown
         alDeeCooldown.queueResponse(
           text,
           alDeeResponse,
           addMessageToConversation,
           'Al Dee',
-          isBye ? () => ModalHelpers.closeModal(1000) : null
+          ModalHelpers.getFarewellCloseCallback(text)
         );
       }
 
@@ -9791,7 +10831,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     });
     costelloSendBtn.addEventListener('click', sendMessageToCostello);
 
-    const costelloCooldown = createNPCCooldownManager(NPC_CHAT_RESPONSE_DELAY_MS);
+    const costelloCooldown = createNPCCooldownManager();
     let costelloAwaitingHolyTible = false;
     let costelloOfferingQueenBanshees = false;
     let costelloOfferingBloodProtector = false;
@@ -9816,17 +10856,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             kingChatState.progressQueenBanshees.completed = true;
             const allProgress = getAllMissionProgress();
             await saveKingTibianusProgress(costelloPlayerName, allProgress);
-            showToast({
-              productName: COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName,
-              message: 'Received Blessed Ankh!',
-              duration: TOAST_DURATION_IMPORTANT,
-              logPrefix: '[Quests Mod][Costello]'
-            });
-            showToast({
-              message: 'Castello\'s diary has been returned.',
-              duration: TOAST_DURATION_IMPORTANT,
-              logPrefix: '[Quests Mod][Costello]'
-            });
+            showQueenBansheesCompletionToasts();
             costelloCooldown.queueResponse(text, 'You have completed the seven seals of Ghostlands. The Queen Of The Banshees task is complete. You have received the Blessed Ankh. My thanks.', addMessageToConversation, 'Costello');
           } catch (err) {
             console.error('[Quests Mod][Costello] Error completing Queen Banshees:', err);
@@ -9856,17 +10886,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                 kingChatState.progressQueenBanshees.completed = true;
                 const allProgress = getAllMissionProgress();
                 await saveKingTibianusProgress(costelloPlayerName, allProgress);
-                showToast({
-                  productName: COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName,
-                  message: 'Received Blessed Ankh!',
-                  duration: TOAST_DURATION_IMPORTANT,
-                  logPrefix: '[Quests Mod][Costello]'
-                });
-                showToast({
-                  message: 'Castello\'s diary has been returned.',
-                  duration: TOAST_DURATION_IMPORTANT,
-                  logPrefix: '[Quests Mod][Costello]'
-                });
+                showQueenBansheesCompletionToasts();
                 costelloCooldown.queueResponse(text, 'You have completed the seven seals of Ghostlands. The Queen Of The Banshees task is complete. You have received the Blessed Ankh. My thanks.', addMessageToConversation, 'Costello');
               } catch (err) {
                 console.error('[Quests Mod][Costello] Error completing Queen Banshees:', err);
@@ -9974,7 +10994,13 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         }
 
         const response = getCostelloResponse(text, costelloPlayerName);
-        costelloCooldown.queueResponse(text, response, addMessageToConversation, 'Costello');
+        costelloCooldown.queueResponse(
+          text,
+          response,
+          addMessageToConversation,
+          'Costello',
+          ModalHelpers.getFarewellCloseCallback(text)
+        );
     }
 
     modalTimeout = setTimeout(() => {
@@ -10031,7 +11057,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       messageContainerId: 'wyda-messages'
     });
 
-    const wydaCooldown = createNPCCooldownManager(NPC_CHAT_RESPONSE_DELAY_MS);
+    const wydaCooldown = createNPCCooldownManager();
     let wydaOfferingMotherOfAllSpiders = false;
 
     async function sendMessageToWyda() {
@@ -10065,7 +11091,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             await addQuestItem(MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName, 1);
             if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
             wydaCooldown.queueResponse(text, 'The silk! Excellent. I can make good use of this. Here, take this Spool of Yarn as thanks.', addMessage, 'Wyda');
-            showToast({ message: 'Received Spool of Yarn!', duration: TOAST_DURATION_IMPORTANT, logPrefix: '[Quests Mod][Wyda]' });
+            NotificationService.showItemReceived(MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName, '[Quests Mod][Wyda]');
             return;
           }
           wydaCooldown.queueResponse(text, "You don't have the spider silk. Defeat the mother of all spiders in the secluded herb and return with the silk.", addMessage, 'Wyda');
@@ -10104,7 +11130,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
             const coinMsg = FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins ? ' Here are ' + FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins + ' guild coins for your trouble.' : '';
             wydaCooldown.queueResponse(text, 'The Blessed Ankh! Yes, this is what I needed. You have done well. The matter Castello spoke of is complete.' + coinMsg, addMessage, 'Wyda');
-            showToast({ message: 'The Follower of Zathroth task is complete. Received ' + FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins + ' guild coins!', duration: TOAST_DURATION_IMPORTANT, logPrefix: '[Quests Mod][Wyda]' });
+            NotificationService.showTaskCompletedWithCoins(FOLLOWER_OF_ZATHROTH_MISSION, '[Quests Mod][Wyda]');
             return;
           }
         } catch (err) {
@@ -10156,15 +11182,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
       const lines = getWydaResponse(text, wydaPlayerName);
       if (lines.length === 0) return;
-      if (lines.length === 1) {
-        wydaCooldown.queueResponse(text, lines[0], addMessage, 'Wyda');
-        return;
-      }
-      lines.forEach((line, i) => {
-        setTimeout(() => {
-          addMessage('Wyda', line, true);
-        }, (i + 1) * NPC_CHAT_RESPONSE_DELAY_MS);
-      });
+      wydaCooldown.queueResponse(text, lines, addMessage, 'Wyda', ModalHelpers.getFarewellCloseCallback(text));
     }
 
     textarea.addEventListener('keydown', (e) => {
@@ -10187,6 +11205,316 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           title: 'Wyda',
           width: wydaDims.width,
           height: wydaDims.height,
+          content: contentDiv,
+          buttons: []
+        });
+        setupQuestsModalResponsiveLayout(
+          modal,
+          contentDiv,
+          KING_TIBI_MODAL_WIDTH,
+          COSTELLO_MODAL_HEIGHT,
+          QUESTS_MODAL_CONFIG.npcChat.minHeight,
+          (dialog) => {
+            if (typeof removeDefaultModalFooter === 'function') {
+              removeDefaultModalFooter(dialog);
+            }
+          }
+        );
+      }
+      modalTimeout = null;
+    }, 50);
+  }
+
+  // Tesha Modal (Darama Oasis) – uses shared NPC chat layout
+  function showTeshaModal() {
+    clearTimeoutOrInterval(modalTimeout);
+    clearTimeoutOrInterval(dialogTimeout);
+    for (let i = 0; i < 2; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    }
+
+    const teshaPlayerName = getCurrentPlayerName() || 'Player';
+    const teshaIconUrl = getQuestItemsAssetUrl('Tesha.gif');
+    const { contentDiv, addMessage, textarea, sendBtn } = createNPCChatModalContent({
+      npcName: 'Tesha',
+      playerName: teshaPlayerName,
+      imageUrl: teshaIconUrl,
+      imageAlt: 'Tesha',
+      welcomeMessage: 'Be mourned pilgrim in flesh, ' + teshaPlayerName + '. Welcome to the bank and jewel store.',
+      placeholder: 'Type your message to Tesha...',
+      modalWidth: KING_TIBI_MODAL_WIDTH,
+      modalHeight: COSTELLO_MODAL_HEIGHT,
+      messageContainerId: 'tesha-messages'
+    });
+
+    const teshaCooldown = createNPCCooldownManager();
+    let teshaOfferingSerpentineTower = false;
+
+    async function sendMessageToTesha() {
+      const text = (textarea.value || '').trim();
+      if (!text) return;
+      addMessage(teshaPlayerName, text, false);
+      textarea.value = '';
+      teshaCooldown.clearPendingResponse();
+      const lowerText = text.toLowerCase();
+
+      const meetingProgress = getMissionProgress(MEETING_WITH_TESHA_MISSION);
+      const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+
+      const wantsSerpentineReward =
+        lowerText.includes('mission') ||
+        lowerText.includes('quest') ||
+        lowerText.includes('reward') ||
+        lowerText.includes('sceptre') ||
+        lowerText.includes('scepter') ||
+        lowerText.includes('putrid') ||
+        lowerText.includes('chamber');
+      if (
+        serpentineProgress.accepted &&
+        serpentineProgress.putridChamberComplete &&
+        !serpentineProgress.completed &&
+        wantsSerpentineReward
+      ) {
+        try {
+          const rewarded = await completeSerpentineTowerQuestWithTeshaReward();
+          if (rewarded) {
+            const completeLines = SERPENTINE_TOWER_MISSION.teshaRewardLines.map(
+              line => line.replace(/Player/g, teshaPlayerName)
+            );
+            teshaCooldown.queueResponse(text, completeLines, addMessage, 'Tesha');
+          } else {
+            teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+          }
+        } catch (err) {
+          console.error('[Quests Mod][Tesha] Error completing Serpentine Tower quest reward:', err);
+          teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+        }
+        return;
+      }
+
+      const giveCoinKeywords = ['scarab coin', 'scarab', 'coin', 'give', 'here', 'take', 'offer', 'show'];
+      const wantsToGiveCoin =
+        giveCoinKeywords.some(kw => lowerText.includes(kw)) ||
+        (lowerText.includes('yes') && !teshaOfferingSerpentineTower);
+      if (meetingProgress.accepted && !meetingProgress.completed && wantsToGiveCoin) {
+        try {
+          const questItems = await getQuestItems(false);
+          const hasCoin = (questItems[SCARAB_COIN_CONFIG.productName] || 0) >= 1;
+          if (hasCoin) {
+            await consumeQuestItem(SCARAB_COIN_CONFIG.productName, 1);
+            setMissionProgress(MEETING_WITH_TESHA_MISSION, { accepted: true, completed: true });
+            kingChatState.progressMeetingWithTesha.accepted = true;
+            kingChatState.progressMeetingWithTesha.completed = true;
+            const playerName = getCurrentPlayerName();
+            if (playerName) {
+              await saveKingTibianusProgress(playerName, getAllMissionProgress());
+            }
+            const coinsAdder = globalThis.addGuildCoins ||
+              (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+              (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
+              (typeof addGuildCoins === 'function' ? addGuildCoins : null);
+            if (coinsAdder) {
+              await coinsAdder(MEETING_WITH_TESHA_MISSION.rewardCoins);
+            } else {
+              console.warn('[Quests Mod][Tesha] addGuildCoins not available, skipping guild coin reward');
+            }
+            updateTeshaArrowState();
+            const completeLines = [
+              ...MEETING_WITH_TESHA_MISSION.completeLines,
+              MEETING_WITH_TESHA_MISSION.completeCoinLine.replace('{coins}', String(MEETING_WITH_TESHA_MISSION.rewardCoins))
+            ].map(line => line.replace(/Player/g, teshaPlayerName));
+            teshaCooldown.queueResponse(text, completeLines, addMessage, 'Tesha');
+            NotificationService.showQuestCompleted(MEETING_WITH_TESHA_MISSION, '[Quests Mod][Tesha]', {
+              rewardCoins: MEETING_WITH_TESHA_MISSION.rewardCoins
+            });
+            return;
+          }
+          teshaCooldown.queueResponse(text, MEETING_WITH_TESHA_MISSION.noCoin, addMessage, 'Tesha');
+          return;
+        } catch (err) {
+          console.error('[Quests Mod][Tesha] Error completing Meeting with Tesha:', err);
+          teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+          return;
+        }
+      }
+
+      if (lowerText.includes('mission') || lowerText.includes('quest')) {
+        if (meetingProgress.accepted && !meetingProgress.completed) {
+          teshaCooldown.queueResponse(
+            text,
+            MEETING_WITH_TESHA_MISSION.askForCoin.replace(/Player/g, teshaPlayerName),
+            addMessage,
+            'Tesha'
+          );
+          return;
+        }
+
+        if (!meetingProgress.completed) {
+          teshaCooldown.queueResponse(
+            text,
+            SERPENTINE_TOWER_MISSION.requiresMeetingWithTesha.replace(/Player/g, teshaPlayerName),
+            addMessage,
+            'Tesha'
+          );
+          return;
+        }
+
+        if (!serpentineProgress.accepted) {
+          teshaOfferingSerpentineTower = true;
+          teshaCooldown.queueResponse(
+            text,
+            SERPENTINE_TOWER_MISSION.prompt.replace(/Player/g, teshaPlayerName),
+            addMessage,
+            'Tesha'
+          );
+          return;
+        }
+
+        if (!serpentineProgress.completed) {
+          if (serpentineProgress.putridChamberComplete) {
+            teshaCooldown.queueResponse(
+              text,
+              SERPENTINE_TOWER_MISSION.putridChamberReturnObjective.replace(/Player/g, teshaPlayerName),
+              addMessage,
+              'Tesha'
+            );
+            return;
+          }
+          teshaCooldown.queueResponse(
+            text,
+            SERPENTINE_TOWER_MISSION.alreadyActive.replace(/Player/g, teshaPlayerName),
+            addMessage,
+            'Tesha'
+          );
+          return;
+        }
+
+        teshaCooldown.queueResponse(
+          text,
+          SERPENTINE_TOWER_MISSION.alreadyCompleted.replace(/Player/g, teshaPlayerName),
+          addMessage,
+          'Tesha'
+        );
+        return;
+      }
+
+      if (teshaOfferingSerpentineTower && lowerText.includes('yes')) {
+        teshaOfferingSerpentineTower = false;
+        if (!getMissionProgress(MEETING_WITH_TESHA_MISSION).completed) {
+          teshaCooldown.queueResponse(
+            text,
+            SERPENTINE_TOWER_MISSION.requiresMeetingWithTesha.replace(/Player/g, teshaPlayerName),
+            addMessage,
+            'Tesha'
+          );
+          return;
+        }
+        try {
+          const questItems = await getQuestItems(false);
+          const hasRune = (questItems?.[DESTROY_FIELD_RUNE_CONFIG.productName] || 0) >= 1;
+          setMissionProgress(SERPENTINE_TOWER_MISSION, buildSerpentineTowerProgress({
+            accepted: true,
+            completed: false,
+            destroyFieldRuneTaken: hasRune,
+            putridChamberComplete: false
+          }));
+          kingChatState.progressSerpentineTower = buildSerpentineTowerProgress({
+            accepted: true,
+            completed: false,
+            destroyFieldRuneTaken: hasRune,
+            putridChamberComplete: false
+          });
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            await saveKingTibianusProgress(playerName, getAllMissionProgress());
+          }
+          teshaCooldown.queueResponse(
+            text,
+            SERPENTINE_TOWER_MISSION.accept.replace(/Player/g, teshaPlayerName),
+            addMessage,
+            'Tesha'
+          );
+          NotificationService.showQuestAccepted(SERPENTINE_TOWER_MISSION, '[Quests Mod][Tesha]');
+          updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
+          setTimeout(() => {
+            updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
+          }, FISHING_CONFIG.MAP_SWITCH_DELAY);
+        } catch (err) {
+          console.error('[Quests Mod][Tesha] Error accepting Serpentine Tower quest:', err);
+          teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+        }
+        return;
+      }
+
+      if (teshaOfferingSerpentineTower && (lowerText.includes('no') || lowerText.includes('not'))) {
+        teshaOfferingSerpentineTower = false;
+        teshaCooldown.queueResponse(text, 'Return when you are ready for this task.', addMessage, 'Tesha');
+        return;
+      }
+
+      if (teshaOfferingSerpentineTower) {
+        teshaCooldown.queueResponse(
+          text,
+          SERPENTINE_TOWER_MISSION.answerYesNo.replace(/Player/g, teshaPlayerName),
+          addMessage,
+          'Tesha'
+        );
+        return;
+      }
+
+      const askingDestroyFieldRune =
+        lowerText.includes('destroy field rune') ||
+        lowerText.includes('destroy field') ||
+        lowerText.includes('field rune') ||
+        lowerText.includes('adito grav');
+      if (askingDestroyFieldRune) {
+        const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+        if (serpentineProgress.accepted && !serpentineProgress.completed) {
+          try {
+            const questItems = await getQuestItems(false);
+            const hasRune = (questItems?.[DESTROY_FIELD_RUNE_CONFIG.productName] || 0) >= 1;
+            teshaCooldown.queueResponse(
+              text,
+              (hasRune
+                ? SERPENTINE_TOWER_MISSION.destroyFieldRuneAlreadyHave
+                : SERPENTINE_TOWER_MISSION.destroyFieldRuneHint
+              ).replace(/Player/g, teshaPlayerName),
+              addMessage,
+              'Tesha'
+            );
+          } catch (err) {
+            console.error('[Quests Mod][Tesha] Error responding about Destroy Field Rune:', err);
+            teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+          }
+          return;
+        }
+      }
+
+      const lines = getTeshaResponse(text, teshaPlayerName);
+      if (lines.length === 0) return;
+      teshaCooldown.queueResponse(text, lines, addMessage, 'Tesha', ModalHelpers.getFarewellCloseCallback(text));
+    }
+
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessageToTesha();
+      }
+    });
+    sendBtn.addEventListener('click', sendMessageToTesha);
+
+    modalTimeout = setTimeout(() => {
+      const api = (typeof globalThis !== 'undefined' && globalThis.BestiaryModAPI) || (typeof window !== 'undefined' && window.BestiaryModAPI);
+      if (api && api.ui && api.ui.components && api.ui.components.createModal) {
+        const teshaDims = getQuestsModalDimensions(
+          KING_TIBI_MODAL_WIDTH,
+          COSTELLO_MODAL_HEIGHT,
+          QUESTS_MODAL_CONFIG.npcChat.minHeight
+        );
+        const modal = api.ui.components.createModal({
+          title: 'Tesha',
+          width: teshaDims.width,
+          height: teshaDims.height,
           content: contentDiv,
           buttons: []
         });
@@ -10776,8 +12104,9 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   // - checkMissionState(): Check current mission state in console
   // - setMissionAccepted(missionId): Set a mission as accepted (default: king_letter_al_dee)
   // - resetQuest(missionId): Reset a quest to not accepted/not completed
-  //   Available mission IDs: 'king_copper_key', 'king_red_dragon', 'king_letter_al_dee', 'king_monks_study', 'costello_queen_banshees', 'al_dee_fishing_gold', 'al_dee_golden_rope'
+  //   Available mission IDs: 'king_copper_key', 'king_red_dragon', 'king_letter_al_dee', 'king_monks_study', 'costello_queen_banshees', 'follower_of_zathroth', 'mother_of_all_spiders', 'al_dee_fishing_gold', 'al_dee_golden_rope', 'meeting_with_tesha', 'serpentine_tower'
   // - resetAlDeeFishing(): Convenience function to reset Al Dee fishing mission specifically
+  // - resetMeetingWithTesha(): Reset Meeting with Tesha and remove Scarab Coin from inventory
   // - resetAllQuests(): Reset ALL quests, quest items, Al Dee shop purchases, Copper Key received status, DELETE all Firebase entries, and grant Silver Token
 
   // Debug function to check Firebase mission state
@@ -10879,7 +12208,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         'follower_of_zathroth': 'progressFollowerOfZathroth',
         'mother_of_all_spiders': 'progressMotherOfAllSpiders',
         'al_dee_fishing_gold': 'progressAlDeeFishing',
-        'al_dee_golden_rope': 'progressAlDeeGoldenRope'
+        'al_dee_golden_rope': 'progressAlDeeGoldenRope',
+        'meeting_with_tesha': 'progressMeetingWithTesha',
+        'king_scarab_coin': 'progressScarabHunt',
+        'serpentine_tower': 'progressSerpentineTower'
       };
 
       const stateKey = missionMap[missionId];
@@ -10906,6 +12238,9 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         motherOfAllSpiders: kingChatState.progressMotherOfAllSpiders,
         alDeeFishing: kingChatState.progressAlDeeFishing,
         alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope,
+        meetingWithTesha: kingChatState.progressMeetingWithTesha,
+        scarabHunt: kingChatState.progressScarabHunt,
+        serpentineTower: kingChatState.progressSerpentineTower,
         costelloVisited: kingChatState.costelloVisited,
         sevenSealsCompleted: normalizeSevenSealsCompleted(kingChatState.sevenSealsCompleted)
       };
@@ -10932,6 +12267,16 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         }
       }
 
+      if (missionId === 'meeting_with_tesha') {
+        const questItems = await getQuestItems(false);
+        const scarabCount = questItems[SCARAB_COIN_CONFIG.productName] || 0;
+        if (scarabCount > 0) {
+          await consumeQuestItem(SCARAB_COIN_CONFIG.productName, scarabCount);
+          console.log('[Quests Mod][Dev] Removed Scarab Coin from inventory (count:', scarabCount, ')');
+        }
+        updateTeshaArrowState();
+      }
+
       // Force update UI state
       updateTile79RightClickState();
       console.log('[Quests Mod][Dev] UI state updated');
@@ -10944,6 +12289,12 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   window.resetAlDeeFishing = async function() {
     console.log('[Quests Mod][Dev] Resetting Al Dee fishing mission');
     await resetQuest('al_dee_fishing_gold');
+  };
+
+  // Debug function to reset Meeting with Tesha and remove Scarab Coin
+  window.resetMeetingWithTesha = async function() {
+    console.log('[Quests Mod][Dev] Resetting Meeting with Tesha');
+    await resetQuest('meeting_with_tesha');
   };
 
   // Seven seals (Queen Banshees): complete each seal separately. Use setSealCompleted(sealIndex, true) to mark a seal done.
@@ -10973,6 +12324,9 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       kingChatState.progressMotherOfAllSpiders = { accepted: false, completed: false };
       kingChatState.progressAlDeeFishing = { accepted: false, completed: false };
       kingChatState.progressAlDeeGoldenRope = { accepted: false, completed: false };
+      kingChatState.progressMeetingWithTesha = { accepted: false, completed: false };
+      kingChatState.progressScarabHunt = { accepted: false, completed: false };
+      kingChatState.progressSerpentineTower = { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false };
       kingChatState.costelloVisited = false;
       kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
       console.log('[Quests Mod][Dev] Local quest state reset');
@@ -11314,18 +12668,18 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           }
 
           // Check if we're leaving Banshee's Last Room (reset one-time setup flag)
-          if (currentRoomName && currentRoomName !== BANSHEE_LAST_ROOM_NAME && bansheeVillainSetupDone) {
+          if (currentRoomName && currentRoomName !== BANSHEE_LAST_ROOM_NAME && bansheeLastRoomBattle?.isEntryVillainSetupDone()) {
             console.log('[Quests Mod][Overlay Hider] Leaving Banshee\'s Last Room - resetting villain setup flag');
-            bansheeVillainSetupDone = false;
+            bansheeLastRoomBattle.resetEntryVillainSetup();
             removeCustomBattleStatusToast();
           }
 
           // Spider Lair: leaving room — full cleanup like Mornenion leaving Ab'Dendriel (restore vanilla Spider Lair).
           // Exception: warp to A Secluded Herb after defeat keeps spiderLairRetryWithoutTile77 so map re-entry can re-init without tile 77.
           if (lastOverlayHiderRoomName === SPIDER_LAIR_ROOM_NAME && currentRoomName && currentRoomName !== SPIDER_LAIR_ROOM_NAME) {
-            if (spiderLairVillainSetupDone) {
+            if (spiderLairBattle?.isEntryVillainSetupDone()) {
               console.log('[Quests Mod][Overlay Hider] Leaving Spider Lair - resetting villain setup flag');
-              spiderLairVillainSetupDone = false;
+              spiderLairBattle.resetEntryVillainSetup();
             }
             spiderLairReinitTriggered = false;
             const postDefeatSecludedHerb = spiderLairRetryWithoutTile77 && currentRoomName === SECLUDED_HERB_ROOM_NAME;
@@ -11335,23 +12689,32 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             }
           }
 
-          // Banshee's Last Room: same as Mornenion — when we enter via portal, remove original villains and add Queen of the Banshee
+          // Putrid Chamber: leaving room — cleanup unless returning to basement after defeat for lever retry
+          if (lastOverlayHiderRoomName === PUTRID_CHAMBER_ROOM_NAME && currentRoomName && currentRoomName !== PUTRID_CHAMBER_ROOM_NAME) {
+            if (putridChamberBattle?.isEntryVillainSetupDone()) {
+              console.log('[Quests Mod][Overlay Hider] Leaving Putrid Chamber - resetting villain setup flag');
+              putridChamberBattle.resetEntryVillainSetup();
+            }
+            putridChamberReinitTriggered = false;
+            const postDefeatBasement = putridChamberRetryAfterDefeat
+              && currentRoomName === SERPENTINE_TOWER_BASEMENT_ROOM_NAME
+              && isSerpentineTowerBasementGameplayActive();
+            if (!postDefeatBasement && (playerUsedSerpentineLeverToPutridChamber || putridChamberBattle)) {
+              console.log('[Quests Mod][Overlay Hider] Leaving Putrid Chamber - clearing Serpentine lever battle state');
+              cleanupPutridChamberQuest();
+            }
+          }
+
+          // Banshee's Last Room: one-shot entry villain setup via CustomBattle
           if (currentRoomName === BANSHEE_LAST_ROOM_NAME && playerUsedPortalToBansheeLastRoom && bansheeLastRoomBattle) {
-            if (!bansheeVillainSetupDone) {
-              console.log('[Quests Mod][Overlay Hider] Entering Banshee\'s Last Room - removing original villains and adding custom villain');
-              hideQuestOverlays();
-              hideHeroEditorButton();
-              bansheeLastRoomBattle.removeOriginalVillains();
-              bansheeVillainSetupDone = true;
-            }
-            // Re-add custom villains if any missing (e.g. after battle)
-            const queenExists = boardConfig.some(entity =>
-              entity.key && entity.key.startsWith('banshee-queen-tile-95-')
-            );
-            if (!queenExists) {
-              console.log('[Quests Mod][Overlay Hider] Banshee Last Room villains missing - re-adding');
-              bansheeLastRoomBattle.addVillains();
-            }
+            bansheeLastRoomBattle.runEntryVillainSetupIfNeeded({
+              isActiveCheck: () => playerUsedPortalToBansheeLastRoom,
+              onComplete: () => {
+                hideQuestOverlays();
+                hideHeroEditorButton();
+              }
+            });
+            bansheeLastRoomBattle.ensureCustomVillainsPresent();
           }
 
           // Spider Lair: re-init battle after defeat (cleanup cleared battle) so player can retry without tile 77 — only when spiderLairRetryWithoutTile77 (set in onClose on defeat)
@@ -11361,7 +12724,6 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             spiderLairReinitTriggered = true;
             console.log('[Quests Mod][Overlay Hider] Spider Lair: re-initializing battle after defeat so player can retry');
             playerUsedTile77ToSpiderLair = true;
-            spiderLairVillainSetupDone = false;
             const initResult = initializeSpiderLairBattle(currentRoomId);
             if (initResult && initResult.then) {
               initResult.then((battle) => {
@@ -11370,7 +12732,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                   spiderLairBattle = battle;
                   spiderLairBattle.setup(
                     () => playerUsedTile77ToSpiderLair,
-                    (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
+                    NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
                   );
                   setupSpiderLairTileRestrictions();
                   showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
@@ -11387,7 +12749,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
               spiderLairBattle = initResult;
               spiderLairBattle.setup(
                 () => playerUsedTile77ToSpiderLair,
-                (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
+                NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
               );
               setupSpiderLairTileRestrictions();
               showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
@@ -11398,22 +12760,34 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           if (currentRoomName === SPIDER_LAIR_ROOM_NAME && playerUsedTile77ToSpiderLair && spiderLairBattle) {
             const justEnteredSpiderLairViaQuest = lastOverlayHiderRoomName !== SPIDER_LAIR_ROOM_NAME;
             if (justEnteredSpiderLairViaQuest) {
-              console.log('[Quests Mod][Overlay Hider] Entering Spider Lair (via quest) - removing original villains and adding custom villains');
-              hideQuestOverlays();
-              hideHeroEditorButton();
-              spiderLairBattle.removeOriginalVillains();
-              spiderLairVillainSetupDone = true;
-              replaceSpiderLairTileSprites();
-              [0, 50, 150].forEach(delay => setTimeout(() => replaceSpiderLairTileSprites(), delay));
+              spiderLairBattle.runEntryVillainSetupIfNeeded({
+                isActiveCheck: () => playerUsedTile77ToSpiderLair,
+                onComplete: () => {
+                  hideQuestOverlays();
+                  hideHeroEditorButton();
+                  replaceSpiderLairTileSprites();
+                  [0, 50, 150].forEach(delay => setTimeout(() => replaceSpiderLairTileSprites(), delay));
+                }
+              });
             }
-            const oldWidowExists = boardConfig.some(entity =>
-              entity.key && entity.key.startsWith('spider-old-widow-tile-81-')
-            );
-            if (!oldWidowExists) {
-              console.log('[Quests Mod][Overlay Hider] Spider Lair villains missing - re-adding');
-              spiderLairBattle.addVillains();
-            }
+            spiderLairBattle.ensureCustomVillainsPresent();
             replaceSpiderLairTileSprites();
+          }
+
+          // Putrid Chamber (Serpentine Tower Quest): lever warp → Thalas + Cobra Statues custom battle
+          if (
+            currentRoomName === PUTRID_CHAMBER_ROOM_NAME
+            && playerUsedSerpentineLeverToPutridChamber
+            && isSerpentineTowerBasementGameplayActive()
+          ) {
+            if (!putridChamberBattle && currentRoomId) {
+              ensurePutridChamberBattleInitialized(currentRoomId);
+            }
+            if (putridChamberBattle) {
+              if (putridChamberBattle.isEntryVillainSetupDone() && !putridChamberBattle.isSceneSpriteReplacementsComplete()) {
+                putridChamberBattle.scheduleSceneSpriteReplacementsForEntry();
+              }
+            }
           }
 
           // Check if we're in Ab'Dendriel Hive or related areas
@@ -11430,13 +12804,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                     mornenionBattle = battle;
                     mornenionBattle.setup(
                       () => playerUsedHoleToMornenion,
-                      (toastData) => {
-                        showToast({ 
-                          message: toastData.message, 
-                          duration: toastData.duration || 3000, 
-                          logPrefix: '[Quests Mod][Mornenion]' 
-                        });
-                      }
+                      NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                     );
                     setupMornenionTileRestrictions();
                     showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
@@ -11452,13 +12820,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
                 mornenionBattle = initResult;
                 mornenionBattle.setup(
                   () => playerUsedHoleToMornenion,
-                  (toastData) => {
-                    showToast({ 
-                      message: toastData.message, 
-                      duration: toastData.duration || 3000, 
-                      logPrefix: '[Quests Mod][Mornenion]' 
-                    });
-                  }
+                  NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
                 );
                 setupMornenionTileRestrictions();
                 showCustomBattleStatusToast({ battleName: 'Mornenion', allyLimit: 5, logPrefix: '[Quests Mod][Mornenion]' });
@@ -11909,14 +13271,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     if (mornenionBattle) {
       mornenionBattle.enforceAllyLimit(
         () => playerUsedHoleToMornenion,
-        (toastData) => {
-          // Use existing showToast (ignores 'type' parameter)
-          showToast({ 
-            message: toastData.message, 
-            duration: toastData.duration || 3000, 
-            logPrefix: '[Quests Mod][Mornenion]' 
-          });
-        }
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
       );
     }
   }
@@ -11926,14 +13281,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     if (mornenionBattle) {
       mornenionBattle.setupAllyLimit(
         () => playerUsedHoleToMornenion,
-        (toastData) => {
-          // Use existing showToast (ignores 'type' parameter)
-          showToast({ 
-            message: toastData.message, 
-            duration: toastData.duration || 3000, 
-            logPrefix: '[Quests Mod][Mornenion]' 
-          });
-        }
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
       );
     }
   }
@@ -12169,6 +13517,23 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     }
   }
 
+  function navigateToSerpentineTowerBasement() {
+    try {
+      const roomId = getRoomIdByRoomName(SERPENTINE_TOWER_BASEMENT_ROOM_NAME);
+      if (!roomId) {
+        console.warn('[Quests Mod][Putrid Chamber] Serpentine Tower Basement room not found');
+        return;
+      }
+      console.log('[Quests Mod][Putrid Chamber] Navigating to Serpentine Tower Basement');
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId: roomId
+      });
+    } catch (error) {
+      console.error('[Quests Mod][Putrid Chamber] Error navigating to Serpentine Tower Basement:', error);
+    }
+  }
+
   // Restore board setup for Banshee's Last Room (delegates to CustomBattle)
   function restoreBoardSetupBanshee() {
     if (bansheeLastRoomBattle) {
@@ -12183,7 +13548,6 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     try {
       removeCustomBattleStatusToast();
       playerUsedPortalToBansheeLastRoom = false;
-      bansheeVillainSetupDone = false;
       if (bansheeLastRoomBattle) {
         bansheeLastRoomBattle.cleanup(restoreBoardSetupBanshee, showQuestOverlays);
         bansheeLastRoomBattle = null;
@@ -12199,13 +13563,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     if (bansheeLastRoomBattle) {
       bansheeLastRoomBattle.setupTileRestrictions(
         () => playerUsedPortalToBansheeLastRoom,
-        (toastData) => {
-          showToast({
-            message: toastData.message,
-            duration: toastData.duration || 3000,
-            logPrefix: '[Quests Mod][Banshee Last Room]'
-          });
-        }
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.bansheeLastRoom)
       );
       setupBansheeAllyLimit();
     } else {
@@ -12218,13 +13576,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     if (bansheeLastRoomBattle) {
       bansheeLastRoomBattle.setupAllyLimit(
         () => playerUsedPortalToBansheeLastRoom,
-        (toastData) => {
-          showToast({
-            message: toastData.message,
-            duration: toastData.duration || 3000,
-            logPrefix: '[Quests Mod][Banshee Last Room]'
-          });
-        }
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.bansheeLastRoom)
       );
     }
   }
@@ -12284,7 +13636,6 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     try {
       removeCustomBattleStatusToast();
       playerUsedTile77ToSpiderLair = false;
-      spiderLairVillainSetupDone = false;
       spiderLairReinitTriggered = false;
       spiderLairRetryWithoutTile77 = false;
       if (spiderLairBattle) {
@@ -12302,13 +13653,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     if (spiderLairBattle) {
       spiderLairBattle.setupTileRestrictions(
         () => playerUsedTile77ToSpiderLair,
-        (toastData) => {
-          showToast({
-            message: toastData.message,
-            duration: toastData.duration || 3000,
-            logPrefix: '[Quests Mod][Spider Lair]'
-          });
-        }
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
       );
       setupSpiderLairAllyLimit();
     } else {
@@ -12320,13 +13665,51 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     if (spiderLairBattle) {
       spiderLairBattle.setupAllyLimit(
         () => playerUsedTile77ToSpiderLair,
-        (toastData) => {
-          showToast({
-            message: toastData.message,
-            duration: toastData.duration || 3000,
-            logPrefix: '[Quests Mod][Spider Lair]'
-          });
-        }
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
+      );
+    }
+  }
+
+  function restoreBoardSetupPutridChamber() {
+    if (putridChamberBattle) {
+      putridChamberBattle.restoreBoardSetup();
+    } else {
+      console.warn('[Quests Mod][Putrid Chamber] Battle not initialized');
+    }
+  }
+
+  function cleanupPutridChamberQuest() {
+    try {
+      removeCustomBattleStatusToast();
+      playerUsedSerpentineLeverToPutridChamber = false;
+      putridChamberReinitTriggered = false;
+      if (putridChamberBattle) {
+        putridChamberBattle.cleanup(restoreBoardSetupPutridChamber, showQuestOverlays);
+        putridChamberBattle = null;
+        console.log('[Quests Mod][Putrid Chamber] Battle cleaned up');
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Putrid Chamber] Error cleaning up:', error);
+    }
+  }
+
+  function setupPutridChamberTileRestrictions() {
+    if (putridChamberBattle) {
+      putridChamberBattle.setupTileRestrictions(
+        () => playerUsedSerpentineLeverToPutridChamber,
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.putridChamber)
+      );
+      setupPutridChamberAllyLimit();
+    } else {
+      console.warn('[Quests Mod][Putrid Chamber] Battle not initialized');
+    }
+  }
+
+  function setupPutridChamberAllyLimit() {
+    if (putridChamberBattle) {
+      putridChamberBattle.setupAllyLimit(
+        () => playerUsedSerpentineLeverToPutridChamber,
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.putridChamber)
       );
     }
   }
@@ -12336,14 +13719,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     if (mornenionBattle) {
       mornenionBattle.setupTileRestrictions(
         () => playerUsedHoleToMornenion,
-        (toastData) => {
-          // Use existing showToast (ignores 'type' parameter)
-          showToast({ 
-            message: toastData.message, 
-            duration: toastData.duration || 3000, 
-            logPrefix: '[Quests Mod][Mornenion]' 
-          });
-        }
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.mornenion)
       );
       // Also set up ally limit monitoring
       setupMornenionAllyLimit();
@@ -12457,9 +13833,9 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
           // Clean up existing water tiles on map change
           if (fishingState.enabled) {
-            disableWaterTileRightClick();
-            fishingState.tiles.clear();
-            fishingState.enabled = false; // Reset enabled flag so it can be re-enabled
+            // Keep fishing enabled across map switches; just clear tracked tiles and let updateWaterFishingState()
+            // re-scan once the new room sprites are mounted.
+            waterFishingRightClickSystem.disableTrackedTiles();
           }
 
           // Wait for new map sprites to load, then scan for water tiles
@@ -12670,24 +14046,603 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     return false;
   }
 
-  // Handle right-click events on document and check if they originated from water tiles
-  function handleWaterFishingRightClickDocument(event) {
-    // Check if the event target is inside any water tile
-    for (const waterTile of fishingState.tiles) {
-      if (waterTile.contains(event.target)) {
-        // Store the clicked tile for animation positioning
-        fishingState.clickedTile = waterTile;
+  // handleWaterFishingRightClickDocument was replaced by waterFishingRightClickSystem (createRightClickTileSystem)
 
-        // Be very aggressive about preventing the browser context menu
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        event.stopPropagation();
+  // =======================
+  // Serpentine Tower Basement: Destroy Field Rune usage
+  // =======================
 
-        // Create our custom context menu
-        createWaterFishingContextMenu(event.clientX, event.clientY);
+  const serpentineFieldState = {
+    boardSubscription: null,
+    currentRoomId: null,
+    rightClickEnabled: false,
+    tiles: new Set(),
+    clickedTile: null,
+    contextMenu: null,
+    pendingUse: false,
+    leverPulled: false
+  };
 
-        return false;
+  let serpentineLeverRightClickEnabled = false;
+  let serpentineLeverWarpPending = false;
+
+  function resetSerpentineBasementSessionState() {
+    restoreSerpentineFieldSprites();
+    restoreSerpentineLeverSprite();
+    serpentineFieldState.leverPulled = false;
+  }
+
+  function restoreSerpentineFieldSprite(sprite) {
+    if (!sprite?.isConnected) return;
+    sprite.style.visibility = '';
+    sprite.style.display = '';
+    sprite.style.pointerEvents = '';
+    delete sprite.dataset.questsSerpentineFieldDestroyed;
+    delete sprite.dataset.questsSerpentineFieldPointerEventsEnabled;
+  }
+
+  function restoreSerpentineFieldSprites() {
+    document.querySelectorAll('[data-quests-serpentine-field-destroyed="1"]').forEach(restoreSerpentineFieldSprite);
+  }
+
+  function restoreSerpentineLeverSprite() {
+    const tile64El = document.getElementById('tile-index-' + SERPENTINE_LEVER_TILE);
+    if (!tile64El?.isConnected) return;
+    const pulled = tile64El.querySelector(`.sprite.item.relative.id-${SERPENTINE_LEVER_SPRITE.to}`);
+    if (!pulled) return;
+    pulled.classList.remove(`id-${SERPENTINE_LEVER_SPRITE.to}`);
+    pulled.classList.add(`id-${SERPENTINE_LEVER_SPRITE.from}`);
+    const img = pulled.querySelector('img');
+    if (img) {
+      img.alt = SERPENTINE_LEVER_SPRITE.from;
+      img.setAttribute('data-cropped', 'false');
+      img.style.setProperty('--cropX', '0');
+      img.style.setProperty('--cropY', '0');
+    }
+  }
+
+  function isSerpentineTowerQuestActive() {
+    const progress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+    const active = !!progress?.accepted && !progress?.completed;
+    return active;
+  }
+
+  function shouldEnableSerpentineDestroyFieldRightClick(boardContext = null) {
+    if (!isSerpentineTowerBasementGameplayActive()) return false;
+    const onBasement = isOnRoomByName(SERPENTINE_TOWER_BASEMENT_ROOM_NAME);
+    const hasAnyFieldSprites = document.querySelectorAll(SERPENTINE_FIELD_SPRITE_SELECTOR).length > 0;
+    // Enable when either:
+    // - we're on the expected room name (when it matches), OR
+    // - energy field sprites are present (room name mismatch across servers/modpacks).
+    return onBasement || hasAnyFieldSprites;
+  }
+
+  function parseTileIndexFromTileElement(tileEl) {
+    const match = (tileEl?.id || '').match(/^tile-index-(\d+)$/);
+    return match ? Number(match[1]) : null;
+  }
+
+  function hideSerpentineFieldSprite(sprite) {
+    if (!sprite) return;
+    // Hide visually but keep the node in the DOM — React owns these elements and
+    // crashes on map change if we call .remove().
+    sprite.style.visibility = 'hidden';
+    sprite.style.display = 'none';
+    sprite.style.pointerEvents = 'none';
+    delete sprite.dataset.questsSerpentineFieldPointerEventsEnabled;
+    sprite.dataset.questsSerpentineFieldDestroyed = '1';
+  }
+
+  function hideSerpentineFieldSpritesOnTile(tileEl) {
+    if (!tileEl) return 0;
+    let count = 0;
+    tileEl.querySelectorAll(SERPENTINE_FIELD_SPRITE_SELECTOR).forEach(sprite => {
+      if (sprite.dataset.questsSerpentineFieldDestroyed === '1') return;
+      hideSerpentineFieldSprite(sprite);
+      count++;
+    });
+    return count;
+  }
+
+  function findSerpentineFieldTiles() {
+    const tiles = [];
+    for (const sprite of document.querySelectorAll(SERPENTINE_FIELD_SPRITE_SELECTOR)) {
+      if (sprite.dataset.questsSerpentineFieldDestroyed === '1') continue;
+      const tileContainer = sprite.closest('[id^="tile-index-"]');
+      if (tileContainer && !tiles.includes(tileContainer)) {
+        tiles.push(tileContainer);
       }
+    }
+    return tiles;
+  }
+
+  function clearSerpentineFieldSpritePointerEvents() {
+    document.querySelectorAll('[data-quests-serpentine-field-pointer-events-enabled="1"]').forEach(sprite => {
+      sprite.style.pointerEvents = '';
+      delete sprite.dataset.questsSerpentineFieldPointerEventsEnabled;
+    });
+  }
+
+  function enableSerpentineFieldTileRightClick() {
+    clearSerpentineFieldSpritePointerEvents();
+    serpentineFieldState.tiles.clear();
+
+    const fieldTiles = findSerpentineFieldTiles();
+    fieldTiles.forEach(tile => {
+      tile.querySelectorAll(SERPENTINE_FIELD_SPRITE_SELECTOR).forEach(sprite => {
+        // Only the field sprite should receive clicks — not the whole tile div,
+        // which can overlap neighbouring tiles and steal right-clicks.
+        sprite.style.pointerEvents = 'auto';
+        sprite.dataset.questsSerpentineFieldPointerEventsEnabled = '1';
+      });
+      serpentineFieldState.tiles.add(tile);
+    });
+  }
+
+  function disableSerpentineFieldTileRightClick() {
+    clearSerpentineFieldSpritePointerEvents();
+    // Clean up legacy whole-tile pointer-events changes from older versions.
+    document.querySelectorAll('[data-quests-serpentine-removed-pointer-events-none="1"]').forEach(tile => {
+      tile.classList.add('pointer-events-none');
+      delete tile.dataset.questsSerpentineRemovedPointerEventsNone;
+      tile.style.pointerEvents = '';
+    });
+    serpentineFieldState.tiles.clear();
+  }
+
+  function setupSerpentineDestroyFieldObserver() {
+    if (serpentineFieldState.boardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+
+    serpentineFieldState.currentRoomId = getCurrentRoomId();
+
+    serpentineFieldState.boardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+      const newRoomId = getCurrentRoomId(boardContext);
+      if (serpentineFieldState.currentRoomId !== newRoomId) {
+        restoreSerpentineFieldSprites();
+        serpentineFieldState.currentRoomId = newRoomId;
+        resetSerpentineBasementSessionState();
+        if (serpentineFieldState.rightClickEnabled) {
+          serpentineFieldState.tiles.clear();
+        }
+        setTimeout(() => {
+          updateSerpentineBasementRightClickState(boardContext);
+        }, FISHING_CONFIG.MAP_SWITCH_DELAY);
+      } else {
+        updateSerpentineBasementRightClickState(boardContext);
+      }
+    });
+
+    setTimeout(() => {
+      updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
+    }, FISHING_CONFIG.MAP_SWITCH_DELAY);
+  }
+
+  function cleanupSerpentineDestroyFieldObserver() {
+    if (serpentineFieldState.boardSubscription) {
+      try {
+        serpentineFieldState.boardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Serpentine Field] Error unsubscribing board:', e);
+      }
+      serpentineFieldState.boardSubscription = null;
+    }
+
+    if (serpentineFieldState.rightClickEnabled) {
+      document.removeEventListener('contextmenu', handleSerpentineDestroyFieldRightClickDocument, true);
+      serpentineFieldState.rightClickEnabled = false;
+    }
+
+    disableSerpentineFieldTileRightClick();
+
+    if (serpentineFieldState.contextMenu && serpentineFieldState.contextMenu.closeMenu) {
+      serpentineFieldState.contextMenu.closeMenu();
+    }
+    serpentineFieldState.contextMenu = null;
+    serpentineFieldState.clickedTile = null;
+    serpentineFieldState.pendingUse = false;
+
+    serpentineRunePickupRightClickSystem.cleanup();
+    serpentineRunePickupState.clickedTile = null;
+    serpentineRunePickupState.pendingPickup = false;
+
+    resetSerpentineBasementSessionState();
+
+    if (serpentineLeverRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleSerpentineLeverTile64RightClickDocument, true);
+      serpentineLeverRightClickEnabled = false;
+    }
+    const tile64El = document.getElementById('tile-index-' + SERPENTINE_LEVER_TILE);
+    if (tile64El?.isConnected) {
+      if (tile64El.dataset.questsSerpentineLeverRemovedPointerEventsNone === '1') {
+        tile64El.classList.add('pointer-events-none');
+        delete tile64El.dataset.questsSerpentineLeverRemovedPointerEventsNone;
+      }
+      tile64El.style.pointerEvents = '';
+    }
+  }
+
+  function updateSerpentineDestroyFieldRightClickState(boardContext = null) {
+    try {
+      if (!serpentineFieldState.boardSubscription) {
+        setupSerpentineDestroyFieldObserver();
+      }
+
+      const basementGameplayActive = isSerpentineTowerBasementGameplayActive();
+      if (!basementGameplayActive) {
+        if (serpentineFieldState.rightClickEnabled) {
+          document.removeEventListener('contextmenu', handleSerpentineDestroyFieldRightClickDocument, true);
+          serpentineFieldState.rightClickEnabled = false;
+        }
+        disableSerpentineFieldTileRightClick();
+        return;
+      }
+
+      const shouldBeEnabled = shouldEnableSerpentineDestroyFieldRightClick(boardContext);
+      if (shouldBeEnabled && !serpentineFieldState.rightClickEnabled) {
+        document.addEventListener('contextmenu', handleSerpentineDestroyFieldRightClickDocument, true);
+        serpentineFieldState.rightClickEnabled = true;
+        enableSerpentineFieldTileRightClick();
+      } else if (shouldBeEnabled && serpentineFieldState.rightClickEnabled) {
+        enableSerpentineFieldTileRightClick();
+      } else if (!shouldBeEnabled && serpentineFieldState.rightClickEnabled) {
+        document.removeEventListener('contextmenu', handleSerpentineDestroyFieldRightClickDocument, true);
+        serpentineFieldState.rightClickEnabled = false;
+        disableSerpentineFieldTileRightClick();
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Serpentine Field] Error updating state:', error);
+    }
+  }
+
+  function getSerpentineFieldTileDebugLabel(tileEl) {
+    const tileIndex = parseTileIndexFromTileElement(tileEl);
+    return tileIndex != null ? `tile-index-${tileIndex}` : (tileEl?.id || 'unknown-tile');
+  }
+
+  function getSerpentineFieldTilesAtPoint(clientX, clientY) {
+    const labels = [];
+    for (const el of document.elementsFromPoint(clientX, clientY)) {
+      const sprite = el.matches?.(SERPENTINE_FIELD_SPRITE_SELECTOR)
+        ? el
+        : el.closest?.(SERPENTINE_FIELD_SPRITE_SELECTOR);
+      if (!sprite) continue;
+      const tile = sprite.closest('[id^="tile-index-"]');
+      if (!tile) continue;
+      const label = getSerpentineFieldTileDebugLabel(tile);
+      if (!labels.includes(label)) labels.push(label);
+    }
+    return labels;
+  }
+
+  function resolveSerpentineFieldTileFromEvent(event) {
+    const fieldSprite = event.target.closest?.(SERPENTINE_FIELD_SPRITE_SELECTOR);
+    if (!fieldSprite) return null;
+    const tile = fieldSprite.closest('[id^="tile-index-"]');
+    if (!tile || !serpentineFieldState.tiles.has(tile)) return null;
+    return { tile, fieldSprite };
+  }
+
+  function handleSerpentineDestroyFieldRightClickDocument(event) {
+    if (!isSerpentineTowerBasementGameplayActive()) return;
+
+    const trackedTiles = Array.from(serpentineFieldState.tiles).map(getSerpentineFieldTileDebugLabel);
+    const tilesAtPoint = getSerpentineFieldTilesAtPoint(event.clientX, event.clientY);
+    const resolved = resolveSerpentineFieldTileFromEvent(event);
+
+    if (!resolved) {
+      if (trackedTiles.length > 0) {
+        console.log('[Quests Mod][Serpentine Field] Right-click ignored — not on a field sprite', {
+          target: event.target,
+          targetTile: getSerpentineFieldTileDebugLabel(event.target.closest?.('[id^="tile-index-"]')),
+          fieldTilesAtPoint: tilesAtPoint,
+          trackedTiles
+        });
+      }
+      return;
+    }
+
+    const { tile, fieldSprite } = resolved;
+    serpentineFieldState.clickedTile = tile;
+    console.log('[Quests Mod][Serpentine Field] Right-click on field tile', {
+      tile: getSerpentineFieldTileDebugLabel(tile),
+      fieldSpriteId: SERPENTINE_FIELD_SPRITE_ID,
+      target: event.target,
+      fieldTilesAtPoint: tilesAtPoint,
+      trackedTileCount: trackedTiles.length
+    });
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+    createSerpentineDestroyFieldContextMenu(event.clientX, event.clientY);
+    return false;
+  }
+
+  function createSerpentineDestroyFieldContextMenu(x, y) {
+    if (serpentineFieldState.contextMenu && serpentineFieldState.contextMenu.closeMenu) {
+      serpentineFieldState.contextMenu.closeMenu();
+    }
+    const menuObj = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      buttons: [
+        {
+          text: 'Use Destroy Field Rune',
+          backgroundColor: '#6b6b6b',
+          color: '#d0d0d0',
+          border: '1px solid #9a9a9a',
+          hoverBackgroundColor: '#5a5a5a',
+          hoverBorderColor: '#b0b0b0',
+          onClick: async () => {
+            if (serpentineFieldState.pendingUse) return;
+            serpentineFieldState.pendingUse = true;
+            try {
+              const questItems = await getQuestItems(false);
+              const runeCount = questItems?.[DESTROY_FIELD_RUNE_ITEM_NAME] || 0;
+              if (runeCount <= 0) {
+                showToast({ message: TOAST_MESSAGES.missingDestroyFieldRune, logPrefix: '[Quests Mod][Serpentine Field]' });
+                return;
+              }
+
+              const tile = serpentineFieldState.clickedTile;
+              if (tile) {
+                createPoofAnimation(tile);
+                const hiddenCount = hideSerpentineFieldSpritesOnTile(tile);
+                console.log('[Quests Mod][Serpentine Field] Destroy Field Rune used', {
+                  tile: getSerpentineFieldTileDebugLabel(tile),
+                  hiddenSpriteCount: hiddenCount,
+                  spriteId: SERPENTINE_FIELD_SPRITE_ID
+                });
+                serpentineFieldState.tiles.delete(tile);
+              } else {
+                console.warn('[Quests Mod][Serpentine Field] Destroy Field Rune used but no clicked tile was stored');
+              }
+
+              enableSerpentineFieldTileRightClick();
+            } catch (err) {
+              console.error('[Quests Mod][Serpentine Field] Error using Destroy Field Rune:', err);
+            } finally {
+              serpentineFieldState.pendingUse = false;
+              if (serpentineFieldState.contextMenu && serpentineFieldState.contextMenu.closeMenu) {
+                serpentineFieldState.contextMenu.closeMenu();
+              }
+            }
+          }
+        }
+      ]
+    });
+
+    serpentineFieldState.contextMenu = menuObj;
+  }
+
+  // Serpentine Tower Basement: Destroy Field Rune pickup (sprite 6011)
+  const serpentineRunePickupState = {
+    rightClickEnabled: false,
+    tiles: new Set(),
+    clickedTile: null,
+    pendingPickup: false
+  };
+
+  function isSerpentineRunePickupConsumed() {
+    return !!kingChatState.progressSerpentineTower?.destroyFieldRuneTaken;
+  }
+
+  function getSerpentineRunePickupSpriteSelector() {
+    return SERPENTINE_RUNE_PICKUP_SPRITE_IDS
+      .map(id => `.sprite.item.relative.id-${id}`)
+      .join(',');
+  }
+
+  async function syncSerpentineRunePickupFlagFromInventory({ saveProgress = false } = {}) {
+    if (getMissionProgress(SERPENTINE_TOWER_MISSION).completed) return false;
+
+    const questItems = await getQuestItems(false);
+    const runeCount = questItems?.[DESTROY_FIELD_RUNE_CONFIG.productName] || 0;
+    if (runeCount === 0 && kingChatState.progressSerpentineTower?.destroyFieldRuneTaken) {
+      kingChatState.progressSerpentineTower.destroyFieldRuneTaken = false;
+      if (saveProgress) {
+        const playerName = getCurrentPlayerName();
+        if (playerName) {
+          await saveKingTibianusProgress(playerName, getAllMissionProgress());
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function shouldEnableSerpentineRunePickupRightClick() {
+    if (!isSerpentineTowerBasementGameplayActive() || isSerpentineRunePickupConsumed()) return false;
+    const onBasement = isOnRoomByName(SERPENTINE_TOWER_BASEMENT_ROOM_NAME);
+    const hasPickupSprite = document.querySelectorAll(getSerpentineRunePickupSpriteSelector()).length > 0;
+    return onBasement || hasPickupSprite;
+  }
+
+  function findSerpentineRunePickupTiles() {
+    const tiles = [];
+    if (isSerpentineRunePickupConsumed()) return tiles;
+
+    const sprites = document.querySelectorAll(getSerpentineRunePickupSpriteSelector());
+    for (const sprite of sprites) {
+      const tileContainer = sprite.closest('[id^="tile-index-"]');
+      if (tileContainer && !tiles.includes(tileContainer)) {
+        tiles.push(tileContainer);
+      }
+    }
+    return tiles;
+  }
+
+  async function markSerpentineRunePickupTaken({ saveProgress = true } = {}) {
+    kingChatState.progressSerpentineTower.destroyFieldRuneTaken = true;
+    serpentineRunePickupRightClickSystem.cleanup();
+    if (saveProgress) {
+      const playerName = getCurrentPlayerName();
+      if (playerName) {
+        await saveKingTibianusProgress(playerName, getAllMissionProgress());
+      }
+    }
+  }
+
+  async function syncSerpentineRunePickupState() {
+    try {
+      await capDestroyFieldRuneInventory();
+      await syncSerpentineRunePickupFlagFromInventory();
+      const questItems = await getQuestItems(false);
+      const runeCount = questItems?.[DESTROY_FIELD_RUNE_CONFIG.productName] || 0;
+      if (runeCount >= DESTROY_FIELD_RUNE_CONFIG.maxCount) {
+        await markSerpentineRunePickupTaken({ saveProgress: !isSerpentineRunePickupConsumed() });
+      } else if (isSerpentineRunePickupConsumed()) {
+        serpentineRunePickupRightClickSystem.cleanup();
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Serpentine Rune] Error syncing pickup state:', error);
+    }
+  }
+
+  async function pickUpSerpentineDestroyFieldRune(tile) {
+    if (serpentineRunePickupState.pendingPickup) return;
+    serpentineRunePickupState.pendingPickup = true;
+    try {
+      const questItems = await getQuestItems(false);
+      const runeCount = questItems?.[DESTROY_FIELD_RUNE_CONFIG.productName] || 0;
+      if (runeCount >= DESTROY_FIELD_RUNE_CONFIG.maxCount || isSerpentineRunePickupConsumed()) {
+        showToast({
+          message: TOAST_MESSAGES.alreadyHaveDestroyFieldRune,
+          logPrefix: '[Quests Mod][Serpentine Rune]'
+        });
+        return;
+      }
+
+      await addQuestItem(DESTROY_FIELD_RUNE_CONFIG.productName, 1);
+      await capDestroyFieldRuneInventory();
+      playRightClickLootEffect(tile);
+      showQuestItemNotification(DESTROY_FIELD_RUNE_CONFIG.productName, 1);
+      await markSerpentineRunePickupTaken();
+    } catch (err) {
+      console.error('[Quests Mod][Serpentine Rune] Error picking up Destroy Field Rune:', err);
+    } finally {
+      serpentineRunePickupState.pendingPickup = false;
+    }
+  }
+
+  const serpentineRunePickupRightClickSystem = createRightClickTileSystem({
+    id: 'Serpentine Rune',
+    state: serpentineRunePickupState,
+    getTiles: findSerpentineRunePickupTiles,
+    shouldEnableListener: shouldEnableSerpentineRunePickupRightClick,
+    shouldEnablePointerEvents: shouldEnableSerpentineRunePickupRightClick,
+    removePointerEventsNone: true,
+    pointerEventsNoneDatasetKey: 'questsSerpentineRuneRemovedPointerEventsNone',
+    onTileRightClick: (_event, tile) => {
+      pickUpSerpentineDestroyFieldRune(tile);
+    }
+  });
+
+  async function updateSerpentineBasementRightClickState(boardContext = null) {
+    updateSerpentineLeverTile64State(boardContext);
+    updateSerpentineDestroyFieldRightClickState(boardContext);
+    await syncSerpentineRunePickupState();
+    if (isSerpentineTowerBasementGameplayActive()) {
+      serpentineRunePickupRightClickSystem.update(boardContext);
+    } else {
+      serpentineRunePickupRightClickSystem.cleanup();
+    }
+  }
+
+  // Serpentine Tower Basement: lever on tile 64 (sprite 2772 → 2773), Fifth Seal pattern
+  function isSerpentineLeverPulled() {
+    return !!serpentineFieldState.leverPulled;
+  }
+
+  function shouldEnableSerpentineLeverTile64(boardContext = null) {
+    if (!isSerpentineTowerBasementGameplayActive()) return false;
+    const basementTile = getSerpentineBasementLeverTileElement();
+    if (basementTile) return true;
+    const onBasement = isOnRoomByName(SERPENTINE_TOWER_BASEMENT_ROOM_NAME);
+    const tile64El = document.getElementById('tile-index-' + SERPENTINE_LEVER_TILE);
+    const hasLever = tile64El?.isConnected && tile64El.querySelector(
+      `.sprite.item.relative.id-${SERPENTINE_LEVER_SPRITE.from}, .sprite.item.relative.id-${SERPENTINE_LEVER_SPRITE.to}`
+    );
+    return onBasement || !!hasLever;
+  }
+
+  function getSerpentineBasementLeverTileElement() {
+    if (!isOnRoomByName(SERPENTINE_TOWER_BASEMENT_ROOM_NAME)) return null;
+    const tile64El = document.getElementById('tile-index-' + SERPENTINE_LEVER_TILE);
+    if (!tile64El) return null;
+    const hasLever = tile64El.querySelector(
+      `.sprite.item.relative.id-${SERPENTINE_LEVER_SPRITE.from}, .sprite.item.relative.id-${SERPENTINE_LEVER_SPRITE.to}`
+    );
+    return hasLever ? tile64El : null;
+  }
+
+  function handleSerpentineLeverTile64RightClickDocument(event) {
+    if (!isSerpentineTowerBasementGameplayActive()) return;
+    if (!shouldEnableSerpentineLeverTile64()) return;
+
+    const tile64El = getSerpentineBasementLeverTileElement();
+    if (!tile64El || !tile64El.contains(event.target)) return;
+
+    const leverSprite = tile64El.querySelector(`.sprite.item.relative.id-${SERPENTINE_LEVER_SPRITE.from}`);
+    const pulledLeverSprite = tile64El.querySelector(`.sprite.item.relative.id-${SERPENTINE_LEVER_SPRITE.to}`);
+    const clickedUnpulled = leverSprite && leverSprite.contains(event.target);
+    const clickedPulled = pulledLeverSprite && pulledLeverSprite.contains(event.target);
+    if (!clickedUnpulled && !clickedPulled) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    if (clickedUnpulled) {
+      leverSprite.classList.remove(`id-${SERPENTINE_LEVER_SPRITE.from}`);
+      leverSprite.classList.add(`id-${SERPENTINE_LEVER_SPRITE.to}`);
+      const img = leverSprite.querySelector('img');
+      if (img) {
+        img.alt = SERPENTINE_LEVER_SPRITE.to;
+        img.setAttribute('data-cropped', 'false');
+        img.style.setProperty('--cropX', '0');
+        img.style.setProperty('--cropY', '0');
+      }
+      serpentineFieldState.leverPulled = true;
+      updateSerpentineLeverTile64State();
+      console.log('[Quests Mod][Serpentine Lever] Lever on tile 64 pulled in Serpentine Tower Basement');
+    } else {
+      console.log('[Quests Mod][Serpentine Lever] Pulled lever clicked again — re-entering Putrid Chamber');
+    }
+
+    enterPutridChamberFromSerpentineLever({ sourceTile: tile64El });
+  }
+
+  function updateSerpentineLeverTile64State(boardContext = null) {
+    try {
+      const shouldBeEnabled = shouldEnableSerpentineLeverTile64(boardContext);
+      const tile64El = document.getElementById('tile-index-' + SERPENTINE_LEVER_TILE);
+
+      if (shouldBeEnabled && !serpentineLeverRightClickEnabled) {
+        document.addEventListener('contextmenu', handleSerpentineLeverTile64RightClickDocument, true);
+        serpentineLeverRightClickEnabled = true;
+        if (tile64El) {
+          if (tile64El.classList.contains('pointer-events-none')) {
+            tile64El.classList.remove('pointer-events-none');
+            tile64El.dataset.questsSerpentineLeverRemovedPointerEventsNone = '1';
+          }
+          tile64El.style.pointerEvents = 'auto';
+        }
+      } else if (!shouldBeEnabled && serpentineLeverRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleSerpentineLeverTile64RightClickDocument, true);
+        serpentineLeverRightClickEnabled = false;
+        const tile64El = document.getElementById('tile-index-' + SERPENTINE_LEVER_TILE);
+        if (tile64El?.isConnected) {
+          if (tile64El.dataset.questsSerpentineLeverRemovedPointerEventsNone === '1') {
+            tile64El.classList.add('pointer-events-none');
+            delete tile64El.dataset.questsSerpentineLeverRemovedPointerEventsNone;
+          }
+          tile64El.style.pointerEvents = '';
+        }
+      }
+    } catch (e) {
+      console.error('[Quests Mod][Serpentine Lever] Error updating tile 64 state:', e);
     }
   }
 
@@ -12705,20 +14660,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       // If this is a manual toggle, apply the current fishingState.enabled directly
       if (manualToggle) {
         if (fishingState.enabled) {
-          // Enable fishing - add document listener and enable pointer events
-          document.addEventListener('contextmenu', handleWaterFishingRightClickDocument, true); // Use capture phase on document
-          enableWaterTileRightClick();
-          console.log('[Quests Mod][Water Fishing] Fishing manually enabled - document listener added and pointer events enabled');
+          waterFishingRightClickSystem.update(globalThis.state?.board?.getSnapshot?.()?.context);
         } else {
-          // Disable fishing - remove document listener and restore tile pointer events
-          document.removeEventListener('contextmenu', handleWaterFishingRightClickDocument, true);
-          disableWaterTileRightClick();
-
-          // Close any open context menu
-          if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) {
-            fishingState.contextMenu.closeMenu();
-          }
-          console.log('[Quests Mod][Water Fishing] Fishing manually disabled - document listener removed and pointer events restored');
+          waterFishingRightClickSystem.cleanup();
+          if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) fishingState.contextMenu.closeMenu();
         }
         return;
       }
@@ -12730,21 +14675,15 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       const canEnable = shouldBeEnabled && !fishingState.manuallyDisabled;
 
       if (canEnable && !fishingState.enabled) {
-        // Enable fishing - add document listener and enable pointer events
-        document.addEventListener('contextmenu', handleWaterFishingRightClickDocument, true); // Use capture phase on document
-        enableWaterTileRightClick();
-
+        waterFishingRightClickSystem.update(globalThis.state?.board?.getSnapshot?.()?.context);
         fishingState.enabled = true;
         console.log('[Quests Mod][Water Fishing] Fishing enabled - document listener added and pointer events enabled');
+      } else if (canEnable && fishingState.enabled) {
+        // Staying enabled (e.g. room switch): refresh tracked tiles for the new board.
+        waterFishingRightClickSystem.update(globalThis.state?.board?.getSnapshot?.()?.context);
       } else if (!shouldBeEnabled && fishingState.enabled) {
-        // Disable fishing - remove document listener and restore tile pointer events
-        document.removeEventListener('contextmenu', handleWaterFishingRightClickDocument, true);
-        disableWaterTileRightClick();
-
-        // Close any open context menu
-        if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) {
-          fishingState.contextMenu.closeMenu();
-        }
+        waterFishingRightClickSystem.cleanup();
+        if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) fishingState.contextMenu.closeMenu();
 
         fishingState.enabled = false;
         // Clear manual preference if automatically disabled (e.g., fishing rod lost)
@@ -12820,125 +14759,31 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
   // Create context menu for Tile 79 with "Visit Al Dee" button
   function createTile79ContextMenu(x, y) {
-    console.log('[Quests Mod][Tile 79] Creating context menu at', x, y);
+    if (tile79ContextMenu && tile79ContextMenu.closeMenu) tile79ContextMenu.closeMenu();
 
-    // Close any existing context menu
-    if (tile79ContextMenu && tile79ContextMenu.closeMenu) {
-      tile79ContextMenu.closeMenu();
-    }
-
-    // Create overlay to close menu on outside click
-    const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.zIndex = '9998';
-    overlay.style.backgroundColor = 'transparent';
-    overlay.style.pointerEvents = 'auto';
-    overlay.style.cursor = 'default';
-
-    // Create menu container
-    const menu = document.createElement('div');
-    menu.style.position = 'fixed';
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-    menu.style.zIndex = '9999';
-    menu.style.minWidth = '120px';
-    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
-    menu.style.border = '4px solid transparent';
-    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
-    menu.style.borderRadius = '6px';
-    menu.style.padding = '8px';
-    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
-
-    // Minimal design - no title or description, just the button
-
-    // Button container
-    const buttonContainer = document.createElement('div');
-    buttonContainer.style.display = 'flex';
-    buttonContainer.style.justifyContent = 'center';
-
-    // "Visit Al Dee" button
-    const visitAlDeeButton = document.createElement('button');
-    visitAlDeeButton.className = 'pixel-font-14';
-    visitAlDeeButton.textContent = 'Visit Al Dee';
-    visitAlDeeButton.style.width = '120px';
-    visitAlDeeButton.style.height = '28px';
-    visitAlDeeButton.style.fontSize = '12px';
-    visitAlDeeButton.style.backgroundColor = '#2a4a2a';
-    visitAlDeeButton.style.color = '#4CAF50';
-    visitAlDeeButton.style.border = '1px solid #4CAF50';
-    visitAlDeeButton.style.borderRadius = '4px';
-    visitAlDeeButton.style.cursor = 'pointer';
-    visitAlDeeButton.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
-    visitAlDeeButton.style.fontWeight = 'bold';
-
-    // Add hover effects
-    visitAlDeeButton.addEventListener('mouseenter', () => {
-      visitAlDeeButton.style.backgroundColor = '#1a2a1a';
-      visitAlDeeButton.style.borderColor = '#66BB6A';
+    tile79ContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      buttons: [
+        {
+          text: 'Visit Al Dee',
+          width: '120px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            showAlDeeModal();
+            if (tile79ContextMenu && tile79ContextMenu.closeMenu) tile79ContextMenu.closeMenu();
+          }
+        }
+      ],
+      onClose: () => {
+        tile79ContextMenu = null;
+      }
     });
-    visitAlDeeButton.addEventListener('mouseleave', () => {
-      visitAlDeeButton.style.backgroundColor = '#2a4a2a';
-      visitAlDeeButton.style.borderColor = '#4CAF50';
-    });
-
-    // Handle click - show Al Dee modal
-    visitAlDeeButton.addEventListener('click', () => {
-      showAlDeeModal();
-      closeMenu();
-    });
-
-    buttonContainer.appendChild(visitAlDeeButton);
-    menu.appendChild(buttonContainer);
-
-    // Event handlers
-    const overlayClickHandler = (e) => {
-      if (e.target === overlay) {
-        closeMenu();
-      }
-    };
-
-    const escHandler = (e) => {
-      if (e.key === 'Escape') {
-        closeMenu();
-      }
-    };
-
-    // Close menu function
-    function closeMenu() {
-      // Remove event listeners
-      overlay.removeEventListener('mousedown', overlayClickHandler);
-      overlay.removeEventListener('click', overlayClickHandler);
-      document.removeEventListener('keydown', escHandler);
-
-      // Remove from DOM
-      if (overlay.parentNode) {
-        overlay.parentNode.removeChild(overlay);
-      }
-      if (menu.parentNode) {
-        menu.parentNode.removeChild(menu);
-      }
-
-      // Clear reference
-      tile79ContextMenu = null;
-    }
-
-    // Add event listeners
-    overlay.addEventListener('mousedown', overlayClickHandler);
-    overlay.addEventListener('click', overlayClickHandler);
-    document.addEventListener('keydown', escHandler);
-
-    // Add to DOM
-    document.body.appendChild(overlay);
-    document.body.appendChild(menu);
-
-    console.log('[Quests Mod][Tile 79] Visit Al Dee context menu created and added to DOM');
-
-    // Store reference
-    tile79ContextMenu = { overlay, menu, closeMenu };
 
     return tile79ContextMenu;
   }
@@ -13137,11 +14982,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       }
       await setSealCompleted(FIRST_SEAL, true);
       console.log('[Quests Mod][First Seal] Completed: poison creatures on', count, 'tiles on Ghostlands Surface');
-      showToast({
-        message: 'First seal completed',
-        duration: TOAST_DURATION_IMPORTANT,
-        logPrefix: '[Quests Mod][First Seal]'
-      });
+      showSealCompletedToast('First', '[Quests Mod][First Seal]');
       setTimeout(() => playFirstSealTileCelebration(), 100);
     });
     console.log('[Quests Mod][First Seal] Board observer set up for Ghostlands Surface (poison tiles)');
@@ -13194,11 +15035,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
       await setSealCompleted(FOURTH_SEAL, true);
       console.log('[Quests Mod][Fourth Seal] Completed: victory on Demon Skeleton Hell with', gameTicks, 'ticks (< ' + FOURTH_SEAL_MAX_TICKS + ')');
-      showToast({
-        message: 'Fourth seal completed',
-        duration: TOAST_DURATION_IMPORTANT,
-        logPrefix: '[Quests Mod][Fourth Seal]'
-      });
+      showSealCompletedToast('Fourth', '[Quests Mod][Fourth Seal]');
     });
     console.log('[Quests Mod][Fourth Seal] Board observer set up for Demon Skeleton Hell (victory with ticks < ' + FOURTH_SEAL_MAX_TICKS + ')');
   }
@@ -13321,11 +15158,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           replaceSeventhSealTile127SpriteIfNeeded();
           setTimeout(replaceSeventhSealTile127SpriteIfNeeded, 300);
           updateTile126PortalState();
-          showToast({
-            message: 'Sixth seal completed',
-            duration: TOAST_DURATION_IMPORTANT,
-            logPrefix: '[Quests Mod][Sixth Seal]'
-          });
+          showSealCompletedToast('Sixth', '[Quests Mod][Sixth Seal]');
           sixthSealLeverSequence = [];
           console.log('[Quests Mod][Sixth Seal] Completed in correct order');
           setTimeout(() => playSixthSealLeverCelebration(), 100);
@@ -13365,7 +15198,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       }
     }
     if (!roomId) {
-      showToast({ message: "Banshee's Last Room not found.", duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Banshee Last Room]' });
+      showToast({ message: TOAST_MESSAGES.bansheeLastRoomNotFound, logPrefix: BATTLE_TOAST_LOG.bansheeLastRoom });
       return;
     }
     console.log('[Quests Mod][Banshee Last Room] Portal clicked — roomId:', roomId, usedFallback ? '(fallback: Demonrage Seal)' : '');
@@ -13384,7 +15217,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           bansheeLastRoomBattle = battle;
           bansheeLastRoomBattle.setup(
             () => playerUsedPortalToBansheeLastRoom,
-            (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Banshee Last Room]' })
+            NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.bansheeLastRoom)
           );
           setupBansheeTileRestrictions();
           showCustomBattleStatusToast({ battleName: 'Queen of the Banshee', allyLimit: 5, logPrefix: '[Quests Mod][Banshee Last Room]' });
@@ -13397,7 +15230,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       bansheeLastRoomBattle = initResult;
       bansheeLastRoomBattle.setup(
         () => playerUsedPortalToBansheeLastRoom,
-        (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Banshee Last Room]' })
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.bansheeLastRoom)
       );
       setupBansheeTileRestrictions();
       showCustomBattleStatusToast({ battleName: 'Queen of the Banshee', allyLimit: 5, logPrefix: '[Quests Mod][Banshee Last Room]' });
@@ -13409,9 +15242,9 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     if (!usedFallback) {
       console.log('[Quests Mod][Banshee Last Room] Sending selectRoomById:', roomId);
       globalThis.state.board.send({ type: 'selectRoomById', roomId: roomId });
-      showToast({ message: "Traveling to Banshee's Last Room...", duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Banshee Last Room]' });
+      showToast({ message: TOAST_MESSAGES.travelingBansheeLastRoom, logPrefix: BATTLE_TOAST_LOG.bansheeLastRoom });
     } else {
-      showToast({ message: "Banshee's Last Room battle starting here.", duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Banshee Last Room]' });
+      showToast({ message: TOAST_MESSAGES.bansheeLastRoomBattleHere, logPrefix: BATTLE_TOAST_LOG.bansheeLastRoom });
     }
   }
 
@@ -13480,7 +15313,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       }
     }
     if (!roomId) {
-      showToast({ message: 'Spider Lair not found.', duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Spider Lair]' });
+      showToast({ message: TOAST_MESSAGES.spiderLairNotFound, logPrefix: BATTLE_TOAST_LOG.spiderLair });
       return;
     }
     console.log('[Quests Mod][Spider Lair] Tile 77 clicked — roomId:', roomId, usedFallback ? '(fallback: A Secluded Herb)' : '');
@@ -13498,7 +15331,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           spiderLairBattle = battle;
           spiderLairBattle.setup(
             () => playerUsedTile77ToSpiderLair,
-            (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
+            NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
           );
           setupSpiderLairTileRestrictions();
           showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
@@ -13511,7 +15344,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       spiderLairBattle = initResult;
       spiderLairBattle.setup(
         () => playerUsedTile77ToSpiderLair,
-        (toastData) => showToast({ message: toastData.message, duration: toastData.duration || 3000, logPrefix: '[Quests Mod][Spider Lair]' })
+        NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.spiderLair)
       );
       setupSpiderLairTileRestrictions();
       showCustomBattleStatusToast({ battleName: 'Old Widow', allyLimit: 5, logPrefix: '[Quests Mod][Spider Lair]' });
@@ -13522,9 +15355,9 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
     if (!usedFallback) {
       globalThis.state.board.send({ type: 'selectRoomById', roomId: roomId });
-      showToast({ message: 'Entering Old Widow\'s Lair...', duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Spider Lair]' });
+      showToast({ message: TOAST_MESSAGES.enteringSpiderLair, logPrefix: BATTLE_TOAST_LOG.spiderLair });
     } else {
-      showToast({ message: 'Spider Lair battle starting here.', duration: TOAST_DURATION_DEFAULT, logPrefix: '[Quests Mod][Spider Lair]' });
+      showToast({ message: TOAST_MESSAGES.spiderLairBattleHere, logPrefix: BATTLE_TOAST_LOG.spiderLair });
     }
   }
 
@@ -13630,6 +15463,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         document.removeEventListener('contextmenu', handleSixthSealLeverRightClickDocument, true);
         sixthSealRightClickEnabled = false;
         sixthSealLeverSequence = [];
+        resetSixthSealLevers();
         for (const tileIndex of SIXTH_SEAL_LEVER_TILES) {
           const tileEl = getSixthSealTileElement(tileIndex);
           if (tileEl) tileEl.style.pointerEvents = '';
@@ -13712,11 +15546,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
     setSealCompleted(SECOND_SEAL, true).catch((err) => console.error('[Quests Mod][Second Seal] Error saving:', err));
     playSecondSealLeverAnimation();
-    showToast({
-      message: 'Second seal completed',
-      duration: TOAST_DURATION_IMPORTANT,
-      logPrefix: '[Quests Mod][Second Seal]'
-    });
+    showSealCompletedToast('Second', '[Quests Mod][Second Seal]');
   }
 
   function shouldEnableSecondSealTile34(boardContext = null) {
@@ -13819,11 +15649,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
 
     setSealCompleted(THIRD_SEAL, true).catch((err) => console.error('[Quests Mod][Third Seal] Error saving:', err));
     playThirdSealSpellAnimation();
-    showToast({
-      message: 'Third seal completed',
-      duration: TOAST_DURATION_IMPORTANT,
-      logPrefix: '[Quests Mod][Third Seal]'
-    });
+    showSealCompletedToast('Third', '[Quests Mod][Third Seal]');
   }
 
   function shouldEnableThirdSealTile52(boardContext = null) {
@@ -13898,11 +15724,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     const updated = setLeverSprite(tile41El, FIFTH_SEAL_LEVER_SPRITE.from, FIFTH_SEAL_LEVER_SPRITE.to);
     if (updated) {
       setSealCompleted(FIFTH_SEAL, true).catch((err) => console.error('[Quests Mod][Fifth Seal] Error saving:', err));
-      showToast({
-        message: 'Fifth seal completed',
-        duration: TOAST_DURATION_IMPORTANT,
-        logPrefix: '[Quests Mod][Fifth Seal]'
-      });
+      showSealCompletedToast('Fifth', '[Quests Mod][Fifth Seal]');
       console.log('[Quests Mod][Fifth Seal] Lever on tile 41 pulled on Zathroth\'s Throne');
     }
   }
@@ -14002,6 +15824,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       if (tile126El) tile126El.style.pointerEvents = '';
     }
     sixthSealLeverSequence = [];
+    resetSixthSealLevers();
     if (sixthSealBoardSubscription) {
       try {
         sixthSealBoardSubscription.unsubscribe();
@@ -14068,55 +15891,32 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   }
 
   function createTile53CostelloContextMenu(x, y) {
-    if (tile53ContextMenu && tile53ContextMenu.closeMenu) {
-      tile53ContextMenu.closeMenu();
-    }
+    if (tile53ContextMenu && tile53ContextMenu.closeMenu) tile53ContextMenu.closeMenu();
 
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:transparent;pointer-events:auto;cursor:default;';
-
-    const menu = document.createElement('div');
-    menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:9999;min-width:120px;background:url(\'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png\') repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;padding:8px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
-
-    const buttonContainer = document.createElement('div');
-    buttonContainer.style.cssText = 'display:flex;justify-content:center;';
-
-    const visitCostelloButton = document.createElement('button');
-    visitCostelloButton.className = 'pixel-font-14';
-    visitCostelloButton.textContent = 'Visit Costello';
-    visitCostelloButton.style.cssText = 'width:120px;height:28px;font-size:12px;background-color:#2a4a2a;color:#4CAF50;border:1px solid #4CAF50;border-radius:4px;cursor:pointer;text-shadow:1px 1px 0 rgba(0,0,0,0.8);font-weight:bold;';
-    visitCostelloButton.addEventListener('mouseenter', () => {
-      visitCostelloButton.style.backgroundColor = '#1a2a1a';
-      visitCostelloButton.style.borderColor = '#66BB6A';
-    });
-    visitCostelloButton.addEventListener('mouseleave', () => {
-      visitCostelloButton.style.backgroundColor = '#2a4a2a';
-      visitCostelloButton.style.borderColor = '#4CAF50';
-    });
-    visitCostelloButton.addEventListener('click', () => {
-      showCostelloModal();
-      closeMenu();
+    tile53ContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      buttons: [
+        {
+          text: 'Visit Costello',
+          width: '120px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            showCostelloModal();
+            if (tile53ContextMenu && tile53ContextMenu.closeMenu) tile53ContextMenu.closeMenu();
+          }
+        }
+      ],
+      onClose: () => {
+        tile53ContextMenu = null;
+      }
     });
 
-    buttonContainer.appendChild(visitCostelloButton);
-    menu.appendChild(buttonContainer);
-
-    function closeMenu() {
-      overlay.removeEventListener('mousedown', overlayClickHandler);
-      overlay.removeEventListener('click', overlayClickHandler);
-      document.removeEventListener('keydown', escHandler);
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      if (menu.parentNode) menu.parentNode.removeChild(menu);
-      tile53ContextMenu = null;
-    }
-    const overlayClickHandler = (e) => { if (e.target === overlay) closeMenu(); };
-    const escHandler = (e) => { if (e.key === 'Escape') closeMenu(); };
-    overlay.addEventListener('mousedown', overlayClickHandler);
-    overlay.addEventListener('click', overlayClickHandler);
-    document.addEventListener('keydown', escHandler);
-    document.body.appendChild(overlay);
-    document.body.appendChild(menu);
-    tile53ContextMenu = { overlay, menu, closeMenu };
     return tile53ContextMenu;
   }
 
@@ -14175,56 +15975,184 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   }
 
   function createTile83WydaContextMenu(x, y) {
-    if (tile83WydaContextMenu && tile83WydaContextMenu.closeMenu) {
-      tile83WydaContextMenu.closeMenu();
-    }
+    if (tile83WydaContextMenu && tile83WydaContextMenu.closeMenu) tile83WydaContextMenu.closeMenu();
 
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:transparent;pointer-events:auto;cursor:default;';
-
-    const menu = document.createElement('div');
-    menu.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;z-index:9999;min-width:120px;background:url(\'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png\') repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;padding:8px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
-
-    const buttonContainer = document.createElement('div');
-    buttonContainer.style.cssText = 'display:flex;justify-content:center;';
-
-    const visitWydaButton = document.createElement('button');
-    visitWydaButton.className = 'pixel-font-14';
-    visitWydaButton.textContent = 'Visit Wyda';
-    visitWydaButton.style.cssText = 'width:120px;height:28px;font-size:12px;background-color:#2a4a2a;color:#4CAF50;border:1px solid #4CAF50;border-radius:4px;cursor:pointer;text-shadow:1px 1px 0 rgba(0,0,0,0.8);font-weight:bold;';
-    visitWydaButton.addEventListener('mouseenter', () => {
-      visitWydaButton.style.backgroundColor = '#1a2a1a';
-      visitWydaButton.style.borderColor = '#66BB6A';
-    });
-    visitWydaButton.addEventListener('mouseleave', () => {
-      visitWydaButton.style.backgroundColor = '#2a4a2a';
-      visitWydaButton.style.borderColor = '#4CAF50';
-    });
-    visitWydaButton.addEventListener('click', () => {
-      showWydaModal();
-      closeMenu();
+    tile83WydaContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      buttons: [
+        {
+          text: 'Visit Wyda',
+          width: '120px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: () => {
+            showWydaModal();
+            if (tile83WydaContextMenu && tile83WydaContextMenu.closeMenu) tile83WydaContextMenu.closeMenu();
+          }
+        }
+      ],
+      onClose: () => {
+        tile83WydaContextMenu = null;
+      }
     });
 
-    buttonContainer.appendChild(visitWydaButton);
-    menu.appendChild(buttonContainer);
-
-    function closeMenu() {
-      overlay.removeEventListener('mousedown', overlayClickHandler);
-      overlay.removeEventListener('click', overlayClickHandler);
-      document.removeEventListener('keydown', escHandler);
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      if (menu.parentNode) menu.parentNode.removeChild(menu);
-      tile83WydaContextMenu = null;
-    }
-    const overlayClickHandler = (e) => { if (e.target === overlay) closeMenu(); };
-    const escHandler = (e) => { if (e.key === 'Escape') closeMenu(); };
-    overlay.addEventListener('mousedown', overlayClickHandler);
-    overlay.addEventListener('click', overlayClickHandler);
-    document.addEventListener('keydown', escHandler);
-    document.body.appendChild(overlay);
-    document.body.appendChild(menu);
-    tile83WydaContextMenu = { overlay, menu, closeMenu };
     return tile83WydaContextMenu;
+  }
+
+  // =======================
+  // Tesha arrow (tile 157, Darama Oasis)
+  // =======================
+
+  function isBoardBattleActive(boardContext) {
+    try {
+      const ctx = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+      const timerContext = globalThis.state?.gameTimer?.getSnapshot()?.context;
+      return !!(ctx?.gameStarted && timerContext?.state === 'initial');
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function countAllyPiecesOnBoard(boardContext) {
+    try {
+      const boardConfig = boardContext?.boardConfig || [];
+      return boardConfig.filter(piece =>
+        piece?.type === 'player' || (piece?.type === 'custom' && piece?.villain === false)
+      ).length;
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  async function hasScarabCoinInInventory() {
+    try {
+      const items = await getQuestItems(true);
+      return (items?.[SCARAB_COIN_CONFIG.productName] || 0) > 0;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function removeTeshaArrow() {
+    document.querySelectorAll(`.${TESHA_ARROW_CLASS}`).forEach(el => el.remove());
+    teshaArrowVisible = false;
+  }
+
+  function handleTeshaArrowClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    showTeshaModal();
+    return false;
+  }
+
+  function placeTeshaArrowOnTile(tileElement) {
+    removeTeshaArrow();
+
+    const arrow = document.createElement('img');
+    arrow.className = `${TESHA_ARROW_CLASS} pixelated`;
+    arrow.src = getQuestItemsAssetUrl('Tutorial_Arrow_Effect.gif');
+    arrow.alt = 'Talk to Tesha';
+    arrow.draggable = false;
+    arrow.style.cssText = [
+      'position:absolute',
+      'left:0',
+      'top:0',
+      'width:100%',
+      'height:100%',
+      'pointer-events:auto',
+      'cursor:pointer',
+      'z-index:1001',
+      'image-rendering:pixelated',
+      'object-fit:contain'
+    ].join(';');
+    arrow.addEventListener('click', handleTeshaArrowClick);
+    tileElement.appendChild(arrow);
+    tileElement.style.pointerEvents = 'auto';
+    teshaArrowVisible = true;
+  }
+
+  async function updateTeshaArrowState(boardContext) {
+    try {
+      const meetingProgress = getMissionProgress(MEETING_WITH_TESHA_MISSION);
+      const qualifiesForArrow = meetingProgress.completed || await hasScarabCoinInInventory();
+      const shouldShow = isOnRoomByName(DESERT_DIGGING_CONFIG.TARGET_MAP) &&
+        !isBoardBattleActive(boardContext) &&
+        countAllyPiecesOnBoard(boardContext) === 0 &&
+        qualifiesForArrow;
+
+      if (!shouldShow) {
+        if (teshaArrowVisible) {
+          const tile = getTileElement(TESHA_TILE_INDEX);
+          if (tile) tile.style.pointerEvents = '';
+          removeTeshaArrow();
+        }
+        return;
+      }
+
+      const tile = getTileElement(TESHA_TILE_INDEX);
+      if (!tile) {
+        setTimeout(() => updateTeshaArrowState(boardContext), 200);
+        return;
+      }
+
+      if (!tile.querySelector(`.${TESHA_ARROW_CLASS}`)) {
+        placeTeshaArrowOnTile(tile);
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Tesha] Error updating arrow state:', error);
+    }
+  }
+
+  function setupTeshaArrowObserver() {
+    if (teshaArrowBoardSubscription) return;
+
+    if (typeof globalThis !== 'undefined' && globalThis.state?.board?.subscribe) {
+      teshaArrowBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        updateTeshaArrowState(boardContext);
+      });
+    }
+
+    if (typeof globalThis !== 'undefined' && globalThis.state?.gameTimer?.subscribe) {
+      teshaArrowGameTimerSubscription = globalThis.state.gameTimer.subscribe(() => {
+        updateTeshaArrowState(globalThis.state?.board?.getSnapshot()?.context);
+      });
+    }
+
+    updateTeshaArrowState(globalThis.state?.board?.getSnapshot()?.context);
+    console.log('[Quests Mod][Tesha] Arrow observer set up for Darama Oasis tile 157');
+  }
+
+  function cleanupTeshaArrowObserver() {
+    if (teshaArrowBoardSubscription) {
+      try {
+        teshaArrowBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tesha] Error unsubscribing from board:', e);
+      }
+      teshaArrowBoardSubscription = null;
+    }
+    if (teshaArrowGameTimerSubscription) {
+      try {
+        teshaArrowGameTimerSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tesha] Error unsubscribing from game timer:', e);
+      }
+      teshaArrowGameTimerSubscription = null;
+    }
+  }
+
+  function cleanupTeshaArrowSystem() {
+    const tile = getTileElement(TESHA_TILE_INDEX);
+    if (tile) tile.style.pointerEvents = '';
+    removeTeshaArrow();
+    cleanupTeshaArrowObserver();
+    console.log('[Quests Mod][Tesha] Arrow system cleaned up');
   }
 
   function setupTile83WydaObserver() {
@@ -14254,68 +16182,21 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   function createWaterFishingContextMenu(x, y) {
 
     // Close any existing context menu
-    if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) {
-      fishingState.contextMenu.closeMenu();
-    }
+    if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) fishingState.contextMenu.closeMenu();
 
-    // Create overlay to close menu on outside click
-    const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.zIndex = '9998';
-    overlay.style.backgroundColor = 'transparent';
-    overlay.style.pointerEvents = 'auto';
-    overlay.style.cursor = 'default';
-
-    // Create menu container
-    const menu = document.createElement('div');
-    menu.style.position = 'fixed';
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
-    menu.style.zIndex = '9999';
-    menu.style.minWidth = '120px';
-    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
-    menu.style.border = '4px solid transparent';
-    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
-    menu.style.borderRadius = '6px';
-    menu.style.padding = '8px';
-    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
-
-    // Button container
-    const buttonContainer = document.createElement('div');
-    buttonContainer.style.display = 'flex';
-    buttonContainer.style.justifyContent = 'center';
-
-    // "Use Fishing Rod" button
-    const useFishingRodButton = document.createElement('button');
-    useFishingRodButton.className = 'pixel-font-14';
-    useFishingRodButton.textContent = 'Use Fishing Rod';
-    useFishingRodButton.style.width = '140px';
-    useFishingRodButton.style.height = '28px';
-    useFishingRodButton.style.fontSize = '12px';
-    useFishingRodButton.style.backgroundColor = '#2a4a7a'; // Blue-ish color for water
-    useFishingRodButton.style.color = '#4FC3F7';
-    useFishingRodButton.style.border = '1px solid #4FC3F7';
-    useFishingRodButton.style.borderRadius = '4px';
-    useFishingRodButton.style.cursor = 'pointer';
-    useFishingRodButton.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
-    useFishingRodButton.style.fontWeight = 'bold';
-
-    // Add hover effects
-    useFishingRodButton.addEventListener('mouseenter', () => {
-      useFishingRodButton.style.backgroundColor = '#1a2a4a';
-      useFishingRodButton.style.borderColor = '#81D4FA';
-    });
-    useFishingRodButton.addEventListener('mouseleave', () => {
-      useFishingRodButton.style.backgroundColor = '#2a4a7a';
-      useFishingRodButton.style.borderColor = '#4FC3F7';
-    });
-
-    // Handle click - for now just show a message, can be expanded later
-    useFishingRodButton.addEventListener('click', async () => {
+    const menuObj = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      buttons: [
+        {
+          text: 'Use Fishing Rod',
+          backgroundColor: '#2a4a7a',
+          color: '#4FC3F7',
+          border: '1px solid #4FC3F7',
+          hoverBackgroundColor: '#1a2a4a',
+          hoverBorderColor: '#81D4FA',
+          onClick: async () => {
       // Get the water tile position for the animation (instead of menu position)
       let animationX, animationY;
       if (fishingState.clickedTile) {
@@ -14324,7 +16205,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         animationY = tileRect.top + tileRect.height / 2;
       } else {
         // Fallback to menu position if tile not found
-        const rect = menu.getBoundingClientRect();
+        const rect = menuObj.menu.getBoundingClientRect();
         animationX = rect.left + rect.width / 2;
         animationY = rect.top + rect.height / 2;
       }
@@ -14345,13 +16226,13 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       const isInGoblinBridge = roomNames && currentRoomId && roomNames[currentRoomId] === 'Goblin Bridge';
       const isOnAlDeeMission = alDeeMissionProgress.accepted && !alDeeMissionProgress.completed;
 
-      let toastMessage = 'You found nothing.';
+      let toastMessage = TOAST_MESSAGES.fishingFoundNothing;
 
       // Special handling for Al Dee Fishing Mission in Goblin Bridge
       if (isOnAlDeeMission && isInGoblinBridge) {
         fishingState.alDeeMissionAttempts++;
         if (fishingState.alDeeMissionAttempts > 3) {
-          toastMessage = 'Seems as a magnet will help here.';
+          toastMessage = TOAST_MESSAGES.fishingMagnetHint;
         }
       } else {
         // Reset attempt counter when not on mission or not in Goblin Bridge
@@ -14367,75 +16248,34 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         if (hasMagnet && isInGoblinBridge) {
           // Consume Magnet and add Small Axe
           await consumeQuestItem('Magnet', 1);
+          playRightClickLootEffect(fishingState.clickedTile);
           await addQuestItem('Small Axe', 1);
 
-          toastMessage = 'You found a Small Axe with your Magnet!';
+          toastMessage = TOAST_MESSAGES.fishingFoundAxe;
         } else if (isInGoblinBridge && !hasMagnet) {
-          toastMessage = 'You found nothing. Maybe a magnet would help?';
+          toastMessage = TOAST_MESSAGES.fishingFoundNothingMagnet;
         } else {
-          toastMessage = 'You found nothing.';
+          toastMessage = TOAST_MESSAGES.fishingFoundNothing;
         }
       } catch (error) {
         console.error('[Quests Mod][Water Fishing] Error during fishing:', error);
-        toastMessage = 'Something went wrong while fishing.';
+        toastMessage = TOAST_MESSAGES.fishingError;
       }
 
       // Show fishing result toast
       showToast({
         message: toastMessage,
-        duration: TOAST_DURATION_DEFAULT,
         logPrefix: '[Quests Mod][Water Fishing]'
       });
-      closeMenu();
+      if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) {
+        fishingState.contextMenu.closeMenu();
+      }
+          }
+        }
+      ]
     });
 
-    buttonContainer.appendChild(useFishingRodButton);
-    menu.appendChild(buttonContainer);
-
-    // Event handlers
-    const overlayClickHandler = (e) => {
-      if (e.target === overlay) {
-        closeMenu();
-      }
-    };
-
-    const escHandler = (e) => {
-      if (e.key === 'Escape') {
-        closeMenu();
-      }
-    };
-
-    // Close menu function
-    function closeMenu() {
-      // Remove event listeners
-      overlay.removeEventListener('mousedown', overlayClickHandler);
-      overlay.removeEventListener('click', overlayClickHandler);
-      document.removeEventListener('keydown', escHandler);
-
-      // Remove from DOM
-      if (overlay.parentNode) {
-        overlay.parentNode.removeChild(overlay);
-      }
-      if (menu.parentNode) {
-        menu.parentNode.removeChild(menu);
-      }
-
-      // Clear reference
-      fishingState.contextMenu = null;
-    }
-
-    // Add event listeners
-    overlay.addEventListener('mousedown', overlayClickHandler);
-    overlay.addEventListener('click', overlayClickHandler);
-    document.addEventListener('keydown', escHandler);
-
-    // Add to DOM
-    document.body.appendChild(overlay);
-    document.body.appendChild(menu);
-
-    // Store reference
-    fishingState.contextMenu = { overlay, menu, closeMenu };
-
+    fishingState.contextMenu = menuObj;
     return fishingState.contextMenu;
   }
 
@@ -14531,12 +16371,12 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       });
 
       // Show success message
-      showToast('Teleported to Al Dee!', 'success');
+      showToast({ message: TOAST_MESSAGES.teleportedAlDee, logPrefix: '[Quests Mod][Tile 79]' });
 
       console.log('[Quests Mod][Tile 79] Teleported to Al Dee successfully');
     } catch (error) {
       console.error('[Quests Mod][Tile 79] Error teleporting to Al Dee:', error);
-      showToast('Failed to teleport to Al Dee', 'error');
+      showToast({ message: TOAST_MESSAGES.teleportAlDeeFailed, logPrefix: '[Quests Mod][Tile 79]' });
     }
   }
 
@@ -14620,6 +16460,8 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     cleanupTile53CostelloSystem();
     // Cleanup Tile 83 Wyda system
     cleanupTile83WydaSystem();
+    // Cleanup Tesha arrow system
+    cleanupTeshaArrowSystem();
     // Cleanup Tile 77 Spider Lair system
     cleanupTile77SpiderLairSystem();
 
@@ -14790,15 +16632,12 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   function cleanupWaterFishingSystem() {
     // Remove event listener from document and restore tile pointer events
     if (fishingState.enabled) {
-      document.removeEventListener('contextmenu', handleWaterFishingRightClickDocument, true);
-      disableWaterTileRightClick();
+      waterFishingRightClickSystem.cleanup();
       fishingState.enabled = false;
     }
 
     // Close any open context menu
-    if (waterFishingContextMenu && waterFishingContextMenu.closeMenu) {
-      waterFishingContextMenu.closeMenu();
-    }
+    if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) fishingState.contextMenu.closeMenu();
 
     // Unsubscribe from board state
     if (fishingState.subscriptions.board) {
@@ -14826,8 +16665,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   function cleanupMiningSystem() {
     // Remove event listener from document and restore tile pointer events
     if (miningState.enabled) {
-      document.removeEventListener('contextmenu', handleMiningRightClickDocument, true);
-      disableMiningTileRightClick();
+      miningRightClickSystem.cleanup();
       miningState.enabled = false;
     }
 
@@ -14871,6 +16709,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
   setupEquipmentSlotObserver();
     setupTile53CostelloObserver();
     setupTile83WydaObserver();
+    setupTeshaArrowObserver();
     setupTile77SpiderLairObserver();
     setupSevenSealsRoomObserver();
     setupFirstSealBoardObserver();
@@ -14879,6 +16718,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
     setupThirdSealBoardObserver();
     setupFifthSealBoardObserver();
     setupSixthSealLeverObserver();
+    setupSerpentineDestroyFieldObserver();
 
   // Load quest items from Firebase on initialization
   loadQuestItemsOnInit();
@@ -14895,7 +16735,7 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
       }
 
       // Map items to their required mission completion status
-      // Format: { itemName: { missionId, requiredStatus: 'accepted' | 'completed', removeWhenCompleted?: boolean } }
+      // Format: { itemName: { missionId, requiredStatus: 'accepted' | 'completed', removeWhenCompleted?: boolean, removeWhenPutridChamberComplete?: boolean } }
       // removeWhenCompleted: if true, item is removed when quest is completed (for unique items)
       const itemMissionMap = {
         'Map to the Mines': { missionId: KING_COPPER_KEY_MISSION.id, requiredStatus: 'accepted' },
@@ -14904,10 +16744,19 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         'Letter from Al Dee': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         'Dragon Claw': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'completed' },
         'Light Shovel': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'completed' },
-        'The Holy Tible': { missionId: AL_DEE_GOLDEN_ROPE_MISSION.id, requiredStatus: 'completed' }
+        'The Holy Tible': { missionId: AL_DEE_GOLDEN_ROPE_MISSION.id, requiredStatus: 'completed' },
+        [SCARAB_COIN_CONFIG.productName]: { missionId: MEETING_WITH_TESHA_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        [DESTROY_FIELD_RUNE_CONFIG.productName]: {
+          missionId: SERPENTINE_TOWER_MISSION.id,
+          requiredStatus: 'accepted',
+          removeWhenCompleted: true,
+          removeWhenPutridChamberComplete: true
+        }
       };
 
-      for (const [itemName, { missionId, requiredStatus, removeWhenCompleted }] of Object.entries(itemMissionMap)) {
+      let serpentineRunePickupFlagNeedsSave = false;
+
+      for (const [itemName, { missionId, requiredStatus, removeWhenCompleted, removeWhenPutridChamberComplete }] of Object.entries(itemMissionMap)) {
         const itemCount = questItems[itemName] || 0;
         if (itemCount > 0) {
           // Get mission progress from registry
@@ -14923,6 +16772,20 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
           if (removeWhenCompleted && missionProgress?.completed) {
             console.log(`[Quests Mod] Removing ${itemName} (unique item, quest completed)`);
             await consumeQuestItem(itemName, itemCount);
+            if (itemName === DESTROY_FIELD_RUNE_CONFIG.productName) {
+              kingChatState.progressSerpentineTower.destroyFieldRuneTaken = false;
+              serpentineRunePickupFlagNeedsSave = true;
+            }
+            continue;
+          }
+
+          if (removeWhenPutridChamberComplete && missionProgress?.putridChamberComplete) {
+            console.log(`[Quests Mod] Removing ${itemName} (Putrid Chamber completed)`);
+            await consumeQuestItem(itemName, itemCount);
+            if (itemName === DESTROY_FIELD_RUNE_CONFIG.productName) {
+              kingChatState.progressSerpentineTower.destroyFieldRuneTaken = false;
+              serpentineRunePickupFlagNeedsSave = true;
+            }
             continue;
           }
           
@@ -14930,6 +16793,10 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             // Mission not started - remove item
             console.log(`[Quests Mod] Removing ${itemName} (mission not started)`);
             await consumeQuestItem(itemName, itemCount);
+            if (itemName === DESTROY_FIELD_RUNE_CONFIG.productName) {
+              kingChatState.progressSerpentineTower.destroyFieldRuneTaken = false;
+              serpentineRunePickupFlagNeedsSave = true;
+            }
             continue;
           }
 
@@ -14941,9 +16808,23 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             // Mission doesn't have required status - remove item
             console.log(`[Quests Mod] Removing ${itemName} (mission ${requiredStatus} status not met)`);
             await consumeQuestItem(itemName, itemCount);
+            if (itemName === DESTROY_FIELD_RUNE_CONFIG.productName) {
+              kingChatState.progressSerpentineTower.destroyFieldRuneTaken = false;
+              serpentineRunePickupFlagNeedsSave = true;
+            }
           }
         }
       }
+
+      if (serpentineRunePickupFlagNeedsSave) {
+        const playerName = getCurrentPlayerName();
+        if (playerName) {
+          await saveKingTibianusProgress(playerName, getAllMissionProgress());
+        }
+      }
+
+      await capScarabCoinInventory();
+      await capDestroyFieldRuneInventory();
     } catch (error) {
       console.error('[Quests Mod] Error cleaning up invalid quest items:', error);
     }
@@ -14976,11 +16857,18 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
             // Always initialize state, even if Firebase data is missing
             kingChatState[stateKey] = progress[firebaseKey] ? {
               accepted: !!progress[firebaseKey].accepted,
-              completed: !!progress[firebaseKey].completed
-            } : {
-              accepted: false,
-              completed: false
-            };
+              completed: !!progress[firebaseKey].completed,
+              ...(firebaseKey === 'serpentineTower'
+                ? {
+                    destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
+                    putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
+                  }
+                : {})
+            } : (
+              firebaseKey === 'serpentineTower'
+                ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
+                : { accepted: false, completed: false }
+            );
           }
         }
         if (progress.ironOre) {
@@ -15048,7 +16936,30 @@ function createNPCCooldownManager(cooldownMs = NPC_CHAT_RESPONSE_DELAY_MS) {
         }
 
         // Clean up quest items that shouldn't exist if missions aren't completed
+        await syncScarabHuntFromInventory();
+        await syncMeetingWithTeshaQuestFromInventory();
+        const serpentinePrereqReset = syncSerpentineTowerQuestPrerequisites();
+        if (serpentinePrereqReset) {
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            await saveKingTibianusProgress(playerName, getAllMissionProgress());
+          }
+        }
+        const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+        if (serpentineProgress.putridChamberComplete && serpentineProgress.destroyFieldRuneTaken) {
+          const syncedProgress = buildSerpentineTowerProgress({ destroyFieldRuneTaken: false });
+          setMissionProgress(SERPENTINE_TOWER_MISSION, syncedProgress);
+          kingChatState.progressSerpentineTower = { ...syncedProgress };
+          const playerName = getCurrentPlayerName();
+          if (playerName) {
+            await saveKingTibianusProgress(playerName, getAllMissionProgress());
+          }
+        }
+        updateTeshaArrowState();
         await cleanupInvalidQuestItems(progress);
+        // Serpentine Tower Basement right-click relies on mission state + current room name,
+        // so refresh it once Firebase progress has been applied.
+        updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
 
         // Migration: having Castello's diary implies Monks Study was completed and Queen Banshees was accepted (diary is only given when accepting Queen Banshees)
         try {

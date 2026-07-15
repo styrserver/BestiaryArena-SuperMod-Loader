@@ -1,8 +1,43 @@
 {
   "_meta": {
-    "_comment": "Sort patch notes by: 1. Type, 2. mod, 3. text. Keep patch notes simple and concise. Do not have duplicate mod+type entries — merge them into one."
+    "_comment": "Sort patch notes by: 1. Type (added → changed → fixed), 2. mod, 3. text. Keep patch notes simple and concise. Do not have duplicate mod+type entries — merge them into one."
   },
   "notes": [
+    {
+      "version": "4.5.3",
+      "changes": [
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "New optional quest content: Tibia-style NPC keyword chat, hand-in rewards, contextual map hints (hidden during battle setup or while allies are on the board), digging feedback, and multi-step follow-up missions. Right-click context menus on special tiles, direct loot pickup, levers, and shared sparkle VFX on pickups. New quest items include inspect descriptions. Custom-battle encounters use the Custom Battles system with configurable ally limits and Firebase progress saves."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "added",
+          "text": "sceneSpriteReplacements config on CustomBattle for encounter map visual overrides: swaps background tile sprite IDs inside #background-scene, scoped to #floor-below and tile-index decorations only (never #actors or outfit sprites), burst apply on room enter, and re-apply when battle starts after the scene DOM refreshes. Shared entry-setup helpers (scheduleEntryVillainSetup, runEntryVillainSetupIfNeeded, ensureCustomVillainsPresent) with configurable attempt delays; atomic removeOriginalVillains + add custom villains in one setState; shiny villain support."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "added",
+          "text": "Mobile long-press acts like right-click for mod context menus: platform.js installs a touch-hold shim on mobile WebExtensions (Orion iOS, Firefox Android, etc.) that fires a synthetic contextmenu after ~500ms when the finger stays still, so quest tile actions, teleporter rows, creature menus, and other right-click features work without a mouse. Cancels on scroll/drag, suppresses the follow-up ghost click, and optional short vibration. Desktop test override: sessionStorage ba-long-press-context (1 on, 0 off). Exposes BestiaryPlatform.prefersLongPressContextMenu() and installLongPressContextMenu()."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Quest toasts use shared templates with color-coded variants and variant-based durations (empty results shortest, mission completions longest). Right-click context menus and tile interactions refactored for deduplication; fishing stays enabled across map switches. NPC chat modals share one dialogue cooldown (1s single-line, 2s per multi-line line, farewell closes 1s after the last reply). Puzzle progress resets when changing maps; cleared obstacles hide with the same poof as digging and restore on map leave. Some encounter map visuals use Custom Battles sceneSpriteReplacements instead of Quests-local DOM helpers. Late-stage quest access can be gated by Firebase flags separate from hand-in completion."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "Sandbox custom battles no longer corrupt live fights: addVillains, removeOriginalVillains, preventVillainMovement, and ally-limit enforcement skip while gameStarted or serverResults is set, so creatures in #actors stay visible when battle starts. Ally creature right-click (and mobile long-press) is blocked during active custom battles in sandbox so Hero Editor cannot be used to cheat stats or equipment; villains and tile interactions are unaffected. Exposes CustomBattles.isAllyContextMenuBlocked()."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Quest modal portraits display at 106×64 to match tab buttons. Tile interaction right-click registers on obstacle sprites instead of the whole tile, fixing mis-clicks on overlapping adjacent tiles. Map switches no longer crash after clearing obstacles (sprites are hidden, not removed from React-owned DOM). Tile interactions activate correctly when accepting missions mid-session."
+        }
+      ]
+    },
     {
       "version": "4.5.2",
       "changes": [

@@ -22,6 +22,100 @@ if (window.CustomBattles) {
     try {
         (function() {
             'use strict';
+
+        function buildSceneSpriteReplacementState(sceneSpriteReplacements) {
+            if (!sceneSpriteReplacements?.rules?.length) return null;
+
+            const replacements = new Map();
+            for (const rule of sceneSpriteReplacements.rules) {
+                const sourceIds = [];
+                if (Array.isArray(rule.sourceIds)) {
+                    sourceIds.push(...rule.sourceIds);
+                }
+                if (rule.sourceIdRange) {
+                    const from = rule.sourceIdRange.from;
+                    const to = rule.sourceIdRange.to;
+                    for (let sourceId = from; sourceId <= to; sourceId++) {
+                        sourceIds.push(sourceId);
+                    }
+                }
+                for (const sourceId of sourceIds) {
+                    replacements.set(sourceId, {
+                        replacementId: rule.replacementId,
+                        makeRelative: !!rule.makeRelative,
+                        scope: rule.scope || 'any'
+                    });
+                }
+            }
+
+            if (replacements.size === 0) return null;
+
+            return {
+                rootId: sceneSpriteReplacements.rootId || 'background-scene',
+                excludeRootIds: Array.isArray(sceneSpriteReplacements.excludeRootIds)
+                    ? sceneSpriteReplacements.excludeRootIds
+                    : ['actors'],
+                datasetKey: sceneSpriteReplacements.datasetKey || 'customBattleSceneReplaced',
+                replacements,
+                selector: [...replacements.keys()].map((sourceId) => `.sprite.item.id-${sourceId}`).join(', '),
+                complete: false
+            };
+        }
+
+        const activeCustomBattles = new Set();
+
+        function isBoardAllyCreatureButton(button) {
+            if (!button) return false;
+            if (button.closest('[role="menu"]') || button.closest('[role="dialog"]')) return false;
+            if (
+                button.closest('#monster-scroll') ||
+                button.closest('.tab-picker-scroll') ||
+                button.closest('[id*="monster-scroll"]')
+            ) {
+                return false;
+            }
+
+            if (button.querySelector('img[alt="creature"]')) return false;
+            if (!button.querySelector('.sprite.outfit')) return false;
+
+            const isDraggable =
+                button.getAttribute('aria-roledescription') === 'draggable' ||
+                [...button.classList].some((className) => className.includes('draggable'));
+            if (!isDraggable) return false;
+
+            return Boolean(
+                button.closest('#viewport') ||
+                button.closest('#tiles') ||
+                button.closest('#background-scene')
+            );
+        }
+
+        function shouldBlockAllyContextMenu() {
+            for (const battle of activeCustomBattles) {
+                if (!battle.isActive || !battle.isInBattleArea()) continue;
+                try {
+                    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+                    if (boardContext?.mode === 'sandbox') return true;
+                } catch {
+                    // ignore snapshot failures
+                }
+            }
+            return false;
+        }
+
+        function blockAllyContextMenuDuringCustomBattle(event) {
+            if (!shouldBlockAllyContextMenu()) return;
+
+            const button = event.target.closest?.('button');
+            if (!isBoardAllyCreatureButton(button)) return;
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            event.stopPropagation();
+        }
+
+        document.addEventListener('contextmenu', blockAllyContextMenuDuringCustomBattle, true);
+
         /**
          * CustomBattle class for managing custom battle configurations
          */
@@ -42,6 +136,11 @@ if (window.CustomBattles) {
                 this.preventVillainMovementActive = false;
                 this.lastVillainAddTime = 0;
                 this.isAddingVillains = false;
+                this.boardSetupLock = false;
+                this.customVillainPlacementReady = false;
+                this.sceneSpriteState = buildSceneSpriteReplacementState(config.sceneSpriteReplacements);
+                this.activationCallback = null;
+                this.sceneSpriteGameEventUnsubscribes = [];
                 
                 // Stop button state
                 this.stopButtonObserver = null;
@@ -55,8 +154,13 @@ if (window.CustomBattles) {
                 this.allyDeathsThisGame = 0;
                 this.allyDeathTrackingUnsubs = [];
                 this.newGameUnsub = null;
-                
-                // Validate config
+                this.autoSetupVillainSyncUnsub = null;
+                this.autoSetupVillainSyncHandler = null;
+                this.autoSetupVillainSyncTimer = null;
+                this.pendingVillainSyncTimer = null;
+                this.entryVillainSetupDone = false;
+                this.entryVillainSetupTimer = null;
+                this.sceneSpriteReplacementTimer = null;
                 if (!config.roomId) {
                     throw new Error('CustomBattle config must include roomId');
                 }
@@ -93,6 +197,163 @@ if (window.CustomBattles) {
                 } catch (error) {
                     console.error('[Custom Battles] Error checking battle area:', error);
                     return false;
+                }
+            }
+
+            /**
+             * True while a fight is running — boardConfig is owned by the game, not sandbox setup.
+             */
+            isBoardBattleActive() {
+                try {
+                    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+                    return boardContext?.gameStarted === true;
+                } catch (error) {
+                    return false;
+                }
+            }
+
+            isBoardSetupLocked() {
+                return this.boardSetupLock === true;
+            }
+
+            markCustomVillainPlacementReady(ready = true) {
+                this.customVillainPlacementReady = ready === true;
+            }
+
+            isEntryVillainSetupDone() {
+                return this.entryVillainSetupDone === true;
+            }
+
+            cancelEntryVillainSetupTimer() {
+                if (this.entryVillainSetupTimer) {
+                    clearTimeout(this.entryVillainSetupTimer);
+                    this.entryVillainSetupTimer = null;
+                }
+            }
+
+            resetEntryVillainSetup() {
+                this.cancelEntryVillainSetupTimer();
+                this.cancelSceneSpriteReplacementTimer();
+                this.entryVillainSetupDone = false;
+                this.resetSceneSpriteReplacements();
+                this.markCustomVillainPlacementReady(false);
+            }
+
+            cancelSceneSpriteReplacementTimer() {
+                if (this.sceneSpriteReplacementTimer) {
+                    clearTimeout(this.sceneSpriteReplacementTimer);
+                    this.sceneSpriteReplacementTimer = null;
+                }
+            }
+
+            /**
+             * One-shot villain swap when entering a quest room (Banshee / Putrid / Spider Lair pattern).
+             * Returns true when setup ran.
+             */
+            performEntryVillainSetup({ isActiveCheck } = {}) {
+                if (this.entryVillainSetupDone || this.isBoardBattleActive()) {
+                    return false;
+                }
+                if (typeof isActiveCheck === 'function' && !isActiveCheck()) {
+                    return false;
+                }
+                if (!this.isInBattleArea()) {
+                    return false;
+                }
+
+                console.log(`[Custom Battles][${this.config.name || 'Battle'}] One-shot entry villain setup`);
+                this.removeOriginalVillains();
+                this.entryVillainSetupDone = true;
+
+                const deferReady = this.config.entrySetup?.deferPlacementReady !== false;
+                if (deferReady) {
+                    this.markCustomVillainPlacementReady(true);
+                }
+
+                console.log(`[Custom Battles][${this.config.name || 'Battle'}] Entry villain setup complete`);
+                return true;
+            }
+
+            /**
+             * Immediate entry setup if not done yet (overlay / room-enter path).
+             */
+            runEntryVillainSetupIfNeeded({ isActiveCheck, onComplete } = {}) {
+                if (this.performEntryVillainSetup({ isActiveCheck })) {
+                    if (typeof onComplete === 'function') {
+                        onComplete();
+                    }
+                    return true;
+                }
+                return false;
+            }
+
+            /**
+             * Delayed entry setup — tries immediately, then retries until the room is ready.
+             */
+            scheduleEntryVillainSetup({ delayMs, attemptDelays, isActiveCheck, onComplete } = {}) {
+                this.cancelEntryVillainSetupTimer();
+                this.markCustomVillainPlacementReady(false);
+
+                const delays = attemptDelays
+                    ?? this.config.entrySetup?.attemptDelays
+                    ?? [delayMs ?? this.config.entrySetup?.delayMs ?? 0];
+
+                let attemptIndex = 0;
+                const scheduleAttempt = () => {
+                    if (this.entryVillainSetupDone) return;
+                    if (attemptIndex >= delays.length) return;
+
+                    const delay = delays[attemptIndex++];
+                    const fire = () => {
+                        this.entryVillainSetupTimer = null;
+                        if (this.entryVillainSetupDone) return;
+                        if (this.runEntryVillainSetupIfNeeded({ isActiveCheck, onComplete })) return;
+                        scheduleAttempt();
+                    };
+
+                    if (delay > 0) {
+                        this.entryVillainSetupTimer = setTimeout(fire, delay);
+                    } else {
+                        queueMicrotask(fire);
+                    }
+                };
+
+                scheduleAttempt();
+            }
+
+            /**
+             * Re-add custom villains when missing after battle (Banshee / Spider Lair fallback).
+             */
+            ensureCustomVillainsPresent() {
+                if (this.isBoardBattleActive() || this.hasCustomVillainsOnBoard()) {
+                    return false;
+                }
+                console.log(`[Custom Battles][${this.config.name || 'Battle'}] Custom villains missing - re-adding`);
+                this.addVillains();
+                return true;
+            }
+
+            hasOriginalVillainsOnBoard() {
+                try {
+                    const boardConfig = globalThis.state.board.getSnapshot().context.boardConfig || [];
+                    return boardConfig.some((entity) => {
+                        if (!entity?.villain) return false;
+                        if (!entity.key) return true;
+                        return !this.villainKeyPrefixes.some(({ prefix }) => entity.key.startsWith(prefix));
+                    });
+                } catch (error) {
+                    return false;
+                }
+            }
+
+            runLockedBoardSetup(callback) {
+                this.boardSetupLock = true;
+                try {
+                    callback();
+                } finally {
+                    setTimeout(() => {
+                        this.boardSetupLock = false;
+                    }, 50);
                 }
             }
 
@@ -137,10 +398,62 @@ if (window.CustomBattles) {
             }
 
             /**
+             * Build one custom villain entity for the board (fresh key each call).
+             */
+            createCustomVillainEntity(villainConfig) {
+                const prefix = villainConfig.keyPrefix || `${villainConfig.nickname?.toLowerCase() || 'villain'}-tile-${villainConfig.tileIndex}-`;
+                let key;
+                if (prefix.includes(`-${villainConfig.tileIndex}-`) || prefix.endsWith(`-${villainConfig.tileIndex}-`)) {
+                    key = prefix + Date.now() + Math.random();
+                } else {
+                    key = `${prefix}${villainConfig.tileIndex}-${Date.now()}-${Math.random()}`;
+                }
+
+                return applyVillainAwakenFromConfig({
+                    type: "custom",
+                    key: key,
+                    nickname: villainConfig.nickname,
+                    name: villainConfig.nickname || undefined,
+                    tileIndex: villainConfig.tileIndex,
+                    villain: true,
+                    gameId: villainConfig.gameId,
+                    direction: villainConfig.direction || "south",
+                    level: villainConfig.level || 1,
+                    tier: villainConfig.tier || 0,
+                    equip: villainConfig.equip || null,
+                    ...(villainConfig.shiny === true ? { shiny: true } : {}),
+                    genes: villainConfig.genes || {
+                        hp: 1,
+                        ad: 1,
+                        ap: 1,
+                        armor: 1,
+                        magicResist: 1
+                    }
+                }, villainConfig);
+            }
+
+            isCustomVillainEntity(entity) {
+                if (!entity?.key) return false;
+                return this.villainKeyPrefixes.some(({ prefix, tileIndex, hasTileInPrefix }) => {
+                    if (hasTileInPrefix) {
+                        return entity.key.startsWith(prefix);
+                    }
+                    return entity.key.startsWith(prefix) && entity.tileIndex === tileIndex;
+                });
+            }
+
+            /**
              * Add custom villains to the board
              */
-            addVillains() {
+            addVillains(options = {}) {
                 try {
+                    if (this.isBoardBattleActive()) {
+                        return;
+                    }
+                    if (!options.force && this.boardSetupLock) {
+                        return;
+                    }
+
                     const boardContext = globalThis.state.board.getSnapshot().context;
                     const currentBoardConfig = boardContext.boardConfig || [];
 
@@ -185,35 +498,7 @@ if (window.CustomBattles) {
                         });
 
                         if (!exists) {
-                            // Generate key: if prefix includes tile, append timestamp, otherwise include tile in key
-                            let key;
-                            if (prefix.includes(`-${villainConfig.tileIndex}-`) || prefix.endsWith(`-${villainConfig.tileIndex}-`)) {
-                                key = prefix + Date.now() + Math.random();
-                            } else {
-                                key = `${prefix}${villainConfig.tileIndex}-${Date.now()}-${Math.random()}`;
-                            }
-                            
-                            const villain = applyVillainAwakenFromConfig({
-                                type: "custom",
-                                key: key,
-                                nickname: villainConfig.nickname,
-                                name: villainConfig.nickname || undefined,
-                                tileIndex: villainConfig.tileIndex,
-                                villain: true,
-                                gameId: villainConfig.gameId,
-                                direction: villainConfig.direction || "south",
-                                level: villainConfig.level || 1,
-                                tier: villainConfig.tier || 0,
-                                equip: villainConfig.equip || null,
-                                genes: villainConfig.genes || {
-                                    hp: 1,
-                                    ad: 1,
-                                    ap: 1,
-                                    armor: 1,
-                                    magicResist: 1
-                                }
-                            }, villainConfig);
-
+                            const villain = this.createCustomVillainEntity(villainConfig);
                             updatedBoardConfig.push(villain);
                             addedAny = true;
                             console.log(`[Custom Battles][${this.config.name || 'Battle'}] Adding ${villainConfig.nickname || 'villain'} to tile ${villainConfig.tileIndex}`);
@@ -244,80 +529,72 @@ if (window.CustomBattles) {
             }
 
             /**
-             * Remove original villains from board (keep custom ones)
+             * Replace every villain on the board with custom ones in a single atomic update.
              */
             removeOriginalVillains() {
-                try {
-                    console.log(`[Custom Battles][${this.config.name || 'Battle'}] Removing original villains from board`);
+                if (this.isBoardBattleActive()) {
+                    return;
+                }
 
-                    const boardContext = globalThis.state.board.getSnapshot().context;
-                    const boardConfig = boardContext.boardConfig || [];
+                this.runLockedBoardSetup(() => {
+                    try {
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Removing original villains from board`);
 
-                    // Filter out original villains (keep custom ones)
-                    const configWithoutVillains = boardConfig.filter(entity => {
-                        // Keep custom villains (they have our key prefixes)
-                        if (entity.key) {
-                            const isCustomVillain = this.villainKeyPrefixes.some(({ prefix }) =>
-                                entity.key.startsWith(prefix)
-                            );
-                            if (isCustomVillain) return true;
-                        }
-                        
-                        // Remove original villains
-                        if (entity.villain) return false;
-                        
-                        // Keep everything else (allies, etc.)
-                        return true;
-                    });
-
-                    if (configWithoutVillains.length < boardConfig.length) {
-                        globalThis.state.board.send({
-                            type: 'setState',
-                            fn: (prev) => ({
-                                ...prev,
-                                boardConfig: configWithoutVillains
-                            })
+                        const boardContext = globalThis.state.board.getSnapshot().context;
+                        const boardConfig = boardContext.boardConfig || [];
+                        const configWithoutVillains = boardConfig.filter((entity) => !entity.villain);
+                        const customVillains = this.config.villains.map((villainConfig) => {
+                            console.log(`[Custom Battles][${this.config.name || 'Battle'}] Adding ${villainConfig.nickname || 'villain'} to tile ${villainConfig.tileIndex}`);
+                            return this.createCustomVillainEntity(villainConfig);
                         });
+                        const updatedBoardConfig = [...configWithoutVillains, ...customVillains];
 
-                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Original villains removed from board`);
-
-                        // Hide villain sprites if needed
-                        if (this.config.hideVillainSprites) {
-                            const allSprites = document.querySelectorAll('.sprite.item.relative');
-                            let hidden = 0;
-                            allSprites.forEach((sprite) => {
-                                const spriteClasses = Array.from(sprite.classList);
-                                const idClass = spriteClasses.find(cls => cls.startsWith('id-'));
-                                if (idClass) {
-                                    const spriteId = idClass.replace('id-', '');
-                                    const wasVillain = boardConfig.some(entity =>
-                                        entity.gameId?.toString() === spriteId && entity.villain &&
-                                        !this.villainKeyPrefixes.some(({ prefix }) => entity.key?.startsWith(prefix))
-                                    );
-                                    if (wasVillain) {
-                                        sprite.style.display = 'none';
-                                        hidden++;
-                                    }
-                                }
+                        if (updatedBoardConfig.length !== boardConfig.length || boardConfig.some((entity) => entity.villain)) {
+                            globalThis.state.board.send({
+                                type: 'setState',
+                                fn: (prev) => ({
+                                    ...prev,
+                                    boardConfig: updatedBoardConfig
+                                })
                             });
-                            if (hidden > 0) {
-                                console.log(`[Custom Battles][${this.config.name || 'Battle'}] Hidden ${hidden} villain sprites`);
+
+                            console.log(`[Custom Battles][${this.config.name || 'Battle'}] Original villains removed from board`);
+                            console.log(`[Custom Battles][${this.config.name || 'Battle'}] Board configuration updated with new villains`);
+
+                            if (this.config.hideVillainSprites) {
+                                const allSprites = document.querySelectorAll('[id^="tile-index-"] .sprite.item.relative');
+                                let hidden = 0;
+                                allSprites.forEach((sprite) => {
+                                    if (sprite.closest('#actors')) return;
+                                    const spriteClasses = Array.from(sprite.classList);
+                                    const idClass = spriteClasses.find(cls => cls.startsWith('id-'));
+                                    if (idClass) {
+                                        const spriteId = idClass.replace('id-', '');
+                                        const wasVillain = boardConfig.some(entity =>
+                                            entity.gameId?.toString() === spriteId && entity.villain &&
+                                            !this.isCustomVillainEntity(entity)
+                                        );
+                                        if (wasVillain) {
+                                            sprite.style.display = 'none';
+                                            hidden++;
+                                        }
+                                    }
+                                });
+                                if (hidden > 0) {
+                                    console.log(`[Custom Battles][${this.config.name || 'Battle'}] Hidden ${hidden} villain sprites`);
+                                }
                             }
                         }
-                    }
 
-                    // After removing villains, add custom ones back
-                    this.addVillains();
-                    
-                    // Set floor after board setup completes
-                    if (this.config.floor !== undefined) {
-                        setTimeout(() => {
-                            this.setFloor(this.config.floor);
-                        }, 300);
+                        if (this.config.floor !== undefined) {
+                            setTimeout(() => {
+                                this.setFloor(this.config.floor);
+                            }, 300);
+                        }
+                    } catch (error) {
+                        console.error('[Custom Battles] Error removing villains:', error);
                     }
-                } catch (error) {
-                    console.error('[Custom Battles] Error removing villains:', error);
-                }
+                });
             }
             
             /**
@@ -382,6 +659,7 @@ if (window.CustomBattles) {
             enforceAllyLimit(activationCallback, showToastCallback) {
                 if (!this.config.allyLimit) return;
                 if (!this.shouldRestrictionsBeActive(activationCallback)) return;
+                if (this.boardSetupLock || this.isBoardBattleActive()) return;
                 
                 try {
                     const boardContext = globalThis.state.board.getSnapshot().context;
@@ -449,11 +727,16 @@ if (window.CustomBattles) {
 
             /**
              * Prevent villain movement (keep them on their assigned tiles).
-             * Also re-add any custom villains that were removed from the board (e.g. dragged off).
-             * Runs when tileRestrictionActive is true (from tile restrictions or from preventVillainMovement-only subscription).
+             * If the board has vanilla or duplicate villains, run a full villain swap instead of stacking extras.
              */
             preventVillainMovement() {
                 if (!this.tileRestrictionActive && !this.preventVillainMovementActive) return;
+                if (!this.customVillainPlacementReady || this.boardSetupLock || this.isBoardBattleActive()) return;
+
+                if (!this.isCustomVillainBoardStateValid()) {
+                    this.syncCustomVillainsIfNeeded();
+                    return;
+                }
                 
                 try {
                     const boardContext = globalThis.state.board.getSnapshot().context;
@@ -493,47 +776,6 @@ if (window.CustomBattles) {
                             }
                         }
                         return entity;
-                    });
-
-                    // Re-add any custom villains that were removed from the board (dragged off / deleted)
-                    this.config.villains.forEach((villainConfig, idx) => {
-                        const { prefix, tileIndex, hasTileInPrefix } = this.villainKeyPrefixes[idx];
-                        const exists = restoredConfig.some(entity => {
-                            if (!entity.key || !entity.villain) return false;
-                            if (hasTileInPrefix) return entity.key.startsWith(prefix);
-                            return entity.key.startsWith(prefix) && entity.tileIndex === tileIndex;
-                        });
-                        if (!exists) {
-                            console.log(`[Custom Battles][${this.config.name || 'Battle'}] Villain removed from board - re-adding ${villainConfig.nickname || 'villain'} to tile ${tileIndex}`);
-                            needsRestore = true;
-                            let key;
-                            if (prefix.includes(`-${tileIndex}-`) || prefix.endsWith(`-${tileIndex}-`)) {
-                                key = prefix + Date.now() + Math.random();
-                            } else {
-                                key = `${prefix}${tileIndex}-${Date.now()}-${Math.random()}`;
-                            }
-                            const villain = applyVillainAwakenFromConfig({
-                                type: 'custom',
-                                key: key,
-                                nickname: villainConfig.nickname,
-                                name: villainConfig.nickname || undefined,
-                                tileIndex: villainConfig.tileIndex,
-                                villain: true,
-                                gameId: villainConfig.gameId,
-                                direction: villainConfig.direction || 'south',
-                                level: villainConfig.level || 1,
-                                tier: villainConfig.tier || 0,
-                                equip: villainConfig.equip || null,
-                                genes: villainConfig.genes || {
-                                    hp: 1,
-                                    ad: 1,
-                                    ap: 1,
-                                    armor: 1,
-                                    magicResist: 1
-                                }
-                            }, villainConfig);
-                            restoredConfig = restoredConfig.concat([villain]);
-                        }
                     });
                     
                     if (needsRestore) {
@@ -648,7 +890,7 @@ if (window.CustomBattles) {
                 this.subscriptions.preventVillainMovement = globalThis.state.board.subscribe(() => {
                     const shouldBeActive = this.shouldRestrictionsBeActive(activationCallback);
                     this.preventVillainMovementActive = shouldBeActive;
-                    if (shouldBeActive) {
+                    if (shouldBeActive && this.customVillainPlacementReady) {
                         this.preventVillainMovement();
                     }
                 });
@@ -779,6 +1021,10 @@ if (window.CustomBattles) {
                     const text = button.textContent.trim();
                     if (text === 'Start' || text === 'Iniciar' || text === 'Play' || text === 'Jogar') {
                         console.log(`[Custom Battles][${this.config.name || 'Battle'}] Start button clicked - immediately disabling stop button`);
+
+                        if (this.sceneSpriteState && this.isInBattleArea()) {
+                            this.resetSceneSpriteReplacements();
+                        }
                         
                         // Check if we're in sandbox mode and hide game timer
                         try {
@@ -1098,6 +1344,372 @@ if (window.CustomBattles) {
             /**
              * Setup the battle system
              */
+            getSceneSpriteReplacementRoot() {
+                if (!this.sceneSpriteState) return null;
+                return document.getElementById(this.sceneSpriteState.rootId);
+            }
+
+            getSceneSpriteSourceId(sprite) {
+                if (!this.sceneSpriteState || !sprite) return null;
+                for (const className of sprite.classList) {
+                    if (className.startsWith('id-')) {
+                        const sourceId = Number(className.slice(3));
+                        if (this.sceneSpriteState.replacements.has(sourceId)) return sourceId;
+                    } else if (className.endsWith('.png')) {
+                        const sourceId = Number(className.slice(0, -4));
+                        if (this.sceneSpriteState.replacements.has(sourceId)) return sourceId;
+                    }
+                }
+                return null;
+            }
+
+            isSceneSpriteBackgroundLayer(sprite) {
+                return sprite.classList.contains('absolute')
+                    && sprite.classList.contains('size-scaled-sprite')
+                    && sprite.classList.contains('pointer-events-none')
+                    && !sprite.closest('[id^="tile-index-"]');
+            }
+
+            isSceneSpriteFloorBelowSprite(sprite) {
+                return sprite.closest('#floor-below') && sprite.classList.contains('relative');
+            }
+
+            isSceneSpriteTileDecoration(sprite) {
+                return sprite.closest('[id^="tile-index-"]') && sprite.classList.contains('relative');
+            }
+
+            isSceneSpriteReplacementTarget(sprite) {
+                if (!sprite) return false;
+                if (!sprite.classList.contains('item')) return false;
+                if (sprite.classList.contains('outfit')) return false;
+                if (sprite.closest('#actors')) return false;
+                if (sprite.closest('[data-gameid]')) return false;
+                const excludeRootIds = this.sceneSpriteState?.excludeRootIds || ['actors'];
+                for (const excludeRootId of excludeRootIds) {
+                    if (sprite.closest(`#${excludeRootId}`)) {
+                        return false;
+                    }
+                }
+                const root = this.getSceneSpriteReplacementRoot();
+                if (root && !root.contains(sprite)) return false;
+
+                const sourceId = this.getSceneSpriteSourceId(sprite);
+                if (sourceId == null) return false;
+
+                const scope = this.sceneSpriteState.replacements.get(sourceId)?.scope || 'any';
+                const isBackground = this.isSceneSpriteBackgroundLayer(sprite);
+                const isFloorBelow = this.isSceneSpriteFloorBelowSprite(sprite);
+                const isTileDecoration = this.isSceneSpriteTileDecoration(sprite);
+
+                switch (scope) {
+                    case 'background':
+                        return isBackground || isFloorBelow;
+                    case 'tile':
+                        return isTileDecoration;
+                    default:
+                        return isBackground || isFloorBelow || isTileDecoration;
+                }
+            }
+
+            applySceneSpriteReplacement(sprite, sourceId) {
+                const state = this.sceneSpriteState;
+                const rule = state?.replacements.get(sourceId);
+                if (!rule || !sprite || sprite.dataset[state.datasetKey] === '1') return false;
+
+                const { replacementId, makeRelative } = rule;
+                if (sprite.classList.contains(`id-${replacementId}`)) {
+                    sprite.dataset[state.datasetKey] = '1';
+                    return false;
+                }
+
+                sprite.classList.remove(`id-${sourceId}`, `${sourceId}.png`, `id-${sourceId}.png`);
+                if (makeRelative) {
+                    sprite.classList.remove('pointer-events-none', 'absolute', 'size-scaled-sprite');
+                    sprite.classList.add('relative');
+                    sprite.style.setProperty('animation-composition', 'accumulate');
+                    sprite.style.setProperty('transform-origin', '100% 100%');
+                    sprite.style.zIndex = '1000';
+                    sprite.style.removeProperty('right');
+                    sprite.style.removeProperty('bottom');
+                }
+                sprite.classList.add(`id-${replacementId}`);
+
+                const img = sprite.querySelector('img');
+                if (img) {
+                    img.alt = String(replacementId);
+                    img.setAttribute('data-cropped', 'false');
+                    img.style.setProperty('--cropX', '0');
+                    img.style.setProperty('--cropY', '0');
+                }
+
+                sprite.dataset[state.datasetKey] = '1';
+                return true;
+            }
+
+            applySceneSpriteReplacements() {
+                const state = this.sceneSpriteState;
+                if (!state) return 0;
+
+                const root = this.getSceneSpriteReplacementRoot();
+                if (!root?.isConnected) return 0;
+
+                let replacedCount = 0;
+                let foundReplacementTargets = false;
+                let hasUnreplacedTargets = false;
+                const pendingSprites = root.querySelectorAll(state.selector);
+                for (let i = 0; i < pendingSprites.length; i++) {
+                    const sprite = pendingSprites[i];
+                    if (!this.isSceneSpriteReplacementTarget(sprite)) continue;
+                    foundReplacementTargets = true;
+                    const sourceId = this.getSceneSpriteSourceId(sprite);
+                    if (sourceId == null) continue;
+                    const rule = state.replacements.get(sourceId);
+                    if (sprite.dataset[state.datasetKey] === '1' || (rule && sprite.classList.contains(`id-${rule.replacementId}`))) {
+                        if (sprite.dataset[state.datasetKey] !== '1') {
+                            sprite.dataset[state.datasetKey] = '1';
+                        }
+                        continue;
+                    }
+                    hasUnreplacedTargets = true;
+                    if (this.applySceneSpriteReplacement(sprite, sourceId)) replacedCount++;
+                }
+
+                if (foundReplacementTargets && !hasUnreplacedTargets) {
+                    state.complete = true;
+                }
+
+                return replacedCount;
+            }
+
+            burstApplySceneSpriteReplacements() {
+                if (!this.sceneSpriteState) return;
+                this.applySceneSpriteReplacements();
+                requestAnimationFrame(() => {
+                    this.applySceneSpriteReplacements();
+                    requestAnimationFrame(() => {
+                        this.applySceneSpriteReplacements();
+                    });
+                });
+            }
+
+            /**
+             * Retry scene sprite swaps until the background DOM is ready (room re-entry / fast villain setup).
+             */
+            scheduleSceneSpriteReplacementsForEntry({ attemptDelays, force = false } = {}) {
+                if (!this.sceneSpriteState || !this.isActive) return;
+                if (!force && this.isSceneSpriteReplacementsComplete()) return;
+                if (!force && this.sceneSpriteReplacementTimer != null) return;
+
+                this.cancelSceneSpriteReplacementTimer();
+
+                const delays = attemptDelays
+                    ?? this.config.entrySetup?.sceneSpriteAttemptDelays
+                    ?? [0, 50, 150, 300, 500, 800, 1200];
+
+                let attemptIndex = 0;
+                const scheduleAttempt = () => {
+                    if (!this.sceneSpriteState || !this.isActive) return;
+                    if (this.isSceneSpriteReplacementsComplete()) return;
+                    if (attemptIndex >= delays.length) return;
+
+                    const delay = delays[attemptIndex++];
+                    const fire = () => {
+                        this.sceneSpriteReplacementTimer = null;
+                        if (!this.sceneSpriteState || !this.isActive) return;
+                        if (!this.isInBattleArea()) {
+                            scheduleAttempt();
+                            return;
+                        }
+                        this.clearSceneSpriteReplacementMarkers();
+                        this.resetSceneSpriteReplacements();
+                        this.burstApplySceneSpriteReplacements();
+                        if (!this.isSceneSpriteReplacementsComplete()) {
+                            scheduleAttempt();
+                        }
+                    };
+
+                    if (delay > 0) {
+                        this.sceneSpriteReplacementTimer = setTimeout(fire, delay);
+                    } else {
+                        queueMicrotask(fire);
+                    }
+                };
+
+                scheduleAttempt();
+            }
+
+            isSceneSpriteReplacementsComplete() {
+                return !this.sceneSpriteState || this.sceneSpriteState.complete;
+            }
+
+            resetSceneSpriteReplacements() {
+                if (this.sceneSpriteState) {
+                    this.sceneSpriteState.complete = false;
+                }
+            }
+
+            clearSceneSpriteReplacementMarkers() {
+                const state = this.sceneSpriteState;
+                if (!state) return;
+
+                const root = this.getSceneSpriteReplacementRoot();
+                if (!root?.isConnected) return;
+
+                root.querySelectorAll('.sprite.item').forEach((sprite) => {
+                    if (!this.isSceneSpriteReplacementTarget(sprite)) return;
+                    if (this.getSceneSpriteSourceId(sprite) == null) return;
+                    delete sprite.dataset[state.datasetKey];
+                });
+            }
+
+            shouldApplySceneSpriteReplacements() {
+                if (!this.sceneSpriteState || !this.isActive) return false;
+                return this.shouldRestrictionsBeActive(this.activationCallback);
+            }
+
+            scheduleSceneSpriteReplacementsForGameStart() {
+                if (!this.shouldApplySceneSpriteReplacements()) return;
+
+                this.resetSceneSpriteReplacements();
+                this.burstApplySceneSpriteReplacements();
+                setTimeout(() => {
+                    if (this.shouldApplySceneSpriteReplacements()) {
+                        this.burstApplySceneSpriteReplacements();
+                    }
+                }, 50);
+                setTimeout(() => {
+                    if (this.shouldApplySceneSpriteReplacements()) {
+                        this.burstApplySceneSpriteReplacements();
+                    }
+                }, 150);
+            }
+
+            setupSceneSpriteReplacements() {
+                if (!this.sceneSpriteState) return;
+                if (typeof globalThis === 'undefined' || !globalThis.state?.board) return;
+
+                if (this.sceneSpriteGameEventUnsubscribes.length > 0) {
+                    this.sceneSpriteGameEventUnsubscribes.forEach((listener) => {
+                        try {
+                            if (listener && typeof listener === 'object' && typeof listener.unsubscribe === 'function') {
+                                listener.unsubscribe();
+                            } else if (listener && typeof listener === 'function') {
+                                listener();
+                            }
+                        } catch (e) {
+                            console.error('[Custom Battles] Error unsubscribing from scene sprite game events:', e);
+                        }
+                    });
+                    this.sceneSpriteGameEventUnsubscribes = [];
+                }
+
+                const board = globalThis.state.board;
+                this.sceneSpriteGameEventUnsubscribes = [
+                    board.on('before-game-start', () => {
+                        if (!this.shouldApplySceneSpriteReplacements()) return;
+                        this.resetSceneSpriteReplacements();
+                    }),
+                    board.on('emitNewGame', () => {
+                        this.scheduleSceneSpriteReplacementsForGameStart();
+                    }),
+                    board.on('newGame', () => {
+                        this.scheduleSceneSpriteReplacementsForGameStart();
+                    })
+                ];
+
+                console.log(`[Custom Battles][${this.config.name || 'Battle'}] Scene sprite replacement game-start hooks set up`);
+            }
+
+            isCustomVillainBoardStateValid() {
+                try {
+                    const boardConfig = globalThis.state.board.getSnapshot().context.boardConfig || [];
+                    const villainsOnBoard = boardConfig.filter((entity) => entity?.villain);
+                    if (villainsOnBoard.length !== this.config.villains.length) {
+                        return false;
+                    }
+                    return this.hasCustomVillainsOnBoard() && !this.hasOriginalVillainsOnBoard();
+                } catch (error) {
+                    return false;
+                }
+            }
+
+            syncCustomVillainsIfNeeded() {
+                if (!this.customVillainPlacementReady || this.boardSetupLock || this.isBoardBattleActive()) return;
+                if (this.isCustomVillainBoardStateValid()) return;
+                if (this.pendingVillainSyncTimer) return;
+
+                this.pendingVillainSyncTimer = setTimeout(() => {
+                    this.pendingVillainSyncTimer = null;
+                    if (!this.customVillainPlacementReady || this.boardSetupLock || this.isBoardBattleActive()) return;
+                    if (this.isCustomVillainBoardStateValid()) return;
+                    console.log(`[Custom Battles][${this.config.name || 'Battle'}] Board villain state invalid - re-running villain swap`);
+                    this.removeOriginalVillains();
+                }, 150);
+            }
+
+            hasCustomVillainsOnBoard() {
+                try {
+                    const boardConfig = globalThis.state.board.getSnapshot().context.boardConfig || [];
+                    return this.config.villains.every((villainConfig) => {
+                        const prefix = villainConfig.keyPrefix || `${villainConfig.nickname?.toLowerCase() || 'villain'}-tile-${villainConfig.tileIndex}-`;
+                        if (prefix.includes(`-${villainConfig.tileIndex}-`) || prefix.endsWith(`-${villainConfig.tileIndex}-`)) {
+                            return boardConfig.some((entity) => entity.key && entity.key.startsWith(prefix));
+                        }
+                        return boardConfig.some((entity) =>
+                            entity.key && entity.key.startsWith(prefix) && entity.tileIndex === villainConfig.tileIndex
+                        );
+                    });
+                } catch (error) {
+                    return false;
+                }
+            }
+
+            resetSandboxBattleState() {
+                try {
+                    globalThis.state.board.send({
+                        type: 'setState',
+                        fn: (prev) => ({
+                            ...prev,
+                            gameStarted: false,
+                            serverResults: null
+                        })
+                    });
+                } catch (error) {
+                    console.error('[Custom Battles] Error resetting sandbox battle state:', error);
+                }
+            }
+
+            setupAutoSetupVillainSync(activationCallback) {
+                if (this.autoSetupVillainSyncUnsub) {
+                    try {
+                        if (typeof this.autoSetupVillainSyncUnsub === 'function') {
+                            this.autoSetupVillainSyncUnsub();
+                        } else if (this.autoSetupVillainSyncUnsub.unsubscribe) {
+                            this.autoSetupVillainSyncUnsub.unsubscribe();
+                        } else if (globalThis.state.board?.off && this.autoSetupVillainSyncHandler) {
+                            globalThis.state.board.off('autoSetupBoard', this.autoSetupVillainSyncHandler);
+                        }
+                    } catch (e) {}
+                    this.autoSetupVillainSyncUnsub = null;
+                }
+
+                this.autoSetupVillainSyncHandler = () => {
+                    if (!this.isActive || !this.shouldRestrictionsBeActive(activationCallback)) return;
+                    if (!this.customVillainPlacementReady || this.boardSetupLock || this.isBoardBattleActive()) return;
+                    if (this.autoSetupVillainSyncTimer) {
+                        clearTimeout(this.autoSetupVillainSyncTimer);
+                    }
+                    this.autoSetupVillainSyncTimer = setTimeout(() => {
+                        if (!this.isActive || !this.shouldRestrictionsBeActive(activationCallback)) return;
+                        if (!this.customVillainPlacementReady || this.boardSetupLock || this.isBoardBattleActive()) return;
+                        this.syncCustomVillainsIfNeeded();
+                    }, 75);
+                };
+
+                this.autoSetupVillainSyncUnsub = globalThis.state.board.on('autoSetupBoard', this.autoSetupVillainSyncHandler);
+                console.log(`[Custom Battles][${this.config.name || 'Battle'}] autoSetupBoard villain sync set up`);
+            }
+
             setup(activationCallback, showToastCallback) {
                 if (this.isActive) {
                     console.warn('[Custom Battles][' + (this.config.name || 'Battle') + '] Already set up');
@@ -1105,6 +1717,8 @@ if (window.CustomBattles) {
                 }
 
                 this.isActive = true;
+                activeCustomBattles.add(this);
+                this.activationCallback = activationCallback || null;
                 console.log('[Custom Battles][' + (this.config.name || 'Battle') + '] Setting up battle system');
 
                 // Setup stop button disabler (always enabled)
@@ -1128,6 +1742,14 @@ if (window.CustomBattles) {
                 // Setup victory/defeat detection if configured
                 if (this.config.victoryDefeat) {
                     this.setupVictoryDefeatDetection();
+                }
+
+                if (this.sceneSpriteState) {
+                    this.setupSceneSpriteReplacements();
+                }
+
+                if (this.config.villains?.length) {
+                    this.setupAutoSetupVillainSync(activationCallback);
                 }
                 
                 // Set floor if configured (with delay to ensure board is ready)
@@ -1192,6 +1814,33 @@ if (window.CustomBattles) {
                     this.newGameUnsub = null;
                 }
 
+                if (this.autoSetupVillainSyncTimer) {
+                    clearTimeout(this.autoSetupVillainSyncTimer);
+                    this.autoSetupVillainSyncTimer = null;
+                }
+                if (this.pendingVillainSyncTimer) {
+                    clearTimeout(this.pendingVillainSyncTimer);
+                    this.pendingVillainSyncTimer = null;
+                }
+                this.cancelEntryVillainSetupTimer();
+                this.entryVillainSetupDone = false;
+                this.cancelSceneSpriteReplacementTimer();
+                if (this.autoSetupVillainSyncUnsub) {
+                    try {
+                        if (typeof this.autoSetupVillainSyncUnsub === 'function') {
+                            this.autoSetupVillainSyncUnsub();
+                        } else if (this.autoSetupVillainSyncUnsub.unsubscribe) {
+                            this.autoSetupVillainSyncUnsub.unsubscribe();
+                        } else if (globalThis.state.board?.off && this.autoSetupVillainSyncHandler) {
+                            globalThis.state.board.off('autoSetupBoard', this.autoSetupVillainSyncHandler);
+                        }
+                    } catch (e) {
+                        console.error('[Custom Battles] Error unsubscribing from autoSetupBoard villain sync:', e);
+                    }
+                    this.autoSetupVillainSyncUnsub = null;
+                    this.autoSetupVillainSyncHandler = null;
+                }
+
                 // Cleanup stop button disabler
                 if (this.startButtonClickHandler) {
                     document.removeEventListener('click', this.startButtonClickHandler, true);
@@ -1213,6 +1862,21 @@ if (window.CustomBattles) {
                         }
                     });
                     this.gameStartEventUnsubscribes = [];
+                }
+
+                if (this.sceneSpriteGameEventUnsubscribes.length > 0) {
+                    this.sceneSpriteGameEventUnsubscribes.forEach((listener) => {
+                        try {
+                            if (listener && typeof listener === 'object' && typeof listener.unsubscribe === 'function') {
+                                listener.unsubscribe();
+                            } else if (listener && typeof listener === 'function') {
+                                listener();
+                            }
+                        } catch (e) {
+                            console.error('[Custom Battles] Error unsubscribing from scene sprite game events:', e);
+                        }
+                    });
+                    this.sceneSpriteGameEventUnsubscribes = [];
                 }
 
                 // Disconnect stop button observer
@@ -1248,26 +1912,38 @@ if (window.CustomBattles) {
                     this.restoreBoardSetup();
                 }
 
+                this.resetSandboxBattleState();
+
                 // Show overlays if callback provided
                 if (showOverlaysCallback) {
                     showOverlaysCallback();
                 }
 
                 this.tileRestrictionActive = false;
+                this.boardSetupLock = false;
+                this.customVillainPlacementReady = false;
+                this.resetSceneSpriteReplacements();
+                this.activationCallback = null;
                 this.isActive = false;
+                activeCustomBattles.delete(this);
                 this.lastGameState = 'initial';
                 console.log('[Custom Battles][' + (this.config.name || 'Battle') + '] Cleanup completed');
             }
         }
 
-        // Battle configs (e.g. Mornenion, Banshee's Last Room) live in Quests.js. This file only provides
-        // CustomBattle and create(config). Same flow for all: create(config) → setup(activationCallback, showToast)
-        // → onClose does cleanup(restoreBoardSetup, showQuestOverlays) + navigate.
+        // Battle configs (e.g. Mornenion, Putrid Chamber) live in Quests.js. This file provides
+        // CustomBattle and create(config). Optional config.sceneSpriteReplacements swaps background
+        // sprite ids inside a DOM root (default #background-scene) for quest map visuals.
+        // Sprites inside #actors (board creatures) are always excluded.
+        // Optional rule.scope: "background" (absolute floor layers / #floor-below) or "tile" (tile-index decorations).
+        // Same flow for all: create(config) → setup(activationCallback, showToast)
+        // → scheduleEntryVillainSetup / runEntryVillainSetupIfNeeded → onClose cleanup + navigate.
 
         // Expose globally
             try {
                 window.CustomBattles = {
-                    create: (config) => new CustomBattle(config)
+                    create: (config) => new CustomBattle(config),
+                    isAllyContextMenuBlocked: shouldBlockAllyContextMenu
                 };
             } catch (error) {
                 console.error('[Custom Battles] ✗ ERROR setting window.CustomBattles:', error);
