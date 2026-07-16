@@ -797,7 +797,12 @@
     ],
     tabIcons: {
       rank: { src: '/assets/icons/star-tier.png', alt: 'Rank' },
-      floor: { src: '/assets/icons/speed.png', alt: 'Ticks' }
+      floor: { src: '/assets/icons/speed.png', alt: 'Ticks' },
+      shiny: { src: '/assets/icons/star-tier-shiny.png', alt: 'Shiny' }
+    },
+    shinyCompetition: {
+      creatureName: 'Football Elemental',
+      minCreatedAt: '2026-07-17T00:00:00'
     },
     isPlayerEligible: async (playerName) => {
       if (!playerName) {

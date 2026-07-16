@@ -63,6 +63,66 @@ if (window.CustomBattles) {
         }
 
         const activeCustomBattles = new Set();
+        let globalAllyVillainGuardInstalled = false;
+        let globalAllyVillainBoardTimer = null;
+
+        function enforceAllyVillainSeparationForActiveBattles(showToastCallback) {
+            for (const battle of activeCustomBattles) {
+                if (!battle.isActive) continue;
+                try {
+                    if (!battle.shouldRestrictionsBeActive(battle.activationCallback)) continue;
+                    if (battle.isBoardBattleActive()) continue;
+                    const toast = showToastCallback || battle._overlapToastCallback || null;
+                    if (battle.removeAlliesOverlappingVillains(toast)) {
+                        break;
+                    }
+                } catch (_) {}
+            }
+        }
+
+        function filterAutoSetupForActiveBattles(event) {
+            if (!event?.setup?.length) return;
+
+            for (const battle of activeCustomBattles) {
+                if (!battle.isActive) continue;
+                try {
+                    if (!battle.shouldRestrictionsBeActive(battle.activationCallback)) continue;
+                    const filteredSetup = battle.filterSetupPreventAllyOnVillainTiles(event.setup, battle._overlapToastCallback || null);
+                    if (filteredSetup.length !== event.setup.length) {
+                        event.setup = filteredSetup;
+                    }
+                } catch (_) {}
+            }
+        }
+
+        function installGlobalAllyVillainOverlapGuard() {
+            if (globalAllyVillainGuardInstalled || !globalThis.state?.board) return;
+            globalAllyVillainGuardInstalled = true;
+
+            try {
+                globalThis.state.board.on('autoSetupBoard', filterAutoSetupForActiveBattles);
+            } catch (error) {
+                console.error('[Custom Battles] Failed to install autoSetupBoard overlap guard:', error);
+            }
+
+            try {
+                globalThis.state.board.subscribe(() => {
+                    if (globalAllyVillainBoardTimer) {
+                        clearTimeout(globalAllyVillainBoardTimer);
+                    }
+                    globalAllyVillainBoardTimer = setTimeout(() => {
+                        globalAllyVillainBoardTimer = null;
+                        enforceAllyVillainSeparationForActiveBattles(null);
+                    }, 0);
+                });
+            } catch (error) {
+                console.error('[Custom Battles] Failed to install board overlap guard:', error);
+            }
+
+            console.log('[Custom Battles] Global ally/villain overlap guard installed');
+        }
+
+        installGlobalAllyVillainOverlapGuard();
 
         function isBoardAllyCreatureButton(button) {
             if (!button) return false;
@@ -128,6 +188,7 @@ if (window.CustomBattles) {
                     allyLimit: null,
                     tileRestriction: null,
                     preventVillainMovement: null,
+                    allyVillainOverlap: null,
                     victoryDefeat: null
                 };
                 this.setupUnsubscribe = null;
@@ -157,6 +218,9 @@ if (window.CustomBattles) {
                 this.autoSetupVillainSyncUnsub = null;
                 this.autoSetupVillainSyncHandler = null;
                 this.autoSetupVillainSyncTimer = null;
+                this.allyVillainOverlapUnsub = null;
+                this.allyVillainOverlapHandler = null;
+                this.allyVillainOverlapTimer = null;
                 this.pendingVillainSyncTimer = null;
                 this.entryVillainSetupDone = false;
                 this.entryVillainSetupTimer = null;
@@ -793,6 +857,135 @@ if (window.CustomBattles) {
                 }
             }
 
+            isAllyPiece(piece) {
+                if (!piece || piece.villain === true) return false;
+                if (piece.type === 'player') return true;
+                if (piece.monsterId != null || piece.databaseId != null) return true;
+                if (piece.type === 'custom' && piece.villain !== true) {
+                    return !this.isCustomVillainEntity(piece);
+                }
+                return false;
+            }
+
+            isVillainPiece(piece) {
+                if (!piece) return false;
+                if (piece.villain === true) return true;
+                return this.isCustomVillainEntity(piece);
+            }
+
+            getVillainOccupiedTiles() {
+                const tiles = new Set();
+                for (const villain of this.config.villains || []) {
+                    if (villain?.tileIndex != null) {
+                        tiles.add(villain.tileIndex);
+                    }
+                }
+
+                try {
+                    const boardConfig = globalThis.state.board.getSnapshot()?.context?.boardConfig || [];
+                    for (const entity of boardConfig) {
+                        if (this.isVillainPiece(entity) && entity.tileIndex != null) {
+                            tiles.add(entity.tileIndex);
+                        }
+                    }
+                } catch (_) {}
+
+                return tiles;
+            }
+
+            filterSetupPreventAllyOnVillainTiles(setup, showToastCallback) {
+                if (!Array.isArray(setup)) return setup;
+
+                const villainTiles = this.getVillainOccupiedTiles();
+                if (!villainTiles.size) return setup;
+
+                let blocked = 0;
+                const filtered = setup.filter((piece) => {
+                    if (piece?.villain) return true;
+                    if (this.isAllyPiece(piece) && villainTiles.has(piece.tileIndex)) {
+                        blocked++;
+                        return false;
+                    }
+                    return true;
+                });
+
+                if (blocked > 0) {
+                    console.log(`[Custom Battles][${this.config.name || 'Battle'}] Blocked ${blocked} ally placement(s) on villain tiles`);
+                    if (showToastCallback) {
+                        showToastCallback({
+                            message: 'Ally creatures cannot be placed on villain tiles!',
+                            type: 'warning',
+                            duration: 3000
+                        });
+                    }
+                }
+
+                return filtered;
+            }
+
+            removeAlliesOverlappingVillains(showToastCallback) {
+                if (this.isBoardBattleActive()) return false;
+
+                try {
+                    const boardConfig = globalThis.state.board.getSnapshot()?.context?.boardConfig || [];
+                    const villainTiles = new Set(
+                        boardConfig
+                            .filter((entity) => this.isVillainPiece(entity) && entity.tileIndex != null)
+                            .map((entity) => entity.tileIndex)
+                    );
+
+                    for (const villain of this.config.villains || []) {
+                        if (villain?.tileIndex != null) {
+                            villainTiles.add(villain.tileIndex);
+                        }
+                    }
+
+                    if (!villainTiles.size) return false;
+
+                    let removed = 0;
+                    const newBoardConfig = boardConfig.filter((piece) => {
+                        if (this.isAllyPiece(piece) && villainTiles.has(piece.tileIndex)) {
+                            removed++;
+                            return false;
+                        }
+                        return true;
+                    });
+
+                    if (removed > 0) {
+                        this.runLockedBoardSetup(() => {
+                            globalThis.state.board.send({
+                                type: 'setState',
+                                fn: (prev) => ({
+                                    ...prev,
+                                    boardConfig: newBoardConfig
+                                })
+                            });
+                        });
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Removed ${removed} ally creature(s) overlapping villain tiles`);
+                        if (showToastCallback) {
+                            showToastCallback({
+                                message: 'Ally creatures cannot be placed on villain tiles!',
+                                type: 'warning',
+                                duration: 3000
+                            });
+                        }
+                        return true;
+                    }
+                } catch (error) {
+                    console.error('[Custom Battles] Error removing allies on villain tiles:', error);
+                }
+
+                return false;
+            }
+
+            setupAllyVillainOverlapPrevention(activationCallback, showToastCallback) {
+                if (!this.config.villains?.length) return;
+
+                this._overlapToastCallback = showToastCallback || null;
+                this._overlapActivationCallback = activationCallback || null;
+                console.log(`[Custom Battles][${this.config.name || 'Battle'}] Ally/villain overlap prevention enabled`);
+            }
+
             /**
              * Setup tile restrictions
              */
@@ -827,13 +1020,16 @@ if (window.CustomBattles) {
                     console.log(`[Custom Battles][${this.config.name || 'Battle'}] Intercepting board setup for tile restrictions`);
 
                     const allowedTiles = this.config.tileRestrictions.allowedTiles || [];
+                    event.setup = this.filterSetupPreventAllyOnVillainTiles(event.setup, showToastCallback);
+
+                    const beforeAllowedFilter = event.setup.length;
                     const filteredSetup = event.setup.filter(piece => {
                         if (piece.villain) return true;
                         return allowedTiles.includes(piece.tileIndex);
                     });
 
-                    if (filteredSetup.length !== event.setup.length) {
-                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Blocked ${event.setup.length - filteredSetup.length} ally placements outside allowed tiles`);
+                    if (filteredSetup.length !== beforeAllowedFilter) {
+                        console.log(`[Custom Battles][${this.config.name || 'Battle'}] Blocked ${beforeAllowedFilter - filteredSetup.length} ally placements outside allowed tiles`);
 
                         if (showToastCallback) {
                             showToastCallback({
@@ -842,7 +1038,9 @@ if (window.CustomBattles) {
                                 duration: 3000
                             });
                         }
+                    }
 
+                    if (filteredSetup.length !== beforeAllowedFilter) {
                         event.setup = filteredSetup;
                     }
                 };
@@ -1695,7 +1893,11 @@ if (window.CustomBattles) {
 
                 this.autoSetupVillainSyncHandler = () => {
                     if (!this.isActive || !this.shouldRestrictionsBeActive(activationCallback)) return;
-                    if (!this.customVillainPlacementReady || this.boardSetupLock || this.isBoardBattleActive()) return;
+                    if (this.isBoardBattleActive()) return;
+
+                    this.removeAlliesOverlappingVillains(this._overlapToastCallback || null);
+
+                    if (!this.customVillainPlacementReady || this.boardSetupLock) return;
                     if (this.autoSetupVillainSyncTimer) {
                         clearTimeout(this.autoSetupVillainSyncTimer);
                     }
@@ -1718,7 +1920,9 @@ if (window.CustomBattles) {
 
                 this.isActive = true;
                 activeCustomBattles.add(this);
+                installGlobalAllyVillainOverlapGuard();
                 this.activationCallback = activationCallback || null;
+                this._overlapToastCallback = showToastCallback || null;
                 console.log('[Custom Battles][' + (this.config.name || 'Battle') + '] Setting up battle system');
 
                 // Setup stop button disabler (always enabled)
@@ -1749,6 +1953,7 @@ if (window.CustomBattles) {
                 }
 
                 if (this.config.villains?.length) {
+                    this.setupAllyVillainOverlapPrevention(activationCallback, showToastCallback);
                     this.setupAutoSetupVillainSync(activationCallback);
                 }
                 
@@ -1784,6 +1989,33 @@ if (window.CustomBattles) {
                 if (this.subscriptions.preventVillainMovement) {
                     this.subscriptions.preventVillainMovement.unsubscribe();
                     this.subscriptions.preventVillainMovement = null;
+                }
+
+                if (this.subscriptions.allyVillainOverlap) {
+                    if (typeof this.subscriptions.allyVillainOverlap === 'function') {
+                        this.subscriptions.allyVillainOverlap();
+                    } else if (this.subscriptions.allyVillainOverlap.unsubscribe) {
+                        this.subscriptions.allyVillainOverlap.unsubscribe();
+                    }
+                    this.subscriptions.allyVillainOverlap = null;
+                }
+
+                if (this.allyVillainOverlapTimer) {
+                    clearTimeout(this.allyVillainOverlapTimer);
+                    this.allyVillainOverlapTimer = null;
+                }
+                if (this.allyVillainOverlapUnsub) {
+                    try {
+                        if (typeof this.allyVillainOverlapUnsub === 'function') {
+                            this.allyVillainOverlapUnsub();
+                        } else if (globalThis.state.board?.off && this.allyVillainOverlapHandler) {
+                            globalThis.state.board.off('autoSetupBoard', this.allyVillainOverlapHandler);
+                        }
+                    } catch (e) {
+                        console.error('[Custom Battles] Error unsubscribing from ally/villain overlap prevention:', e);
+                    }
+                    this.allyVillainOverlapUnsub = null;
+                    this.allyVillainOverlapHandler = null;
                 }
 
                 // Unsubscribe from autoSetupBoard event
@@ -1924,6 +2156,7 @@ if (window.CustomBattles) {
                 this.customVillainPlacementReady = false;
                 this.resetSceneSpriteReplacements();
                 this.activationCallback = null;
+                this._overlapToastCallback = null;
                 this.isActive = false;
                 activeCustomBattles.delete(this);
                 this.lastGameState = 'initial';

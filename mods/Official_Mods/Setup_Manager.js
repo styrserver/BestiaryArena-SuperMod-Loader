@@ -487,6 +487,120 @@ function getMapSetups(mapId) {
   return config.savedSetups[mapId] || [];
 }
 
+function getBoardAutoSetupPieces(mapId) {
+  try {
+    const boardSetup = globalThis.state.player.getSnapshot().context.boardConfigs?.[mapId];
+    return Array.isArray(boardSetup) ? boardSetup : [];
+  } catch (error) {
+    console.warn('[Setup Manager] Could not read boardConfigs for auto-setup compare:', error);
+    return [];
+  }
+}
+
+/** Normalize player pieces for comparing a saved setup to the game Auto-setup board config. */
+function normalizePieceForAutoSetupCompare(piece) {
+  if (!piece || piece.type === 'custom') return null;
+  const monsterId = piece.monsterId ?? piece.databaseId;
+  if (monsterId == null || piece.tileIndex == null) return null;
+  return {
+    tileIndex: Number(piece.tileIndex),
+    monsterId: String(monsterId),
+    equipId: piece.equipId == null || piece.equipId === '' ? '' : String(piece.equipId)
+  };
+}
+
+function setupMatchesAutoSetup(mapId, savedSetup) {
+  const setupPieces = Array.isArray(savedSetup?.setup) ? savedSetup.setup : [];
+  if (setupPieces.some((piece) => piece?.type === 'custom')) {
+    return false;
+  }
+
+  const autoNormalized = getBoardAutoSetupPieces(mapId)
+    .map(normalizePieceForAutoSetupCompare)
+    .filter(Boolean);
+  const savedNormalized = setupPieces
+    .map(normalizePieceForAutoSetupCompare)
+    .filter(Boolean);
+
+  if (autoNormalized.length === 0 || autoNormalized.length !== savedNormalized.length) {
+    return false;
+  }
+
+  const sortKey = (piece) => `${piece.tileIndex}|${piece.monsterId}|${piece.equipId}`;
+  const autoKeys = autoNormalized.map(sortKey).sort();
+  const savedKeys = savedNormalized.map(sortKey).sort();
+  return autoKeys.every((key, index) => key === savedKeys[index]);
+}
+
+function formatSetupNameWithAutoSetupMatch(setupName) {
+  return tReplace('mods.setupManager.setupMatchesAutoSetupLabel', { name: setupName });
+}
+
+/** Auto-setup matches first; otherwise keep original relative order. */
+function sortSetupsWithAutoSetupMatchesFirst(mapId, setups) {
+  const list = (Array.isArray(setups) ? setups : []).filter((setup) => setup?.name);
+  const withFlags = list.map((setup, index) => ({
+    setup,
+    index,
+    matchesAutoSetup: setupMatchesAutoSetup(mapId, setup)
+  }));
+  withFlags.sort((a, b) => {
+    if (a.matchesAutoSetup !== b.matchesAutoSetup) {
+      return a.matchesAutoSetup ? -1 : 1;
+    }
+    return a.index - b.index;
+  });
+  return withFlags;
+}
+
+/** Full setup fingerprint for duplicate detection (player + custom pieces). */
+function normalizePieceForFullSetupCompare(piece) {
+  if (!piece || piece.tileIndex == null) return null;
+
+  if (piece.type === 'custom') {
+    if (piece.gameId == null) return null;
+    return [
+      'custom',
+      Number(piece.tileIndex),
+      String(piece.gameId),
+      String(piece.level || 1),
+      JSON.stringify(piece.genes || {}),
+      JSON.stringify(piece.equip || null)
+    ].join('|');
+  }
+
+  const monsterId = piece.monsterId ?? piece.databaseId;
+  if (monsterId == null) return null;
+  const equipId = piece.equipId == null || piece.equipId === '' ? '' : String(piece.equipId);
+  return ['player', Number(piece.tileIndex), String(monsterId), equipId].join('|');
+}
+
+function areSetupPieceArraysEquivalent(setupA, setupB) {
+  const keysA = (Array.isArray(setupA) ? setupA : [])
+    .map(normalizePieceForFullSetupCompare)
+    .filter(Boolean)
+    .sort();
+  const keysB = (Array.isArray(setupB) ? setupB : [])
+    .map(normalizePieceForFullSetupCompare)
+    .filter(Boolean)
+    .sort();
+
+  if (keysA.length === 0 || keysA.length !== keysB.length) {
+    return false;
+  }
+  return keysA.every((key, index) => key === keysB[index]);
+}
+
+function findDuplicateSavedSetupName(mapId, setupPieces) {
+  for (const saved of getMapSetups(mapId)) {
+    if (!saved?.name) continue;
+    if (areSetupPieceArraysEquivalent(setupPieces, saved.setup)) {
+      return saved.name;
+    }
+  }
+  return null;
+}
+
 function loadTeamSetup(mapId, setupName) {
   try {
     if (!mapId) {
@@ -655,7 +769,10 @@ function loadTeamSetup(mapId, setupName) {
 function loadTeamAndNotify(mapId, setupName) {
   if (loadTeamSetup(mapId, setupName)) {
     forceCloseAllModals();
-    showNotification(t('mods.setupManager.teamLoaded'), 'success');
+    const displayName = setupName === 'Auto-Setup'
+      ? t('mods.setupManager.originalSetup')
+      : setupName;
+    showNotification(tReplace('mods.setupManager.teamLoaded', { name: displayName }), 'success');
     return true;
   }
 
@@ -666,8 +783,8 @@ function loadTeamAndNotify(mapId, setupName) {
 // ========== UI Functions ==========
 
 const SETUP_MANAGER_MODAL_CONFIG = {
-  width: 500,
-  height: 550,
+  width: 520,
+  height: 600,
   viewportPadding: 16,
   minWidth: 280,
   minHeight: 280
@@ -1363,6 +1480,150 @@ function createActionButton(text, onClick, primary = false) {
 
 const SETUP_MANAGER_DELETE_CONFIRM_MS = 5000;
 const SETUP_MANAGER_SETUP_CARD_CLASS = 'setup-manager-setup-card';
+const SETUP_MANAGER_SETUPS_LIST_CLASS = 'setup-manager-setups-list';
+const SETUP_MANAGER_CARD_RIGHT_WIDTH_PX = 112;
+
+function styleSetupCardRightSection(rightSection) {
+  rightSection.style.flex = `0 0 ${SETUP_MANAGER_CARD_RIGHT_WIDTH_PX}px`;
+  rightSection.style.width = `${SETUP_MANAGER_CARD_RIGHT_WIDTH_PX}px`;
+  rightSection.style.minWidth = `${SETUP_MANAGER_CARD_RIGHT_WIDTH_PX}px`;
+  rightSection.style.maxWidth = `${SETUP_MANAGER_CARD_RIGHT_WIDTH_PX}px`;
+  rightSection.style.display = 'flex';
+  rightSection.style.flexDirection = 'column';
+  rightSection.style.gap = '8px';
+  rightSection.style.alignItems = 'stretch';
+  rightSection.style.justifyContent = 'flex-start';
+  rightSection.style.boxSizing = 'border-box';
+  rightSection.style.padding = '6px 4px';
+}
+
+function ensureSetupReorderStyles() {
+  if (document.getElementById('setup-manager-reorder-styles')) return;
+
+  const style = document.createElement('style');
+  style.id = 'setup-manager-reorder-styles';
+  style.textContent = `
+    .setup-manager-reorder-controls {
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+      width: 100%;
+      margin-bottom: 4px;
+    }
+    .setup-manager-reorder-btn {
+      flex: 1 1 0;
+      min-width: 0;
+      padding: 2px 0;
+      line-height: 1;
+      font-size: 11px;
+    }
+    .setup-manager-reorder-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function getSetupCardsListRoot(card) {
+  return card?.closest(`.${SETUP_MANAGER_SETUPS_LIST_CLASS}`) || card?.parentElement;
+}
+
+function getReorderableSetupCards(listEl) {
+  if (!listEl) return [];
+  return [...listEl.querySelectorAll(`.${SETUP_MANAGER_SETUP_CARD_CLASS}[data-reorderable="true"]`)];
+}
+
+function persistSetupOrderFromList(listEl, mapId) {
+  if (!listEl || !mapId) return;
+
+  const orderedNames = [...listEl.querySelectorAll(`.${SETUP_MANAGER_SETUP_CARD_CLASS}[data-setup-name]`)]
+    .map((card) => card.dataset.setupName)
+    .filter((name) => name && name !== 'Auto-Setup');
+
+  const setups = Array.isArray(config.savedSetups[mapId]) ? config.savedSetups[mapId] : [];
+  if (setups.length === 0) return;
+
+  const byName = new Map(setups.map((setup) => [setup.name, setup]));
+  const next = [];
+  for (const name of orderedNames) {
+    const setup = byName.get(name);
+    if (setup) next.push(setup);
+  }
+  for (const setup of setups) {
+    if (setup?.name && !orderedNames.includes(setup.name)) {
+      next.push(setup);
+    }
+  }
+
+  config.savedSetups[mapId] = next;
+  saveConfigToStorage();
+}
+
+function refreshSetupReorderButtonStates(listEl) {
+  const reorderableCards = getReorderableSetupCards(listEl);
+  reorderableCards.forEach((card, index) => {
+    const upBtn = card.querySelector('.setup-manager-reorder-btn[data-reorder-dir="up"]');
+    const downBtn = card.querySelector('.setup-manager-reorder-btn[data-reorder-dir="down"]');
+    if (upBtn) upBtn.disabled = index === 0;
+    if (downBtn) downBtn.disabled = index === reorderableCards.length - 1;
+  });
+}
+
+function moveSetupCardInList(mapId, card, direction) {
+  const listEl = getSetupCardsListRoot(card);
+  if (!listEl || card.dataset.reorderable !== 'true') return;
+
+  const reorderableCards = getReorderableSetupCards(listEl);
+  const index = reorderableCards.indexOf(card);
+  if (index < 0) return;
+
+  const targetIndex = direction === 'up' ? index - 1 : index + 1;
+  if (targetIndex < 0 || targetIndex >= reorderableCards.length) return;
+
+  const targetCard = reorderableCards[targetIndex];
+  if (direction === 'up') {
+    listEl.insertBefore(card, targetCard);
+  } else {
+    listEl.insertBefore(card, targetCard.nextSibling);
+  }
+
+  persistSetupOrderFromList(listEl, mapId);
+  refreshSetupReorderButtonStates(listEl);
+}
+
+function createSetupReorderArrowButton(direction, onClick) {
+  ensureSetupReorderStyles();
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `${SETUP_MANAGER_BUTTON_CLASS.secondary} setup-manager-reorder-btn pixel-font-14`;
+  button.dataset.reorderDir = direction;
+  button.textContent = direction === 'up' ? '▲' : '▼';
+  button.title = direction === 'up'
+    ? t('mods.setupManager.moveSetupUp')
+    : t('mods.setupManager.moveSetupDown');
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onClick();
+  });
+  return button;
+}
+
+function createSetupReorderControls(mapId, card) {
+  ensureSetupReorderStyles();
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'setup-manager-reorder-controls';
+
+  const upBtn = createSetupReorderArrowButton('up', () => moveSetupCardInList(mapId, card, 'up'));
+  const downBtn = createSetupReorderArrowButton('down', () => moveSetupCardInList(mapId, card, 'down'));
+
+  wrapper.appendChild(upBtn);
+  wrapper.appendChild(downBtn);
+  return wrapper;
+}
 
 function setSetupCardDeleteWarning(deleteButton, active) {
   const card = deleteButton?.closest(`.${SETUP_MANAGER_SETUP_CARD_CLASS}`);
@@ -1520,7 +1781,7 @@ function applySetupNameInputEditable(nameInput, editable, { greyedWhenLocked = f
   nameInput.style.color = '';
 }
 
-function createEditableSetupNameRow(mapId, setupName) {
+function createEditableSetupNameRow(mapId, setupName, { matchesAutoSetup = false } = {}) {
   const nameRow = document.createElement('div');
   nameRow.className = 'flex w-full min-w-0 items-center gap-1';
   nameRow.style.maxHeight = `${SETUP_NAME_FIELD_HEIGHT_PX}px`;
@@ -1531,6 +1792,15 @@ function createEditableSetupNameRow(mapId, setupName) {
   nameInput.style.width = 'auto';
   applySetupNameInputEditable(nameInput, false);
   nameRow.appendChild(nameInput);
+
+  if (matchesAutoSetup) {
+    const matchBadge = document.createElement('span');
+    matchBadge.className = 'pixel-font-12 text-whiteRegular shrink-0';
+    matchBadge.textContent = t('mods.setupManager.autoSetupMatchSuffix');
+    matchBadge.style.opacity = '0.85';
+    matchBadge.style.whiteSpace = 'nowrap';
+    nameRow.appendChild(matchBadge);
+  }
 
   let isEditingName = false;
   let outsideClickHandler = null;
@@ -1665,10 +1935,10 @@ function createSetupTeamPreviewContainer() {
 }
 
 function styleSetupCardLeftSection(leftSection) {
-  leftSection.className = 'flex flex-col w-full gap-1 min-h-0 self-stretch';
-  leftSection.style.width = '75%';
-  leftSection.style.flex = '0 0 75%';
+  leftSection.className = 'flex flex-col gap-1 min-h-0 self-stretch';
+  leftSection.style.flex = '1 1 0';
   leftSection.style.minWidth = '0';
+  leftSection.style.width = 'auto';
 }
 
 function appendBoardPieceToTeamContent(teamContent, piece) {
@@ -1728,6 +1998,15 @@ function saveCurrentBoardSetup(mapId, name) {
     return false;
   }
 
+  const duplicateName = findDuplicateSavedSetupName(mapId, currentSetup);
+  if (duplicateName) {
+    showNotification(
+      tReplace('mods.setupManager.duplicateSetupNamed', { name: duplicateName }),
+      'warning'
+    );
+    return false;
+  }
+
   const saveResult = saveTeamSetup(mapId, trimmedName, currentSetup);
   if (saveResult) {
     showNotification(t('mods.setupManager.teamSaved'), 'success');
@@ -1776,15 +2055,7 @@ function createCurrentBoardCard(mapId) {
   leftSection.appendChild(teamPreview);
 
   const rightSection = document.createElement('div');
-  rightSection.style.width = '25%';
-  rightSection.style.flex = '0 0 25%';
-  rightSection.style.display = 'flex';
-  rightSection.style.flexDirection = 'column';
-  rightSection.style.gap = '8px';
-  rightSection.style.alignItems = 'flex-end';
-  rightSection.style.justifyContent = 'flex-start';
-  rightSection.style.boxSizing = 'border-box';
-  rightSection.style.padding = '8px';
+  styleSetupCardRightSection(rightSection);
 
   const actionsDiv = document.createElement('div');
   actionsDiv.className = 'flex gap-1';
@@ -1806,6 +2077,34 @@ function createCurrentBoardCard(mapId) {
   `;
   actionsDiv.appendChild(countIndicator);
 
+  const currentSetup = hasSetup ? getCurrentTeamSetup() : [];
+  const duplicateName = hasSetup ? findDuplicateSavedSetupName(mapId, currentSetup) : null;
+  const isDuplicateSetup = Boolean(duplicateName);
+
+  const saveRow = document.createElement('div');
+  saveRow.className = 'flex items-center gap-1';
+  saveRow.style.width = '100%';
+
+  if (isDuplicateSetup) {
+    const duplicateWarning = document.createElement('span');
+    duplicateWarning.setAttribute('aria-label', t('mods.setupManager.duplicateSetup'));
+    duplicateWarning.title = duplicateName
+      ? tReplace('mods.setupManager.duplicateSetupNamed', { name: duplicateName })
+      : t('mods.setupManager.duplicateSetup');
+    duplicateWarning.textContent = '⚠️';
+    duplicateWarning.style.cssText = `
+      cursor: help;
+      color: #f0c36d;
+      font-size: 12px;
+      line-height: 1;
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    saveRow.appendChild(duplicateWarning);
+  }
+
   const saveButton = createActionButton(
     t('common.save'),
     () => saveCurrentBoardSetup(mapId, nameInput.value),
@@ -1813,19 +2112,27 @@ function createCurrentBoardCard(mapId) {
     null,
     true
   );
-  saveButton.style.width = '100%';
+  saveButton.style.flex = '1 1 auto';
+  saveButton.style.minWidth = '0';
+  saveButton.style.width = 'auto';
   saveButton.style.marginRight = '0';
-  if (!hasSetup) {
+  if (!hasSetup || isDuplicateSetup) {
     saveButton.disabled = true;
     saveButton.style.opacity = '0.5';
     saveButton.style.cursor = 'not-allowed';
+    if (isDuplicateSetup) {
+      saveButton.title = duplicateName
+        ? tReplace('mods.setupManager.duplicateSetupNamed', { name: duplicateName })
+        : t('mods.setupManager.duplicateSetup');
+    }
   }
   nameInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !saveButton.disabled) {
       saveCurrentBoardSetup(mapId, nameInput.value);
     }
   });
-  actionsDiv.appendChild(saveButton);
+  saveRow.appendChild(saveButton);
+  actionsDiv.appendChild(saveRow);
 
   rightSection.appendChild(actionsDiv);
   card.appendChild(leftSection);
@@ -1835,24 +2142,30 @@ function createCurrentBoardCard(mapId) {
 }
 
 // Create a setup card for a team
-function createSetupCard(mapId, setupName, setupData) {
+function createSetupCard(mapId, setupName, setupData, { matchesAutoSetup = false } = {}) {
   const card = document.createElement('div');
   card.className = `frame-1 surface-regular box-border flex w-full items-stretch gap-2 overflow-hidden p-1 shrink-0 ${SETUP_MANAGER_SETUP_CARD_CLASS}`;
   card.dataset.deleteConfirming = 'false';
+  card.dataset.setupName = setupName;
+  const isSavedSetup = setupName !== 'Auto-Setup';
+  const canReorder = isSavedSetup && !matchesAutoSetup;
+  if (canReorder) {
+    card.dataset.reorderable = 'true';
+  } else {
+    card.dataset.pinned = 'true';
+  }
   
   // Left section (75%): Setup name and creatures
   const leftSection = document.createElement('div');
   styleSetupCardLeftSection(leftSection);
-  
-  const isSavedSetup = setupName !== 'Auto-Setup';
   if (isSavedSetup) {
-    leftSection.appendChild(createEditableSetupNameRow(mapId, setupName));
+    leftSection.appendChild(createEditableSetupNameRow(mapId, setupName, { matchesAutoSetup }));
     const notesPreview = createSetupNotesPreview(setupData?.notes);
     if (notesPreview) {
       leftSection.appendChild(notesPreview);
     }
   } else {
-    const nameInput = createSetupNameInput(setupName);
+    const nameInput = createSetupNameInput(t('mods.setupManager.originalSetup'));
     applySetupNameInputEditable(nameInput, false);
     leftSection.appendChild(nameInput);
   }
@@ -1942,15 +2255,7 @@ function createSetupCard(mapId, setupName, setupData) {
   
   // Right section (25%): Actions (Load Team and Delete buttons)
   const rightSection = document.createElement('div');
-  rightSection.style.width = '25%';
-  rightSection.style.flex = '0 0 25%';
-  rightSection.style.display = 'flex';
-  rightSection.style.flexDirection = 'column';
-  rightSection.style.gap = '8px';
-  rightSection.style.alignItems = 'flex-end';
-  rightSection.style.justifyContent = 'flex-start';
-  rightSection.style.boxSizing = 'border-box';
-  rightSection.style.padding = '8px';
+  styleSetupCardRightSection(rightSection);
   
   // Actions container
   const actionsDiv = document.createElement('div');
@@ -1958,6 +2263,10 @@ function createSetupCard(mapId, setupName, setupData) {
   actionsDiv.style.flexDirection = 'column';
   actionsDiv.style.width = '100%';
   actionsDiv.style.alignItems = 'stretch';
+
+  if (canReorder) {
+    actionsDiv.appendChild(createSetupReorderControls(mapId, card));
+  }
   
   // Creature count indicator - count creatures in this setup
   let setupCreatureCount = 0;
@@ -1984,11 +2293,10 @@ function createSetupCard(mapId, setupName, setupData) {
   
   countIndicator.style.cssText = `
     text-align: center;
-    margin-bottom: 4px;
+    margin-top: 4px;
     opacity: 0.9;
     color: ${indicatorColor};
   `;
-  actionsDiv.appendChild(countIndicator);
   
   // Load button
   const loadButton = createActionButton(
@@ -2016,6 +2324,8 @@ function createSetupCard(mapId, setupName, setupData) {
     const deleteButton = createDeleteButton(mapId, setupName);
     actionsDiv.appendChild(deleteButton);
   }
+
+  actionsDiv.appendChild(countIndicator);
   
   rightSection.appendChild(actionsDiv);
   
@@ -2081,24 +2391,34 @@ function showSetupManagerModal() {
     content.appendChild(listHeader);
     
     const scrollContainer = createSetupManagerScrollContainer();
+    const setupsList = document.createElement('div');
+    setupsList.className = `${SETUP_MANAGER_SETUPS_LIST_CLASS} flex flex-col gap-2`;
+    setupsList.dataset.mapId = mapId;
     
-    // Load the saved setups for this map
+    // Load the saved setups for this map (auto-setup matches sorted first)
     const savedSetups = getMapSetups(mapId);
-    
-    // Add original setup card
-    const originalCard = createSetupCard(mapId, 'Auto-Setup');
-    scrollContainer.addContent(originalCard);
+    const sortedSavedSetups = sortSetupsWithAutoSetupMatchesFirst(mapId, savedSetups);
+    const matchingAutoSetupNames = new Set(
+      sortedSavedSetups
+        .filter((entry) => entry.matchesAutoSetup)
+        .map((entry) => entry.setup.name)
+    );
+
+    // Standalone Auto-setup card only when no saved setup duplicates it
+    if (matchingAutoSetupNames.size === 0) {
+      setupsList.appendChild(createSetupCard(mapId, 'Auto-Setup'));
+    }
     
     // Add saved setup cards
     let hasSavedSetups = false;
     
-    if (savedSetups && savedSetups.length > 0) {
-      savedSetups.forEach(setup => {
-        if (setup && setup.name) {
-          hasSavedSetups = true;
-          const setupCard = createSetupCard(mapId, setup.name, setup);
-          scrollContainer.addContent(setupCard);
-        }
+    if (sortedSavedSetups.length > 0) {
+      sortedSavedSetups.forEach(({ setup, matchesAutoSetup }) => {
+        hasSavedSetups = true;
+        const setupCard = createSetupCard(mapId, setup.name, setup, {
+          matchesAutoSetup
+        });
+        setupsList.appendChild(setupCard);
       });
     }
     
@@ -2107,9 +2427,11 @@ function showSetupManagerModal() {
       noSetupsMessage.className = 'text-whiteRegular italic mt-2';
       noSetupsMessage.textContent = t('mods.setupManager.noTeamsFound');
       noSetupsMessage.style.textAlign = 'center';
-      scrollContainer.addContent(noSetupsMessage);
+      setupsList.appendChild(noSetupsMessage);
     }
-    
+
+    scrollContainer.addContent(setupsList);
+    refreshSetupReorderButtonStates(setupsList);
     content.appendChild(scrollContainer.element);
     
     // Create the modal
@@ -2260,6 +2582,7 @@ const MAP_SHORTCUT_BUTTON_CLASS = 'setup-manager-map-shortcut-btn';
 const MAP_SHORTCUTS_TOGGLE_CLASS = 'setup-manager-map-shortcuts-toggle';
 const MAP_SHORTCUT_PREVIEW_CLASS = 'setup-manager-map-shortcut-preview';
 const MAP_SHORTCUT_NAME_MAX_LENGTH = 16;
+const MAP_SHORTCUT_MATCH_LABEL_MAX_LENGTH = 28;
 const MAP_SHORTCUT_PREVIEW_PADDING = 8;
 const MAP_SHORTCUT_PREVIEW_COMBOS_PER_ROW = 3;
 const MAP_SHORTCUT_PREVIEW_COMBO_INNER_GAP_PX = 2;
@@ -2364,18 +2687,33 @@ function truncateShortcutLabel(label, maxLength = MAP_SHORTCUT_NAME_MAX_LENGTH) 
 }
 
 function getMapShortcutEntries(mapId) {
-  const entries = [{
-    name: 'Auto-Setup',
-    label: t('mods.setupManager.originalSetup')
-  }];
+  const sortedSavedSetups = sortSetupsWithAutoSetupMatchesFirst(mapId, getMapSetups(mapId));
+  const matchingAutoSetupNames = new Set(
+    sortedSavedSetups
+      .filter((entry) => entry.matchesAutoSetup)
+      .map((entry) => entry.setup.name)
+  );
 
-  getMapSetups(mapId).forEach((setup) => {
-    if (setup?.name) {
-      entries.push({
-        name: setup.name,
-        label: setup.name
-      });
-    }
+  const entries = [];
+  if (matchingAutoSetupNames.size === 0) {
+    entries.push({
+      name: 'Auto-Setup',
+      label: truncateShortcutLabel(t('mods.setupManager.originalSetup'))
+    });
+  }
+
+  sortedSavedSetups.forEach(({ setup, matchesAutoSetup }) => {
+    const fullLabel = matchesAutoSetup
+      ? formatSetupNameWithAutoSetupMatch(setup.name)
+      : setup.name;
+    const maxLength = matchesAutoSetup
+      ? MAP_SHORTCUT_MATCH_LABEL_MAX_LENGTH
+      : MAP_SHORTCUT_NAME_MAX_LENGTH;
+    entries.push({
+      name: setup.name,
+      label: truncateShortcutLabel(fullLabel, maxLength),
+      matchesAutoSetup: matchesAutoSetup === true
+    });
   });
 
   return entries;
@@ -2676,13 +3014,16 @@ function attachMapShortcutHoverPreview(button) {
   });
 }
 
-function createMapShortcutButton(mapId, setupName, label) {
+function createMapShortcutButton(mapId, setupName, label, { matchesAutoSetup = false } = {}) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = `${MAP_SHORTCUT_BUTTON_CLASS} pixel-font-14`;
-  button.textContent = truncateShortcutLabel(label);
+  button.textContent = label;
   button.dataset.mapId = mapId;
   button.dataset.setupName = setupName;
+  if (matchesAutoSetup || setupName === 'Auto-Setup') {
+    button.dataset.matchesAutoSetup = 'true';
+  }
   Object.assign(button.style, getMapShortcutButtonStyles());
 
   attachMapShortcutHoverPreview(button);
@@ -2798,8 +3139,8 @@ function createMapShortcutsBar(mapId) {
     maxWidth: 'min(92vw, 720px)'
   });
 
-  getMapShortcutEntries(mapId).forEach(({ name, label }) => {
-    buttonsRow.appendChild(createMapShortcutButton(mapId, name, label));
+  getMapShortcutEntries(mapId).forEach(({ name, label, matchesAutoSetup }) => {
+    buttonsRow.appendChild(createMapShortcutButton(mapId, name, label, { matchesAutoSetup }));
   });
 
   wrapper.appendChild(buttonsRow);

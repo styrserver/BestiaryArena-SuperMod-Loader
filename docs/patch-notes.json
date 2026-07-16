@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "4.5.4",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "added",
+          "text": "Tibia Ball League Event Competition: new Shiny tab tracks qualifying shiny Football Elementals per participant via profilePageData (Guilds-style rate limiting at 28 requests per 10s, 429 retries, and 1h profile cache). Rankings use shiny count with latest-drop tiebreaker (relative Drop time, e.g. 2h ago); only players with at least one shiny after the server-time cutoff (2026-07-17 00:00 UTC-3) appear on the board. Before tracking starts the summary timer shows red “Shiny starts in” instead of the raid end countdown; separate Shiny Beast Coin prize."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Hotkeys tab → Setups: configurable Auto-setup hotkey (default U) that clicks the game Auto-setup button using the same localization and wand-icon detection as Stamina Optimizer. Dropdown to load Setup 1–8 from Better Setups (default) or Setup Manager map shortcuts (F1 = first non-auto-setup saved setup; Auto-setup and matching saved setups stay on U). Loading a setup via hotkey (or Setup Manager shortcuts) shows a success toast with the setup name."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "King Tibianus arena mission leaderboard (Firebase): rank from completed mission count, Quest Log card with tabbed Missions/Completed lists, shell-first modal loading, and completed-mission summaries with reward lines."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Tibia Ball League Event Competition modal opens immediately (no loading gate); Ticks, Rank, and Shiny tabs load on demand, reuse cached tab data when available, and prefetch inactive tabs in the background."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Content scripts and background injection now load only on /game and /pt/game (including www and subpaths). Other bestiaryarena.com pages no longer run the mod loader."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Lost in the Sands and Meeting with Tesha are one quest (finishes when you hand the scarab coin to Tesha). Serpentine Tower Quest renamed Serpentine Basement Quest; Putrid Chamber is The Cursed Chamber in quest logs and battle toasts (Battling The Cursed Chamber). Tesha objective shows only when the scarab coin is in inventory. Scorpion Sceptre stays in inventory only after the basement quest is completed. Mission list uses story order; scroll position is preserved when switching missions."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "changed",
+          "text": "Renamed the built-in setup label from Original to Auto-setup (Autoconfigurar in pt-BR) to match the game UI. When a saved setup matches the game Auto-setup board, the standalone Auto-setup entry is hidden and matching setups show an (auto-setup) suffix and sort first in the modal and map shortcuts. Other saved setups can be reordered with up/down arrows. Saving a board that already matches a saved setup is blocked: Save is greyed out with a yellow warning icon (hover shows Duplicate setup). Setup card layout fixed so action buttons are no longer clipped. Creature count (e.g. 1/1 creatures) sits at the bottom of the action column. Modal size is 520×600."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "Allies can no longer remain on villain spawn tiles: autoSetupBoard filtering, immediate boardConfig cleanup on placement or drag, and overlap removal before villain resync to prevent duplicate villains."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Firebase save/load for Lost in the Sands and Serpentine Basement Quest: migration from the old split quests, persisting putridChamberComplete and destroyFieldRuneTaken, and repair when serpentine progress existed but scarab was wrongly reset on refresh."
+        }
+      ]
+    },
+    {
       "version": "4.5.3",
       "changes": [
         {

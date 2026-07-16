@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "4.5.3",
+  "version": "4.5.4",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -24,22 +24,14 @@
   "content_scripts": [
     {
       "matches": [
-        "*://*.bestiaryarena.com/*",
-        "*://bestiaryarena.com/*"
-      ],
-      "exclude_matches": [
-        "*://bestiaryarena.com/abilities*",
-        "*://*.bestiaryarena.com/abilities*",
-        "*://bestiaryarena.com/profile*",
-        "*://*.bestiaryarena.com/profile*",
-        "*://bestiaryarena.com/recolor*",
-        "*://*.bestiaryarena.com/recolor*",
-        "*://bestiaryarena.com/assets*",
-        "*://*.bestiaryarena.com/assets*",
-        "*://bestiaryarena.com/_next/*",
-        "*://*.bestiaryarena.com/_next/*",
-        "*://bestiaryarena.com/seasons*",
-        "*://*.bestiaryarena.com/seasons*"
+        "*://bestiaryarena.com/game",
+        "*://bestiaryarena.com/game/*",
+        "*://*.bestiaryarena.com/game",
+        "*://*.bestiaryarena.com/game/*",
+        "*://bestiaryarena.com/pt/game",
+        "*://bestiaryarena.com/pt/game/*",
+        "*://*.bestiaryarena.com/pt/game",
+        "*://*.bestiaryarena.com/pt/game/*"
       ],
       "js": [
         "content/extension-url.js",
@@ -49,22 +41,14 @@
     },
     {
       "matches": [
-        "*://*.bestiaryarena.com/*",
-        "*://bestiaryarena.com/*"
-      ],
-      "exclude_matches": [
-        "*://bestiaryarena.com/abilities*",
-        "*://*.bestiaryarena.com/abilities*",
-        "*://bestiaryarena.com/profile*",
-        "*://*.bestiaryarena.com/profile*",
-        "*://bestiaryarena.com/recolor*",
-        "*://*.bestiaryarena.com/recolor*",
-        "*://bestiaryarena.com/assets*",
-        "*://*.bestiaryarena.com/assets*",
-        "*://bestiaryarena.com/_next/*",
-        "*://*.bestiaryarena.com/_next/*",
-        "*://bestiaryarena.com/seasons*",
-        "*://*.bestiaryarena.com/seasons*"
+        "*://bestiaryarena.com/game",
+        "*://bestiaryarena.com/game/*",
+        "*://*.bestiaryarena.com/game",
+        "*://*.bestiaryarena.com/game/*",
+        "*://bestiaryarena.com/pt/game",
+        "*://bestiaryarena.com/pt/game/*",
+        "*://*.bestiaryarena.com/pt/game",
+        "*://*.bestiaryarena.com/pt/game/*"
       ],
       "js": [
         "content/extension-url.js",

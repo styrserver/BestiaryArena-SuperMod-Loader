@@ -18,7 +18,8 @@ if (window.EventCompetition) {
     joinStateCacheTtlMs: 120000,
     participantsCacheTtlMs: 60000,
     participantSyncMinIntervalMs: 60000,
-    ineligiblePurgeMinIntervalMs: 6 * 60 * 60 * 1000
+    ineligiblePurgeMinIntervalMs: 6 * 60 * 60 * 1000,
+    profileCacheTtlMs: 60 * 60 * 1000
   };
 
   const DEFAULT_MODAL = {
@@ -68,7 +69,10 @@ if (window.EventCompetition) {
         firebaseMax: floors.firebaseMax ?? 14,
         highscore: Array.isArray(floors.highscore) ? floors.highscore : [0, 15],
         highscoreRank: Array.isArray(floors.highscoreRank) ? floors.highscoreRank : [0]
-      }
+      },
+      shinyCompetition: config.shinyCompetition || null,
+      profileApiBase: config.profileApiBase
+        || 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData'
     };
   }
 
@@ -110,7 +114,13 @@ if (window.EventCompetition) {
     const ascensionFormula = cfg.ascensionFormula;
     const highscoreFloorsSet = new Set(cfg.floors.highscore);
     const highscoreRankFloorsSet = new Set(cfg.floors.highscoreRank);
-    const COMPETITION_TAB = { RANK: 'rank', FLOOR: 'floor' };
+    const COMPETITION_TAB = { RANK: 'rank', FLOOR: 'floor', SHINY: 'shiny' };
+    const PROFILE_RATE_WINDOW_MS = 10000;
+    const PROFILE_RATE_MAX = 28;
+    const PROFILE_429_RETRY_AFTER_MS = 10500;
+    const PROFILE_429_MAX_RETRIES = 2;
+    const profileRequestTimestamps = [];
+    const profileRateLimitQueue = [];
     const participantsPath = `${cfg.firebaseBase}/participants`;
     const scoresPath = `${cfg.firebaseBase}/scores`;
     const rankScoresPath = `${cfg.firebaseBase}/rank-scores`;
@@ -140,6 +150,9 @@ if (window.EventCompetition) {
   floorBarCacheAt: 0,
   rankBarRows: null,
   rankBarCacheAt: 0,
+  shinyBarRows: null,
+  shinyBarCacheAt: 0,
+  shinyScoresByName: null,
   activeModalTab: COMPETITION_TAB.FLOOR,
   lastBarFloor: null,
   trackedBattleSetup: null,
@@ -150,17 +163,22 @@ if (window.EventCompetition) {
   participantCount: 0,
   fetchCache: new Map(),
   fetchInFlight: new Map(),
+  profileCache: new Map(),
+  profileFetchInFlight: new Map(),
   fullLoadInFlight: null,
   rankFullLoadInFlight: null,
+  shinyFullLoadInFlight: null,
   lastFullLoadAt: 0,
   lastRankFullLoadAt: 0,
+  lastShinyFullLoadAt: 0,
   lastParticipantSyncAt: 0,
   joinStateCachedAt: 0,
   eligibilityCheckedAt: 0,
   currentPlayerEligible: true,
   eligibilityByName: new Map(),
   purgeInFlight: null,
-  lastIneligiblePurgeAt: 0
+  lastIneligiblePurgeAt: 0,
+  modalLoadSession: 0
 };
 
 const firebaseClient = {
@@ -304,6 +322,449 @@ async function loadTblParticipantsBundle(force = false) {
     highscoreRankMap: rankMap,
     highscoreRankTickMap: rankTickMap
   };
+}
+
+function isTblShinyCompetitionEnabled() {
+  return Boolean(cfg.shinyCompetition);
+}
+
+function getTblShinyCreatureGameId() {
+  const shinyConfig = cfg.shinyCompetition;
+  if (!shinyConfig) {
+    return null;
+  }
+  if (Number.isFinite(shinyConfig.gameId)) {
+    return Number(shinyConfig.gameId);
+  }
+  if (shinyConfig.creatureName) {
+    const db = globalThis.creatureDatabase;
+    const monster = db?.findMonsterByName?.(shinyConfig.creatureName);
+    if (monster?.gameId != null) {
+      return Number(monster.gameId);
+    }
+  }
+  return null;
+}
+
+function buildTblProfileRequestUrl(playerName) {
+  return `${cfg.profileApiBase}?batch=1&input=${encodeURIComponent(JSON.stringify({ '0': { json: playerName } }))}`;
+}
+
+function getTblProfileCacheRecord(playerName) {
+  const entry = state.profileCache.get(playerName);
+  if (!entry) {
+    return null;
+  }
+  if (Date.now() - entry.at >= cfg.timers.profileCacheTtlMs) {
+    state.profileCache.delete(playerName);
+    return null;
+  }
+  return entry;
+}
+
+function setTblProfileCacheEntry(playerName, profileData) {
+  state.profileCache.set(playerName, { data: profileData, at: Date.now() });
+}
+
+function isTblProfileCached(playerName) {
+  return getTblProfileCacheRecord(playerName) !== null;
+}
+
+function processTblProfileRateLimitQueue() {
+  if (!profileRateLimitQueue.length) {
+    return;
+  }
+  const now = Date.now();
+  while (profileRequestTimestamps.length && profileRequestTimestamps[0] < now - PROFILE_RATE_WINDOW_MS) {
+    profileRequestTimestamps.shift();
+  }
+  if (profileRequestTimestamps.length >= PROFILE_RATE_MAX) {
+    const waitMs = Math.min(
+      PROFILE_RATE_WINDOW_MS,
+      profileRequestTimestamps[0] + PROFILE_RATE_WINDOW_MS - now + 50
+    );
+    scheduleTimeout(processTblProfileRateLimitQueue, Math.max(100, waitMs));
+    return;
+  }
+  const next = profileRateLimitQueue.shift();
+  if (!next) {
+    return;
+  }
+  profileRequestTimestamps.push(Date.now());
+  next.run();
+  if (profileRateLimitQueue.length) {
+    scheduleTimeout(processTblProfileRateLimitQueue, 0);
+  }
+}
+
+function withTblProfileRateLimit(task) {
+  return new Promise((resolve, reject) => {
+    profileRateLimitQueue.push({
+      run: () => {
+        Promise.resolve(task()).then(resolve).catch(reject);
+      }
+    });
+    processTblProfileRateLimitQueue();
+  });
+}
+
+function parseTblProfilePageDataResponse(data) {
+  let profileData = null;
+  if (Array.isArray(data) && data[0]?.result?.data?.json !== undefined) {
+    profileData = data[0].result.data.json;
+    if (data[0]?.result?.error || !profileData || (typeof profileData === 'object' && !profileData.name)) {
+      return null;
+    }
+    return profileData;
+  }
+  profileData = data && typeof data === 'object' ? data : null;
+  if (!profileData || (typeof profileData === 'object' && !profileData.name)) {
+    return null;
+  }
+  return profileData;
+}
+
+async function fetchTblPlayerProfileNetwork(playerName, retryCount = 0) {
+  const apiUrl = buildTblProfileRequestUrl(playerName);
+  const response = await fetch(apiUrl, { headers: { Accept: 'application/json' } });
+  if (response.status === 429 && retryCount < PROFILE_429_MAX_RETRIES) {
+    const retryAfter = parseInt(response.headers.get('Retry-After'), 10);
+    let waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? retryAfter * 1000
+      : PROFILE_429_RETRY_AFTER_MS;
+    if (retryCount > 0) {
+      waitMs = Math.min(20000, waitMs + retryCount * 2000);
+    }
+    if (waitMs > 0) {
+      console.warn(
+        `${logPrefix} Profile API rate limited (429), retrying after`,
+        Math.round(waitMs / 1000),
+        's (attempt',
+        retryCount + 1,
+        'of',
+        PROFILE_429_MAX_RETRIES + 1,
+        ')'
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    return fetchTblPlayerProfileNetwork(playerName, retryCount + 1);
+  }
+  if (!response.ok) {
+    return null;
+  }
+  const data = await response.json();
+  return parseTblProfilePageDataResponse(data);
+}
+
+async function fetchTblPlayerProfile(playerName, force = false) {
+  if (!playerName || typeof playerName !== 'string') {
+    return null;
+  }
+
+  if (!force) {
+    const cached = getTblProfileCacheRecord(playerName);
+    if (cached) {
+      return cached.data;
+    }
+    const inFlight = state.profileFetchInFlight.get(playerName);
+    if (inFlight) {
+      return inFlight;
+    }
+  } else {
+    state.profileCache.delete(playerName);
+  }
+
+  const promise = (async () => {
+    try {
+      const profileData = await withTblProfileRateLimit(() => fetchTblPlayerProfileNetwork(playerName, 0));
+      setTblProfileCacheEntry(playerName, profileData);
+      return profileData;
+    } catch (error) {
+      if (!error?.message || (!error.message.includes('fetch') && !error.message.includes('network'))) {
+        console.warn(`${logPrefix} Error fetching player profile:`, error);
+      }
+      return null;
+    } finally {
+      state.profileFetchInFlight.delete(playerName);
+    }
+  })();
+
+  state.profileFetchInFlight.set(playerName, promise);
+  return promise;
+}
+
+async function buildTblShinyScoresForParticipants(names, gameId, force = false) {
+  const shinyScoresByName = new Map();
+  const namesToFetch = [];
+
+  names.forEach((name) => {
+    if (force || !isTblProfileCached(name)) {
+      namesToFetch.push(name);
+      return;
+    }
+    const cachedProfile = getTblProfileCacheRecord(name)?.data ?? null;
+    shinyScoresByName.set(name, countTblShinyCreatures(cachedProfile, gameId));
+  });
+
+  for (const name of namesToFetch) {
+    if (isDisposed()) {
+      break;
+    }
+    const profileData = await fetchTblPlayerProfile(name, force);
+    shinyScoresByName.set(name, countTblShinyCreatures(profileData, gameId));
+  }
+
+  return shinyScoresByName;
+}
+
+function getTblServerUtcOffsetMs() {
+  const offsetHours = Number(cfg.shinyCompetition?.serverUtcOffsetHours);
+  if (Number.isFinite(offsetHours)) {
+    return offsetHours * 60 * 60 * 1000;
+  }
+  // Bestiary Arena server wall clock is UTC-3 (e.g. 2026-07-17T00:00:00 server = 03:00 UTC).
+  return 3 * 60 * 60 * 1000;
+}
+
+function parseTblServerTimeMs(value) {
+  const str = String(value).trim();
+  if (!str) {
+    return 0;
+  }
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z)?$/i);
+  if (match) {
+    const [, year, month, day, hour, minute, second] = match;
+    return Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    ) + getTblServerUtcOffsetMs();
+  }
+  const parsed = Date.parse(str);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getTblShinyMinCreatedAtMs() {
+  const minCreatedAt = cfg.shinyCompetition?.minCreatedAt;
+  if (minCreatedAt == null || minCreatedAt === '') {
+    return 0;
+  }
+  if (Number.isFinite(minCreatedAt)) {
+    let ts = Number(minCreatedAt);
+    if (ts > 0 && ts < 1e12) {
+      ts *= 1000;
+    }
+    return ts;
+  }
+  return parseTblServerTimeMs(minCreatedAt);
+}
+
+function normalizeTblMonsterCreatedAtMs(createdAt) {
+  let ts = Number(createdAt);
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return null;
+  }
+  if (ts < 1e12) {
+    ts *= 1000;
+  }
+  return ts;
+}
+
+function countTblShinyCreatures(profileData, gameId) {
+  const minCreatedAtMs = getTblShinyMinCreatedAtMs();
+  const monsters = Array.isArray(profileData?.monsters) ? profileData.monsters : [];
+  let count = 0;
+  let lastCreatedAt = 0;
+  monsters.forEach((monster) => {
+    if (Number(monster?.gameId) !== Number(gameId) || monster?.shiny !== true) {
+      return;
+    }
+    const createdAtMs = normalizeTblMonsterCreatedAtMs(monster.createdAt);
+    if (createdAtMs === null || createdAtMs < minCreatedAtMs) {
+      return;
+    }
+    count += 1;
+    if (createdAtMs > lastCreatedAt) {
+      lastCreatedAt = createdAtMs;
+    }
+  });
+  return { count, lastCreatedAt };
+}
+
+function sortTblShinyStandings(standings) {
+  return [...standings].sort((a, b) => {
+    const countA = Number(a.count) || 0;
+    const countB = Number(b.count) || 0;
+    if (countB !== countA) {
+      return countB - countA;
+    }
+    const createdA = Number(a.lastCreatedAt) || 0;
+    const createdB = Number(b.lastCreatedAt) || 0;
+    if (createdB !== createdA) {
+      return createdB - createdA;
+    }
+    return String(a.name).localeCompare(String(b.name));
+  });
+}
+
+function buildTblShinyOverallStandings(rows, ensurePlayerName = null) {
+  const standings = Array.isArray(rows)
+    ? rows
+      .filter((row) => Number(row.count) > 0)
+      .map((row) => ({
+        name: row.name,
+        count: Number(row.count) || 0,
+        lastCreatedAt: Number(row.lastCreatedAt) || 0,
+        floorsLed: 0
+      }))
+    : [];
+
+  if (ensurePlayerName && !standings.some((entry) => entry.name === ensurePlayerName)) {
+    const viewerScore = (state.shinyScoresByName || new Map()).get(ensurePlayerName);
+    const viewerCount = Number(viewerScore?.count) || 0;
+    if (viewerCount > 0) {
+      standings.push({
+        name: ensurePlayerName,
+        count: viewerCount,
+        lastCreatedAt: Number(viewerScore?.lastCreatedAt) || 0,
+        floorsLed: 0
+      });
+    }
+  }
+
+  return sortTblShinyStandings(standings);
+}
+
+function getTblPlayerShinyCount(playerName) {
+  return Number((state.shinyScoresByName || new Map()).get(playerName)?.count) || 0;
+}
+
+function getTblPlayerShinyLastCreatedAt(playerName) {
+  return Number((state.shinyScoresByName || new Map()).get(playerName)?.lastCreatedAt) || 0;
+}
+
+function formatTblShinyDropAgo(timestamp) {
+  let ts = Number(timestamp);
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return '—';
+  }
+  if (ts < 1e12) {
+    ts *= 1000;
+  }
+  const diffMs = Date.now() - ts;
+  if (diffMs < 0) {
+    return tEvent('ShinyDropJustNow');
+  }
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) {
+    return tEvent('ShinyDropJustNow');
+  }
+  if (diffMins < 60) {
+    return tEvent('ShinyDropMinutesAgo', { minutes: diffMins });
+  }
+  if (diffHours < 48) {
+    return tEvent('ShinyDropHoursAgo', { hours: diffHours });
+  }
+  if (diffDays === 1) {
+    return tEvent('ShinyDropDayAgo');
+  }
+  return tEvent('ShinyDropDaysAgo', { days: diffDays });
+}
+
+function getTblPlayerShinyDropLabel(player) {
+  const lastCreatedAt = Number(
+    player?.lastCreatedAt ?? getTblPlayerShinyLastCreatedAt(player?.name)
+  ) || 0;
+  if (!lastCreatedAt) {
+    return tEvent('ShinyDropNone');
+  }
+  return formatTblShinyDropAgo(lastCreatedAt);
+}
+
+async function loadTblAllShinyData(force = false) {
+  if (!isTblShinyCompetitionEnabled()) {
+    return state.shinyBarRows || [];
+  }
+
+  const now = Date.now();
+  if (
+    !force &&
+    state.shinyBarRows &&
+    now - state.shinyBarCacheAt < cfg.timers.fetchCacheTtlMs
+  ) {
+    return state.shinyBarRows;
+  }
+  if (
+    !force &&
+    state.shinyBarRows &&
+    now - state.lastShinyFullLoadAt < cfg.timers.fetchMinIntervalMs
+  ) {
+    return state.shinyBarRows;
+  }
+  if (state.shinyFullLoadInFlight) {
+    return state.shinyFullLoadInFlight;
+  }
+
+  state.shinyFullLoadInFlight = (async () => {
+    try {
+      if (isDisposed()) {
+        return state.shinyBarRows || [];
+      }
+
+      const gameId = getTblShinyCreatureGameId();
+      if (!Number.isFinite(gameId)) {
+        console.warn(`${logPrefix} Shiny competition enabled but creature gameId is unavailable`);
+        return state.shinyBarRows || [];
+      }
+
+      const participantBundle = await loadTblParticipantsBundle(force);
+      const participantNames = Object.values(participantBundle.participants || {})
+        .map((participant) => participant?.name)
+        .filter(Boolean);
+
+      const uniqueNames = [...new Set(participantNames)];
+      const shinyScoresByName = await buildTblShinyScoresForParticipants(uniqueNames, gameId, force);
+
+      if (isDisposed()) {
+        return state.shinyBarRows || [];
+      }
+
+      state.shinyScoresByName = shinyScoresByName;
+      state.participantCount = participantBundle.count;
+
+      const rows = sortTblShinyStandings(uniqueNames.map((name) => {
+        const score = shinyScoresByName.get(name) || { count: 0, lastCreatedAt: 0 };
+        return {
+          name,
+          count: score.count,
+          lastCreatedAt: score.lastCreatedAt
+        };
+      }))
+        .filter((row) => Number(row.count) > 0)
+        .map((row, index) => ({
+          ...row,
+          rank: index + 1
+        }));
+
+      state.shinyBarRows = rows;
+      state.shinyBarCacheAt = Date.now();
+      state.lastShinyFullLoadAt = Date.now();
+      return rows;
+    } catch (error) {
+      console.warn(`${logPrefix} Failed to load shiny competition data:`, error);
+      return state.shinyBarRows || [];
+    } finally {
+      state.shinyFullLoadInFlight = null;
+    }
+  })();
+
+  return state.shinyFullLoadInFlight;
 }
 
 function tblScoresPath(floor) {
@@ -1127,6 +1588,18 @@ function getTblEventTimerColor(msRemaining, active) {
   return '#8f8';
 }
 
+function getTblShinyStartTimerState() {
+  const minCreatedAtMs = getTblShinyMinCreatedAtMs();
+  if (!minCreatedAtMs) {
+    return { started: true, msUntilStart: 0 };
+  }
+  const msUntilStart = minCreatedAtMs - Date.now();
+  return {
+    started: msUntilStart <= 0,
+    msUntilStart: Math.max(0, msUntilStart)
+  };
+}
+
 function updateTblEventTimerDisplay() {
   if (isDisposed()) {
     return;
@@ -1136,11 +1609,21 @@ function updateTblEventTimerDisplay() {
     return;
   }
 
+  const isShinyTab = state.activeModalTab === COMPETITION_TAB.SHINY && isTblShinyCompetitionEnabled();
+  const shinyStart = isShinyTab ? getTblShinyStartTimerState() : null;
   const { active, msRemaining } = getTblEventTimerState();
   if (active) {
     state.eventWasActive = true;
   }
   valueEls.forEach((valueEl) => {
+    if (isShinyTab && shinyStart && !shinyStart.started) {
+      valueEl.textContent = tEvent('ShinyStartsIn', {
+        time: formatTblEventTimer(shinyStart.msUntilStart)
+      });
+      valueEl.style.color = '#f88';
+      return;
+    }
+
     if (active && msRemaining > 0) {
       valueEl.textContent = tEvent('EventEndsIn', {
         time: formatTblEventTimer(msRemaining)
@@ -3029,6 +3512,9 @@ function createTblStatsPanel(html) {
 }
 
 function sortTblOverallStandings(standings, competitionMode = COMPETITION_TAB.FLOOR) {
+  if (competitionMode === COMPETITION_TAB.SHINY) {
+    return sortTblShinyStandings(standings);
+  }
   if (competitionMode === COMPETITION_TAB.RANK) {
     const playerTotalRanks = state.playerTotalRanks || new Map();
     const playerTotalRankTicks = state.playerTotalRankTicks || new Map();
@@ -3068,6 +3554,9 @@ function sortTblOverallStandings(standings, competitionMode = COMPETITION_TAB.FL
 }
 
 function buildTblOverallStandings(rows, ensurePlayerName = null, competitionMode = COMPETITION_TAB.FLOOR) {
+  if (competitionMode === COMPETITION_TAB.SHINY) {
+    return buildTblShinyOverallStandings(rows, ensurePlayerName);
+  }
   const standings = new Map();
   const playerTotals = competitionMode === COMPETITION_TAB.RANK
     ? (state.playerTotalRanks || new Map())
@@ -3234,6 +3723,7 @@ function formatTblTopGridMedalHeader(position) {
 function buildTblLeagueTopPlayersGridHtml(topThree, competitionMode, viewerName, yourRow = null) {
   const slots = [0, 1, 2].map((index) => topThree[index] || null);
   const isRank = competitionMode === COMPETITION_TAB.RANK;
+  const isShiny = competitionMode === COMPETITION_TAB.SHINY;
 
   let html = '<table class="tbl-league-top-grid"><thead><tr>';
   html += `<th class="tbl-league-top-grid-corner"></th>`;
@@ -3251,7 +3741,28 @@ function buildTblLeagueTopPlayersGridHtml(topThree, competitionMode, viewerName,
   });
   html += '</tr>';
 
-  if (isRank) {
+  if (isShiny) {
+    html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridShinies'))}</th>`;
+    slots.forEach((entry) => {
+      if (!entry) {
+        html += '<td class="tbl-league-top-grid-cell">—</td>';
+        return;
+      }
+      const count = Number(entry.player.count ?? getTblPlayerShinyCount(entry.player.name)) || 0;
+      html += formatTblTopGridValueCell(count, viewerName, entry.player.name);
+    });
+    html += '</tr>';
+    html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridDrop'))}</th>`;
+    slots.forEach((entry) => {
+      if (!entry) {
+        html += '<td class="tbl-league-top-grid-cell">—</td>';
+        return;
+      }
+      const dropAgo = getTblPlayerShinyDropLabel(entry.player);
+      html += formatTblTopGridValueCell(dropAgo, viewerName, entry.player.name);
+    });
+    html += '</tr>';
+  } else if (isRank) {
     html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridPoints'))}</th>`;
     slots.forEach((entry) => {
       html += entry
@@ -3265,20 +3776,22 @@ function buildTblLeagueTopPlayersGridHtml(topThree, competitionMode, viewerName,
     html += '</tr>';
   }
 
-  html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridTicks'))}</th>`;
-  slots.forEach((entry) => {
-    if (!entry) {
-      html += '<td class="tbl-league-top-grid-cell">—</td>';
-      return;
-    }
-    const ticks = isRank
-      ? getTblPlayerTotalRankTicks(entry.player.name)
-      : getTblPlayerTotalTicks(entry.player.name);
-    html += formatTblTopGridValueCell(ticks, viewerName, entry.player.name);
-  });
-  html += '</tr>';
+  if (!isShiny) {
+    html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridTicks'))}</th>`;
+    slots.forEach((entry) => {
+      if (!entry) {
+        html += '<td class="tbl-league-top-grid-cell">—</td>';
+        return;
+      }
+      const ticks = isRank
+        ? getTblPlayerTotalRankTicks(entry.player.name)
+        : getTblPlayerTotalTicks(entry.player.name);
+      html += formatTblTopGridValueCell(ticks, viewerName, entry.player.name);
+    });
+    html += '</tr>';
+  }
 
-  if (!isRank) {
+  if (!isRank && !isShiny) {
     html += `<tr><th class="tbl-league-top-grid-label">${escapeTblHtml(tEvent('GridRecords'))}</th>`;
     slots.forEach((entry) => {
       html += entry
@@ -3316,6 +3829,11 @@ function formatTblOverallStandingGridFooterRow(player, rank, viewerName, competi
 }
 
 function formatTblOverallStandingStats(player, competitionMode = COMPETITION_TAB.FLOOR) {
+  if (competitionMode === COMPETITION_TAB.SHINY) {
+    const count = Number(player.count ?? getTblPlayerShinyCount(player.name)) || 0;
+    const lastDropped = getTblPlayerShinyDropLabel(player);
+    return tEvent('PlayerStandingShiny', { count, lastDropped });
+  }
   return competitionMode === COMPETITION_TAB.RANK
     ? tEvent('PlayerStandingRank', {
       points: getTblPlayerTotalRankPoints(player.name),
@@ -3581,6 +4099,9 @@ function createTblLeagueSummaryPanel(rows, participantCount = 0, competitionMode
 }
 
 function getTblLeaguePrizeText(competitionMode = COMPETITION_TAB.FLOOR) {
+  if (competitionMode === COMPETITION_TAB.SHINY) {
+    return tEvent('ShinyPrize', { amount: cfg.prizeBeastCoins });
+  }
   return competitionMode === COMPETITION_TAB.RANK
     ? tEvent('RankPrize', { amount: cfg.prizeBeastCoins })
     : tEvent('FloorPrize', { amount: cfg.prizeBeastCoins });
@@ -3588,7 +4109,7 @@ function getTblLeaguePrizeText(competitionMode = COMPETITION_TAB.FLOOR) {
 
 function buildTblLeagueSummaryLeftColHtml(participantCount = 0, competitionMode = COMPETITION_TAB.FLOOR) {
   let leftCol = `<div class="tbl-event-timer-row pixel-font-14" style="margin-bottom:6px;"><span class="tbl-event-timer-value" style="color:#ccc;">—</span></div>`;
-  leftCol += `<div style="margin-bottom:6px;">${escapeTblHtml(tEvent('Participants', { count: participantCount }))}</div>`;
+  leftCol += `<div class="tbl-league-participant-count" style="margin-bottom:6px;">${escapeTblHtml(tEvent('Participants', { count: participantCount }))}</div>`;
   leftCol += `<div class="tbl-event-prize-row pixel-font-14" style="margin-bottom:6px;display:flex;align-items:center;gap:4px;color:#ffd700;">
     <span class="tbl-league-prize-label">${escapeTblHtml(getTblLeaguePrizeText(competitionMode))}</span>
     <img src="/assets/icons/beastcoin.png" alt="Beast Coins" class="pixelated" style="width:12px;height:12px;object-fit:contain;flex-shrink:0;" />
@@ -3611,6 +4132,25 @@ function updateTblLeagueSummaryCurrentLeader(leaderEl, rows, competitionMode) {
   leaderEl.innerHTML = buildTblLeagueCurrentLeaderRowHtml(rows, competitionMode);
 }
 
+function updateTblLeagueSummaryParticipantCount(participantEl, participantCount = 0) {
+  if (!participantEl) {
+    return;
+  }
+  participantEl.textContent = tEvent('Participants', { count: participantCount });
+}
+
+function updateTblLeagueSummaryLoading(standingsCol, competitionMode = COMPETITION_TAB.FLOOR) {
+  if (!standingsCol) {
+    return;
+  }
+  const title = competitionMode === COMPETITION_TAB.SHINY
+    ? tEvent('TopShinyPlayers')
+    : (competitionMode === COMPETITION_TAB.RANK
+      ? tEvent('TopRankPlayers')
+      : tEvent('TopFloorPlayers'));
+  standingsCol.innerHTML = `<div class="tbl-league-top-players"><div class="tbl-league-top-players-title">${escapeTblHtml(title)}</div><div style="color:#888;margin-top:4px;text-align:center;padding:8px 0;">${escapeTblHtml(tEvent('Loading'))}</div></div>`;
+}
+
 function buildTblLeagueSummaryStandingsHtml(rows, competitionMode = COMPETITION_TAB.FLOOR) {
   const playerName = getTblPlayerName();
   const includeViewerInStandings = state.currentPlayerEligible !== false;
@@ -3624,9 +4164,11 @@ function buildTblLeagueSummaryStandingsHtml(rows, competitionMode = COMPETITION_
     : standings.filter((entry) => entry?.name !== playerName);
 
   let rightCol = `<div class="tbl-league-top-players"><div class="tbl-league-top-players-title">${escapeTblHtml(
-    competitionMode === COMPETITION_TAB.RANK
-      ? tEvent('TopRankPlayers')
-      : tEvent('TopFloorPlayers')
+    competitionMode === COMPETITION_TAB.SHINY
+      ? tEvent('TopShinyPlayers')
+      : (competitionMode === COMPETITION_TAB.RANK
+        ? tEvent('TopRankPlayers')
+        : tEvent('TopFloorPlayers'))
   )}</div>`;
   if (visibleStandings.length > 0) {
     const standingsWithRank = visibleStandings.map((player, index) => ({ player, rank: index + 1 }));
@@ -3642,9 +4184,11 @@ function buildTblLeagueSummaryStandingsHtml(rows, competitionMode = COMPETITION_
       yourRow && yourRow.rank > 3 ? yourRow : null
     );
   } else {
-    rightCol += competitionMode === COMPETITION_TAB.RANK
-      ? `<div style="color:#888;margin-top:4px;text-align:center;">${escapeTblHtml(tEvent('RankNoRuns'))}</div>`
-      : `<div style="color:#888;margin-top:4px;text-align:center;">${escapeTblHtml(tEvent('NoRuns', { ticks: cfg.missingFloorTicks }))}</div>`;
+    rightCol += competitionMode === COMPETITION_TAB.SHINY
+      ? `<div style="color:#888;margin-top:4px;text-align:center;">${escapeTblHtml(tEvent('ShinyNoneYet'))}</div>`
+      : (competitionMode === COMPETITION_TAB.RANK
+        ? `<div style="color:#888;margin-top:4px;text-align:center;">${escapeTblHtml(tEvent('RankNoRuns'))}</div>`
+        : `<div style="color:#888;margin-top:4px;text-align:center;">${escapeTblHtml(tEvent('NoRuns', { ticks: cfg.missingFloorTicks }))}</div>`);
   }
   rightCol += '</div>';
   return rightCol;
@@ -3669,7 +4213,8 @@ function createTblLeagueSharedSummary(participantCount) {
     panel,
     standingsCol: panel.querySelector('.tbl-league-standings-col'),
     prizeLabel: panel.querySelector('.tbl-league-prize-label'),
-    leaderRow: panel.querySelector('.tbl-league-current-leader-row')
+    leaderRow: panel.querySelector('.tbl-league-current-leader-row'),
+    participantCountEl: panel.querySelector('.tbl-league-participant-count')
   };
 }
 
@@ -3737,6 +4282,13 @@ function createTblLeagueTabBar(activeTab, onTabChange) {
     { id: COMPETITION_TAB.FLOOR, label: tEvent('TabFloor'), icon: cfg.tabIcons.floor },
     { id: COMPETITION_TAB.RANK, label: tEvent('TabRank'), icon: cfg.tabIcons.rank }
   ];
+  if (isTblShinyCompetitionEnabled()) {
+    tabDefs.push({
+      id: COMPETITION_TAB.SHINY,
+      label: tEvent('TabShiny'),
+      icon: cfg.tabIcons.shiny || { src: '/assets/icons/star-tier-shiny.png', alt: 'Shiny' }
+    });
+  }
 
   const buttons = tabDefs.map(({ id, label, icon }) => {
     const button = createTblLeagueTabButton(icon, label, id, id === activeTab, onTabChange);
@@ -3752,6 +4304,27 @@ function createTblLeagueListPanel(scrollContainer) {
   panel.className = 'tbl-league-list-panel';
   panel.appendChild(scrollContainer.element);
   return panel;
+}
+
+function createTblLeagueTabLoadingScrollContainer() {
+  const scrollContainer = createTblScrollContainer();
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'pixel-font-14';
+  Object.assign(loadingEl.style, {
+    color: '#888',
+    textAlign: 'center',
+    padding: '20px 8px'
+  });
+  loadingEl.textContent = tEvent('Loading');
+  scrollContainer.addContent(loadingEl);
+  return scrollContainer;
+}
+
+function setTblLeagueListPanelContent(panel, scrollContainer) {
+  if (!panel || !scrollContainer?.element) {
+    return;
+  }
+  panel.replaceChildren(scrollContainer.element);
 }
 
 async function navigateTblToFloor(floor) {
@@ -3849,6 +4422,78 @@ function buildTblRankImprovementText(row) {
   return tEvent('RankNoRuns');
 }
 
+function buildTblShinyThumbHtml() {
+  const gameId = getTblShinyCreatureGameId();
+  const portraitSrc = Number.isFinite(gameId)
+    ? `/assets/portraits/${gameId}-shiny.png`
+    : '/assets/icons/star-tier-shiny.png';
+  return `
+    <div class="tbl-league-floor-thumb frame-pressed-1 shrink-0">
+      <img
+        src="${portraitSrc}"
+        alt="${escapeTblHtml(cfg.shinyCompetition?.creatureName || 'Shiny')}"
+        class="pixelated tbl-league-floor-thumb-bg" />
+      <div class="tbl-league-floor-thumb-overlay">
+        <img src="/assets/icons/star-tier-shiny.png" alt="Shiny" class="pixelated" width="18" height="18" style="filter:drop-shadow(0 0 2px #fff);object-fit:contain;" />
+      </div>
+    </div>
+  `;
+}
+
+function formatTblShinyRowNameHtml(name, viewerName) {
+  if (!name) {
+    return '—';
+  }
+  if (viewerName && name === viewerName) {
+    return `<span style="color:#8f8;">${escapeTblHtml(name)}</span>`;
+  }
+  return formatTblProfileLink(name);
+}
+
+function buildTblShinyRowList(rows) {
+  const scrollContainer = createTblScrollContainer();
+  const viewerName = getTblPlayerName();
+
+  rows.forEach((row) => {
+    const itemEl = document.createElement('div');
+    itemEl.className = 'frame-1 surface-regular flex items-center gap-2 p-1';
+    const count = Number(row.count) || 0;
+    const isYou = Boolean(viewerName && row.name === viewerName);
+    const nameHtml = formatTblShinyRowNameHtml(row.name, viewerName);
+    const countLabel = escapeTblHtml(tEvent('ShinyCountLabel', { count }));
+    const dropLabel = escapeTblHtml(tEvent('ShinyDropLabel', {
+      time: getTblPlayerShinyDropLabel(row)
+    }));
+    const rankLabel = row.rank ? `#${row.rank}` : '—';
+    const rankColor = isYou ? '#8f8' : '#ccc';
+
+    itemEl.innerHTML = `
+      ${buildTblShinyThumbHtml()}
+      <div class="grid w-full gap-1">
+        <div class="flex items-center justify-between gap-2">
+          <div>${nameHtml}</div>
+          <div class="pixel-font-14" style="color:${rankColor};">${escapeTblHtml(rankLabel)}</div>
+        </div>
+        <div class="pixel-font-14">${countLabel}</div>
+        <div class="pixel-font-14" style="color:#aaa;">${dropLabel}</div>
+      </div>
+    `;
+    scrollContainer.addContent(itemEl);
+  });
+
+  if (!rows.length) {
+    const emptyEl = document.createElement('div');
+    emptyEl.className = 'pixel-font-14';
+    emptyEl.style.color = '#888';
+    emptyEl.style.textAlign = 'center';
+    emptyEl.style.padding = '12px 8px';
+    emptyEl.textContent = tEvent('ShinyNoneYet');
+    scrollContainer.addContent(emptyEl);
+  }
+
+  return scrollContainer;
+}
+
 function buildTblLeagueRowList(rows, competitionMode) {
   const scrollContainer = createTblScrollContainer();
   const isRankMode = competitionMode === COMPETITION_TAB.RANK;
@@ -3933,11 +4578,34 @@ function buildTblLeagueThumbHtml(floor, competitionMode = COMPETITION_TAB.FLOOR)
   `;
 }
 
-function createTblLeagueModalContent(floorRows, rankRows, participantCount = 0) {
+function createTblLeagueModalContent(options = {}) {
+  const {
+    forceRefresh = false,
+    participantCount = 0,
+    modalLoadSession = 0
+  } = options;
   const activeTab = state.activeModalTab || COMPETITION_TAB.FLOOR;
-  const { panel: summaryPanel, standingsCol, prizeLabel, leaderRow } = createTblLeagueSharedSummary(participantCount);
-  const rankListPanel = createTblLeagueListPanel(buildTblLeagueRowList(rankRows, COMPETITION_TAB.RANK));
-  const floorListPanel = createTblLeagueListPanel(buildTblLeagueRowList(floorRows, COMPETITION_TAB.FLOOR));
+  const {
+    panel: summaryPanel,
+    standingsCol,
+    prizeLabel,
+    leaderRow,
+    participantCountEl
+  } = createTblLeagueSharedSummary(participantCount);
+
+  const tabStore = {
+    [COMPETITION_TAB.FLOOR]: { rows: null, loadPromise: null },
+    [COMPETITION_TAB.RANK]: { rows: null, loadPromise: null }
+  };
+  if (isTblShinyCompetitionEnabled()) {
+    tabStore[COMPETITION_TAB.SHINY] = { rows: null, loadPromise: null };
+  }
+
+  const floorListPanel = createTblLeagueListPanel(createTblLeagueTabLoadingScrollContainer());
+  const rankListPanel = createTblLeagueListPanel(createTblLeagueTabLoadingScrollContainer());
+  const shinyListPanel = isTblShinyCompetitionEnabled()
+    ? createTblLeagueListPanel(createTblLeagueTabLoadingScrollContainer())
+    : null;
 
   const container = document.createElement('div');
   container.className = 'flex flex-col tbl-league-modal-content';
@@ -3952,28 +4620,202 @@ function createTblLeagueModalContent(floorRows, rankRows, participantCount = 0) 
 
   let tabButtons = [];
 
+  const getModeForTab = (tab) => {
+    if (tab === COMPETITION_TAB.RANK) {
+      return COMPETITION_TAB.RANK;
+    }
+    if (tab === COMPETITION_TAB.SHINY) {
+      return COMPETITION_TAB.SHINY;
+    }
+    return COMPETITION_TAB.FLOOR;
+  };
+
+  const getPanelForTab = (tab) => {
+    if (tab === COMPETITION_TAB.RANK) {
+      return rankListPanel;
+    }
+    if (tab === COMPETITION_TAB.SHINY) {
+      return shinyListPanel;
+    }
+    return floorListPanel;
+  };
+
+  const isModalSessionActive = () => modalLoadSession === state.modalLoadSession;
+
+  const seedTabFromCache = (tab) => {
+    if (forceRefresh) {
+      return;
+    }
+    const entry = tabStore[tab];
+    if (!entry || entry.rows) {
+      return;
+    }
+
+    let cachedRows = null;
+    if (tab === COMPETITION_TAB.FLOOR && state.floorBarRows) {
+      cachedRows = state.floorBarRows;
+    } else if (tab === COMPETITION_TAB.RANK && state.rankBarRows) {
+      cachedRows = state.rankBarRows;
+    } else if (tab === COMPETITION_TAB.SHINY && state.shinyBarRows) {
+      cachedRows = state.shinyBarRows;
+    }
+
+    if (!cachedRows) {
+      return;
+    }
+
+    entry.rows = cachedRows;
+    renderTabPanelLoaded(tab, cachedRows);
+  };
+
+  const prefetchInactiveModalTabs = (currentTab) => {
+    Object.keys(tabStore).forEach((tab) => {
+      if (tab !== currentTab) {
+        loadTabData(tab, forceRefresh);
+      }
+    });
+  };
+
+  const updateSummaryForTab = (tab, rows) => {
+    const mode = getModeForTab(tab);
+    updateTblLeagueSummaryStandings(standingsCol, rows, mode);
+    updateTblLeagueSummaryPrize(prizeLabel, mode);
+    updateTblLeagueSummaryCurrentLeader(leaderRow, rows, mode);
+  };
+
+  const renderTabPanelLoading = (tab) => {
+    const panel = getPanelForTab(tab);
+    if (!panel) {
+      return;
+    }
+    setTblLeagueListPanelContent(panel, createTblLeagueTabLoadingScrollContainer());
+  };
+
+  const renderTabPanelLoaded = (tab, rows) => {
+    const panel = getPanelForTab(tab);
+    if (!panel) {
+      return;
+    }
+    const scrollContainer = tab === COMPETITION_TAB.SHINY
+      ? buildTblShinyRowList(rows)
+      : buildTblLeagueRowList(rows, tab);
+    setTblLeagueListPanelContent(panel, scrollContainer);
+  };
+
+  const renderTabPanelError = (tab) => {
+    const panel = getPanelForTab(tab);
+    if (!panel) {
+      return;
+    }
+    const scrollContainer = createTblScrollContainer();
+    const errorEl = document.createElement('div');
+    errorEl.className = 'pixel-font-14';
+    Object.assign(errorEl.style, {
+      color: '#888',
+      textAlign: 'center',
+      padding: '20px 8px'
+    });
+    errorEl.textContent = tEvent('LoadError');
+    scrollContainer.addContent(errorEl);
+    setTblLeagueListPanelContent(panel, scrollContainer);
+  };
+
+  const loadTabData = (tab, force = false) => {
+    const entry = tabStore[tab];
+    if (!entry) {
+      return Promise.resolve([]);
+    }
+    if (entry.rows && !force) {
+      renderTabPanelLoaded(tab, entry.rows);
+      if (state.activeModalTab === tab && isModalSessionActive()) {
+        updateSummaryForTab(tab, entry.rows);
+        updateTblLeagueSummaryParticipantCount(participantCountEl, state.participantCount || 0);
+      }
+      return Promise.resolve(entry.rows);
+    }
+    if (entry.loadPromise && !force) {
+      return entry.loadPromise;
+    }
+
+    renderTabPanelLoading(tab);
+
+    entry.loadPromise = (async () => {
+      try {
+        let rows = [];
+        if (tab === COMPETITION_TAB.FLOOR) {
+          rows = await loadTblAllFloorData(force);
+          if (isModalSessionActive()) {
+            state.floorBarRows = rows;
+            state.floorBarCacheAt = Date.now();
+          }
+        } else if (tab === COMPETITION_TAB.RANK) {
+          rows = await loadTblAllRankData(force);
+          if (isModalSessionActive()) {
+            state.rankBarRows = rows;
+            state.rankBarCacheAt = Date.now();
+          }
+        } else if (tab === COMPETITION_TAB.SHINY) {
+          rows = await loadTblAllShinyData(force);
+          if (isModalSessionActive()) {
+            state.shinyBarRows = rows;
+            state.shinyBarCacheAt = Date.now();
+          }
+        }
+
+        if (!isModalSessionActive()) {
+          return rows;
+        }
+
+        entry.rows = rows;
+        renderTabPanelLoaded(tab, rows);
+        updateTblLeagueSummaryParticipantCount(participantCountEl, state.participantCount || 0);
+
+        if (state.activeModalTab === tab) {
+          updateSummaryForTab(tab, rows);
+        }
+        return rows;
+      } catch (error) {
+        console.warn(`${logPrefix} Failed to load ${tab} tab data:`, error);
+        if (isModalSessionActive()) {
+          renderTabPanelError(tab);
+          if (state.activeModalTab === tab) {
+            updateTblLeagueSummaryLoading(standingsCol, getModeForTab(tab));
+          }
+        }
+        return entry.rows || [];
+      } finally {
+        entry.loadPromise = null;
+      }
+    })();
+
+    return entry.loadPromise;
+  };
+
   const setActiveTab = (tab) => {
     state.activeModalTab = tab;
-    const isRank = tab === COMPETITION_TAB.RANK;
-    updateTblLeagueSummaryStandings(
-      standingsCol,
-      isRank ? rankRows : floorRows,
-      isRank ? COMPETITION_TAB.RANK : COMPETITION_TAB.FLOOR
-    );
-    updateTblLeagueSummaryPrize(
-      prizeLabel,
-      isRank ? COMPETITION_TAB.RANK : COMPETITION_TAB.FLOOR
-    );
-    updateTblLeagueSummaryCurrentLeader(
-      leaderRow,
-      isRank ? rankRows : floorRows,
-      isRank ? COMPETITION_TAB.RANK : COMPETITION_TAB.FLOOR
-    );
-    rankListPanel.style.display = isRank ? 'flex' : 'none';
-    floorListPanel.style.display = isRank ? 'none' : 'flex';
+    const mode = getModeForTab(tab);
+    const entry = tabStore[tab];
+    updateTblLeagueSummaryPrize(prizeLabel, mode);
+
+    if (entry?.rows) {
+      renderTabPanelLoaded(tab, entry.rows);
+      updateSummaryForTab(tab, entry.rows);
+    } else {
+      updateTblLeagueSummaryCurrentLeader(leaderRow, [], mode);
+      updateTblLeagueSummaryLoading(standingsCol, mode);
+    }
+
+    floorListPanel.style.display = tab === COMPETITION_TAB.FLOOR ? 'flex' : 'none';
+    rankListPanel.style.display = tab === COMPETITION_TAB.RANK ? 'flex' : 'none';
+    if (shinyListPanel) {
+      shinyListPanel.style.display = tab === COMPETITION_TAB.SHINY ? 'flex' : 'none';
+    }
     tabButtons.forEach((button) => {
       button.className = getTblLeagueTabButtonClassName(button.dataset.tab === tab);
     });
+
+    updateTblEventTimerDisplay();
+    loadTabData(tab, forceRefresh);
   };
 
   const { bar: tabBar, buttons } = createTblLeagueTabBar(activeTab, setActiveTab);
@@ -3983,14 +4825,23 @@ function createTblLeagueModalContent(floorRows, rankRows, participantCount = 0) 
   container.appendChild(tabBar);
   container.appendChild(floorListPanel);
   container.appendChild(rankListPanel);
+  if (shinyListPanel) {
+    container.appendChild(shinyListPanel);
+  }
+  Object.keys(tabStore).forEach(seedTabFromCache);
   setActiveTab(activeTab);
+  prefetchInactiveModalTabs(activeTab);
 
-  return { element: container };
+  return {
+    element: container,
+    reloadTab: (tab) => loadTabData(tab, true)
+  };
 }
 
 function closeTblFloorLeagueModal() {
   clearTblModalLayoutCleanup();
   clearTblEventTimerUpdates();
+  state.modalLoadSession += 1;
   if (state.modalRef?.close) {
     state.modalRef.close();
   } else {
@@ -4016,40 +4867,16 @@ async function openTblFloorLeagueModal(forceRefresh = false) {
 
   closeTblFloorLeagueModal();
   ensureTblLeagueStyles();
+  const modalLoadSession = state.modalLoadSession;
 
-  if (!state.joinChecked) {
-    await refreshTblJoinState(forceRefresh);
-  }
+  refreshTblJoinState(forceRefresh).catch(() => {});
 
-  let dismissLoading = null;
   try {
-    dismissLoading = api.showModal?.({
-      title: tEvent('Title'),
-      content: `<div style="text-align:center;padding:20px;">${escapeTblHtml(tEvent('Loading'))}</div>`,
-      buttons: []
+    const modalContent = createTblLeagueModalContent({
+      forceRefresh,
+      participantCount: state.participantCount || 0,
+      modalLoadSession
     });
-
-    const [floorRows, rankRows] = await Promise.all([
-      loadTblAllFloorData(forceRefresh),
-      loadTblAllRankData(forceRefresh)
-    ]);
-    if (isDisposed()) {
-      return;
-    }
-    state.floorBarRows = floorRows;
-    state.floorBarCacheAt = Date.now();
-    state.rankBarRows = rankRows;
-    state.rankBarCacheAt = Date.now();
-    const modalContent = createTblLeagueModalContent(
-      floorRows,
-      rankRows,
-      state.participantCount || 0
-    );
-
-    if (typeof dismissLoading === 'function') {
-      dismissLoading();
-      dismissLoading = null;
-    }
 
     const modalButtons = [
       {
@@ -4093,10 +4920,6 @@ async function openTblFloorLeagueModal(forceRefresh = false) {
       content: `<p>${escapeTblHtml(tEvent('LoadError'))}</p>`,
       buttons: [{ text: translate('controls.ok'), primary: true }]
     });
-  } finally {
-    if (typeof dismissLoading === 'function') {
-      dismissLoading();
-    }
   }
 }
 
@@ -4294,6 +5117,9 @@ function cleanupTblFloorLeague() {
   state.floorBarCacheAt = 0;
   state.rankBarRows = null;
   state.rankBarCacheAt = 0;
+  state.shinyBarRows = null;
+  state.shinyBarCacheAt = 0;
+  state.shinyScoresByName = null;
   state.activeModalTab = COMPETITION_TAB.FLOOR;
   state.lastBarFloor = null;
   state.trackedBattleSetup = null;
@@ -4303,10 +5129,14 @@ function cleanupTblFloorLeague() {
   state.participantCount = 0;
   state.fetchCache.clear();
   state.fetchInFlight.clear();
+  state.profileCache.clear();
+  state.profileFetchInFlight.clear();
   state.fullLoadInFlight = null;
   state.rankFullLoadInFlight = null;
+  state.shinyFullLoadInFlight = null;
   state.lastFullLoadAt = 0;
   state.lastRankFullLoadAt = 0;
+  state.lastShinyFullLoadAt = 0;
   state.lastParticipantSyncAt = 0;
   state.joinStateCachedAt = 0;
   state.eligibilityCheckedAt = 0;
@@ -4314,6 +5144,7 @@ function cleanupTblFloorLeague() {
   state.eligibilityByName.clear();
   state.purgeInFlight = null;
   state.lastIneligiblePurgeAt = 0;
+  state.modalLoadSession += 1;
 }
 
     return {

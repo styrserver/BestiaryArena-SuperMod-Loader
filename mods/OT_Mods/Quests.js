@@ -18,9 +18,13 @@ const QUESTS_MODAL_CONFIG = {
   minWidth: 280,
   minHeight: 160,
   kingTibianus: { width: 450, height: 500, minHeight: 320 },
+  arenaLeaderboard: { width: 500, minHeight: 260, maxHeight: 500 },
   npcChat: { width: 450, height: 280, minHeight: 240 },
   questItems: { width: 450, height: 280, minHeight: 240 }
 };
+const ARENA_LEADERBOARD_MODAL_MIN_HEIGHT = QUESTS_MODAL_CONFIG.arenaLeaderboard.minHeight;
+const ARENA_LEADERBOARD_MODAL_MAX_HEIGHT = QUESTS_MODAL_CONFIG.arenaLeaderboard.maxHeight;
+const ARENA_LEADERBOARD_MODAL_WIDTH = QUESTS_MODAL_CONFIG.arenaLeaderboard.width;
 const KING_TIBI_MODAL_WIDTH = QUESTS_MODAL_CONFIG.kingTibianus.width;
 const KING_TIBI_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.kingTibianus.height;
 const COSTELLO_MODAL_HEIGHT = QUESTS_MODAL_CONFIG.npcChat.height;
@@ -43,12 +47,6 @@ function getQuestsModalDimensions(maxWidth, maxHeight, minHeight = QUESTS_MODAL_
   };
 }
 
-function getQuestsDialog(modalRef) {
-  if (modalRef && modalRef.element) return modalRef.element;
-  if (modalRef instanceof HTMLElement) return modalRef;
-  return document.querySelector('div[role="dialog"][data-state="open"]');
-}
-
 function clearQuestsModalLayoutCleanup() {
   if (questsModalLayoutCleanup) {
     questsModalLayoutCleanup();
@@ -56,8 +54,35 @@ function clearQuestsModalLayoutCleanup() {
   }
 }
 
+function isActiveQuestsModDialog(dialog, contentRoot) {
+  if (!dialog || !contentRoot || !dialog.isConnected) return false;
+  if (dialog.getAttribute('data-state') !== 'open') return false;
+  if (!contentRoot.classList.contains('quests-modal-content')) return false;
+  return dialog.contains(contentRoot);
+}
+
+function resolveQuestsModDialog(modalRef, contentRoot, boundDialog) {
+  if (boundDialog && isActiveQuestsModDialog(boundDialog, contentRoot)) {
+    return boundDialog;
+  }
+  if (modalRef?.element && isActiveQuestsModDialog(modalRef.element, contentRoot)) {
+    return modalRef.element;
+  }
+  if (modalRef instanceof HTMLElement && isActiveQuestsModDialog(modalRef, contentRoot)) {
+    return modalRef;
+  }
+  let node = contentRoot.parentElement;
+  while (node) {
+    if (node.getAttribute?.('role') === 'dialog') {
+      return isActiveQuestsModDialog(node, contentRoot) ? node : null;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
 function applyQuestsModalLayoutToDialog(dialog, contentRoot, maxWidth, maxHeight, minHeight) {
-  if (!dialog) return;
+  if (!dialog || !isActiveQuestsModDialog(dialog, contentRoot)) return;
 
   const { width, height } = getQuestsModalDimensions(maxWidth, maxHeight, minHeight);
 
@@ -303,23 +328,49 @@ function applyQuestsKingChatContentLayout(contentRoot, dialogWidth, dialog) {
 
 function setupQuestsModalResponsiveLayout(modalRef, contentRoot, maxWidth, maxHeight, minHeight, afterFirstLayout) {
   clearQuestsModalLayoutCleanup();
+  if (!contentRoot) return;
+
   let initialized = false;
+  let boundDialog = null;
+  let dialogObserver = null;
+
+  const cleanup = () => {
+    if (dialogObserver) {
+      dialogObserver.disconnect();
+      dialogObserver = null;
+    }
+    window.removeEventListener('resize', onResize);
+    questsModalLayoutCleanup = null;
+    boundDialog = null;
+  };
+
   const apply = () => {
-    const dialog = getQuestsDialog(modalRef);
+    const dialog = resolveQuestsModDialog(modalRef, contentRoot, boundDialog);
+    if (!dialog) {
+      cleanup();
+      return;
+    }
+    boundDialog = dialog;
     applyQuestsModalLayoutToDialog(dialog, contentRoot, maxWidth, maxHeight, minHeight);
     if (!initialized) {
       initialized = true;
-      if (dialog && typeof afterFirstLayout === 'function') {
+      if (typeof afterFirstLayout === 'function') {
         afterFirstLayout(dialog);
       }
+      dialogObserver = new MutationObserver(() => {
+        if (!isActiveQuestsModDialog(boundDialog, contentRoot)) {
+          cleanup();
+        }
+      });
+      dialogObserver.observe(dialog, { attributes: true, attributeFilter: ['data-state'] });
     }
   };
-  requestAnimationFrame(() => apply());
+
   const onResize = () => apply();
+
+  requestAnimationFrame(() => apply());
   window.addEventListener('resize', onResize);
-  questsModalLayoutCleanup = () => {
-    window.removeEventListener('resize', onResize);
-  };
+  questsModalLayoutCleanup = cleanup;
 }
 
 const KING_GUILD_COIN_REWARD = 50;
@@ -447,28 +498,9 @@ const LOOT_EFFECT_CONFIG = {
   durationMs: 1000
 };
 
-const MEETING_WITH_TESHA_MISSION = {
-  id: 'meeting_with_tesha',
-  title: 'Meeting with Tesha',
-  hidden: true,
-  objectiveLine1: 'Show the scarab coin to Tesha in Darama Oasis.',
-  objectiveLine2: 'Speak with Tesha about the scarab coin.',
-  hint: 'Tesha is rumoured to know the meaning of scarab coins.',
-  askForCoin: 'Have you brought me a scarab coin from the desert? Show it to me if you have one.',
-  noCoin: 'You do not have a scarab coin with you.',
-  alreadyCompleted: 'You have already shown me a scarab coin. May enlightenment guide you, Player.',
-  rewardCoins: 100,
-  completeLines: [
-    'A scarab coin from the desert sands! The priests say they are sacred beings, although ... <whispers>I find them scary!',
-    'They are not mere curios — these coins are offerings for the tomb warps. The priests use them to open the paths to ascension.',
-    'Thank you for bringing it to me, Player. I shall keep it safe.'
-  ],
-  completeCoinLine: 'Here are {coins} guild coins for your trouble, Player.'
-};
-
 const SERPENTINE_TOWER_MISSION = {
   id: 'serpentine_tower',
-  title: 'Serpentine Tower Quest',
+  title: 'Serpentine Basement Quest',
   requiresMeetingWithTesha: 'First bring me the scarab coin from the desert sands. Then we may speak of other matters.',
   prompt: 'There is a matter I would ask of you, Player. Beneath the Serpentine Tower, in the basement, there is a lever. I need someone to go and use it — but be prepared for danger. Will you undertake this task?',
   accept: 'Descend to the Serpentine Tower basement and use the lever. Be warned — great peril awaits those who are not ready.',
@@ -476,9 +508,9 @@ const SERPENTINE_TOWER_MISSION = {
   alreadyActive: 'You have already accepted this task. Go to the Serpentine Tower basement and use the lever — but be prepared for danger.',
   alreadyCompleted: 'You have already braved what lies beneath the Serpentine Tower. My thanks.',
   putridChamberReturnObjective: 'Return to Tesha in Darama Oasis to receive your reward.',
-  putridChamberVictoryToast: 'You survived the Putrid Chamber. Return to Tesha in Darama Oasis.',
+  putridChamberVictoryToast: 'You survived The Cursed Chamber. Return to Tesha in Darama Oasis.',
   teshaRewardLines: [
-    'You have braved the Putrid Chamber. Take this Scorpion Sceptre — may it serve you well, Player.',
+    'You have braved The Cursed Chamber. Take this Scorpion Sceptre — may it serve you well, Player.',
     'A hermit near Carlin might be able to tell you more about it.'
   ],
   destroyFieldRuneHint: 'The destroy field rune you seek lies upon the corpse of a magic elf, Player.',
@@ -621,11 +653,21 @@ const KING_SCARAB_COIN_MISSION = {
   missingCoin: 'You claim yes but carry nothing from the sands. Return when you have dug up the valuable.',
   keepSearching: 'Then keep searching the desert and return when you find it.',
   answerYesNo: 'Answer yes or no: have you found the lost valuable?',
-  alreadyCompleted: 'You have already recovered what was lost in the sands. Seek Tesha in Darama Oasis if you have not yet shown it to her.',
+  alreadyCompleted: 'You have already completed the hunt in the desert sands. My thanks.',
   alreadyActive: 'You are already searching the desert sands of Darama Oasis for the lost valuable.',
   objectiveLine1: 'Search the desert sands of Darama Oasis for a lost valuable.',
+  objectiveLine2: 'Show the scarab coin to Tesha in Darama Oasis.',
   hint: 'Lore tells that the valuable was lost while fighting where the stairs are that lead to Port Hope.',
-  rewardCoins: 0
+  teshaAskForCoin: 'Have you brought me a scarab coin from the desert? Show it to me if you have one.',
+  teshaNoCoin: 'You do not have a scarab coin with you.',
+  teshaAlreadyCompleted: 'You have already shown me a scarab coin. May enlightenment guide you, Player.',
+  teshaCompleteLines: [
+    'A scarab coin from the desert sands! The priests say they are sacred beings, although ... <whispers>I find them scary!',
+    'They are not mere curios — these coins are offerings for the tomb warps. The priests use them to open the paths to ascension.',
+    'Thank you for bringing it to me, Player. I shall keep it safe.'
+  ],
+  teshaCompleteCoinLine: 'Here are {coins} guild coins for your trouble, Player.',
+  rewardCoins: 100
 };
 
 const AL_DEE_FISHING_MISSION = {
@@ -709,6 +751,54 @@ const MOTHER_OF_ALL_SPIDERS_MISSION = {
   rewardDescription: 'It is made from fine spider silk.',
   rewardCoins: 0
 };
+
+const MISSION_COMPLETION_SUMMARIES = {
+  [KING_COPPER_KEY_MISSION.id]: 'Returned the copper key to King Tibianus.',
+  [KING_RED_DRAGON_MISSION.id]: 'Delivered 30 red dragon scales and 30 red dragon leathers to the royal forge.',
+  [KING_LETTER_MISSION.id]: 'Returned the stamped letter to Al Dee in Rookgaard.',
+  [KING_MONKS_STUDY_MISSION.id]: 'Found Costello at the White Raven Monastery.',
+  [KING_SCARAB_COIN_MISSION.id]: 'Unearthed the scarab coin in the desert sands and showed it to Tesha in Darama Oasis.',
+  [AL_DEE_FISHING_MISSION.id]: 'Retrieved Al Dee\'s Small Axe from the cave waters.',
+  [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'Returned Al Dee\'s elvenhair rope.',
+  [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'Completed the seven seals of Ghostlands and returned to Castello.',
+  [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'Brought the Blessed Ankh to Wyda in the swamps of Venore.',
+  [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'Descended the secluded herb, defeated the mother of all spiders, and returned the silk to Wyda.',
+  [SERPENTINE_TOWER_MISSION.id]: 'Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.'
+};
+
+function getMissionCompletionSummary(mission) {
+  if (!mission) return '';
+  return MISSION_COMPLETION_SUMMARIES[mission.id] || mission.objectiveLine2 || `Completed ${mission.title}.`;
+}
+
+function getMissionCompletionRewardText(mission) {
+  if (!mission) return '';
+
+  switch (mission.id) {
+    case KING_RED_DRAGON_MISSION.id:
+      return 'Reward: Dragon Claw.';
+    case AL_DEE_FISHING_MISSION.id:
+      return 'Reward: Light Shovel.';
+    case AL_DEE_GOLDEN_ROPE_MISSION.id:
+      return 'Reward: The Holy Tible.';
+    case COSTELLO_QUEEN_BANSHEES_MISSION.id:
+      return 'Reward: Blessed Ankh.';
+    case MOTHER_OF_ALL_SPIDERS_MISSION.id:
+      return 'Reward: Spool of Yarn.';
+    case SERPENTINE_TOWER_MISSION.id:
+      return `Reward: ${SCORPION_SCEPTRE_CONFIG.productName}.`;
+    case KING_SCARAB_COIN_MISSION.id:
+      return `Reward: ${SCARAB_COIN_CONFIG.productName}, ${KING_SCARAB_COIN_MISSION.rewardCoins} guild coins.`;
+    default:
+      if (mission.rewardItemName) {
+        return `Reward: ${mission.rewardItemName}.`;
+      }
+      if (mission.rewardCoins) {
+        return `Reward: ${mission.rewardCoins} guild coins.`;
+      }
+      return '';
+  }
+}
 
 // Room names that count as "the seven seals of Ghostlands". Index i = i-th seal (0 = First Seal, 6 = Seventh Seal).
 const SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES = [
@@ -1218,6 +1308,10 @@ const MAP_COLOUR_CONFIG = {
 
 
 const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
+const ARENA_LEADERBOARD_TAB_ID = 'quests-mod-arena-leaderboard-tab';
+const ARENA_RANKINGS_OPEN_BTN_ID = 'arena-rankings-open-btn';
+const ARENA_LEADERBOARD_MODAL_LIST_ID = 'arena-leaderboard-modal-list';
+const ARENA_LEADERBOARD_TOP = 10;
 const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
 // =======================
@@ -1367,6 +1461,10 @@ function createNPCCooldownManager() {
     awaitingKeyConfirm: false,
     starterCoinThanked: false
   };
+  let missionProgressLoaded = false;
+  let missionProgressLoadPromise = null;
+  let arenaRankDisplaySeq = 0;
+  let arenaRankDisplayTimer = null;
   
   // =======================
   // Mining/Digging System State
@@ -1472,6 +1570,8 @@ function createNPCCooldownManager() {
   let questLogMonitorInterval = null;
   let questLogObserverTimeout = null;
   let kingModeActive = false;
+  let pendingQuestLogMissionsRestore = false;
+  let questLogMissionsRestoreTimeout = null;
   let lastQuestLogContainer = null;
   let missionsToggleButton = null;
   
@@ -2232,8 +2332,8 @@ function createNPCCooldownManager() {
         },
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
-        victoryMessage: 'You survived the horrors of the Putrid Chamber. Return to Tesha in Darama Oasis.',
-        defeatMessage: 'The creatures of the Putrid Chamber were too strong.',
+        victoryMessage: 'You survived the horrors of The Cursed Chamber. Return to Tesha in Darama Oasis.',
+        defeatMessage: 'The creatures of The Cursed Chamber were too strong.',
         showItems: false,
         items: []
       }
@@ -2277,7 +2377,7 @@ function createNPCCooldownManager() {
       NotificationService.createBattleToastCallback(BATTLE_TOAST_LOG.putridChamber)
     );
     putridChamberBattle.resetSandboxBattleState();
-    showCustomBattleStatusToast({ battleName: 'Thalas', allyLimit: 5, logPrefix: BATTLE_TOAST_LOG.putridChamber });
+    showCustomBattleStatusToast({ battleName: 'The Cursed Chamber', allyLimit: 5, logPrefix: BATTLE_TOAST_LOG.putridChamber });
     putridChamberBattle.scheduleEntryVillainSetup({
       isActiveCheck: () => playerUsedSerpentineLeverToPutridChamber,
       onComplete: () => {
@@ -2613,9 +2713,9 @@ function createNPCCooldownManager() {
         try {
           const questItems = await getQuestItems(false);
           const scarabCount = questItems?.[SCARAB_COIN_CONFIG.productName] || 0;
-          const meetingCompleted = getMissionProgress(MEETING_WITH_TESHA_MISSION).completed;
-          const alreadyFoundScarab = scarabCount >= SCARAB_COIN_CONFIG.maxCount || meetingCompleted;
-          const huntProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
+          const scarabProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
+          const alreadyFoundScarab = scarabCount >= SCARAB_COIN_CONFIG.maxCount || scarabProgress.completed;
+          const huntProgress = scarabProgress;
 
           if (!huntProgress.accepted) {
             showToast({
@@ -2627,8 +2727,6 @@ function createNPCCooldownManager() {
             await addQuestItem(SCARAB_COIN_CONFIG.productName, 1);
             await capScarabCoinInventory();
             showQuestItemNotification(SCARAB_COIN_CONFIG.productName, 1);
-            await completeScarabHuntMission();
-            await activateMeetingWithTeshaQuest();
             updateTeshaArrowState();
             console.log('[Quests Mod][Digging] Scarab Coin found on Darama Oasis tile', DESERT_DIGGING_CONFIG.SCARAB_COIN_TILE);
           } else {
@@ -2871,86 +2969,96 @@ function createNPCCooldownManager() {
     }
   }
 
-  async function completeScarabHuntMission({ showCompletionToast = true } = {}) {
+  async function completeLostInTheSandsQuest({ showCompletionToast = true } = {}) {
     const progress = getMissionProgress(KING_SCARAB_COIN_MISSION);
     if (progress.completed) return false;
 
     setMissionProgress(KING_SCARAB_COIN_MISSION, { accepted: true, completed: true });
+
+    const coinsAdder = globalThis.addGuildCoins ||
+      (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+      (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
+      (typeof addGuildCoins === 'function' ? addGuildCoins : null);
+    if (coinsAdder && KING_SCARAB_COIN_MISSION.rewardCoins > 0) {
+      await coinsAdder(KING_SCARAB_COIN_MISSION.rewardCoins);
+    } else if (KING_SCARAB_COIN_MISSION.rewardCoins > 0) {
+      console.warn('[Quests Mod][Lost in the Sands] addGuildCoins not available, skipping guild coin reward');
+    }
 
     const playerName = getCurrentPlayerName();
     if (playerName) {
       try {
         await saveKingTibianusProgress(playerName, getAllMissionProgress());
       } catch (error) {
-        console.error('[Quests Mod][Scarab Hunt] Error saving quest completion:', error);
+        console.error('[Quests Mod][Lost in the Sands] Error saving quest completion:', error);
       }
     }
 
     if (showCompletionToast) {
-      NotificationService.showQuestCompleted(KING_SCARAB_COIN_MISSION, '[Quests Mod][King Tibianus]');
+      NotificationService.showQuestCompleted(KING_SCARAB_COIN_MISSION, '[Quests Mod][Tesha]', {
+        rewardCoins: KING_SCARAB_COIN_MISSION.rewardCoins
+      });
     }
 
-    console.log('[Quests Mod][Scarab Hunt] King scarab coin hunt completed');
+    updateTeshaArrowState();
+    console.log('[Quests Mod][Lost in the Sands] Quest completed');
     return true;
   }
 
-  async function syncScarabHuntFromInventory() {
+  async function syncLostInTheSandsQuestFromInventory() {
     try {
+      await capScarabCoinInventory();
       const progress = getMissionProgress(KING_SCARAB_COIN_MISSION);
       if (progress.completed) return;
       if (!(await hasScarabCoinInInventory())) return;
 
       if (!progress.accepted) {
         setMissionProgress(KING_SCARAB_COIN_MISSION, { accepted: true, completed: false });
+        const playerName = getCurrentPlayerName();
+        if (playerName) {
+          await saveKingTibianusProgress(playerName, getAllMissionProgress());
+        }
       }
-      await completeScarabHuntMission({ showCompletionToast: false });
     } catch (error) {
-      console.error('[Quests Mod][Scarab Hunt] Error syncing hunt from inventory:', error);
+      console.error('[Quests Mod][Lost in the Sands] Error syncing quest from inventory:', error);
     }
   }
 
-  async function activateMeetingWithTeshaQuest({ showDiscoveryToast = true } = {}) {
-    const progress = getMissionProgress(MEETING_WITH_TESHA_MISSION);
-    if (progress.accepted || progress.completed) {
-      return false;
+  function migrateCombinedLostInTheSandsQuest(rawProgress) {
+    const meeting = rawProgress?.meetingWithTesha;
+    const scarab = kingChatState.progressScarabHunt;
+    let changed = false;
+
+    if (meeting?.completed && !scarab.completed) {
+      kingChatState.progressScarabHunt = { accepted: true, completed: true };
+      changed = true;
+    } else if (scarab.completed && meeting?.accepted && !meeting?.completed) {
+      // Legacy split quest: scarab was auto-completed on dig before Tesha hand-in.
+      kingChatState.progressScarabHunt = { accepted: true, completed: false };
+      changed = true;
+    } else if (meeting?.accepted && !scarab.accepted) {
+      kingChatState.progressScarabHunt = { accepted: true, completed: false };
+      changed = true;
     }
 
-    setMissionProgress(MEETING_WITH_TESHA_MISSION, { accepted: true, completed: false });
-
-    const playerName = getCurrentPlayerName();
-    if (playerName) {
-      try {
-        await saveKingTibianusProgress(playerName, getAllMissionProgress());
-      } catch (error) {
-        console.error('[Quests Mod][Tesha] Error saving Meeting with Tesha quest progress:', error);
-      }
+    const serpentine = kingChatState.progressSerpentineTower;
+    if (!kingChatState.progressScarabHunt.completed &&
+        (serpentine?.accepted || serpentine?.putridChamberComplete || serpentine?.completed)) {
+      kingChatState.progressScarabHunt = { accepted: true, completed: true };
+      changed = true;
     }
 
-    if (showDiscoveryToast) {
-      NotificationService.showQuestDiscovered(MEETING_WITH_TESHA_MISSION.title, '[Quests Mod][Tesha]');
+    if (kingChatState.progressMeetingWithTesha?.accepted || kingChatState.progressMeetingWithTesha?.completed) {
+      kingChatState.progressMeetingWithTesha = { accepted: false, completed: false };
     }
 
-    console.log('[Quests Mod][Tesha] Hidden quest activated: Meeting with Tesha');
-    return true;
-  }
-
-  async function syncMeetingWithTeshaQuestFromInventory() {
-    try {
-      await capScarabCoinInventory();
-      const questItems = await getQuestItems(false);
-      if (!questItems || !(questItems[SCARAB_COIN_CONFIG.productName] > 0)) {
-        return;
-      }
-      await activateMeetingWithTeshaQuest({ showDiscoveryToast: false });
-    } catch (error) {
-      console.error('[Quests Mod][Tesha] Error syncing quest from Scarab Coin inventory:', error);
-    }
+    return changed;
   }
 
   function syncSerpentineTowerQuestPrerequisites() {
-    const meetingProgress = getMissionProgress(MEETING_WITH_TESHA_MISSION);
+    const scarabProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
     const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
-    if (meetingProgress.completed || (!serpentineProgress.accepted && !serpentineProgress.completed)) {
+    if (scarabProgress.completed || (!serpentineProgress.accepted && !serpentineProgress.completed)) {
       return false;
     }
 
@@ -2966,7 +3074,7 @@ function createNPCCooldownManager() {
       destroyFieldRuneTaken: false,
       putridChamberComplete: false
     };
-    console.log('[Quests Mod][Tesha] Reset Serpentine Tower quest — Meeting with Tesha not completed');
+    console.log('[Quests Mod][Tesha] Reset Serpentine Tower quest — Lost in the Sands not completed');
     return true;
   }
 
@@ -4991,7 +5099,6 @@ function createNPCCooldownManager() {
     [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'progressMotherOfAllSpiders',
     [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
     [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope',
-    [MEETING_WITH_TESHA_MISSION.id]: 'progressMeetingWithTesha',
     [KING_SCARAB_COIN_MISSION.id]: 'progressScarabHunt',
     [SERPENTINE_TOWER_MISSION.id]: 'progressSerpentineTower'
   };
@@ -5006,7 +5113,6 @@ function createNPCCooldownManager() {
     [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'motherOfAllSpiders',
     [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
     [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope',
-    [MEETING_WITH_TESHA_MISSION.id]: 'meetingWithTesha',
     [KING_SCARAB_COIN_MISSION.id]: 'scarabHunt',
     [SERPENTINE_TOWER_MISSION.id]: 'serpentineTower'
   };
@@ -5097,6 +5203,10 @@ function createNPCCooldownManager() {
     return `${FIREBASE_CONFIG.firebaseUrl}/quests/king-tibianus/progress`;
   }
 
+  function getArenaLeaderboardPath() {
+    return `${FIREBASE_CONFIG.firebaseUrl}/quests/king-tibianus/arena-leaderboard`;
+  }
+
   async function getKingTibianusProgress(playerName) {
     if (!playerName) {
       return { accepted: false, completed: false, __isEmpty: true };
@@ -5121,10 +5231,24 @@ function createNPCCooldownManager() {
       for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
         result[firebaseKey] = data[firebaseKey] ? {
           accepted: !!data[firebaseKey].accepted,
-          completed: !!data[firebaseKey].completed
-        } : {
-          accepted: false,
-          completed: false
+          completed: !!data[firebaseKey].completed,
+          ...(firebaseKey === 'serpentineTower'
+            ? {
+                destroyFieldRuneTaken: !!data[firebaseKey].destroyFieldRuneTaken,
+                putridChamberComplete: !!data[firebaseKey].putridChamberComplete
+              }
+            : {})
+        } : (
+          firebaseKey === 'serpentineTower'
+            ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
+            : { accepted: false, completed: false }
+        );
+      }
+
+      if (data.meetingWithTesha) {
+        result.meetingWithTesha = {
+          accepted: !!data.meetingWithTesha.accepted,
+          completed: !!data.meetingWithTesha.completed
         };
       }
       
@@ -5187,11 +5311,18 @@ function createNPCCooldownManager() {
           for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
             result[firebaseKey] = progress[firebaseKey] ? {
               accepted: !!progress[firebaseKey].accepted,
-              completed: !!progress[firebaseKey].completed
-            } : {
-              accepted: false,
-              completed: false
-            };
+              completed: !!progress[firebaseKey].completed,
+              ...(firebaseKey === 'serpentineTower'
+                ? {
+                    destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
+                    putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
+                  }
+                : {})
+            } : (
+              firebaseKey === 'serpentineTower'
+                ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
+                : { accepted: false, completed: false }
+            );
           }
           
           // Add ironOre (special case - not a regular mission)
@@ -5226,6 +5357,72 @@ function createNPCCooldownManager() {
       'save King Tibianus progress'
     );
     console.log('[Quests Mod][King Tibianus] Progress saved', normalized);
+    saveArenaLeaderboardEntry(playerName, normalized).catch((err) => {
+      console.warn('[Quests Mod][Arena Leaderboard] Failed to update entry:', err);
+    });
+    scheduleArenaRankDisplayUpdate(0);
+  }
+
+  async function saveArenaLeaderboardEntry(playerName, progress) {
+    if (!playerName) return;
+    const completedCount = getCompletedMissionsCount(progress);
+    if (completedCount <= 0) return;
+
+    const hashedPlayer = await hashUsername(playerName);
+    await FirebaseService.put(
+      `${getArenaLeaderboardPath()}/${hashedPlayer}`,
+      {
+        playerName,
+        completedCount,
+        updatedAt: Date.now()
+      },
+      'save arena leaderboard entry'
+    );
+    arenaLeaderboardCache = null;
+    arenaLeaderboardCacheTime = 0;
+  }
+
+  async function syncArenaLeaderboardForCurrentPlayer() {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) return;
+    try {
+      const progress = await getKingTibianusProgress(playerName);
+      await saveArenaLeaderboardEntry(playerName, progress);
+    } catch (err) {
+      console.warn('[Quests Mod][Arena Leaderboard] Failed to sync current player entry:', err);
+    }
+  }
+
+  let arenaLeaderboardCache = null;
+  let arenaLeaderboardCacheTime = 0;
+  const ARENA_LEADERBOARD_CACHE_MS = 60000;
+
+  async function loadArenaLeaderboard(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && arenaLeaderboardCache && (now - arenaLeaderboardCacheTime) < ARENA_LEADERBOARD_CACHE_MS) {
+      return arenaLeaderboardCache;
+    }
+
+    const data = await FirebaseService.get(
+      getArenaLeaderboardPath(),
+      'fetch arena leaderboard',
+      null
+    );
+    if (!data || typeof data !== 'object') {
+      arenaLeaderboardCache = [];
+      arenaLeaderboardCacheTime = now;
+      return arenaLeaderboardCache;
+    }
+
+    arenaLeaderboardCache = Object.values(data)
+      .filter((entry) => entry && typeof entry.completedCount === 'number')
+      .sort((a, b) => {
+        if (b.completedCount !== a.completedCount) return b.completedCount - a.completedCount;
+        return String(a.playerName || '').localeCompare(String(b.playerName || ''));
+      })
+      .slice(0, ARENA_LEADERBOARD_TOP);
+    arenaLeaderboardCacheTime = now;
+    return arenaLeaderboardCache;
   }
 
   async function deleteKingTibianusProgress(playerName) {
@@ -5321,64 +5518,109 @@ function createNPCCooldownManager() {
     if (!progress || progress.__isEmpty) return 0;
 
     let count = 0;
-
-    // Handle new nested structure — count ALL King/Arena quests
-    if (progress.copper && progress.copper.completed) count++;
-    if (progress.dragon && progress.dragon.completed) count++;
-    if (progress.letter && progress.letter.completed) count++;
-    if (progress.monksStudy && progress.monksStudy.completed) count++;
-    if (progress.queenBanshees && progress.queenBanshees.completed) count++;
-    if (progress.followerOfZathroth && progress.followerOfZathroth.completed) count++;
-    if (progress.motherOfAllSpiders && progress.motherOfAllSpiders.completed) count++;
-    if (progress.alDeeFishing && progress.alDeeFishing.completed) count++;
-    if (progress.alDeeGoldenRope && progress.alDeeGoldenRope.completed) count++;
+    for (const firebaseKey of Object.values(MISSION_FIREBASE_KEY_MAP)) {
+      if (progress[firebaseKey]?.completed) count++;
+    }
 
     // Handle legacy flat structure for backward compatibility
     if (progress.completed === true && count === 0) {
-      count = 1; // Assume at least one mission completed in old format
+      count = 1;
     }
 
     return count;
   }
 
+  function getArenaRankIndex(completedMissions) {
+    const count = Math.max(0, Number(completedMissions) || 0);
+    return Math.min(Math.floor(count / 2), KING_ARENA_RANKS.length - 1);
+  }
+
+  function getArenaRankInfo(completedMissions) {
+    const rankIndex = getArenaRankIndex(completedMissions);
+    let color = 'rgb(255, 215, 0)'; // Gold (Sage, Savant, Enlightened)
+    if (rankIndex <= 1) color = 'rgb(150, 150, 150)'; // Grey (Scout, Sentinel)
+    else if (rankIndex <= 3) color = 'rgb(100, 200, 100)'; // Green (Steward, Warden)
+    else if (rankIndex <= 5) color = 'rgb(100, 150, 255)'; // Blue (Squire, Warrior)
+    else if (rankIndex <= 7) color = 'rgb(150, 100, 255)'; // Purple (Keeper, Guardian)
+
+    return {
+      rankIndex,
+      rankName: KING_ARENA_RANKS[rankIndex],
+      color
+    };
+  }
+
   function getCurrentArenaRank(completedMissions) {
-    // 2 missions per rank; cap at the highest rank (20+ missions = Enlightened)
-    const rankIndex = Math.min(Math.floor(completedMissions / 2), KING_ARENA_RANKS.length - 1);
-    return KING_ARENA_RANKS[rankIndex];
+    return getArenaRankInfo(completedMissions).rankName;
   }
 
   function getRankColor(completedMissions) {
-    const rankIndex = Math.min(Math.floor(completedMissions / 2), KING_ARENA_RANKS.length - 1);
-    // Rarity-based color progression: grey → green → blue → purple → gold (by rank tier)
-    if (rankIndex <= 1) return 'rgb(150, 150, 150)'; // Grey (Scout, Sentinel)
-    if (rankIndex <= 3) return 'rgb(100, 200, 100)'; // Green (Steward, Warden)
-    if (rankIndex <= 5) return 'rgb(100, 150, 255)'; // Blue (Squire, Warrior)
-    if (rankIndex <= 7) return 'rgb(150, 100, 255)'; // Purple (Keeper, Guardian)
-    return 'rgb(255, 215, 0)'; // Gold (Sage, Savant, Enlightened)
+    return getArenaRankInfo(completedMissions).color;
   }
 
-  async function updateArenaRankDisplay() {
+  function getArenaProgressSnapshot(forceFirebase = false) {
+    if (!forceFirebase && missionProgressLoaded) {
+      return Promise.resolve(getAllMissionProgress());
+    }
+    const playerName = getCurrentPlayerName();
+    if (!playerName) {
+      return Promise.resolve({ __isEmpty: true });
+    }
+    return getKingTibianusProgress(playerName);
+  }
+
+  function scheduleArenaRankDisplayUpdate(delayMs = 0) {
+    if (arenaRankDisplayTimer) {
+      clearTimeout(arenaRankDisplayTimer);
+    }
+    arenaRankDisplayTimer = setTimeout(() => {
+      arenaRankDisplayTimer = null;
+      updateArenaRankDisplay().catch((err) => {
+        console.warn('[Quests Mod] Error updating arena rank display:', err);
+      });
+    }, delayMs);
+  }
+
+  async function updateArenaRankDisplay(options = {}) {
+    const { forceFirebase = false } = options;
     const rankElement = document.getElementById('king-tibianus-rank-display');
     if (!rankElement) return;
+
+    const seq = ++arenaRankDisplaySeq;
+
+    const applyRank = (completedCount) => {
+      if (seq !== arenaRankDisplaySeq) return;
+      const { rankName, color } = getArenaRankInfo(completedCount);
+      rankElement.textContent = `Rank: ${rankName}`;
+      rankElement.style.color = color;
+    };
 
     try {
       const currentPlayer = getCurrentPlayerName();
       if (!currentPlayer) {
-        rankElement.textContent = 'Rank: Scout of the Arena';
-        rankElement.style.color = 'rgb(150, 150, 150)'; // Grey for default
+        applyRank(0);
         return;
       }
 
-      const progress = await getKingTibianusProgress(currentPlayer);
-      const completedCount = getCompletedMissionsCount(progress);
-      const currentRank = getCurrentArenaRank(completedCount);
+      const progress = await getArenaProgressSnapshot(forceFirebase);
+      if (seq !== arenaRankDisplaySeq) return;
 
-      rankElement.textContent = `Rank: ${currentRank}`;
-      rankElement.style.color = getRankColor(completedCount);
+      const completedCount = getCompletedMissionsCount(progress);
+      applyRank(completedCount);
+
+      saveArenaLeaderboardEntry(currentPlayer, progress).catch((err) => {
+        console.warn('[Quests Mod][Arena Leaderboard] Failed to sync entry:', err);
+      });
+
+      if (document.getElementById(ARENA_LEADERBOARD_MODAL_LIST_ID)) {
+        updateArenaLeaderboardDisplay().catch((err) => {
+          console.warn('[Quests Mod] Error refreshing arena leaderboard:', err);
+        });
+      }
     } catch (error) {
+      if (seq !== arenaRankDisplaySeq) return;
       console.error('[Quests Mod] Error updating arena rank display:', error);
-      rankElement.textContent = 'Rank: Scout of the Arena';
-      rankElement.style.color = 'rgb(150, 150, 150)'; // Grey for error case
+      applyRank(0);
     }
   }
 
@@ -5433,6 +5675,9 @@ function createNPCCooldownManager() {
       } catch (err) {
         console.warn('[Quests Mod] Could not grant starter Silver Token on init:', err);
       }
+      syncArenaLeaderboardForCurrentPlayer().catch((err) => {
+        console.warn('[Quests Mod][Arena Leaderboard] Failed to sync on init:', err);
+      });
       const products = await getQuestItems(false); // Force fetch, don't use cache
       console.log('[Quests Mod] Quest items loaded:', products);
     } catch (error) {
@@ -8271,8 +8516,20 @@ function createNPCCooldownManager() {
       }
 
       // kingChatState is now defined globally
-      // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = display order in Quest Log (Monks Study after The search for the Light; Queen Banshees after Monks Study; Follower of Zathroth after Queen Banshees).
-      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION, KING_MONKS_STUDY_MISSION, KING_SCARAB_COIN_MISSION, COSTELLO_QUEEN_BANSHEES_MISSION, FOLLOWER_OF_ZATHROTH_MISSION, MOTHER_OF_ALL_SPIDERS_MISSION, MEETING_WITH_TESHA_MISSION, SERPENTINE_TOWER_MISSION];
+      // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = display order in Quest Log.
+      const MISSIONS = [
+        KING_COPPER_KEY_MISSION,
+        KING_RED_DRAGON_MISSION,
+        KING_LETTER_MISSION,
+        AL_DEE_FISHING_MISSION,
+        AL_DEE_GOLDEN_ROPE_MISSION,
+        KING_MONKS_STUDY_MISSION,
+        COSTELLO_QUEEN_BANSHEES_MISSION,
+        FOLLOWER_OF_ZATHROTH_MISSION,
+        MOTHER_OF_ALL_SPIDERS_MISSION,
+        KING_SCARAB_COIN_MISSION,
+        SERPENTINE_TOWER_MISSION
+      ];
 
       // Mission Registry: Maps mission IDs to their state property names in kingChatState
       // This centralizes mission-to-state mapping for easier maintenance
@@ -8286,7 +8543,6 @@ function createNPCCooldownManager() {
         [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'progressMotherOfAllSpiders',
         [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
         [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope',
-    [MEETING_WITH_TESHA_MISSION.id]: 'progressMeetingWithTesha',
     [KING_SCARAB_COIN_MISSION.id]: 'progressScarabHunt',
     [SERPENTINE_TOWER_MISSION.id]: 'progressSerpentineTower'
       };
@@ -8302,7 +8558,6 @@ function createNPCCooldownManager() {
         [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'motherOfAllSpiders',
         [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
         [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope',
-    [MEETING_WITH_TESHA_MISSION.id]: 'meetingWithTesha',
     [KING_SCARAB_COIN_MISSION.id]: 'scarabHunt',
     [SERPENTINE_TOWER_MISSION.id]: 'serpentineTower'
       };
@@ -8349,6 +8604,8 @@ function createNPCCooldownManager() {
 
       let activeMission = currentMission();
       let selectedMissionId = null; // none selected by default
+      let kingMissionListTab = 'missions';
+      const kingMissionListScrollTops = { missions: 0, completed: 0 };
       let kingQuestDetailsVisible = false;
       let kingQuestDescEl = null;
       let kingQuestDescBody = null;
@@ -8389,6 +8646,7 @@ function createNPCCooldownManager() {
         };
       }
       let kingStrings = buildStrings(activeMission);
+      let kingModalProgressLoading = false;
 
       function closeDialogWithFallback(delayMs = 0) {
         ModalHelpers.closeModal(delayMs);
@@ -8476,6 +8734,12 @@ function createNPCCooldownManager() {
 
       function renderKingQuestUI() {
         if (!col1 || !col2) return;
+
+        const existingMissionListScroll = col1.querySelector('.king-mission-list-scroll-body');
+        if (existingMissionListScroll) {
+          kingMissionListScrollTops[kingMissionListTab] = existingMissionListScroll.scrollTop;
+        }
+
         col1.innerHTML = '';
         col2.innerHTML = '';
 
@@ -8542,11 +8806,72 @@ function createNPCCooldownManager() {
           return box;
         }
 
+        function createTabbedMissionListBox(activeTab, missionsContent, completedContent) {
+          const box = document.createElement('div');
+          box.style.display = 'flex';
+          box.style.flexDirection = 'column';
+          box.style.margin = '0';
+          box.style.padding = '0';
+          box.style.minHeight = '0';
+          box.style.height = '100%';
+          box.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat';
+          box.style.border = '4px solid transparent';
+          box.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
+          box.style.borderRadius = '6px';
+          box.style.overflow = 'hidden';
+
+          const tabBar = document.createElement('div');
+          tabBar.style.cssText = 'display:flex;gap:4px;padding:4px 8px 0;box-sizing:border-box;';
+
+          const tabs = [
+            { id: 'missions', label: 'Missions' },
+            { id: 'completed', label: 'Completed' }
+          ];
+
+          tabs.forEach(({ id, label }) => {
+            const isActive = activeTab === id;
+            const tabButton = document.createElement('button');
+            tabButton.type = 'button';
+            tabButton.textContent = label;
+            tabButton.className = isActive
+              ? 'focus-style-visible flex items-center justify-center tracking-wide text-whiteHighlight frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14'
+              : 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+            tabButton.style.cssText = 'flex:1 1 0;cursor:pointer;white-space:nowrap;box-sizing:border-box;max-height:21px;height:21px;font-size:14px;';
+            tabButton.addEventListener('click', () => {
+              if (kingMissionListTab === id) return;
+              kingMissionListTab = id;
+              renderKingQuestUI();
+            });
+            tabBar.appendChild(tabButton);
+          });
+
+          box.appendChild(tabBar);
+
+          const body = document.createElement('div');
+          body.className = 'king-mission-list-scroll-body';
+          body.style.flex = '1 1 0';
+          body.style.minHeight = '0';
+          body.style.overflowY = 'auto';
+          body.style.padding = '8px';
+          body.appendChild(activeTab === 'completed' ? completedContent : missionsContent);
+          box.appendChild(body);
+          return box;
+        }
+
         const missionsBody = document.createElement('div');
         missionsBody.style.display = 'flex';
         missionsBody.style.flexDirection = 'column';
         missionsBody.style.gap = '6px';
 
+        const completedBody = document.createElement('div');
+        completedBody.style.display = 'flex';
+        completedBody.style.flexDirection = 'column';
+        completedBody.style.gap = '6px';
+
+        if (kingModalProgressLoading) {
+          missionsBody.appendChild(createKingPanelPlaceholder('Loading...'));
+          completedBody.appendChild(createKingPanelPlaceholder('Loading...'));
+        } else {
         const currentMissions = missionStates.filter(ms => ms.progress.accepted && !ms.progress.completed);
         if (currentMissions.length > 0) {
           currentMissions.forEach(({ mission }) => {
@@ -8570,10 +8895,6 @@ function createNPCCooldownManager() {
           kingQuestDetailsVisible = false;
         }
 
-        const completedBody = document.createElement('div');
-        completedBody.style.display = 'flex';
-        completedBody.style.flexDirection = 'column';
-        completedBody.style.gap = '6px';
         const completedMissions = missionStates.filter(ms => ms.progress.completed);
         if (completedMissions.length > 0) {
           completedMissions.forEach(({ mission }) => {
@@ -8596,26 +8917,14 @@ function createNPCCooldownManager() {
           noneItem.style.fontStyle = 'italic';
           completedBody.appendChild(noneItem);
         }
+        }
 
-        const missionsBox = createFramedBox('Missions', missionsBody);
-        missionsBox.style.flex = '1 1 0';
-        missionsBox.style.minHeight = '0';
+        const missionListBox = createTabbedMissionListBox(kingMissionListTab, missionsBody, completedBody);
+        missionListBox.style.flex = '1 1 0';
+        missionListBox.style.minHeight = '0';
+        missionListBox.style.height = '100%';
 
-        const completedBox = createFramedBox('Completed', completedBody);
-        completedBox.style.flex = '1 1 0';
-        completedBox.style.minHeight = '0';
-
-        // Use two separate boxes stacked in column
-        const col1Container = document.createElement('div');
-        col1Container.style.display = 'flex';
-        col1Container.style.flexDirection = 'column';
-        col1Container.style.gap = '8px';
-        col1Container.style.height = '100%';
-
-        col1Container.appendChild(missionsBox);
-        col1Container.appendChild(completedBox);
-
-        col1.appendChild(col1Container);
+        col1.appendChild(missionListBox);
 
         const descContent = document.createElement('div');
         descContent.className = 'flex flex-col gap-1';
@@ -8626,7 +8935,13 @@ function createNPCCooldownManager() {
         const hintBlock = document.createElement('div');
         hintBlock.className = 'flex flex-col gap-1';
 
-        if (!selectedMission) {
+        if (kingModalProgressLoading) {
+          const line1 = document.createElement('p');
+          line1.textContent = 'Loading...';
+          line1.style.color = '#888';
+          line1.style.fontStyle = 'italic';
+          descBlock.appendChild(line1);
+        } else if (!selectedMission) {
           const line1 = document.createElement('p');
           line1.textContent = 'No mission selected.';
           line1.style.color = '#888';
@@ -8640,34 +8955,20 @@ function createNPCCooldownManager() {
           descBlock.appendChild(line1);
         } else if (selectedProgress.completed) {
           const line1 = document.createElement('p');
-          line1.textContent = 'Completed: ' + selectedMission.title;
-          const line2 = document.createElement('p');
-          if (selectedMission.id === KING_RED_DRAGON_MISSION.id) {
-            line2.textContent = 'Reward: Dragon Claw.';
-          } else if (selectedMission.id === AL_DEE_FISHING_MISSION.id) {
-            line2.textContent = 'Reward: Light Shovel.';
-          } else if (selectedMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
-            line2.textContent = 'Reward: The Holy Tible.';
-          } else if (selectedMission.id === KING_MONKS_STUDY_MISSION.id) {
-            line2.textContent = `Reward: ${selectedMission.rewardCoins} guild coins.`;
-          } else if (selectedMission.id === COSTELLO_QUEEN_BANSHEES_MISSION.id) {
-            line2.textContent = 'Reward: Blessed Ankh.';
-          } else if (selectedMission.id === FOLLOWER_OF_ZATHROTH_MISSION.id) {
-            line2.textContent = selectedMission.rewardCoins ? `Reward: ${selectedMission.rewardCoins} guild coins.` : 'Bring the Blessed Ankh to Wyda in the swamps of Venore.';
-          } else if (selectedMission.id === MOTHER_OF_ALL_SPIDERS_MISSION.id) {
-            line2.textContent = 'Reward: Spool of Yarn.';
-          } else if (selectedMission.id === MEETING_WITH_TESHA_MISSION.id) {
-            line2.textContent = `Reward: ${selectedMission.rewardCoins} guild coins.`;
-          } else if (selectedMission.id === KING_SCARAB_COIN_MISSION.id) {
-            line2.textContent = 'Seek Tesha in Darama Oasis once you have recovered the valuable.';
-          } else if (selectedMission.id === SERPENTINE_TOWER_MISSION.id) {
-            line2.textContent = `Reward: ${SCORPION_SCEPTRE_CONFIG.productName}.`;
-          } else {
-            line2.textContent = selectedMission.rewardCoins ? `Reward: ${selectedMission.rewardCoins} guild coins.` : '';
-          }
+          line1.textContent = getMissionCompletionSummary(selectedMission);
+          line1.style.margin = '0';
+          line1.style.color = 'rgb(255, 255, 255)';
           descBlock.appendChild(line1);
-          descBlock.appendChild(line2);
-          // Hide hint on completion
+
+          const rewardText = getMissionCompletionRewardText(selectedMission);
+          if (rewardText) {
+            const line2 = document.createElement('p');
+            line2.textContent = rewardText;
+            line2.style.margin = '0';
+            line2.style.marginTop = '6px';
+            line2.style.color = 'rgb(230, 215, 176)';
+            descBlock.appendChild(line2);
+          }
         } else {
           // For letter mission, check if player has Stamped Letter to adjust objectives
           if (selectedMission.id === KING_LETTER_MISSION.id) {
@@ -8733,6 +9034,70 @@ function createNPCCooldownManager() {
               line3.textContent = selectedMission.hint;
               hintBlock.appendChild(line3);
             }
+          } else if (selectedMission.id === KING_SCARAB_COIN_MISSION.id) {
+            let hasScarabCoin = false;
+            if (cachedQuestItems !== null) {
+              hasScarabCoin = (cachedQuestItems[SCARAB_COIN_CONFIG.productName] || 0) > 0;
+            }
+
+            if (hasScarabCoin) {
+              const line1 = document.createElement('p');
+              line1.textContent = selectedMission.objectiveLine1;
+              line1.style.textDecoration = 'line-through';
+              line1.style.opacity = '0.7';
+              descBlock.appendChild(line1);
+
+              const line2 = document.createElement('p');
+              line2.textContent = selectedMission.objectiveLine2;
+              descBlock.appendChild(line2);
+
+              const line3 = document.createElement('p');
+              line3.style.color = '#b0b0b0';
+              line3.style.fontStyle = 'italic';
+              line3.style.marginTop = '6px';
+              line3.textContent = 'Tesha is rumoured to know the meaning of scarab coins.';
+              hintBlock.appendChild(line3);
+            } else {
+              const line1 = document.createElement('p');
+              line1.textContent = selectedMission.objectiveLine1;
+              descBlock.appendChild(line1);
+
+              (async () => {
+                try {
+                  const currentProducts = await getQuestItems(false);
+                  const hasScarabCoinAsync = (currentProducts[SCARAB_COIN_CONFIG.productName] || 0) > 0;
+                  if (hasScarabCoinAsync) {
+                    descBlock.innerHTML = '';
+                    const doneLine = document.createElement('p');
+                    doneLine.textContent = selectedMission.objectiveLine1;
+                    doneLine.style.textDecoration = 'line-through';
+                    doneLine.style.opacity = '0.7';
+                    descBlock.appendChild(doneLine);
+
+                    const nextLine = document.createElement('p');
+                    nextLine.textContent = selectedMission.objectiveLine2;
+                    descBlock.appendChild(nextLine);
+
+                    hintBlock.innerHTML = '';
+                    const hintLine = document.createElement('p');
+                    hintLine.style.color = '#b0b0b0';
+                    hintLine.style.fontStyle = 'italic';
+                    hintLine.style.marginTop = '6px';
+                    hintLine.textContent = 'Tesha is rumoured to know the meaning of scarab coins.';
+                    hintBlock.appendChild(hintLine);
+                  }
+                } catch (error) {
+                  console.error('[Quests Mod][King Tibianus] Error checking for Scarab Coin in objectives:', error);
+                }
+              })();
+
+              const line3 = document.createElement('p');
+              line3.style.color = '#b0b0b0';
+              line3.style.fontStyle = 'italic';
+              line3.style.marginTop = '6px';
+              line3.textContent = selectedMission.hint;
+              hintBlock.appendChild(line3);
+            }
           } else if (selectedMission.id === SERPENTINE_TOWER_MISSION.id) {
             const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
             const line1 = document.createElement('p');
@@ -8784,7 +9149,7 @@ function createNPCCooldownManager() {
 
         // Start hidden until a mission is clicked
         // Always show details when a mission is selected; hide only when none selected
-        descBodyWrapper.style.display = selectedMission ? 'block' : 'none';
+        descBodyWrapper.style.display = (kingModalProgressLoading || selectedMission) ? 'block' : 'none';
 
         const missionLogBox = createFramedBox('Mission Log', descBodyWrapper);
         missionLogBox.style.flex = '1 1 0';
@@ -8793,75 +9158,115 @@ function createNPCCooldownManager() {
         col2.appendChild(missionLogBox);
         kingQuestDescEl = missionLogBox;
         kingQuestDescBody = descBodyWrapper;
+
+        const missionListScroll = col1.querySelector('.king-mission-list-scroll-body');
+        if (missionListScroll) {
+          const savedScrollTop = kingMissionListScrollTops[kingMissionListTab] || 0;
+          requestAnimationFrame(() => {
+            missionListScroll.scrollTop = savedScrollTop;
+          });
+        }
+      }
+
+      function createKingPanelPlaceholder(text) {
+        const placeholder = document.createElement('p');
+        placeholder.style.margin = '0';
+        placeholder.style.color = '#888';
+        placeholder.style.fontStyle = 'italic';
+        placeholder.textContent = text;
+        return placeholder;
+      }
+
+      async function applyKingModalSideEffects() {
+        try {
+          const goldenRopeProgress = kingChatState.progressAlDeeGoldenRope;
+          if (!goldenRopeProgress.accepted && !goldenRopeProgress.completed) {
+            const questItems = await getQuestItems(false);
+            if (questItems && questItems['Elvenhair Rope'] && questItems['Elvenhair Rope'] > 0) {
+              console.log('[Quests Mod][King Tibianus] Auto-accepting Al Dee golden rope mission - player has Elvenhair Rope');
+              kingChatState.progressAlDeeGoldenRope.accepted = true;
+              const playerName = getCurrentPlayerName();
+              if (playerName) {
+                const currentProgress = await getKingTibianusProgress(playerName);
+                await saveKingTibianusProgress(playerName, {
+                  ...currentProgress,
+                  alDeeGoldenRope: {
+                    accepted: true,
+                    completed: false
+                  }
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.warn('[Quests Mod][King Tibianus] Error auto-accepting golden rope mission:', error);
+        }
+
+        try {
+          const tokenHeld = await hasSilverToken();
+          setRow2Disabled(tokenHeld && !kingChatState.starterCoinThanked);
+        } catch (err) {
+          console.warn('[Quests Mod] Could not set row2 disabled state:', err);
+        }
+      }
+
+      function refreshKingModalMissionState() {
+        activeMission = currentMission();
+        kingStrings = buildStrings(activeMission);
+        renderKingQuestUI();
+      }
+
+      function applyKingProgressToState(progress) {
+        if (progress && progress.accepted !== undefined) {
+          kingChatState.progressCopper = {
+            accepted: progress.accepted,
+            completed: progress.completed
+          };
+        }
+        if (progress) {
+          for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
+            const stateKey = MISSION_STATE_MAP[missionId];
+            if (stateKey && progress[firebaseKey]) {
+              kingChatState[stateKey] = {
+                accepted: !!progress[firebaseKey].accepted,
+                completed: !!progress[firebaseKey].completed
+              };
+            }
+          }
+          kingChatState.mornenionDefeated = !!(progress.mornenion && progress.mornenion.defeated);
+        }
       }
 
       async function loadKingTibianusProgress() {
+        if (missionProgressLoaded) {
+          try {
+            await getQuestItems(false);
+            await applyKingModalSideEffects();
+            selectedMissionId = null;
+            refreshKingModalMissionState();
+          } catch (error) {
+            console.error('[Quests Mod][King Tibianus] Error refreshing local progress:', error);
+          }
+          return;
+        }
+
+        kingModalProgressLoading = true;
+        renderKingQuestUI();
         try {
-          // Refresh quest items so currentMission() can check for Holy Tible (Monks Study availability)
           await getQuestItems(false);
           const playerName = getCurrentPlayerName();
           const progress = await getKingTibianusProgress(playerName);
           await grantStarterSilverTokenIfNeeded(progress, playerName);
-          // Backward compatibility: old shape {accepted, completed}
-          if (progress && progress.accepted !== undefined) {
-            kingChatState.progressCopper = {
-              accepted: progress.accepted,
-              completed: progress.completed
-            };
-          }
-          // New shape: Load all missions from registry dynamically
-          if (progress) {
-            for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
-              const stateKey = MISSION_STATE_MAP[missionId];
-              if (stateKey && progress[firebaseKey]) {
-                kingChatState[stateKey] = {
-                  accepted: !!progress[firebaseKey].accepted,
-                  completed: !!progress[firebaseKey].completed
-                };
-              }
-            }
-            kingChatState.mornenionDefeated = !!(progress.mornenion && progress.mornenion.defeated);
-          }
-          
-          // Auto-accept Al Dee golden rope mission if player has Elvenhair Rope but mission not accepted
-          try {
-            const goldenRopeProgress = kingChatState.progressAlDeeGoldenRope;
-            if (!goldenRopeProgress.accepted && !goldenRopeProgress.completed) {
-              const questItems = await getQuestItems(false);
-              if (questItems && questItems['Elvenhair Rope'] && questItems['Elvenhair Rope'] > 0) {
-                console.log('[Quests Mod][King Tibianus] Auto-accepting Al Dee golden rope mission - player has Elvenhair Rope');
-                kingChatState.progressAlDeeGoldenRope.accepted = true;
-                // Save to Firebase
-                const playerName = getCurrentPlayerName();
-                if (playerName) {
-                  const currentProgress = await getKingTibianusProgress(playerName);
-                  await saveKingTibianusProgress(playerName, {
-                    ...currentProgress,
-                    alDeeGoldenRope: {
-                      accepted: true,
-                      completed: false
-                    }
-                  });
-                }
-              }
-            }
-          } catch (error) {
-            console.warn('[Quests Mod][King Tibianus] Error auto-accepting golden rope mission:', error);
-          }
-          
-          // Grey out missions/log until starter coin is handed in
-          try {
-            const tokenHeld = await hasSilverToken();
-            setRow2Disabled(tokenHeld && !kingChatState.starterCoinThanked);
-          } catch (err) {
-            console.warn('[Quests Mod] Could not set row2 disabled state:', err);
-          }
-          activeMission = currentMission();
+          applyKingProgressToState(progress);
+          await applyKingModalSideEffects();
           selectedMissionId = null;
+          activeMission = currentMission();
           kingStrings = buildStrings(activeMission);
-          renderKingQuestUI();
         } catch (error) {
           console.error('[Quests Mod][King Tibianus] Error loading progress:', error);
+        } finally {
+          kingModalProgressLoading = false;
+          renderKingQuestUI();
         }
       }
 
@@ -9053,7 +9458,7 @@ function createNPCCooldownManager() {
           console.log('[Quests Mod][King Tibianus] Quest marked as completed');
 
           // Update rank display after quest completion
-          setTimeout(() => updateArenaRankDisplay(), 1000);
+          scheduleArenaRankDisplayUpdate(100);
         } catch (error) {
           console.error('[Quests Mod][King Tibianus] Error completing quest:', error);
         }
@@ -9268,11 +9673,7 @@ function createNPCCooldownManager() {
             const completingScarabHunt = activeMission.id === KING_SCARAB_COIN_MISSION.id;
             queueKingReply(kingStrings.keyComplete, { onDone: async () => {
               if (completingScarabHunt) {
-                await completeScarabHuntMission({ showCompletionToast: false });
-                await activateMeetingWithTeshaQuest({ showDiscoveryToast: false });
                 updateTeshaArrowState();
-                activeMission = currentMission();
-                kingStrings = buildStrings(activeMission);
                 renderKingQuestUI();
               } else {
                 if (activeMission.rewardCoins > 0) {
@@ -9577,6 +9978,7 @@ function createNPCCooldownManager() {
       footerCloseBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
       footerCloseBtn.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px; font-size: 14px;';
       footerCloseBtn.addEventListener('click', () => {
+        clearQuestsModalLayoutCleanup();
         if (modalRef?.close) {
           modalRef.close();
         } else {
@@ -9606,12 +10008,9 @@ function createNPCCooldownManager() {
       footerContainer.appendChild(footer);
       modalContent.appendChild(footerContainer);
 
-      // Load existing progress when modal opens
-      loadKingTibianusProgress().then(() => {
-        renderKingQuestUI();
-        updateGuildCoinDisplay();
-      });
-      
+      renderKingQuestUI();
+      updateGuildCoinDisplay();
+
       contentDiv.appendChild(modalContent);
       
       const kingDims = getQuestsModalDimensions(
@@ -9636,6 +10035,12 @@ function createNPCCooldownManager() {
         QUESTS_MODAL_CONFIG.kingTibianus.minHeight,
         (dialog) => removeDefaultModalFooter(dialog)
       );
+
+      loadKingTibianusProgress().then(() => {
+        updateGuildCoinDisplay();
+      }).catch((error) => {
+        console.error('[Quests Mod][King Tibianus] Error loading progress after modal open:', error);
+      });
       
       modalTimeout = null;
     }, 50);
@@ -10613,6 +11018,7 @@ function createNPCCooldownManager() {
       footerCloseBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
       footerCloseBtn.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px; font-size: 14px;';
       footerCloseBtn.addEventListener('click', () => {
+        clearQuestsModalLayoutCleanup();
         if (modalRef?.close) {
           modalRef.close();
         } else {
@@ -11258,7 +11664,7 @@ function createNPCCooldownManager() {
       teshaCooldown.clearPendingResponse();
       const lowerText = text.toLowerCase();
 
-      const meetingProgress = getMissionProgress(MEETING_WITH_TESHA_MISSION);
+      const scarabProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
       const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
 
       const wantsSerpentineReward =
@@ -11296,60 +11702,51 @@ function createNPCCooldownManager() {
       const wantsToGiveCoin =
         giveCoinKeywords.some(kw => lowerText.includes(kw)) ||
         (lowerText.includes('yes') && !teshaOfferingSerpentineTower);
-      if (meetingProgress.accepted && !meetingProgress.completed && wantsToGiveCoin) {
+      if (scarabProgress.accepted && !scarabProgress.completed && wantsToGiveCoin) {
         try {
           const questItems = await getQuestItems(false);
           const hasCoin = (questItems[SCARAB_COIN_CONFIG.productName] || 0) >= 1;
           if (hasCoin) {
             await consumeQuestItem(SCARAB_COIN_CONFIG.productName, 1);
-            setMissionProgress(MEETING_WITH_TESHA_MISSION, { accepted: true, completed: true });
-            kingChatState.progressMeetingWithTesha.accepted = true;
-            kingChatState.progressMeetingWithTesha.completed = true;
-            const playerName = getCurrentPlayerName();
-            if (playerName) {
-              await saveKingTibianusProgress(playerName, getAllMissionProgress());
-            }
-            const coinsAdder = globalThis.addGuildCoins ||
-              (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
-              (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
-              (typeof addGuildCoins === 'function' ? addGuildCoins : null);
-            if (coinsAdder) {
-              await coinsAdder(MEETING_WITH_TESHA_MISSION.rewardCoins);
-            } else {
-              console.warn('[Quests Mod][Tesha] addGuildCoins not available, skipping guild coin reward');
-            }
-            updateTeshaArrowState();
+            await completeLostInTheSandsQuest({ showCompletionToast: true });
             const completeLines = [
-              ...MEETING_WITH_TESHA_MISSION.completeLines,
-              MEETING_WITH_TESHA_MISSION.completeCoinLine.replace('{coins}', String(MEETING_WITH_TESHA_MISSION.rewardCoins))
+              ...KING_SCARAB_COIN_MISSION.teshaCompleteLines,
+              KING_SCARAB_COIN_MISSION.teshaCompleteCoinLine.replace('{coins}', String(KING_SCARAB_COIN_MISSION.rewardCoins))
             ].map(line => line.replace(/Player/g, teshaPlayerName));
             teshaCooldown.queueResponse(text, completeLines, addMessage, 'Tesha');
-            NotificationService.showQuestCompleted(MEETING_WITH_TESHA_MISSION, '[Quests Mod][Tesha]', {
-              rewardCoins: MEETING_WITH_TESHA_MISSION.rewardCoins
-            });
             return;
           }
-          teshaCooldown.queueResponse(text, MEETING_WITH_TESHA_MISSION.noCoin, addMessage, 'Tesha');
+          teshaCooldown.queueResponse(text, KING_SCARAB_COIN_MISSION.teshaNoCoin, addMessage, 'Tesha');
           return;
         } catch (err) {
-          console.error('[Quests Mod][Tesha] Error completing Meeting with Tesha:', err);
+          console.error('[Quests Mod][Tesha] Error completing Lost in the Sands:', err);
           teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
           return;
         }
       }
 
+      if (scarabProgress.completed && wantsToGiveCoin) {
+        teshaCooldown.queueResponse(
+          text,
+          KING_SCARAB_COIN_MISSION.teshaAlreadyCompleted.replace(/Player/g, teshaPlayerName),
+          addMessage,
+          'Tesha'
+        );
+        return;
+      }
+
       if (lowerText.includes('mission') || lowerText.includes('quest')) {
-        if (meetingProgress.accepted && !meetingProgress.completed) {
+        if (scarabProgress.accepted && !scarabProgress.completed) {
           teshaCooldown.queueResponse(
             text,
-            MEETING_WITH_TESHA_MISSION.askForCoin.replace(/Player/g, teshaPlayerName),
+            KING_SCARAB_COIN_MISSION.teshaAskForCoin.replace(/Player/g, teshaPlayerName),
             addMessage,
             'Tesha'
           );
           return;
         }
 
-        if (!meetingProgress.completed) {
+        if (!scarabProgress.completed) {
           teshaCooldown.queueResponse(
             text,
             SERPENTINE_TOWER_MISSION.requiresMeetingWithTesha.replace(/Player/g, teshaPlayerName),
@@ -11400,7 +11797,7 @@ function createNPCCooldownManager() {
 
       if (teshaOfferingSerpentineTower && lowerText.includes('yes')) {
         teshaOfferingSerpentineTower = false;
-        if (!getMissionProgress(MEETING_WITH_TESHA_MISSION).completed) {
+        if (!getMissionProgress(KING_SCARAB_COIN_MISSION).completed) {
           teshaCooldown.queueResponse(
             text,
             SERPENTINE_TOWER_MISSION.requiresMeetingWithTesha.replace(/Player/g, teshaPlayerName),
@@ -11582,9 +11979,367 @@ function createNPCCooldownManager() {
     return null;
   }
 
+  function resetNativeQuestLogDialogLayout() {
+    const footer = findQuestLogFooter();
+    const dialog = footer?.closest('div[role="dialog"]');
+    if (!dialog || dialog.querySelector('.quests-modal-content')) return;
+
+    dialog.style.removeProperty('width');
+    dialog.style.removeProperty('min-width');
+    dialog.style.removeProperty('max-width');
+    dialog.style.removeProperty('height');
+    dialog.style.removeProperty('min-height');
+    dialog.style.removeProperty('max-height');
+    dialog.style.removeProperty('box-sizing');
+
+    const contentWrapper = dialog.querySelector(':scope > div') || dialog.firstElementChild;
+    if (contentWrapper) {
+      contentWrapper.style.removeProperty('height');
+      contentWrapper.style.removeProperty('display');
+      contentWrapper.style.removeProperty('flex-direction');
+      contentWrapper.style.removeProperty('flex');
+      contentWrapper.style.removeProperty('min-height');
+    }
+
+    const widgetBottom = dialog.querySelector('.widget-bottom');
+    if (widgetBottom) {
+      widgetBottom.style.removeProperty('display');
+      widgetBottom.style.removeProperty('flex-direction');
+      widgetBottom.style.removeProperty('flex');
+      widgetBottom.style.removeProperty('min-height');
+      widgetBottom.style.removeProperty('overflow');
+    }
+  }
+
   function getKingTabElement() {
     const kingTab = document.getElementById(KING_TIBIANUS_TAB_ID);
     return kingTab && isInDOM(kingTab) ? kingTab : null;
+  }
+
+  function getArenaLeaderboardTabElement() {
+    const tab = document.getElementById(ARENA_LEADERBOARD_TAB_ID);
+    return tab && isInDOM(tab) ? tab : null;
+  }
+
+  function getArenaQuestLogCards() {
+    return [getKingTabElement(), getArenaLeaderboardTabElement()].filter(Boolean);
+  }
+
+  function getArenaProfileUrl(playerName) {
+    return `https://bestiaryarena.com/profile/${encodeURIComponent(String(playerName || '').trim())}`;
+  }
+
+  function appendArenaLeaderboardBox(listElement, content) {
+    const box = createBox({ title: 'Rankings', content });
+    const wrapper = box.querySelector('.column-content-wrapper');
+    if (wrapper) {
+      wrapper.style.overflowX = 'hidden';
+      wrapper.style.minWidth = '0';
+      wrapper.style.maxWidth = '100%';
+      wrapper.style.boxSizing = 'border-box';
+    }
+    listElement.innerHTML = '';
+    listElement.appendChild(box);
+  }
+
+  function createArenaLeaderboardPlaceholderMessage(text) {
+    const message = document.createElement('p');
+    message.style.margin = '0';
+    message.style.color = '#888';
+    message.style.fontStyle = 'italic';
+    message.style.textAlign = 'center';
+    message.textContent = text;
+    return message;
+  }
+
+  const ARENA_LEADERBOARD_GRID_COLUMNS = 'minmax(0, 8%) minmax(0, 30%) minmax(0, 36%) minmax(0, 20%)';
+
+  function createArenaLeaderboardTableHeader() {
+    const gridRowStyle = 'width:100%;max-width:100%;min-width:0;box-sizing:border-box;';
+    const ellipsisCellStyle = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    const header = document.createElement('div');
+    header.className = 'pixel-font-16 text-whiteRegular';
+    header.style.cssText = `${gridRowStyle}display:grid;grid-template-columns:${ARENA_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:0 0 6px;border-bottom:1px solid rgba(255,255,255,0.18);align-items:end;position:sticky;top:0;z-index:1;background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;color:rgb(255,255,255);`;
+
+    const headerLabels = ['#', 'Player', 'Rank', 'Missions\ncompleted'];
+    headerLabels.forEach((label, colIndex) => {
+      const cell = document.createElement('span');
+      cell.className = 'pixel-font-16';
+      cell.style.cssText = colIndex === 0 || colIndex === 3
+        ? `text-align:center;color:rgb(255,255,255);${ellipsisCellStyle}`
+        : `color:rgb(255,255,255);${ellipsisCellStyle}`;
+      if (colIndex === 3) {
+        cell.style.whiteSpace = 'pre-line';
+        cell.style.lineHeight = '1.2';
+      }
+      cell.textContent = label;
+      header.appendChild(cell);
+    });
+    return header;
+  }
+
+  function buildArenaLeaderboardTableShell(loadingText = 'Loading...') {
+    const gridRowStyle = 'width:100%;max-width:100%;min-width:0;box-sizing:border-box;';
+    const table = document.createElement('div');
+    table.style.cssText = `${gridRowStyle}display:flex;flex-direction:column;gap:2px;`;
+    table.appendChild(createArenaLeaderboardTableHeader());
+    table.appendChild(createArenaLeaderboardPlaceholderMessage(loadingText));
+    return table;
+  }
+
+  async function renderArenaLeaderboardInto(listElement, forceRefresh = false) {
+    if (!listElement) return;
+
+    appendArenaLeaderboardBox(listElement, buildArenaLeaderboardTableShell('Loading...'));
+
+    try {
+      const entries = await loadArenaLeaderboard(forceRefresh);
+      const currentPlayer = getCurrentPlayerName();
+
+      if (!entries.length) {
+        appendArenaLeaderboardBox(listElement, createArenaLeaderboardPlaceholderMessage('No rankings yet.'));
+        return;
+      }
+
+      const gridRowStyle = 'width:100%;max-width:100%;min-width:0;box-sizing:border-box;';
+      const ellipsisCellStyle = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      const table = document.createElement('div');
+      table.style.cssText = `${gridRowStyle}display:flex;flex-direction:column;gap:2px;`;
+      table.appendChild(createArenaLeaderboardTableHeader());
+
+      entries.forEach((entry, index) => {
+        const playerName = entry.playerName || 'Unknown';
+        const completedCount = entry.completedCount || 0;
+        const { rankName, color: rankColor } = getArenaRankInfo(completedCount);
+        const isCurrentPlayer = currentPlayer && entry.playerName === currentPlayer;
+        const rowBackground = isCurrentPlayer
+          ? 'rgba(100,150,255,0.22)'
+          : index % 2 === 1
+            ? 'rgba(255,255,255,0.04)'
+            : 'transparent';
+
+        const row = document.createElement('div');
+        row.className = 'pixel-font-16';
+        row.style.cssText = `${gridRowStyle}display:grid;grid-template-columns:${ARENA_LEADERBOARD_GRID_COLUMNS};gap:6px;padding:4px 0;align-items:center;min-height:28px;border-radius:2px;background:${rowBackground};${isCurrentPlayer ? 'box-shadow:inset 2px 0 0 rgb(100,150,255);' : ''}`;
+
+        const rankCell = document.createElement('span');
+        rankCell.className = 'pixel-font-16';
+        rankCell.style.cssText = `min-width:0;text-align:center;font-variant-numeric:tabular-nums;color:${isCurrentPlayer ? 'rgb(230,215,176)' : 'rgb(255,255,255)'};`;
+        rankCell.textContent = String(index + 1);
+
+        const nameLink = document.createElement('a');
+        nameLink.href = getArenaProfileUrl(playerName);
+        nameLink.target = '_blank';
+        nameLink.rel = 'noopener noreferrer';
+        nameLink.className = 'pixel-font-16';
+        nameLink.style.cssText = `margin:0;${ellipsisCellStyle}color:${isCurrentPlayer ? 'rgb(230,215,176)' : 'rgb(255,255,255)'};font-style:normal;cursor:pointer;text-decoration:underline;`;
+        nameLink.textContent = playerName;
+        nameLink.title = `Open ${playerName}'s profile`;
+
+        const rankTitleCell = document.createElement('span');
+        rankTitleCell.className = 'pixel-font-16';
+        rankTitleCell.style.cssText = `color:${rankColor};${ellipsisCellStyle}`;
+        rankTitleCell.textContent = rankName;
+        rankTitleCell.title = rankName;
+
+        const countCell = document.createElement('span');
+        countCell.className = 'pixel-font-16';
+        countCell.style.cssText = `min-width:0;overflow:hidden;text-align:center;font-variant-numeric:tabular-nums;color:${isCurrentPlayer ? 'rgb(230,215,176)' : 'rgb(255,255,255)'};`;
+        countCell.textContent = String(entry.completedCount || 0);
+
+        row.appendChild(rankCell);
+        row.appendChild(nameLink);
+        row.appendChild(rankTitleCell);
+        row.appendChild(countCell);
+        table.appendChild(row);
+      });
+
+      appendArenaLeaderboardBox(listElement, table);
+    } catch (error) {
+      console.error('[Quests Mod] Error loading arena leaderboard:', error);
+      appendArenaLeaderboardBox(listElement, createArenaLeaderboardPlaceholderMessage('Could not load rankings.'));
+    }
+  }
+
+  async function updateArenaLeaderboardDisplay(forceRefresh = false) {
+    const modalList = document.getElementById(ARENA_LEADERBOARD_MODAL_LIST_ID);
+    if (modalList) {
+      await renderArenaLeaderboardInto(modalList, forceRefresh);
+    }
+  }
+
+  function clearQuestLogMissionsRestoreTimeout() {
+    if (questLogMissionsRestoreTimeout) {
+      clearTimeout(questLogMissionsRestoreTimeout);
+      questLogMissionsRestoreTimeout = null;
+    }
+  }
+
+  function clickQuestLogOpener() {
+    const questBlipSelectors = [
+      '#header-slot img[src*="quest-blip"]',
+      'img[src*="quest-blip.png"]',
+      'img[src*="/assets/icons/quest-blip.png"]'
+    ];
+
+    for (const selector of questBlipSelectors) {
+      const blip = document.querySelector(selector);
+      if (blip && blip.offsetParent !== null) {
+        blip.click();
+        return true;
+      }
+    }
+
+    const navButtons = document.querySelectorAll('header button, #header-slot button, [role="banner"] button');
+    for (const btn of navButtons) {
+      const text = (btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (text.includes('quest')) {
+        btn.click();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function restoreQuestLogMissionsView(attempt = 0) {
+    const maxAttempts = 25;
+    const questLogContainer = findQuestLogContainer();
+    if (questLogContainer) {
+      clearQuestLogMissionsRestoreTimeout();
+      pendingQuestLogMissionsRestore = true;
+      kingModeActive = true;
+      handleQuestLogReady(questLogContainer);
+      pendingQuestLogMissionsRestore = false;
+      if (!getKingTabElement()) {
+        createKingTibianusTab();
+      } else {
+        createArenaLeaderboardTab();
+      }
+      verifyKingTibianusTabPosition();
+      verifyArenaLeaderboardTabPosition();
+      const kingTab = getKingTabElement();
+      if (kingTab) {
+        hideQuestLogWidgetsExceptKing(questLogContainer, kingTab);
+      }
+      ensureMissionsFooterButton();
+      updateMissionsButtonState();
+      scheduleArenaRankDisplayUpdate(0);
+      return;
+    }
+
+    if (attempt >= maxAttempts) {
+      clearQuestLogMissionsRestoreTimeout();
+      pendingQuestLogMissionsRestore = false;
+      return;
+    }
+
+    questLogMissionsRestoreTimeout = setTimeout(() => {
+      restoreQuestLogMissionsView(attempt + 1);
+    }, 100);
+  }
+
+  function openQuestLogMissionsView() {
+    clearQuestLogMissionsRestoreTimeout();
+    if (!clickQuestLogOpener()) {
+      console.warn('[Quests Mod] Could not find quest log opener for Back navigation');
+      return;
+    }
+    restoreQuestLogMissionsView(0);
+  }
+
+  function showArenaRankingsModal() {
+    const api = (typeof globalThis !== 'undefined' && globalThis.BestiaryModAPI) || (typeof window !== 'undefined' && window.BestiaryModAPI);
+    if (!api?.ui?.components?.createModal) {
+      console.warn('[Quests Mod] Modal API unavailable for arena rankings');
+      return;
+    }
+
+    clearTimeoutOrInterval(modalTimeout);
+    clearTimeoutOrInterval(dialogTimeout);
+    const shouldRestoreMissions = kingModeActive;
+
+    for (let i = 0; i < 2; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    }
+
+    modalTimeout = setTimeout(() => {
+      const contentDiv = document.createElement('div');
+      applyModalContentStyles(contentDiv, ARENA_LEADERBOARD_MODAL_WIDTH, ARENA_LEADERBOARD_MODAL_MAX_HEIGHT);
+      contentDiv.classList.add('quests-king-chat-content');
+      contentDiv.style.flexDirection = 'column';
+      contentDiv.style.gap = '0';
+
+      const modalBody = document.createElement('div');
+      modalBody.className = 'quests-king-chat-body';
+      modalBody.style.cssText = 'display:flex;flex-direction:column;gap:12px;padding:0;width:100%;min-width:0;height:100%;box-sizing:border-box;max-width:100%;flex:1 1 auto;min-height:0;';
+
+      const mainRow = document.createElement('div');
+      mainRow.className = 'quests-king-chat-main';
+      mainRow.style.cssText = 'width:100%;max-width:100%;min-width:0;flex:1 1 auto;min-height:0;height:100%;display:flex;gap:12px;margin:0;align-self:stretch;box-sizing:border-box;';
+
+      const listContainer = document.createElement('div');
+      listContainer.id = ARENA_LEADERBOARD_MODAL_LIST_ID;
+      listContainer.className = 'arena-leaderboard-modal-list';
+      listContainer.style.cssText = 'flex:1;height:100%;min-height:0;min-width:0;display:flex;flex-direction:column;gap:0;padding:0;box-sizing:border-box;';
+      appendArenaLeaderboardBox(listContainer, buildArenaLeaderboardTableShell('Loading...'));
+      mainRow.appendChild(listContainer);
+      modalBody.appendChild(mainRow);
+      contentDiv.appendChild(modalBody);
+
+      const modalDims = getQuestsModalDimensions(
+        ARENA_LEADERBOARD_MODAL_WIDTH,
+        ARENA_LEADERBOARD_MODAL_MAX_HEIGHT,
+        ARENA_LEADERBOARD_MODAL_MIN_HEIGHT
+      );
+      const modal = api.ui.components.createModal({
+        title: 'Mission Leaderboard',
+        width: modalDims.width,
+        height: modalDims.height,
+        content: contentDiv,
+        buttons: [{
+          text: 'Back',
+          primary: false,
+          onClick: () => {
+            clearQuestsModalLayoutCleanup();
+            if (shouldRestoreMissions) {
+              setTimeout(() => openQuestLogMissionsView(), 100);
+            }
+          }
+        }]
+      });
+
+      setupQuestsModalResponsiveLayout(
+        modal,
+        contentDiv,
+        ARENA_LEADERBOARD_MODAL_WIDTH,
+        ARENA_LEADERBOARD_MODAL_MAX_HEIGHT,
+        ARENA_LEADERBOARD_MODAL_MIN_HEIGHT,
+        (dialog) => {
+          const backButton = Array.from(dialog?.querySelectorAll('.flex.justify-end.gap-2 button') || [])
+            .find((btn) => btn.textContent?.trim() === 'Back');
+          if (backButton) {
+            backButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+            backButton.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px; font-size: 14px;';
+          }
+        }
+      );
+
+      renderArenaLeaderboardInto(listContainer, true).catch((err) => {
+        console.warn('[Quests Mod] Error loading arena rankings modal:', err);
+      });
+
+      modalTimeout = null;
+    }, 50);
+  }
+
+  function bindArenaRankingsOpenButton(tabElement) {
+    const openButton = tabElement?.querySelector(`#${ARENA_RANKINGS_OPEN_BTN_ID}`);
+    if (!openButton || openButton.dataset.questsBound === '1') return;
+    openButton.dataset.questsBound = '1';
+    openButton.addEventListener('click', () => {
+      showArenaRankingsModal();
+    });
   }
 
   function updateMissionsButtonState() {
@@ -11596,9 +12351,11 @@ function createNPCCooldownManager() {
   function showAllQuestLogWidgets(questLogContainer, kingTab) {
     if (!questLogContainer) return;
 
+    const questCards = new Set(getArenaQuestLogCards());
+
     const children = Array.from(questLogContainer.children);
     children.forEach(child => {
-      if (child === kingTab) {
+      if (questCards.has(child)) {
         if (!child.dataset.questsOriginalDisplay) {
           child.dataset.questsOriginalDisplay = child.style.display || '';
         }
@@ -11620,6 +12377,7 @@ function createNPCCooldownManager() {
   function hideQuestLogWidgetsExceptKing(questLogContainer, kingTab) {
     if (!questLogContainer || !kingTab) return;
 
+    const visibleCards = new Set(getArenaQuestLogCards());
     const children = Array.from(questLogContainer.children);
     children.forEach(child => {
       if (!child.dataset) return;
@@ -11627,17 +12385,21 @@ function createNPCCooldownManager() {
       if (!child.dataset.questsOriginalDisplay) {
         child.dataset.questsOriginalDisplay = child.style.display || '';
       }
-      child.style.display = child === kingTab ? '' : 'none';
+      child.style.display = visibleCards.has(child) ? '' : 'none';
     });
   }
 
   function resetQuestLogView(questLogContainer = findQuestLogContainer()) {
     const kingTab = getKingTabElement();
+    const leaderboardTab = getArenaLeaderboardTabElement();
     if (!questLogContainer) {
       kingModeActive = false;
       updateMissionsButtonState();
       if (kingTab) {
         kingTab.style.display = 'none';
+      }
+      if (leaderboardTab) {
+        leaderboardTab.style.display = 'none';
       }
       return;
     }
@@ -11647,6 +12409,9 @@ function createNPCCooldownManager() {
     if (kingTab) {
       kingTab.style.display = 'none';
     }
+    if (leaderboardTab) {
+      leaderboardTab.style.display = 'none';
+    }
     updateMissionsButtonState();
   }
 
@@ -11654,13 +12419,18 @@ function createNPCCooldownManager() {
     const questLogContainer = findQuestLogContainer();
     if (!questLogContainer) return;
 
+    resetNativeQuestLogDialogLayout();
+
     if (!getKingTabElement()) {
       createKingTibianusTab();
+    } else {
+      createArenaLeaderboardTab();
     }
     const kingTab = getKingTabElement();
     if (!kingTab) return;
 
     verifyKingTibianusTabPosition();
+    verifyArenaLeaderboardTabPosition();
 
     if (!kingModeActive) {
       hideQuestLogWidgetsExceptKing(questLogContainer, kingTab);
@@ -11717,17 +12487,27 @@ function createNPCCooldownManager() {
   function handleQuestLogReady(questLogContainer) {
     if (!questLogContainer) return;
 
+    resetNativeQuestLogDialogLayout();
     ensureMissionsFooterButton();
     const kingTab = getKingTabElement();
+    const leaderboardTab = getArenaLeaderboardTabElement();
+    if (kingTab && !leaderboardTab) {
+      createArenaLeaderboardTab();
+    }
 
     if (lastQuestLogContainer !== questLogContainer) {
       lastQuestLogContainer = questLogContainer;
-      kingModeActive = false;
-      if (kingTab) {
-        kingTab.style.display = 'none';
+      if (!pendingQuestLogMissionsRestore) {
+        kingModeActive = false;
+        if (kingTab) {
+          kingTab.style.display = 'none';
+        }
+        if (leaderboardTab) {
+          leaderboardTab.style.display = 'none';
+        }
+        showAllQuestLogWidgets(questLogContainer, kingTab);
+        updateMissionsButtonState();
       }
-      showAllQuestLogWidgets(questLogContainer, kingTab);
-      updateMissionsButtonState();
     }
   }
 
@@ -11753,12 +12533,80 @@ function createNPCCooldownManager() {
     return null;
   }
 
+  function getArenaLeaderboardTabHtml() {
+    return `
+      <div class="flex w-full flex-col items-center text-center">
+        <p class="w-full text-whiteHighlight">Mission Leaderboard</p>
+        <div class="flex gap-1 mt-1 w-full">
+          <button class="focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight" id="${ARENA_RANKINGS_OPEN_BTN_ID}">
+            View Leaderboard
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function getArenaLeaderboardTabClassName() {
+    return 'frame-1 surface-regular relative grid gap-2 p-1.5 text-center data-[disabled=\'true\']:order-last md:data-[highlighted=\'true\']:brightness-[1.2]';
+  }
+
+  function createArenaLeaderboardTab() {
+    const questLogContainer = findQuestLogContainer();
+    const kingTab = getKingTabElement();
+    if (!questLogContainer || !kingTab) return;
+
+    let tabElement = document.getElementById(ARENA_LEADERBOARD_TAB_ID);
+    if (tabElement) {
+      tabElement.className = getArenaLeaderboardTabClassName();
+      tabElement.style.order = '-3';
+      tabElement.innerHTML = getArenaLeaderboardTabHtml();
+      bindArenaRankingsOpenButton(tabElement);
+      verifyArenaLeaderboardTabPosition();
+      return;
+    }
+
+    tabElement = document.createElement('div');
+    tabElement.id = ARENA_LEADERBOARD_TAB_ID;
+    tabElement.className = getArenaLeaderboardTabClassName();
+    tabElement.setAttribute('data-highlighted', 'false');
+    tabElement.setAttribute('data-disabled', 'false');
+    tabElement.style.order = '-3';
+    tabElement.innerHTML = getArenaLeaderboardTabHtml();
+    tabElement.dataset.questsOriginalDisplay = tabElement.style.display || '';
+    tabElement.style.display = 'none';
+
+    questLogContainer.insertBefore(tabElement, kingTab);
+
+    bindArenaRankingsOpenButton(tabElement);
+  }
+
+  function verifyArenaLeaderboardTabPosition() {
+    const kingTab = getKingTabElement();
+    const leaderboardTab = getArenaLeaderboardTabElement();
+    const questLogContainer = findQuestLogContainer();
+    if (!kingTab || !leaderboardTab || !questLogContainer) return;
+    if (leaderboardTab.parentNode !== questLogContainer) return;
+
+    if (leaderboardTab.style.order !== '-3') {
+      leaderboardTab.style.order = '-3';
+    }
+
+    const kingIndex = Array.from(questLogContainer.children).indexOf(kingTab);
+    const leaderboardIndex = Array.from(questLogContainer.children).indexOf(leaderboardTab);
+    if (leaderboardIndex >= kingIndex) {
+      leaderboardTab.remove();
+      questLogContainer.insertBefore(leaderboardTab, kingTab);
+    }
+  }
+
   function createKingTibianusTab() {
     console.log('[Quests Mod] Creating King Tibianus tab');
     
     const existingTab = document.getElementById(KING_TIBIANUS_TAB_ID);
     if (existingTab) {
       console.log('[Quests Mod] King Tibianus tab already exists, skipping');
+      createArenaLeaderboardTab();
+      verifyArenaLeaderboardTabPosition();
       return;
     }
 
@@ -11853,7 +12701,9 @@ function createNPCCooldownManager() {
     }
 
     // Initialize rank display
-    updateArenaRankDisplay();
+    scheduleArenaRankDisplayUpdate(0);
+    createArenaLeaderboardTab();
+    verifyArenaLeaderboardTabPosition();
 
     console.log('[Quests Mod] King Tibianus tab created successfully!');
   }
@@ -12104,7 +12954,7 @@ function createNPCCooldownManager() {
   // - checkMissionState(): Check current mission state in console
   // - setMissionAccepted(missionId): Set a mission as accepted (default: king_letter_al_dee)
   // - resetQuest(missionId): Reset a quest to not accepted/not completed
-  //   Available mission IDs: 'king_copper_key', 'king_red_dragon', 'king_letter_al_dee', 'king_monks_study', 'costello_queen_banshees', 'follower_of_zathroth', 'mother_of_all_spiders', 'al_dee_fishing_gold', 'al_dee_golden_rope', 'meeting_with_tesha', 'serpentine_tower'
+  //   Available mission IDs: 'king_copper_key', 'king_red_dragon', 'king_letter_al_dee', 'king_monks_study', 'costello_queen_banshees', 'follower_of_zathroth', 'mother_of_all_spiders', 'al_dee_fishing_gold', 'al_dee_golden_rope', 'king_scarab_coin', 'serpentine_tower'
   // - resetAlDeeFishing(): Convenience function to reset Al Dee fishing mission specifically
   // - resetMeetingWithTesha(): Reset Meeting with Tesha and remove Scarab Coin from inventory
   // - resetAllQuests(): Reset ALL quests, quest items, Al Dee shop purchases, Copper Key received status, DELETE all Firebase entries, and grant Silver Token
@@ -12209,7 +13059,6 @@ function createNPCCooldownManager() {
         'mother_of_all_spiders': 'progressMotherOfAllSpiders',
         'al_dee_fishing_gold': 'progressAlDeeFishing',
         'al_dee_golden_rope': 'progressAlDeeGoldenRope',
-        'meeting_with_tesha': 'progressMeetingWithTesha',
         'king_scarab_coin': 'progressScarabHunt',
         'serpentine_tower': 'progressSerpentineTower'
       };
@@ -12238,7 +13087,6 @@ function createNPCCooldownManager() {
         motherOfAllSpiders: kingChatState.progressMotherOfAllSpiders,
         alDeeFishing: kingChatState.progressAlDeeFishing,
         alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope,
-        meetingWithTesha: kingChatState.progressMeetingWithTesha,
         scarabHunt: kingChatState.progressScarabHunt,
         serpentineTower: kingChatState.progressSerpentineTower,
         costelloVisited: kingChatState.costelloVisited,
@@ -12267,7 +13115,7 @@ function createNPCCooldownManager() {
         }
       }
 
-      if (missionId === 'meeting_with_tesha') {
+      if (missionId === 'king_scarab_coin') {
         const questItems = await getQuestItems(false);
         const scarabCount = questItems[SCARAB_COIN_CONFIG.productName] || 0;
         if (scarabCount > 0) {
@@ -12291,10 +13139,10 @@ function createNPCCooldownManager() {
     await resetQuest('al_dee_fishing_gold');
   };
 
-  // Debug function to reset Meeting with Tesha and remove Scarab Coin
+  // Debug function to reset Lost in the Sands and remove Scarab Coin
   window.resetMeetingWithTesha = async function() {
-    console.log('[Quests Mod][Dev] Resetting Meeting with Tesha');
-    await resetQuest('meeting_with_tesha');
+    console.log('[Quests Mod][Dev] Resetting Lost in the Sands');
+    await resetQuest('king_scarab_coin');
   };
 
   // Seven seals (Queen Banshees): complete each seal separately. Use setSealCompleted(sealIndex, true) to mark a seal done.
@@ -16079,8 +16927,8 @@ function createNPCCooldownManager() {
 
   async function updateTeshaArrowState(boardContext) {
     try {
-      const meetingProgress = getMissionProgress(MEETING_WITH_TESHA_MISSION);
-      const qualifiesForArrow = meetingProgress.completed || await hasScarabCoinInInventory();
+      const scarabProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
+      const qualifiesForArrow = scarabProgress.completed || await hasScarabCoinInInventory();
       const shouldShow = isOnRoomByName(DESERT_DIGGING_CONFIG.TARGET_MAP) &&
         !isBoardBattleActive(boardContext) &&
         countAllyPiecesOnBoard(boardContext) === 0 &&
@@ -16386,6 +17234,8 @@ function createNPCCooldownManager() {
 
   function cleanup() {
     clearQuestsModalLayoutCleanup();
+    clearQuestLogMissionsRestoreTimeout();
+    pendingQuestLogMissionsRestore = false;
     if (inventoryObserver) {
       try { 
         inventoryObserver.disconnect(); 
@@ -16745,12 +17595,16 @@ function createNPCCooldownManager() {
         'Dragon Claw': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'completed' },
         'Light Shovel': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'completed' },
         'The Holy Tible': { missionId: AL_DEE_GOLDEN_ROPE_MISSION.id, requiredStatus: 'completed' },
-        [SCARAB_COIN_CONFIG.productName]: { missionId: MEETING_WITH_TESHA_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
+        [SCARAB_COIN_CONFIG.productName]: { missionId: KING_SCARAB_COIN_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         [DESTROY_FIELD_RUNE_CONFIG.productName]: {
           missionId: SERPENTINE_TOWER_MISSION.id,
           requiredStatus: 'accepted',
           removeWhenCompleted: true,
           removeWhenPutridChamberComplete: true
+        },
+        [SCORPION_SCEPTRE_CONFIG.productName]: {
+          missionId: SERPENTINE_TOWER_MISSION.id,
+          requiredStatus: 'completed'
         }
       };
 
@@ -16831,17 +17685,22 @@ function createNPCCooldownManager() {
   }
 
   async function loadMissionProgressOnInit() {
-    try {
-      const playerName = getCurrentPlayerName();
-      if (!playerName) {
-        console.log('[Quests Mod] No player name available for mission progress loading');
-        return;
-      }
+    if (missionProgressLoadPromise) {
+      return missionProgressLoadPromise;
+    }
 
-      const progress = await getKingTibianusProgress(playerName);
+    missionProgressLoadPromise = (async () => {
+      try {
+        const playerName = getCurrentPlayerName();
+        if (!playerName) {
+          console.log('[Quests Mod] No player name available for mission progress loading');
+          return;
+        }
 
-      // Update kingChatState with loaded progress
-      if (progress) {
+        const progress = await getKingTibianusProgress(playerName);
+
+        // Update kingChatState with loaded progress
+        if (progress) {
         // Backward compatibility: old shape {accepted, completed}
         if (progress.accepted !== undefined) {
           kingChatState.progressCopper = {
@@ -16887,6 +17746,19 @@ function createNPCCooldownManager() {
           kingChatState.sevenSealsCompleted = progress.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
         } else if (Array.isArray(progress.sevenSealsVisited)) {
           kingChatState.sevenSealsCompleted = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.map(roomName => progress.sevenSealsVisited.includes(roomName));
+        }
+
+        const lostInTheSandsMigrated = migrateCombinedLostInTheSandsQuest(progress);
+        if (lostInTheSandsMigrated) {
+          const currentPlayer = getCurrentPlayerName();
+          if (currentPlayer) {
+            try {
+              await saveKingTibianusProgress(currentPlayer, getAllMissionProgress());
+              console.log('[Quests Mod] Migrated Lost in the Sands / Meeting with Tesha progress');
+            } catch (err) {
+              console.error('[Quests Mod] Error saving Lost in the Sands migration:', err);
+            }
+          }
         }
 
         // If Al Dee fishing mission is completed, mark Iron Ore quest as completed
@@ -16936,8 +17808,7 @@ function createNPCCooldownManager() {
         }
 
         // Clean up quest items that shouldn't exist if missions aren't completed
-        await syncScarabHuntFromInventory();
-        await syncMeetingWithTeshaQuestFromInventory();
+        await syncLostInTheSandsQuestFromInventory();
         const serpentinePrereqReset = syncSerpentineTowerQuestPrerequisites();
         if (serpentinePrereqReset) {
           const playerName = getCurrentPlayerName();
@@ -17007,9 +17878,15 @@ function createNPCCooldownManager() {
       } else {
         console.log('[Quests Mod] No mission progress found in Firebase');
       }
-    } catch (error) {
-      console.error('[Quests Mod] Error loading mission progress on init:', error);
-    }
+      } catch (error) {
+        console.error('[Quests Mod] Error loading mission progress on init:', error);
+      } finally {
+        missionProgressLoaded = true;
+        scheduleArenaRankDisplayUpdate(0);
+      }
+    })();
+
+    return missionProgressLoadPromise;
   }
 
   // Start monitoring for quest log

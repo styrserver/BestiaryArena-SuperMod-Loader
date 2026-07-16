@@ -20,6 +20,7 @@ const defaultConfig = {
   showAbilityOnHover: false,
   showSetupLabels: false,
   enableSetupShortcutsAndHover: true,
+  hotkeySetupSource: 'betterSetups', // 'betterSetups' | 'setupManager'
   enableShinyEnemies: false,
   enableAutoplayRefresh: false,
   alwaysNavigateMaxFloor: false,
@@ -71,6 +72,7 @@ const defaultConfig = {
   hotkeyStartOrSkip: 'z',
   hotkeyToggleTurboMode: 'y',
   hotkeyOpenBetterTeleporter: 'p',
+  hotkeyAutoSetup: 'u',
   hotkeySetupSlot1: 'f1',
   hotkeySetupSlot2: 'f2',
   hotkeySetupSlot3: 'f3',
@@ -158,6 +160,8 @@ if (config.hotkeyOpenBetterTeleporter === undefined) {
 config.hotkeyOpenBetterTeleporter = sanitizeStoredHotkey(config.hotkeyOpenBetterTeleporter, '');
 delete config.hotkeyOpenRoomHopper;
 config.hotkeyOpenCyclopedia = sanitizeStoredHotkey(config.hotkeyOpenCyclopedia, '');
+if (config.hotkeyAutoSetup === undefined) config.hotkeyAutoSetup = 'u';
+config.hotkeyAutoSetup = sanitizeStoredHotkey(config.hotkeyAutoSetup, '');
 for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
   const setupKey = `hotkeySetupSlot${setupSlot}`;
   if (config[setupKey] === undefined) config[setupKey] = `f${setupSlot}`;
@@ -165,6 +169,7 @@ for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
 }
 if (config.enableHotkeys === undefined) config.enableHotkeys = false;
 if (config.enableSetupShortcutsAndHover === undefined) config.enableSetupShortcutsAndHover = true;
+if (config.hotkeySetupSource !== 'setupManager') config.hotkeySetupSource = 'betterSetups';
 if (config.defaultInventorySticky === undefined) config.defaultInventorySticky = false;
 if (config.alwaysNavigateMaxFloor === undefined) config.alwaysNavigateMaxFloor = false;
 if (config.autoHideNonShinyNonAwakenedMonsters === undefined) config.autoHideNonShinyNonAwakenedMonsters = false;
@@ -1706,7 +1711,120 @@ function clickBetterSetupSlotFromHotkey(zeroBasedSlotIndex) {
     );
     return;
   }
+  const setupName = getBetterSetupSlotDisplayName(btn, zeroBasedSlotIndex);
   btn.click();
+  showSetupLoadedFromHotkeyToast(setupName);
+}
+
+/**
+ * Setup Manager map shortcut buttons for non-auto-setup saved setups only.
+ * Skips Auto-Setup and any saved setup that matches Auto-setup (those stay on hotkeyAutoSetup / U).
+ * @returns {HTMLButtonElement[]}
+ */
+function findSetupManagerSavedSetupButtonsInOrder() {
+  const buttons = document.querySelectorAll('button.setup-manager-map-shortcut-btn');
+  const out = [];
+  for (const btn of buttons) {
+    if ((btn.dataset.setupName || '') === 'Auto-Setup') continue;
+    if (btn.dataset.matchesAutoSetup === 'true') continue;
+    out.push(btn);
+  }
+  return out;
+}
+
+function clickSetupManagerSlotFromHotkey(zeroBasedSlotIndex) {
+  const buttons = findSetupManagerSavedSetupButtonsInOrder();
+  const btn = buttons[zeroBasedSlotIndex];
+  if (!btn) {
+    console.warn(
+      `[Mod Settings] Setup Manager hotkey slot ${zeroBasedSlotIndex + 1}: no matching saved setup button (found ${buttons.length})`
+    );
+    return;
+  }
+  // Setup Manager's own click handler already toasts "Successfully loaded {name}".
+  btn.click();
+}
+
+function clickSetupSlotFromHotkey(zeroBasedSlotIndex) {
+  if (config.hotkeySetupSource === 'setupManager') {
+    clickSetupManagerSlotFromHotkey(zeroBasedSlotIndex);
+    return;
+  }
+  clickBetterSetupSlotFromHotkey(zeroBasedSlotIndex);
+}
+
+function escapeHtmlForToast(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function getBetterSetupSlotDisplayName(btn, zeroBasedSlotIndex) {
+  const label = ((btn && btn.textContent) || '').replace(/\s+/g, ' ').trim();
+  const match = label.match(/(?:Setup|Save)\s*\(([^)]*)\)/i);
+  if (match) {
+    const inner = (match[1] || '').trim();
+    if (inner) return inner;
+  }
+  if (label) return label;
+  return `Setup ${zeroBasedSlotIndex + 1}`;
+}
+
+function showSetupLoadedFromHotkeyToast(setupName) {
+  const name = String(setupName || '').trim();
+  if (!name) return;
+  try {
+    createToast({
+      message: `<span class="text-success">${tReplace('mods.betterUI.hotkeySetupLoaded', {
+        name: escapeHtmlForToast(name)
+      })}</span>`,
+      type: 'success',
+      duration: 3000
+    });
+  } catch (error) {
+    console.warn('[Mod Settings] Could not show setup loaded toast:', error);
+  }
+}
+
+/**
+ * Find the game Auto-setup button (same detection as Stamina Optimizer's findAutoSetupButton).
+ * @returns {HTMLButtonElement|null}
+ */
+function findAutoSetupButtonFromHotkey() {
+  const autoSetupTexts = [
+    t('mods.betterTasker.autoSetup'),
+    t('mods.betterBoostedMaps.autoSetup'),
+    t('mods.raidHunter.autoSetup'),
+    'Auto-setup',
+    'Auto setup',
+    'Autosetup',
+    'Autoconfigurar'
+  ]
+    .filter((text) => typeof text === 'string' && text.trim() && !text.includes('.'))
+    .map((text) => text.trim().toLowerCase());
+
+  for (const button of document.querySelectorAll('button')) {
+    const buttonText = (button.textContent || '').trim();
+    const normalizedText = buttonText.toLowerCase();
+    const hasAutoSetupText = autoSetupTexts.some((candidate) => normalizedText.includes(candidate));
+    const hasWandIcon = !!button.querySelector('svg.lucide-wand-sparkles');
+    if (hasAutoSetupText || (hasWandIcon && normalizedText.includes('auto'))) {
+      return button;
+    }
+  }
+  return null;
+}
+
+function clickAutoSetupFromHotkey() {
+  const btn = findAutoSetupButtonFromHotkey();
+  if (!btn) {
+    console.warn('[Mod Settings] Auto-setup hotkey pressed but Auto-setup button was not found');
+    return;
+  }
+  btn.click();
+  showSetupLoadedFromHotkeyToast(t('mods.betterUI.hotkeyLabelAutoSetup'));
 }
 
 /**
@@ -1965,13 +2083,20 @@ function handleGlobalHotkeys(event) {
     openBetterTeleporterFromHotkey();
     return;
   }
+  const autoSetupId = sanitizeStoredHotkey(config.hotkeyAutoSetup, '');
+  if (autoSetupId && pressedId === autoSetupId) {
+    event.preventDefault();
+    event.stopPropagation();
+    clickAutoSetupFromHotkey();
+    return;
+  }
   for (let i = 0; i < 8; i++) {
     const setupCfgKey = `hotkeySetupSlot${i + 1}`;
     const setupKeyId = sanitizeStoredHotkey(config[setupCfgKey], '');
     if (setupKeyId && pressedId === setupKeyId) {
       event.preventDefault();
       event.stopPropagation();
-      clickBetterSetupSlotFromHotkey(i);
+      clickSetupSlotFromHotkey(i);
       return;
     }
   }
@@ -2086,6 +2211,7 @@ const MODS_HOTKEY_UI_ROWS = [
 ];
 
 const SETUP_HOTKEY_UI_ROWS = [
+  { configKey: 'hotkeyAutoSetup', captureId: 'hotkey-auto-setup-capture-btn', resetId: 'hotkey-auto-setup-reset-btn', displayFallback: '' },
   { configKey: 'hotkeySetupSlot1', captureId: 'hotkey-setup-slot-1-capture-btn', resetId: 'hotkey-setup-slot-1-reset-btn', displayFallback: '' },
   { configKey: 'hotkeySetupSlot2', captureId: 'hotkey-setup-slot-2-capture-btn', resetId: 'hotkey-setup-slot-2-reset-btn', displayFallback: '' },
   { configKey: 'hotkeySetupSlot3', captureId: 'hotkey-setup-slot-3-capture-btn', resetId: 'hotkey-setup-slot-3-reset-btn', displayFallback: '' },
@@ -6645,6 +6771,16 @@ function showSettingsModal() {
           'display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; width: 100%; min-width: 0; box-sizing: border-box;';
         const hotkeyLabelStyle =
           'color: #ccc; flex: 1 1 auto; min-width: 0; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+        const autoSetupHotkeyRowHtml = `
+            <div class="hotkey-setup-row" style="${hotkeyRowStyle}">
+              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelAutoSetup')}</span>
+              <button type="button" id="hotkey-auto-setup-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                U
+              </button>
+              <button type="button" id="hotkey-auto-setup-reset-btn" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>`;
         const setupHotkeyRowsHtml = [1, 2, 3, 4, 5, 6, 7, 8]
           .map(
             (i) => `
@@ -6912,6 +7048,14 @@ function showSettingsModal() {
           </div>
           <div id="hotkeys-setups-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionSetups')}</h4>
+            ${autoSetupHotkeyRowHtml}
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0;">
+              <span style="color: #ccc;">${t('mods.betterUI.hotkeySetupSource')}</span>
+              <select id="hotkey-setup-source-select" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+                <option value="betterSetups">${t('mods.betterUI.hotkeySetupSourceBetterSetups')}</option>
+                <option value="setupManager">${t('mods.betterUI.hotkeySetupSourceSetupManager')}</option>
+              </select>
+            </div>
             <div id="hotkeys-setups-section">${setupHotkeyRowsHtml}</div>
           </div>
           </div>
@@ -7784,6 +7928,17 @@ function showSettingsModal() {
         'p',
         ''
       );
+      bindHotkeyConfigRowInModal(
+        content.querySelector('#hotkey-auto-setup-capture-btn'),
+        content.querySelector('#hotkey-auto-setup-reset-btn'),
+        'hotkeyAutoSetup',
+        'u',
+        ''
+      );
+      const hotkeySetupSourceSelect = content.querySelector('#hotkey-setup-source-select');
+      if (hotkeySetupSourceSelect) {
+        createSettingsDropdownHandler('hotkeySetupSource')(hotkeySetupSourceSelect);
+      }
       for (let slot = 1; slot <= 8; slot++) {
         bindHotkeyConfigRowInModal(
           content.querySelector(`#hotkey-setup-slot-${slot}-capture-btn`),

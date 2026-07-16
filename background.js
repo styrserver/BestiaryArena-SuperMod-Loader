@@ -1296,9 +1296,23 @@ browserAPI.tabs.onRemoved.addListener((tabId) => {
   registeredTabs.delete(tabId);
 });
 
-// Mirrors content_scripts exclude_matches in manifest.json — when a URL is excluded,
-// no content script runs, so checkAPI fails and this listener would otherwise inject
-// injector.js via scripting.executeScript and bypass the exclusion.
+// Mirrors content_scripts matches in the manifest — only inject on allowlisted game URLs
+// (e.g. /game and /pt/game). Without this, tabs.onUpdated would inject injector.js on any
+// bestiaryarena.com page when checkAPI fails.
+const BESTIARY_MOD_INJECTION_MATCH_PATTERNS = (() => {
+  try {
+    const patterns = new Set();
+    for (const entry of browserAPI.runtime.getManifest().content_scripts || []) {
+      for (const pattern of entry.matches || []) {
+        patterns.add(pattern);
+      }
+    }
+    return [...patterns];
+  } catch {
+    return [];
+  }
+})();
+
 const BESTIARY_MOD_INJECTION_EXCLUDE_PATTERNS = (() => {
   try {
     const patterns = new Set();
@@ -1352,20 +1366,27 @@ function urlMatchesChromeMatchPattern(url, pattern) {
   return pathRegex.test(parsedUrl.pathname);
 }
 
-function isBestiaryExcludedFromModInjectionUrl(url) {
+function isBestiaryAllowedForModInjectionUrl(url) {
   try {
     const hostname = new URL(url).hostname;
     if (!hostname.endsWith('bestiaryarena.com')) return false;
-    return BESTIARY_MOD_INJECTION_EXCLUDE_PATTERNS.some(
-      (pattern) => urlMatchesChromeMatchPattern(url, pattern)
-    );
+    if (BESTIARY_MOD_INJECTION_EXCLUDE_PATTERNS.some((pattern) => urlMatchesChromeMatchPattern(url, pattern))) {
+      return false;
+    }
+    if (BESTIARY_MOD_INJECTION_MATCH_PATTERNS.length > 0) {
+      return BESTIARY_MOD_INJECTION_MATCH_PATTERNS.some(
+        (pattern) => urlMatchesChromeMatchPattern(url, pattern)
+      );
+    }
+    const path = new URL(url).pathname.replace(/\/+$/, '') || '/';
+    return path === '/game' || path === '/pt/game';
   } catch {
     return false;
   }
 }
 
 browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (tab.url && tab.url.match(/bestiaryarena\.com/) && !isBestiaryExcludedFromModInjectionUrl(tab.url)) {
+  if (tab.url && tab.url.match(/bestiaryarena\.com/) && !isBestiaryAllowedForModInjectionUrl(tab.url)) {
     if (changeInfo.status === 'loading') {
       registeredTabs.delete(tabId);
       return;
@@ -1373,7 +1394,7 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 
   if (changeInfo.status === 'complete' && tab.url && tab.url.match(/bestiaryarena\.com/)) {
-    if (isBestiaryExcludedFromModInjectionUrl(tab.url)) {
+    if (!isBestiaryAllowedForModInjectionUrl(tab.url)) {
       return;
     }
     console.log(`Tab ${tabId} updated with URL ${tab.url}`);
