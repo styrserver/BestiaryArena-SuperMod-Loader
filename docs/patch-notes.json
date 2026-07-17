@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "4.5.5",
+      "changes": [
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Quest access tiles (NPCs, holes, ladders, levers, fishing, and digging) now show a pulsing tile highlight (opacity 0–50%) when the board is empty; the effect is removed once creatures are placed, matching the Tesha tutorial arrow behavior. Highlighted pickup tiles use a right-click context menu before granting the item. A compact tutorial tooltip (game frame styling) appears above the first such tile. An optional side mission can be accepted and completed in parallel with the main King Tibianus chain."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Mission progress sync waits for the player name and retries on player state so fresh sessions hydrate from Firebase reliably. Arena leaderboard entries are removed when completed mission count is zero; full quest reset also clears the leaderboard row."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Quest tile highlight overlays now match scaled tile size at all zoom levels, refresh when quest inventory changes, and show a pointer cursor on the highlight hitbox."
+        },
+        {
+          "mod": "Bestiary Automator",
+          "type": "changed",
+          "text": "Seamless autoplay now automatically unchecks the session widget's Stop after a defeat option so defeats are handled by the mod instead of stopping the session."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Fixed panel z-index (150) so the panel stays above Autoseller's floating auto badge (100) but behind native right-click context menus (z-modals = 200)."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Fixed floating auto badge z-index (100) so Hunt Analyzer and Awaken Tracker panels can stack above it while both stay below native game context menus."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Fixed automation stalling on active tasks when the quest cooldown expired: in-progress hunts (gameId set) now take priority over new-task acceptance, so navigation and autoplay resume instead of looping on skipped accept attempts."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Fixed panel z-index (150) so the panel stays above Autoseller's floating auto badge (100) but behind native right-click context menus (z-modals = 200). Updated autoplay session timer parsing for the new Session widget (with and without run count)."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "Fixed intermittent mod load failures where only default bundled mods ran: registerLocalMods responses now use the message format local_mods expects, the init fallback timer is cancelled when stored states arrive, and a post-batch catch-up loads any enabled mods missed during a race with the fallback batch. Mod-button settings panels (Bestiary Automator, Board Analyzer, etc.) now stack above mod UI panels such as Awaken Tracker and Hunt Analyzer."
+        }
+      ]
+    },
+    {
       "version": "4.5.4",
       "changes": [
         {
@@ -34,7 +84,7 @@
         {
           "mod": "Quests",
           "type": "changed",
-          "text": "Lost in the Sands and Meeting with Tesha are one quest (finishes when you hand the scarab coin to Tesha). Serpentine Tower Quest renamed Serpentine Basement Quest; Putrid Chamber is The Cursed Chamber in quest logs and battle toasts (Battling The Cursed Chamber). Tesha objective shows only when the scarab coin is in inventory. Scorpion Sceptre stays in inventory only after the basement quest is completed. Mission list uses story order; scroll position is preserved when switching missions."
+          "text": "Related split quest lines are now treated as one quest with unified completion. Quest and encounter labels are consistent between the quest log and battle toasts. Objectives appear only when their prerequisites are met. Certain quest items remain in inventory only after the linked quest is finished. Mission list uses story order; scroll position is preserved when switching missions."
         },
         {
           "mod": "Setup Manager",
@@ -49,7 +99,7 @@
         {
           "mod": "Quests",
           "type": "fixed",
-          "text": "Firebase save/load for Lost in the Sands and Serpentine Basement Quest: migration from the old split quests, persisting putridChamberComplete and destroyFieldRuneTaken, and repair when serpentine progress existed but scarab was wrongly reset on refresh."
+          "text": "Firebase save/load reliability for merged quest lines: migration from older split-quest progress, persistence of mid-quest flags, and repair when progress was partially reset on refresh."
         }
       ]
     },

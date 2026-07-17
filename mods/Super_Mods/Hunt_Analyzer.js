@@ -520,7 +520,9 @@ function injectHuntAnalyzerStyles() {
             color: var(--ha-text);
             padding: 0;
             overflow: hidden;
-            z-index: 9999;
+            /* Above Autoseller auto badges (100) and board UI (z-1..z-10),
+               below native game context menus (z-modals = 200). */
+            z-index: 150;
             display: flex;
             flex-direction: column;
             height: 100%;
@@ -1011,7 +1013,7 @@ function showPanelFeedback(panel, text, isSuccess = true) {
     feedbackMessage.style.color = '#FFFFFF';
     feedbackMessage.style.padding = '8px 12px';
     feedbackMessage.style.borderRadius = '5px';
-    feedbackMessage.style.zIndex = '10001';
+    feedbackMessage.style.zIndex = '100';
     feedbackMessage.style.opacity = '0';
     feedbackMessage.style.transition = 'opacity 0.3s ease-in-out';
     panel.appendChild(feedbackMessage);
@@ -1510,28 +1512,33 @@ function getHuntAnalyzerStorageResetDismissHint() {
 // =======================
 // Parse autoplay session time from DOM text content
 function parseAutoplayTime(textContent) {
-  const enText = "Autoplay session";
-  const ptText = "Sessão autoplay";
-  
-  // Pattern for H:MM:SS format (1 hour and above)
-  const hourPattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+):(\\d+)\\)`);
-  const hourMatch = textContent.match(hourPattern);
-  if (hourMatch) {
-    const hours = parseInt(hourMatch[1]);
-    const minutes = parseInt(hourMatch[2]);
-    const seconds = parseInt(hourMatch[3]);
-    return (hours * 60) + minutes + (seconds / 60);
+  if (!textContent) return null;
+
+  const normalized = textContent.replace(/\s+/g, ' ').trim();
+  const patterns = [
+    // New widget with runs: Session (5 runs) (2:13) / Sessão (7 runs) (2:43)
+    /(?:Session|Sessão)\s*\(\d+\s*runs?\)\s*\((\d+):(\d+)(?::(\d+))?\)/i,
+    // New widget with no runs yet: Session (0:12) / Sessão (0:12)
+    /(?:Session|Sessão)\s*\((\d+):(\d+)(?::(\d+))?\)/i,
+    // Legacy widget: Autoplay session (2:13) / Sessão autoplay (2:43)
+    /(?:Autoplay session|Sessão autoplay)\s*\((\d+):(\d+)(?::(\d+))?\)/
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match) {
+      if (match[3] !== undefined) {
+        const hours = parseInt(match[1], 10);
+        const minutes = parseInt(match[2], 10);
+        const seconds = parseInt(match[3], 10);
+        return (hours * 60) + minutes + (seconds / 60);
+      }
+      const minutes = parseInt(match[1], 10);
+      const seconds = parseInt(match[2], 10);
+      return minutes + (seconds / 60);
+    }
   }
-  
-  // Pattern for MM:SS format (under 1 hour)
-  const minutePattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+)\\)`);
-  const minuteMatch = textContent.match(minutePattern);
-  if (minuteMatch) {
-    const minutes = parseInt(minuteMatch[1]);
-    const seconds = parseInt(minuteMatch[2]);
-    return minutes + (seconds / 60);
-  }
-  
+
   return null;
 }
 
@@ -4387,7 +4394,7 @@ function updateMapFilterDropdown() {
     dropdownMenu.style.left = "0";
     dropdownMenu.style.right = "0";
     dropdownMenu.style.borderRadius = "4px";
-    dropdownMenu.style.zIndex = "10000";
+    dropdownMenu.style.zIndex = "100";
     dropdownMenu.style.display = "none";
     dropdownMenu.style.maxHeight = "200px";
     dropdownMenu.style.overflowY = "auto";
@@ -7814,7 +7821,7 @@ function addResizeHandles(panel) {
         handle.className = 'resize-handle resize-handle-' + dir;
         handle.setAttribute('data-dir', dir);
         handle.style.position = 'absolute';
-        handle.style.zIndex = '10001';
+        handle.style.zIndex = '10';
         handle.style.background = 'transparent';
         handle.style.userSelect = 'none';
         handle.setAttribute('aria-label', 'Resize ' + dir);

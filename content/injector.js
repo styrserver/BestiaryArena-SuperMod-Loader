@@ -438,6 +438,27 @@ window.addEventListener('message', function(event) {
       return;
     }
 
+    if (message.action === 'registerLocalMods') {
+      browserAPI.runtime.sendMessage(message, function(response) {
+        console.log('Received response from background script:', response);
+
+        if (browserAPI.runtime.lastError) {
+          console.error('Background script error:', browserAPI.runtime.lastError);
+          return;
+        }
+
+        // local_mods.js listens for message.action, not id/response pairs
+        window.postMessage({
+          from: 'BESTIARY_EXTENSION',
+          message: {
+            action: 'registerLocalMods',
+            mods: response?.mods || []
+          }
+        }, '*');
+      });
+      return;
+    }
+
     browserAPI.runtime.sendMessage(message, function(response) {
       console.log('Received response from background script:', response);
       

@@ -3210,6 +3210,8 @@ const updateRequiredStamina = () => {
 let automationInterval = null;
 
 let gameStateObserver = null;
+let sessionWidgetObserver = null;
+let sessionWidgetDebounceTimer = null;
 let focusEventListeners = null;
 let currentCountdownTask = null;
 let gameStateUnsubscribers = [];
@@ -3217,6 +3219,116 @@ let gameStateUnsubscribers = [];
 // Add debouncing for game state events
 let lastGameStateChange = 0;
 const GAME_STATE_DEBOUNCE_MS = 1000; // 1 second debounce
+const SESSION_WIDGET_OBSERVER_DEBOUNCE_MS = 200;
+
+const STOP_AFTER_DEFEAT_LABEL_MARKERS = [
+  'stop after a defeat',
+  'parar após uma derrota',
+  'parar depois de uma derrota',
+];
+
+const findAutoplaySessionContainer = () => {
+  const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+  for (const session of autoplaySessions) {
+    const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+    if (widgetBottom) return widgetBottom;
+  }
+
+  const autoplayButtons = Array.from(document.querySelectorAll('button.widget-top, button.widget-top-text'));
+  for (const button of autoplayButtons) {
+    if (!button.querySelector('img[alt="Autoplay"]')) continue;
+    const widgetBottom = button.parentElement?.querySelector('.widget-bottom[data-minimized="false"]');
+    if (widgetBottom) return widgetBottom;
+  }
+
+  for (const widgetBottom of document.querySelectorAll('.widget-bottom[data-minimized="false"]')) {
+    let parent = widgetBottom.parentElement;
+    while (parent && parent !== document.body) {
+      for (const btn of parent.querySelectorAll('button')) {
+        if (btn.querySelector('img[alt="Autoplay"]')) {
+          return widgetBottom;
+        }
+      }
+      parent = parent.parentElement;
+    }
+  }
+
+  return null;
+};
+
+const findStopAfterDefeatCheckbox = () => {
+  const container = findAutoplaySessionContainer();
+  if (!container) return null;
+
+  for (const label of container.querySelectorAll('label')) {
+    const labelText = (label.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!STOP_AFTER_DEFEAT_LABEL_MARKERS.some((marker) => labelText.includes(marker))) {
+      continue;
+    }
+    const checkbox = label.querySelector('button[role="checkbox"]');
+    if (checkbox) return checkbox;
+  }
+
+  return null;
+};
+
+const uncheckStopAfterDefeatIfNeeded = () => {
+  if (!config.autoPlayAfterDefeat || window.__automatorUpdatingSessionCheckbox) {
+    return;
+  }
+
+  const checkbox = findStopAfterDefeatCheckbox();
+  if (!checkbox || checkbox.getAttribute('aria-checked') !== 'true') {
+    return;
+  }
+
+  console.log('[Bestiary Automator] Seamless autoplay enabled — unchecking session "Stop after a defeat"');
+  window.__automatorUpdatingSessionCheckbox = true;
+  checkbox.click();
+  setTimeout(() => {
+    window.__automatorUpdatingSessionCheckbox = false;
+  }, 100);
+};
+
+const teardownSessionWidgetSync = () => {
+  if (sessionWidgetDebounceTimer) {
+    clearTimeout(sessionWidgetDebounceTimer);
+    sessionWidgetDebounceTimer = null;
+  }
+  if (sessionWidgetObserver) {
+    sessionWidgetObserver.disconnect();
+    sessionWidgetObserver = null;
+  }
+};
+
+const setupSessionWidgetSync = () => {
+  if (!config.autoPlayAfterDefeat) {
+    teardownSessionWidgetSync();
+    return;
+  }
+
+  uncheckStopAfterDefeatIfNeeded();
+
+  if (typeof MutationObserver === 'undefined') return;
+  if (sessionWidgetObserver) return;
+
+  sessionWidgetObserver = new MutationObserver(() => {
+    if (sessionWidgetDebounceTimer) {
+      clearTimeout(sessionWidgetDebounceTimer);
+    }
+    sessionWidgetDebounceTimer = setTimeout(() => {
+      sessionWidgetDebounceTimer = null;
+      uncheckStopAfterDefeatIfNeeded();
+    }, SESSION_WIDGET_OBSERVER_DEBOUNCE_MS);
+  });
+
+  sessionWidgetObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-state', 'aria-checked', 'data-minimized'],
+  });
+};
 
 // Subscribe to board game state changes
 const subscribeToGameState = () => {
@@ -3294,6 +3406,8 @@ const subscribeToGameState = () => {
     
     // Set up MutationObserver for real-time toast detection
     if (!config.autoPlayAfterDefeat) return;
+
+    setupSessionWidgetSync();
     
     // Use MutationObserver to watch for new toast elements in real-time
     gameStateObserver = new MutationObserver((mutations) => {
@@ -3371,6 +3485,8 @@ const subscribeToGameState = () => {
 
 // Unsubscribe from game state changes
 const unsubscribeFromGameState = () => {
+  teardownSessionWidgetSync();
+
   if (gameStateObserver) {
     gameStateObserver.disconnect();
     gameStateObserver = null;

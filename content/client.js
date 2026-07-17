@@ -578,6 +578,10 @@ if (typeof browserAPI === 'undefined') {
   const MOD_TOGGLE_GAP = 10;
   // Keep below game dropdowns/menus (z-modals = 200) but above normal board UI (z-1..z-10).
   const MOD_BAR_Z_INDEX = 101;
+  // Mod-button settings panels — above mod UI panels (Awaken Tracker 150, etc.) and mod overlays (~10003).
+  const MOD_CONFIG_PANEL_Z_INDEX = 100005;
+  const MOD_CONFIG_PANEL_OVERLAY_Z_INDEX = MOD_CONFIG_PANEL_Z_INDEX - 1;
+  window.BESTIARY_MOD_CONFIG_PANEL_Z_INDEX = MOD_CONFIG_PANEL_Z_INDEX;
   const MOD_BAR_SAFE_BOTTOM = `calc(${MOD_TOGGLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`;
   const MOD_BAR_SAFE_RIGHT = `calc(${MOD_TOGGLE_MARGIN}px + env(safe-area-inset-right, 0px))`;
 
@@ -930,7 +934,7 @@ if (typeof browserAPI === 'undefined') {
       position: fixed;
       bottom: 60px; /* Posicionado acima do wrapper de botões */
       right: 10px;
-      z-index: 100;
+      z-index: ${MOD_CONFIG_PANEL_Z_INDEX};
     `;
     
     document.body.appendChild(container);
@@ -1675,7 +1679,7 @@ if (typeof browserAPI === 'undefined') {
         
         // Create overlay to capture clicks outside the panel
         const overlay = document.createElement('div');
-        overlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: 9998;';
+        overlay.style.cssText = `position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); z-index: ${MOD_CONFIG_PANEL_OVERLAY_Z_INDEX};`;
         overlay.style.display = 'none';
         document.body.appendChild(overlay);
         
@@ -1690,7 +1694,7 @@ if (typeof browserAPI === 'undefined') {
           padding: 15px;
           box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
           display: none;
-          z-index: 9999;
+          z-index: ${MOD_CONFIG_PANEL_Z_INDEX};
           position: relative;
           box-sizing: border-box;
           flex-direction: column;

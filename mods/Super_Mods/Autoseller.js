@@ -8015,7 +8015,7 @@
                 text-shadow: 0 0 6px rgba(34, 197, 94, 0.95), 0 1px 0 #000;
                 pointer-events: auto;
                 cursor: pointer;
-                z-index: 9999;
+                z-index: 100;
                 will-change: left, top;
                 filter: none !important;
                 -webkit-filter: none !important;

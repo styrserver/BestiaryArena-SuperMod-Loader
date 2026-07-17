@@ -1346,6 +1346,16 @@ function generateMessageId() {
 let completionSignalSent = false;
 let lastCompletionErrors = [];
 
+function schedulePostBatchCatchup() {
+  const pending = (window.localMods || []).filter(mod => mod.enabled && !executedMods[mod.name]);
+  if (pending.length === 0) {
+    return;
+  }
+  console.log(`[Local Mods] ${pending.length} enabled mod(s) not yet executed — scheduling catch-up batch`);
+  resetCompletionSignal();
+  setTimeout(() => triggerModExecution(pending, 'post-batch-catchup'), 0);
+}
+
 function sendCompletionSignal(results = []) {
   console.log('[Local Mods] sendCompletionSignal called, completionSignalSent:', completionSignalSent);
   if (completionSignalSent) {
@@ -1399,6 +1409,7 @@ function sendCompletionSignal(results = []) {
   
   isBatchExecuting = false;
   console.log('[Local Mods] Completion signal sent successfully');
+  schedulePostBatchCatchup();
 }
 
 // Reset completion signal flag (for testing/reloading)
@@ -1456,6 +1467,7 @@ window.addEventListener('message', function(event) {
     }
     
     if (event.data.message && event.data.message.action === 'registerLocalMods') {
+      clearInitExecutionFallbackTimer();
       console.log('Received registerLocalMods message:', event.data.message);
       if (event.data.message.mods && Array.isArray(event.data.message.mods)) {
         // Merge with existing mods instead of replacing to avoid dropping file-based mods

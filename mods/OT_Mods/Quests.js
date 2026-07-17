@@ -530,6 +530,10 @@ const SCARAB_COIN_CONFIG = {
 
 const TESHA_TILE_INDEX = 157;
 const TESHA_ARROW_CLASS = 'quests-tesha-arrow';
+const TILE_HIGHLIGHT_CLASS = 'quests-tile-highlight';
+const TILE_HIGHLIGHT_TILE_ATTR = 'data-quests-tile-highlight';
+const QUEST_ACCESS_CURSOR = 'pointer';
+const QUEST_ACCESS_TILE_TITLE = 'Right-click';
 
 const SERPENTINE_TOWER_BASEMENT_ROOM_NAME = 'Serpentine Tower Basement';
 const DESTROY_FIELD_RUNE_ITEM_NAME = 'Destroy Field Rune';
@@ -569,6 +573,36 @@ const PUTRID_CHAMBER_SCENE_SPRITE_REPLACEMENTS = {
 const SERPENTINE_LEVER_WARP_NAV_DELAY_MS = 200;
 const PUTRID_CHAMBER_VILLAIN_SETUP_ATTEMPT_DELAYS_MS = [0, 100, 250];
 const PUTRID_CHAMBER_SCENE_SPRITE_ATTEMPT_DELAYS_MS = [0, 100, 250, 500, 800, 1200];
+
+const HONEYFLOWER_TILE_INDEX = 84;
+const HONEYFLOWER_TILE_HINT_ID = 'quests-honeyflower-tile-hint';
+const GAME_FRAME_BORDER_IMAGE = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch';
+const GAME_FRAME_BACKGROUND = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
+const HONEYFLOWER_TOWER_ROOM_NAME = 'Honeyflower Tower';
+const HONEYFLOWER_CONFIG = {
+  productName: 'Honeyflower',
+  icon: 'Honey_Flower.gif',
+  description: 'A fragrant honeyflower plucked fresh from the tower.',
+  rarity: 2
+};
+
+const KING_HONEYFLOWER_MISSION = {
+  id: 'king_honeyflower',
+  title: 'Retrieve the Honeyflower',
+  prompt: 'I require honey for my tea. Journey to Honeyflower Tower and retrieve a honeyflower for me. Will you help?',
+  accept: 'Go to Honeyflower Tower and pick the honeyflower. Return to me when you have it.',
+  askForItem: 'Have you brought the honeyflower?',
+  complete: 'Splendid! My tea shall be sweet once more. Here are 50 guild coins for your trouble.',
+  missingItem: 'You claim yes but carry no honeyflower. Return when you have picked one from Honeyflower Tower.',
+  keepSearching: 'Then journey to Honeyflower Tower and retrieve the honeyflower.',
+  answerYesNo: 'Answer yes or no: have you brought the honeyflower?',
+  alreadyCompleted: 'You already brought me a honeyflower. My thanks.',
+  alreadyActive: 'You are already on this task. Retrieve the honeyflower from Honeyflower Tower and return to me.',
+  objectiveLine1: 'Travel to Honeyflower Tower.',
+  objectiveLine2: 'Pick the honeyflower and return it to King Tibianus.',
+  hint: 'Right-click the glowing flower tile in Honeyflower Tower.',
+  rewardCoins: 50
+};
 
 const KING_COPPER_KEY_MISSION = {
   id: 'king_copper_key',
@@ -753,6 +787,7 @@ const MOTHER_OF_ALL_SPIDERS_MISSION = {
 };
 
 const MISSION_COMPLETION_SUMMARIES = {
+  [KING_HONEYFLOWER_MISSION.id]: 'Retrieved a honeyflower from Honeyflower Tower for King Tibianus.',
   [KING_COPPER_KEY_MISSION.id]: 'Returned the copper key to King Tibianus.',
   [KING_RED_DRAGON_MISSION.id]: 'Delivered 30 red dragon scales and 30 red dragon leathers to the royal forge.',
   [KING_LETTER_MISSION.id]: 'Returned the stamped letter to Al Dee in Rookgaard.',
@@ -1442,6 +1477,7 @@ function createNPCCooldownManager() {
   // =======================
   const kingChatState = {
     progressCopper: { accepted: false, completed: false },
+    progressHoneyflower: { accepted: false, completed: false },
     progressDragon: { accepted: false, completed: false },
     progressLetter: { accepted: false, completed: false },
     progressMonksStudy: { accepted: false, completed: false },
@@ -1461,8 +1497,9 @@ function createNPCCooldownManager() {
     awaitingKeyConfirm: false,
     starterCoinThanked: false
   };
-  let missionProgressLoaded = false;
+  let missionProgressHydratedFromFirebase = false;
   let missionProgressLoadPromise = null;
+  let missionProgressPlayerSubscription = null;
   let arenaRankDisplaySeq = 0;
   let arenaRankDisplayTimer = null;
   
@@ -1513,6 +1550,11 @@ function createNPCCooldownManager() {
   let tile79ContextMenu = null;
   let tile79BoardSubscription = null;
   let tile79PlayerSubscription = null;
+
+  // Honeyflower Tower (tile 84)
+  let honeyflowerTileRightClickEnabled = false;
+  let honeyflowerTileBoardSubscription = null;
+  let honeyflowerContextMenu = null;
 
   // Costello (tile 53, Isle of Kings, Carlin)
   let tile53RightClickEnabled = false;
@@ -3886,6 +3928,16 @@ function createNPCCooldownManager() {
       productDefinitions.push(silverTokenDef);
     }
 
+    const honeyflowerDef = {
+      name: HONEYFLOWER_CONFIG.productName,
+      icon: HONEYFLOWER_CONFIG.icon,
+      description: HONEYFLOWER_CONFIG.description,
+      rarity: HONEYFLOWER_CONFIG.rarity
+    };
+    if (!productDefinitions.find(p => p.name === honeyflowerDef.name)) {
+      productDefinitions.push(honeyflowerDef);
+    }
+
     // Add Map (Colour) to product definitions
     const mapColourDef = {
       name: MAP_COLOUR_CONFIG.productName,
@@ -4149,6 +4201,19 @@ function createNPCCooldownManager() {
       console.error('[Quests Mod] Error getting current player name:', error);
     }
     return null;
+  }
+
+  const PLAYER_NAME_WAIT_MS = 30000;
+  const PLAYER_NAME_POLL_MS = 250;
+
+  async function waitForCurrentPlayerName(maxWaitMs = PLAYER_NAME_WAIT_MS) {
+    const deadline = Date.now() + maxWaitMs;
+    let playerName = getCurrentPlayerName();
+    while (!playerName && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, PLAYER_NAME_POLL_MS));
+      playerName = getCurrentPlayerName();
+    }
+    return playerName || getCurrentPlayerName();
   }
 
   // Hash username for Firebase key
@@ -5090,6 +5155,7 @@ function createNPCCooldownManager() {
   //   MISSION_FIREBASE_KEY_MAP: { 'new_mission': 'newMission' }
   //
   const MISSION_STATE_MAP = {
+    [KING_HONEYFLOWER_MISSION.id]: 'progressHoneyflower',
     [KING_COPPER_KEY_MISSION.id]: 'progressCopper',
     [KING_RED_DRAGON_MISSION.id]: 'progressDragon',
     [KING_LETTER_MISSION.id]: 'progressLetter',
@@ -5104,6 +5170,7 @@ function createNPCCooldownManager() {
   };
 
   const MISSION_FIREBASE_KEY_MAP = {
+    [KING_HONEYFLOWER_MISSION.id]: 'honeyflower',
     [KING_COPPER_KEY_MISSION.id]: 'copper',
     [KING_RED_DRAGON_MISSION.id]: 'dragon',
     [KING_LETTER_MISSION.id]: 'letter',
@@ -5366,7 +5433,10 @@ function createNPCCooldownManager() {
   async function saveArenaLeaderboardEntry(playerName, progress) {
     if (!playerName) return;
     const completedCount = getCompletedMissionsCount(progress);
-    if (completedCount <= 0) return;
+    if (completedCount <= 0) {
+      await deleteArenaLeaderboardEntry(playerName);
+      return;
+    }
 
     const hashedPlayer = await hashUsername(playerName);
     await FirebaseService.put(
@@ -5386,7 +5456,9 @@ function createNPCCooldownManager() {
     const playerName = getCurrentPlayerName();
     if (!playerName) return;
     try {
-      const progress = await getKingTibianusProgress(playerName);
+      const progress = missionProgressHydratedFromFirebase
+        ? getAllMissionProgress()
+        : await getKingTibianusProgress(playerName);
       await saveArenaLeaderboardEntry(playerName, progress);
     } catch (err) {
       console.warn('[Quests Mod][Arena Leaderboard] Failed to sync current player entry:', err);
@@ -5415,7 +5487,7 @@ function createNPCCooldownManager() {
     }
 
     arenaLeaderboardCache = Object.values(data)
-      .filter((entry) => entry && typeof entry.completedCount === 'number')
+      .filter((entry) => entry && typeof entry.completedCount === 'number' && entry.completedCount > 0)
       .sort((a, b) => {
         if (b.completedCount !== a.completedCount) return b.completedCount - a.completedCount;
         return String(a.playerName || '').localeCompare(String(b.playerName || ''));
@@ -5423,6 +5495,18 @@ function createNPCCooldownManager() {
       .slice(0, ARENA_LEADERBOARD_TOP);
     arenaLeaderboardCacheTime = now;
     return arenaLeaderboardCache;
+  }
+
+  async function deleteArenaLeaderboardEntry(playerName) {
+    if (!playerName) return;
+    const hashedPlayer = await hashUsername(playerName);
+    await FirebaseService.delete(
+      `${getArenaLeaderboardPath()}/${hashedPlayer}`,
+      'delete arena leaderboard entry'
+    );
+    arenaLeaderboardCache = null;
+    arenaLeaderboardCacheTime = 0;
+    console.log('[Quests Mod][Arena Leaderboard] Entry deleted for player:', playerName);
   }
 
   async function deleteKingTibianusProgress(playerName) {
@@ -5559,7 +5643,7 @@ function createNPCCooldownManager() {
   }
 
   function getArenaProgressSnapshot(forceFirebase = false) {
-    if (!forceFirebase && missionProgressLoaded) {
+    if (!forceFirebase && missionProgressHydratedFromFirebase) {
       return Promise.resolve(getAllMissionProgress());
     }
     const playerName = getCurrentPlayerName();
@@ -5662,14 +5746,23 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod] Quest items cache cleared');
   }
   
+  async function reloadQuestItemsFromFirebase() {
+    clearQuestItemsCache();
+    const products = await getQuestItems(false);
+    console.log('[Quests Mod] Quest items loaded:', products);
+    return products;
+  }
+
   // Load quest items from Firebase on initialization
   async function loadQuestItemsOnInit() {
     try {
       console.log('[Quests Mod] Loading quest items from Firebase on initialization...');
-      // Clear cache first to ensure fresh data
-      clearQuestItemsCache();
+      const playerName = await waitForCurrentPlayerName();
+      if (!playerName) {
+        console.warn('[Quests Mod] Player name not available yet — quest items will load after mission progress sync');
+        return;
+      }
       try {
-        const playerName = getCurrentPlayerName();
         const kingProgress = await getKingTibianusProgress(playerName);
         await grantStarterSilverTokenIfNeeded(kingProgress, playerName);
       } catch (err) {
@@ -5678,8 +5771,7 @@ function createNPCCooldownManager() {
       syncArenaLeaderboardForCurrentPlayer().catch((err) => {
         console.warn('[Quests Mod][Arena Leaderboard] Failed to sync on init:', err);
       });
-      const products = await getQuestItems(false); // Force fetch, don't use cache
-      console.log('[Quests Mod] Quest items loaded:', products);
+      await reloadQuestItemsFromFirebase();
     } catch (error) {
       console.error('[Quests Mod] Error loading quest items on init:', error);
     }
@@ -5838,6 +5930,7 @@ function createNPCCooldownManager() {
         'Dragon Claw',
         'Obsidian Knife',
         'Letter from Al Dee',
+        'Honeyflower',
         'Stamped Letter',
         'Small Axe',
         'Magnet',
@@ -8352,6 +8445,9 @@ function createNPCCooldownManager() {
     'sam': 'He is a skilled blacksmith and a loyal subject.',
     'letter': KING_LETTER_MISSION.prompt,
     'scroll': KING_LETTER_MISSION.prompt,
+    'honeyflower': KING_HONEYFLOWER_MISSION.prompt,
+    'honey flower': KING_HONEYFLOWER_MISSION.prompt,
+    'honey': KING_HONEYFLOWER_MISSION.prompt,
     'al dee': 'I haven\'t seen Al Dee for a while and don\'t know where he holds house. Let me know if you have any information about him!',
     'bye': 'Good bye, Player!'
   };
@@ -8518,6 +8614,7 @@ function createNPCCooldownManager() {
       // kingChatState is now defined globally
       // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = display order in Quest Log.
       const MISSIONS = [
+        KING_HONEYFLOWER_MISSION,
         KING_COPPER_KEY_MISSION,
         KING_RED_DRAGON_MISSION,
         KING_LETTER_MISSION,
@@ -8534,6 +8631,7 @@ function createNPCCooldownManager() {
       // Mission Registry: Maps mission IDs to their state property names in kingChatState
       // This centralizes mission-to-state mapping for easier maintenance
       const MISSION_STATE_MAP = {
+        [KING_HONEYFLOWER_MISSION.id]: 'progressHoneyflower',
         [KING_COPPER_KEY_MISSION.id]: 'progressCopper',
         [KING_RED_DRAGON_MISSION.id]: 'progressDragon',
         [KING_LETTER_MISSION.id]: 'progressLetter',
@@ -8549,6 +8647,7 @@ function createNPCCooldownManager() {
 
       // Mission Firebase Key Map: Maps mission IDs to their Firebase property names
       const MISSION_FIREBASE_KEY_MAP = {
+        [KING_HONEYFLOWER_MISSION.id]: 'honeyflower',
         [KING_COPPER_KEY_MISSION.id]: 'copper',
         [KING_RED_DRAGON_MISSION.id]: 'dragon',
         [KING_LETTER_MISSION.id]: 'letter',
@@ -8587,6 +8686,18 @@ function createNPCCooldownManager() {
         if (hasHolyTible) kingMissions.push(KING_MONKS_STUDY_MISSION);
         kingMissions.push(KING_SCARAB_COIN_MISSION);
         return kingMissions;
+      }
+
+      function getHoneyflowerMissionProgress() {
+        return getMissionProgress(KING_HONEYFLOWER_MISSION);
+      }
+
+      function canOfferHoneyflowerMission() {
+        return !getHoneyflowerMissionProgress().completed;
+      }
+
+      function hasHoneyflowerInInventory() {
+        return (cachedQuestItems?.[HONEYFLOWER_CONFIG.productName] || 0) > 0;
       }
 
       function areAllMissionsCompleted() {
@@ -9238,30 +9349,27 @@ function createNPCCooldownManager() {
       }
 
       async function loadKingTibianusProgress() {
-        if (missionProgressLoaded) {
-          try {
-            await getQuestItems(false);
-            await applyKingModalSideEffects();
-            selectedMissionId = null;
-            refreshKingModalMissionState();
-          } catch (error) {
-            console.error('[Quests Mod][King Tibianus] Error refreshing local progress:', error);
-          }
-          return;
+        kingModalProgressLoading = !missionProgressHydratedFromFirebase;
+        if (!missionProgressHydratedFromFirebase) {
+          renderKingQuestUI();
         }
 
-        kingModalProgressLoading = true;
-        renderKingQuestUI();
         try {
+          if (!missionProgressHydratedFromFirebase) {
+            await loadMissionProgressOnInit();
+          }
           await getQuestItems(false);
-          const playerName = getCurrentPlayerName();
-          const progress = await getKingTibianusProgress(playerName);
-          await grantStarterSilverTokenIfNeeded(progress, playerName);
-          applyKingProgressToState(progress);
+          if (!missionProgressHydratedFromFirebase) {
+            const playerName = getCurrentPlayerName();
+            const progress = await getKingTibianusProgress(playerName);
+            await grantStarterSilverTokenIfNeeded(progress, playerName);
+            applyKingProgressToState(progress);
+          }
           await applyKingModalSideEffects();
           selectedMissionId = null;
           activeMission = currentMission();
           kingStrings = buildStrings(activeMission);
+          refreshKingModalMissionState();
         } catch (error) {
           console.error('[Quests Mod][King Tibianus] Error loading progress:', error);
         } finally {
@@ -9290,6 +9398,11 @@ function createNPCCooldownManager() {
           // Update the corresponding progress state
           if (mission.id === KING_COPPER_KEY_MISSION.id) {
             kingChatState.progressCopper.accepted = true;
+          } else if (mission.id === KING_HONEYFLOWER_MISSION.id) {
+            kingChatState.progressHoneyflower.accepted = true;
+            if (typeof updateHoneyflowerTileRightClickState === 'function') {
+              updateHoneyflowerTileRightClickState();
+            }
           } else if (mission.id === KING_RED_DRAGON_MISSION.id) {
             kingChatState.progressDragon.accepted = true;
           } else if (mission.id === KING_LETTER_MISSION.id) {
@@ -9622,13 +9735,20 @@ function createNPCCooldownManager() {
         const mentionsLetter = lowerText.includes('letter') || lowerText.includes('scroll');
         const mentionsMonks = lowerText.includes('costello') || lowerText.includes('monastery') || lowerText.includes('monks') || lowerText.includes('white raven');
         const mentionsScarab = lowerText.includes('scarab') || lowerText.includes('desert') || lowerText.includes('darama') || lowerText.includes('valuable') || lowerText.includes('sands');
+        const mentionsHoneyflower = lowerText.includes('honeyflower') || lowerText.includes('honey flower') || lowerText.includes('honey');
         const hasHolyTible = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
+
+        if (mentionsHoneyflower && canOfferHoneyflowerMission()) {
+          return MISSIONS.find(m => m.id === KING_HONEYFLOWER_MISSION.id) || activeMission;
+        }
 
         if (areAllMissionsCompleted()) {
           return activeMission;
         }
 
-        if (mentionsLetter) {
+        if (mentionsHoneyflower) {
+          return MISSIONS.find(m => m.id === KING_HONEYFLOWER_MISSION.id) || activeMission;
+        } else if (mentionsLetter) {
           return MISSIONS.find(m => m.id === KING_LETTER_MISSION.id) || activeMission;
         } else if (mentionsKey) {
           return MISSIONS.find(m => m.id === KING_COPPER_KEY_MISSION.id) || activeMission;
@@ -9644,61 +9764,78 @@ function createNPCCooldownManager() {
 
       // Helper: Handle key confirmation response (yes/no after "Have you found my key?")
       async function handleKeyConfirmation(lowerText, activeMission, kingStrings) {
-        if (!kingChatState.awaitingKeyConfirm || !activeMission) {
+        if (!kingChatState.awaitingKeyConfirm) {
           return false;
         }
 
-        const currentProgress = getMissionProgress(activeMission);
+        const confirmMission = kingChatState.offeredMission || activeMission;
+        if (!confirmMission) {
+          return false;
+        }
+
+        const confirmStrings = buildStrings(confirmMission);
+        const currentProgress = getMissionProgress(confirmMission);
         if (!currentProgress.accepted || currentProgress.completed) {
           return false;
         }
 
         if (lowerText.includes('yes')) {
           let hasItems = false;
-          if (activeMission.id === KING_COPPER_KEY_MISSION.id) {
+          if (confirmMission.id === KING_COPPER_KEY_MISSION.id) {
             hasItems = await hasCopperKeyInInventory();
-          } else if (activeMission.id === KING_RED_DRAGON_MISSION.id) {
+          } else if (confirmMission.id === KING_HONEYFLOWER_MISSION.id) {
+            hasItems = hasHoneyflowerInInventory();
+          } else if (confirmMission.id === KING_RED_DRAGON_MISSION.id) {
             hasItems = await hasRedDragonMaterials();
-          } else if (activeMission.id === KING_LETTER_MISSION.id) {
+          } else if (confirmMission.id === KING_LETTER_MISSION.id) {
             // TODO: Implement proper letter delivery tracking
             hasItems = false;
-          } else if (activeMission.id === KING_MONKS_STUDY_MISSION.id) {
+          } else if (confirmMission.id === KING_MONKS_STUDY_MISSION.id) {
             // Completion can be set when player finds Costello (e.g. via Costello NPC); until then keep searching
             hasItems = false;
-          } else if (activeMission.id === KING_SCARAB_COIN_MISSION.id) {
+          } else if (confirmMission.id === KING_SCARAB_COIN_MISSION.id) {
             hasItems = await hasScarabCoinInInventory();
           }
 
           if (hasItems) {
-            const completingScarabHunt = activeMission.id === KING_SCARAB_COIN_MISSION.id;
-            queueKingReply(kingStrings.keyComplete, { onDone: async () => {
+            const completingScarabHunt = confirmMission.id === KING_SCARAB_COIN_MISSION.id;
+            queueKingReply(confirmStrings.keyComplete, { onDone: async () => {
               if (completingScarabHunt) {
                 updateTeshaArrowState();
                 renderKingQuestUI();
               } else {
-                if (activeMission.rewardCoins > 0) {
-                  await awardGuildCoins(activeMission.rewardCoins);
+                if (confirmMission.id === KING_HONEYFLOWER_MISSION.id) {
+                  await consumeQuestItem(HONEYFLOWER_CONFIG.productName, 1);
+                  if (typeof updateHoneyflowerTileRightClickState === 'function') {
+                    updateHoneyflowerTileRightClickState();
+                  }
+                }
+                if (confirmMission.rewardCoins > 0) {
+                  await awardGuildCoins(confirmMission.rewardCoins);
                   await updateGuildCoinDisplay();
                 }
+                activeMission = confirmMission;
                 await completeKingTibianusQuest();
               }
             } });
           } else {
-            queueKingReply(kingStrings.keyScoldNoKey, { closeAfterMs: 2000 });
+            queueKingReply(confirmStrings.keyScoldNoKey, { closeAfterMs: 2000 });
           }
           kingChatState.awaitingKeyConfirm = false;
+          kingChatState.offeredMission = null;
           clearTextarea();
           return true;
         }
 
         if (lowerText.includes('no')) {
-          queueKingReply(kingStrings.keyKeepSearching);
+          queueKingReply(confirmStrings.keyKeepSearching);
           kingChatState.awaitingKeyConfirm = false;
+          kingChatState.offeredMission = null;
           clearTextarea();
           return true;
         }
 
-        queueKingReply(kingStrings.keyAnswerYesNo);
+        queueKingReply(confirmStrings.keyAnswerYesNo);
         clearTextarea();
         return true;
       }
@@ -9790,6 +9927,7 @@ function createNPCCooldownManager() {
         const mentionsLetter = lowerText.includes('letter') || lowerText.includes('scroll');
         const mentionsMonks = lowerText.includes('costello') || lowerText.includes('monastery') || lowerText.includes('monks') || lowerText.includes('white raven');
         const mentionsScarab = lowerText.includes('scarab') || lowerText.includes('desert') || lowerText.includes('darama') || lowerText.includes('valuable') || lowerText.includes('sands');
+        const mentionsHoneyflower = lowerText.includes('honeyflower') || lowerText.includes('honey flower') || lowerText.includes('honey');
 
         // Determine target mission based on what player mentioned
         const targetMission = determineTargetMission(lowerText, activeMission);
@@ -9815,12 +9953,12 @@ function createNPCCooldownManager() {
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
           NotificationService.showItemReceived(SILVER_TOKEN_CONFIG.productName, '[Quests Mod][King Tibianus]', TOAST_MESSAGES.kingTookCoin);
-        } else if (areAllMissionsCompleted() && (mentionsKey || mentionsDragon || mentionsMonks || lowerText.includes('mission') || lowerText.includes('quest'))) {
+        } else if (areAllMissionsCompleted() && !canOfferHoneyflowerMission() && (mentionsKey || mentionsDragon || mentionsMonks || mentionsHoneyflower || lowerText.includes('mission') || lowerText.includes('quest'))) {
           // All missions completed, tell player to come back later
           kingResponse = 'All missions have been completed. Come back later for more tasks.';
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
-        } else if (mentionsKey || mentionsDragon || mentionsLetter || mentionsMonks || mentionsScarab) {
+        } else if (mentionsKey || mentionsDragon || mentionsLetter || mentionsMonks || mentionsScarab || mentionsHoneyflower) {
           const hasHolyTibleForMonks = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
           if (mentionsMonks && !hasHolyTibleForMonks) {
             kingResponse = 'You must first complete the search for the Light and possess the Holy Tible before I can entrust you with that task.';
@@ -9893,8 +10031,27 @@ function createNPCCooldownManager() {
             kingChatState.offeredMission = targetMission;
           }
         } else if (lowerText.includes('mission') || lowerText.includes('quest')) {
-          if (areAllMissionsCompleted()) {
-            // All missions completed, tell player to come back later
+          const honeyProgress = getHoneyflowerMissionProgress();
+          const honeyStrings = buildStrings(KING_HONEYFLOWER_MISSION);
+
+          if (canOfferHoneyflowerMission()) {
+            if (honeyProgress.accepted) {
+              if (hasHoneyflowerInInventory()) {
+                kingChatState.awaitingKeyConfirm = true;
+                kingChatState.offeredMission = KING_HONEYFLOWER_MISSION;
+                queueKingReply(honeyStrings.keyQuestion);
+                clearTextarea();
+                return;
+              }
+              kingResponse = honeyStrings.missionActive;
+              kingChatState.missionOffered = false;
+              kingChatState.offeredMission = null;
+            } else {
+              kingResponse = KING_HONEYFLOWER_MISSION.prompt;
+              kingChatState.missionOffered = true;
+              kingChatState.offeredMission = KING_HONEYFLOWER_MISSION;
+            }
+          } else if (areAllMissionsCompleted() && !canOfferHoneyflowerMission()) {
             kingResponse = 'All missions have been completed. Come back later for more tasks.';
             kingChatState.missionOffered = false;
             kingChatState.offeredMission = null;
@@ -13175,13 +13332,19 @@ function createNPCCooldownManager() {
       kingChatState.progressMeetingWithTesha = { accepted: false, completed: false };
       kingChatState.progressScarabHunt = { accepted: false, completed: false };
       kingChatState.progressSerpentineTower = { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false };
+      kingChatState.progressHoneyflower = { accepted: false, completed: false };
       kingChatState.costelloVisited = false;
+      kingChatState.mornenionDefeated = false;
+      kingChatState.starterCoinThanked = false;
       kingChatState.sevenSealsCompleted = getDefaultSevenSealsCompleted().slice();
       console.log('[Quests Mod][Dev] Local quest state reset');
 
       // Delete quest progress from Firebase
       await deleteKingTibianusProgress(playerName);
       console.log('[Quests Mod][Dev] Quest progress deleted from Firebase');
+
+      await deleteArenaLeaderboardEntry(playerName);
+      console.log('[Quests Mod][Dev] Arena leaderboard entry deleted from Firebase');
 
       // Delete all quest items from Firebase
       await deleteQuestItems(playerName);
@@ -13213,9 +13376,16 @@ function createNPCCooldownManager() {
 
       // Force update UI state
       updateTile79RightClickState();
+      if (typeof updateHoneyflowerTileRightClickState === 'function') {
+        updateHoneyflowerTileRightClickState();
+      }
       if (typeof updateTile53CostelloRightClickState === 'function') {
         updateTile53CostelloRightClickState();
       }
+      updateArenaLeaderboardDisplay(true).catch((err) => {
+        console.warn('[Quests Mod][Dev] Error refreshing arena leaderboard after reset:', err);
+      });
+      scheduleArenaRankDisplayUpdate(0);
       console.log('[Quests Mod][Dev] UI state updated');
 
       console.log('[Quests Mod][Dev] All quests and quest items reset complete');
@@ -14807,6 +14977,7 @@ function createNPCCooldownManager() {
           }
           tile79RightClickEnabled = false;
         }
+        refreshQuestTileHighlights(boardContext);
         return; // Don't proceed if mission is not active
       }
 
@@ -14838,6 +15009,8 @@ function createNPCCooldownManager() {
         tile79RightClickEnabled = false;
         console.log('[Quests Mod][Tile 79] Right-click disabled - document listener removed and pointer events restored');
       }
+
+      refreshQuestTileHighlights(boardContext);
     } catch (error) {
       console.error('[Quests Mod][Tile 79] Error updating right-click state:', error);
     }
@@ -15634,6 +15807,284 @@ function createNPCCooldownManager() {
     });
 
     return tile79ContextMenu;
+  }
+
+  // =======================
+  // Honeyflower Tower (tile 84)
+  // =======================
+
+  function shouldEnableHoneyflowerTileRightClick(boardContext = null) {
+    try {
+      if (!isOnRoomByName(HONEYFLOWER_TOWER_ROOM_NAME)) {
+        return false;
+      }
+
+      const progress = getMissionProgress(KING_HONEYFLOWER_MISSION);
+      if (!progress.accepted || progress.completed) {
+        return false;
+      }
+
+      const currentProducts = cachedQuestItems || {};
+      return (currentProducts[HONEYFLOWER_CONFIG.productName] || 0) <= 0;
+    } catch (error) {
+      console.error('[Quests Mod][Honeyflower] Error checking tile access:', error);
+      return false;
+    }
+  }
+
+  async function pickHoneyflowerFromTile() {
+    try {
+      const progress = getMissionProgress(KING_HONEYFLOWER_MISSION);
+      if (!progress.accepted || progress.completed) {
+        return;
+      }
+
+      const currentProducts = cachedQuestItems || {};
+      if ((currentProducts[HONEYFLOWER_CONFIG.productName] || 0) > 0) {
+        return;
+      }
+
+      await addQuestItem(HONEYFLOWER_CONFIG.productName, 1);
+      NotificationService.showItemReceived(HONEYFLOWER_CONFIG.productName, '[Quests Mod][Honeyflower]');
+      updateHoneyflowerTileRightClickState();
+      refreshQuestTileHighlights();
+      console.log('[Quests Mod][Honeyflower] Honeyflower picked from tile 84');
+    } catch (error) {
+      console.error('[Quests Mod][Honeyflower] Error picking honeyflower:', error);
+    }
+  }
+
+  function createHoneyflowerContextMenu(x, y) {
+    if (honeyflowerContextMenu && honeyflowerContextMenu.closeMenu) {
+      honeyflowerContextMenu.closeMenu();
+    }
+
+    honeyflowerContextMenu = createContextMenu({
+      x,
+      y,
+      layout: 'center',
+      logPrefix: '[Quests Mod][Honeyflower]',
+      buttons: [
+        {
+          text: t('mods.quests.takeHoneyflower'),
+          width: '140px',
+          backgroundColor: '#2a4a2a',
+          color: '#4CAF50',
+          border: '1px solid #4CAF50',
+          hoverBackgroundColor: '#1a2a1a',
+          hoverBorderColor: '#66BB6A',
+          onClick: async () => {
+            if (honeyflowerContextMenu && honeyflowerContextMenu.closeMenu) {
+              honeyflowerContextMenu.closeMenu();
+            }
+            await pickHoneyflowerFromTile();
+          }
+        }
+      ],
+      onClose: () => {
+        honeyflowerContextMenu = null;
+      }
+    });
+
+    return honeyflowerContextMenu;
+  }
+
+  function handleHoneyflowerTileRightClick(event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    const progress = getMissionProgress(KING_HONEYFLOWER_MISSION);
+    if (!progress.accepted || progress.completed) {
+      return false;
+    }
+
+    const currentProducts = cachedQuestItems || {};
+    if ((currentProducts[HONEYFLOWER_CONFIG.productName] || 0) > 0) {
+      return false;
+    }
+
+    createHoneyflowerContextMenu(event.clientX, event.clientY);
+    return false;
+  }
+
+  function handleHoneyflowerTileRightClickDocument(event) {
+    const tile84Element = getTileElement(HONEYFLOWER_TILE_INDEX);
+    if (!tile84Element || !tile84Element.contains(event.target)) {
+      return;
+    }
+
+    handleHoneyflowerTileRightClick(event);
+  }
+
+  function ensureHoneyflowerTileHintStyles() {
+    if (document.getElementById('quests-honeyflower-tile-hint-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'quests-honeyflower-tile-hint-styles';
+    style.textContent = `
+      #${HONEYFLOWER_TILE_HINT_ID} {
+        position: fixed;
+        pointer-events: none;
+        z-index: 20000;
+        max-width: 176px;
+        transform: translate(-50%, calc(-100% - 6px));
+        text-align: center;
+        white-space: normal;
+        line-height: 1.25;
+        box-sizing: border-box;
+        background: ${GAME_FRAME_BACKGROUND};
+        background-size: auto;
+        background-repeat: repeat;
+        border: 4px solid transparent;
+        border-image: ${GAME_FRAME_BORDER_IMAGE};
+        border-radius: 4px;
+        padding: 4px 6px;
+        color: white;
+        font-size: 11px;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function removeHoneyflowerTileRightClickHint() {
+    document.getElementById(HONEYFLOWER_TILE_HINT_ID)?.remove();
+    document.querySelectorAll('.quests-tile-right-click-hint').forEach((hint) => hint.remove());
+  }
+
+  function updateHoneyflowerTileRightClickHint() {
+    if (!shouldEnableHoneyflowerTileRightClick()) {
+      removeHoneyflowerTileRightClickHint();
+      return;
+    }
+
+    const tileElement = getTileElement(HONEYFLOWER_TILE_INDEX);
+    if (!tileElement || !tileElement.isConnected) {
+      removeHoneyflowerTileRightClickHint();
+      return;
+    }
+
+    let hint = document.getElementById(HONEYFLOWER_TILE_HINT_ID);
+    if (!hint) {
+      ensureHoneyflowerTileHintStyles();
+      hint = document.createElement('div');
+      hint.id = HONEYFLOWER_TILE_HINT_ID;
+      hint.className = 'pixel-font-14 text-whiteRegular';
+      document.body.appendChild(hint);
+    }
+
+    hint.textContent = t('mods.quests.tileRightClickTutorial');
+
+    const rect = tileElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      hint.style.display = 'none';
+      return;
+    }
+
+    hint.style.display = 'block';
+    hint.style.left = `${rect.left + rect.width / 2}px`;
+    hint.style.top = `${rect.top}px`;
+  }
+
+  function isHoneyflowerTileElement(tileElement) {
+    return tileElement?.id === `tile-index-${HONEYFLOWER_TILE_INDEX}`;
+  }
+
+  function bindHoneyflowerTileHitbox(tileElement) {
+    if (!isHoneyflowerTileElement(tileElement) || !shouldEnableHoneyflowerTileRightClick()) {
+      return;
+    }
+
+    const hitbox = tileElement.querySelector('.quests-tile-highlight-hitbox');
+    if (!hitbox || hitbox.dataset.questsHoneyflowerHandler === '1') {
+      return;
+    }
+
+    hitbox.addEventListener('contextmenu', handleHoneyflowerTileRightClick, true);
+    hitbox.dataset.questsHoneyflowerHandler = '1';
+  }
+
+  function bringQuestTileOverlaysToFront(tileElement) {
+    if (!tileElement) return;
+
+    const hitbox = tileElement.querySelector('.quests-tile-highlight-hitbox');
+    const highlight = tileElement.querySelector(`.${TILE_HIGHLIGHT_CLASS}`);
+
+    if (hitbox) tileElement.appendChild(hitbox);
+    if (highlight) tileElement.appendChild(highlight);
+
+    bindHoneyflowerTileHitbox(tileElement);
+  }
+
+  function updateHoneyflowerTileRightClickState(boardContext = null) {
+    try {
+      const shouldBeEnabled = shouldEnableHoneyflowerTileRightClick(boardContext);
+      const tile84Element = getTileElement(HONEYFLOWER_TILE_INDEX);
+
+      if (shouldBeEnabled && tile84Element && !honeyflowerTileRightClickEnabled) {
+        document.addEventListener('contextmenu', handleHoneyflowerTileRightClickDocument, true);
+        honeyflowerTileRightClickEnabled = true;
+        console.log('[Quests Mod][Honeyflower] Right-click enabled on tile 84');
+      } else if (shouldBeEnabled && !tile84Element) {
+        setTimeout(() => updateHoneyflowerTileRightClickState(boardContext), 200);
+      } else if (!shouldBeEnabled && honeyflowerTileRightClickEnabled) {
+        document.removeEventListener('contextmenu', handleHoneyflowerTileRightClickDocument, true);
+        honeyflowerTileRightClickEnabled = false;
+        console.log('[Quests Mod][Honeyflower] Right-click disabled on tile 84');
+      }
+
+      if (shouldBeEnabled) {
+        refreshQuestTileHighlights(boardContext);
+        bringQuestTileOverlaysToFront(getTileElement(HONEYFLOWER_TILE_INDEX));
+        updateHoneyflowerTileRightClickHint();
+      } else {
+        refreshQuestTileHighlights(boardContext);
+        removeHoneyflowerTileRightClickHint();
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Honeyflower] Error updating right-click state:', error);
+    }
+  }
+
+  function setupHoneyflowerTileObserver() {
+    if (honeyflowerTileBoardSubscription) return;
+
+    if (typeof globalThis !== 'undefined' && globalThis.state?.board?.subscribe) {
+      honeyflowerTileBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        updateHoneyflowerTileRightClickState(boardContext);
+      });
+      updateHoneyflowerTileRightClickState(globalThis.state?.board?.getSnapshot()?.context);
+      console.log('[Quests Mod][Honeyflower] Board subscription set up for Honeyflower Tower');
+    }
+  }
+
+  function cleanupHoneyflowerTileObserver() {
+    if (honeyflowerTileBoardSubscription) {
+      try {
+        honeyflowerTileBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Honeyflower] Error unsubscribing from board:', e);
+      }
+      honeyflowerTileBoardSubscription = null;
+    }
+  }
+
+  function cleanupHoneyflowerTileSystem() {
+    if (honeyflowerContextMenu && honeyflowerContextMenu.closeMenu) {
+      honeyflowerContextMenu.closeMenu();
+      honeyflowerContextMenu = null;
+    }
+    if (honeyflowerTileRightClickEnabled) {
+      document.removeEventListener('contextmenu', handleHoneyflowerTileRightClickDocument, true);
+      honeyflowerTileRightClickEnabled = false;
+    }
+    const tile = getTileElement(HONEYFLOWER_TILE_INDEX);
+    if (tile) {
+      unmarkQuestAccessTile(tile);
+    }
+    removeHoneyflowerTileRightClickHint();
+    cleanupHoneyflowerTileObserver();
+    console.log('[Quests Mod][Honeyflower] System cleaned up');
   }
 
   // =======================
@@ -16877,6 +17328,318 @@ function createNPCCooldownManager() {
     }
   }
 
+  const questTileHighlightSources = [];
+  let tileHighlightBoardSubscription = null;
+  let tileHighlightGameTimerSubscription = null;
+
+  function canShowQuestTileHighlights(boardContext) {
+    return !isBoardBattleActive(boardContext) && countAllyPiecesOnBoard(boardContext) === 0;
+  }
+
+  function markQuestAccessTile(tileElement) {
+    if (!tileElement) return;
+    tileElement.setAttribute(TILE_HIGHLIGHT_TILE_ATTR, '1');
+    tileElement.title = QUEST_ACCESS_TILE_TITLE;
+  }
+
+  function unmarkQuestAccessTile(tileElement) {
+    if (!tileElement) return;
+    tileElement.removeAttribute(TILE_HIGHLIGHT_TILE_ATTR);
+    tileElement.removeAttribute('title');
+  }
+
+  function ensureQuestTileHighlightStyles() {
+    if (document.getElementById('quests-tile-highlight-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'quests-tile-highlight-styles';
+    style.textContent = `
+      @keyframes quests-tile-highlight-pulse {
+        0%, 100% {
+          opacity: 0;
+          transform: scale(0.96);
+        }
+        50% {
+          opacity: 0.5;
+          transform: scale(1);
+        }
+      }
+      .${TILE_HIGHLIGHT_CLASS} {
+        opacity: 0;
+        animation: quests-tile-highlight-pulse 1.6s ease-in-out infinite;
+        cursor: ${QUEST_ACCESS_CURSOR} !important;
+      }
+      [${TILE_HIGHLIGHT_TILE_ATTR}="1"] {
+        cursor: ${QUEST_ACCESS_CURSOR} !important;
+      }
+      [${TILE_HIGHLIGHT_TILE_ATTR}="1"] *,
+      .quests-tile-highlight-hitbox {
+        cursor: ${QUEST_ACCESS_CURSOR} !important;
+      }
+      .${TESHA_ARROW_CLASS} {
+        cursor: ${QUEST_ACCESS_CURSOR} !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function getQuestTileOverlayBoxStyle(extraProperties = []) {
+    return [
+      'position:absolute',
+      'right:0',
+      'bottom:0',
+      'width:calc(32px * var(--zoomFactor))',
+      'height:calc(32px * var(--zoomFactor))',
+      ...extraProperties
+    ].join(';');
+  }
+
+  function placeTileHighlightEffect(tileElement, alt = 'Quest access') {
+    if (!tileElement || tileElement.querySelector(`.${TILE_HIGHLIGHT_CLASS}`)) return;
+
+    ensureQuestTileHighlightStyles();
+
+    markQuestAccessTile(tileElement);
+
+    const hitbox = document.createElement('div');
+    hitbox.className = 'quests-tile-highlight-hitbox';
+    hitbox.title = QUEST_ACCESS_TILE_TITLE;
+    hitbox.style.cssText = getQuestTileOverlayBoxStyle([
+      'pointer-events:auto',
+      'cursor:' + QUEST_ACCESS_CURSOR,
+      'z-index:10001',
+      'background:transparent'
+    ]);
+
+    const highlight = document.createElement('img');
+    highlight.className = `${TILE_HIGHLIGHT_CLASS} pixelated`;
+    highlight.src = getQuestItemsAssetUrl('Tile_Highlight_Effect.gif');
+    highlight.alt = alt;
+    highlight.title = QUEST_ACCESS_TILE_TITLE;
+    highlight.draggable = false;
+    highlight.style.cssText = getQuestTileOverlayBoxStyle([
+      'pointer-events:none',
+      'z-index:10002',
+      'image-rendering:pixelated',
+      'object-fit:fill',
+      'transform-origin:center center'
+    ]);
+    tileElement.appendChild(hitbox);
+    tileElement.appendChild(highlight);
+    bringQuestTileOverlaysToFront(tileElement);
+  }
+
+  function removeAllTileHighlightEffects() {
+    document.querySelectorAll(`.${TILE_HIGHLIGHT_CLASS}`).forEach((highlight) => {
+      const tile = highlight.parentElement;
+      if (tile?.getAttribute(TILE_HIGHLIGHT_TILE_ATTR) === '1') {
+        unmarkQuestAccessTile(tile);
+      }
+      highlight.remove();
+    });
+    document.querySelectorAll('.quests-tile-highlight-hitbox').forEach((hitbox) => hitbox.remove());
+  }
+
+  function registerQuestTileHighlightSource({ getTiles, isAccessActive, alt = 'Quest access' }) {
+    questTileHighlightSources.push({ getTiles, isAccessActive, alt });
+  }
+
+  function updateAllQuestTileHighlights(boardContext) {
+    removeAllTileHighlightEffects();
+    if (!canShowQuestTileHighlights(boardContext)) return;
+
+    for (const source of questTileHighlightSources) {
+      try {
+        if (!source.isAccessActive(boardContext)) continue;
+        const tiles = source.getTiles(boardContext);
+        const tileList = Array.isArray(tiles) ? tiles : (tiles ? [...tiles] : []);
+        for (const tile of tileList) {
+          if (tile?.isConnected) {
+            placeTileHighlightEffect(tile, source.alt);
+          }
+        }
+      } catch (error) {
+        console.error('[Quests Mod][Tile Highlight] Error updating highlight source:', error);
+      }
+    }
+  }
+
+  function refreshQuestTileHighlights(boardContext = null) {
+    if (typeof updateAllQuestTileHighlights !== 'function') return;
+    updateAllQuestTileHighlights(boardContext || globalThis.state?.board?.getSnapshot()?.context);
+  }
+
+  function initializeQuestTileHighlightSources() {
+    if (questTileHighlightSources.length > 0) return;
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(HONEYFLOWER_TILE_INDEX);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableHoneyflowerTileRightClick,
+      alt: 'Pick Honeyflower'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(COSTELLO_TILE_INDEX);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableTile53CostelloRightClick,
+      alt: 'Visit Costello'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(WYDA_TILE_INDEX);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableTile83WydaRightClick,
+      alt: 'Visit Wyda'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(79);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableTile79RightClick,
+      alt: 'Visit Al Dee'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getTileElement(SECLUDED_HERB_TILE_77);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableTile77SpiderLair,
+      alt: 'Spider Lair'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getSixthSealTileElement(SEVENTH_SEAL_TILE_126);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableTile126Portal,
+      alt: 'Portal'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => SIXTH_SEAL_LEVER_TILES.map((tileIndex) => getSixthSealTileElement(tileIndex)).filter(Boolean),
+      isAccessActive: shouldEnableSixthSealLevers,
+      alt: 'Lever'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getSixthSealTileElement(SECOND_SEAL_TILE_34);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableSecondSealTile34,
+      alt: 'Lever'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getSixthSealTileElement(THIRD_SEAL_TILE_52);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableThirdSealTile52,
+      alt: 'Rune'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getSixthSealTileElement(FIFTH_SEAL_TILE_41);
+        return tile ? [tile] : [];
+      },
+      isAccessActive: shouldEnableFifthSealTile41,
+      alt: 'Lever'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => {
+        const tile = getSerpentineBasementLeverTileElement();
+        return tile ? [tile] : [];
+      },
+      isAccessActive: (boardContext) => shouldEnableSerpentineLeverTile64(boardContext) && !isSerpentineLeverPulled(),
+      alt: 'Lever'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => [...serpentineFieldState.tiles],
+      isAccessActive: shouldEnableSerpentineDestroyFieldRightClick,
+      alt: 'Destroy field'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => [...serpentineRunePickupState.tiles],
+      isAccessActive: shouldEnableSerpentineRunePickupRightClick,
+      alt: 'Pick up rune'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => [...miningState.tiles],
+      isAccessActive: () => miningState.tiles.size > 0 && !!(miningState.enabled && hasLightShovelInInventory()),
+      alt: 'Dig'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => [...fishingState.tiles],
+      isAccessActive: () => fishingState.tiles.size > 0 && !!(fishingState.enabled && shouldEnableWaterFishing()),
+      alt: 'Fish'
+    });
+  }
+
+  function setupTileHighlightObserver() {
+    if (tileHighlightBoardSubscription) return;
+
+    initializeQuestTileHighlightSources();
+
+    if (typeof globalThis !== 'undefined' && globalThis.state?.board?.subscribe) {
+      tileHighlightBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        updateAllQuestTileHighlights(boardContext);
+      });
+    }
+
+    if (typeof globalThis !== 'undefined' && globalThis.state?.gameTimer?.subscribe) {
+      tileHighlightGameTimerSubscription = globalThis.state.gameTimer.subscribe(() => {
+        updateAllQuestTileHighlights(globalThis.state?.board?.getSnapshot()?.context);
+      });
+    }
+
+    updateAllQuestTileHighlights(globalThis.state?.board?.getSnapshot()?.context);
+    console.log('[Quests Mod][Tile Highlight] Observer set up for quest access tiles');
+  }
+
+  function cleanupTileHighlightObserver() {
+    if (tileHighlightBoardSubscription) {
+      try {
+        tileHighlightBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tile Highlight] Error unsubscribing from board:', e);
+      }
+      tileHighlightBoardSubscription = null;
+    }
+    if (tileHighlightGameTimerSubscription) {
+      try {
+        tileHighlightGameTimerSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tile Highlight] Error unsubscribing from game timer:', e);
+      }
+      tileHighlightGameTimerSubscription = null;
+    }
+  }
+
+  function cleanupTileHighlightSystem() {
+    removeAllTileHighlightEffects();
+    cleanupTileHighlightObserver();
+    questTileHighlightSources.length = 0;
+    console.log('[Quests Mod][Tile Highlight] System cleaned up');
+  }
+
   async function hasScarabCoinInInventory() {
     try {
       const items = await getQuestItems(true);
@@ -16906,6 +17669,7 @@ function createNPCCooldownManager() {
     arrow.className = `${TESHA_ARROW_CLASS} pixelated`;
     arrow.src = getQuestItemsAssetUrl('Tutorial_Arrow_Effect.gif');
     arrow.alt = 'Talk to Tesha';
+    arrow.title = QUEST_ACCESS_TILE_TITLE;
     arrow.draggable = false;
     arrow.style.cssText = [
       'position:absolute',
@@ -16914,14 +17678,14 @@ function createNPCCooldownManager() {
       'width:100%',
       'height:100%',
       'pointer-events:auto',
-      'cursor:pointer',
-      'z-index:1001',
+      'cursor:' + QUEST_ACCESS_CURSOR,
+      'z-index:9999',
       'image-rendering:pixelated',
       'object-fit:contain'
     ].join(';');
-    arrow.addEventListener('click', handleTeshaArrowClick);
+    arrow.addEventListener('contextmenu', handleTeshaArrowClick);
+    markQuestAccessTile(tileElement);
     tileElement.appendChild(arrow);
-    tileElement.style.pointerEvents = 'auto';
     teshaArrowVisible = true;
   }
 
@@ -16937,7 +17701,7 @@ function createNPCCooldownManager() {
       if (!shouldShow) {
         if (teshaArrowVisible) {
           const tile = getTileElement(TESHA_TILE_INDEX);
-          if (tile) tile.style.pointerEvents = '';
+          if (tile) unmarkQuestAccessTile(tile);
           removeTeshaArrow();
         }
         return;
@@ -16997,7 +17761,7 @@ function createNPCCooldownManager() {
 
   function cleanupTeshaArrowSystem() {
     const tile = getTileElement(TESHA_TILE_INDEX);
-    if (tile) tile.style.pointerEvents = '';
+    if (tile) unmarkQuestAccessTile(tile);
     removeTeshaArrow();
     cleanupTeshaArrowObserver();
     console.log('[Quests Mod][Tesha] Arrow system cleaned up');
@@ -17244,6 +18008,15 @@ function createNPCCooldownManager() {
       }
       inventoryObserver = null;
     }
+
+    if (missionProgressPlayerSubscription) {
+      try {
+        missionProgressPlayerSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod] Error unsubscribing from mission progress player subscription:', e);
+      }
+      missionProgressPlayerSubscription = null;
+    }
     
     // Cleanup quest items drop system
     if (questItemsBoardSubscription) {
@@ -17306,12 +18079,17 @@ function createNPCCooldownManager() {
     // Cleanup Tile 79 system
     cleanupTile79System();
 
+    // Cleanup Honeyflower Tower system
+    cleanupHoneyflowerTileSystem();
+
     // Cleanup Tile 53 Costello system
     cleanupTile53CostelloSystem();
     // Cleanup Tile 83 Wyda system
     cleanupTile83WydaSystem();
     // Cleanup Tesha arrow system
     cleanupTeshaArrowSystem();
+    // Cleanup tile highlight system
+    cleanupTileHighlightSystem();
     // Cleanup Tile 77 Spider Lair system
     cleanupTile77SpiderLairSystem();
 
@@ -17558,8 +18336,10 @@ function createNPCCooldownManager() {
   setupCopperKeySystem();
   setupEquipmentSlotObserver();
     setupTile53CostelloObserver();
+    setupHoneyflowerTileObserver();
     setupTile83WydaObserver();
     setupTeshaArrowObserver();
+    setupTileHighlightObserver();
     setupTile77SpiderLairObserver();
     setupSevenSealsRoomObserver();
     setupFirstSealBoardObserver();
@@ -17589,6 +18369,7 @@ function createNPCCooldownManager() {
       // removeWhenCompleted: if true, item is removed when quest is completed (for unique items)
       const itemMissionMap = {
         'Map to the Mines': { missionId: KING_COPPER_KEY_MISSION.id, requiredStatus: 'accepted' },
+        [HONEYFLOWER_CONFIG.productName]: { missionId: KING_HONEYFLOWER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         'Obsidian Knife': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted' },
         'Stamped Letter': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted' },
         'Letter from Al Dee': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
@@ -17684,6 +18465,234 @@ function createNPCCooldownManager() {
     }
   }
 
+  function refreshSystemsAfterMissionProgressLoaded() {
+    updateTile79RightClickState();
+    updateHoneyflowerTileRightClickState();
+    updateWaterFishingState();
+    updateMiningState();
+    setupCopperKeySystem();
+  }
+
+  function finishMissionProgressHydration() {
+    missionProgressHydratedFromFirebase = true;
+    scheduleArenaRankDisplayUpdate(0);
+    syncArenaLeaderboardForCurrentPlayer().catch((err) => {
+      console.warn('[Quests Mod][Arena Leaderboard] Failed to sync after mission progress hydration:', err);
+    });
+    refreshSystemsAfterMissionProgressLoaded();
+    reloadQuestItemsFromFirebase().catch((err) => {
+      console.warn('[Quests Mod] Failed to reload quest items after mission progress sync:', err);
+    });
+  }
+
+  function setupMissionProgressRetryOnPlayerReady() {
+    if (missionProgressHydratedFromFirebase || missionProgressPlayerSubscription) {
+      return;
+    }
+    const playerActor = globalThis.state?.player;
+    if (!playerActor?.subscribe) {
+      return;
+    }
+
+    console.log('[Quests Mod] Waiting for player state before loading mission progress from Firebase');
+    missionProgressPlayerSubscription = playerActor.subscribe(async () => {
+      if (missionProgressHydratedFromFirebase) {
+        missionProgressPlayerSubscription?.unsubscribe?.();
+        missionProgressPlayerSubscription = null;
+        return;
+      }
+
+      const playerName = getCurrentPlayerName();
+      if (!playerName) {
+        return;
+      }
+
+      missionProgressPlayerSubscription?.unsubscribe?.();
+      missionProgressPlayerSubscription = null;
+
+      try {
+        await hydrateMissionProgressFromFirebase(playerName);
+        finishMissionProgressHydration();
+        console.log('[Quests Mod] Mission progress loaded from Firebase after player became ready');
+      } catch (error) {
+        console.error('[Quests Mod] Error loading mission progress after player became ready:', error);
+        missionProgressLoadPromise = null;
+      }
+    });
+  }
+
+  async function hydrateMissionProgressFromFirebase(playerName) {
+    const progress = await getKingTibianusProgress(playerName);
+
+    if (!progress || progress.__isEmpty) {
+      console.log('[Quests Mod] No mission progress found in Firebase');
+    }
+
+    if (progress) {
+      if (progress.accepted !== undefined) {
+        kingChatState.progressCopper = {
+          accepted: progress.accepted,
+          completed: progress.completed
+        };
+      }
+
+      for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
+        const stateKey = MISSION_STATE_MAP[missionId];
+        if (stateKey) {
+          kingChatState[stateKey] = progress[firebaseKey] ? {
+            accepted: !!progress[firebaseKey].accepted,
+            completed: !!progress[firebaseKey].completed,
+            ...(firebaseKey === 'serpentineTower'
+              ? {
+                  destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
+                  putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
+                }
+              : {})
+          } : (
+            firebaseKey === 'serpentineTower'
+              ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
+              : { accepted: false, completed: false }
+          );
+        }
+      }
+      if (progress.ironOre) {
+        fishingState.ironOreQuestActive = !!progress.ironOre.active;
+        fishingState.ironOreQuestStartTime = progress.ironOre.startTime;
+        fishingState.ironOreQuestCompleted = !!progress.ironOre.completed;
+        fishingState.ironOreQuestExpired = !progress.ironOre.active &&
+                                           !progress.ironOre.completed &&
+                                           !!progress.ironOre.startTime;
+      }
+      if (progress.costelloVisited !== undefined) {
+        kingChatState.costelloVisited = !!progress.costelloVisited;
+      }
+      kingChatState.mornenionDefeated = !!(progress.mornenion && progress.mornenion.defeated);
+      if (Array.isArray(progress.sevenSealsCompleted) && progress.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
+        kingChatState.sevenSealsCompleted = progress.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
+      } else if (Array.isArray(progress.sevenSealsVisited)) {
+        kingChatState.sevenSealsCompleted = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.map(roomName => progress.sevenSealsVisited.includes(roomName));
+      }
+
+      const lostInTheSandsMigrated = migrateCombinedLostInTheSandsQuest(progress);
+      if (lostInTheSandsMigrated) {
+        const currentPlayer = getCurrentPlayerName();
+        if (currentPlayer) {
+          try {
+            await saveKingTibianusProgress(currentPlayer, getAllMissionProgress());
+            console.log('[Quests Mod] Migrated Lost in the Sands / Meeting with Tesha progress');
+          } catch (err) {
+            console.error('[Quests Mod] Error saving Lost in the Sands migration:', err);
+          }
+        }
+      }
+
+      if (kingChatState.progressAlDeeFishing.completed) {
+        if (fishingState.ironOreQuestActive) {
+          console.log('[Quests Mod] Al Dee fishing mission completed - marking active Iron Ore quest as completed');
+          fishingState.ironOreQuestActive = false;
+          fishingState.ironOreQuestExpired = false;
+          fishingState.ironOreQuestCompleted = true;
+          fishingState.ironOreQuestStartTime = null;
+        } else if (!fishingState.ironOreQuestCompleted) {
+          console.log('[Quests Mod] Al Dee fishing mission completed - marking Iron Ore quest as completed');
+          fishingState.ironOreQuestCompleted = true;
+        }
+
+        const currentPlayer = getCurrentPlayerName();
+        if (currentPlayer) {
+          try {
+            const allProgress = getAllMissionProgress();
+            allProgress.ironOre = {
+              active: false,
+              startTime: null,
+              completed: true
+            };
+            await saveKingTibianusProgress(currentPlayer, allProgress);
+            console.log('[Quests Mod] Iron Ore quest marked as completed and saved to Firebase');
+          } catch (err) {
+            console.error('[Quests Mod] Error marking Iron Ore quest as completed:', err);
+          }
+        }
+      }
+
+      if (fishingState.ironOreQuestCompleted) {
+        try {
+          const questItems = await getQuestItems(false);
+          if (questItems['Iron Ore'] && questItems['Iron Ore'] > 0) {
+            console.log('[Quests Mod] Removing leftover Iron Ore from inventory (quest completed)');
+            await consumeQuestItem('Iron Ore', questItems['Iron Ore']);
+          }
+        } catch (err) {
+          console.error('[Quests Mod] Error cleaning up Iron Ore on init:', err);
+        }
+      }
+
+      await syncLostInTheSandsQuestFromInventory();
+      const serpentinePrereqReset = syncSerpentineTowerQuestPrerequisites();
+      if (serpentinePrereqReset) {
+        const hydratedPlayerName = getCurrentPlayerName();
+        if (hydratedPlayerName) {
+          await saveKingTibianusProgress(hydratedPlayerName, getAllMissionProgress());
+        }
+      }
+      const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
+      if (serpentineProgress.putridChamberComplete && serpentineProgress.destroyFieldRuneTaken) {
+        const syncedProgress = buildSerpentineTowerProgress({ destroyFieldRuneTaken: false });
+        setMissionProgress(SERPENTINE_TOWER_MISSION, syncedProgress);
+        kingChatState.progressSerpentineTower = { ...syncedProgress };
+        const hydratedPlayerName = getCurrentPlayerName();
+        if (hydratedPlayerName) {
+          await saveKingTibianusProgress(hydratedPlayerName, getAllMissionProgress());
+        }
+      }
+      updateTeshaArrowState();
+      await cleanupInvalidQuestItems(progress);
+      updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
+
+      try {
+        const questItems = await getQuestItems(false);
+        const diaryCount = questItems[COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName] || 0;
+        let needsSave = false;
+        if (diaryCount >= 1 && !kingChatState.progressMonksStudy.completed) {
+          console.log('[Quests Mod] Syncing Monks Study to completed (player has Castello\'s diary)');
+          setMissionProgress(KING_MONKS_STUDY_MISSION, { accepted: true, completed: true });
+          kingChatState.progressMonksStudy.accepted = true;
+          kingChatState.progressMonksStudy.completed = true;
+          needsSave = true;
+        }
+        if (diaryCount >= 1 && !kingChatState.progressQueenBanshees.accepted) {
+          console.log('[Quests Mod] Syncing Queen Banshees to accepted (player has Castello\'s diary)');
+          setMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION, { accepted: true, completed: !!kingChatState.progressQueenBanshees.completed });
+          kingChatState.progressQueenBanshees.accepted = true;
+          needsSave = true;
+        }
+        if (needsSave) {
+          const allProgress = getAllMissionProgress();
+          if (progress.ironOre) {
+            allProgress.ironOre = {
+              active: fishingState.ironOreQuestActive,
+              startTime: fishingState.ironOreQuestStartTime,
+              completed: fishingState.ironOreQuestCompleted
+            };
+          }
+          await saveKingTibianusProgress(getCurrentPlayerName(), allProgress);
+        }
+      } catch (err) {
+        console.error('[Quests Mod] Error syncing mission state from diary:', err);
+      }
+
+      const loggedProgress = getAllMissionProgress();
+      if (progress.ironOre) {
+        loggedProgress.ironOre = {
+          active: fishingState.ironOreQuestActive,
+          expired: fishingState.ironOreQuestExpired,
+          completed: fishingState.ironOreQuestCompleted
+        };
+      }
+      console.log('[Quests Mod] Mission progress loaded from Firebase:', loggedProgress);
+    }
+  }
+
   async function loadMissionProgressOnInit() {
     if (missionProgressLoadPromise) {
       return missionProgressLoadPromise;
@@ -17691,198 +18700,19 @@ function createNPCCooldownManager() {
 
     missionProgressLoadPromise = (async () => {
       try {
-        const playerName = getCurrentPlayerName();
+        const playerName = await waitForCurrentPlayerName();
         if (!playerName) {
-          console.log('[Quests Mod] No player name available for mission progress loading');
+          console.warn('[Quests Mod] Player name not available yet — will retry when player state is ready');
+          setupMissionProgressRetryOnPlayerReady();
           return;
         }
 
-        const progress = await getKingTibianusProgress(playerName);
-
-        // Update kingChatState with loaded progress
-        if (progress) {
-        // Backward compatibility: old shape {accepted, completed}
-        if (progress.accepted !== undefined) {
-          kingChatState.progressCopper = {
-            accepted: progress.accepted,
-            completed: progress.completed
-          };
-        }
-        
-        // New shape: Load all missions from registry dynamically
-        for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
-          const stateKey = MISSION_STATE_MAP[missionId];
-          if (stateKey) {
-            // Always initialize state, even if Firebase data is missing
-            kingChatState[stateKey] = progress[firebaseKey] ? {
-              accepted: !!progress[firebaseKey].accepted,
-              completed: !!progress[firebaseKey].completed,
-              ...(firebaseKey === 'serpentineTower'
-                ? {
-                    destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
-                    putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
-                  }
-                : {})
-            } : (
-              firebaseKey === 'serpentineTower'
-                ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
-                : { accepted: false, completed: false }
-            );
-          }
-        }
-        if (progress.ironOre) {
-          fishingState.ironOreQuestActive = !!progress.ironOre.active;
-          fishingState.ironOreQuestStartTime = progress.ironOre.startTime;
-          fishingState.ironOreQuestCompleted = !!progress.ironOre.completed;
-          // If quest was started but not completed and not active, it means timer expired
-          fishingState.ironOreQuestExpired = !progress.ironOre.active &&
-                                             !progress.ironOre.completed &&
-                                             !!progress.ironOre.startTime;
-        }
-        if (progress.costelloVisited !== undefined) {
-          kingChatState.costelloVisited = !!progress.costelloVisited;
-        }
-        if (Array.isArray(progress.sevenSealsCompleted) && progress.sevenSealsCompleted.length === SEVEN_SEALS_COUNT) {
-          kingChatState.sevenSealsCompleted = progress.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
-        } else if (Array.isArray(progress.sevenSealsVisited)) {
-          kingChatState.sevenSealsCompleted = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.map(roomName => progress.sevenSealsVisited.includes(roomName));
-        }
-
-        const lostInTheSandsMigrated = migrateCombinedLostInTheSandsQuest(progress);
-        if (lostInTheSandsMigrated) {
-          const currentPlayer = getCurrentPlayerName();
-          if (currentPlayer) {
-            try {
-              await saveKingTibianusProgress(currentPlayer, getAllMissionProgress());
-              console.log('[Quests Mod] Migrated Lost in the Sands / Meeting with Tesha progress');
-            } catch (err) {
-              console.error('[Quests Mod] Error saving Lost in the Sands migration:', err);
-            }
-          }
-        }
-
-        // If Al Dee fishing mission is completed, mark Iron Ore quest as completed
-        // since Iron Ore was part of that mission and the overall quest line is now done
-        if (kingChatState.progressAlDeeFishing.completed) {
-          if (fishingState.ironOreQuestActive) {
-            console.log('[Quests Mod] Al Dee fishing mission completed - marking active Iron Ore quest as completed');
-            fishingState.ironOreQuestActive = false;
-            fishingState.ironOreQuestExpired = false;
-            fishingState.ironOreQuestCompleted = true;
-            fishingState.ironOreQuestStartTime = null;
-          } else if (!fishingState.ironOreQuestCompleted) {
-            console.log('[Quests Mod] Al Dee fishing mission completed - marking Iron Ore quest as completed');
-            fishingState.ironOreQuestCompleted = true;
-          }
-
-          // Save the completed state to Firebase
-          const currentPlayer = getCurrentPlayerName();
-          if (currentPlayer) {
-            try {
-              // Use registry to get all mission progress (future-proof)
-              const allProgress = getAllMissionProgress();
-              allProgress.ironOre = {
-                active: false,
-                startTime: null,
-                completed: true
-              };
-              await saveKingTibianusProgress(currentPlayer, allProgress);
-              console.log('[Quests Mod] Iron Ore quest marked as completed and saved to Firebase');
-            } catch (err) {
-              console.error('[Quests Mod] Error marking Iron Ore quest as completed:', err);
-            }
-          }
-        }
-
-        // Clean up any remaining Iron Ore from inventory since quest is completed
-        if (fishingState.ironOreQuestCompleted) {
-          try {
-            const questItems = await getQuestItems(false);
-            if (questItems['Iron Ore'] && questItems['Iron Ore'] > 0) {
-              console.log('[Quests Mod] Removing leftover Iron Ore from inventory (quest completed)');
-              await consumeQuestItem('Iron Ore', questItems['Iron Ore']);
-            }
-          } catch (err) {
-            console.error('[Quests Mod] Error cleaning up Iron Ore on init:', err);
-          }
-        }
-
-        // Clean up quest items that shouldn't exist if missions aren't completed
-        await syncLostInTheSandsQuestFromInventory();
-        const serpentinePrereqReset = syncSerpentineTowerQuestPrerequisites();
-        if (serpentinePrereqReset) {
-          const playerName = getCurrentPlayerName();
-          if (playerName) {
-            await saveKingTibianusProgress(playerName, getAllMissionProgress());
-          }
-        }
-        const serpentineProgress = getMissionProgress(SERPENTINE_TOWER_MISSION);
-        if (serpentineProgress.putridChamberComplete && serpentineProgress.destroyFieldRuneTaken) {
-          const syncedProgress = buildSerpentineTowerProgress({ destroyFieldRuneTaken: false });
-          setMissionProgress(SERPENTINE_TOWER_MISSION, syncedProgress);
-          kingChatState.progressSerpentineTower = { ...syncedProgress };
-          const playerName = getCurrentPlayerName();
-          if (playerName) {
-            await saveKingTibianusProgress(playerName, getAllMissionProgress());
-          }
-        }
-        updateTeshaArrowState();
-        await cleanupInvalidQuestItems(progress);
-        // Serpentine Tower Basement right-click relies on mission state + current room name,
-        // so refresh it once Firebase progress has been applied.
-        updateSerpentineBasementRightClickState(globalThis.state?.board?.getSnapshot?.()?.context);
-
-        // Migration: having Castello's diary implies Monks Study was completed and Queen Banshees was accepted (diary is only given when accepting Queen Banshees)
-        try {
-          const questItems = await getQuestItems(false);
-          const diaryCount = questItems[COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName] || 0;
-          let needsSave = false;
-          if (diaryCount >= 1 && !kingChatState.progressMonksStudy.completed) {
-            console.log('[Quests Mod] Syncing Monks Study to completed (player has Castello\'s diary)');
-            setMissionProgress(KING_MONKS_STUDY_MISSION, { accepted: true, completed: true });
-            kingChatState.progressMonksStudy.accepted = true;
-            kingChatState.progressMonksStudy.completed = true;
-            needsSave = true;
-          }
-          if (diaryCount >= 1 && !kingChatState.progressQueenBanshees.accepted) {
-            console.log('[Quests Mod] Syncing Queen Banshees to accepted (player has Castello\'s diary)');
-            setMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION, { accepted: true, completed: !!kingChatState.progressQueenBanshees.completed });
-            kingChatState.progressQueenBanshees.accepted = true;
-            needsSave = true;
-          }
-          if (needsSave) {
-            const allProgress = getAllMissionProgress();
-            if (progress.ironOre) {
-              allProgress.ironOre = {
-                active: fishingState.ironOreQuestActive,
-                startTime: fishingState.ironOreQuestStartTime,
-                completed: fishingState.ironOreQuestCompleted
-              };
-            }
-            await saveKingTibianusProgress(getCurrentPlayerName(), allProgress);
-          }
-        } catch (err) {
-          console.error('[Quests Mod] Error syncing mission state from diary:', err);
-        }
-
-        // Log all mission progress using registry (future-proof)
-        const loggedProgress = getAllMissionProgress();
-        if (progress.ironOre) {
-          loggedProgress.ironOre = {
-            active: fishingState.ironOreQuestActive,
-            expired: fishingState.ironOreQuestExpired,
-            completed: fishingState.ironOreQuestCompleted
-          };
-        }
-        console.log('[Quests Mod] Mission progress loaded from Firebase:', loggedProgress);
-      } else {
-        console.log('[Quests Mod] No mission progress found in Firebase');
-      }
+        await hydrateMissionProgressFromFirebase(playerName);
+        finishMissionProgressHydration();
       } catch (error) {
         console.error('[Quests Mod] Error loading mission progress on init:', error);
-      } finally {
-        missionProgressLoaded = true;
-        scheduleArenaRankDisplayUpdate(0);
+        setupMissionProgressRetryOnPlayerReady();
+        throw error;
       }
     })();
 
@@ -17941,60 +18771,26 @@ function createNPCCooldownManager() {
     console.log('[Quests Mod][Iron Ore Quest] Timer started');
   }
 
+  async function runPostMissionProgressInitSetup() {
+    registerDevGrantHelper();
+    registerDevCompleteAllQuestsHelper();
+
+    await migrateDwarvenPickaxeToLightShovel();
+    fishingState.enabled = false;
+    fishingState.manuallyDisabled = true;
+    updateWaterFishingState(true);
+
+    setupQuestOverlayHider();
+    refreshSystemsAfterMissionProgressLoaded();
+    trackCreaturePlacements();
+  }
+
   // Load mission progress from Firebase on initialization and then setup systems
   loadMissionProgressOnInit().then(async () => {
-    // Register dev helpers for console commands
-    registerDevGrantHelper();
-    registerDevCompleteAllQuestsHelper();
-    
-    // Migrate any existing Dwarven Pickaxe items to Light Shovel
-    await migrateDwarvenPickaxeToLightShovel();
-    // Always start with fishing disabled after reload
-    fishingState.enabled = false;
-    fishingState.manuallyDisabled = true; // Start disabled and prevent automatic re-enabling
-    updateWaterFishingState(true);
-
-    // Set up quest overlay hider (always active)
-    setupQuestOverlayHider();
-    // Set up systems conditionally (only when items/missions are active)
-    // These will set up subscriptions when items/missions are detected
-    updateTile79RightClickState();
-    updateWaterFishingState();
-    updateMiningState();
-    // Set up Copper Key system conditionally (only when mission is active)
-    setupCopperKeySystem();
-    // Note: Mornenion tile restrictions are set up when battle is initialized (after entering hole)
-    // Set up creature placement tracking
-    trackCreaturePlacements();
-    // Note: Stop button disabler and victory/defeat detection are now handled by CustomBattle system
-  }).catch(async error => {
+    await runPostMissionProgressInitSetup();
+  }).catch(async (error) => {
     console.error('[Quests Mod] Failed to load mission progress, setting up systems anyway:', error);
-
-    // Register dev helpers for console commands (even if mission progress failed to load)
-    registerDevGrantHelper();
-    registerDevCompleteAllQuestsHelper();
-
-    // Migrate any existing Dwarven Pickaxe items to Light Shovel (even if mission progress failed to load)
-    await migrateDwarvenPickaxeToLightShovel();
-
-    // Always start with fishing disabled after reload
-    fishingState.enabled = false;
-    fishingState.manuallyDisabled = true; // Start disabled and prevent automatic re-enabling
-    updateWaterFishingState(true);
-
-    // Set up quest overlay hider (always active)
-    setupQuestOverlayHider();
-    // Set up systems conditionally (only when items/missions are active)
-    // These will set up subscriptions when items/missions are detected
-    updateTile79RightClickState();
-    updateWaterFishingState();
-    updateMiningState();
-    // Set up Copper Key system conditionally (only when mission is active)
-    setupCopperKeySystem();
-    // Note: Mornenion tile restrictions are set up when battle is initialized (after entering hole)
-    // Set up creature placement tracking
-    trackCreaturePlacements();
-    // Note: Stop button disabler and victory/defeat detection are now handled by CustomBattle system
+    await runPostMissionProgressInitSetup();
   });
 
   // Start Iron Ore quest timer

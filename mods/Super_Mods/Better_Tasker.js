@@ -4779,6 +4779,11 @@ function isQuestBlipAvailable() {
             console.log('[Better Tasker] isQuestBlipAvailable: No task object found');
             return false;
         }
+
+        // resetAt can expire while an in-progress task still has gameId — that is not a new-task signal.
+        if (hasActiveQuestTask()) {
+            return false;
+        }
         
         // If resetAt is null, a new task is available
         if (!task.resetAt) {
@@ -6976,14 +6981,6 @@ async function handleTaskFinishing() {
                 await triggerFailsafe('Task is ready');
                 return;
                 
-            } else if (isQuestBlipReady) {
-                if (taskOperationInProgress) {
-                    console.log('[Better Tasker] Task accept already in progress - skipping duplicate delegate');
-                    return;
-                }
-                console.log('[Better Tasker] New task available - delegating to openQuestLogAndAcceptTask');
-                await openQuestLogAndAcceptTask();
-                return;
             } else if (task.gameId && !task.ready) {
                 // Active task that's not ready yet - check if we need to navigate to the task map
                 if (!taskNavigationCompleted) {
@@ -7028,6 +7025,15 @@ async function handleTaskFinishing() {
                     console.log('[Better Tasker] Active task in progress (not ready) - already navigated, monitoring kill progress only');
                     return;
                 }
+
+            } else if (isQuestBlipReady) {
+                if (taskOperationInProgress) {
+                    console.log('[Better Tasker] Task accept already in progress - skipping duplicate delegate');
+                    return;
+                }
+                console.log('[Better Tasker] New task available - delegating to openQuestLogAndAcceptTask');
+                await openQuestLogAndAcceptTask();
+                return;
                 
             } else if (isAutoplayActive) {
                 console.log('[Better Tasker] Autoplay is active and quest log accessible, checking...');
@@ -8111,8 +8117,8 @@ async function openQuestLogAndAcceptTask() {
             if (!taskRemovedByFilter) {
                 console.log('[Better Tasker] Current task is still valid - skipping new task accept to prevent accidental removal');
                 releaseTaskOperation();
-                // Recheck soon in case server state catches up and active task clears.
-                taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), 3000);
+                // Active task: resume hunt/navigation instead of scheduler (scheduler no-ops while gameId is set).
+                taskCheckTimeout = setTimeout(() => handleTaskFinishing(), 3000);
                 return;
             }
 

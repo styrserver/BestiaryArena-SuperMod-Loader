@@ -1105,10 +1105,9 @@
                 color: var(--at-text);
                 padding: 0;
                 overflow: hidden;
-                /* Above the game UI (floor slider/bestiary tooltip use z-1),
-                   but below other mod panels (Hunt Analyzer/Raid Hunter/etc. use 9999+)
-                   so this panel never covers them. */
-                z-index: 3;
+                /* Above Autoseller auto badges (100) and board UI (z-1..z-10),
+                   below native game context menus (z-modals = 200). */
+                z-index: 150;
                 display: flex;
                 flex-direction: column;
                 font-family: Inter, sans-serif;
@@ -1342,7 +1341,7 @@
             handle.className = 'resize-handle resize-handle-' + dir;
             handle.setAttribute('data-dir', dir);
             handle.style.position = 'absolute';
-            handle.style.zIndex = '10001';
+            handle.style.zIndex = '10';
             handle.style.background = 'transparent';
             handle.style.userSelect = 'none';
             handle.setAttribute('aria-label', 'Resize ' + dir);
