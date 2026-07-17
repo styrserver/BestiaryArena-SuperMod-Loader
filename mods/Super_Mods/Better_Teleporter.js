@@ -24,6 +24,12 @@
   const MAP_COLUMN_WIDTH_PX = 180;
   const ROOM_TYPE_ATTR = `data-${NS}-room-type`;
   const TOOLTIP_ATTR = `data-${NS}-tooltip`;
+  const CREATURE_COUNT_ATTR = `data-${NS}-creature-count`;
+  const CREATURE_LEVEL_ATTR = `data-${NS}-creature-level`;
+  const PORTRAIT_SLOT_ATTR = `data-${NS}-portrait-slot`;
+  const PORTRAIT_META_ATTR = `data-${NS}-portrait-meta`;
+  const ROW_PORTRAIT_ENHANCED_ATTR = `data-${NS}-row-portraits-enhanced`;
+  const TABLE_ENHANCED_ATTR = `data-${NS}-table-enhanced`;
   const FILTERS_ATTR = `data-${NS}-filters`;
   const REGION_SELECT_ATTR = `data-${NS}-region-select`;
   const HIDE_RAIDS_ATTR = `data-${NS}-hide-raids`;
@@ -130,6 +136,8 @@
   let openRowContextMenu = null;
   let teleporterKeyboardHandler = null;
   let processModalsRaf = null;
+  let modalLayoutBurstRaf = null;
+  let cyclopediaModEnabledCache = null;
 
   const DEFAULT_SESSION_PREFERENCES = {
     regionId: '',
@@ -584,6 +592,20 @@
         z-index: 2;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
       }
+      div[role="dialog"][${TARGET_ATTR}] table thead th {
+        z-index: 5 !important;
+      }
+      div[role="dialog"][${TARGET_ATTR}] .container-slot[${PORTRAIT_SLOT_ATTR}] {
+        overflow: hidden !important;
+        position: relative !important;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
+        isolation: isolate;
+      }
+      div[role="dialog"][${TARGET_ATTR}] table tbody td:nth-child(2) {
+        overflow: hidden;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -631,6 +653,7 @@
     if (!table) return true;
     if (table.getAttribute(SORT_BOUND_ATTR) !== 'true') return false;
     if (tableNeedsEnhancement(table)) return false;
+    if (tableNeedsPortraitEnhancement(table)) return false;
 
     return true;
   }
@@ -695,6 +718,10 @@
   }
 
   function clearModalLayoutCleanup() {
+    if (modalLayoutBurstRaf != null) {
+      cancelAnimationFrame(modalLayoutBurstRaf);
+      modalLayoutBurstRaf = null;
+    }
     if (modalLayoutCleanup) {
       modalLayoutCleanup();
       modalLayoutCleanup = null;
@@ -789,9 +816,13 @@
     const burstApply = () => {
       apply();
       burstFrames += 1;
-      if (burstFrames < 4) requestAnimationFrame(burstApply);
+      if (burstFrames < 4) {
+        modalLayoutBurstRaf = requestAnimationFrame(burstApply);
+      } else {
+        modalLayoutBurstRaf = null;
+      }
     };
-    requestAnimationFrame(burstApply);
+    modalLayoutBurstRaf = requestAnimationFrame(burstApply);
 
     const onResize = () => apply();
     window.addEventListener('resize', onResize);
@@ -820,11 +851,13 @@
 
     for (const tr of table.querySelectorAll('tbody tr')) {
       teardownRowContextMenu(tr);
+      teardownRowPortraitEnhancements(tr);
       clearRoomRowAccent(tr);
     }
 
     teardownSortableHeaders(table);
     releaseTableSortState(table);
+    table.removeAttribute(TABLE_ENHANCED_ATTR);
   }
 
   function releaseTableSortState(table) {
@@ -857,6 +890,7 @@
 
   function handleTeleporterDialogStateChange(dialog) {
     if (dialog.getAttribute('data-state') === 'closed') {
+      roomBoardMetaCache.clear();
       teardownTeleporterDialogEnhancements(dialog);
       return;
     }
@@ -2137,7 +2171,10 @@
         const highlight = keyboardRoomId
           ? roomId === keyboardRoomId
           : Boolean(currentRoomId && roomId === currentRoomId);
-        tr.setAttribute('data-highlight', highlight ? 'true' : 'false');
+        const nextHighlight = highlight ? 'true' : 'false';
+        if (tr.getAttribute('data-highlight') !== nextHighlight) {
+          tr.setAttribute('data-highlight', nextHighlight);
+        }
       }
     });
   }
@@ -2200,12 +2237,19 @@
       for (const piece of board) {
         const gameId = Number(piece?.gameId);
         if (Number.isFinite(gameId)) {
-          if (!creatureMap.has(gameId)) {
-            creatureMap.set(gameId, {
+          const level = Number(piece?.level) || 1;
+          let existing = creatureMap.get(gameId);
+          if (!existing) {
+            existing = {
               gameId,
               name: resolveCreatureName(gameId) || `#${gameId}`,
-            });
+              count: 0,
+              levelCounts: new Map(),
+            };
+            creatureMap.set(gameId, existing);
           }
+          existing.count += 1;
+          existing.levelCounts.set(level, (existing.levelCounts.get(level) || 0) + 1);
         }
 
         const equipGameId = Number(piece?.equip?.gameId);
@@ -2226,7 +2270,14 @@
         }
       }
 
-      meta.creatures = [...creatureMap.values()];
+      meta.creatures = [...creatureMap.values()].map((entry) => ({
+        gameId: entry.gameId,
+        name: entry.name,
+        count: entry.count,
+        levels: [...entry.levelCounts.entries()]
+          .sort((a, b) => b[0] - a[0])
+          .map(([level, levelCount]) => ({ level, count: levelCount })),
+      }));
       meta.equips = [...equipMap.values()];
     } catch (_) {}
 
@@ -2238,6 +2289,107 @@
     if (!el || !title) return;
     el.title = title;
     el.setAttribute(TOOLTIP_ATTR, 'true');
+  }
+
+  const PORTRAIT_LEVEL_BADGE_STYLE = [
+    'background:rgba(0,0,0,0.8)',
+    'color:#fff',
+    'font-size:9px',
+    'padding:0 2px',
+    'border-radius:2px',
+    'font-weight:bold',
+    'pointer-events:none',
+    'line-height:1.2',
+    'flex-shrink:0',
+  ].join(';');
+
+  const PORTRAIT_COUNT_COLOR = '#ffe066';
+  const PORTRAIT_COUNT_TEXT_SHADOW = '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 4px rgba(0, 0, 0, 0.6)';
+
+  const PORTRAIT_COUNT_BADGE_STYLE = [
+    'position:absolute',
+    'top:0',
+    'right:0',
+    'color:' + PORTRAIT_COUNT_COLOR,
+    'font-size:10px',
+    'font-weight:bold',
+    'font-family:Arial,Helvetica,sans-serif',
+    'letter-spacing:-0.02em',
+    'pointer-events:none',
+    'line-height:1.1',
+    'z-index:1',
+    'text-shadow:' + PORTRAIT_COUNT_TEXT_SHADOW,
+    'background:rgba(0,0,0,0.55)',
+    'padding:1px 2px 2px 3px',
+    'border-radius:0 0 0 3px',
+  ].join(';');
+
+  function createCreatureLevelBadge(level) {
+    const badge = document.createElement('span');
+    badge.setAttribute(CREATURE_LEVEL_ATTR, String(level));
+    badge.textContent = String(level);
+    badge.style.cssText = PORTRAIT_LEVEL_BADGE_STYLE;
+    return badge;
+  }
+
+  function getCreaturePortraitMetaKey(creature) {
+    const levels = creature?.levels || [];
+    return `${creature?.count || 0}|${levels.map(({ level, count }) => `${level}:${count}`).join(',')}`;
+  }
+
+  function removeCreaturePortraitBadges(target) {
+    if (!target) return;
+    for (const badge of target.querySelectorAll(`[${CREATURE_COUNT_ATTR}], [${CREATURE_LEVEL_ATTR}]`)) {
+      badge.remove();
+    }
+  }
+
+  function setCreaturePortraitBadges(target, creature) {
+    if (!target || !creature) return;
+
+    const metaKey = getCreaturePortraitMetaKey(creature);
+    if (target.getAttribute(PORTRAIT_META_ATTR) === metaKey) return;
+
+    target.setAttribute(PORTRAIT_SLOT_ATTR, 'true');
+    target.setAttribute(PORTRAIT_META_ATTR, metaKey);
+    removeCreaturePortraitBadges(target);
+
+    const levels = creature.levels || [];
+    if (levels.length === 1) {
+      const badge = createCreatureLevelBadge(levels[0].level);
+      badge.style.position = 'absolute';
+      badge.style.bottom = '1px';
+      badge.style.left = '1px';
+      badge.style.zIndex = '1';
+      target.appendChild(badge);
+    } else if (levels.length > 1) {
+      const group = document.createElement('span');
+      group.setAttribute(CREATURE_LEVEL_ATTR, 'group');
+      group.style.cssText = [
+        'position:absolute',
+        'bottom:1px',
+        'left:1px',
+        'display:flex',
+        'flex-direction:row',
+        'gap:1px',
+        'max-width:calc(100% - 14px)',
+        'overflow:hidden',
+        'pointer-events:none',
+        'z-index:1',
+      ].join(';');
+      for (const { level } of levels) {
+        group.appendChild(createCreatureLevelBadge(level));
+      }
+      target.appendChild(group);
+    }
+
+    if (creature.count > 1) {
+      const countBadge = document.createElement('span');
+      countBadge.setAttribute(CREATURE_COUNT_ATTR, 'true');
+      countBadge.textContent = `×${creature.count}`;
+      countBadge.style.cssText = PORTRAIT_COUNT_BADGE_STYLE;
+      target.appendChild(countBadge);
+    }
   }
 
   function enhanceRowPortraitTooltips(tr, roomId) {
@@ -2254,6 +2406,7 @@
       const title = creature?.name || resolveCreatureName(gameId);
       setTooltipTarget(target, title);
       if (target !== img && title) img.title = title;
+      if (creature) setCreaturePortraitBadges(target, creature);
     }
 
     for (const portrait of tr.querySelectorAll('.equipment-portrait')) {
@@ -2267,6 +2420,27 @@
       }
       setTooltipTarget(portrait, title);
     }
+
+    tr.setAttribute(ROW_PORTRAIT_ENHANCED_ATTR, 'true');
+  }
+
+  function teardownRowPortraitEnhancements(tr) {
+    if (!tr) return;
+
+    for (const target of tr.querySelectorAll(`.container-slot[${PORTRAIT_SLOT_ATTR}], .container-slot[${TOOLTIP_ATTR}]`)) {
+      removeCreaturePortraitBadges(target);
+      target.removeAttribute(PORTRAIT_SLOT_ATTR);
+      target.removeAttribute(PORTRAIT_META_ATTR);
+      target.removeAttribute(TOOLTIP_ATTR);
+      target.removeAttribute('title');
+    }
+
+    for (const portrait of tr.querySelectorAll(`.equipment-portrait[${TOOLTIP_ATTR}]`)) {
+      portrait.removeAttribute(TOOLTIP_ATTR);
+      portrait.removeAttribute('title');
+    }
+
+    tr.removeAttribute(ROW_PORTRAIT_ENHANCED_ATTR);
   }
 
   function getRoomNameFromRow(tr) {
@@ -2593,6 +2767,15 @@
     return Boolean(roomId && !tr.querySelector(`td[${XP_STAM_ATTR}]`));
   }
 
+  function tableNeedsPortraitEnhancement(table) {
+    for (const tr of table.querySelectorAll('tbody tr')) {
+      if (getRegionHeaderCell(tr)) continue;
+      const roomId = extractRoomIdFromRow(tr);
+      if (roomId && tr.getAttribute(ROW_PORTRAIT_ENHANCED_ATTR) !== 'true') return true;
+    }
+    return false;
+  }
+
   function tableNeedsEnhancement(table) {
     if (!table.querySelector(`th[${XP_STAM_ATTR}]`)) return true;
     for (const tr of table.querySelectorAll('tbody tr')) {
@@ -2606,6 +2789,7 @@
     if (!table) return;
 
     const structureComplete = !tableNeedsEnhancement(table) && table.getAttribute(SORT_BOUND_ATTR) === 'true';
+    const portraitsComplete = !tableNeedsPortraitEnhancement(table);
 
     if (!structureComplete) {
       ensureXpStamHeader(table);
@@ -2639,17 +2823,26 @@
       }
     }
 
-    for (const tr of table.querySelectorAll('tbody tr')) {
-      if (getRegionHeaderCell(tr)) continue;
-      const roomId = extractRoomIdFromRow(tr);
-      if (roomId) {
+    if (!portraitsComplete) {
+      for (const tr of table.querySelectorAll('tbody tr')) {
+        if (getRegionHeaderCell(tr)) continue;
+        if (tr.getAttribute(ROW_PORTRAIT_ENHANCED_ATTR) === 'true') continue;
+        const roomId = extractRoomIdFromRow(tr);
+        if (!roomId) continue;
         enhanceRowPortraitTooltips(tr, roomId);
         bindRowContextMenu(tr, roomId);
       }
     }
 
-    syncTeleporterRowHighlights(table, dialog);
-    restoreSessionSort(table);
+    if (!structureComplete || !portraitsComplete) {
+      syncTeleporterRowHighlights(table, dialog);
+      restoreSessionSort(table);
+    }
+
+    if (!tableNeedsEnhancement(table) && !tableNeedsPortraitEnhancement(table)) {
+      table.setAttribute(TABLE_ENHANCED_ATTR, 'true');
+    }
+
     bindTeleporterKeyboardNav(dialog);
   }
 
@@ -2664,9 +2857,11 @@
   }
 
   function isCyclopediaModEnabled() {
-    return typeof window.__cyclopediaOpen === 'function'
+    if (cyclopediaModEnabledCache !== null) return cyclopediaModEnabledCache;
+    cyclopediaModEnabledCache = typeof window.__cyclopediaOpen === 'function'
       || typeof window.Cyclopedia?.show === 'function'
       || !!document.querySelector('.cyclopedia-header-btn');
+    return cyclopediaModEnabledCache;
   }
 
   function isCyclopediaOpen() {
@@ -3240,6 +3435,10 @@
   }
 
   function revertMisTaggedTeleporterDialogs() {
+    if (!document.querySelector(`div[role="dialog"][${TARGET_ATTR}], div[role="dialog"][${LAYOUT_ENHANCED_ATTR}]`)) {
+      return;
+    }
+
     for (const dialog of document.querySelectorAll(`div[role="dialog"][${TARGET_ATTR}], div[role="dialog"][${LAYOUT_ENHANCED_ATTR}]`)) {
       if (matchesTeleporterForLayout(dialog)) continue;
       teardownTeleporterDialogEnhancements(dialog);
@@ -3269,6 +3468,26 @@
     }
   }
 
+  function addedNodeAffectsTeleporter(node) {
+    if (!(node instanceof Element)) return false;
+
+    if (node.matches?.('div[role="dialog"]')) {
+      return matchesTeleporterForLayout(node);
+    }
+
+    const hostDialog = node.closest?.(`div[role="dialog"][${TARGET_ATTR}]`);
+    if (hostDialog) {
+      if (node.matches?.('tr') || node.querySelector?.('tr')) return true;
+      return !isTeleporterProcessingComplete(hostDialog);
+    }
+
+    for (const dialog of collectTeleporterDialogsFromNode(node)) {
+      if (matchesTeleporterForLayout(dialog)) return true;
+    }
+
+    return false;
+  }
+
   function onDocumentMutation(mutations) {
     if (suppressMutations) return;
 
@@ -3278,22 +3497,18 @@
       if (mutation.type === 'attributes' && mutation.target instanceof Element) {
         if (mutation.target.matches('div[role="dialog"]') && mutation.attributeName === 'data-state') {
           handleTeleporterDialogStateChange(mutation.target);
-          shouldSchedule = mutation.target.getAttribute('data-state') !== 'closed';
+          if (mutation.target.getAttribute('data-state') !== 'closed'
+            && (matchesTeleporterForLayout(mutation.target) || mutation.target.hasAttribute(TARGET_ATTR))) {
+            shouldSchedule = true;
+          }
         }
         continue;
       }
 
+      if (mutation.type !== 'childList') continue;
+
       for (const node of mutation.addedNodes) {
-        if (!(node instanceof Element)) continue;
-
-        const hostDialog = node.closest?.('div[role="dialog"]');
-        if (hostDialog?.hasAttribute(TARGET_ATTR)) {
-          if (!isTeleporterProcessingComplete(hostDialog)) {
-            shouldSchedule = true;
-          }
-          continue;
-        }
-
+        if (!addedNodeAffectsTeleporter(node)) continue;
         scanNodeForTeleporter(node);
         shouldSchedule = true;
       }
@@ -3342,6 +3557,7 @@
     observer = null;
     roomIndexById = null;
     roomBoardMetaCache.clear();
+    cyclopediaModEnabledCache = null;
 
     for (const dialog of document.querySelectorAll(`div[role="dialog"][${TARGET_ATTR}], div[role="dialog"][${LAYOUT_ENHANCED_ATTR}]`)) {
       teardownTeleporterTableEnhancements(dialog);

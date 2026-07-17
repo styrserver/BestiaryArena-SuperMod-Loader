@@ -308,6 +308,7 @@ const GAME_CONSTANTS = {
 // Modal dimensions
 const MODAL_CONFIG = {
   width: 600,
+  maxWidth: 600,
   height: 500,
   leftColumnWidth: 140,
   rightColumnWidth: 400,
@@ -318,10 +319,11 @@ const MODAL_CONFIG = {
 
 function getModSettingsModalDimensions() {
   const pad = MODAL_CONFIG.viewportPadding * 2;
+  const maxW = MODAL_CONFIG.maxWidth;
   return {
     width: Math.max(
       MODAL_CONFIG.minWidth,
-      Math.min(MODAL_CONFIG.width, window.innerWidth - pad)
+      Math.min(MODAL_CONFIG.width, maxW, window.innerWidth - pad)
     ),
     height: Math.max(
       MODAL_CONFIG.minHeight,
@@ -331,8 +333,9 @@ function getModSettingsModalDimensions() {
 }
 
 function getModSettingsColumnWidths(modalWidth) {
-  const contentWidth = modalWidth - 30;
-  if (modalWidth >= MODAL_CONFIG.width) {
+  const cappedWidth = Math.min(modalWidth, MODAL_CONFIG.maxWidth);
+  const contentWidth = cappedWidth - 30;
+  if (cappedWidth >= MODAL_CONFIG.width) {
     return {
       contentWidth: MODAL_CONFIG.width - 30,
       leftWidth: MODAL_CONFIG.leftColumnWidth,
@@ -350,16 +353,18 @@ function getModSettingsColumnWidths(modalWidth) {
 function applyModSettingsModalLayout(dialog, elements, dimensions) {
   if (!dialog) return;
 
-  const { width, height } = dimensions;
-  const { contentWidth, leftWidth, rightWidth } = getModSettingsColumnWidths(width);
+  const width = Math.min(dimensions.width, MODAL_CONFIG.maxWidth);
+  const height = dimensions.height;
+  const { leftWidth, rightWidth } = getModSettingsColumnWidths(width);
 
   dialog.style.width = `${width}px`;
   dialog.style.minWidth = '0';
-  dialog.style.maxWidth = `${width}px`;
+  dialog.style.maxWidth = `${MODAL_CONFIG.maxWidth}px`;
   dialog.style.height = `${height}px`;
   dialog.style.minHeight = '0';
   dialog.style.maxHeight = `${height}px`;
   dialog.style.boxSizing = 'border-box';
+  dialog.style.overflow = 'hidden';
   dialog.classList.remove('max-w-[300px]');
 
   let contentWrapper = null;
@@ -379,6 +384,9 @@ function applyModSettingsModalLayout(dialog, elements, dimensions) {
     contentWrapper.style.flexDirection = 'column';
     contentWrapper.style.flex = '1 1 0';
     contentWrapper.style.minHeight = '0';
+    contentWrapper.style.minWidth = '0';
+    contentWrapper.style.maxWidth = '100%';
+    contentWrapper.style.overflow = 'hidden';
   }
 
   const contentContainer = dialog.querySelector('.widget-bottom');
@@ -399,8 +407,11 @@ function applyModSettingsModalLayout(dialog, elements, dimensions) {
       minHeight: '0',
       height: '100%',
       maxHeight: 'none',
-      minWidth: `${contentWidth}px`,
-      maxWidth: `${contentWidth}px`
+      width: '100%',
+      minWidth: '0',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden'
     });
   }
 
@@ -428,7 +439,8 @@ function applyModSettingsModalLayout(dialog, elements, dimensions) {
       width: `${rightWidth}px`,
       minWidth: '0',
       maxWidth: `${rightWidth}px`,
-      flex: `1 1 ${rightWidth}px`
+      flex: `1 1 0`,
+      overflowX: 'hidden'
     });
   }
 }
@@ -6347,12 +6359,11 @@ function showSettingsModal() {
     content.className = 'mod-settings-modal-root';
     
     // Apply sizing and layout styles to content (matching Autoscroller pattern)
-    const contentWidth = columnWidths.contentWidth;
     Object.assign(content.style, {
       width: '100%',
       height: '100%',
-      minWidth: `${contentWidth}px`,
-      maxWidth: `${contentWidth}px`,
+      minWidth: '0',
+      maxWidth: '100%',
       minHeight: '0',
       maxHeight: 'none',
       boxSizing: 'border-box',
@@ -6406,12 +6417,13 @@ function showSettingsModal() {
       width: `${columnWidths.rightWidth}px`,
       minWidth: '0',
       maxWidth: `${columnWidths.rightWidth}px`,
-      flex: `1 1 ${columnWidths.rightWidth}px`,
+      flex: '1 1 0',
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
       gap: '8px',
       overflowY: 'auto',
+      overflowX: 'hidden',
       padding: '2px 12px 2px 2px',
       boxSizing: 'border-box'
     });
@@ -9161,6 +9173,11 @@ function showSettingsModal() {
         }
       ]
     });
+    
+    if (modalRef?.element) {
+      modalRef.element.style.maxWidth = `${MODAL_CONFIG.maxWidth}px`;
+      modalRef.element.style.overflow = 'hidden';
+    }
     
     const modalLayoutElements = { content, mainContent, leftColumn, rightColumn };
     setupModSettingsModalResponsiveLayout(modalRef, modalLayoutElements);

@@ -983,32 +983,27 @@ function createSelectAllNoneButtons(idPrefix, scrollContainer) {
 // 3.1. Mod Coordination Functions
 // =======================
 
-// Check if raid automation is active
-function isRaidHunterRaiding() {
+// Check if any raid (any priority) should block boosted map farming
+function isAnyRaidBlockingBoostedMaps() {
     try {
-        // Use coordination system if available
-        if (window.ModCoordination) {
-            return window.ModCoordination.isModActive('Raid Hunter');
+        if (typeof window === 'undefined') {
+            return false;
         }
-        
-        // Fallback to old method for backward compatibility
-        if (typeof window !== 'undefined') {
-            // Check if raid automation is enabled
-            const raidHunterEnabled = localStorage.getItem('raidHunterAutomationEnabled');
-            if (raidHunterEnabled !== 'true') {
-                return false;
-            }
-            
-            // Check quest button control or internal raiding state
-            const isRaidHunterCurrentlyRaiding = window.QuestButtonManager?.getCurrentOwner() === 'Raid Hunter' ||
-                                                 (window.raidHunterIsCurrentlyRaiding && window.raidHunterIsCurrentlyRaiding());
-            
-            if (isRaidHunterCurrentlyRaiding) {
-                console.log('[Better Boosted Maps] Raid Hunter is actively raiding - yielding priority');
-                return true;
-            }
+
+        if (window.raidHunterIsCurrentlyRaiding?.()) {
+            return true;
         }
-        return false;
+
+        if (window.ModCoordination?.isModActive('Raid Hunter')) {
+            return true;
+        }
+
+        const raidHunterEnabled = localStorage.getItem('raidHunterAutomationEnabled');
+        if (raidHunterEnabled !== 'true') {
+            return false;
+        }
+
+        return window.QuestButtonManager?.getCurrentOwner?.() === 'Raid Hunter';
     } catch (error) {
         console.error('[Better Boosted Maps] Error checking Raid Hunter status:', error);
         return false;
@@ -1320,45 +1315,30 @@ function shouldFarmBoostedMap() {
     }
 }
 
-// Check if task automation is active
-function isBetterTaskerTasking() {
+// Check if Better Tasker activity should block boosted map farming
+function isAnyTaskBlockingBoostedMaps() {
     try {
-        // Use coordination system if available
-        if (window.ModCoordination) {
-            return window.ModCoordination.isModActive('Better Tasker');
+        if (typeof window === 'undefined') {
+            return false;
         }
-        
-        // Fallback to old method for backward compatibility
-        if (typeof window !== 'undefined') {
-            // Check quest button control or active task operations
-            const hasBetterTaskerQuestButtonControl = window.QuestButtonManager?.getCurrentOwner() === 'Better Tasker';
-            
-            // Also check exposed state flags
-            const betterTaskerState = window.betterTaskerState;
-            let hasActiveTaskOperations = false;
-            
-            if (betterTaskerState) {
-                // Check if task automation is disabled
-                if (betterTaskerState.taskerState === 'disabled') {
-                    return false;
-                }
-                
-                // Check operation flags (enabled state alone doesn't indicate activity)
-                // Also check if Better Tasker has an active task (even if in cooldown)
-                hasActiveTaskOperations = betterTaskerState.taskOperationInProgress || 
-                                         betterTaskerState.taskHuntingOngoing || 
-                                         betterTaskerState.pendingTaskCompletion ||
-                                         betterTaskerState.hasActiveTask;
-            }
-            
-            const isActivelyTasking = hasBetterTaskerQuestButtonControl || hasActiveTaskOperations;
-            
-            if (isActivelyTasking) {
-                console.log('[Better Boosted Maps] Better Tasker is actively tasking - yielding priority');
-                return true;
-            }
+
+        if (window.ModCoordination?.isModActive('Better Tasker')) {
+            return true;
         }
-        return false;
+
+        if (window.QuestButtonManager?.getCurrentOwner?.() === 'Better Tasker') {
+            return true;
+        }
+
+        const betterTaskerState = window.betterTaskerState;
+        if (!betterTaskerState || betterTaskerState.taskerState === 'disabled') {
+            return false;
+        }
+
+        return !!(betterTaskerState.taskOperationInProgress ||
+            betterTaskerState.taskHuntingOngoing ||
+            betterTaskerState.pendingTaskCompletion ||
+            betterTaskerState.hasActiveTask);
     } catch (error) {
         console.error('[Better Boosted Maps] Error checking Better Tasker status:', error);
         return false;
@@ -1400,12 +1380,12 @@ function canRunBoostedMaps() {
     }
     
     // Priority check: check status directly to avoid race conditions
-    if (isRaidHunterRaiding()) {
+    if (isAnyRaidBlockingBoostedMaps()) {
         console.log('[Better Boosted Maps] Cannot run - Raid Hunter is actively raiding');
         return false;
     }
     
-    if (isBetterTaskerTasking()) {
+    if (isAnyTaskBlockingBoostedMaps()) {
         console.log('[Better Boosted Maps] Cannot run - Better Tasker is actively tasking');
         return false;
     }

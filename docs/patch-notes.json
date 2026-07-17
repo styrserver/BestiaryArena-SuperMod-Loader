@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "4.5.6",
+      "changes": [
+        {
+          "mod": "Better Teleporter",
+          "type": "added",
+          "text": "Map list creature portraits show level badge(s) at the bottom-left (side-by-side when the same creature spawns at multiple levels) and a ×count label at the top-right when more than one is on the board. Count uses Cyclopedia-style gold text with a subtle dark background for readability."
+        },
+        {
+          "mod": "Better Boosted Maps",
+          "type": "changed",
+          "text": "Raid and task blocking checks now use Raid Hunter's shared window API with clearer helper names (isAnyRaidBlockingBoostedMaps, isAnyTaskBlockingBoostedMaps)."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "changed",
+          "text": "Reduced teleporter lag: the mutation observer only re-processes teleporter DOM changes, enhanced rows are marked and skipped on later passes, highlights update only when selection changes, board metadata and portrait state clear on close, and layout burst RAF is cancelled on teardown."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Quest missions that alter board sprites now share one DOM-safe hide helper (visual hide, node kept for React). Used for pickup tiles, energy fields, key drops, and similar interactions."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Fixed tasking not starting during LOW priority raids: priority-aware yield checks (ModCoordination no longer treats every raid as blocking), immediate Raid Hunter handoff when accepting or enabling with an active task, and deduped coordination logs."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "fixed",
+          "text": "Fixed level and count overlays clipping through the sticky Creatures column header—portraits clip badges inside the 32×32 slot and the header stacks above badge z-index."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Fixed settings modal expanding beyond 600px on wide panel content—hard max-width cap with overflow clipping on columns."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Fixed client crashes when changing maps after quest pickups or field destruction caused by removing React-owned tile nodes. Pickup sprites hide on take via the context menu and reappear after a map refresh until picked up again."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "LOW priority raids now yield to Better Tasker when it has an active task—releases autoplay and quest-button control, with event-driven yield via the shared window API."
+        }
+      ]
+    },
+    {
       "version": "4.5.5",
       "changes": [
         {

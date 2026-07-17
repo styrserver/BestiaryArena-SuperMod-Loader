@@ -575,6 +575,7 @@ const PUTRID_CHAMBER_VILLAIN_SETUP_ATTEMPT_DELAYS_MS = [0, 100, 250];
 const PUTRID_CHAMBER_SCENE_SPRITE_ATTEMPT_DELAYS_MS = [0, 100, 250, 500, 800, 1200];
 
 const HONEYFLOWER_TILE_INDEX = 84;
+const HONEYFLOWER_PICKUP_SPRITE_ID = 2984;
 const HONEYFLOWER_TILE_HINT_ID = 'quests-honeyflower-tile-hint';
 const GAME_FRAME_BORDER_IMAGE = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch';
 const GAME_FRAME_BACKGROUND = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
@@ -3187,6 +3188,60 @@ function createNPCCooldownManager() {
     return text;
   };
 
+  // React owns board tile sprites — hide visually instead of .remove() to avoid map-change crashes.
+  const QUEST_BOARD_HIDDEN_ATTR = 'data-quests-board-hidden';
+  const QUEST_BOARD_HIDDEN_TAG_SERPENTINE_FIELD = 'serpentine-field';
+  const QUEST_BOARD_HIDDEN_TAG_HONEYFLOWER_PICKUP = 'honeyflower-pickup';
+  const QUEST_BOARD_HIDDEN_TAG_COPPER_KEY = 'copper-key';
+  const QUEST_BOARD_HIDDEN_TAG_SPIDER_LAIR = 'spider-lair-removal';
+
+  function hideQuestBoardElement(element, options = {}) {
+    const { tag = '1', clearDatasetKeys = [] } = options;
+    if (!element) return false;
+    if (element.hasAttribute(QUEST_BOARD_HIDDEN_ATTR)) return false;
+
+    element.style.visibility = 'hidden';
+    element.style.display = 'none';
+    element.style.pointerEvents = 'none';
+    for (const key of clearDatasetKeys) {
+      delete element.dataset[key];
+    }
+    element.setAttribute(QUEST_BOARD_HIDDEN_ATTR, tag);
+    return true;
+  }
+
+  function restoreQuestBoardElement(element, options = {}) {
+    const { clearDatasetKeys = [] } = options;
+    if (!element?.isConnected) return;
+
+    element.style.visibility = '';
+    element.style.display = '';
+    element.style.pointerEvents = '';
+    element.removeAttribute(QUEST_BOARD_HIDDEN_ATTR);
+    for (const key of clearDatasetKeys) {
+      delete element.dataset[key];
+    }
+  }
+
+  function restoreQuestBoardElementsByTag(tag, options = {}) {
+    document.querySelectorAll(`[${QUEST_BOARD_HIDDEN_ATTR}="${tag}"]`).forEach((element) => {
+      restoreQuestBoardElement(element, options);
+    });
+  }
+
+  function hideQuestBoardElements(container, selector, options = {}) {
+    const root = container || document;
+    let count = 0;
+    root.querySelectorAll(selector).forEach((element) => {
+      if (hideQuestBoardElement(element, options)) count++;
+    });
+    return count;
+  }
+
+  function isQuestBoardElementHidden(element) {
+    return element?.hasAttribute?.(QUEST_BOARD_HIDDEN_ATTR) ?? false;
+  }
+
   // Helper to construct URL from base and path
   function constructUrl(base, path) {
     const normalizedBase = base.endsWith('/') ? base : base + '/';
@@ -3811,20 +3866,17 @@ function createNPCCooldownManager() {
     }
   }
   
-  // Helper function to remove key from a specific element
-  // removeSprite: if true, removes the actual game sprite div (id-2970). Only use this after serverResults verification!
+  // Helper function to hide key sprite on a tile (DOM-safe; React owns the node).
   function removeKeyFromElement(element, tileIndex, removeSprite = false) {
     try {
-      // Only remove the actual sprite div if explicitly requested (after serverResults verification)
       if (removeSprite) {
         const spriteDiv = findKeySprite(element);
-        if (spriteDiv) {
-          spriteDiv.remove();
-          console.log('[Quests Mod][Copper Key] Removed sprite div (id-2970) and all children for tile', tileIndex);
+        if (spriteDiv && hideQuestBoardElement(spriteDiv, { tag: QUEST_BOARD_HIDDEN_TAG_COPPER_KEY })) {
+          console.log('[Quests Mod][Copper Key] Hidden sprite div (id-2970) for tile', tileIndex);
         }
       }
     } catch (error) {
-      console.error('[Quests Mod][Copper Key] Error removing key from element:', error);
+      console.error('[Quests Mod][Copper Key] Error hiding key on element:', error);
     }
   }
 
@@ -14610,14 +14662,14 @@ function createNPCCooldownManager() {
     const tile86 = getTileElement(SPIDER_LAIR_TILE_87);
     if (tile85) {
       const sprite233on85 = tile85.querySelector('.sprite.item.relative.id-' + SPIDER_LAIR_SPRITE_TO_REMOVE_ID);
-      if (sprite233on85) sprite233on85.remove();
+      if (sprite233on85) hideQuestBoardElement(sprite233on85, { tag: QUEST_BOARD_HIDDEN_TAG_SPIDER_LAIR });
       if (!tile85.querySelector('.id-' + SPIDER_LAIR_TILE_86_SPRITE_ID)) {
         tile85.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_TILE_86_SPRITE_ID);
       }
     }
     if (tile86) {
       const sprite233on86 = tile86.querySelector('.sprite.item.relative.id-' + SPIDER_LAIR_SPRITE_TO_REMOVE_ID);
-      if (sprite233on86) sprite233on86.remove();
+      if (sprite233on86) hideQuestBoardElement(sprite233on86, { tag: QUEST_BOARD_HIDDEN_TAG_SPIDER_LAIR });
       if (!tile86.querySelector('.id-' + SPIDER_LAIR_TILE_87_SPRITE_ID)) {
         tile86.innerHTML = getSpiderLairSpriteInnerHTML(SPIDER_LAIR_TILE_87_SPRITE_ID);
       }
@@ -15094,16 +15146,13 @@ function createNPCCooldownManager() {
   }
 
   function restoreSerpentineFieldSprite(sprite) {
-    if (!sprite?.isConnected) return;
-    sprite.style.visibility = '';
-    sprite.style.display = '';
-    sprite.style.pointerEvents = '';
-    delete sprite.dataset.questsSerpentineFieldDestroyed;
-    delete sprite.dataset.questsSerpentineFieldPointerEventsEnabled;
+    restoreQuestBoardElement(sprite, { clearDatasetKeys: ['questsSerpentineFieldPointerEventsEnabled'] });
   }
 
   function restoreSerpentineFieldSprites() {
-    document.querySelectorAll('[data-quests-serpentine-field-destroyed="1"]').forEach(restoreSerpentineFieldSprite);
+    restoreQuestBoardElementsByTag(QUEST_BOARD_HIDDEN_TAG_SERPENTINE_FIELD, {
+      clearDatasetKeys: ['questsSerpentineFieldPointerEventsEnabled']
+    });
   }
 
   function restoreSerpentineLeverSprite() {
@@ -15144,23 +15193,18 @@ function createNPCCooldownManager() {
   }
 
   function hideSerpentineFieldSprite(sprite) {
-    if (!sprite) return;
-    // Hide visually but keep the node in the DOM — React owns these elements and
-    // crashes on map change if we call .remove().
-    sprite.style.visibility = 'hidden';
-    sprite.style.display = 'none';
-    sprite.style.pointerEvents = 'none';
-    delete sprite.dataset.questsSerpentineFieldPointerEventsEnabled;
-    sprite.dataset.questsSerpentineFieldDestroyed = '1';
+    return hideQuestBoardElement(sprite, {
+      tag: QUEST_BOARD_HIDDEN_TAG_SERPENTINE_FIELD,
+      clearDatasetKeys: ['questsSerpentineFieldPointerEventsEnabled']
+    });
   }
 
   function hideSerpentineFieldSpritesOnTile(tileEl) {
     if (!tileEl) return 0;
     let count = 0;
-    tileEl.querySelectorAll(SERPENTINE_FIELD_SPRITE_SELECTOR).forEach(sprite => {
-      if (sprite.dataset.questsSerpentineFieldDestroyed === '1') return;
-      hideSerpentineFieldSprite(sprite);
-      count++;
+    tileEl.querySelectorAll(SERPENTINE_FIELD_SPRITE_SELECTOR).forEach((sprite) => {
+      if (isQuestBoardElementHidden(sprite)) return;
+      if (hideSerpentineFieldSprite(sprite)) count++;
     });
     return count;
   }
@@ -15168,7 +15212,7 @@ function createNPCCooldownManager() {
   function findSerpentineFieldTiles() {
     const tiles = [];
     for (const sprite of document.querySelectorAll(SERPENTINE_FIELD_SPRITE_SELECTOR)) {
-      if (sprite.dataset.questsSerpentineFieldDestroyed === '1') continue;
+      if (isQuestBoardElementHidden(sprite)) continue;
       const tileContainer = sprite.closest('[id^="tile-index-"]');
       if (tileContainer && !tiles.includes(tileContainer)) {
         tiles.push(tileContainer);
@@ -15832,6 +15876,15 @@ function createNPCCooldownManager() {
     }
   }
 
+  function hideHoneyflowerPickupSprite(tileElement = null) {
+    const tile = tileElement || getTileElement(HONEYFLOWER_TILE_INDEX);
+    if (!tile) return;
+
+    hideQuestBoardElements(tile, `.sprite.item.relative.id-${HONEYFLOWER_PICKUP_SPRITE_ID}`, {
+      tag: QUEST_BOARD_HIDDEN_TAG_HONEYFLOWER_PICKUP
+    });
+  }
+
   async function pickHoneyflowerFromTile() {
     try {
       const progress = getMissionProgress(KING_HONEYFLOWER_MISSION);
@@ -15845,6 +15898,7 @@ function createNPCCooldownManager() {
       }
 
       await addQuestItem(HONEYFLOWER_CONFIG.productName, 1);
+      hideHoneyflowerPickupSprite();
       NotificationService.showItemReceived(HONEYFLOWER_CONFIG.productName, '[Quests Mod][Honeyflower]');
       updateHoneyflowerTileRightClickState();
       refreshQuestTileHighlights();

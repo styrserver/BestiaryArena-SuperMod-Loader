@@ -486,6 +486,48 @@ async function detectVictoryDefeat() {
     }
 }
 
+// Yield LOW priority raid when Better Tasker is actively tasking (full automation mode)
+function tryYieldLowPriorityRaidToBetterTasker(reason = 'Better Tasker active') {
+    if (!isCurrentlyRaiding || !currentRaidInfo || currentRaidInfo.priority !== RAID_PRIORITY.LOW) {
+        return false;
+    }
+
+    const betterTaskerState = window.betterTaskerState;
+    if (!betterTaskerState || betterTaskerState.taskerState !== 'enabled') {
+        return false;
+    }
+
+    const taskerActive = betterTaskerState.hasActiveTask === true ||
+        betterTaskerState.taskHuntingOngoing === true ||
+        betterTaskerState.taskOperationInProgress === true ||
+        betterTaskerState.pendingTaskCompletion === true ||
+        window.AutoplayManager?.getCurrentOwner?.() === 'Better Tasker';
+
+    if (!taskerActive) {
+        return false;
+    }
+
+    console.log(`[Raid Hunter] ${reason} - LOW priority raid yielding to Better Tasker`);
+    const currentOwner = window.AutoplayManager?.getCurrentOwner?.();
+    if (currentOwner === 'Raid Hunter') {
+        try {
+            const boardContext = globalThis.state.board.getSnapshot().context;
+            if (boardContext.mode === 'autoplay') {
+                globalThis.state.board.send({ type: 'setPlayMode', mode: 'manual' });
+                console.log('[Raid Hunter] Switched to manual mode (yielding to Better Tasker)');
+            }
+        } catch (error) {
+            console.error('[Raid Hunter] Error switching to manual mode while yielding:', error);
+        }
+        window.AutoplayManager.releaseControl('Raid Hunter');
+    }
+    if (window.QuestButtonManager?.getCurrentOwner?.() === 'Raid Hunter') {
+        window.QuestButtonManager.releaseControl('Raid Hunter');
+    }
+    cancelCurrentRaid(`Better Tasker active - LOW priority raid yields (${reason})`);
+    return true;
+}
+
 // Helper function to cancel current raid and cleanup
 function cancelCurrentRaid(reason = 'unknown') {
     console.log(`[Raid Hunter] Cancelling raid: ${reason}`);
@@ -3863,23 +3905,8 @@ function startRaidEndChecking() {
                 }
                 
                 // For LOW priority raids: Monitor Better Tasker and yield if it becomes active
-                if (currentRaidInfo && currentRaidInfo.priority === RAID_PRIORITY.LOW) {
-                    const betterTaskerState = window.betterTaskerState;
-                    if (betterTaskerState && betterTaskerState.taskerState === 'enabled') {
-                        // Check if Better Tasker is actively tasking
-                        if (betterTaskerState.hasActiveTask === true || 
-                            betterTaskerState.taskHuntingOngoing === true ||
-                            betterTaskerState.taskOperationInProgress === true ||
-                            betterTaskerState.pendingTaskCompletion === true) {
-                            const currentOwner = window.AutoplayManager?.getCurrentOwner();
-                            if (currentOwner === 'Raid Hunter') {
-                                console.log('[Raid Hunter] Better Tasker became active during LOW priority raid - releasing control');
-                                window.AutoplayManager.releaseControl('Raid Hunter');
-                                cancelCurrentRaid('Better Tasker became active - LOW priority raid yields');
-                                return;
-                            }
-                        }
-                    }
+                if (tryYieldLowPriorityRaidToBetterTasker('periodic check')) {
+                    return;
                 }
                 
                 // Look for raid-specific UI elements that might indicate raid ended
@@ -6825,6 +6852,8 @@ function init() {
         window.ModCoordination.on('modActiveChanged', (data) => {
             if (data.modName === 'Board Analyzer' || data.modName === 'Manual Runner') {
                 handleBoardAnalyzerCoordination();
+            } else if (data.modName === 'Better Tasker' && data.active) {
+                tryYieldLowPriorityRaidToBetterTasker('Better Tasker became active');
             }
         });
     }
@@ -7754,8 +7783,9 @@ context.exports = {
     }
 };
 
-// Expose Raid Hunter state globally for Better Tasker coordination
+// Shared coordination API for Better Tasker and Better Boosted Maps (prefer these over duplicating checks)
 window.raidHunterIsCurrentlyRaiding = () => isCurrentlyRaiding;
+window.raidHunterTryYieldToBetterTasker = (reason) => tryYieldLowPriorityRaidToBetterTasker(reason);
 
 // Expose function to check if Raid Hunter is raiding a HIGH priority raid
 // Better Tasker should yield ONLY for HIGH priority raids
