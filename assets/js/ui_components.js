@@ -163,8 +163,17 @@ const DEBUG = false; // Set to true for development
     });
   }
 
+  function getModConfigPanelZIndex() {
+    return typeof window.BESTIARY_MOD_CONFIG_PANEL_Z_INDEX === 'number'
+      ? window.BESTIARY_MOD_CONFIG_PANEL_Z_INDEX
+      : 100005;
+  }
+
   function createModal({ title, width = 300, height = 'auto', content, buttons = [] }) {
     ensureStyles();
+
+    const panelZIndex = getModConfigPanelZIndex();
+    const overlayZIndex = panelZIndex - 1;
     
     // Create overlay to capture clicks outside the modal
     const overlay = document.createElement('div');
@@ -175,7 +184,7 @@ const DEBUG = false; // Set to true for development
       right: 0;
       bottom: 0;
       background: rgba(0, 0, 0, 0.5);
-      z-index: 9998;
+      z-index: ${overlayZIndex};
     `;
     document.body.appendChild(overlay);
     
@@ -188,7 +197,7 @@ const DEBUG = false; // Set to true for development
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      z-index: 9999;
+      z-index: ${panelZIndex};
       width: ${typeof width === 'number' ? width + 'px' : width};
       height: ${typeof height === 'number' ? height + 'px' : height};
       max-width: 95vw;

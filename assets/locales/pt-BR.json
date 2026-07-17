@@ -1875,7 +1875,9 @@
       "count": "Quantidade: {count}",
       "emptyState": "Ainda não há itens de missão. Derrote o Dragon Lord para obtê-los!",
       "errorLoading": "Erro ao carregar itens de missão. Tente novamente.",
-      "productObtained": "{productName} obtido! (+{amount})"
+      "productObtained": "{productName} obtido! (+{amount})",
+      "tileRightClickTutorial": "Clique com o botão direito para interagir com tiles de missão.",
+      "takeHoneyflower": "Pegar Honeyflower"
     },
     "battleHelper": {
       "title": "Battle Helper",

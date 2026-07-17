@@ -1876,7 +1876,9 @@
       "count": "Count: {count}",
       "emptyState": "No quest items yet. Defeat Dragon Lord to obtain them!",
       "errorLoading": "Error loading quest items. Please try again.",
-      "productObtained": "{productName} obtained! (+{amount})"
+      "productObtained": "{productName} obtained! (+{amount})",
+      "tileRightClickTutorial": "Right-click to interact with quest tiles.",
+      "takeHoneyflower": "Take Honeyflower"
     },
     "battleHelper": {
       "title": "Battle Helper",
