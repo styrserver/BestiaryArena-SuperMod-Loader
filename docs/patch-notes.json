@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.5.7",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Advanced tab: optional Disable Quest Helpers toggle hides quest helper overlays (tile highlights and tutorial arrows); interactive quest tiles still work via right-click."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Tibia Ball League Event Competition: per-floor Firebase leader tiebreakers now use updatedAt so the first player to set a matching ticks or rank on a floor is shown (replacing total event ticks/rank-ticks tiebreakers). Removed hover tooltips from league floor rows and standings player names."
+        },
+        {
+          "mod": "Board Analyzer",
+          "type": "changed",
+          "text": "If Turbo Mode was on before starting an analysis, it is restored when the analysis finishes (including force stop)."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "changed",
+          "text": "Faster teleporter opens: portrait/equipment metadata is pre-built during init index construction (one board read per map) and kept for the session instead of clearing on close, so each open avoids redundant board scans during portrait enhancement."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "changed",
+          "text": "Creature portrait slots no longer add mod level and count badges; native portrait count and level styling is shown instead."
+        },
+        {
+          "mod": "Better Teleporter",
+          "type": "fixed",
+          "text": "During autoplay, the board Manual (goto) icon and hotkey (P) now open Better Teleporter while map controls are disabled. Only the goto icon is intercepted—Select map stays with the game. Opens via the goto button handler with native press animation, not the Select map openMapPicker path."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Fixed Mission Leaderboard Back navigation failing when another mod has relabeled the quest nav button—the opener now matches via icon and label fallbacks."
+        }
+      ]
+    },
+    {
       "version": "4.5.6",
       "changes": [
         {

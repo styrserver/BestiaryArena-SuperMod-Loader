@@ -974,6 +974,7 @@ let equipmentGameIdsToNames = new Map();
 // Variable to track if turbo mode is active
 let turboActive = false;
 let speedupSubscription = null;
+let turboModeWasActiveBeforeAnalysis = false;
 
 // Function to force a specific seed - use API version if available
 let forceSeed = (seed) => {
@@ -1203,6 +1204,71 @@ function disableTurbo() {
   }
   
   turboActive = false;
+}
+
+function wasTurboModeModActive() {
+  return !!(window.turboMode?.isActive?.() || window.__turboState?.active);
+}
+
+function disableTurboModeModForAnalysis() {
+  if (!wasTurboModeModActive()) return false;
+
+  try {
+    if (window.turboMode?.disable) {
+      window.turboMode.disable();
+      return true;
+    }
+  } catch (error) {
+    console.warn('[Board Analyzer] Error disabling Turbo Mode via turboMode API:', error);
+  }
+
+  if (!window.__turboState?.active) return false;
+
+  window.__turboState.active = false;
+
+  if (window.__turboState.speedupSubscription) {
+    try {
+      window.__turboState.speedupSubscription.unsubscribe();
+      window.__turboState.speedupSubscription = null;
+    } catch (error) {
+      console.warn('[Board Analyzer] Error removing turbo subscription:', error);
+    }
+  }
+
+  if (globalThis.state?.board?.getSnapshot()?.context?.world?.tickEngine) {
+    try {
+      const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
+      tickEngine.setTickInterval(DEFAULT_TICK_INTERVAL_MS);
+    } catch (error) {
+      console.warn('[Board Analyzer] Error resetting tick interval:', error);
+    }
+  }
+
+  if (window.__turboState.timerSubscribed) {
+    window.__turboState.timerSubscribed = false;
+  }
+
+  if (window.__turboState.timerCheckInterval) {
+    clearInterval(window.__turboState.timerCheckInterval);
+    window.__turboState.timerCheckInterval = null;
+  }
+
+  return true;
+}
+
+function restoreTurboModeModAfterAnalysis() {
+  if (!turboModeWasActiveBeforeAnalysis) return;
+
+  turboModeWasActiveBeforeAnalysis = false;
+
+  try {
+    if (window.turboMode?.enable) {
+      window.turboMode.enable();
+    }
+    window.turboMode?.refreshButton?.();
+  } catch (error) {
+    console.warn('[Board Analyzer] Failed to restore Turbo Mode after analysis:', error);
+  }
 }
 
 // Replay a board configuration with a specific seed - use API version if available
@@ -2856,16 +2922,8 @@ function cleanupAnalysisResources(thisAnalysisId) {
     window.turboButton.disabled = false;
     window.turboButton.title = '';
   }
-  
-  // Also restore Turbo Mode button text and style if it was modified
-  if (window.turboButton && window.__turboState) {
-    // Only restore if turbo is actually inactive (not re-enabled by user)
-    if (!window.__turboState.active) {
-      window.turboButton.textContent = t('mods.boardAnalyzer.enableTurboLabel');
-      window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-      window.turboButton.style.color = "#ffe066";
-    }
-  }
+
+  restoreTurboModeModAfterAnalysis();
 }
 
 // Main analyze function - refactored to use helper functions
@@ -4620,53 +4678,9 @@ async function runAnalysis() {
     return;
   }
   
-  // Check if Turbo Mode mod is enabled and disable it before analysis
-  if (window.__turboState && window.__turboState.active) {
-    // Try to disable Turbo Mode using the exported function if available
-    if (window.__turboState.disable && typeof window.__turboState.disable === 'function') {
-      window.__turboState.disable();
-    } else {
-      // Fallback: manually disable turbo completely
-      window.__turboState.active = false;
-      
-      // Remove speedup subscription - this is crucial for actually stopping turbo
-      if (window.__turboState.speedupSubscription) {
-        try {
-          window.__turboState.speedupSubscription.unsubscribe();
-          window.__turboState.speedupSubscription = null;
-        } catch (e) {
-          console.warn('[Board Analyzer] Error removing turbo subscription:', e);
-        }
-      }
-      
-      // Reset tick interval to default
-      if (globalThis.state?.board?.getSnapshot()?.context?.world?.tickEngine) {
-        try {
-          const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
-          tickEngine.setTickInterval(62.5); // Reset to default tick interval
-        } catch (e) {
-          console.warn('[Board Analyzer] Error resetting tick interval:', e);
-        }
-      }
-      
-      // Also try to reset any other turbo-related state
-      if (window.__turboState.timerSubscribed) {
-        window.__turboState.timerSubscribed = false;
-      }
-      
-      // Clear any intervals
-      if (window.__turboState.timerCheckInterval) {
-        clearInterval(window.__turboState.timerCheckInterval);
-        window.__turboState.timerCheckInterval = null;
-      }
-    }
-    
-    // Update the Turbo Mode button to show as inactive
-    if (window.turboButton) {
-      window.turboButton.textContent = t('mods.boardAnalyzer.enableTurboLabel');
-      window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-      window.turboButton.style.color = "#ffe066";
-    }
+  turboModeWasActiveBeforeAnalysis = wasTurboModeModActive();
+  if (turboModeWasActiveBeforeAnalysis) {
+    disableTurboModeModForAnalysis();
   }
   
   // Close any existing modals using modal manager
@@ -4792,6 +4806,7 @@ async function runAnalysis() {
     });
   } finally {
     liveStatsThrottler.cancel();
+    restoreTurboModeModAfterAnalysis();
   }
 }
 

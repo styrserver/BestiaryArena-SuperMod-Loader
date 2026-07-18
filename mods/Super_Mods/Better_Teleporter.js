@@ -24,10 +24,6 @@
   const MAP_COLUMN_WIDTH_PX = 180;
   const ROOM_TYPE_ATTR = `data-${NS}-room-type`;
   const TOOLTIP_ATTR = `data-${NS}-tooltip`;
-  const CREATURE_COUNT_ATTR = `data-${NS}-creature-count`;
-  const CREATURE_LEVEL_ATTR = `data-${NS}-creature-level`;
-  const PORTRAIT_SLOT_ATTR = `data-${NS}-portrait-slot`;
-  const PORTRAIT_META_ATTR = `data-${NS}-portrait-meta`;
   const ROW_PORTRAIT_ENHANCED_ATTR = `data-${NS}-row-portraits-enhanced`;
   const TABLE_ENHANCED_ATTR = `data-${NS}-table-enhanced`;
   const FILTERS_ATTR = `data-${NS}-filters`;
@@ -135,6 +131,8 @@
   const roomBoardMetaCache = new Map();
   let openRowContextMenu = null;
   let teleporterKeyboardHandler = null;
+  let boardButtonInterceptHandler = null;
+  let openingNativeTeleporter = false;
   let processModalsRaf = null;
   let modalLayoutBurstRaf = null;
   let cyclopediaModEnabledCache = null;
@@ -595,14 +593,6 @@
       div[role="dialog"][${TARGET_ATTR}] table thead th {
         z-index: 5 !important;
       }
-      div[role="dialog"][${TARGET_ATTR}] .container-slot[${PORTRAIT_SLOT_ATTR}] {
-        overflow: hidden !important;
-        position: relative !important;
-        width: 32px;
-        height: 32px;
-        flex-shrink: 0;
-        isolation: isolate;
-      }
       div[role="dialog"][${TARGET_ATTR}] table tbody td:nth-child(2) {
         overflow: hidden;
       }
@@ -641,7 +631,7 @@
 
   function isTeleporterProcessingComplete(dialog) {
     if (!dialog?.hasAttribute(LAYOUT_ENHANCED_ATTR)) return false;
-    if (!matchesTeleporterContent(dialog)) return true;
+    if (!matchesTeleporterContent(dialog)) return false;
 
     const titleEl = getTeleporterTitleElement(dialog);
     if (titleEl?.getAttribute(ENHANCED_ATTR) !== 'true') return false;
@@ -650,7 +640,7 @@
     if (searchInput && dialog.getAttribute(FILTERS_BOUND_ATTR) !== 'true') return false;
 
     const table = dialog.querySelector('table');
-    if (!table) return true;
+    if (!table) return false;
     if (table.getAttribute(SORT_BOUND_ATTR) !== 'true') return false;
     if (tableNeedsEnhancement(table)) return false;
     if (tableNeedsPortraitEnhancement(table)) return false;
@@ -890,7 +880,6 @@
 
   function handleTeleporterDialogStateChange(dialog) {
     if (dialog.getAttribute('data-state') === 'closed') {
-      roomBoardMetaCache.clear();
       teardownTeleporterDialogEnhancements(dialog);
       return;
     }
@@ -921,13 +910,189 @@
     return true;
   }
 
-  function findTeleporterGotoButton() {
-    for (const img of document.querySelectorAll('button img[src*="goto.png"]')) {
+  function isBoardGotoButton(button) {
+    return Boolean(button?.querySelector?.('img[src*="goto.png"][alt="Manual"]'));
+  }
+
+  function findTeleporterGotoButtons() {
+    const buttons = [];
+    const seen = new Set();
+    for (const img of document.querySelectorAll('button img[src*="goto.png"][alt="Manual"]')) {
       const btn = img.closest('button');
-      if (!btn || btn.disabled || btn.closest('[role="dialog"]')) continue;
-      return btn;
+      if (!btn || btn.closest('[role="dialog"]') || seen.has(btn)) continue;
+      seen.add(btn);
+      buttons.push(btn);
+    }
+    return buttons;
+  }
+
+  function findBoardGotoButtonAtPoint(clientX, clientY) {
+    for (const button of findTeleporterGotoButtons()) {
+      const rect = button.getBoundingClientRect();
+      if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+        return button;
+      }
     }
     return null;
+  }
+
+  function handleBoardButtonPointerDown(event) {
+    if (event.button !== 0 || openingNativeTeleporter) return;
+
+    let button = event.target.closest?.('button');
+    if (!isBoardGotoButton(button)) {
+      button = findBoardGotoButtonAtPoint(event.clientX, event.clientY);
+    }
+    if (!isBoardGotoButton(button)) return;
+
+    const isBlocked = button.disabled || button.hasAttribute('disabled');
+    if (!isBlocked || !event.isTrusted) return;
+
+    const snapshot = snapshotBoardButtonState(button);
+    unblockBoardButton(button);
+
+    const pointerId = event.pointerId;
+    let handled = false;
+
+    const cleanup = (shouldOpen) => {
+      if (handled) return;
+      handled = true;
+      document.removeEventListener('pointerup', onPointerUp, true);
+      document.removeEventListener('pointercancel', onPointerUp, true);
+      document.removeEventListener('click', onClick, true);
+      if (shouldOpen) {
+        openNativeTeleporter({ gotoButton: button });
+        requestAnimationFrame(() => restoreBoardButton(button, snapshot));
+      } else {
+        restoreBoardButton(button, snapshot);
+      }
+    };
+
+    const onClick = (clickEvent) => {
+      if (clickEvent.button !== 0) return;
+      const clickedButton = clickEvent.target?.closest?.('button');
+      if (clickedButton !== button) return;
+      clickEvent.preventDefault();
+      clickEvent.stopImmediatePropagation?.();
+      if (!handled) cleanup(true);
+    };
+
+    const onPointerUp = (upEvent) => {
+      if (upEvent.pointerId !== pointerId) return;
+      document.removeEventListener('pointerup', onPointerUp, true);
+      document.removeEventListener('pointercancel', onPointerUp, true);
+      if (handled) return;
+      const stillOnButton = button.contains(upEvent.target)
+        || upEvent.target === button
+        || findBoardGotoButtonAtPoint(upEvent.clientX, upEvent.clientY) === button;
+      cleanup(stillOnButton);
+    };
+
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('pointerup', onPointerUp, true);
+    document.addEventListener('pointercancel', onPointerUp, true);
+  }
+
+  function installBoardButtonInterceptListeners() {
+    if (boardButtonInterceptHandler) return;
+    boardButtonInterceptHandler = handleBoardButtonPointerDown;
+    document.addEventListener('pointerdown', boardButtonInterceptHandler, true);
+  }
+
+  function removeBoardButtonInterceptListeners() {
+    if (!boardButtonInterceptHandler) return;
+    document.removeEventListener('pointerdown', boardButtonInterceptHandler, true);
+    boardButtonInterceptHandler = null;
+  }
+
+  function getReactFiberNode(el) {
+    if (!el) return null;
+    const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+    return key ? el[key] : null;
+  }
+
+  function findReactActivationHandler(button) {
+    let fiber = getReactFiberNode(button);
+    for (let hops = 0; fiber && hops < 25; hops++, fiber = fiber.return) {
+      const props = fiber.memoizedProps || fiber.pendingProps;
+      if (!props) continue;
+      for (const key of ['onClick', 'onPointerUp', 'onPointerDown']) {
+        if (typeof props[key] === 'function') return { handler: props[key], type: key };
+      }
+    }
+    return null;
+  }
+
+  function createSyntheticPointerEvent(target, type) {
+    const nativeEvent = new MouseEvent(type, { bubbles: true, cancelable: true, view: window, buttons: 1 });
+    return {
+      preventDefault() { nativeEvent.preventDefault(); },
+      stopPropagation() { nativeEvent.stopPropagation(); },
+      nativeEvent,
+      currentTarget: target,
+      target,
+      type,
+      button: 0,
+      buttons: 1,
+      bubbles: true,
+      cancelable: true,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+    };
+  }
+
+  function clickTeleporterGotoButton(button) {
+    if (!button) return false;
+    const snapshot = snapshotBoardButtonState(button);
+    unblockBoardButton(button);
+
+    let clicked = false;
+    try {
+      const activation = findReactActivationHandler(button);
+      if (activation) {
+        const eventType = activation.type === 'onClick' ? 'click' : activation.type.slice(2).toLowerCase();
+        activation.handler(createSyntheticPointerEvent(button, eventType));
+        clicked = true;
+      }
+
+      if (!clicked) {
+        button.click();
+        clicked = true;
+      }
+    } catch (error) {
+      console.warn('[Better Teleporter] Failed to click board goto button:', error);
+    } finally {
+      requestAnimationFrame(() => restoreBoardButton(button, snapshot));
+    }
+    return clicked;
+  }
+
+  function snapshotBoardButtonState(button) {
+    return {
+      disabled: button.disabled,
+      hasDisabledAttr: button.hasAttribute('disabled'),
+      dataDisabled: button.getAttribute('data-disabled'),
+      ariaDisabled: button.getAttribute('aria-disabled'),
+    };
+  }
+
+  function unblockBoardButton(button) {
+    button.disabled = false;
+    button.removeAttribute('disabled');
+    button.setAttribute('data-disabled', 'false');
+    button.removeAttribute('aria-disabled');
+  }
+
+  function restoreBoardButton(button, snapshot) {
+    if (!button || !snapshot) return;
+    button.disabled = snapshot.disabled;
+    if (snapshot.hasDisabledAttr) button.setAttribute('disabled', '');
+    else button.removeAttribute('disabled');
+    if (snapshot.dataDisabled == null) button.removeAttribute('data-disabled');
+    else button.setAttribute('data-disabled', snapshot.dataDisabled);
+    if (snapshot.ariaDisabled == null) button.removeAttribute('aria-disabled');
+    else button.setAttribute('aria-disabled', snapshot.ariaDisabled);
   }
 
   function scheduleFocusTeleporterSearchAfterOpen() {
@@ -942,21 +1107,29 @@
     requestAnimationFrame(tick);
   }
 
-  function openNativeTeleporter() {
-    const existing = findOpenTeleporterDialog();
-    if (existing) {
-      focusTeleporterSearchInput(existing);
-      return;
-    }
+  function openNativeTeleporter({ gotoButton = null } = {}) {
+    if (openingNativeTeleporter) return;
+    openingNativeTeleporter = true;
 
-    const gotoButton = findTeleporterGotoButton();
-    if (gotoButton && typeof gotoButton.click === 'function') {
-      gotoButton.click();
+    try {
+      const existing = findOpenTeleporterDialog();
+      if (existing) {
+        focusTeleporterSearchInput(existing);
+        scheduleFocusTeleporterSearchAfterOpen();
+        return;
+      }
+
+      const buttons = gotoButton ? [gotoButton] : findTeleporterGotoButtons();
+      for (const button of buttons) {
+        clickTeleporterGotoButton(button);
+        if (findOpenTeleporterDialog()) break;
+      }
+
+      scheduleProcessTeleporterModals();
       scheduleFocusTeleporterSearchAfterOpen();
-      return;
+    } finally {
+      openingNativeTeleporter = false;
     }
-
-    console.warn('[Better Teleporter] Native teleporter open failed: goto button not found');
   }
 
   function getDialogKeyboardNavState(dialog) {
@@ -1200,11 +1373,17 @@
         const roomId = room?.id;
         if (!roomId) continue;
 
-        let villains = [];
+        let board = [];
         try {
-          const board = getBoard(roomId);
-          if (Array.isArray(board)) villains = board.filter((p) => p?.villain === true);
+          const rawBoard = getBoard(roomId);
+          if (Array.isArray(rawBoard)) board = rawBoard;
         } catch (_) {}
+
+        if (!roomBoardMetaCache.has(roomId)) {
+          roomBoardMetaCache.set(roomId, buildRoomBoardMetaFromBoard(board));
+        }
+
+        const villains = board.filter((p) => p?.villain === true);
 
         let levelSumCapped = 0;
         for (const v of villains) {
@@ -2225,31 +2404,21 @@
     return { gameId, spriteId: gameId, name: `#${gameId}` };
   }
 
-  function getRoomBoardMeta(roomId) {
-    if (roomBoardMetaCache.has(roomId)) return roomBoardMetaCache.get(roomId);
-
+  function buildRoomBoardMetaFromBoard(board) {
     const meta = { creatures: [], equips: [] };
+    if (!Array.isArray(board) || board.length === 0) return meta;
+
     try {
-      const board = globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
       const creatureMap = new Map();
       const equipMap = new Map();
 
       for (const piece of board) {
         const gameId = Number(piece?.gameId);
-        if (Number.isFinite(gameId)) {
-          const level = Number(piece?.level) || 1;
-          let existing = creatureMap.get(gameId);
-          if (!existing) {
-            existing = {
-              gameId,
-              name: resolveCreatureName(gameId) || `#${gameId}`,
-              count: 0,
-              levelCounts: new Map(),
-            };
-            creatureMap.set(gameId, existing);
-          }
-          existing.count += 1;
-          existing.levelCounts.set(level, (existing.levelCounts.get(level) || 0) + 1);
+        if (Number.isFinite(gameId) && !creatureMap.has(gameId)) {
+          creatureMap.set(gameId, {
+            gameId,
+            name: resolveCreatureName(gameId) || `#${gameId}`,
+          });
         }
 
         const equipGameId = Number(piece?.equip?.gameId);
@@ -2270,17 +2439,22 @@
         }
       }
 
-      meta.creatures = [...creatureMap.values()].map((entry) => ({
-        gameId: entry.gameId,
-        name: entry.name,
-        count: entry.count,
-        levels: [...entry.levelCounts.entries()]
-          .sort((a, b) => b[0] - a[0])
-          .map(([level, levelCount]) => ({ level, count: levelCount })),
-      }));
+      meta.creatures = [...creatureMap.values()];
       meta.equips = [...equipMap.values()];
     } catch (_) {}
 
+    return meta;
+  }
+
+  function getRoomBoardMeta(roomId) {
+    if (roomBoardMetaCache.has(roomId)) return roomBoardMetaCache.get(roomId);
+
+    let board = [];
+    try {
+      board = globalThis.state?.utils?.getBoardMonstersFromRoomId?.(roomId) || [];
+    } catch (_) {}
+
+    const meta = buildRoomBoardMetaFromBoard(board);
     roomBoardMetaCache.set(roomId, meta);
     return meta;
   }
@@ -2289,107 +2463,6 @@
     if (!el || !title) return;
     el.title = title;
     el.setAttribute(TOOLTIP_ATTR, 'true');
-  }
-
-  const PORTRAIT_LEVEL_BADGE_STYLE = [
-    'background:rgba(0,0,0,0.8)',
-    'color:#fff',
-    'font-size:9px',
-    'padding:0 2px',
-    'border-radius:2px',
-    'font-weight:bold',
-    'pointer-events:none',
-    'line-height:1.2',
-    'flex-shrink:0',
-  ].join(';');
-
-  const PORTRAIT_COUNT_COLOR = '#ffe066';
-  const PORTRAIT_COUNT_TEXT_SHADOW = '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 4px rgba(0, 0, 0, 0.6)';
-
-  const PORTRAIT_COUNT_BADGE_STYLE = [
-    'position:absolute',
-    'top:0',
-    'right:0',
-    'color:' + PORTRAIT_COUNT_COLOR,
-    'font-size:10px',
-    'font-weight:bold',
-    'font-family:Arial,Helvetica,sans-serif',
-    'letter-spacing:-0.02em',
-    'pointer-events:none',
-    'line-height:1.1',
-    'z-index:1',
-    'text-shadow:' + PORTRAIT_COUNT_TEXT_SHADOW,
-    'background:rgba(0,0,0,0.55)',
-    'padding:1px 2px 2px 3px',
-    'border-radius:0 0 0 3px',
-  ].join(';');
-
-  function createCreatureLevelBadge(level) {
-    const badge = document.createElement('span');
-    badge.setAttribute(CREATURE_LEVEL_ATTR, String(level));
-    badge.textContent = String(level);
-    badge.style.cssText = PORTRAIT_LEVEL_BADGE_STYLE;
-    return badge;
-  }
-
-  function getCreaturePortraitMetaKey(creature) {
-    const levels = creature?.levels || [];
-    return `${creature?.count || 0}|${levels.map(({ level, count }) => `${level}:${count}`).join(',')}`;
-  }
-
-  function removeCreaturePortraitBadges(target) {
-    if (!target) return;
-    for (const badge of target.querySelectorAll(`[${CREATURE_COUNT_ATTR}], [${CREATURE_LEVEL_ATTR}]`)) {
-      badge.remove();
-    }
-  }
-
-  function setCreaturePortraitBadges(target, creature) {
-    if (!target || !creature) return;
-
-    const metaKey = getCreaturePortraitMetaKey(creature);
-    if (target.getAttribute(PORTRAIT_META_ATTR) === metaKey) return;
-
-    target.setAttribute(PORTRAIT_SLOT_ATTR, 'true');
-    target.setAttribute(PORTRAIT_META_ATTR, metaKey);
-    removeCreaturePortraitBadges(target);
-
-    const levels = creature.levels || [];
-    if (levels.length === 1) {
-      const badge = createCreatureLevelBadge(levels[0].level);
-      badge.style.position = 'absolute';
-      badge.style.bottom = '1px';
-      badge.style.left = '1px';
-      badge.style.zIndex = '1';
-      target.appendChild(badge);
-    } else if (levels.length > 1) {
-      const group = document.createElement('span');
-      group.setAttribute(CREATURE_LEVEL_ATTR, 'group');
-      group.style.cssText = [
-        'position:absolute',
-        'bottom:1px',
-        'left:1px',
-        'display:flex',
-        'flex-direction:row',
-        'gap:1px',
-        'max-width:calc(100% - 14px)',
-        'overflow:hidden',
-        'pointer-events:none',
-        'z-index:1',
-      ].join(';');
-      for (const { level } of levels) {
-        group.appendChild(createCreatureLevelBadge(level));
-      }
-      target.appendChild(group);
-    }
-
-    if (creature.count > 1) {
-      const countBadge = document.createElement('span');
-      countBadge.setAttribute(CREATURE_COUNT_ATTR, 'true');
-      countBadge.textContent = `×${creature.count}`;
-      countBadge.style.cssText = PORTRAIT_COUNT_BADGE_STYLE;
-      target.appendChild(countBadge);
-    }
   }
 
   function enhanceRowPortraitTooltips(tr, roomId) {
@@ -2406,7 +2479,6 @@
       const title = creature?.name || resolveCreatureName(gameId);
       setTooltipTarget(target, title);
       if (target !== img && title) img.title = title;
-      if (creature) setCreaturePortraitBadges(target, creature);
     }
 
     for (const portrait of tr.querySelectorAll('.equipment-portrait')) {
@@ -2427,10 +2499,7 @@
   function teardownRowPortraitEnhancements(tr) {
     if (!tr) return;
 
-    for (const target of tr.querySelectorAll(`.container-slot[${PORTRAIT_SLOT_ATTR}], .container-slot[${TOOLTIP_ATTR}]`)) {
-      removeCreaturePortraitBadges(target);
-      target.removeAttribute(PORTRAIT_SLOT_ATTR);
-      target.removeAttribute(PORTRAIT_META_ATTR);
+    for (const target of tr.querySelectorAll(`.container-slot[${TOOLTIP_ATTR}]`)) {
       target.removeAttribute(TOOLTIP_ATTR);
       target.removeAttribute('title');
     }
@@ -2919,7 +2988,6 @@
   }
 
   function navigateCyclopediaFromRoom(roomId, mode, entryName = null) {
-    debugContextMenu('navigate', { roomId, mode, entryName });
     closeTeleporterIfOpen(() => {
       if (mode === 'map') {
         const { mapName, regionName } = getRoomMapNavigationTarget(roomId);
@@ -2943,10 +3011,6 @@
       }
       openCyclopediaModal(mode === 'creature' ? { creature: name } : { equipment: name });
     });
-  }
-
-  function debugContextMenu(event, data = {}) {
-    console.log(`[Better Teleporter] context menu ${event}`, data);
   }
 
   function stopContextMenuEvent(event) {
@@ -3030,7 +3094,6 @@
     Object.assign(button.style, CONTEXT_MENU_BUTTON_LAYOUT);
     bindContextMenuHoverBrightness(button);
     bindContextMenuActivation(button, () => {
-      debugContextMenu('item selected', { label, roomId, kind });
       closeRowContextMenu();
       onClick?.();
     });
@@ -3160,7 +3223,6 @@
     cancelButton.style.color = '#888';
     bindContextMenuHoverBrightness(cancelButton, { activeColor: '#ccc', idleColor: '#888' });
     bindContextMenuActivation(cancelButton, () => {
-      debugContextMenu('dismiss cancel', { roomId });
       onCancel();
     });
     return cancelButton;
@@ -3243,7 +3305,6 @@
 
   function showRowContextMenu(x, y, roomId) {
     if (!isCyclopediaModEnabled()) {
-      debugContextMenu('open failed', { roomId, reason: 'cyclopedia mod disabled' });
       return;
     }
 
@@ -3251,7 +3312,6 @@
 
     const host = findOpenTeleporterDialog();
     if (!host) {
-      debugContextMenu('open failed', { roomId, reason: 'no teleporter dialog' });
       return;
     }
 
@@ -3259,18 +3319,6 @@
     const equipmentNames = getBoardEntryNames(roomId, 'equipment');
     const { mapName, regionName } = getRoomMapNavigationTarget(roomId);
     const mapEnabled = Boolean(mapName && regionName);
-
-    debugContextMenu('open', {
-      roomId,
-      x,
-      y,
-      mapName,
-      regionName,
-      creatureNames,
-      equipmentNames,
-      mapEnabled,
-      hostTag: host.tagName,
-    });
 
     const { hostPosition, hostOverflow } = prepareContextMenuHost(host);
     const overlay = createContextMenuOverlay();
@@ -3333,18 +3381,15 @@
     menuState.overlayClickHandler = (event) => {
       if (event.target !== overlay) return;
       stopContextMenuEvent(event);
-      debugContextMenu('dismiss overlay', { roomId });
       closeMenu();
     };
     menuState.escHandler = (event) => {
       if (event.key === 'Escape') {
-        debugContextMenu('dismiss escape', { roomId });
         closeMenu();
       }
     };
     menuState.modalClickHandler = (event) => {
       if (menu.contains(event.target) || overlay.contains(event.target)) return;
-      debugContextMenu('dismiss modal click', { roomId, target: event.target?.tagName });
       closeMenu();
     };
 
@@ -3363,17 +3408,6 @@
     host.addEventListener('click', menuState.modalClickHandler);
 
     openRowContextMenu = menuState;
-
-    debugContextMenu('mounted', {
-      roomId,
-      mountedIn: 'teleporter-dialog',
-      menuRect: {
-        x: Math.round(menu.getBoundingClientRect().x),
-        y: Math.round(menu.getBoundingClientRect().y),
-        w: Math.round(menu.getBoundingClientRect().width),
-        h: Math.round(menu.getBoundingClientRect().height),
-      },
-    });
   }
 
   function bindRowContextMenu(tr, roomId) {
@@ -3383,7 +3417,6 @@
     const onContextMenu = (event) => {
       event.preventDefault();
       event.stopPropagation();
-      debugContextMenu('row contextmenu', { roomId, x: event.clientX, y: event.clientY });
       showRowContextMenu(event.clientX, event.clientY, roomId);
     };
 
@@ -3458,14 +3491,16 @@
       return;
     }
 
-    for (const dialog of dialogs) {
-      if (isTeleporterProcessingComplete(dialog)) continue;
+    runWithoutMutationObserver(() => {
+      for (const dialog of dialogs) {
+        if (isTeleporterProcessingComplete(dialog)) continue;
 
-      markAndEnhanceTeleporterDialog(dialog);
-      if (matchesTeleporterContent(dialog)) {
-        enhanceTeleporterTable(dialog);
+        markAndEnhanceTeleporterDialog(dialog);
+        if (matchesTeleporterContent(dialog)) {
+          enhanceTeleporterTable(dialog);
+        }
       }
-    }
+    });
   }
 
   function addedNodeAffectsTeleporter(node) {
@@ -3536,6 +3571,7 @@
       attributeFilter: ['data-state'],
     });
     processTeleporterModals();
+    installBoardButtonInterceptListeners();
     window.__betterTeleporterOpen = openNativeTeleporter;
     console.log('[Better Teleporter] initialized');
   }
@@ -3547,7 +3583,10 @@
     }
 
     closeRowContextMenu();
+    openRowContextMenu = null;
+    openingNativeTeleporter = false;
     detachTeleporterKeyboardNavListener();
+    removeBoardButtonInterceptListeners();
     if (processModalsRaf != null) {
       cancelAnimationFrame(processModalsRaf);
       processModalsRaf = null;

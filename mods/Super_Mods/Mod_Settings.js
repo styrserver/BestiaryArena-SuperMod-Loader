@@ -27,6 +27,7 @@ const defaultConfig = {
   autoplayRefreshMinutes: 30,
   autoplayRefreshTimerMode: 'autoplay', // 'autoplay', 'internal', or 'both'
   disableAutoReload: false,
+  disableQuestHelpers: false,
   enableAntiIdleSounds: false,
   removeWebsiteFooter: false,
   compactNavBar: false,
@@ -173,6 +174,7 @@ if (config.hotkeySetupSource !== 'setupManager') config.hotkeySetupSource = 'bet
 if (config.defaultInventorySticky === undefined) config.defaultInventorySticky = false;
 if (config.alwaysNavigateMaxFloor === undefined) config.alwaysNavigateMaxFloor = false;
 if (config.autoHideNonShinyNonAwakenedMonsters === undefined) config.autoHideNonShinyNonAwakenedMonsters = false;
+if (config.disableQuestHelpers === undefined) config.disableQuestHelpers = false;
 ensureFirebaseUploadRegionsConfig();
 
 // Last visited map feature globals
@@ -3171,6 +3173,12 @@ function saveConfig() {
 function notifySetupShortcutsAndHoverChanged(enabled) {
   window.dispatchEvent(new CustomEvent('betterUISetupShortcutsAndHoverChanged', {
     detail: { enabled: enabled === true }
+  }));
+}
+
+function notifyQuestHelpersChanged(disabled) {
+  window.dispatchEvent(new CustomEvent('betterUIQuestHelpersChanged', {
+    detail: { disabled: disabled === true }
   }));
 }
 
@@ -7131,6 +7139,12 @@ function showSettingsModal() {
             </label>
           </div>
           <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="disable-quest-helpers-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableQuestHelpersWarning')}">${t('mods.betterUI.disableQuestHelpers')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
             <label id="run-tracker-toggle-label" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <span id="run-tracker-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center;">⚠️</span>
               <input type="checkbox" id="run-tracker-toggle" style="transform: scale(1.2);">
@@ -8209,6 +8223,18 @@ function showSettingsModal() {
           } else {
             disableAntiIdleSounds();
           }
+        });
+      }
+
+      const disableQuestHelpersCheckbox = content.querySelector('#disable-quest-helpers-toggle');
+      if (disableQuestHelpersCheckbox) {
+        disableQuestHelpersCheckbox.checked = config.disableQuestHelpers;
+
+        disableQuestHelpersCheckbox.addEventListener('change', () => {
+          config.disableQuestHelpers = disableQuestHelpersCheckbox.checked;
+          saveConfig();
+          notifyQuestHelpersChanged(config.disableQuestHelpers);
+          console.log('[Mod Settings] Quest helpers disabled:', config.disableQuestHelpers);
         });
       }
       

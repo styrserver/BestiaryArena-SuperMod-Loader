@@ -12384,6 +12384,40 @@ function createNPCCooldownManager() {
     }
   }
 
+  function isVisibleNavElement(element) {
+    return !!(element && element.offsetParent !== null);
+  }
+
+  function findQuestLogNavButton() {
+    const imageSelectors = [
+      'button img[src*="quest.png"]',
+      'button img[src*="enemy.png"]',
+      'button img[src*="taskrank.png"]',
+      'button img[alt="Quests"]',
+      'button img[alt="Tasking"]',
+      'button img[alt="Enemy"]'
+    ];
+
+    for (const selector of imageSelectors) {
+      const button = document.querySelector(selector)?.closest('button');
+      if (isVisibleNavElement(button)) return button;
+    }
+
+    const textMatches = ['Raiding', 'Tasking'];
+    const navButtons = document.querySelectorAll('header button, #header-slot button, [role="banner"] button');
+    for (const btn of navButtons) {
+      if (!isVisibleNavElement(btn)) continue;
+
+      const spanText = btn.querySelector('span')?.textContent?.trim();
+      if (spanText && textMatches.includes(spanText)) return btn;
+
+      const text = (btn.textContent || '').replace(/\s+/g, ' ').trim();
+      if (textMatches.some((match) => text === match)) return btn;
+    }
+
+    return null;
+  }
+
   function clickQuestLogOpener() {
     const questBlipSelectors = [
       '#header-slot img[src*="quest-blip"]',
@@ -12393,19 +12427,16 @@ function createNPCCooldownManager() {
 
     for (const selector of questBlipSelectors) {
       const blip = document.querySelector(selector);
-      if (blip && blip.offsetParent !== null) {
+      if (isVisibleNavElement(blip)) {
         blip.click();
         return true;
       }
     }
 
-    const navButtons = document.querySelectorAll('header button, #header-slot button, [role="banner"] button');
-    for (const btn of navButtons) {
-      const text = (btn.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-      if (text.includes('quest')) {
-        btn.click();
-        return true;
-      }
+    const navButton = findQuestLogNavButton();
+    if (navButton) {
+      navButton.click();
+      return true;
     }
 
     return false;
@@ -17386,6 +17417,15 @@ function createNPCCooldownManager() {
   let tileHighlightBoardSubscription = null;
   let tileHighlightGameTimerSubscription = null;
 
+  function areQuestHelpersEnabled() {
+    return !window.betterUIConfig?.disableQuestHelpers;
+  }
+
+  function removeQuestHelperVisuals() {
+    document.querySelectorAll(`.${TILE_HIGHLIGHT_CLASS}`).forEach((highlight) => highlight.remove());
+    removeTeshaArrow();
+  }
+
   function canShowQuestTileHighlights(boardContext) {
     return !isBoardBattleActive(boardContext) && countAllyPiecesOnBoard(boardContext) === 0;
   }
@@ -17449,21 +17489,29 @@ function createNPCCooldownManager() {
   }
 
   function placeTileHighlightEffect(tileElement, alt = 'Quest access') {
-    if (!tileElement || tileElement.querySelector(`.${TILE_HIGHLIGHT_CLASS}`)) return;
+    if (!tileElement) return;
 
     ensureQuestTileHighlightStyles();
 
     markQuestAccessTile(tileElement);
 
-    const hitbox = document.createElement('div');
-    hitbox.className = 'quests-tile-highlight-hitbox';
-    hitbox.title = QUEST_ACCESS_TILE_TITLE;
-    hitbox.style.cssText = getQuestTileOverlayBoxStyle([
-      'pointer-events:auto',
-      'cursor:' + QUEST_ACCESS_CURSOR,
-      'z-index:10001',
-      'background:transparent'
-    ]);
+    if (!tileElement.querySelector('.quests-tile-highlight-hitbox')) {
+      const hitbox = document.createElement('div');
+      hitbox.className = 'quests-tile-highlight-hitbox';
+      hitbox.title = QUEST_ACCESS_TILE_TITLE;
+      hitbox.style.cssText = getQuestTileOverlayBoxStyle([
+        'pointer-events:auto',
+        'cursor:' + QUEST_ACCESS_CURSOR,
+        'z-index:10001',
+        'background:transparent'
+      ]);
+      tileElement.appendChild(hitbox);
+    }
+
+    if (!areQuestHelpersEnabled() || tileElement.querySelector(`.${TILE_HIGHLIGHT_CLASS}`)) {
+      bringQuestTileOverlaysToFront(tileElement);
+      return;
+    }
 
     const highlight = document.createElement('img');
     highlight.className = `${TILE_HIGHLIGHT_CLASS} pixelated`;
@@ -17478,7 +17526,6 @@ function createNPCCooldownManager() {
       'object-fit:fill',
       'transform-origin:center center'
     ]);
-    tileElement.appendChild(hitbox);
     tileElement.appendChild(highlight);
     bringQuestTileOverlaysToFront(tileElement);
   }
@@ -17718,6 +17765,7 @@ function createNPCCooldownManager() {
 
   function placeTeshaArrowOnTile(tileElement) {
     removeTeshaArrow();
+    if (!areQuestHelpersEnabled()) return;
 
     const arrow = document.createElement('img');
     arrow.className = `${TESHA_ARROW_CLASS} pixelated`;
@@ -17745,6 +17793,15 @@ function createNPCCooldownManager() {
 
   async function updateTeshaArrowState(boardContext) {
     try {
+      if (!areQuestHelpersEnabled()) {
+        if (teshaArrowVisible) {
+          const tile = getTileElement(TESHA_TILE_INDEX);
+          if (tile) unmarkQuestAccessTile(tile);
+          removeTeshaArrow();
+        }
+        return;
+      }
+
       const scarabProgress = getMissionProgress(KING_SCARAB_COIN_MISSION);
       const qualifiesForArrow = scarabProgress.completed || await hasScarabCoinInInventory();
       const shouldShow = isOnRoomByName(DESERT_DIGGING_CONFIG.TARGET_MAP) &&
@@ -18394,6 +18451,11 @@ function createNPCCooldownManager() {
     setupTile83WydaObserver();
     setupTeshaArrowObserver();
     setupTileHighlightObserver();
+    window.addEventListener('betterUIQuestHelpersChanged', () => {
+      removeQuestHelperVisuals();
+      refreshQuestTileHighlights(globalThis.state?.board?.getSnapshot()?.context);
+      updateTeshaArrowState(globalThis.state?.board?.getSnapshot()?.context);
+    });
     setupTile77SpiderLairObserver();
     setupSevenSealsRoomObserver();
     setupFirstSealBoardObserver();

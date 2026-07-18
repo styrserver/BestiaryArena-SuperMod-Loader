@@ -2971,7 +2971,21 @@ function buildTblPlayerTotalRankTicks(
   return totals;
 }
 
-function compareTblRankLeaderboardEntries(a, b, playerTotalRankTicks) {
+function compareTblEntryUpdatedAtTieBreak(a, b) {
+  const updatedA = Number(a?.updatedAt);
+  const updatedB = Number(b?.updatedAt);
+  const validA = Number.isFinite(updatedA);
+  const validB = Number.isFinite(updatedB);
+  if (validA && validB && updatedA !== updatedB) {
+    return updatedA - updatedB;
+  }
+  if (validA !== validB) {
+    return validA ? -1 : 1;
+  }
+  return String(a?.name || '').localeCompare(String(b?.name || ''));
+}
+
+function compareTblRankLeaderboardEntries(a, b) {
   if (a.rank !== b.rank) {
     return b.rank - a.rank;
   }
@@ -2980,19 +2994,12 @@ function compareTblRankLeaderboardEntries(a, b, playerTotalRankTicks) {
   if (ticksA !== ticksB) {
     return ticksA - ticksB;
   }
-  const totalA = playerTotalRankTicks.get(a.name)
-    ?? ((cfg.floors.max - cfg.floors.min + 1) * cfg.missingFloorTicks);
-  const totalB = playerTotalRankTicks.get(b.name)
-    ?? ((cfg.floors.max - cfg.floors.min + 1) * cfg.missingFloorTicks);
-  if (totalA !== totalB) {
-    return totalA - totalB;
-  }
-  return String(a.name).localeCompare(String(b.name));
+  return compareTblEntryUpdatedAtTieBreak(a, b);
 }
 
-function rankTblRankLeaderboardEntries(entries, playerTotalRankTicks) {
+function rankTblRankLeaderboardEntries(entries) {
   return [...entries]
-    .sort((a, b) => compareTblRankLeaderboardEntries(a, b, playerTotalRankTicks))
+    .sort((a, b) => compareTblRankLeaderboardEntries(a, b))
     .slice(0, cfg.leaderboardTop);
 }
 
@@ -3069,23 +3076,16 @@ function buildTblPlayerTotalTicks(
   return totals;
 }
 
-function compareTblLeaderboardEntries(a, b, playerTotalTicks) {
+function compareTblLeaderboardEntries(a, b) {
   if (a.ticks !== b.ticks) {
     return a.ticks - b.ticks;
   }
-  const totalA = playerTotalTicks.get(a.name)
-    ?? ((cfg.floors.max - cfg.floors.min + 1) * cfg.missingFloorTicks);
-  const totalB = playerTotalTicks.get(b.name)
-    ?? ((cfg.floors.max - cfg.floors.min + 1) * cfg.missingFloorTicks);
-  if (totalA !== totalB) {
-    return totalA - totalB;
-  }
-  return String(a.name).localeCompare(String(b.name));
+  return compareTblEntryUpdatedAtTieBreak(a, b);
 }
 
-function rankTblLeaderboardEntries(entries, playerTotalTicks) {
+function rankTblLeaderboardEntries(entries) {
   return [...entries]
-    .sort((a, b) => compareTblLeaderboardEntries(a, b, playerTotalTicks))
+    .sort((a, b) => compareTblLeaderboardEntries(a, b))
     .slice(0, cfg.leaderboardTop);
 }
 
@@ -3692,9 +3692,8 @@ function formatTblTopGridNameCell(player, viewerName) {
   const nameHtml = isYou
     ? escapeTblHtml(player.name)
     : formatTblProfileLink(player.name);
-  const nameTitle = escapeTblHtml(player.name);
   const youClass = isYou ? ' tbl-league-top-grid-you-cell' : '';
-  return `<td class="tbl-league-top-grid-cell tbl-league-top-grid-name${youClass}" title="${nameTitle}">${nameHtml}</td>`;
+  return `<td class="tbl-league-top-grid-cell tbl-league-top-grid-name${youClass}">${nameHtml}</td>`;
 }
 
 function formatTblTopGridValueCell(value, viewerName, playerName, { isYou: forceYou = false } = {}) {
@@ -3820,11 +3819,10 @@ function formatTblOverallStandingGridFooterRow(player, rank, viewerName, competi
     ? escapeTblHtml(player.name)
     : formatTblProfileLink(player.name);
   const standingLabel = escapeTblHtml(formatTblOverallStandingStats(player, competitionMode));
-  const nameTitle = escapeTblHtml(player.name);
   const rankLabel = rank ? `#${rank}` : '—';
   return `<tr class="tbl-league-top-grid-footer">
     <th class="tbl-league-top-grid-label">${rankLabel}</th>
-    <td class="tbl-league-top-grid-cell" colspan="3" title="${nameTitle}">${nameHtml} — ${standingLabel}</td>
+    <td class="tbl-league-top-grid-cell" colspan="3">${nameHtml} — ${standingLabel}</td>
   </tr>`;
 }
 
@@ -3932,7 +3930,7 @@ async function loadTblAllFloorData(force = false) {
         const eligibleEntries = await filterTblNamedEntries(rawEntriesByFloor.get(floor) || []);
         firebaseByFloor.set(
           floor,
-          rankTblLeaderboardEntries(eligibleEntries, playerTotalTicks)
+          rankTblLeaderboardEntries(eligibleEntries)
         );
       }
 
@@ -4053,7 +4051,7 @@ async function loadTblAllRankData(force = false) {
         const eligibleEntries = await filterTblNamedEntries(rawEntriesByFloor.get(floor) || []);
         firebaseByFloor.set(
           floor,
-          rankTblRankLeaderboardEntries(eligibleEntries, playerTotalRankTicks)
+          rankTblRankLeaderboardEntries(eligibleEntries)
         );
       }
 
@@ -4520,11 +4518,6 @@ function buildTblLeagueRowList(rows, competitionMode) {
         });
       }
     }
-    itemEl.title = isViewerIneligible
-      ? 'View-only (admin)'
-      : (visualUnlocked
-        ? tEvent('GoToFloor', { floor: row.floor })
-        : tEvent('FloorLocked'));
     const statusColor = visualUnlocked ? '#8f8' : '#888';
     const comparisonHtml = isRankMode
       ? formatTblRankComparison(
