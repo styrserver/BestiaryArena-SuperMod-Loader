@@ -1405,6 +1405,13 @@ const RUN_TRACKER_MOD_NAME = 'Super Mods/RunTracker.js';
 const HUNT_ANALYZER_MOD_NAME = 'Super Mods/Hunt Analyzer.js';
 const VIP_LIST_MOD_NAME = 'OT Mods/VIP List.js';
 const DEPOT_MANAGER_MOD_NAME = 'Super Mods/Depot Manager.js';
+const OT_MOD_REGISTRY_NAMES = [
+  'OT Mods/Challenges.js',
+  'OT Mods/Quests.js',
+  'OT Mods/Guilds.js',
+  'OT Mods/VIP List.js'
+];
+const QUESTS_MOD_NAME = 'OT Mods/Quests.js';
 
 /** @type {((categoryId: string) => void) | null} */
 let modSettingsSelectCategoryHandler = null;
@@ -1449,6 +1456,18 @@ function isDepotManagerModEnabled() {
     || !!window.depotManager;
 }
 
+function isQuestsModEnabled() {
+  return isLocalModEnabledInRegistry(QUESTS_MOD_NAME)
+    || typeof window.resetAllQuests === 'function';
+}
+
+function isAnyOtModEnabled() {
+  if (OT_MOD_REGISTRY_NAMES.some(isLocalModEnabledInRegistry)) {
+    return true;
+  }
+  return !!(window.Challenges || window.Guilds || window.VIPList || isQuestsModEnabled());
+}
+
 function applyModDependentCheckboxRow({ disabledTitle, disabled, warningEl, labelEl, checkboxEl }) {
   if (warningEl) {
     warningEl.hidden = !disabled;
@@ -1491,6 +1510,19 @@ const BACKUP_RUN_DATA_DISABLED_TITLE =
   'Enable the Run Tracker mod to include run data in backups.';
 const BACKUP_HUNT_DATA_DISABLED_TITLE =
   'Enable the Hunt Analyzer mod to include hunt data in backups.';
+const QUESTS_RESET_DISABLED_TITLE =
+  'Enable the Quests mod to reset quest progress.';
+
+function updateOtModsSettingsAvailability() {
+  const disabled = !isQuestsModEnabled();
+  applyModDependentSection({
+    disabledTitle: QUESTS_RESET_DISABLED_TITLE,
+    disabled,
+    sectionEl: document.getElementById('ot-mods-quests-section'),
+    warningEl: document.getElementById('reset-all-quests-unavailable-warning'),
+    controlEls: [document.getElementById('reset-all-quests-btn')]
+  });
+}
 
 function updateModSettingsMenuVisibility() {
   const leftMenu = document.getElementById('mod-settings-left-menu');
@@ -1499,7 +1531,8 @@ function updateModSettingsMenuVisibility() {
   const modAvailabilityByCategory = {
     'depot-manager': isDepotManagerModEnabled(),
     'hunt-analyzer': isHuntAnalyzerModEnabled(),
-    'vip-list': isVipListModEnabled()
+    'vip-list': isVipListModEnabled(),
+    'ot-mods': isAnyOtModEnabled()
   };
 
   let selectedCategory = leftMenu.dataset.selectedCategory || 'creatures';
@@ -1589,6 +1622,7 @@ function syncModDependentSettingsAvailability() {
   updateRunTrackerSettingsAvailability();
   updateFirebaseRunsSettingsAvailability();
   updateBackupModExportAvailability();
+  updateOtModsSettingsAvailability();
 }
 
 const TURBO_SCRIPT_CONFIG_HASH = 'local_Official Mods/Turbo Mode.js';
@@ -6519,6 +6553,7 @@ function showSettingsModal() {
       { id: 'hotkeys', label: t('mods.betterUI.menuHotkeys'), selected: false },
       { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false, requiresMod: true },
       { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false, requiresMod: true },
+      { id: 'ot-mods', label: t('mods.betterUI.menuOtMods'), selected: false, requiresMod: true },
       { id: 'mod-coordination', label: t('mods.betterUI.menuModCoordination'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
       { id: 'backup', label: t('mods.betterUI.menuBackup'), selected: false }
@@ -6574,7 +6609,8 @@ function showSettingsModal() {
           const modAvailabilityByCategory = {
             'depot-manager': isDepotManagerModEnabled(),
             'hunt-analyzer': isHuntAnalyzerModEnabled(),
-            'vip-list': isVipListModEnabled()
+            'vip-list': isVipListModEnabled(),
+            'ot-mods': isAnyOtModEnabled()
           };
           if (!modAvailabilityByCategory[item.id]) return;
         }
@@ -7139,12 +7175,6 @@ function showSettingsModal() {
             </label>
           </div>
           <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="disable-quest-helpers-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableQuestHelpersWarning')}">${t('mods.betterUI.disableQuestHelpers')}</span>
-            </label>
-          </div>
-          <div style="margin-bottom: 15px;">
             <label id="run-tracker-toggle-label" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <span id="run-tracker-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center;">⚠️</span>
               <input type="checkbox" id="run-tracker-toggle" style="transform: scale(1.2);">
@@ -7405,6 +7435,30 @@ function showSettingsModal() {
           <a href="https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/chat_documentation.md" target="_blank" rel="noopener noreferrer" style="color: #4a9eff; text-decoration: none; font-size: 13px;">📖 ${t('mods.betterUI.vipListChatDocumentation')}</a>
         `;
         rightColumn.appendChild(vipListFooter);
+      } else if (categoryId === 'ot-mods') {
+        const otModsContent = document.createElement('div');
+        otModsContent.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="disable-quest-helpers-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableQuestHelpersWarning')}">${t('mods.betterUI.disableQuestHelpers')}</span>
+            </label>
+          </div>
+          <div id="ot-mods-quests-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+            <h4 style="margin: 0 0 12px 0; color: #ffaa00; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+              <span id="reset-all-quests-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px;">⚠️</span>
+              ${t('mods.betterUI.otModsQuestsSectionTitle')}
+            </h4>
+            <p style="margin: 0 0 12px 0; color: #9aa5b5; font-size: 12px; line-height: 1.4;">
+              ${t('mods.betterUI.resetAllQuestsWarning')}
+            </p>
+            <button type="button" id="reset-all-quests-btn" class="btn btn-secondary" style="color: #dc3545;">
+              ${t('mods.betterUI.resetAllQuests')}
+            </button>
+            <p id="reset-all-quests-status" style="margin: 10px 0 0 0; color: #9aa5b5; font-size: 12px; min-height: 16px;"></p>
+          </div>
+        `;
+        rightColumn.appendChild(otModsContent);
       } else if (categoryId === 'mod-coordination') {
         const modCoordinationContent = document.createElement('div');
         modCoordinationContent.innerHTML = `
@@ -8237,6 +8291,79 @@ function showSettingsModal() {
           console.log('[Mod Settings] Quest helpers disabled:', config.disableQuestHelpers);
         });
       }
+
+      const resetAllQuestsBtn = content.querySelector('#reset-all-quests-btn');
+      const resetAllQuestsStatus = content.querySelector('#reset-all-quests-status');
+      if (resetAllQuestsBtn) {
+        applyAdvancedActionButtonStyle(resetAllQuestsBtn, { variant: 'red' });
+        let resetAllQuestsConfirmArmed = false;
+        let resetAllQuestsConfirmTimeout = null;
+        const defaultResetAllQuestsLabel = t('mods.betterUI.resetAllQuests');
+
+        resetAllQuestsBtn.addEventListener('click', async () => {
+          if (!isQuestsModEnabled() || typeof window.resetAllQuests !== 'function') {
+            if (resetAllQuestsStatus) {
+              resetAllQuestsStatus.textContent = t('mods.betterUI.resetAllQuestsUnavailable');
+            }
+            return;
+          }
+
+          if (!resetAllQuestsConfirmArmed) {
+            resetAllQuestsConfirmArmed = true;
+            resetAllQuestsBtn.textContent = t('mods.betterUI.resetAllQuestsConfirmClick');
+            if (resetAllQuestsStatus) {
+              resetAllQuestsStatus.textContent = t('mods.betterUI.resetAllQuestsWarning');
+              resetAllQuestsStatus.style.color = '#f0c36d';
+            }
+            if (resetAllQuestsConfirmTimeout) clearTimeout(resetAllQuestsConfirmTimeout);
+            resetAllQuestsConfirmTimeout = setTimeout(() => {
+              resetAllQuestsConfirmArmed = false;
+              resetAllQuestsBtn.textContent = defaultResetAllQuestsLabel;
+              if (resetAllQuestsStatus) {
+                resetAllQuestsStatus.textContent = '';
+                resetAllQuestsStatus.style.color = '#9aa5b5';
+              }
+              resetAllQuestsConfirmTimeout = null;
+            }, 5000);
+            return;
+          }
+
+          resetAllQuestsConfirmArmed = false;
+          if (resetAllQuestsConfirmTimeout) {
+            clearTimeout(resetAllQuestsConfirmTimeout);
+            resetAllQuestsConfirmTimeout = null;
+          }
+          resetAllQuestsBtn.textContent = defaultResetAllQuestsLabel;
+          resetAllQuestsBtn.disabled = true;
+          if (resetAllQuestsStatus) {
+            resetAllQuestsStatus.textContent = t('mods.betterUI.resetAllQuestsRunning');
+            resetAllQuestsStatus.style.color = '#9aa5b5';
+          }
+
+          try {
+            await window.resetAllQuests();
+            if (resetAllQuestsStatus) {
+              resetAllQuestsStatus.textContent = t('mods.betterUI.resetAllQuestsSuccess');
+              resetAllQuestsStatus.style.color = '#7dcea0';
+            }
+            createToast({
+              message: `<span class="text-success">✅ ${t('mods.betterUI.resetAllQuestsSuccess')}</span>`,
+              type: 'success',
+              duration: 3000
+            });
+          } catch (error) {
+            console.error('[Mod Settings] Failed to reset all quests:', error);
+            if (resetAllQuestsStatus) {
+              resetAllQuestsStatus.textContent = t('mods.betterUI.resetAllQuestsFailed');
+              resetAllQuestsStatus.style.color = '#dc3545';
+            }
+          } finally {
+            resetAllQuestsBtn.disabled = false;
+            updateOtModsSettingsAvailability();
+          }
+        });
+      }
+      updateOtModsSettingsAvailability();
       
       const runTrackerCheckbox = content.querySelector('#run-tracker-toggle');
       if (runTrackerCheckbox) {

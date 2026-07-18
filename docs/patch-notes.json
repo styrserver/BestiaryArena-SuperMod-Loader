@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.5.8",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "OT Mods tab (shown when any OT mod is enabled): Disable Quest Helpers moved here from Advanced; Reset all quests button with two-click confirmation calls Quests mod reset."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Honeyflower turn-in no longer completes the wrong King Tibianus mission—yes/no confirmations bind only to the offered quest, completion uses an explicit mission, stale chat prompts clear on modal open, and yes/no use word boundaries. Picking a honeyflower sets a persistent honeyflowerPicked flag so tile hint and right-click stay off after pickup."
+        }
+      ]
+    },
+    {
       "version": "4.5.7",
       "changes": [
         {

@@ -1478,7 +1478,7 @@ function createNPCCooldownManager() {
   // =======================
   const kingChatState = {
     progressCopper: { accepted: false, completed: false },
-    progressHoneyflower: { accepted: false, completed: false },
+    progressHoneyflower: { accepted: false, completed: false, honeyflowerPicked: false },
     progressDragon: { accepted: false, completed: false },
     progressLetter: { accepted: false, completed: false },
     progressMonksStudy: { accepted: false, completed: false },
@@ -2153,6 +2153,30 @@ function createNPCCooldownManager() {
       destroyFieldRuneTaken: patch.destroyFieldRuneTaken ?? current.destroyFieldRuneTaken ?? false,
       putridChamberComplete: patch.putridChamberComplete ?? current.putridChamberComplete ?? false
     };
+  }
+
+  function buildHoneyflowerProgress(patch = {}) {
+    const current = getMissionProgress(KING_HONEYFLOWER_MISSION);
+    return {
+      accepted: patch.accepted ?? current.accepted ?? false,
+      completed: patch.completed ?? current.completed ?? false,
+      honeyflowerPicked: patch.honeyflowerPicked ?? current.honeyflowerPicked ?? false
+    };
+  }
+
+  function hasHoneyflowerBeenPicked() {
+    return !!getMissionProgress(KING_HONEYFLOWER_MISSION).honeyflowerPicked;
+  }
+
+  async function markHoneyflowerPickedInFirebase() {
+    const progress = buildHoneyflowerProgress({ honeyflowerPicked: true });
+    setMissionProgress(KING_HONEYFLOWER_MISSION, progress);
+    kingChatState.progressHoneyflower = { ...progress };
+
+    const playerName = getCurrentPlayerName();
+    if (playerName) {
+      await saveKingTibianusProgress(playerName, getAllMissionProgress());
+    }
   }
 
   function isSerpentineTowerBasementGameplayActive() {
@@ -5356,11 +5380,15 @@ function createNPCCooldownManager() {
                 destroyFieldRuneTaken: !!data[firebaseKey].destroyFieldRuneTaken,
                 putridChamberComplete: !!data[firebaseKey].putridChamberComplete
               }
-            : {})
+            : firebaseKey === 'honeyflower'
+              ? { honeyflowerPicked: !!data[firebaseKey].honeyflowerPicked }
+              : {})
         } : (
           firebaseKey === 'serpentineTower'
             ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
-            : { accepted: false, completed: false }
+            : firebaseKey === 'honeyflower'
+              ? { accepted: false, completed: false, honeyflowerPicked: false }
+              : { accepted: false, completed: false }
         );
       }
 
@@ -5436,11 +5464,15 @@ function createNPCCooldownManager() {
                     destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
                     putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
                   }
-                : {})
+                : firebaseKey === 'honeyflower'
+                  ? { honeyflowerPicked: !!progress[firebaseKey].honeyflowerPicked }
+                  : {})
             } : (
               firebaseKey === 'serpentineTower'
                 ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
-                : { accepted: false, completed: false }
+                : firebaseKey === 'honeyflower'
+                  ? { accepted: false, completed: false, honeyflowerPicked: false }
+                  : { accepted: false, completed: false }
             );
           }
           
@@ -8540,6 +8572,11 @@ function createNPCCooldownManager() {
     // Clear any pending modal timeouts
     clearTimeoutOrInterval(modalTimeout);
     clearTimeoutOrInterval(dialogTimeout);
+
+    // Fresh modal = fresh conversation; drop stale yes/no or accept prompts
+    kingChatState.awaitingKeyConfirm = false;
+    kingChatState.missionOffered = false;
+    kingChatState.offeredMission = null;
     
     // Close any existing modals first (like Autoscroller does)
     for (let i = 0; i < 2; i++) {
@@ -9392,7 +9429,15 @@ function createNPCCooldownManager() {
             if (stateKey && progress[firebaseKey]) {
               kingChatState[stateKey] = {
                 accepted: !!progress[firebaseKey].accepted,
-                completed: !!progress[firebaseKey].completed
+                completed: !!progress[firebaseKey].completed,
+                ...(firebaseKey === 'serpentineTower'
+                  ? {
+                      destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
+                      putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
+                    }
+                  : firebaseKey === 'honeyflower'
+                    ? { honeyflowerPicked: !!progress[firebaseKey].honeyflowerPicked }
+                    : {})
               };
             }
           }
@@ -9583,19 +9628,22 @@ function createNPCCooldownManager() {
         }
       }
 
-      async function completeKingTibianusQuest() {
+      async function completeKingTibianusQuest(missionToComplete) {
         try {
           const playerName = getCurrentPlayerName();
           if (!playerName) return;
-          if (!activeMission) {
+          const mission = missionToComplete || activeMission;
+          if (!mission) {
             console.warn('[Quests Mod][King Tibianus] No active mission to complete');
             return;
           }
-          const currentProgress = getMissionProgress(activeMission);
+          const currentProgress = getMissionProgress(mission);
           const shouldAwardDragonClaw =
-            activeMission.id === KING_RED_DRAGON_MISSION.id && !currentProgress.completed;
-          const nextProgress = { accepted: true, completed: true };
-          setMissionProgress(activeMission, nextProgress);
+            mission.id === KING_RED_DRAGON_MISSION.id && !currentProgress.completed;
+          const nextProgress = mission.id === KING_HONEYFLOWER_MISSION.id
+            ? buildHoneyflowerProgress({ accepted: true, completed: true })
+            : { accepted: true, completed: true };
+          setMissionProgress(mission, nextProgress);
           activeMission = currentMission();
           selectedMissionId = null;
           kingStrings = buildStrings(activeMission);
@@ -9743,6 +9791,26 @@ function createNPCCooldownManager() {
         return trimmed === 'hail' || trimmed === 'hail king' || trimmed === 'hail the king';
       }
 
+      function isAffirmativeReply(text) {
+        return /\byes\b/i.test(text.trim());
+      }
+
+      function isNegativeReply(text) {
+        return /\bno\b/i.test(text.trim());
+      }
+
+      function setKingAwaitingKeyConfirm(mission) {
+        kingChatState.missionOffered = false;
+        kingChatState.awaitingKeyConfirm = true;
+        kingChatState.offeredMission = mission;
+      }
+
+      function setKingMissionOffered(mission) {
+        kingChatState.awaitingKeyConfirm = false;
+        kingChatState.missionOffered = true;
+        kingChatState.offeredMission = mission;
+      }
+
       async function maybeHandleStarterCoin(lowerText) {
         if (kingChatState.starterCoinThanked) {
           return null;
@@ -9815,23 +9883,26 @@ function createNPCCooldownManager() {
       }
 
       // Helper: Handle key confirmation response (yes/no after "Have you found my key?")
-      async function handleKeyConfirmation(lowerText, activeMission, kingStrings) {
+      async function handleKeyConfirmation(lowerText) {
         if (!kingChatState.awaitingKeyConfirm) {
           return false;
         }
 
-        const confirmMission = kingChatState.offeredMission || activeMission;
+        const confirmMission = kingChatState.offeredMission;
         if (!confirmMission) {
+          kingChatState.awaitingKeyConfirm = false;
           return false;
         }
 
         const confirmStrings = buildStrings(confirmMission);
         const currentProgress = getMissionProgress(confirmMission);
         if (!currentProgress.accepted || currentProgress.completed) {
+          kingChatState.awaitingKeyConfirm = false;
+          kingChatState.offeredMission = null;
           return false;
         }
 
-        if (lowerText.includes('yes')) {
+        if (isAffirmativeReply(lowerText)) {
           let hasItems = false;
           if (confirmMission.id === KING_COPPER_KEY_MISSION.id) {
             hasItems = await hasCopperKeyInInventory();
@@ -9850,24 +9921,24 @@ function createNPCCooldownManager() {
           }
 
           if (hasItems) {
+            const missionToComplete = confirmMission;
             const completingScarabHunt = confirmMission.id === KING_SCARAB_COIN_MISSION.id;
             queueKingReply(confirmStrings.keyComplete, { onDone: async () => {
               if (completingScarabHunt) {
                 updateTeshaArrowState();
                 renderKingQuestUI();
               } else {
-                if (confirmMission.id === KING_HONEYFLOWER_MISSION.id) {
+                if (missionToComplete.id === KING_HONEYFLOWER_MISSION.id) {
                   await consumeQuestItem(HONEYFLOWER_CONFIG.productName, 1);
                   if (typeof updateHoneyflowerTileRightClickState === 'function') {
                     updateHoneyflowerTileRightClickState();
                   }
                 }
-                if (confirmMission.rewardCoins > 0) {
-                  await awardGuildCoins(confirmMission.rewardCoins);
+                if (missionToComplete.rewardCoins > 0) {
+                  await awardGuildCoins(missionToComplete.rewardCoins);
                   await updateGuildCoinDisplay();
                 }
-                activeMission = confirmMission;
-                await completeKingTibianusQuest();
+                await completeKingTibianusQuest(missionToComplete);
               }
             } });
           } else {
@@ -9879,7 +9950,7 @@ function createNPCCooldownManager() {
           return true;
         }
 
-        if (lowerText.includes('no')) {
+        if (isNegativeReply(lowerText)) {
           queueKingReply(confirmStrings.keyKeepSearching);
           kingChatState.awaitingKeyConfirm = false;
           kingChatState.offeredMission = null;
@@ -9894,7 +9965,7 @@ function createNPCCooldownManager() {
 
       // Helper: Handle mission acceptance
       async function handleMissionAcceptance(lowerText) {
-        if (!kingChatState.missionOffered || !kingChatState.offeredMission || !lowerText.includes('yes')) {
+        if (!kingChatState.missionOffered || !kingChatState.offeredMission || !isAffirmativeReply(lowerText)) {
           return false;
         }
 
@@ -9987,7 +10058,7 @@ function createNPCCooldownManager() {
         const targetProgress = getMissionProgress(targetMission);
 
         // Handle pending key confirmation (yes/no after "Have you found my key?")
-        if (await handleKeyConfirmation(lowerText, activeMission, kingStrings)) {
+        if (await handleKeyConfirmation(lowerText)) {
           return;
         }
 
@@ -10072,15 +10143,13 @@ function createNPCCooldownManager() {
               }
             }
             
-            kingChatState.awaitingKeyConfirm = true;
-            kingChatState.offeredMission = targetMission;
+            setKingAwaitingKeyConfirm(targetMission);
             queueKingReply(targetStrings.keyQuestion);
             clearTextarea();
             return;
           } else {
             kingResponse = targetStrings.missionPrompt;
-            kingChatState.missionOffered = true;
-            kingChatState.offeredMission = targetMission;
+            setKingMissionOffered(targetMission);
           }
         } else if (lowerText.includes('mission') || lowerText.includes('quest')) {
           const honeyProgress = getHoneyflowerMissionProgress();
@@ -10089,8 +10158,7 @@ function createNPCCooldownManager() {
           if (canOfferHoneyflowerMission()) {
             if (honeyProgress.accepted) {
               if (hasHoneyflowerInInventory()) {
-                kingChatState.awaitingKeyConfirm = true;
-                kingChatState.offeredMission = KING_HONEYFLOWER_MISSION;
+                setKingAwaitingKeyConfirm(KING_HONEYFLOWER_MISSION);
                 queueKingReply(honeyStrings.keyQuestion);
                 clearTextarea();
                 return;
@@ -10100,8 +10168,7 @@ function createNPCCooldownManager() {
               kingChatState.offeredMission = null;
             } else {
               kingResponse = KING_HONEYFLOWER_MISSION.prompt;
-              kingChatState.missionOffered = true;
-              kingChatState.offeredMission = KING_HONEYFLOWER_MISSION;
+              setKingMissionOffered(KING_HONEYFLOWER_MISSION);
             }
           } else if (areAllMissionsCompleted() && !canOfferHoneyflowerMission()) {
             kingResponse = 'All missions have been completed. Come back later for more tasks.';
@@ -10117,8 +10184,7 @@ function createNPCCooldownManager() {
             kingChatState.offeredMission = null;
           } else {
             kingResponse = kingStrings.missionPrompt;
-            kingChatState.missionOffered = true;
-            kingChatState.offeredMission = activeMission;
+            setKingMissionOffered(activeMission);
           }
         } else if (/\b(hi|hello|hey|greetings|good day)\b/.test(lowerText)) {
           kingResponse = 'I greet thee, my loyal subject.';
@@ -13415,7 +13481,7 @@ function createNPCCooldownManager() {
       kingChatState.progressMeetingWithTesha = { accepted: false, completed: false };
       kingChatState.progressScarabHunt = { accepted: false, completed: false };
       kingChatState.progressSerpentineTower = { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false };
-      kingChatState.progressHoneyflower = { accepted: false, completed: false };
+      kingChatState.progressHoneyflower = { accepted: false, completed: false, honeyflowerPicked: false };
       kingChatState.costelloVisited = false;
       kingChatState.mornenionDefeated = false;
       kingChatState.starterCoinThanked = false;
@@ -15899,6 +15965,10 @@ function createNPCCooldownManager() {
         return false;
       }
 
+      if (progress.honeyflowerPicked) {
+        return false;
+      }
+
       const currentProducts = cachedQuestItems || {};
       return (currentProducts[HONEYFLOWER_CONFIG.productName] || 0) <= 0;
     } catch (error) {
@@ -15928,7 +15998,12 @@ function createNPCCooldownManager() {
         return;
       }
 
+      if (hasHoneyflowerBeenPicked()) {
+        return;
+      }
+
       await addQuestItem(HONEYFLOWER_CONFIG.productName, 1);
+      await markHoneyflowerPickedInFirebase();
       hideHoneyflowerPickupSprite();
       NotificationService.showItemReceived(HONEYFLOWER_CONFIG.productName, '[Quests Mod][Honeyflower]');
       updateHoneyflowerTileRightClickState();
@@ -15981,6 +16056,10 @@ function createNPCCooldownManager() {
 
     const progress = getMissionProgress(KING_HONEYFLOWER_MISSION);
     if (!progress.accepted || progress.completed) {
+      return false;
+    }
+
+    if (progress.honeyflowerPicked) {
       return false;
     }
 
@@ -16125,6 +16204,9 @@ function createNPCCooldownManager() {
       } else {
         refreshQuestTileHighlights(boardContext);
         removeHoneyflowerTileRightClickHint();
+        if (hasHoneyflowerBeenPicked()) {
+          hideHoneyflowerPickupSprite();
+        }
       }
     } catch (error) {
       console.error('[Quests Mod][Honeyflower] Error updating right-click state:', error);
@@ -18663,11 +18745,15 @@ function createNPCCooldownManager() {
                   destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
                   putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
                 }
-              : {})
+              : firebaseKey === 'honeyflower'
+                ? { honeyflowerPicked: !!progress[firebaseKey].honeyflowerPicked }
+                : {})
           } : (
             firebaseKey === 'serpentineTower'
               ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
-              : { accepted: false, completed: false }
+              : firebaseKey === 'honeyflower'
+                ? { accepted: false, completed: false, honeyflowerPicked: false }
+                : { accepted: false, completed: false }
           );
         }
       }
@@ -18687,6 +18773,25 @@ function createNPCCooldownManager() {
         kingChatState.sevenSealsCompleted = progress.sevenSealsCompleted.slice(0, SEVEN_SEALS_COUNT).map(Boolean);
       } else if (Array.isArray(progress.sevenSealsVisited)) {
         kingChatState.sevenSealsCompleted = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.map(roomName => progress.sevenSealsVisited.includes(roomName));
+      }
+
+      const honeyProgress = kingChatState.progressHoneyflower;
+      if (honeyProgress?.accepted && !honeyProgress.honeyflowerPicked) {
+        const questItems = await getQuestItems(false);
+        const hasHoneyflowerItem = (questItems?.[HONEYFLOWER_CONFIG.productName] || 0) > 0;
+        if (hasHoneyflowerItem || honeyProgress.completed) {
+          const migratedProgress = buildHoneyflowerProgress({ honeyflowerPicked: true });
+          setMissionProgress(KING_HONEYFLOWER_MISSION, migratedProgress);
+          kingChatState.progressHoneyflower = { ...migratedProgress };
+          if (playerName) {
+            try {
+              await saveKingTibianusProgress(playerName, getAllMissionProgress());
+              console.log('[Quests Mod][Honeyflower] Migrated honeyflowerPicked flag for existing progress');
+            } catch (err) {
+              console.error('[Quests Mod][Honeyflower] Error saving honeyflowerPicked migration:', err);
+            }
+          }
+        }
       }
 
       const lostInTheSandsMigrated = migrateCombinedLostInTheSandsQuest(progress);
