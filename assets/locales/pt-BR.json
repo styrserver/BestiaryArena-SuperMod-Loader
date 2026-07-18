@@ -247,6 +247,8 @@
       "useApiForStaminaRefillWarning": "Usa Game State API em vez de cliques DOM para reabastecimentos mais rápidos e confiáveis. Funciona em abas em segundo plano. Usa poções de menor nível primeiro. Aviso: Há risco de ser limitado por taxa de requisições.",
       "disableAutoReload": "⚠️ Desativar Recarregamento Automático",
       "disableAutoReloadWarning": "Impede recarregamentos automáticos de página do Raid Hunter e Better Tasker.",
+      "disableQuestHelpers": "⚠️ Desativar Auxiliares de Missão",
+      "disableQuestHelpersWarning": "Oculta os destaques de tiles de missão e a seta do tutorial. Interações com tiles de missão ainda funcionam com clique direito.",
       "alwaysOpenHuntAnalyzer": "⚠️ Auto-abrir Hunt Analyzer",
       "alwaysOpenHuntAnalyzerWarning": "Abre automaticamente o painel do Hunt Analyzer ao iniciar novos jogos. Só funciona se o mod Hunt Analyzer estiver carregado.",
       "hideWebsiteFooter": "Ocultar Rodapé do Site",

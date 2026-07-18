@@ -247,6 +247,8 @@
       "useApiForStaminaRefillWarning": "Uses Game State API instead of DOM clicks for faster, more reliable refills. Works in background tabs. Uses lowest tier potions first. Warning: There is a risk of getting rate limited.",
       "disableAutoReload": "⚠️ Disable Auto-Reload",
       "disableAutoReloadWarning": "Prevents automatic page reloads from Raid Hunter and Better Tasker.",
+      "disableQuestHelpers": "⚠️ Disable Quest Helpers",
+      "disableQuestHelpersWarning": "Hides quest tile highlight and tutorial arrow overlays. Quest tile interactions still work via right-click.",
       "alwaysOpenHuntAnalyzer": "⚠️ Auto-open Hunt Analyzer",
       "alwaysOpenHuntAnalyzerWarning": "Automatically opens the Hunt Analyzer panel when starting new games. Only works if Hunt Analyzer mod is loaded.",
       "hideWebsiteFooter": "Hide Website Footer",
