@@ -1199,23 +1199,16 @@ const HuntAnalyzerState = {
       }
     });
   })(),
-  // Internal clock system for accurate time tracking
+  // Internal clock system — wall-clock ms via Date.now(), paused/resumed by game events
   timeTracking: {
     currentMap: null,
     mapStartTime: 0,
     accumulatedTimeMs: 0, // Total time accumulated across all maps
     mapTimeMs: new Map(), // Time per map: Map<roomName, timeMs>
-    lastAutoplayTime: 0,
     clockIntervalId: null,
-    // Manual mode timing (when no autoplay timer exists)
-    manualActive: false,
-    manualSessionStartMs: 0,
-    // When true, wait for the next newGame to start manual timing (set on map change)
+    liveSegmentStartMs: 0, // Date.now() when the current live segment started; 0 = paused
+    // When true, wait for the next newGame before resuming manual timing (set on map change)
     waitingForManualStart: false,
-    // Autoplay baseline to subtract when map changes so we don't double count
-    autoplayBaselineMinutes: 0,
-    // When true, skip the next autoplay reset accumulation (used after we already snapshot on map/mode change)
-    suppressNextAutoplayReset: false,
     // When true, playtime clock stays idle until the first newGame (battle start)
     awaitingFirstBattle: true
   }
@@ -1243,52 +1236,98 @@ function huntAnalyzerTimerArmed() {
   return !HuntAnalyzerState.timeTracking.awaitingFirstBattle;
 }
 
-// On first battle start, align baselines so pre-battle idle time is not counted.
-function armTimeTrackingAtBattleStart() {
-  const mode = getCurrentMode();
-  if (mode === 'autoplay') {
-    const currentAutoplayTime = getAutoplaySessionTime();
-    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime || 0;
-    HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime || 0;
-    HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
-    HuntAnalyzerState.timeTracking.manualActive = false;
-    HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
-  } else if (mode === 'manual') {
-    HuntAnalyzerState.timeTracking.manualActive = true;
-    HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+function isAutoplayPauseButtonVisible() {
+  for (const flexContainer of document.querySelectorAll('div.flex')) {
+    const buttons = flexContainer.querySelectorAll('button');
+    if (buttons.length >= 2 && buttons[1].querySelector('svg.lucide-pause')) {
+      return true;
+    }
   }
+  return false;
+}
+
+function isAutoplayResumeButtonVisible() {
+  for (const button of document.querySelectorAll('button')) {
+    const text = button.textContent.trim();
+    if (text === 'Resume' || text === 'Retomar') {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isAutoplayIdleStartVisible() {
+  if (isAutoplayPauseButtonVisible()) {
+    return false;
+  }
+  for (const button of document.querySelectorAll('button')) {
+    const text = button.textContent.trim();
+    if (text === 'Start' || text === 'Iniciar') {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isAutoplayHuntSessionStopped() {
+  if (getCurrentMode() !== 'autoplay') {
+    return true;
+  }
+  return isAutoplayIdleStartVisible() && !isAutoplayResumeButtonVisible();
+}
+
+function isAutoplayHuntSessionPaused() {
+  if (getCurrentMode() !== 'autoplay') {
+    return false;
+  }
+  return !isAutoplayPauseButtonVisible() && isAutoplayResumeButtonVisible();
+}
+
+function isAutoplayHuntSessionActive() {
+  if (getCurrentMode() !== 'autoplay') {
+    return false;
+  }
+  if (isAutoplayPauseButtonVisible()) {
+    return true;
+  }
+  try {
+    const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+    if (ctx) {
+      return !!(ctx.isRunning || ctx.autoplayRunning || ctx.gameStarted);
+    }
+  } catch (_e) { /* ignore */ }
+  return false;
+}
+
+function shouldLiveTimerRun() {
+  if (!huntAnalyzerTimerArmed()) {
+    return false;
+  }
+  const mode = getCurrentMode();
+  if (mode === 'manual') {
+    return !HuntAnalyzerState.timeTracking.waitingForManualStart;
+  }
+  if (mode === 'autoplay') {
+    if (isAutoplayHuntSessionStopped() || isAutoplayHuntSessionPaused()) {
+      return false;
+    }
+    return isAutoplayHuntSessionActive();
+  }
+  return false;
 }
 
 function getLiveSessionMs() {
   if (!huntAnalyzerTimerArmed()) {
     return 0;
   }
-  const mode = getCurrentMode();
-  if (mode === 'autoplay') {
-    const currentAutoplayTime = getAutoplaySessionTime(); // minutes
-    if (currentAutoplayTime && currentAutoplayTime > 0) {
-      const baseline = HuntAnalyzerState.timeTracking.autoplayBaselineMinutes || 0;
-      // Validate: baseline should not exceed current time (prevents negative calculations)
-      const adjustedAutoplayMinutes = Math.max(0, currentAutoplayTime - Math.min(baseline, currentAutoplayTime));
-      return adjustedAutoplayMinutes * 60 * 1000;
-    }
+  const startMs = HuntAnalyzerState.timeTracking.liveSegmentStartMs;
+  if (startMs <= 0) {
     return 0;
   }
-  if (mode === 'manual') {
-    if (HuntAnalyzerState.timeTracking.manualActive && HuntAnalyzerState.timeTracking.manualSessionStartMs > 0) {
-      const elapsed = Date.now() - HuntAnalyzerState.timeTracking.manualSessionStartMs;
-      // Validate: ensure non-negative time
-      return Math.max(0, elapsed);
-    }
-    return 0;
-  }
-  return 0;
+  return Math.max(0, Date.now() - startMs);
 }
 
-function snapshotIntoTotals() {
-  if (!huntAnalyzerTimerArmed()) {
-    return 0;
-  }
+function pauseLiveSegment() {
   const liveMs = getLiveSessionMs();
   if (liveMs > 0) {
     HuntAnalyzerState.timeTracking.accumulatedTimeMs += liveMs;
@@ -1297,21 +1336,31 @@ function snapshotIntoTotals() {
       HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, prevMapTime + liveMs);
     }
   }
+  HuntAnalyzerState.timeTracking.liveSegmentStartMs = 0;
+  return liveMs;
+}
 
-  const mode = getCurrentMode();
-  if (mode === 'autoplay') {
-    // Reset autoplay baseline to current DOM minutes so next session starts from 0
-    const currentAutoplayTime = getAutoplaySessionTime();
-    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime || 0;
-    // Ensure manual is not active
-    HuntAnalyzerState.timeTracking.manualActive = false;
-    HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
-  } else if (mode === 'manual') {
-    // Keep manual timing continuous but avoid double counting: advance start to now
-    if (HuntAnalyzerState.timeTracking.manualActive) {
-      HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-    }
+function resumeLiveSegment() {
+  if (!shouldLiveTimerRun()) {
+    return;
   }
+  if (HuntAnalyzerState.timeTracking.liveSegmentStartMs === 0) {
+    HuntAnalyzerState.timeTracking.liveSegmentStartMs = Date.now();
+  }
+}
+
+// On first battle start, begin counting from now so pre-battle idle time is excluded.
+function armTimeTrackingAtBattleStart() {
+  HuntAnalyzerState.timeTracking.waitingForManualStart = false;
+  resumeLiveSegment();
+}
+
+function snapshotIntoTotals() {
+  if (!huntAnalyzerTimerArmed()) {
+    return 0;
+  }
+  const liveMs = pauseLiveSegment();
+  resumeLiveSegment();
   return liveMs;
 }
 
@@ -1508,67 +1557,6 @@ function getHuntAnalyzerStorageResetDismissHint() {
 }
 
 // =======================
-// 2.5. Autoplay Time Tracking Functions
-// =======================
-// Parse autoplay session time from DOM text content
-function parseAutoplayTime(textContent) {
-  if (!textContent) return null;
-
-  const normalized = textContent.replace(/\s+/g, ' ').trim();
-  const patterns = [
-    // New widget with runs: Session (5 runs) (2:13) / Sessão (7 runs) (2:43)
-    /(?:Session|Sessão)\s*\(\d+\s*runs?\)\s*\((\d+):(\d+)(?::(\d+))?\)/i,
-    // New widget with no runs yet: Session (0:12) / Sessão (0:12)
-    /(?:Session|Sessão)\s*\((\d+):(\d+)(?::(\d+))?\)/i,
-    // Legacy widget: Autoplay session (2:13) / Sessão autoplay (2:43)
-    /(?:Autoplay session|Sessão autoplay)\s*\((\d+):(\d+)(?::(\d+))?\)/
-  ];
-
-  for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    if (match) {
-      if (match[3] !== undefined) {
-        const hours = parseInt(match[1], 10);
-        const minutes = parseInt(match[2], 10);
-        const seconds = parseInt(match[3], 10);
-        return (hours * 60) + minutes + (seconds / 60);
-      }
-      const minutes = parseInt(match[1], 10);
-      const seconds = parseInt(match[2], 10);
-      return minutes + (seconds / 60);
-    }
-  }
-
-  return null;
-}
-
-// Get current autoplay session time from DOM
-function getAutoplaySessionTime() {
-  try {
-    const autoplayButton = document.querySelector('button.widget-top-text img[alt="Autoplay"]');
-    if (autoplayButton) {
-      const button = autoplayButton.closest('button');
-      if (button) {
-        const time = parseAutoplayTime(button.textContent);
-        if (time !== null) return time;
-      }
-    }
-    
-    // Fallback: look for any button containing autoplay session text
-    const buttons = document.querySelectorAll('button');
-    for (const button of buttons) {
-      const time = parseAutoplayTime(button.textContent);
-      if (time !== null) return time;
-    }
-    
-    return 0;
-  } catch (error) {
-    console.error('[Hunt Analyzer] Error getting autoplay session time:', error);
-    return 0;
-  }
-}
-
-// =======================
 // 2.6. DOM Cache Manager
 // =======================
 class DOMCache {
@@ -1636,95 +1624,35 @@ function stopInternalClock() {
 // Manual Runner coordination is now handled event-driven in updateInternalClock()
 // No polling needed - manual timing is already started on newGame events and mode changes
 
-// Update the internal clock by watching DOM autoplay timer
+// Update the internal clock — pause/resume the live Date.now() segment from game state
 function updateInternalClock() {
-  const currentAutoplayTime = getAutoplaySessionTime();
   if (!huntAnalyzerTimerArmed()) {
-    HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
     return;
   }
-  const nowMs = Date.now();
-  const mode = getCurrentMode();
-  const isAutoplayRunning = mode === 'autoplay' && currentAutoplayTime && currentAutoplayTime > 0;
-  // Lightweight heartbeat only when something interesting changes below
-  
-  // Check Manual Runner coordination (event-driven, no polling)
-  // If Manual Runner is running and we're in manual mode, ensure timing is active
-  if (mode === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
+
+  // Manual Runner coordination (event-driven, no polling)
+  if (getCurrentMode() === 'manual' && !HuntAnalyzerState.timeTracking.waitingForManualStart) {
     try {
-      const manualRunnerRunning = window.ModCoordination?.isModActive('Manual Runner') || false;
-      if (manualRunnerRunning) {
-        HuntAnalyzerState.timeTracking.manualActive = true;
-        HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+      if (window.ModCoordination?.isModActive('Manual Runner')) {
+        resumeLiveSegment();
       }
-    } catch (_) {}
+    } catch (_e) { /* ignore */ }
   }
-  
-  // If autoplay is active, stop manual session (manual starts only on first newGame)
-  if (isAutoplayRunning) {
-    // If we were in manual, first accumulate manual elapsed into totals and current map
-    if (HuntAnalyzerState.timeTracking.manualActive && HuntAnalyzerState.timeTracking.manualSessionStartMs > 0) {
-      const elapsedManualMs = nowMs - HuntAnalyzerState.timeTracking.manualSessionStartMs;
-      HuntAnalyzerState.timeTracking.accumulatedTimeMs += elapsedManualMs;
-      if (HuntAnalyzerState.timeTracking.currentMap) {
-        const prevMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
-        HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, prevMapTime + elapsedManualMs);
-      }
-      HuntAnalyzerState.timeTracking.manualActive = false;
-      HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
-      // Start autoplay session from its current value (baseline 0 so we count full autoplay session)
-      HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
-    }
-  }
-  
-  // If autoplay time decreased (session reset), accumulate the previous time
-  if (currentAutoplayTime < HuntAnalyzerState.timeTracking.lastAutoplayTime) {
-    if (HuntAnalyzerState.timeTracking.suppressNextAutoplayReset) {
-      // We already snapshotted this segment on a recent map/mode change; skip double-counting
-      HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = false;
-    } else {
-      // Validate: ensure lastAutoplayTime is positive before calculating
-      if (HuntAnalyzerState.timeTracking.lastAutoplayTime > 0) {
-        const timeToAccumulate = HuntAnalyzerState.timeTracking.lastAutoplayTime * 60 * 1000; // Convert minutes to ms
-        
-        // Validate: ensure timeToAccumulate is positive
-        if (timeToAccumulate > 0) {
-          // Add to accumulated time
-          HuntAnalyzerState.timeTracking.accumulatedTimeMs += timeToAccumulate;
-          
-          // Add to current map time if we have one
-          if (HuntAnalyzerState.timeTracking.currentMap) {
-            const currentMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
-            HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, currentMapTime + timeToAccumulate);
-          }
-        }
-      }
-    }
-  }
-  
-  // Track last DOM-reported autoplay minutes
-  const prevAutoplayTime = HuntAnalyzerState.timeTracking.lastAutoplayTime;
-  HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
-  
-  // Only when actually in autoplay mode, detect transition from >0 → 0 and reset baseline
-  if (mode === 'autoplay' && prevAutoplayTime > 0 && currentAutoplayTime === 0) {
-    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
+
+  const shouldRun = shouldLiveTimerRun();
+  const isRunning = HuntAnalyzerState.timeTracking.liveSegmentStartMs > 0;
+
+  if (shouldRun && !isRunning) {
+    resumeLiveSegment();
+  } else if (!shouldRun && isRunning) {
+    pauseLiveSegment();
   }
 }
 
 // Track map change and start timing for new map
 function trackMapChange(roomName) {
-  // If we're switching maps, just update context. Accumulation is handled by snapshotIntoTotals() upstream.
-  const mapChanged = HuntAnalyzerState.timeTracking.currentMap && HuntAnalyzerState.timeTracking.currentMap !== roomName;
-
-  // Set new current map
   HuntAnalyzerState.timeTracking.currentMap = roomName;
   HuntAnalyzerState.timeTracking.mapStartTime = Date.now();
-  
-  // If in manual mode and map actually changed, start a new manual session window from now
-  if (mapChanged && HuntAnalyzerState.timeTracking.manualActive) {
-    HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-  }
 }
 
 // Wall-clock span from session timestamps for one map (used when per-map clock ms is missing).
@@ -2023,9 +1951,8 @@ loadHuntAnalyzerState();
 // Ensure map filter is set to "ALL" on initialization
 HuntAnalyzerState.ui.selectedMapFilter = "ALL";
 
-// Do not resume manual timing after reload; require a fresh newGame or autoplay
-HuntAnalyzerState.timeTracking.manualActive = false;
-HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+// Do not resume live timing after reload; require a fresh newGame or autoplay session
+HuntAnalyzerState.timeTracking.liveSegmentStartMs = 0;
 HuntAnalyzerState.timeTracking.awaitingFirstBattle = true;
 
 // Initialize internal clock system
@@ -2290,10 +2217,7 @@ function buildHuntAnalyzerManifestPayload() {
             mapStartTime: HuntAnalyzerState.timeTracking.mapStartTime,
             accumulatedTimeMs: HuntAnalyzerState.timeTracking.accumulatedTimeMs,
             mapTimeMs: mapTimeMsArray,
-            lastAutoplayTime: HuntAnalyzerState.timeTracking.lastAutoplayTime,
-            manualActive: false,
-            manualSessionStartMs: 0,
-            autoplayBaselineMinutes: HuntAnalyzerState.timeTracking.autoplayBaselineMinutes
+            liveSegmentStartMs: 0
         }
     };
 }
@@ -2507,38 +2431,11 @@ function applyHuntAnalyzerManifest(parsedData) {
         HuntAnalyzerState.timeTracking.currentMap = parsedData.timeTracking.currentMap || null;
         HuntAnalyzerState.timeTracking.mapStartTime = parsedData.timeTracking.mapStartTime || 0;
         HuntAnalyzerState.timeTracking.accumulatedTimeMs = parsedData.timeTracking.accumulatedTimeMs || 0;
-        HuntAnalyzerState.timeTracking.lastAutoplayTime = parsedData.timeTracking.lastAutoplayTime || 0;
-        HuntAnalyzerState.timeTracking.manualActive = false;
-        HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+        HuntAnalyzerState.timeTracking.liveSegmentStartMs = 0;
         HuntAnalyzerState.timeTracking.awaitingFirstBattle = true;
 
         if (parsedData.timeTracking.mapTimeMs && Array.isArray(parsedData.timeTracking.mapTimeMs)) {
             HuntAnalyzerState.timeTracking.mapTimeMs = new Map(parsedData.timeTracking.mapTimeMs);
-        }
-
-        const mode = getCurrentMode();
-        if (mode === 'autoplay') {
-            HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
-            const immediateAutoplayTime = getAutoplaySessionTime();
-            if (immediateAutoplayTime && immediateAutoplayTime > 0) {
-                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = immediateAutoplayTime;
-                HuntAnalyzerState.timeTracking.lastAutoplayTime = immediateAutoplayTime;
-            } else {
-                setTimeout(() => {
-                    const currentAutoplayTime = getAutoplaySessionTime();
-                    if (currentAutoplayTime && currentAutoplayTime > 0) {
-                        HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
-                        HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
-                    } else {
-                        HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
-                        HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
-                        HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = false;
-                    }
-                }, 100);
-            }
-        } else {
-            HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = parsedData.timeTracking.autoplayBaselineMinutes || 0;
-            HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
         }
     }
 }
@@ -5947,11 +5844,9 @@ function resetHuntAnalyzerState() {
     HuntAnalyzerState.timeTracking.mapStartTime = 0;
     HuntAnalyzerState.timeTracking.accumulatedTimeMs = 0;
     HuntAnalyzerState.timeTracking.mapTimeMs.clear();
-    HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
     HuntAnalyzerState.timeTracking.clockIntervalId = null;
-    HuntAnalyzerState.timeTracking.manualActive = false;
-    HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
-    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
+    HuntAnalyzerState.timeTracking.liveSegmentStartMs = 0;
+    HuntAnalyzerState.timeTracking.waitingForManualStart = false;
     HuntAnalyzerState.timeTracking.awaitingFirstBattle = true;
     
     // Clear localStorage so "Clear All" permanently removes data
@@ -7362,19 +7257,14 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
 
     // Start the internal clock on first battle; keep it running for subsequent battles
     try {
-        const mode = getCurrentMode();
         if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
             startInternalClock('newGame');
         }
+        const mode = getCurrentMode();
         if (mode === 'manual') {
-            if (!HuntAnalyzerState.timeTracking.manualActive || HuntAnalyzerState.timeTracking.manualSessionStartMs === 0) {
-                HuntAnalyzerState.timeTracking.manualActive = true;
-                HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-            }
             HuntAnalyzerState.timeTracking.waitingForManualStart = false;
-        } else {
-            HuntAnalyzerState.timeTracking.manualActive = false;
-            HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+            resumeLiveSegment();
+        } else if (mode === 'autoplay') {
             HuntAnalyzerState.timeTracking.waitingForManualStart = false;
         }
     } catch (_e) { /* ignore */ }
@@ -7415,20 +7305,15 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
                 processAutoplaySummary(serverResults);
                 HuntAnalyzerState.session.isActive = false;
                 
-                // Ensure clock keeps running after results, align manual flag only if not active
+                // Ensure clock keeps running after results
                 try {
-                    const modeNow = getCurrentMode();
                     if (huntAnalyzerTimerArmed()) {
                         if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
                             startInternalClock('serverResults');
                         }
-                        if (modeNow === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
-                            HuntAnalyzerState.timeTracking.manualActive = true;
-                            HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-                        }
-                        if (modeNow !== 'manual') {
-                            HuntAnalyzerState.timeTracking.manualActive = false;
-                            HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+                        if (getCurrentMode() === 'manual') {
+                            HuntAnalyzerState.timeTracking.waitingForManualStart = false;
+                            resumeLiveSegment();
                         }
                     }
                 } catch (_e) { /* ignore */ }
@@ -7451,37 +7336,17 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
                     || null;
                 const mode = ctx.mode || null;
 
-                // Mode transition handling: snapshot current live time and start baseline for new mode
+                // Mode transition handling: snapshot current live time, then resume if the new mode should run
                 if (mode !== lastKnownMode) {
-                    // Snapshot whatever was active before switching
                     snapshotIntoTotals();
-                    // If we were previously in autoplay, we just snapshotted the segment; suppress the next autoplay reset accumulation
-                    if (lastKnownMode === 'autoplay') {
-                        HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
-                    }
 
-                    // Prepare new mode
                     if (huntAnalyzerTimerArmed()) {
-                        if (mode === 'autoplay') {
-                            // Set baseline to current DOM time, with validation
-                            const currentAutoplayTime = getAutoplaySessionTime();
-                            if (currentAutoplayTime && currentAutoplayTime > 0) {
-                                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
-                            } else {
-                                // If DOM timer not ready, try again after a short delay
-                                setTimeout(() => {
-                                    const retryTime = getAutoplaySessionTime();
-                                    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = retryTime || 0;
-                                }, 100);
-                            }
-                            // Ensure internal clock runs for UI updates
-                            if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
-                                startInternalClock('modeChange:autoplay');
-                            }
-                        } else if (mode === 'manual') {
-                            // Start manual session window
-                            HuntAnalyzerState.timeTracking.manualActive = true;
-                            HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+                        if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
+                            startInternalClock('modeChange');
+                        }
+                        if (mode === 'manual') {
+                            HuntAnalyzerState.timeTracking.waitingForManualStart = false;
+                            resumeLiveSegment();
                         }
                     }
                     lastKnownMode = mode;
@@ -7509,23 +7374,12 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
                     return;
                 }
                 if (roomId !== lastSelectedRoomId) {
-                    const preHadClock = !!HuntAnalyzerState.timeTracking.clockIntervalId;
-                    const preMode = getCurrentMode();
-                    // On map change:
-                    // 1) Snapshot any live time
-                    const snapMs = snapshotIntoTotals();
-                    // If currently in autoplay, we just snapshotted the DOM segment; suppress the next autoplay reset accumulation
-                    if (getCurrentMode() === 'autoplay') {
-                        HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
-                    }
-                    // 2) Update map/time context
+                    // On map change: snapshot live time, update map context, wait for next newGame
+                    snapshotIntoTotals();
                     lastSelectedRoomId = roomId;
                     const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
                     const roomName = roomNamesMap?.[roomId] || `Room ID: ${roomId}`;
                     trackMapChange(roomName);
-                    // 3) Do NOT start or continue manual timing on map change; wait for next newGame
-                    HuntAnalyzerState.timeTracking.manualActive = false;
-                    HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
                     HuntAnalyzerState.timeTracking.waitingForManualStart = true;
                     updateRoomTitleDisplay(roomId, roomName);
                 }

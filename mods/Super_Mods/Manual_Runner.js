@@ -89,6 +89,7 @@ const GAME_RESTART_DELAY_MS = 400;
 const BOARD_IDLE_MAX_WAIT_MS = 10000;
 const BOARD_IDLE_RECHECK_DELAY_MS = 100;
 const NOTIFICATION_DISPLAY_MS = 3000;
+const STAMINA_SKIP_COST = 2;
 
 // Analysis state constants
 const ANALYSIS_STATES = {
@@ -121,18 +122,29 @@ const MANUAL_RUNNER_RUNNING_MODAL_CONFIG = {
 };
 
 let manualRunnerModalLayoutCleanup = null;
+let manualRunnerActiveModalLayout = null;
+let manualRunnerModalLayoutRefreshTimer = null;
+
+const MANUAL_RUNNER_RESULTS_UI = {
+  CONTENT_PADDING: 2
+};
+
+function snapManualRunnerModalPx(value) {
+  const rounded = Math.round(value);
+  return rounded % 2 === 0 ? rounded : rounded + 1;
+}
 
 function getManualRunnerResultsModalDimensions() {
   const pad = MANUAL_RUNNER_RESULTS_MODAL_CONFIG.viewportPadding * 2;
   return {
-    width: Math.max(
+    width: snapManualRunnerModalPx(Math.max(
       MANUAL_RUNNER_RESULTS_MODAL_CONFIG.minWidth,
       Math.min(MANUAL_RUNNER_RESULTS_MODAL_CONFIG.width, window.innerWidth - pad)
-    ),
-    maxHeight: Math.max(
+    )),
+    maxHeight: snapManualRunnerModalPx(Math.max(
       MANUAL_RUNNER_RESULTS_MODAL_CONFIG.minHeight,
       Math.min(MANUAL_RUNNER_RESULTS_MODAL_CONFIG.maxHeight, window.innerHeight - pad)
-    )
+    ))
   };
 }
 
@@ -143,10 +155,113 @@ function getManualRunnerDialog(modalRef) {
 }
 
 function clearManualRunnerModalLayoutCleanup() {
+  if (manualRunnerModalLayoutRefreshTimer) {
+    clearTimeout(manualRunnerModalLayoutRefreshTimer);
+    manualRunnerModalLayoutRefreshTimer = null;
+  }
   if (manualRunnerModalLayoutCleanup) {
     manualRunnerModalLayoutCleanup();
     manualRunnerModalLayoutCleanup = null;
   }
+  manualRunnerActiveModalLayout = null;
+}
+
+function applyManualRunnerResultsModalNaturalLayout(contentRoot) {
+  if (!contentRoot) return;
+  Object.assign(contentRoot.style, {
+    flex: '0 0 auto',
+    minHeight: '0',
+    height: 'auto',
+    maxHeight: 'none',
+    width: '100%',
+    minWidth: '0',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+    padding: `${MANUAL_RUNNER_RESULTS_UI.CONTENT_PADDING}px`,
+    overflowX: 'hidden',
+    overflowY: 'visible'
+  });
+}
+
+function applyManualRunnerResultsModalScrollLayout(rootWrapper, contentContainer, contentRoot) {
+  if (rootWrapper) {
+    Object.assign(rootWrapper.style, {
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0',
+      minHeight: '0',
+      gap: '0'
+    });
+  }
+  if (contentContainer) {
+    Object.assign(contentContainer.style, {
+      flex: '1 1 auto',
+      minHeight: '0',
+      marginTop: '-1px',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+  if (contentRoot) {
+    Object.assign(contentRoot.style, {
+      flex: '1 1 0',
+      minHeight: '0',
+      overflowX: 'hidden',
+      overflowY: 'auto'
+    });
+  }
+}
+
+function applyManualRunnerResultsModalCompactLayout(rootWrapper, contentContainer, contentRoot) {
+  if (rootWrapper) {
+    Object.assign(rootWrapper.style, {
+      height: 'auto',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '0 0 auto',
+      minHeight: '0',
+      gap: '0'
+    });
+  }
+  if (contentContainer) {
+    Object.assign(contentContainer.style, {
+      flex: '0 0 auto',
+      minHeight: '0',
+      marginTop: '-1px',
+      overflow: 'visible',
+      display: 'flex',
+      flexDirection: 'column'
+    });
+  }
+  applyManualRunnerResultsModalNaturalLayout(contentRoot);
+}
+
+function measureManualRunnerResultsModalNaturalHeight(dialog, contentRoot) {
+  const rootWrapper = dialog.querySelector(':scope > div');
+  if (rootWrapper?.offsetHeight > 0) {
+    return rootWrapper.offsetHeight;
+  }
+
+  if (!contentRoot) return dialog.scrollHeight;
+
+  const title = dialog.querySelector('.widget-top');
+  const widgetBottom = dialog.querySelector('.widget-bottom');
+  const separator = widgetBottom?.querySelector('.separator');
+  const footer = widgetBottom?.querySelector('.flex.justify-end.gap-2');
+
+  let chrome = 0;
+  if (title) chrome += title.offsetHeight;
+  if (separator) chrome += separator.offsetHeight;
+  if (footer) chrome += footer.offsetHeight;
+  if (widgetBottom) {
+    const style = window.getComputedStyle(widgetBottom);
+    chrome += parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    chrome += parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+  }
+
+  return chrome + contentRoot.scrollHeight;
 }
 
 function applyManualRunnerResultsModalLayout(modalRef, contentRoot, dimensions) {
@@ -155,96 +270,85 @@ function applyManualRunnerResultsModalLayout(modalRef, contentRoot, dimensions) 
 
   const { width, maxHeight } = dimensions;
   const { minHeight } = MANUAL_RUNNER_RESULTS_MODAL_CONFIG;
+  const snappedWidth = snapManualRunnerModalPx(width);
 
-  dialog.style.width = `${width}px`;
+  dialog.style.width = `${snappedWidth}px`;
   dialog.style.minWidth = '0';
-  dialog.style.maxWidth = `${width}px`;
+  dialog.style.maxWidth = `${snappedWidth}px`;
   dialog.style.boxSizing = 'border-box';
-  dialog.classList.remove('max-w-[300px]');
+  dialog.classList.remove('max-w-[300px]', 'w-full');
 
   const rootWrapper = dialog.querySelector(':scope > div');
   const contentContainer = dialog.querySelector('.widget-bottom');
 
-  if (rootWrapper) {
-    Object.assign(rootWrapper.style, {
-      height: 'auto',
-      display: 'flex',
-      flexDirection: 'column',
-      flex: '0 0 auto',
-      minHeight: '0'
-    });
-  }
-
-  if (contentContainer) {
-    Object.assign(contentContainer.style, {
-      flex: '0 1 auto',
-      minHeight: '0',
-      overflowY: 'visible',
-      overflowX: 'hidden',
-      display: 'flex',
-      flexDirection: 'column'
-    });
-  }
-
-  if (contentRoot) {
-    Object.assign(contentRoot.style, {
-      flex: '0 0 auto',
-      minHeight: '0',
-      height: 'auto',
-      maxHeight: 'none',
-      width: '100%',
-      minWidth: '0',
-      maxWidth: '100%',
-      boxSizing: 'border-box',
-      overflowY: 'visible',
-      overflowX: 'hidden'
-    });
-  }
-
   dialog.style.height = 'auto';
   dialog.style.minHeight = '0';
-  dialog.style.maxHeight = `${maxHeight}px`;
+  dialog.style.maxHeight = 'none';
 
-  const measuredHeight = dialog.offsetHeight;
-  const needsScroll = measuredHeight > maxHeight;
-  const finalHeight = needsScroll ? maxHeight : Math.max(minHeight, measuredHeight);
+  const widgetTop = dialog.querySelector('.widget-top');
+  if (widgetTop) {
+    widgetTop.style.margin = '0';
+    const titleText = widgetTop.querySelector('p');
+    if (titleText) titleText.style.margin = '0';
+  }
+
+  applyManualRunnerResultsModalCompactLayout(rootWrapper, contentContainer, contentRoot);
+
+  const naturalHeight = measureManualRunnerResultsModalNaturalHeight(dialog, contentRoot);
+  const needsScroll = naturalHeight > maxHeight;
+  const finalHeight = snapManualRunnerModalPx(
+    needsScroll ? maxHeight : Math.max(minHeight, naturalHeight)
+  );
 
   dialog.style.height = `${finalHeight}px`;
   dialog.style.maxHeight = `${maxHeight}px`;
 
   if (needsScroll) {
-    if (rootWrapper) {
-      Object.assign(rootWrapper.style, {
-        height: '100%',
-        flex: '1 1 0',
-        minHeight: '0'
-      });
-    }
-    if (contentContainer) {
-      Object.assign(contentContainer.style, {
-        flex: '1 1 auto',
-        minHeight: '0',
-        overflowY: 'hidden'
-      });
-    }
-    if (contentRoot) {
-      Object.assign(contentRoot.style, {
-        flex: '1 1 0',
-        minHeight: '0',
-        overflowY: 'auto'
-      });
-    }
+    applyManualRunnerResultsModalScrollLayout(rootWrapper, contentContainer, contentRoot);
+  } else {
+    applyManualRunnerResultsModalCompactLayout(rootWrapper, contentContainer, contentRoot);
+  }
+}
+
+function scheduleManualRunnerResultsModalLayoutRefresh() {
+  if (!manualRunnerActiveModalLayout) return;
+  if (manualRunnerModalLayoutRefreshTimer) {
+    clearTimeout(manualRunnerModalLayoutRefreshTimer);
+  }
+  manualRunnerModalLayoutRefreshTimer = setTimeout(() => {
+    manualRunnerModalLayoutRefreshTimer = null;
+    if (!manualRunnerActiveModalLayout) return;
+    const { modalRef, contentRoot } = manualRunnerActiveModalLayout;
+    applyManualRunnerResultsModalLayout(modalRef, contentRoot, getManualRunnerResultsModalDimensions());
+  }, 120);
+}
+
+function attachManualRunnerResultsModalCloseCleanup(modalRef) {
+  if (!modalRef) return;
+
+  if (typeof modalRef.onClose === 'function') {
+    modalRef.onClose(() => clearManualRunnerModalLayoutCleanup());
+  }
+
+  const originalClose = modalRef.close?.bind(modalRef);
+  if (originalClose) {
+    modalRef.close = () => {
+      clearManualRunnerModalLayoutCleanup();
+      originalClose();
+    };
   }
 }
 
 function setupManualRunnerResultsModalResponsiveLayout(modalRef, contentRoot) {
   clearManualRunnerModalLayoutCleanup();
+  manualRunnerActiveModalLayout = { modalRef, contentRoot };
   const apply = () => applyManualRunnerResultsModalLayout(modalRef, contentRoot, getManualRunnerResultsModalDimensions());
   requestAnimationFrame(() => apply());
   const onResize = () => apply();
   window.addEventListener('resize', onResize);
   manualRunnerModalLayoutCleanup = () => {
     window.removeEventListener('resize', onResize);
+    manualRunnerActiveModalLayout = null;
   };
 }
 
@@ -528,6 +632,7 @@ const modalManager = new ModalManager();
 
 // Add a global function to forcefully close all analysis modals
 function forceCloseAllModals() {
+  clearManualRunnerModalLayoutCleanup();
   modalManager.closeAll();
 }
 
@@ -698,7 +803,14 @@ function logManualRunnerPerfCheckpoint(attemptNumber, attemptMs) {
 let currentAttemptTrace = null;
 
 function beginAttemptTrace(attemptNumber) {
-  currentAttemptTrace = { attemptNumber, skipped: false, reward: null, rewardMs: null, waits: [] };
+  currentAttemptTrace = {
+    attemptNumber,
+    skipped: false,
+    staminaSkipSpent: 0,
+    reward: null,
+    rewardMs: null,
+    waits: []
+  };
 }
 
 function noteServerResultsCaptured(serverResults) {
@@ -713,6 +825,12 @@ function noteServerResultsCaptured(serverResults) {
 
 function noteAttemptSkip() {
   if (currentAttemptTrace) currentAttemptTrace.skipped = true;
+}
+
+function noteStaminaSkipCost() {
+  if (currentAttemptTrace) {
+    currentAttemptTrace.staminaSkipSpent += STAMINA_SKIP_COST;
+  }
 }
 
 function noteRewardHandled(action, ms) {
@@ -1567,7 +1685,15 @@ async function waitForGameCompletion(analysisId) {
       readableGrade = calculateGradeFromRankPoints(rankPoints, maxTeamSize);
     }
   }
-  
+
+  if (currentAttemptTrace?.skipped) {
+    skippedThisRun = true;
+  }
+
+  if (!completed) {
+    readableGrade = 'F';
+  }
+
   return {
     ticks: currentTick,
     grade: readableGrade,
@@ -1738,6 +1864,9 @@ async function handleSkipButton() {
         return false;
       }
       noteAttemptSkip();
+      if (isStaminaSkipButton(skipButton)) {
+        noteStaminaSkipCost();
+      }
       skipButton.click();
       await sleep(500); // Wait for skip to process
 
@@ -3113,21 +3242,33 @@ async function waitForServerResults(maxWaitTime = 2000) {
 function applyRewardScreenToRunResult(result, serverResults) {
   if (!result || !serverResults?.rewardScreen) return;
   const rs = serverResults.rewardScreen;
+  const isVictory = rs.victory === true;
   if (typeof rs.gameTicks === 'number') {
     result.ticks = rs.gameTicks;
   }
   if (typeof rs.rank === 'number') {
     result.rankPoints = rs.rank;
   }
-  if (rs.grade && typeof rs.grade === 'string' && rs.grade !== '') {
-    result.grade = rs.grade;
-  } else if (typeof result.rankPoints === 'number') {
-    const maxTeamSize = getMaxTeamSize(serverResults);
-    result.grade = calculateGradeFromRankPoints(result.rankPoints, maxTeamSize);
+  if (isVictory) {
+    if (rs.grade && typeof rs.grade === 'string' && rs.grade !== '') {
+      result.grade = rs.grade;
+    } else if (typeof result.rankPoints === 'number') {
+      const maxTeamSize = getMaxTeamSize(serverResults);
+      result.grade = calculateGradeFromRankPoints(result.rankPoints, maxTeamSize);
+    }
+  } else {
+    result.grade = 'F';
   }
   if (typeof rs.victory === 'boolean') {
     result.completed = rs.victory;
   }
+}
+
+/** Defeats must show grade F; gameTimer/server may still report a tick-speed grade (e.g. S) on skip. */
+function normalizeRunResultForOutcome(result, isVictory) {
+  if (!result || isVictory) return;
+  result.grade = 'F';
+  result.completed = false;
 }
 
 function updateVictoryDefeatCounters(isVictory) {
@@ -3142,10 +3283,14 @@ function trackStaminaUsage(serverResults, attemptNumber) {
   let attemptStaminaSpent = 0;
   if (typeof serverResults?.next?.playerExpDiff === 'number') {
     attemptStaminaSpent = serverResults.next.playerExpDiff;
-    totalStaminaSpent += attemptStaminaSpent;
   } else {
     console.warn(`[Manual Runner] No valid playerExpDiff found in serverResults for attempt ${attemptNumber}`);
   }
+  const staminaSkipSpent = currentAttemptTrace?.staminaSkipSpent || 0;
+  if (staminaSkipSpent > 0) {
+    attemptStaminaSpent += staminaSkipSpent;
+  }
+  totalStaminaSpent += attemptStaminaSpent;
   return attemptStaminaSpent;
 }
 
@@ -3411,6 +3556,8 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       }
 
       updateVictoryDefeatCounters(isVictory);
+
+      normalizeRunResultForOutcome(result, isVictory);
 
       const attemptStaminaSpent = result.failedToStart
         ? 0
@@ -4499,7 +4646,6 @@ async function showResultsModal(results) {
     const modalDimensions = getManualRunnerResultsModalDimensions();
     const content = document.createElement('div');
     content.className = 'manual-runner-results-modal-root';
-    content.style.cssText = 'width:100%;height:auto;box-sizing:border-box;';
     
     // Add a note if stopped by user
     if (results.forceStopped && !results.success) {
@@ -4608,8 +4754,8 @@ async function showResultsModal(results) {
 
     appendStatRow(statsContainer, t('mods.manualRunner.skips'), (stats.skips || 0).toString());
     
-    // If victory, show success message
-    if (results.success && results.finalResult) {
+    const finalVictory = results.finalResult?.victory === true || results.finalResult?.completed === true;
+    if (finalVictory && results.finalResult) {
       content.appendChild(createTextElement('div', {
         text: t('mods.manualRunner.victoryAchieved'),
         style: 'text-align: center; color: #2ecc71; margin-bottom: 15px; font-size: 1.2em; font-weight: bold;'
@@ -4853,7 +4999,6 @@ async function showResultsModal(results) {
     const modal = api.ui.components.createModal({
       title: t('mods.manualRunner.resultsTitle'),
       width: modalDimensions.width,
-      height: modalDimensions.maxHeight,
       content: content,
       buttons: [
         {
@@ -4871,7 +5016,12 @@ async function showResultsModal(results) {
       }
     });
 
-    setupManualRunnerResultsModalResponsiveLayout(modal, content);
+    attachManualRunnerResultsModalCloseCleanup(modal);
+
+    requestAnimationFrame(() => {
+      setupManualRunnerResultsModalResponsiveLayout(modal, content);
+      scheduleManualRunnerResultsModalLayoutRefresh();
+    });
     
     // Handle modal - it might be a function (closeModal) or an object
     let modalObject = modal;

@@ -71,6 +71,9 @@ if (window.EventCompetition) {
         highscoreRank: Array.isArray(floors.highscoreRank) ? floors.highscoreRank : [0]
       },
       shinyCompetition: config.shinyCompetition || null,
+      countdownToast: config.countdownToast != null
+        ? Object.assign({ maxDays: 10 }, config.countdownToast)
+        : null,
       profileApiBase: config.profileApiBase
         || 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData'
     };
@@ -145,6 +148,10 @@ if (window.EventCompetition) {
   runTrackerTrigger: null,
   eventTimerInterval: null,
   raidsUnsubscribe: null,
+  countdownToastInterval: null,
+  countdownRaidsUnsubscribe: null,
+  lastCountdownToastDays: null,
+  lastCountdownToastLiveShown: false,
   eventNextCheckEndTime: null,
   floorBarRows: null,
   floorBarCacheAt: 0,
@@ -779,6 +786,19 @@ function isTblMapActive(mapCode = getCurrentMapCode()) {
   return mapCode === cfg.roomId;
 }
 
+function getTblCurrentBoardRoomId() {
+  try {
+    const roomId = globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom?.id;
+    return typeof roomId === 'string' && roomId.length > 0 ? roomId : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function isTblOnEventBoardRoom() {
+  return getTblCurrentBoardRoomId() === cfg.roomId;
+}
+
 function getTblPlayerName() {
   const snapshot = getPlayerSnapshot();
   return snapshot?.context?.name || snapshot?.context?.playerName || null;
@@ -1024,6 +1044,10 @@ function readTblJoinedLocal() {
   } catch (error) {
     return false;
   }
+}
+
+function isTblPlayerJoined() {
+  return state.joined || readTblJoinedLocal();
 }
 
 function writeTblJoinedLocal(joined) {
@@ -1507,7 +1531,17 @@ function showTblEventToast(message, options = {}) {
       }
     };
 
-    toast.addEventListener('click', removeToast);
+    toast.addEventListener('click', () => {
+      removeToast();
+      if (typeof options.onClick === 'function') {
+        Promise.resolve(options.onClick()).catch((error) => {
+          console.warn(`${logPrefix} Toast click action failed:`, error);
+        });
+      }
+    });
+    if (typeof options.onClick === 'function') {
+      toast.style.cursor = 'pointer';
+    }
     scheduleTimeout(removeToast, duration);
   } catch (error) {
     console.warn(`${logPrefix} Toast failed:`, error);
@@ -1586,6 +1620,139 @@ function getTblEventTimerColor(msRemaining, active) {
     return '#ff8';
   }
   return '#8f8';
+}
+
+function getTblEventDaysRemaining(msRemaining) {
+  const totalSeconds = Math.max(0, Math.ceil(msRemaining / 1000));
+  return Math.floor(totalSeconds / 86400);
+}
+
+function getTblEventMapName() {
+  const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+  return roomNames[cfg.roomId] || cfg.roomId;
+}
+
+function getTblEventCountdownToastMessage(daysRemaining) {
+  if (daysRemaining === 0) {
+    return tEvent('EventEndsTodayToast');
+  }
+  if (daysRemaining === 1) {
+    return tEvent('EventDayLeftToast');
+  }
+  return tEvent('EventDaysLeftToast', { days: daysRemaining });
+}
+
+function getTblEventLiveToastMessage() {
+  const liveMessage = cfg.countdownToast?.liveMessage;
+  const mapName = getTblEventMapName();
+  if (typeof liveMessage === 'function') {
+    return liveMessage(mapName);
+  }
+  if (typeof liveMessage === 'string' && liveMessage.trim()) {
+    return liveMessage.replace(/\{mapName\}/g, mapName);
+  }
+  return tEvent('EventLiveToast', { mapName });
+}
+
+function maybeShowTblEventCountdownToast(options = {}) {
+  const maxDays = cfg.countdownToast?.maxDays;
+  if (!maxDays || maxDays <= 0) {
+    return;
+  }
+
+  const { active, msRemaining } = getTblEventTimerState();
+  if (!active || msRemaining <= 0) {
+    return;
+  }
+
+  const daysRemaining = getTblEventDaysRemaining(msRemaining);
+  const force = options.force === true;
+
+  if (daysRemaining >= maxDays) {
+    if (!force && state.lastCountdownToastLiveShown) {
+      return;
+    }
+
+    state.lastCountdownToastLiveShown = true;
+    state.lastCountdownToastDays = null;
+    showTblEventToast(
+      getTblEventLiveToastMessage(),
+      {
+        onClick: () => openTblCompetitionFromCountdownToast()
+      }
+    );
+    return;
+  }
+
+  state.lastCountdownToastLiveShown = false;
+  if (!force && state.lastCountdownToastDays === daysRemaining) {
+    return;
+  }
+
+  state.lastCountdownToastDays = daysRemaining;
+  showTblEventToast(
+    getTblEventCountdownToastMessage(daysRemaining),
+    {
+      messageColor: getTblEventTimerColor(msRemaining, true),
+      onClick: () => openTblCompetitionFromCountdownToast()
+    }
+  );
+}
+
+async function openTblCompetitionFromCountdownToast() {
+  if (!isTblOnEventBoardRoom()) {
+    const navigated = await navigateTblToEventMap();
+    if (navigated) {
+      onLeaderboardsUpdate?.();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+  }
+
+  if (!isTblPlayerJoined()) {
+    return;
+  }
+
+  await refreshTblJoinState().catch(() => {});
+  if (!isTblPlayerJoined()) {
+    return;
+  }
+
+  openTblFloorLeagueModal();
+}
+
+function updateTblEventCountdownToast() {
+  if (isDisposed()) {
+    return;
+  }
+  maybeShowTblEventCountdownToast();
+}
+
+function clearTblEventCountdownToastWatcher() {
+  if (state.countdownToastInterval) {
+    clearInterval(state.countdownToastInterval);
+    state.countdownToastInterval = null;
+  }
+  unsubscribeTblSubscription(state.countdownRaidsUnsubscribe);
+  state.countdownRaidsUnsubscribe = null;
+}
+
+function setupTblEventCountdownToastWatcher() {
+  if (!cfg.countdownToast?.maxDays) {
+    return;
+  }
+
+  clearTblEventCountdownToastWatcher();
+  maybeShowTblEventCountdownToast({ force: true });
+  state.countdownToastInterval = setInterval(
+    updateTblEventCountdownToast,
+    cfg.timers.eventIntervalMs
+  );
+  if (globalThis.state?.raids?.subscribe) {
+    state.countdownRaidsUnsubscribe = globalThis.state.raids.subscribe(() => {
+      state.eventNextCheckEndTime = null;
+      updateTblEventCountdownToast();
+    });
+  }
 }
 
 function getTblShinyStartTimerState() {
@@ -4325,6 +4492,40 @@ function setTblLeagueListPanelContent(panel, scrollContainer) {
   panel.replaceChildren(scrollContainer.element);
 }
 
+async function navigateTblToEventMap() {
+  if (!globalThis.state?.board?.send) {
+    return false;
+  }
+
+  if (isTblOnEventBoardRoom()) {
+    return true;
+  }
+
+  try {
+    if (typeof window.markModSettingsProgrammaticNavFloorGuard === 'function') {
+      window.markModSettingsProgrammaticNavFloorGuard('event-competition-toast');
+    }
+
+    globalThis.state.board.send({
+      type: 'selectRoomById',
+      roomId: cfg.roomId
+    });
+
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (isTblOnEventBoardRoom()) {
+        return true;
+      }
+    }
+
+    return isTblOnEventBoardRoom();
+  } catch (error) {
+    console.warn(`${logPrefix} Failed to navigate to event map:`, error);
+    return false;
+  }
+}
+
 async function navigateTblToFloor(floor) {
   const targetFloor = Math.min(cfg.floors.max, Math.max(cfg.floors.min, Number(floor)));
   if (!Number.isFinite(targetFloor) || !globalThis.state?.board?.send) {
@@ -4335,13 +4536,9 @@ async function navigateTblToFloor(floor) {
   }
 
   try {
-    const mapCode = getCurrentMapCode();
-    if (mapCode !== cfg.roomId) {
-      globalThis.state.board.send({
-        type: 'selectRoomById',
-        roomId: cfg.roomId
-      });
-      await new Promise((resolve) => setTimeout(resolve, 300));
+    const navigated = await navigateTblToEventMap();
+    if (!navigated) {
+      return;
     }
 
     globalThis.state?.board?.trigger?.setState?.({
@@ -5080,12 +5277,14 @@ function initTblFloorLeague() {
   setupTblNetworkListener();
   setupTblBoardListener();
   setupTblRunTrackerTrigger();
+  setupTblEventCountdownToastWatcher();
 }
 
 function cleanupTblFloorLeague() {
   closeTblFloorLeagueModal();
   clearTblModalLayoutCleanup();
   clearTblEventTimerUpdates();
+  clearTblEventCountdownToastWatcher();
   cleanupTblToastContainer();
   removeTblBoardSubscription();
   if (state.fetchRestore) {
@@ -5105,6 +5304,8 @@ function cleanupTblFloorLeague() {
   state.myEventRankScores = {};
   state.myEventRankTicks = {};
   state.eventNextCheckEndTime = null;
+  state.lastCountdownToastDays = null;
+  state.lastCountdownToastLiveShown = false;
   state.eventWasActive = false;
   state.floorBarRows = null;
   state.floorBarCacheAt = 0;

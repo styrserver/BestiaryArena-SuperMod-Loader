@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.5.9",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "added",
+          "text": "Tibia Ball League event toasts: when 7+ days remain, shows \"Event competition live for [map name]\" on load; when fewer than 7 days remain, countdown toast shown on load and again each time the day count drops. Click travels to wcfield, and opens Event Competition only if you have already joined."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Playtime timer now uses wall-clock Date.now() instead of reading the autoplay session widget; pause and resume follow game state (autoplay pause/stop, map change, mode change, first-battle gate) so behavior matches the previous timer."
+        },
+        {
+          "mod": "Manual Runner",
+          "type": "fixed",
+          "text": "Stamina spent in the running and results modals now includes the 2-stamina paid skip cost (free skips unchanged). Results modal sizes to content like Board Analyzer instead of stretching to max height. Defeats show grade F instead of a tick-speed grade from skipped runs; victory banner and final result only appear on actual wins. Skip count includes skips triggered from the board subscription as well as the wait loop."
+        }
+      ]
+    },
+    {
       "version": "4.5.8",
       "changes": [
         {

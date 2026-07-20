@@ -831,6 +831,9 @@
     },
     toast: {
       containerId: 'better-highscores-tbl-toast-container'
+    },
+    countdownToast: {
+      maxDays: 7
     }
   };
 
