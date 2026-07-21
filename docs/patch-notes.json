@@ -4,6 +4,36 @@
   },
   "notes": [
     {
+      "version": "4.5.10",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Interface tab: optional Hide Stop after a defeat and Hide Power saving mode toggles hide the matching autoplay session widget checkboxes; labels are matched in English and Portuguese and stay hidden when the widget re-renders."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Interface tab options are grouped into five sections with separators: Mod Bar & Inventory, Navigation, Setup, Autoplay Session, and Page Layout."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Tibia Ball League: event toasts and competition timer highlight key phrases and countdown times in color (live green, days-left red, inactive muted; timer values match urgency). Shiny tab count label uses an \"{n}x\" prefix (e.g. 1x shiny Football Elementals)."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "fixed",
+          "text": "Tibia Ball League Shiny tab: when shiny counts are tied, standings now use earliest-drop tiebreaker (first to reach that count ranks higher; was most recent drop)."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "fixed",
+          "text": "Shiny creature drops in the loot grid now use the shiny portrait URL instead of the normal portrait with only the shiny star overlay."
+        }
+      ]
+    },
+    {
       "version": "4.5.9",
       "changes": [
         {

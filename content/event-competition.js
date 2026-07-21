@@ -611,7 +611,7 @@ function sortTblShinyStandings(standings) {
     const createdA = Number(a.lastCreatedAt) || 0;
     const createdB = Number(b.lastCreatedAt) || 0;
     if (createdB !== createdA) {
-      return createdB - createdA;
+      return createdA - createdB;
     }
     return String(a.name).localeCompare(String(b.name));
   });
@@ -1477,10 +1477,11 @@ function updateTblToastPositions(container) {
 }
 
 function showTblEventToast(message, options = {}) {
-  const safeMessage = message != null && message !== '' ? String(message).replace(/</g, '&lt;') : '';
-  if (!safeMessage) {
+  const rawMessage = message != null && message !== '' ? String(message) : '';
+  if (!rawMessage) {
     return;
   }
+  const useHtml = options.html === true || hasTblEventHighlightTags(rawMessage);
 
   try {
     const container = getTblToastContainer();
@@ -1510,13 +1511,17 @@ function showTblEventToast(message, options = {}) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
     messageDiv.style.flex = '1 1 auto';
-    if (safeMessage.indexOf('\n') !== -1) {
+    if (rawMessage.indexOf('\n') !== -1) {
       messageDiv.style.whiteSpace = 'pre-line';
     }
-    if (options.messageColor) {
-      messageDiv.style.color = options.messageColor;
+    if (useHtml) {
+      messageDiv.innerHTML = formatTblEventHighlightHtml(rawMessage);
+    } else {
+      if (options.messageColor) {
+        messageDiv.style.color = options.messageColor;
+      }
+      messageDiv.textContent = rawMessage.replace(/</g, '&lt;');
     }
-    messageDiv.textContent = safeMessage;
     widgetBottom.appendChild(messageDiv);
 
     toast.appendChild(widgetTop);
@@ -1693,7 +1698,6 @@ function maybeShowTblEventCountdownToast(options = {}) {
   showTblEventToast(
     getTblEventCountdownToastMessage(daysRemaining),
     {
-      messageColor: getTblEventTimerColor(msRemaining, true),
       onClick: () => openTblCompetitionFromCountdownToast()
     }
   );
@@ -1784,37 +1788,43 @@ function updateTblEventTimerDisplay() {
   }
   valueEls.forEach((valueEl) => {
     if (isShinyTab && shinyStart && !shinyStart.started) {
-      valueEl.textContent = tEvent('ShinyStartsIn', {
-        time: formatTblEventTimer(shinyStart.msUntilStart)
-      });
-      valueEl.style.color = '#f88';
+      valueEl.innerHTML = formatTblEventTimerValueHtml(
+        'ShinyStartsIn',
+        formatTblEventTimer(shinyStart.msUntilStart),
+        '#f88'
+      );
+      valueEl.style.color = '';
       return;
     }
 
     if (active && msRemaining > 0) {
-      valueEl.textContent = tEvent('EventEndsIn', {
-        time: formatTblEventTimer(msRemaining)
-      });
-      valueEl.style.color = getTblEventTimerColor(msRemaining, true);
+      valueEl.innerHTML = formatTblEventTimerValueHtml(
+        'EventEndsIn',
+        formatTblEventTimer(msRemaining),
+        getTblEventTimerColor(msRemaining, true)
+      );
+      valueEl.style.color = '';
       return;
     }
 
     if (state.eventWasActive) {
-      valueEl.textContent = tEvent('EventEnded');
-      valueEl.style.color = '#ccc';
+      valueEl.innerHTML = formatTblEventHighlightHtml(tEvent('EventEnded'));
+      valueEl.style.color = '';
       return;
     }
 
     if (msRemaining > 0) {
-      valueEl.textContent = tEvent('EventInactiveCheck', {
-        time: formatTblEventTimer(msRemaining)
-      });
-      valueEl.style.color = '#ccc';
+      valueEl.innerHTML = formatTblEventTimerValueHtml(
+        'EventInactiveCheck',
+        formatTblEventTimer(msRemaining),
+        '#ccc'
+      );
+      valueEl.style.color = '';
       return;
     }
 
-    valueEl.textContent = tEvent('EventInactive');
-    valueEl.style.color = '#ccc';
+    valueEl.innerHTML = formatTblEventHighlightHtml(tEvent('EventInactive'));
+    valueEl.style.color = '';
   });
 }
 
@@ -3262,6 +3272,55 @@ function escapeTblHtml(text) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+const TBL_EVENT_HIGHLIGHT_COLORS = {
+  green: '#8f8',
+  red: '#f88',
+  yellow: '#ff8',
+  muted: '#ccc'
+};
+
+const TBL_EVENT_HIGHLIGHT_TAG_RE = /\[\[(green|red|yellow|muted)\]\]([\s\S]*?)\[\[\/\1\]\]/g;
+const TBL_EVENT_TIMER_PLACEHOLDER = '@@TBL_EVENT_TIME@@';
+
+function hasTblEventHighlightTags(text) {
+  TBL_EVENT_HIGHLIGHT_TAG_RE.lastIndex = 0;
+  return TBL_EVENT_HIGHLIGHT_TAG_RE.test(String(text || ''));
+}
+
+function buildTblEventColoredSpanHtml(color, text) {
+  return `<span style="color:${color};font-weight:normal;text-shadow:1px 0 0 ${color},0 0 2px ${color}66,0 1px 1px rgba(0,0,0,0.4);">${escapeTblHtml(text)}</span>`;
+}
+
+function formatTblEventHighlightHtml(text) {
+  const source = String(text || '');
+  if (!source) {
+    return '';
+  }
+
+  let html = '';
+  let lastIndex = 0;
+  TBL_EVENT_HIGHLIGHT_TAG_RE.lastIndex = 0;
+  let match = TBL_EVENT_HIGHLIGHT_TAG_RE.exec(source);
+  while (match) {
+    html += escapeTblHtml(source.slice(lastIndex, match.index));
+    const color = TBL_EVENT_HIGHLIGHT_COLORS[match[1]] || '#fff';
+    html += buildTblEventColoredSpanHtml(color, match[2]);
+    lastIndex = TBL_EVENT_HIGHLIGHT_TAG_RE.lastIndex;
+    match = TBL_EVENT_HIGHLIGHT_TAG_RE.exec(source);
+  }
+  html += escapeTblHtml(source.slice(lastIndex));
+  return html;
+}
+
+function formatTblEventTimerValueHtml(i18nKey, time, timeColor, extraParams = {}) {
+  const template = tEvent(i18nKey, { ...extraParams, time: TBL_EVENT_TIMER_PLACEHOLDER });
+  const html = formatTblEventHighlightHtml(template);
+  return html.replace(
+    TBL_EVENT_TIMER_PLACEHOLDER,
+    buildTblEventColoredSpanHtml(timeColor, time)
+  );
 }
 
 function tblFloorToAscensionPercent(floor) {

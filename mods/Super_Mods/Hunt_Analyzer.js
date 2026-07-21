@@ -1981,7 +1981,8 @@ function createInventoryStyleCreaturePortrait(creatureData) {
     
     // Creature image
     const img = document.createElement('img');
-    img.src = `/assets/portraits/${creatureData.gameId}.png`;
+    img.src = window.creatureDatabase?.getMonsterPortraitUrl(creatureData.gameId, creatureData.isShiny) ||
+        `/assets/portraits/${creatureData.gameId}${creatureData.isShiny ? '-shiny' : ''}.png`;
     img.alt = creatureData.originalName;
     img.className = 'pixelated ml-auto';
     img.style.width = '32px';

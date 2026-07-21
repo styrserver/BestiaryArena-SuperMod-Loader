@@ -30,6 +30,8 @@ const defaultConfig = {
   disableQuestHelpers: false,
   enableAntiIdleSounds: false,
   removeWebsiteFooter: false,
+  hideStopAfterDefeat: false,
+  hidePowerSavingMode: false,
   compactNavBar: false,
   showLastVisitedMapButton: false,
   alwaysOpenHuntAnalyzer: false,
@@ -733,6 +735,7 @@ const observers = {
   setupLabels: null,
   scrollLock: null,
   compactNavBar: null,
+  autoplaySessionCheckboxes: null,
   inventoryModButtons: null
 };
 
@@ -6642,15 +6645,22 @@ function showSettingsModal() {
       
       if (categoryId === 'ui') {
         const uiContent = document.createElement('div');
+        const uiSectionWrapperStyle =
+          'margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); margin-bottom: 15px;';
+        const uiSectionTitleStyle =
+          'margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;';
+        const uiOptionStyle = 'margin-bottom: 15px;';
         uiContent.innerHTML = `
-          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+          <div style="margin-bottom: 15px;">
+            <h4 style="${uiSectionTitleStyle}">${t('mods.betterUI.interfaceSectionModBar')}</h4>
+            <div style="${uiOptionStyle} display: flex; align-items: center; gap: 10px;">
               <span style="color: #ccc;">${t('mods.betterUI.modButtonDisplay')}</span>
               <select id="mod-button-display-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
                 <option value="text">${t('mods.betterUI.modButtonDisplayText')}</option>
                 <option value="icon">${t('mods.betterUI.modButtonDisplayIcon')}</option>
               </select>
             </div>
-            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <div style="${uiOptionStyle} display: flex; align-items: center; gap: 10px;">
               <span style="color: #ccc;">${t('mods.betterUI.inventoryBorderStyle')}</span>
               <select id="inventory-border-style-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
                 <option value="Original">Original</option>
@@ -6662,53 +6672,78 @@ function showSettingsModal() {
                 <option value="Prismatic">Prismatic</option>
               </select>
             </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="compact-nav-bar-toggle" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.compactNavBar')}</span>
-            </label>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="default-inventory-sticky-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.stickyInventory')}</span>
+              </label>
+            </div>
           </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="remove-footer-toggle" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.hideWebsiteFooter')}</span>
-            </label>
+          <div style="${uiSectionWrapperStyle}">
+            <h4 style="${uiSectionTitleStyle}">${t('mods.betterUI.interfaceSectionNavigation')}</h4>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="compact-nav-bar-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.compactNavBar')}</span>
+              </label>
+            </div>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="last-visited-map-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.showReturnToMapButton')}</span>
+              </label>
+            </div>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="stamina-timer-toggle" checked="" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.showStaminaTimer')}</span>
+              </label>
+            </div>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="playercount-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.showPlayersOnline')}</span>
+              </label>
+            </div>
           </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="default-inventory-sticky-toggle" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.stickyInventory')}</span>
-            </label>
+          <div style="${uiSectionWrapperStyle}">
+            <h4 style="${uiSectionTitleStyle}">${t('mods.betterUI.interfaceSectionSetup')}</h4>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="setup-labels-toggle" checked="" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.showSetupLabels')}</span>
+              </label>
+            </div>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="setup-shortcuts-hover-toggle" checked="" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.enableSetupShortcutsAndHover')}</span>
+              </label>
+            </div>
           </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="playercount-toggle" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.showPlayersOnline')}</span>
-            </label>
+          <div style="${uiSectionWrapperStyle}">
+            <h4 style="${uiSectionTitleStyle}">${t('mods.betterUI.interfaceSectionAutoplaySession')}</h4>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="hide-stop-after-defeat-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.hideStopAfterDefeat')}</span>
+              </label>
+            </div>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="hide-power-saving-mode-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.hidePowerSavingMode')}</span>
+              </label>
+            </div>
           </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="setup-labels-toggle" checked="" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.showSetupLabels')}</span>
-            </label>
-          </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="setup-shortcuts-hover-toggle" checked="" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.enableSetupShortcutsAndHover')}</span>
-            </label>
-          </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="last-visited-map-toggle" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.showReturnToMapButton')}</span>
-            </label>
-          </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="stamina-timer-toggle" checked="" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.showStaminaTimer')}</span>
-            </label>
+          <div style="${uiSectionWrapperStyle}">
+            <h4 style="${uiSectionTitleStyle}">${t('mods.betterUI.interfaceSectionPageLayout')}</h4>
+            <div style="${uiOptionStyle}">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="remove-footer-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.hideWebsiteFooter')}</span>
+              </label>
+            </div>
           </div>
         `;
         rightColumn.appendChild(uiContent);
@@ -7800,6 +7835,24 @@ function showSettingsModal() {
           hideWebsiteFooter,
           showWebsiteFooter
         )(removeFooterCheckbox);
+      }
+
+      const hideStopAfterDefeatCheckbox = content.querySelector('#hide-stop-after-defeat-toggle');
+      if (hideStopAfterDefeatCheckbox) {
+        createSettingsCheckboxHandler(
+          'hideStopAfterDefeat',
+          applyAutoplaySessionCheckboxVisibility,
+          applyAutoplaySessionCheckboxVisibility
+        )(hideStopAfterDefeatCheckbox);
+      }
+
+      const hidePowerSavingModeCheckbox = content.querySelector('#hide-power-saving-mode-toggle');
+      if (hidePowerSavingModeCheckbox) {
+        createSettingsCheckboxHandler(
+          'hidePowerSavingMode',
+          applyAutoplaySessionCheckboxVisibility,
+          applyAutoplaySessionCheckboxVisibility
+        )(hidePowerSavingModeCheckbox);
       }
 
       const defaultInventoryStickyCheckbox = content.querySelector('#default-inventory-sticky-toggle');
@@ -11899,7 +11952,107 @@ function startSetupLabelsObserver() {
 }
 
 // =======================
-// 11. Website Footer Functions
+// 11. Autoplay Session Checkbox Visibility
+// =======================
+
+const STOP_AFTER_DEFEAT_LABEL_MARKERS = [
+  'stop after a defeat',
+  'parar após uma derrota',
+  'parar depois de uma derrota',
+];
+
+const POWER_SAVING_MODE_LABEL_MARKERS = [
+  'power saving mode',
+  'modo de economia de energia',
+  'modo economia de energia',
+];
+
+function findAutoplaySessionWidgetBottom() {
+  const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+  for (const session of autoplaySessions) {
+    const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+    if (widgetBottom) return widgetBottom;
+  }
+
+  const autoplayButtons = Array.from(document.querySelectorAll('button.widget-top, button.widget-top-text'));
+  for (const button of autoplayButtons) {
+    if (!button.querySelector('img[alt="Autoplay"]')) continue;
+    const widgetBottom = button.parentElement?.querySelector('.widget-bottom[data-minimized="false"]');
+    if (widgetBottom) return widgetBottom;
+  }
+
+  for (const widgetBottom of document.querySelectorAll('.widget-bottom[data-minimized="false"]')) {
+    let parent = widgetBottom.parentElement;
+    while (parent && parent !== document.body) {
+      for (const btn of parent.querySelectorAll('button')) {
+        if (btn.querySelector('img[alt="Autoplay"]')) {
+          return widgetBottom;
+        }
+      }
+      parent = parent.parentElement;
+    }
+  }
+
+  return null;
+}
+
+function findAutoplaySessionCheckboxLabels() {
+  const widgetBottom = findAutoplaySessionWidgetBottom();
+  if (!widgetBottom) return [];
+
+  const searchRoot = widgetBottom.parentElement || widgetBottom;
+  return Array.from(searchRoot.querySelectorAll('label')).filter(
+    (label) => label.querySelector('button[role="checkbox"]')
+  );
+}
+
+function setSessionCheckboxLabelHidden(label, hidden, markerKey) {
+  if (!label) return;
+  const attr = `data-mod-settings-hidden-${markerKey}`;
+  if (hidden) {
+    label.style.display = 'none';
+    label.setAttribute(attr, 'true');
+    return;
+  }
+  if (label.getAttribute(attr) === 'true') {
+    label.style.display = '';
+    label.removeAttribute(attr);
+  }
+}
+
+function applyAutoplaySessionCheckboxVisibility() {
+  for (const label of findAutoplaySessionCheckboxLabels()) {
+    const labelText = (label.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+    if (STOP_AFTER_DEFEAT_LABEL_MARKERS.some((marker) => labelText.includes(marker))) {
+      setSessionCheckboxLabelHidden(label, !!config.hideStopAfterDefeat, 'stopAfterDefeat');
+      continue;
+    }
+
+    if (POWER_SAVING_MODE_LABEL_MARKERS.some((marker) => labelText.includes(marker))) {
+      setSessionCheckboxLabelHidden(label, !!config.hidePowerSavingMode, 'powerSavingMode');
+    }
+  }
+}
+
+function startAutoplaySessionCheckboxObserver() {
+  console.log('[Mod Settings] Starting autoplay session checkbox observer');
+
+  const observer = new MutationObserver(() => {
+    if (!config.hideStopAfterDefeat && !config.hidePowerSavingMode) return;
+    applyAutoplaySessionCheckboxVisibility();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+
+  return observer;
+}
+
+// =======================
+// 12. Website Footer Functions
 // =======================
 
 // Hide website footer
@@ -14061,6 +14214,11 @@ function initBetterUI() {
       }, 1000); // Delay to ensure DOM is ready
     }
 
+    scheduleTimeout(() => {
+      applyAutoplaySessionCheckboxVisibility();
+      observers.autoplaySessionCheckboxes = startAutoplaySessionCheckboxObserver();
+    }, 1000);
+
     applyDefaultInventorySticky();
     observers.inventoryModButtons = startInventoryModButtonsObserver();
     scheduleTimeout(() => {
@@ -14138,6 +14296,10 @@ function cleanupBetterUI() {
     observers.setupLabels = disconnectObserver(observers.setupLabels, 'Setup labels');
     observers.scrollLock = disconnectObserver(observers.scrollLock, 'Scroll lock');
     observers.compactNavBar = disconnectObserver(observers.compactNavBar, 'Compact nav bar');
+    observers.autoplaySessionCheckboxes = disconnectObserver(
+      observers.autoplaySessionCheckboxes,
+      'Autoplay session checkboxes'
+    );
     observers.inventoryModButtons = disconnectObserver(observers.inventoryModButtons, 'Inventory mod buttons');
     inventoryModButtonsState.missingRetryCount.clear();
     inventoryModButtonsState.knownClasses.clear();
