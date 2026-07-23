@@ -261,10 +261,106 @@ header {
   width: 100%;
 }
 
+.patch-note-summary-legacy {
+  grid-template-columns: minmax(0, 1fr) 14px 74px;
+}
+
+.patch-note-summary-mod-grouped {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .patch-note-summary-mod {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.patch-note-summary-type-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.patch-note-summary-type-chip {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.patch-note-summary-type-chip.added {
+  color: #27ae60;
+}
+
+.patch-note-summary-type-chip.changed {
+  color: #f39c12;
+}
+
+.patch-note-summary-type-chip.fixed {
+  color: #3498db;
+}
+
+.patch-note-summary-type-chip.removed {
+  color: #e74c3c;
+}
+
+.patch-note-details-mod {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.patch-note-details-mod[hidden] {
+  display: none !important;
+}
+
+.patch-note-type-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.patch-note-type-separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.patch-note-type-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.patch-note-type-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.patch-note-type-block.added .patch-note-type-label {
+  color: #27ae60;
+}
+
+.patch-note-type-block.changed .patch-note-type-label {
+  color: #f39c12;
+}
+
+.patch-note-type-block.fixed .patch-note-type-label {
+  color: #3498db;
+}
+
+.patch-note-type-block.removed .patch-note-type-label {
+  color: #e74c3c;
+}
+
+.patch-note-type-text {
+  color: var(--theme-text, #e6d7b0);
+  line-height: 1.5;
 }
 
 .patch-note-summary-separator {

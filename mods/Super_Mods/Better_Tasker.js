@@ -2147,13 +2147,50 @@ function isAutoplaySessionStopped(boardContext) {
     return !isAutoplaySessionActiveByApi(boardContext);
 }
 
+function isAutoplayStartButton(button) {
+    if (!button || !isElementVisible(button)) {
+        return false;
+    }
+    if (button.querySelector('svg.lucide-pause')) {
+        return false;
+    }
+    const text = button.textContent.trim();
+    return ['Start', 'Iniciar', 'Resume', 'Retomar'].includes(text);
+}
+
+async function waitForAutoplayStartButton(maxAttempts = PAUSE_VERIFY_ATTEMPTS, delayMs = 500) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const startButton = findAutoplayStartButton();
+        if (startButton) {
+            return startButton;
+        }
+        if (attempt < maxAttempts - 1) {
+            await sleep(delayMs);
+        }
+    }
+    return null;
+}
+
+async function verifyAutoplaySessionStarted() {
+    for (let attempt = 0; attempt < PAUSE_VERIFY_ATTEMPTS; attempt++) {
+        const boardContext = globalThis.state.board.getSnapshot().context;
+        if (isAutoplayPauseButtonVisible() || isAutoplaySessionActiveByApi(boardContext)) {
+            return true;
+        }
+        if (attempt < PAUSE_VERIFY_ATTEMPTS - 1) {
+            await sleep(500);
+        }
+    }
+    return false;
+}
+
 // Generic function to control autoplay with button clicks
 async function controlAutoplayWithButton(action) {
     try {
         const buttonLabel = action === 'play' ? 'Start' : action;
         console.log(`[Better Tasker] Looking for ${buttonLabel} button...`);
 
-        const button = findAutoplayStartButton();
+        const button = await waitForAutoplayStartButton(action === 'play' ? PAUSE_BUTTON_MAX_RETRIES : 1);
         if (button) {
             console.log(`[Better Tasker] Found ${buttonLabel} button, clicking to start autoplay...`);
 
@@ -2164,6 +2201,16 @@ async function controlAutoplayWithButton(action) {
 
             await sleep(PAUSE_BUTTON_UPDATE_DELAY_MS);
             console.log(`[Better Tasker] ${buttonLabel} button clicked successfully`);
+
+            if (action === 'play') {
+                const started = await verifyAutoplaySessionStarted();
+                if (!started) {
+                    console.warn(
+                        `[Better Tasker] ${buttonLabel} button clicked but autoplay session did not start after ${PAUSE_VERIFY_ATTEMPTS * 500}ms`
+                    );
+                    return false;
+                }
+            }
 
             return true;
         }
@@ -2222,6 +2269,14 @@ async function pauseAutoplayWithButton(
 
 // Find and click the play button to resume autoplay
 async function resumeAutoplayWithButton() {
+    // When the pause button is still showing, buttons[0] is Pause — stop the session first so Start appears.
+    if (isAutoplayPauseButtonVisible()) {
+        console.log('[Better Tasker] Pause button visible during resume — stopping session before Start');
+        await pauseAutoplayWithButton(PAUSE_BUTTON_MAX_RETRIES, PAUSE_BUTTON_RETRY_DELAY_MS, {
+            closeQuestLog: false
+        });
+        await sleep(PAUSE_BUTTON_UPDATE_DELAY_MS);
+    }
     return await controlAutoplayWithButton('play');
 }
 
@@ -5682,20 +5737,20 @@ function findButtonByText(text) {
 
 // Finds the autoplay Start button (green "Start" / "Iniciar", not lucide-play icon)
 function findAutoplayStartButton() {
-    // Autoplay control row: [Start] [Autoplay menu] — most specific match
+    // Autoplay control row: [Start|Pause] [Autoplay menu] — only return when slot 0 is actually Start.
     for (const flexContainer of document.querySelectorAll('div.flex')) {
         const buttons = flexContainer.querySelectorAll('button');
         if (buttons.length < 2) continue;
         const autoplayMenuBtn = buttons[1];
         if (!autoplayMenuBtn.querySelector('img[alt="Autoplay"], img[src*="autoplay.png"]')) continue;
         const startBtn = buttons[0];
-        if (isElementVisible(startBtn)) {
+        if (isAutoplayStartButton(startBtn)) {
             return startBtn;
         }
     }
 
     const byText = findButtonByText('Start');
-    if (byText) {
+    if (byText && isAutoplayStartButton(byText)) {
         return byText;
     }
 
@@ -5707,7 +5762,7 @@ function findAutoplayStartButton() {
     ];
     const bySelector = playSelectors.reduce((found, selector) =>
         found || document.querySelector(selector), null);
-    if (bySelector && isElementVisible(bySelector)) {
+    if (bySelector && isAutoplayStartButton(bySelector)) {
         return bySelector;
     }
 
@@ -6080,6 +6135,7 @@ async function handleFinalRunPauseWithRetry(retryDepth = 0) {
             );
             // Re-arm final-run guard so we can pause again once the retry game ends.
             finalRunPauseIssued = false;
+            refreshTaskHuntingRunsBudget('final-run-incomplete-retry');
             await resumeAutoplay({ force: true, reason: 'final-run-incomplete' });
             return;
         }
@@ -6221,27 +6277,26 @@ async function resumeAutoplay(options = {}) {
             }
             
             // Use Start button instead of switching to autoplay mode
-            const resumed = await resumeAutoplayWithButton();
-            autoplayPausedByTasker = false;
-            if (resumed) {
-                console.log('[Better Tasker] Autoplay resumed successfully using Start button');
-            } else {
+            let resumed = await resumeAutoplayWithButton();
+            if (!resumed) {
                 // Fallback: ensure autoplay mode, then try Start again (session may stop while mode stays autoplay)
                 const wasChanged = ensureAutoplayMode();
                 if (wasChanged) {
                     console.log('[Better Tasker] Switched to autoplay mode - clicking Start button...');
                 }
-                const startRetried = await resumeAutoplayWithButton();
-                if (startRetried) {
-                    console.log('[Better Tasker] Autoplay resumed successfully using Start button (after mode fallback)');
-                } else if (wasChanged) {
+                resumed = await resumeAutoplayWithButton();
+                if (!resumed && wasChanged) {
                     console.log('[Better Tasker] Switched to autoplay mode but Start button not found');
-                } else {
-                    console.log('[Better Tasker] Start button not found - could not resume autoplay session');
                 }
             }
+            autoplayPausedByTasker = false;
+            if (resumed) {
+                console.log('[Better Tasker] Autoplay resumed successfully using Start button');
+            } else {
+                console.warn('[Better Tasker] Could not resume autoplay session after Start click');
+            }
             window.AutoplayManager.releaseControl('Better Tasker');
-            return true;
+            return resumed;
         } else {
             console.log('[Better Tasker] Autoplay was not paused by tasker - no need to resume');
             return true;

@@ -1978,6 +1978,36 @@ async function ensureTblRankBarData(force = false) {
   return rows;
 }
 
+async function ensureTblShinyBarData(force = false) {
+  if (!isTblShinyCompetitionEnabled()) {
+    return state.shinyBarRows || [];
+  }
+  return loadTblAllShinyData(force);
+}
+
+function scheduleTblShinyDataWarm() {
+  if (isDisposed() || !isTblMapActive() || !isTblShinyCompetitionEnabled()) {
+    return;
+  }
+  const now = Date.now();
+  if (
+    state.shinyBarRows &&
+    now - state.shinyBarCacheAt < cfg.timers.fetchCacheTtlMs
+  ) {
+    return;
+  }
+  if (
+    state.shinyBarRows &&
+    now - state.lastShinyFullLoadAt < cfg.timers.fetchMinIntervalMs
+  ) {
+    return;
+  }
+  if (state.shinyFullLoadInFlight) {
+    return;
+  }
+  ensureTblShinyBarData(false).catch(() => {});
+}
+
 async function refreshTblFloorBarSection(force = false) {
   if (isDisposed() || !isTblMapActive() || !getLeaderboardContainer()?.isConnected) {
     return;
@@ -2006,6 +2036,7 @@ function scheduleTblFloorBarRefresh() {
   if (isDisposed() || !isTblMapActive()) {
     return;
   }
+  scheduleTblShinyDataWarm();
   Promise.all([ensureTblFloorBarData(), ensureTblRankBarData()]).then(() => {
     if (isDisposed() || !isTblMapActive()) {
       return;
@@ -5337,6 +5368,9 @@ function initTblFloorLeague() {
   setupTblBoardListener();
   setupTblRunTrackerTrigger();
   setupTblEventCountdownToastWatcher();
+  if (isTblMapActive()) {
+    scheduleTblShinyDataWarm();
+  }
 }
 
 function cleanupTblFloorLeague() {
@@ -5409,6 +5443,7 @@ function cleanupTblFloorLeague() {
       createFloorLeaderboardSection: createTblFloorLeaderboardSection,
       createRankLeaderboardSection: createTblRankLeaderboardSection,
       scheduleFloorBarRefresh: scheduleTblFloorBarRefresh,
+      scheduleShinyDataWarm: scheduleTblShinyDataWarm,
       isMapActive: isTblMapActive,
       isCompetitionActive: isTblEventCompetitionActive,
       refreshFloorBarSection: refreshTblFloorBarSection,

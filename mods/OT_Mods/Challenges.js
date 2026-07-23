@@ -26,6 +26,11 @@ const CHALLENGE_COLORS = { TEXT: '#fff', PRIMARY: '#ffe066', SECONDARY: '#e6d7b0
 
 /** Shared styles for framed widget boxes (placeholder box, matchmaking panel, etc.) */
 const CHALLENGES_FRAME_BOX_STYLE = 'display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; border: 4px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; border-radius: 6px; overflow: hidden;';
+
+function applyChallengesCol1BoxLayout(box, flexGrow) {
+  box.style.flex = (flexGrow != null ? flexGrow : 1) + ' 1 0';
+  box.style.minHeight = '0';
+}
 const CHALLENGES_WIDGET_TITLE_STYLE = 'margin: 0; padding: 2px 8px; text-align: center; color: ' + CHALLENGE_COLORS.TEXT + ';';
 const CHALLENGES_WIDGET_BODY_STYLE = 'flex: 1 1 0; overflow-y: auto; padding: 8px 12px; color: ' + CHALLENGE_COLORS.SECONDARY + '; font-size: 14px; line-height: 1.4; min-height: 0; background: url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;';
 
@@ -53,6 +58,15 @@ const CHALLENGE_EQUIP_GAMEID_MAX = 300;
 const CHALLENGE_LEADERBOARD_TOP = 10;
 /** Max villain creatures per challenge roll (1 to this value, inclusive). */
 const CHALLENGE_MAX_VILLAINS = 10;
+/** Player arsenal for solo/PvPvE challenges: count, level, and gene value per stat. */
+/** Player arsenal size = factor × rolled enemy count (e.g. 4 enemies → 8 creatures + 8 equips). */
+const CHALLENGE_PLAYER_ARSENAL_ENEMY_COUNT_FACTOR = 2;
+const CHALLENGE_PLAYER_LEVEL = 99;
+const CHALLENGE_PLAYER_GENE_VALUE = 20;
+/** Fallback if autoSetupBoard does not fire after room navigation. */
+const CHALLENGE_PLAYER_ARSENAL_APPLY_FALLBACK_MS = 200;
+/** Base bonus points per rolled arsenal creature/equipment before strength reduction (÷ creature/equip mult). */
+const CHALLENGE_PLAYER_ARSENAL_ITEM_BASE_POINTS = 500;
 /** Creatures excluded from random challenge rolls (display names, case-insensitive). */
 const CHALLENGE_BLOCKED_SPAWN_CREATURE_NAMES = ['Rahemos'];
 /** Per-creature chance to roll awakened (non-awakenable creatures never awaken). */
@@ -67,6 +81,7 @@ const CHALLENGE_PERSONAL_RECORDS_KEY = 'bestiary_challenges_personal';
 const CHALLENGE_PERSONAL_RECORDS_MAX = 10;
 /** Delay in ms between each slot reveal (map → creature → equipment → … → summary). */
 const ROLL_SLOT_DELAY_MS = 200;
+const ARSENAL_ROLL_SLOT_DELAY_MS = 150;
 /** Interval in ms between reel "ticks" (one-armed bandit spin). */
 const ROLL_REEL_TICK_MS = 70;
 
@@ -118,14 +133,19 @@ var CHALLENGES_I18N_FALLBACK = {
   'mods.challenges.deleteRun': "Delete run",
   'mods.challenges.difficultyLabel': "Difficulty: ",
   'mods.challenges.expectedScoreLabel': "Expected score:",
-  'mods.challenges.expectedScoreTitle': "Score you would get for A rank with 500 ticks",
+  'mods.challenges.expectedScoreTitle': "Score you would get for A rank with 500 ticks (includes map difficulty and your rolled arsenal)",
+  'mods.challenges.arsenalFactorLabel': "Arsenal factor",
+  'mods.challenges.arsenalBonusLabel': "Arsenal bonus",
+  'mods.challenges.arsenalItemScoreLabel': "Score",
   'mods.challenges.globalTop10': "Global Top 10",
   'mods.challenges.help': "Help",
+  'mods.challenges.helpPanel.arsenalBonusText': "Added on top of map score: average points from each rolled creature and equipment piece × the hardest enemy creature multiplier on the map. Harder rolled items contribute fewer points. Shown in Expected score after the arsenal roll finishes.",
+  'mods.challenges.helpPanel.arsenalBonusTitle': "Arsenal bonus",
   'mods.challenges.helpPanel.baseValueTicks': "Base value: (1000 − ticks).",
   'mods.challenges.helpPanel.difficultyMultiplier': "Difficulty multiplier",
   'mods.challenges.helpPanel.difficultyMultiplierDescription': "Based on how many allies you were allowed vs how many enemy creatures (e.g. 1 v 5). Raw difficulty is the internal number that encodes how hard the setup is; the displayed/score multiplier is 10 × (raw÷1000)^{power}, so lower difficulties grant more score (steep at the low end). Shown in the summary and leaderboard (e.g. raw 100 → ~3.16×, raw 500 → ~7.07×, raw 1000 → 10×).",
   'mods.challenges.helpPanel.formula': "Formula",
-  'mods.challenges.helpPanel.formulaText': "Score = round( ( (1000 − ticks) + gradeBonus ) × difficultyMultiplier )",
+  'mods.challenges.helpPanel.formulaText': "Map score = round( ( (1000 − ticks) + gradeBonus ) × difficultyMultiplier ). Final score = map score + arsenal bonus.",
   'mods.challenges.helpPanel.gradeA': "A : +1000",
   'mods.challenges.helpPanel.gradeB': "B : +750",
   'mods.challenges.helpPanel.gradeBonus': "Grade bonus",
@@ -135,13 +155,17 @@ var CHALLENGES_I18N_FALLBACK = {
   'mods.challenges.helpPanel.gradeF': "F : +0 (defeat)",
   'mods.challenges.helpPanel.gradeS': "S : +1250",
   'mods.challenges.helpPanel.gradeSPlus': "S+ : +1500",
-  'mods.challenges.helpPanel.howToPlayText': "Click Randomize to roll a map and creatures, then Start to play the battle. Your score is based on ticks, grade (team size and creatures alive), and difficulty.",
+  'mods.challenges.helpPanel.howToPlayText': "Click Randomize to roll a map and enemy creatures (with equipment). Your player arsenal rolls next in the panel below the summary. Click Start to enter the challenge — your inventory is temporarily replaced with the rolled arsenal and restored when you leave.",
   'mods.challenges.helpPanel.howToPlayTitle': "How to play",
-  'mods.challenges.helpPanel.mpHowToPlayText': "Click Join queue to enter matchmaking. When another player is in the queue, you are paired and both must accept. The creator rolls map and creatures; both see the same roll animation, then the battle starts.",
+  'mods.challenges.helpPanel.mpHowToPlayText': "Click Join queue for matchmaking. When paired, both players must accept within 30 seconds. The first player in the match (by name order) rolls the shared map, enemies, and player arsenal; both see the same roll animation, then enter the same challenge. You have 3 minutes to finish. Higher challenge score wins; defeat scores 0.",
   'mods.challenges.helpPanel.mpHowToPlayTitle': "How to play",
-  'mods.challenges.helpPanel.mpRatingText': "Matches use Elo rating (default 1000). Winning gains points, losing loses points; beating a higher-rated player gains more. The leaderboard sorts by rating, then matches played, then name. Your score in the battle (ticks + grade) decides who wins; the loser's score is 0.",
+  'mods.challenges.helpPanel.mpRatingText': "Matches use Elo rating (default 1000). Winning gains points, losing loses points; beating a higher-rated player gains more. The leaderboard sorts by rating, then matches played, then name. Your challenge score (map score + arsenal bonus) decides who wins; the loser's score is 0.",
   'mods.challenges.helpPanel.mpRatingTitle': "Rating & leaderboard",
-  'mods.challenges.helpPanel.mpTitle': "Multiplayer",
+  'mods.challenges.helpPanel.mpSharedArsenalText': "Both players receive the same rolled player arsenal. Slot count is 2× the number of enemies. Each inventory creature can only be placed on the board once.",
+  'mods.challenges.helpPanel.mpSharedArsenalTitle': "Shared arsenal",
+  'mods.challenges.helpPanel.mpTitle': "PvPvE",
+  'mods.challenges.helpPanel.playerArsenalText': "After villains finish rolling, you receive random Lv. 99 shiny awakened creatures and random equipment. Slot count is 2× the number of enemies rolled (e.g. 4 enemies → 8 creatures + 8 equipment).",
+  'mods.challenges.helpPanel.playerArsenalTitle': "Player arsenal",
   'mods.challenges.helpPanel.removeTicks': "Remove Ticks",
   'mods.challenges.helpPanel.soloTitle': "Solo",
   'mods.challenges.helpPanel.title': "How challenge score is calculated",
@@ -188,7 +212,7 @@ var CHALLENGES_I18N_FALLBACK = {
   'mods.challenges.multiplayer.rating': "Rating",
   'mods.challenges.multiplayer.submitError': "Could not submit score.",
   'mods.challenges.multiplayer.timeUp': "Time's up! Submitting score...",
-  'mods.challenges.multiplayer.underDevelopmentBanner': "Multiplayer is under development and may be a little buggy.",
+  'mods.challenges.multiplayer.underDevelopmentBanner': "PvPvE is under development and may be a little buggy.",
   'mods.challenges.multiplayer.waitingForAccept': "Waiting for {name} to accept…",
   'mods.challenges.multiplayer.waitingForAcceptWithin': "Waiting for {name} to accept within {n}s...",
   'mods.challenges.multiplayer.waitingForOpponent': "Waiting for an opponent…",
@@ -210,7 +234,13 @@ var CHALLENGES_I18N_FALLBACK = {
   'mods.challenges.skip': "Skip",
   'mods.challenges.start': "Start",
   'mods.challenges.summary': "Summary",
-  'mods.challenges.tabs.multiplayer': "Multiplayer",
+  'mods.challenges.playerArsenal': "Player arsenal",
+  'mods.challenges.playerArsenalCreatures': "Creatures",
+  'mods.challenges.playerArsenalEquipment': "Equipment",
+  'mods.challenges.playerArsenalEmpty': "Roll a challenge to see your arsenal.",
+  'mods.challenges.playerArsenalRolling': "Rolling player arsenal…",
+  'mods.challenges.playerArsenalSlots': "{n} slots (2× {enemies} enemies)",
+  'mods.challenges.tabs.multiplayer': "PvPvE",
   'mods.challenges.tabs.solo': "Solo",
   'mods.challenges.title': "Challenges",
   'mods.challenges.victory': "Victory!"
@@ -223,7 +253,7 @@ function challengesModTranslate(key, fallback) {
   try {
     if (typeof context !== 'undefined' && context.api && context.api.i18n && typeof context.api.i18n.t === 'function') {
       var s = context.api.i18n.t(key);
-      if (s && typeof s === 'string' && s !== key) return s;
+      if (s && typeof s === 'string' && s !== key && s.indexOf('mods.') !== 0) return s;
     }
   } catch (e) {}
   return fallback != null ? fallback : key;
@@ -534,6 +564,11 @@ function navigateToRoomAndFinishMultiplayerMatch(roomId, roomName) {
 }
 
 var CHALLENGE_MP_ROLL_DELAY_MS = 5000;
+/** Both clients start the reel at chosenAt + this delay so opponent has time to poll Firebase. */
+var CHALLENGE_MP_ROLL_SYNC_DELAY_MS = 2500;
+var CHALLENGE_MP_ROLL_POLL_MS = 400;
+var challengeMpRollStartedForMatchId = null;
+var challengeMpRollWriteStartedForMatchId = null;
 var CHALLENGE_MP_TIME_LIMIT_MS = 3 * 60 * 1000; // 3 minutes
 var CHALLENGE_MP_ACCEPT_DEADLINE_MS = 30 * 1000; // time to accept match; after that remove from queue / re-queue if one accepted
 var CHALLENGE_MP_QUEUE_POLL_MS = 1000; // Firebase GET /queue while in matchmaking (1s; e.g. after toast Join)
@@ -788,6 +823,7 @@ function pollMultiplayerMatchScores() {
 }
 
 function stopMultiplayerChallengeToast() {
+  challengeMpRollStartedForMatchId = null;
   if (challengeMultiplayerToastIntervalId != null) {
     clearInterval(challengeMultiplayerToastIntervalId);
     challengeMultiplayerToastIntervalId = null;
@@ -799,15 +835,42 @@ function stopMultiplayerChallengeToast() {
   removeChallengesPersistentToast();
 }
 
-function ensureChallengesModalOpenOnMultiplayerTab() {
-  if (!isChallengesModalOpen()) {
-    if (typeof openChallengesModal === 'function') openChallengesModal();
-    setTimeout(function() {
-      if (typeof window !== 'undefined' && window.__challengesSetActiveTab) window.__challengesSetActiveTab(1);
-    }, 250);
-  } else {
-    if (typeof window !== 'undefined' && window.__challengesSetActiveTab) window.__challengesSetActiveTab(1);
+function ensureChallengesModalOpenOnMultiplayerTab(onReady) {
+  function finish() {
+    if (typeof window !== 'undefined' && window.__challengesSetActiveTab) {
+      window.__challengesSetActiveTab(1);
+    }
+    if (typeof onReady === 'function') {
+      setTimeout(onReady, 0);
+    }
   }
+  if (!isChallengesModalOpen()) {
+    if (typeof openChallengesModal === 'function') openChallengesModal(1);
+    setTimeout(finish, 50);
+  } else {
+    finish();
+  }
+}
+
+function waitForChallengesMpUiReady(onReady, maxAttempts) {
+  var attempts = 0;
+  var limit = maxAttempts != null ? maxAttempts : 80;
+  function tryReady() {
+    if (typeof window !== 'undefined'
+        && typeof window.__challengesRunMultiplayerRoll === 'function'
+        && typeof window.__challengesMpSetRollResult === 'function') {
+      onReady();
+      return;
+    }
+    attempts++;
+    if (attempts >= limit) {
+      console.warn('[Challenges MP] MP UI not ready after wait; continuing without reel animation');
+      onReady();
+      return;
+    }
+    setTimeout(tryReady, 50);
+  }
+  ensureChallengesModalOpenOnMultiplayerTab(tryReady);
 }
 
 function openChallengesModalMultiplayerAndJoinQueue() {
@@ -844,70 +907,80 @@ function normalizeVillainSpecsArray(specs) {
   return [];
 }
 
-function runMultiplayerRollThenStart(roomId, roomName, villainSpecs, matchId, myKey, opponentName) {
+function runMultiplayerRollThenStart(roomId, roomName, villainSpecs, matchId, myKey, opponentName, allyGameIds, allyEquips) {
   var specs = normalizeVillainSpecsArray(villainSpecs);
   if (!roomId || !specs.length) {
     showChallengeToastNotification('Invalid match roll.');
     return;
   }
+  if (matchId) challengeMpRollStartedForMatchId = matchId;
   villainSpecs = specs;
-  ensureChallengesModalOpenOnMultiplayerTab();
-  var diff = computeChallengeDifficulty(villainSpecs);
-  var expectedScore = Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100;
+  console.log('[Challenges MP] runMultiplayerRollThenStart', roomId, villainSpecs.length, 'villains', matchId);
 
   function doAfterRoll() {
+    var diff = computeChallengeDifficulty(villainSpecs);
+    var expectedScore = computeChallengeExpectedScore(diff.difficulty, 'A', 500, allyGameIds, allyEquips, villainSpecs);
     if (typeof window !== 'undefined' && window.__challengesMpSetRollResult) {
-      window.__challengesMpSetRollResult(roomId, roomName, villainSpecs, diff, expectedScore);
+      window.__challengesMpSetRollResult(roomId, roomName, villainSpecs, diff, expectedScore, allyGameIds, allyEquips);
     }
     setTimeout(function() {
-    clearMultiplayerStateFields(challengesMultiplayerPersisted);
-    if (matchId && myKey) {
-      if (challengeMultiplayerTimerId != null) {
-        clearTimeout(challengeMultiplayerTimerId);
-        challengeMultiplayerTimerId = null;
+      clearMultiplayerStateFields(challengesMultiplayerPersisted);
+      if (matchId && myKey) {
+        if (challengeMultiplayerTimerId != null) {
+          clearTimeout(challengeMultiplayerTimerId);
+          challengeMultiplayerTimerId = null;
+        }
+        var startTime = Date.now();
+        challengeMultiplayerContext = {
+          matchId: matchId,
+          myKey: myKey,
+          difficulty: diff.difficulty,
+          alliesAllowed: diff.alliesAllowed,
+          startTime: startTime,
+          opponentName: opponentName || '',
+          cachedMatch: null
+        };
+        var keys = getMatchPlayerKeys(matchId);
+        challengeMultiplayerContext.cachedMatch = syncCachedMatchPlayersFromMatch({ scores: {} }, {
+          player1Key: keys[0],
+          player2Key: keys[1],
+          player1: (myKey === keys[0] ? (getCurrentPlayerName() || keys[0]) : (opponentName || keys[0])),
+          player2: (myKey === keys[1] ? (getCurrentPlayerName() || keys[1]) : (opponentName || keys[1]))
+        }, matchId);
+        var initialMsg = buildMultiplayerLiveToastMessage(challengeMultiplayerContext);
+        removeChallengesPersistentToast();
+        showChallengesToast(initialMsg);
+        updateMultiplayerChallengeToast();
+        challengeMultiplayerToastIntervalId = setInterval(updateMultiplayerChallengeToast, CHALLENGE_MP_TOAST_UPDATE_MS);
+        pollMultiplayerMatchScores();
+        challengeMultiplayerScorePollIntervalId = setInterval(pollMultiplayerMatchScores, CHALLENGE_MP_SCORE_POLL_MS);
+      } else {
+        removeChallengesPersistentToast();
       }
-      var startTime = Date.now();
-      challengeMultiplayerContext = {
-        matchId: matchId,
-        myKey: myKey,
-        difficulty: diff.difficulty,
-        alliesAllowed: diff.alliesAllowed,
-        startTime: startTime,
-        opponentName: opponentName || '',
-        cachedMatch: null
-      };
-      var keys = getMatchPlayerKeys(matchId);
-      challengeMultiplayerContext.cachedMatch = syncCachedMatchPlayersFromMatch({ scores: {} }, {
-        player1Key: keys[0],
-        player2Key: keys[1],
-        player1: (myKey === keys[0] ? (getCurrentPlayerName() || keys[0]) : (opponentName || keys[0])),
-        player2: (myKey === keys[1] ? (getCurrentPlayerName() || keys[1]) : (opponentName || keys[1]))
-      }, matchId);
-      var initialMsg = buildMultiplayerLiveToastMessage(challengeMultiplayerContext);
-      removeChallengesPersistentToast();
-      showChallengesToast(initialMsg);
-      updateMultiplayerChallengeToast();
-      challengeMultiplayerToastIntervalId = setInterval(updateMultiplayerChallengeToast, CHALLENGE_MP_TOAST_UPDATE_MS);
-      pollMultiplayerMatchScores();
-      challengeMultiplayerScorePollIntervalId = setInterval(pollMultiplayerMatchScores, CHALLENGE_MP_SCORE_POLL_MS);
-    } else {
-      removeChallengesPersistentToast();
-    }
-    startChallengeWithVillainConfig({ roomId: roomId, roomName: roomName || roomId, villains: villainSpecs });
-    if (challengeMultiplayerContext) {
-      challengeMultiplayerTimerId = setTimeout(function() {
-        challengeMultiplayerTimerId = null;
-        onMultiplayerTimeLimitReached();
-      }, CHALLENGE_MP_TIME_LIMIT_MS);
-    }
-  }, CHALLENGE_MP_ROLL_DELAY_MS);
+      console.log('[Challenges MP] navigating to challenge map', roomId);
+      startChallengeWithVillainConfig({
+        roomId: roomId,
+        roomName: roomName || roomId,
+        villains: villainSpecs,
+        allyGameIds: allyGameIds,
+        allyEquips: allyEquips
+      });
+      if (challengeMultiplayerContext) {
+        challengeMultiplayerTimerId = setTimeout(function() {
+          challengeMultiplayerTimerId = null;
+          onMultiplayerTimeLimitReached();
+        }, CHALLENGE_MP_TIME_LIMIT_MS);
+      }
+    }, CHALLENGE_MP_ROLL_DELAY_MS);
   }
 
-  if (typeof window !== 'undefined' && window.__challengesRunMultiplayerRoll) {
-    window.__challengesRunMultiplayerRoll(roomId, roomName, specs, doAfterRoll);
-  } else {
-    doAfterRoll();
-  }
+  waitForChallengesMpUiReady(function() {
+    if (typeof window !== 'undefined' && window.__challengesRunMultiplayerRoll) {
+      window.__challengesRunMultiplayerRoll(roomId, roomName, specs, doAfterRoll, allyGameIds, allyEquips);
+    } else {
+      doAfterRoll();
+    }
+  });
 }
 
 /** Submit multiplayer score. Live toast stays visible; pollMultiplayerMatchScores will detect both scores and show result. scoreOverride: if a number (including 0), use it; otherwise compute from current board (for time-up). */
@@ -1003,66 +1076,212 @@ function showMultiplayerResult(ctx, data) {
   if (typeof window !== 'undefined' && window.__challengesRefreshMultiplayerLeaderboard) window.__challengesRefreshMultiplayerLeaderboard();
 }
 
-/** When both players accepted: ensure modal on Multiplayer tab, chooser rolls map+creatures and writes to Firebase; both show roll for 5s then start challenge. */
+/** When both players accepted: chooser writes roll to Firebase; both poll until complete then run the same synced reel animation. */
 function handleMultiplayerMatchReady(matchId, myKey) {
   if (!matchId || !myKey) return;
+  if (challengeMultiplayerContext && challengeMultiplayerContext.matchId === matchId) {
+    console.log('[Challenges MP] handleMultiplayerMatchReady: match already in progress', matchId);
+    return;
+  }
+  if (challengeMpRollStartedForMatchId === matchId) {
+    console.log('[Challenges MP] handleMultiplayerMatchReady: roll already started for', matchId);
+    return;
+  }
+  var keysPreview = getMatchPlayerKeys(matchId);
+  console.log('[Challenges MP] handleMultiplayerMatchReady', matchId, myKey, 'chooser=', myKey === keysPreview[0]);
+  ensureChallengesModalOpenOnMultiplayerTab(function() {
+    startMultiplayerMatchRollSync(matchId, myKey);
+  });
+}
+
+function startMultiplayerMatchRollSync(matchId, myKey) {
   var matchPath = CHALLENGE_MULTIPLAYER_BASE + '/matches/' + matchId;
-  ChallengeFirebaseService.get(matchPath, null).then(function(match) {
-    var keys = getMatchPlayerKeys(matchId);
+  var keys = getMatchPlayerKeys(matchId);
+  if (keys.length < 2) return;
+  var isChooser = (myKey === keys[0]);
+  var pollTimer = null;
+  var pollCount = 0;
+  var maxPolls = 60;
+
+  function stopPoll() {
+    if (pollTimer != null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function opponentFromMatch(match) {
     var opponentKey = (myKey === keys[0]) ? keys[1] : keys[0];
-    var opponentName = getMatchPlayerNameForKey(match, opponentKey) || challengesText('mods.challenges.opponentFallback');
-    var existingSpecs = normalizeVillainSpecsArray(match && match.chosenVillainSpecs);
-    if (match && match.chosenRoomId && existingSpecs.length > 0) {
-      console.log('[Challenges MP] match already has roll', match.chosenRoomId);
-      runMultiplayerRollThenStart(match.chosenRoomId, match.chosenRoomName, existingSpecs, matchId, myKey, opponentName);
+    return getMatchPlayerNameForKey(match, opponentKey) || challengesText('mods.challenges.opponentFallback');
+  }
+
+  function startRollFromSync(match, sync) {
+    if (challengeMpRollStartedForMatchId === matchId) {
+      stopPoll();
       return;
     }
-    if (keys.length < 2) return;
-    var isChooser = (myKey === keys[0]);
-    if (isChooser) {
-      var allRooms = getAllRoomsForReel();
-      if (!allRooms || !allRooms.length) {
-        showChallengeToastNotification('No maps available.');
-        return;
-      }
-      var picked = pickRandomFromArray(allRooms, 1)[0];
-      var roomId = picked.roomId;
-      var roomName = picked.roomName || roomId;
-      var villainSpecs = pickRandomCreatureSpecsForRoom(roomId);
-      if (!villainSpecs || !villainSpecs.length) {
-        showChallengeToastNotification('Could not roll creatures for map.');
-        return;
-      }
-      console.log('[Challenges MP] chosen map + creatures', roomId, villainSpecs.length);
-      ChallengeFirebaseService.patch(matchPath, {
-        chosenRoomId: roomId,
-        chosenRoomName: roomName,
-        chosenVillainSpecs: villainSpecs,
-        chosenAt: Date.now()
-      }).then(function() {
-        runMultiplayerRollThenStart(roomId, roomName, villainSpecs, matchId, myKey, opponentName);
-      }).catch(function(err) {
-        console.warn('[Challenges MP] PATCH chosen roll failed', err);
-        runMultiplayerRollThenStart(roomId, roomName, villainSpecs, matchId, myKey, opponentName);
-      });
-    } else {
-      var pollCount = 0;
-      var maxPolls = 30;
-      var iv = setInterval(function() {
-        pollCount++;
-        ChallengeFirebaseService.get(matchPath, null).then(function(m) {
-          var polledSpecs = normalizeVillainSpecsArray(m && m.chosenVillainSpecs);
-          if (m && m.chosenRoomId && polledSpecs.length > 0) {
-            clearInterval(iv);
-            var oppKey = (myKey === keys[0]) ? keys[1] : keys[0];
-            var opp = getMatchPlayerNameForKey(m, oppKey) || challengesText('mods.challenges.opponentFallback');
-            console.log('[Challenges MP] got chosen roll from match', m.chosenRoomId);
-            runMultiplayerRollThenStart(m.chosenRoomId, m.chosenRoomName, polledSpecs, matchId, myKey, opp);
-          }
-        });
-        if (pollCount >= maxPolls) clearInterval(iv);
-      }, 1000);
+    challengeMpRollStartedForMatchId = matchId;
+    stopPoll();
+    var chosenAt = sync.chosenAt || (match && match.chosenAt) || Date.now();
+    console.log('[Challenges MP] roll payload ready', sync.roomId, sync.specs.length, 'villains',
+      sync.rawIdCount + '/' + sync.arsenalCount, 'allies',
+      sync.rawEquipCount + '/' + sync.arsenalCount, 'equips');
+    scheduleSyncedMultiplayerRoll(chosenAt, function() {
+      runMultiplayerRollThenStart(
+        sync.roomId,
+        sync.roomName || sync.roomId,
+        sync.specs,
+        matchId,
+        myKey,
+        opponentFromMatch(match),
+        sync.allyIds,
+        sync.allyEquips
+      );
+    });
+  }
+
+  function chooserWriteFullRoll(match) {
+    if (challengeMpRollWriteStartedForMatchId === matchId) return;
+    challengeMpRollWriteStartedForMatchId = matchId;
+    var allRooms = getAllRoomsForReel();
+    if (!allRooms || !allRooms.length) {
+      challengeMpRollWriteStartedForMatchId = null;
+      showChallengeToastNotification('No maps available.');
+      return;
     }
+    var picked = pickRandomFromArray(allRooms, 1)[0];
+    var roomId = picked.roomId;
+    var roomName = picked.roomName || roomId;
+    var villainSpecs = pickRandomCreatureSpecsForRoom(roomId);
+    if (!villainSpecs || !villainSpecs.length) {
+      challengeMpRollWriteStartedForMatchId = null;
+      showChallengeToastNotification('Could not roll creatures for map.');
+      return;
+    }
+    var arsenalCount = getChallengePlayerArsenalCount(villainSpecs);
+    var allyGameIds = pickRandomUniqueChallengePlayerGameIds(arsenalCount);
+    if (!allyGameIds.length) {
+      challengeMpRollWriteStartedForMatchId = null;
+      showChallengeToastNotification('Could not roll player creatures.');
+      return;
+    }
+    var allyEquips = pickRandomChallengePlayerEquips(arsenalCount);
+    if (!allyEquips.length) {
+      challengeMpRollWriteStartedForMatchId = null;
+      showChallengeToastNotification('Could not roll player equipment.');
+      return;
+    }
+    var chosenAt = Date.now();
+    console.log('[Challenges MP] chooser writing full roll', roomId, villainSpecs.length, 'villains', arsenalCount, 'arsenal slots');
+    ChallengeFirebaseService.patch(matchPath, {
+      chosenRoomId: roomId,
+      chosenRoomName: roomName,
+      chosenVillainSpecs: villainSpecs,
+      chosenAllyGameIds: allyGameIds,
+      chosenAllyEquips: allyEquips,
+      chosenAt: chosenAt
+    }).then(function() {
+      startRollFromSync(match, {
+        specs: villainSpecs,
+        arsenalCount: arsenalCount,
+        rawIdCount: allyGameIds.length,
+        rawEquipCount: allyEquips.length,
+        allyIds: allyGameIds,
+        allyEquips: allyEquips,
+        complete: true,
+        stale: false,
+        roomId: roomId,
+        roomName: roomName,
+        chosenAt: chosenAt
+      });
+    }).catch(function(err) {
+      challengeMpRollWriteStartedForMatchId = null;
+      console.warn('[Challenges MP] chooser PATCH full roll failed', err);
+      showChallengeToastNotification('Could not sync challenge roll.');
+    });
+  }
+
+  function chooserCompletePartialRoll(match, sync) {
+    if (challengeMpRollWriteStartedForMatchId === matchId) return;
+    challengeMpRollWriteStartedForMatchId = matchId;
+    var allyIds = sync.allyIds.slice();
+    var allyEquips = sync.allyEquips.slice();
+    if (allyIds.length < sync.arsenalCount) {
+      allyIds = pickRandomUniqueChallengePlayerGameIds(sync.arsenalCount);
+    }
+    if (allyEquips.length < sync.arsenalCount) {
+      allyEquips = pickRandomChallengePlayerEquips(sync.arsenalCount);
+    }
+    if (!allyIds.length || !allyEquips.length) {
+      challengeMpRollWriteStartedForMatchId = null;
+      chooserWriteFullRoll(match);
+      return;
+    }
+    var chosenAt = Date.now();
+    console.log('[Challenges MP] chooser completing partial roll (allies)', sync.roomId, sync.arsenalCount, 'slots');
+    ChallengeFirebaseService.patch(matchPath, {
+      chosenAllyGameIds: allyIds,
+      chosenAllyEquips: allyEquips,
+      chosenAt: chosenAt
+    }).finally(function() {
+      startRollFromSync(match, {
+        specs: sync.specs,
+        arsenalCount: sync.arsenalCount,
+        rawIdCount: allyIds.length,
+        rawEquipCount: allyEquips.length,
+        allyIds: allyIds,
+        allyEquips: allyEquips,
+        complete: true,
+        stale: false,
+        roomId: sync.roomId,
+        roomName: sync.roomName,
+        chosenAt: chosenAt
+      });
+    });
+  }
+
+  function onMatchPoll(match) {
+    pollCount++;
+    var sync = getMatchRollSyncState(match);
+    if (sync.complete && !sync.stale) {
+      startRollFromSync(match, sync);
+      return;
+    }
+    if (isChooser) {
+      if (sync.stale || !sync.roomId || !sync.specs.length) {
+        chooserWriteFullRoll(match);
+      } else if (!sync.complete) {
+        chooserCompletePartialRoll(match, sync);
+      }
+      return;
+    }
+    if (pollCount === 1 || pollCount % 5 === 0) {
+      console.log('[Challenges MP] waiting for chooser roll', pollCount,
+        sync.roomId || '(no map)',
+        sync.specs.length, 'villains',
+        sync.rawIdCount + '/' + sync.arsenalCount, 'allies',
+        sync.rawEquipCount + '/' + sync.arsenalCount, 'equips',
+        sync.stale ? '(stale — chooser will re-roll)' : '');
+    }
+    if (pollCount >= maxPolls) {
+      stopPoll();
+      console.warn('[Challenges MP] timed out waiting for chooser roll from Firebase');
+      showChallengeToastNotification('Timed out waiting for opponent to roll the challenge.');
+    }
+  }
+
+  ChallengeFirebaseService.get(matchPath, null).then(function(match) {
+    onMatchPoll(match || {});
+    if (challengeMpRollStartedForMatchId === matchId) return;
+    pollTimer = setInterval(function() {
+      if (challengeMpRollStartedForMatchId === matchId) {
+        stopPoll();
+        return;
+      }
+      ChallengeFirebaseService.get(matchPath, null).then(function(m) {
+        onMatchPoll(m || {});
+      });
+    }, CHALLENGE_MP_ROLL_POLL_MS);
   });
 }
 
@@ -1268,7 +1487,11 @@ function saveChallengeRunToLeaderboard(run) {
     score: run.score,
     replay: run.replay || '',
     ticks: run.ticks,
-    grade: run.grade
+    grade: run.grade,
+    playerArsenalBonus: run.playerArsenalBonus != null ? run.playerArsenalBonus : 0,
+    playerArsenalAverage: run.playerArsenalAverage,
+    playerArsenalMapMax: run.playerArsenalMapMax,
+    playerArsenalItems: Array.isArray(run.playerArsenalItems) ? run.playerArsenalItems : []
   };
   var path = getChallengeLeaderboardPath();
   ChallengeFirebaseService.get(path, []).then(function(list) {
@@ -1614,6 +1837,10 @@ function setupChallengesModalResponsiveLayout(modalRef, contentRoot, initChromeF
       window.__challengesFooterQueueIntervalId = null;
     }
     if (typeof window !== 'undefined') window.__challengesSyncFooter = null;
+    if (typeof window !== 'undefined') {
+      window.__challengesRunMultiplayerRoll = null;
+      window.__challengesMpSetRollResult = null;
+    }
   };
 }
 
@@ -1993,7 +2220,13 @@ function openChallengesModal(initialTabIndex) {
             player1Key: sortedKeys[0],
             player2Key: sortedKeys[1],
             createdAt: now,
-            acceptances: {}
+            acceptances: {},
+            chosenRoomId: null,
+            chosenRoomName: null,
+            chosenVillainSpecs: null,
+            chosenAllyGameIds: null,
+            chosenAllyEquips: null,
+            chosenAt: null
           };
           var base = CHALLENGE_MULTIPLAYER_BASE;
           var isCreator = (a.key === myKey || b.key === myKey);
@@ -2143,6 +2376,11 @@ function openChallengesModal(initialTabIndex) {
     } else if (state.matchedOpponent && state.matchId && !state.bothAccepted) {
       console.log('[Challenges MP]','panel open: restoring matched state, starting acceptPoll');
       startAcceptPolling();
+    } else if (state.bothAccepted && state.matchId && !challengeMultiplayerContext) {
+      console.log('[Challenges MP]','panel open: both accepted, resuming match roll');
+      challengeMpRollStartedForMatchId = null;
+      challengeMpRollWriteStartedForMatchId = null;
+      handleMultiplayerMatchReady(state.matchId, state.myKey);
     } else {
       console.log('[Challenges MP]','panel open: state', { inQueue: state.inQueue, myKey: state.myKey, matchedOpponent: state.matchedOpponent, matchId: state.matchId, bothAccepted: state.bothAccepted });
     }
@@ -2296,6 +2534,8 @@ function openChallengesModal(initialTabIndex) {
   var soloBodyHtml = [
     '<p style="' + helpTitleP + '">' + t(hp + 'howToPlayTitle') + '</p>',
     '<p style="' + helpBlockP + '">' + t(hp + 'howToPlayText') + '</p>',
+    '<p style="' + helpTitleP + '">' + t(hp + 'playerArsenalTitle') + '</p>',
+    '<p style="' + helpBlockP + '">' + t(hp + 'playerArsenalText') + '</p>',
     '<p style="' + helpTitleP + '">' + t(hp + 'title') + '</p>',
     '<p style="' + helpSubP + '"><strong>' + t(hp + 'formula') + '</strong></p>',
     '<p style="' + helpBlockP + '">' + t(hp + 'formulaText') + '</p>',
@@ -2310,12 +2550,16 @@ function openChallengesModal(initialTabIndex) {
     '<li style="margin:0;">' + t(hp + 'gradeD') + '</li>',
     '<li style="margin:0;">' + t(hp + 'gradeF') + '</li>',
     '</ul>',
+    '<p style="' + helpSubP + '"><strong>' + t(hp + 'arsenalBonusTitle') + '</strong></p>',
+    '<p style="' + helpBlockP + '">' + t(hp + 'arsenalBonusText') + '</p>',
     '<p style="' + helpSubP + '"><strong>' + t(hp + 'difficultyMultiplier') + '</strong></p>',
     '<p style="' + helpEndP + '">' + t(hp + 'difficultyMultiplierDescription').replace('^{power}', '^' + CHALLENGE_DIFFICULTY_POWER) + '</p>'
   ].join('');
   var mpBodyHtml = [
     '<p style="' + helpTitleP + '">' + t(hp + 'mpHowToPlayTitle') + '</p>',
     '<p style="' + helpBlockP + '">' + t(hp + 'mpHowToPlayText') + '</p>',
+    '<p style="' + helpTitleP + '">' + t(hp + 'mpSharedArsenalTitle') + '</p>',
+    '<p style="' + helpBlockP + '">' + t(hp + 'mpSharedArsenalText') + '</p>',
     '<p style="' + helpTitleP + '">' + t(hp + 'mpRatingTitle') + '</p>',
     '<p style="' + helpEndP + '">' + t(hp + 'mpRatingText') + '</p>'
   ].join('');
@@ -2369,10 +2613,7 @@ function openChallengesModal(initialTabIndex) {
     minHeight: '0'
   });
 
-  // Summary elements – created first so Col1/Col2 roll handlers can update them (shown in Col1 bottom)
-  const summaryMapEl = document.createElement('p');
-  summaryMapEl.style.margin = '0 0 4px 0';
-  summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' —';
+  // Summary elements – created first so Col1/Col2 roll handlers can update them
   const summaryCreaturesEl = document.createElement('p');
   summaryCreaturesEl.style.margin = '0';
   summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
@@ -2391,7 +2632,7 @@ function openChallengesModal(initialTabIndex) {
   summaryExpectedScoreValueSpan.textContent = '—';
   summaryExpectedScoreEl.appendChild(summaryExpectedScoreValueSpan);
 
-  // Col1: Top = Maps, Bottom = Summary
+  // Col1: Summary (map + stats), then player arsenal
   const leftCol = document.createElement('div');
   leftCol.className = 'challenges-col-left';
   Object.assign(leftCol.style, {
@@ -2403,14 +2644,9 @@ function openChallengesModal(initialTabIndex) {
     flexDirection: 'column',
     padding: '8px',
     gap: '8px',
-    overflowY: 'auto',
+    overflow: 'hidden',
     minHeight: '0'
   });
-  const mapBox = createPlaceholderBox(t('mods.challenges.maps'), '');
-  const mapResultContainer = document.createElement('div');
-  mapResultContainer.style.cssText = 'margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;';
-  mapBox.querySelector('.widget-bottom').innerHTML = '';
-  mapBox.querySelector('.widget-bottom').appendChild(mapResultContainer);
 
   var PLACEHOLDER_ICONS = {
     map: 'https://bestiaryarena.com/assets/icons/minotaurstatue.png',
@@ -2418,6 +2654,10 @@ function openChallengesModal(initialTabIndex) {
     equip: 'https://bestiaryarena.com/assets/icons/empty-equip.png',
     stats: 'https://bestiaryarena.com/assets/icons/spellbook.png'
   };
+
+  const mapResultContainer = document.createElement('div');
+  mapResultContainer.style.cssText = 'margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;';
+
   function setMapPlaceholder() {
     mapResultContainer.innerHTML = '';
     var thumb = document.createElement('div');
@@ -2436,14 +2676,26 @@ function openChallengesModal(initialTabIndex) {
   }
   setMapPlaceholder();
 
-  leftCol.appendChild(mapBox);
   const summaryBox = createPlaceholderBox(t('mods.challenges.summary'), '');
-  summaryBox.querySelector('.widget-bottom').innerHTML = '';
-  summaryBox.querySelector('.widget-bottom').appendChild(summaryMapEl);
-  summaryBox.querySelector('.widget-bottom').appendChild(summaryCreaturesEl);
-  summaryBox.querySelector('.widget-bottom').appendChild(summaryDifficultyEl);
-  summaryBox.querySelector('.widget-bottom').appendChild(summaryExpectedScoreEl);
+  applyChallengesCol1BoxLayout(summaryBox, 11);
+  const summaryBody = summaryBox.querySelector('.widget-bottom');
+  summaryBody.innerHTML = '';
+  summaryBody.style.display = 'flex';
+  summaryBody.style.flexDirection = 'column';
+  summaryBody.style.gap = '6px';
+  summaryBody.appendChild(mapResultContainer);
+  summaryBody.appendChild(summaryCreaturesEl);
+  summaryBody.appendChild(summaryDifficultyEl);
+  summaryBody.appendChild(summaryExpectedScoreEl);
   leftCol.appendChild(summaryBox);
+
+  const playerArsenalContainer = document.createElement('div');
+  playerArsenalContainer.style.cssText = 'margin: 0; display: flex; flex-direction: column; gap: 4px;';
+  const playerArsenalBox = createPlaceholderBox(t('mods.challenges.playerArsenal'), '');
+  applyChallengesCol1BoxLayout(playerArsenalBox, 9);
+  playerArsenalBox.querySelector('.widget-bottom').appendChild(playerArsenalContainer);
+  renderPlayerArsenalPanel(playerArsenalContainer, null, null);
+  leftCol.appendChild(playerArsenalBox);
 
   function getRoomThumbnailUrl(roomId) {
     return '/assets/room-thumbnails/' + (roomId || '') + '.png';
@@ -2513,6 +2765,7 @@ function openChallengesModal(initialTabIndex) {
       var villainsToPlace = Math.min(rolledCreatureSpecs.length, walkableCount);
       if (villainsToPlace + diff.alliesAllowed <= walkableCount) break;
     } while (attempt < maxAttempts);
+    clearChallengePlayerArsenalRoll();
     return rolledCreatureSpecs;
   }
 
@@ -2521,7 +2774,6 @@ function openChallengesModal(initialTabIndex) {
     try {
       computeMapRoll();
       setMapResultToRolled(rolledRoomId, rolledRoomName);
-      summaryMapEl.textContent = 'Map: ' + rolledRoomName;
       console.log('[Challenges Mod] rollMap: rolled', rolledRoomName, '(' + rolledRoomId + ')');
     } catch (e) {
       console.error('[Challenges Mod] rollMapHandler error:', e);
@@ -2794,6 +3046,311 @@ function openChallengesModal(initialTabIndex) {
     return card;
   }
 
+  function buildCompactEquipPortrait(equipSpec) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:1px; width:44px;';
+    var eqName = getEquipmentName(equipSpec.gameId);
+    var eqPoints = getPlayerArsenalEquipmentScorePoints(equipSpec);
+    wrap.title = eqName + ' T' + (equipSpec.tier || 1);
+    if (api && api.ui && api.ui.components && typeof api.ui.components.createItemPortrait === 'function') {
+      try {
+        var eqData = getState() && getState().utils && getState().utils.getEquipment ? getState().utils.getEquipment(equipSpec.gameId) : null;
+        var itemId = (eqData && eqData.metadata && eqData.metadata.spriteId) ? eqData.metadata.spriteId : equipSpec.gameId;
+        var equipPortrait = api.ui.components.createItemPortrait({
+          itemId: itemId,
+          tier: equipSpec.tier || 1,
+          stat: equipSpec.stat || 'ad'
+        });
+        if (equipPortrait && equipPortrait.nodeType === 1) {
+          var portraitEl = equipPortrait.tagName === 'BUTTON' && equipPortrait.firstChild ? equipPortrait.firstChild : equipPortrait;
+          var portraitWrap = document.createElement('div');
+          portraitWrap.style.cssText = 'width:32px; height:32px; display:flex; align-items:center; justify-content:center;';
+          portraitEl.style.position = 'relative';
+          portraitWrap.appendChild(portraitEl);
+          wrap.appendChild(portraitWrap);
+        }
+      } catch (e) {
+        console.warn('[Challenges Mod] buildCompactEquipPortrait failed:', e);
+      }
+    }
+    if (!wrap.firstChild) {
+      var ph = document.createElement('div');
+      ph.style.cssText = 'width:32px; height:32px; background:rgba(68,68,68,0.5); border:1px solid #555; border-radius:4px;';
+      wrap.appendChild(ph);
+    }
+    var scoreEl = document.createElement('span');
+    scoreEl.style.cssText = 'font-size:9px; line-height:1.1; color:' + CHALLENGE_COLORS.SECONDARY + '; text-align:center;';
+    scoreEl.textContent = formatChallengePlayerArsenalItemScore(eqPoints);
+    scoreEl.title = t('mods.challenges.arsenalItemScoreLabel') + ': ' + formatChallengePlayerArsenalItemScore(eqPoints);
+    wrap.appendChild(scoreEl);
+    return wrap;
+  }
+
+  function buildCompactPlayerCreatureRow(gameId) {
+    var name = getCreatureName(gameId);
+    var points = getPlayerArsenalCreatureScorePoints(gameId);
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center; gap:6px; padding:2px 0; min-width:0;';
+    row.title = name;
+    var img = document.createElement('img');
+    img.src = getCreaturePortraitUrl(gameId);
+    img.alt = name;
+    img.className = 'pixelated';
+    img.style.cssText = 'width:28px; height:28px; object-fit:cover; border-radius:3px; border:1px solid #555; flex-shrink:0;';
+    row.appendChild(img);
+    var label = document.createElement('span');
+    label.style.cssText = 'font-size:11px; line-height:1.2; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;';
+    label.textContent = name;
+    row.appendChild(label);
+    var scoreEl = document.createElement('span');
+    scoreEl.style.cssText = 'font-size:10px; line-height:1.2; color:' + CHALLENGE_COLORS.SECONDARY + '; flex-shrink:0;';
+    scoreEl.textContent = formatChallengePlayerArsenalItemScore(points);
+    scoreEl.title = t('mods.challenges.arsenalItemScoreLabel') + ': ' + formatChallengePlayerArsenalItemScore(points);
+    row.appendChild(scoreEl);
+    return row;
+  }
+
+  function renderPlayerArsenalPanel(container, gameIds, equipSpecs, villainSpecs) {
+    container.innerHTML = '';
+    var specs = villainSpecs;
+    if (!specs || !specs.length) specs = rolledCreatureSpecs;
+    var arsenalCount = getChallengePlayerArsenalCount(specs);
+    var enemyCount = specs && specs.length ? specs.length : 0;
+    var ids = normalizeChallengeAllyGameIds(gameIds, arsenalCount);
+    var equips = normalizeChallengeAllyEquips(equipSpecs, arsenalCount);
+    if (!ids.length && !equips.length) {
+      var empty = document.createElement('p');
+      empty.style.cssText = 'margin:0; font-size:12px; color:#888; text-align:center;';
+      empty.textContent = t('mods.challenges.playerArsenalEmpty');
+      container.appendChild(empty);
+      return;
+    }
+    var slotsEl = document.createElement('p');
+    slotsEl.style.cssText = 'margin:0 0 6px 0; font-size:10px; color:' + CHALLENGE_COLORS.SECONDARY + '; text-align:center;';
+    slotsEl.textContent = t('mods.challenges.playerArsenalSlots')
+      .replace('{n}', String(arsenalCount))
+      .replace('{enemies}', String(enemyCount));
+    container.appendChild(slotsEl);
+    if (ids.length) {
+      var creaturesHeader = document.createElement('p');
+      creaturesHeader.style.cssText = 'margin:0 0 4px 0; font-size:11px; font-weight:bold; color:' + CHALLENGE_COLORS.PRIMARY + ';';
+      creaturesHeader.textContent = t('mods.challenges.playerArsenalCreatures') + ' (' + ids.length + ')';
+      container.appendChild(creaturesHeader);
+      var creaturesList = document.createElement('div');
+      creaturesList.style.cssText = 'display:flex; flex-direction:column; gap:2px; margin-bottom:8px;';
+      ids.forEach(function(gid) {
+        creaturesList.appendChild(buildCompactPlayerCreatureRow(gid));
+      });
+      container.appendChild(creaturesList);
+    }
+    if (equips.length) {
+      var equipHeader = document.createElement('p');
+      equipHeader.style.cssText = 'margin:0 0 4px 0; font-size:11px; font-weight:bold; color:' + CHALLENGE_COLORS.PRIMARY + ';';
+      equipHeader.textContent = t('mods.challenges.playerArsenalEquipment') + ' (' + equips.length + ')';
+      container.appendChild(equipHeader);
+      var equipGrid = document.createElement('div');
+      equipGrid.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px;';
+      equips.forEach(function(spec) {
+        equipGrid.appendChild(buildCompactEquipPortrait(spec));
+      });
+      container.appendChild(equipGrid);
+    }
+  }
+
+  function preparePlayerArsenalRollLayout(container, villainSpecs) {
+    container.innerHTML = '';
+    var specs = (villainSpecs && villainSpecs.length) ? villainSpecs : (rolledCreatureSpecs || []);
+    var arsenalCount = getChallengePlayerArsenalCount(specs);
+    var enemyCount = specs.length ? specs.length : 0;
+    var slotsEl = document.createElement('p');
+    slotsEl.style.cssText = 'margin:0 0 4px 0; font-size:10px; color:' + CHALLENGE_COLORS.SECONDARY + '; text-align:center;';
+    slotsEl.textContent = t('mods.challenges.playerArsenalSlots')
+      .replace('{n}', String(arsenalCount))
+      .replace('{enemies}', String(enemyCount));
+    container.appendChild(slotsEl);
+    var rollingEl = document.createElement('p');
+    rollingEl.style.cssText = 'margin:0 0 6px 0; font-size:11px; color:#888; text-align:center;';
+    rollingEl.textContent = t('mods.challenges.playerArsenalRolling');
+    rollingEl.dataset.role = 'arsenal-rolling-label';
+    container.appendChild(rollingEl);
+    var creaturesHeader = document.createElement('p');
+    creaturesHeader.style.cssText = 'margin:0 0 4px 0; font-size:11px; font-weight:bold; color:' + CHALLENGE_COLORS.PRIMARY + ';';
+    creaturesHeader.dataset.role = 'arsenal-creatures-header';
+    creaturesHeader.textContent = t('mods.challenges.playerArsenalCreatures') + ' (0/' + arsenalCount + ')';
+    container.appendChild(creaturesHeader);
+    var creaturesList = document.createElement('div');
+    creaturesList.style.cssText = 'display:flex; flex-direction:column; gap:2px; margin-bottom:8px;';
+    creaturesList.dataset.role = 'arsenal-creatures-list';
+    container.appendChild(creaturesList);
+    var equipHeader = document.createElement('p');
+    equipHeader.style.cssText = 'margin:0 0 4px 0; font-size:11px; font-weight:bold; color:' + CHALLENGE_COLORS.PRIMARY + '; display:none;';
+    equipHeader.dataset.role = 'arsenal-equip-header';
+    equipHeader.textContent = t('mods.challenges.playerArsenalEquipment') + ' (0/' + arsenalCount + ')';
+    container.appendChild(equipHeader);
+    var equipGrid = document.createElement('div');
+    equipGrid.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px;';
+    equipGrid.dataset.role = 'arsenal-equip-grid';
+    container.appendChild(equipGrid);
+    return {
+      specs: specs,
+      arsenalCount: arsenalCount,
+      creaturesHeader: creaturesHeader,
+      creaturesList: creaturesList,
+      equipHeader: equipHeader,
+      equipGrid: equipGrid,
+      rollingEl: rollingEl
+    };
+  }
+
+  function spinArsenalCreatureSlot(listEl, poolIds, finalGameId, durationMs) {
+    if (rollState.skipRequested || !poolIds.length) {
+      listEl.appendChild(buildCompactPlayerCreatureRow(finalGameId));
+      return Promise.resolve();
+    }
+    var spinRow = document.createElement('div');
+    spinRow.style.cssText = 'display:flex; align-items:center; gap:6px; padding:2px 0; min-width:0; opacity:0.85;';
+    var img = document.createElement('img');
+    img.className = 'pixelated';
+    img.style.cssText = 'width:28px; height:28px; object-fit:cover; border-radius:3px; border:1px solid #555; flex-shrink:0;';
+    var label = document.createElement('span');
+    label.style.cssText = 'font-size:11px; line-height:1.2; color:#888; flex:1; min-width:0;';
+    label.textContent = '…';
+    spinRow.appendChild(img);
+    spinRow.appendChild(label);
+    listEl.appendChild(spinRow);
+    return new Promise(function(resolve) {
+      var interval = setInterval(function() {
+        if (rollState.skipRequested) {
+          clearInterval(interval);
+          clearTimeout(timeoutId);
+          spinRow.replaceWith(buildCompactPlayerCreatureRow(finalGameId));
+          resolve();
+          return;
+        }
+        var spinId = poolIds[Math.floor(Math.random() * poolIds.length)];
+        img.src = getCreaturePortraitUrl(spinId);
+        label.textContent = getCreatureName(spinId);
+      }, ROLL_REEL_TICK_MS);
+      var timeoutId = setTimeout(function() {
+        clearInterval(interval);
+        spinRow.replaceWith(buildCompactPlayerCreatureRow(finalGameId));
+        resolve();
+      }, durationMs);
+    });
+  }
+
+  function spinArsenalEquipSlot(gridEl, poolIds, finalSpec, durationMs) {
+    if (rollState.skipRequested) {
+      gridEl.appendChild(buildCompactEquipPortrait(finalSpec));
+      return Promise.resolve();
+    }
+    var spinWrap = document.createElement('div');
+    spinWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:2px; width:40px; opacity:0.85;';
+    var ph = document.createElement('div');
+    ph.style.cssText = 'width:32px; height:32px; background:rgba(68,68,68,0.5); border:1px solid #555; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:14px; color:#888;';
+    ph.textContent = '?';
+    spinWrap.appendChild(ph);
+    gridEl.appendChild(spinWrap);
+    if (!poolIds.length) {
+      spinWrap.replaceWith(buildCompactEquipPortrait(finalSpec));
+      return Promise.resolve();
+    }
+    return new Promise(function(resolve) {
+      var interval = setInterval(function() {
+        if (rollState.skipRequested) {
+          clearInterval(interval);
+          clearTimeout(timeoutId);
+          spinWrap.replaceWith(buildCompactEquipPortrait(finalSpec));
+          resolve();
+          return;
+        }
+        ph.textContent = ph.textContent === '?' ? '…' : '?';
+      }, ROLL_REEL_TICK_MS);
+      var timeoutId = setTimeout(function() {
+        clearInterval(interval);
+        spinWrap.replaceWith(buildCompactEquipPortrait(finalSpec));
+        resolve();
+      }, durationMs);
+    });
+  }
+
+  /** Roll (or reveal pre-rolled) player arsenal after villain specs are final. Animated unless skip. */
+  function runPlayerArsenalRollSequence(container, villainSpecs, preRolledGameIds, preRolledEquips) {
+    var specs = (villainSpecs && villainSpecs.length) ? villainSpecs : (rolledCreatureSpecs || []);
+    if (!specs.length) {
+      renderPlayerArsenalPanel(container, null, null, specs);
+      return Promise.resolve();
+    }
+    var arsenalCount = getChallengePlayerArsenalCount(specs);
+    var gameIds;
+    var equips;
+    if (preRolledGameIds != null && preRolledEquips != null) {
+      gameIds = normalizeChallengeAllyGameIds(preRolledGameIds, arsenalCount);
+      equips = normalizeChallengeAllyEquips(preRolledEquips, arsenalCount);
+      rolledMapMaxCreatureMult = getMapMaxCreatureDifficultyMultiplier(specs);
+      rolledAllyArsenalCount = arsenalCount;
+      rolledAllyGameIds = gameIds;
+      rolledAllyEquips = equips;
+    } else {
+      var rolled = rollChallengePlayerArsenal(specs);
+      gameIds = rolled.gameIds;
+      equips = rolled.equips;
+    }
+    if (rollState.skipRequested) {
+      renderPlayerArsenalPanel(container, gameIds, equips, specs);
+      return Promise.resolve();
+    }
+    var layout = preparePlayerArsenalRollLayout(container, specs);
+    var creaturePool = getChallengePlayerArsenalCreatureGameIds();
+    var equipPool = getAllEquipmentGameIds();
+    function runCreatureSlots(index) {
+      if (index >= gameIds.length) {
+        layout.rollingEl.textContent = t('mods.challenges.playerArsenalEquipment') + '…';
+        layout.equipHeader.style.display = '';
+        return runEquipSlots(0);
+      }
+      return spinArsenalCreatureSlot(layout.creaturesList, creaturePool, gameIds[index], ARSENAL_ROLL_SLOT_DELAY_MS)
+        .then(function() {
+          layout.creaturesHeader.textContent = t('mods.challenges.playerArsenalCreatures') + ' (' + (index + 1) + '/' + gameIds.length + ')';
+          return runCreatureSlots(index + 1);
+        });
+    }
+    function runEquipSlots(index) {
+      if (index >= equips.length) {
+        if (layout.rollingEl.parentNode) layout.rollingEl.remove();
+        renderPlayerArsenalPanel(container, gameIds, equips, specs);
+        return Promise.resolve();
+      }
+      return spinArsenalEquipSlot(layout.equipGrid, equipPool, equips[index], ARSENAL_ROLL_SLOT_DELAY_MS)
+        .then(function() {
+          layout.equipHeader.textContent = t('mods.challenges.playerArsenalEquipment') + ' (' + (index + 1) + '/' + equips.length + ')';
+          return runEquipSlots(index + 1);
+        });
+    }
+    return runCreatureSlots(0);
+  }
+
+  function finalizeRollSummary(specs, gameIds, equips, summaryCreatures, summaryDifficulty, summaryExpected) {
+    summaryCreatures.textContent = t('mods.challenges.creaturesLabel') + ' ' + specs.length;
+    var diff = computeChallengeDifficulty(specs);
+    var mult = getDifficultyMultiplier(diff.difficulty);
+    var enemyCount = specs.length;
+    summaryDifficulty.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
+    summaryDifficulty.style.color = getDifficultyColor(mult) || '';
+    if (summaryExpected) {
+      summaryExpected.textContent = '~' + computeChallengeExpectedScore(diff.difficulty, 'A', 500, gameIds, equips, specs);
+    }
+  }
+
+  function finalizeVillainRollSummary(specs, summaryCreatures, summaryDifficulty) {
+    summaryCreatures.textContent = t('mods.challenges.creaturesLabel') + ' ' + specs.length;
+    var diff = computeChallengeDifficulty(specs);
+    var mult = getDifficultyMultiplier(diff.difficulty);
+    var enemyCount = specs.length;
+    summaryDifficulty.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
+    summaryDifficulty.style.color = getDifficultyColor(mult) || '';
+  }
+
   /** Minimal creature card for reel spin (portrait + name + Lv ? + placeholder stats). */
   function buildReelCreatureCard(gameId) {
     var name = getCreatureName(gameId);
@@ -2948,7 +3505,16 @@ function openChallengesModal(initialTabIndex) {
       summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
       summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
       summaryDifficultyEl.title = t('mods.challenges.alliesVsEnemiesTitle');
-      summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
+      runPlayerArsenalRollSequence(playerArsenalContainer, rolledCreatureSpecs).then(function() {
+        finalizeRollSummary(
+          rolledCreatureSpecs,
+          rolledAllyGameIds,
+          rolledAllyEquips,
+          summaryCreaturesEl,
+          summaryDifficultyValueSpan,
+          summaryExpectedScoreValueSpan
+        );
+      });
       console.log('[Challenges Mod] rollCreatures: rolled', rolledCreatureSpecs.length, names.join(', '), 'difficulty', diff.difficulty, 'allies', diff.alliesAllowed);
     } catch (e) {
       console.error('[Challenges Mod] rollCreaturesHandler error:', e);
@@ -3026,27 +3592,31 @@ function openChallengesModal(initialTabIndex) {
     creaturesListEl.innerHTML = '';
     creaturesListEl.textContent = t('mods.challenges.rolling');
     creaturesListEl.style.textAlign = 'center';
-    summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' —';
     summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
     summaryDifficultyValueSpan.textContent = '— (— v —)';
     summaryDifficultyValueSpan.style.color = '';
     summaryExpectedScoreValueSpan.textContent = '—';
+    renderPlayerArsenalPanel(playerArsenalContainer, null, null);
     var allRooms = getAllRoomsForReel();
     var creatureIds = getAllCreatureGameIds();
     function runCreatureSequence(index) {
       if (index >= specs.length) {
         return delay(ROLL_SLOT_DELAY_MS).then(function() {
-          summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' ' + roomName;
-          summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' ' + specs.length;
-          var diff = computeChallengeDifficulty(specs);
-          var mult = getDifficultyMultiplier(diff.difficulty);
-          var enemyCount = specs.length;
-          summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
-          summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
           summaryDifficultyEl.title = t('mods.challenges.alliesVsEnemiesTitle');
-          summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
-          finishRollState();
-          if (typeof onDone === 'function') onDone();
+          finalizeVillainRollSummary(specs, summaryCreaturesEl, summaryDifficultyValueSpan);
+          summaryExpectedScoreValueSpan.textContent = '—';
+          return runPlayerArsenalRollSequence(playerArsenalContainer, specs).then(function() {
+            summaryExpectedScoreValueSpan.textContent = '~' + computeChallengeExpectedScore(
+              computeChallengeDifficulty(specs).difficulty,
+              'A',
+              500,
+              rolledAllyGameIds,
+              rolledAllyEquips,
+              specs
+            );
+            finishRollState();
+            if (typeof onDone === 'function') onDone();
+          });
         });
       }
       return spinCreatureReel(creatureIds, specs[index], creaturesListEl, ROLL_SLOT_DELAY_MS)
@@ -3057,10 +3627,10 @@ function openChallengesModal(initialTabIndex) {
       creaturesListEl.textContent = '';
       creaturesListEl.style.textAlign = '';
       if (specs.length === 0) {
-        summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' ' + roomName;
         summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
         summaryDifficultyValueSpan.textContent = '— (— v —)';
         summaryExpectedScoreValueSpan.textContent = '—';
+        renderPlayerArsenalPanel(playerArsenalContainer, null, null);
         finishRollState();
         if (typeof onDone === 'function') onDone();
         return;
@@ -3071,8 +3641,10 @@ function openChallengesModal(initialTabIndex) {
 
   if (typeof window !== 'undefined') window.__challengesRunPredeterminedRoll = runPredeterminedRoll;
 
+  var mpPlayerArsenalContainer;
+
   /** Run predetermined roll animation inside the Multiplayer panel (same flow as solo). Calls onDone() when finished. */
-  function runMultiplayerPredeterminedRoll(roomId, roomName, specs, onDone) {
+  function runMultiplayerPredeterminedRoll(roomId, roomName, specs, onDone, allyGameIds, allyEquips) {
     if (!specs || !Array.isArray(specs)) specs = [];
     var allRooms = getAllRoomsForReel();
     var creatureIds = getAllCreatureGameIds();
@@ -3080,24 +3652,28 @@ function openChallengesModal(initialTabIndex) {
     mpCreaturesListEl.innerHTML = '';
     mpCreaturesListEl.textContent = t('mods.challenges.rolling');
     mpCreaturesListEl.style.textAlign = 'center';
-    mpSummaryMapEl.textContent = t('mods.challenges.mapLabel') + ' —';
     mpSummaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
     mpSummaryDifficultyValueSpan.textContent = '— (— v —)';
     mpSummaryDifficultyValueSpan.style.color = '';
     mpSummaryExpectedScoreValueSpan.textContent = '—';
+    renderPlayerArsenalPanel(mpPlayerArsenalContainer, null, null);
     function runCreatureSequence(index) {
       if (index >= specs.length) {
         return delay(ROLL_SLOT_DELAY_MS).then(function() {
-          mpSummaryMapEl.textContent = t('mods.challenges.mapLabel') + ' ' + roomName;
-          mpSummaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' ' + specs.length;
-          var diff = computeChallengeDifficulty(specs);
-          var mult = getDifficultyMultiplier(diff.difficulty);
-          var enemyCount = specs.length;
-          mpSummaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
-          mpSummaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
           mpSummaryDifficultyEl.title = t('mods.challenges.alliesVsEnemiesTitle');
-          mpSummaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
-          if (typeof onDone === 'function') onDone();
+          finalizeVillainRollSummary(specs, mpSummaryCreaturesEl, mpSummaryDifficultyValueSpan);
+          mpSummaryExpectedScoreValueSpan.textContent = '—';
+          return runPlayerArsenalRollSequence(mpPlayerArsenalContainer, specs, allyGameIds, allyEquips).then(function() {
+            mpSummaryExpectedScoreValueSpan.textContent = '~' + computeChallengeExpectedScore(
+              computeChallengeDifficulty(specs).difficulty,
+              'A',
+              500,
+              rolledAllyGameIds,
+              rolledAllyEquips,
+              specs
+            );
+            if (typeof onDone === 'function') onDone();
+          });
         });
       }
       return spinCreatureReel(creatureIds, specs[index], mpCreaturesListEl, ROLL_SLOT_DELAY_MS)
@@ -3108,10 +3684,10 @@ function openChallengesModal(initialTabIndex) {
       mpCreaturesListEl.textContent = '';
       mpCreaturesListEl.style.textAlign = '';
       if (specs.length === 0) {
-        mpSummaryMapEl.textContent = t('mods.challenges.mapLabel') + ' ' + roomName;
         mpSummaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
         mpSummaryDifficultyValueSpan.textContent = '— (— v —)';
         mpSummaryExpectedScoreValueSpan.textContent = '—';
+        renderPlayerArsenalPanel(mpPlayerArsenalContainer, null, null);
         if (typeof onDone === 'function') onDone();
         return;
       }
@@ -3137,11 +3713,11 @@ function openChallengesModal(initialTabIndex) {
     creaturesListEl.innerHTML = '';
     creaturesListEl.textContent = t('mods.challenges.rolling');
     creaturesListEl.style.textAlign = 'center';
-    summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' —';
     summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
     summaryDifficultyValueSpan.textContent = '— (— v —)';
     summaryDifficultyValueSpan.style.color = '';
     summaryExpectedScoreValueSpan.textContent = '—';
+    renderPlayerArsenalPanel(playerArsenalContainer, null, null);
 
     (function runSlotRoll() {
       var roomId, roomName, specs;
@@ -3166,16 +3742,20 @@ function openChallengesModal(initialTabIndex) {
       function runCreatureEquipmentSequence(index) {
         if (index >= specs.length) {
           return delay(ROLL_SLOT_DELAY_MS).then(function() {
-            summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' ' + roomName;
-            summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' ' + specs.length;
-            var diff = computeChallengeDifficulty(specs);
-            var mult = getDifficultyMultiplier(diff.difficulty);
-            var enemyCount = specs.length;
-            summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
-            summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
             summaryDifficultyEl.title = t('mods.challenges.alliesVsEnemiesTitle');
-            summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
-            finishRollState();
+            finalizeVillainRollSummary(specs, summaryCreaturesEl, summaryDifficultyValueSpan);
+            summaryExpectedScoreValueSpan.textContent = '—';
+            return runPlayerArsenalRollSequence(playerArsenalContainer, specs).then(function() {
+              summaryExpectedScoreValueSpan.textContent = '~' + computeChallengeExpectedScore(
+                computeChallengeDifficulty(specs).difficulty,
+                'A',
+                500,
+                rolledAllyGameIds,
+                rolledAllyEquips,
+                specs
+              );
+              finishRollState();
+            });
           });
         }
         return spinCreatureReel(creatureIds, specs[index], creaturesListEl, ROLL_SLOT_DELAY_MS)
@@ -3191,11 +3771,11 @@ function openChallengesModal(initialTabIndex) {
         creaturesListEl.textContent = '';
         creaturesListEl.style.textAlign = '';
         if (specs.length === 0) {
-          summaryMapEl.textContent = t('mods.challenges.mapLabel') + ' ' + roomName;
           summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
           summaryDifficultyValueSpan.textContent = '— (— v —)';
           summaryDifficultyValueSpan.style.color = '';
           summaryExpectedScoreValueSpan.textContent = '—';
+          renderPlayerArsenalPanel(playerArsenalContainer, null, null);
           finishRollState();
           return;
         }
@@ -3370,9 +3950,6 @@ function openChallengesModal(initialTabIndex) {
     gap: '0',
     minHeight: '0'
   });
-  const mpSummaryMapEl = document.createElement('p');
-  mpSummaryMapEl.style.margin = '0 0 4px 0';
-  mpSummaryMapEl.textContent = t('mods.challenges.mapLabel') + ' —';
   const mpSummaryCreaturesEl = document.createElement('p');
   mpSummaryCreaturesEl.style.margin = '0';
   mpSummaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' —';
@@ -3427,6 +4004,8 @@ function openChallengesModal(initialTabIndex) {
     mpMapResultContainer.textContent = text;
   }
   mpSetMapPlaceholder();
+  mpPlayerArsenalContainer = document.createElement('div');
+  mpPlayerArsenalContainer.style.cssText = 'margin: 0; display: flex; flex-direction: column; gap: 4px;';
   const mpLeftCol = document.createElement('div');
   mpLeftCol.className = 'challenges-col-left';
   Object.assign(mpLeftCol.style, {
@@ -3438,21 +4017,26 @@ function openChallengesModal(initialTabIndex) {
     flexDirection: 'column',
     padding: '8px',
     gap: '8px',
-    overflowY: 'auto',
+    overflow: 'hidden',
     minHeight: '0'
   });
-  const mpMapBox = createPlaceholderBox(t('mods.challenges.maps'), '');
-  mpMapBox.querySelector('.widget-bottom').innerHTML = '';
-  mpMapBox.querySelector('.widget-bottom').appendChild(mpMapResultContainer);
-  mpLeftCol.appendChild(mpMapBox);
   const mpSummaryBox = createPlaceholderBox(t('mods.challenges.summary'), '');
+  applyChallengesCol1BoxLayout(mpSummaryBox, 11);
   const mpSummaryBody = mpSummaryBox.querySelector('.widget-bottom');
   mpSummaryBody.innerHTML = '';
-  mpSummaryBody.appendChild(mpSummaryMapEl);
+  mpSummaryBody.style.display = 'flex';
+  mpSummaryBody.style.flexDirection = 'column';
+  mpSummaryBody.style.gap = '6px';
+  mpSummaryBody.appendChild(mpMapResultContainer);
   mpSummaryBody.appendChild(mpSummaryCreaturesEl);
   mpSummaryBody.appendChild(mpSummaryDifficultyEl);
   mpSummaryBody.appendChild(mpSummaryExpectedScoreEl);
   mpLeftCol.appendChild(mpSummaryBox);
+  const mpPlayerArsenalBox = createPlaceholderBox(t('mods.challenges.playerArsenal'), '');
+  applyChallengesCol1BoxLayout(mpPlayerArsenalBox, 9);
+  mpPlayerArsenalBox.querySelector('.widget-bottom').appendChild(mpPlayerArsenalContainer);
+  renderPlayerArsenalPanel(mpPlayerArsenalContainer, null, null);
+  mpLeftCol.appendChild(mpPlayerArsenalBox);
   const mpMiddleCol = document.createElement('div');
   Object.assign(mpMiddleCol.style, {
     flex: '1 1 0',
@@ -3496,7 +4080,7 @@ function openChallengesModal(initialTabIndex) {
   multiplayerPanel.appendChild(mpContainer);
   refreshMultiplayerLeaderboard();
   if (typeof window !== 'undefined') {
-    window.__challengesMpSetRollResult = function(roomId, roomName, villainSpecs, diff, expectedScore) {
+    window.__challengesMpSetRollResult = function(roomId, roomName, villainSpecs, diff, expectedScore, allyGameIds, allyEquips) {
       mpSetMapResultToRolled(roomId, roomName || roomId);
       mpCreaturesListEl.innerHTML = '';
       if (villainSpecs && villainSpecs.length) {
@@ -3506,7 +4090,6 @@ function openChallengesModal(initialTabIndex) {
       } else {
         mpCreaturesListEl.appendChild(buildBlankCreatureCard());
       }
-      mpSummaryMapEl.textContent = t('mods.challenges.mapLabel') + ' ' + (roomName || roomId || '—');
       mpSummaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' ' + (villainSpecs && villainSpecs.length ? villainSpecs.length : '—');
       var multStr = (diff && typeof diff.difficulty === 'number') ? getDifficultyMultiplier(diff.difficulty).toFixed(2) : '—';
       var allies = (diff && diff.alliesAllowed != null) ? diff.alliesAllowed : '—';
@@ -3514,20 +4097,19 @@ function openChallengesModal(initialTabIndex) {
       mpSummaryDifficultyValueSpan.textContent = multStr + '× (' + allies + ' v ' + nV + ')';
       mpSummaryDifficultyValueSpan.style.color = multStr !== '—' ? (getDifficultyColor(parseFloat(multStr)) || '') : '';
       mpSummaryExpectedScoreValueSpan.textContent = expectedScore != null ? '~' + expectedScore : '—';
+      renderPlayerArsenalPanel(mpPlayerArsenalContainer, allyGameIds, allyEquips, villainSpecs);
     };
   }
 
   function restoreLastRollInModal() {
     if (rolledRoomId && rolledRoomName) {
       setMapResultToRolled(rolledRoomId, rolledRoomName);
-      summaryMapEl.textContent = 'Map: ' + rolledRoomName;
     }
     if (rolledCreatureSpecs && rolledCreatureSpecs.length) {
       creaturesListEl.innerHTML = '';
       rolledCreatureSpecs.forEach(function(spec) {
         creaturesListEl.appendChild(buildCreatureCard(spec));
       });
-      var names = rolledCreatureSpecs.map(function(s) { return getCreatureName(s.gameId); });
       summaryCreaturesEl.textContent = t('mods.challenges.creaturesLabel') + ' ' + rolledCreatureSpecs.length;
       var diff = computeChallengeDifficulty(rolledCreatureSpecs);
       var mult = getDifficultyMultiplier(diff.difficulty);
@@ -3535,7 +4117,8 @@ function openChallengesModal(initialTabIndex) {
       summaryDifficultyValueSpan.textContent = mult.toFixed(2) + '× (' + diff.alliesAllowed + ' v ' + enemyCount + ')';
       summaryDifficultyValueSpan.style.color = getDifficultyColor(mult) || '';
       summaryDifficultyEl.title = t('mods.challenges.alliesVsEnemiesTitle');
-      summaryExpectedScoreValueSpan.textContent = '~' + (Math.round(computeChallengeScore(500, diff.difficulty, 'A') / 100) * 100);
+      summaryExpectedScoreValueSpan.textContent = '~' + computeChallengeExpectedScore(diff.difficulty, 'A', 500, rolledAllyGameIds, rolledAllyEquips, rolledCreatureSpecs);
+      renderPlayerArsenalPanel(playerArsenalContainer, rolledAllyGameIds, rolledAllyEquips, rolledCreatureSpecs);
     }
   }
   restoreLastRollInModal();
@@ -3753,6 +4336,10 @@ let rolledRegionName = null;
 let rolledRoomId = null;
 let rolledRoomName = null;
 let rolledCreatureSpecs = null;
+let rolledAllyGameIds = null;
+let rolledAllyEquips = null;
+let rolledMapMaxCreatureMult = null;
+let rolledAllyArsenalCount = null;
 /** True after Start was used for the current roll; cleared when user rolls a new map. */
 let hasNavigatedWithCurrentRoll = false;
 
@@ -3948,6 +4535,420 @@ function pickRandomFromArray(arr, count) {
   return shuffled.slice(0, count);
 }
 
+var challengePlayerArsenalBackup = null;
+var challengePendingPlayerArsenal = null;
+var challengeActivePlayerArsenal = null;
+var challengeActiveVillainSpecs = null;
+var challengePlayerArsenalNavigationUnsub = null;
+var challengePlayerArsenalApplyTimeoutId = null;
+
+function generateChallengePlayerMonsterId(index) {
+  var rand = Math.random().toString(36).slice(2, 10);
+  return 'ch-' + Date.now().toString(36) + '-' + index + '-' + rand;
+}
+
+function generateChallengePlayerEquipId(index) {
+  var rand = Math.random().toString(36).slice(2, 10);
+  return 'che-' + Date.now().toString(36) + '-' + index + '-' + rand;
+}
+
+function getAllEquipmentGameIds() {
+  var ids = [];
+  try {
+    var state = getState();
+    var getEquipment = state && state.utils && state.utils.getEquipment;
+    if (getEquipment) {
+      for (var i = 1; i <= CHALLENGE_EQUIP_GAMEID_MAX; i++) {
+        try {
+          var eq = getEquipment(i);
+          if (eq && eq.metadata && eq.metadata.name) ids.push(i);
+        } catch (_) {
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Challenges Mod] getAllEquipmentGameIds error:', e);
+  }
+  return ids;
+}
+
+function getChallengeRandomEquipTier() {
+  return getRandomInt(CHALLENGE_EQUIP_TIER_MIN, CHALLENGE_EQUIP_TIER_MAX);
+}
+
+function getChallengeRandomEquipStat() {
+  return CHALLENGE_EQUIP_STATS[Math.floor(Math.random() * CHALLENGE_EQUIP_STATS.length)];
+}
+
+function getChallengePlayerLevelExp() {
+  try {
+    var state = getState();
+    if (state && state.utils && typeof state.utils.expAtLevel === 'function') {
+      return state.utils.expAtLevel(CHALLENGE_PLAYER_LEVEL);
+    }
+  } catch (e) {}
+  return 0;
+}
+
+function pickRandomUniqueChallengePlayerGameIds(count) {
+  var pool = getChallengePlayerArsenalCreatureGameIds();
+  if (!pool || !pool.length) return [];
+  if (pool.length >= count) {
+    return pickRandomFromArray(pool, count);
+  }
+  var out = pickRandomFromArray(pool, pool.length);
+  while (out.length < count) {
+    out.push(pool[Math.floor(Math.random() * pool.length)]);
+  }
+  return out;
+}
+
+function getChallengePlayerArsenalCreatureGameIds() {
+  return getAllCreatureGameIds().filter(function(gameId) {
+    var name = getCreatureName(gameId);
+    if (!name) return false;
+    if (name.toLowerCase().indexOf('gazer') !== -1) return false;
+    return isCreatureAwakenable(gameId);
+  });
+}
+
+function normalizeChallengeAllyGameIds(raw, maxCount) {
+  if (raw == null) return [];
+  var ids = Array.isArray(raw)
+    ? raw.slice()
+    : (typeof raw === 'object'
+      ? Object.keys(raw).sort(function(a, b) { return Number(a) - Number(b); }).map(function(k) { return raw[k]; })
+      : []);
+  var out = [];
+  for (var i = 0; i < ids.length; i++) {
+    var n = Number(ids[i]);
+    if (!Number.isFinite(n)) continue;
+    var name = getCreatureName(n);
+    if (!name || name.toLowerCase().indexOf('gazer') !== -1 || !isCreatureAwakenable(n)) continue;
+    out.push(n);
+  }
+  var limit = maxCount != null ? maxCount : getChallengePlayerArsenalCount();
+  return out.slice(0, limit);
+}
+
+function clearChallengePlayerArsenalRoll() {
+  rolledAllyGameIds = null;
+  rolledAllyEquips = null;
+  rolledMapMaxCreatureMult = null;
+  rolledAllyArsenalCount = null;
+}
+
+function rollChallengePlayerArsenal(villainSpecs) {
+  var specs = villainSpecs;
+  if (!specs || !specs.length) {
+    if (rolledCreatureSpecs && rolledCreatureSpecs.length) specs = rolledCreatureSpecs;
+  }
+  if (!specs || !specs.length) {
+    clearChallengePlayerArsenalRoll();
+    return { gameIds: [], equips: [], count: 0, mapMax: 1 };
+  }
+  var arsenalCount = getChallengePlayerArsenalCount(specs);
+  rolledMapMaxCreatureMult = getMapMaxCreatureDifficultyMultiplier(specs);
+  rolledAllyArsenalCount = arsenalCount;
+  rolledAllyGameIds = pickRandomUniqueChallengePlayerGameIds(arsenalCount);
+  rolledAllyEquips = pickRandomChallengePlayerEquips(arsenalCount);
+  console.log('[Challenges Mod] player arsenal rolled:', arsenalCount, 'slots (2×', specs.length, 'enemies)');
+  return {
+    gameIds: rolledAllyGameIds,
+    equips: rolledAllyEquips,
+    count: arsenalCount,
+    mapMax: rolledMapMaxCreatureMult
+  };
+}
+
+function pickRandomChallengePlayerEquips(count) {
+  var pool = getAllEquipmentGameIds();
+  if (!pool.length) return [];
+  var out = [];
+  for (var i = 0; i < count; i++) {
+    out.push({
+      gameId: pool[Math.floor(Math.random() * pool.length)],
+      stat: getChallengeRandomEquipStat(),
+      tier: getChallengeRandomEquipTier()
+    });
+  }
+  return out;
+}
+
+function normalizeChallengeAllyEquips(raw, maxCount) {
+  if (raw == null) return [];
+  var list = Array.isArray(raw)
+    ? raw.slice()
+    : (typeof raw === 'object'
+      ? Object.keys(raw).sort(function(a, b) { return Number(a) - Number(b); }).map(function(k) { return raw[k]; })
+      : []);
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    var spec = list[i];
+    if (!spec || spec.gameId == null) continue;
+    var gameId = Number(spec.gameId);
+    if (!Number.isFinite(gameId)) continue;
+    var stat = CHALLENGE_EQUIP_STATS.indexOf(spec.stat) >= 0 ? spec.stat : CHALLENGE_EQUIP_STATS[0];
+    var tier = CHALLENGE_EQUIP_TIER_MIN;
+    if (spec.tier != null) {
+      tier = Math.min(CHALLENGE_EQUIP_TIER_MAX, Math.max(CHALLENGE_EQUIP_TIER_MIN, Number(spec.tier) || CHALLENGE_EQUIP_TIER_MIN));
+    }
+    out.push({ gameId: gameId, stat: stat, tier: tier });
+  }
+  var limit = maxCount != null ? maxCount : getChallengePlayerArsenalCount();
+  return out.slice(0, limit);
+}
+
+function buildChallengePlayerEquips(equipSpecs) {
+  return equipSpecs.map(function(spec, index) {
+    return {
+      id: generateChallengePlayerEquipId(index),
+      gameId: spec.gameId,
+      stat: spec.stat,
+      tier: spec.tier
+    };
+  });
+}
+
+function countRawFirebaseArray(raw) {
+  if (raw == null) return 0;
+  if (Array.isArray(raw)) return raw.length;
+  if (typeof raw === 'object') return Object.keys(raw).length;
+  return 0;
+}
+
+function getMatchRollSyncState(match) {
+  var specs = normalizeVillainSpecsArray(match && match.chosenVillainSpecs);
+  var arsenalCount = specs.length ? getChallengePlayerArsenalCount(specs) : 0;
+  var rawIdCount = countRawFirebaseArray(match && match.chosenAllyGameIds);
+  var rawEquipCount = countRawFirebaseArray(match && match.chosenAllyEquips);
+  var allyIds = normalizeChallengeAllyGameIds(match && match.chosenAllyGameIds, arsenalCount);
+  var allyEquips = normalizeChallengeAllyEquips(match && match.chosenAllyEquips, arsenalCount);
+  var complete = !!(match && match.chosenRoomId && specs.length > 0
+    && rawIdCount >= arsenalCount && rawEquipCount >= arsenalCount);
+  var stale = !!(match && match.chosenRoomId && specs.length > 0 && match.createdAt
+    && (!match.chosenAt || match.chosenAt < match.createdAt));
+  return {
+    specs: specs,
+    arsenalCount: arsenalCount,
+    rawIdCount: rawIdCount,
+    rawEquipCount: rawEquipCount,
+    allyIds: allyIds,
+    allyEquips: allyEquips,
+    complete: complete,
+    stale: stale,
+    roomId: match && match.chosenRoomId,
+    roomName: match && match.chosenRoomName,
+    chosenAt: match && match.chosenAt
+  };
+}
+
+function isChallengePlayerArsenalReady(gameIds, equipSpecs, villainSpecs) {
+  var count = getChallengePlayerArsenalCount(villainSpecs);
+  return countRawFirebaseArray(gameIds) >= count && countRawFirebaseArray(equipSpecs) >= count;
+}
+
+function scheduleSyncedMultiplayerRoll(chosenAt, fn) {
+  var base = (typeof chosenAt === 'number' && chosenAt > 0) ? chosenAt : Date.now();
+  var syncAt = base + CHALLENGE_MP_ROLL_SYNC_DELAY_MS;
+  var delay = Math.max(0, syncAt - Date.now());
+  console.log('[Challenges MP] synced roll starts in', delay, 'ms');
+  setTimeout(fn, delay);
+}
+
+function buildChallengePlayerMonsters(gameIds) {
+  var exp = getChallengePlayerLevelExp();
+  var now = Date.now();
+  return gameIds.map(function(gameId, index) {
+    return {
+      id: generateChallengePlayerMonsterId(index),
+      gameId: gameId,
+      hp: CHALLENGE_PLAYER_GENE_VALUE,
+      ad: CHALLENGE_PLAYER_GENE_VALUE,
+      ap: CHALLENGE_PLAYER_GENE_VALUE,
+      armor: CHALLENGE_PLAYER_GENE_VALUE,
+      magicResist: CHALLENGE_PLAYER_GENE_VALUE,
+      exp: exp,
+      tier: 6,
+      shiny: true,
+      awaken: true,
+      awakened: true,
+      isAwakened: true,
+      locked: false,
+      createdAt: now + index
+    };
+  });
+}
+
+function backupChallengePlayerArsenalIfNeeded() {
+  if (challengePlayerArsenalBackup) return;
+  try {
+    var state = getState();
+    var player = state && state.player;
+    if (!player || typeof player.getSnapshot !== 'function') return;
+    var ctx = player.getSnapshot().context;
+    if (!ctx) return;
+    challengePlayerArsenalBackup = {
+      monsters: JSON.parse(JSON.stringify(Array.isArray(ctx.monsters) ? ctx.monsters : [])),
+      equips: JSON.parse(JSON.stringify(Array.isArray(ctx.equips) ? ctx.equips : []))
+    };
+  } catch (e) {
+    console.warn('[Challenges Mod] backupChallengePlayerArsenalIfNeeded:', e);
+  }
+}
+
+function applyChallengePlayerArsenal(gameIds, equipSpecs, skipBackup, villainSpecs) {
+  var payloadCount = Math.max(countRawFirebaseArray(gameIds), countRawFirebaseArray(equipSpecs));
+  var arsenalCount = payloadCount > 0
+    ? payloadCount
+    : getChallengePlayerArsenalCount(villainSpecs);
+  var ids = normalizeChallengeAllyGameIds(gameIds, arsenalCount);
+  if (ids.length < arsenalCount) {
+    ids = pickRandomUniqueChallengePlayerGameIds(arsenalCount);
+  }
+  var equips = normalizeChallengeAllyEquips(equipSpecs, arsenalCount);
+  if (equips.length < arsenalCount) {
+    equips = pickRandomChallengePlayerEquips(arsenalCount);
+  }
+  if (!ids.length) {
+    console.warn('[Challenges Mod] applyChallengePlayerArsenal: no creature ids available');
+    return false;
+  }
+  if (!equips.length) {
+    console.warn('[Challenges Mod] applyChallengePlayerArsenal: no equipment available');
+    return false;
+  }
+  if (!skipBackup) backupChallengePlayerArsenalIfNeeded();
+  var monsters = buildChallengePlayerMonsters(ids);
+  var playerEquips = buildChallengePlayerEquips(equips);
+  try {
+    var state = getState();
+    if (!state || !state.player || typeof state.player.send !== 'function') return false;
+    state.player.send({
+      type: 'setState',
+      fn: function(prev) {
+        return Object.assign({}, prev, { monsters: monsters, equips: playerEquips });
+      }
+    });
+    console.log('[Challenges Mod] applyChallengePlayerArsenal:', ids.length, 'creatures,', playerEquips.length, 'equips');
+    challengeActivePlayerArsenal = { gameIds: ids.slice(), equipSpecs: equips.map(function(e) { return { gameId: e.gameId, stat: e.stat, tier: e.tier }; }) };
+    return true;
+  } catch (e) {
+    console.warn('[Challenges Mod] applyChallengePlayerArsenal:', e);
+    return false;
+  }
+}
+
+function setChallengePendingPlayerArsenal(gameIds, equipSpecs, villainSpecs) {
+  backupChallengePlayerArsenalIfNeeded();
+  challengePendingPlayerArsenal = {
+    gameIds: gameIds,
+    equipSpecs: equipSpecs,
+    villainSpecs: villainSpecs && villainSpecs.length ? villainSpecs.slice() : null
+  };
+}
+
+function applyPendingChallengePlayerArsenalAfterNavigation() {
+  if (!challengePendingPlayerArsenal) return true;
+  var pending = challengePendingPlayerArsenal;
+  challengePendingPlayerArsenal = null;
+  return applyChallengePlayerArsenal(pending.gameIds, pending.equipSpecs, true, pending.villainSpecs);
+}
+
+function clearChallengePlayerArsenalNavigationHook() {
+  if (challengePlayerArsenalApplyTimeoutId != null) {
+    clearTimeout(challengePlayerArsenalApplyTimeoutId);
+    challengePlayerArsenalApplyTimeoutId = null;
+  }
+  if (!challengePlayerArsenalNavigationUnsub) return;
+  try {
+    if (typeof challengePlayerArsenalNavigationUnsub === 'function') {
+      challengePlayerArsenalNavigationUnsub();
+    } else if (challengePlayerArsenalNavigationUnsub.unsubscribe) {
+      challengePlayerArsenalNavigationUnsub.unsubscribe();
+    }
+  } catch (e) {}
+  challengePlayerArsenalNavigationUnsub = null;
+}
+
+/** Apply pending player arsenal after room load (autoSetupBoard or fallback timeout). */
+function scheduleChallengePlayerArsenalAfterNavigation() {
+  clearChallengePlayerArsenalNavigationHook();
+  if (!challengePendingPlayerArsenal) return;
+  var applied = false;
+  function isOnChallengeRoom() {
+    if (!challengeRoomId) return true;
+    try {
+      var state = getState();
+      var ctx = state && state.board && state.board.getSnapshot && state.board.getSnapshot().context;
+      var currentRoomId = ctx && (ctx.selectedMap && (ctx.selectedMap.selectedRoom && ctx.selectedMap.selectedRoom.id || ctx.selectedMap.roomId));
+      return currentRoomId === challengeRoomId;
+    } catch (e) {
+      return false;
+    }
+  }
+  function tryApply(source) {
+    if (applied || !challengePendingPlayerArsenal) return;
+    if (!isOnChallengeRoom()) return;
+    applied = true;
+    clearChallengePlayerArsenalNavigationHook();
+    if (!applyPendingChallengePlayerArsenalAfterNavigation()) {
+      console.warn('[Challenges Mod] player arsenal apply failed (' + source + ')');
+    }
+  }
+  try {
+    var state = getState();
+    if (state && state.board && typeof state.board.on === 'function') {
+      var handler = function() {
+        tryApply('autoSetupBoard');
+      };
+      var unsub = state.board.on('autoSetupBoard', handler);
+      if (typeof unsub === 'function') {
+        challengePlayerArsenalNavigationUnsub = unsub;
+      } else {
+        challengePlayerArsenalNavigationUnsub = function() {
+          try {
+            if (state.board.off) state.board.off('autoSetupBoard', handler);
+          } catch (e) {}
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('[Challenges Mod] scheduleChallengePlayerArsenalAfterNavigation:', e);
+  }
+  challengePlayerArsenalApplyTimeoutId = setTimeout(function() {
+    challengePlayerArsenalApplyTimeoutId = null;
+    tryApply('timeout');
+  }, CHALLENGE_PLAYER_ARSENAL_APPLY_FALLBACK_MS);
+}
+
+function restoreChallengePlayerArsenal() {
+  clearChallengePlayerArsenalNavigationHook();
+  challengePendingPlayerArsenal = null;
+  challengeActivePlayerArsenal = null;
+  challengeActiveVillainSpecs = null;
+  if (!challengePlayerArsenalBackup) return;
+  try {
+    var backup = challengePlayerArsenalBackup;
+    challengePlayerArsenalBackup = null;
+    var state = getState();
+    if (!state || !state.player || typeof state.player.send !== 'function') return;
+    state.player.send({
+      type: 'setState',
+      fn: function(prev) {
+        return Object.assign({}, prev, {
+          monsters: backup.monsters,
+          equips: backup.equips
+        });
+      }
+    });
+    console.log('[Challenges Mod] restoreChallengePlayerArsenal');
+  } catch (e) {
+    console.warn('[Challenges Mod] restoreChallengePlayerArsenal:', e);
+  }
+}
+
 function getCreatureName(gameId) {
   try {
     const state = getState();
@@ -4050,6 +5051,236 @@ function getEquipmentDifficultyMultiplier(equipmentName) {
   if (!equipmentName || typeof equipmentName !== 'string') return 1;
   var key = equipmentName.toLowerCase().trim();
   return EQUIPMENT_DIFFICULTY_MULTIPLIERS[key] !== undefined ? EQUIPMENT_DIFFICULTY_MULTIPLIERS[key] : 1;
+}
+
+/** Bonus points for a player arsenal creature: base ÷ creature difficulty mult (e.g. Black Knight 500÷3 ≈ 167). */
+function getPlayerArsenalCreatureScorePoints(gameId) {
+  var mult = getCreatureDifficultyMultiplier(getCreatureName(gameId));
+  if (!(mult > 0)) mult = 1;
+  return Math.round(CHALLENGE_PLAYER_ARSENAL_ITEM_BASE_POINTS / mult);
+}
+
+/** Bonus points for player equipment: base ÷ (name mult × tier). */
+function getPlayerArsenalEquipmentScorePoints(equipSpec) {
+  if (!equipSpec || equipSpec.gameId == null) return 0;
+  var nameMult = getEquipmentDifficultyMultiplier(getEquipmentName(equipSpec.gameId));
+  if (!(nameMult > 0)) nameMult = 1;
+  var tier = equipSpec.tier != null ? Number(equipSpec.tier) : CHALLENGE_EQUIP_TIER_MIN;
+  tier = Math.min(CHALLENGE_EQUIP_TIER_MAX, Math.max(CHALLENGE_EQUIP_TIER_MIN, tier));
+  return Math.round(CHALLENGE_PLAYER_ARSENAL_ITEM_BASE_POINTS / (nameMult * tier));
+}
+
+function getChallengeAllyBoardPieces() {
+  var pieces = [];
+  try {
+    var state = getState();
+    if (!state || !state.board || typeof state.board.getSnapshot !== 'function') return pieces;
+    var boardCtx = state.board.getSnapshot().context;
+    var boardConfig = boardCtx && boardCtx.boardConfig;
+    if (!Array.isArray(boardConfig)) return pieces;
+    var playerCtx = state.player && state.player.getSnapshot && state.player.getSnapshot().context;
+    var monsters = (playerCtx && Array.isArray(playerCtx.monsters)) ? playerCtx.monsters : [];
+    var equips = (playerCtx && Array.isArray(playerCtx.equips)) ? playerCtx.equips : [];
+    function isAlly(piece) {
+      return piece && (piece.type === 'player' || (piece.type === 'custom' && piece.villain === false));
+    }
+    for (var i = 0; i < boardConfig.length; i++) {
+      var piece = boardConfig[i];
+      if (!isAlly(piece)) continue;
+      var gameId = null;
+      var equipSpec = null;
+      if (piece.type === 'custom' && piece.gameId != null) {
+        gameId = piece.gameId;
+        if (piece.equip && piece.equip.gameId != null) {
+          equipSpec = { gameId: piece.equip.gameId, tier: piece.equip.tier, stat: piece.equip.stat };
+        }
+      } else {
+        var monsterId = piece.monsterId != null ? piece.monsterId : piece.databaseId;
+        if (monsterId != null) {
+          for (var m = 0; m < monsters.length; m++) {
+            if (monsters[m].id === monsterId) {
+              gameId = monsters[m].gameId;
+              break;
+            }
+          }
+        }
+        if (piece.equipId != null) {
+          for (var e = 0; e < equips.length; e++) {
+            if (equips[e].id === piece.equipId) {
+              equipSpec = { gameId: equips[e].gameId, tier: equips[e].tier, stat: equips[e].stat };
+              break;
+            }
+          }
+        }
+      }
+      if (gameId != null) pieces.push({ gameId: gameId, equip: equipSpec });
+    }
+  } catch (err) {
+    console.warn('[Challenges Mod] getChallengeAllyBoardPieces:', err);
+  }
+  return pieces;
+}
+
+function getMapMaxCreatureDifficultyMultiplier(villainSpecs) {
+  if (!villainSpecs || !villainSpecs.length) return 1;
+  var max = 1;
+  for (var i = 0; i < villainSpecs.length; i++) {
+    var spec = villainSpecs[i];
+    if (!spec || spec.gameId == null) continue;
+    var mult = getCreatureDifficultyMultiplier(getCreatureName(spec.gameId));
+    if (mult > max) max = mult;
+  }
+  return max;
+}
+
+function getChallengeVillainSpecsForScoring(villainSpecs) {
+  if (villainSpecs && villainSpecs.length) return villainSpecs;
+  if (challengeActiveVillainSpecs && challengeActiveVillainSpecs.length) return challengeActiveVillainSpecs;
+  if (rolledCreatureSpecs && rolledCreatureSpecs.length) return rolledCreatureSpecs;
+  return [];
+}
+
+function getChallengePlayerArsenalCount(villainSpecs) {
+  var specs = villainSpecs;
+  if (!specs || !specs.length) {
+    if (challengeActiveVillainSpecs && challengeActiveVillainSpecs.length) specs = challengeActiveVillainSpecs;
+    else if (rolledCreatureSpecs && rolledCreatureSpecs.length) specs = rolledCreatureSpecs;
+  }
+  var enemyCount = specs && specs.length ? specs.length : 1;
+  return Math.max(1, Math.round(CHALLENGE_PLAYER_ARSENAL_ENEMY_COUNT_FACTOR * enemyCount));
+}
+
+function collectPlayerArsenalScorePointsFromSpecs(gameIds, equipSpecs) {
+  var points = [];
+  var ids = normalizeChallengeAllyGameIds(gameIds);
+  var equips = normalizeChallengeAllyEquips(equipSpecs);
+  for (var i = 0; i < ids.length; i++) {
+    points.push(getPlayerArsenalCreatureScorePoints(ids[i]));
+  }
+  for (var j = 0; j < equips.length; j++) {
+    points.push(getPlayerArsenalEquipmentScorePoints(equips[j]));
+  }
+  return points;
+}
+
+function computeChallengePlayerArsenalBonusFromPoints(points, mapMaxCreatureMult) {
+  if (!points || !points.length) return { bonus: 0, average: 0, mapMax: mapMaxCreatureMult || 1 };
+  var sum = 0;
+  for (var i = 0; i < points.length; i++) sum += points[i];
+  var average = sum / points.length;
+  var mapMax = mapMaxCreatureMult != null && mapMaxCreatureMult > 0 ? mapMaxCreatureMult : 1;
+  return {
+    bonus: Math.round(average * mapMax),
+    average: average,
+    mapMax: mapMax
+  };
+}
+
+function computeChallengePlayerArsenalBonusFromSpecs(gameIds, equipSpecs, villainSpecs) {
+  var points = collectPlayerArsenalScorePointsFromSpecs(gameIds, equipSpecs);
+  var mapMax = getMapMaxCreatureDifficultyMultiplier(getChallengeVillainSpecsForScoring(villainSpecs));
+  return computeChallengePlayerArsenalBonusFromPoints(points, mapMax);
+}
+
+function computeChallengePlayerArsenalBonusFromBoard(villainSpecs) {
+  var arsenal = challengeActivePlayerArsenal || challengePendingPlayerArsenal;
+  if (arsenal) {
+    return computeChallengePlayerArsenalBonusFromSpecs(arsenal.gameIds, arsenal.equipSpecs, villainSpecs);
+  }
+  var pieces = getChallengeAllyBoardPieces();
+  if (!pieces.length) {
+    return computeChallengePlayerArsenalBonusFromPoints([], getMapMaxCreatureDifficultyMultiplier(getChallengeVillainSpecsForScoring(villainSpecs)));
+  }
+  var points = [];
+  for (var i = 0; i < pieces.length; i++) {
+    points.push(getPlayerArsenalCreatureScorePoints(pieces[i].gameId));
+    if (pieces[i].equip) {
+      points.push(getPlayerArsenalEquipmentScorePoints(pieces[i].equip));
+    }
+  }
+  var mapMax = getMapMaxCreatureDifficultyMultiplier(getChallengeVillainSpecsForScoring(villainSpecs));
+  return computeChallengePlayerArsenalBonusFromPoints(points, mapMax);
+}
+
+function getChallengePlayerArsenalScoreItemsFromSpecs(gameIds, equipSpecs) {
+  var items = [];
+  var ids = normalizeChallengeAllyGameIds(gameIds);
+  var equips = normalizeChallengeAllyEquips(equipSpecs);
+  for (var i = 0; i < ids.length; i++) {
+    items.push({
+      type: 'creature',
+      name: getCreatureName(ids[i]),
+      points: getPlayerArsenalCreatureScorePoints(ids[i])
+    });
+  }
+  for (var j = 0; j < equips.length; j++) {
+    items.push({
+      type: 'equipment',
+      name: getEquipmentName(equips[j].gameId),
+      points: getPlayerArsenalEquipmentScorePoints(equips[j]),
+      tier: equips[j].tier
+    });
+  }
+  return items;
+}
+
+function getChallengePlayerArsenalScoreItemsFromBoard() {
+  var pieces = getChallengeAllyBoardPieces();
+  var items = [];
+  for (var i = 0; i < pieces.length; i++) {
+    items.push({
+      type: 'creature',
+      name: getCreatureName(pieces[i].gameId),
+      points: getPlayerArsenalCreatureScorePoints(pieces[i].gameId)
+    });
+    if (pieces[i].equip) {
+      items.push({
+        type: 'equipment',
+        name: getEquipmentName(pieces[i].equip.gameId),
+        points: getPlayerArsenalEquipmentScorePoints(pieces[i].equip),
+        tier: pieces[i].equip.tier
+      });
+    }
+  }
+  return items;
+}
+
+function getChallengePlayerArsenalScoreItems(gameIds, equipSpecs) {
+  var boardItems = getChallengePlayerArsenalScoreItemsFromBoard();
+  if (boardItems.length) return boardItems;
+  if (gameIds || equipSpecs) {
+    return getChallengePlayerArsenalScoreItemsFromSpecs(gameIds, equipSpecs);
+  }
+  var arsenal = challengeActivePlayerArsenal || challengePendingPlayerArsenal;
+  if (arsenal) {
+    return getChallengePlayerArsenalScoreItemsFromSpecs(arsenal.gameIds, arsenal.equipSpecs);
+  }
+  return [];
+}
+
+function getChallengePlayerArsenalBonusPoints(villainSpecs) {
+  return computeChallengePlayerArsenalBonusFromBoard(villainSpecs).bonus;
+}
+
+function getChallengePlayerArsenalBonusDetails(villainSpecs) {
+  return computeChallengePlayerArsenalBonusFromBoard(villainSpecs);
+}
+
+function formatChallengePlayerArsenalItemScore(points) {
+  if (points == null || !Number.isFinite(points)) return '+0';
+  return '+' + Math.round(points);
+}
+
+function computeChallengeExpectedScore(rawDifficulty, grade, ticks, gameIds, equipSpecs, villainSpecs) {
+  ticks = ticks != null ? ticks : 500;
+  grade = grade || 'A';
+  var bonusResult;
+  if (gameIds || equipSpecs) {
+    bonusResult = computeChallengePlayerArsenalBonusFromSpecs(gameIds || [], equipSpecs || [], villainSpecs);
+  } else {
+    bonusResult = computeChallengePlayerArsenalBonusFromBoard(villainSpecs);
+  }
+  return Math.round(computeChallengeScore(ticks, rawDifficulty, grade, bonusResult.bonus) / 100) * 100;
 }
 
 /** Difficulty contribution from a single creature (level + 10*equipTier) * creatureMult * equipmentMult. */
@@ -4177,11 +5408,12 @@ function getGradePoints(grade) {
   return CHALLENGE_GRADE_POINTS[key] !== undefined ? CHALLENGE_GRADE_POINTS[key] : 0;
 }
 
-/** Score = round(((1000 - ticks) + gradePoints) * difficultyMultiplier). */
-function computeChallengeScore(ticks, rawDifficulty, grade) {
+/** Score = round((1000 − ticks + gradePoints) × mapMultiplier) + arsenal bonus points. */
+function computeChallengeScore(ticks, rawDifficulty, grade, playerArsenalBonus) {
   var mult = getDifficultyMultiplier(rawDifficulty);
   var base = (1000 - (ticks || 0)) + getGradePoints(grade);
-  return Math.round(base * mult);
+  var bonus = playerArsenalBonus != null ? playerArsenalBonus : getChallengePlayerArsenalBonusPoints();
+  return Math.round(base * mult) + bonus;
 }
 
 /** Compute challenge score from gameData (victory). Used by onVictory and victoryContent. */
@@ -4191,7 +5423,23 @@ function computeVictoryScoreFromGameData(gameData, allyLimit, difficulty) {
   var creaturesAlive = (gameData && typeof gameData.creaturesAlive === 'number') ? gameData.creaturesAlive : getCreaturesAliveFromBoardState();
   if (typeof creaturesAlive !== 'number' || creaturesAlive < 0) creaturesAlive = currentTeamSize;
   var grade = computeChallengeGrade(allyLimit, currentTeamSize, creaturesAlive);
-  return { score: computeChallengeScore(ticks, difficulty, grade), grade: grade, ticks: ticks };
+  var playerArsenalItems = getChallengePlayerArsenalScoreItemsFromBoard();
+  if (!playerArsenalItems.length) {
+    var arsenal = challengeActivePlayerArsenal || challengePendingPlayerArsenal;
+    if (arsenal) {
+      playerArsenalItems = getChallengePlayerArsenalScoreItemsFromSpecs(arsenal.gameIds, arsenal.equipSpecs);
+    }
+  }
+  var bonusDetails = computeChallengePlayerArsenalBonusFromBoard();
+  return {
+    score: computeChallengeScore(ticks, difficulty, grade, bonusDetails.bonus),
+    grade: grade,
+    ticks: ticks,
+    playerArsenalBonus: bonusDetails.bonus,
+    playerArsenalAverage: bonusDetails.average,
+    playerArsenalMapMax: bonusDetails.mapMax,
+    playerArsenalItems: playerArsenalItems
+  };
 }
 
 /** Compute multiplayer score from current board state (time-up path). Returns 0 if defeat, else computed score. */
@@ -4200,22 +5448,40 @@ function computeMultiplayerScoreFromBoardState(alliesAllowed, difficulty) {
   if (typeof creaturesAlive !== 'number' || creaturesAlive < 0) creaturesAlive = 0;
   if (creaturesAlive <= 0) return 0;
   var grade = computeChallengeGrade(alliesAllowed, alliesAllowed, creaturesAlive);
-  return computeChallengeScore(180, difficulty, grade); // 3 min = 180 ticks
+  var bonusDetails = computeChallengePlayerArsenalBonusFromBoard();
+  return computeChallengeScore(180, difficulty, grade, bonusDetails.bonus); // 3 min = 180 ticks
 }
 
 /** Build score breakdown tooltip for a leaderboard row (with newlines for title attribute). Always shows actual numbers. */
 function getScoreBreakdownText(row) {
   var mult = row.difficulty != null ? getDifficultyMultiplier(row.difficulty) : 0;
   var multStr = mult > 0 ? mult.toFixed(2) + '×' : '—';
+  var arsenalBonus = row.playerArsenalBonus != null ? row.playerArsenalBonus : 0;
   var score = row.score != null ? row.score : 0;
   if (row.ticks != null && row.difficulty != null) {
     var gradePoints = getGradePoints(row.grade);
     var base = (1000 - row.ticks) + gradePoints;
+    var mapScore = Math.round(base * mult);
     var lines = [
       'Base: (1000 − ' + row.ticks + ') + ' + gradePoints + ' = ' + base,
-      'Multiplier: ' + multStr,
-      'Score: round(' + base + ' × ' + multStr.replace('×', '') + ') = ' + score
+      'Map score: round(' + base + ' × ' + multStr.replace('×', '') + ') = ' + mapScore
     ];
+    if (row.playerArsenalItems && row.playerArsenalItems.length) {
+      for (var i = 0; i < row.playerArsenalItems.length; i++) {
+        var item = row.playerArsenalItems[i];
+        var itemLabel = item.name || (item.type === 'equipment' ? 'Equipment' : 'Creature');
+        if (item.type === 'equipment' && item.tier != null) itemLabel += ' T' + item.tier;
+        var itemPoints = item.points != null ? item.points : 0;
+        lines.push(itemLabel + ': ' + formatChallengePlayerArsenalItemScore(itemPoints));
+      }
+    }
+    if (row.playerArsenalAverage != null && row.playerArsenalMapMax != null) {
+      lines.push('Arsenal average: ' + Math.round(row.playerArsenalAverage) + ' × map max ' + row.playerArsenalMapMax + '×');
+    }
+    if (arsenalBonus > 0) {
+      lines.push('Arsenal bonus: +' + arsenalBonus);
+    }
+    lines.push('Score: ' + mapScore + ' + ' + arsenalBonus + ' = ' + score);
     if (row.grade) lines.push('Grade: ' + row.grade + ' (+' + gradePoints + ')');
     return lines.join('\n');
   }
@@ -4231,20 +5497,9 @@ function getRandomInt(min, max) {
 }
 
 function getRandomEquipmentGameId() {
-  try {
-    var state = getState();
-    var getEquipment = state?.utils?.getEquipment;
-    if (!getEquipment) return null;
-    var ids = [];
-    for (var i = 1; i <= CHALLENGE_EQUIP_GAMEID_MAX; i++) {
-      try {
-        var eq = getEquipment(i);
-        if (eq && eq.metadata && eq.metadata.name) ids.push(i);
-      } catch (_) { break; }
-    }
-    if (ids.length) return pickRandomFromArray(ids, 1)[0];
-  } catch (e) {}
-  return null;
+  var ids = getAllEquipmentGameIds();
+  if (!ids.length) return null;
+  return ids[Math.floor(Math.random() * ids.length)];
 }
 
 function rollRandomGenes() {
@@ -4260,9 +5515,7 @@ function rollRandomGenes() {
 function rollRandomEquip() {
   var gameId = getRandomEquipmentGameId();
   if (gameId == null) return null;
-  var stat = CHALLENGE_EQUIP_STATS[Math.floor(Math.random() * CHALLENGE_EQUIP_STATS.length)];
-  var tier = getRandomInt(CHALLENGE_EQUIP_TIER_MIN, CHALLENGE_EQUIP_TIER_MAX);
-  return { gameId: gameId, stat: stat, tier: tier };
+  return { gameId: gameId, stat: getChallengeRandomEquipStat(), tier: getChallengeRandomEquipTier() };
 }
 
 /** Pick random creature specs for a room (for multiplayer sync: chooser calls this and writes to Firebase). Returns array of { gameId, tileIndex, level, genes, equip }. */
@@ -4313,6 +5566,7 @@ function pickRandomCreatureSpecsForRoom(roomId) {
 function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
   var mapName = (opts && opts.mapName) ? opts.mapName : '';
   var difficulty = (opts && typeof opts.difficulty === 'number') ? opts.difficulty : 0;
+  challengeActiveVillainSpecs = villainSpecs && villainSpecs.length ? villainSpecs.slice() : null;
 
   const villains = villainSpecs.map(function(spec) {
     const nickname = getCreatureName(spec.gameId);
@@ -4386,7 +5640,11 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
             score: score,
             replay: configString,
             ticks: ticks,
-            grade: grade
+            grade: grade,
+            playerArsenalBonus: result.playerArsenalBonus,
+            playerArsenalAverage: result.playerArsenalAverage,
+            playerArsenalMapMax: result.playerArsenalMapMax,
+            playerArsenalItems: result.playerArsenalItems
           });
         }
       },
@@ -4411,6 +5669,20 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
         }
         wrap.appendChild(row(challengesText('mods.challenges.labels.map'), mapName || '—'));
         wrap.appendChild(row(challengesText('mods.challenges.difficultyLabel').replace(/:\s*$/, ''), getDifficultyMultiplier(difficulty).toFixed(2) + '×'));
+        if (result.playerArsenalItems && result.playerArsenalItems.length) {
+          result.playerArsenalItems.forEach(function(item) {
+            var itemLabel = item.name || (item.type === 'equipment' ? 'Equipment' : 'Creature');
+            if (item.type === 'equipment' && item.tier != null) itemLabel += ' T' + item.tier;
+            wrap.appendChild(row(itemLabel, formatChallengePlayerArsenalItemScore(item.points)));
+          });
+        }
+        if (result.playerArsenalBonus > 0) {
+          var bonusDetail = '+' + result.playerArsenalBonus;
+          if (result.playerArsenalAverage != null && result.playerArsenalMapMax != null) {
+            bonusDetail += ' (avg ' + Math.round(result.playerArsenalAverage) + ' × ' + result.playerArsenalMapMax + '×)';
+          }
+          wrap.appendChild(row(challengesText('mods.challenges.arsenalBonusLabel'), bonusDetail));
+        }
         wrap.appendChild(row(challengesText('mods.challenges.labels.score'), String(score)));
         wrap.appendChild(row(challengesText('mods.challenges.labels.ticks'), String(ticks)));
         wrap.appendChild(row(challengesText('mods.challenges.labels.grade'), (grade && String(grade).trim()) ? String(grade) + ' (+' + getGradePoints(grade) + ')' : '—'));
@@ -4675,6 +5947,7 @@ function copyReplayToClipboard(text) {
 }
 
 function cleanupChallengeBattle() {
+  clearChallengePlayerArsenalNavigationHook();
   if (challengeBoardUnsubscribe && typeof challengeBoardUnsubscribe === 'function') {
     try { challengeBoardUnsubscribe(); } catch (e) {}
     challengeBoardUnsubscribe = null;
@@ -4689,6 +5962,7 @@ function cleanupChallengeBattle() {
   }
   challengeRoomId = null;
   challengeSetupDone = false;
+  challengeActiveVillainSpecs = null;
   // In multiplayer, keep context/timer/toast until match result; still restore board UI on modal close.
   if (!challengeMultiplayerContext) {
     stopSoloChallengeToast();
@@ -4705,6 +5979,7 @@ function cleanupChallengeBattle() {
 function resetChallengeBoardAfterBattleClose() {
   var roomId = challengeRoomId;
   cleanupChallengeBattle();
+  restoreChallengePlayerArsenal();
   setTimeout(function() {
     triggerChallengeStopButton();
     if (!roomId) return;
@@ -4769,13 +6044,7 @@ function setSandboxAndHideChallengeUI() {
 
 function hideChallengesOverlaysAndButtons() {
   try {
-    // Hide monster count + map/region name overlay (same as Quests: .pointer-events-none.absolute.right-0.top-0.z-1)
-    var overlays = document.querySelectorAll('.pointer-events-none.absolute.right-0.top-0.z-1');
-    overlays.forEach(function(overlay) {
-      if (overlay.textContent && overlay.textContent.includes('Monsters')) {
-        overlay.style.display = 'none';
-      }
-    });
+    // Room info overlay (Monsters / map name) is owned by custom-battles.js during CustomBattles.
     var floorContainers = document.querySelectorAll('.absolute.right-0.z-3');
     floorContainers.forEach(function(container) {
       var hasFloor = container.querySelector('img[alt="Floor"]') || container.querySelector('input[type="range"]') || container.querySelector('[data-floor]');
@@ -4800,11 +6069,7 @@ function hideChallengesOverlaysAndButtons() {
 
 function showChallengesOverlaysAndButtons() {
   try {
-    // Restore monster count + map/region name overlay
-    var overlays = document.querySelectorAll('.pointer-events-none.absolute.right-0.top-0.z-1');
-    overlays.forEach(function(overlay) {
-      overlay.style.display = '';
-    });
+    // Room info overlay restore is owned by custom-battles.js.
     var modeButtons = document.querySelectorAll('button img[alt="Sandbox"], button img[alt="Manual"], button img[alt="Autoplay"]');
     modeButtons.forEach(function(btnImg) {
       var btn = btnImg.closest('button');
@@ -4902,6 +6167,7 @@ function startChallenge() {
 
     setSandboxAndHideChallengeUI();
     hideChallengesOverlaysAndButtons();
+    setChallengePendingPlayerArsenal(rolledAllyGameIds, rolledAllyEquips, rolledCreatureSpecs);
 
     var roomId = rolledRoomId;
     var specs = rolledCreatureSpecs.slice();
@@ -4942,6 +6208,7 @@ function startChallenge() {
       waitForCustomBattles().then(function(CustomBattles) {
         if (!CustomBattles) {
           console.log('[Challenges Mod] startChallenge: CustomBattles not available after wait');
+          restoreChallengePlayerArsenal();
           showChallengeToast('Custom Battles system not available. Try again in a moment.');
           return;
         }
@@ -4950,11 +6217,13 @@ function startChallenge() {
         state = getState();
         if (!state || !state.board) {
           console.log('[Challenges Mod] startChallenge: no state/board in then');
+          restoreChallengePlayerArsenal();
           showChallengeToast('Board state not available.');
           return;
         }
 
         cleanupChallengeBattle();
+        challengeActiveVillainSpecs = villainSpecs && villainSpecs.length ? villainSpecs.slice() : null;
         console.log('[Challenges Mod] startChallenge: creating battle');
 
         var battle = CustomBattles.create(config);
@@ -4981,6 +6250,7 @@ function startChallenge() {
             challengeRoomId = null;
             challengeSetupDone = false;
             stopSoloChallengeToast();
+            restoreChallengePlayerArsenal();
             try {
               battleToClean.cleanup(undefined, showChallengesOverlaysAndButtons);
             } catch (e) {
@@ -4991,32 +6261,38 @@ function startChallenge() {
           if (currentRoomId !== challengeRoomId || !challengeBattle) return;
           if (challengeSetupDone) return;
           challengeSetupDone = true;
-          try {
-            challengeBattle.removeOriginalVillains();
-          } catch (e) {
-            console.warn('[Challenges Mod] removeOriginalVillains:', e);
-          }
+          setTimeout(function() {
+            if (!challengeBattle || !challengeRoomId) return;
+            try {
+              challengeBattle.removeOriginalVillains();
+            } catch (e) {
+              console.warn('[Challenges Mod] removeOriginalVillains:', e);
+            }
+          }, 350);
         });
 
         showChallengeToastNotification('Navigating to challenge.');
         startSoloChallengeLiveToast(alliesAllowed);
+        scheduleChallengePlayerArsenalAfterNavigation();
         console.log('[Challenges Mod] startChallenge: sending selectRoomById', roomId);
         state.board.send({ type: 'selectRoomById', roomId: roomId });
         console.log('[Challenges Mod] startChallenge: done, navigating to room:', roomId);
       }).catch(function(err) {
         console.error('[Challenges Mod] startChallenge promise error:', err);
+        restoreChallengePlayerArsenal();
         showChallengeToast('Error starting challenge: ' + (err && err.message ? err.message : 'Unknown error'));
       });
     }, CHALLENGE_SANDBOX_DELAY_MS);
   } catch (err) {
     console.error('[Challenges Mod] startChallenge error:', err);
+    restoreChallengePlayerArsenal();
     showChallengeToast('Error: ' + (err && err.message ? err.message : 'Unknown error'));
   }
 }
 
 /**
  * Start a challenge from a saved villain config (roomId, roomName, villains). Closes modal and navigates to map with villains.
- * @param {{ roomId: string, roomName: string, villains: Array }} config
+ * @param {{ roomId: string, roomName: string, villains: Array, allyGameIds?: Array<number>, allyEquips?: Array<{gameId:number, stat:string, tier:number}> }} config
  */
 function startChallengeWithVillainConfig(config) {
   console.log('[Challenges Mod] startChallengeWithVillainConfig called', { roomId: config && config.roomId, roomName: config && config.roomName, villains: config && config.villains && config.villains.length });
@@ -5046,6 +6322,7 @@ function startChallengeWithVillainConfig(config) {
   closeChallengesModalIfOpen();
   setSandboxAndHideChallengeUI();
   hideChallengesOverlaysAndButtons();
+  setChallengePendingPlayerArsenal(config.allyGameIds, config.allyEquips, config.villains);
 
   var roomId = config.roomId;
   var villainSpecs = config.villains;
@@ -5073,6 +6350,7 @@ function startChallengeWithVillainConfig(config) {
     waitForCustomBattles().then(function(CustomBattles) {
       if (!CustomBattles) {
         console.log('[Challenges Mod] startChallengeWithVillainConfig: CustomBattles not available');
+        restoreChallengePlayerArsenal();
         showChallengeToast('Custom Battles not available.');
         return;
       }
@@ -5080,11 +6358,13 @@ function startChallengeWithVillainConfig(config) {
       state = getState();
       if (!state || !state.board) {
         console.log('[Challenges Mod] startChallengeWithVillainConfig: no state/board after wait');
+        restoreChallengePlayerArsenal();
         showChallengeToast('Board state not available.');
         return;
       }
-      cleanupChallengeBattle();
-      var battle = CustomBattles.create(battleConfig);
+        cleanupChallengeBattle();
+        challengeActiveVillainSpecs = villainSpecs && villainSpecs.length ? villainSpecs.slice() : null;
+        var battle = CustomBattles.create(battleConfig);
       battle.setup(
         function() { return true; },
         function(toastData) {
@@ -5110,6 +6390,7 @@ function startChallengeWithVillainConfig(config) {
           } else {
             stopSoloChallengeToast();
           }
+          restoreChallengePlayerArsenal();
           try {
             battleToClean.cleanup(undefined, showChallengesOverlaysAndButtons);
           } catch (e) {
@@ -5120,8 +6401,6 @@ function startChallengeWithVillainConfig(config) {
         if (currentRoomId !== challengeRoomId || !challengeBattle) return;
         if (challengeSetupDone) return;
         challengeSetupDone = true;
-        // Delay so the board has applied the new room's boardConfig before we strip room villains.
-        // Otherwise we run on stale config and the room load overwrites us, leaving room villains + re-added custom ones.
         var delayMs = 350;
         setTimeout(function() {
           if (!challengeBattle || !challengeRoomId) return;
@@ -5136,6 +6415,7 @@ function startChallengeWithVillainConfig(config) {
         showChallengeToastNotification('Loading challenge setup...');
         startSoloChallengeLiveToast(alliesAllowed);
       }
+      scheduleChallengePlayerArsenalAfterNavigation();
       // Match Start flow: send selectRoomById immediately so the board loads the room the same way
       if (state && state.board && typeof state.board.send === 'function') {
         console.log('[Challenges Mod] startChallengeWithVillainConfig: sending selectRoomById', roomId);
@@ -5145,6 +6425,7 @@ function startChallengeWithVillainConfig(config) {
       }
     }).catch(function(err) {
       console.error('[Challenges Mod] startChallengeWithVillainConfig error:', err);
+      restoreChallengePlayerArsenal();
       showChallengeToast('Error loading setup: ' + (err && err.message ? err.message : 'Unknown error'));
     });
   }, CHALLENGE_SANDBOX_DELAY_MS);

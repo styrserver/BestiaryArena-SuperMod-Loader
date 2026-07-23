@@ -32,13 +32,18 @@ const defaultConfig = {
   removeWebsiteFooter: false,
   hideStopAfterDefeat: false,
   hidePowerSavingMode: false,
+  persistPowerSavingMode: false,
+  powerSavingModeEnabled: false,
   compactNavBar: false,
   showLastVisitedMapButton: false,
   alwaysOpenHuntAnalyzer: false,
   enablePlayercount: true,
   includeRunDataByDefault: true,
   includeHuntDataByDefault: true,
-  defaultInventorySticky: false,
+  persistentInventory: false,
+  inventoryWidgetPinned: null,
+  inventoryWidgetLeft: null,
+  inventoryWidgetTop: null,
   inventoryBorderStyle: 'Original',
   modButtonDisplay: 'text', // 'text' or 'icon'
   modButtonBarLayout: 'horizontal', // 'horizontal', 'vertical', or 'hidden'
@@ -57,6 +62,7 @@ const defaultConfig = {
   hotkeyOpenTrophyRoom: 't',
   hotkeyOpenDaycare: 'd',
   hotkeyOpenBestiary: 'b',
+  hotkeyOpenDrMephistopheles: 'e',
   hotkeyOpenForge: 'f',
   hotkeyOpenHygenie: 'h',
   hotkeyOpenMountainFortress: 'm',
@@ -114,6 +120,7 @@ if (config.hotkeyOpenStore === undefined) config.hotkeyOpenStore = 's';
 if (config.hotkeyOpenTrophyRoom === undefined) config.hotkeyOpenTrophyRoom = 't';
 if (config.hotkeyOpenDaycare === undefined) config.hotkeyOpenDaycare = 'd';
 if (config.hotkeyOpenBestiary === undefined) config.hotkeyOpenBestiary = 'b';
+if (config.hotkeyOpenDrMephistopheles === undefined) config.hotkeyOpenDrMephistopheles = 'e';
 if (config.hotkeyOpenHygenie === undefined) config.hotkeyOpenHygenie = 'h';
 if (config.hotkeyOpenForge === undefined) config.hotkeyOpenForge = 'f';
 if (config.hotkeyOpenMountainFortress === undefined) config.hotkeyOpenMountainFortress = 'm';
@@ -131,6 +138,7 @@ config.hotkeyOpenStore = sanitizeStoredHotkey(config.hotkeyOpenStore, '');
 config.hotkeyOpenTrophyRoom = sanitizeStoredHotkey(config.hotkeyOpenTrophyRoom, '');
 config.hotkeyOpenDaycare = sanitizeStoredHotkey(config.hotkeyOpenDaycare, '');
 config.hotkeyOpenBestiary = sanitizeStoredHotkey(config.hotkeyOpenBestiary, '');
+config.hotkeyOpenDrMephistopheles = sanitizeStoredHotkey(config.hotkeyOpenDrMephistopheles, '');
 config.hotkeyOpenForge = sanitizeStoredHotkey(config.hotkeyOpenForge, '');
 config.hotkeyOpenHygenie = sanitizeStoredHotkey(config.hotkeyOpenHygenie, '');
 config.hotkeyOpenMountainFortress = sanitizeStoredHotkey(config.hotkeyOpenMountainFortress, '');
@@ -173,7 +181,37 @@ for (let setupSlot = 1; setupSlot <= 8; setupSlot++) {
 if (config.enableHotkeys === undefined) config.enableHotkeys = false;
 if (config.enableSetupShortcutsAndHover === undefined) config.enableSetupShortcutsAndHover = true;
 if (config.hotkeySetupSource !== 'setupManager') config.hotkeySetupSource = 'betterSetups';
-if (config.defaultInventorySticky === undefined) config.defaultInventorySticky = false;
+if (config.persistentInventory === undefined) {
+  config.persistentInventory = config.defaultInventorySticky === true;
+}
+if (config.inventoryWidgetPinned === undefined) {
+  // Old Sticky Inventory always forced pin; otherwise leave unset until the user pins.
+  config.inventoryWidgetPinned = config.defaultInventorySticky === true ? true : null;
+}
+// Repair: a prior bug saved pinned=false whenever inventory was open unpinned, wiping sticky intent.
+if (
+  config.persistentInventory &&
+  config.inventoryWidgetPinned === false &&
+  config.defaultInventorySticky === true
+) {
+  config.inventoryWidgetPinned = true;
+}
+// Persistent Inventory implies restore-on-init; null pinned was never written on drag-save.
+if (config.persistentInventory && config.inventoryWidgetPinned == null) {
+  config.inventoryWidgetPinned = true;
+}
+if (!Number.isFinite(config.inventoryWidgetLeft)) config.inventoryWidgetLeft = null;
+if (!Number.isFinite(config.inventoryWidgetTop)) config.inventoryWidgetTop = null;
+if (config.persistentInventory && config.inventoryWidgetPinned === true) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  } catch (_) {
+    // Best effort; in-memory values still drive this session.
+  }
+}
+// Legacy translate storage is wiped (do not convert — values were often corrupted).
+delete config.inventoryWidgetTranslateX;
+delete config.inventoryWidgetTranslateY;
 if (config.alwaysNavigateMaxFloor === undefined) config.alwaysNavigateMaxFloor = false;
 if (config.autoHideNonShinyNonAwakenedMonsters === undefined) config.autoHideNonShinyNonAwakenedMonsters = false;
 if (config.disableQuestHelpers === undefined) config.disableQuestHelpers = false;
@@ -219,7 +257,6 @@ const SELECTORS = {
   STAMINA_PARENT_SPAN: 'span[data-full]',
   STAMINA_CHILD_SPANS: 'span',
   HEADER_SLOT: '#header-slot',
-  CURRENCY_CONTAINER: '#header-slot > div > div:first-child',
   CREATURE_IMG: 'img[alt="creature"]',
   STAR_TIER_4: 'img[src*="star-tier-4.png"], img[src*="star-tier-shiny.png"], img[src*="star-tier-hundo.png"], img.tier-stars[alt="star tier"]',
   RARITY_DIV: '.has-rarity, .rarity-shiny, .rarity-hundo, .rarity-awaken',
@@ -456,6 +493,39 @@ function clearModSettingsModalLayoutCleanup() {
   }
 }
 
+function clearModSettingsModalWatchers() {
+  for (const cleanup of modSettingsModalWatchCleanups) {
+    try {
+      cleanup();
+    } catch (_) { /* ignore */ }
+  }
+  modSettingsModalWatchCleanups = [];
+}
+
+function clearModSettingsModalCoordinationSubs() {
+  for (const unsub of modSettingsModalCoordinationUnsubscribers) {
+    try {
+      unsub?.();
+    } catch (_) { /* ignore */ }
+  }
+  modSettingsModalCoordinationUnsubscribers = [];
+}
+
+/** Tear down settings-modal timers, bus subscriptions, resize, and capture mode. Idempotent. */
+function teardownSettingsModal() {
+  clearModSettingsModalWatchers();
+  clearModSettingsModalCoordinationSubs();
+  clearModSettingsModalLayoutCleanup();
+  if (typeof hotkeysState.detachHotkeyCapture === 'function') {
+    try {
+      hotkeysState.detachHotkeyCapture();
+    } catch (_) { /* ignore */ }
+  }
+  modSettingsSelectCategoryHandler = null;
+  modSettingsFirebaseUploadStateUpdater = null;
+  modSettingsModalInstance = null;
+}
+
 function getModSettingsDialog(modalRef) {
   if (modalRef?.element) return modalRef.element;
   if (modalRef instanceof HTMLElement) return modalRef;
@@ -690,10 +760,7 @@ function initFirebaseUploadRegionToggles(container) {
 
 // Timeout/Delay settings (in milliseconds)
 const TIMEOUT_DELAYS = {
-  MENU_CLOSE: 10,
-  SUBMENU_HIDE: 100,
   TAB_REAPPLY: 100,
-  STATE_VERIFY: 100,
   INIT_RETRY: 500,
   OBSERVER_RETRY: 1000,
   CONTAINER_DEBOUNCE: 200,
@@ -736,7 +803,8 @@ const observers = {
   scrollLock: null,
   compactNavBar: null,
   autoplaySessionCheckboxes: null,
-  inventoryModButtons: null
+  inventoryModButtons: null,
+  persistentInventory: null
 };
 
 // Timer state
@@ -752,10 +820,40 @@ const uiState = {
   settingsButton: null
 };
 
-const stickyInventoryState = {
-  started: false,
-  done: false
+const persistentInventoryState = {
+  restoreStarted: false,
+  restoreComplete: false,
+  restoring: false,
+  dragActive: false,
+  positionApplied: false,
+  savePositionTimeout: null,
+  restoreTimeouts: [],
+  boundDragRoot: null,
+  onPointerDown: null,
+  onPointerMove: null,
+  onPointerUp: null,
+  dragOrigin: null,
+  restoreStartedAt: 0,
+  lastRestoreStepAt: 0,
+  openedInventory: false,
+  clickedPin: false,
+  lastPinClickAt: 0,
+  lastOpenAttemptAt: 0,
+  pinClickAttempts: 0
 };
+
+const PERSISTENT_INVENTORY_STYLE_ID = 'mod-settings-persistent-inventory-style';
+const PERSISTENT_INVENTORY_RESTORE_STYLE_ID = 'mod-settings-persistent-inventory-restore-style';
+const PERSISTENT_INVENTORY_ATTR = 'data-ba-persistent-inventory';
+const PERSISTENT_INVENTORY_RESTORING_ATTR = 'data-ba-persistent-inventory-restoring';
+
+function logPersistentInventory(message, details) {
+  if (details !== undefined) {
+    console.log(`[Mod Settings] Persistent inventory: ${message}`, details);
+    return;
+  }
+  console.log(`[Mod Settings] Persistent inventory: ${message}`);
+}
 
 const EXPECTED_INVENTORY_MOD_BUTTON_CLASSES = [
   'auto-inventory-button',
@@ -845,16 +943,23 @@ function isTypingIntoInput(target) {
   return false;
 }
 
+function normalizeForLabelMatch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
 function findGameNavButtonByLabel(label) {
-  const normalizedLabel = String(label || '').toLowerCase();
+  const normalizedLabel = normalizeForLabelMatch(label);
   if (!normalizedLabel) return null;
 
   for (const root of getNavButtonSearchRoots()) {
     const buttons = root.querySelectorAll('button');
     for (const button of buttons) {
-      const aria = (button.getAttribute('aria-label') || '').toLowerCase();
-      const title = (button.getAttribute('title') || '').toLowerCase();
-      const text = (button.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const aria = normalizeForLabelMatch(button.getAttribute('aria-label'));
+      const title = normalizeForLabelMatch(button.getAttribute('title'));
+      const text = normalizeForLabelMatch((button.textContent || '').replace(/\s+/g, ' ').trim());
       if (aria.includes(normalizedLabel) || title.includes(normalizedLabel) || text.includes(normalizedLabel)) {
         return button;
       }
@@ -874,8 +979,56 @@ function findGameNavButtonBySearchTerms(terms) {
   return null;
 }
 
+function getInventoryNavSearchTerms() {
+  const terms = ['inventory', 'inventario', 'inventário'];
+  try {
+    const localized = t('mods.betterUI.inventory');
+    if (localized) terms.push(String(localized));
+  } catch (_) {
+    // Locale helper may be unavailable during early boot.
+  }
+  return terms;
+}
+
+function findInventoryNavButton() {
+  const byLabel = findGameNavButtonBySearchTerms(getInventoryNavSearchTerms());
+  if (byLabel) return byLabel;
+
+  for (const root of getNavButtonSearchRoots()) {
+    const img =
+      root.querySelector('img[src*="inventory.png"]') ||
+      root.querySelector('img[alt="inventory" i]') ||
+      root.querySelector('img[alt="Inventário" i]') ||
+      root.querySelector('img[alt="Inventario" i]');
+    const button = img?.closest?.('button');
+    if (button) return button;
+  }
+
+  const fallbackImg = document.querySelector(
+    'header img[src*="inventory.png"], #header-slot img[src*="inventory.png"], [role="banner"] img[src*="inventory.png"], nav img[src*="inventory.png"]'
+  );
+  return fallbackImg?.closest?.('button') || null;
+}
+
 function openInventoryFromHotkey() {
-  const inventoryButton = findGameNavButtonByLabel('inventory');
+  // Locale-independent path used by other mods (e.g. Autoseller).
+  try {
+    const currentMode = globalThis.state?.menu?.getSnapshot?.()?.context?.mode;
+    if (currentMode === 'inventory') {
+      return;
+    }
+    if (globalThis.state?.menu?.send) {
+      globalThis.state.menu.send({
+        type: 'setState',
+        fn: (prev) => ({ ...prev, mode: 'inventory' })
+      });
+      return;
+    }
+  } catch (_) {
+    // Fall through to DOM click.
+  }
+
+  const inventoryButton = findInventoryNavButton();
   if (!inventoryButton) {
     console.warn('[Mod Settings] Inventory hotkey pressed but inventory button was not found');
     return;
@@ -1086,6 +1239,27 @@ function openHygenieFromHotkey() {
   openInventorySubtabFromHotkey(
     findHygenieInventoryTabButton,
     "[Mod Settings] Hy'genie hotkey: tab button not found after opening inventory"
+  );
+}
+
+/** Dr. Mephistopheles tab inside Inventory: doctor portrait (img[src*="doctor"] / alt "doctor"). */
+function findDrMephistophelesInventoryTabButton() {
+  return findInventorySubtabButton(
+    'img[src*="doctor"], img[alt="doctor"], .sprite.item.id-50241, img[alt="50241"]',
+    [
+      'img[src*="/assets/misc/doctor.png"]',
+      'img[alt="doctor"]',
+      'img[src*="doctor"]',
+      '.sprite.item.id-50241',
+      'img[alt="50241"]'
+    ]
+  );
+}
+
+function openDrMephistophelesFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findDrMephistophelesInventoryTabButton,
+    '[Mod Settings] Dr. Mephistopheles hotkey: tab button not found after opening inventory'
   );
 }
 
@@ -1313,74 +1487,58 @@ function goToNextMapFromHotkey() {
   cycleMapFromHotkey('next');
 }
 
-function findBoardStartButtonFromHotkey() {
-  const startTexts = ['start', 'fight', 'iniciar', 'lutar', 'jogar', 'começar'];
-  const candidates = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
-  const isBoardStartButton = (button) => {
+function findBoardControlButtonFromHotkey({
+  texts,
+  candidateSelector,
+  requireManualSibling = false
+}) {
+  const candidates = document.querySelectorAll(candidateSelector);
+  const matches = (button) => {
     if (!button || button.disabled) return false;
     const text = (button.textContent || '').trim().toLowerCase();
-    if (!startTexts.some((t) => text === t || text.includes(t))) return false;
+    if (!texts.some((t) => text === t || text.includes(t))) return false;
     let node = button.parentElement;
     while (node) {
       if (node.classList && node.classList.contains('sm:order-3')) return true;
       node = node.parentElement;
     }
-    const container = button.parentElement;
-    return !!(container && container.querySelector('img[alt="Manual"]'));
+    if (requireManualSibling) {
+      const container = button.parentElement;
+      return !!(container && container.querySelector('img[alt="Manual"]'));
+    }
+    return false;
   };
   for (const button of candidates) {
-    if (isBoardStartButton(button)) return button;
+    if (matches(button)) return button;
   }
   for (const button of document.querySelectorAll('button')) {
-    if (isBoardStartButton(button)) return button;
+    if (matches(button)) return button;
   }
   return null;
+}
+
+function findBoardStartButtonFromHotkey() {
+  return findBoardControlButtonFromHotkey({
+    texts: ['start', 'fight', 'iniciar', 'lutar', 'jogar', 'começar'],
+    candidateSelector: 'button[data-full="false"][data-state="closed"]',
+    requireManualSibling: true
+  });
 }
 
 function findBoardSkipButtonFromHotkey() {
-  const skipTexts = ['skip', 'pular'];
-  const candidates = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
-  const isBoardSkipButton = (button) => {
-    if (!button || button.disabled) return false;
-    const text = (button.textContent || '').trim().toLowerCase();
-    if (!skipTexts.some((t) => text === t || text.includes(t))) return false;
-    let node = button.parentElement;
-    while (node) {
-      if (node.classList && node.classList.contains('sm:order-3')) return true;
-      node = node.parentElement;
-    }
-    return false;
-  };
-  for (const button of candidates) {
-    if (isBoardSkipButton(button)) return button;
-  }
-  for (const button of document.querySelectorAll('button')) {
-    if (isBoardSkipButton(button)) return button;
-  }
-  return null;
+  return findBoardControlButtonFromHotkey({
+    texts: ['skip', 'pular'],
+    candidateSelector: 'button[data-full="false"][data-state="closed"]',
+    requireManualSibling: false
+  });
 }
 
 function findBoardStopButtonFromHotkey() {
-  const stopTexts = ['stop', 'parar'];
-  const candidates = document.querySelectorAll('button[data-state="closed"]');
-  const isBoardStopButton = (button) => {
-    if (!button || button.disabled) return false;
-    const text = (button.textContent || '').trim().toLowerCase();
-    if (!stopTexts.some((t) => text === t || text.includes(t))) return false;
-    let node = button.parentElement;
-    while (node) {
-      if (node.classList && node.classList.contains('sm:order-3')) return true;
-      node = node.parentElement;
-    }
-    return false;
-  };
-  for (const button of candidates) {
-    if (isBoardStopButton(button)) return button;
-  }
-  for (const button of document.querySelectorAll('button')) {
-    if (isBoardStopButton(button)) return button;
-  }
-  return null;
+  return findBoardControlButtonFromHotkey({
+    texts: ['stop', 'parar'],
+    candidateSelector: 'button[data-state="closed"]',
+    requireManualSibling: false
+  });
 }
 
 function triggerStartOrSkipFromHotkey() {
@@ -1422,6 +1580,12 @@ let modSettingsSelectCategoryHandler = null;
 let modSettingsFirebaseUploadStateUpdater = null;
 /** @type {(() => void) | null} */
 let modSettingsModalLayoutCleanup = null;
+/** @type {Array<() => void>} */
+let modSettingsModalWatchCleanups = [];
+/** @type {Array<() => void>} */
+let modSettingsModalCoordinationUnsubscribers = [];
+/** @type {{ close: () => void, element?: HTMLElement } | null} */
+let modSettingsModalInstance = null;
 
 function getLocalModByName(modName) {
   return Array.isArray(window.localMods)
@@ -1721,19 +1885,45 @@ function openCyclopediaFromHotkey() {
 
 function isBetterTeleporterModEnabled() {
   return isLocalModEnabledInRegistry(BETTER_TELEPORTER_MOD_NAME)
-    || !!window.__betterTeleporterLoaded;
+    || typeof window.__betterTeleporterOpen === 'function';
 }
 
 function openBetterTeleporterFromHotkey() {
-  if (!isBetterTeleporterModEnabled()) {
-    console.warn('[Mod Settings] Better Teleporter hotkey pressed but Better Teleporter mod is disabled');
+  if (isBetterTeleporterModEnabled()) {
+    if (typeof window.__betterTeleporterOpen === 'function') {
+      window.__betterTeleporterOpen();
+      return;
+    }
+    console.warn('[Mod Settings] Better Teleporter hotkey pressed but teleporter open handler was not available');
     return;
   }
-  if (typeof window.__betterTeleporterOpen === 'function') {
-    window.__betterTeleporterOpen();
-    return;
+  openGnomishTeleporterFromHotkey();
+}
+
+/** Native board Manual (goto) buttons used by the in-game Gnomish Teleporter. */
+function findGnomishTeleporterGotoButtons() {
+  const buttons = [];
+  const seen = new Set();
+  for (const img of document.querySelectorAll('button img[src*="goto.png"][alt="Manual"]')) {
+    const btn = img.closest('button');
+    if (!btn || btn.closest('[role="dialog"]') || seen.has(btn)) continue;
+    seen.add(btn);
+    buttons.push(btn);
   }
-  console.warn('[Mod Settings] Better Teleporter hotkey pressed but teleporter open handler was not available');
+  return buttons;
+}
+
+function openGnomishTeleporterFromHotkey() {
+  const buttons = findGnomishTeleporterGotoButtons();
+  for (const button of buttons) {
+    try {
+      button.click();
+      return;
+    } catch (error) {
+      console.warn('[Mod Settings] Gnomish Teleport hotkey: failed to click goto button:', error);
+    }
+  }
+  console.warn('[Mod Settings] Gnomish Teleport hotkey: goto button not found');
 }
 
 /**
@@ -1886,72 +2076,104 @@ const NAV_HOTKEY_ENTRIES = [
     configKey: 'hotkeyOpenArsenal',
     captureId: 'hotkey-open-arsenal-capture-btn',
     resetId: 'hotkey-open-arsenal-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelArsenal',
+    initialDisplay: 'A',
     open: openArsenalFromHotkey
   },
   {
     configKey: 'hotkeyOpenBestiary',
     captureId: 'hotkey-open-bestiary-capture-btn',
     resetId: 'hotkey-open-bestiary-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelBestiary',
+    initialDisplay: 'B',
     open: openBestiaryFromHotkey
   },
   {
     configKey: 'hotkeyOpenDaycare',
     captureId: 'hotkey-open-daycare-capture-btn',
     resetId: 'hotkey-open-daycare-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelDaycare',
+    initialDisplay: 'D',
     open: openDaycareFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenDrMephistopheles',
+    captureId: 'hotkey-open-dr-mephistopheles-capture-btn',
+    resetId: 'hotkey-open-dr-mephistopheles-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelDrMephistopheles',
+    initialDisplay: 'E',
+    open: openDrMephistophelesFromHotkey
   },
   {
     configKey: 'hotkeyOpenForge',
     captureId: 'hotkey-open-forge-capture-btn',
     resetId: 'hotkey-open-forge-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelForge',
+    initialDisplay: 'F',
     open: openForgeFromHotkey
   },
   {
     configKey: 'hotkeyOpenHygenie',
     captureId: 'hotkey-open-hygenie-capture-btn',
     resetId: 'hotkey-open-hygenie-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelHygenie',
+    initialDisplay: 'H',
     open: openHygenieFromHotkey
   },
   {
     configKey: 'hotkeyOpenInventory',
     captureId: 'hotkey-open-inventory-capture-btn',
     resetId: 'hotkey-open-inventory-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelOpenInventory',
+    initialDisplay: 'I',
     open: openInventoryFromHotkey
   },
   {
     configKey: 'hotkeyOpenMonsterSqueezer',
     captureId: 'hotkey-open-monster-squeezer-capture-btn',
     resetId: 'hotkey-open-monster-squeezer-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelMonsterSqueezer',
+    initialDisplay: 'X',
     open: openMonsterSqueezerFromHotkey
   },
   {
     configKey: 'hotkeyOpenMonstrousCauldron',
     captureId: 'hotkey-open-monstrous-cauldron-capture-btn',
     resetId: 'hotkey-open-monstrous-cauldron-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelMonstrousCauldron',
+    initialDisplay: 'O',
     open: openMonstrousCauldronFromHotkey
   },
   {
     configKey: 'hotkeyOpenMountainFortress',
     captureId: 'hotkey-open-mountain-fortress-capture-btn',
     resetId: 'hotkey-open-mountain-fortress-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelMountainFortress',
+    initialDisplay: 'M',
     open: openMountainFortressFromHotkey
   },
   {
     configKey: 'hotkeyOpenQuestLog',
     captureId: 'hotkey-open-quest-log-capture-btn',
     resetId: 'hotkey-open-quest-log-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelOpenQuestLog',
+    initialDisplay: 'Q',
     open: openQuestLogFromHotkey
   },
   {
     configKey: 'hotkeyOpenStore',
     captureId: 'hotkey-open-store-capture-btn',
     resetId: 'hotkey-open-store-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelOpenStore',
+    initialDisplay: 'S',
     open: openStoreFromHotkey
   },
   {
     configKey: 'hotkeyOpenTrophyRoom',
     captureId: 'hotkey-open-trophy-room-capture-btn',
     resetId: 'hotkey-open-trophy-room-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelTrophyRoom',
+    initialDisplay: 'T',
     open: openTrophyRoomFromHotkey
   }
 ];
@@ -1962,10 +2184,12 @@ const HOTKEY_ALLOWLIST_DURING_BATTLE_KEYS = [
   'hotkeyCycleBestiaryEquipmentTab',
   'hotkeyStartOrSkip'
 ];
-const NAV_HOTKEY_UI_ROWS = NAV_HOTKEY_ENTRIES.map(({ configKey, captureId, resetId }) => ({
+const NAV_HOTKEY_UI_ROWS = NAV_HOTKEY_ENTRIES.map(({ configKey, captureId, resetId, labelKey, initialDisplay }) => ({
   configKey,
   captureId,
   resetId,
+  labelKey,
+  initialDisplay,
   displayFallback: ''
 }));
 
@@ -2183,83 +2407,154 @@ const TURBO_MODE_HOTKEY_DISABLED_TITLE =
   'Enable the Turbo Mode mod for this hotkey to work.';
 const CYCLOPEDIA_HOTKEY_DISABLED_TITLE =
   'Enable the Cyclopedia mod for this hotkey to work.';
-const BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE =
-  'Enable the Better Teleporter mod for this hotkey to work.';
 
-const MODS_HOTKEY_UI_ROWS = [
-  {
-    configKey: 'hotkeyReturnToMap',
-    captureId: 'hotkey-return-to-map-capture-btn',
-    resetId: 'hotkey-return-to-map-reset-btn',
-    displayFallback: ''
-  },
+const HOTKEY_BATTLE_UI_ROWS = [
   {
     configKey: 'hotkeyFloorUp',
     captureId: 'hotkey-floor-up-capture-btn',
     resetId: 'hotkey-floor-up-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    labelText: 'Floor up',
+    initialDisplay: 'PageUp',
+    marginTop: true
   },
   {
     configKey: 'hotkeyFloorDown',
     captureId: 'hotkey-floor-down-capture-btn',
     resetId: 'hotkey-floor-down-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    labelText: 'Floor down',
+    initialDisplay: 'PageDown',
+    marginTop: true
   },
   {
     configKey: 'hotkeyCycleBestiaryEquipmentTab',
     captureId: 'hotkey-cycle-bestiary-equipment-capture-btn',
     resetId: 'hotkey-cycle-bestiary-equipment-reset-btn',
-    displayFallback: ''
-  },
-  {
-    configKey: 'hotkeyResetCurrentMapDefault',
-    captureId: 'hotkey-reset-current-map-capture-btn',
-    resetId: 'hotkey-reset-current-map-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    labelText: 'Cycle Bestiary/Equipment tab',
+    initialDisplay: 'Tab',
+    marginTop: true
   },
   {
     configKey: 'hotkeyCycleBattleStyle',
     captureId: 'hotkey-cycle-battle-style-capture-btn',
     resetId: 'hotkey-cycle-battle-style-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    labelText: 'Cycle battle style',
+    initialDisplay: 'V',
+    marginTop: true
   },
   {
     configKey: 'hotkeyPreviousMap',
     captureId: 'hotkey-previous-map-capture-btn',
     resetId: 'hotkey-previous-map-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    labelText: 'Previous map',
+    initialDisplay: 'J',
+    marginTop: true
   },
   {
     configKey: 'hotkeyNextMap',
     captureId: 'hotkey-next-map-capture-btn',
     resetId: 'hotkey-next-map-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    labelText: 'Next map',
+    initialDisplay: 'K',
+    marginTop: true
   },
   {
     configKey: 'hotkeyStartOrSkip',
     captureId: 'hotkey-start-or-skip-capture-btn',
     resetId: 'hotkey-start-or-skip-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    labelText: 'Start/Skip button',
+    initialDisplay: 'Z',
+    marginTop: true
+  },
+  {
+    configKey: 'hotkeyResetCurrentMapDefault',
+    captureId: 'hotkey-reset-current-map-capture-btn',
+    resetId: 'hotkey-reset-current-map-reset-btn',
+    displayFallback: '',
+    labelKey: 'mods.betterUI.hotkeyLabelResetCurrentMapDefault',
+    initialDisplay: 'R',
+    marginTop: true
+  }
+];
+
+const HOTKEY_MODS_GATED_UI_ROWS = [
+  {
+    configKey: 'hotkeyReturnToMap',
+    captureId: 'hotkey-return-to-map-capture-btn',
+    resetId: 'hotkey-return-to-map-reset-btn',
+    displayFallback: '',
+    initialDisplay: 'G',
+    marginTop: false,
+    rowId: 'hotkey-return-to-map-row',
+    labelId: 'hotkey-return-to-map-label'
   },
   {
     configKey: 'hotkeyToggleTurboMode',
     captureId: 'hotkey-toggle-turbo-mode-capture-btn',
     resetId: 'hotkey-toggle-turbo-mode-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    initialDisplay: 'Y',
+    marginTop: true,
+    rowId: 'hotkey-toggle-turbo-mode-row',
+    labelId: 'hotkey-toggle-turbo-mode-label'
   },
   {
     configKey: 'hotkeyOpenCyclopedia',
     captureId: 'hotkey-open-cyclopedia-capture-btn',
     resetId: 'hotkey-open-cyclopedia-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    initialDisplay: 'C',
+    marginTop: true,
+    rowId: 'hotkey-open-cyclopedia-row',
+    labelId: 'hotkey-open-cyclopedia-label'
   },
   {
     configKey: 'hotkeyOpenBetterTeleporter',
     captureId: 'hotkey-open-better-teleporter-capture-btn',
     resetId: 'hotkey-open-better-teleporter-reset-btn',
-    displayFallback: ''
+    displayFallback: '',
+    initialDisplay: 'P',
+    marginTop: true,
+    rowId: 'hotkey-open-better-teleporter-row',
+    labelId: 'hotkey-open-better-teleporter-label'
   }
 ];
+
+function getModsGatedHotkeyLabelHtml(row) {
+  switch (row.configKey) {
+    case 'hotkeyReturnToMap':
+      return `
+                  <span id="hotkey-return-to-map-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
+                  ${t('mods.betterUI.hotkeyLabelReturnToMap')}
+                  <span style="cursor: help; margin-left: 6px; color: #ffffff; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; border: 1px solid #ffffff; border-radius: 50%; line-height: 1;" title="Shift + hotkey goes forward in map history">i</span>
+                `;
+    case 'hotkeyToggleTurboMode':
+      return `
+                  <span id="hotkey-toggle-turbo-mode-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
+                  Toggle Turbo Mode
+                `;
+    case 'hotkeyOpenCyclopedia':
+      return `
+                  <span id="hotkey-open-cyclopedia-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
+                  ${t('mods.betterUI.hotkeyLabelCyclopedia')}
+                `;
+    case 'hotkeyOpenBetterTeleporter':
+      return `
+                  <span id="hotkey-open-better-teleporter-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
+                  <span id="hotkey-open-better-teleporter-name">${t('mods.betterUI.hotkeyLabelBetterTeleporter')}</span>
+                `;
+    default:
+      return '';
+  }
+}
+
+const MODS_HOTKEY_UI_ROWS = HOTKEY_BATTLE_UI_ROWS.concat(HOTKEY_MODS_GATED_UI_ROWS);
 
 const SETUP_HOTKEY_UI_ROWS = [
   { configKey: 'hotkeyAutoSetup', captureId: 'hotkey-auto-setup-capture-btn', resetId: 'hotkey-auto-setup-reset-btn', displayFallback: '' },
@@ -2278,6 +2573,45 @@ const SETUP_HOTKEY_BINDING_KEYS = SETUP_HOTKEY_UI_ROWS.map((r) => r.configKey);
 const ALL_HOTKEY_BINDING_KEYS = NAV_HOTKEY_BINDING_KEYS.concat(MODS_HOTKEY_BINDING_KEYS).concat(SETUP_HOTKEY_BINDING_KEYS);
 
 const ALL_HOTKEY_UI_ROWS = NAV_HOTKEY_UI_ROWS.concat(MODS_HOTKEY_UI_ROWS).concat(SETUP_HOTKEY_UI_ROWS);
+
+function hotkeyConfigRowHtml({
+  captureId,
+  resetId,
+  labelHtml,
+  initialDisplay,
+  rowClass = 'hotkey-inventory-row',
+  rowId,
+  rowStyle,
+  labelStyle,
+  marginTop = true,
+  labelId
+}) {
+  const margin = marginTop ? ' margin-top: 12px;' : '';
+  const idAttr = rowId ? ` id="${rowId}"` : '';
+  const labelAttrs = labelId ? ` id="${labelId}"` : '';
+  return `
+            <div${idAttr} class="${rowClass}" style="${rowStyle}${margin}">
+              <span${labelAttrs} style="${labelStyle}">${labelHtml}</span>
+              <button type="button" id="${captureId}" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
+                ${initialDisplay}
+              </button>
+              <button type="button" id="${resetId}" style="pointer-events: auto;">
+                ${t('mods.betterUI.hotkeyResetBinding')}
+              </button>
+            </div>`;
+}
+
+function bindAllHotkeyUiRowsInModal(content, rows = ALL_HOTKEY_UI_ROWS) {
+  for (const row of rows) {
+    bindHotkeyConfigRowInModal(
+      content.querySelector(`#${row.captureId}`),
+      content.querySelector(`#${row.resetId}`),
+      row.configKey,
+      defaultConfig[row.configKey] ?? '',
+      row.displayFallback ?? ''
+    );
+  }
+}
 
 function effectiveNavHotkeyBinding(configKey) {
   return sanitizeStoredHotkey(config[configKey], '');
@@ -2320,20 +2654,26 @@ function sizeHotkeyCaptureToResetButton(captureButton, resetButton) {
   captureButton.style.setProperty('flex-shrink', '0', 'important');
 }
 
-function updateReturnToMapHotkeyAvailability() {
-  const label = document.getElementById('hotkey-return-to-map-label');
-  const warning = document.getElementById('hotkey-return-to-map-unavailable-warning');
-  const captureButton = document.getElementById('hotkey-return-to-map-capture-btn');
-  const resetButton = document.getElementById('hotkey-return-to-map-reset-btn');
-  const disabled = !config.showLastVisitedMapButton;
+function updateHotkeyRowAvailability({
+  labelId,
+  warningId,
+  captureId,
+  resetId,
+  disabled,
+  disabledTitle
+}) {
+  const label = document.getElementById(labelId);
+  const warning = document.getElementById(warningId);
+  const captureButton = document.getElementById(captureId);
+  const resetButton = document.getElementById(resetId);
 
   if (label) {
     label.style.color = disabled ? '#888' : '#ccc';
-    label.title = disabled ? RETURN_TO_MAP_HOTKEY_DISABLED_TITLE : '';
+    label.title = disabled ? disabledTitle : '';
   }
   if (warning) {
     warning.hidden = !disabled;
-    warning.title = RETURN_TO_MAP_HOTKEY_DISABLED_TITLE;
+    warning.title = disabledTitle;
     warning.style.display = disabled ? 'inline-flex' : 'none';
     warning.style.color = '#f0c36d';
     warning.style.opacity = '1';
@@ -2342,121 +2682,107 @@ function updateReturnToMapHotkeyAvailability() {
   if (captureButton) {
     captureButton.disabled = false;
     captureButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    captureButton.title = disabled ? RETURN_TO_MAP_HOTKEY_DISABLED_TITLE : t('mods.betterUI.hotkeyCaptureTitle');
+    captureButton.title = disabled ? disabledTitle : t('mods.betterUI.hotkeyCaptureTitle');
     captureButton.style.cursor = disabled ? 'not-allowed' : '';
     captureButton.style.opacity = disabled ? '0.65' : '';
   }
   if (resetButton) {
     resetButton.disabled = false;
     resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    resetButton.title = disabled ? RETURN_TO_MAP_HOTKEY_DISABLED_TITLE : '';
+    resetButton.title = disabled ? disabledTitle : '';
     resetButton.style.cursor = disabled ? 'not-allowed' : '';
     resetButton.style.opacity = disabled ? '0.65' : '';
   }
+}
+
+function updateReturnToMapHotkeyAvailability() {
+  updateHotkeyRowAvailability({
+    labelId: 'hotkey-return-to-map-label',
+    warningId: 'hotkey-return-to-map-unavailable-warning',
+    captureId: 'hotkey-return-to-map-capture-btn',
+    resetId: 'hotkey-return-to-map-reset-btn',
+    disabled: !config.showLastVisitedMapButton,
+    disabledTitle: RETURN_TO_MAP_HOTKEY_DISABLED_TITLE
+  });
 }
 
 function updateTurboModeHotkeyAvailability() {
-  const label = document.getElementById('hotkey-toggle-turbo-mode-label');
-  const warning = document.getElementById('hotkey-toggle-turbo-mode-unavailable-warning');
-  const captureButton = document.getElementById('hotkey-toggle-turbo-mode-capture-btn');
-  const resetButton = document.getElementById('hotkey-toggle-turbo-mode-reset-btn');
-  const disabled = !isTurboModeModEnabled();
-
-  if (label) {
-    label.style.color = disabled ? '#888' : '#ccc';
-    label.title = disabled ? TURBO_MODE_HOTKEY_DISABLED_TITLE : '';
-  }
-  if (warning) {
-    warning.hidden = !disabled;
-    warning.title = TURBO_MODE_HOTKEY_DISABLED_TITLE;
-    warning.style.display = disabled ? 'inline-flex' : 'none';
-    warning.style.color = '#f0c36d';
-    warning.style.opacity = '1';
-    warning.style.filter = 'none';
-  }
-  if (captureButton) {
-    captureButton.disabled = false;
-    captureButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    captureButton.title = disabled ? TURBO_MODE_HOTKEY_DISABLED_TITLE : t('mods.betterUI.hotkeyCaptureTitle');
-    captureButton.style.cursor = disabled ? 'not-allowed' : '';
-    captureButton.style.opacity = disabled ? '0.65' : '';
-  }
-  if (resetButton) {
-    resetButton.disabled = false;
-    resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    resetButton.title = disabled ? TURBO_MODE_HOTKEY_DISABLED_TITLE : '';
-    resetButton.style.cursor = disabled ? 'not-allowed' : '';
-    resetButton.style.opacity = disabled ? '0.65' : '';
-  }
+  updateHotkeyRowAvailability({
+    labelId: 'hotkey-toggle-turbo-mode-label',
+    warningId: 'hotkey-toggle-turbo-mode-unavailable-warning',
+    captureId: 'hotkey-toggle-turbo-mode-capture-btn',
+    resetId: 'hotkey-toggle-turbo-mode-reset-btn',
+    disabled: !isTurboModeModEnabled(),
+    disabledTitle: TURBO_MODE_HOTKEY_DISABLED_TITLE
+  });
 }
 
 function updateCyclopediaHotkeyAvailability() {
-  const label = document.getElementById('hotkey-open-cyclopedia-label');
-  const warning = document.getElementById('hotkey-open-cyclopedia-unavailable-warning');
-  const captureButton = document.getElementById('hotkey-open-cyclopedia-capture-btn');
-  const resetButton = document.getElementById('hotkey-open-cyclopedia-reset-btn');
-  const disabled = !isCyclopediaModEnabled();
-
-  if (label) {
-    label.style.color = disabled ? '#888' : '#ccc';
-    label.title = disabled ? CYCLOPEDIA_HOTKEY_DISABLED_TITLE : '';
-  }
-  if (warning) {
-    warning.hidden = !disabled;
-    warning.title = CYCLOPEDIA_HOTKEY_DISABLED_TITLE;
-    warning.style.display = disabled ? 'inline-flex' : 'none';
-    warning.style.color = '#f0c36d';
-    warning.style.opacity = '1';
-    warning.style.filter = 'none';
-  }
-  if (captureButton) {
-    captureButton.disabled = false;
-    captureButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    captureButton.title = disabled ? CYCLOPEDIA_HOTKEY_DISABLED_TITLE : t('mods.betterUI.hotkeyCaptureTitle');
-    captureButton.style.cursor = disabled ? 'not-allowed' : '';
-    captureButton.style.opacity = disabled ? '0.65' : '';
-  }
-  if (resetButton) {
-    resetButton.disabled = false;
-    resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    resetButton.title = disabled ? CYCLOPEDIA_HOTKEY_DISABLED_TITLE : '';
-    resetButton.style.cursor = disabled ? 'not-allowed' : '';
-    resetButton.style.opacity = disabled ? '0.65' : '';
-  }
+  updateHotkeyRowAvailability({
+    labelId: 'hotkey-open-cyclopedia-label',
+    warningId: 'hotkey-open-cyclopedia-unavailable-warning',
+    captureId: 'hotkey-open-cyclopedia-capture-btn',
+    resetId: 'hotkey-open-cyclopedia-reset-btn',
+    disabled: !isCyclopediaModEnabled(),
+    disabledTitle: CYCLOPEDIA_HOTKEY_DISABLED_TITLE
+  });
 }
 
 function updateBetterTeleporterHotkeyAvailability() {
+  const row = document.getElementById('hotkey-open-better-teleporter-row');
+  const nameEl = document.getElementById('hotkey-open-better-teleporter-name');
   const label = document.getElementById('hotkey-open-better-teleporter-label');
   const warning = document.getElementById('hotkey-open-better-teleporter-unavailable-warning');
   const captureButton = document.getElementById('hotkey-open-better-teleporter-capture-btn');
   const resetButton = document.getElementById('hotkey-open-better-teleporter-reset-btn');
-  const disabled = !isBetterTeleporterModEnabled();
-
-  if (label) {
-    label.style.color = disabled ? '#888' : '#ccc';
-    label.title = disabled ? BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE : '';
+  if (!row) {
+    return;
   }
+
+  const betterEnabled = isBetterTeleporterModEnabled();
+
+  if (nameEl) {
+    nameEl.textContent = betterEnabled
+      ? t('mods.betterUI.hotkeyLabelBetterTeleporter')
+      : t('mods.betterUI.hotkeyLabelGnomishTeleport');
+  }
+
+  // Usable in both modes: Better Teleporter (Mods) or native Gnomish Teleport (General).
   if (warning) {
-    warning.hidden = !disabled;
-    warning.title = BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE;
-    warning.style.display = disabled ? 'inline-flex' : 'none';
-    warning.style.color = '#f0c36d';
-    warning.style.opacity = '1';
-    warning.style.filter = 'none';
+    warning.hidden = true;
+    warning.style.display = 'none';
+  }
+  if (label) {
+    label.style.color = '#ccc';
+    label.title = '';
   }
   if (captureButton) {
     captureButton.disabled = false;
-    captureButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    captureButton.title = disabled ? BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE : t('mods.betterUI.hotkeyCaptureTitle');
-    captureButton.style.cursor = disabled ? 'not-allowed' : '';
-    captureButton.style.opacity = disabled ? '0.65' : '';
+    captureButton.setAttribute('aria-disabled', 'false');
+    captureButton.title = t('mods.betterUI.hotkeyCaptureTitle');
+    captureButton.style.cursor = '';
+    captureButton.style.opacity = '';
   }
   if (resetButton) {
     resetButton.disabled = false;
-    resetButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
-    resetButton.title = disabled ? BETTER_TELEPORTER_HOTKEY_DISABLED_TITLE : '';
-    resetButton.style.cursor = disabled ? 'not-allowed' : '';
-    resetButton.style.opacity = disabled ? '0.65' : '';
+    resetButton.setAttribute('aria-disabled', 'false');
+    resetButton.title = '';
+    resetButton.style.cursor = '';
+    resetButton.style.opacity = '';
+  }
+
+  if (betterEnabled) {
+    const modsSection = document.getElementById('hotkeys-mods-section');
+    if (modsSection && (row.parentElement !== modsSection || modsSection.lastElementChild !== row)) {
+      modsSection.appendChild(row);
+    }
+    return;
+  }
+
+  const hygenieRow = document.getElementById('hotkey-open-hygenie-capture-btn')
+    ?.closest('.hotkey-inventory-row');
+  if (hygenieRow?.parentElement && row.nextElementSibling !== hygenieRow) {
+    hygenieRow.parentElement.insertBefore(row, hygenieRow);
   }
 }
 
@@ -2713,10 +3039,6 @@ function isEliteMonster(monster) {
          monster.tier === GAME_CONSTANTS.MAX_TIER;
 }
 
-function isMaxLevel(levelText) {
-  return levelText === GAME_CONSTANTS.MAX_LEVEL.toString();
-}
-
 function getCreatureGameId(imgElement) {
   // Match both regular and shiny portraits: /46.png or /46-shiny.png
   const match = imgElement.src.match(/\/(\d+)(?:-shiny)?\.png$/);
@@ -2875,6 +3197,36 @@ function generateMaxShiniesCSS(colorOption, colorKey) {
   return CSS_TEMPLATES.maxShinies(colorOption, colorKey);
 }
 
+function generateSealedCreaturesCSS(colorOption, colorKey) {
+  return `
+    .rarity-sealed[data-sealed-creatures="true"][data-sealed-creatures-color="${colorKey}"] {
+      border: 2px solid;
+      border-image: ${colorOption.borderGradient} 1;
+      background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
+      opacity: 0.8;
+    }
+  `;
+}
+
+function upsertFeatureStyle({ idPrefix, colorKey, cssText, replaceAllColors = false }) {
+  if (replaceAllColors) {
+    Object.keys(COLOR_OPTIONS).forEach((color) => {
+      document.getElementById(`${idPrefix}-${color}-style`)?.remove();
+    });
+  } else if (document.getElementById(`${idPrefix}-${colorKey}-style`)) {
+    return;
+  }
+  const styleId = `${idPrefix}-${colorKey}-style`;
+  let style = document.getElementById(styleId);
+  if (!style) {
+    style = document.createElement('style');
+    style.id = styleId;
+    document.head.appendChild(style);
+  }
+  style.textContent = cssText;
+}
+
 // Helper function to get inventory border style HTML based on setting
 function getInventoryBorderStyle(borderStyleName) {
   if (!borderStyleName || borderStyleName === 'Original') {
@@ -2954,11 +3306,6 @@ function trackInventoryModButtons() {
   return classesInDom;
 }
 
-function findMissingInventoryModButtons() {
-  const classesInDom = trackInventoryModButtons();
-  return Array.from(inventoryModButtonsState.knownClasses).filter((className) => !classesInDom.has(className));
-}
-
 function triggerInventoryModButtonsRecovery() {
   const inventoryContainer = document.querySelector('.container-inventory-4');
   if (!inventoryContainer) return false;
@@ -2978,8 +3325,8 @@ function triggerInventoryModButtonsRecovery() {
 }
 
 function verifyInventoryModButtonsIntegrity(source = 'unknown') {
-  if (!config.defaultInventorySticky) return;
-  if (!stickyInventoryState.started && !stickyInventoryState.done && isInventoryWidgetPinned() !== true) return;
+  if (!config.persistentInventory) return;
+  if (!findInventoryWidgetRoot()) return;
 
   const classesInDom = trackInventoryModButtons();
   const baselineClasses = Array.from(inventoryModButtonsState.knownClasses).filter((className) =>
@@ -3002,7 +3349,7 @@ function verifyInventoryModButtonsIntegrity(source = 'unknown') {
       window.Autoscroller?.reinjectButton?.('mod-settings-missing-check');
       window.dispatchEvent(new CustomEvent('autoscroller:reinject-button'));
     } catch (error) {
-      console.warn('[Mod Settings] Sticky inventory: autoscroller reinject hook failed', error);
+      console.warn('[Mod Settings] Persistent inventory: autoscroller reinject hook failed', error);
     }
   }
 
@@ -3011,7 +3358,7 @@ function verifyInventoryModButtonsIntegrity(source = 'unknown') {
       window.DiceRoller?.reinjectButton?.('mod-settings-missing-check');
       window.dispatchEvent(new CustomEvent('dice-roller:reinject-button'));
     } catch (error) {
-      console.warn('[Mod Settings] Sticky inventory: dice roller reinject hook failed', error);
+      console.warn('[Mod Settings] Persistent inventory: dice roller reinject hook failed', error);
     }
   }
 
@@ -3020,7 +3367,7 @@ function verifyInventoryModButtonsIntegrity(source = 'unknown') {
       window.BetterForge?.reinjectButton?.('mod-settings-missing-check');
       window.dispatchEvent(new CustomEvent('better-forge:reinject-button'));
     } catch (error) {
-      console.warn('[Mod Settings] Sticky inventory: better forge reinject hook failed', error);
+      console.warn('[Mod Settings] Persistent inventory: better forge reinject hook failed', error);
     }
   }
 
@@ -3028,7 +3375,7 @@ function verifyInventoryModButtonsIntegrity(source = 'unknown') {
   if (now - inventoryModButtonsState.lastRecoveryAt < 1500) return;
   inventoryModButtonsState.lastRecoveryAt = now;
 
-  console.log('[Mod Settings] Sticky inventory: missing mod inventory buttons, forcing refresh', {
+  console.log('[Mod Settings] Persistent inventory: missing mod inventory buttons, forcing refresh', {
     source,
     missingClasses: recoverableMissingClasses
   });
@@ -3617,24 +3964,6 @@ async function uploadBestRunsToFirebase(playerName, bestRuns, password, options 
 async function getBestRunsFirebasePath(playerName) {
   const hashedName = await hashUsername(playerName);
   return `${FIREBASE_RUNS_CONFIG.firebaseUrl}/best-runs/${hashedName}`;
-}
-
-/** @deprecated Legacy v1 full-blob upload — use uploadBestRunsToFirebase */
-async function uploadRunsToFirebase(playerName, encryptedData, password) {
-  try {
-    const path = await getBestRunsFirebasePath(playerName);
-    const data = {
-      encrypted: encryptedData,
-      lastUpdated: Date.now(),
-      version: '1.0'
-    };
-    await FirebaseRunsService.put(path, data, 'upload runs to Firebase');
-    console.log('[Mod Settings] Successfully uploaded runs to Firebase (v1)');
-    return true;
-  } catch (error) {
-    console.error('[Mod Settings] Error uploading runs to Firebase:', error);
-    return false;
-  }
 }
 
 // Fetch runs from Firebase
@@ -5317,7 +5646,7 @@ function stopAutoUploadMonitor() {
 // Start monitor if enabled
 if (config.autoUploadRuns && config.enableFirebaseRunsUpload) {
   // Wait a bit for RunTracker to initialize
-  setTimeout(() => {
+  scheduleTimeout(() => {
     startAutoUploadMonitor();
   }, 5000);
 }
@@ -6376,6 +6705,253 @@ function createSettingsCheckboxHandler(configKey, onEnable, onDisable) {
   };
 }
 
+/** Shared reader for Bestiary Automator localStorage config. */
+function getAutomatorConfigFromStorage() {
+  try {
+    const raw = localStorage.getItem('bestiary-automator-config');
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function readHuntAnalyzerSettings() {
+  try {
+    const raw = localStorage.getItem('huntAnalyzerSettings');
+    return raw ? JSON.parse(raw) : {};
+  } catch (error) {
+    console.error('[Mod Settings] Error reading Hunt Analyzer settings:', error);
+    return {};
+  }
+}
+
+function updateHuntAnalyzerSettings(mutator) {
+  try {
+    const settings = readHuntAnalyzerSettings();
+    mutator(settings);
+    localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
+    return settings;
+  } catch (error) {
+    console.error('[Mod Settings] Error updating Hunt Analyzer settings:', error);
+    return null;
+  }
+}
+
+function syncHuntAnalyzerRuntimeSetting(key, value) {
+  if (window.HuntAnalyzerState?.settings) {
+    window.HuntAnalyzerState.settings[key] = value;
+  }
+}
+
+function bindHuntAnalyzerCheckbox(checkbox, {
+  settingsKey,
+  defaultChecked = false,
+  onAfterWrite
+}) {
+  if (!checkbox) return;
+  const settings = readHuntAnalyzerSettings();
+  const stored = settings[settingsKey];
+  checkbox.checked = stored === undefined ? defaultChecked : !!stored;
+  checkbox.addEventListener('change', () => {
+    const newValue = checkbox.checked;
+    updateHuntAnalyzerSettings((s) => { s[settingsKey] = newValue; });
+    syncHuntAnalyzerRuntimeSetting(settingsKey, newValue);
+    onAfterWrite?.(newValue);
+    console.log(`[Mod Settings] Updated Hunt Analyzer ${settingsKey}:`, newValue);
+  });
+}
+
+function isAutomatorSeamlessAutoplayEnabled() {
+  return getAutomatorConfigFromStorage().autoPlayAfterDefeat === true;
+}
+
+function isAutomatorThresholdsEnabled() {
+  return getAutomatorConfigFromStorage().thresholdsEnabled !== false;
+}
+
+const WARNING_LABEL_COLOR = '#ffaa00';
+const WARNING_LABEL_EMOJI = '⚠️';
+
+/** Strip a leading warning emoji so we can re-apply it consistently. */
+function stripLeadingWarningEmoji(text) {
+  return String(text ?? '').replace(/^\s*⚠️\s*/u, '').trim();
+}
+
+/** Always prefix label text with ⚠️ (idempotent if already present). */
+function withLeadingWarningEmoji(text) {
+  const cleaned = stripLeadingWarningEmoji(text);
+  return cleaned ? `${WARNING_LABEL_EMOJI} ${cleaned}` : WARNING_LABEL_EMOJI;
+}
+
+/**
+ * Yellow warning option label with leading ⚠️.
+ * Use for Mod Settings checkboxes/titles that carry a caution tooltip.
+ */
+function warningLabelSpanHtml(labelText, { title = '', extraStyle = '', extraAttrs = '' } = {}) {
+  const text = withLeadingWarningEmoji(labelText);
+  const titleAttr = title ? ` title="${title}"` : '';
+  const attrs = extraAttrs ? ` ${extraAttrs}` : '';
+  const style = `cursor: help; font-size: 16px; color: ${WARNING_LABEL_COLOR};${extraStyle ? ` ${extraStyle}` : ''}`;
+  return `<span style="${style}"${titleAttr}${attrs}>${text}</span>`;
+}
+
+/**
+ * Grey-out / disable visual for exclusive settings checkboxes
+ * (Hide Stop, Persistent Powersaver, stamina API, etc.).
+ */
+function applyExclusiveCheckboxLock(checkbox, {
+  locked,
+  lockedChecked,
+  unlockedChecked,
+  lockMessage,
+  unlockedTitle = '',
+}) {
+  if (!checkbox) return;
+  const label = checkbox.closest('label');
+  const span = label?.querySelector('span');
+
+  if (locked) {
+    checkbox.disabled = true;
+    checkbox.checked = !!lockedChecked;
+    checkbox.title = lockMessage || '';
+    if (label) {
+      label.style.cursor = 'not-allowed';
+      label.style.opacity = '0.5';
+    }
+    if (span) {
+      span.style.cursor = 'help';
+      span.title = lockMessage || '';
+    }
+    return;
+  }
+
+  checkbox.disabled = false;
+  checkbox.checked = !!unlockedChecked;
+  checkbox.title = '';
+  if (label) {
+    label.style.cursor = 'pointer';
+    label.style.opacity = '1';
+  }
+  if (span) {
+    if (unlockedTitle) {
+      span.style.cursor = 'help';
+      span.title = unlockedTitle;
+    } else {
+      span.style.cursor = '';
+      span.removeAttribute('title');
+    }
+  }
+}
+
+/** HTML attrs for exclusive checkbox labels rendered into settings templates. */
+function getExclusiveCheckboxHtmlState({ locked, checked, lockMessage, unlockedTitle = '' }) {
+  const labelStyle = locked ? 'cursor: not-allowed; opacity: 0.5;' : 'cursor: pointer;';
+  const inputExtra = locked
+    ? `disabled title="${lockMessage}"`
+    : '';
+  const spanTitle = locked ? lockMessage : unlockedTitle;
+  return { labelStyle, inputExtra, spanTitle, checked: !!checked };
+}
+
+/** Poll while the settings modal containing `content` is open. */
+function watchSettingsModalWhileOpen(content, onTick, intervalMs = 1000) {
+  if (!content || typeof onTick !== 'function') return null;
+
+  let observer = null;
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    clearInterval(timer);
+    if (observer) {
+      try {
+        observer.disconnect();
+      } catch (_) { /* ignore */ }
+      observer = null;
+    }
+    const idx = modSettingsModalWatchCleanups.indexOf(cleanup);
+    if (idx >= 0) modSettingsModalWatchCleanups.splice(idx, 1);
+  };
+
+  const timer = setInterval(() => {
+    if (!document.contains(content)) {
+      cleanup();
+      return;
+    }
+    onTick();
+  }, intervalMs);
+
+  // createModal uses role="dialog" (no .modal class). Fall back to content root.
+  const modal =
+    content.closest('[role="dialog"]') ||
+    content.closest('.mod-settings-modal-root') ||
+    content;
+  observer = new MutationObserver(() => {
+    if (!document.contains(modal) || !document.contains(content)) {
+      cleanup();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  modSettingsModalWatchCleanups.push(cleanup);
+  return timer;
+}
+
+/**
+ * Bind a settings checkbox that can be locked by an exclusivity rule.
+ * @param {object} opts
+ * @param {HTMLInputElement} opts.checkbox
+ * @param {HTMLElement} [opts.content] - modal content root (enables poll while open)
+ * @param {() => boolean} opts.isLocked
+ * @param {() => boolean} opts.getLockedChecked
+ * @param {() => boolean} opts.getUnlockedChecked
+ * @param {() => string} opts.getLockMessage
+ * @param {() => string} [opts.getUnlockedTitle]
+ * @param {(checked: boolean) => void} opts.onUnlockedChange
+ * @param {() => void} [opts.onBeforeRefresh] - e.g. enforce forced config
+ */
+function bindExclusiveSettingsCheckbox({
+  checkbox,
+  content,
+  isLocked,
+  getLockedChecked,
+  getUnlockedChecked,
+  getLockMessage,
+  getUnlockedTitle,
+  onUnlockedChange,
+  onBeforeRefresh,
+}) {
+  if (!checkbox) return;
+
+  const refresh = () => {
+    onBeforeRefresh?.();
+    applyExclusiveCheckboxLock(checkbox, {
+      locked: !!isLocked(),
+      lockedChecked: !!getLockedChecked(),
+      unlockedChecked: !!getUnlockedChecked(),
+      lockMessage: getLockMessage() || '',
+      unlockedTitle: getUnlockedTitle?.() || '',
+    });
+  };
+
+  refresh();
+
+  if (checkbox.dataset.modSettingsExclusiveBound !== 'true') {
+    checkbox.dataset.modSettingsExclusiveBound = 'true';
+    checkbox.addEventListener('change', () => {
+      if (isLocked()) {
+        refresh();
+        return;
+      }
+      onUnlockedChange(!!checkbox.checked);
+      refresh();
+    });
+  }
+
+  if (content) {
+    watchSettingsModalWhileOpen(content, refresh);
+  }
+}
+
 // Create settings event handler for dropdowns
 function createSettingsDropdownHandler(configKey, onChangeCallback) {
   return (dropdown) => {
@@ -6394,7 +6970,11 @@ function createSettingsDropdownHandler(configKey, onChangeCallback) {
 // Show settings modal
 function showSettingsModal() {
   try {
-    clearModSettingsModalLayoutCleanup();
+    if (document.querySelector('.mod-settings-modal-root')) {
+      return;
+    }
+
+    teardownSettingsModal();
 
     const modalDimensions = getModSettingsModalDimensions();
     const columnWidths = getModSettingsColumnWidths(modalDimensions.width);
@@ -6553,6 +7133,7 @@ function showSettingsModal() {
       { id: 'creatures', label: t('mods.betterUI.menuCreatures'), selected: true },
       { id: 'depot-manager', label: t('mods.depot.title'), selected: false, requiresMod: true },
       { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
+      { id: 'gameplay', label: t('mods.betterUI.menuGameplay'), selected: false },
       { id: 'hotkeys', label: t('mods.betterUI.menuHotkeys'), selected: false },
       { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false, requiresMod: true },
       { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false, requiresMod: true },
@@ -6641,6 +7222,8 @@ function showSettingsModal() {
     
     // Function to update right column content based on selected category
     function updateRightColumn(categoryId) {
+      clearModSettingsModalWatchers();
+      clearModSettingsModalCoordinationSubs();
       rightColumn.innerHTML = '';
       
       if (categoryId === 'ui') {
@@ -6650,6 +7233,12 @@ function showSettingsModal() {
         const uiSectionTitleStyle =
           'margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;';
         const uiOptionStyle = 'margin-bottom: 15px;';
+        const hideStopLocked = isAutomatorSeamlessAutoplayEnabled();
+        const hideStopUi = getExclusiveCheckboxHtmlState({
+          locked: hideStopLocked,
+          checked: hideStopLocked || !!config.hideStopAfterDefeat,
+          lockMessage: t('mods.betterUI.hideStopAfterDefeatSeamlessLock'),
+        });
         uiContent.innerHTML = `
           <div style="margin-bottom: 15px;">
             <h4 style="${uiSectionTitleStyle}">${t('mods.betterUI.interfaceSectionModBar')}</h4>
@@ -6674,8 +7263,8 @@ function showSettingsModal() {
             </div>
             <div style="${uiOptionStyle}">
               <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                <input type="checkbox" id="default-inventory-sticky-toggle" style="transform: scale(1.2);">
-                <span>${t('mods.betterUI.stickyInventory')}</span>
+                <input type="checkbox" id="persistent-inventory-toggle" style="transform: scale(1.2);">
+                <span>${t('mods.betterUI.persistentInventory')}</span>
               </label>
             </div>
           </div>
@@ -6724,9 +7313,9 @@ function showSettingsModal() {
           <div style="${uiSectionWrapperStyle}">
             <h4 style="${uiSectionTitleStyle}">${t('mods.betterUI.interfaceSectionAutoplaySession')}</h4>
             <div style="${uiOptionStyle}">
-              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                <input type="checkbox" id="hide-stop-after-defeat-toggle" style="transform: scale(1.2);">
-                <span>${t('mods.betterUI.hideStopAfterDefeat')}</span>
+              <label style="display: flex; align-items: center; gap: 10px; ${hideStopUi.labelStyle}">
+                <input type="checkbox" id="hide-stop-after-defeat-toggle" ${hideStopUi.checked ? 'checked' : ''} ${hideStopUi.inputExtra} style="transform: scale(1.2);">
+                <span style="${hideStopUi.spanStyle}" ${hideStopUi.spanTitleAttr}>${t('mods.betterUI.hideStopAfterDefeat')}</span>
               </label>
             </div>
             <div style="${uiOptionStyle}">
@@ -6804,13 +7393,13 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="shiny-enemies-toggle" checked="" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.shinyEnemiesWarning')}">${t('mods.betterUI.shinyEnemies')}</span>
+              ${warningLabelSpanHtml(t('mods.betterUI.shinyEnemies'), { title: t('mods.betterUI.shinyEnemiesWarning') })}
             </label>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="auto-hide-non-shiny-awakened-monsters-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.autoHideNonShinyNonAwakenedMonstersWarning')}">⚠️ ${t('mods.betterUI.autoHideNonShinyNonAwakenedMonsters')}</span>
+              ${warningLabelSpanHtml(t('mods.betterUI.autoHideNonShinyNonAwakenedMonsters'), { title: t('mods.betterUI.autoHideNonShinyNonAwakenedMonstersWarning') })}
             </label>
           </div>
           <div style="margin-bottom: 15px;">
@@ -6886,6 +7475,41 @@ function showSettingsModal() {
             </div>`
           )
           .join('');
+        const generalHotkeyRowsHtml = NAV_HOTKEY_ENTRIES.map((entry, index) =>
+          hotkeyConfigRowHtml({
+            captureId: entry.captureId,
+            resetId: entry.resetId,
+            labelHtml: t(entry.labelKey),
+            initialDisplay: entry.initialDisplay,
+            rowStyle: hotkeyRowStyle,
+            labelStyle: hotkeyLabelStyle,
+            marginTop: index > 0
+          })
+        ).join('');
+        const battleHotkeyRowsHtml = HOTKEY_BATTLE_UI_ROWS.map((row) =>
+          hotkeyConfigRowHtml({
+            captureId: row.captureId,
+            resetId: row.resetId,
+            labelHtml: row.labelKey ? t(row.labelKey) : row.labelText,
+            initialDisplay: row.initialDisplay,
+            rowStyle: hotkeyRowStyle,
+            labelStyle: hotkeyLabelStyle,
+            marginTop: row.marginTop !== false
+          })
+        ).join('');
+        const modsGatedHotkeyRowsHtml = HOTKEY_MODS_GATED_UI_ROWS.map((row) =>
+          hotkeyConfigRowHtml({
+            captureId: row.captureId,
+            resetId: row.resetId,
+            labelHtml: getModsGatedHotkeyLabelHtml(row),
+            initialDisplay: row.initialDisplay,
+            rowStyle: hotkeyRowStyle,
+            labelStyle: hotkeyLabelStyle,
+            marginTop: row.marginTop,
+            rowId: row.rowId,
+            labelId: row.labelId
+          })
+        ).join('');
         const hotkeysContent = document.createElement('div');
         hotkeysContent.innerHTML = `
           <div style="margin-bottom: 15px;">
@@ -6897,244 +7521,18 @@ function showSettingsModal() {
           <div id="hotkeys-bindings-container">
           <div id="hotkeys-general-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); margin-bottom: 15px;">
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionGeneral')}</h4>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle}">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelArsenal')}</span>
-              <button type="button" id="hotkey-open-arsenal-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                A
-              </button>
-              <button type="button" id="hotkey-open-arsenal-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelBestiary')}</span>
-              <button type="button" id="hotkey-open-bestiary-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                B
-              </button>
-              <button type="button" id="hotkey-open-bestiary-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelDaycare')}</span>
-              <button type="button" id="hotkey-open-daycare-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                D
-              </button>
-              <button type="button" id="hotkey-open-daycare-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelForge')}</span>
-              <button type="button" id="hotkey-open-forge-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                F
-              </button>
-              <button type="button" id="hotkey-open-forge-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelHygenie')}</span>
-              <button type="button" id="hotkey-open-hygenie-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                H
-              </button>
-              <button type="button" id="hotkey-open-hygenie-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelOpenInventory')}</span>
-              <button type="button" id="hotkey-open-inventory-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                I
-              </button>
-              <button type="button" id="hotkey-open-inventory-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelMonsterSqueezer')}</span>
-              <button type="button" id="hotkey-open-monster-squeezer-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                X
-              </button>
-              <button type="button" id="hotkey-open-monster-squeezer-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelMonstrousCauldron')}</span>
-              <button type="button" id="hotkey-open-monstrous-cauldron-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                O
-              </button>
-              <button type="button" id="hotkey-open-monstrous-cauldron-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelMountainFortress')}</span>
-              <button type="button" id="hotkey-open-mountain-fortress-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                M
-              </button>
-              <button type="button" id="hotkey-open-mountain-fortress-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelOpenQuestLog')}</span>
-              <button type="button" id="hotkey-open-quest-log-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                Q
-              </button>
-              <button type="button" id="hotkey-open-quest-log-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelOpenStore')}</span>
-              <button type="button" id="hotkey-open-store-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                S
-              </button>
-              <button type="button" id="hotkey-open-store-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelTrophyRoom')}</span>
-              <button type="button" id="hotkey-open-trophy-room-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                T
-              </button>
-              <button type="button" id="hotkey-open-trophy-room-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
+            ${generalHotkeyRowsHtml}
           </div>
           <div id="hotkeys-battle-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12); margin-bottom: 15px;">
             <div>
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">Battle</h4>
             </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">Floor up</span>
-              <button type="button" id="hotkey-floor-up-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                PageUp
-              </button>
-              <button type="button" id="hotkey-floor-up-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">Floor down</span>
-              <button type="button" id="hotkey-floor-down-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                PageDown
-              </button>
-              <button type="button" id="hotkey-floor-down-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">Cycle Bestiary/Equipment tab</span>
-              <button type="button" id="hotkey-cycle-bestiary-equipment-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                Tab
-              </button>
-              <button type="button" id="hotkey-cycle-bestiary-equipment-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">Cycle battle style</span>
-              <button type="button" id="hotkey-cycle-battle-style-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                V
-              </button>
-              <button type="button" id="hotkey-cycle-battle-style-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">Previous map</span>
-              <button type="button" id="hotkey-previous-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                J
-              </button>
-              <button type="button" id="hotkey-previous-map-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">Next map</span>
-              <button type="button" id="hotkey-next-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                K
-              </button>
-              <button type="button" id="hotkey-next-map-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">Start/Skip button</span>
-              <button type="button" id="hotkey-start-or-skip-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                Z
-              </button>
-              <button type="button" id="hotkey-start-or-skip-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
-            <div class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-              <span style="${hotkeyLabelStyle}">${t('mods.betterUI.hotkeyLabelResetCurrentMapDefault')}</span>
-              <button type="button" id="hotkey-reset-current-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                R
-              </button>
-              <button type="button" id="hotkey-reset-current-map-reset-btn" style="pointer-events: auto;">
-                ${t('mods.betterUI.hotkeyResetBinding')}
-              </button>
-            </div>
+            ${battleHotkeyRowsHtml}
           </div>
           <div id="hotkeys-mods-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
             <h4 style="margin: 0 0 12px 0; color: #e8e8e8; font-size: 16px; font-weight: 600; text-align: left; padding-left: 8px;">${t('mods.betterUI.hotkeysSectionMods')}</h4>
             <div id="hotkeys-mods-section">
-              <div id="hotkey-return-to-map-row" class="hotkey-inventory-row" style="${hotkeyRowStyle}">
-                <span id="hotkey-return-to-map-label" style="${hotkeyLabelStyle}">
-                  <span id="hotkey-return-to-map-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
-                  ${t('mods.betterUI.hotkeyLabelReturnToMap')}
-                  <span style="cursor: help; margin-left: 6px; color: #ffffff; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; border: 1px solid #ffffff; border-radius: 50%; line-height: 1;" title="Shift + hotkey goes forward in map history">i</span>
-                </span>
-                <button type="button" id="hotkey-return-to-map-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                  G
-                </button>
-                <button type="button" id="hotkey-return-to-map-reset-btn" style="pointer-events: auto;">
-                  ${t('mods.betterUI.hotkeyResetBinding')}
-                </button>
-              </div>
-              <div id="hotkey-toggle-turbo-mode-row" class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-                <span id="hotkey-toggle-turbo-mode-label" style="${hotkeyLabelStyle}">
-                  <span id="hotkey-toggle-turbo-mode-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
-                  Toggle Turbo Mode
-                </span>
-                <button type="button" id="hotkey-toggle-turbo-mode-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                  Y
-                </button>
-                <button type="button" id="hotkey-toggle-turbo-mode-reset-btn" style="pointer-events: auto;">
-                  ${t('mods.betterUI.hotkeyResetBinding')}
-                </button>
-              </div>
-              <div id="hotkey-open-cyclopedia-row" class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-                <span id="hotkey-open-cyclopedia-label" style="${hotkeyLabelStyle}">
-                  <span id="hotkey-open-cyclopedia-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
-                  ${t('mods.betterUI.hotkeyLabelCyclopedia')}
-                </span>
-                <button type="button" id="hotkey-open-cyclopedia-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                  C
-                </button>
-                <button type="button" id="hotkey-open-cyclopedia-reset-btn" style="pointer-events: auto;">
-                  ${t('mods.betterUI.hotkeyResetBinding')}
-                </button>
-              </div>
-              <div id="hotkey-open-better-teleporter-row" class="hotkey-inventory-row" style="${hotkeyRowStyle} margin-top: 12px;">
-                <span id="hotkey-open-better-teleporter-label" style="${hotkeyLabelStyle}">
-                  <span id="hotkey-open-better-teleporter-unavailable-warning" hidden style="cursor: help; margin-right: 6px; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; line-height: 1;">⚠️</span>
-                  ${t('mods.betterUI.hotkeyLabelBetterTeleporter')}
-                </span>
-                <button type="button" id="hotkey-open-better-teleporter-capture-btn" title="${t('mods.betterUI.hotkeyCaptureTitle')}" style="pointer-events: auto;">
-                  P
-                </button>
-                <button type="button" id="hotkey-open-better-teleporter-reset-btn" style="pointer-events: auto;">
-                  ${t('mods.betterUI.hotkeyResetBinding')}
-                </button>
-              </div>
+              ${modsGatedHotkeyRowsHtml}
             </div>
           </div>
           <div id="hotkeys-setups-section-wrapper" style="margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.12);">
@@ -7152,29 +7550,33 @@ function showSettingsModal() {
           </div>
         `;
         rightColumn.appendChild(hotkeysContent);
-      } else if (categoryId === 'advanced') {
+      } else if (categoryId === 'gameplay') {
         // Read Bestiary Automator config values BEFORE creating HTML to ensure correct initial state
-        let useApiForStaminaRefill = false;
-        let persistAutoRefill = false;
-        let thresholdsEnabled = true; // Default to true as per Bestiary Automator config
-        try {
-          const automatorConfig = localStorage.getItem('bestiary-automator-config');
-          const parsedConfig = automatorConfig ? JSON.parse(automatorConfig) : {};
-          useApiForStaminaRefill = parsedConfig.useApiForStaminaRefill || false;
-          persistAutoRefill = parsedConfig.persistAutoRefillOnRefresh || false;
-          thresholdsEnabled = parsedConfig.thresholdsEnabled !== false; // Default to true if not set
-        } catch (error) {
-          console.error('[Mod Settings] Error reading Bestiary Automator config for HTML:', error);
-        }
+        const parsedAutomatorConfig = getAutomatorConfigFromStorage();
+        const useApiForStaminaRefill = !!parsedAutomatorConfig.useApiForStaminaRefill;
+        const persistAutoRefill = !!parsedAutomatorConfig.persistAutoRefillOnRefresh;
+        const thresholdsEnabled = parsedAutomatorConfig.thresholdsEnabled !== false;
+        const persistPowerUi = getExclusiveCheckboxHtmlState({
+          locked: !!config.hidePowerSavingMode,
+          checked: !!config.persistPowerSavingMode && !config.hidePowerSavingMode,
+          lockMessage: t('mods.betterUI.persistPowerSavingModeHideLock'),
+          unlockedTitle: t('mods.betterUI.persistPowerSavingModeWarning'),
+        });
+        const staminaApiUi = getExclusiveCheckboxHtmlState({
+          locked: thresholdsEnabled,
+          checked: thresholdsEnabled ? true : useApiForStaminaRefill,
+          lockMessage: t('mods.betterUI.useApiForStaminaRefillThresholdsLock'),
+          unlockedTitle: t('mods.betterUI.useApiForStaminaRefillWarning'),
+        });
 
         const turboSpeedupFactor = getTurboSpeedupFactor();
-        
-        const advancedContent = document.createElement('div');
-        advancedContent.innerHTML = `
+
+        const gameplayContent = document.createElement('div');
+        gameplayContent.innerHTML = `
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; cursor: pointer;">
               <input type="checkbox" id="autoplay-refresh-toggle" checked="" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.autoplayRefreshWarning')}">⚠️</span>
+              ${warningLabelSpanHtml('', { title: t('mods.betterUI.autoplayRefreshWarning') })}
               <select id="autoplay-refresh-timer-mode" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 30px 4px 10px; border-radius: 4px; pointer-events: auto;" title="${t('mods.betterUI.autoplayRefreshTimerModeWarning')}" onclick="event.stopPropagation();">
                 <option value="autoplay">${t('mods.betterUI.autoplaySessionText')}</option>
                 <option value="internal">${t('mods.betterUI.internalTimer')}</option>
@@ -7188,45 +7590,51 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="persist-automator-autorefill-toggle" ${persistAutoRefill ? 'checked' : ''} style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.persistAutomatorAutoRefillWarning')}">${t('mods.betterUI.persistAutomatorAutoRefill')}</span>
+              ${warningLabelSpanHtml(t('mods.betterUI.persistAutomatorAutoRefill'), { title: t('mods.betterUI.persistAutomatorAutoRefillWarning') })}
             </label>
           </div>
           <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; ${thresholdsEnabled ? 'cursor: not-allowed; opacity: 0.5;' : 'cursor: pointer;'}">
-              <input type="checkbox" id="automator-api-stamina-refill-toggle" ${useApiForStaminaRefill ? 'checked' : ''} ${thresholdsEnabled ? 'disabled title="Cannot disable while thresholds are enabled in Bestiary Automator settings"' : ''} style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${thresholdsEnabled ? t('mods.betterUI.useApiForStaminaRefillWarning') + ' (Disabled while thresholds are enabled in Bestiary Automator)' : t('mods.betterUI.useApiForStaminaRefillWarning')}">⚠️ ${t('mods.betterUI.useApiForStaminaRefill')}</span>
+            <label style="display: flex; align-items: center; gap: 10px; ${persistPowerUi.labelStyle}">
+              <input type="checkbox" id="persist-power-saving-mode-toggle" ${persistPowerUi.checked ? 'checked' : ''} ${persistPowerUi.inputExtra} style="transform: scale(1.2);">
+              ${warningLabelSpanHtml(t('mods.betterUI.persistPowerSavingMode'), { title: persistPowerUi.spanTitle })}
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; ${staminaApiUi.labelStyle}">
+              <input type="checkbox" id="automator-api-stamina-refill-toggle" ${staminaApiUi.checked ? 'checked' : ''} ${staminaApiUi.inputExtra} style="transform: scale(1.2);">
+              ${warningLabelSpanHtml(t('mods.betterUI.useApiForStaminaRefill'), { title: staminaApiUi.spanTitle })}
             </label>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="disable-auto-reload-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableAutoReloadWarning')}">${t('mods.betterUI.disableAutoReload')}</span>
+              ${warningLabelSpanHtml(t('mods.betterUI.disableAutoReload'), { title: t('mods.betterUI.disableAutoReloadWarning') })}
             </label>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="anti-idle-sounds-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.antiIdleTooltip')}">${t('mods.betterUI.antiIdleLabel')}</span>
+              ${warningLabelSpanHtml(t('mods.betterUI.antiIdleLabel'), { title: t('mods.betterUI.antiIdleTooltip') })}
             </label>
           </div>
           <div style="margin-bottom: 15px;">
             <label id="run-tracker-toggle-label" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <span id="run-tracker-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px; display: inline-flex; align-items: center;">⚠️</span>
               <input type="checkbox" id="run-tracker-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableRunTrackerWarning')}">${t('mods.betterUI.disableRunTracker')}</span>
+              ${warningLabelSpanHtml(t('mods.betterUI.disableRunTracker'), { title: t('mods.betterUI.disableRunTrackerWarning') })}
             </label>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="always-navigate-max-floor-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.alwaysNavigateMaxFloorWarning')}">⚠️ ${t('mods.betterUI.alwaysNavigateMaxFloor')}</span>
+              ${warningLabelSpanHtml(t('mods.betterUI.alwaysNavigateMaxFloor'), { title: t('mods.betterUI.alwaysNavigateMaxFloorWarning') })}
             </label>
           </div>
           <div id="turbo-speed-settings-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;">
             <h4 style="margin: 0 0 12px 0; color: #ffaa00; font-size: 14px; display: flex; align-items: center; gap: 6px;">
               <span id="turbo-speed-settings-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px;">⚠️</span>
               ${t('mods.turbo.configTitle')}
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Adjust the slider to control how much faster the game runs when Turbo is enabled. Higher values make the game run faster but may cause performance issues on some devices. Default game speed is 1x (${TURBO_DEFAULT_TICK_INTERVAL_MS}ms per tick). Turbo speeds range from 2x to 10x with performance optimizations.">⚠️</span>
+              ${warningLabelSpanHtml('', { title: `Adjust the slider to control how much faster the game runs when Turbo is enabled. Higher values make the game run faster but may cause performance issues on some devices. Default game speed is 1x (${TURBO_DEFAULT_TICK_INTERVAL_MS}ms per tick). Turbo speeds range from 2x to 10x with performance optimizations.` })}
             </h4>
             <div style="display: flex; flex-direction: column; margin-bottom: 12px;">
               <div style="display: flex; justify-content: space-between; margin-bottom: 5px; color: #ccc;">
@@ -7236,11 +7644,16 @@ function showSettingsModal() {
               <input type="range" id="turbo-speed-slider" min="2" max="10" step="1" value="${turboSpeedupFactor}" style="width: 100%; pointer-events: auto;" onclick="event.stopPropagation();">
             </div>
           </div>
-          <div id="firebase-runs-settings-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+        `;
+        rightColumn.appendChild(gameplayContent);
+      } else if (categoryId === 'advanced') {
+        const advancedContent = document.createElement('div');
+        advancedContent.innerHTML = `
+          <div id="firebase-runs-settings-section" style="margin-top: 0; padding-top: 0;">
             <div style="margin-bottom: 15px; text-align: center;">
               <h4 style="margin: 0 0 15px 0; color: #ffaa00; font-size: 14px; cursor: help; display: inline-flex; align-items: center; gap: 6px; justify-content: center;" title="${t('mods.betterUI.firebaseBestRunsUploadTooltip')}">
                 <span id="firebase-runs-unavailable-warning" hidden style="cursor: help; color: #f0c36d; font-size: 12px;">⚠️</span>
-                ${t('mods.betterUI.firebaseBestRunsUploadTitle')}
+                ${withLeadingWarningEmoji(t('mods.betterUI.firebaseBestRunsUploadTitle'))}
               </h4>
             </div>
             <div style="margin-bottom: 15px;">
@@ -7314,7 +7727,7 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="hunt-analyzer-persist-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.huntPersistTooltip')}">${t('mods.betterUI.huntPersistLabel')}</span>
+              ${warningLabelSpanHtml(t('mods.betterUI.huntPersistLabel'), { title: t('mods.betterUI.huntPersistTooltip') })}
             </label>
           </div>
           <div style="margin-bottom: 15px;">
@@ -7476,7 +7889,7 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="disable-quest-helpers-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableQuestHelpersWarning')}">${t('mods.betterUI.disableQuestHelpers')}</span>
+              ${warningLabelSpanHtml(t('mods.betterUI.disableQuestHelpers'), { title: t('mods.betterUI.disableQuestHelpersWarning') })}
             </label>
           </div>
           <div id="ot-mods-quests-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
@@ -7548,8 +7961,8 @@ function showSettingsModal() {
               }
             });
             
-            // Store unsubscribe functions for cleanup (if needed)
-            modCoordinationContent._unsubscribers = [unsubscribeEnabled, unsubscribeActive];
+            // Store unsubscribe functions for cleanup on category leave / modal close
+            modSettingsModalCoordinationUnsubscribers = [unsubscribeEnabled, unsubscribeActive];
           }
         }, 0);
       } else if (categoryId === 'backup') {
@@ -7839,29 +8252,47 @@ function showSettingsModal() {
 
       const hideStopAfterDefeatCheckbox = content.querySelector('#hide-stop-after-defeat-toggle');
       if (hideStopAfterDefeatCheckbox) {
-        createSettingsCheckboxHandler(
-          'hideStopAfterDefeat',
-          applyAutoplaySessionCheckboxVisibility,
-          applyAutoplaySessionCheckboxVisibility
-        )(hideStopAfterDefeatCheckbox);
+        bindExclusiveSettingsCheckbox({
+          checkbox: hideStopAfterDefeatCheckbox,
+          content,
+          isLocked: isAutomatorSeamlessAutoplayEnabled,
+          getLockedChecked: () => true,
+          getUnlockedChecked: () => !!config.hideStopAfterDefeat,
+          getLockMessage: () => t('mods.betterUI.hideStopAfterDefeatSeamlessLock'),
+          onBeforeRefresh: enforceHideStopAfterDefeatForSeamlessAutoplay,
+          onUnlockedChange: (checked) => {
+            config.hideStopAfterDefeat = checked;
+            saveConfig();
+            applyAutoplaySessionCheckboxVisibility();
+          },
+        });
       }
 
       const hidePowerSavingModeCheckbox = content.querySelector('#hide-power-saving-mode-toggle');
       if (hidePowerSavingModeCheckbox) {
         createSettingsCheckboxHandler(
           'hidePowerSavingMode',
-          applyAutoplaySessionCheckboxVisibility,
-          applyAutoplaySessionCheckboxVisibility
+          disableAndWipePowerSavingMode,
+          () => {
+            applyAutoplaySessionCheckboxVisibility();
+            updatePersistPowerSavingModeCheckboxState();
+          }
         )(hidePowerSavingModeCheckbox);
       }
 
-      const defaultInventoryStickyCheckbox = content.querySelector('#default-inventory-sticky-toggle');
-      if (defaultInventoryStickyCheckbox) {
+      const persistentInventoryCheckbox = content.querySelector('#persistent-inventory-toggle');
+      if (persistentInventoryCheckbox) {
         createSettingsCheckboxHandler(
-          'defaultInventorySticky',
-          () => applyDefaultInventorySticky(),
-          () => {}
-        )(defaultInventoryStickyCheckbox);
+          'persistentInventory',
+          () => {
+            capturePersistentInventoryStateFromDom();
+            // Enabling always means restore open+pinned on next load.
+            config.inventoryWidgetPinned = true;
+            saveConfig();
+            applyPersistentInventory();
+          },
+          () => disablePersistentInventory()
+        )(persistentInventoryCheckbox);
       }
       
       const inventoryBorderStyleSelector = content.querySelector('#inventory-border-style-selector');
@@ -7893,193 +8324,10 @@ function showSettingsModal() {
       }
       updateHotkeysBindingsVisibility();
 
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-arsenal-capture-btn'),
-        content.querySelector('#hotkey-open-arsenal-reset-btn'),
-        'hotkeyOpenArsenal',
-        'a',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-bestiary-capture-btn'),
-        content.querySelector('#hotkey-open-bestiary-reset-btn'),
-        'hotkeyOpenBestiary',
-        'b',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-daycare-capture-btn'),
-        content.querySelector('#hotkey-open-daycare-reset-btn'),
-        'hotkeyOpenDaycare',
-        'd',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-forge-capture-btn'),
-        content.querySelector('#hotkey-open-forge-reset-btn'),
-        'hotkeyOpenForge',
-        'f',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-hygenie-capture-btn'),
-        content.querySelector('#hotkey-open-hygenie-reset-btn'),
-        'hotkeyOpenHygenie',
-        'h',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-inventory-capture-btn'),
-        content.querySelector('#hotkey-open-inventory-reset-btn'),
-        'hotkeyOpenInventory',
-        'i',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-monster-squeezer-capture-btn'),
-        content.querySelector('#hotkey-open-monster-squeezer-reset-btn'),
-        'hotkeyOpenMonsterSqueezer',
-        'x',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-monstrous-cauldron-capture-btn'),
-        content.querySelector('#hotkey-open-monstrous-cauldron-reset-btn'),
-        'hotkeyOpenMonstrousCauldron',
-        'o',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-mountain-fortress-capture-btn'),
-        content.querySelector('#hotkey-open-mountain-fortress-reset-btn'),
-        'hotkeyOpenMountainFortress',
-        'm',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-quest-log-capture-btn'),
-        content.querySelector('#hotkey-open-quest-log-reset-btn'),
-        'hotkeyOpenQuestLog',
-        'q',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-store-capture-btn'),
-        content.querySelector('#hotkey-open-store-reset-btn'),
-        'hotkeyOpenStore',
-        's',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-trophy-room-capture-btn'),
-        content.querySelector('#hotkey-open-trophy-room-reset-btn'),
-        'hotkeyOpenTrophyRoom',
-        't',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-return-to-map-capture-btn'),
-        content.querySelector('#hotkey-return-to-map-reset-btn'),
-        'hotkeyReturnToMap',
-        'g',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-floor-up-capture-btn'),
-        content.querySelector('#hotkey-floor-up-reset-btn'),
-        'hotkeyFloorUp',
-        'pageup',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-floor-down-capture-btn'),
-        content.querySelector('#hotkey-floor-down-reset-btn'),
-        'hotkeyFloorDown',
-        'pagedown',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-cycle-bestiary-equipment-capture-btn'),
-        content.querySelector('#hotkey-cycle-bestiary-equipment-reset-btn'),
-        'hotkeyCycleBestiaryEquipmentTab',
-        'tab',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-reset-current-map-capture-btn'),
-        content.querySelector('#hotkey-reset-current-map-reset-btn'),
-        'hotkeyResetCurrentMapDefault',
-        'r',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-cycle-battle-style-capture-btn'),
-        content.querySelector('#hotkey-cycle-battle-style-reset-btn'),
-        'hotkeyCycleBattleStyle',
-        'v',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-previous-map-capture-btn'),
-        content.querySelector('#hotkey-previous-map-reset-btn'),
-        'hotkeyPreviousMap',
-        'j',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-next-map-capture-btn'),
-        content.querySelector('#hotkey-next-map-reset-btn'),
-        'hotkeyNextMap',
-        'k',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-start-or-skip-capture-btn'),
-        content.querySelector('#hotkey-start-or-skip-reset-btn'),
-        'hotkeyStartOrSkip',
-        'z',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-toggle-turbo-mode-capture-btn'),
-        content.querySelector('#hotkey-toggle-turbo-mode-reset-btn'),
-        'hotkeyToggleTurboMode',
-        'y',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-cyclopedia-capture-btn'),
-        content.querySelector('#hotkey-open-cyclopedia-reset-btn'),
-        'hotkeyOpenCyclopedia',
-        'c',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-open-better-teleporter-capture-btn'),
-        content.querySelector('#hotkey-open-better-teleporter-reset-btn'),
-        'hotkeyOpenBetterTeleporter',
-        'p',
-        ''
-      );
-      bindHotkeyConfigRowInModal(
-        content.querySelector('#hotkey-auto-setup-capture-btn'),
-        content.querySelector('#hotkey-auto-setup-reset-btn'),
-        'hotkeyAutoSetup',
-        'u',
-        ''
-      );
+      bindAllHotkeyUiRowsInModal(content);
       const hotkeySetupSourceSelect = content.querySelector('#hotkey-setup-source-select');
       if (hotkeySetupSourceSelect) {
         createSettingsDropdownHandler('hotkeySetupSource')(hotkeySetupSourceSelect);
-      }
-      for (let slot = 1; slot <= 8; slot++) {
-        bindHotkeyConfigRowInModal(
-          content.querySelector(`#hotkey-setup-slot-${slot}-capture-btn`),
-          content.querySelector(`#hotkey-setup-slot-${slot}-reset-btn`),
-          `hotkeySetupSlot${slot}`,
-          `f${slot}`,
-          ''
-        );
       }
       syncModDependentSettingsAvailability();
 
@@ -8228,82 +8476,59 @@ function showSettingsModal() {
         }
       });
       }
+
+    const persistPowerSavingModeCheckbox = content.querySelector('#persist-power-saving-mode-toggle');
+    if (persistPowerSavingModeCheckbox) {
+      bindExclusiveSettingsCheckbox({
+        checkbox: persistPowerSavingModeCheckbox,
+        content,
+        isLocked: () => !!config.hidePowerSavingMode,
+        getLockedChecked: () => false,
+        getUnlockedChecked: () => !!config.persistPowerSavingMode,
+        getLockMessage: () => t('mods.betterUI.persistPowerSavingModeHideLock'),
+        getUnlockedTitle: () => t('mods.betterUI.persistPowerSavingModeWarning'),
+        onUnlockedChange: (checked) => {
+          config.persistPowerSavingMode = checked;
+          if (config.persistPowerSavingMode) {
+            const button = findPowerSavingModeCheckboxButton();
+            if (button) {
+              config.powerSavingModeEnabled = isPowerSavingModeCheckboxChecked(button);
+            }
+          }
+          saveConfig();
+          applyAutoplaySessionCheckboxFeatures();
+        },
+      });
+    }
       
       const automatorApiStaminaRefillCheckbox = content.querySelector('#automator-api-stamina-refill-toggle');
       if (automatorApiStaminaRefillCheckbox) {
-        // Function to update checkbox state based on thresholds
-        const updateCheckboxState = () => {
-          try {
-            const automatorConfig = localStorage.getItem('bestiary-automator-config');
-            const config = automatorConfig ? JSON.parse(automatorConfig) : {};
-            const thresholdsEnabled = config.thresholdsEnabled !== false;
-            const label = automatorApiStaminaRefillCheckbox.closest('label');
-
-            if (thresholdsEnabled) {
-              automatorApiStaminaRefillCheckbox.disabled = true;
-              automatorApiStaminaRefillCheckbox.checked = true; // Force checked when thresholds enabled
-              automatorApiStaminaRefillCheckbox.title = 'Cannot disable while thresholds are enabled in Bestiary Automator settings';
-              label.style.cursor = 'not-allowed';
-              label.style.opacity = '0.5';
-              label.querySelector('span').title = t('mods.betterUI.useApiForStaminaRefillWarning') + ' (Disabled while thresholds are enabled in Bestiary Automator)';
-            } else {
-              automatorApiStaminaRefillCheckbox.disabled = false;
-              automatorApiStaminaRefillCheckbox.checked = config.useApiForStaminaRefill || false;
-              automatorApiStaminaRefillCheckbox.title = ''; // Clear the title when enabled
-              label.style.cursor = 'pointer';
-              label.style.opacity = '1';
-              label.querySelector('span').title = t('mods.betterUI.useApiForStaminaRefillWarning');
+        bindExclusiveSettingsCheckbox({
+          checkbox: automatorApiStaminaRefillCheckbox,
+          content,
+          isLocked: isAutomatorThresholdsEnabled,
+          getLockedChecked: () => true,
+          getUnlockedChecked: () => !!getAutomatorConfigFromStorage().useApiForStaminaRefill,
+          getLockMessage: () => t('mods.betterUI.useApiForStaminaRefillThresholdsLock'),
+          getUnlockedTitle: () => t('mods.betterUI.useApiForStaminaRefillWarning'),
+          onUnlockedChange: (newValue) => {
+            try {
+              const automatorConfig = getAutomatorConfigFromStorage();
+              automatorConfig.useApiForStaminaRefill = newValue;
+              localStorage.setItem('bestiary-automator-config', JSON.stringify(automatorConfig));
+              console.log('[Mod Settings] Updated Bestiary Automator localStorage useApiForStaminaRefill:', newValue);
+            } catch (error) {
+              console.error('[Mod Settings] Error updating Bestiary Automator config:', error);
             }
-          } catch (error) {
-            console.error('[Mod Settings] Error updating checkbox state:', error);
-          }
-        };
 
-        // Set initial state
-        updateCheckboxState();
-
-        automatorApiStaminaRefillCheckbox.addEventListener('change', () => {
-          const newValue = automatorApiStaminaRefillCheckbox.checked;
-
-          // Write directly to Bestiary Automator's localStorage
-          try {
-            const automatorConfig = localStorage.getItem('bestiary-automator-config');
-            const config = automatorConfig ? JSON.parse(automatorConfig) : {};
-            config.useApiForStaminaRefill = newValue;
-            localStorage.setItem('bestiary-automator-config', JSON.stringify(config));
-            console.log('[Mod Settings] Updated Bestiary Automator localStorage useApiForStaminaRefill:', newValue);
-          } catch (error) {
-            console.error('[Mod Settings] Error updating Bestiary Automator config:', error);
-          }
-
-          // Also update runtime if Bestiary Automator is loaded
-          if (window.bestiaryAutomator && typeof window.bestiaryAutomator.updateConfig === 'function') {
-            window.bestiaryAutomator.updateConfig({
-              useApiForStaminaRefill: newValue
-            });
-            console.log('[Mod Settings] Updated Bestiary Automator runtime config');
-          }
+            if (window.bestiaryAutomator && typeof window.bestiaryAutomator.updateConfig === 'function') {
+              window.bestiaryAutomator.updateConfig({
+                useApiForStaminaRefill: newValue
+              });
+              console.log('[Mod Settings] Updated Bestiary Automator runtime config');
+            }
+          },
         });
-
-        // Listen for changes to Bestiary Automator config (in case thresholds are toggled)
-        const checkForConfigChanges = () => {
-          updateCheckboxState();
-        };
-
-        // Check for config changes every second while modal is open
-        const configCheckInterval = setInterval(checkForConfigChanges, 1000);
-
-        // Clear interval when modal closes
-        const modal = content.closest('.modal');
-        if (modal) {
-          const observer = new MutationObserver(() => {
-            if (!document.contains(modal)) {
-              clearInterval(configCheckInterval);
-              observer.disconnect();
-            }
-          });
-          observer.observe(document.body, { childList: true, subtree: true });
-        }
       }
       
       const disableAutoReloadCheckbox = content.querySelector('#disable-auto-reload-toggle');
@@ -8963,137 +9188,35 @@ function showSettingsModal() {
       }
       
       // Hunt Analyzer settings
-      const huntAnalyzerPersistCheckbox = content.querySelector('#hunt-analyzer-persist-toggle');
-      if (huntAnalyzerPersistCheckbox) {
-        // Load current Hunt Analyzer settings
-        try {
-          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-          huntAnalyzerPersistCheckbox.checked = parsedSettings.persistData || false;
-        } catch (error) {
-          console.error('[Mod Settings] Error reading Hunt Analyzer settings:', error);
-        }
-        
-        huntAnalyzerPersistCheckbox.addEventListener('change', () => {
-          const newValue = huntAnalyzerPersistCheckbox.checked;
-          
-          // Update Hunt Analyzer settings in localStorage
-          try {
-            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-            settings.persistData = newValue;
-            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
-            console.log('[Mod Settings] Updated Hunt Analyzer persistData:', newValue);
-            
-            // If turning OFF persistence, clear persisted manifest and IndexedDB history
-            if (!newValue) {
-              localStorage.removeItem('huntAnalyzerData');
-              if (typeof window.HuntAnalyzerAPI?.clearPersistedStorage === 'function') {
-                window.HuntAnalyzerAPI.clearPersistedStorage().catch((err) => {
-                  console.warn('[Mod Settings] Could not clear Hunt Analyzer IndexedDB:', err);
-                });
-              }
+      bindHuntAnalyzerCheckbox(content.querySelector('#hunt-analyzer-persist-toggle'), {
+        settingsKey: 'persistData',
+        defaultChecked: false,
+        onAfterWrite: (newValue) => {
+          if (!newValue) {
+            localStorage.removeItem('huntAnalyzerData');
+            if (typeof window.HuntAnalyzerAPI?.clearPersistedStorage === 'function') {
+              window.HuntAnalyzerAPI.clearPersistedStorage().catch((err) => {
+                console.warn('[Mod Settings] Could not clear Hunt Analyzer IndexedDB:', err);
+              });
             }
-          } catch (error) {
-            console.error('[Mod Settings] Error updating Hunt Analyzer settings:', error);
           }
-          
-          // Also update runtime if Hunt Analyzer is loaded
-          if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
-            window.HuntAnalyzerState.settings.persistData = newValue;
-          }
-        });
-      }
-
-      const huntAnalyzerCreatureSellValueCheckbox = content.querySelector('#hunt-analyzer-creature-sell-value-toggle');
-      if (huntAnalyzerCreatureSellValueCheckbox) {
-        try {
-          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-          huntAnalyzerCreatureSellValueCheckbox.checked = parsedSettings.includeCreatureSellValue !== false;
-        } catch (error) {
-          console.error('[Mod Settings] Error reading Hunt Analyzer includeCreatureSellValue setting:', error);
-          huntAnalyzerCreatureSellValueCheckbox.checked = true;
         }
+      });
 
-        huntAnalyzerCreatureSellValueCheckbox.addEventListener('change', () => {
-          const newValue = huntAnalyzerCreatureSellValueCheckbox.checked;
+      bindHuntAnalyzerCheckbox(content.querySelector('#hunt-analyzer-creature-sell-value-toggle'), {
+        settingsKey: 'includeCreatureSellValue',
+        defaultChecked: true
+      });
 
-          try {
-            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-            settings.includeCreatureSellValue = newValue;
-            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
-            console.log('[Mod Settings] Updated Hunt Analyzer includeCreatureSellValue:', newValue);
-          } catch (error) {
-            console.error('[Mod Settings] Error updating Hunt Analyzer includeCreatureSellValue setting:', error);
-          }
+      bindHuntAnalyzerCheckbox(content.querySelector('#hunt-analyzer-dragon-plant-collect-toggle'), {
+        settingsKey: 'includeDragonPlantCollect',
+        defaultChecked: true
+      });
 
-          if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
-            window.HuntAnalyzerState.settings.includeCreatureSellValue = newValue;
-          }
-        });
-      }
-
-      const huntAnalyzerDragonPlantCollectCheckbox = content.querySelector('#hunt-analyzer-dragon-plant-collect-toggle');
-      if (huntAnalyzerDragonPlantCollectCheckbox) {
-        try {
-          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-          huntAnalyzerDragonPlantCollectCheckbox.checked = parsedSettings.includeDragonPlantCollect !== false;
-        } catch (error) {
-          console.error('[Mod Settings] Error reading Hunt Analyzer includeDragonPlantCollect setting:', error);
-          huntAnalyzerDragonPlantCollectCheckbox.checked = true;
-        }
-
-        huntAnalyzerDragonPlantCollectCheckbox.addEventListener('change', () => {
-          const newValue = huntAnalyzerDragonPlantCollectCheckbox.checked;
-
-          try {
-            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-            settings.includeDragonPlantCollect = newValue;
-            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
-            console.log('[Mod Settings] Updated Hunt Analyzer includeDragonPlantCollect:', newValue);
-          } catch (error) {
-            console.error('[Mod Settings] Error updating Hunt Analyzer includeDragonPlantCollect setting:', error);
-          }
-
-          if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
-            window.HuntAnalyzerState.settings.includeDragonPlantCollect = newValue;
-          }
-        });
-      }
-
-      const huntAnalyzerDisenchantedEquipmentsCheckbox = content.querySelector('#hunt-analyzer-disenchant-value-toggle');
-      if (huntAnalyzerDisenchantedEquipmentsCheckbox) {
-        try {
-          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-          huntAnalyzerDisenchantedEquipmentsCheckbox.checked = parsedSettings.includeDisenchantedEquipments !== false;
-        } catch (error) {
-          console.error('[Mod Settings] Error reading Hunt Analyzer includeDisenchantedEquipments setting:', error);
-          huntAnalyzerDisenchantedEquipmentsCheckbox.checked = true;
-        }
-
-        huntAnalyzerDisenchantedEquipmentsCheckbox.addEventListener('change', () => {
-          const newValue = huntAnalyzerDisenchantedEquipmentsCheckbox.checked;
-
-          try {
-            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-            settings.includeDisenchantedEquipments = newValue;
-            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
-            console.log('[Mod Settings] Updated Hunt Analyzer includeDisenchantedEquipments:', newValue);
-          } catch (error) {
-            console.error('[Mod Settings] Error updating Hunt Analyzer includeDisenchantedEquipments setting:', error);
-          }
-
-          if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
-            window.HuntAnalyzerState.settings.includeDisenchantedEquipments = newValue;
-          }
-        });
-      }
+      bindHuntAnalyzerCheckbox(content.querySelector('#hunt-analyzer-disenchant-value-toggle'), {
+        settingsKey: 'includeDisenchantedEquipments',
+        defaultChecked: true
+      });
       
       const huntAnalyzerThemeSelector = content.querySelector('#hunt-analyzer-theme-selector');
       if (huntAnalyzerThemeSelector) {
@@ -9122,31 +9245,17 @@ function showSettingsModal() {
         }
         
         // Load current Hunt Analyzer theme
-        try {
-          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-          huntAnalyzerThemeSelector.value = parsedSettings.theme || 'original';
-        } catch (error) {
-          console.error('[Mod Settings] Error reading Hunt Analyzer theme:', error);
-        }
+        huntAnalyzerThemeSelector.value = readHuntAnalyzerSettings().theme || 'original';
         
         huntAnalyzerThemeSelector.addEventListener('change', () => {
           const newTheme = huntAnalyzerThemeSelector.value;
           
-          // Update Hunt Analyzer settings in localStorage
-          try {
-            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-            settings.theme = newTheme;
-            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
-            console.log('[Mod Settings] Updated Hunt Analyzer theme:', newTheme);
-          } catch (error) {
-            console.error('[Mod Settings] Error updating Hunt Analyzer theme:', error);
-          }
+          updateHuntAnalyzerSettings((s) => { s.theme = newTheme; });
+          console.log('[Mod Settings] Updated Hunt Analyzer theme:', newTheme);
           
           // Also update runtime if Hunt Analyzer is loaded
           if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
-            window.HuntAnalyzerState.settings.theme = newTheme;
+            syncHuntAnalyzerRuntimeSetting('theme', newTheme);
             console.log('[Mod Settings] Updated Hunt Analyzer runtime theme');
             
             // Call applyTheme function if available for immediate update
@@ -9162,14 +9271,7 @@ function showSettingsModal() {
       const visibilityToggles = content.querySelectorAll('.ha-visibility-toggle');
       if (visibilityToggles.length > 0) {
         // Load current visibility settings from localStorage
-        let currentVisibility = {};
-        try {
-          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-          const parsed = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-          currentVisibility = parsed.visibility || {};
-        } catch (e) {
-          console.error('[Mod Settings] Error reading Hunt Analyzer visibility settings:', e);
-        }
+        const currentVisibility = readHuntAnalyzerSettings().visibility || {};
 
         visibilityToggles.forEach(toggle => {
           const visKey = toggle.getAttribute('data-vis-key');
@@ -9179,15 +9281,10 @@ function showSettingsModal() {
           toggle.checked = currentVisibility[visKey] !== false;
 
           toggle.addEventListener('change', () => {
-            try {
-              const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
-              const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
-              if (!settings.visibility) settings.visibility = {};
-              settings.visibility[visKey] = toggle.checked;
-              localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
-            } catch (e) {
-              console.error('[Mod Settings] Error saving visibility setting:', e);
-            }
+            updateHuntAnalyzerSettings((s) => {
+              if (!s.visibility) s.visibility = {};
+              s.visibility[visKey] = toggle.checked;
+            });
 
             // Update runtime state if Hunt Analyzer is loaded
             if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
@@ -9372,13 +9469,21 @@ function showSettingsModal() {
           closeOnClick: true,
           onClick: () => {
             console.log('[Mod Settings] Settings modal closed');
-            clearModSettingsModalLayoutCleanup();
-            modSettingsSelectCategoryHandler = null;
-            modSettingsFirebaseUploadStateUpdater = null;
+            teardownSettingsModal();
           }
         }
       ]
     });
+
+    // Overlay dismiss only calls close() — wrap so teardown always runs.
+    if (modalRef && typeof modalRef.close === 'function') {
+      const nativeClose = modalRef.close.bind(modalRef);
+      modalRef.close = () => {
+        teardownSettingsModal();
+        nativeClose();
+      };
+    }
+    modSettingsModalInstance = modalRef;
     
     if (modalRef?.element) {
       modalRef.element.style.maxWidth = `${MODAL_CONFIG.maxWidth}px`;
@@ -9540,38 +9645,27 @@ function reapplyCreatureCosmeticPriority() {
 }
 
 function ensureMaxCreaturesCSS(colorOption, colorKey) {
-  const styleId = `max-creatures-${colorKey}-style`;
-  if (document.getElementById(styleId)) return;
-  const style = document.createElement('style');
-  style.id = styleId;
-  style.textContent = generateMaxCreaturesCSS(colorOption, colorKey);
-  document.head.appendChild(style);
+  upsertFeatureStyle({
+    idPrefix: 'max-creatures',
+    colorKey,
+    cssText: generateMaxCreaturesCSS(colorOption, colorKey)
+  });
 }
 
 function ensureMaxShiniesCSS(colorOption, colorKey) {
-  const styleId = `max-shinies-${colorKey}-style`;
-  if (document.getElementById(styleId)) return;
-  const style = document.createElement('style');
-  style.id = styleId;
-  style.textContent = generateMaxShiniesCSS(colorOption, colorKey);
-  document.head.appendChild(style);
+  upsertFeatureStyle({
+    idPrefix: 'max-shinies',
+    colorKey,
+    cssText: generateMaxShiniesCSS(colorOption, colorKey)
+  });
 }
 
 function ensureSealedCreaturesCSS(colorOption, colorKey) {
-  const styleId = `sealed-creatures-${colorKey}-style`;
-  if (document.getElementById(styleId)) return;
-  const style = document.createElement('style');
-  style.id = styleId;
-  style.textContent = `
-    .rarity-sealed[data-sealed-creatures="true"][data-sealed-creatures-color="${colorKey}"] {
-      border: 2px solid;
-      border-image: ${colorOption.borderGradient} 1;
-      background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
-      opacity: 0.8;
-    }
-  `;
-  document.head.appendChild(style);
+  upsertFeatureStyle({
+    idPrefix: 'sealed-creatures',
+    colorKey,
+    cssText: generateSealedCreaturesCSS(colorOption, colorKey)
+  });
 }
 
 function removeCreatureCosmeticsInRoot(root) {
@@ -9864,23 +9958,12 @@ function applyStylingToCreature(creature, colorKey) {
 }
 
 function injectMaxCreaturesCSS(colorOption, colorKey) {
-  // Remove any existing max creatures styles first
-  Object.keys(COLOR_OPTIONS).forEach(color => {
-    const existingStyle = document.getElementById(`max-creatures-${color}-style`);
-    if (existingStyle) {
-      existingStyle.remove();
-    }
+  upsertFeatureStyle({
+    idPrefix: 'max-creatures',
+    colorKey,
+    cssText: generateMaxCreaturesCSS(colorOption, colorKey),
+    replaceAllColors: true
   });
-
-  // Create new style for current color
-  const styleId = `max-creatures-${colorKey}-style`;
-  const style = document.createElement("style");
-  style.id = styleId;
-  document.head.appendChild(style);
-  
-  // Generate CSS using template system
-  const css = generateMaxCreaturesCSS(colorOption, colorKey);
-  style.textContent = css;
 }
 
 function filterEligibleSealedCreatures(visibleCreatures, options = {}) {
@@ -9910,24 +9993,12 @@ function applySealedStyling(sealedCreature, colorKey) {
 }
 
 function injectSealedCreaturesCSS(colorOption, colorKey) {
-  Object.keys(COLOR_OPTIONS).forEach((color) => {
-    const existingStyle = document.getElementById(`sealed-creatures-${color}-style`);
-    if (existingStyle) existingStyle.remove();
+  upsertFeatureStyle({
+    idPrefix: 'sealed-creatures',
+    colorKey,
+    cssText: generateSealedCreaturesCSS(colorOption, colorKey),
+    replaceAllColors: true
   });
-
-  const styleId = `sealed-creatures-${colorKey}-style`;
-  const style = document.createElement('style');
-  style.id = styleId;
-  style.textContent = `
-    .rarity-sealed[data-sealed-creatures="true"][data-sealed-creatures-color="${colorKey}"] {
-      border: 2px solid;
-      border-image: ${colorOption.borderGradient} 1;
-      background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
-      opacity: 0.8;
-    }
-  `;
-  document.head.appendChild(style);
 }
 
 function applySealedCreatures() {
@@ -10075,23 +10146,12 @@ function applyShinyStyling(shiny, colorKey) {
 }
 
 function injectMaxShiniesCSS(colorOption, colorKey) {
-  // Remove any existing max shinies styles first
-  Object.keys(COLOR_OPTIONS).forEach(color => {
-    const existingStyle = document.getElementById(`max-shinies-${color}-style`);
-    if (existingStyle) {
-      existingStyle.remove();
-    }
+  upsertFeatureStyle({
+    idPrefix: 'max-shinies',
+    colorKey,
+    cssText: generateMaxShiniesCSS(colorOption, colorKey),
+    replaceAllColors: true
   });
-  
-  // Create new style for current color
-  const styleId = `max-shinies-${colorKey}-style`;
-  const style = document.createElement("style");
-  style.id = styleId;
-  document.head.appendChild(style);
-  
-  // Generate CSS using template system
-  const css = generateMaxShiniesCSS(colorOption, colorKey);
-  style.textContent = css;
 }
 
 function applyMaxShinies() {
@@ -11707,37 +11767,6 @@ function extractSpriteIdFromClasses(element) {
   return idClass ? idClass.replace('id-', '') : null;
 }
 
-// Helper: Get comprehensive sprite information from a sprite element
-function getSpriteInfo(spriteElement) {
-  // Null safety check
-  if (!spriteElement) {
-    return {
-      spriteContainer: null,
-      battleContainer: null,
-      isInDialog: false,
-      spriteId: null,
-      creatureName: null,
-      isEnemy: false
-    };
-  }
-  
-  const spriteContainer = spriteElement.closest('.sprite');
-  const battleContainer = spriteElement.closest('[data-name]');
-  const isInDialog = spriteElement.closest('[role="dialog"]') !== null;
-  const spriteId = spriteContainer ? parseInt(extractSpriteIdFromClasses(spriteContainer), 10) : null;
-  const creatureName = battleContainer?.getAttribute('data-name') || null;
-  const isEnemy = battleContainer ? isEnemyByHealthBar(battleContainer) : false;
-  
-  return {
-    spriteContainer,
-    battleContainer,
-    isInDialog,
-    spriteId,
-    creatureName,
-    isEnemy
-  };
-}
-
 // Helper: Check if creature is in the unobtainable list
 // Handles numbered variants like "Dwarf Henchman 4" only — not distinct species that share a prefix (e.g. "Orc" vs "Orc Spearman")
 function isCreatureUnobtainable(creatureName) {
@@ -11957,15 +11986,23 @@ function startSetupLabelsObserver() {
 
 const STOP_AFTER_DEFEAT_LABEL_MARKERS = [
   'stop after a defeat',
-  'parar após uma derrota',
+  'parar apos uma derrota',
   'parar depois de uma derrota',
 ];
 
 const POWER_SAVING_MODE_LABEL_MARKERS = [
   'power saving mode',
+  // Current pt-BR game string (not "modo de…")
+  'economia de energia',
   'modo de economia de energia',
   'modo economia de energia',
 ];
+
+function labelTextMatchesMarkers(labelText, markers) {
+  const normalized = normalizeForLabelMatch(labelText).replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+  return markers.some((marker) => normalized.includes(normalizeForLabelMatch(marker)));
+}
 
 function findAutoplaySessionWidgetBottom() {
   const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
@@ -12020,27 +12057,490 @@ function setSessionCheckboxLabelHidden(label, hidden, markerKey) {
   }
 }
 
+function findPowerSavingModeCheckboxButton() {
+  for (const label of findAutoplaySessionCheckboxLabels()) {
+    if (labelTextMatchesMarkers(label.textContent, POWER_SAVING_MODE_LABEL_MARKERS)) {
+      return label.querySelector('button[role="checkbox"]');
+    }
+  }
+  return null;
+}
+
+function isPowerSavingModeCheckboxChecked(button) {
+  if (!button) return false;
+  return button.getAttribute('aria-checked') === 'true' || button.dataset.state === 'checked';
+}
+
+/**
+ * Turn off the in-game Power saving mode checkbox if it is currently checked.
+ * Uses the same click + pending guard pattern as persist restore.
+ */
+function forceDisableGamePowerSavingMode() {
+  const button = findPowerSavingModeCheckboxButton();
+  if (!button) {
+    setLivePowerSavingModeEnabled(false);
+    return;
+  }
+  if (!isPowerSavingModeCheckboxChecked(button)) {
+    setLivePowerSavingModeEnabled(false);
+    return;
+  }
+
+  powerSavingUserEditUntil = Date.now() + 1500;
+  powerSavingModeRestorePending = true;
+  try {
+    button.click();
+  } finally {
+    setTimeout(() => {
+      powerSavingModeRestorePending = false;
+      const stillOn = isPowerSavingModeCheckboxChecked(button);
+      setLivePowerSavingModeEnabled(stillOn);
+      // Retry once if the game ignored the first click (persist wipe already done).
+      if (stillOn) {
+        powerSavingModeRestorePending = true;
+        try {
+          button.click();
+        } finally {
+          setTimeout(() => {
+            powerSavingModeRestorePending = false;
+            setLivePowerSavingModeEnabled(isPowerSavingModeCheckboxChecked(button));
+          }, 100);
+        }
+      }
+    }, 100);
+  }
+}
+
+/**
+ * When Seamless autoplay is on, force Hide Stop after a defeat so the session
+ * checkbox stays hidden (Automator owns defeat handling).
+ */
+function enforceHideStopAfterDefeatForSeamlessAutoplay() {
+  if (!isAutomatorSeamlessAutoplayEnabled()) return false;
+  if (config.hideStopAfterDefeat) return false;
+  config.hideStopAfterDefeat = true;
+  saveConfig();
+  applyAutoplaySessionCheckboxVisibility();
+  console.log('[Mod Settings] Seamless autoplay on — enabled Hide Stop after a defeat');
+  return true;
+}
+
+function updateHideStopAfterDefeatCheckboxState(checkboxEl = null) {
+  const checkbox = checkboxEl || document.querySelector('#hide-stop-after-defeat-toggle');
+  applyExclusiveCheckboxLock(checkbox, {
+    locked: isAutomatorSeamlessAutoplayEnabled(),
+    lockedChecked: true,
+    unlockedChecked: !!config.hideStopAfterDefeat,
+    lockMessage: t('mods.betterUI.hideStopAfterDefeatSeamlessLock'),
+  });
+}
+
+function updatePersistPowerSavingModeCheckboxState(checkboxEl = null) {
+  const checkbox = checkboxEl || document.querySelector('#persist-power-saving-mode-toggle');
+  const baseWarning = t('mods.betterUI.persistPowerSavingModeWarning');
+  const lockMessage = t('mods.betterUI.persistPowerSavingModeHideLock');
+  applyExclusiveCheckboxLock(checkbox, {
+    locked: !!config.hidePowerSavingMode,
+    lockedChecked: false,
+    unlockedChecked: !!config.persistPowerSavingMode,
+    lockMessage,
+    unlockedTitle: baseWarning,
+  });
+}
+
+/**
+ * Used when enabling Hide Power saving mode: hide the checkbox, force Power saving off,
+ * and wipe Persistent Powersaver + its saved on/off state.
+ */
+function disableAndWipePowerSavingMode() {
+  config.persistPowerSavingMode = false;
+  config.powerSavingModeEnabled = false;
+  saveConfig();
+
+  // Clear persist before clicking off so restore logic cannot turn it back on.
+  forceDisableGamePowerSavingMode();
+  applyAutoplaySessionCheckboxVisibility();
+  updatePersistPowerSavingModeCheckboxState();
+  console.log('[Mod Settings] Hide Power saving mode: disabled Power saving and wiped Persistent Powersaver config');
+}
+
+let powerSavingModeRestorePending = false;
+let powerSavingUserEditUntil = 0;
+let powerSavingRestoreDebounceTimer = null;
+let powerSavingStateObserver = null;
+let powerSavingObservedButton = null;
+let livePowerSavingModeEnabled = false;
+let powerSavingOverlaysSuppressed = false;
+let powerSavingOverlayRestoreObserver = null;
+let powerSavingOverlayRestoreTimer = null;
+
+function getLivePowerSavingModeEnabled() {
+  return livePowerSavingModeEnabled === true;
+}
+
+function isPowerSavingAutoplayScreenActive() {
+  return !!document.getElementById('autoplay-goblin');
+}
+
+function isNormalBattlefieldReady() {
+  // Power saving replaces the board with the goblin screen — #tiles only exists on the real battlefield
+  return !isPowerSavingAutoplayScreenActive() && !!document.getElementById('tiles');
+}
+
+function cancelPendingPowerSavingOverlayRestore() {
+  if (powerSavingOverlayRestoreObserver) {
+    try {
+      powerSavingOverlayRestoreObserver.disconnect();
+    } catch (_) {}
+    powerSavingOverlayRestoreObserver = null;
+  }
+  if (powerSavingOverlayRestoreTimer) {
+    clearTimeout(powerSavingOverlayRestoreTimer);
+    powerSavingOverlayRestoreTimer = null;
+  }
+}
+
+function dispatchPowerSavingModeChanged(enabled) {
+  try {
+    window.dispatchEvent(
+      new CustomEvent('ba-power-saving-mode-changed', {
+        detail: { enabled: enabled === true },
+      })
+    );
+  } catch (error) {
+    console.warn('[Mod Settings] Failed to dispatch power saving event:', error);
+  }
+  if (window.ModCoordination && typeof window.ModCoordination.emit === 'function') {
+    try {
+      window.ModCoordination.emit('powerSavingModeChanged', { enabled: enabled === true });
+    } catch (_) {}
+  }
+}
+
+/** Apply overlay suppress/restore + notify mods. `suppressed=true` means hide battle overlays. */
+function setPowerSavingOverlaysSuppressed(suppressed) {
+  const next = suppressed === true;
+  if (powerSavingOverlaysSuppressed === next) {
+    return;
+  }
+  powerSavingOverlaysSuppressed = next;
+  applyPowerSavingBattleOverlayVisibility(next);
+  dispatchPowerSavingModeChanged(next);
+}
+
+function schedulePowerSavingOverlayRestoreWhenBattlefieldReady() {
+  cancelPendingPowerSavingOverlayRestore();
+
+  if (isNormalBattlefieldReady()) {
+    setPowerSavingOverlaysSuppressed(false);
+    return;
+  }
+
+  // Keep overlays suppressed while the "Autoplaying..." goblin screen is still up
+  // ("will resume after this battle"), or until #tiles is back on the real board.
+  console.log('[Mod Settings] Power saving off — waiting for battlefield before restoring overlays');
+
+  const watchRoot = document.getElementById('viewport') || document.body;
+  powerSavingOverlayRestoreObserver = new MutationObserver(() => {
+    if (livePowerSavingModeEnabled) {
+      cancelPendingPowerSavingOverlayRestore();
+      return;
+    }
+    if (!isNormalBattlefieldReady()) {
+      return;
+    }
+    cancelPendingPowerSavingOverlayRestore();
+    // Brief settle so the normal board can mount before Custom Display re-applies
+    powerSavingOverlayRestoreTimer = setTimeout(() => {
+      powerSavingOverlayRestoreTimer = null;
+      if (livePowerSavingModeEnabled) return;
+      if (!isNormalBattlefieldReady()) {
+        schedulePowerSavingOverlayRestoreWhenBattlefieldReady();
+        return;
+      }
+      console.log('[Mod Settings] Battlefield restored — re-enabling power-saving-suppressed overlays');
+      setPowerSavingOverlaysSuppressed(false);
+    }, 200);
+  });
+  powerSavingOverlayRestoreObserver.observe(watchRoot, {
+    childList: true,
+    subtree: true,
+  });
+}
+
+function setLivePowerSavingModeEnabled(enabled, { force = false } = {}) {
+  const next = enabled === true;
+  if (!force && livePowerSavingModeEnabled === next) {
+    return;
+  }
+  livePowerSavingModeEnabled = next;
+
+  if (next) {
+    cancelPendingPowerSavingOverlayRestore();
+    setPowerSavingOverlaysSuppressed(true);
+    return;
+  }
+
+  // Unchecking: defer restore until #autoplay-goblin / Autoplaying screen is gone
+  schedulePowerSavingOverlayRestoreWhenBattlefieldReady();
+}
+
+function applyPowerSavingBattleOverlayVisibility(enabled) {
+  // Better Highscores leaderboard overlay
+  try {
+    if (typeof window.BetterHighscores?.setPowerSavingSuppressed === 'function') {
+      window.BetterHighscores.setPowerSavingSuppressed(enabled);
+    } else {
+      document
+        .querySelectorAll('.better-highscores-container, .better-highscores-restore-btn')
+        .forEach((el) => {
+          if (enabled) {
+            if (el.dataset.powerSavingPrevDisplay == null) {
+              el.dataset.powerSavingPrevDisplay = el.style.display || '';
+            }
+            el.style.display = 'none';
+          } else if (el.dataset.powerSavingPrevDisplay != null) {
+            el.style.display = el.dataset.powerSavingPrevDisplay;
+            delete el.dataset.powerSavingPrevDisplay;
+          }
+        });
+    }
+  } catch (error) {
+    console.warn('[Mod Settings] Error toggling Better Highscores for power saving:', error);
+  }
+
+  // Setup Manager map shortcuts overlay
+  try {
+    const setupContext =
+      window.modLoader?.getModContext?.('setup-manager') ||
+      window.modLoader?.getModContext?.('Setup Manager');
+    const setupExports = setupContext?.exports;
+    if (typeof setupExports?.setPowerSavingSuppressed === 'function') {
+      setupExports.setPowerSavingSuppressed(enabled);
+    } else {
+      document.querySelectorAll('.setup-manager-map-shortcuts, .setup-manager-map-shortcut-preview').forEach((el) => {
+        if (enabled) {
+          if (el.dataset.powerSavingPrevDisplay == null) {
+            el.dataset.powerSavingPrevDisplay = el.style.display || '';
+          }
+          el.style.display = 'none';
+        } else if (el.dataset.powerSavingPrevDisplay != null) {
+          el.style.display = el.dataset.powerSavingPrevDisplay;
+          delete el.dataset.powerSavingPrevDisplay;
+        }
+      });
+    }
+  } catch (error) {
+    console.warn('[Mod Settings] Error toggling Setup Manager shortcuts for power saving:', error);
+  }
+
+  // Custom Display performance/grid overlays
+  try {
+    const customDisplayContext =
+      window.modLoader?.getModContext?.('custom-display') ||
+      window.modLoader?.getModContext?.('Custom Display');
+    const customDisplayExports = customDisplayContext?.exports;
+    if (typeof customDisplayExports?.setPowerSavingSuppressed === 'function') {
+      customDisplayExports.setPowerSavingSuppressed(enabled);
+    } else {
+      document
+        .querySelectorAll(
+          '#custom-display-hitbox-overlay, #custom-display-grid-overlay, #custom-display-perf-styles, .custom-display-tile-overlay'
+        )
+        .forEach((el) => {
+          if (enabled) {
+            if (el.tagName === 'STYLE') {
+              el.remove();
+              return;
+            }
+            if (el.dataset.powerSavingPrevDisplay == null) {
+              el.dataset.powerSavingPrevDisplay = el.style.display || '';
+            }
+            el.style.display = 'none';
+          } else if (el.dataset.powerSavingPrevDisplay != null) {
+            el.style.display = el.dataset.powerSavingPrevDisplay;
+            delete el.dataset.powerSavingPrevDisplay;
+          }
+        });
+    }
+  } catch (error) {
+    console.warn('[Mod Settings] Error toggling Custom Display for power saving:', error);
+  }
+}
+
+let missingPowerSavingButtonSince = null;
+
+function syncLivePowerSavingModeFromDom() {
+  const button = findPowerSavingModeCheckboxButton();
+  if (!button) {
+    // Session widget may briefly remount — only clear after it's gone for a bit.
+    if (!livePowerSavingModeEnabled) {
+      missingPowerSavingButtonSince = null;
+      return;
+    }
+    if (!missingPowerSavingButtonSince) {
+      missingPowerSavingButtonSince = Date.now();
+      return;
+    }
+    if (Date.now() - missingPowerSavingButtonSince < 500) return;
+    missingPowerSavingButtonSince = null;
+    setLivePowerSavingModeEnabled(false);
+    return;
+  }
+  missingPowerSavingButtonSince = null;
+  setLivePowerSavingModeEnabled(isPowerSavingModeCheckboxChecked(button));
+}
+
+window.baPowerSavingMode = {
+  isEnabled: getLivePowerSavingModeEnabled,
+  areOverlaysSuppressed: () => powerSavingOverlaysSuppressed === true,
+  setEnabled: setLivePowerSavingModeEnabled,
+};
+
+function savePowerSavingModeStateFromButton(button) {
+  if (!config.persistPowerSavingMode || !button) return;
+  const checked = isPowerSavingModeCheckboxChecked(button);
+  // Always keep live state in sync when we read the checkbox.
+  setLivePowerSavingModeEnabled(checked);
+  if (config.powerSavingModeEnabled === checked) return;
+  config.powerSavingModeEnabled = checked;
+  saveConfig();
+}
+
+function restorePersistedPowerSavingMode() {
+  if (!config.persistPowerSavingMode) return;
+  if (Date.now() < powerSavingUserEditUntil) return;
+
+  const button = findPowerSavingModeCheckboxButton();
+  if (!button) return;
+
+  ensurePowerSavingModePersistListener();
+
+  const desired = !!config.powerSavingModeEnabled;
+  if (isPowerSavingModeCheckboxChecked(button) === desired) return;
+
+  powerSavingModeRestorePending = true;
+  try {
+    button.click();
+  } finally {
+    // Keep pending long enough for React to apply aria-checked / data-state.
+    setTimeout(() => {
+      powerSavingModeRestorePending = false;
+      setLivePowerSavingModeEnabled(isPowerSavingModeCheckboxChecked(button));
+      // If the game reset the checkbox after our click, retry once the dust settles.
+      if (
+        config.persistPowerSavingMode &&
+        Date.now() >= powerSavingUserEditUntil &&
+        isPowerSavingModeCheckboxChecked(button) !== desired
+      ) {
+        schedulePersistedPowerSavingModeRestore(150);
+      }
+    }, 100);
+  }
+}
+
+function schedulePersistedPowerSavingModeRestore(delayMs = 75) {
+  if (powerSavingRestoreDebounceTimer) {
+    clearTimeout(powerSavingRestoreDebounceTimer);
+  }
+  powerSavingRestoreDebounceTimer = setTimeout(() => {
+    powerSavingRestoreDebounceTimer = null;
+    restorePersistedPowerSavingMode();
+  }, delayMs);
+}
+
+function ensurePowerSavingModePersistListener() {
+  const button = findPowerSavingModeCheckboxButton();
+  if (!button) return;
+
+  if (button.dataset.modSettingsPowerSavingPersistBound !== 'true') {
+    button.dataset.modSettingsPowerSavingPersistBound = 'true';
+    button.addEventListener('click', () => {
+      if (powerSavingModeRestorePending) return;
+      powerSavingUserEditUntil = Date.now() + 1500;
+      // Read state after React updates aria-checked / data-state.
+      setTimeout(() => {
+        const checked = isPowerSavingModeCheckboxChecked(button);
+        setLivePowerSavingModeEnabled(checked);
+        if (!config.persistPowerSavingMode) return;
+        if (config.powerSavingModeEnabled === checked) return;
+        config.powerSavingModeEnabled = checked;
+        saveConfig();
+      }, 50);
+    });
+  }
+
+  if (powerSavingObservedButton !== button) {
+    if (powerSavingStateObserver) {
+      powerSavingStateObserver.disconnect();
+      powerSavingStateObserver = null;
+    }
+    powerSavingObservedButton = button;
+    powerSavingStateObserver = new MutationObserver(() => {
+      if (powerSavingModeRestorePending) return;
+      const checked = isPowerSavingModeCheckboxChecked(button);
+      if (Date.now() < powerSavingUserEditUntil) {
+        setLivePowerSavingModeEnabled(checked);
+        if (config.persistPowerSavingMode) {
+          savePowerSavingModeStateFromButton(button);
+        }
+        return;
+      }
+      setLivePowerSavingModeEnabled(checked);
+      // Game remounted/reset the checkbox — re-apply persisted state if needed.
+      if (
+        config.persistPowerSavingMode &&
+        checked !== !!config.powerSavingModeEnabled
+      ) {
+        schedulePersistedPowerSavingModeRestore(50);
+      }
+    });
+    powerSavingStateObserver.observe(button, {
+      attributes: true,
+      attributeFilter: ['aria-checked', 'data-state'],
+    });
+  }
+}
+
 function applyAutoplaySessionCheckboxVisibility() {
   for (const label of findAutoplaySessionCheckboxLabels()) {
-    const labelText = (label.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-
-    if (STOP_AFTER_DEFEAT_LABEL_MARKERS.some((marker) => labelText.includes(marker))) {
+    if (labelTextMatchesMarkers(label.textContent, STOP_AFTER_DEFEAT_LABEL_MARKERS)) {
       setSessionCheckboxLabelHidden(label, !!config.hideStopAfterDefeat, 'stopAfterDefeat');
       continue;
     }
 
-    if (POWER_SAVING_MODE_LABEL_MARKERS.some((marker) => labelText.includes(marker))) {
+    if (labelTextMatchesMarkers(label.textContent, POWER_SAVING_MODE_LABEL_MARKERS)) {
       setSessionCheckboxLabelHidden(label, !!config.hidePowerSavingMode, 'powerSavingMode');
     }
   }
+}
+
+function applyAutoplaySessionCheckboxFeatures() {
+  enforceHideStopAfterDefeatForSeamlessAutoplay();
+  applyAutoplaySessionCheckboxVisibility();
+  updateHideStopAfterDefeatCheckboxState();
+  ensurePowerSavingModePersistListener();
+  schedulePersistedPowerSavingModeRestore(0);
+  syncLivePowerSavingModeFromDom();
+}
+
+let autoplaySessionFeaturesDebounceTimer = null;
+
+function scheduleAutoplaySessionCheckboxFeatures() {
+  if (autoplaySessionFeaturesDebounceTimer) {
+    clearTimeout(autoplaySessionFeaturesDebounceTimer);
+  }
+  autoplaySessionFeaturesDebounceTimer = setTimeout(() => {
+    autoplaySessionFeaturesDebounceTimer = null;
+    applyAutoplaySessionCheckboxFeatures();
+  }, 50);
 }
 
 function startAutoplaySessionCheckboxObserver() {
   console.log('[Mod Settings] Starting autoplay session checkbox observer');
 
   const observer = new MutationObserver(() => {
-    if (!config.hideStopAfterDefeat && !config.hidePowerSavingMode) return;
-    applyAutoplaySessionCheckboxVisibility();
+    scheduleAutoplaySessionCheckboxFeatures();
   });
 
   observer.observe(document.body, {
@@ -12099,7 +12599,21 @@ function applyCompactNavBar() {
   console.log('[Mod Settings] Compact nav bar applied - text hidden');
 }
 
+function isInventoryWidgetHeader(header) {
+  if (!header) return false;
+  if (header.querySelector('img[alt="inventory" i], img[alt="Inventário" i], img[alt="Inventario" i], img[src*="inventory.png"]')) {
+    return true;
+  }
+  const labelText = normalizeForLabelMatch(header.textContent);
+  return labelText.includes('inventory') || labelText.includes('inventario');
+}
+
 function isInventoryWidgetPinned() {
+  const root = findInventoryWidgetRoot();
+  // Prefer icons inside the inventory widget — after pinning, aria-label/button may remount away.
+  if (root?.querySelector('svg.lucide-pin-off')) return true;
+  if (root?.querySelector('svg.lucide-pin')) return false;
+
   const pinButton = getInventoryWidgetPinButton();
   if (!pinButton) return null;
   const icon = pinButton.querySelector('svg');
@@ -12110,102 +12624,774 @@ function isInventoryWidgetPinned() {
 }
 
 function getInventoryWidgetPinButton() {
+  const root = findInventoryWidgetRoot();
+  if (root) {
+    const inRoot =
+      root.querySelector('button[aria-label="Pin widget"]') ||
+      root.querySelector('button[aria-label="Unpin widget"]') ||
+      root.querySelector('button[aria-label*="Pin" i]') ||
+      root.querySelector('button[aria-label*="Fixar" i]') ||
+      root.querySelector('button[aria-label*="Desafixar" i]') ||
+      root.querySelector('button:has(svg.lucide-pin-off), button:has(svg.lucide-pin)');
+    if (inRoot) return inRoot;
+  }
+
   const inventoryHeaders = Array.from(
     document.querySelectorAll(
       '#game-sidebar-id h2.widget-top-text, #game-sidebar-id .widget-top.widget-top-text, [role="dialog"] h2.widget-top-text, [role="dialog"] .widget-top.widget-top-text, h2.widget-top-text, .widget-top.widget-top-text'
     )
   );
   for (const header of inventoryHeaders) {
-    const labelText = (header.textContent || '').toLowerCase();
-    if (!labelText.includes('inventory')) continue;
-    const pinBtn = header.querySelector('button[aria-label="Pin widget"]');
+    if (!isInventoryWidgetHeader(header)) continue;
+    const pinBtn =
+      header.querySelector('button[aria-label="Pin widget"], button[aria-label="Unpin widget"]') ||
+      header.parentElement?.querySelector?.('button[aria-label="Pin widget"], button[aria-label="Unpin widget"]') ||
+      header.querySelector('button[aria-label*="Fixar" i], button[aria-label*="Desafixar" i]') ||
+      header.parentElement?.querySelector?.('button[aria-label*="Fixar" i], button[aria-label*="Desafixar" i]') ||
+      header.querySelector('button:has(svg.lucide-pin-off), button:has(svg.lucide-pin)') ||
+      header.parentElement?.querySelector?.('button:has(svg.lucide-pin-off), button:has(svg.lucide-pin)');
     if (pinBtn) return pinBtn;
   }
-  return (
-    document.querySelector('[role="dialog"] button[aria-label="Pin widget"]') ||
-    document.querySelector('#game-sidebar-id button[aria-label="Pin widget"]') ||
-    document.querySelector('button[aria-label="Pin widget"]')
+  return null;
+}
+
+function findInventoryWidgetRoot() {
+  const grid = document.querySelector('.container-inventory-4');
+  if (grid) {
+    let el = grid.parentElement;
+    while (el && el !== document.body) {
+      if (el.classList?.contains('fixed')) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+  }
+
+  const headers = document.querySelectorAll(
+    '.widget-top.widget-top-text[aria-roledescription="draggable"], .widget-top.widget-top-text'
+  );
+  for (const header of headers) {
+    if (!isInventoryWidgetHeader(header)) continue;
+    let el = header.parentElement;
+    while (el && el !== document.body) {
+      if (el.classList?.contains('fixed')) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+  }
+  return null;
+}
+
+function getInventoryWidgetDragHandle(root = findInventoryWidgetRoot()) {
+  if (!root) return null;
+  return root.querySelector(
+    '.widget-top[aria-roledescription="draggable"], .widget-top.widget-top-text[role="button"], .widget-top.widget-top-text'
   );
 }
 
-function ensureInventoryWidgetPinned() {
-  if (stickyInventoryState.done) return true;
-  const pinButton = getInventoryWidgetPinButton();
-  if (!pinButton) {
-    console.log('[Mod Settings] Sticky inventory: pin button not found');
+function clampInventoryLeftTop(root, left, top) {
+  const rect = root.getBoundingClientRect();
+  const width = Math.max(40, root.offsetWidth || Math.round(rect.width) || 280);
+  const height = Math.max(40, root.offsetHeight || Math.round(rect.height) || 200);
+  const margin = 8;
+  const minLeft = margin;
+  const minTop = margin;
+  const maxLeft = Math.max(minLeft, Math.round(window.innerWidth - width - margin));
+  const maxTop = Math.max(minTop, Math.round(window.innerHeight - height - margin));
+  const clamped = {
+    left: Math.min(maxLeft, Math.max(minLeft, Math.round(left))),
+    top: Math.min(maxTop, Math.max(minTop, Math.round(top)))
+  };
+  if (clamped.left !== Math.round(left) || clamped.top !== Math.round(top)) {
+    logPersistentInventory('clamped off-screen position', {
+      requested: { left, top },
+      clamped,
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+      size: { width, height }
+    });
+  }
+  return clamped;
+}
+
+function getSavedInventoryWidgetPosition() {
+  const left = config.inventoryWidgetLeft;
+  const top = config.inventoryWidgetTop;
+  if (!Number.isFinite(left) || !Number.isFinite(top)) {
+    return { left: null, top: null };
+  }
+  return { left: Math.round(left), top: Math.round(top) };
+}
+
+function ensurePersistentInventoryPositionStyle(left, top) {
+  let styleEl = document.getElementById(PERSISTENT_INVENTORY_STYLE_ID);
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = PERSISTENT_INVENTORY_STYLE_ID;
+    document.documentElement.appendChild(styleEl);
+  }
+  styleEl.textContent =
+    `[${PERSISTENT_INVENTORY_ATTR}="1"]{` +
+    `left:${left}px!important;top:${top}px!important;right:auto!important;bottom:auto!important;` +
+    `transform:none!important;}`;
+}
+
+function clearPersistentInventoryPositionStyle() {
+  document.getElementById(PERSISTENT_INVENTORY_STYLE_ID)?.remove();
+  document.querySelectorAll(`[${PERSISTENT_INVENTORY_ATTR}]`).forEach((el) => {
+    el.removeAttribute(PERSISTENT_INVENTORY_ATTR);
+    el.style.removeProperty('left');
+    el.style.removeProperty('top');
+    el.style.removeProperty('right');
+    el.style.removeProperty('bottom');
+    el.style.removeProperty('transform');
+  });
+}
+
+function applyInventoryWidgetPosition(root = findInventoryWidgetRoot()) {
+  if (!config.persistentInventory || !root || persistentInventoryState.dragActive) {
+    return false;
+  }
+  const saved = getSavedInventoryWidgetPosition();
+  if (saved.left == null || saved.top == null) {
+    logPersistentInventory('skip apply (no saved left/top)');
+    return true; // nothing to place — count as done
+  }
+  const measuredWidth = root.offsetWidth || Math.round(root.getBoundingClientRect().width) || 0;
+  if (measuredWidth < 40) {
+    logPersistentInventory('skip apply (widget not laid out yet)', { measuredWidth });
+    return false;
+  }
+
+  const { left, top } = clampInventoryLeftTop(root, saved.left, saved.top);
+  ensurePersistentInventoryPositionStyle(left, top);
+  root.setAttribute(PERSISTENT_INVENTORY_ATTR, '1');
+  root.style.left = `${left}px`;
+  root.style.top = `${top}px`;
+  root.style.right = 'auto';
+  root.style.bottom = 'auto';
+  root.style.transform = 'none';
+  logPersistentInventory('applied position', {
+    left,
+    top,
+    elapsedMs: persistentInventoryState.restoreStartedAt
+      ? Date.now() - persistentInventoryState.restoreStartedAt
+      : null
+  });
+  return true;
+}
+
+function saveInventoryWidgetPinnedFromDom() {
+  if (!config.persistentInventory || persistentInventoryState.restoring) {
     return false;
   }
   const pinned = isInventoryWidgetPinned();
-  const iconClassBefore = pinButton.querySelector('svg')?.className?.baseVal || pinButton.querySelector('svg')?.className || '';
-  console.log('[Mod Settings] Sticky inventory: pin state before click', { pinned, iconClassBefore });
-  if (pinned === true) {
-    stickyInventoryState.done = true;
-    console.log('[Mod Settings] Sticky inventory: already pinned');
-    return true;
+  // Only persist real pin reads; never treat "inventory closed" / unknown as unpinned.
+  if (pinned !== true && pinned !== false) {
+    return false;
   }
-  if (pinned === false) {
-    triggerWidgetPinButton(pinButton);
+  if (config.inventoryWidgetPinned === pinned) {
+    return false;
+  }
+  config.inventoryWidgetPinned = pinned;
+  saveConfig();
+  logPersistentInventory('saved pin state', { pinned });
+  return true;
+}
+
+function bindPersistentInventoryPinButtonListener(root = findInventoryWidgetRoot()) {
+  if (!config.persistentInventory) return;
+  const scope = root || document;
+  const pinButton = scope.querySelector?.('button[aria-label="Pin widget"]') || getInventoryWidgetPinButton();
+  if (!pinButton || pinButton.dataset.baPersistentPinBound === '1') return;
+  pinButton.dataset.baPersistentPinBound = '1';
+  pinButton.addEventListener('click', () => {
     scheduleTimeout(() => {
-      const postPinned = isInventoryWidgetPinned();
-      const iconClassAfter = pinButton.querySelector('svg')?.className?.baseVal || pinButton.querySelector('svg')?.className || '';
-      if (postPinned === true) stickyInventoryState.done = true;
-      console.log('[Mod Settings] Sticky inventory: pin state after click', { postPinned, iconClassAfter });
-    }, 50);
-    return true;
+      if (!config.persistentInventory || persistentInventoryState.restoring) return;
+      saveInventoryWidgetPinnedFromDom();
+    }, 60);
+  });
+}
+
+function capturePersistentInventoryStateFromDom() {
+  if (!config.persistentInventory) {
+    return;
   }
-  console.log('[Mod Settings] Sticky inventory: unknown pin state, skipping click');
-  return false;
+  // Prefer live pin state when readable; otherwise keep intent to restore pinned.
+  const pinned = isInventoryWidgetPinned();
+  if (pinned === true || pinned === false) {
+    config.inventoryWidgetPinned = pinned;
+  } else if (config.inventoryWidgetPinned == null) {
+    config.inventoryWidgetPinned = true;
+  }
+  const root = findInventoryWidgetRoot();
+  if (root) {
+    const measuredWidth = root.offsetWidth || Math.round(root.getBoundingClientRect().width) || 0;
+    if (measuredWidth >= 40) {
+      const rect = root.getBoundingClientRect();
+      const clamped = clampInventoryLeftTop(root, rect.left, rect.top);
+      config.inventoryWidgetLeft = clamped.left;
+      config.inventoryWidgetTop = clamped.top;
+    }
+  }
+  saveConfig();
+  logPersistentInventory('captured state from DOM', {
+    pinned: config.inventoryWidgetPinned,
+    left: config.inventoryWidgetLeft,
+    top: config.inventoryWidgetTop
+  });
+}
+
+function setPersistentInventoryRestoringVisual(active, root = findInventoryWidgetRoot()) {
+  const styleEl = document.getElementById(PERSISTENT_INVENTORY_RESTORE_STYLE_ID);
+  if (active) {
+    let el = styleEl;
+    if (!el) {
+      el = document.createElement('style');
+      el.id = PERSISTENT_INVENTORY_RESTORE_STYLE_ID;
+      document.documentElement.appendChild(el);
+    }
+    el.textContent =
+      `[${PERSISTENT_INVENTORY_RESTORING_ATTR}="1"] button.widget-top-button,` +
+      `[${PERSISTENT_INVENTORY_RESTORING_ATTR}="1"] button[aria-label="Pin widget"],` +
+      `[${PERSISTENT_INVENTORY_RESTORING_ATTR}="1"] button[aria-label="Unpin widget"],` +
+      `[${PERSISTENT_INVENTORY_RESTORING_ATTR}="1"] button[aria-label*="Fixar" i],` +
+      `[${PERSISTENT_INVENTORY_RESTORING_ATTR}="1"] button[aria-label*="Desafixar" i]{` +
+      'display:block!important;visibility:visible!important;pointer-events:all!important;opacity:1!important;}';
+    if (root) {
+      root.setAttribute(PERSISTENT_INVENTORY_RESTORING_ATTR, '1');
+    }
+    return;
+  }
+  styleEl?.remove();
+  document.querySelectorAll(`[${PERSISTENT_INVENTORY_RESTORING_ATTR}]`).forEach((node) => {
+    node.removeAttribute(PERSISTENT_INVENTORY_RESTORING_ATTR);
+  });
+}
+
+function isInventoryWidgetReadyForPin(root = findInventoryWidgetRoot()) {
+  if (!root) return false;
+  const dialogState = root.getAttribute('data-state');
+  if (dialogState && dialogState !== 'open') return false;
+  const grid = root.querySelector('.container-inventory-4');
+  if (!grid) return false;
+  const width = grid.offsetWidth || Math.round(grid.getBoundingClientRect().width) || 0;
+  return width >= 40;
+}
+
+function withProgrammaticClickTarget(button, fn) {
+  if (!button || typeof fn !== 'function') return false;
+  const hadHidden = button.classList.contains('hidden');
+  const prevDisplay = button.style.display;
+  const prevVisibility = button.style.visibility;
+  const prevPointerEvents = button.style.pointerEvents;
+  const prevOpacity = button.style.opacity;
+  if (hadHidden) button.classList.remove('hidden');
+  button.style.display = 'block';
+  button.style.visibility = 'visible';
+  button.style.pointerEvents = 'all';
+  button.style.opacity = '1';
+  try {
+    button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    return fn(button) === true;
+  } finally {
+    if (hadHidden) button.classList.add('hidden');
+    button.style.display = prevDisplay;
+    button.style.visibility = prevVisibility;
+    button.style.pointerEvents = prevPointerEvents;
+    button.style.opacity = prevOpacity;
+  }
 }
 
 function triggerWidgetPinButton(button) {
-  if (!button) return;
-  const pointerPayload = { bubbles: true, cancelable: true, composed: true };
-  const mousePayload = { bubbles: true, cancelable: true, composed: true, button: 0 };
-  try {
-    button.focus?.({ preventScroll: true });
-  } catch (error) {
-    // Focus is best effort only.
-  }
-  button.dispatchEvent(new PointerEvent('pointerdown', pointerPayload));
-  button.dispatchEvent(new MouseEvent('mousedown', mousePayload));
-  button.dispatchEvent(new PointerEvent('pointerup', pointerPayload));
-  button.dispatchEvent(new MouseEvent('mouseup', mousePayload));
-  button.dispatchEvent(new MouseEvent('click', mousePayload));
+  return withProgrammaticClickTarget(button, (target) => {
+    const rect = target.getBoundingClientRect();
+    const clientX = Math.round(rect.left + Math.max(1, rect.width) / 2);
+    const clientY = Math.round(rect.top + Math.max(1, rect.height) / 2);
+    const pointerBase = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      clientX,
+      clientY,
+      button: 0,
+      buttons: 1,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true
+    };
+    const mouseBase = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      clientX,
+      clientY,
+      button: 0,
+      buttons: 1
+    };
+    try {
+      target.focus?.({ preventScroll: true });
+    } catch (_) {
+      // Focus is best effort only.
+    }
+    const clickTarget = target.querySelector('svg') || target;
+    const targets = clickTarget === target ? [target] : [target, clickTarget];
+    for (const el of targets) {
+      el.dispatchEvent(new PointerEvent('pointerover', pointerBase));
+      el.dispatchEvent(new PointerEvent('pointerenter', pointerBase));
+      el.dispatchEvent(new MouseEvent('mouseover', mouseBase));
+      el.dispatchEvent(new MouseEvent('mouseenter', mouseBase));
+      el.dispatchEvent(new PointerEvent('pointerdown', pointerBase));
+      el.dispatchEvent(new MouseEvent('mousedown', mouseBase));
+      el.dispatchEvent(new PointerEvent('pointerup', { ...pointerBase, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent('mouseup', { ...mouseBase, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent('click', { ...mouseBase, buttons: 0 }));
+    }
+    try {
+      target.click();
+    } catch (_) {
+      // Native click is best effort after synthetic events.
+    }
+    return true;
+  });
 }
 
-function openInventoryThenPinWidget() {
-  if (stickyInventoryState.done || isInventoryWidgetPinned() === true) {
-    stickyInventoryState.done = true;
+function clearPersistentInventoryRestoreTimeouts() {
+  persistentInventoryState.restoreTimeouts.forEach((timeoutId) => {
+    clearTimeout(timeoutId);
+    activeTimeouts.delete(timeoutId);
+  });
+  persistentInventoryState.restoreTimeouts = [];
+}
+
+function schedulePersistentInventoryRestoreStep(fn, delay) {
+  const timeoutId = scheduleTimeout(fn, delay);
+  persistentInventoryState.restoreTimeouts.push(timeoutId);
+  return timeoutId;
+}
+
+/**
+ * Pinned restore only: open inventory → pin if needed → place at saved left/top once.
+ * If left/top are null, still open+pin but skip position apply.
+ */
+function runPersistentInventoryRestoreAttempt() {
+  const elapsedMs = persistentInventoryState.restoreStartedAt
+    ? Date.now() - persistentInventoryState.restoreStartedAt
+    : 0;
+
+  if (!config.persistentInventory) {
+    logPersistentInventory('restore attempt skipped (feature off)', { elapsedMs });
+    return true;
+  }
+
+  // Not pinned → leave the game alone. Only listen so a later pin/drag can be saved.
+  if (config.inventoryWidgetPinned !== true) {
+    const root = findInventoryWidgetRoot();
+    logPersistentInventory('restore idle (not pinned in config)', {
+      elapsedMs,
+      inventoryOpen: Boolean(root),
+      configPinned: config.inventoryWidgetPinned
+    });
+    if (root) {
+      bindPersistentInventoryDragListeners();
+      bindPersistentInventoryPinButtonListener(root);
+    }
+    return true;
+  }
+
+  const root = findInventoryWidgetRoot();
+  if (!root) {
+    const shouldRetryOpen =
+      !persistentInventoryState.openedInventory ||
+      elapsedMs - (persistentInventoryState.lastOpenAttemptAt || 0) > 700;
+    if (shouldRetryOpen) {
+      logPersistentInventory(
+        persistentInventoryState.openedInventory
+          ? 'inventory still closed → retry open'
+          : 'inventory closed → opening',
+        { elapsedMs }
+      );
+      persistentInventoryState.openedInventory = true;
+      persistentInventoryState.lastOpenAttemptAt = elapsedMs;
+      openInventoryFromHotkey();
+    } else {
+      logPersistentInventory('waiting for inventory root after open', { elapsedMs });
+    }
+    return false;
+  }
+
+  setPersistentInventoryRestoringVisual(true, root);
+
+  if (!isInventoryWidgetReadyForPin(root)) {
+    logPersistentInventory('waiting for inventory widget ready', { elapsedMs });
+    return false;
+  }
+
+  const pinned = isInventoryWidgetPinned();
+  const hasPinButton = Boolean(getInventoryWidgetPinButton());
+  const saved = getSavedInventoryWidgetPosition();
+  logPersistentInventory('inventory open', {
+    elapsedMs,
+    pinned,
+    hasPinButton,
+    clickedPin: persistentInventoryState.clickedPin,
+    saved
+  });
+
+  if (pinned === false) {
+    const pinButton = getInventoryWidgetPinButton();
+    if (!pinButton) {
+      logPersistentInventory('pin button missing', { elapsedMs });
+      return false;
+    }
+    const attempts = persistentInventoryState.pinClickAttempts || 0;
+    const canClickPin =
+      attempts < 10 &&
+      (!persistentInventoryState.lastPinClickAt ||
+        elapsedMs - persistentInventoryState.lastPinClickAt > 350);
+    if (canClickPin) {
+      persistentInventoryState.pinClickAttempts = attempts + 1;
+      persistentInventoryState.clickedPin = true;
+      persistentInventoryState.lastPinClickAt = elapsedMs;
+      const clicked = triggerWidgetPinButton(pinButton);
+      logPersistentInventory('clicking pin', {
+        elapsedMs,
+        attempt: persistentInventoryState.pinClickAttempts,
+        clicked,
+        rect: pinButton.getBoundingClientRect()
+      });
+    } else {
+      logPersistentInventory('waiting for pin to stick', {
+        elapsedMs,
+        attempts: persistentInventoryState.pinClickAttempts
+      });
+    }
+    return false;
+  }
+
+  persistentInventoryState.pinClickAttempts = 0;
+
+  // After pin click the control often remounts/disappears briefly — treat as done
+  // only when the pin control is gone (not when it still shows unpinned).
+  if (pinned !== true) {
+    if (persistentInventoryState.clickedPin && pinned == null && !hasPinButton) {
+      logPersistentInventory('pin control unavailable after click → treating as pinned', {
+        elapsedMs,
+        hasPinButton
+      });
+    } else {
+      logPersistentInventory('pin state unknown', { elapsedMs, pinned, hasPinButton });
+      return false;
+    }
+  }
+
+  if (!persistentInventoryState.positionApplied) {
+    const applied = applyInventoryWidgetPosition(root);
+    if (!applied) {
+      return false;
+    }
+    persistentInventoryState.positionApplied = true;
+  }
+
+  bindPersistentInventoryDragListeners();
+  bindPersistentInventoryPinButtonListener(root);
+  setPersistentInventoryRestoringVisual(false, root);
+  logPersistentInventory('restore complete', {
+    elapsedMs,
+    pinned: pinned === true ? true : 'assumed-after-click',
+    saved: getSavedInventoryWidgetPosition()
+  });
+  return true;
+}
+
+function applyPersistentInventory() {
+  if (!config.persistentInventory) return;
+
+  startPersistentInventoryObserver();
+
+  // Feature on but not pinned: do not open, close, pin, or move the inventory.
+  if (config.inventoryWidgetPinned !== true) {
+    logPersistentInventory('apply skipped (config not pinned)', {
+      configPinned: config.inventoryWidgetPinned,
+      saved: getSavedInventoryWidgetPosition()
+    });
+    clearPersistentInventoryRestoreTimeouts();
+    persistentInventoryState.restoreStarted = false;
+    persistentInventoryState.restoreComplete = true;
+    persistentInventoryState.restoring = false;
+    persistentInventoryState.positionApplied = false;
+    bindPersistentInventoryDragListeners();
     return;
   }
-  // Sticky pin button only exists/reliably updates when inventory widget is open.
-  console.log('[Mod Settings] Sticky inventory: opening inventory before pin');
-  openInventoryFromHotkey();
-  const retryDelays = [200, 400, 600];
-  retryDelays.forEach((delay, idx) => {
-    scheduleTimeout(() => {
-      if (stickyInventoryState.done) return;
-      console.log('[Mod Settings] Sticky inventory: pin attempt', { attempt: idx + 1, delay });
-      ensureInventoryWidgetPinned();
+
+  clearPersistentInventoryRestoreTimeouts();
+  persistentInventoryState.restoreStarted = true;
+  persistentInventoryState.restoreComplete = false;
+  persistentInventoryState.restoring = true;
+  persistentInventoryState.positionApplied = false;
+  persistentInventoryState.restoreStartedAt = Date.now();
+  persistentInventoryState.openedInventory = false;
+  persistentInventoryState.clickedPin = false;
+  persistentInventoryState.lastPinClickAt = 0;
+  persistentInventoryState.lastOpenAttemptAt = 0;
+  persistentInventoryState.pinClickAttempts = 0;
+
+  logPersistentInventory('restore started', {
+    saved: getSavedInventoryWidgetPosition(),
+    configPinned: config.inventoryWidgetPinned
+  });
+
+  const attemptDelays = [0, 50, 100, 200, 350, 550, 800, 1200, 1800, 2500, 3200, 4000];
+  attemptDelays.forEach((delay, index) => {
+    schedulePersistentInventoryRestoreStep(() => {
+      if (!config.persistentInventory) return;
+      if (config.inventoryWidgetPinned !== true) {
+        persistentInventoryState.restoreComplete = true;
+        persistentInventoryState.restoring = false;
+        setPersistentInventoryRestoringVisual(false);
+        logPersistentInventory('restore aborted (config unpinned mid-run)');
+        return;
+      }
+      persistentInventoryState.lastRestoreStepAt = Date.now();
+      logPersistentInventory(`restore step #${index + 1}`, {
+        delayMs: delay,
+        elapsedMs: Date.now() - persistentInventoryState.restoreStartedAt
+      });
+      const done = runPersistentInventoryRestoreAttempt();
+      if (done || index === attemptDelays.length - 1) {
+        persistentInventoryState.restoreComplete = done;
+        persistentInventoryState.restoring = false;
+        setPersistentInventoryRestoringVisual(false);
+        if (done) {
+          clearPersistentInventoryRestoreTimeouts();
+        }
+        if (config.inventoryWidgetPinned === true) {
+          bindPersistentInventoryDragListeners();
+        }
+        logPersistentInventory('restore finished', {
+          success: done,
+          elapsedMs: Date.now() - persistentInventoryState.restoreStartedAt,
+          saved: getSavedInventoryWidgetPosition()
+        });
+      }
     }, delay);
   });
 }
 
-function applyDefaultInventorySticky() {
-  if (!config.defaultInventorySticky) return;
-  if (stickyInventoryState.done || isInventoryWidgetPinned() === true) {
-    stickyInventoryState.done = true;
+function unbindPersistentInventoryDragListeners() {
+  const root = persistentInventoryState.boundDragRoot;
+  if (root && persistentInventoryState.onPointerDown) {
+    root.removeEventListener('pointerdown', persistentInventoryState.onPointerDown, true);
+  }
+  if (persistentInventoryState.onPointerMove) {
+    window.removeEventListener('pointermove', persistentInventoryState.onPointerMove, true);
+  }
+  if (persistentInventoryState.onPointerUp) {
+    window.removeEventListener('pointerup', persistentInventoryState.onPointerUp, true);
+    window.removeEventListener('pointercancel', persistentInventoryState.onPointerUp, true);
+  }
+  persistentInventoryState.boundDragRoot = null;
+  persistentInventoryState.onPointerDown = null;
+  persistentInventoryState.onPointerMove = null;
+  persistentInventoryState.onPointerUp = null;
+  persistentInventoryState.dragOrigin = null;
+  persistentInventoryState.dragActive = false;
+}
+
+/**
+ * Own the drag with left/top. The game uses dnd-kit transforms; mixing that with a
+ * restored left/top makes the panel snap back (transform clears, left/top stay).
+ */
+function bindPersistentInventoryDragListeners() {
+  if (!config.persistentInventory) return;
+  const root = findInventoryWidgetRoot();
+  if (!root) return;
+  if (persistentInventoryState.boundDragRoot === root && persistentInventoryState.onPointerDown) {
     return;
   }
-  if (stickyInventoryState.started) return;
-  stickyInventoryState.started = true;
-  const attemptDelays = [0, 250, 800, 1500, 2500, 4000];
-  for (const delay of attemptDelays) {
-    scheduleTimeout(() => {
-      if (!config.defaultInventorySticky || stickyInventoryState.done) return;
-      openInventoryThenPinWidget();
-    }, delay);
+  unbindPersistentInventoryDragListeners();
+
+  persistentInventoryState.onPointerMove = (event) => {
+    if (!persistentInventoryState.dragActive || !persistentInventoryState.dragOrigin) return;
+    const liveRoot = findInventoryWidgetRoot() || root;
+    const { startClientX, startClientY, originLeft, originTop } = persistentInventoryState.dragOrigin;
+    const nextLeft = originLeft + (event.clientX - startClientX);
+    const nextTop = originTop + (event.clientY - startClientY);
+    const clamped = clampInventoryLeftTop(liveRoot, nextLeft, nextTop);
+    liveRoot.style.left = `${clamped.left}px`;
+    liveRoot.style.top = `${clamped.top}px`;
+    liveRoot.style.right = 'auto';
+    liveRoot.style.bottom = 'auto';
+    liveRoot.style.transform = 'none';
+  };
+
+  persistentInventoryState.onPointerUp = () => {
+    if (!persistentInventoryState.dragActive) return;
+    window.removeEventListener('pointermove', persistentInventoryState.onPointerMove, true);
+    const liveRoot = findInventoryWidgetRoot() || root;
+    const rect = liveRoot.getBoundingClientRect();
+    const clamped = clampInventoryLeftTop(liveRoot, rect.left, rect.top);
+    liveRoot.style.left = `${clamped.left}px`;
+    liveRoot.style.top = `${clamped.top}px`;
+    liveRoot.style.right = 'auto';
+    liveRoot.style.bottom = 'auto';
+    liveRoot.style.transform = 'none';
+    // Re-lock at the drop spot so a React re-render cannot snap it away.
+    ensurePersistentInventoryPositionStyle(clamped.left, clamped.top);
+    liveRoot.setAttribute(PERSISTENT_INVENTORY_ATTR, '1');
+    config.inventoryWidgetLeft = clamped.left;
+    config.inventoryWidgetTop = clamped.top;
+    // Dragging a persistent inventory means we should restore it pinned next load.
+    config.inventoryWidgetPinned = true;
+    saveConfig();
+    logPersistentInventory('saved position', clamped);
+    persistentInventoryState.dragOrigin = null;
+    persistentInventoryState.dragActive = false;
+    bindPersistentInventoryPinButtonListener(liveRoot);
+  };
+
+  persistentInventoryState.onPointerDown = (event) => {
+    if (event.button != null && event.button !== 0) return;
+    const handle = getInventoryWidgetDragHandle(root);
+    if (!handle || !handle.contains(event.target)) return;
+    if (event.target.closest?.('button[aria-label="Pin widget"], button[aria-label="Unpin widget"]')) return;
+    if (event.target.closest?.('button:has(svg.lucide-pin), button:has(svg.lucide-pin-off)')) return;
+
+    // Stop dnd-kit from starting a transform drag.
+    event.preventDefault();
+    event.stopPropagation();
+
+    const liveRoot = findInventoryWidgetRoot() || root;
+    const rect = liveRoot.getBoundingClientRect();
+    const startLeft = Math.round(rect.left);
+    const startTop = Math.round(rect.top);
+
+    document.getElementById(PERSISTENT_INVENTORY_STYLE_ID)?.remove();
+    liveRoot.removeAttribute(PERSISTENT_INVENTORY_ATTR);
+    liveRoot.style.left = `${startLeft}px`;
+    liveRoot.style.top = `${startTop}px`;
+    liveRoot.style.right = 'auto';
+    liveRoot.style.bottom = 'auto';
+    liveRoot.style.transform = 'none';
+
+    persistentInventoryState.dragActive = true;
+    persistentInventoryState.dragOrigin = {
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      originLeft: startLeft,
+      originTop: startTop
+    };
+
+    window.addEventListener('pointermove', persistentInventoryState.onPointerMove, true);
+    logPersistentInventory('drag begin (mod-owned left/top)', {
+      left: startLeft,
+      top: startTop
+    });
+  };
+
+  root.addEventListener('pointerdown', persistentInventoryState.onPointerDown, true);
+  window.addEventListener('pointerup', persistentInventoryState.onPointerUp, true);
+  window.addEventListener('pointercancel', persistentInventoryState.onPointerUp, true);
+  persistentInventoryState.boundDragRoot = root;
+}
+
+function startPersistentInventoryObserver() {
+  if (!config.persistentInventory) return null;
+  if (observers.persistentInventory) return observers.persistentInventory;
+
+  let debounceTimeout = null;
+  const observer = new MutationObserver(() => {
+    if (!config.persistentInventory || persistentInventoryState.dragActive) return;
+    if (debounceTimeout) {
+      clearTimeout(debounceTimeout);
+      activeTimeouts.delete(debounceTimeout);
+    }
+    debounceTimeout = scheduleTimeout(() => {
+      debounceTimeout = null;
+      if (!config.persistentInventory || persistentInventoryState.dragActive) return;
+      const root = findInventoryWidgetRoot();
+      if (!root) return;
+      // During restore: help drive open/pin/place attempts.
+      if (persistentInventoryState.restoring) {
+        runPersistentInventoryRestoreAttempt();
+        return;
+      }
+      // After restore: rebind listeners. Re-place only if the widget remounted
+      // (e.g. inventory refresh) — never fight a live drag or post-drop settle.
+      const remounted =
+        !persistentInventoryState.boundDragRoot ||
+        persistentInventoryState.boundDragRoot !== root ||
+        !document.contains(persistentInventoryState.boundDragRoot);
+      if (
+        remounted &&
+        config.inventoryWidgetPinned === true
+      ) {
+        if (isInventoryWidgetPinned() === false) {
+          const pinButton = getInventoryWidgetPinButton();
+          if (pinButton) triggerWidgetPinButton(pinButton);
+        }
+        if (getSavedInventoryWidgetPosition().left != null) {
+          applyInventoryWidgetPosition(root);
+        }
+      }
+      bindPersistentInventoryPinButtonListener(root);
+      bindPersistentInventoryDragListeners();
+    }, 120);
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  observers.persistentInventory = observer;
+  return observer;
+}
+
+function stopPersistentInventoryObserver() {
+  clearPersistentInventoryRestoreTimeouts();
+  if (observers.persistentInventory) {
+    observers.persistentInventory.disconnect();
+    observers.persistentInventory = null;
   }
+  unbindPersistentInventoryDragListeners();
+  clearPersistentInventoryPositionStyle();
+  setPersistentInventoryRestoringVisual(false);
+  persistentInventoryState.restoreStarted = false;
+  persistentInventoryState.restoreComplete = false;
+  persistentInventoryState.restoring = false;
+  persistentInventoryState.positionApplied = false;
+  persistentInventoryState.openedInventory = false;
+  persistentInventoryState.clickedPin = false;
+  persistentInventoryState.lastPinClickAt = 0;
+  persistentInventoryState.lastOpenAttemptAt = 0;
+  persistentInventoryState.pinClickAttempts = 0;
+  persistentInventoryState.restoreStartedAt = 0;
+  if (persistentInventoryState.savePositionTimeout) {
+    clearTimeout(persistentInventoryState.savePositionTimeout);
+    activeTimeouts.delete(persistentInventoryState.savePositionTimeout);
+    persistentInventoryState.savePositionTimeout = null;
+  }
+}
+
+function clearPersistentInventorySavedConfig() {
+  config.persistentInventory = false;
+  config.inventoryWidgetPinned = null;
+  config.inventoryWidgetLeft = null;
+  config.inventoryWidgetTop = null;
+  // Prevent sticky→pinned repair from reviving state on next load.
+  if (config.defaultInventorySticky !== undefined) {
+    config.defaultInventorySticky = false;
+  }
+  saveConfig();
+  logPersistentInventory('cleared saved config (feature disabled)');
+}
+
+function disablePersistentInventory() {
+  stopPersistentInventoryObserver();
+  clearPersistentInventorySavedConfig();
 }
 
 // Remove compact nav bar (show text again)
@@ -12617,16 +13803,11 @@ function onBestiarySearchInputForCosmetics(event) {
   scheduleInventoryCosmeticsAfterBestiarySearch();
 }
 
-function onBestiarySearchFocusOutForCosmetics(event) {
-  if (event.target?.id !== BESTIARY_SEARCH_INPUT_ID) return;
-  scheduleInventoryCosmeticsAfterBestiarySearch();
-}
-
 function startMonsterBestiarySearchCosmeticsListener() {
   if (bestiarySearchStyleListeners) return;
   bestiarySearchStyleListeners = {
     input: onBestiarySearchInputForCosmetics,
-    focusout: onBestiarySearchFocusOutForCosmetics
+    focusout: onBestiarySearchInputForCosmetics
   };
   document.addEventListener('input', bestiarySearchStyleListeners.input, true);
   document.addEventListener('focusout', bestiarySearchStyleListeners.focusout, true);
@@ -14215,11 +15396,11 @@ function initBetterUI() {
     }
 
     scheduleTimeout(() => {
-      applyAutoplaySessionCheckboxVisibility();
+      applyAutoplaySessionCheckboxFeatures();
       observers.autoplaySessionCheckboxes = startAutoplaySessionCheckboxObserver();
     }, 1000);
 
-    applyDefaultInventorySticky();
+    applyPersistentInventory();
     observers.inventoryModButtons = startInventoryModButtonsObserver();
     scheduleTimeout(() => {
       refreshModBarButtonLabels();
@@ -14254,6 +15435,33 @@ window.betterUIConfig = config;
 function cleanupBetterUI() {
   console.log('[Mod Settings] Cleanup called');
   try {
+    const openModal = modSettingsModalInstance;
+    if (openModal && typeof openModal.close === 'function') {
+      try {
+        openModal.close();
+      } catch (_) { /* ignore */ }
+    } else {
+      teardownSettingsModal();
+    }
+    stopAutoUploadMonitor();
+
+    if (powerSavingRestoreDebounceTimer) {
+      clearTimeout(powerSavingRestoreDebounceTimer);
+      powerSavingRestoreDebounceTimer = null;
+    }
+    if (autoplaySessionFeaturesDebounceTimer) {
+      clearTimeout(autoplaySessionFeaturesDebounceTimer);
+      autoplaySessionFeaturesDebounceTimer = null;
+    }
+    if (powerSavingStateObserver) {
+      try {
+        powerSavingStateObserver.disconnect();
+      } catch (_) { /* ignore */ }
+      powerSavingStateObserver = null;
+      powerSavingObservedButton = null;
+    }
+    cancelPendingPowerSavingOverlayRestore();
+
     // Cancel pending async callbacks
     const cancelIdleCallback = window.cancelIdleCallback || cancelAnimationFrame;
     if (pendingAsyncCallbacks.creatureObserver) {
@@ -14301,6 +15509,7 @@ function cleanupBetterUI() {
       'Autoplay session checkboxes'
     );
     observers.inventoryModButtons = disconnectObserver(observers.inventoryModButtons, 'Inventory mod buttons');
+    stopPersistentInventoryObserver();
     inventoryModButtonsState.missingRetryCount.clear();
     inventoryModButtonsState.knownClasses.clear();
     stopMonsterBestiarySearchCosmeticsListener();

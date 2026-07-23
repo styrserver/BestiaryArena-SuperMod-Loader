@@ -1017,40 +1017,39 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Build HTML
     let html = '';
-    // Define type order for sorting
+    // Define type order for sorting / section display
     const typeOrder = { 'added': 0, 'changed': 1, 'removed': 2, 'fixed': 3 };
-    
-    for (const note of relevantNotes) {
-      html += `<div class="patch-note-version">`;
-      const versionText = await getTranslation('popup.version', 'Version');
-      html += `<div class="patch-note-version-title">${versionText} ${note.version}</div>`;
-      html += `<ul class="patch-note-list">`;
-      // Sort changes by: 1. Type, 2. mod, 3. text
+    const useModGroupedLayout = (version) => compareVersions(version || '0', '4.6.0') >= 0;
+
+    function escapePatchHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function buildLegacyPatchEntriesHtml(note, sanitizedVersion) {
+      let entriesHtml = '';
       const sortedChanges = [...note.changes].sort((a, b) => {
-        // 1. Sort by type
         const orderA = typeOrder[a.type] !== undefined ? typeOrder[a.type] : 999;
         const orderB = typeOrder[b.type] !== undefined ? typeOrder[b.type] : 999;
         if (orderA !== orderB) return orderA - orderB;
-        
-        // 2. Sort by mod (if both have mod field)
         const modA = (a.mod || '').toLowerCase();
         const modB = (b.mod || '').toLowerCase();
         if (modA !== modB) return modA.localeCompare(modB);
-        
-        // 3. Sort by text
         return (a.text || '').localeCompare(b.text || '');
       });
-      const sanitizedVersion = String(note.version || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-');
       sortedChanges.forEach((change, index) => {
-        const changeMod = change.mod || 'General';
+        const changeMod = escapePatchHtml(change.mod || 'General');
         const changeType = change.type || 'changed';
-        const changeTypeLabel = changeType.charAt(0).toUpperCase() + changeType.slice(1);
-        const changeText = change.text || '';
+        const changeTypeLabel = escapePatchHtml(changeType.charAt(0).toUpperCase() + changeType.slice(1));
+        const changeText = escapePatchHtml(change.text || '');
         const entryId = `patch-note-${sanitizedVersion}-${index}`;
-        html += `
-          <li class="patch-note-entry ${changeType}">
+        entriesHtml += `
+          <li class="patch-note-entry ${escapePatchHtml(changeType)}">
             <button class="patch-note-toggle" type="button" aria-expanded="false" aria-controls="${entryId}">
-              <span class="patch-note-summary">
+              <span class="patch-note-summary patch-note-summary-legacy">
                 <span class="patch-note-summary-mod">${changeMod}</span>
                 <span class="patch-note-summary-separator">|</span>
                 <span class="patch-note-summary-type">${changeTypeLabel}</span>
@@ -1061,6 +1060,79 @@ document.addEventListener('DOMContentLoaded', async () => {
           </li>
         `;
       });
+      return entriesHtml;
+    }
+
+    function buildModGroupedPatchEntriesHtml(note, sanitizedVersion) {
+      let entriesHtml = '';
+      const byMod = new Map();
+      for (const change of note.changes || []) {
+        const modName = change.mod || 'General';
+        if (!byMod.has(modName)) byMod.set(modName, []);
+        byMod.get(modName).push(change);
+      }
+
+      const sortedMods = [...byMod.keys()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      sortedMods.forEach((modName, index) => {
+        const modChanges = [...byMod.get(modName)].sort((a, b) => {
+          const orderA = typeOrder[a.type] !== undefined ? typeOrder[a.type] : 999;
+          const orderB = typeOrder[b.type] !== undefined ? typeOrder[b.type] : 999;
+          if (orderA !== orderB) return orderA - orderB;
+          return (a.text || '').localeCompare(b.text || '');
+        });
+
+        const typeSections = [];
+        for (const change of modChanges) {
+          const changeType = change.type || 'changed';
+          const changeTypeLabel = changeType.charAt(0).toUpperCase() + changeType.slice(1);
+          const changeText = escapePatchHtml(change.text || '');
+          typeSections.push(`
+            <div class="patch-note-type-block ${escapePatchHtml(changeType)}">
+              <div class="patch-note-type-separator">
+                <span class="patch-note-type-label">${escapePatchHtml(changeTypeLabel)}</span>
+              </div>
+              <div class="patch-note-type-text">${changeText}</div>
+            </div>
+          `);
+        }
+
+        const entryId = `patch-note-${sanitizedVersion}-mod-${index}`;
+        const presentTypes = [...new Set(modChanges.map((c) => c.type || 'changed'))]
+          .sort((a, b) => (typeOrder[a] ?? 999) - (typeOrder[b] ?? 999));
+        const typeHint = presentTypes
+          .map((type) => {
+            const label = type.charAt(0).toUpperCase() + type.slice(1);
+            return `<span class="patch-note-summary-type-chip ${escapePatchHtml(type)}">${escapePatchHtml(label)}</span>`;
+          })
+          .join('<span class="patch-note-summary-separator">|</span>');
+
+        entriesHtml += `
+          <li class="patch-note-entry patch-note-entry-mod">
+            <button class="patch-note-toggle" type="button" aria-expanded="false" aria-controls="${entryId}">
+              <span class="patch-note-summary patch-note-summary-mod-grouped">
+                <span class="patch-note-summary-mod">${escapePatchHtml(modName)}</span>
+                <span class="patch-note-summary-type-chips">${typeHint}</span>
+              </span>
+              <span class="patch-note-chevron">▼</span>
+            </button>
+            <div id="${entryId}" class="patch-note-details patch-note-details-mod" hidden>${typeSections.join('')}</div>
+          </li>
+        `;
+      });
+      return entriesHtml;
+    }
+    
+    for (const note of relevantNotes) {
+      html += `<div class="patch-note-version">`;
+      const versionText = await getTranslation('popup.version', 'Version');
+      html += `<div class="patch-note-version-title">${versionText} ${note.version}</div>`;
+      html += `<ul class="patch-note-list">`;
+      const sanitizedVersion = String(note.version || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '-');
+      if (useModGroupedLayout(note.version)) {
+        html += buildModGroupedPatchEntriesHtml(note, sanitizedVersion);
+      } else {
+        html += buildLegacyPatchEntriesHtml(note, sanitizedVersion);
+      }
       html += `</ul></div>`;
     }
 

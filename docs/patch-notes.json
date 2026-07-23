@@ -1,8 +1,103 @@
 {
   "_meta": {
-    "_comment": "Sort patch notes by: 1. Type (added → changed → fixed), 2. mod, 3. text. Keep patch notes simple and concise. Do not have duplicate mod+type entries — merge them into one."
+    "_comment": "From 4.6.0 onward: sort by mod name, then type (added → changed → fixed) within each mod. Older versions: sort by type → mod → text. Keep notes simple and concise. Do not have duplicate mod+type entries — merge them into one. Never include quest spoilers (no NPC names, map/room names, rewards, objectives, or solution hints)."
   },
   "notes": [
+    {
+      "version": "4.6.0",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Power saving mode / Stop after a defeat checkbox clicks no longer clear Enable Dragon Plant / autoplant. Dragon Plant auto-activate uses full click simulation and retries while a creature drop is present (fixes missed devour under Power saving’s slower drop UI). Portuguese session labels: matches Habilitar Petisqueira and Economia de energia (accent-insensitive). Autoduster no longer skips equipment when creature rewards were already sold/squeezed/devoured or waiting on inventory sync; successful equipToDust always marks processed (local inventory miss is not a retry gate); inter-dust delay restored."
+        },
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Panel is temporarily hidden during custom battles (Challenges, Quests, etc.) and while Power saving mode is on; restored when the battle ends or Power saving turns off and the normal battlefield (#tiles) is back. Your manual hide/show setting is unchanged."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "fixed",
+          "text": "Final-run retry after incomplete kills no longer clicks Pause while logging Start success: resume waits for a real Start button, stops an active session first when Pause is still showing, verifies the session actually started, and refreshes the runs budget before retrying."
+        },
+        {
+          "mod": "Challenges",
+          "type": "added",
+          "text": "Player arsenal for solo and PvPvE: after villain creatures finish rolling, random Lv. 99 shiny awakened creatures and equipment roll in the Player arsenal panel (2× enemy count slots). On Start, allies and equips apply after navigation with backup/restore; PvPvE syncs the shared roll via Firebase. Final score adds an arsenal bonus (average per-item points × hardest enemy creature multiplier)."
+        },
+        {
+          "mod": "Challenges",
+          "type": "changed",
+          "text": "Solo column: Summary and Player arsenal stacked (55/45). Multiplayer tab renamed PvPvE. Help panel covers player arsenal, arsenal bonus scoring, and PvPvE match flow (accept timer, shared roll, 3-minute limit). Arsenal animates only after villains finish; expected score updates when arsenal completes."
+        },
+        {
+          "mod": "Challenges",
+          "type": "fixed",
+          "text": "Added missing en-US strings for the arsenal panel; rolled duplicate game IDs no longer shrink slot count; full arsenal applies after navigation; PvPvE roll sync waits for complete Firebase payload and starts the shared reel for both players."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "changed",
+          "text": "Forced allies, outfit sprite overrides (visual outfit can differ from combat identity), interaction locks, and room-info / Better Highscores hiding for active battles. Outfit overrides are deduped and reclaim after revive; facing/idle stay with the game mid-battle so walk animations work. Compact Super-Mod-style win/loss modal (fixed width, content height; outside click = Close; auto-closes after 5s). After Close, room reload no longer re-applies custom setup unless reapplyAfterReload is set."
+        },
+        {
+          "mod": "Custom Battles",
+          "type": "fixed",
+          "text": "Outfit overrides no longer miss when combat id differs from the DOM outfit class, and no longer restyle player allies on empty custom spawn tiles. Win/loss modal no longer stretches via w-full fallback; outside click and 5s auto-close run the same reload/cleanup path as Close so battles do not get stuck."
+        },
+        {
+          "mod": "Custom Display",
+          "type": "changed",
+          "text": "Performance Mode and map grid are suppressed while Power saving mode is on (saved toggles unchanged) and restored only after the Autoplaying goblin screen is gone and #tiles is back. Mod-bar Performance Mode / Toggle Grid buttons show inactive (not green) while suppressed; missing #tiles no longer logs an error."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Perfect and Shiny Creatures progress max share one creature-database count (floor 76). Bag Outfits progress max updated to 205."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Extension popup patch notes (4.6.0+): entries are grouped by mod name; expanding a mod shows Added / Changed / Fixed sections. Older versions keep the previous Mod | Type rows. Mod rows start collapsed."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Gameplay tab under Interface (options moved from Advanced: autoplay refresh, Persist Autorefill Stamina, API stamina refill, disable auto-reload, anti-idle, run tracker, always max floor, Turbo). Persistent Powersaver remembers the Power saving mode checkbox across refreshes. While Power saving is on, battle overlays from Better Highscores, Setup Manager map shortcuts, and Custom Display are suppressed; after unchecking, restore waits until the Autoplaying screen is gone and #tiles returns. Persistent Inventory (replaces Sticky Inventory) restores open/pinned state and dragged position on load; disable clears the saved layout. Hotkeys: Dr. Mephistopheles (default E); Better Teleporter stays under Mods when that mod is on, otherwise labeled Gnomish Teleport under General and opens the native teleporter."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Enabling Hide Power saving mode also turns off in-game Power saving mode, disables Persistent Powersaver, and clears its saved on/off state. While Hide is on, Persistent Powersaver is greyed out and unselectable. While Seamless autoplay is on in Bestiary Automator, Hide Stop after a defeat is forced on and greyed out until Seamless is disabled. Exclusive settings (Hide Stop, Persistent Powersaver, Use Game State for Stamina Refill) share one lock/grey-out helper. Warning option labels share one helper that always prefixes ⚠️ and uses yellow (#ffaa00) text. Code cleanup: unused helpers removed; hotkey rows, Hunt Analyzer settings I/O, board Start/Skip/Stop finders, and creature CSS inject/ensure paths use shared helpers."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Portuguese locale: Persistent Inventory opens via game API / Inventário / inventory icon; Persistent Powersaver and Hide Power saving mode match \"Economia de energia\" (not only \"modo de economia…\"). Persistent Inventory pin restore forces the pin button visible (hidden lg:block), uses centered pointer/mouse click simulation with retries until pinned, and no longer completes while still unpinned. Settings modal no longer leaks poll timers or Mod Coordination listeners when switching categories or closing (including overlay dismiss); reopening while already open no longer stacks dialogs; mod disable cleanup also stops auto-upload and power-saving observers/timers."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "New optional quest with a custom battle and item reward."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Optional quest custom battle balance, equipment, and spawn layout tuned."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Optional quest custom battle visuals, shiny outfits, walk animations, and ally interaction restored after revive/rebuild. Victory modal no longer hints the post-battle step. Console resetQuest for the optional quest clears full progress flags, runtime battle state, and the reward item so the quest can be retested cleanly."
+        },
+        {
+          "mod": "Setup Manager",
+          "type": "changed",
+          "text": "Map shortcuts overlay is hidden while Power saving mode is on and restored when Power saving turns off and the normal battlefield is back."
+        }
+      ]
+    },
     {
       "version": "4.5.10",
       "changes": [

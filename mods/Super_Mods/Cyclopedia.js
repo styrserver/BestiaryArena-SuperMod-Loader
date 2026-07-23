@@ -408,10 +408,11 @@ const CYCLOPEDIA_UI = {
 /** Centralized Cyclopedia settings for easy future tuning. */
 const CYCLOPEDIA_SETTINGS = {
   playerStatCaps: {
-    perfectCreatures: 75,
+    // Floor for Perfect/Shiny progress max; live count comes from creature-database (never below this).
+    perfectCreatures: 76,
     bisEquipments: 126,
     exploredMaps: 73,
-    bagOutfits: 201,
+    bagOutfits: 205,
     raids: 16
   }
 };
@@ -10292,19 +10293,26 @@ function getBisEquipmentMaxFromDatabase() {
   return CYCLOPEDIA_SETTINGS.playerStatCaps.bisEquipments;
 }
 
-/** Obtainable creature count for shiny progress (excludes event/gazer species; see creature-database getShinyProgressCreatureNames). */
+/** Obtainable creature count for Perfect/Shiny progress (excludes event/gazer species; see creature-database getShinyProgressCreatureNames). */
 function getObtainableCreatureCountFromDatabase() {
   const db = window.creatureDatabase;
+  let count = 0;
   if (typeof db?.getShinyProgressCreatureNames === 'function') {
-    return db.getShinyProgressCreatureNames().length;
+    count = db.getShinyProgressCreatureNames().length;
+  } else {
+    count = (db?.ALL_CREATURES || []).filter((name) => {
+      if (!name || HIDE_FROM_CYCLOPEDIA.includes(name)) return false;
+      if (typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(name)) return false;
+      if (typeof db?.isGazerCreatureName === 'function' && db.isGazerCreatureName(name)) return false;
+      if (typeof db?.creatureHasShinyVariant === 'function' && !db.creatureHasShinyVariant(name)) return false;
+      return true;
+    }).length;
   }
-  return (db?.ALL_CREATURES || []).filter((name) => {
-    if (!name || HIDE_FROM_CYCLOPEDIA.includes(name)) return false;
-    if (typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(name)) return false;
-    if (typeof db?.isGazerCreatureName === 'function' && db.isGazerCreatureName(name)) return false;
-    if (typeof db?.creatureHasShinyVariant === 'function' && !db.creatureHasShinyVariant(name)) return false;
-    return true;
-  }).length;
+  const floor = CYCLOPEDIA_SETTINGS.playerStatCaps.perfectCreatures;
+  if (typeof floor === 'number' && floor > 0) {
+    return Math.max(count, floor);
+  }
+  return count;
 }
 
 /** Unique obtainable species (gameId) with at least one shiny owned; event/gazer shinies excluded. */
@@ -10376,7 +10384,7 @@ function countUniqueEventShinyCreatureGameIds(monsters) {
 const CYCLOPEDIA_MAX_VALUES = CYCLOPEDIA_SETTINGS.playerStatCaps;
 
 const CYCLOPEDIA_PROGRESS_STATS = [
-  { key: 'perfectCreatures', icon: '/assets/icons/enemy.png', max: CYCLOPEDIA_MAX_VALUES.perfectCreatures },
+  { key: 'perfectCreatures', icon: '/assets/icons/enemy.png', max: getObtainableCreatureCountFromDatabase },
   { key: 'shinyCreatures', icon: CYCLOPEDIA_ASSETS.shinyStar, max: getObtainableCreatureCountFromDatabase },
   { key: 'bisEquipments', icon: '/assets/icons/equips.png', max: getBisEquipmentMaxFromDatabase },
   { key: 'raids', icon: '/assets/icons/raid.png', max: CYCLOPEDIA_MAX_VALUES.raids },

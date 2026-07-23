@@ -3223,9 +3223,24 @@ const SESSION_WIDGET_OBSERVER_DEBOUNCE_MS = 200;
 
 const STOP_AFTER_DEFEAT_LABEL_MARKERS = [
   'stop after a defeat',
-  'parar após uma derrota',
+  'parar apos uma derrota',
   'parar depois de uma derrota',
 ];
+
+const normalizeSessionLabelText = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const labelMatchesStopAfterDefeat = (labelText) => {
+  const normalized = normalizeSessionLabelText(labelText);
+  return STOP_AFTER_DEFEAT_LABEL_MARKERS.some((marker) =>
+    normalized.includes(normalizeSessionLabelText(marker))
+  );
+};
 
 const findAutoplaySessionContainer = () => {
   const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
@@ -3261,8 +3276,7 @@ const findStopAfterDefeatCheckbox = () => {
   if (!container) return null;
 
   for (const label of container.querySelectorAll('label')) {
-    const labelText = (label.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-    if (!STOP_AFTER_DEFEAT_LABEL_MARKERS.some((marker) => labelText.includes(marker))) {
+    if (!labelMatchesStopAfterDefeat(label.textContent)) {
       continue;
     }
     const checkbox = label.querySelector('button[role="checkbox"]');

@@ -38,6 +38,8 @@
         UI_SETTLE_MS: 500,
         BEFORE_DRAGON_PLANT_ACTIVATE_MS: 300,  // Delay for activating Dragon Plant after game end
         AFTER_GAME_END_BEFORE_ACTIVATE_MS: 200, // Delay after game end before checking Dragon Plant
+        DRAGON_PLANT_ACTIVATE_RETRY_MS: 400, // Retry plant click while drop UI settles (esp. power saving)
+        DRAGON_PLANT_ACTIVATE_MAX_ATTEMPTS: 12,
         
         // Delay after operation before removing from local inventory
         BEFORE_REMOVE_FROM_INVENTORY_MS: 100,  // Used for squeeze
@@ -188,6 +190,11 @@
     let lastBoardEquipHandledSeed = null;
     let visibilityChangeHandler = null;
     let pendingGameEndInventorySubscription = null;
+    let dragonPlantActivateRetryTimer = null;
+    let dragonPlantActivateAttempts = 0;
+    let dragonPlantActivateGiveUpForDrop = false;
+    let dragonPlantActivateLastDropSig = '';
+    let powerSavingModeChangedHandler = null;
     
     // Translation helper
     const t = (key) => {
@@ -2493,6 +2500,21 @@
         }
     }
     
+    function getPlayerEquipmentArray(snapshot) {
+        if (!snapshot) return null;
+        if (Array.isArray(snapshot.context?.equips)) return snapshot.context.equips;
+        if (Array.isArray(snapshot.equips)) return snapshot.equips;
+        return null;
+    }
+
+    function equipmentIdsAbsentFromList(equips, idsToRemove) {
+        if (!Array.isArray(equips) || !Array.isArray(idsToRemove) || idsToRemove.length === 0) {
+            return false;
+        }
+        const presentIds = new Set(equips.map((e) => e?.id).filter(Boolean));
+        return idsToRemove.every((id) => !presentIds.has(id));
+    }
+
     async function removeEquipmentFromLocalInventory(idsToRemove, retryCount = 0, verificationRetryCount = 0) {
         const MAX_RETRIES = 3;
         const RETRY_DELAY = 500;
@@ -2521,15 +2543,25 @@
             
             // Get pre-update state for verification
             const preState = player.getSnapshot();
-            if (!preState?.context?.equips || !Array.isArray(preState.context.equips)) {
+            const preEquips = getPlayerEquipmentArray(preState);
+            if (!preEquips) {
                 console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Equipment array not available`);
                 return { success: false, removed: [] };
             }
             
-            const preCount = preState.context.equips.length;
+            const preCount = preEquips.length;
             const idsToRemoveSet = new Set(idsToRemove);
-            
-            // Removed verbose INFO log - only log on success/error
+
+            // Immediate dust path often runs before inventory sync — already-absent ids are success
+            if (equipmentIdsAbsentFromList(preEquips, idsToRemove)) {
+                return {
+                    success: true,
+                    removed: idsToRemove,
+                    alreadyAbsent: true,
+                    preCount,
+                    postCount: preCount
+                };
+            }
             
             // Perform state update
             player.send({
@@ -2568,15 +2600,18 @@
             
             // Verification with retry logic
             let postState = player.getSnapshot();
-            let postCount = (postState?.context?.equips?.length ?? postState?.equips?.length) ?? preCount;
+            let postEquips = getPlayerEquipmentArray(postState);
+            let postCount = postEquips?.length ?? preCount;
             let removedCount = preCount - postCount;
+            let allIdsGone = equipmentIdsAbsentFromList(postEquips || [], idsToRemove);
             
             // Wait 1000ms before first verification check
             await new Promise(resolve => setTimeout(resolve, 1000));
             
             // Check if removal was successful
             postState = player.getSnapshot();
-            if (!postState?.context?.equips && !postState?.equips) {
+            postEquips = getPlayerEquipmentArray(postState);
+            if (!postEquips) {
                 console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Could not verify update - state unavailable`);
                 
                 // Retry if we haven't exceeded max retries
@@ -2589,25 +2624,24 @@
                 return { success: false, removed: [] };
             }
             
-            postCount = postState.context?.equips?.length ?? postState.equips?.length ?? preCount;
+            postCount = postEquips.length;
             removedCount = preCount - postCount;
+            allIdsGone = equipmentIdsAbsentFromList(postEquips, idsToRemove);
             
-            // If removal wasn't successful and we haven't exceeded verification retries, retry with increasing delays
-            if (removedCount === 0 && verificationRetryCount < MAX_VERIFICATION_RETRIES) {
+            // Prefer id-absent check: count can stay flat if something else was added concurrently
+            if (!allIdsGone && removedCount === 0 && verificationRetryCount < MAX_VERIFICATION_RETRIES) {
                 const delay = VERIFICATION_RETRY_DELAYS[verificationRetryCount] || VERIFICATION_RETRY_DELAYS[VERIFICATION_RETRY_DELAYS.length - 1];
                 console.log(`[${modName}][INFO][removeEquipmentFromLocalInventory] Verification failed, retrying verification after ${delay}ms (attempt ${verificationRetryCount + 1}/${MAX_VERIFICATION_RETRIES})...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return removeEquipmentFromLocalInventory(idsToRemove, retryCount, verificationRetryCount + 1);
             }
             
-            if (removedCount > 0) {
-                // Removed verbose success log - inventory updates are implicit in action logs
-            } else if (verificationRetryCount >= MAX_VERIFICATION_RETRIES) {
+            if (!allIdsGone && removedCount === 0 && verificationRetryCount >= MAX_VERIFICATION_RETRIES) {
                 console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Verification failed after ${MAX_VERIFICATION_RETRIES} retries. Inventory count unchanged: ${preCount}`);
             }
             
             return { 
-                success: removedCount > 0, 
+                success: allIdsGone || removedCount > 0, 
                 removed: idsToRemove,
                 preCount,
                 postCount
@@ -6848,59 +6882,45 @@
                 
                 // Disenchant the equipment
                 const result = await disenchantEquipment(equipmentId);
-                
+                let outcome;
+
                 if (result.success) {
                     // Track equipment count (each equipment = 25 dust as per specification)
                     stateManager.updateSessionStats('disenchanted', 1, 1);
-                    // Remove from local inventory and verify removal before marking as processed
-                    const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
-                    if (removalResult.success) {
-                        // Only mark as processed after successful removal verification
-                        stateManager.markProcessed([equipmentId]);
-                        // Remove from pending list on success
-                        stateManager.removePendingEquipment(equipmentId);
-                    } else {
-                        logAutosellerDebug('Disenchant', `local inventory remove failed after disenchant equipmentId=${equipmentId}`);
-                        // Removal failed - log warning but don't mark as processed so it can be retried
-                        console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory after disenchanting. Will retry on next batch.`);
-                        // Keep in pending list for retry
-                        if (!isPending) {
-                            stateManager.addPendingEquipment(equipmentId);
-                        }
-                    }
-                    // Return result for consolidated logging
-                    return { success: true, dustGained: result.dustGained || 0 };
-                } else if (result.status === 404) {
-                    // 404 means equipment no longer exists on server - always remove from local inventory
-                    const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
-                    if (removalResult.success) {
-                        // Only mark as processed after successful removal verification
-                        stateManager.markProcessed([equipmentId]);
-                    } else {
-                        // Removal failed - log warning but don't mark as processed so it can be retried
-                        console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory (404). Will retry on next batch.`);
-                    }
-                    // Remove from pending list on 404 (equipment doesn't exist)
+                    // Server dust succeeded — always mark processed so we never re-dust / TTL-drop falsely
+                    stateManager.markProcessed([equipmentId]);
                     stateManager.removePendingEquipment(equipmentId);
-                    return { success: false, status: 404 };
+                    const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
+                    if (!removalResult.success) {
+                        logAutosellerDebug('Disenchant', `local inventory remove failed after disenchant equipmentId=${equipmentId}`);
+                        console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory after disenchanting (server dust already applied).`);
+                    }
+                    outcome = { success: true, dustGained: result.dustGained || 0 };
+                } else if (result.status === 404) {
+                    // 404 means equipment no longer exists on server
+                    stateManager.markProcessed([equipmentId]);
+                    stateManager.removePendingEquipment(equipmentId);
+                    const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
+                    if (!removalResult.success) {
+                        console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory (404).`);
+                    }
+                    outcome = { success: false, status: 404 };
                 } else if (result.status === 429) {
                     await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
-                    // Keep in pending list for retry
                     if (!isPending) {
                         stateManager.addPendingEquipment(equipmentId);
                     }
-                    return { success: false, status: 429 };
+                    outcome = { success: false, status: 429 };
                 } else {
-                    // Other errors - keep in pending list for retry
                     console.warn(`[Autoseller] Failed to disenchant equipment ${equipmentId}, will retry. Status: ${result.status || 'unknown'}`);
                     if (!isPending) {
                         stateManager.addPendingEquipment(equipmentId);
                     }
-                    return { success: false, status: result.status };
+                    outcome = { success: false, status: result.status };
                 }
-                
-                // Delay between disenchant operations
+
                 await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
+                return outcome;
             }
             
             // Fast path: if serverResults already gives equipment ids, try disenchant immediately
@@ -8407,9 +8427,85 @@
     // =======================
     
     let dragonPlantObserver = null;
+    
+    // Label text markers for the game's "Enable Dragon Plant" autoplay checkbox.
+    // The session widget also has "Stop after a defeat" and "Power saving mode" checkboxes —
+    // never treat those as Dragon Plant.
+    const DRAGON_PLANT_CHECKBOX_LABEL_MARKERS = [
+        'enable dragon plant',
+        'dragon plant',
+        'planta de dragao',
+        'planta do dragao',
+        'ativar planta',
+        // Current pt-BR game string
+        'habilitar petisqueira',
+        'petisqueira',
+    ];
+    const NON_DRAGON_PLANT_CHECKBOX_LABEL_MARKERS = [
+        'power saving mode',
+        'stop after a defeat',
+        'economia de energia',
+        'modo de economia de energia',
+        'modo economia de energia',
+        'parar apos uma derrota',
+        'parar depois de uma derrota',
+    ];
+
+    function normalizeAutoplayLabelText(value) {
+        return String(value || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/\p{M}/gu, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function getAutoplayCheckboxLabelText(checkboxButton) {
+        const label = checkboxButton?.closest?.('label');
+        return normalizeAutoplayLabelText(label?.textContent);
+    }
+
+    function labelMatchesMarkers(labelText, markers) {
+        if (!labelText) return false;
+        return markers.some((marker) => labelText.includes(normalizeAutoplayLabelText(marker)));
+    }
+
+    function isDragonPlantCheckboxButton(checkboxButton) {
+        if (!checkboxButton || checkboxButton.getAttribute('role') !== 'checkbox') return false;
+        const labelText = getAutoplayCheckboxLabelText(checkboxButton);
+        if (!labelText) return false;
+        if (labelMatchesMarkers(labelText, NON_DRAGON_PLANT_CHECKBOX_LABEL_MARKERS)) {
+            return false;
+        }
+        return labelMatchesMarkers(labelText, DRAGON_PLANT_CHECKBOX_LABEL_MARKERS);
+    }
+
+    function findDragonPlantCheckboxButton(container = null) {
+        const widgetBottom = container || findAutoplayContainer();
+        if (!widgetBottom) return null;
+
+        const searchRoot = widgetBottom.parentElement || widgetBottom;
+        for (const label of searchRoot.querySelectorAll('label')) {
+            const button = label.querySelector('button[role="checkbox"]');
+            if (button && isDragonPlantCheckboxButton(button)) {
+                return button;
+            }
+        }
+
+        // Fallback: first checkbox whose label is not a known non-plant option
+        for (const button of searchRoot.querySelectorAll('button[role="checkbox"]')) {
+            const labelText = getAutoplayCheckboxLabelText(button);
+            if (!labelText) continue;
+            if (labelMatchesMarkers(labelText, NON_DRAGON_PLANT_CHECKBOX_LABEL_MARKERS)) {
+                continue;
+            }
+            return button;
+        }
+        return null;
+    }
+
     let dragonPlantObserverAttempts = 0;
     
-    // Apply localStorage state to game checkbox
     // Helper function to find autoplay container (widget-bottom)
     function findAutoplayContainer() {
         // Try to find by data-autosetup first (old method)
@@ -8795,11 +8891,11 @@
         
         const widgetBottom = findAutoplayContainer();
         if (widgetBottom) {
-            const gameCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
+            const gameCheckbox = findDragonPlantCheckboxButton(widgetBottom);
             if (gameCheckbox) {
                 const isCurrentlyChecked = gameCheckbox.getAttribute('aria-checked') === 'true';
                 if (savedState !== isCurrentlyChecked) {
-                    console.log(`[${modName}] Applying localStorage (${savedState}) to game checkbox`);
+                    console.log(`[${modName}] Applying localStorage (${savedState}) to Dragon Plant checkbox`);
                     // Temporarily disable the click handler to prevent it from overriding our mode change
                     window.__autosellerUpdatingCheckbox = true;
                     gameCheckbox.click();
@@ -8853,6 +8949,15 @@
                     // When autoplay session appears/changes, apply localStorage to it
                     applyLocalStorageToGameCheckbox();
                     updateAutosellerAutoBadges();
+                    // Power saving / slow UI: plant button may appear after game-end handler already ran
+                    if (
+                        getSettings().autoMode === 'autoplant' &&
+                        hasPlantableCreatureDrop() &&
+                        !dragonPlantActivateRetryTimer &&
+                        !dragonPlantActivateGiveUpForDrop
+                    ) {
+                        checkAndActivateDragonPlant();
+                    }
                 }, OBSERVER_DEBOUNCE_MS);
             });
             
@@ -8884,21 +8989,21 @@
         // Find the autoplay container
         const widgetBottom = findAutoplayContainer();
         if (!widgetBottom || !widgetBottom.contains(target)) return;
-        
-        // Verify this is the Dragon Plant checkbox by checking if it's in the widget bottom
-        // and has a label (Dragon Plant checkbox is the only checkbox in autoplay container)
-        const label = widgetBottom.querySelector('label');
-        if (!label) return;
+
+        // Ignore Power saving mode / Stop after a defeat (and only handle Dragon Plant)
+        if (!isDragonPlantCheckboxButton(target)) {
+            return;
+        }
         
         console.log(`[${modName}] User clicked Dragon Plant checkbox in autoplay session`);
         
         // Use a small delay to let the game update the checkbox state first
         const timeoutId = setTimeout(() => {
             if (isCleaningUp) return;
-            const gameCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
+            const gameCheckbox = findDragonPlantCheckboxButton(widgetBottom) || target;
             if (gameCheckbox) {
                 const newState = gameCheckbox.getAttribute('aria-checked') === 'true';
-                console.log(`[${modName}] Game checkbox clicked, saving to localStorage: ${newState}`);
+                console.log(`[${modName}] Dragon Plant checkbox clicked, saving to localStorage: ${newState}`);
                 
                 // Save to localStorage - set autoMode to 'autoplant' if enabled, null if disabled
                 if (newState) {
@@ -9338,6 +9443,35 @@
         }
     }
 
+    async function runGameEndAutodusterPass(currentSeed, battleRewardEquipment, rewardEquipmentIds) {
+        const settings = getSettings();
+        if (!settings.autodusterChecked) {
+            return { incomplete: false, pendingCount: 0, skipped: true };
+        }
+
+        const inventoryEquipment = await fetchServerEquipment();
+        if (battleRewardEquipment.length > 0) {
+            const idsBeforeResolve = rewardEquipmentIds.size;
+            resolveEquipmentIdsFromInventory(battleRewardEquipment, inventoryEquipment, rewardEquipmentIds);
+            if (rewardEquipmentIds.size > idsBeforeResolve) {
+                logAutosellerDebug('GameEnd', `equipment ids after inventory resolve: ${rewardEquipmentIds.size} (was ${idsBeforeResolve})`);
+            }
+        }
+        rewardEquipmentIds.forEach((id) => stateManager.addPendingEquipment(id));
+        if (rewardEquipmentIds.size > 0) {
+            console.log('[Autoseller] Processing autoduster for', rewardEquipmentIds.size, 'equipment');
+        }
+        const dusterResult = await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment, battleRewardEquipment);
+        if (rewardEquipmentIds.size === 0 && battleRewardEquipment.length > 0) {
+            console.log(
+                `[Autoseller][EquipDrop] seed=${currentSeed}: ${battleRewardEquipment.length} equipment drop(s) in serverResults ` +
+                'but no inventory ids resolved — queued via pending'
+            );
+            schedulePendingRewardsFlush();
+        }
+        return dusterResult || { incomplete: false, pendingCount: 0 };
+    }
+
     async function processGameEndRewards(serverResults, serverResultsSource) {
         const settings = getSettings();
 
@@ -9370,6 +9504,7 @@
         const injectRewardExpected = battleRewardsIncludeSealedInjectCandidates(battleRewardMonsters, settings);
         let needsActionRetry = false;
         let actionRetryReason = null;
+        let deferForInventorySync = false;
 
         const boardState = globalThis.state?.board?.getSnapshot?.();
         const floorFromServerResults = serverResults?.floor ?? serverResults?.rewardScreen?.floor;
@@ -9394,29 +9529,24 @@
                 const rewardIds = [...rewardMonsterIds];
                 const alreadyHandled = rewardIds.length > 0 && rewardIds.every((id) => stateManager.isProcessed(id));
                 if (alreadyHandled) {
-                    logAutosellerDebug('GameEnd', `seed=${currentSeed}: reward creatures already processed (devoured/sold/squeezed), closing`);
-                    finalizeProcessedGameEndSeed(currentSeed);
-                    return;
+                    // Creatures done — do not return early; autoduster may still need this seed's equips
+                    logAutosellerDebug('GameEnd', `seed=${currentSeed}: reward creatures already processed (devoured/sold/squeezed), continuing to autoduster`);
+                } else {
+                    const meta = pendingGameEndMeta.get(currentSeed);
+                    const inventorySyncRetries = meta?.inventorySyncAttempts ?? 0;
+                    if (settings.autoMode === 'autoplant' && inventorySyncRetries >= 1 && !squeezeRewardExpected && !injectRewardExpected) {
+                        // Plant likely ate creatures — still dust equipment from this seed
+                        logAutosellerDebug('GameEnd', `seed=${currentSeed}: reward not in inventory after ${inventorySyncRetries} sync wait(s) — likely devoured by plant, continuing to autoduster`);
+                    } else if (inventorySyncRetries >= PENDING_GAME_END_MAX_SYNC_ATTEMPTS) {
+                        const squeezeHint = squeezeRewardExpected ? ' (was in autosqueeze gene band)' : '';
+                        logAutosellerDebug('GameEnd', `seed=${currentSeed}: inventory never matched after ${inventorySyncRetries} sync retries${squeezeHint} — continuing to autoduster before close`);
+                    } else {
+                        // Dust first so equipment is not blocked on monster inventory sync
+                        deferForInventorySync = true;
+                        logAutosellerDebug('GameEnd', `0/${rewardMonsterIds.size} reward monsters matched in inventory — dust first, then requeue when synced (sync retry ${inventorySyncRetries + 1})`);
+                    }
                 }
-                const meta = pendingGameEndMeta.get(currentSeed);
-                const inventorySyncRetries = meta?.inventorySyncAttempts ?? 0;
-                if (settings.autoMode === 'autoplant' && inventorySyncRetries >= 1 && !squeezeRewardExpected && !injectRewardExpected) {
-                    logAutosellerDebug('GameEnd', `seed=${currentSeed}: reward not in inventory after ${inventorySyncRetries} sync wait(s) — likely devoured by plant, closing`);
-                    finalizeProcessedGameEndSeed(currentSeed);
-                    return;
-                }
-                if (inventorySyncRetries >= PENDING_GAME_END_MAX_SYNC_ATTEMPTS) {
-                    const squeezeHint = squeezeRewardExpected ? ' (was in autosqueeze gene band)' : '';
-                    logAutosellerDebug('GameEnd', `abandon seed=${currentSeed}: inventory never matched after ${inventorySyncRetries} sync retries${squeezeHint}`);
-                    finalizeProcessedGameEndSeed(currentSeed);
-                    return;
-                }
-                logAutosellerDebug('GameEnd', `0/${rewardMonsterIds.size} reward monsters matched in inventory — requeue when synced (sync retry ${inventorySyncRetries + 1})`);
-                queueGameEndForRetry(serverResults, 'inventory-sync');
-                return;
-            }
-
-            if (matchedMonsters.length > 0) {
+            } else if (matchedMonsters.length > 0) {
                 if (settings.autoMode !== 'autosell' && sealedCandidateCount > 0) {
                     console.log('[Autoseller][Inject] Running standalone inject pass (autosell mode is OFF)');
                     await autoInjectEligibleSealedCreatures(matchedMonsters);
@@ -9455,35 +9585,19 @@
             }
         }
 
-        if (settings.autodusterChecked) {
-            const inventoryEquipment = await fetchServerEquipment();
-            if (battleRewardEquipment.length > 0) {
-                const idsBeforeResolve = rewardEquipmentIds.size;
-                resolveEquipmentIdsFromInventory(battleRewardEquipment, inventoryEquipment, rewardEquipmentIds);
-                if (rewardEquipmentIds.size > idsBeforeResolve) {
-                    logAutosellerDebug('GameEnd', `equipment ids after inventory resolve: ${rewardEquipmentIds.size} (was ${idsBeforeResolve})`);
-                }
-            }
-            rewardEquipmentIds.forEach((id) => stateManager.addPendingEquipment(id));
-            if (rewardEquipmentIds.size > 0) {
-                console.log('[Autoseller] Processing autoduster for', rewardEquipmentIds.size, 'equipment');
-            }
-            const dusterResult = await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment, battleRewardEquipment);
-            if (dusterResult?.incomplete) {
-                needsActionRetry = true;
-                actionRetryReason = 'duster-incomplete';
-                logAutosellerDebug(
-                    'GameEnd',
-                    `seed=${currentSeed}: duster incomplete (${dusterResult.pendingCount} equipment still pending) — will retry`
-                );
-            }
-            if (rewardEquipmentIds.size === 0 && battleRewardEquipment.length > 0) {
-                console.log(
-                    `[Autoseller][EquipDrop] seed=${currentSeed}: ${battleRewardEquipment.length} equipment drop(s) in serverResults ` +
-                    'but no inventory ids resolved — queued via pending'
-                );
-                schedulePendingRewardsFlush();
-            }
+        const dusterResult = await runGameEndAutodusterPass(currentSeed, battleRewardEquipment, rewardEquipmentIds);
+        if (dusterResult?.incomplete) {
+            needsActionRetry = true;
+            actionRetryReason = 'duster-incomplete';
+            logAutosellerDebug(
+                'GameEnd',
+                `seed=${currentSeed}: duster incomplete (${dusterResult.pendingCount} equipment still pending) — will retry`
+            );
+        }
+
+        if (deferForInventorySync) {
+            queueGameEndForRetry(serverResults, 'inventory-sync');
+            return;
         }
 
         if (needsActionRetry && actionRetryReason) {
@@ -9619,30 +9733,142 @@
             return false;
         }
     }
+
+    function hasPlantableCreatureDrop(widgetBottom = null) {
+        const container = widgetBottom || findAutoplayContainer();
+        if (!container) return false;
+        const dropRoot = container.querySelector('#drop-widget-bottom-element') || container;
+        return !!dropRoot.querySelector('img[src*="/assets/portraits/"]');
+    }
+
+    function getPlantableCreatureDropSignature(widgetBottom = null) {
+        const container = widgetBottom || findAutoplayContainer();
+        if (!container) return '';
+        const dropRoot = container.querySelector('#drop-widget-bottom-element') || container;
+        const img = dropRoot.querySelector('img[src*="/assets/portraits/"]');
+        return img?.getAttribute('src') || '';
+    }
+
+    function isDragonPlantButtonClickable(button) {
+        if (!button) return false;
+        if (button.hasAttribute('disabled') || button.getAttribute('data-disabled') === 'true') {
+            return false;
+        }
+        // Already mid-activation / open dialog
+        if (button.getAttribute('data-state') === 'open') {
+            return false;
+        }
+        return true;
+    }
+
+    function clearDragonPlantActivateRetries() {
+        if (dragonPlantActivateRetryTimer) {
+            clearTimeout(dragonPlantActivateRetryTimer);
+            dragonPlantActivateRetryTimer = null;
+        }
+        dragonPlantActivateAttempts = 0;
+    }
+
+    function resetDragonPlantActivateState() {
+        clearDragonPlantActivateRetries();
+        dragonPlantActivateGiveUpForDrop = false;
+        dragonPlantActivateLastDropSig = '';
+    }
+
+    function scheduleDragonPlantActivateAttempt(delayMs) {
+        if (isCleaningUp) return;
+        if (dragonPlantActivateRetryTimer) {
+            clearTimeout(dragonPlantActivateRetryTimer);
+        }
+        dragonPlantActivateRetryTimer = setTimeout(() => {
+            dragonPlantActivateRetryTimer = null;
+            attemptDragonPlantActivate();
+        }, delayMs);
+        timeoutIds.push(dragonPlantActivateRetryTimer);
+    }
+
+    function attemptDragonPlantActivate() {
+        if (isCleaningUp) return;
+
+        const settings = getSettings();
+        if (settings.autoMode !== 'autoplant') {
+            clearDragonPlantActivateRetries();
+            dragonPlantActivateGiveUpForDrop = false;
+            dragonPlantActivateLastDropSig = '';
+            return;
+        }
+
+        const widgetBottom = findAutoplayContainer();
+        const dropSig = getPlantableCreatureDropSignature(widgetBottom);
+        const hasDrop = !!dropSig;
+
+        if (!hasDrop) {
+            clearDragonPlantActivateRetries();
+            dragonPlantActivateGiveUpForDrop = false;
+            dragonPlantActivateLastDropSig = '';
+            return;
+        }
+
+        if (dropSig !== dragonPlantActivateLastDropSig) {
+            dragonPlantActivateLastDropSig = dropSig;
+            dragonPlantActivateGiveUpForDrop = false;
+            dragonPlantActivateAttempts = 0;
+        }
+
+        if (dragonPlantActivateGiveUpForDrop) {
+            return;
+        }
+
+        const button = widgetBottom ? findDragonPlantButton(widgetBottom) : null;
+
+        if (isDragonPlantButtonClickable(button)) {
+            const clicked = clickDragonPlantButton();
+            dragonPlantActivateAttempts += 1;
+            logAutosellerDebug(
+                'DragonPlant',
+                `activate attempt ${dragonPlantActivateAttempts}/${OPERATION_DELAYS.DRAGON_PLANT_ACTIVATE_MAX_ATTEMPTS} ` +
+                `clicked=${clicked} drop=${dropSig}`
+            );
+            if (dragonPlantActivateAttempts < OPERATION_DELAYS.DRAGON_PLANT_ACTIVATE_MAX_ATTEMPTS) {
+                scheduleDragonPlantActivateAttempt(OPERATION_DELAYS.DRAGON_PLANT_ACTIVATE_RETRY_MS);
+            } else {
+                dragonPlantActivateGiveUpForDrop = true;
+                clearDragonPlantActivateRetries();
+                logAutosellerDebug('DragonPlant', `give up for drop=${dropSig} after max attempts`);
+            }
+            return;
+        }
+
+        // Drop present but button not ready yet (common under power saving) — keep trying
+        if (dragonPlantActivateAttempts < OPERATION_DELAYS.DRAGON_PLANT_ACTIVATE_MAX_ATTEMPTS) {
+            dragonPlantActivateAttempts += 1;
+            scheduleDragonPlantActivateAttempt(OPERATION_DELAYS.DRAGON_PLANT_ACTIVATE_RETRY_MS);
+            return;
+        }
+
+        dragonPlantActivateGiveUpForDrop = true;
+        clearDragonPlantActivateRetries();
+    }
     
     function checkAndActivateDragonPlant() {
         const settings = getSettings();
         
         // Only proceed if autoplant is enabled
         if (settings.autoMode !== 'autoplant') return;
-        
-        // Find the autoplay container
-        const widgetBottom = findAutoplayContainer();
-        if (!widgetBottom) return;
-        
-        const dragonPlantButton = findDragonPlantButton(widgetBottom);
-        if (!dragonPlantButton) return;
-        
-        // Check if Dragon Plant is currently enabled
-        const isCurrentlyEnabled = dragonPlantButton.getAttribute('data-state') === 'open' && 
-                                 !dragonPlantButton.hasAttribute('disabled');
-        
-        // Only activate if not already enabled
-        if (!isCurrentlyEnabled) {
-            setTimeout(() => {
-                dragonPlantButton.click();
-            }, OPERATION_DELAYS.UI_SETTLE_MS);
-        }
+
+        dragonPlantActivateGiveUpForDrop = false;
+        dragonPlantActivateAttempts = 0;
+        scheduleDragonPlantActivateAttempt(OPERATION_DELAYS.UI_SETTLE_MS);
+    }
+
+    function onPowerSavingModeChangedForAutoseller() {
+        if (isCleaningUp) return;
+        const settings = getSettings();
+        if (settings.autoMode !== 'autoplant') return;
+        // Re-assert plant filter + checkbox after power-saving DOM/state churn, then retry plant click
+        updatePlantMonsterFilter();
+        applyLocalStorageToGameCheckbox();
+        checkAndActivateDragonPlant();
     }
 
     // Dragon Plant Autocollect State
@@ -10043,6 +10269,11 @@
         setupPendingGameEndInventoryWatcher();
         setupDragonPlantAPIMonitor();
         setupDragonPlantAutocollect();
+
+        if (!powerSavingModeChangedHandler) {
+            powerSavingModeChangedHandler = onPowerSavingModeChangedForAutoseller;
+            window.addEventListener('ba-power-saving-mode-changed', powerSavingModeChangedHandler);
+        }
         
         // Initialize plant monster filter with saved ignore list from localStorage
         // (ignore mod loader config, use localStorage as single source of truth)
@@ -10201,6 +10432,11 @@
                         document.removeEventListener('visibilitychange', visibilityChangeHandler);
                         visibilityChangeHandler = null;
                     }
+                    if (powerSavingModeChangedHandler) {
+                        window.removeEventListener('ba-power-saving-mode-changed', powerSavingModeChangedHandler);
+                        powerSavingModeChangedHandler = null;
+                    }
+                    resetDragonPlantActivateState();
                     
                     // 3. Remove DOM elements
                     const widget = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET);

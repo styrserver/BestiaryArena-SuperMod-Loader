@@ -1003,6 +1003,8 @@
     // Sandbox state preservation
     preservedContainer: null,
     wasInSandboxMode: false,
+    customBattleSuppressed: false,
+    powerSavingSuppressed: false,
     
     // Board analysis detection
     isBoardAnalyzing: false,
@@ -1036,6 +1038,8 @@
       this.isUpdating = false;
       this.preservedContainer = null;
       this.wasInSandboxMode = false;
+      this.customBattleSuppressed = false;
+      this.powerSavingSuppressed = false;
       this.consecutiveErrors = 0;
       this.lastErrorTime = 0;
       this.totalErrors = 0;
@@ -1274,6 +1278,9 @@
   function handleStateTransition(previousState, currentState) {
     // Detect playing -> initial transitions
     if (previousState === 'playing' && currentState === 'initial') {
+      if (isLeaderboardSuppressed()) {
+        return;
+      }
       if (isSandboxMode()) {
         console.log('[Better Highscores] Sandbox game ended, restoring container');
         scheduleTimeout(() => restoreContainer(), DELAYS.RESTORE);
@@ -1285,6 +1292,9 @@
     
     // Detect initial -> playing transitions
     if (previousState === 'initial' && currentState === 'playing') {
+      if (isLeaderboardSuppressed()) {
+        return;
+      }
       if (isSandboxMode()) {
         console.log('[Better Highscores] Sandbox game started, preserving container');
         scheduleTimeout(() => preserveContainer(), DELAYS.RESTORE);
@@ -1301,7 +1311,7 @@
   }
   
   async function refreshLeaderboardForMap(mapCode) {
-    if (modDisposed || isBetterHighscoresHidden() || !mapCode || isBoardAnalyzing()) {
+    if (modDisposed || isBetterHighscoresHidden() || isLeaderboardSuppressed() || !mapCode || isBoardAnalyzing()) {
       return false;
     }
 
@@ -1343,7 +1353,7 @@
   }
 
   function scheduleLeaderboardRefresh(mapCode, reason = 'refresh') {
-    if (!mapCode || isBetterHighscoresHidden()) {
+    if (!mapCode || isBetterHighscoresHidden() || isLeaderboardSuppressed()) {
       return;
     }
 
@@ -1362,7 +1372,7 @@
   }
 
   function handlePlayerScoreUpdate() {
-    if (isBoardAnalyzing() || isBetterHighscoresHidden()) {
+    if (isBoardAnalyzing() || isBetterHighscoresHidden() || isLeaderboardSuppressed()) {
       return;
     }
 
@@ -1388,6 +1398,10 @@
   // Helper to handle battle completion (victory/defeat states)
   async function handleBattleCompletion() {
     if (isBetterHighscoresHidden()) {
+      return;
+    }
+
+    if (isLeaderboardSuppressed()) {
       return;
     }
 
@@ -1488,6 +1502,56 @@
     return roomNames[mapCode] || mapCode;
   }
 
+  function isCustomBattleSuppressed() {
+    return BetterHighscoresState.customBattleSuppressed === true;
+  }
+
+  function isPowerSavingSuppressed() {
+    return BetterHighscoresState.powerSavingSuppressed === true;
+  }
+
+  function isLeaderboardSuppressed() {
+    return isCustomBattleSuppressed() || isPowerSavingSuppressed();
+  }
+
+  function applyLeaderboardSuppressionVisibility() {
+    if (isLeaderboardSuppressed()) {
+      if (leaderboardContainer) {
+        preserveContainer();
+      }
+      removeExistingContainers();
+      removeRestoreButton();
+      return;
+    }
+    BetterHighscoresState.wasInSandboxMode = false;
+    if (!isBetterHighscoresHidden()) {
+      scheduleTimeout(() => {
+        restoreContainer();
+        updateLeaderboards();
+      }, DELAYS.RESTORE);
+    }
+  }
+
+  function setCustomBattleSuppressed(suppressed) {
+    const next = suppressed === true;
+    if (BetterHighscoresState.customBattleSuppressed === next) {
+      return;
+    }
+    BetterHighscoresState.customBattleSuppressed = next;
+    console.log(`[Better Highscores] Custom battle suppression ${next ? 'enabled' : 'disabled'}`);
+    applyLeaderboardSuppressionVisibility();
+  }
+
+  function setPowerSavingSuppressed(suppressed) {
+    const next = suppressed === true;
+    if (BetterHighscoresState.powerSavingSuppressed === next) {
+      return;
+    }
+    BetterHighscoresState.powerSavingSuppressed = next;
+    console.log(`[Better Highscores] Power saving suppression ${next ? 'enabled' : 'disabled'}`);
+    applyLeaderboardSuppressionVisibility();
+  }
+
   function isSandboxMode() {
     try {
       const boardContext = globalThis.state?.board?.getSnapshot()?.context;
@@ -1576,7 +1640,7 @@
 
   // Function to restore the preserved container when exiting sandbox mode
   function restoreContainer() {
-    if (isBetterHighscoresHidden()) {
+    if (isBetterHighscoresHidden() || isLeaderboardSuppressed()) {
       return;
     }
 
@@ -2393,6 +2457,12 @@
       return;
     }
 
+    if (isLeaderboardSuppressed()) {
+      removeExistingContainers();
+      removeRestoreButton();
+      return;
+    }
+
     removeRestoreButton();
     
     if (BetterHighscoresState.isUpdating) {
@@ -2636,10 +2706,18 @@
     syncNavButtonSelectedState();
   }
 
+  function onPowerSavingModeChanged(event) {
+    setPowerSavingSuppressed(!!event?.detail?.enabled);
+  }
+
   // Function to initialize the mod
   function initBetterHighscores() {
     console.log('[Better Highscores] Initializing version 1.0.0');
     scheduleTimeout(() => applyNavButtonVisibility(), 1500);
+    window.addEventListener('ba-power-saving-mode-changed', onPowerSavingModeChanged);
+    if (window.baPowerSavingMode?.areOverlaysSuppressed?.() ?? window.baPowerSavingMode?.isEnabled?.()) {
+      setPowerSavingSuppressed(true);
+    }
     
     // Wait for game state to be available
     let checkGameStateTimeout = null;
@@ -2811,6 +2889,7 @@
     console.log('[Better Highscores] Cleaning up...');
     modDisposed = true;
 
+    window.removeEventListener('ba-power-saving-mode-changed', onPowerSavingModeChanged);
     cleanupTblFloorLeague();
     closeBetterHighscoresContextMenu();
     removeRestoreButton();
@@ -2941,6 +3020,11 @@
     window.BetterHighscores.updateLeaderboards = updateLeaderboards;
     window.BetterHighscores.restoreContainer = restoreContainer;
     window.BetterHighscores.preserveContainer = preserveContainer;
+    window.BetterHighscores.setCustomBattleSuppressed = setCustomBattleSuppressed;
+    window.BetterHighscores.isCustomBattleSuppressed = isCustomBattleSuppressed;
+    window.BetterHighscores.setPowerSavingSuppressed = setPowerSavingSuppressed;
+    window.BetterHighscores.isPowerSavingSuppressed = isPowerSavingSuppressed;
+    window.BetterHighscores.isLeaderboardSuppressed = isLeaderboardSuppressed;
     window.BetterHighscores.updateOpacity = updateOpacity;
     window.BetterHighscores.updatePlacement = updatePlacement;
     window.BetterHighscores.updateScale = updateScale;

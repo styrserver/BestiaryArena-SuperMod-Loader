@@ -35,6 +35,7 @@ let activeButtonElement = null;
 let mapShortcutsContainer = null;
 let mapShortcutsSubscription = null;
 let mapShortcutsMapId = null;
+let powerSavingSuppressed = false;
 
 // Add a reference to track active modals
 let activeModal = null;
@@ -3162,6 +3163,11 @@ function removeMapShortcuts() {
 }
 
 function updateMapShortcuts() {
+  if (powerSavingSuppressed) {
+    removeMapShortcuts();
+    return;
+  }
+
   if (config.showMapShortcuts === false || !isSetupShortcutsAndHoverEnabled()) {
     removeMapShortcuts();
     return;
@@ -3207,12 +3213,38 @@ function updateMapShortcuts() {
   requestAnimationFrame(syncMapShortcutsPosition);
 }
 
+function setPowerSavingSuppressed(suppressed) {
+  const next = suppressed === true;
+  if (powerSavingSuppressed === next) {
+    return;
+  }
+  powerSavingSuppressed = next;
+  if (powerSavingSuppressed) {
+    removeMapShortcuts();
+  } else {
+    updateMapShortcuts();
+  }
+}
+
+function onPowerSavingModeChanged(event) {
+  setPowerSavingSuppressed(!!event?.detail?.enabled);
+}
+
 function initMapShortcuts() {
   if (!window.__setupManagerShortcutsHoverListenerAdded) {
     window.__setupManagerShortcutsHoverListenerAdded = true;
     window.addEventListener('betterUISetupShortcutsAndHoverChanged', () => {
       updateMapShortcuts();
     });
+  }
+
+  if (!window.__setupManagerPowerSavingListenerAdded) {
+    window.__setupManagerPowerSavingListenerAdded = true;
+    window.addEventListener('ba-power-saving-mode-changed', onPowerSavingModeChanged);
+  }
+
+  if (window.baPowerSavingMode?.areOverlaysSuppressed?.() ?? window.baPowerSavingMode?.isEnabled?.()) {
+    setPowerSavingSuppressed(true);
   }
 
   updateMapShortcuts();
@@ -3237,6 +3269,11 @@ function initMapShortcuts() {
 function cleanupMapShortcuts() {
   hideMapShortcutPreview();
   removeMapShortcutsPositionListener();
+
+  if (window.__setupManagerPowerSavingListenerAdded) {
+    window.removeEventListener('ba-power-saving-mode-changed', onPowerSavingModeChanged);
+    window.__setupManagerPowerSavingListenerAdded = false;
+  }
 
   if (mapShortcutsSubscription) {
     try {
@@ -3348,6 +3385,7 @@ function cleanup() {
 // Export functionality
 context.exports = {
   showModal: showSetupManagerModal,
+  setPowerSavingSuppressed,
   saveTeam: (name) => {
     const mapId = getCurrentMapId();
     if (mapId) {

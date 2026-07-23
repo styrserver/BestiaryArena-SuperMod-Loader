@@ -42,6 +42,57 @@ let gameStateSubscription = null;
 let boardStateSubscription = null;
 let lastGameStarted = false;
 let gridOverlay = null;
+let powerSavingSuppressed = false;
+let performanceModeTilesRetryObserver = null;
+let performanceModeTilesRetryTimer = null;
+
+function isPowerSavingBoardActive() {
+  return !!document.getElementById('autoplay-goblin');
+}
+
+function cancelPerformanceModeTilesRetry() {
+  if (performanceModeTilesRetryObserver) {
+    try {
+      performanceModeTilesRetryObserver.disconnect();
+    } catch (_) {}
+    performanceModeTilesRetryObserver = null;
+  }
+  if (performanceModeTilesRetryTimer) {
+    clearTimeout(performanceModeTilesRetryTimer);
+    performanceModeTilesRetryTimer = null;
+  }
+}
+
+function schedulePerformanceModeWhenTilesReady() {
+  if (powerSavingSuppressed || !config.performance.enabled) return;
+  if (document.getElementById('tiles') && !isPowerSavingBoardActive()) {
+    applyPerformanceMode(true);
+    return;
+  }
+
+  cancelPerformanceModeTilesRetry();
+  const watchRoot = document.getElementById('viewport') || document.body;
+  performanceModeTilesRetryObserver = new MutationObserver(() => {
+    if (powerSavingSuppressed || !config.performance.enabled) {
+      cancelPerformanceModeTilesRetry();
+      return;
+    }
+    if (isPowerSavingBoardActive() || !document.getElementById('tiles')) {
+      return;
+    }
+    cancelPerformanceModeTilesRetry();
+    performanceModeTilesRetryTimer = setTimeout(() => {
+      performanceModeTilesRetryTimer = null;
+      if (powerSavingSuppressed || !config.performance.enabled) return;
+      if (isPowerSavingBoardActive() || !document.getElementById('tiles')) {
+        schedulePerformanceModeWhenTilesReady();
+        return;
+      }
+      applyPerformanceMode(true);
+    }, 100);
+  });
+  performanceModeTilesRetryObserver.observe(watchRoot, { childList: true, subtree: true });
+}
 
 // Translations
 // Use shared translation system via API
@@ -148,7 +199,12 @@ function monitorGameState() {
 
 // Function to reapply performance mode
 function reapplyPerformanceMode() {
-  if (!config.performance.enabled) return;
+  if (powerSavingSuppressed || !config.performance.enabled) return;
+  // No board tiles during power-saving Autoplaying screen — retry when battlefield returns
+  if (isPowerSavingBoardActive() || !document.getElementById('tiles')) {
+    schedulePerformanceModeWhenTilesReady();
+    return;
+  }
   
   // Cleanup first to avoid duplicate elements
   cleanupOverlayElements();
@@ -235,19 +291,21 @@ function applyBaseStyles() {
 // Create overlay to show hitboxes and walkable paths
 function createHitboxOverlay() {
   try {
+    if (isPowerSavingBoardActive() || !document.getElementById('tiles')) {
+      return false;
+    }
+
     // Get the room data from the game state
-    const boardContext = globalThis.state.board.getSnapshot().context;
+    const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
     if (!boardContext || !boardContext.selectedMap || !boardContext.selectedMap.selectedRoom) {
-      console.error('Unable to access room data for hitbox overlay');
-      return;
+      return false;
     }
     
     const roomData = boardContext.selectedMap.selectedRoom;
     
     // Check if we have hitboxes data
     if (!roomData.file || !roomData.file.data || !roomData.file.data.hitboxes) {
-      console.warn('No hitbox data found for current room');
-      return;
+      return false;
     }
     
     const hitboxes = roomData.file.data.hitboxes;
@@ -255,8 +313,7 @@ function createHitboxOverlay() {
     // Find the tiles container - this is where we'll add our overlay elements
     const tilesContainer = document.getElementById('tiles');
     if (!tilesContainer) {
-      console.error('Could not find #tiles container');
-      return;
+      return false;
     }
     
     // Create a wrapper container for our overlays
@@ -342,9 +399,11 @@ function createHitboxOverlay() {
     
     // Add the overlay container to the document
     tilesContainer.appendChild(overlayContainer);
+    return true;
     
   } catch (error) {
     console.error('Error creating hitbox overlay:', error);
+    return false;
   }
 }
 
@@ -398,7 +457,7 @@ function togglePerformanceMode() {
   api.service.updateScriptConfig(context.hash, config);
   
   // Apply or remove performance mode
-  if (config.performance.enabled) {
+  if (config.performance.enabled && !powerSavingSuppressed) {
     applyPerformanceMode(true);
   } else {
     cleanupPerformanceMode();
@@ -410,15 +469,35 @@ function togglePerformanceMode() {
 
 // Update the toggle button text and style
 function updatePerformanceButton() {
+  const visuallyActive = config.performance.enabled && !powerSavingSuppressed;
   api.ui.updateButton(PERF_TOGGLE_ID, {
     text: t('mods.customDisplay.perfButtonText'),
-    primary: config.performance.enabled,
-    tooltip: config.performance.enabled ? t('mods.customDisplay.perfButtonTooltipEnabled') : t('mods.customDisplay.perfButtonTooltipDisabled')
+    primary: visuallyActive,
+    tooltip: visuallyActive ? t('mods.customDisplay.perfButtonTooltipEnabled') : t('mods.customDisplay.perfButtonTooltipDisabled')
   });
-  // Apply green background when enabled, regular when not
+  // Apply green background when visually active, regular when not
   const btn = document.getElementById(PERF_TOGGLE_ID);
   if (btn) {
-    if (config.performance.enabled) {
+    if (visuallyActive) {
+      btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+      btn.style.backgroundSize = "auto";
+    } else {
+      btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+      btn.style.color = "#ffe066";
+    }
+  }
+}
+
+function updateGridButton() {
+  const visuallyActive = config.mapGrid.enabled && !powerSavingSuppressed;
+  api.ui.updateButton(GRID_TOGGLE_ID, {
+    text: t('mods.customDisplay.gridButtonText'),
+    primary: visuallyActive,
+    tooltip: visuallyActive ? t('mods.customDisplay.gridButtonTooltipEnabled') : t('mods.customDisplay.gridButtonTooltipDisabled')
+  });
+  const btn = document.getElementById(GRID_TOGGLE_ID);
+  if (btn) {
+    if (visuallyActive) {
       btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
       btn.style.backgroundSize = "auto";
     } else {
@@ -430,7 +509,7 @@ function updatePerformanceButton() {
 
 // Apply the performance mode
 function applyPerformanceMode(enabled) {
-  if (!enabled) {
+  if (!enabled || powerSavingSuppressed) {
     // If disabled, clean up and return
     cleanupPerformanceMode();
     return;
@@ -441,6 +520,44 @@ function applyPerformanceMode(enabled) {
   
   // Set up state monitoring
   monitorGameState();
+}
+
+function setPowerSavingSuppressed(suppressed) {
+  const next = suppressed === true;
+  if (powerSavingSuppressed === next) {
+    return;
+  }
+  powerSavingSuppressed = next;
+
+  if (powerSavingSuppressed) {
+    console.log('[Custom Display] Suppressed for power saving mode');
+    cancelPerformanceModeTilesRetry();
+    cleanupPerformanceMode();
+    cleanupGrid();
+    updatePerformanceButton();
+    updateGridButton();
+    return;
+  }
+
+  console.log('[Custom Display] Restored after power saving mode');
+  if (config.performance.enabled) {
+    if (isPowerSavingBoardActive() || !document.getElementById('tiles')) {
+      schedulePerformanceModeWhenTilesReady();
+    } else {
+      applyPerformanceMode(true);
+    }
+  }
+  if (config.mapGrid.enabled) {
+    if (!isPowerSavingBoardActive()) {
+      gridOverlay = createGridOverlay();
+    }
+  }
+  updatePerformanceButton();
+  updateGridButton();
+}
+
+function onPowerSavingModeChanged(event) {
+  setPowerSavingSuppressed(!!event?.detail?.enabled);
 }
 
 // GRID MODE FUNCTIONALITY (FORMER TOGGLE MAP GRID)
@@ -531,36 +648,15 @@ function createGridOverlay() {
 function toggleGrid() {
     config.mapGrid.enabled = !config.mapGrid.enabled;
 
-    if (config.mapGrid.enabled) {
+    if (config.mapGrid.enabled && !powerSavingSuppressed) {
         gridOverlay = createGridOverlay();
-        api.ui.updateButton(GRID_TOGGLE_ID, {
-            text: t('mods.customDisplay.gridButtonText'),
-            primary: true,
-            tooltip: t('mods.customDisplay.gridButtonTooltipEnabled')
-        });
     } else {
         cleanupGrid();
-        api.ui.updateButton(GRID_TOGGLE_ID, {
-            text: t('mods.customDisplay.gridButtonText'),
-            primary: false,
-            tooltip: t('mods.customDisplay.gridButtonTooltipDisabled')
-        });
     }
 
     // Save config
     api.service.updateScriptConfig(context.hash, config);
-
-    // Apply green background when enabled, regular when not
-    const btn = document.getElementById(GRID_TOGGLE_ID);
-    if (btn) {
-        if (config.mapGrid.enabled) {
-            btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
-            btn.style.backgroundSize = "auto";
-        } else {
-            btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-            btn.style.color = "#ffe066";
-        }
-    }
+    updateGridButton();
 }
 
 // Clean up grid overlay
@@ -900,19 +996,10 @@ function init() {
     onClick: toggleGrid
   });
   
-  // Apply green backgrounds if enabled
+  // Sync button visuals (respects power-saving suppression)
   setTimeout(() => {
-    const perfBtn = document.getElementById(PERF_TOGGLE_ID);
-    if (perfBtn && config.performance.enabled) {
-      perfBtn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
-      perfBtn.style.backgroundSize = "auto";
-    }
-    
-    const gridBtn = document.getElementById(GRID_TOGGLE_ID);
-    if (gridBtn && config.mapGrid.enabled) {
-      gridBtn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
-      gridBtn.style.backgroundSize = "auto";
-    }
+    updatePerformanceButton();
+    updateGridButton();
   }, 100);
   
   // Add the configuration button
@@ -928,12 +1015,17 @@ function init() {
   createConfigPanel();
   
   // Apply features if enabled
-  if (config.performance.enabled) {
+  if (config.performance.enabled && !powerSavingSuppressed) {
     applyPerformanceMode(true);
   }
   
-  if (config.mapGrid.enabled) {
+  if (config.mapGrid.enabled && !powerSavingSuppressed) {
     gridOverlay = createGridOverlay();
+  }
+
+  window.addEventListener('ba-power-saving-mode-changed', onPowerSavingModeChanged);
+  if (window.baPowerSavingMode?.areOverlaysSuppressed?.() ?? window.baPowerSavingMode?.isEnabled?.()) {
+    setPowerSavingSuppressed(true);
   }
   
       console.log('Custom Display UI initialized');
@@ -947,17 +1039,20 @@ context.exports = {
   togglePerformanceMode: togglePerformanceMode,
   toggleGrid: toggleGrid,
   reapplyPerformanceMode: reapplyPerformanceMode,
+  setPowerSavingSuppressed: setPowerSavingSuppressed,
   updateConfig: (newConfig) => {
     Object.assign(config, newConfig);
     api.service.updateScriptConfig(context.hash, config);
     
     // If features are enabled, reapply with new settings
-    if (config.performance.enabled) {
+    if (config.performance.enabled && !powerSavingSuppressed) {
       reapplyPerformanceMode();
     }
     
-    if (config.mapGrid.enabled && gridOverlay) {
-      gridOverlay.remove();
+    if (config.mapGrid.enabled && !powerSavingSuppressed) {
+      if (gridOverlay) {
+        gridOverlay.remove();
+      }
       gridOverlay = createGridOverlay();
     }
   }
@@ -966,6 +1061,11 @@ context.exports = {
 // Cleanup function for Custom Display mod (exposed for mod system)
 context.exports.cleanup = function() {
   console.log('[Custom Display] Running cleanup...');
+
+  window.removeEventListener('ba-power-saving-mode-changed', onPowerSavingModeChanged);
+  cancelPerformanceModeTilesRetry();
+  cleanupPerformanceMode();
+  cleanupGrid();
   
   // Remove any existing overlays
   if (typeof gridOverlay !== 'undefined' && gridOverlay) {
