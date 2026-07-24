@@ -39,6 +39,11 @@ const HIGHSCORE_BUTTON_ID = 'highscore-button';
 const SPEEDRUN_TIMEOUT_TICKS = 9600;
 const MAP_MAX_FLOOR_INDEX = 15;
 
+// Display placeholders for maps with no personal record (never played / never cleared)
+const UNPLAYED_YOUR_TICKS = SPEEDRUN_TIMEOUT_TICKS;
+const UNPLAYED_YOUR_RANK = 0;
+const UNPLAYED_YOUR_FLOOR = 0;
+
 const MAX_INDICATOR_COLOR_AT_MAX = '#8f8';
 const MAX_INDICATOR_COLOR_BELOW_MAX = '#f88';
 
@@ -446,6 +451,24 @@ function hasAnyPersonalMapData(roomData) {
     || normalizeYourFloor(roomData) !== null;
 }
 
+/** Your ticks for display/comparisons; 9600 when never played. */
+function getDisplayYourTicks(roomData) {
+  const n = readYourTicks(roomData);
+  return n !== null ? n : UNPLAYED_YOUR_TICKS;
+}
+
+/** Your rank for display/comparisons; 0 when never played. */
+function getDisplayYourRank(roomData) {
+  const n = normalizeYourRank(roomData);
+  return n !== null ? n : UNPLAYED_YOUR_RANK;
+}
+
+/** Your floor for display/comparisons; 0 when never played. */
+function getDisplayYourFloor(roomData) {
+  const n = getEffectiveYourFloor(roomData);
+  return n !== null ? n : UNPLAYED_YOUR_FLOOR;
+}
+
 // =======================
 // 7. Record Formatting & Display HTML
 // =======================
@@ -463,6 +486,11 @@ function floorIndexToAscensionPercent(floorIndex) {
     return null;
   }
   return 100 + Number(floorIndex) * 20;
+}
+
+function formatNoWrStatHtml(unit, youValue, youSubTicks) {
+  const yours = formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null);
+  return `<span style="color:#ccc">${yours}</span> <span style="color:#888">· No WR</span>`;
 }
 
 function formatOwnWrStatHtml(unit, youValue, youSubTicks) {
@@ -484,8 +512,7 @@ function formatSummaryStatHtml(unit, youValue, youSubTicks, bestRecord, you, you
     if (missingYou) {
       return '<span style="color:#888">—</span>';
     }
-    const yours = formatRecordValue(unit, youValue, unit !== 'ticks' ? youSubTicks : null);
-    return `<span style="color:#ccc">${yours}</span> <span style="color:#888">· No WR</span>`;
+    return formatNoWrStatHtml(unit, youValue, youSubTicks);
   }
 
   const theirValue = unit === 'ticks'
@@ -621,20 +648,21 @@ function buildSummaryEntries(mapCodes, rooms, best, roomsHighscores, you, yourNa
     const rankBest = roomsHighscores?.rank?.[code];
     const floorBest = roomsHighscores?.floor?.[code];
 
-    const yourTicks = readYourTicks(roomData);
-    const yourRank = normalizeYourRank(roomData);
+    const yourTicks = getDisplayYourTicks(roomData);
+    const yourRank = getDisplayYourRank(roomData);
     const yourRankTicks = normalizeYourRankTicks(roomData);
-    const yourFloor = getEffectiveYourFloor(roomData);
+    const yourFloor = getDisplayYourFloor(roomData);
     const yourFloorTicks = getEffectiveYourFloorTicks(roomData);
+    const hasPersonalData = hasAnyPersonalMapData(roomData);
 
     const ownsTickWr = isOwnHighscoreRecord(tickBest, you, yourName);
     const ownsRankWr = isOwnHighscoreRecord(rankBest, you, yourName);
     const ownsFloorWr = isOwnHighscoreRecord(floorBest, you, yourName);
 
-    const tickBehind = tickBest && yourTicks !== null && !ownsTickWr && yourTicks > tickBest.ticks;
-    const rankBehind = rankBest && yourRank !== null && !ownsRankWr && yourRank < rankBest.rank;
-    const floorBehind = floorBest && yourFloor !== null && !ownsFloorWr && yourFloor < floorBest.floor;
-    const sameFloorBehind = floorBest && yourFloor !== null && !ownsFloorWr &&
+    const tickBehind = tickBest && !ownsTickWr && yourTicks > tickBest.ticks;
+    const rankBehind = rankBest && !ownsRankWr && yourRank < rankBest.rank;
+    const floorBehind = floorBest && !ownsFloorWr && yourFloor < floorBest.floor;
+    const sameFloorBehind = floorBest && !ownsFloorWr &&
       yourFloor === floorBest.floor &&
       yourFloorTicks !== null &&
       normalizeBestFloorTicks(floorBest) !== null &&
@@ -655,17 +683,10 @@ function buildSummaryEntries(mapCodes, rooms, best, roomsHighscores, you, yourNa
       ownsRankWr,
       ownsFloorWr,
       hasImprovement: tickBehind || rankBehind || floorBehind || sameFloorBehind,
-      hasPersonalData: hasAnyPersonalMapData(roomData),
+      hasPersonalData,
       isUnlocked: isMapUnlocked(code, rooms)
     };
-  }).filter((entry) =>
-    entry.yourTicks !== null ||
-    entry.yourRank !== null ||
-    entry.yourFloor !== null ||
-    entry.tickBest ||
-    entry.rankBest ||
-    entry.floorBest
-  );
+  });
   return sortImprovementOpportunities(entries);
 }
 
@@ -685,20 +706,20 @@ function buildImprovementSummaryStats(tickOpportunities, rankOpportunities, floo
   const mapsWithRoom = new Set();
 
   const tickGain = tickOpportunities.reduce((sum, o) => {
-    if (o.ownsWr || o.diff <= 0) return sum;
+    if (o.ownsWr || o.hasWr === false || o.diff <= 0) return sum;
     mapsWithRoom.add(o.code);
     return sum + o.diff;
   }, 0);
 
   const rankGain = rankOpportunities.reduce((sum, o) => {
-    if (o.ownsWr) return sum;
+    if (o.ownsWr || o.hasWr === false) return sum;
     const points = Math.max(0, Number(o.diff) || 0);
     if (points > 0) mapsWithRoom.add(o.code);
     return sum + points;
   }, 0);
 
   const floorGain = floorOpportunities.reduce((sum, o) => {
-    if (o.ownsWr) return sum;
+    if (o.ownsWr || o.hasWr === false) return sum;
     const floors = Math.max(0, Number(o.floorDiff) || 0);
     if (floors > 0) mapsWithRoom.add(o.code);
     return sum + floors;
@@ -1247,8 +1268,14 @@ function createTickContent(opportunities, minTheo, hasTickWrData) {
             </div>
           <div class="pixel-font-14">${o.ownsWr
             ? formatOwnWrStatHtml('ticks', o.yours ?? o.best, null)
-            : buildRecordComparisonHtml('ticks', o.yours, null, o.player, o.best, null)}</div>
-          <div class="pixel-font-14" style="color: #8f8;">${o.ownsWr ? 'You hold the WR' : (o.yours == null ? `Up to ${o.best} ticks to WR` : `+${o.diff} ticks (${o.pct}%)`)}</div>
+            : o.hasWr === false
+              ? formatNoWrStatHtml('ticks', o.yours, null)
+              : buildRecordComparisonHtml('ticks', o.yours, null, o.player, o.best, null)}</div>
+          <div class="pixel-font-14" style="color: #8f8;">${o.ownsWr
+            ? 'You hold the WR'
+            : o.hasWr === false
+              ? 'No WR yet'
+              : `+${o.diff} ticks (${o.pct}%)`}</div>
         </div>
       `;
       tagImprovementListItem(itemEl, { code: o.code, name: o.name, hasPersonalData: o.hasPersonalData });
@@ -1266,8 +1293,8 @@ function createTickContent(opportunities, minTheo, hasTickWrData) {
   // Add stats footer
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
-  const totalTicksImprovement = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : o.diff), 0);
-  const tickImprovementRooms = opportunities.filter((o) => !o.ownsWr).length;
+  const totalTicksImprovement = opportunities.reduce((sum, o) => sum + (o.ownsWr || o.hasWr === false ? 0 : o.diff), 0);
+  const tickImprovementRooms = opportunities.filter((o) => !o.ownsWr && o.hasWr !== false).length;
   statsContainer.innerHTML = `
     <div>Rooms with ticks improvement: ${tickImprovementRooms}</div>
     <div>Total ticks improvement: ${totalTicksImprovement}</div>
@@ -1306,7 +1333,9 @@ function createRankContent(opportunities, hasRankWrData) {
             </div>
           <div class="pixel-font-14">${o.ownsWr
             ? buildOwnWrWithMaxHtml('rank', o.yourScore ?? o.bestScore, o.yourRankTicks ?? o.bestRankTicks, getMapMaxRankPoints(o.code))
-            : buildRecordComparisonWithMaxHtml('rank', o.yourScore, o.yourRankTicks, o.player, o.bestScore, o.bestRankTicks, getMapMaxRankPoints(o.code))}</div>
+            : o.hasWr === false
+              ? formatNoWrStatHtml('rank', o.yourScore, o.yourRankTicks)
+              : buildRecordComparisonWithMaxHtml('rank', o.yourScore, o.yourRankTicks, o.player, o.bestScore, o.bestRankTicks, getMapMaxRankPoints(o.code))}</div>
           <div class="pixel-font-14" style="color: #8f8;">${o.improvementText}</div>
         </div>
       `;
@@ -1325,9 +1354,9 @@ function createRankContent(opportunities, hasRankWrData) {
   // Add stats footer
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
-  const rankPointGain = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : Math.max(0, Number(o.diff) || 0)), 0);
-  const tickGain = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : Math.max(0, Number(o.tickDiff) || 0)), 0);
-  const rankImprovementRooms = opportunities.filter((o) => !o.ownsWr).length;
+  const rankPointGain = opportunities.reduce((sum, o) => sum + (o.ownsWr || o.hasWr === false ? 0 : Math.max(0, Number(o.diff) || 0)), 0);
+  const tickGain = opportunities.reduce((sum, o) => sum + (o.ownsWr || o.hasWr === false ? 0 : Math.max(0, Number(o.tickDiff) || 0)), 0);
+  const rankImprovementRooms = opportunities.filter((o) => !o.ownsWr && o.hasWr !== false).length;
   statsContainer.innerHTML = `
     <div>Rooms with rank improvement: ${rankImprovementRooms}</div>
     <div>Total rank points to gain: ${rankPointGain}</div>
@@ -1364,7 +1393,9 @@ function createFloorContent(opportunities, hasFloorWrData) {
             </div>
           <div class="pixel-font-14">${o.ownsWr
             ? buildOwnWrWithMaxHtml('floor', o.yourFloor ?? o.bestFloor, o.yourFloorTicks ?? o.bestFloorTicks, MAP_MAX_FLOOR_INDEX)
-            : buildRecordComparisonWithMaxHtml('floor', o.yourFloor, o.yourFloorTicks, o.player, o.bestFloor, o.bestFloorTicks, MAP_MAX_FLOOR_INDEX)}</div>
+            : o.hasWr === false
+              ? formatNoWrStatHtml('floor', o.yourFloor, o.yourFloorTicks)
+              : buildRecordComparisonWithMaxHtml('floor', o.yourFloor, o.yourFloorTicks, o.player, o.bestFloor, o.bestFloorTicks, MAP_MAX_FLOOR_INDEX)}</div>
           <div class="pixel-font-14" style="color: #8f8;">${o.improvementText}</div>
         </div>
       `;
@@ -1382,9 +1413,9 @@ function createFloorContent(opportunities, hasFloorWrData) {
   
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
-  const floorGain = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : o.floorDiff), 0);
-  const tickGain = opportunities.reduce((sum, o) => sum + (o.ownsWr ? 0 : Math.max(0, Number(o.tickDiff) || 0)), 0);
-  const floorImprovementRooms = opportunities.filter((o) => !o.ownsWr).length;
+  const floorGain = opportunities.reduce((sum, o) => sum + (o.ownsWr || o.hasWr === false ? 0 : o.floorDiff), 0);
+  const tickGain = opportunities.reduce((sum, o) => sum + (o.ownsWr || o.hasWr === false ? 0 : Math.max(0, Number(o.tickDiff) || 0)), 0);
+  const floorImprovementRooms = opportunities.filter((o) => !o.ownsWr && o.hasWr !== false).length;
   statsContainer.innerHTML = `
     <div>Rooms with floor improvement: ${floorImprovementRooms}</div>
     <div>Total floor gain: +${floorGain}</div>
@@ -1581,7 +1612,7 @@ async function showImprovementsModal() {
     const summaryMapCodes = getSummaryMapCodesInOrder(rooms);
     const summaryEntries = buildSummaryEntries(summaryMapCodes, rooms, best, roomsHighscores, you, yourName);
 
-    const tickRoomCodes = getImprovementRoomCodes(rooms, Object.keys(best || {}));
+    const tickRoomCodes = getImprovementRoomCodes(rooms, [...summaryMapCodes, ...Object.keys(best || {})]);
     const hasTickWrData = tickRoomCodes.some((code) => best[code]);
 
     // Process tick opportunities
@@ -1590,40 +1621,26 @@ async function showImprovementsModal() {
       const r = rooms?.[code] || {};
       const hasPersonalData = hasAnyPersonalMapData(r);
       const isUnlocked = isMapUnlocked(code, rooms);
+      const yourTicks = getDisplayYourTicks(r);
       const b = best[code];
-      if (!b) return [];
-      const ownsWr = isOwnHighscoreRecord(b, you, yourName);
-      const yourTicks = readYourTicks(r);
 
-      if (yourTicks === null) {
-        if (ownsWr) {
-          return [{
-            code,
-            name: ROOM_NAMES[code] || code,
-            yours: null,
-            best: b.ticks,
-            diff: 0,
-            pct: '0.0',
-            player: b.userName,
-            ownsWr: true,
-            hasPersonalData,
-            isUnlocked
-          }];
-        }
+      if (!b) {
         return [{
           code,
           name: ROOM_NAMES[code] || code,
-          yours: null,
-          best: b.ticks,
-          diff: b.ticks,
+          yours: yourTicks,
+          best: null,
+          diff: 0,
           pct: '0.0',
-          player: b.userName,
+          player: null,
           ownsWr: false,
+          hasWr: false,
           hasPersonalData,
           isUnlocked
         }];
       }
 
+      const ownsWr = isOwnHighscoreRecord(b, you, yourName);
       const d = yourTicks - b.ticks;
       if (!ownsWr && d <= 0) return [];
       return [{
@@ -1635,6 +1652,7 @@ async function showImprovementsModal() {
         pct: ownsWr ? '0.0' : ((d / yourTicks) * 100).toFixed(1),
         player: b.userName,
         ownsWr,
+        hasWr: true,
         hasPersonalData,
         isUnlocked
       }];
@@ -1644,14 +1662,13 @@ async function showImprovementsModal() {
     
     const minTheo = tickRoomCodes.reduce((s, code) => {
       const r = rooms?.[code] || {};
-      const yourTicks = readYourTicks(r);
+      const yourTicks = getDisplayYourTicks(r);
       const wrTicks = best[code]?.ticks;
       if (!wrTicks) return s;
-      if (yourTicks === null) return s + wrTicks;
       return s + Math.min(yourTicks, wrTicks);
     }, 0);
     
-    const rankRoomCodes = getImprovementRoomCodes(rooms, Object.keys(roomsHighscores?.rank || {}));
+    const rankRoomCodes = getImprovementRoomCodes(rooms, [...summaryMapCodes, ...Object.keys(roomsHighscores?.rank || {})]);
     const hasRankWrData = rankRoomCodes.some((code) => roomsHighscores?.rank?.[code]);
 
     // Process rank opportunities (higher rank is better; same-rank entries are always shown)
@@ -1660,49 +1677,32 @@ async function showImprovementsModal() {
       const r = rooms?.[code] || {};
       const hasPersonalData = hasAnyPersonalMapData(r);
       const isUnlocked = isMapUnlocked(code, rooms);
-      const topRank = roomsHighscores?.rank?.[code];
-      if (!topRank) return [];
-
-      const ownsWr = isOwnHighscoreRecord(topRank, you, yourName);
-      const yourRank = normalizeYourRank(r);
+      const yourRank = getDisplayYourRank(r);
       const yourRankTicks = normalizeYourRankTicks(r);
-      const bestRank = Number.isFinite(Number(topRank.rank)) ? Number(topRank.rank) : 0;
-      const bestRankTicks = Number.isFinite(Number(topRank.ticks)) ? Number(topRank.ticks) : null;
+      const topRank = roomsHighscores?.rank?.[code];
 
-      if (yourRank === null) {
-        if (ownsWr) {
-          return [{
-            code,
-            name: ROOM_NAMES[code] || code,
-            yourScore: null,
-            bestScore: bestRank,
-            diff: 0,
-            yourRankTicks: null,
-            bestRankTicks,
-            tickDiff: 0,
-            improvementText: 'You hold the WR',
-            player: topRank.userName,
-            ownsWr: true,
-            hasPersonalData,
-            isUnlocked
-          }];
-        }
+      if (!topRank) {
         return [{
           code,
           name: ROOM_NAMES[code] || code,
-          yourScore: null,
-          bestScore: bestRank,
-          diff: bestRank,
-          yourRankTicks: null,
-          bestRankTicks,
+          yourScore: yourRank,
+          bestScore: null,
+          diff: 0,
+          yourRankTicks,
+          bestRankTicks: null,
           tickDiff: 0,
-          improvementText: `+${bestRank} rank point${bestRank > 1 ? 's' : ''}`,
-          player: topRank.userName,
+          improvementText: 'No WR yet',
+          player: null,
           ownsWr: false,
+          hasWr: false,
           hasPersonalData,
           isUnlocked
         }];
       }
+
+      const ownsWr = isOwnHighscoreRecord(topRank, you, yourName);
+      const bestRank = Number.isFinite(Number(topRank.rank)) ? Number(topRank.rank) : 0;
+      const bestRankTicks = Number.isFinite(Number(topRank.ticks)) ? Number(topRank.ticks) : null;
 
       const rankDiff = bestRank - yourRank;
       const sameRankTickDelta = (
@@ -1734,6 +1734,7 @@ async function showImprovementsModal() {
         improvementText,
         player: topRank.userName,
         ownsWr,
+        hasWr: true,
         hasPersonalData,
         isUnlocked
       }];
@@ -1747,7 +1748,7 @@ async function showImprovementsModal() {
     console.log('[Highscores][Floor Debug] Starting floor opportunity processing');
     console.log('[Highscores][Floor Debug] roomsHighscores.floor keys:', Object.keys(roomsHighscores?.floor || {}).length);
     
-    const floorRoomCodes = getImprovementRoomCodes(rooms, Object.keys(roomsHighscores?.floor || {}));
+    const floorRoomCodes = getImprovementRoomCodes(rooms, [...summaryMapCodes, ...Object.keys(roomsHighscores?.floor || {})]);
     const hasFloorWrData = floorRoomCodes.some((code) => roomsHighscores?.floor?.[code]);
 
     // Process floor opportunities (higher floor is better; same-floor entries are always shown)
@@ -1756,55 +1757,34 @@ async function showImprovementsModal() {
       const r = rooms?.[code] || {};
       const hasPersonalData = hasAnyPersonalMapData(r);
       const isUnlocked = isMapUnlocked(code, rooms);
-      const topFloor = roomsHighscores?.floor?.[code];
-      if (!topFloor) {
-        console.log('[Highscores][Floor Debug] Skipping room (no public floor WR):', code);
-        return [];
-      }
-      const ownsWr = isOwnHighscoreRecord(topFloor, you, yourName);
-
-      const yourFloor = getEffectiveYourFloor(r);
-      const bestFloor = Number.isFinite(Number(topFloor.floor)) ? Number(topFloor.floor) : 0;
-
+      const yourFloor = getDisplayYourFloor(r);
       const yourFloorTicks = getEffectiveYourFloorTicks(r);
-      const bestFloorTicks = Number.isFinite(Number(topFloor.floorTicks))
-        ? Number(topFloor.floorTicks)
-        : (Number.isFinite(Number(topFloor.ticks)) ? Number(topFloor.ticks) : null);
+      const topFloor = roomsHighscores?.floor?.[code];
 
-      if (yourFloor === null) {
-        if (ownsWr) {
-          return [{
-            code,
-            name: ROOM_NAMES[code] || code,
-            yourFloor: null,
-            yourFloorTicks: null,
-            bestFloor,
-            bestFloorTicks,
-            floorDiff: 0,
-            tickDiff: 0,
-            improvementText: 'You hold the WR',
-            player: topFloor.userName,
-            ownsWr: true,
-            hasPersonalData,
-            isUnlocked
-          }];
-        }
+      if (!topFloor) {
         return [{
           code,
           name: ROOM_NAMES[code] || code,
-          yourFloor: null,
-          yourFloorTicks: null,
-          bestFloor,
-          bestFloorTicks,
-          floorDiff: bestFloor,
+          yourFloor,
+          yourFloorTicks,
+          bestFloor: null,
+          bestFloorTicks: null,
+          floorDiff: 0,
           tickDiff: 0,
-          improvementText: `+${bestFloor} floor${bestFloor > 1 ? 's' : ''}`,
-          player: topFloor.userName,
+          improvementText: 'No WR yet',
+          player: null,
           ownsWr: false,
+          hasWr: false,
           hasPersonalData,
           isUnlocked
         }];
       }
+
+      const ownsWr = isOwnHighscoreRecord(topFloor, you, yourName);
+      const bestFloor = Number.isFinite(Number(topFloor.floor)) ? Number(topFloor.floor) : 0;
+      const bestFloorTicks = Number.isFinite(Number(topFloor.floorTicks))
+        ? Number(topFloor.floorTicks)
+        : (Number.isFinite(Number(topFloor.ticks)) ? Number(topFloor.ticks) : null);
 
       const floorDiff = bestFloor - yourFloor;
       const sameFloorTickDelta = (
@@ -1865,6 +1845,7 @@ async function showImprovementsModal() {
         improvementText,
         player: topFloor.userName,
         ownsWr,
+        hasWr: true,
         hasPersonalData,
         isUnlocked
       }];

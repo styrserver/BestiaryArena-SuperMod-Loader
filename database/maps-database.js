@@ -253,7 +253,9 @@ const EVENT_TO_ROOM_MAPPING = {
   'Poacher Cave (Bear)': 'kpob',
   'Poacher Cave (Wolf)': 'kpow',
   'Dwarven Bank Heist': 'vbank',
-  'An Arcanist Ritual': 'vdhar'
+  'An Arcanist Ritual': 'vdhar',
+  'Botham II': 'ankuh',
+  'Esuph IV': 'anksqr'
 };
 
 /**

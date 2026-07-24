@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.6.4",
+      "changes": [
+        {
+          "mod": "Challenges",
+          "type": "added",
+          "text": "Player names link to bestiaryarena.com/profile across leaderboards, matchmaking/result toasts, and victory screens."
+        },
+        {
+          "mod": "Depot Manager",
+          "type": "changed",
+          "text": "While Persistent Inventory position is locked, right-clicking inventory items still shows Send to depot / Send to inventory, greyed out and unselectable, with a tooltip to unlock inventory."
+        },
+        {
+          "mod": "Highscores",
+          "type": "changed",
+          "text": "Never-played maps (excluding dynamic events) now appear on Summary, Ticks, Rank, and Floor with placeholders: 9600 ticks, rank 0, floor 0. Maps with no public WR still show (· No WR), stay dimmed, and are not counted in improvement totals."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "added",
+          "text": "Added Ankrahmun static raids Botham II and Esuph IV to EVENT_TO_ROOM_MAPPING."
+        }
+      ]
+    },
+    {
       "version": "4.6.3",
       "changes": [
         {

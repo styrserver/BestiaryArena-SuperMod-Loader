@@ -791,12 +791,21 @@ function showInventoryItemDepotContextMenu(clientX, clientY, button) {
 
   const inDepot = depotInventoryItemState.keys.includes(key);
   const label = inDepot ? t('mods.depot.sendToInventory') : t('mods.depot.sendToDepot');
-  const item = createDepotContextActionMenuItem(label, (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    toggleInventoryItemDepot(button);
-    closeInventoryItemDepotContextMenu();
-  });
+  const locked = isInventoryWidgetLockedForDepot();
+  const item = createDepotContextActionMenuItem(
+    label,
+    locked
+      ? null
+      : (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleInventoryItemDepot(button);
+          closeInventoryItemDepotContextMenu();
+        },
+    locked
+      ? { disabled: true, title: t('mods.depot.inventoryLockedForDepot') }
+      : undefined
+  );
   item.setAttribute('data-depot-menu-item', 'true');
   group.appendChild(item);
   menu.appendChild(group);
@@ -834,7 +843,6 @@ function handleInventoryItemContextMenu(event) {
   const button = event.target?.closest?.('button');
   if (!button || !container.contains(button)) return;
   if (!isDepotableInventoryButton(button)) return;
-  if (isInventoryWidgetLockedForDepot()) return;
   event.preventDefault();
   event.stopPropagation();
   if (typeof event.stopImmediatePropagation === 'function') {
@@ -3460,7 +3468,9 @@ function moveDepotMenuItemToBottom(menuElem, knownDepotItem = null) {
   }
 }
 
-function createDepotContextActionMenuItem(labelText, onClick) {
+function createDepotContextActionMenuItem(labelText, onClick, options) {
+  options = options || {};
+  const disabled = options.disabled === true;
   const item = document.createElement('div');
   item.className =
     'focus-style dropdown-menu-item flex cursor-default select-none items-center gap-2 outline-none data-[state=open]:bg-whiteDarkest data-[state=open]:text-whiteBrightest';
@@ -3468,15 +3478,29 @@ function createDepotContextActionMenuItem(labelText, onClick) {
   item.setAttribute('tabindex', '-1');
   item.setAttribute('data-orientation', 'vertical');
   item.setAttribute('data-radix-collection-item', '');
-  item.style.cssText = 'color:white;background:transparent;padding:0 8px;height:20px;min-height:20px;max-height:20px;border:none;font-family:inherit;font-size:16px;font-weight:400;line-height:1;display:flex;align-items:center;';
+  item.style.cssText = disabled
+    ? 'color:#888;background:transparent;padding:0 8px;height:20px;min-height:20px;max-height:20px;border:none;font-family:inherit;font-size:16px;font-weight:400;line-height:1;display:flex;align-items:center;opacity:0.55;cursor:not-allowed;'
+    : 'color:white;background:transparent;padding:0 8px;height:20px;min-height:20px;max-height:20px;border:none;font-family:inherit;font-size:16px;font-weight:400;line-height:1;display:flex;align-items:center;';
   item.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-package" aria-hidden="true"><path d="M21 8v8a1 1 0 0 1-.5.87l-7 4a1 1 0 0 1-1 0l-7-4A1 1 0 0 1 5 16V8"></path><path d="m3.3 7 8.2 4.73a1 1 0 0 0 1 0L20.7 7"></path><path d="M12 22V12"></path><path d="M5 5.5 12 2l7 3.5"></path></svg>${labelText}`;
+  if (disabled) {
+    item.setAttribute('aria-disabled', 'true');
+    item.setAttribute('data-disabled', 'true');
+    item.title = options.title || t('mods.depot.inventoryLockedForDepot');
+    item.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    }, { capture: true });
+    return item;
+  }
   item.addEventListener('mouseenter', () => {
     item.style.background = 'rgba(255, 255, 255, 0.15)';
   });
   item.addEventListener('mouseleave', () => {
     item.style.background = 'transparent';
   });
-  item.addEventListener('click', onClick, { capture: true });
+  if (typeof onClick === 'function') {
+    item.addEventListener('click', onClick, { capture: true });
+  }
   return item;
 }
 

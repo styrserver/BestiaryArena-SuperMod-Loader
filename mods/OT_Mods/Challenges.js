@@ -263,6 +263,68 @@ function challengesText(key) {
   return challengesModTranslate(key, CHALLENGES_I18N_FALLBACK[key]);
 }
 
+var CHALLENGE_PROFILE_URL_BASE = 'https://bestiaryarena.com/profile/';
+
+function getChallengePlayerProfileUrl(playerName) {
+  return CHALLENGE_PROFILE_URL_BASE + encodeURIComponent(String(playerName || '').trim());
+}
+
+function isChallengeLinkablePlayerName(playerName) {
+  var name = (playerName != null && String(playerName).trim()) ? String(playerName).trim() : '';
+  if (!name || name === '—' || name === 'Unknown') return false;
+  var fallback = challengesText('mods.challenges.opponentFallback');
+  if (fallback && name === fallback) return false;
+  return true;
+}
+
+/** Profile <a> for a player name, or a plain <span> when the name is not linkable. */
+function createChallengePlayerProfileLink(playerName, options) {
+  options = options || {};
+  var name = (playerName != null && String(playerName).trim()) ? String(playerName).trim() : '';
+  var el;
+  if (isChallengeLinkablePlayerName(name)) {
+    el = document.createElement('a');
+    el.href = getChallengePlayerProfileUrl(name);
+    el.target = '_blank';
+    el.rel = 'noopener noreferrer';
+    el.textContent = name;
+    el.title = challengesText('mods.challenges.openProfileTitle').replace('{name}', name);
+  } else {
+    el = document.createElement('span');
+    el.textContent = name || (options.emptyText != null ? options.emptyText : '—');
+  }
+  el.style.cssText = options.style || ('color:' + CHALLENGE_COLORS.PRIMARY + '; text-decoration:none; cursor:pointer;');
+  if (!isChallengeLinkablePlayerName(name)) el.style.cursor = 'default';
+  if (options.className) el.className = options.className;
+  return el;
+}
+
+/** Build a node from a template with `{name}` replaced by a profile link. Extra `{key}` replacements via `replacements`. */
+function buildChallengeTemplateWithProfileName(template, playerName, replacements) {
+  var wrap = document.createElement('span');
+  wrap.style.whiteSpace = 'pre-line';
+  var text = String(template || '');
+  if (replacements && typeof replacements === 'object') {
+    Object.keys(replacements).forEach(function(k) {
+      text = text.split('{' + k + '}').join(String(replacements[k]));
+    });
+  }
+  var parts = text.split('{name}');
+  if (parts.length === 1) {
+    wrap.textContent = text;
+    return wrap;
+  }
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i]) wrap.appendChild(document.createTextNode(parts[i]));
+    if (i < parts.length - 1) wrap.appendChild(createChallengePlayerProfileLink(playerName));
+  }
+  return wrap;
+}
+
+function isChallengeDomNode(value) {
+  return !!(value && typeof value === 'object' && value.nodeType);
+}
+
 var ChallengeFirebaseService = {
   get: function(path, defaultReturn) {
     defaultReturn = defaultReturn !== undefined ? defaultReturn : null;
@@ -694,7 +756,7 @@ function formatTimeRemainingMs(ms) {
 }
 
 function buildMultiplayerLiveToastMessage(ctx) {
-  if (!ctx || !ctx.startTime) return '';
+  if (!ctx || !ctx.startTime) return null;
   var elapsed = Date.now() - ctx.startTime;
   var timeStr = elapsed >= CHALLENGE_MP_TIME_LIMIT_MS ? '0:00' : formatTimeRemainingMs(CHALLENGE_MP_TIME_LIMIT_MS - elapsed);
   var keys = getMatchPlayerKeys(ctx.matchId);
@@ -703,10 +765,17 @@ function buildMultiplayerLiveToastMessage(ctx) {
   var s1 = (ctx.cachedMatch && ctx.cachedMatch.scores && typeof ctx.cachedMatch.scores[keys[0]] === 'number') ? ctx.cachedMatch.scores[keys[0]] : '—';
   var s2 = (ctx.cachedMatch && ctx.cachedMatch.scores && typeof ctx.cachedMatch.scores[keys[1]] === 'number') ? ctx.cachedMatch.scores[keys[1]] : '—';
   var alliesAllowedText = (ctx && typeof ctx.alliesAllowed === 'number') ? String(ctx.alliesAllowed) : '—';
-  return challengesText('mods.challenges.multiplayer.liveToastTime').replace('{time}', timeStr) + '\n' +
-    challengesText('mods.challenges.creaturesAllowed').replace('{n}', alliesAllowedText) + '\n' +
-    name1 + ': ' + s1 + '\n' +
-    name2 + ': ' + s2;
+  var wrap = document.createElement('div');
+  wrap.style.whiteSpace = 'pre-line';
+  wrap.appendChild(document.createTextNode(
+    challengesText('mods.challenges.multiplayer.liveToastTime').replace('{time}', timeStr) + '\n' +
+    challengesText('mods.challenges.creaturesAllowed').replace('{n}', alliesAllowedText) + '\n'
+  ));
+  wrap.appendChild(createChallengePlayerProfileLink(name1));
+  wrap.appendChild(document.createTextNode(': ' + s1 + '\n'));
+  wrap.appendChild(createChallengePlayerProfileLink(name2));
+  wrap.appendChild(document.createTextNode(': ' + s2));
+  return wrap;
 }
 
 function buildSoloCreaturesAllowedToastMessage(alliesAllowed) {
@@ -784,7 +853,10 @@ function pollMultiplayerMatchScores() {
       var oppKey = (keys.length >= 2 && ctx.myKey) ? (keys[0] === ctx.myKey ? keys[1] : keys[0]) : null;
       var oppName = oppKey ? (getMatchPlayerNameForKey(ctx.cachedMatch, oppKey) || (ctx.opponentName && String(ctx.opponentName).trim()) || oppKey) : challengesText('mods.challenges.opponentFallback');
       var winByForfeitTemplate = challengesText('mods.challenges.multiplayer.winByForfeitWithOpponent');
-      var winByForfeitMsg = winByForfeitTemplate.replace('{name}', String(oppName).trim() || challengesText('mods.challenges.opponentFallback'));
+      var winByForfeitMsg = buildChallengeTemplateWithProfileName(
+        winByForfeitTemplate,
+        String(oppName).trim() || challengesText('mods.challenges.opponentFallback')
+      );
       showChallengesToast(winByForfeitMsg, { duration: 10000 });
       if (typeof window !== 'undefined' && window.__challengesRefreshMultiplayerLeaderboard) window.__challengesRefreshMultiplayerLeaderboard();
       challengeMultiplayerContext = null;
@@ -1043,7 +1115,8 @@ function showMultiplayerResult(ctx, data) {
   function scoreRow(name, score) {
     var p = document.createElement('p');
     p.style.cssText = 'margin: 8px 0; font-size: 15px; color: #e6d7b0;';
-    p.textContent = name + ': ' + score;
+    p.appendChild(createChallengePlayerProfileLink(name));
+    p.appendChild(document.createTextNode(': ' + score));
     return p;
   }
   wrap.appendChild(scoreRow(name1, data.score1));
@@ -1064,7 +1137,12 @@ function showMultiplayerResult(ctx, data) {
   });
 
   if (!opened) {
-    var scoresAndResult = name1 + ': ' + data.score1 + '\n' + name2 + ': ' + data.score2 + '\n' + resultTitle;
+    var scoresAndResult = document.createElement('div');
+    scoresAndResult.style.whiteSpace = 'pre-line';
+    scoresAndResult.appendChild(createChallengePlayerProfileLink(name1));
+    scoresAndResult.appendChild(document.createTextNode(': ' + data.score1 + '\n'));
+    scoresAndResult.appendChild(createChallengePlayerProfileLink(name2));
+    scoresAndResult.appendChild(document.createTextNode(': ' + data.score2 + '\n' + resultTitle));
     showChallengesToast(scoresAndResult, { duration: 6000, messageColor: resultColor });
     if (typeof window !== 'undefined') {
       window.setTimeout(function() {
@@ -2093,14 +2171,24 @@ function openChallengesModal(initialTabIndex) {
           acceptMessage = t('mods.challenges.multiplayer.matchAccepted');
         } else if (state.myAccepted) {
           joinBtn.style.display = 'none';
-          statusEl.textContent = (t('mods.challenges.multiplayer.waitingForAcceptWithin') || 'Waiting for {name} to accept within {n}s...').replace('{name}', state.matchedOpponent).replace('{n}', String(acceptSecondsLeft));
+          var waitingAcceptNode = buildChallengeTemplateWithProfileName(
+            t('mods.challenges.multiplayer.waitingForAcceptWithin') || 'Waiting for {name} to accept within {n}s...',
+            state.matchedOpponent,
+            { n: String(acceptSecondsLeft) }
+          );
+          statusEl.textContent = waitingAcceptNode.textContent || '';
           matchmakingAcceptPanelBtn.style.display = 'none';
-          acceptMessage = statusEl.textContent;
+          acceptMessage = waitingAcceptNode;
         } else {
           joinBtn.style.display = 'none';
-          statusEl.textContent = (t('mods.challenges.multiplayer.acceptMatchPromptWithin') || 'Matched with {name}. Accept within {n}s...').replace('{name}', state.matchedOpponent).replace('{n}', String(acceptSecondsLeft));
+          var acceptPromptNode = buildChallengeTemplateWithProfileName(
+            t('mods.challenges.multiplayer.acceptMatchPromptWithin') || 'Matched with {name}. Accept within {n}s...',
+            state.matchedOpponent,
+            { n: String(acceptSecondsLeft) }
+          );
+          statusEl.textContent = acceptPromptNode.textContent || '';
           matchmakingAcceptPanelBtn.style.display = 'inline-block';
-          acceptMessage = statusEl.textContent;
+          acceptMessage = acceptPromptNode;
           showAcceptInToast = true;
         }
         if (challengesPersistentToastHandle) {
@@ -2472,9 +2560,10 @@ function openChallengesModal(initialTabIndex) {
       rankCell.style.cssText = 'display:table-cell; padding:4px 6px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + ';';
       rankCell.textContent = index + 1;
       tr.appendChild(rankCell);
-      var nameCell = document.createElement('div');
-      nameCell.style.cssText = 'display:table-cell; padding:4px 6px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + '; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
-      nameCell.textContent = row.name || row.key || '—';
+      var nameCell = createChallengePlayerProfileLink(row.name || row.key || '', {
+        emptyText: '—',
+        style: 'display:table-cell; padding:4px 6px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + '; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:' + CHALLENGE_COLORS.PRIMARY + '; text-decoration:none;'
+      });
       tr.appendChild(nameCell);
       var matchesCell = document.createElement('div');
       matchesCell.style.cssText = 'display:table-cell; padding:4px 6px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + ';';
@@ -3841,13 +3930,10 @@ function openChallengesModal(initialTabIndex) {
         });
       }
       if (showNameColumn) {
-        var nameCell = document.createElement('a');
-        nameCell.href = 'https://bestiaryarena.com/profile/' + encodeURIComponent(row.name || '');
-        nameCell.target = '_blank';
-        nameCell.rel = 'noopener noreferrer';
-        nameCell.style.cssText = 'display:table-cell; padding:2px 4px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + '; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:' + CHALLENGE_COLORS.PRIMARY + '; text-decoration:none;';
-        nameCell.textContent = row.name || '—';
-        nameCell.title = row.name ? t('mods.challenges.openProfileTitle').replace('{name}', row.name) : '';
+        var nameCell = createChallengePlayerProfileLink(row.name || '', {
+          emptyText: '—',
+          style: 'display:table-cell; padding:2px 4px; border-bottom:1px solid ' + CHALLENGE_COLORS.BORDER + '; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:' + CHALLENGE_COLORS.PRIMARY + '; text-decoration:none;'
+        });
         tr.appendChild(nameCell);
       }
       var mapCell = document.createElement('div');
@@ -5692,11 +5778,11 @@ function buildChallengeConfig(roomId, villainSpecs, allyLimit, opts) {
             || challengesText('mods.challenges.opponentFallback');
           var oppP = document.createElement('p');
           oppP.style.cssText = 'margin: 6px 0; font-size: 14px;';
-          oppP.textContent = challengesText('mods.challenges.multiplayer.victoryOpponent').replace('{name}', oppName);
+          oppP.appendChild(buildChallengeTemplateWithProfileName(challengesText('mods.challenges.multiplayer.victoryOpponent'), oppName));
           wrap.appendChild(oppP);
           var waitP = document.createElement('p');
           waitP.style.cssText = 'margin: 12px 0 0 0; font-size: 13px; color: #c9e4a8; font-style: italic; text-align: center;';
-          waitP.textContent = challengesText('mods.challenges.multiplayer.victoryWaitingForOpponent').replace('{name}', oppName);
+          waitP.appendChild(buildChallengeTemplateWithProfileName(challengesText('mods.challenges.multiplayer.victoryWaitingForOpponent'), oppName));
           wrap.appendChild(waitP);
           return wrap;
         }
@@ -5787,7 +5873,8 @@ function updateChallengesToastPositions(container) {
  */
 function showChallengesToast(message, options) {
   options = options || {};
-  var safeMsg = (message != null && message !== '') ? String(message).replace(/</g, '&lt;') : '';
+  var messageIsNode = isChallengeDomNode(message);
+  var safeMsg = (!messageIsNode && message != null && message !== '') ? String(message).replace(/</g, '&lt;') : '';
   try {
     var container = getChallengesToastContainer();
     if (!container) return null;
@@ -5799,13 +5886,13 @@ function showChallengesToast(message, options) {
     var flexContainer = document.createElement('div');
     flexContainer.className = 'challenges-toast-item';
     flexContainer.style.cssText = 'display: flex; position: absolute; transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1); transform: translateY(-' + stackOffset + 'px); bottom: 0px; right: 0px; justify-content: flex-end; pointer-events: none; width: max-content; max-width: 100%;';
-    var toast = document.createElement((isTransient && !useJoinLink) ? 'button' : 'div');
+    var toast = document.createElement((isTransient && !useJoinLink && !messageIsNode) ? 'button' : 'div');
     toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
     if (!isTransient) toast.setAttribute('role', 'presentation');
-    var toastNeedsPointerEvents = isTransient || useJoinLink || options.showAccept === true || options.acceptLabel !== undefined || typeof options.onClose === 'function';
+    var toastNeedsPointerEvents = isTransient || useJoinLink || messageIsNode || options.showAccept === true || options.acceptLabel !== undefined || typeof options.onClose === 'function';
     if (toastNeedsPointerEvents) {
       toast.style.pointerEvents = 'auto';
-      if (useJoinLink) toast.style.cursor = 'default';
+      if (useJoinLink || messageIsNode) toast.style.cursor = 'default';
     }
     var widgetTop = document.createElement('div');
     widgetTop.className = 'widget-top h-2.5';
@@ -5814,6 +5901,19 @@ function showChallengesToast(message, options) {
     var messageDiv = document.createElement('div');
     messageDiv.className = 'text-left';
     messageDiv.style.flex = '1 1 auto';
+    function applyToastMessageContent(content) {
+      messageDiv.textContent = '';
+      if (isChallengeDomNode(content)) {
+        if (options.messageColor && typeof options.messageColor === 'string') messageDiv.style.color = options.messageColor;
+        messageDiv.appendChild(content);
+        return;
+      }
+      var text = (content != null && content !== '') ? String(content).replace(/</g, '&lt;') : '';
+      if (text.indexOf('\n') !== -1) messageDiv.style.whiteSpace = 'pre-line';
+      else messageDiv.style.whiteSpace = '';
+      if (options.messageColor && typeof options.messageColor === 'string') messageDiv.style.color = options.messageColor;
+      messageDiv.textContent = text;
+    }
     if (useJoinLink) {
       messageDiv.style.display = 'inline-flex';
       messageDiv.style.flexWrap = 'wrap';
@@ -5838,9 +5938,7 @@ function showChallengesToast(message, options) {
       messageDiv.appendChild(joinLinkBtn);
       messageDiv.appendChild(tail);
     } else {
-      if (safeMsg.indexOf('\n') !== -1) messageDiv.style.whiteSpace = 'pre-line';
-      if (options.messageColor && typeof options.messageColor === 'string') messageDiv.style.color = options.messageColor;
-      messageDiv.textContent = safeMsg;
+      applyToastMessageContent(messageIsNode ? message : safeMsg);
     }
     widgetBottom.appendChild(messageDiv);
     var acceptToastBtn = null;
@@ -5879,6 +5977,7 @@ function showChallengesToast(message, options) {
     if (isTransient) {
       toast.addEventListener('click', function(e) {
         if (useJoinLink && e.target && e.target.closest && e.target.closest('[data-challenges-queue-watch-join]')) return;
+        if (messageIsNode && e.target && e.target.closest && e.target.closest('a[href]')) return;
         if (flexContainer && flexContainer.parentNode) {
           flexContainer.parentNode.removeChild(flexContainer);
           updateChallengesToastPositions(container);
@@ -5895,7 +5994,11 @@ function showChallengesToast(message, options) {
 
     updateChallengesToastPositions(container);
     var handle = {
-      updateMessage: function(text) { messageDiv.textContent = (text != null && text !== '') ? String(text).replace(/</g, '&lt;') : ''; },
+      updateMessage: function(text) {
+        toast.style.pointerEvents = 'auto';
+        toast.style.cursor = 'default';
+        applyToastMessageContent(text);
+      },
       setAcceptVisible: acceptToastBtn ? function(visible) { acceptToastBtn.style.display = visible ? 'inline-block' : 'none'; } : function() {},
       remove: function() {
         if (flexContainer && flexContainer.parentNode) {
