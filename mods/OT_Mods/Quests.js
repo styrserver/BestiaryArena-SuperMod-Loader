@@ -7715,7 +7715,7 @@ function createNPCCooldownManager() {
     const imageUrl = getQuestItemsAssetUrl('Fur_Backpack.gif');
     
     questItemsButton.innerHTML = `
-      <div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image">
+      <div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled='true']:dithered data-[highlighted='true']:unset-border-image data-[hoverable='true']:hover:unset-border-image">
         <div class="relative grid h-full place-items-center">
           ${borderDiv}
           <img alt="quest items" class="pixelated" width="32" height="32" src="${imageUrl}">

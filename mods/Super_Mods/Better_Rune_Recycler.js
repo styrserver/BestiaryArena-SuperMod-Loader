@@ -687,7 +687,7 @@
     const borderDiv = window.getInventoryBorderStyle ? window.getInventoryBorderStyle(inventoryBorderStyle) : '';
     
     betterRuneRecyclerButton.innerHTML = `
-      <div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image">
+      <div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled='true']:dithered data-[highlighted='true']:unset-border-image data-[hoverable='true']:hover:unset-border-image">
         <div class="relative grid h-full place-items-center">
           ${borderDiv}
           <img src="/assets/icons/rune-recycle.png" alt="Better Rune Recycler" style="width: 32px; height: 32px; object-fit: contain; position: relative; z-index: 2;">

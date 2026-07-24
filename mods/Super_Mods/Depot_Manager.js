@@ -1784,7 +1784,7 @@ function addDepotInventoryButton() {
   const borderDiv = window.getInventoryBorderStyle ? window.getInventoryBorderStyle(inventoryBorderStyle) : '';
   const button = document.createElement('button');
   button.className = 'focus-style-visible active:opacity-70 depot-manager-inventory-button';
-  button.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image"><div class="relative grid h-full place-items-center">${borderDiv}<img alt="depot chest" class="pixelated" width="32" height="32" src="${getDepotChestAssetUrl()}"></div></div>`;
+  button.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled='true']:dithered data-[highlighted='true']:unset-border-image data-[hoverable='true']:hover:unset-border-image"><div class="relative grid h-full place-items-center">${borderDiv}<img alt="depot chest" class="pixelated" width="32" height="32" src="${getDepotChestAssetUrl()}"></div></div>`;
   button.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();

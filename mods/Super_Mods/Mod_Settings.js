@@ -44,6 +44,8 @@ const defaultConfig = {
   inventoryWidgetPinned: null,
   inventoryWidgetLeft: null,
   inventoryWidgetTop: null,
+  inventoryHorizontalLayout: false,
+  inventoryWidgetLocked: false,
   inventoryBorderStyle: 'Original',
   modButtonDisplay: 'text', // 'text' or 'icon'
   modButtonBarLayout: 'horizontal', // 'horizontal', 'vertical', or 'hidden'
@@ -202,6 +204,8 @@ if (config.persistentInventory && config.inventoryWidgetPinned == null) {
 }
 if (!Number.isFinite(config.inventoryWidgetLeft)) config.inventoryWidgetLeft = null;
 if (!Number.isFinite(config.inventoryWidgetTop)) config.inventoryWidgetTop = null;
+if (config.inventoryHorizontalLayout !== true) config.inventoryHorizontalLayout = false;
+if (config.inventoryWidgetLocked !== true) config.inventoryWidgetLocked = false;
 if (config.persistentInventory && config.inventoryWidgetPinned === true) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
@@ -839,13 +843,21 @@ const persistentInventoryState = {
   clickedPin: false,
   lastPinClickAt: 0,
   lastOpenAttemptAt: 0,
-  pinClickAttempts: 0
+  pinClickAttempts: 0,
+  horizontalLayoutCss: null,
+  positionStyleCss: null
 };
 
 const PERSISTENT_INVENTORY_STYLE_ID = 'mod-settings-persistent-inventory-style';
 const PERSISTENT_INVENTORY_RESTORE_STYLE_ID = 'mod-settings-persistent-inventory-restore-style';
 const PERSISTENT_INVENTORY_ATTR = 'data-ba-persistent-inventory';
 const PERSISTENT_INVENTORY_RESTORING_ATTR = 'data-ba-persistent-inventory-restoring';
+const INVENTORY_HORIZONTAL_ATTR = 'data-ba-inventory-horizontal';
+const INVENTORY_HORIZONTAL_STYLE_ID = 'mod-settings-inventory-horizontal-style';
+const INVENTORY_LAYOUT_TOGGLE_CLASS = 'ba-inventory-layout-toggle';
+const INVENTORY_LOCK_TOGGLE_CLASS = 'ba-inventory-lock-toggle';
+const INVENTORY_HEADER_ACTIONS_CLASS = 'ba-inventory-header-actions';
+const INVENTORY_SLOT_PX = 34;
 
 function logPersistentInventory(message, details) {
   if (details !== undefined) {
@@ -3262,12 +3274,30 @@ function getInventoryBorderStyle(borderStyleName) {
   return `<div class="has-rarity absolute inset-0 z-1 opacity-80 pointer-events-none" data-rarity="5" data-max-shinies="true" data-max-shinies-color="${colorKey}" data-mod-inventory-border="true" style="${borderStyle}"></div>`;
 }
 
+// Must match native inventory slot utilities (quoted attribute variants) or hover border never applies.
+const INVENTORY_MOD_SLOT_CLASS =
+  "container-slot surface-darker data-[disabled='true']:dithered data-[highlighted='true']:unset-border-image data-[hoverable='true']:hover:unset-border-image";
+
+function normalizeInventoryModSlotHoverClasses(slot) {
+  if (!(slot instanceof HTMLElement)) return;
+  let className = slot.className || '';
+  className = className
+    .replace(/data-\[disabled=true\]/g, "data-[disabled='true']")
+    .replace(/data-\[highlighted=true\]/g, "data-[highlighted='true']")
+    .replace(/data-\[hoverable=true\]/g, "data-[hoverable='true']");
+  if (className !== slot.className) {
+    slot.className = className;
+  }
+}
+
 // Expose globally for other mods
 window.getInventoryBorderStyle = getInventoryBorderStyle;
+window.INVENTORY_MOD_SLOT_CLASS = INVENTORY_MOD_SLOT_CLASS;
 
-function refreshInventoryModButtonBorderStyle() {
+function refreshInventoryModButtonBorderStyle(options = {}) {
+  const forceBorderRebuild = options.forceBorderRebuild === true;
   const borderHtml = getInventoryBorderStyle(config.inventoryBorderStyle);
-  document.querySelectorAll('[data-mod-inventory-border="true"]').forEach((node) => node.remove());
+  const wantsCustomBorder = Boolean(borderHtml);
 
   const inventoryModButtons = Array.from(document.querySelectorAll('button')).filter((button) => {
     if (!(button instanceof HTMLElement)) return false;
@@ -3277,10 +3307,28 @@ function refreshInventoryModButtonBorderStyle() {
   inventoryModButtons.forEach((button) => {
     const slot = button.querySelector(':scope > .container-slot');
     if (!slot) return;
-    slot.style.position = 'relative';
-    slot.style.overflow = 'hidden';
-    if (!borderHtml) return;
-    slot.insertAdjacentHTML('beforeend', borderHtml);
+    normalizeInventoryModSlotHoverClasses(slot);
+
+    const existingBorder = slot.querySelector(':scope > [data-mod-inventory-border="true"]');
+    if (!wantsCustomBorder) {
+      existingBorder?.remove();
+      // Original: do not clip the native white hover border.
+      if (slot.style.overflow === 'hidden') {
+        slot.style.removeProperty('overflow');
+      }
+      return;
+    }
+
+    if (slot.style.position !== 'relative') {
+      slot.style.position = 'relative';
+    }
+    if (slot.style.overflow !== 'hidden') {
+      slot.style.overflow = 'hidden';
+    }
+    if (forceBorderRebuild || !existingBorder) {
+      existingBorder?.remove();
+      slot.insertAdjacentHTML('beforeend', borderHtml);
+    }
   });
 }
 
@@ -3328,6 +3376,9 @@ function triggerInventoryModButtonsRecovery() {
 }
 
 function verifyInventoryModButtonsIntegrity(source = 'unknown') {
+  // Keep mod inventory slot hover/border styles in sync (independent of Persistent Inventory).
+  refreshInventoryModButtonBorderStyle();
+
   if (!config.persistentInventory) return;
   if (!findInventoryWidgetRoot()) return;
 
@@ -8288,10 +8339,7 @@ function showSettingsModal() {
         createSettingsCheckboxHandler(
           'persistentInventory',
           () => {
-            capturePersistentInventoryStateFromDom();
-            // Enabling always means restore open+pinned on next load.
-            config.inventoryWidgetPinned = true;
-            saveConfig();
+            initializePersistentInventoryConfigForEnable();
             applyPersistentInventory();
           },
           () => disablePersistentInventory()
@@ -8300,7 +8348,9 @@ function showSettingsModal() {
       
       const inventoryBorderStyleSelector = content.querySelector('#inventory-border-style-selector');
       if (inventoryBorderStyleSelector) {
-        createSettingsDropdownHandler('inventoryBorderStyle', refreshInventoryModButtonBorderStyle)(inventoryBorderStyleSelector);
+        createSettingsDropdownHandler('inventoryBorderStyle', () =>
+          refreshInventoryModButtonBorderStyle({ forceBorderRebuild: true })
+        )(inventoryBorderStyleSelector);
       }
 
       const modButtonDisplaySelector = content.querySelector('#mod-button-display-selector');
@@ -12028,10 +12078,6 @@ function ensurePersistentPowersaverInGameLabelStyle() {
   // Title via ::after. Game text cleared in JS. Real game checkbox hidden; custom
   // preference checkbox shown. gap:0 + pref margin = one normal gap.
   style.textContent = `
-@keyframes mod-settings-persist-ps-shimmer {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
-}
 label[${PERSIST_PS_IN_GAME_LABEL_ATTR}="true"] {
   gap: 0 !important;
   cursor: help;
@@ -12064,22 +12110,7 @@ label[${PERSIST_PS_IN_GAME_LABEL_ATTR}="true"]::after {
   content: attr(${PERSIST_PS_IN_GAME_TITLE_ATTR});
   font-size: 16px;
   line-height: normal;
-  background: linear-gradient(
-    90deg,
-    #d8dde8,
-    #9ec5e8,
-    #c4b5e8,
-    #e8d5a8,
-    #a8dcc4,
-    #d8dde8,
-    #9ec5e8
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  animation: mod-settings-persist-ps-shimmer 8s linear infinite;
+  color: #fff;
 }
 `;
 }
@@ -12290,7 +12321,7 @@ function findPowerSavingModeCheckboxLabel() {
 }
 
 /**
- * While Persistent Powersaver is on: shimmer title, custom preference checkbox
+ * While Persistent Powersaver is on: white title, custom preference checkbox
  * (powerSavingModeEnabled), real game checkbox hidden but still session-driven.
  */
 function applyPersistentPowersaverInGameLabel() {
@@ -12492,6 +12523,9 @@ const POWER_SAVING_OFF_DEBOUNCE_EXTRA_MS = 1000;
 const POWER_SAVING_FASTER_AUTOPLAY_MS_DEFAULT = 100;
 const POWER_SAVING_FASTER_AUTOPLAY_MS_MIN = 10;
 const POWER_SAVING_FASTER_AUTOPLAY_MS_MAX = 180000;
+/** Re-arms while waiting between fights (defeat gaps); caps so pause can't loop forever. */
+let powerSavingGapHoldCount = 0;
+const POWER_SAVING_GAP_HOLD_MAX = 3;
 
 function getPowerSavingOffDebounceMs() {
   const raw = Number(getAutomatorConfigFromStorage().fasterAutoplayMs);
@@ -12528,6 +12562,13 @@ function getAutoplayPrimaryButtonTextForPowerSaving() {
   return (row?.primary?.textContent || '').trim();
 }
 
+function normalizeAutoplayControlLabel(text) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function isAutoplayPauseButtonVisibleForPowerSaving() {
   const row = findAutoplayControlRowForPowerSaving();
   if (!row) return false;
@@ -12540,8 +12581,13 @@ function isAutoplayPausedInDomForPowerSaving() {
   const row = findAutoplayControlRowForPowerSaving();
   if (!row) return false;
   if (isAutoplayPauseButtonVisibleForPowerSaving()) return false;
-  const text = (row.primary?.textContent || '').trim();
-  return text === 'Resume' || text === 'Retomar';
+  const text = normalizeAutoplayControlLabel(row.primary?.textContent);
+  return (
+    text === 'resume' ||
+    text === 'retomar' ||
+    text.includes('resume') ||
+    text.includes('retomar')
+  );
 }
 
 /** True only when the autoplay row itself shows Start/Iniciar (session fully stopped). */
@@ -12550,8 +12596,13 @@ function isAutoplayFullyStoppedInDomForPowerSaving() {
   if (!row) return false;
   if (isAutoplayPauseButtonVisibleForPowerSaving()) return false;
   if (isAutoplayPausedInDomForPowerSaving()) return false;
-  const text = (row.primary?.textContent || '').trim();
-  return text === 'Start' || text === 'Iniciar';
+  const text = normalizeAutoplayControlLabel(row.primary?.textContent);
+  return (
+    text === 'start' ||
+    text === 'iniciar' ||
+    text.includes('start') ||
+    text.includes('iniciar')
+  );
 }
 
 function getPowerSavingBoardRoomId(ctx) {
@@ -12774,6 +12825,7 @@ function clearPowerSavingOffDebounce() {
     clearTimeout(powerSavingOffDebounceTimer);
     powerSavingOffDebounceTimer = null;
   }
+  powerSavingGapHoldCount = 0;
 }
 
 function isPowerSavingOffDebouncePending() {
@@ -12781,28 +12833,91 @@ function isPowerSavingOffDebouncePending() {
 }
 
 /**
- * After leaving a fight: wait, then decide. Do not touch the checkbox during the wait
- * (avoids: game unchecks → we force goblin back on → later we turn off).
+ * Autoplay still mid-session (not Start, not Resume). Defeat gaps often hide Pause
+ * briefly, so we do not require it — gapHold cap limits how long we wait.
+ */
+function shouldHoldPowerSavingThroughAutoplayGap() {
+  try {
+    const ctx = globalThis.state?.board?.getSnapshot?.().context;
+    const mode = typeof ctx?.mode === 'string' ? ctx.mode.toLowerCase() : '';
+    if (mode !== 'autoplay') return false;
+    if (isAutoplayPausedInDomForPowerSaving()) return false;
+    if (isAutoplayFullyStoppedInDomForPowerSaving()) return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Keep the game Power saving checkbox ON through a defeat/between-fight gap.
+ * Overlay hold alone is not enough — when the game unchecks, the goblin screen drops
+ * and the battlefield flashes even if Highscores stay suppressed.
+ */
+function ensurePowerSavingCheckboxOnDuringGap() {
+  if (!config.persistPowerSavingMode || !config.powerSavingModeEnabled) return;
+  if (powerSavingModeRestorePending) return;
+  const button = findPowerSavingModeCheckboxButton();
+  if (!button) return;
+  if (isPowerSavingModeCheckboxChecked(button)) {
+    setLivePowerSavingModeEnabled(true);
+    return;
+  }
+  console.log('[Mod Settings] Power saving: re-assert ON during gap (goblin dropped)');
+  clickPowerSavingModeCheckbox(button, () => {
+    setLivePowerSavingModeEnabled(true);
+  });
+}
+
+/**
+ * After leaving a fight: wait, then decide.
+ * Keep goblin/checkbox ON through the gap (game often unchecks on defeat).
+ * Overlays stay suppressed until we decide to disable.
  */
 function schedulePowerSavingOffDebounce() {
   if (powerSavingOffDebounceTimer) return;
+  if (config.powerSavingModeEnabled) {
+    setLivePowerSavingModeEnabled(true);
+    ensurePowerSavingCheckboxOnDuringGap();
+  }
   const debounceMs = getPowerSavingOffDebounceMs();
   console.log('[Mod Settings] Power saving: OFF debounce armed', {
     ms: debounceMs,
     fasterAutoplayMs: debounceMs - POWER_SAVING_OFF_DEBOUNCE_EXTRA_MS,
+    gapHold: powerSavingGapHoldCount,
   });
   powerSavingOffDebounceTimer = setTimeout(() => {
     powerSavingOffDebounceTimer = null;
     if (!config.persistPowerSavingMode) return;
     if (isPowerSavingActiveSession()) {
       lastPowerSavingSessionActive = true;
+      powerSavingGapHoldCount = 0;
       console.log('[Mod Settings] Power saving: OFF debounce ended — fight active, keeping/enabling');
       schedulePersistedPowerSavingModeRestore(0);
       return;
     }
+    // Defeat gap: keep holding a few times (Pause often missing). Cap at 3 (~4s total after first wait).
+    if (config.powerSavingModeEnabled && shouldHoldPowerSavingThroughAutoplayGap()) {
+      powerSavingGapHoldCount += 1;
+      if (powerSavingGapHoldCount <= POWER_SAVING_GAP_HOLD_MAX) {
+        console.log('[Mod Settings] Power saving: OFF debounce ended — autoplay gap, holding', {
+          gapHold: powerSavingGapHoldCount,
+          max: POWER_SAVING_GAP_HOLD_MAX,
+        });
+        setLivePowerSavingModeEnabled(true);
+        ensurePowerSavingCheckboxOnDuringGap();
+        schedulePowerSavingOffDebounce();
+        return;
+      }
+      console.log('[Mod Settings] Power saving: OFF debounce ended — gap hold cap, disabling', {
+        gapHold: powerSavingGapHoldCount,
+      });
+    }
+    powerSavingGapHoldCount = 0;
     lastPowerSavingSessionActive = false;
     console.log('[Mod Settings] Power saving: OFF debounce ended — disabling');
     uncheckPowerSavingModeCheckboxPreservingPreference();
+    setLivePowerSavingModeEnabled(false);
   }, debounceMs);
 }
 
@@ -12856,6 +12971,10 @@ function ensurePowerSavingSessionListener() {
     if (lastPowerSavingSessionActive === true || isPowerSavingOffDebouncePending()) {
       if (lastPowerSavingSessionActive === true) {
         lastPowerSavingSessionActive = false;
+      }
+      // Hold overlays through the gap (defeat often unchecks the game box immediately).
+      if (config.powerSavingModeEnabled) {
+        setLivePowerSavingModeEnabled(true);
       }
       schedulePowerSavingOffDebounce();
       return;
@@ -13091,6 +13210,9 @@ function applyPowerSavingBattleOverlayVisibility(enabled) {
 let missingPowerSavingButtonSince = null;
 
 function syncLivePowerSavingModeFromDom() {
+  // During OFF debounce, ignore DOM (defeat often unchecks; overlays must stay held).
+  if (isPowerSavingOffDebouncePending()) return;
+
   const button = findPowerSavingModeCheckboxButton();
   if (!button) {
     // Goblin screen still up means Power saving is still on — don't fake "off" on remount.
@@ -13209,12 +13331,33 @@ function ensurePowerSavingModePersistListener() {
     powerSavingObservedButton = button;
     powerSavingStateObserver = new MutationObserver(() => {
       if (powerSavingModeRestorePending) return;
+      // Defeat / end-of-fight: game often unchecks Power saving. Keep goblin ON while
+      // OFF debounce is pending; don't restore battlefield overlays mid-gap.
       if (isPowerSavingOffDebouncePending()) {
-        // Leave checkbox alone until OFF debounce decides.
-        setLivePowerSavingModeEnabled(isPowerSavingModeCheckboxChecked(button));
+        if (config.powerSavingModeEnabled) {
+          ensurePowerSavingCheckboxOnDuringGap();
+        }
         return;
       }
+
       const checked = isPowerSavingModeCheckboxChecked(button);
+
+      // Observer can fire before board session events on defeat — hold overlays and
+      // arm OFF debounce instead of flashing the battlefield.
+      if (
+        !checked &&
+        config.persistPowerSavingMode &&
+        config.powerSavingModeEnabled &&
+        livePowerSavingModeEnabled &&
+        !isPowerSavingActiveSession()
+      ) {
+        lastPowerSavingSessionActive = false;
+        setLivePowerSavingModeEnabled(true);
+        ensurePowerSavingCheckboxOnDuringGap();
+        schedulePowerSavingOffDebounce();
+        return;
+      }
+
       setLivePowerSavingModeEnabled(checked);
       // Game remounted/reset the checkbox — re-apply session-gated persisted state.
       if (
@@ -13454,21 +13597,32 @@ function getSavedInventoryWidgetPosition() {
   return { left: Math.round(left), top: Math.round(top) };
 }
 
+function buildPersistentInventoryPositionStyleCss(left, top) {
+  return (
+    `[${PERSISTENT_INVENTORY_ATTR}="1"]{` +
+    `left:${left}px!important;top:${top}px!important;right:auto!important;bottom:auto!important;` +
+    `transform:none!important;}`
+  );
+}
+
 function ensurePersistentInventoryPositionStyle(left, top) {
+  const css = buildPersistentInventoryPositionStyleCss(left, top);
+  if (persistentInventoryState.positionStyleCss === css) {
+    return;
+  }
   let styleEl = document.getElementById(PERSISTENT_INVENTORY_STYLE_ID);
   if (!styleEl) {
     styleEl = document.createElement('style');
     styleEl.id = PERSISTENT_INVENTORY_STYLE_ID;
     document.documentElement.appendChild(styleEl);
   }
-  styleEl.textContent =
-    `[${PERSISTENT_INVENTORY_ATTR}="1"]{` +
-    `left:${left}px!important;top:${top}px!important;right:auto!important;bottom:auto!important;` +
-    `transform:none!important;}`;
+  styleEl.textContent = css;
+  persistentInventoryState.positionStyleCss = css;
 }
 
 function clearPersistentInventoryPositionStyle() {
   document.getElementById(PERSISTENT_INVENTORY_STYLE_ID)?.remove();
+  persistentInventoryState.positionStyleCss = null;
   document.querySelectorAll(`[${PERSISTENT_INVENTORY_ATTR}]`).forEach((el) => {
     el.removeAttribute(PERSISTENT_INVENTORY_ATTR);
     el.style.removeProperty('left');
@@ -13477,6 +13631,256 @@ function clearPersistentInventoryPositionStyle() {
     el.style.removeProperty('bottom');
     el.style.removeProperty('transform');
   });
+}
+
+function buildInventoryHorizontalLayoutStyleCss() {
+  const colWidth = INVENTORY_SLOT_PX;
+  return (
+    `.${INVENTORY_HEADER_ACTIONS_CLASS}{` +
+    `margin-left:auto;flex-shrink:0;display:inline-flex;align-items:center;gap:2px;}` +
+    `.${INVENTORY_LAYOUT_TOGGLE_CLASS},.${INVENTORY_LOCK_TOGGLE_CLASS}{` +
+    `display:inline-flex;align-items:center;justify-content:center;` +
+    `width:16px;height:16px;padding:1px;box-sizing:border-box;color:#c0c0c0;` +
+    `background:transparent;border:0;cursor:pointer;position:relative;z-index:2;line-height:0;}` +
+    `.${INVENTORY_LAYOUT_TOGGLE_CLASS}:hover{color:#e8e8e8;}` +
+    `.${INVENTORY_LOCK_TOGGLE_CLASS}[aria-pressed="false"]{color:#a0e0a0;}` +
+    `.${INVENTORY_LOCK_TOGGLE_CLASS}[aria-pressed="false"]:hover{color:#b8f0b8;}` +
+    `.${INVENTORY_LOCK_TOGGLE_CLASS}[aria-pressed="true"]{color:#f0a0a0;}` +
+    `.${INVENTORY_LOCK_TOGGLE_CLASS}[aria-pressed="true"]:hover{color:#ffb3b3;}` +
+    `.${INVENTORY_LAYOUT_TOGGLE_CLASS} svg,.${INVENTORY_LOCK_TOGGLE_CLASS} svg{` +
+    `width:12px;height:12px;display:block;pointer-events:none;}` +
+    `.widget-top.widget-top-text:has(.${INVENTORY_HEADER_ACTIONS_CLASS}){` +
+    `height:19px!important;min-height:19px!important;max-height:19px!important;` +
+    `box-sizing:border-box;overflow:hidden;}` +
+    `[${INVENTORY_HORIZONTAL_ATTR}="1"]{` +
+    `max-width:calc(100vw - 16px)!important;height:auto!important;}` +
+    `[${INVENTORY_HORIZONTAL_ATTR}="1"] .widget-bottom{` +
+    `height:auto!important;max-height:none!important;overflow:visible!important;}` +
+    `[${INVENTORY_HORIZONTAL_ATTR}="1"] .widget-bottom > div{` +
+    `height:auto!important;max-height:none!important;overflow:visible!important;}` +
+    `[${INVENTORY_HORIZONTAL_ATTR}="1"] [data-radix-scroll-area-viewport]{` +
+    `overflow-x:auto!important;overflow-y:hidden!important;` +
+    `height:auto!important;max-height:none!important;width:100%!important;}` +
+    `[${INVENTORY_HORIZONTAL_ATTR}="1"] [data-radix-scroll-area-viewport] > div{` +
+    `display:block!important;min-width:max-content!important;width:max-content!important;` +
+    `height:auto!important;}` +
+    `[${INVENTORY_HORIZONTAL_ATTR}="1"] .container-inventory-4{` +
+    `display:grid!important;grid-template-rows:repeat(4,auto)!important;` +
+    `grid-auto-flow:column!important;grid-auto-columns:${colWidth}px!important;` +
+    `width:max-content!important;min-width:0!important;height:auto!important;}` +
+    `[${INVENTORY_HORIZONTAL_ATTR}="1"] .scrollbar-element[data-orientation="vertical"]{` +
+    `display:none!important;}`
+  );
+}
+
+function ensureInventoryHorizontalLayoutStyle() {
+  const css = buildInventoryHorizontalLayoutStyleCss();
+  if (persistentInventoryState.horizontalLayoutCss === css) {
+    return;
+  }
+  let styleEl = document.getElementById(INVENTORY_HORIZONTAL_STYLE_ID);
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = INVENTORY_HORIZONTAL_STYLE_ID;
+    document.documentElement.appendChild(styleEl);
+  }
+  styleEl.textContent = css;
+  persistentInventoryState.horizontalLayoutCss = css;
+}
+
+function clearInventoryHorizontalLayoutStyle() {
+  document.getElementById(INVENTORY_HORIZONTAL_STYLE_ID)?.remove();
+  persistentInventoryState.horizontalLayoutCss = null;
+  document.querySelectorAll(`[${INVENTORY_HORIZONTAL_ATTR}]`).forEach((el) => {
+    el.removeAttribute(INVENTORY_HORIZONTAL_ATTR);
+  });
+}
+
+function getInventoryLayoutToggleIconSvg(horizontal) {
+  // Vertical layout → columns icon (switch to horizontal). Horizontal → rows icon.
+  if (horizontal) {
+    return (
+      '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+      'class="lucide lucide-rows-2" aria-hidden="true">' +
+      '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 12h18"/></svg>'
+    );
+  }
+  return (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+    'class="lucide lucide-columns-2" aria-hidden="true">' +
+    '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>'
+  );
+}
+
+function getInventoryLockToggleIconSvg(locked) {
+  if (locked) {
+    return (
+      '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+      'class="lucide lucide-lock" aria-hidden="true">' +
+      '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+    );
+  }
+  return (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+    'class="lucide lucide-lock-open" aria-hidden="true">' +
+    '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>'
+  );
+}
+
+function updateInventoryLayoutToggleLabel(button) {
+  if (!button) return;
+  const horizontal = config.inventoryHorizontalLayout === true;
+  const pressed = horizontal ? 'true' : 'false';
+  if (button.getAttribute('aria-pressed') !== pressed) {
+    button.innerHTML = getInventoryLayoutToggleIconSvg(horizontal);
+    button.title = horizontal ? 'Vertical inventory layout' : 'Horizontal inventory layout';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-pressed', pressed);
+  }
+}
+
+function updateInventoryLockToggleLabel(button) {
+  if (!button) return;
+  const locked = config.inventoryWidgetLocked === true;
+  const pressed = locked ? 'true' : 'false';
+  if (button.getAttribute('aria-pressed') !== pressed) {
+    button.innerHTML = getInventoryLockToggleIconSvg(locked);
+    button.title = locked ? 'Unlock inventory position' : 'Lock inventory position';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-pressed', pressed);
+  }
+}
+
+function stopInventoryHeaderControlDrag(event) {
+  // Do not preventDefault — that can suppress the following click.
+  event.stopPropagation();
+  if (typeof event.stopImmediatePropagation === 'function') {
+    event.stopImmediatePropagation();
+  }
+}
+
+function ensureInventoryHeaderActions(handle) {
+  if (!handle) return null;
+  let actions = handle.querySelector(`.${INVENTORY_HEADER_ACTIONS_CLASS}`);
+  if (!actions) {
+    actions = document.createElement('span');
+    actions.className = INVENTORY_HEADER_ACTIONS_CLASS;
+    handle.appendChild(actions);
+  }
+  return actions;
+}
+
+function inventoryHorizontalLayoutNeedsSync(root = findInventoryWidgetRoot()) {
+  if (!root) return false;
+  const handle = getInventoryWidgetDragHandle(root);
+  if (!handle) return false;
+  const wantsHorizontal = config.inventoryHorizontalLayout === true;
+  const hasHorizontalAttr = root.hasAttribute(INVENTORY_HORIZONTAL_ATTR);
+  const actions = handle.querySelector(`.${INVENTORY_HEADER_ACTIONS_CLASS}`);
+  const hasLayoutToggle = !!actions?.querySelector(`.${INVENTORY_LAYOUT_TOGGLE_CLASS}`);
+  const hasLockToggle = !!actions?.querySelector(`.${INVENTORY_LOCK_TOGGLE_CLASS}`);
+  return !hasLayoutToggle || !hasLockToggle || wantsHorizontal !== hasHorizontalAttr;
+}
+
+function injectInventoryLayoutToggle(root = findInventoryWidgetRoot()) {
+  if (!config.persistentInventory) return;
+  const handle = getInventoryWidgetDragHandle(root);
+  if (!handle) return;
+
+  ensureInventoryHorizontalLayoutStyle();
+  const actions = ensureInventoryHeaderActions(handle);
+  if (!actions) return;
+
+  let lockButton = actions.querySelector(`.${INVENTORY_LOCK_TOGGLE_CLASS}`);
+  if (!lockButton) {
+    lockButton = document.createElement('button');
+    lockButton.type = 'button';
+    lockButton.className = INVENTORY_LOCK_TOGGLE_CLASS;
+    lockButton.addEventListener('pointerdown', stopInventoryHeaderControlDrag, true);
+    lockButton.addEventListener('mousedown', stopInventoryHeaderControlDrag, true);
+    lockButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
+      config.inventoryWidgetLocked = !config.inventoryWidgetLocked;
+      saveConfig();
+      updateInventoryLockToggleLabel(lockButton);
+      logPersistentInventory('position lock', { locked: config.inventoryWidgetLocked === true });
+    });
+    actions.appendChild(lockButton);
+  }
+  updateInventoryLockToggleLabel(lockButton);
+
+  let button = actions.querySelector(`.${INVENTORY_LAYOUT_TOGGLE_CLASS}`);
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = INVENTORY_LAYOUT_TOGGLE_CLASS;
+    button.addEventListener('pointerdown', stopInventoryHeaderControlDrag, true);
+    button.addEventListener('mousedown', stopInventoryHeaderControlDrag, true);
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
+      config.inventoryHorizontalLayout = !config.inventoryHorizontalLayout;
+      saveConfig();
+      const liveRoot = findInventoryWidgetRoot() || root;
+      applyInventoryHorizontalLayout(liveRoot);
+      void liveRoot?.offsetHeight;
+      // Re-place with final size so clamp matches the new layout.
+      if (
+        liveRoot &&
+        Number.isFinite(config.inventoryWidgetLeft) &&
+        Number.isFinite(config.inventoryWidgetTop)
+      ) {
+        applyInventoryWidgetPosition(liveRoot);
+      }
+      updateInventoryLayoutToggleLabel(button);
+    });
+    actions.appendChild(button);
+  }
+  updateInventoryLayoutToggleLabel(button);
+}
+
+function removeInventoryLayoutToggle(root = findInventoryWidgetRoot()) {
+  const scope = root || document;
+  scope.querySelectorAll?.(`.${INVENTORY_HEADER_ACTIONS_CLASS}`).forEach((el) => el.remove());
+  document.querySelectorAll(`.${INVENTORY_HEADER_ACTIONS_CLASS}`).forEach((el) => el.remove());
+  scope.querySelectorAll?.(`.${INVENTORY_LAYOUT_TOGGLE_CLASS}`).forEach((el) => el.remove());
+  document.querySelectorAll(`.${INVENTORY_LAYOUT_TOGGLE_CLASS}`).forEach((el) => el.remove());
+  scope.querySelectorAll?.(`.${INVENTORY_LOCK_TOGGLE_CLASS}`).forEach((el) => el.remove());
+  document.querySelectorAll(`.${INVENTORY_LOCK_TOGGLE_CLASS}`).forEach((el) => el.remove());
+}
+
+function applyInventoryHorizontalLayout(root = findInventoryWidgetRoot()) {
+  if (!config.persistentInventory) {
+    clearInventoryHorizontalLayoutStyle();
+    removeInventoryLayoutToggle();
+    return false;
+  }
+  if (!root) return false;
+
+  ensureInventoryHorizontalLayoutStyle();
+  injectInventoryLayoutToggle(root);
+
+  const wantsHorizontal = config.inventoryHorizontalLayout === true;
+  if (wantsHorizontal) {
+    if (!root.hasAttribute(INVENTORY_HORIZONTAL_ATTR)) {
+      root.setAttribute(INVENTORY_HORIZONTAL_ATTR, '1');
+    }
+  } else if (root.hasAttribute(INVENTORY_HORIZONTAL_ATTR)) {
+    root.removeAttribute(INVENTORY_HORIZONTAL_ATTR);
+  }
+
+  return true;
 }
 
 function applyInventoryWidgetPosition(root = findInventoryWidgetRoot()) {
@@ -13496,12 +13900,16 @@ function applyInventoryWidgetPosition(root = findInventoryWidgetRoot()) {
 
   const { left, top } = clampInventoryLeftTop(root, saved.left, saved.top);
   ensurePersistentInventoryPositionStyle(left, top);
-  root.setAttribute(PERSISTENT_INVENTORY_ATTR, '1');
-  root.style.left = `${left}px`;
-  root.style.top = `${top}px`;
-  root.style.right = 'auto';
-  root.style.bottom = 'auto';
-  root.style.transform = 'none';
+  if (!root.hasAttribute(PERSISTENT_INVENTORY_ATTR)) {
+    root.setAttribute(PERSISTENT_INVENTORY_ATTR, '1');
+  }
+  const leftPx = `${left}px`;
+  const topPx = `${top}px`;
+  if (root.style.left !== leftPx) root.style.left = leftPx;
+  if (root.style.top !== topPx) root.style.top = topPx;
+  if (root.style.right !== 'auto') root.style.right = 'auto';
+  if (root.style.bottom !== 'auto') root.style.bottom = 'auto';
+  if (root.style.transform !== 'none') root.style.transform = 'none';
   logPersistentInventory('applied position', {
     left,
     top,
@@ -13818,6 +14226,11 @@ function runPersistentInventoryRestoreAttempt() {
     }
   }
 
+  // Layout first (horizontal vs vertical changes height/width). Clamping while tall
+  // pushes top upward; then switching to a short strip leaves it too high.
+  applyInventoryHorizontalLayout(root);
+  void root.offsetHeight; // force reflow so clamp uses final size
+
   if (!persistentInventoryState.positionApplied) {
     const applied = applyInventoryWidgetPosition(root);
     if (!applied) {
@@ -13841,6 +14254,7 @@ function applyPersistentInventory() {
   if (!config.persistentInventory) return;
 
   startPersistentInventoryObserver();
+  applyInventoryHorizontalLayout(findInventoryWidgetRoot());
 
   // Feature on but not pinned: do not open, close, pin, or move the inventory.
   if (config.inventoryWidgetPinned !== true) {
@@ -13854,6 +14268,7 @@ function applyPersistentInventory() {
     persistentInventoryState.restoring = false;
     persistentInventoryState.positionApplied = false;
     bindPersistentInventoryDragListeners();
+    applyInventoryHorizontalLayout(findInventoryWidgetRoot());
     return;
   }
 
@@ -13989,6 +14404,16 @@ function bindPersistentInventoryDragListeners() {
     if (!handle || !handle.contains(event.target)) return;
     if (event.target.closest?.('button[aria-label="Pin widget"], button[aria-label="Unpin widget"]')) return;
     if (event.target.closest?.('button:has(svg.lucide-pin), button:has(svg.lucide-pin-off)')) return;
+    if (event.target.closest?.(`.${INVENTORY_LAYOUT_TOGGLE_CLASS}`)) return;
+    if (event.target.closest?.(`.${INVENTORY_LOCK_TOGGLE_CLASS}`)) return;
+    if (event.target.closest?.(`.${INVENTORY_HEADER_ACTIONS_CLASS}`)) return;
+
+    // Locked: block game dnd-kit drag without starting our own move.
+    if (config.inventoryWidgetLocked === true) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
 
     // Stop dnd-kit from starting a transform drag.
     event.preventDefault();
@@ -14000,6 +14425,7 @@ function bindPersistentInventoryDragListeners() {
     const startTop = Math.round(rect.top);
 
     document.getElementById(PERSISTENT_INVENTORY_STYLE_ID)?.remove();
+    persistentInventoryState.positionStyleCss = null;
     liveRoot.removeAttribute(PERSISTENT_INVENTORY_ATTR);
     liveRoot.style.left = `${startLeft}px`;
     liveRoot.style.top = `${startTop}px`;
@@ -14063,12 +14489,28 @@ function startPersistentInventoryObserver() {
           const pinButton = getInventoryWidgetPinButton();
           if (pinButton) triggerWidgetPinButton(pinButton);
         }
+        // Layout before position so clamp uses the final widget size.
+        applyInventoryHorizontalLayout(root);
+        void root.offsetHeight;
         if (getSavedInventoryWidgetPosition().left != null) {
           applyInventoryWidgetPosition(root);
         }
       }
       bindPersistentInventoryPinButtonListener(root);
       bindPersistentInventoryDragListeners();
+      if (inventoryHorizontalLayoutNeedsSync(root)) {
+        applyInventoryHorizontalLayout(root);
+        void root.offsetHeight;
+        if (
+          config.inventoryWidgetPinned === true &&
+          getSavedInventoryWidgetPosition().left != null &&
+          !persistentInventoryState.dragActive
+        ) {
+          applyInventoryWidgetPosition(root);
+        }
+      } else if (!document.getElementById(INVENTORY_HORIZONTAL_STYLE_ID)) {
+        ensureInventoryHorizontalLayoutStyle();
+      }
     }, 120);
   });
 
@@ -14089,6 +14531,8 @@ function stopPersistentInventoryObserver() {
   }
   unbindPersistentInventoryDragListeners();
   clearPersistentInventoryPositionStyle();
+  clearInventoryHorizontalLayoutStyle();
+  removeInventoryLayoutToggle();
   setPersistentInventoryRestoringVisual(false);
   persistentInventoryState.restoreStarted = false;
   persistentInventoryState.restoreComplete = false;
@@ -14112,12 +14556,27 @@ function clearPersistentInventorySavedConfig() {
   config.inventoryWidgetPinned = null;
   config.inventoryWidgetLeft = null;
   config.inventoryWidgetTop = null;
+  config.inventoryHorizontalLayout = false;
+  config.inventoryWidgetLocked = false;
   // Prevent sticky→pinned repair from reviving state on next load.
   if (config.defaultInventorySticky !== undefined) {
     config.defaultInventorySticky = false;
   }
+  delete config.inventoryWidgetTranslateX;
+  delete config.inventoryWidgetTranslateY;
   saveConfig();
   logPersistentInventory('cleared saved config (feature disabled)');
+}
+
+function initializePersistentInventoryConfigForEnable() {
+  config.inventoryWidgetPinned = true;
+  config.inventoryWidgetLeft = null;
+  config.inventoryWidgetTop = null;
+  config.inventoryHorizontalLayout = false;
+  config.inventoryWidgetLocked = false;
+  delete config.inventoryWidgetTranslateX;
+  delete config.inventoryWidgetTranslateY;
+  saveConfig();
 }
 
 function disablePersistentInventory() {

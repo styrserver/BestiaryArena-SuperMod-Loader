@@ -4,6 +4,26 @@
   },
   "notes": [
     {
+      "version": "4.6.2",
+      "changes": [
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Persistent Inventory: header toggle for horizontal strip (4 slots tall, expands sideways) and a lock control to freeze position; preferences persist. Lucide icons (layout columns/rows; lock green when unlocked, red when locked). Disabling Persistent Inventory clears pin, position, layout, and lock so re-enabling starts clean."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Persistent Powersaver in-game label is plain white text (no shimmer). Between fights it holds Power saving through a short gap (re-asserts the checkbox if the game unchecks it so the goblin stays up); turns off on Resume/Start or after the gap hold cap."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Mod inventory buttons show the same white hover border as native slots; Persistent Inventory style tags no longer rewrite on every DOM mutation. Inventory restore applies layout before position so the widget no longer jumps upward on refresh. Persistent Powersaver no longer flashes the battlefield on defeat, and no longer loops forever after a manual pause."
+        }
+      ]
+    },
+    {
       "version": "4.6.1",
       "changes": [
         {
