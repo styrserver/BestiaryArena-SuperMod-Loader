@@ -11834,6 +11834,15 @@
                 --bs-info: #61AFEF;
                 position: fixed;
                 z-index: 10050;
+                overflow: visible;
+                box-sizing: border-box;
+                padding: 0;
+                margin: 0;
+            }
+            #${PANEL_ID} > .bs-panel-frame {
+                width: 100%;
+                height: 100%;
+                box-sizing: border-box;
                 display: flex;
                 flex-direction: column;
                 padding: 0;
@@ -11845,7 +11854,6 @@
                 border-image: var(--bs-frame-3);
                 box-shadow: 0 0 15px rgba(0,0,0,0.7);
                 font-family: Inter, sans-serif;
-                box-sizing: border-box;
             }
             #${PANEL_ID} *,
             #${PANEL_ID} *::before,
@@ -13835,6 +13843,11 @@
             `min-width:${PANEL_LAYOUT.minWidth}px;max-width:${PANEL_LAYOUT.maxWidth}px;` +
             `min-height:${PANEL_LAYOUT.minHeight}px;max-height:${PANEL_LAYOUT.maxHeight}px;`;
 
+        const frame = document.createElement('div');
+        frame.className = 'bs-panel-frame';
+        panel.appendChild(frame);
+        panel._frame = frame;
+
         const header = document.createElement('div');
         header.className = 'bs-header';
         const titleEl = document.createElement('div');
@@ -14040,13 +14053,13 @@
         logList.id = LOG_LIST_ID;
         logBody.appendChild(logList);
 
-        panel.appendChild(header);
-        panel.appendChild(statusEl);
-        panel.appendChild(speedRow);
-        panel.appendChild(tabBar);
-        panel.appendChild(unitsBody);
-        panel.appendChild(logBody);
-        panel.appendChild(summaryBody);
+        frame.appendChild(header);
+        frame.appendChild(statusEl);
+        frame.appendChild(speedRow);
+        frame.appendChild(tabBar);
+        frame.appendChild(unitsBody);
+        frame.appendChild(logBody);
+        frame.appendChild(summaryBody);
 
         gameSpeedPercent = normalizeSpeedPercent(s.gameSpeedPercent);
         slowMotionEnabled = s.slowMotionEnabled === true;

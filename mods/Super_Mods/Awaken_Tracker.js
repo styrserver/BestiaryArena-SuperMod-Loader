@@ -1094,9 +1094,19 @@
                 --at-border-dark: #2C313A;
                 --at-entry-bg: rgba(59,64,72,0.3);
                 --at-section-bg-alpha: rgba(40,44,52,0.4);
-            }
-            #${PANEL_ID} {
                 position: fixed;
+                /* Above Autoseller auto badges (100) and board UI (z-1..z-10),
+                   below native game context menus (z-modals = 200). */
+                z-index: 150;
+                overflow: visible;
+                box-sizing: border-box;
+                padding: 0;
+                margin: 0;
+            }
+            #${PANEL_ID} > .at-panel-frame {
+                width: 100%;
+                height: 100%;
+                box-sizing: border-box;
                 background-image: var(--at-bg-panel);
                 background-repeat: repeat;
                 background-color: var(--at-panel-bg);
@@ -1105,9 +1115,6 @@
                 color: var(--at-text);
                 padding: 0;
                 overflow: hidden;
-                /* Above Autoseller auto badges (100) and board UI (z-1..z-10),
-                   below native game context menus (z-modals = 200). */
-                z-index: 150;
                 display: flex;
                 flex-direction: column;
                 font-family: Inter, sans-serif;
@@ -1517,6 +1524,11 @@
             `min-width:${PANEL_LAYOUT.minWidth}px;max-width:${PANEL_LAYOUT.maxWidth}px;` +
             `min-height:${PANEL_LAYOUT.minHeight}px;max-height:${PANEL_LAYOUT.maxHeight}px;`;
 
+        const frame = document.createElement('div');
+        frame.className = 'at-panel-frame';
+        panel.appendChild(frame);
+        panel._frame = frame;
+
         const header = document.createElement('div');
         header.className = 'at-header';
         const titleEl = document.createElement('span');
@@ -1569,7 +1581,7 @@
         closeBtn.className = 'at-icon-btn';
         closeBtn.addEventListener('click', closePanel);
         header.appendChild(closeBtn);
-        panel.appendChild(header);
+        frame.appendChild(header);
 
         const footer = document.createElement('div');
         footer.className = 'at-footer';
@@ -1663,8 +1675,8 @@
 
         tabBar.appendChild(tabTrackerBtn);
         tabBar.appendChild(tabOverviewBtn);
-        panel.appendChild(tabBar);
-        panel.appendChild(trackerBody);
+        frame.appendChild(tabBar);
+        frame.appendChild(trackerBody);
 
         // =======================
         // Overview tab content
@@ -1766,7 +1778,7 @@
         overviewBody.appendChild(overviewSummary);
         overviewBody.appendChild(overviewFilterBar);
         overviewBody.appendChild(overviewMainArea);
-        panel.appendChild(overviewBody);
+        frame.appendChild(overviewBody);
 
         // =======================
         // Overview: render inventory scan
@@ -2194,7 +2206,7 @@
         // Set initial tab from persisted settings
         switchTab(s.activeTab || 'tracker');
 
-        panel.appendChild(footer);
+        frame.appendChild(footer);
 
         addResizeHandles(panel);
         ensurePanelResizeListeners();

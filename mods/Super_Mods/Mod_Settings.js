@@ -2926,12 +2926,15 @@ let antiIdleAudioElement = null;
 // Playercount state
 const PLAYER_COUNT_POLL_MS = 60000;
 const PLAYER_ONLINE_RECORD_CHECK_MS = 15 * 60 * 1000;
+const PLAYER_ONLINE_RECORD_TOAST_COOLDOWN_MS = 2 * 60 * 1000;
 
 const playercountState = {
   currentPlayerCount: null,
   lastUpdateTime: null,
   onlineRecord: null,
   onlineRecordFetchSucceeded: false,
+  recordToastBaselineReady: false,
+  lastRecordToastAt: 0,
   updateInterval: null,
   recordCheckInterval: null
 };
@@ -8490,10 +8493,9 @@ function showSettingsModal() {
         onUnlockedChange: (checked) => {
           config.persistPowerSavingMode = checked;
           if (config.persistPowerSavingMode) {
-            const button = findPowerSavingModeCheckboxButton();
-            if (button) {
-              config.powerSavingModeEnabled = isPowerSavingModeCheckboxChecked(button);
-            }
+            // Session gating keeps the live box off while idle — enabling Persistent
+            // Powersaver means the user wants it on during fights, not "remember unchecked".
+            config.powerSavingModeEnabled = true;
           }
           saveConfig();
           applyAutoplaySessionCheckboxFeatures();
@@ -11996,12 +11998,337 @@ const POWER_SAVING_MODE_LABEL_MARKERS = [
   'economia de energia',
   'modo de economia de energia',
   'modo economia de energia',
+  // Legacy rename (text-node approach); CSS ::after keeps the original game text in the DOM
+  'persistent powersaver',
+  'powersaver persistente',
 ];
+
+const PERSIST_PS_IN_GAME_LABEL_ATTR = 'data-mod-settings-persist-ps-label';
+const PERSIST_PS_IN_GAME_TITLE_ATTR = 'data-mod-settings-persist-ps-title';
+const PERSIST_PS_IN_GAME_ORIG_TEXT_ATTR = 'data-mod-settings-persist-ps-orig-text';
+const PERSIST_PS_PREF_CHECKBOX_ATTR = 'data-mod-settings-persist-ps-pref-checkbox';
+const PERSIST_PS_IN_GAME_STYLE_ID = 'mod-settings-persist-ps-label-style';
+/** Keeps React from restoring the game label text (which would re-open a wide flex gap). */
+let persistPsLabelTextObserver = null;
+let persistPsLabelTextObserved = null;
 
 function labelTextMatchesMarkers(labelText, markers) {
   const normalized = normalizeForLabelMatch(labelText).replace(/\s+/g, ' ').trim();
   if (!normalized) return false;
   return markers.some((marker) => normalized.includes(normalizeForLabelMatch(marker)));
+}
+
+function ensurePersistentPowersaverInGameLabelStyle() {
+  let style = document.getElementById(PERSIST_PS_IN_GAME_STYLE_ID);
+  if (!style) {
+    style = document.createElement('style');
+    style.id = PERSIST_PS_IN_GAME_STYLE_ID;
+    document.head.appendChild(style);
+  }
+  // Title via ::after. Game text cleared in JS. Real game checkbox hidden; custom
+  // preference checkbox shown. gap:0 + pref margin = one normal gap.
+  style.textContent = `
+@keyframes mod-settings-persist-ps-shimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+label[${PERSIST_PS_IN_GAME_LABEL_ATTR}="true"] {
+  gap: 0 !important;
+  cursor: help;
+  position: relative;
+}
+/* Real game checkbox sits under the custom one (real hit box for synthetic clicks). */
+label[${PERSIST_PS_IN_GAME_LABEL_ATTR}="true"] > button[role="checkbox"]:not([${PERSIST_PS_PREF_CHECKBOX_ATTR}]) {
+  position: absolute !important;
+  left: 0 !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 12px !important;
+  height: 12px !important;
+  margin: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+}
+label[${PERSIST_PS_IN_GAME_LABEL_ATTR}="true"] > button[${PERSIST_PS_PREF_CHECKBOX_ATTR}="true"] {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  margin-right: 0.375rem;
+  cursor: pointer;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+label[${PERSIST_PS_IN_GAME_LABEL_ATTR}="true"]::after {
+  content: attr(${PERSIST_PS_IN_GAME_TITLE_ATTR});
+  font-size: 16px;
+  line-height: normal;
+  background: linear-gradient(
+    90deg,
+    #d8dde8,
+    #9ec5e8,
+    #c4b5e8,
+    #e8d5a8,
+    #a8dcc4,
+    #d8dde8,
+    #9ec5e8
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: mod-settings-persist-ps-shimmer 8s linear infinite;
+}
+`;
+}
+
+function getNativePowerSavingModeLabelText() {
+  const renamed = normalizeForLabelMatch(t('mods.betterUI.persistPowerSavingMode'));
+  if (renamed.includes('powersaver persistente') || renamed.includes('persistente')) {
+    return 'Economia de energia';
+  }
+  return 'Power saving mode';
+}
+
+function stopPersistentPowersaverLabelTextObserver() {
+  if (persistPsLabelTextObserver) {
+    try {
+      persistPsLabelTextObserver.disconnect();
+    } catch (_) { /* ignore */ }
+    persistPsLabelTextObserver = null;
+  }
+  persistPsLabelTextObserved = null;
+}
+
+function isPersistentPowersaverInGameActive() {
+  return !!config.persistPowerSavingMode && !config.hidePowerSavingMode;
+}
+
+function clearPersistPsLabelTextNodes(label, { saveOriginal = false } = {}) {
+  if (!label) return;
+  for (const child of label.childNodes) {
+    if (child.nodeType !== Node.TEXT_NODE) continue;
+    const raw = child.textContent || '';
+    if (!raw.trim()) continue;
+    if (saveOriginal && !label.getAttribute(PERSIST_PS_IN_GAME_ORIG_TEXT_ATTR)) {
+      label.setAttribute(PERSIST_PS_IN_GAME_ORIG_TEXT_ATTR, raw);
+    }
+    child.textContent = '';
+  }
+}
+
+/**
+ * Empty the game’s trailing text node in place (same node — does not remount the checkbox).
+ * React may restore the string; the observer clears it again so no flex-width gap returns.
+ */
+function suppressPersistentPowersaverGameLabelText(label) {
+  if (!label) return;
+  clearPersistPsLabelTextNodes(label, { saveOriginal: true });
+
+  if (persistPsLabelTextObserved === label && persistPsLabelTextObserver) return;
+
+  stopPersistentPowersaverLabelTextObserver();
+  persistPsLabelTextObserved = label;
+  persistPsLabelTextObserver = new MutationObserver(() => {
+    if (!label.isConnected || label.getAttribute(PERSIST_PS_IN_GAME_LABEL_ATTR) !== 'true') {
+      stopPersistentPowersaverLabelTextObserver();
+      return;
+    }
+    clearPersistPsLabelTextNodes(label, { saveOriginal: true });
+  });
+  persistPsLabelTextObserver.observe(label, {
+    characterData: true,
+    childList: true,
+    subtree: true,
+  });
+}
+
+function restorePersistentPowersaverGameLabelText(label) {
+  stopPersistentPowersaverLabelTextObserver();
+  if (!label) return;
+  removePersistPsPrefCheckbox(label);
+  const original =
+    label.getAttribute(PERSIST_PS_IN_GAME_ORIG_TEXT_ATTR) || getNativePowerSavingModeLabelText();
+  let hasText = false;
+  for (const child of label.childNodes) {
+    if (child.nodeType !== Node.TEXT_NODE) continue;
+    child.textContent = original;
+    hasText = true;
+    break;
+  }
+  if (!hasText) {
+    const button = findGamePowerSavingModeCheckboxInLabel(label);
+    const textNode = document.createTextNode(original);
+    if (button) button.after(textNode);
+    else label.appendChild(textNode);
+  }
+  label.removeAttribute(PERSIST_PS_IN_GAME_ORIG_TEXT_ATTR);
+}
+
+function findGamePowerSavingModeCheckboxInLabel(label) {
+  if (!label) return null;
+  for (const btn of label.querySelectorAll('button[role="checkbox"]')) {
+    if (btn.getAttribute(PERSIST_PS_PREF_CHECKBOX_ATTR) === 'true') continue;
+    return btn;
+  }
+  return null;
+}
+
+function removePersistPsPrefCheckbox(label) {
+  if (!label) return;
+  for (const btn of label.querySelectorAll(`[${PERSIST_PS_PREF_CHECKBOX_ATTR}="true"]`)) {
+    btn.remove();
+  }
+}
+
+function syncPersistPsPrefCheckboxUI(button) {
+  if (!button) return;
+  const checked = config.powerSavingModeEnabled === true;
+  button.setAttribute('aria-checked', checked ? 'true' : 'false');
+  button.dataset.state = checked ? 'checked' : 'unchecked';
+  let mark = button.querySelector('[data-mod-settings-persist-ps-check-mark]');
+  if (checked) {
+    if (!mark) {
+      mark = document.createElement('span');
+      mark.dataset.modSettingsPersistPsCheckMark = 'true';
+      mark.dataset.state = 'checked';
+      mark.style.pointerEvents = 'none';
+      mark.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check size-full stroke-3" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
+      button.appendChild(mark);
+    } else {
+      mark.dataset.state = 'checked';
+    }
+  } else if (mark) {
+    mark.remove();
+  }
+}
+
+function togglePowerSavingModePreferenceFromInGame(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  if (!isPersistentPowersaverInGameActive()) return;
+
+  config.powerSavingModeEnabled = !config.powerSavingModeEnabled;
+  saveConfig();
+
+  console.log('[Mod Settings] Power saving: preference checkbox', {
+    checked: config.powerSavingModeEnabled === true,
+  });
+
+  const label = findPowerSavingModeCheckboxLabel();
+  const prefBtn = label?.querySelector(`[${PERSIST_PS_PREF_CHECKBOX_ATTR}="true"]`);
+  syncPersistPsPrefCheckboxUI(prefBtn);
+
+  // Preference off → drop live Power saving immediately; on → re-apply session gating.
+  if (!config.powerSavingModeEnabled) {
+    clearPowerSavingOffDebounce();
+    uncheckPowerSavingModeCheckboxPreservingPreference();
+  }
+  schedulePersistedPowerSavingModeRestore(0);
+}
+
+function ensurePersistPsPrefCheckbox(label) {
+  if (!label) return null;
+  let prefBtn = label.querySelector(`[${PERSIST_PS_PREF_CHECKBOX_ATTR}="true"]`);
+  const gameBtn = findGamePowerSavingModeCheckboxInLabel(label);
+
+  if (!prefBtn) {
+    prefBtn = document.createElement('button');
+    prefBtn.type = 'button';
+    prefBtn.setAttribute('role', 'checkbox');
+    prefBtn.setAttribute(PERSIST_PS_PREF_CHECKBOX_ATTR, 'true');
+    prefBtn.value = 'on';
+    prefBtn.className =
+      gameBtn?.className ||
+      'shrink-0 disabled:text-whiteDark/60 bg-grayRegular focus-style-visible frame-pressed-1 size-3 text-whiteRegular disabled:dithered-background disabled:cursor-not-allowed disabled:bg-grayBrightest';
+    prefBtn.addEventListener('click', togglePowerSavingModePreferenceFromInGame);
+    if (gameBtn) gameBtn.after(prefBtn);
+    else label.insertBefore(prefBtn, label.firstChild);
+  }
+
+  if (label.dataset.modSettingsPersistPsLabelClickBound !== 'true') {
+    label.dataset.modSettingsPersistPsLabelClickBound = 'true';
+    // Title clicks toggle preference. Ignore any checkbox (real or custom) —
+    // synthetic game-checkbox clicks must not flip powerSavingModeEnabled.
+    label.addEventListener(
+      'click',
+      (e) => {
+        if (label.getAttribute(PERSIST_PS_IN_GAME_LABEL_ATTR) !== 'true') return;
+        if (powerSavingModeRestorePending) return;
+        if (e.target.closest('button[role="checkbox"]')) return;
+        togglePowerSavingModePreferenceFromInGame(e);
+      },
+      true
+    );
+  }
+
+  syncPersistPsPrefCheckboxUI(prefBtn);
+  return prefBtn;
+}
+
+function findPowerSavingModeCheckboxLabel() {
+  for (const label of findAutoplaySessionCheckboxLabels()) {
+    if (label.getAttribute(PERSIST_PS_IN_GAME_LABEL_ATTR) === 'true') return label;
+    if (labelTextMatchesMarkers(label.textContent, POWER_SAVING_MODE_LABEL_MARKERS)) {
+      return label;
+    }
+  }
+  const byAttr = document.querySelector(`label[${PERSIST_PS_IN_GAME_LABEL_ATTR}="true"]`);
+  if (byAttr) return byAttr;
+  for (const label of document.querySelectorAll('label')) {
+    if (!findGamePowerSavingModeCheckboxInLabel(label)) continue;
+    if (labelTextMatchesMarkers(label.textContent, POWER_SAVING_MODE_LABEL_MARKERS)) {
+      return label;
+    }
+  }
+  return null;
+}
+
+/**
+ * While Persistent Powersaver is on: shimmer title, custom preference checkbox
+ * (powerSavingModeEnabled), real game checkbox hidden but still session-driven.
+ */
+function applyPersistentPowersaverInGameLabel() {
+  const label = findPowerSavingModeCheckboxLabel();
+  if (!label) return;
+
+  const shouldRename = isPersistentPowersaverInGameActive();
+  if (!shouldRename) {
+    if (label.hasAttribute(PERSIST_PS_IN_GAME_LABEL_ATTR)) {
+      label.removeAttribute(PERSIST_PS_IN_GAME_LABEL_ATTR);
+      label.removeAttribute(PERSIST_PS_IN_GAME_TITLE_ATTR);
+      label.removeAttribute('title');
+      label.style.removeProperty('color');
+      label.style.removeProperty('cursor');
+      restorePersistentPowersaverGameLabelText(label);
+    } else {
+      stopPersistentPowersaverLabelTextObserver();
+      removePersistPsPrefCheckbox(label);
+    }
+    label.removeAttribute('data-mod-settings-persist-ps-orig-color');
+    return;
+  }
+
+  ensurePersistentPowersaverInGameLabelStyle();
+  const renamed = t('mods.betterUI.persistPowerSavingMode');
+  const tooltip = t('mods.betterUI.persistPowerSavingModeInGameTooltip');
+  if (label.getAttribute(PERSIST_PS_IN_GAME_TITLE_ATTR) !== renamed) {
+    label.setAttribute(PERSIST_PS_IN_GAME_TITLE_ATTR, renamed);
+  }
+  if (label.getAttribute('title') !== tooltip) {
+    label.setAttribute('title', tooltip);
+  }
+  if (label.getAttribute(PERSIST_PS_IN_GAME_LABEL_ATTR) !== 'true') {
+    label.setAttribute(PERSIST_PS_IN_GAME_LABEL_ATTR, 'true');
+  }
+  suppressPersistentPowersaverGameLabelText(label);
+  ensurePersistPsPrefCheckbox(label);
+  label.removeAttribute('data-mod-settings-persist-ps-orig-color');
 }
 
 function findAutoplaySessionWidgetBottom() {
@@ -12058,12 +12385,8 @@ function setSessionCheckboxLabelHidden(label, hidden, markerKey) {
 }
 
 function findPowerSavingModeCheckboxButton() {
-  for (const label of findAutoplaySessionCheckboxLabels()) {
-    if (labelTextMatchesMarkers(label.textContent, POWER_SAVING_MODE_LABEL_MARKERS)) {
-      return label.querySelector('button[role="checkbox"]');
-    }
-  }
-  return null;
+  const label = findPowerSavingModeCheckboxLabel();
+  return findGamePowerSavingModeCheckboxInLabel(label);
 }
 
 function isPowerSavingModeCheckboxChecked(button) {
@@ -12073,42 +12396,20 @@ function isPowerSavingModeCheckboxChecked(button) {
 
 /**
  * Turn off the in-game Power saving mode checkbox if it is currently checked.
- * Uses the same click + pending guard pattern as persist restore.
  */
 function forceDisableGamePowerSavingMode() {
-  const button = findPowerSavingModeCheckboxButton();
-  if (!button) {
+  const result = uncheckPowerSavingModeCheckboxPreservingPreference();
+  if (result === 'missing') {
     setLivePowerSavingModeEnabled(false);
     return;
   }
-  if (!isPowerSavingModeCheckboxChecked(button)) {
-    setLivePowerSavingModeEnabled(false);
-    return;
-  }
-
-  powerSavingUserEditUntil = Date.now() + 1500;
-  powerSavingModeRestorePending = true;
-  try {
-    button.click();
-  } finally {
-    setTimeout(() => {
-      powerSavingModeRestorePending = false;
-      const stillOn = isPowerSavingModeCheckboxChecked(button);
-      setLivePowerSavingModeEnabled(stillOn);
-      // Retry once if the game ignored the first click (persist wipe already done).
-      if (stillOn) {
-        powerSavingModeRestorePending = true;
-        try {
-          button.click();
-        } finally {
-          setTimeout(() => {
-            powerSavingModeRestorePending = false;
-            setLivePowerSavingModeEnabled(isPowerSavingModeCheckboxChecked(button));
-          }, 100);
-        }
-      }
-    }, 100);
-  }
+  if (result === 'off') return;
+  // Retry once if the first synthetic click did not take.
+  setTimeout(() => {
+    if (isPowerSavingModeCheckboxChecked(findPowerSavingModeCheckboxButton())) {
+      uncheckPowerSavingModeCheckboxPreservingPreference();
+    }
+  }, 120);
 }
 
 /**
@@ -12165,7 +12466,6 @@ function disableAndWipePowerSavingMode() {
 }
 
 let powerSavingModeRestorePending = false;
-let powerSavingUserEditUntil = 0;
 let powerSavingRestoreDebounceTimer = null;
 let powerSavingStateObserver = null;
 let powerSavingObservedButton = null;
@@ -12173,6 +12473,426 @@ let livePowerSavingModeEnabled = false;
 let powerSavingOverlaysSuppressed = false;
 let powerSavingOverlayRestoreObserver = null;
 let powerSavingOverlayRestoreTimer = null;
+let powerSavingSessionUnsubscribe = null;
+let lastPowerSavingSessionActive = null;
+let powerSavingTrackedRoomId = null;
+/** After a map switch, force Power saving off until a new fight. */
+let powerSavingSuspendedAfterMapChange = false;
+let powerSavingSuspendSeenIdle = false;
+let powerSavingLastGameStarted = null;
+let powerSavingLastResumeVisible = false;
+let powerSavingMapChangeOffTimers = [];
+/**
+ * When we leave an active fight, wait this long before turning Power saving off.
+ * If a new fight starts in time, cancel — never force ON/OFF mid-window (stops flicker).
+ * Duration = Automator fasterAutoplayMs + 1s (covers the between-fight gap).
+ */
+let powerSavingOffDebounceTimer = null;
+const POWER_SAVING_OFF_DEBOUNCE_EXTRA_MS = 1000;
+const POWER_SAVING_FASTER_AUTOPLAY_MS_DEFAULT = 100;
+const POWER_SAVING_FASTER_AUTOPLAY_MS_MIN = 10;
+const POWER_SAVING_FASTER_AUTOPLAY_MS_MAX = 180000;
+
+function getPowerSavingOffDebounceMs() {
+  const raw = Number(getAutomatorConfigFromStorage().fasterAutoplayMs);
+  const fasterMs = Number.isFinite(raw)
+    ? Math.max(
+        POWER_SAVING_FASTER_AUTOPLAY_MS_MIN,
+        Math.min(POWER_SAVING_FASTER_AUTOPLAY_MS_MAX, raw)
+      )
+    : POWER_SAVING_FASTER_AUTOPLAY_MS_DEFAULT;
+  return fasterMs + POWER_SAVING_OFF_DEBOUNCE_EXTRA_MS;
+}
+
+/**
+ * Autoplay control row: [Start|Pause|Resume] + Autoplay menu (or pause in slot 1).
+ * Scoped like Better Tasker / Hunt Analyzer — never scan the whole page for "Start".
+ */
+function findAutoplayControlRowForPowerSaving() {
+  for (const flexContainer of document.querySelectorAll('div.flex')) {
+    const buttons = flexContainer.querySelectorAll('button');
+    if (buttons.length < 2) continue;
+    const second = buttons[1];
+    if (second.querySelector('img[alt="Autoplay"], img[src*="autoplay.png"]')) {
+      return { primary: buttons[0], secondary: second };
+    }
+    if (second.querySelector('svg.lucide-pause')) {
+      return { primary: buttons[0], secondary: second, pauseInSecondary: true };
+    }
+  }
+  return null;
+}
+
+function getAutoplayPrimaryButtonTextForPowerSaving() {
+  const row = findAutoplayControlRowForPowerSaving();
+  return (row?.primary?.textContent || '').trim();
+}
+
+function isAutoplayPauseButtonVisibleForPowerSaving() {
+  const row = findAutoplayControlRowForPowerSaving();
+  if (!row) return false;
+  if (row.pauseInSecondary) return true;
+  return !!row.primary?.querySelector('svg.lucide-pause');
+}
+
+/** True when autoplay row shows Resume/Retomar (session paused, not running). */
+function isAutoplayPausedInDomForPowerSaving() {
+  const row = findAutoplayControlRowForPowerSaving();
+  if (!row) return false;
+  if (isAutoplayPauseButtonVisibleForPowerSaving()) return false;
+  const text = (row.primary?.textContent || '').trim();
+  return text === 'Resume' || text === 'Retomar';
+}
+
+/** True only when the autoplay row itself shows Start/Iniciar (session fully stopped). */
+function isAutoplayFullyStoppedInDomForPowerSaving() {
+  const row = findAutoplayControlRowForPowerSaving();
+  if (!row) return false;
+  if (isAutoplayPauseButtonVisibleForPowerSaving()) return false;
+  if (isAutoplayPausedInDomForPowerSaving()) return false;
+  const text = (row.primary?.textContent || '').trim();
+  return text === 'Start' || text === 'Iniciar';
+}
+
+function getPowerSavingBoardRoomId(ctx) {
+  const roomId = ctx?.selectedMap?.selectedRoom?.id;
+  return typeof roomId === 'string' && roomId.length > 0 ? roomId : null;
+}
+
+/** Force the live checkbox off after a map switch; retry while the session widget remounts. */
+function clearPowerSavingMapChangeOffRetries() {
+  for (const id of powerSavingMapChangeOffTimers) {
+    try {
+      clearTimeout(id);
+    } catch (_) { /* ignore */ }
+  }
+  powerSavingMapChangeOffTimers = [];
+}
+
+/**
+ * Uncheck the in-game Power saving checkbox without touching saved preference.
+ * Uses full pointer/mouse events (plain click() is often ignored while the goblin screen is up).
+ * @returns {'off'|'on'|'missing'}
+ */
+function uncheckPowerSavingModeCheckboxPreservingPreference() {
+  const button = findPowerSavingModeCheckboxButton();
+  if (!button) return 'missing';
+  if (!isPowerSavingModeCheckboxChecked(button)) {
+    setLivePowerSavingModeEnabled(false);
+    return 'off';
+  }
+
+  clickPowerSavingModeCheckbox(button, () => {
+    const stillOn = isPowerSavingModeCheckboxChecked(button);
+    setLivePowerSavingModeEnabled(stillOn);
+  });
+  return 'on';
+}
+
+/**
+ * Synthetic activate for the (visually hidden) game Power saving checkbox.
+ * Single activation only (dispatch+click() would toggle twice → stuck off).
+ * Label preference handler ignores checkbox targets / restorePending.
+ */
+function clickPowerSavingModeCheckbox(button, afterMs = null) {
+  if (!button) return;
+  powerSavingModeRestorePending = true;
+  // Real 12×12 under the custom checkbox — briefly enable hit-testing for Radix.
+  button.style.setProperty('pointer-events', 'auto', 'important');
+  button.style.setProperty('opacity', '0.01', 'important');
+  try {
+    const pointerPayload = { bubbles: true, cancelable: true, composed: true };
+    const mousePayload = { bubbles: true, cancelable: true, composed: true, button: 0 };
+    try {
+      button.focus?.({ preventScroll: true });
+    } catch (_) { /* ignore */ }
+    button.dispatchEvent(new PointerEvent('pointerdown', pointerPayload));
+    button.dispatchEvent(new MouseEvent('mousedown', mousePayload));
+    button.dispatchEvent(new PointerEvent('pointerup', { ...pointerPayload, buttons: 0 }));
+    button.dispatchEvent(new MouseEvent('mouseup', { ...mousePayload, buttons: 0 }));
+    // One click only — a second click() would immediately undo the toggle.
+    button.dispatchEvent(new MouseEvent('click', { ...mousePayload, buttons: 0 }));
+  } finally {
+    setTimeout(() => {
+      powerSavingModeRestorePending = false;
+      button.style.removeProperty('pointer-events');
+      button.style.removeProperty('opacity');
+      if (typeof afterMs === 'function') afterMs();
+    }, 100);
+  }
+}
+
+function queuePowerSavingOffAfterMapChange() {
+  if (!config.persistPowerSavingMode) return;
+  clearPowerSavingOffDebounce();
+  clearPowerSavingMapChangeOffRetries();
+
+  let attempts = 0;
+  const maxAttempts = 15;
+
+  const attempt = () => {
+    attempts += 1;
+    const result = uncheckPowerSavingModeCheckboxPreservingPreference();
+    const goblinUp = !!document.getElementById('autoplay-goblin');
+    // missing + no goblin = already off / widget gone — treat as success
+    const done = (result === 'off' || result === 'missing') && !goblinUp;
+
+    if (done || attempts >= maxAttempts) {
+      if (!done && attempts >= maxAttempts) {
+        console.warn(
+          '[Mod Settings] Map change: could not uncheck Power saving mode after retries',
+          { result, goblinUp }
+        );
+      }
+      return;
+    }
+
+    const id = setTimeout(() => {
+      powerSavingMapChangeOffTimers = powerSavingMapChangeOffTimers.filter((t) => t !== id);
+      attempt();
+    }, 200);
+    powerSavingMapChangeOffTimers.push(id);
+  };
+
+  attempt();
+}
+
+/**
+ * Map switches should drop live Power saving immediately (preference unchanged).
+ * Stays off until we've seen gameStarted clear, then a new battle — or fully stopped.
+ */
+function syncPowerSavingTrackedRoom(ctx) {
+  const roomId = getPowerSavingBoardRoomId(ctx);
+  if (!roomId) return false;
+  if (!powerSavingTrackedRoomId) {
+    powerSavingTrackedRoomId = roomId;
+    return false;
+  }
+  if (roomId === powerSavingTrackedRoomId) return false;
+
+  powerSavingTrackedRoomId = roomId;
+  powerSavingSuspendedAfterMapChange = true;
+  powerSavingSuspendSeenIdle = ctx?.gameStarted !== true;
+  clearPowerSavingOffDebounce();
+  lastPowerSavingSessionActive = false;
+  queuePowerSavingOffAfterMapChange();
+  return true;
+}
+
+/**
+ * True only while a fight is actually running (not between fights, not paused).
+ * Between-fight / pause gaps use OFF debounce instead of faking "still active".
+ * @see docs/game_state_api.md board context (gameStarted, mode)
+ */
+function isPowerSavingActiveSession() {
+  try {
+    const ctx = globalThis.state?.board?.getSnapshot?.().context;
+    if (!ctx) return false;
+    syncPowerSavingTrackedRoom(ctx);
+
+    const mode = typeof ctx.mode === 'string' ? ctx.mode.toLowerCase() : '';
+    const gameStarted = ctx.gameStarted === true;
+    if (powerSavingLastGameStarted === null) {
+      powerSavingLastGameStarted = gameStarted;
+    } else if (gameStarted !== powerSavingLastGameStarted) {
+      console.log(
+        gameStarted
+          ? '[Mod Settings] Power saving: battle started'
+          : '[Mod Settings] Power saving: battle stopped',
+        { mode: ctx.mode }
+      );
+      powerSavingLastGameStarted = gameStarted;
+    }
+
+    if (powerSavingSuspendedAfterMapChange) {
+      if (!gameStarted) {
+        powerSavingSuspendSeenIdle = true;
+      }
+      if (isAutoplayFullyStoppedInDomForPowerSaving()) {
+        powerSavingSuspendedAfterMapChange = false;
+        powerSavingSuspendSeenIdle = false;
+        return false;
+      }
+      if (powerSavingSuspendSeenIdle && gameStarted) {
+        powerSavingSuspendedAfterMapChange = false;
+        powerSavingSuspendSeenIdle = false;
+      } else {
+        return false;
+      }
+    }
+
+    if (mode === 'autoplay') {
+      const resumeVisible = isAutoplayPausedInDomForPowerSaving();
+      if (resumeVisible && !powerSavingLastResumeVisible) {
+        console.log('[Mod Settings] Power saving: autoplay paused (Resume visible)', {
+          button: getAutoplayPrimaryButtonTextForPowerSaving(),
+          gameStarted,
+        });
+      } else if (!resumeVisible && powerSavingLastResumeVisible) {
+        console.log('[Mod Settings] Power saving: autoplay unpaused (Resume gone)', {
+          button: getAutoplayPrimaryButtonTextForPowerSaving(),
+        });
+      }
+      powerSavingLastResumeVisible = resumeVisible;
+
+      // Paused or fully stopped → not an active fight (OFF debounce decides later).
+      if (resumeVisible || isAutoplayFullyStoppedInDomForPowerSaving()) {
+        return false;
+      }
+      return gameStarted;
+    }
+
+    powerSavingLastResumeVisible = false;
+    return gameStarted;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Preference (`powerSavingModeEnabled`) stays saved while Persistent Powersaver is on;
+ * the live game checkbox only targets ON during an active fight.
+ * While OFF debounce is pending we do not sync at all (see restorePersistedPowerSavingMode).
+ */
+function getEffectivePowerSavingModeDesired() {
+  if (!config.persistPowerSavingMode) return false;
+  if (!config.powerSavingModeEnabled) return false;
+  if (powerSavingSuspendedAfterMapChange) return false;
+  return isPowerSavingActiveSession();
+}
+
+function unsubscribePowerSavingHandle(sub) {
+  if (!sub) return;
+  try {
+    if (typeof sub === 'function') sub();
+    else if (typeof sub.unsubscribe === 'function') sub.unsubscribe();
+  } catch (_) { /* ignore */ }
+}
+
+function clearPowerSavingOffDebounce() {
+  if (powerSavingOffDebounceTimer) {
+    clearTimeout(powerSavingOffDebounceTimer);
+    powerSavingOffDebounceTimer = null;
+  }
+}
+
+function isPowerSavingOffDebouncePending() {
+  return powerSavingOffDebounceTimer != null;
+}
+
+/**
+ * After leaving a fight: wait, then decide. Do not touch the checkbox during the wait
+ * (avoids: game unchecks → we force goblin back on → later we turn off).
+ */
+function schedulePowerSavingOffDebounce() {
+  if (powerSavingOffDebounceTimer) return;
+  const debounceMs = getPowerSavingOffDebounceMs();
+  console.log('[Mod Settings] Power saving: OFF debounce armed', {
+    ms: debounceMs,
+    fasterAutoplayMs: debounceMs - POWER_SAVING_OFF_DEBOUNCE_EXTRA_MS,
+  });
+  powerSavingOffDebounceTimer = setTimeout(() => {
+    powerSavingOffDebounceTimer = null;
+    if (!config.persistPowerSavingMode) return;
+    if (isPowerSavingActiveSession()) {
+      lastPowerSavingSessionActive = true;
+      console.log('[Mod Settings] Power saving: OFF debounce ended — fight active, keeping/enabling');
+      schedulePersistedPowerSavingModeRestore(0);
+      return;
+    }
+    lastPowerSavingSessionActive = false;
+    console.log('[Mod Settings] Power saving: OFF debounce ended — disabling');
+    uncheckPowerSavingModeCheckboxPreservingPreference();
+  }, debounceMs);
+}
+
+function stopPowerSavingSessionListener() {
+  clearPowerSavingOffDebounce();
+  clearPowerSavingMapChangeOffRetries();
+  if (powerSavingSessionUnsubscribe) {
+    try {
+      powerSavingSessionUnsubscribe();
+    } catch (_) { /* ignore */ }
+    powerSavingSessionUnsubscribe = null;
+  }
+  lastPowerSavingSessionActive = null;
+  powerSavingTrackedRoomId = null;
+  powerSavingSuspendedAfterMapChange = false;
+  powerSavingSuspendSeenIdle = false;
+  powerSavingLastGameStarted = null;
+  powerSavingLastResumeVisible = false;
+}
+
+function ensurePowerSavingSessionListener() {
+  if (powerSavingSessionUnsubscribe) return;
+  const board = globalThis.state?.board;
+  if (!board) return;
+
+  const onSessionMaybeChanged = () => {
+    if (!config.persistPowerSavingMode) return;
+
+    try {
+      const ctx = board.getSnapshot?.().context;
+      // syncPowerSavingTrackedRoom queues OFF retries itself when the room changes.
+      if (syncPowerSavingTrackedRoom(ctx)) {
+        console.log('[Mod Settings] Power saving: map changed — forcing off');
+        return;
+      }
+    } catch (_) { /* ignore */ }
+
+    const active = isPowerSavingActiveSession();
+
+    if (active) {
+      // Fight running: cancel pending OFF and apply ON immediately.
+      clearPowerSavingOffDebounce();
+      if (lastPowerSavingSessionActive === true) return;
+      lastPowerSavingSessionActive = true;
+      console.log('[Mod Settings] Power saving: enabling (session active)');
+      schedulePersistedPowerSavingModeRestore(50);
+      return;
+    }
+
+    // Not in a fight: arm OFF debounce once, then leave the checkbox alone until it fires.
+    if (lastPowerSavingSessionActive === true || isPowerSavingOffDebouncePending()) {
+      if (lastPowerSavingSessionActive === true) {
+        lastPowerSavingSessionActive = false;
+      }
+      schedulePowerSavingOffDebounce();
+      return;
+    }
+
+    // Already idle with no pending debounce — nothing to do.
+  };
+
+  const subs = [];
+  try {
+    if (typeof board.subscribe === 'function') {
+      const sub = board.subscribe(onSessionMaybeChanged);
+      if (sub) subs.push(sub);
+    }
+  } catch (_) { /* ignore */ }
+
+  if (typeof board.on === 'function') {
+    for (const evt of ['emitNewGame', 'emitEndGame', 'setPlayMode', 'newGame', 'selectRoomById']) {
+      try {
+        const sub = board.on(evt, () => {
+          onSessionMaybeChanged();
+        });
+        if (sub) subs.push(sub);
+      } catch (_) { /* ignore */ }
+    }
+  }
+
+  if (!subs.length) return;
+
+  powerSavingSessionUnsubscribe = () => {
+    for (const sub of subs) unsubscribePowerSavingHandle(sub);
+  };
+  try {
+    syncPowerSavingTrackedRoom(board.getSnapshot?.().context);
+  } catch (_) { /* ignore */ }
+  lastPowerSavingSessionActive = isPowerSavingActiveSession();
+}
 
 function getLivePowerSavingModeEnabled() {
   return livePowerSavingModeEnabled === true;
@@ -12373,6 +13093,14 @@ let missingPowerSavingButtonSince = null;
 function syncLivePowerSavingModeFromDom() {
   const button = findPowerSavingModeCheckboxButton();
   if (!button) {
+    // Goblin screen still up means Power saving is still on — don't fake "off" on remount.
+    if (document.getElementById('autoplay-goblin')) {
+      missingPowerSavingButtonSince = null;
+      if (!livePowerSavingModeEnabled) {
+        setLivePowerSavingModeEnabled(true);
+      }
+      return;
+    }
     // Session widget may briefly remount — only clear after it's gone for a bit.
     if (!livePowerSavingModeEnabled) {
       missingPowerSavingButtonSince = null;
@@ -12397,46 +13125,57 @@ window.baPowerSavingMode = {
   setEnabled: setLivePowerSavingModeEnabled,
 };
 
-function savePowerSavingModeStateFromButton(button) {
-  if (!config.persistPowerSavingMode || !button) return;
-  const checked = isPowerSavingModeCheckboxChecked(button);
-  // Always keep live state in sync when we read the checkbox.
-  setLivePowerSavingModeEnabled(checked);
-  if (config.powerSavingModeEnabled === checked) return;
-  config.powerSavingModeEnabled = checked;
-  saveConfig();
+function schedulePowerSavingMismatchRetry(button, delayMs = 150) {
+  setTimeout(() => {
+    if (!config.persistPowerSavingMode) return;
+    if (isPowerSavingOffDebouncePending()) return;
+    if (!button?.isConnected) return;
+    if (isPowerSavingModeCheckboxChecked(button) === getEffectivePowerSavingModeDesired()) return;
+    schedulePersistedPowerSavingModeRestore(delayMs);
+  }, delayMs);
 }
 
 function restorePersistedPowerSavingMode() {
   if (!config.persistPowerSavingMode) return;
-  if (Date.now() < powerSavingUserEditUntil) return;
+  // During OFF debounce: leave the live checkbox alone — decide only when the timer fires.
+  if (isPowerSavingOffDebouncePending()) return;
 
   const button = findPowerSavingModeCheckboxButton();
-  if (!button) return;
+  if (!button) {
+    if (powerSavingSuspendedAfterMapChange && config.powerSavingModeEnabled) {
+      schedulePersistedPowerSavingModeRestore(200);
+    }
+    return;
+  }
 
   ensurePowerSavingModePersistListener();
+  ensurePowerSavingSessionListener();
 
-  const desired = !!config.powerSavingModeEnabled;
-  if (isPowerSavingModeCheckboxChecked(button) === desired) return;
+  const desired = getEffectivePowerSavingModeDesired();
+  const checked = isPowerSavingModeCheckboxChecked(button);
+  if (checked === desired) return;
 
-  powerSavingModeRestorePending = true;
-  try {
-    button.click();
-  } finally {
-    // Keep pending long enough for React to apply aria-checked / data-state.
-    setTimeout(() => {
-      powerSavingModeRestorePending = false;
-      setLivePowerSavingModeEnabled(isPowerSavingModeCheckboxChecked(button));
-      // If the game reset the checkbox after our click, retry once the dust settles.
-      if (
-        config.persistPowerSavingMode &&
-        Date.now() >= powerSavingUserEditUntil &&
-        isPowerSavingModeCheckboxChecked(button) !== desired
-      ) {
-        schedulePersistedPowerSavingModeRestore(150);
-      }
-    }, 100);
+  console.log('[Mod Settings] Power saving: sync checkbox', {
+    desired,
+    checked,
+    goblinUp: !!document.getElementById('autoplay-goblin'),
+  });
+
+  if (!desired) {
+    // Preference off or map switch: force OFF now. Otherwise debounce, then decide.
+    if (!config.powerSavingModeEnabled || powerSavingSuspendedAfterMapChange) {
+      uncheckPowerSavingModeCheckboxPreservingPreference();
+      schedulePowerSavingMismatchRetry(button, 150);
+      return;
+    }
+    schedulePowerSavingOffDebounce();
+    return;
   }
+
+  clickPowerSavingModeCheckbox(button, () => {
+    setLivePowerSavingModeEnabled(isPowerSavingModeCheckboxChecked(button));
+    schedulePowerSavingMismatchRetry(button, 150);
+  });
 }
 
 function schedulePersistedPowerSavingModeRestore(delayMs = 75) {
@@ -12457,16 +13196,8 @@ function ensurePowerSavingModePersistListener() {
     button.dataset.modSettingsPowerSavingPersistBound = 'true';
     button.addEventListener('click', () => {
       if (powerSavingModeRestorePending) return;
-      powerSavingUserEditUntil = Date.now() + 1500;
-      // Read state after React updates aria-checked / data-state.
-      setTimeout(() => {
-        const checked = isPowerSavingModeCheckboxChecked(button);
-        setLivePowerSavingModeEnabled(checked);
-        if (!config.persistPowerSavingMode) return;
-        if (config.powerSavingModeEnabled === checked) return;
-        config.powerSavingModeEnabled = checked;
-        saveConfig();
-      }, 50);
+      // Live checkbox is session-gated; preference is controlled by the custom checkbox.
+      setLivePowerSavingModeEnabled(isPowerSavingModeCheckboxChecked(button));
     });
   }
 
@@ -12478,19 +13209,17 @@ function ensurePowerSavingModePersistListener() {
     powerSavingObservedButton = button;
     powerSavingStateObserver = new MutationObserver(() => {
       if (powerSavingModeRestorePending) return;
-      const checked = isPowerSavingModeCheckboxChecked(button);
-      if (Date.now() < powerSavingUserEditUntil) {
-        setLivePowerSavingModeEnabled(checked);
-        if (config.persistPowerSavingMode) {
-          savePowerSavingModeStateFromButton(button);
-        }
+      if (isPowerSavingOffDebouncePending()) {
+        // Leave checkbox alone until OFF debounce decides.
+        setLivePowerSavingModeEnabled(isPowerSavingModeCheckboxChecked(button));
         return;
       }
+      const checked = isPowerSavingModeCheckboxChecked(button);
       setLivePowerSavingModeEnabled(checked);
-      // Game remounted/reset the checkbox — re-apply persisted state if needed.
+      // Game remounted/reset the checkbox — re-apply session-gated persisted state.
       if (
         config.persistPowerSavingMode &&
-        checked !== !!config.powerSavingModeEnabled
+        checked !== getEffectivePowerSavingModeDesired()
       ) {
         schedulePersistedPowerSavingModeRestore(50);
       }
@@ -12513,6 +13242,7 @@ function applyAutoplaySessionCheckboxVisibility() {
       setSessionCheckboxLabelHidden(label, !!config.hidePowerSavingMode, 'powerSavingMode');
     }
   }
+  applyPersistentPowersaverInGameLabel();
 }
 
 function applyAutoplaySessionCheckboxFeatures() {
@@ -12520,6 +13250,7 @@ function applyAutoplaySessionCheckboxFeatures() {
   applyAutoplaySessionCheckboxVisibility();
   updateHideStopAfterDefeatCheckboxState();
   ensurePowerSavingModePersistListener();
+  ensurePowerSavingSessionListener();
   schedulePersistedPowerSavingModeRestore(0);
   syncLivePowerSavingModeFromDom();
 }
@@ -14763,6 +15494,43 @@ async function fetchLivePlayerCount() {
   }
 }
 
+function maybeShowPlayerOnlineRecordToast(count) {
+  if (!playercountState.recordToastBaselineReady) {
+    return;
+  }
+  if (!Number.isFinite(count) || count < 0) {
+    return;
+  }
+
+  const knownPeak = playercountState.onlineRecord?.peak;
+  if (knownPeak == null || !Number.isFinite(knownPeak) || count <= knownPeak) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - playercountState.lastRecordToastAt < PLAYER_ONLINE_RECORD_TOAST_COOLDOWN_MS) {
+    return;
+  }
+
+  playercountState.lastRecordToastAt = now;
+  playercountState.onlineRecord = {
+    peak: Math.floor(count),
+    achievedAt: now
+  };
+
+  try {
+    createToast({
+      message: `<span class="text-success">${tReplace('mods.betterUI.playerOnlineRecordToast', {
+        record: formatPlayerOnlineRecordPeak(count)
+      })}</span>`,
+      type: 'success',
+      duration: 5000
+    });
+  } catch (toastError) {
+    console.warn('[Mod Settings] Could not show player online record toast:', toastError);
+  }
+}
+
 async function runPlayerOnlineRecordCheck() {
   let count = playercountState.currentPlayerCount;
   if (count === null) {
@@ -14772,6 +15540,8 @@ async function runPlayerOnlineRecordCheck() {
     }
   }
 
+  // Toast before sync so a successful write does not raise the local peak first.
+  maybeShowPlayerOnlineRecordToast(count);
   await syncPlayerOnlineHighscore(count);
   updatePlayerCountDisplay(count);
 }
@@ -14850,6 +15620,8 @@ function clearPlayerCountIntervals() {
 // Start periodic updates
 function startPlayerCountUpdates() {
   clearPlayerCountIntervals();
+  playercountState.recordToastBaselineReady = false;
+  playercountState.lastRecordToastAt = 0;
 
   fetchPlayerOnlineHighscore().finally(async () => {
     const count = await fetchLivePlayerCount();
@@ -14858,10 +15630,13 @@ function startPlayerCountUpdates() {
       await syncPlayerOnlineHighscore(count);
       updatePlayerCountDisplay(count);
     }
+    // Enable toasts only after init so the first sync never notifies.
+    playercountState.recordToastBaselineReady = true;
   });
 
   playercountState.updateInterval = setInterval(async () => {
     const count = await fetchLivePlayerCount();
+    maybeShowPlayerOnlineRecordToast(count);
     updatePlayerCountDisplay(count);
   }, PLAYER_COUNT_POLL_MS);
 
@@ -15460,6 +16235,8 @@ function cleanupBetterUI() {
       powerSavingStateObserver = null;
       powerSavingObservedButton = null;
     }
+    stopPowerSavingSessionListener();
+    stopPersistentPowersaverLabelTextObserver();
     cancelPendingPowerSavingOverlayRestore();
 
     // Cancel pending async callbacks
@@ -15689,6 +16466,9 @@ function cleanupBetterUI() {
     playercountState.currentPlayerCount = null;
     playercountState.lastUpdateTime = null;
     playercountState.onlineRecord = null;
+    playercountState.onlineRecordFetchSucceeded = false;
+    playercountState.recordToastBaselineReady = false;
+    playercountState.lastRecordToastAt = 0;
     playercountState.updateInterval = null;
     playercountState.recordCheckInterval = null;
     

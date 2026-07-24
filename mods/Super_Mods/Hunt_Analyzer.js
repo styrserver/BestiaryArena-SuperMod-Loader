@@ -510,8 +510,22 @@ function injectHuntAnalyzerStyles() {
         ${buildHuntAnalyzerCssVariableBlock(theme)}
         
         /* Hunt Analyzer Common Styles */
-        .ha-panel-container {
+        /* Outer shell owns size/position/resize handles; inner frame is the visual panel. */
+        .ha-panel-shell {
             position: fixed;
+            /* Above Autoseller auto badges (100) and board UI (z-1..z-10),
+               below native game context menus (z-modals = 200). */
+            z-index: 150;
+            overflow: visible;
+            box-sizing: border-box;
+            padding: 0;
+            margin: 0;
+        }
+        .ha-panel-shell > .ha-panel-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
             background-image: var(--ha-panel-bg-image);
             background-repeat: repeat;
             background-color: var(--ha-panel-bg);
@@ -520,12 +534,8 @@ function injectHuntAnalyzerStyles() {
             color: var(--ha-text);
             padding: 0;
             overflow: hidden;
-            /* Above Autoseller auto badges (100) and board UI (z-1..z-10),
-               below native game context menus (z-modals = 200). */
-            z-index: 150;
             display: flex;
             flex-direction: column;
-            height: 100%;
             font-family: Inter, sans-serif;
             border-radius: 6px;
             box-shadow: 0 0 15px var(--ha-panel-shadow);
@@ -1001,8 +1011,14 @@ function clearAnalyzerDataAndRefresh() {
     showPanelFeedback(panel, resetFeedbackText, true);
 }
 
+function getPanelFrame(panel) {
+    if (!panel) return null;
+    return panel._frame || panel.querySelector(':scope > .ha-panel-container') || panel;
+}
+
 function showPanelFeedback(panel, text, isSuccess = true) {
     if (!panel) return;
+    const frame = getPanelFrame(panel);
     const feedbackMessage = document.createElement('div');
     feedbackMessage.textContent = text;
     feedbackMessage.style.position = 'absolute';
@@ -1016,7 +1032,7 @@ function showPanelFeedback(panel, text, isSuccess = true) {
     feedbackMessage.style.zIndex = '100';
     feedbackMessage.style.opacity = '0';
     feedbackMessage.style.transition = 'opacity 0.3s ease-in-out';
-    panel.appendChild(feedbackMessage);
+    frame.appendChild(feedbackMessage);
 
     setTimeout(() => {
         feedbackMessage.style.opacity = '1';
@@ -5949,11 +5965,16 @@ function createStyledIconButton(iconText) {
     return button;
 }
 
-// Creates the main panel container with basic styling and layout.
+// Creates the main panel shell (size/position/handles) with an inner visual frame.
 function createPanelContainer() {
     const panel = document.createElement("div");
     panel.id = PANEL_ID;
-    panel.className = "ha-panel-container";
+    panel.className = "ha-panel-shell";
+
+    const frame = document.createElement("div");
+    frame.className = "ha-panel-container";
+    panel.appendChild(frame);
+    panel._frame = frame;
     
     // Load saved panel settings
     const savedSettings = loadPanelSettings();
@@ -5961,7 +5982,7 @@ function createPanelContainer() {
     // Apply initial layout constraints
     const initialLayout = LAYOUT_DIMENSIONS[LAYOUT_MODES.VERTICAL];
     
-    // Apply saved settings or defaults
+    // Apply saved settings or defaults (size/position on outer shell)
     if (savedSettings) {
         applyPanelSettings(panel, savedSettings);
     } else {
@@ -6500,10 +6521,11 @@ function createAutoplayAnalyzerPanel() {
     // Version display removed
 
     // Assemble the panel (default to vertical, updatePanelLayout will fix for horizontal)
-    panel.appendChild(leftColumn);
-    panel.appendChild(mapFilterContainer);
-    panel.appendChild(lootContainer);
-    panel.appendChild(creatureDropContainer);
+    const frame = getPanelFrame(panel);
+    frame.appendChild(leftColumn);
+    frame.appendChild(mapFilterContainer);
+    frame.appendChild(lootContainer);
+    frame.appendChild(creatureDropContainer);
 
     // Cache DOM elements
     domCache.set("mod-loot-display", lootDisplayDiv);
@@ -7014,9 +7036,9 @@ function applyLayoutMode(panel, mode, mapFilterContainer, lootContainer, creatur
     panel.style.minHeight = layout.minHeight + 'px';
     panel.style.maxHeight = layout.maxHeight + 'px';
     if (mode === LAYOUT_MODES.HORIZONTAL) {
-        panel.style.flexDirection = 'row';
+        getPanelFrame(panel).style.flexDirection = 'row';
     } else {
-        panel.style.flexDirection = 'column';
+        getPanelFrame(panel).style.flexDirection = 'column';
     }
     if (mode === LAYOUT_MODES.MINIMIZED) {
         mapFilterContainer.style.display = 'none';
@@ -7035,6 +7057,7 @@ function applyLayoutMode(panel, mode, mapFilterContainer, lootContainer, creatur
 
 // In updatePanelLayout, use currentLayoutMode instead of height for layout:
 function updatePanelLayout(panel) {
+    const frame = getPanelFrame(panel);
     const leftColumn = panel._leftColumn;
     const topHeaderContainer = panel._topHeaderContainer;
     const liveDisplaySection = panel._liveDisplaySection;
@@ -7126,9 +7149,9 @@ function updatePanelLayout(panel) {
         }
     }
 
-    // Use currentLayoutMode for layout
+    // Use currentLayoutMode for layout (content lives in the inner frame)
     if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
-        panel.style.flexDirection = 'row';
+        frame.style.flexDirection = 'row';
         if (leftColumn) leftColumn.style.order = '0';
         if (mapFilterContainer) mapFilterContainer.style.order = '';
         if (lootContainer) lootContainer.style.order = '1';
@@ -7139,7 +7162,7 @@ function updatePanelLayout(panel) {
             const newLeftColumn = document.createElement('div');
             newLeftColumn.className = 'ha-left-column';
             panel._leftColumn = newLeftColumn;
-            panel.insertBefore(newLeftColumn, panel.firstChild);
+            frame.insertBefore(newLeftColumn, frame.firstChild);
         }
         if (leftColumn) {
             if (leftColumn.children[0] !== topHeaderContainer) leftColumn.insertBefore(topHeaderContainer, leftColumn.firstChild);
@@ -7149,51 +7172,48 @@ function updatePanelLayout(panel) {
         }
         // Ensure panel order: leftColumn, loot, creatures
         [leftColumn, lootContainer, creatureDropContainer].forEach((el, idx) => {
-            if (el && !panel.contains(el)) {
-                // Add element if it's not in the panel
-                panel.appendChild(el);
-            } else if (el && panel.children[idx] !== el) {
-                panel.insertBefore(el, panel.children[idx] || null);
+            if (el && !frame.contains(el)) {
+                frame.appendChild(el);
+            } else if (el && frame.children[idx] !== el) {
+                frame.insertBefore(el, frame.children[idx] || null);
             }
         });
     } else if (panelState.mode === LAYOUT_MODES.VERTICAL) {
-        panel.style.flexDirection = 'column';
+        frame.style.flexDirection = 'column';
         if (leftColumn) leftColumn.style.order = '';
         if (mapFilterContainer) mapFilterContainer.style.order = '';
         if (lootContainer) lootContainer.style.order = '';
         if (creatureDropContainer) creatureDropContainer.style.order = '';
         // Remove leftColumn if present (vertical mode doesn't use it)
-        if (leftColumn && panel.contains(leftColumn)) {
-            // Move children back to panel before removing leftColumn
+        if (leftColumn && frame.contains(leftColumn)) {
             while (leftColumn.firstChild) {
-                panel.insertBefore(leftColumn.firstChild, leftColumn);
+                frame.insertBefore(leftColumn.firstChild, leftColumn);
             }
-            panel.removeChild(leftColumn);
+            frame.removeChild(leftColumn);
         }
         // Ensure all containers are in the panel and in correct order
         const elements = [topHeaderContainer, liveDisplaySection, buttonContainer, mapFilterContainer, lootContainer, creatureDropContainer];
         elements.forEach((el, idx) => {
-            if (el && !panel.contains(el)) {
-                // Add element if it's not in the panel (restoring from minimized)
-                panel.appendChild(el);
-            } else if (el && panel.children[idx] !== el) {
-                panel.insertBefore(el, panel.children[idx] || null);
+            if (el && !frame.contains(el)) {
+                frame.appendChild(el);
+            } else if (el && frame.children[idx] !== el) {
+                frame.insertBefore(el, frame.children[idx] || null);
             }
         });
     } else if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
-        panel.style.flexDirection = 'column';
+        frame.style.flexDirection = 'column';
         if (leftColumn) leftColumn.style.order = '';
         if (mapFilterContainer) mapFilterContainer.style.order = '';
         if (lootContainer) lootContainer.style.order = '';
         if (creatureDropContainer) creatureDropContainer.style.order = '';
         // Remove leftColumn if present
-        if (leftColumn && panel.contains(leftColumn)) panel.removeChild(leftColumn);
-        // Always remove all six elements from the panel, then append in correct order
+        if (leftColumn && frame.contains(leftColumn)) frame.removeChild(leftColumn);
+        // Always remove all six elements from the frame, then append in correct order
         [topHeaderContainer, liveDisplaySection, buttonContainer, mapFilterContainer, lootContainer, creatureDropContainer].forEach(el => {
-            if (el && el.parentNode === panel) panel.removeChild(el);
+            if (el && el.parentNode === frame) frame.removeChild(el);
         });
         [topHeaderContainer, liveDisplaySection].forEach(el => {
-            if (el) panel.appendChild(el);
+            if (el) frame.appendChild(el);
         });
         // Fit all to width/height auto
         if (topHeaderContainer) {

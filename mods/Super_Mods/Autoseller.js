@@ -9704,25 +9704,12 @@
             return false;
         }
         
-        // Click the dragon plant button (game will handle filtering)
-        // Use a more reliable click method that simulates user interaction
+        // Click the dragon plant button once (game will handle filtering).
+        // Do not combine synthetic MouseEvents with .click() — that fires the
+        // handler twice; tRPC batches two quest.plantEat calls and the second
+        // fails with "User version mismatch".
         try {
-            // Scroll button into view if needed
             dragonPlantButton.scrollIntoView({ behavior: 'auto', block: 'center' });
-            
-            // Dispatch mouse events in sequence to simulate a real click
-            const events = ['mousedown', 'mouseup', 'click'];
-            events.forEach(eventType => {
-                const event = new MouseEvent(eventType, {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window,
-                    buttons: 1
-                });
-                dragonPlantButton.dispatchEvent(event);
-            });
-            
-            // Also call the native click method as fallback
             dragonPlantButton.click();
             
             console.log(`[Autoseller] Clicked Dragon Plant button after battle`);

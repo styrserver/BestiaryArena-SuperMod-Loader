@@ -231,6 +231,19 @@ function getAllEquipment() {
   return equipment;
 }
 
+/** Catalog getEquipment() entries have no fixed stat — owned equips carry .stat. */
+function resolveEquipmentStatKey(item) {
+  const raw = item?.metadata?.stat ?? item?.stat;
+  if (raw == null || raw === '') return null;
+  const s = String(raw).toLowerCase().replace(/[_\s-]/g, '');
+  if (s === 'ad' || s === 'attackdamage') return 'ad';
+  if (s === 'ap' || s === 'abilitypower') return 'ap';
+  if (s === 'hp' || s === 'health') return 'hp';
+  if (s === 'armor') return 'armor';
+  if (s === 'mr' || s === 'magicresist') return 'magicResist';
+  return null;
+}
+
 let equipmentNameMapCache = null;
 
 /** Cached lowercase name → { gameId, item } for O(1) equipment lookups. */
@@ -287,12 +300,18 @@ function buildEquipmentDatabase() {
   
   // Group equipment by stat type for easier filtering
   const equipmentByStat = {
-    ad: allEquipment.filter(e => e.stat === 'ad').map(e => e.metadata.name),
-    ap: allEquipment.filter(e => e.stat === 'ap').map(e => e.metadata.name),
-    hp: allEquipment.filter(e => e.stat === 'hp').map(e => e.metadata.name),
-    armor: allEquipment.filter(e => e.stat === 'armor').map(e => e.metadata.name),
-    magicResist: allEquipment.filter(e => e.stat === 'magicResist').map(e => e.metadata.name)
+    ad: [],
+    ap: [],
+    hp: [],
+    armor: [],
+    magicResist: []
   };
+  for (const item of allEquipment) {
+    const key = resolveEquipmentStatKey(item);
+    if (key && equipmentByStat[key]) {
+      equipmentByStat[key].push(item.metadata.name);
+    }
+  }
   
   return {
     ALL_EQUIPMENT: allEquipmentNames,
@@ -406,7 +425,14 @@ waitForGameState(() => {
 
     console.log(`[equipment-database.js] Loaded ${equipmentDatabase.ALL_EQUIPMENT.length} equipment items dynamically (cached for all mods)`);
     console.log('[equipment-database.js] ALL_EQUIPMENT length:', equipmentDatabase.ALL_EQUIPMENT?.length);
-    console.log('[equipment-database.js] Equipment by stat:', Object.keys(equipmentDatabase.EQUIPMENT_BY_STAT).map(stat => `${stat}: ${equipmentDatabase.EQUIPMENT_BY_STAT[stat].length}`).join(', '));
+    // Catalog items have no fixed AD/AP/HP/… — that lives on owned equips (player.context.equips[].stat)
+    const byStatCounts = Object.keys(equipmentDatabase.EQUIPMENT_BY_STAT).map(stat => `${stat}: ${equipmentDatabase.EQUIPMENT_BY_STAT[stat].length}`).join(', ');
+    const catalogStatTotal = Object.values(equipmentDatabase.EQUIPMENT_BY_STAT).reduce((n, arr) => n + arr.length, 0);
+    if (catalogStatTotal === 0) {
+      console.log('[equipment-database.js] Equipment by stat: none on catalog (expected — stat is per owned instance)');
+    } else {
+      console.log('[equipment-database.js] Equipment by stat:', byStatCounts);
+    }
     console.log('[equipment-database.js] HARDCODED_BOOSTED_MAP entries:', Object.keys(equipmentDatabase.HARDCODED_BOOSTED_MAP || {}).length);
   }
   if (typeof module !== 'undefined') {

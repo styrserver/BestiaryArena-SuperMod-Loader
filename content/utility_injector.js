@@ -33,78 +33,18 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
     // Handle script loading events
     script.onload = function() {
       console.log('BA Utility Injector: Sandbox utils loaded successfully');
-      // After sandbox utils load, inject custom battles system
-      injectCustomBattles();
     };
     
     script.onerror = function(error) {
       const detail = extUrl ? extUrl.formatScriptLoadError(error, scriptUrl) : error;
       console.error('BA Utility Injector: Error loading sandbox utils:', detail);
-      // Still try to inject custom battles even if sandbox utils fails
-      injectCustomBattles();
-    };
-    
-    document.head.appendChild(script);
-  }
-  
-  // Function to inject custom battles system
-  function injectCustomBattles() {
-    console.log('BA Utility Injector: Injecting custom battles system');
-    
-    const extUrl = typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
-    const getURL = browserAPI.runtime.getURL.bind(browserAPI.runtime);
-    const scriptUrl = extUrl
-      ? extUrl.getExtensionResourceUrl(getURL, 'content/custom-battles.js')
-      : getURL('content/custom-battles.js');
-
-    // Create and inject the script
-    const script = document.createElement('script');
-    script.type = 'text/javascript';
-    script.src = scriptUrl;
-    
-    // Handle script loading events
-    script.onload = function() {
-      console.log('BA Utility Injector: Custom battles script element loaded');
-      // Note: Content scripts run in isolated context, so window.CustomBattles
-      // may not be visible here, but mods (which run in page context) will be able to see it.
-      // The script logs show it IS executing and setting window.CustomBattles in the page context.
-      console.log('BA Utility Injector: custom-battles.js loaded - mods will be able to access window.CustomBattles');
-      injectEventCompetition();
-    };
-    
-    script.onerror = function(error) {
-      const detail = extUrl ? extUrl.formatScriptLoadError(error, scriptUrl) : error;
-      console.error('BA Utility Injector: ✗ ERROR loading custom battles system:', detail);
-      console.error('BA Utility Injector: Script URL was:', scriptUrl);
     };
     
     document.head.appendChild(script);
   }
 
-  function injectEventCompetition() {
-    console.log('BA Utility Injector: Injecting event competition framework');
-
-    const extUrl = typeof BestiaryExtensionUrl !== 'undefined' ? BestiaryExtensionUrl : null;
-    const getURL = browserAPI.runtime.getURL.bind(browserAPI.runtime);
-    const scriptUrl = extUrl
-      ? extUrl.getExtensionResourceUrl(getURL, 'content/event-competition.js')
-      : getURL('content/event-competition.js');
-
-    const script = document.createElement('script');
-    script.type = 'text/javascript';
-    script.src = scriptUrl;
-
-    script.onload = function() {
-      console.log('BA Utility Injector: event-competition.js loaded - mods will be able to access window.EventCompetition');
-    };
-
-    script.onerror = function(error) {
-      const detail = extUrl ? extUrl.formatScriptLoadError(error, scriptUrl) : error;
-      console.error('BA Utility Injector: ✗ ERROR loading event competition framework:', detail);
-    };
-
-    document.head.appendChild(script);
-  }
+  // custom-battles.js and event-competition.js are injected once by injector.js
+  // (after mod-coordination, before local_mods) to avoid double-loading.
   
   // Inject as soon as possible but wait for the document to be ready
   if (document.readyState === 'loading') {

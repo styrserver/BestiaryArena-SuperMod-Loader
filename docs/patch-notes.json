@@ -4,6 +4,51 @@
   },
   "notes": [
     {
+      "version": "4.6.1",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Dragon Plant auto-activate no longer double-clicks the plant button (synthetic click + native click), which batched two quest.plantEat calls and showed a User version mismatch toast after devouring sealed creatures."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Resize handles sit on an outer shell around the framed panel so you grab the outer edge instead of the inner content edge."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Resize handles sit on an outer shell around the framed panel so you grab the outer edge instead of the inner content edge."
+        },
+        {
+          "mod": "Hunt Analyzer",
+          "type": "changed",
+          "text": "Resize handles sit on an outer shell around the framed panel so you grab the outer edge instead of the inner content edge."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "changed",
+          "text": "Quieter startup console: dropped per-file existence checks, sorting debug, and per-mod execute START/END spam; kept short summaries and errors. Equipment / playereq databases clarify that catalog items have no fixed AD/AP/HP (stat is per owned instance)."
+        },
+        {
+          "mod": "Mod Loader",
+          "type": "fixed",
+          "text": "custom-battles.js and event-competition.js are injected once via injector.js only; utility injector no longer double-loads them after sandbox utils."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Players Online: toast when the live count beats the known overall maximum (not on init; 2-minute cooldown)."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "Persistent Powersaver: only turns Power saving on during fights; after a fight waits Automator’s Faster Autoplay delay + 1s before turning off (no between-fight flicker); map changes turn it off immediately. While enabled, the in-game row uses a custom preference checkbox (use Power saving during fights), hides the real game checkbox (still session-driven), and shows a localized shimmer label (Persistent Powersaver / Powersaver Persistente) with a Mod Settings tooltip."
+        }
+      ]
+    },
+    {
       "version": "4.6.0",
       "changes": [
         {

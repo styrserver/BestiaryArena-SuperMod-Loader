@@ -20,6 +20,19 @@ function getAllEquipment() {
   return equipment;
 }
 
+/** Catalog getEquipment() entries have no fixed stat — owned equips carry .stat. */
+function resolveEquipmentStatKey(item) {
+  const raw = item?.metadata?.stat ?? item?.stat;
+  if (raw == null || raw === '') return null;
+  const s = String(raw).toLowerCase().replace(/[_\s-]/g, '');
+  if (s === 'ad' || s === 'attackdamage') return 'ad';
+  if (s === 'ap' || s === 'abilitypower') return 'ap';
+  if (s === 'hp' || s === 'health') return 'hp';
+  if (s === 'armor') return 'armor';
+  if (s === 'mr' || s === 'magicresist') return 'magicResist';
+  return null;
+}
+
 // Function to determine equipment slot type from equipment data
 function getEquipmentSlotType(equipment) {
   // First, check if metadata has a slot property
@@ -135,12 +148,18 @@ function buildEquipmentDatabase() {
   
   // Group equipment by stat type for easier filtering
   const equipmentByStat = {
-    ad: allEquipment.filter(e => e.stat === 'ad').map(e => e.metadata.name),
-    ap: allEquipment.filter(e => e.stat === 'ap').map(e => e.metadata.name),
-    hp: allEquipment.filter(e => e.stat === 'hp').map(e => e.metadata.name),
-    armor: allEquipment.filter(e => e.stat === 'armor').map(e => e.metadata.name),
-    magicResist: allEquipment.filter(e => e.stat === 'magicResist').map(e => e.metadata.name)
+    ad: [],
+    ap: [],
+    hp: [],
+    armor: [],
+    magicResist: []
   };
+  for (const item of allEquipment) {
+    const key = resolveEquipmentStatKey(item);
+    if (key && equipmentByStat[key]) {
+      equipmentByStat[key].push(item.metadata.name);
+    }
+  }
   
   // Group equipment by slot type
   const equipmentBySlot = {
@@ -188,7 +207,13 @@ if (globalWindow) {
   globalWindow.playerEquipmentDatabase = playerEquipmentDatabase;
   console.log(`[playereq-database.js] Loaded ${playerEquipmentDatabase.ALL_EQUIPMENT.length} equipment items dynamically (cached for all mods)`);
   console.log('[playereq-database.js] ALL_EQUIPMENT length:', playerEquipmentDatabase.ALL_EQUIPMENT?.length);
-  console.log('[playereq-database.js] Equipment by stat:', Object.keys(playerEquipmentDatabase.EQUIPMENT_BY_STAT).map(stat => `${stat}: ${playerEquipmentDatabase.EQUIPMENT_BY_STAT[stat].length}`).join(', '));
+  const byStatCounts = Object.keys(playerEquipmentDatabase.EQUIPMENT_BY_STAT).map(stat => `${stat}: ${playerEquipmentDatabase.EQUIPMENT_BY_STAT[stat].length}`).join(', ');
+  const catalogStatTotal = Object.values(playerEquipmentDatabase.EQUIPMENT_BY_STAT).reduce((n, arr) => n + arr.length, 0);
+  if (catalogStatTotal === 0) {
+    console.log('[playereq-database.js] Equipment by stat: none on catalog (expected — stat is per owned instance)');
+  } else {
+    console.log('[playereq-database.js] Equipment by stat:', byStatCounts);
+  }
   console.log('[playereq-database.js] Equipment by slot:', Object.keys(playerEquipmentDatabase.EQUIPMENT_BY_SLOT).map(slot => `${slot}: ${playerEquipmentDatabase.EQUIPMENT_BY_SLOT[slot].length}`).join(', '));
 }
 if (typeof module !== 'undefined') {
