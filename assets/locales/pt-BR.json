@@ -165,11 +165,13 @@
     "depot": {
       "title": "Depot Manager",
       "navButton": "Depósito",
-      "tooltip": "Gerencie seu bestiário e equipamentos.",
+      "tooltip": "Gerencie seu bestiário, equipamentos e itens do inventário.",
       "defaultFavoriteSymbol": "Símbolo padrão de favorito",
       "enableCreatureDepot": "Depósito de criaturas",
       "sendToDepot": "Enviar para o depósito",
-      "sendToBestiary": "Enviar para o bestiário"
+      "sendToBestiary": "Enviar para o bestiário",
+      "sendToInventory": "Enviar para o inventário",
+      "inventoryLockedForDepot": "Desbloqueie a posição do inventário para mover itens para o depósito ou de volta"
     },
     "betterBestiary": {
       "activated": "Better Bestiary ativado!",
@@ -358,6 +360,7 @@
       "refreshOnMismatch": "Atualizar em Incompatibilidade",
       "refreshOnMismatchTooltip": "Atualiza automaticamente o navegador quando uma incompatibilidade servidor/simulação é detectada",
       "inventoryBorderStyle": "Botões de Mod do Inventário",
+      "inventoryItemsPerColumn": "Itens por coluna no inventário:",
       "modButtonDisplay": "Rótulos dos botões da barra de mods:",
       "modButtonDisplayText": "Texto",
       "modButtonDisplayIcon": "Ícones",
@@ -482,6 +485,7 @@
       "hotkeyLabelOpenStore": "Loja",
       "hotkeyLabelTrophyRoom": "Sala de Troféus",
       "hotkeyLabelDaycare": "Creche",
+      "hotkeyLabelDragonPlant": "Planta Dragão",
       "hotkeyLabelDrMephistopheles": "Dr. Mephistopheles",
       "hotkeyLabelForge": "Forja",
       "hotkeyLabelHygenie": "Hy'genie",
@@ -489,6 +493,8 @@
       "hotkeyLabelArsenal": "Arsenal",
       "hotkeyLabelMonsterSqueezer": "Espremedor de Monstros",
       "hotkeyLabelMonstrousCauldron": "Caldeirão Monstruoso",
+      "hotkeyLabelPawAndFurSociety": "Sociedade Pata e Pelo",
+      "hotkeyLabelRunes": "Runas",
       "hotkeyLabelReturnToMap": "Voltar ao mapa",
       "hotkeyLabelCyclopedia": "Ciclopédia",
       "hotkeyLabelBetterTeleporter": "Better Teleporter",

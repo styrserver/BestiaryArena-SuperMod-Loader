@@ -165,11 +165,13 @@
     "depot": {
       "title": "Depot Manager",
       "navButton": "Depot",
-      "tooltip": "Manage your bestiary and equipments.",
+      "tooltip": "Manage your bestiary, equipments, and inventory items.",
       "defaultFavoriteSymbol": "Default favorite symbol",
       "enableCreatureDepot": "Creature depot",
       "sendToDepot": "Send to depot",
-      "sendToBestiary": "Send to bestiary"
+      "sendToBestiary": "Send to bestiary",
+      "sendToInventory": "Send to inventory",
+      "inventoryLockedForDepot": "Unlock inventory position to move items to or from the depot"
     },
     "betterBestiary": {
       "activated": "Better Bestiary activated!",
@@ -358,6 +360,7 @@
       "refreshOnMismatch": "Refresh on Mismatch",
       "refreshOnMismatchTooltip": "Automatically refresh the browser when a server/simulation mismatch is detected",
       "inventoryBorderStyle": "Inventory Mod Buttons",
+      "inventoryItemsPerColumn": "Inventory items per column:",
       "modButtonDisplay": "Mod bar button labels:",
       "modButtonDisplayText": "Text",
       "modButtonDisplayIcon": "Icons",
@@ -482,6 +485,7 @@
       "hotkeyLabelOpenStore": "Store",
       "hotkeyLabelTrophyRoom": "Trophy Room",
       "hotkeyLabelDaycare": "Daycare",
+      "hotkeyLabelDragonPlant": "Dragon Plant",
       "hotkeyLabelDrMephistopheles": "Dr. Mephistopheles",
       "hotkeyLabelForge": "Forge",
       "hotkeyLabelHygenie": "Hy'genie",
@@ -489,6 +493,8 @@
       "hotkeyLabelArsenal": "Arsenal",
       "hotkeyLabelMonsterSqueezer": "Monster Squeezer",
       "hotkeyLabelMonstrousCauldron": "Monstrous Cauldron",
+      "hotkeyLabelPawAndFurSociety": "Paw and Fur Society",
+      "hotkeyLabelRunes": "Runes",
       "hotkeyLabelReturnToMap": "Return to Map",
       "hotkeyLabelCyclopedia": "Cyclopedia",
       "hotkeyLabelBetterTeleporter": "Better Teleporter",
