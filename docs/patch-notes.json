@@ -4,12 +4,27 @@
   },
   "notes": [
     {
+      "version": "4.6.3",
+      "changes": [
+        {
+          "mod": "Depot Manager",
+          "type": "added",
+          "text": "Right-click any native inventory slot (not mod buttons) for Send to depot / Send to inventory. Hidden slots appear in a new Depot Items column; the Depot modal is wider (780px) for three columns. Click a depot item tile to restore it to the inventory ribbon. Depot Items show stack amount, correct rarity borders, inventory-database names (T1–T5), and the same order as the inventory ribbon. While Persistent Inventory position is locked, inventory items cannot be sent to or restored from the depot."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "added",
+          "text": "Interface → Mod Bar & Inventory: inventory items per column (4, 2, or 1) for the normal grid and Persistent Inventory horizontal strip height. With 1–2 columns, the widget width fits the grid; the Inventory title ellipsizes (hidden at 1 column) and header lock/layout toggles use tighter spacing so both stay visible. Hotkeys for Runes (N), Dragon Plant (L), and Paw and Fur Society (W); badges show on those portraits when Hotkeys are enabled."
+        }
+      ]
+    },
+    {
       "version": "4.6.2",
       "changes": [
         {
           "mod": "Mod Settings",
           "type": "added",
-          "text": "Persistent Inventory: header toggle for horizontal strip (4 slots tall, expands sideways) and a lock control to freeze position; preferences persist. Lucide icons (layout columns/rows; lock green when unlocked, red when locked). Disabling Persistent Inventory clears pin, position, layout, and lock so re-enabling starts clean."
+          "text": "Persistent Inventory: header toggle for horizontal strip (4 slots tall, expands sideways) and a lock control to freeze position; preferences persist. Lucide icons (layout columns/rows; lock green when unlocked, red when locked). While locked, the layout toggle is disabled (greyed out) with a tooltip. Disabling Persistent Inventory clears pin, position, layout, and lock so re-enabling starts clean. When Hotkeys are enabled, bound inventory hotkeys (Daycare, Forge, Arsenal, etc.) show as a small key label on the top-left of that portrait."
         },
         {
           "mod": "Mod Settings",

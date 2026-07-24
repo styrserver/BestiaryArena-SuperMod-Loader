@@ -28,6 +28,7 @@ const defaultDepotConfig = {
 const DEPOT_CREATURE_IDS_KEY = 'depot-manager-depot-creature-ids';
 const DEPOT_CREATURE_META_KEY = 'depot-manager-depot-creature-meta-v1';
 const DEPOT_EQUIPMENT_IDS_KEY = 'depot-manager-depot-equipment-ids-v1';
+const DEPOT_INVENTORY_ITEMS_KEY = 'depot-manager-depot-inventory-items-v1';
 
 const depotCreatureState = {
   /** @type {string[]} */
@@ -39,6 +40,13 @@ const depotCreatureState = {
 const depotEquipmentState = {
   /** @type {string[]} */
   ids: []
+};
+
+const depotInventoryItemState = {
+  /** @type {string[]} fingerprint keys in depot order */
+  keys: [],
+  /** @type {Map<string, { key: string, label?: string, src?: string, rarity?: number|null, spriteId?: number|null }>} */
+  metaByKey: new Map()
 };
 
 let lastDepotLayoutCreatureRefreshAt = 0;
@@ -63,8 +71,10 @@ function isEliteMonster(monster) {
 const DATA_DEPOT_SLOT_ID = 'data-depot-creature-id';
 const DATA_DEPOT_HIDDEN = 'data-depot-hidden';
 const DATA_DEPOT_EQUIPMENT_HIDDEN = 'data-depot-equipment-hidden';
+const DATA_DEPOT_INVENTORY_HIDDEN = 'data-depot-inventory-hidden';
 const DATA_DEPOT_BB_GREYSCALE = 'data-depot-bb-greyscale';
 const BB_DEPOT_VISIBLE_GREYSCALE = 'grayscale(90%)';
+const INVENTORY_ITEM_DEPOT_MENU_CLASS = 'depot-inventory-item-context-menu';
 
 const TIMEOUT_DELAYS = {
   MENU_CLOSE: 10,
@@ -128,6 +138,8 @@ let depotLayoutPendingTimeout = null;
 let depotConfig;
 let currentRightClickedCreature = null;
 let currentRightClickedEquipment = null;
+let inventoryItemDepotContextMenuEl = null;
+let inventoryItemDepotMenuCleanup = null;
 let depotInitialized = false;
 let depotTabClickListener = null;
 let tabReapplyDebounceTimeout = null;
@@ -272,6 +284,75 @@ function saveDepotEquipmentIds() {
   }
 }
 
+function loadDepotInventoryItems() {
+  try {
+    const raw = localStorage.getItem(DEPOT_INVENTORY_ITEMS_KEY);
+    if (!raw) {
+      depotInventoryItemState.keys = [];
+      depotInventoryItemState.metaByKey = new Map();
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      // Legacy: plain key list
+      depotInventoryItemState.keys = parsed.map(String).filter(Boolean);
+      depotInventoryItemState.metaByKey = new Map();
+      return;
+    }
+    const keys = Array.isArray(parsed?.keys) ? parsed.keys.map(String).filter(Boolean) : [];
+    const meta = parsed?.meta && typeof parsed.meta === 'object' ? parsed.meta : {};
+    depotInventoryItemState.keys = keys;
+    depotInventoryItemState.metaByKey = new Map();
+    for (const key of keys) {
+      const entry = meta[key];
+      if (entry && typeof entry === 'object') {
+        depotInventoryItemState.metaByKey.set(key, {
+          key,
+          label: typeof entry.label === 'string' ? entry.label : 'Item',
+          src: typeof entry.src === 'string' ? entry.src : '',
+          rarity: entry.rarity == null || entry.rarity === '' ? null : Number(entry.rarity),
+          spriteId: entry.spriteId == null || entry.spriteId === '' ? null : Number(entry.spriteId),
+          amount: typeof entry.amount === 'string' ? entry.amount : '',
+          imgFilter: typeof entry.imgFilter === 'string' ? entry.imgFilter : ''
+        });
+      }
+    }
+  } catch (e) {
+    console.error('[Depot Manager] Error loading depot inventory items:', e);
+    depotInventoryItemState.keys = [];
+    depotInventoryItemState.metaByKey = new Map();
+  }
+}
+
+function saveDepotInventoryItems() {
+  try {
+    const meta = {};
+    for (const [key, entry] of depotInventoryItemState.metaByKey.entries()) {
+      meta[key] = {
+        label: entry?.label || 'Item',
+        src: entry?.src || '',
+        rarity: entry?.rarity ?? null,
+        spriteId: entry?.spriteId ?? null,
+        amount: entry?.amount || '',
+        imgFilter: entry?.imgFilter || ''
+      };
+    }
+    localStorage.setItem(
+      DEPOT_INVENTORY_ITEMS_KEY,
+      JSON.stringify({ keys: depotInventoryItemState.keys, meta })
+    );
+  } catch (e) {
+    console.error('[Depot Manager] Error saving depot inventory items:', e);
+  }
+}
+
+function removeOneDepotInventoryItemKey(key) {
+  const sid = String(key);
+  const idx = depotInventoryItemState.keys.indexOf(sid);
+  if (idx >= 0) depotInventoryItemState.keys.splice(idx, 1);
+  depotInventoryItemState.metaByKey.delete(sid);
+}
+
 function removeOneDepotEquipmentId(id) {
   const sid = String(id);
   const idx = depotEquipmentState.ids.indexOf(sid);
@@ -362,6 +443,404 @@ function getInventoryAnchorButton() {
     return Boolean(img?.src && img.src.includes('summonscroll'));
   });
   return summonBtn || allButtons[0];
+}
+
+function isModInventoryButton(button) {
+  if (!(button instanceof HTMLElement)) return true;
+  if (button.classList.contains('depot-manager-inventory-button')) return true;
+  return Array.from(button.classList).some((className) => className.endsWith('-inventory-button'));
+}
+
+function isDepotableInventoryButton(button) {
+  if (!(button instanceof HTMLElement)) return false;
+  if (isModInventoryButton(button)) return false;
+  if (!button.querySelector('.container-slot')) return false;
+  return Boolean(getInventoryItemFingerprint(button));
+}
+
+function normalizeInventoryAssetPath(src) {
+  if (!src) return '';
+  const raw = String(src);
+  const match =
+    raw.match(/\/assets\/[^?#]+/i) ||
+    raw.match(/(?:^|\/)(assets\/[^?#]+)/i);
+  if (!match) return '';
+  const path = match[0].startsWith('/') ? match[0] : `/${match[1] || match[0]}`;
+  return path.toLowerCase();
+}
+
+function getInventorySlotRarityAttr(button) {
+  if (!(button instanceof HTMLElement)) return '';
+  const host =
+    button.querySelector(':scope .container-slot > .has-rarity[data-rarity]') ||
+    button.querySelector('.has-rarity.relative.grid[data-rarity]') ||
+    button.querySelector('.has-rarity[data-rarity]');
+  return host?.getAttribute('data-rarity') || '';
+}
+
+function readInventorySlotAmountText(button) {
+  if (!(button instanceof HTMLElement)) return '';
+  const span = button.querySelector('.revert-pixel-font-spacing span');
+  if (!span) return '';
+  let text = '';
+  for (const node of span.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) text += node.textContent || '';
+  }
+  text = text.replace(/\s+/g, '').trim();
+  if (text) return text;
+  return String(span.textContent || '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function getInventoryTooltipEntries() {
+  const db = window.inventoryDatabase?.tooltips || window.inventoryTooltips;
+  return db && typeof db === 'object' ? db : null;
+}
+
+/** Resolve inventory-database tooltip match (item key + entry) from sprite/path + rarity. */
+function lookupInventoryTooltipMatch({ spriteId, src, rarity }) {
+  const tooltips = getInventoryTooltipEntries();
+  if (!tooltips) return null;
+  const rarityStr = rarity == null || rarity === '' ? null : String(rarity);
+  const path = normalizeInventoryAssetPath(src);
+  const spriteIcon = Number.isFinite(Number(spriteId)) ? `sprite://${Number(spriteId)}` : '';
+  let fallback = null;
+  for (const [key, entry] of Object.entries(tooltips)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const icon = String(entry.icon || '');
+    let matchesIcon = false;
+    if (spriteIcon && icon === spriteIcon) matchesIcon = true;
+    else if (path && normalizeInventoryAssetPath(icon) === path) matchesIcon = true;
+    if (!matchesIcon) continue;
+    const hit = { key, entry };
+    if (rarityStr != null && String(entry.rarity ?? '') === rarityStr) return hit;
+    if (!fallback) fallback = hit;
+  }
+  return fallback;
+}
+
+function isNumericInventoryLabel(label) {
+  return /^\d+$/.test(String(label || '').trim());
+}
+
+function resolveDepotInventoryItemLabel({ label, spriteId, src, rarity }) {
+  const entry = lookupInventoryTooltipMatch({ spriteId, src, rarity })?.entry;
+  if (entry?.displayName) return String(entry.displayName);
+  const raw = String(label || '').trim();
+  if (raw && !isNumericInventoryLabel(raw) && raw.toLowerCase() !== 'item') return raw;
+  if (Number.isFinite(Number(spriteId))) return `Item ${Number(spriteId)}`;
+  return raw || 'Item';
+}
+
+/** Stable item-id key for fallback sorting: sprite id, else icon path with tier digits stripped. */
+function getDepotInventoryItemIdKey(row) {
+  const spriteId = Number(row?.spriteId);
+  if (Number.isFinite(spriteId)) return `sprite:${spriteId}`;
+  const path = normalizeInventoryAssetPath(row?.src);
+  if (path) {
+    // summonscroll5.png / stamina3.png → same family across tiers
+    return `img:${path.replace(/\d+(?=\.\w+$)/, '')}`;
+  }
+  const key = String(row?.key || '');
+  const spriteFromKey = key.match(/^sprite:id-(\d+)/i);
+  if (spriteFromKey) return `sprite:${spriteFromKey[1]}`;
+  const imgFromKey = key.match(/^img:([^:]+)/i);
+  if (imgFromKey) {
+    return `img:${normalizeInventoryAssetPath(imgFromKey[1]).replace(/\d+(?=\.\w+$)/, '')}`;
+  }
+  return `label:${String(row?.label || 'Item').toLowerCase()}`;
+}
+
+/** Inventory ribbon order for depot keys (matches native left→right / top→bottom). */
+function getDepotInventoryItemDomOrderMap() {
+  /** @type {Map<string, number>} */
+  const order = new Map();
+  const container = getInventoryContainerElement();
+  if (!container) return order;
+  const buttons = getDepotableInventoryButtons(container);
+  for (let i = 0; i < buttons.length; i++) {
+    const key = getInventoryItemFingerprint(buttons[i]);
+    if (key && !order.has(key)) order.set(key, i);
+  }
+  return order;
+}
+
+function compareDepotInventoryItemRows(a, b, domOrder = null) {
+  const order = domOrder || getDepotInventoryItemDomOrderMap();
+  const idxA = order.has(a.key) ? order.get(a.key) : Number.MAX_SAFE_INTEGER;
+  const idxB = order.has(b.key) ? order.get(b.key) : Number.MAX_SAFE_INTEGER;
+  if (idxA !== idxB) return idxA - idxB;
+
+  // Fallback when a key is not currently in the inventory ribbon.
+  const idA = getDepotInventoryItemIdKey(a);
+  const idB = getDepotInventoryItemIdKey(b);
+  if (idA !== idB) {
+    const numA = idA.startsWith('sprite:') ? Number(idA.slice(7)) : NaN;
+    const numB = idB.startsWith('sprite:') ? Number(idB.slice(7)) : NaN;
+    if (Number.isFinite(numA) && Number.isFinite(numB) && numA !== numB) return numA - numB;
+    if (Number.isFinite(numA) && !Number.isFinite(numB)) return -1;
+    if (!Number.isFinite(numA) && Number.isFinite(numB)) return 1;
+    return idA.localeCompare(idB);
+  }
+  // Native inventory stacks tiers low → high (T1…T5).
+  const rarityA = Number(a.rarity || 0);
+  const rarityB = Number(b.rarity || 0);
+  if (rarityA !== rarityB) return rarityA - rarityB;
+  return String(a.label || '').localeCompare(String(b.label || ''));
+}
+
+function getInventoryItemFingerprint(button) {
+  if (!(button instanceof HTMLElement) || isModInventoryButton(button)) return null;
+  const rarity = getInventorySlotRarityAttr(button);
+  const raritySuffix = rarity ? `:r${rarity}` : '';
+
+  const sprite = button.querySelector('.sprite.item');
+  if (sprite) {
+    const idClass = Array.from(sprite.classList).find((className) => /^id-\d+$/.test(className));
+    if (idClass) return `sprite:${idClass}${raritySuffix}`;
+  }
+
+  const img = button.querySelector('img');
+  if (img) {
+    const path = normalizeInventoryAssetPath(img.getAttribute('src') || img.src || '');
+    if (path) return `img:${path}${raritySuffix}`;
+    const alt = String(img.alt || '')
+      .trim()
+      .toLowerCase();
+    if (alt) return `alt:${alt}${raritySuffix}`;
+  }
+
+  return null;
+}
+
+function captureInventoryItemMeta(button, key) {
+  const rarityRaw = getInventorySlotRarityAttr(button);
+  const sprite = button.querySelector('.sprite.item');
+  let spriteId = null;
+  if (sprite) {
+    const idClass = Array.from(sprite.classList).find((className) => /^id-\d+$/.test(className));
+    if (idClass) spriteId = Number(idClass.slice(3));
+  }
+  // Prefer non-spritesheet icon alt/src when present (scrolls/potions); else sprite img.
+  const iconImg =
+    button.querySelector('.has-rarity > img.pixelated') ||
+    button.querySelector('img.pixelated:not(.spritesheet)') ||
+    button.querySelector('img:not(.spritesheet)') ||
+    button.querySelector('img');
+  const src = iconImg?.getAttribute('src') || iconImg?.src || '';
+  const rarity = rarityRaw == null || rarityRaw === '' ? null : Number(rarityRaw);
+  const rawLabel = String(iconImg?.alt || sprite?.querySelector('img')?.alt || '').trim() || 'Item';
+  const label = resolveDepotInventoryItemLabel({
+    label: rawLabel,
+    spriteId: Number.isFinite(spriteId) ? spriteId : null,
+    src,
+    rarity
+  });
+  return {
+    key: String(key),
+    label,
+    src,
+    rarity,
+    spriteId: Number.isFinite(spriteId) ? spriteId : null,
+    amount: readInventorySlotAmountText(button),
+    imgFilter: iconImg?.style?.filter || ''
+  };
+}
+
+function refreshDepotInventoryItemMetaFromDom() {
+  const container = getInventoryContainerElement();
+  if (!container || depotInventoryItemState.keys.length === 0) return false;
+  let changed = false;
+  for (const button of getDepotableInventoryButtons(container)) {
+    const key = getInventoryItemFingerprint(button);
+    if (!key || !depotInventoryItemState.keys.includes(key)) continue;
+    const next = captureInventoryItemMeta(button, key);
+    const prev = depotInventoryItemState.metaByKey.get(key);
+    if (
+      !prev ||
+      prev.amount !== next.amount ||
+      prev.rarity !== next.rarity ||
+      prev.label !== next.label ||
+      prev.src !== next.src ||
+      prev.spriteId !== next.spriteId ||
+      prev.imgFilter !== next.imgFilter
+    ) {
+      depotInventoryItemState.metaByKey.set(key, next);
+      changed = true;
+    }
+  }
+  if (changed) saveDepotInventoryItems();
+  return changed;
+}
+
+function getDepotableInventoryButtons(container = getInventoryContainerElement()) {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(':scope > button')).filter((btn) => !isModInventoryButton(btn));
+}
+
+function applyInventoryItemDepotLayout() {
+  const container = getInventoryContainerElement();
+  if (!container) return;
+  const depotKeys = new Set(depotInventoryItemState.keys.map(String));
+  for (const button of getDepotableInventoryButtons(container)) {
+    const key = getInventoryItemFingerprint(button);
+    const shouldHide = Boolean(key && depotKeys.has(key));
+    if (shouldHide) {
+      button.setAttribute(DATA_DEPOT_INVENTORY_HIDDEN, 'true');
+      button.style.setProperty('display', 'none', 'important');
+    } else if (button.hasAttribute(DATA_DEPOT_INVENTORY_HIDDEN)) {
+      button.removeAttribute(DATA_DEPOT_INVENTORY_HIDDEN);
+      button.style.removeProperty('display');
+    }
+  }
+}
+
+function pruneDepotInventoryItemsAgainstDom() {
+  const container = getInventoryContainerElement();
+  if (!container || depotInventoryItemState.keys.length === 0) return;
+  const present = new Set();
+  for (const button of getDepotableInventoryButtons(container)) {
+    const key = getInventoryItemFingerprint(button);
+    if (key) present.add(key);
+  }
+  const nextKeys = depotInventoryItemState.keys.filter((key) => present.has(String(key)));
+  if (nextKeys.length === depotInventoryItemState.keys.length) return;
+  depotInventoryItemState.keys = nextKeys;
+  for (const key of Array.from(depotInventoryItemState.metaByKey.keys())) {
+    if (!nextKeys.includes(key)) depotInventoryItemState.metaByKey.delete(key);
+  }
+  saveDepotInventoryItems();
+}
+
+function addInventoryItemToDepot(button) {
+  if (isInventoryWidgetLockedForDepot()) return false;
+  const key = getInventoryItemFingerprint(button);
+  if (!key) return false;
+  if (!depotInventoryItemState.keys.includes(key)) {
+    depotInventoryItemState.keys.push(key);
+  }
+  depotInventoryItemState.metaByKey.set(key, captureInventoryItemMeta(button, key));
+  saveDepotInventoryItems();
+  applyInventoryItemDepotLayout();
+  return true;
+}
+
+function removeInventoryItemFromDepot(key) {
+  if (isInventoryWidgetLockedForDepot()) return false;
+  const sid = String(key || '');
+  if (!sid) return false;
+  if (!depotInventoryItemState.keys.includes(sid)) return false;
+  removeOneDepotInventoryItemKey(sid);
+  saveDepotInventoryItems();
+  applyInventoryItemDepotLayout();
+  return true;
+}
+
+function toggleInventoryItemDepot(button) {
+  if (isInventoryWidgetLockedForDepot()) return false;
+  const key = getInventoryItemFingerprint(button);
+  if (!key) return false;
+  if (depotInventoryItemState.keys.includes(key)) {
+    return removeInventoryItemFromDepot(key);
+  }
+  return addInventoryItemToDepot(button);
+}
+
+/** Persistent Inventory lock (Mod Settings) freezes ribbon layout — block hide/restore via depot. */
+function isInventoryWidgetLockedForDepot() {
+  return window.betterUIConfig?.inventoryWidgetLocked === true;
+}
+
+function closeInventoryItemDepotContextMenu() {
+  if (typeof inventoryItemDepotMenuCleanup === 'function') {
+    try {
+      inventoryItemDepotMenuCleanup();
+    } catch (_) { /* ignore */ }
+    inventoryItemDepotMenuCleanup = null;
+  }
+  inventoryItemDepotContextMenuEl?.remove();
+  inventoryItemDepotContextMenuEl = null;
+}
+
+function showInventoryItemDepotContextMenu(clientX, clientY, button) {
+  closeInventoryItemDepotContextMenu();
+  const key = getInventoryItemFingerprint(button);
+  if (!key) return;
+
+  // Match native Radix context-menu content (frame-3 / surface-regular).
+  const menu = document.createElement('div');
+  menu.className =
+    `${INVENTORY_ITEM_DEPOT_MENU_CLASS} pixel-font-16 frame-3 surface-regular z-modals ` +
+    `min-w-[7rem] overflow-hidden py-1 text-whiteHighlight shadow-md [&_svg]:size-4`;
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-orientation', 'vertical');
+  menu.setAttribute('data-state', 'open');
+  menu.setAttribute('data-orientation', 'vertical');
+  menu.setAttribute('data-radix-menu-content', '');
+  menu.setAttribute('data-side', 'bottom');
+  menu.setAttribute('data-align', 'start');
+  menu.setAttribute('dir', 'ltr');
+  menu.tabIndex = -1;
+  menu.style.cssText = 'position:fixed;z-index:100000;outline:none;pointer-events:auto;';
+  menu.style.left = `${Math.max(0, clientX)}px`;
+  menu.style.top = `${Math.max(0, clientY)}px`;
+
+  const group = document.createElement('div');
+  group.setAttribute('role', 'group');
+
+  const inDepot = depotInventoryItemState.keys.includes(key);
+  const label = inDepot ? t('mods.depot.sendToInventory') : t('mods.depot.sendToDepot');
+  const item = createDepotContextActionMenuItem(label, (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleInventoryItemDepot(button);
+    closeInventoryItemDepotContextMenu();
+  });
+  item.setAttribute('data-depot-menu-item', 'true');
+  group.appendChild(item);
+  menu.appendChild(group);
+  document.body.appendChild(menu);
+  inventoryItemDepotContextMenuEl = menu;
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) {
+    menu.style.left = `${Math.max(0, window.innerWidth - rect.width - 4)}px`;
+  }
+  if (rect.bottom > window.innerHeight) {
+    menu.style.top = `${Math.max(0, window.innerHeight - rect.height - 4)}px`;
+  }
+
+  const onPointerDown = (event) => {
+    if (menu.contains(event.target)) return;
+    closeInventoryItemDepotContextMenu();
+  };
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') closeInventoryItemDepotContextMenu();
+  };
+  inventoryItemDepotMenuCleanup = () => {
+    document.removeEventListener('pointerdown', onPointerDown, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+  };
+  scheduleTimeout(() => {
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+  }, 0);
+}
+
+function handleInventoryItemContextMenu(event) {
+  const container = getInventoryContainerElement();
+  if (!container) return;
+  const button = event.target?.closest?.('button');
+  if (!button || !container.contains(button)) return;
+  if (!isDepotableInventoryButton(button)) return;
+  if (isInventoryWidgetLockedForDepot()) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (typeof event.stopImmediatePropagation === 'function') {
+    event.stopImmediatePropagation();
+  }
+  showInventoryItemDepotContextMenu(event.clientX, event.clientY, button);
 }
 
 function updateDepotInventoryButtonCount() {
@@ -1218,14 +1697,15 @@ function attachDepotCreatureStatTooltip(targetEl, row) {
 }
 
 const DEPOT_MODAL_CONFIG = {
-  width: 530,
+  width: 780,
   height: 500,
-  columnWidth: 245,
+  columnWidth: 244,
   columnGap: 8,
-  contentInset: 35,
+  contentInset: 40,
   viewportPadding: 16,
   minWidth: 280,
-  minHeight: 280
+  minHeight: 280,
+  columnCount: 3
 };
 
 let depotModalLayoutCleanup = null;
@@ -1245,9 +1725,10 @@ function getDepotModalDimensions() {
 }
 
 function getDepotModalColumnWidths(modalWidth) {
-  const { columnWidth, columnGap, contentInset, width } = DEPOT_MODAL_CONFIG;
+  const { columnWidth, columnGap, contentInset, width, columnCount } = DEPOT_MODAL_CONFIG;
+  const cols = Math.max(1, Number(columnCount) || 2);
   const contentWidth = modalWidth - contentInset;
-  const totalDesktop = columnWidth * 2 + columnGap;
+  const totalDesktop = columnWidth * cols + columnGap * Math.max(0, cols - 1);
 
   if (modalWidth >= width) {
     return {
@@ -1346,7 +1827,8 @@ function applyDepotModalLayout(modalRef, contentRoot, dimensions) {
         minWidth: `${columnWidth}px`,
         maxWidth: `${columnWidth}px`,
         minHeight: '0',
-        height: '100%'
+        height: '100%',
+        boxSizing: 'border-box'
       });
     });
 
@@ -1373,7 +1855,7 @@ function setupDepotModalResponsiveLayout(modalRef, contentRoot) {
 function createDepotModalColumnFrame(titleText) {
   const frame = document.createElement('div');
   frame.className = 'depot-modal-column';
-  frame.style.cssText = 'flex:1 1 0;min-width:0;display:flex;flex-direction:column;min-height:0;height:100%;background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;overflow:hidden;';
+  frame.style.cssText = 'flex:1 1 0;min-width:0;display:flex;flex-direction:column;min-height:0;height:100%;box-sizing:border-box;background:url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat;border:4px solid transparent;border-image:url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;border-radius:6px;overflow:hidden;';
   const titleEl = document.createElement('h2');
   titleEl.className = 'widget-top widget-top-text pixel-font-16';
   titleEl.style.cssText = 'margin:0;padding:2px 8px;height:24px;min-height:24px;max-height:24px;display:flex;align-items:center;justify-content:center;text-align:center;color:#fff;box-sizing:border-box;';
@@ -1521,6 +2003,7 @@ function showDepotModal() {
   clearDepotModalLayoutCleanup();
   setTimeout(() => {
     syncDepotStateWithOwnedInventory();
+    pruneDepotInventoryItemsAgainstDom();
     const DEPOT_UI = {
       COLUMNS: 6,
       CELL: 34,
@@ -1539,8 +2022,10 @@ function showDepotModal() {
 
     const creatureFrame = createDepotModalColumnFrame('Depot Creatures');
     const equipmentFrame = createDepotModalColumnFrame('Depot Equipments');
+    const inventoryItemsFrame = createDepotModalColumnFrame('Depot Items');
     columnsWrap.appendChild(creatureFrame);
     columnsWrap.appendChild(equipmentFrame);
+    columnsWrap.appendChild(inventoryItemsFrame);
 
     const creatureSearchWrap = createDepotModalSearchWrap();
     const creatureSearch = document.createElement('input');
@@ -1571,6 +2056,21 @@ function showDepotModal() {
     equipmentFrame.appendChild(equipmentSearchWrap);
     const equipmentArea = createDepotModalGridArea(DEPOT_UI);
     equipmentFrame.appendChild(equipmentArea);
+
+    const inventoryItemSearchWrap = createDepotModalSearchWrap();
+    const inventoryItemSearch = document.createElement('input');
+    inventoryItemSearch.type = 'text';
+    inventoryItemSearch.placeholder = 'Search items...';
+    inventoryItemSearch.title = 'Search by item name. Use quotes for exact match. Use AND / OR for combinations.';
+    inventoryItemSearch.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 6px;border-radius:2px;font-size:12px;flex:1;min-width:0;font-family:inherit;outline:none;box-sizing:border-box;';
+    const inventoryItemFilterBtn = document.createElement('button');
+    inventoryItemFilterBtn.textContent = 'All';
+    inventoryItemFilterBtn.style.cssText = 'background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:3px 8px;border-radius:2px;font-size:12px;cursor:pointer;font-family:inherit;outline:none;white-space:nowrap;min-width:50px;margin-left:4px;';
+    inventoryItemSearchWrap.appendChild(inventoryItemSearch);
+    inventoryItemSearchWrap.appendChild(inventoryItemFilterBtn);
+    inventoryItemsFrame.appendChild(inventoryItemSearchWrap);
+    const inventoryItemArea = createDepotModalGridArea(DEPOT_UI);
+    inventoryItemsFrame.appendChild(inventoryItemArea);
 
 
     function createDepotCreatureButton(row) {
@@ -1683,6 +2183,8 @@ function showDepotModal() {
     const creatureFilterOptions = ['All', 'Grey', 'Green', 'Blue', 'Purple', 'Yellow'];
     let equipmentFilterIdx = 0;
     const equipmentFilterOptions = ['All', 'T1', 'T2', 'T3', 'T4', 'T5'];
+    let inventoryItemFilterIdx = 0;
+    const inventoryItemFilterOptions = ['All', 'T1', 'T2', 'T3', 'T4', 'T5'];
 
     function matchesCreatureTier(row, label) {
       if (!label || label.toLowerCase() === 'all') return true;
@@ -1703,6 +2205,129 @@ function showDepotModal() {
       const matched = String(label).trim().match(/^t([1-5])$/i);
       if (!matched) return true;
       return tier === Number(matched[1]);
+    }
+
+    function matchesInventoryItemRarity(row, label) {
+      if (!label || label.toLowerCase() === 'all') return true;
+      const matched = String(label).trim().match(/^t([1-5])$/i);
+      if (!matched) return true;
+      if (row.rarity == null) return false;
+      return Number(row.rarity) === Number(matched[1]);
+    }
+
+    function matchesInventoryItemSearch(row, expression) {
+      const normalized = String(expression || '').trim().toLowerCase();
+      if (!normalized) return true;
+      if (normalized.includes(' or ')) {
+        return normalized.split(/\s+or\s*/).some((part) => matchesInventoryItemSearch(row, part));
+      }
+      if (normalized.includes(' and ')) {
+        return normalized.split(/\s+and\s*/).every((part) => matchesInventoryItemSearch(row, part));
+      }
+      const quoted = normalized.match(/^"(.+)"$/);
+      const value = quoted ? quoted[1] : normalized;
+      const name = String(row.label || '').toLowerCase();
+      return quoted ? name === value : name.includes(value);
+    }
+
+    function createInventoryItemButton(row) {
+      const btn = document.createElement('button');
+      btn.className = 'focus-style-visible active:opacity-70';
+      btn.setAttribute('data-depot-inventory-key', row.key);
+      btn.style.cssText = 'width:34px;height:34px;min-width:34px;min-height:34px;max-width:34px;max-height:34px;display:flex;align-items:center;justify-content:center;padding:0;margin:0;border:none;background:none;cursor:pointer;';
+      const slot = document.createElement('div');
+      slot.className = 'container-slot surface-darker data-[disabled=\'true\']:dithered';
+      slot.style.cssText = 'width:34px;height:34px;min-width:34px;min-height:34px;max-width:34px;max-height:34px;';
+      const host = document.createElement('div');
+      host.className = 'has-rarity relative grid h-full place-items-center';
+      if (row.rarity != null && Number.isFinite(Number(row.rarity))) {
+        host.setAttribute('data-rarity', String(row.rarity));
+      }
+
+      if (row.spriteId) {
+        const sprite = document.createElement('div');
+        sprite.className = `sprite item relative id-${row.spriteId}`;
+        const viewport = document.createElement('div');
+        viewport.className = 'viewport';
+        const img = document.createElement('img');
+        img.alt = row.label || String(row.spriteId);
+        img.className = 'spritesheet';
+        img.setAttribute('data-cropped', 'false');
+        img.style.cssText = '--cropX: 0; --cropY: 0;';
+        viewport.appendChild(img);
+        sprite.appendChild(viewport);
+        host.appendChild(sprite);
+      } else {
+        const img = document.createElement('img');
+        img.className = 'pixelated';
+        img.width = 32;
+        img.height = 32;
+        img.alt = row.label || 'Item';
+        img.src = row.src || getDepotChestAssetUrl();
+        img.style.cssText = 'width:32px;height:32px;object-fit:contain;position:relative;z-index:2;';
+        if (row.imgFilter) img.style.filter = row.imgFilter;
+        host.appendChild(img);
+      }
+
+      if (row.amount) {
+        const amountWrap = document.createElement('div');
+        amountWrap.className =
+          'revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5';
+        amountWrap.style.zIndex = '3';
+        const amountSpan = document.createElement('span');
+        amountSpan.className = 'relative';
+        amountSpan.setAttribute('translate', 'no');
+        amountSpan.style.cssText =
+          "line-height:1;font-size:12px;color:#fff;font-family:'Yalla','Trebuchet MS',Arial,sans-serif;" +
+          'letter-spacing:0;font-weight:600;' +
+          'text-shadow:-1px 0 0 #000,1px 0 0 #000,0 -1px 0 #000,0 1px 0 #000;';
+        amountSpan.textContent = String(row.amount);
+        amountWrap.appendChild(amountSpan);
+        host.appendChild(amountWrap);
+      }
+
+      slot.appendChild(host);
+      btn.appendChild(slot);
+      const titleParts = [row.label || 'Item'];
+      if (row.rarity != null) titleParts.push(`T${row.rarity}`);
+      if (row.amount) titleParts.push(String(row.amount));
+      btn.title = titleParts.join(' | ');
+      return btn;
+    }
+
+    function getDepotInventoryItemRows() {
+      refreshDepotInventoryItemMetaFromDom();
+      let labelsUpgraded = false;
+      const rows = depotInventoryItemState.keys.map((key) => {
+        const sid = String(key);
+        const meta = depotInventoryItemState.metaByKey.get(sid) || { key: sid, label: 'Item' };
+        const rarity = meta.rarity ?? null;
+        const spriteId = meta.spriteId ?? null;
+        const src = meta.src || '';
+        const label = resolveDepotInventoryItemLabel({
+          label: meta.label || 'Item',
+          spriteId,
+          src,
+          rarity
+        });
+        // Upgrade stored numeric-only labels when the database can resolve a name.
+        if (label && label !== meta.label) {
+          meta.label = label;
+          depotInventoryItemState.metaByKey.set(sid, meta);
+          labelsUpgraded = true;
+        }
+        return {
+          key: sid,
+          label,
+          src,
+          rarity,
+          spriteId,
+          amount: meta.amount || '',
+          imgFilter: meta.imgFilter || ''
+        };
+      });
+      if (labelsUpgraded) saveDepotInventoryItems();
+      return rows;
     }
 
     function renderEquipmentRows() {
@@ -1743,6 +2368,38 @@ function showDepotModal() {
       });
     }
 
+    function renderInventoryItemRows() {
+      const term = (inventoryItemSearch.value || '').trim();
+      const filterLabel = inventoryItemFilterOptions[inventoryItemFilterIdx] || 'All';
+      const domOrder = getDepotInventoryItemDomOrderMap();
+      const rows = getDepotInventoryItemRows()
+        .filter((r) => matchesInventoryItemSearch(r, term) && matchesInventoryItemRarity(r, filterLabel))
+        .sort((a, b) => compareDepotInventoryItemRows(a, b, domOrder));
+      inventoryItemArea.innerHTML = '';
+      if (rows.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'color:#bbb;text-align:center;padding:16px;grid-column:span 6;';
+        empty.textContent = 'No depot items found.';
+        inventoryItemArea.appendChild(empty);
+        return;
+      }
+      rows.forEach((row) => {
+        const btn = createInventoryItemButton(row);
+        const locked = isInventoryWidgetLockedForDepot();
+        if (locked) {
+          btn.style.cursor = 'not-allowed';
+          btn.style.opacity = '0.55';
+          btn.title = `${btn.title} — ${t('mods.depot.inventoryLockedForDepot')}`;
+        }
+        btn.addEventListener('click', () => {
+          if (isInventoryWidgetLockedForDepot()) return;
+          removeInventoryItemFromDepot(row.key);
+          renderInventoryItemRows();
+        });
+        inventoryItemArea.appendChild(btn);
+      });
+    }
+
     creatureSearch.addEventListener('input', renderCreatureRows);
     creatureFilterBtn.addEventListener('click', () => {
       creatureFilterIdx = (creatureFilterIdx + 1) % creatureFilterOptions.length;
@@ -1755,9 +2412,16 @@ function showDepotModal() {
       equipmentFilterBtn.textContent = equipmentFilterOptions[equipmentFilterIdx];
       renderEquipmentRows();
     });
+    inventoryItemSearch.addEventListener('input', renderInventoryItemRows);
+    inventoryItemFilterBtn.addEventListener('click', () => {
+      inventoryItemFilterIdx = (inventoryItemFilterIdx + 1) % inventoryItemFilterOptions.length;
+      inventoryItemFilterBtn.textContent = inventoryItemFilterOptions[inventoryItemFilterIdx];
+      renderInventoryItemRows();
+    });
 
     renderCreatureRows();
     renderEquipmentRows();
+    renderInventoryItemRows();
     const modalInstance = api.ui.components.createModal({
       title: 'Depot',
       width: modalDimensions.width,
@@ -1804,6 +2468,8 @@ function startDepotInventoryObserver() {
     }
     depotInventoryDebounceTimeout = scheduleTimeout(() => {
       addDepotInventoryButton();
+      applyInventoryItemDepotLayout();
+      pruneDepotInventoryItemsAgainstDom();
       depotInventoryDebounceTimeout = null;
     }, 80);
   };
@@ -1838,8 +2504,12 @@ function startDepotInventoryObserver() {
     }
   });
   depotObservers.inventory.observe(document.body, { childList: true, subtree: true });
+  document.addEventListener('contextmenu', handleInventoryItemContextMenu, true);
   run();
-  depotInventoryRefreshInterval = setInterval(() => addDepotInventoryButton(), 1000);
+  depotInventoryRefreshInterval = setInterval(() => {
+    addDepotInventoryButton();
+    applyInventoryItemDepotLayout();
+  }, 1000);
 }
 
 function stopDepotInventoryObserver() {
@@ -1847,6 +2517,8 @@ function stopDepotInventoryObserver() {
     depotObservers.inventory.disconnect();
     depotObservers.inventory = null;
   }
+  document.removeEventListener('contextmenu', handleInventoryItemContextMenu, true);
+  closeInventoryItemDepotContextMenu();
   if (depotInventoryDebounceTimeout) {
     clearTimeout(depotInventoryDebounceTimeout);
     activeTimeouts.delete(depotInventoryDebounceTimeout);
@@ -1857,6 +2529,10 @@ function stopDepotInventoryObserver() {
     depotInventoryRefreshInterval = null;
   }
   document.querySelectorAll('.depot-manager-inventory-button').forEach((el) => el.remove());
+  document.querySelectorAll(`[${DATA_DEPOT_INVENTORY_HIDDEN}="true"]`).forEach((el) => {
+    el.removeAttribute(DATA_DEPOT_INVENTORY_HIDDEN);
+    el.style.removeProperty('display');
+  });
 }
 
 // =======================
@@ -4245,8 +4921,10 @@ function initDepotManager() {
   loadDepotCreatureIds();
   loadDepotCreatureMeta();
   loadDepotEquipmentIds();
+  loadDepotInventoryItems();
   assignEquipmentIdsToArsenalButtons();
   applyEquipmentDepotLayout();
+  applyInventoryItemDepotLayout();
   window.depotManagerConfig = depotConfig;
 
   startContextMenuObserver();
@@ -4284,6 +4962,7 @@ function initDepotManager() {
 
 function cleanupDepotManager() {
   clearDepotModalLayoutCleanup();
+  closeInventoryItemDepotContextMenu();
   depotInitialized = false;
   if (tabReapplyDebounceTimeout !== null) {
     clearTimeout(tabReapplyDebounceTimeout);

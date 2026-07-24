@@ -46,6 +46,7 @@ const defaultConfig = {
   inventoryWidgetTop: null,
   inventoryHorizontalLayout: false,
   inventoryWidgetLocked: false,
+  inventoryItemsPerColumn: 4, // 4 | 2 | 1 — vertical columns / horizontal strip height
   inventoryBorderStyle: 'Original',
   modButtonDisplay: 'text', // 'text' or 'icon'
   modButtonBarLayout: 'horizontal', // 'horizontal', 'vertical', or 'hidden'
@@ -72,6 +73,9 @@ const defaultConfig = {
   hotkeyOpenMonstrousCauldron: 'o',
   hotkeyOpenCyclopedia: 'c',
   hotkeyOpenMonsterSqueezer: 'x',
+  hotkeyOpenRunes: 'n',
+  hotkeyOpenDragonPlant: 'l',
+  hotkeyOpenPawAndFurSociety: 'w',
   hotkeyReturnToMap: 'g',
   hotkeyFloorUp: 'pageup',
   hotkeyFloorDown: 'pagedown',
@@ -135,6 +139,25 @@ if (config.hotkeyOpenCyclopedia === undefined) {
   }
 }
 if (config.hotkeyOpenMonsterSqueezer === undefined) config.hotkeyOpenMonsterSqueezer = 'x';
+// One-shot: earlier builds left these unbound (''). Apply mnemonic defaults once.
+if (config.hotkeyOpenRunesPlantPawDefaultsApplied !== true) {
+  if (config.hotkeyOpenRunes === undefined || config.hotkeyOpenRunes === '') config.hotkeyOpenRunes = 'n';
+  if (config.hotkeyOpenDragonPlant === undefined || config.hotkeyOpenDragonPlant === '') {
+    config.hotkeyOpenDragonPlant = 'l';
+  }
+  if (config.hotkeyOpenPawAndFurSociety === undefined || config.hotkeyOpenPawAndFurSociety === '') {
+    config.hotkeyOpenPawAndFurSociety = 'w';
+  }
+  config.hotkeyOpenRunesPlantPawDefaultsApplied = true;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  } catch (_) {
+    // Best effort; in-memory values still drive this session.
+  }
+}
+if (config.hotkeyOpenRunes === undefined) config.hotkeyOpenRunes = 'n';
+if (config.hotkeyOpenDragonPlant === undefined) config.hotkeyOpenDragonPlant = 'l';
+if (config.hotkeyOpenPawAndFurSociety === undefined) config.hotkeyOpenPawAndFurSociety = 'w';
 config.hotkeyOpenQuestLog = sanitizeStoredHotkey(config.hotkeyOpenQuestLog, '');
 config.hotkeyOpenStore = sanitizeStoredHotkey(config.hotkeyOpenStore, '');
 config.hotkeyOpenTrophyRoom = sanitizeStoredHotkey(config.hotkeyOpenTrophyRoom, '');
@@ -147,6 +170,9 @@ config.hotkeyOpenMountainFortress = sanitizeStoredHotkey(config.hotkeyOpenMounta
 config.hotkeyOpenArsenal = sanitizeStoredHotkey(config.hotkeyOpenArsenal, '');
 config.hotkeyOpenMonstrousCauldron = sanitizeStoredHotkey(config.hotkeyOpenMonstrousCauldron, '');
 config.hotkeyOpenMonsterSqueezer = sanitizeStoredHotkey(config.hotkeyOpenMonsterSqueezer, '');
+config.hotkeyOpenRunes = sanitizeStoredHotkey(config.hotkeyOpenRunes, 'n');
+config.hotkeyOpenDragonPlant = sanitizeStoredHotkey(config.hotkeyOpenDragonPlant, 'l');
+config.hotkeyOpenPawAndFurSociety = sanitizeStoredHotkey(config.hotkeyOpenPawAndFurSociety, 'w');
 if (config.hotkeyReturnToMap === undefined) config.hotkeyReturnToMap = 'g';
 config.hotkeyReturnToMap = sanitizeStoredHotkey(config.hotkeyReturnToMap, '');
 if (config.hotkeyFloorUp === undefined) config.hotkeyFloorUp = 'pageup';
@@ -206,6 +232,10 @@ if (!Number.isFinite(config.inventoryWidgetLeft)) config.inventoryWidgetLeft = n
 if (!Number.isFinite(config.inventoryWidgetTop)) config.inventoryWidgetTop = null;
 if (config.inventoryHorizontalLayout !== true) config.inventoryHorizontalLayout = false;
 if (config.inventoryWidgetLocked !== true) config.inventoryWidgetLocked = false;
+{
+  const cols = Number(config.inventoryItemsPerColumn);
+  config.inventoryItemsPerColumn = cols === 1 || cols === 2 || cols === 4 ? cols : 4;
+}
 if (config.persistentInventory && config.inventoryWidgetPinned === true) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
@@ -854,10 +884,21 @@ const PERSISTENT_INVENTORY_ATTR = 'data-ba-persistent-inventory';
 const PERSISTENT_INVENTORY_RESTORING_ATTR = 'data-ba-persistent-inventory-restoring';
 const INVENTORY_HORIZONTAL_ATTR = 'data-ba-inventory-horizontal';
 const INVENTORY_HORIZONTAL_STYLE_ID = 'mod-settings-inventory-horizontal-style';
+const INVENTORY_COLUMNS_STYLE_ID = 'mod-settings-inventory-columns-style';
+const INVENTORY_COLUMNS_ATTR = 'data-ba-inventory-columns';
+const INVENTORY_NARROW_ATTR = 'data-ba-inventory-narrow';
 const INVENTORY_LAYOUT_TOGGLE_CLASS = 'ba-inventory-layout-toggle';
 const INVENTORY_LOCK_TOGGLE_CLASS = 'ba-inventory-lock-toggle';
 const INVENTORY_HEADER_ACTIONS_CLASS = 'ba-inventory-header-actions';
+const INVENTORY_TITLE_CLASS = 'ba-inventory-title';
+const INVENTORY_HOTKEY_BADGE_CLASS = 'ba-inventory-hotkey-badge';
+const INVENTORY_HOTKEY_BADGE_STYLE_ID = 'mod-settings-inventory-hotkey-badge-style';
 const INVENTORY_SLOT_PX = 34;
+
+function getInventoryItemsPerColumn() {
+  const cols = Number(config.inventoryItemsPerColumn);
+  return cols === 1 || cols === 2 || cols === 4 ? cols : 4;
+}
 
 function logPersistentInventory(message, details) {
   if (details !== undefined) {
@@ -1273,6 +1314,160 @@ function openDrMephistophelesFromHotkey() {
     findDrMephistophelesInventoryTabButton,
     '[Mod Settings] Dr. Mephistopheles hotkey: tab button not found after opening inventory'
   );
+}
+
+/** Runes tab inside Inventory: sprite item id 21445. */
+function findRunesInventoryTabButton() {
+  return findInventorySubtabButton('.sprite.item.id-21445, img[alt="21445"]', [
+    '.sprite.item.id-21445',
+    'img[alt="21445"]'
+  ]);
+}
+
+function openRunesFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findRunesInventoryTabButton,
+    '[Mod Settings] Runes hotkey: tab button not found after opening inventory'
+  );
+}
+
+/** Dragon Plant tab inside Inventory: sprite item id 37021. */
+function findDragonPlantInventoryTabButton() {
+  return findInventorySubtabButton('.sprite.item.id-37021, img[alt="37021"]', [
+    '.sprite.item.id-37021',
+    'img[alt="37021"]'
+  ]);
+}
+
+function openDragonPlantFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findDragonPlantInventoryTabButton,
+    '[Mod Settings] Dragon Plant hotkey: tab button not found after opening inventory'
+  );
+}
+
+/** Paw and Fur Society tab inside Inventory: sprite item id 35572. */
+function findPawAndFurSocietyInventoryTabButton() {
+  return findInventorySubtabButton('.sprite.item.id-35572, img[alt="35572"]', [
+    '.sprite.item.id-35572',
+    'img[alt="35572"]'
+  ]);
+}
+
+function openPawAndFurSocietyFromHotkey() {
+  openInventorySubtabFromHotkey(
+    findPawAndFurSocietyInventoryTabButton,
+    '[Mod Settings] Paw and Fur Society hotkey: tab button not found after opening inventory'
+  );
+}
+
+/** Inventory ribbon portraits that have a matching Mod Settings hotkey (shown top-left on the slot). */
+const INVENTORY_HOTKEY_BADGE_ENTRIES = [
+  { configKey: 'hotkeyOpenArsenal', find: findArsenalInventoryTabButton },
+  { configKey: 'hotkeyOpenBestiary', find: findBestiaryInventoryTabButton },
+  { configKey: 'hotkeyOpenDaycare', find: findDaycareInventoryTabButton },
+  { configKey: 'hotkeyOpenDragonPlant', find: findDragonPlantInventoryTabButton },
+  { configKey: 'hotkeyOpenDrMephistopheles', find: findDrMephistophelesInventoryTabButton },
+  { configKey: 'hotkeyOpenForge', find: findForgeInventoryTabButton },
+  { configKey: 'hotkeyOpenHygenie', find: findHygenieInventoryTabButton },
+  { configKey: 'hotkeyOpenMonsterSqueezer', find: findMonsterSqueezerInventoryTabButton },
+  { configKey: 'hotkeyOpenMonstrousCauldron', find: findMonstrousCauldronInventoryTabButton },
+  { configKey: 'hotkeyOpenMountainFortress', find: findMountainFortressInventoryTabButton },
+  { configKey: 'hotkeyOpenPawAndFurSociety', find: findPawAndFurSocietyInventoryTabButton },
+  { configKey: 'hotkeyOpenRunes', find: findRunesInventoryTabButton }
+];
+
+function ensureInventoryHotkeyBadgeStyle() {
+  let styleEl = document.getElementById(INVENTORY_HOTKEY_BADGE_STYLE_ID);
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = INVENTORY_HOTKEY_BADGE_STYLE_ID;
+    document.documentElement.appendChild(styleEl);
+  }
+  const css =
+    `.${INVENTORY_HOTKEY_BADGE_CLASS}{` +
+    `position:absolute;top:1px;left:1px;z-index:4;pointer-events:none;` +
+    `box-sizing:border-box;min-width:10px;padding:0 2px;` +
+    `line-height:1.1;font-size:9px;font-weight:700;color:#fff;` +
+    `font-family:'Yalla','Trebuchet MS',Arial,sans-serif;letter-spacing:0;` +
+    `text-align:center;` +
+    `background:rgba(0,0,0,0.72);border:1px solid rgba(0,0,0,0.9);` +
+    `text-shadow:-1px 0 0 #000,1px 0 0 #000,0 -1px 0 #000,0 1px 0 #000;}`;
+  if (styleEl.textContent !== css) styleEl.textContent = css;
+}
+
+function getInventorySlotHotkeyBadgeHost(button) {
+  if (!(button instanceof HTMLElement)) return null;
+  const slot =
+    button.querySelector(':scope > .container-slot') || button.querySelector('.container-slot');
+  if (!slot) return null;
+  return (
+    slot.querySelector(':scope > .has-rarity') ||
+    slot.querySelector(':scope > .relative.grid') ||
+    slot.querySelector(':scope > .relative') ||
+    slot
+  );
+}
+
+function clearInventoryHotkeyBadges(scope = document) {
+  scope.querySelectorAll?.(`.${INVENTORY_HOTKEY_BADGE_CLASS}`)?.forEach((el) => el.remove());
+}
+
+/**
+ * Show bound nav hotkeys on matching inventory portraits (top-left), when Hotkeys are enabled.
+ */
+function refreshInventoryHotkeyBadges() {
+  ensureInventoryHotkeyBadgeStyle();
+  const container = document.querySelector('.container-inventory-4');
+  if (!container) return;
+
+  if (!config.enableHotkeys) {
+    clearInventoryHotkeyBadges(container);
+    return;
+  }
+
+  const keptBadges = new Set();
+
+  for (const { configKey, find } of INVENTORY_HOTKEY_BADGE_ENTRIES) {
+    const boundId = sanitizeStoredHotkey(config[configKey], '');
+    if (!boundId) continue;
+
+    const label = formatHotkeyForDisplay(boundId, '');
+    if (!label || label === '—') continue;
+
+    let button = null;
+    try {
+      button = typeof find === 'function' ? find() : null;
+    } catch (_) {
+      button = null;
+    }
+    if (!(button instanceof HTMLElement) || !container.contains(button)) continue;
+
+    const host = getInventorySlotHotkeyBadgeHost(button);
+    if (!host) continue;
+
+    if (host.style.position !== 'relative' && host.style.position !== 'absolute') {
+      const computed = window.getComputedStyle?.(host)?.position;
+      if (!computed || computed === 'static') {
+        host.style.position = 'relative';
+      }
+    }
+
+    let badge = host.querySelector(`:scope > .${INVENTORY_HOTKEY_BADGE_CLASS}`);
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = INVENTORY_HOTKEY_BADGE_CLASS;
+      badge.setAttribute('translate', 'no');
+      badge.setAttribute('aria-hidden', 'true');
+      host.appendChild(badge);
+    }
+    if (badge.textContent !== label) badge.textContent = label;
+    keptBadges.add(badge);
+  }
+
+  container.querySelectorAll(`.${INVENTORY_HOTKEY_BADGE_CLASS}`).forEach((el) => {
+    if (!keptBadges.has(el)) el.remove();
+  });
 }
 
 /** Same action as the Last Visited Map / Return to Map nav button (caller must gate on `showLastVisitedMapButton`). */
@@ -2109,6 +2304,14 @@ const NAV_HOTKEY_ENTRIES = [
     open: openDaycareFromHotkey
   },
   {
+    configKey: 'hotkeyOpenDragonPlant',
+    captureId: 'hotkey-open-dragon-plant-capture-btn',
+    resetId: 'hotkey-open-dragon-plant-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelDragonPlant',
+    initialDisplay: 'L',
+    open: openDragonPlantFromHotkey
+  },
+  {
     configKey: 'hotkeyOpenDrMephistopheles',
     captureId: 'hotkey-open-dr-mephistopheles-capture-btn',
     resetId: 'hotkey-open-dr-mephistopheles-reset-btn',
@@ -2165,12 +2368,28 @@ const NAV_HOTKEY_ENTRIES = [
     open: openMountainFortressFromHotkey
   },
   {
+    configKey: 'hotkeyOpenPawAndFurSociety',
+    captureId: 'hotkey-open-paw-and-fur-society-capture-btn',
+    resetId: 'hotkey-open-paw-and-fur-society-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelPawAndFurSociety',
+    initialDisplay: 'W',
+    open: openPawAndFurSocietyFromHotkey
+  },
+  {
     configKey: 'hotkeyOpenQuestLog',
     captureId: 'hotkey-open-quest-log-capture-btn',
     resetId: 'hotkey-open-quest-log-reset-btn',
     labelKey: 'mods.betterUI.hotkeyLabelOpenQuestLog',
     initialDisplay: 'Q',
     open: openQuestLogFromHotkey
+  },
+  {
+    configKey: 'hotkeyOpenRunes',
+    captureId: 'hotkey-open-runes-capture-btn',
+    resetId: 'hotkey-open-runes-reset-btn',
+    labelKey: 'mods.betterUI.hotkeyLabelRunes',
+    initialDisplay: 'N',
+    open: openRunesFromHotkey
   },
   {
     configKey: 'hotkeyOpenStore',
@@ -2810,6 +3029,7 @@ function syncAllNavHotkeyCaptureDisplays() {
     if (cap && res) sizeHotkeyCaptureToResetButton(cap, res);
   }
   syncModDependentSettingsAvailability();
+  refreshInventoryHotkeyBadges();
   scheduleTimeout(() => {
     for (const row of ALL_HOTKEY_UI_ROWS) {
       const cap = document.getElementById(row.captureId);
@@ -2817,6 +3037,7 @@ function syncAllNavHotkeyCaptureDisplays() {
       if (cap && res) sizeHotkeyCaptureToResetButton(cap, res);
     }
     syncModDependentSettingsAvailability();
+    refreshInventoryHotkeyBadges();
   }, 0);
 }
 
@@ -3378,6 +3599,8 @@ function triggerInventoryModButtonsRecovery() {
 function verifyInventoryModButtonsIntegrity(source = 'unknown') {
   // Keep mod inventory slot hover/border styles in sync (independent of Persistent Inventory).
   refreshInventoryModButtonBorderStyle();
+  refreshInventoryHotkeyBadges();
+  applyInventoryColumnsStyle();
 
   if (!config.persistentInventory) return;
   if (!findInventoryWidgetRoot()) return;
@@ -7315,6 +7538,14 @@ function showSettingsModal() {
                 <option value="Prismatic">Prismatic</option>
               </select>
             </div>
+            <div style="${uiOptionStyle} display: flex; align-items: center; gap: 10px;">
+              <span style="color: #ccc;">${t('mods.betterUI.inventoryItemsPerColumn')}</span>
+              <select id="inventory-items-per-column-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+                <option value="4">4</option>
+                <option value="2">2</option>
+                <option value="1">1</option>
+              </select>
+            </div>
             <div style="${uiOptionStyle}">
               <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
                 <input type="checkbox" id="persistent-inventory-toggle" style="transform: scale(1.2);">
@@ -8353,6 +8584,29 @@ function showSettingsModal() {
         )(inventoryBorderStyleSelector);
       }
 
+      const inventoryItemsPerColumnSelector = content.querySelector('#inventory-items-per-column-selector');
+      if (inventoryItemsPerColumnSelector) {
+        inventoryItemsPerColumnSelector.value = String(getInventoryItemsPerColumn());
+        createSettingsDropdownHandler('inventoryItemsPerColumn', () => {
+          config.inventoryItemsPerColumn = getInventoryItemsPerColumn();
+          saveConfig();
+          applyInventoryColumnsStyle();
+          // Rebuild horizontal CSS (row count follows this setting).
+          persistentInventoryState.horizontalLayoutCss = null;
+          const root = findInventoryWidgetRoot();
+          if (root && config.persistentInventory) {
+            applyInventoryHorizontalLayout(root);
+            void root.offsetHeight;
+            if (
+              config.inventoryWidgetPinned === true &&
+              getSavedInventoryWidgetPosition().left != null
+            ) {
+              applyInventoryWidgetPosition(root);
+            }
+          }
+        })(inventoryItemsPerColumnSelector);
+      }
+
       const modButtonDisplaySelector = content.querySelector('#mod-button-display-selector');
       if (modButtonDisplaySelector) {
         createSettingsDropdownHandler('modButtonDisplay', refreshModBarButtonLabels)(modButtonDisplaySelector);
@@ -8366,6 +8620,8 @@ function showSettingsModal() {
         }
         if (config.enableHotkeys) {
           scheduleTimeout(() => syncAllNavHotkeyCaptureDisplays(), 0);
+        } else {
+          refreshInventoryHotkeyBadges();
         }
       };
       if (enableHotkeysCheckbox) {
@@ -13635,14 +13891,19 @@ function clearPersistentInventoryPositionStyle() {
 
 function buildInventoryHorizontalLayoutStyleCss() {
   const colWidth = INVENTORY_SLOT_PX;
+  const itemsPerColumn = getInventoryItemsPerColumn();
   return (
     `.${INVENTORY_HEADER_ACTIONS_CLASS}{` +
-    `margin-left:auto;flex-shrink:0;display:inline-flex;align-items:center;gap:2px;}` +
+    `margin-left:auto;flex-shrink:0;display:inline-flex;align-items:center;gap:0;}` +
     `.${INVENTORY_LAYOUT_TOGGLE_CLASS},.${INVENTORY_LOCK_TOGGLE_CLASS}{` +
     `display:inline-flex;align-items:center;justify-content:center;` +
-    `width:16px;height:16px;padding:1px;box-sizing:border-box;color:#c0c0c0;` +
+    `width:16px;height:16px;padding:0;box-sizing:border-box;color:#c0c0c0;` +
     `background:transparent;border:0;cursor:pointer;position:relative;z-index:2;line-height:0;}` +
     `.${INVENTORY_LAYOUT_TOGGLE_CLASS}:hover{color:#e8e8e8;}` +
+    `.${INVENTORY_LAYOUT_TOGGLE_CLASS}:disabled,.${INVENTORY_LAYOUT_TOGGLE_CLASS}[aria-disabled="true"]{` +
+    `color:#666;cursor:not-allowed;opacity:0.55;}` +
+    `.${INVENTORY_LAYOUT_TOGGLE_CLASS}:disabled:hover,` +
+    `.${INVENTORY_LAYOUT_TOGGLE_CLASS}[aria-disabled="true"]:hover{color:#666;}` +
     `.${INVENTORY_LOCK_TOGGLE_CLASS}[aria-pressed="false"]{color:#a0e0a0;}` +
     `.${INVENTORY_LOCK_TOGGLE_CLASS}[aria-pressed="false"]:hover{color:#b8f0b8;}` +
     `.${INVENTORY_LOCK_TOGGLE_CLASS}[aria-pressed="true"]{color:#f0a0a0;}` +
@@ -13665,7 +13926,8 @@ function buildInventoryHorizontalLayoutStyleCss() {
     `display:block!important;min-width:max-content!important;width:max-content!important;` +
     `height:auto!important;}` +
     `[${INVENTORY_HORIZONTAL_ATTR}="1"] .container-inventory-4{` +
-    `display:grid!important;grid-template-rows:repeat(4,auto)!important;` +
+    `display:grid!important;grid-template-columns:none!important;` +
+    `grid-template-rows:repeat(${itemsPerColumn},auto)!important;` +
     `grid-auto-flow:column!important;grid-auto-columns:${colWidth}px!important;` +
     `width:max-content!important;min-width:0!important;height:auto!important;}` +
     `[${INVENTORY_HORIZONTAL_ATTR}="1"] .scrollbar-element[data-orientation="vertical"]{` +
@@ -13673,7 +13935,125 @@ function buildInventoryHorizontalLayoutStyleCss() {
   );
 }
 
+function buildInventoryColumnsStyleCss() {
+  const cols = getInventoryItemsPerColumn();
+  const colWidth = INVENTORY_SLOT_PX;
+  // Extra chrome: scrollbar gutter + frame padding so 1/2-col grids aren't clipped.
+  const chromeX = 20;
+  const fitWidth = cols * colWidth + chromeX;
+  // Vertical (default) inventory: N columns. Horizontal strip overrides rows separately.
+  let css =
+    `.container-inventory-4{` +
+    `display:grid!important;` +
+    `grid-template-columns:repeat(${cols},${colWidth}px)!important;` +
+    `width:max-content!important;max-width:100%!important;}` +
+    `.${INVENTORY_TITLE_CLASS}{` +
+    `min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` +
+    `flex:1 1 0%;line-height:1;}`;
+
+  // Narrower than default 4-col: shrink widget to the grid and ellipsis the title.
+  // Uses INVENTORY_NARROW_ATTR (not persistent-inventory) so width survives drag
+  // when data-ba-persistent-inventory is temporarily removed.
+  if (cols === 1 || cols === 2) {
+    css +=
+      `[${INVENTORY_NARROW_ATTR}="${cols}"]{` +
+      `width:${fitWidth}px!important;min-width:0!important;max-width:calc(100vw - 16px)!important;}` +
+      `[${INVENTORY_NARROW_ATTR}="${cols}"] ` +
+      `.widget-top.widget-top-text:has(.${INVENTORY_HEADER_ACTIONS_CLASS}){` +
+      `width:100%!important;min-width:0!important;max-width:100%!important;` +
+      `box-sizing:border-box;overflow:hidden;gap:0!important;column-gap:0!important;}` +
+      `[${INVENTORY_NARROW_ATTR}="${cols}"] .${INVENTORY_HEADER_ACTIONS_CLASS}{` +
+      `margin-left:0;gap:0;}` +
+      `[${INVENTORY_NARROW_ATTR}="${cols}"] ` +
+      `.widget-bottom{width:100%!important;min-width:0!important;max-width:100%!important;}` +
+      `[${INVENTORY_NARROW_ATTR}="${cols}"] ` +
+      `[data-radix-scroll-area-viewport]{width:100%!important;}`;
+  }
+
+  // 1-col header is too tight for "Inventory" + two toggles; drop the label so both icons fit.
+  if (cols === 1) {
+    css +=
+      `[${INVENTORY_NARROW_ATTR}="1"] .${INVENTORY_TITLE_CLASS}{` +
+      `display:none!important;}`;
+  }
+
+  return css;
+}
+
+function applyInventoryColumnsStyle() {
+  const cols = getInventoryItemsPerColumn();
+  config.inventoryItemsPerColumn = cols;
+  const css = buildInventoryColumnsStyleCss();
+  let styleEl = document.getElementById(INVENTORY_COLUMNS_STYLE_ID);
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = INVENTORY_COLUMNS_STYLE_ID;
+    document.documentElement.appendChild(styleEl);
+  }
+  if (styleEl.textContent !== css) {
+    styleEl.textContent = css;
+  }
+  const colsAttr = String(cols);
+  document.querySelectorAll('.container-inventory-4').forEach((grid) => {
+    if (grid.getAttribute(INVENTORY_COLUMNS_ATTR) !== colsAttr) {
+      grid.setAttribute(INVENTORY_COLUMNS_ATTR, colsAttr);
+    }
+  });
+  const root = findInventoryWidgetRoot();
+  if (root) {
+    if (root.getAttribute(INVENTORY_COLUMNS_ATTR) !== colsAttr) {
+      root.setAttribute(INVENTORY_COLUMNS_ATTR, colsAttr);
+    }
+    const wantsNarrow =
+      (cols === 1 || cols === 2) &&
+      config.inventoryHorizontalLayout !== true &&
+      !root.hasAttribute(INVENTORY_HORIZONTAL_ATTR);
+    if (wantsNarrow) {
+      if (root.getAttribute(INVENTORY_NARROW_ATTR) !== colsAttr) {
+        root.setAttribute(INVENTORY_NARROW_ATTR, colsAttr);
+      }
+    } else if (root.hasAttribute(INVENTORY_NARROW_ATTR)) {
+      root.removeAttribute(INVENTORY_NARROW_ATTR);
+    }
+    ensureInventoryTitleEllipsisSpan(getInventoryWidgetDragHandle(root));
+  }
+}
+
+function clearInventoryColumnsStyle() {
+  document.getElementById(INVENTORY_COLUMNS_STYLE_ID)?.remove();
+  document.querySelectorAll(`[${INVENTORY_COLUMNS_ATTR}]`).forEach((el) => {
+    el.removeAttribute(INVENTORY_COLUMNS_ATTR);
+  });
+  document.querySelectorAll(`[${INVENTORY_NARROW_ATTR}]`).forEach((el) => {
+    el.removeAttribute(INVENTORY_NARROW_ATTR);
+  });
+  document.querySelectorAll(`.${INVENTORY_TITLE_CLASS}`).forEach((el) => {
+    const parent = el.parentNode;
+    if (!parent) {
+      el.remove();
+      return;
+    }
+    parent.insertBefore(document.createTextNode(el.textContent || ''), el);
+    el.remove();
+  });
+}
+
+function ensureInventoryTitleEllipsisSpan(handle) {
+  if (!handle || handle.querySelector(`.${INVENTORY_TITLE_CLASS}`)) return;
+  for (const node of Array.from(handle.childNodes)) {
+    if (node.nodeType !== Node.TEXT_NODE) continue;
+    const text = node.textContent || '';
+    if (!text.trim()) continue;
+    const span = document.createElement('span');
+    span.className = INVENTORY_TITLE_CLASS;
+    span.textContent = text;
+    handle.replaceChild(span, node);
+    return;
+  }
+}
+
 function ensureInventoryHorizontalLayoutStyle() {
+  applyInventoryColumnsStyle();
   const css = buildInventoryHorizontalLayoutStyleCss();
   if (persistentInventoryState.horizontalLayoutCss === css) {
     return;
@@ -13734,13 +14114,22 @@ function getInventoryLockToggleIconSvg(locked) {
 function updateInventoryLayoutToggleLabel(button) {
   if (!button) return;
   const horizontal = config.inventoryHorizontalLayout === true;
+  const locked = config.inventoryWidgetLocked === true;
   const pressed = horizontal ? 'true' : 'false';
   if (button.getAttribute('aria-pressed') !== pressed) {
     button.innerHTML = getInventoryLayoutToggleIconSvg(horizontal);
-    button.title = horizontal ? 'Vertical inventory layout' : 'Horizontal inventory layout';
-    button.setAttribute('aria-label', button.title);
     button.setAttribute('aria-pressed', pressed);
   }
+  if (locked) {
+    button.disabled = true;
+    button.setAttribute('aria-disabled', 'true');
+    button.title = 'Unlock inventory position to change layout';
+  } else {
+    button.disabled = false;
+    button.removeAttribute('aria-disabled');
+    button.title = horizontal ? 'Vertical inventory layout' : 'Horizontal inventory layout';
+  }
+  button.setAttribute('aria-label', button.title);
 }
 
 function updateInventoryLockToggleLabel(button) {
@@ -13749,7 +14138,9 @@ function updateInventoryLockToggleLabel(button) {
   const pressed = locked ? 'true' : 'false';
   if (button.getAttribute('aria-pressed') !== pressed) {
     button.innerHTML = getInventoryLockToggleIconSvg(locked);
-    button.title = locked ? 'Unlock inventory position' : 'Lock inventory position';
+    button.title = locked
+      ? 'Unlock inventory position (also allows depot item moves)'
+      : 'Lock inventory position (also blocks depot item moves)';
     button.setAttribute('aria-label', button.title);
     button.setAttribute('aria-pressed', pressed);
   }
@@ -13765,6 +14156,7 @@ function stopInventoryHeaderControlDrag(event) {
 
 function ensureInventoryHeaderActions(handle) {
   if (!handle) return null;
+  ensureInventoryTitleEllipsisSpan(handle);
   let actions = handle.querySelector(`.${INVENTORY_HEADER_ACTIONS_CLASS}`);
   if (!actions) {
     actions = document.createElement('span');
@@ -13811,6 +14203,7 @@ function injectInventoryLayoutToggle(root = findInventoryWidgetRoot()) {
       config.inventoryWidgetLocked = !config.inventoryWidgetLocked;
       saveConfig();
       updateInventoryLockToggleLabel(lockButton);
+      updateInventoryLayoutToggleLabel(actions.querySelector(`.${INVENTORY_LAYOUT_TOGGLE_CLASS}`));
       logPersistentInventory('position lock', { locked: config.inventoryWidgetLocked === true });
     });
     actions.appendChild(lockButton);
@@ -13830,6 +14223,7 @@ function injectInventoryLayoutToggle(root = findInventoryWidgetRoot()) {
       if (typeof event.stopImmediatePropagation === 'function') {
         event.stopImmediatePropagation();
       }
+      if (config.inventoryWidgetLocked === true || button.disabled) return;
       config.inventoryHorizontalLayout = !config.inventoryHorizontalLayout;
       saveConfig();
       const liveRoot = findInventoryWidgetRoot() || root;
@@ -13879,6 +14273,8 @@ function applyInventoryHorizontalLayout(root = findInventoryWidgetRoot()) {
   } else if (root.hasAttribute(INVENTORY_HORIZONTAL_ATTR)) {
     root.removeAttribute(INVENTORY_HORIZONTAL_ATTR);
   }
+  // Narrow fit depends on horizontal vs vertical.
+  applyInventoryColumnsStyle();
 
   return true;
 }
@@ -16635,6 +17031,7 @@ function initBetterUI() {
     }, 1000);
 
     applyPersistentInventory();
+    applyInventoryColumnsStyle();
     observers.inventoryModButtons = startInventoryModButtonsObserver();
     scheduleTimeout(() => {
       refreshModBarButtonLabels();
@@ -16745,6 +17142,7 @@ function cleanupBetterUI() {
       'Autoplay session checkboxes'
     );
     observers.inventoryModButtons = disconnectObserver(observers.inventoryModButtons, 'Inventory mod buttons');
+    clearInventoryColumnsStyle();
     stopPersistentInventoryObserver();
     inventoryModButtonsState.missingRetryCount.clear();
     inventoryModButtonsState.knownClasses.clear();
