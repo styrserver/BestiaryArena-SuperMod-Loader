@@ -1922,6 +1922,7 @@
       "errorLoading": "Erro ao carregar itens de missão. Tente novamente.",
       "productObtained": "{productName} obtido! (+{amount})",
       "tileRightClickTutorial": "Clique com o botão direito para interagir com tiles de missão.",
+      "crossingTheLineTileTutorial": "Coloque magos nos tiles brilhantes e vença a batalha.",
       "takeHoneyflower": "Pegar Honeyflower"
     },
     "battleHelper": {

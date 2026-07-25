@@ -1922,6 +1922,7 @@
       "errorLoading": "Error loading quest items. Please try again.",
       "productObtained": "{productName} obtained! (+{amount})",
       "tileRightClickTutorial": "Right-click to interact with quest tiles.",
+      "crossingTheLineTileTutorial": "Place mages on the glowing tiles, then win the battle.",
       "takeHoneyflower": "Take Honeyflower"
     },
     "battleHelper": {
