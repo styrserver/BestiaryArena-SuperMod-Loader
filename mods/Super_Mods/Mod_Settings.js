@@ -139,25 +139,10 @@ if (config.hotkeyOpenCyclopedia === undefined) {
   }
 }
 if (config.hotkeyOpenMonsterSqueezer === undefined) config.hotkeyOpenMonsterSqueezer = 'x';
-// One-shot: earlier builds left these unbound (''). Apply mnemonic defaults once.
-if (config.hotkeyOpenRunesPlantPawDefaultsApplied !== true) {
-  if (config.hotkeyOpenRunes === undefined || config.hotkeyOpenRunes === '') config.hotkeyOpenRunes = 'n';
-  if (config.hotkeyOpenDragonPlant === undefined || config.hotkeyOpenDragonPlant === '') {
-    config.hotkeyOpenDragonPlant = 'l';
-  }
-  if (config.hotkeyOpenPawAndFurSociety === undefined || config.hotkeyOpenPawAndFurSociety === '') {
-    config.hotkeyOpenPawAndFurSociety = 'w';
-  }
-  config.hotkeyOpenRunesPlantPawDefaultsApplied = true;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-  } catch (_) {
-    // Best effort; in-memory values still drive this session.
-  }
-}
 if (config.hotkeyOpenRunes === undefined) config.hotkeyOpenRunes = 'n';
 if (config.hotkeyOpenDragonPlant === undefined) config.hotkeyOpenDragonPlant = 'l';
 if (config.hotkeyOpenPawAndFurSociety === undefined) config.hotkeyOpenPawAndFurSociety = 'w';
+delete config.hotkeyOpenRunesPlantPawDefaultsApplied;
 config.hotkeyOpenQuestLog = sanitizeStoredHotkey(config.hotkeyOpenQuestLog, '');
 config.hotkeyOpenStore = sanitizeStoredHotkey(config.hotkeyOpenStore, '');
 config.hotkeyOpenTrophyRoom = sanitizeStoredHotkey(config.hotkeyOpenTrophyRoom, '');
@@ -170,9 +155,9 @@ config.hotkeyOpenMountainFortress = sanitizeStoredHotkey(config.hotkeyOpenMounta
 config.hotkeyOpenArsenal = sanitizeStoredHotkey(config.hotkeyOpenArsenal, '');
 config.hotkeyOpenMonstrousCauldron = sanitizeStoredHotkey(config.hotkeyOpenMonstrousCauldron, '');
 config.hotkeyOpenMonsterSqueezer = sanitizeStoredHotkey(config.hotkeyOpenMonsterSqueezer, '');
-config.hotkeyOpenRunes = sanitizeStoredHotkey(config.hotkeyOpenRunes, 'n');
-config.hotkeyOpenDragonPlant = sanitizeStoredHotkey(config.hotkeyOpenDragonPlant, 'l');
-config.hotkeyOpenPawAndFurSociety = sanitizeStoredHotkey(config.hotkeyOpenPawAndFurSociety, 'w');
+config.hotkeyOpenRunes = sanitizeStoredHotkey(config.hotkeyOpenRunes, '');
+config.hotkeyOpenDragonPlant = sanitizeStoredHotkey(config.hotkeyOpenDragonPlant, '');
+config.hotkeyOpenPawAndFurSociety = sanitizeStoredHotkey(config.hotkeyOpenPawAndFurSociety, '');
 if (config.hotkeyReturnToMap === undefined) config.hotkeyReturnToMap = 'g';
 config.hotkeyReturnToMap = sanitizeStoredHotkey(config.hotkeyReturnToMap, '');
 if (config.hotkeyFloorUp === undefined) config.hotkeyFloorUp = 'pageup';
@@ -886,6 +871,7 @@ const INVENTORY_HORIZONTAL_ATTR = 'data-ba-inventory-horizontal';
 const INVENTORY_HORIZONTAL_STYLE_ID = 'mod-settings-inventory-horizontal-style';
 const INVENTORY_COLUMNS_STYLE_ID = 'mod-settings-inventory-columns-style';
 const INVENTORY_COLUMNS_ATTR = 'data-ba-inventory-columns';
+const INVENTORY_FILLER_HIDDEN_ATTR = 'data-ba-inventory-filler-hidden';
 const INVENTORY_NARROW_ATTR = 'data-ba-inventory-narrow';
 const INVENTORY_LAYOUT_TOGGLE_CLASS = 'ba-inventory-layout-toggle';
 const INVENTORY_LOCK_TOGGLE_CLASS = 'ba-inventory-lock-toggle';
@@ -3601,6 +3587,7 @@ function verifyInventoryModButtonsIntegrity(source = 'unknown') {
   refreshInventoryModButtonBorderStyle();
   refreshInventoryHotkeyBadges();
   applyInventoryColumnsStyle();
+  hideTrailingInventoryEmptySlots();
 
   if (!config.persistentInventory) return;
   if (!findInventoryWidgetRoot()) return;
@@ -13980,6 +13967,72 @@ function buildInventoryColumnsStyleCss() {
   return css;
 }
 
+function isInventoryEmptyFillerSlot(node) {
+  if (!(node instanceof HTMLElement)) return false;
+  if (node.tagName !== 'DIV') return false;
+  if (!node.classList.contains('container-slot')) return false;
+  // Real inventory cells are buttons; game pads are bare div.container-slot.
+  if (node.matches('button, button *')) return false;
+  // Any nested button means this is not an empty pad.
+  if (node.querySelector('button')) return false;
+  // Empty pads have no item chrome (sprite / rarity / icon img).
+  if (node.querySelector('.sprite, .has-rarity, img')) return false;
+  return true;
+}
+
+function clearInventoryFillerHidden(node) {
+  if (!(node instanceof HTMLElement)) return;
+  if (!node.hasAttribute(INVENTORY_FILLER_HIDDEN_ATTR)) return;
+  node.removeAttribute(INVENTORY_FILLER_HIDDEN_ATTR);
+  node.style.removeProperty('display');
+}
+
+function clearAllInventoryFillerHidden(scope = document) {
+  const root = scope instanceof HTMLElement ? scope : document;
+  if (root.hasAttribute?.(INVENTORY_FILLER_HIDDEN_ATTR)) {
+    clearInventoryFillerHidden(root);
+  }
+  root.querySelectorAll?.(`[${INVENTORY_FILLER_HIDDEN_ATTR}]`).forEach((el) => {
+    clearInventoryFillerHidden(el);
+  });
+}
+
+function hideTrailingInventoryEmptySlots(scope = document) {
+  // Only when Persistent Inventory is on; otherwise restore any previously hidden pads.
+  if (!config.persistentInventory) {
+    clearAllInventoryFillerHidden(scope);
+    return;
+  }
+
+  const grids = new Set();
+  if (scope instanceof HTMLElement && scope.classList.contains('container-inventory-4')) {
+    grids.add(scope);
+  }
+  if (scope.querySelectorAll) {
+    scope.querySelectorAll('.container-inventory-4').forEach((g) => grids.add(g));
+  }
+
+  for (const grid of grids) {
+    const children = Array.from(grid.children);
+    let trailingStart = children.length;
+    for (let i = children.length - 1; i >= 0; i--) {
+      if (!isInventoryEmptyFillerSlot(children[i])) break;
+      trailingStart = i;
+    }
+
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (!(child instanceof HTMLElement)) continue;
+      if (i >= trailingStart && trailingStart < children.length) {
+        child.setAttribute(INVENTORY_FILLER_HIDDEN_ATTR, '1');
+        child.style.setProperty('display', 'none', 'important');
+      } else if (child.hasAttribute(INVENTORY_FILLER_HIDDEN_ATTR)) {
+        clearInventoryFillerHidden(child);
+      }
+    }
+  }
+}
+
 function applyInventoryColumnsStyle() {
   const cols = getInventoryItemsPerColumn();
   config.inventoryItemsPerColumn = cols;
@@ -14977,6 +15030,7 @@ function initializePersistentInventoryConfigForEnable() {
 
 function disablePersistentInventory() {
   stopPersistentInventoryObserver();
+  clearAllInventoryFillerHidden();
   clearPersistentInventorySavedConfig();
 }
 

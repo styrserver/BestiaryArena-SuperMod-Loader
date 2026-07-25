@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.6.5",
+      "changes": [
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Max raids progress raised to 18. Season tabs sit in the Rankings header (replacing Rankings - Season N) with section-header styling and framed button borders; they still only switch highscore rows. Home search results sort by relevance score first, then type (Abilities → Creatures → Equipment → Inventory → Maps)."
+        },
+        {
+          "mod": "Highscores",
+          "type": "added",
+          "text": "Summary footer also shows Incomplete maps (no personal record)."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "changed",
+          "text": "With Persistent Inventory on, the inventory grid hides trailing empty filler slots so the widget shrinks to the last real item or mod button."
+        },
+        {
+          "mod": "Mod Settings",
+          "type": "fixed",
+          "text": "Runes, Dragon Plant, and Paw and Fur Society hotkeys no longer reset to N/L/W on refresh; custom and cleared bindings persist like Arsenal and Bestiary."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "New tutorial mission with on-board guidance and placement success feedback."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Quest tile tutorial hints only appear when the board is empty; they hide when creatures are placed, a battle starts, or any open modal (including other mods) is shown. Placement success stars also appear on additional early missions when board setup is correct. Saying mission/task/quest prefers any active mission that is ready to hand in when several are accepted. An early chain mission is only offered once its prerequisite map is unlocked."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Quest tile tutorial hints stay centered or anchored correctly on window resize and scroll."
+        }
+      ]
+    },
+    {
       "version": "4.6.4",
       "changes": [
         {

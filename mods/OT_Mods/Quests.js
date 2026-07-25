@@ -437,7 +437,8 @@ const TOAST_MESSAGES = {
   desertDigSandsEmpty: 'The sands feel empty.',
   desertDigNeedMission: 'The sands yield nothing. Perhaps the king knows what to seek here.',
   missingDestroyFieldRune: 'You are missing a Destroy Field Rune.',
-  alreadyHaveDestroyFieldRune: 'You already carry a destroy field rune.'
+  alreadyHaveDestroyFieldRune: 'You already carry a destroy field rune.',
+  crossingTheLineObjectiveComplete: 'Fastest Bishop in Carlin completed! Return to the king to claim your reward.'
 };
 
 const BATTLE_TOAST_LOG = {
@@ -577,6 +578,14 @@ const PUTRID_CHAMBER_SCENE_SPRITE_ATTEMPT_DELAYS_MS = [0, 100, 250, 500, 800, 12
 const HONEYFLOWER_TILE_INDEX = 84;
 const HONEYFLOWER_PICKUP_SPRITE_ID = 2984;
 const HONEYFLOWER_TILE_HINT_ID = 'quests-honeyflower-tile-hint';
+const CROSSING_THE_LINE_TILE_HINT_ID = 'quests-crossing-the-line-tile-hint';
+const QUEST_TILE_SUCCESS_EFFECT_URL = 'https://bestiaryarena.com/assets/EFFECT/32.png';
+const QUEST_TILE_SUCCESS_EFFECT_CLASS = 'quests-tile-success-effect';
+const QUEST_TILE_SUCCESS_FRAME_MS = 80;
+const CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_URL = QUEST_TILE_SUCCESS_EFFECT_URL;
+const CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS = QUEST_TILE_SUCCESS_EFFECT_CLASS;
+const CROSSING_THE_LINE_ORC_SUCCESS_FRAME_MS = QUEST_TILE_SUCCESS_FRAME_MS;
+const COPPER_KEY_CORYM_SUCCESS_EFFECT_CLASS = QUEST_TILE_SUCCESS_EFFECT_CLASS;
 const GAME_FRAME_BORDER_IMAGE = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch';
 const GAME_FRAME_BACKGROUND = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
 const HONEYFLOWER_TOWER_ROOM_NAME = 'Honeyflower Tower';
@@ -617,6 +626,27 @@ const KING_HONEYFLOWER_MISSION = {
   rewardCoins: 50
 };
 
+const CITY_BOARDGAMES_ROOM_NAME = 'City Boardgames';
+const CROSSING_THE_LINE_TILES = [18, 25, 123, 130];
+
+const KING_CROSSING_THE_LINE_MISSION = {
+  id: 'king_crossing_the_line',
+  title: 'Fastest Bishop in Carlin',
+  prompt: 'Ah, a game of wits! Travel to City Boardgames and station mages upon the marked tiles of the board, then win a battle with them so placed. Will you prove the fastest bishop in Carlin?',
+  accept: 'Excellent. Go to City Boardgames, place mages on the glowing tiles, and win a match. Return to me when it is done.',
+  askForItem: 'Have you completed the chess drill at City Boardgames?',
+  complete: 'Splendid play! Truly the fastest bishop in Carlin. Here are 50 guild coins for your trouble.',
+  missingItem: 'You claim yes, yet I see no proof of a proper victory. Station mages on the marked tiles, win the battle, then return.',
+  keepSearching: 'Then go to City Boardgames and complete the chess drill with mages on the marked tiles.',
+  answerYesNo: 'Answer yes or no: have you completed the chess drill?',
+  alreadyCompleted: 'You already proved yourself at the board. Well done.',
+  alreadyActive: 'You are already on this chess drill. Station mages on the marked tiles at City Boardgames, win, and return to me.',
+  objectiveLine1: 'Travel to City Boardgames and station mages on the marked tiles.',
+  objectiveLine2: 'Win a battle with mages on those tiles, then return to King Tibianus.',
+  hint: 'Only creatures with the Mage category count on the glowing tiles.',
+  rewardCoins: 50
+};
+
 const KING_COPPER_KEY_MISSION = {
   id: 'king_copper_key',
   title: 'Retrieve King Tibianus belongings',
@@ -629,6 +659,7 @@ const KING_COPPER_KEY_MISSION = {
   answerYesNo: 'Answer yes or no: have you found my key?',
   alreadyCompleted: 'You already completed this mission. Excellent work, my subject.',
   alreadyActive: 'You are already on this mission. Bring me back the copper key!',
+  notExperiencedEnough: 'That task is beyond you for now. Come back when you are more experienced.',
   objectiveLine1: 'A guard lost the king\'s copper key deep in the mines.',
   objectiveLine2: 'Find the copper key and return it to King Tibianus.',
   hint: 'It seems as I must steal it from the angry Dwarfs as they probably won\'t let me have it without resistance.',
@@ -824,6 +855,7 @@ const MINOTAUR_TROPHY_CONFIG = {
 
 const MISSION_COMPLETION_SUMMARIES = {
   [KING_HONEYFLOWER_MISSION.id]: 'Retrieved a honeyflower from Honeyflower Tower for King Tibianus.',
+  [KING_CROSSING_THE_LINE_MISSION.id]: 'Won a City Boardgames chess battle with mages stationed on the marked tiles for King Tibianus.',
   [KING_COPPER_KEY_MISSION.id]: 'Returned the copper key to King Tibianus.',
   [KING_RED_DRAGON_MISSION.id]: 'Delivered 30 red dragon scales and 30 red dragon leathers to the royal forge.',
   [KING_LETTER_MISSION.id]: 'Returned the stamped letter to Al Dee in Rookgaard.',
@@ -1503,6 +1535,9 @@ function createNPCCooldownManager() {
   let copperKeyBoardSubscription = null;
   let lastProcessedCopperKeySeed = null;
   let trackedBoardConfig = null; // Track boardConfig before battle for verification
+  let trackedBoardConfigCrossing = null; // Track boardConfig at Fastest Bishop battle start
+  let crossingTheLineBoardSubscription = null;
+  let lastProcessedCrossingTheLineSeed = null;
   let equipmentSlotObserver = null; // Observer for equipment slot display
 
   let firstSealBoardSubscription = null;
@@ -1515,6 +1550,7 @@ function createNPCCooldownManager() {
   const kingChatState = {
     progressCopper: { accepted: false, completed: false },
     progressHoneyflower: { accepted: false, completed: false, honeyflowerPicked: false },
+    progressCrossingTheLine: { accepted: false, completed: false, crossingObjectiveComplete: false },
     progressDragon: { accepted: false, completed: false },
     progressLetter: { accepted: false, completed: false },
     progressMonksStudy: { accepted: false, completed: false },
@@ -1593,6 +1629,11 @@ function createNPCCooldownManager() {
   let honeyflowerTileRightClickEnabled = false;
   let honeyflowerTileBoardSubscription = null;
   let honeyflowerContextMenu = null;
+  let honeyflowerTileHintLayoutBound = false;
+  let honeyflowerTileHintRaf = null;
+  let honeyflowerTileHintScrollLockObserver = null;
+  let crossingTheLineTileHintLayoutBound = false;
+  let crossingTheLineTileHintRaf = null;
 
   // Costello (tile 53, Isle of Kings, Carlin)
   let tile53RightClickEnabled = false;
@@ -2400,8 +2441,21 @@ function createNPCCooldownManager() {
     };
   }
 
+  function buildCrossingTheLineProgress(patch = {}) {
+    const current = getMissionProgress(KING_CROSSING_THE_LINE_MISSION);
+    return {
+      accepted: patch.accepted ?? current.accepted ?? false,
+      completed: patch.completed ?? current.completed ?? false,
+      crossingObjectiveComplete: patch.crossingObjectiveComplete ?? current.crossingObjectiveComplete ?? false
+    };
+  }
+
   function hasHoneyflowerBeenPicked() {
     return !!getMissionProgress(KING_HONEYFLOWER_MISSION).honeyflowerPicked;
+  }
+
+  function hasCrossingTheLineObjectiveComplete() {
+    return !!getMissionProgress(KING_CROSSING_THE_LINE_MISSION).crossingObjectiveComplete;
   }
 
   async function markHoneyflowerPickedInFirebase() {
@@ -4663,6 +4717,18 @@ function createNPCCooldownManager() {
     }
   }
 
+  function isMineHubUnlocked() {
+    try {
+      const mineHubRoomId = getMineHubRoomId();
+      if (!mineHubRoomId) return false;
+      const rooms = globalThis.state?.player?.getSnapshot?.()?.context?.rooms;
+      return !!(rooms && Object.prototype.hasOwnProperty.call(rooms, mineHubRoomId));
+    } catch (error) {
+      console.error('[Quests Mod][Copper Key] Error checking if Mine Hub is unlocked:', error);
+      return false;
+    }
+  }
+
   function getRoomIdByRoomName(roomName) {
     try {
       if (!roomName || !globalThis.state?.utils?.ROOM_NAME) return null;
@@ -5265,6 +5331,7 @@ function createNPCCooldownManager() {
   //
   const MISSION_STATE_MAP = {
     [KING_HONEYFLOWER_MISSION.id]: 'progressHoneyflower',
+    [KING_CROSSING_THE_LINE_MISSION.id]: 'progressCrossingTheLine',
     [KING_COPPER_KEY_MISSION.id]: 'progressCopper',
     [KING_RED_DRAGON_MISSION.id]: 'progressDragon',
     [KING_LETTER_MISSION.id]: 'progressLetter',
@@ -5281,6 +5348,7 @@ function createNPCCooldownManager() {
 
   const MISSION_FIREBASE_KEY_MAP = {
     [KING_HONEYFLOWER_MISSION.id]: 'honeyflower',
+    [KING_CROSSING_THE_LINE_MISSION.id]: 'crossingTheLine',
     [KING_COPPER_KEY_MISSION.id]: 'copper',
     [KING_RED_DRAGON_MISSION.id]: 'dragon',
     [KING_LETTER_MISSION.id]: 'letter',
@@ -5294,6 +5362,43 @@ function createNPCCooldownManager() {
     [SERPENTINE_TOWER_MISSION.id]: 'serpentineTower',
     [APPRENTICE_SHENG_MISSION.id]: 'apprenticeSheng'
   };
+
+  function getExtraMissionProgressFields(firebaseKey, source = null) {
+    if (firebaseKey === 'serpentineTower') {
+      return {
+        destroyFieldRuneTaken: !!source?.destroyFieldRuneTaken,
+        putridChamberComplete: !!source?.putridChamberComplete
+      };
+    }
+    if (firebaseKey === 'honeyflower') {
+      return { honeyflowerPicked: !!source?.honeyflowerPicked };
+    }
+    if (firebaseKey === 'crossingTheLine') {
+      return { crossingObjectiveComplete: !!source?.crossingObjectiveComplete };
+    }
+    if (firebaseKey === 'apprenticeSheng') {
+      return {
+        battleCompleted: !!source?.battleCompleted,
+        rookstayerDismissed: !!source?.rookstayerDismissed
+      };
+    }
+    return {};
+  }
+
+  function buildMissionProgressFromFirebaseEntry(firebaseKey, entry = null) {
+    if (!entry) {
+      return {
+        accepted: false,
+        completed: false,
+        ...getExtraMissionProgressFields(firebaseKey)
+      };
+    }
+    return {
+      accepted: !!entry.accepted,
+      completed: !!entry.completed,
+      ...getExtraMissionProgressFields(firebaseKey, entry)
+    };
+  }
 
   // Helper: Get all mission progress from kingChatState using registry
   // This ensures all registered missions are included when saving
@@ -5407,31 +5512,7 @@ function createNPCCooldownManager() {
       
       // Build mission progress from registry
       for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
-        result[firebaseKey] = data[firebaseKey] ? {
-          accepted: !!data[firebaseKey].accepted,
-          completed: !!data[firebaseKey].completed,
-          ...(firebaseKey === 'serpentineTower'
-            ? {
-                destroyFieldRuneTaken: !!data[firebaseKey].destroyFieldRuneTaken,
-                putridChamberComplete: !!data[firebaseKey].putridChamberComplete
-              }
-            : firebaseKey === 'honeyflower'
-              ? { honeyflowerPicked: !!data[firebaseKey].honeyflowerPicked }
-              : firebaseKey === 'apprenticeSheng'
-                ? {
-                    battleCompleted: !!data[firebaseKey].battleCompleted,
-                    rookstayerDismissed: !!data[firebaseKey].rookstayerDismissed
-                  }
-                : {})
-        } : (
-          firebaseKey === 'serpentineTower'
-            ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
-            : firebaseKey === 'honeyflower'
-              ? { accepted: false, completed: false, honeyflowerPicked: false }
-              : firebaseKey === 'apprenticeSheng'
-                ? { accepted: false, completed: false, battleCompleted: false, rookstayerDismissed: false }
-                : { accepted: false, completed: false }
-        );
+        result[firebaseKey] = buildMissionProgressFromFirebaseEntry(firebaseKey, data[firebaseKey]);
       }
 
       if (data.meetingWithTesha) {
@@ -5498,31 +5579,7 @@ function createNPCCooldownManager() {
           
           // Build normalized mission progress from registry
           for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
-            result[firebaseKey] = progress[firebaseKey] ? {
-              accepted: !!progress[firebaseKey].accepted,
-              completed: !!progress[firebaseKey].completed,
-              ...(firebaseKey === 'serpentineTower'
-                ? {
-                    destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
-                    putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
-                  }
-                : firebaseKey === 'honeyflower'
-                  ? { honeyflowerPicked: !!progress[firebaseKey].honeyflowerPicked }
-                  : firebaseKey === 'apprenticeSheng'
-                    ? {
-                        battleCompleted: !!progress[firebaseKey].battleCompleted,
-                        rookstayerDismissed: !!progress[firebaseKey].rookstayerDismissed
-                      }
-                    : {})
-            } : (
-              firebaseKey === 'serpentineTower'
-                ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
-                : firebaseKey === 'honeyflower'
-                  ? { accepted: false, completed: false, honeyflowerPicked: false }
-                  : firebaseKey === 'apprenticeSheng'
-                    ? { accepted: false, completed: false, battleCompleted: false, rookstayerDismissed: false }
-                    : { accepted: false, completed: false }
-            );
+            result[firebaseKey] = buildMissionProgressFromFirebaseEntry(firebaseKey, progress[firebaseKey]);
           }
           
           // Add ironOre (special case - not a regular mission)
@@ -6518,6 +6575,48 @@ function createNPCCooldownManager() {
       equipmentSlotObserver.unsubscribe();
       equipmentSlotObserver = null;
     }
+    removeCopperKeyCorymSuccessEffects();
+  }
+
+  function shouldEnableCopperKeyCorymSuccessEffects() {
+    try {
+      const copperMissionProgress = kingChatState.progressCopper || { accepted: false, completed: false };
+      if (!copperMissionProgress.accepted || copperMissionProgress.completed) return false;
+      return isOnMineHub();
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function removeCopperKeyCorymSuccessEffects() {
+    removeQuestTileSuccessEffects(COPPER_KEY_CORYM_SUCCESS_EFFECT_CLASS);
+  }
+
+  function updateCopperKeyCorymSuccessEffects(boardContext = null) {
+    const ctx = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+    if (
+      !shouldEnableCopperKeyCorymSuccessEffects() ||
+      isBoardBattleActive(ctx) ||
+      !!ctx?.gameStarted
+    ) {
+      removeCopperKeyCorymSuccessEffects();
+      return;
+    }
+
+    const tileIndex = COPPER_KEY_CONFIG.targetTileIndex;
+    const tile = getTileElement(tileIndex);
+    if (!tile?.isConnected) {
+      removeCopperKeyCorymSuccessEffects();
+      return;
+    }
+
+    const boardConfig = ctx?.boardConfig || [];
+    const existing = tile.querySelector(`.${COPPER_KEY_CORYM_SUCCESS_EFFECT_CLASS}`);
+    if (hasCorymCharlatanOnTile69(boardConfig)) {
+      if (!existing) placeQuestTileSuccessEffect(tile, COPPER_KEY_CORYM_SUCCESS_EFFECT_CLASS);
+    } else if (existing) {
+      existing.remove();
+    }
   }
 
   // Setup Copper Key verification system (only when mission is active)
@@ -6550,7 +6649,11 @@ function createNPCCooldownManager() {
         // Track boardConfig before battle starts
         if (context.boardConfig && !context.serverResults) {
           await trackBoardConfigForCopperKey();
+          updateCopperKeyCorymSuccessEffects(context);
+          return;
         }
+
+        updateCopperKeyCorymSuccessEffects(context);
         
         // Monitor serverResults for victory verification
         const serverResults = context.serverResults;
@@ -6654,6 +6757,7 @@ function createNPCCooldownManager() {
           console.error('[Quests Mod][Copper Key] Error processing Copper Key:', error);
         }
       });
+      updateCopperKeyCorymSuccessEffects(globalThis.state?.board?.getSnapshot()?.context);
       
       console.log('[Quests Mod][Copper Key] Copper Key system set up');
     }
@@ -6691,6 +6795,7 @@ function createNPCCooldownManager() {
     [TOAST_MESSAGES.desertDigNeedMission]: 'info',
     [TOAST_MESSAGES.missingDestroyFieldRune]: 'nothing',
     [TOAST_MESSAGES.alreadyHaveDestroyFieldRune]: 'nothing',
+    [TOAST_MESSAGES.crossingTheLineObjectiveComplete]: 'completed',
     [TOAST_MESSAGES.copperKeyFound]: 'found',
     [TOAST_MESSAGES.mapReceived]: 'found',
     [TOAST_MESSAGES.navigatedToMines]: 'found',
@@ -8754,6 +8859,7 @@ function createNPCCooldownManager() {
       // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = display order in Quest Log.
       const MISSIONS = [
         KING_HONEYFLOWER_MISSION,
+        KING_CROSSING_THE_LINE_MISSION,
         KING_COPPER_KEY_MISSION,
         KING_RED_DRAGON_MISSION,
         KING_LETTER_MISSION,
@@ -8772,6 +8878,7 @@ function createNPCCooldownManager() {
       // This centralizes mission-to-state mapping for easier maintenance
       const MISSION_STATE_MAP = {
         [KING_HONEYFLOWER_MISSION.id]: 'progressHoneyflower',
+        [KING_CROSSING_THE_LINE_MISSION.id]: 'progressCrossingTheLine',
         [KING_COPPER_KEY_MISSION.id]: 'progressCopper',
         [KING_RED_DRAGON_MISSION.id]: 'progressDragon',
         [KING_LETTER_MISSION.id]: 'progressLetter',
@@ -8789,6 +8896,7 @@ function createNPCCooldownManager() {
       // Mission Firebase Key Map: Maps mission IDs to their Firebase property names
       const MISSION_FIREBASE_KEY_MAP = {
         [KING_HONEYFLOWER_MISSION.id]: 'honeyflower',
+        [KING_CROSSING_THE_LINE_MISSION.id]: 'crossingTheLine',
         [KING_COPPER_KEY_MISSION.id]: 'copper',
         [KING_RED_DRAGON_MISSION.id]: 'dragon',
         [KING_LETTER_MISSION.id]: 'letter',
@@ -8838,8 +8946,69 @@ function createNPCCooldownManager() {
         return !getHoneyflowerMissionProgress().completed;
       }
 
+      function getCrossingTheLineMissionProgress() {
+        return getMissionProgress(KING_CROSSING_THE_LINE_MISSION);
+      }
+
+      function canOfferCrossingTheLineMission() {
+        return getHoneyflowerMissionProgress().completed && !getCrossingTheLineMissionProgress().completed;
+      }
+
+      function canOfferCopperKeyMission() {
+        const progress = getMissionProgress(KING_COPPER_KEY_MISSION);
+        if (progress.completed || progress.accepted) return false;
+        return isMineHubUnlocked();
+      }
+
       function hasHoneyflowerInInventory() {
         return (cachedQuestItems?.[HONEYFLOWER_CONFIG.productName] || 0) > 0;
+      }
+
+      function getKingMissionKeywordCandidates() {
+        return [
+          KING_HONEYFLOWER_MISSION,
+          KING_CROSSING_THE_LINE_MISSION,
+          ...getKingMissionChain()
+        ];
+      }
+
+      function getActiveKingMissions() {
+        return getKingMissionKeywordCandidates().filter((mission) => {
+          const progress = getMissionProgress(mission);
+          return !!progress.accepted && !progress.completed;
+        });
+      }
+
+      async function isKingMissionReadyForHandIn(mission) {
+        if (!mission) return false;
+        const progress = getMissionProgress(mission);
+        if (!progress.accepted || progress.completed) return false;
+
+        if (mission.id === KING_COPPER_KEY_MISSION.id) {
+          return await hasCopperKeyInInventory();
+        }
+        if (mission.id === KING_HONEYFLOWER_MISSION.id) {
+          return hasHoneyflowerInInventory();
+        }
+        if (mission.id === KING_CROSSING_THE_LINE_MISSION.id) {
+          return hasCrossingTheLineObjectiveComplete();
+        }
+        if (mission.id === KING_RED_DRAGON_MISSION.id) {
+          return await hasRedDragonMaterials();
+        }
+        if (mission.id === KING_SCARAB_COIN_MISSION.id) {
+          return await hasScarabCoinInInventory();
+        }
+        return false;
+      }
+
+      async function findProgressableActiveKingMission() {
+        for (const mission of getActiveKingMissions()) {
+          if (await isKingMissionReadyForHandIn(mission)) {
+            return mission;
+          }
+        }
+        return null;
       }
 
       function areAllMissionsCompleted() {
@@ -9480,23 +9649,7 @@ function createNPCCooldownManager() {
           for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
             const stateKey = MISSION_STATE_MAP[missionId];
             if (stateKey && progress[firebaseKey]) {
-              kingChatState[stateKey] = {
-                accepted: !!progress[firebaseKey].accepted,
-                completed: !!progress[firebaseKey].completed,
-                ...(firebaseKey === 'serpentineTower'
-                  ? {
-                      destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
-                      putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
-                    }
-                  : firebaseKey === 'honeyflower'
-                    ? { honeyflowerPicked: !!progress[firebaseKey].honeyflowerPicked }
-                    : firebaseKey === 'apprenticeSheng'
-                      ? {
-                          battleCompleted: !!progress[firebaseKey].battleCompleted,
-                          rookstayerDismissed: !!progress[firebaseKey].rookstayerDismissed
-                        }
-                      : {})
-              };
+              kingChatState[stateKey] = buildMissionProgressFromFirebaseEntry(firebaseKey, progress[firebaseKey]);
             }
           }
           kingChatState.mornenionDefeated = !!(progress.mornenion && progress.mornenion.defeated);
@@ -9558,6 +9711,17 @@ function createNPCCooldownManager() {
             if (typeof updateHoneyflowerTileRightClickState === 'function') {
               updateHoneyflowerTileRightClickState();
             }
+          } else if (mission.id === KING_CROSSING_THE_LINE_MISSION.id) {
+            const crossingProgress = buildCrossingTheLineProgress({ accepted: true });
+            setMissionProgress(mission, crossingProgress);
+            kingChatState.progressCrossingTheLine = { ...crossingProgress };
+            if (typeof setupCrossingTheLineSystem === 'function') {
+              setupCrossingTheLineSystem();
+            }
+            if (typeof refreshQuestTileHighlights === 'function') {
+              refreshQuestTileHighlights();
+            }
+            NotificationService.showQuestAccepted(KING_CROSSING_THE_LINE_MISSION, '[Quests Mod][King Tibianus]');
           } else if (mission.id === KING_RED_DRAGON_MISSION.id) {
             kingChatState.progressDragon.accepted = true;
           } else if (mission.id === KING_LETTER_MISSION.id) {
@@ -9700,7 +9864,9 @@ function createNPCCooldownManager() {
             mission.id === KING_RED_DRAGON_MISSION.id && !currentProgress.completed;
           const nextProgress = mission.id === KING_HONEYFLOWER_MISSION.id
             ? buildHoneyflowerProgress({ accepted: true, completed: true })
-            : { accepted: true, completed: true };
+            : mission.id === KING_CROSSING_THE_LINE_MISSION.id
+              ? buildCrossingTheLineProgress({ accepted: true, completed: true, crossingObjectiveComplete: true })
+              : { accepted: true, completed: true };
           setMissionProgress(mission, nextProgress);
           activeMission = currentMission();
           selectedMissionId = null;
@@ -9914,10 +10080,15 @@ function createNPCCooldownManager() {
         const mentionsMonks = lowerText.includes('costello') || lowerText.includes('monastery') || lowerText.includes('monks') || lowerText.includes('white raven');
         const mentionsScarab = lowerText.includes('scarab') || lowerText.includes('desert') || lowerText.includes('darama') || lowerText.includes('valuable') || lowerText.includes('sands');
         const mentionsHoneyflower = lowerText.includes('honeyflower') || lowerText.includes('honey flower') || lowerText.includes('honey');
+        const mentionsCrossing = lowerText.includes('crossing') || lowerText.includes('bishop') || lowerText.includes('chess') || lowerText.includes('carlin') || lowerText.includes('boardgame') || lowerText.includes('board game') || lowerText.includes('city boardgames') || lowerText.includes('mage');
         const hasHolyTible = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
 
         if (mentionsHoneyflower && canOfferHoneyflowerMission()) {
           return MISSIONS.find(m => m.id === KING_HONEYFLOWER_MISSION.id) || activeMission;
+        }
+
+        if (mentionsCrossing && canOfferCrossingTheLineMission()) {
+          return MISSIONS.find(m => m.id === KING_CROSSING_THE_LINE_MISSION.id) || activeMission;
         }
 
         if (areAllMissionsCompleted()) {
@@ -9926,6 +10097,8 @@ function createNPCCooldownManager() {
 
         if (mentionsHoneyflower) {
           return MISSIONS.find(m => m.id === KING_HONEYFLOWER_MISSION.id) || activeMission;
+        } else if (mentionsCrossing && getHoneyflowerMissionProgress().completed) {
+          return MISSIONS.find(m => m.id === KING_CROSSING_THE_LINE_MISSION.id) || activeMission;
         } else if (mentionsLetter) {
           return MISSIONS.find(m => m.id === KING_LETTER_MISSION.id) || activeMission;
         } else if (mentionsKey) {
@@ -9961,22 +10134,7 @@ function createNPCCooldownManager() {
         }
 
         if (isAffirmativeReply(lowerText)) {
-          let hasItems = false;
-          if (confirmMission.id === KING_COPPER_KEY_MISSION.id) {
-            hasItems = await hasCopperKeyInInventory();
-          } else if (confirmMission.id === KING_HONEYFLOWER_MISSION.id) {
-            hasItems = hasHoneyflowerInInventory();
-          } else if (confirmMission.id === KING_RED_DRAGON_MISSION.id) {
-            hasItems = await hasRedDragonMaterials();
-          } else if (confirmMission.id === KING_LETTER_MISSION.id) {
-            // TODO: Implement proper letter delivery tracking
-            hasItems = false;
-          } else if (confirmMission.id === KING_MONKS_STUDY_MISSION.id) {
-            // Completion can be set when player finds Costello (e.g. via Costello NPC); until then keep searching
-            hasItems = false;
-          } else if (confirmMission.id === KING_SCARAB_COIN_MISSION.id) {
-            hasItems = await hasScarabCoinInInventory();
-          }
+          const hasItems = await isKingMissionReadyForHandIn(confirmMission);
 
           if (hasItems) {
             const missionToComplete = confirmMission;
@@ -9990,6 +10148,11 @@ function createNPCCooldownManager() {
                   await consumeQuestItem(HONEYFLOWER_CONFIG.productName, 1);
                   if (typeof updateHoneyflowerTileRightClickState === 'function') {
                     updateHoneyflowerTileRightClickState();
+                  }
+                }
+                if (missionToComplete.id === KING_CROSSING_THE_LINE_MISSION.id) {
+                  if (typeof refreshQuestTileHighlights === 'function') {
+                    refreshQuestTileHighlights();
                   }
                 }
                 if (missionToComplete.rewardCoins > 0) {
@@ -10038,6 +10201,16 @@ function createNPCCooldownManager() {
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
           queueKingReply('That mission belongs to Al Dee, the rope merchant in Rookgaard. You must speak with him to accept it.', { onDone: () => {
+            clearTextarea();
+          } });
+          tibianusCooldown.reset();
+          return true;
+        }
+
+        if (offeredMissionToStart.id === KING_COPPER_KEY_MISSION.id && !canOfferCopperKeyMission()) {
+          kingChatState.missionOffered = false;
+          kingChatState.offeredMission = null;
+          queueKingReply(KING_COPPER_KEY_MISSION.notExperiencedEnough, { onDone: () => {
             clearTextarea();
           } });
           tibianusCooldown.reset();
@@ -10109,6 +10282,8 @@ function createNPCCooldownManager() {
         const mentionsMonks = lowerText.includes('costello') || lowerText.includes('monastery') || lowerText.includes('monks') || lowerText.includes('white raven');
         const mentionsScarab = lowerText.includes('scarab') || lowerText.includes('desert') || lowerText.includes('darama') || lowerText.includes('valuable') || lowerText.includes('sands');
         const mentionsHoneyflower = lowerText.includes('honeyflower') || lowerText.includes('honey flower') || lowerText.includes('honey');
+        const mentionsCrossing = lowerText.includes('crossing') || lowerText.includes('bishop') || lowerText.includes('chess') || lowerText.includes('carlin') || lowerText.includes('boardgame') || lowerText.includes('board game') || lowerText.includes('city boardgames') || lowerText.includes('mage');
+        const mentionsMissionKeyword = lowerText.includes('mission') || lowerText.includes('quest') || lowerText.includes('task');
 
         // Determine target mission based on what player mentioned
         const targetMission = determineTargetMission(lowerText, activeMission);
@@ -10134,12 +10309,16 @@ function createNPCCooldownManager() {
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
           NotificationService.showItemReceived(SILVER_TOKEN_CONFIG.productName, '[Quests Mod][King Tibianus]', TOAST_MESSAGES.kingTookCoin);
-        } else if (areAllMissionsCompleted() && !canOfferHoneyflowerMission() && (mentionsKey || mentionsDragon || mentionsMonks || mentionsHoneyflower || lowerText.includes('mission') || lowerText.includes('quest'))) {
+        } else if (areAllMissionsCompleted() && !canOfferHoneyflowerMission() && !canOfferCrossingTheLineMission() && (mentionsKey || mentionsDragon || mentionsMonks || mentionsHoneyflower || mentionsCrossing || mentionsMissionKeyword)) {
           // All missions completed, tell player to come back later
           kingResponse = 'All missions have been completed. Come back later for more tasks.';
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
-        } else if (mentionsKey || mentionsDragon || mentionsLetter || mentionsMonks || mentionsScarab || mentionsHoneyflower) {
+        } else if (mentionsCrossing && !getHoneyflowerMissionProgress().completed) {
+          kingResponse = 'Complete your current task for me first, then we may speak of further drills.';
+          kingChatState.missionOffered = false;
+          kingChatState.offeredMission = null;
+        } else if (mentionsKey || mentionsDragon || mentionsLetter || mentionsMonks || mentionsScarab || mentionsHoneyflower || mentionsCrossing) {
           const hasHolyTibleForMonks = (cachedQuestItems && (cachedQuestItems['The Holy Tible'] || 0) > 0);
           if (mentionsMonks && !hasHolyTibleForMonks) {
             kingResponse = 'You must first complete the search for the Light and possess the Holy Tible before I can entrust you with that task.';
@@ -10205,22 +10384,31 @@ function createNPCCooldownManager() {
             queueKingReply(targetStrings.keyQuestion);
             clearTextarea();
             return;
+          } else if (targetMission.id === KING_COPPER_KEY_MISSION.id && !canOfferCopperKeyMission()) {
+            kingResponse = KING_COPPER_KEY_MISSION.notExperiencedEnough;
+            kingChatState.missionOffered = false;
+            kingChatState.offeredMission = null;
           } else {
             kingResponse = targetStrings.missionPrompt;
             setKingMissionOffered(targetMission);
           }
-        } else if (lowerText.includes('mission') || lowerText.includes('quest')) {
+        } else if (mentionsMissionKeyword) {
           const honeyProgress = getHoneyflowerMissionProgress();
           const honeyStrings = buildStrings(KING_HONEYFLOWER_MISSION);
+          const crossingProgress = getCrossingTheLineMissionProgress();
+          const crossingStrings = buildStrings(KING_CROSSING_THE_LINE_MISSION);
+
+          // Prefer any already-accepted mission that is ready to hand in.
+          const progressableMission = await findProgressableActiveKingMission();
+          if (progressableMission) {
+            setKingAwaitingKeyConfirm(progressableMission);
+            queueKingReply(buildStrings(progressableMission).keyQuestion);
+            clearTextarea();
+            return;
+          }
 
           if (canOfferHoneyflowerMission()) {
             if (honeyProgress.accepted) {
-              if (hasHoneyflowerInInventory()) {
-                setKingAwaitingKeyConfirm(KING_HONEYFLOWER_MISSION);
-                queueKingReply(honeyStrings.keyQuestion);
-                clearTextarea();
-                return;
-              }
               kingResponse = honeyStrings.missionActive;
               kingChatState.missionOffered = false;
               kingChatState.offeredMission = null;
@@ -10228,7 +10416,16 @@ function createNPCCooldownManager() {
               kingResponse = KING_HONEYFLOWER_MISSION.prompt;
               setKingMissionOffered(KING_HONEYFLOWER_MISSION);
             }
-          } else if (areAllMissionsCompleted() && !canOfferHoneyflowerMission()) {
+          } else if (canOfferCrossingTheLineMission()) {
+            if (crossingProgress.accepted) {
+              kingResponse = crossingStrings.missionActive;
+              kingChatState.missionOffered = false;
+              kingChatState.offeredMission = null;
+            } else {
+              kingResponse = KING_CROSSING_THE_LINE_MISSION.prompt;
+              setKingMissionOffered(KING_CROSSING_THE_LINE_MISSION);
+            }
+          } else if (areAllMissionsCompleted() && !canOfferHoneyflowerMission() && !canOfferCrossingTheLineMission()) {
             kingResponse = 'All missions have been completed. Come back later for more tasks.';
             kingChatState.missionOffered = false;
             kingChatState.offeredMission = null;
@@ -10238,6 +10435,10 @@ function createNPCCooldownManager() {
             kingChatState.offeredMission = null;
           } else if (currentProgress.accepted) {
             kingResponse = kingStrings.missionActive;
+            kingChatState.missionOffered = false;
+            kingChatState.offeredMission = null;
+          } else if (activeMission?.id === KING_COPPER_KEY_MISSION.id && !canOfferCopperKeyMission()) {
+            kingResponse = KING_COPPER_KEY_MISSION.notExperiencedEnough;
             kingChatState.missionOffered = false;
             kingChatState.offeredMission = null;
           } else {
@@ -15889,17 +16090,125 @@ function createNPCCooldownManager() {
         color: white;
         font-size: 11px;
       }
+      #${CROSSING_THE_LINE_TILE_HINT_ID} {
+        position: fixed;
+        pointer-events: none;
+        z-index: 20000;
+        max-width: 220px;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        white-space: normal;
+        line-height: 1.25;
+        box-sizing: border-box;
+        background: ${GAME_FRAME_BACKGROUND};
+        background-size: auto;
+        background-repeat: repeat;
+        border: 4px solid transparent;
+        border-image: ${GAME_FRAME_BORDER_IMAGE};
+        border-radius: 4px;
+        padding: 4px 6px;
+        color: white;
+        font-size: 11px;
+      }
     `;
     document.head.appendChild(style);
   }
 
+  function isBodyScrollLocked() {
+    const raw = document.body?.getAttribute?.('data-scroll-locked');
+    if (raw == null || raw === '') return false;
+    const n = Number.parseInt(String(raw), 10);
+    return Number.isFinite(n) && n >= 1;
+  }
+
+  function isOpenDialogPresent() {
+    try {
+      return !!document.querySelector(
+        'div[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"]:not([data-state="closed"])'
+      );
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function shouldHideQuestTileHints() {
+    return isBodyScrollLocked() || isOpenDialogPresent();
+  }
+
+  function refreshQuestTileHintsForModalState() {
+    const ctx = globalThis.state?.board?.getSnapshot()?.context;
+    updateHoneyflowerTileRightClickHint(ctx);
+    updateCrossingTheLineTileHint(ctx);
+  }
+
+  function unbindHoneyflowerTileHintLayoutListeners() {
+    if (!honeyflowerTileHintLayoutBound) return;
+    window.removeEventListener('resize', scheduleHoneyflowerTileRightClickHintReposition);
+    window.removeEventListener('scroll', scheduleHoneyflowerTileRightClickHintReposition, true);
+    if (honeyflowerTileHintRaf != null) {
+      cancelAnimationFrame(honeyflowerTileHintRaf);
+      honeyflowerTileHintRaf = null;
+    }
+    honeyflowerTileHintLayoutBound = false;
+  }
+
+  function bindHoneyflowerTileHintLayoutListeners() {
+    if (honeyflowerTileHintLayoutBound) return;
+    window.addEventListener('resize', scheduleHoneyflowerTileRightClickHintReposition);
+    window.addEventListener('scroll', scheduleHoneyflowerTileRightClickHintReposition, true);
+    honeyflowerTileHintLayoutBound = true;
+  }
+
+  function scheduleHoneyflowerTileRightClickHintReposition() {
+    if (honeyflowerTileHintRaf != null) return;
+    honeyflowerTileHintRaf = requestAnimationFrame(() => {
+      honeyflowerTileHintRaf = null;
+      repositionHoneyflowerTileRightClickHint();
+    });
+  }
+
+  function repositionHoneyflowerTileRightClickHint() {
+    const hint = document.getElementById(HONEYFLOWER_TILE_HINT_ID);
+    if (!hint) {
+      unbindHoneyflowerTileHintLayoutListeners();
+      return;
+    }
+
+    if (shouldHideQuestTileHints()) {
+      hint.style.display = 'none';
+      return;
+    }
+
+    const tileElement = getTileElement(HONEYFLOWER_TILE_INDEX);
+    if (!tileElement || !tileElement.isConnected) {
+      removeHoneyflowerTileRightClickHint();
+      return;
+    }
+
+    const rect = tileElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      hint.style.display = 'none';
+      return;
+    }
+
+    hint.style.display = 'block';
+    hint.style.left = `${rect.left + rect.width / 2}px`;
+    hint.style.top = `${rect.top}px`;
+  }
+
   function removeHoneyflowerTileRightClickHint() {
+    unbindHoneyflowerTileHintLayoutListeners();
     document.getElementById(HONEYFLOWER_TILE_HINT_ID)?.remove();
     document.querySelectorAll('.quests-tile-right-click-hint').forEach((hint) => hint.remove());
   }
 
-  function updateHoneyflowerTileRightClickHint() {
-    if (!shouldEnableHoneyflowerTileRightClick()) {
+  function updateHoneyflowerTileRightClickHint(boardContext = null) {
+    const ctx = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+    if (
+      !shouldEnableHoneyflowerTileRightClick(ctx) ||
+      !canShowQuestTileHighlights(ctx) ||
+      shouldHideQuestTileHints()
+    ) {
       removeHoneyflowerTileRightClickHint();
       return;
     }
@@ -15920,16 +16229,35 @@ function createNPCCooldownManager() {
     }
 
     hint.textContent = t('mods.quests.tileRightClickTutorial');
+    bindHoneyflowerTileHintLayoutListeners();
+    repositionHoneyflowerTileRightClickHint();
+  }
 
-    const rect = tileElement.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
-      hint.style.display = 'none';
-      return;
-    }
+  function setupHoneyflowerTileHintScrollLockObserver() {
+    if (honeyflowerTileHintScrollLockObserver || !document.body) return;
 
-    hint.style.display = 'block';
-    hint.style.left = `${rect.left + rect.width / 2}px`;
-    hint.style.top = `${rect.top}px`;
+    let raf = null;
+    const scheduleRefresh = () => {
+      if (raf != null) return;
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        refreshQuestTileHintsForModalState();
+      });
+    };
+
+    honeyflowerTileHintScrollLockObserver = new MutationObserver(scheduleRefresh);
+    honeyflowerTileHintScrollLockObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ['data-scroll-locked', 'data-state', 'aria-modal'],
+      childList: true,
+      subtree: true
+    });
+  }
+
+  function cleanupHoneyflowerTileHintScrollLockObserver() {
+    if (!honeyflowerTileHintScrollLockObserver) return;
+    honeyflowerTileHintScrollLockObserver.disconnect();
+    honeyflowerTileHintScrollLockObserver = null;
   }
 
   function isHoneyflowerTileElement(tileElement) {
@@ -15982,7 +16310,7 @@ function createNPCCooldownManager() {
       if (shouldBeEnabled) {
         refreshQuestTileHighlights(boardContext);
         bringQuestTileOverlaysToFront(getTileElement(HONEYFLOWER_TILE_INDEX));
-        updateHoneyflowerTileRightClickHint();
+        updateHoneyflowerTileRightClickHint(boardContext);
       } else {
         refreshQuestTileHighlights(boardContext);
         removeHoneyflowerTileRightClickHint();
@@ -15998,6 +16326,8 @@ function createNPCCooldownManager() {
   function setupHoneyflowerTileObserver() {
     if (honeyflowerTileBoardSubscription) return;
 
+    setupHoneyflowerTileHintScrollLockObserver();
+
     if (typeof globalThis !== 'undefined' && globalThis.state?.board?.subscribe) {
       honeyflowerTileBoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
         updateHoneyflowerTileRightClickState(boardContext);
@@ -16008,6 +16338,7 @@ function createNPCCooldownManager() {
   }
 
   function cleanupHoneyflowerTileObserver() {
+    cleanupHoneyflowerTileHintScrollLockObserver();
     if (honeyflowerTileBoardSubscription) {
       try {
         honeyflowerTileBoardSubscription.unsubscribe();
@@ -16034,6 +16365,402 @@ function createNPCCooldownManager() {
     removeHoneyflowerTileRightClickHint();
     cleanupHoneyflowerTileObserver();
     console.log('[Quests Mod][Honeyflower] System cleaned up');
+  }
+
+  // =======================
+  // Fastest Bishop in Carlin (City Boardgames tiles 18, 25, 123, 130)
+  // =======================
+
+  function isAllyPieceOnBoard(piece) {
+    return piece?.type === 'player' || (piece?.type === 'custom' && piece?.villain === false);
+  }
+
+  function getCrossingPieceCreatureName(piece) {
+    try {
+      let gameId = piece?.gameId || piece?.monsterId;
+      if (!gameId && piece?.databaseId) {
+        const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters;
+        const monster = monsters?.find((m) => m.id === piece.databaseId);
+        gameId = monster?.gameId;
+      }
+      if (gameId && globalThis.state?.utils?.getMonster) {
+        const monster = globalThis.state.utils.getMonster(gameId);
+        if (monster?.metadata?.name) return monster.metadata.name;
+      }
+      return piece?.nickname || '';
+    } catch (error) {
+      return piece?.nickname || '';
+    }
+  }
+
+  function isMageRole(role) {
+    const s = typeof role === 'object' && role !== null && role.name != null ? String(role.name) : String(role);
+    return s.toLowerCase() === 'mage';
+  }
+
+  function getRolesForBoardPiece(piece, serverResults = null) {
+    const gameId = getPieceGameId(piece, serverResults);
+    let roles = gameId != null ? getCreatureRolesByGameId(gameId) : null;
+    if (roles == null) {
+      const name = getCrossingPieceCreatureName(piece);
+      if (name) roles = getCreatureRolesByCreatureName(name);
+      if (roles == null && gameId != null && typeof window !== 'undefined' && window.creatureDatabase?.findMonsterByGameId) {
+        const monster = window.creatureDatabase.findMonsterByGameId(gameId);
+        roles = monster?.metadata?.roles;
+        if (!Array.isArray(roles) && typeof roles === 'string') roles = [roles];
+      }
+    }
+    return Array.isArray(roles) ? roles : null;
+  }
+
+  function hasMageRoleForPiece(piece, serverResults = null) {
+    const roles = getRolesForBoardPiece(piece, serverResults);
+    if (roles == null) return false;
+    return roles.some((r) => isMageRole(r));
+  }
+
+  function isBishopAllyPiece(piece) {
+    if (!isAllyPieceOnBoard(piece)) return false;
+    return hasMageRoleForPiece(piece);
+  }
+
+  function hasBishopAllyOnTileIndex(boardConfig, tileIndex) {
+    if (!Array.isArray(boardConfig)) return false;
+    return boardConfig.some((piece) => isBishopAllyPiece(piece) && piece?.tileIndex === tileIndex);
+  }
+
+  function hasBishopsOnCrossingTheLineTiles(boardConfig) {
+    return CROSSING_THE_LINE_TILES.every((tileIndex) => hasBishopAllyOnTileIndex(boardConfig, tileIndex));
+  }
+
+  function getCrossingTheLineHintAnchorRect() {
+    const board = document.querySelector('#tiles');
+    if (board?.isConnected) {
+      const rect = board.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        return rect;
+      }
+    }
+
+    const rects = CROSSING_THE_LINE_TILES
+      .map((tileIndex) => getTileElement(tileIndex))
+      .filter((tile) => tile?.isConnected)
+      .map((tile) => tile.getBoundingClientRect())
+      .filter((rect) => rect.width > 0 && rect.height > 0);
+
+    if (rects.length === 0) return null;
+
+    let left = Infinity;
+    let right = -Infinity;
+    let top = Infinity;
+    let bottom = -Infinity;
+    for (const rect of rects) {
+      left = Math.min(left, rect.left);
+      right = Math.max(right, rect.right);
+      top = Math.min(top, rect.top);
+      bottom = Math.max(bottom, rect.bottom);
+    }
+    return { left, right, top, bottom, width: right - left, height: bottom - top };
+  }
+
+  function unbindCrossingTheLineTileHintLayoutListeners() {
+    if (!crossingTheLineTileHintLayoutBound) return;
+    window.removeEventListener('resize', scheduleCrossingTheLineTileHintReposition);
+    window.removeEventListener('scroll', scheduleCrossingTheLineTileHintReposition, true);
+    if (crossingTheLineTileHintRaf != null) {
+      cancelAnimationFrame(crossingTheLineTileHintRaf);
+      crossingTheLineTileHintRaf = null;
+    }
+    crossingTheLineTileHintLayoutBound = false;
+  }
+
+  function bindCrossingTheLineTileHintLayoutListeners() {
+    if (crossingTheLineTileHintLayoutBound) return;
+    window.addEventListener('resize', scheduleCrossingTheLineTileHintReposition);
+    window.addEventListener('scroll', scheduleCrossingTheLineTileHintReposition, true);
+    crossingTheLineTileHintLayoutBound = true;
+  }
+
+  function scheduleCrossingTheLineTileHintReposition() {
+    if (crossingTheLineTileHintRaf != null) return;
+    crossingTheLineTileHintRaf = requestAnimationFrame(() => {
+      crossingTheLineTileHintRaf = null;
+      repositionCrossingTheLineTileHint();
+    });
+  }
+
+  function repositionCrossingTheLineTileHint() {
+    const hint = document.getElementById(CROSSING_THE_LINE_TILE_HINT_ID);
+    if (!hint) {
+      unbindCrossingTheLineTileHintLayoutListeners();
+      return;
+    }
+
+    if (shouldHideQuestTileHints()) {
+      hint.style.display = 'none';
+      return;
+    }
+
+    const rect = getCrossingTheLineHintAnchorRect();
+    if (!rect) {
+      removeCrossingTheLineTileHint();
+      return;
+    }
+
+    hint.style.display = 'block';
+    hint.style.left = `${rect.left + rect.width / 2}px`;
+    hint.style.top = `${rect.top + rect.height / 2}px`;
+  }
+
+  function removeCrossingTheLineTileHint() {
+    unbindCrossingTheLineTileHintLayoutListeners();
+    document.getElementById(CROSSING_THE_LINE_TILE_HINT_ID)?.remove();
+  }
+
+  function removeQuestTileSuccessEffects(effectClass = QUEST_TILE_SUCCESS_EFFECT_CLASS) {
+    document.querySelectorAll(`.${effectClass}`).forEach((el) => el.remove());
+  }
+
+  function removeCrossingTheLineOrcSuccessEffects() {
+    removeQuestTileSuccessEffects(CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS);
+  }
+
+  function placeQuestTileSuccessEffect(tileElement, effectClass = QUEST_TILE_SUCCESS_EFFECT_CLASS) {
+    if (!tileElement || tileElement.querySelector(`.${effectClass}`)) {
+      return;
+    }
+
+    const viewport = document.createElement('div');
+    viewport.className = effectClass;
+    viewport.style.cssText = getQuestTileOverlayBoxStyle([
+      'pointer-events:none',
+      'z-index:10003',
+      'overflow:hidden'
+    ]);
+
+    const img = document.createElement('img');
+    img.src = QUEST_TILE_SUCCESS_EFFECT_URL;
+    img.alt = '';
+    img.draggable = false;
+    img.className = 'pixelated';
+    img.style.cssText = [
+      'display:block',
+      'width:100%',
+      'height:auto',
+      'image-rendering:pixelated',
+      'will-change:transform'
+    ].join(';');
+
+    const startLoop = () => {
+      const frameWidth = img.naturalWidth || 32;
+      const frameCount = Math.max(1, Math.round((img.naturalHeight || frameWidth) / frameWidth));
+      img.style.height = `calc(100% * ${frameCount})`;
+      if (img._questsTileSuccessAnim) {
+        try { img._questsTileSuccessAnim.cancel(); } catch (_) {}
+      }
+      img._questsTileSuccessAnim = img.animate(
+        [
+          { transform: 'translateY(0)' },
+          { transform: `translateY(calc(-100% * ${(frameCount - 1) / frameCount}))` }
+        ],
+        {
+          duration: Math.max(1, frameCount) * QUEST_TILE_SUCCESS_FRAME_MS,
+          easing: `steps(${frameCount})`,
+          iterations: Infinity
+        }
+      );
+    };
+
+    if (img.complete && img.naturalHeight > 0) {
+      startLoop();
+    } else {
+      img.addEventListener('load', startLoop, { once: true });
+    }
+
+    viewport.appendChild(img);
+    tileElement.appendChild(viewport);
+  }
+
+  function placeCrossingTheLineOrcSuccessEffect(tileElement) {
+    placeQuestTileSuccessEffect(tileElement, CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS);
+  }
+
+  function updateCrossingTheLineOrcSuccessEffects(boardContext = null) {
+    const ctx = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+    if (
+      !shouldEnableCrossingTheLineTileHighlights() ||
+      isBoardBattleActive(ctx) ||
+      !!ctx?.gameStarted
+    ) {
+      removeCrossingTheLineOrcSuccessEffects();
+      return;
+    }
+
+    const boardConfig = ctx?.boardConfig || [];
+    for (const tileIndex of CROSSING_THE_LINE_TILES) {
+      const tile = getTileElement(tileIndex);
+      if (!tile?.isConnected) continue;
+
+      const existing = tile.querySelector(`.${CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS}`);
+      if (hasBishopAllyOnTileIndex(boardConfig, tileIndex)) {
+        if (!existing) placeCrossingTheLineOrcSuccessEffect(tile);
+      } else if (existing) {
+        existing.remove();
+      }
+    }
+  }
+
+  function updateCrossingTheLineTileHint(boardContext = null) {
+    const ctx = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+    if (
+      !shouldEnableCrossingTheLineTileHighlights() ||
+      !canShowQuestTileHighlights(ctx) ||
+      shouldHideQuestTileHints()
+    ) {
+      removeCrossingTheLineTileHint();
+      return;
+    }
+
+    if (!getCrossingTheLineHintAnchorRect()) {
+      removeCrossingTheLineTileHint();
+      return;
+    }
+
+    let hint = document.getElementById(CROSSING_THE_LINE_TILE_HINT_ID);
+    if (!hint) {
+      ensureHoneyflowerTileHintStyles();
+      hint = document.createElement('div');
+      hint.id = CROSSING_THE_LINE_TILE_HINT_ID;
+      hint.className = 'pixel-font-14 text-whiteRegular';
+      document.body.appendChild(hint);
+    }
+
+    hint.textContent = t('mods.quests.crossingTheLineTileTutorial');
+    bindCrossingTheLineTileHintLayoutListeners();
+    repositionCrossingTheLineTileHint();
+  }
+
+  function shouldEnableCrossingTheLineTileHighlights() {
+    try {
+      const progress = getMissionProgress(KING_CROSSING_THE_LINE_MISSION);
+      if (!progress.accepted || progress.completed || progress.crossingObjectiveComplete) return false;
+      return isOnRoomByName(CITY_BOARDGAMES_ROOM_NAME);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function markCrossingTheLineObjectiveComplete() {
+    try {
+      const progress = getMissionProgress(KING_CROSSING_THE_LINE_MISSION);
+      if (!progress.accepted || progress.completed || progress.crossingObjectiveComplete) {
+        return false;
+      }
+
+      const nextProgress = buildCrossingTheLineProgress({
+        accepted: true,
+        completed: false,
+        crossingObjectiveComplete: true
+      });
+      setMissionProgress(KING_CROSSING_THE_LINE_MISSION, nextProgress);
+      kingChatState.progressCrossingTheLine = { ...nextProgress };
+
+      const playerName = getCurrentPlayerName();
+      if (playerName) {
+        await saveKingTibianusProgress(playerName, getAllMissionProgress());
+      }
+
+      setTimeout(() => {
+        NotificationService.showImportant(
+          TOAST_MESSAGES.crossingTheLineObjectiveComplete,
+          '[Quests Mod][Fastest Bishop]',
+          undefined,
+          'completed'
+        );
+      }, 1500);
+      if (typeof refreshQuestTileHighlights === 'function') {
+        refreshQuestTileHighlights();
+      }
+      console.log('[Quests Mod][Fastest Bishop] Objective marked complete');
+      return true;
+    } catch (error) {
+      console.error('[Quests Mod][Fastest Bishop] Error marking objective complete:', error);
+      return false;
+    }
+  }
+
+  function cleanupCrossingTheLineSystem() {
+    if (crossingTheLineBoardSubscription) {
+      try {
+        crossingTheLineBoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Fastest Bishop] Error unsubscribing from board:', e);
+      }
+      crossingTheLineBoardSubscription = null;
+    }
+    trackedBoardConfigCrossing = null;
+    removeCrossingTheLineTileHint();
+    removeCrossingTheLineOrcSuccessEffects();
+  }
+
+  function setupCrossingTheLineSystem() {
+    const progress = kingChatState.progressCrossingTheLine || { accepted: false, completed: false };
+    if (!progress.accepted || progress.completed) {
+      if (crossingTheLineBoardSubscription) {
+        cleanupCrossingTheLineSystem();
+      }
+      return;
+    }
+
+    if (crossingTheLineBoardSubscription) return;
+    if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
+
+    console.log('[Quests Mod][Fastest Bishop] Setting up battle tracking...');
+    crossingTheLineBoardSubscription = globalThis.state.board.subscribe(async ({ context }) => {
+      const crossingProgress = kingChatState.progressCrossingTheLine || { accepted: false, completed: false };
+      if (!crossingProgress.accepted || crossingProgress.completed) {
+        cleanupCrossingTheLineSystem();
+        return;
+      }
+
+      if (context.boardConfig && !context.serverResults) {
+        if (isOnRoomByName(CITY_BOARDGAMES_ROOM_NAME) && !context.gameStarted) {
+          trackedBoardConfigCrossing = JSON.parse(JSON.stringify(context.boardConfig));
+        }
+        updateCrossingTheLineOrcSuccessEffects(context);
+        return;
+      }
+
+      updateCrossingTheLineOrcSuccessEffects(context);
+
+      if (crossingProgress.crossingObjectiveComplete) return;
+
+      const serverResults = context.serverResults;
+      if (!serverResults?.rewardScreen?.victory || typeof serverResults.seed === 'undefined') return;
+
+      const cityBoardgamesRoomId = getRoomIdByRoomName(CITY_BOARDGAMES_ROOM_NAME);
+      let roomId = serverResults.rewardScreen?.roomId;
+      if (roomId == null) {
+        roomId = context?.selectedMap?.selectedRoom?.id
+          ?? globalThis.state?.board?.getSnapshot?.()?.context?.selectedMap?.selectedRoom?.id;
+      }
+      if (!cityBoardgamesRoomId || roomId !== cityBoardgamesRoomId) {
+        return;
+      }
+
+      if (serverResults.seed === lastProcessedCrossingTheLineSeed) return;
+      lastProcessedCrossingTheLineSeed = serverResults.seed;
+
+      const boardToCheck = trackedBoardConfigCrossing;
+      trackedBoardConfigCrossing = null;
+
+      if (!boardToCheck || !hasBishopsOnCrossingTheLineTiles(boardToCheck)) {
+        console.log('[Quests Mod][Fastest Bishop] Victory ignored: marked tiles did not have mages at battle start');
+        return;
+      }
+
+      await markCrossingTheLineObjectiveComplete();
+    });
   }
 
   // =======================
@@ -17411,10 +18138,14 @@ function createNPCCooldownManager() {
 
   function updateAllQuestTileHighlights(boardContext) {
     removeAllTileHighlightEffects();
-    if (!canShowQuestTileHighlights(boardContext)) return;
+    const emptyBoardOk = canShowQuestTileHighlights(boardContext);
+    const battleActive = isBoardBattleActive(boardContext);
 
     for (const source of questTileHighlightSources) {
       try {
+        const allowWithCreatures = !!source.showDuringPlacement;
+        if (!allowWithCreatures && !emptyBoardOk) continue;
+        if (allowWithCreatures && battleActive) continue;
         if (!source.isAccessActive(boardContext)) continue;
         const tiles = source.getTiles(boardContext);
         const tileList = Array.isArray(tiles) ? tiles : (tiles ? [...tiles] : []);
@@ -17427,6 +18158,10 @@ function createNPCCooldownManager() {
         console.error('[Quests Mod][Tile Highlight] Error updating highlight source:', error);
       }
     }
+
+    updateHoneyflowerTileRightClickHint(boardContext);
+    updateCrossingTheLineTileHint(boardContext);
+    updateCrossingTheLineOrcSuccessEffects(boardContext);
   }
 
   function refreshQuestTileHighlights(boardContext = null) {
@@ -17444,6 +18179,13 @@ function createNPCCooldownManager() {
       },
       isAccessActive: shouldEnableHoneyflowerTileRightClick,
       alt: 'Pick Honeyflower'
+    });
+
+    registerQuestTileHighlightSource({
+      getTiles: () => CROSSING_THE_LINE_TILES.map((tileIndex) => getTileElement(tileIndex)).filter(Boolean),
+      isAccessActive: shouldEnableCrossingTheLineTileHighlights,
+      showDuringPlacement: true,
+      alt: 'Fastest Bishop in Carlin'
     });
 
     registerQuestTileHighlightSource({
@@ -18702,6 +19444,8 @@ function createNPCCooldownManager() {
 
     // Cleanup Honeyflower Tower system
     cleanupHoneyflowerTileSystem();
+    // Cleanup Fastest Bishop in Carlin system
+    cleanupCrossingTheLineSystem();
 
     // Cleanup Tile 53 Costello system
     cleanupTile53CostelloSystem();
@@ -18957,6 +19701,7 @@ function createNPCCooldownManager() {
   observeInventory();
   setupQuestItemsDropSystem();
   setupCopperKeySystem();
+  setupCrossingTheLineSystem();
   setupEquipmentSlotObserver();
     setupTile53CostelloObserver();
     setupHoneyflowerTileObserver();
@@ -19100,6 +19845,8 @@ function createNPCCooldownManager() {
     updateWaterFishingState();
     updateMiningState();
     setupCopperKeySystem();
+    setupCrossingTheLineSystem();
+    refreshQuestTileHighlights();
   }
 
   function finishMissionProgressHydration() {
@@ -19168,31 +19915,7 @@ function createNPCCooldownManager() {
       for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
         const stateKey = MISSION_STATE_MAP[missionId];
         if (stateKey) {
-          kingChatState[stateKey] = progress[firebaseKey] ? {
-            accepted: !!progress[firebaseKey].accepted,
-            completed: !!progress[firebaseKey].completed,
-            ...(firebaseKey === 'serpentineTower'
-              ? {
-                  destroyFieldRuneTaken: !!progress[firebaseKey].destroyFieldRuneTaken,
-                  putridChamberComplete: !!progress[firebaseKey].putridChamberComplete
-                }
-              : firebaseKey === 'honeyflower'
-                ? { honeyflowerPicked: !!progress[firebaseKey].honeyflowerPicked }
-                : firebaseKey === 'apprenticeSheng'
-                  ? {
-                      battleCompleted: !!progress[firebaseKey].battleCompleted,
-                      rookstayerDismissed: !!progress[firebaseKey].rookstayerDismissed
-                    }
-                  : {})
-          } : (
-            firebaseKey === 'serpentineTower'
-              ? { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false }
-              : firebaseKey === 'honeyflower'
-                ? { accepted: false, completed: false, honeyflowerPicked: false }
-                : firebaseKey === 'apprenticeSheng'
-                  ? { accepted: false, completed: false, battleCompleted: false, rookstayerDismissed: false }
-                  : { accepted: false, completed: false }
-          );
+          kingChatState[stateKey] = buildMissionProgressFromFirebaseEntry(firebaseKey, progress[firebaseKey]);
         }
       }
       if (progress.ironOre) {
@@ -19930,6 +20653,7 @@ function createNPCCooldownManager() {
       kingChatState.progressScarabHunt = { accepted: false, completed: false };
       kingChatState.progressSerpentineTower = { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false };
       kingChatState.progressHoneyflower = { accepted: false, completed: false, honeyflowerPicked: false };
+      kingChatState.progressCrossingTheLine = { accepted: false, completed: false, crossingObjectiveComplete: false };
       kingChatState.progressApprenticeSheng = { accepted: false, completed: false, battleCompleted: false, rookstayerDismissed: false };
       kingChatState.costelloVisited = false;
       kingChatState.mornenionDefeated = false;

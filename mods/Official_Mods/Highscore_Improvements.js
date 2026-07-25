@@ -1202,11 +1202,12 @@ function createSummaryContent(entries, you, yourName, improvementStats) {
 
   const statsContainer = document.createElement('div');
   statsContainer.className = 'frame-pressed-1 surface-dark p-2 pixel-font-14';
+  const incompleteMapCount = entries.filter((e) => !e.hasPersonalData).length;
   const tickWrCount = entries.filter((e) => e.ownsTickWr).length;
   const rankWrCount = entries.filter((e) => e.ownsRankWr).length;
   const floorWrCount = entries.filter((e) => e.ownsFloorWr).length;
   statsContainer.innerHTML = `
-    <div>Maps with room to improve: ${improvementStats.mapsWithRoomToImprove}</div>
+    <div>Maps with room to improve: ${improvementStats.mapsWithRoomToImprove} · Incomplete maps: ${incompleteMapCount}</div>
     <div>${formatImprovementSummaryLine(improvementStats)}</div>
     <div>Your WRs — Ticks: ${tickWrCount} · Rank: ${rankWrCount} · Floor: ${floorWrCount}</div>
   `;

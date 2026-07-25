@@ -413,7 +413,7 @@ const CYCLOPEDIA_SETTINGS = {
     bisEquipments: 126,
     exploredMaps: 73,
     bagOutfits: 205,
-    raids: 16
+    raids: 18
   }
 };
 
@@ -5610,13 +5610,14 @@ const CyclopediaHomeSearch = (() => {
     }
 
     bestHeap.sort((a, b) => (b.score - a.score) || a.entry.label.localeCompare(b.entry.label));
-    const results = bestHeap.map(({ entry }) => ({
+    const results = bestHeap.map(({ entry, score }) => ({
       kind: entry.kind,
       kindLabel: kindLabel(entry.kind),
       label: entry.label,
       subtitle: entry.subtitle || '',
       itemKey: entry.itemKey,
-      target: entry.target
+      target: entry.target,
+      score
     }));
 
     // Metadata: if query matches a map/region name, also include creatures present there (not in "exact" mode)
@@ -8978,7 +8979,11 @@ function createCyclopediaSeasonsLeaderboardLink() {
 }
 
 const CYCLOPEDIA_SEASON_TAB_BTN_CLASS =
-  'focus-style-visible console-frame-inactive pixel-font-16 surface-dark relative whitespace-nowrap px-3.5 text-center text-whiteRegular disabled:dithered data-[state=active]:console-frame-active data-[state=active]:surface-regular disabled:pointer-events-none disabled:text-whiteBrightest data-[state=active]:z-2 data-[state=active]:text-whiteBrightest';
+  'focus-style-visible relative whitespace-nowrap px-1 text-center';
+const CYCLOPEDIA_SEASON_TAB_FRAME =
+  'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
+const CYCLOPEDIA_SEASON_TAB_FRAME_ACTIVE =
+  'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill';
 
 function setCyclopediaSeasonTabLabel(btn, seasonNum, currentSeason) {
   btn.textContent = '';
@@ -9009,6 +9014,14 @@ function syncCyclopediaSeasonToggleStyles(tablist) {
     btn.setAttribute('aria-selected', selected ? 'true' : 'false');
     btn.dataset.state = selected ? 'active' : 'inactive';
     btn.setAttribute('tabindex', selected ? '0' : '-1');
+    btn.className = `${CYCLOPEDIA_SEASON_TAB_BTN_CLASS} ${selected ? 'text-whiteHighlight' : 'text-whiteDark'}`;
+    btn.style.border = '4px solid transparent';
+    btn.style.borderImage = selected
+      ? CYCLOPEDIA_SEASON_TAB_FRAME_ACTIVE
+      : CYCLOPEDIA_SEASON_TAB_FRAME;
+    btn.style.borderRadius = '0';
+    btn.style.background = 'transparent';
+    btn.style.opacity = selected ? '1' : '0.75';
   });
 }
 
@@ -9023,14 +9036,18 @@ function getCyclopediaRankingRowDisplay(profileData, rankingKey) {
   };
 }
 
+function mountCyclopediaSeasonTabsInRankingsHeader(root, tablist) {
+  if (!root || !tablist) return false;
+  const headerTd = root.querySelector('tr[data-cyclopedia-section-header="rankings"] > td');
+  if (!headerTd) return false;
+  headerTd.textContent = '';
+  headerTd.appendChild(tablist);
+  return true;
+}
+
 function updateCyclopediaStartpageRankings(root, profileData) {
   if (!root || !profileData) return;
   const activeSeason = cyclopediaState.profileSeason || 1;
-  const headerTr = root.querySelector('tr[data-cyclopedia-section-header="rankings"]');
-  if (headerTr) {
-    const td = headerTr.querySelector('td');
-    if (td) td.textContent = getCyclopediaRankingsSectionLabel(activeSeason);
-  }
   const patched = patchProfileDataForActiveSeason(profileData, activeSeason);
   const highscoreIcon = { alt: 'Highscore', src: '/assets/icons/highscore.png', width: 11, height: 11, className: 'pixelated inline-block -translate-y-0.5' };
   CYCLOPEDIA_RANKING_ROW_KEYS.forEach((rankingKey) => {
@@ -9057,7 +9074,7 @@ function renderCyclopediaSeasonToggleRow(onSeasonChange) {
   const tablist = document.createElement('div');
   tablist.setAttribute('role', 'tablist');
   tablist.setAttribute('aria-orientation', 'horizontal');
-  tablist.className = 'flex';
+  tablist.className = 'flex w-full bg-grayDark text-whiteHighlight';
   tablist.style.outline = 'none';
   tablist.style.width = '100%';
   tablist.style.flexShrink = '0';
@@ -9068,7 +9085,6 @@ function renderCyclopediaSeasonToggleRow(onSeasonChange) {
     btn.type = 'button';
     btn.setAttribute('role', 'tab');
     btn.dataset.cyclopediaSeason = String(sn);
-    btn.className = CYCLOPEDIA_SEASON_TAB_BTN_CLASS;
     btn.style.flex = '1 1 0';
     btn.style.cursor = 'pointer';
     setCyclopediaSeasonTabLabel(btn, sn, currentSeason);
@@ -9106,7 +9122,6 @@ function renderCyclopediaProfileColumn(profileData) {
   };
 
   const seasonTablist = renderCyclopediaSeasonToggleRow(handleStartpageSeasonChange);
-  wrapper.appendChild(seasonTablist);
 
   const scrollArea = document.createElement('div');
   Object.assign(scrollArea.style, {
@@ -9120,10 +9135,12 @@ function renderCyclopediaProfileColumn(profileData) {
   });
 
   const patchedProfile = patchProfileDataForActiveSeason(profileData, cyclopediaState.profileSeason || 1);
-  scrollArea.appendChild(renderCyclopediaPlayerInfo(patchedProfile, {
+  const playerInfo = renderCyclopediaPlayerInfo(patchedProfile, {
     compact: true,
     season: cyclopediaState.profileSeason || 1
-  }));
+  });
+  mountCyclopediaSeasonTabsInRankingsHeader(playerInfo, seasonTablist);
+  scrollArea.appendChild(playerInfo);
   wrapper.appendChild(scrollArea);
 
   const linkFooter = document.createElement('div');
@@ -9411,6 +9428,17 @@ const CYCLOPEDIA_HOME_SEARCH_TYPE_OPTIONS = [
   ['map', 'Maps']
 ];
 
+/** Matches CYCLOPEDIA_HOME_SEARCH_TYPE_OPTIONS order (inventory kinds share one bucket). */
+const CYCLOPEDIA_HOME_SEARCH_KIND_ORDER = {
+  ability: 0,
+  creature: 1,
+  equipment: 2,
+  inventoryCategory: 3,
+  inventoryItem: 3,
+  map: 4,
+  region: 5
+};
+
 function applyCyclopediaHomeSearchFilters(results, filters = {}) {
   const { kindFilter } = filters;
   return (results || []).filter((r) => {
@@ -9422,6 +9450,18 @@ function applyCyclopediaHomeSearchFilters(results, filters = {}) {
       } else if (r.kind !== kindFilter) return false;
     }
     return true;
+  });
+}
+
+function sortCyclopediaHomeSearchResults(results) {
+  return (results || []).slice().sort((a, b) => {
+    const scoreA = Number(a.score) || 0;
+    const scoreB = Number(b.score) || 0;
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    const kindA = CYCLOPEDIA_HOME_SEARCH_KIND_ORDER[a.kind] ?? 9;
+    const kindB = CYCLOPEDIA_HOME_SEARCH_KIND_ORDER[b.kind] ?? 9;
+    if (kindA !== kindB) return kindA - kindB;
+    return String(a.label || '').localeCompare(String(b.label || ''));
   });
 }
 
@@ -10241,9 +10281,11 @@ function renderCyclopediaSearchColumn() {
     }
 
     let { results } = CyclopediaHomeSearch.search(query);
-    results = applyCyclopediaHomeSearchFilters(results, {
-      kindFilter: kindSelect.value || null
-    });
+    results = sortCyclopediaHomeSearchResults(
+      applyCyclopediaHomeSearchFilters(results, {
+        kindFilter: kindSelect.value || null
+      })
+    );
 
     if (!results.length) {
       if (wantsEffectIndexing && (!abilityReady || !equipmentEffectReady)) {
