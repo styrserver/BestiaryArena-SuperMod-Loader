@@ -1729,6 +1729,7 @@
       "exportSummaryOverkillSuffix": " · raw {raw} · {overkill} overkill",
       "exportSummarySummonInstance": "{name} #{index}",
       "exportSummarySummonTile": " · tile {tile}",
+      "unitDuplicateInstance": "{name} #{index}",
       "panelBattleLogSummaryTitle": "Combat summary"
     },
     "betterBoostedMaps": {
