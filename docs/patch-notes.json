@@ -4,6 +4,46 @@
   },
   "notes": [
     {
+      "version": "4.6.8",
+      "changes": [
+        {
+          "mod": "Awaken Tracker",
+          "type": "added",
+          "text": "Overview portraits show level and inventory-style rarity borders (shiny / hundo / awaken / gene rarity)."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "changed",
+          "text": "Overview name colors: all non-perfect awakened use awaken orange (darker at level 99). Sort is perfect → level (high→low) → shiny → genes → name."
+        },
+        {
+          "mod": "Awaken Tracker",
+          "type": "fixed",
+          "text": "Overview portrait, level, and border layout aligned with game inventory slots."
+        },
+        {
+          "mod": "Cyclopedia",
+          "type": "changed",
+          "text": "Perfect/Shiny progress max comes only from creature-database (removed hardcoded 76 floor)."
+        },
+        {
+          "mod": "creature-database.js",
+          "type": "changed",
+          "text": "Football Elemental re-added to EVENT_CREATURES (excluded from awakening, Autoscroller/Autoseller pickers, and Perfect/Shiny progress)."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Marked objective tiles show a green border when the correct creature role is stationed. Guild coin get/add/spend works when Guilds is disabled (same balance as Guilds when both are on)."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Objective-tile success sparkles loop again. Glow highlights stay visible while placing creatures for that mission. Dev grant applies all registered item keys (some keys always granted 0)."
+        }
+      ]
+    },
+    {
       "version": "4.6.7",
       "changes": [
         {

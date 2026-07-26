@@ -585,6 +585,8 @@ const QUEST_TILE_SUCCESS_FRAME_MS = 80;
 const CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_URL = QUEST_TILE_SUCCESS_EFFECT_URL;
 const CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS = QUEST_TILE_SUCCESS_EFFECT_CLASS;
 const CROSSING_THE_LINE_ORC_SUCCESS_FRAME_MS = QUEST_TILE_SUCCESS_FRAME_MS;
+const CROSSING_THE_LINE_OK_BORDER_CLASS = 'quests-crossing-tile-ok-border';
+const CROSSING_THE_LINE_OK_BORDER_COLOR = '#98C379';
 const COPPER_KEY_CORYM_SUCCESS_EFFECT_CLASS = QUEST_TILE_SUCCESS_EFFECT_CLASS;
 const GAME_FRAME_BORDER_IMAGE = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch';
 const GAME_FRAME_BACKGROUND = 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")';
@@ -4715,6 +4717,11 @@ function createNPCCooldownManager() {
     return `${FIREBASE_CONFIG.firebaseUrl}/quests/al-dee-shop-purchases`;
   }
 
+  // Shared with Guilds mod — same path/encryption so balances stay compatible
+  function getGuildCoinsApiUrl() {
+    return `${FIREBASE_CONFIG.firebaseUrl}/guilds/coins`;
+  }
+
   // Get current player name
   function getCurrentPlayerName() {
     try {
@@ -5460,6 +5467,136 @@ function createNPCCooldownManager() {
       return await this.handleResponse(response, errorContext);
     }
   };
+
+  // =======================
+  // Guild Coins Fallback (when Guilds mod is not enabled)
+  // Must match Guilds.js: PBKDF2 salt 'guild-coins-salt', AES-GCM, /guilds/coins/{hash}
+  // =======================
+
+  async function deriveGuildCoinsKey(username) {
+    const encoder = new TextEncoder();
+    const password = encoder.encode(username.toLowerCase());
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      password,
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits', 'deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: encoder.encode('guild-coins-salt'),
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  async function encryptGuildCoinCount(count, username) {
+    const key = await deriveGuildCoinsKey(username);
+    const data = new TextEncoder().encode(String(count));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(encrypted), iv.length);
+    return btoa(String.fromCharCode(...combined));
+  }
+
+  async function decryptGuildCoinCount(encryptedText, username) {
+    try {
+      if (!encryptedText || typeof encryptedText !== 'string') return 0;
+      let combined;
+      try {
+        combined = Uint8Array.from(atob(encryptedText), (c) => c.charCodeAt(0));
+      } catch (e) {
+        return 0;
+      }
+      if (combined.length < 13) return 0;
+      const key = await deriveGuildCoinsKey(username);
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: combined.slice(0, 12) },
+        key,
+        combined.slice(12)
+      );
+      const count = parseInt(new TextDecoder().decode(decrypted), 10);
+      return Number.isFinite(count) ? count : 0;
+    } catch (error) {
+      console.warn('[Quests Mod][Guild Coins] Error decrypting coin count:', error);
+      return 0;
+    }
+  }
+
+  async function questsGetGuildCoins() {
+    try {
+      const currentPlayer = getCurrentPlayerName();
+      if (!currentPlayer) return 0;
+      const hashedPlayer = await hashUsername(currentPlayer);
+      const data = await FirebaseService.get(
+        `${getGuildCoinsApiUrl()}/${hashedPlayer}`,
+        'get guild coins',
+        null
+      );
+      if (!data || !data.encrypted) return 0;
+      return await decryptGuildCoinCount(data.encrypted, currentPlayer);
+    } catch (error) {
+      console.error('[Quests Mod][Guild Coins] Error getting guild coins:', error);
+      return 0;
+    }
+  }
+
+  async function questsAddGuildCoins(amount) {
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) throw new Error('Player name not available');
+    if (amount <= 0) return;
+    const currentCoins = await questsGetGuildCoins();
+    const newCoins = currentCoins + amount;
+    const encrypted = await encryptGuildCoinCount(newCoins, currentPlayer);
+    const hashedPlayer = await hashUsername(currentPlayer);
+    await FirebaseService.put(
+      `${getGuildCoinsApiUrl()}/${hashedPlayer}`,
+      { encrypted },
+      'save guild coins'
+    );
+    console.log(`[Quests Mod][Guild Coins] Added ${amount}. New total: ${newCoins}`);
+    return newCoins;
+  }
+
+  async function questsDeductGuildCoins(amount) {
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) throw new Error('Player name not available');
+    if (amount <= 0) throw new Error('Deduction amount must be positive');
+    const currentCoins = await questsGetGuildCoins();
+    if (currentCoins < amount) {
+      throw new Error(`Insufficient guild coins. Have: ${currentCoins}, Need: ${amount}`);
+    }
+    const newCoins = currentCoins - amount;
+    const encrypted = await encryptGuildCoinCount(newCoins, currentPlayer);
+    const hashedPlayer = await hashUsername(currentPlayer);
+    await FirebaseService.put(
+      `${getGuildCoinsApiUrl()}/${hashedPlayer}`,
+      { encrypted },
+      'deduct guild coins'
+    );
+    console.log(`[Quests Mod][Guild Coins] Deducted ${amount}. New total: ${newCoins}`);
+    return newCoins;
+  }
+
+  // Only fill gaps — prefer Guilds mod implementations when present
+  if (typeof globalThis !== 'undefined') {
+    globalThis.Guilds = globalThis.Guilds || {};
+    globalThis.Guilds.getGuildCoins = globalThis.Guilds.getGuildCoins || questsGetGuildCoins;
+    globalThis.Guilds.addGuildCoins = globalThis.Guilds.addGuildCoins || questsAddGuildCoins;
+    globalThis.Guilds.deductGuildCoins = globalThis.Guilds.deductGuildCoins || questsDeductGuildCoins;
+    globalThis.getGuildCoins = globalThis.getGuildCoins || questsGetGuildCoins;
+    globalThis.addGuildCoins = globalThis.addGuildCoins || questsAddGuildCoins;
+    globalThis.deductGuildCoins = globalThis.deductGuildCoins || questsDeductGuildCoins;
+  }
 
   // =======================
   // Mission Registry
@@ -16651,12 +16788,57 @@ function createNPCCooldownManager() {
     crossingTheLineTileHintOverlay.cleanup();
   }
 
+  function ensureQuestTileSuccessEffectStyles() {
+    if (document.getElementById('quests-tile-success-effect-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'quests-tile-success-effect-styles';
+    style.textContent = `
+      .${QUEST_TILE_SUCCESS_EFFECT_CLASS} {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: calc(32px * var(--zoomFactor, 1));
+        height: calc(32px * var(--zoomFactor, 1));
+        pointer-events: none;
+        z-index: 10003;
+        overflow: hidden;
+      }
+      .${QUEST_TILE_SUCCESS_EFFECT_CLASS} > img {
+        display: block;
+        width: 100%;
+        height: auto;
+        image-rendering: pixelated;
+      }
+      @keyframes quests-tile-success-effect-play {
+        from { transform: translateY(0); }
+        to { transform: translateY(-100%); }
+      }
+      .${CROSSING_THE_LINE_OK_BORDER_CLASS} {
+        position: absolute;
+        inset: 0;
+        border-style: solid;
+        pointer-events: none;
+        z-index: 10004;
+        box-sizing: border-box;
+        opacity: 1;
+      }
+    `;
+    document.head.appendChild(style);
+    console.log('[Quests Mod][Fastest Bishop] success visual styles injected (build=2026-07-26c)');
+  }
+
   function removeQuestTileSuccessEffects(effectClass = QUEST_TILE_SUCCESS_EFFECT_CLASS) {
     document.querySelectorAll(`.${effectClass}`).forEach((el) => el.remove());
   }
 
+  function removeCrossingTheLineOkBorders() {
+    document.querySelectorAll(`.${CROSSING_THE_LINE_OK_BORDER_CLASS}`).forEach((el) => el.remove());
+  }
+
   function removeCrossingTheLineOrcSuccessEffects() {
     removeQuestTileSuccessEffects(CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS);
+    removeCrossingTheLineOkBorders();
   }
 
   function placeQuestTileSuccessEffect(tileElement, effectClass = QUEST_TILE_SUCCESS_EFFECT_CLASS) {
@@ -16664,83 +16846,140 @@ function createNPCCooldownManager() {
       return;
     }
 
+    ensureQuestTileSuccessEffectStyles();
+
     const viewport = document.createElement('div');
     viewport.className = effectClass;
-    viewport.style.cssText = getQuestTileOverlayBoxStyle([
-      'pointer-events:none',
-      'z-index:10003',
-      'overflow:hidden'
-    ]);
 
     const img = document.createElement('img');
     img.src = QUEST_TILE_SUCCESS_EFFECT_URL;
     img.alt = '';
     img.draggable = false;
     img.className = 'pixelated';
-    img.style.cssText = [
-      'display:block',
-      'width:100%',
-      'height:auto',
-      'image-rendering:pixelated',
-      'will-change:transform'
-    ].join(';');
 
-    const startLoop = () => {
+    const applyFrameMetrics = () => {
       const frameWidth = img.naturalWidth || 32;
       const frameCount = Math.max(1, Math.round((img.naturalHeight || frameWidth) / frameWidth));
+      const durationMs = frameCount * QUEST_TILE_SUCCESS_FRAME_MS;
+      // steps() does not accept CSS variables — set a literal step count inline
       img.style.height = `calc(100% * ${frameCount})`;
-      if (img._questsTileSuccessAnim) {
-        try { img._questsTileSuccessAnim.cancel(); } catch (_) {}
-      }
-      img._questsTileSuccessAnim = img.animate(
-        [
-          { transform: 'translateY(0)' },
-          { transform: `translateY(calc(-100% * ${(frameCount - 1) / frameCount}))` }
-        ],
-        {
-          duration: Math.max(1, frameCount) * QUEST_TILE_SUCCESS_FRAME_MS,
-          easing: `steps(${frameCount})`,
-          iterations: Infinity
-        }
-      );
+      img.style.animation = `quests-tile-success-effect-play ${durationMs}ms steps(${frameCount}, end) infinite`;
+      console.log('[Quests Mod][Fastest Bishop] sparkle armed', {
+        tileId: tileElement.id,
+        frameCount,
+        durationMs,
+        naturalWidth: img.naturalWidth,
+        naturalHeight: img.naturalHeight,
+        animation: img.style.animation
+      });
     };
 
     if (img.complete && img.naturalHeight > 0) {
-      startLoop();
+      applyFrameMetrics();
     } else {
-      img.addEventListener('load', startLoop, { once: true });
+      img.addEventListener('load', applyFrameMetrics, { once: true });
+      img.addEventListener('error', () => {
+        console.warn('[Quests Mod][Fastest Bishop] sparkle image failed to load', QUEST_TILE_SUCCESS_EFFECT_URL);
+      }, { once: true });
     }
 
     viewport.appendChild(img);
     tileElement.appendChild(viewport);
+    console.log('[Quests Mod][Fastest Bishop] sparkle element mounted', tileElement.id);
   }
 
   function placeCrossingTheLineOrcSuccessEffect(tileElement) {
     placeQuestTileSuccessEffect(tileElement, CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS);
   }
 
+  function placeCrossingTheLineOkBorder(tileElement) {
+    if (!tileElement || tileElement.querySelector(`.${CROSSING_THE_LINE_OK_BORDER_CLASS}`)) {
+      return;
+    }
+    ensureQuestTileSuccessEffectStyles();
+    if (getComputedStyle(tileElement).position === 'static') {
+      tileElement.style.position = 'relative';
+    }
+    const border = document.createElement('div');
+    border.className = CROSSING_THE_LINE_OK_BORDER_CLASS;
+    border.style.setProperty('border-width', 'calc(2px * var(--zoomFactor, 1))', 'important');
+    border.style.setProperty('border-color', CROSSING_THE_LINE_OK_BORDER_COLOR, 'important');
+    border.style.setProperty('border-style', 'solid', 'important');
+    tileElement.appendChild(border);
+    console.log('[Quests Mod][Fastest Bishop] green border mounted', {
+      tileId: tileElement.id,
+      color: CROSSING_THE_LINE_OK_BORDER_COLOR,
+      position: getComputedStyle(tileElement).position,
+      zoomFactor: getComputedStyle(document.documentElement).getPropertyValue('--zoomFactor') || '(unset)'
+    });
+  }
+
+  let lastCrossingVisualLogKey = '';
+
   function updateCrossingTheLineOrcSuccessEffects(boardContext = null) {
     const ctx = boardContext || globalThis.state?.board?.getSnapshot()?.context;
-    if (
-      !shouldEnableCrossingTheLineTileHighlights() ||
-      isBoardBattleActive(ctx) ||
-      !!ctx?.gameStarted
-    ) {
+    const enabled = shouldEnableCrossingTheLineTileHighlights();
+    const battleActive = isBoardBattleActive(ctx);
+    const gameStarted = !!ctx?.gameStarted;
+
+    if (!enabled || battleActive || gameStarted) {
+      const hadVisuals =
+        document.querySelector(`.${CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS}`) ||
+        document.querySelector(`.${CROSSING_THE_LINE_OK_BORDER_CLASS}`);
+      if (hadVisuals) {
+        console.log('[Quests Mod][Fastest Bishop] clearing tile visuals', {
+          enabled,
+          battleActive,
+          gameStarted,
+          room: CITY_BOARDGAMES_ROOM_NAME
+        });
+      }
       removeCrossingTheLineOrcSuccessEffects();
       return;
     }
 
     const boardConfig = ctx?.boardConfig || [];
+    const tileStates = [];
+
     for (const tileIndex of CROSSING_THE_LINE_TILES) {
       const tile = getTileElement(tileIndex);
-      if (!tile?.isConnected) continue;
-
-      const existing = tile.querySelector(`.${CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS}`);
-      if (hasBishopAllyOnTileIndex(boardConfig, tileIndex)) {
-        if (!existing) placeCrossingTheLineOrcSuccessEffect(tile);
-      } else if (existing) {
-        existing.remove();
+      if (!tile?.isConnected) {
+        tileStates.push({ tileIndex, connected: false });
+        continue;
       }
+
+      const piece = Array.isArray(boardConfig)
+        ? boardConfig.find((p) => p?.tileIndex === tileIndex && isAllyPieceOnBoard(p))
+        : null;
+      const roles = piece ? getRolesForBoardPiece(piece) : null;
+      const hasMage = hasBishopAllyOnTileIndex(boardConfig, tileIndex);
+      const existingEffect = tile.querySelector(`.${CROSSING_THE_LINE_ORC_SUCCESS_EFFECT_CLASS}`);
+      const existingBorder = tile.querySelector(`.${CROSSING_THE_LINE_OK_BORDER_CLASS}`);
+
+      tileStates.push({
+        tileIndex,
+        connected: true,
+        pieceType: piece?.type || null,
+        gameId: piece?.gameId || piece?.monsterId || null,
+        roles,
+        hasMage,
+        hasEffect: !!existingEffect,
+        hasBorder: !!existingBorder
+      });
+
+      if (hasMage) {
+        if (!existingEffect) placeCrossingTheLineOrcSuccessEffect(tile);
+        if (!existingBorder) placeCrossingTheLineOkBorder(tile);
+      } else {
+        if (existingEffect) existingEffect.remove();
+        if (existingBorder) existingBorder.remove();
+      }
+    }
+
+    const logKey = tileStates.map((s) => `${s.tileIndex}:${s.hasMage ? 1 : 0}:${s.roles || '-'}`).join('|');
+    if (logKey !== lastCrossingVisualLogKey) {
+      lastCrossingVisualLogKey = logKey;
+      console.log('[Quests Mod][Fastest Bishop] tile visual state', tileStates);
     }
   }
 
@@ -16817,7 +17056,7 @@ function createNPCCooldownManager() {
     if (crossingTheLineBoardSubscription) return;
     if (typeof globalThis === 'undefined' || !globalThis.state?.board?.subscribe) return;
 
-    console.log('[Quests Mod][Fastest Bishop] Setting up battle tracking...');
+    console.log('[Quests Mod][Fastest Bishop] Setting up battle tracking... (visuals build=2026-07-26c)');
     crossingTheLineBoardSubscription = globalThis.state.board.subscribe(async ({ context }) => {
       const crossingProgress = kingChatState.progressCrossingTheLine || { accepted: false, completed: false };
       if (!crossingProgress.accepted || crossingProgress.completed) {
@@ -18075,8 +18314,8 @@ function createNPCCooldownManager() {
     document.querySelectorAll('.quests-tile-highlight-hitbox').forEach((hitbox) => hitbox.remove());
   }
 
-  function registerQuestTileHighlightSource({ getTiles, isAccessActive, alt = 'Quest access' }) {
-    questTileHighlightSources.push({ getTiles, isAccessActive, alt });
+  function registerQuestTileHighlightSource({ getTiles, isAccessActive, alt = 'Quest access', showDuringPlacement = false }) {
+    questTileHighlightSources.push({ getTiles, isAccessActive, alt, showDuringPlacement });
   }
 
   function updateAllQuestTileHighlights(boardContext) {
@@ -20545,6 +20784,7 @@ function createNPCCooldownManager() {
       stampedLetter = 0, elvenhairRope = 0, holyTible = 0, blessedAnkh = 0,
       honeyflower = 0, scarabCoin = 0, destroyFieldRune = 0, diary = 0,
       spoolOfYarn = 0, minotaurTrophy = 0, dragonClaw = 0, lightShovel = 0, silverToken = 0,
+      wishlist = 0, present = 0, bunnySlippers = 0,
       monksStudy = 0, queenBanshees = 0, followerOfZathroth = 0, motherOfAllSpiders = 0,
       firstSeal = 0, secondSeal = 0, thirdSeal = 0, fourthSeal = 0,
       fifthSeal = 0, sixthSeal = 0, seventhSeal = 0,
@@ -20566,7 +20806,8 @@ function createNPCCooldownManager() {
       const flatItemAmounts = {
         leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter, elvenhairRope,
         holyTible, blessedAnkh, honeyflower, scarabCoin, destroyFieldRune, diary,
-        spoolOfYarn, minotaurTrophy, dragonClaw, lightShovel, silverToken
+        spoolOfYarn, minotaurTrophy, dragonClaw, lightShovel, silverToken,
+        wishlist, present, bunnySlippers
       };
       for (const [key, itemName] of Object.entries(QUESTS_DEV_ITEM_KEYS)) {
         await devProcessItemDelta(itemName, flatItemAmounts[key] || 0, actions);

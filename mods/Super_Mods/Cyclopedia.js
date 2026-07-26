@@ -408,8 +408,7 @@ const CYCLOPEDIA_UI = {
 /** Centralized Cyclopedia settings for easy future tuning. */
 const CYCLOPEDIA_SETTINGS = {
   playerStatCaps: {
-    // Floor for Perfect/Shiny progress max; live count comes from creature-database (never below this).
-    perfectCreatures: 76,
+    // Perfect/Shiny max comes from creature-database (game monsters), not a hardcoded cap.
     bisEquipments: 126,
     exploredMaps: 73,
     bagOutfits: 205,
@@ -10338,23 +10337,16 @@ function getBisEquipmentMaxFromDatabase() {
 /** Obtainable creature count for Perfect/Shiny progress (excludes event/gazer species; see creature-database getShinyProgressCreatureNames). */
 function getObtainableCreatureCountFromDatabase() {
   const db = window.creatureDatabase;
-  let count = 0;
   if (typeof db?.getShinyProgressCreatureNames === 'function') {
-    count = db.getShinyProgressCreatureNames().length;
-  } else {
-    count = (db?.ALL_CREATURES || []).filter((name) => {
-      if (!name || HIDE_FROM_CYCLOPEDIA.includes(name)) return false;
-      if (typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(name)) return false;
-      if (typeof db?.isGazerCreatureName === 'function' && db.isGazerCreatureName(name)) return false;
-      if (typeof db?.creatureHasShinyVariant === 'function' && !db.creatureHasShinyVariant(name)) return false;
-      return true;
-    }).length;
+    return db.getShinyProgressCreatureNames().length;
   }
-  const floor = CYCLOPEDIA_SETTINGS.playerStatCaps.perfectCreatures;
-  if (typeof floor === 'number' && floor > 0) {
-    return Math.max(count, floor);
-  }
-  return count;
+  return (db?.ALL_CREATURES || []).filter((name) => {
+    if (!name || HIDE_FROM_CYCLOPEDIA.includes(name)) return false;
+    if (typeof db?.isEventCreatureName === 'function' && db.isEventCreatureName(name)) return false;
+    if (typeof db?.isGazerCreatureName === 'function' && db.isGazerCreatureName(name)) return false;
+    if (typeof db?.creatureHasShinyVariant === 'function' && !db.creatureHasShinyVariant(name)) return false;
+    return true;
+  }).length;
 }
 
 /** Unique obtainable species (gameId) with at least one shiny owned; event/gazer shinies excluded. */

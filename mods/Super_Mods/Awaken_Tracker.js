@@ -1847,13 +1847,15 @@
 
             const categoryRank = (g) => {
                 if (g.anyPerfect) return 0;
-                if (g.anyCapped) return 1;
-                if (g.anyAwakened) return 2;
-                return 3;
+                if (g.anyAwakened) return 1;
+                return 2;
             };
             groups.sort((a, b) => {
                 const ca = categoryRank(a), cb = categoryRank(b);
                 if (ca !== cb) return ca - cb;
+                const la = Number(a.best?.level) || 0;
+                const lb = Number(b.best?.level) || 0;
+                if (lb !== la) return lb - la;
                 if (a.anyAwakened && b.anyAwakened) {
                     const pa = a.anyAwakenedShiny ? 0 : 1;
                     const pb = b.anyAwakenedShiny ? 0 : 1;
@@ -1923,16 +1925,42 @@
                     : t('mods.awakenTracker.badgePerfectHundo');
             const perfectBadge = badgeImg(perfectIconSrc, perfectTitle, g.anyPerfect);
             const shinyMark = g.anyShiny ? badgeImg(BADGE_ICONS.shiny, t('mods.awakenTracker.badgeHasShiny'), true, 12) : '';
+            // Perfect shiny / hundo keep distinct colors; awakened uses orange (darker at lvl 99).
+            const level = Number(g.best?.level) || 0;
             const nameColor = g.anyPerfectShiny ? '#c084fc'
                 : g.anyPerfect ? '#A4D8FF'
-                : g.anyCapped ? '#facc15'
-                : g.anyAwakened ? '#60a5fa'
+                : g.anyAwakened ? (level >= 99 ? '#E08A20' : '#FFB347')
                 : '#9ca3af';
+            const levelHtml = level > 0
+                ? `<div class="pixel-font-16 absolute bottom-0 left-0 z-1 flex size-full items-end pl-0.5 text-whiteExp" style="line-height:0.8;pointer-events:none;">` +
+                    `<span style="line-height:0.9;font-size:14px;color:#fff;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;">${level}</span>` +
+                  `</div>`
+                : '';
+            let borderHtml;
+            if (g.anyPerfectShiny) {
+                borderHtml = `<div role="none" class="rarity-shiny absolute inset-0 z-1 opacity-80"></div>`;
+            } else if (g.anyPerfect) {
+                borderHtml = `<div role="none" class="rarity-hundo absolute inset-0 z-1 opacity-80"></div>`;
+            } else if (g.anyAwakened) {
+                borderHtml = `<div role="none" class="rarity-awaken absolute inset-0 z-1 opacity-80"></div>`;
+            } else {
+                const geneSum = Number(g.best?.sum) || 0;
+                let rarity = 1;
+                if (geneSum >= 80) rarity = 5;
+                else if (geneSum >= 70) rarity = 4;
+                else if (geneSum >= 60) rarity = 3;
+                else if (geneSum >= 50) rarity = 2;
+                borderHtml = `<div role="none" class="has-rarity absolute inset-0 z-1 opacity-80" data-rarity="${rarity}"></div>`;
+            }
             return `<div class="at-row awaken-overview-row" data-gameid="${g.gameId}" data-name="${g.name.toLowerCase().replace(/"/g, '&quot;')}" data-awakened="${g.anyAwakened}" data-capped="${g.anyCapped}" data-perfect="${g.anyPerfect}">` +
-                `<img src="${portraitUrl}" alt="" style="width:34px;height:34px;image-rendering:pixelated;flex-shrink:0;" onerror="this.style.visibility='hidden'" />` +
+                `<div class="container-slot surface-darker relative flex items-center justify-center overflow-hidden" style="width:34px;height:34px;flex-shrink:0;box-sizing:border-box;">` +
+                    `${borderHtml}` +
+                    `${levelHtml}` +
+                    `<img class="pixelated ml-auto" alt="" width="32" height="32" src="${portraitUrl}" style="image-rendering:pixelated;" onerror="this.style.visibility='hidden'" />` +
+                `</div>` +
                 `<div style="flex:1;min-width:0;">` +
                     `<div style="color:${nameColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">` +
-                        `${awakenBadge} ${capBadge} ${perfectBadge} ${g.name} ${shinyMark}` +
+                        `${awakenBadge} ${capBadge} ${perfectBadge} ${shinyMark} ${g.name}` +
                     `</div>` +
                     `<div style="font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:0.5px;">` +
                         `${statsHtml}` +
