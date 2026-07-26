@@ -1316,6 +1316,11 @@
     let lastPanelSyncedEngineTick = null;
     let lastGameTimerFightState = null;
     let boardUnsubs = [];
+    let boardNameplateObserver = null;
+    let boardNameplateSyncTimer = null;
+    let boardNameplateSyncScheduled = false;
+    let boardNameplateSyncGen = 0;
+    let boardDupBorderRetryTimers = [];
     const boardTrack = { roomId: null, floor: null, gameStarted: false, mode: null, configSig: '' };
     const previewMechanicsLogSig = new Map();
     const previewMechanicsResultCache = new Map();
@@ -3797,6 +3802,7 @@
             tick: tick != null ? tick : '?',
             kind: 'status',
             to: unit.name || 'Unknown',
+            toKey: unit.collapseKey || null,
             toVillain: unit.villain === true,
             effectLabel: label,
             effectType: effect.type || 'debuff',
@@ -3865,6 +3871,7 @@
             tick: tick != null ? tick : '?',
             kind: 'statChange',
             unit,
+            unitKey: resolveFightCollapseKey(actor),
             unitVillain: actor.villain === true,
             statKey,
             statLabel,
@@ -4057,6 +4064,7 @@
             tick: tick != null ? tick : '?',
             kind: 'pathing',
             unit: unit.name,
+            unitKey: resolveFightCollapseKey(actor),
             unitVillain: unit.villain === true,
             fromTile,
             toTile
@@ -5623,6 +5631,8 @@
             source: 'fight',
             collapseKey: resolveFightCollapseKey(actor)
         };
+        const initTile = parseTileFromCollapseKey(snapshot.collapseKey) ?? snapshot.tileIndex;
+        if (Number.isFinite(initTile)) snapshot.spawnTile = initTile;
         attachActorSnapshotMeta(snapshot, actor);
         if (!light && !options.bypassCache) setCachedActorProbe(actor, snapshot);
         return snapshot;
@@ -5675,7 +5685,10 @@
             buffedCount: Array.isArray(actor.buffed) ? actor.buffed.length : null,
             statusEffects,
             tileIndex: actor.position?.tile?.index ?? actor.position?.tileIndex ?? prev.tileIndex ?? null,
-            collapseKey: prev.collapseKey ?? resolveFightCollapseKey(actor)
+            collapseKey: prev.collapseKey ?? resolveFightCollapseKey(actor),
+            spawnTile: Number.isFinite(prev.spawnTile)
+                ? prev.spawnTile
+                : (parseTileFromCollapseKey(prev.collapseKey) ?? prev.tileIndex ?? null)
         };
         attachActorSnapshotMeta(snapshot, actor);
         if (!options.bypassCache) setCachedActorProbe(actor, snapshot);
@@ -5754,6 +5767,8 @@
             source: 'fight',
             collapseKey: resolveFightCollapseKey(actor)
         };
+        const initTile = parseTileFromCollapseKey(unit.collapseKey) ?? unit.tileIndex;
+        if (Number.isFinite(initTile)) unit.spawnTile = initTile;
 
         warnUnitsStatGaps(unit, metadata, cooldownInfo, attackSpeedInfo, actor);
         return unit;
@@ -7049,6 +7064,7 @@
             source,
             roomId: roomId ?? null,
             tileIndex: resolved.tileIndex,
+            spawnTile: resolved.tileIndex,
             equipment: resolved.equipment ?? null,
             genes: resolved.genes ?? null,
             shiny: resolved.shiny === true,
@@ -7197,6 +7213,11 @@
 
     function clearScalingRuntimeCaches() {
         cachedEquipStatBonusBySig.clear();
+        runtimeEquipmentCdrPercentCache.clear();
+        if (gameChunkScriptPreviewRefreshTimer != null) {
+            clearTimeout(gameChunkScriptPreviewRefreshTimer);
+            gameChunkScriptPreviewRefreshTimer = null;
+        }
     }
 
     function getRefreshedBoardPreviewUnits() {
@@ -7290,6 +7311,9 @@
                 source: 'fight',
                 collapseKey: resolveFightCollapseKey(actor)
             });
+            const snap = snapshots[snapshots.length - 1];
+            const initTile = parseTileFromCollapseKey(snap.collapseKey) ?? snap.tileIndex;
+            if (Number.isFinite(initTile)) snap.spawnTile = initTile;
         }
         return snapshots;
     }
@@ -7335,6 +7359,40 @@
         });
     }
 
+    function parseTileFromCollapseKey(key) {
+        if (typeof key !== 'string' || !key) return null;
+        const previewEnemy = key.match(/^preview:enemy:[^:]+:\d+:(\d+)/);
+        if (previewEnemy) return Number(previewEnemy[1]);
+        const previewAlly = key.match(/^preview:ally:\d+:(\d+)/);
+        if (previewAlly) return Number(previewAlly[1]);
+        const fightEnemy = key.match(/^fight:enemy:[^:]+:\d+:(\d+)/);
+        if (fightEnemy) return Number(fightEnemy[1]);
+        const fightAlly = key.match(/^fight:ally:\d+:(\d+)/);
+        if (fightAlly) return Number(fightAlly[1]);
+        return null;
+    }
+
+    function resolveUnitInitTile(unit) {
+        if (!unit) return null;
+        if (Number.isFinite(unit.spawnTile)) return unit.spawnTile;
+        if (Number.isFinite(unit.initTile)) return unit.initTile;
+        const fromKey = parseTileFromCollapseKey(unit.collapseKey || getUnitCollapseKey(unit));
+        if (Number.isFinite(fromKey)) return fromKey;
+        return Number.isFinite(unit.tileIndex) ? unit.tileIndex : null;
+    }
+
+    function compareUnitsForDisplay(a, b) {
+        const byName = String(a?.name || '').localeCompare(String(b?.name || ''));
+        if (byName) return byName;
+        const ta = resolveUnitInitTile(a);
+        const tb = resolveUnitInitTile(b);
+        const na = Number.isFinite(ta) ? ta : Infinity;
+        const nb = Number.isFinite(tb) ? tb : Infinity;
+        if (na !== nb) return na - nb;
+        return String(normalizeCollapseKey(getUnitCollapseKey(a)))
+            .localeCompare(String(normalizeCollapseKey(getUnitCollapseKey(b))));
+    }
+
     function splitByTeam(units) {
         const allies = [];
         const enemies = [];
@@ -7342,10 +7400,467 @@
             if (u.villain) enemies.push(u);
             else allies.push(u);
         }
-        const byName = (a, b) => String(a.name).localeCompare(String(b.name));
-        allies.sort(byName);
-        enemies.sort(byName);
+        allies.sort(compareUnitsForDisplay);
+        enemies.sort(compareUnitsForDisplay);
         return { allies, enemies };
+    }
+
+    const DUPLICATE_UNIT_NAME_COLORS = [
+        '#FFD166', // bright gold
+        '#3A86FF', // vivid blue
+        '#FF006E', // hot pink/magenta
+        '#06D6A0', // mint green
+        '#FB5607', // orange
+        '#8338EC', // violet
+        '#00BBF9', // sky cyan
+        '#F72585'  // neon rose
+    ];
+
+    function duplicateColorAt(index) {
+        return DUPLICATE_UNIT_NAME_COLORS[index % DUPLICATE_UNIT_NAME_COLORS.length];
+    }
+
+    function formatDuplicateInstanceName(name, index) {
+        return tReplace('mods.betterAnalytics.unitDuplicateInstance', {
+            name,
+            index: index + 1
+        });
+    }
+
+    function forEachDuplicateNameGroup(items, { getName, getVillain, compare, onReset, onDuplicate }) {
+        const list = Array.isArray(items) ? items : Array.from(items || []);
+        if (!list.length) return;
+        if (onReset) {
+            for (const item of list) onReset(item);
+        }
+        const groups = new Map();
+        for (const item of list) {
+            const name = getName?.(item);
+            if (!name) continue;
+            const groupKey = `${getVillain?.(item) ? 'e' : 'a'}:${name}`;
+            if (!groups.has(groupKey)) groups.set(groupKey, []);
+            groups.get(groupKey).push(item);
+        }
+        for (const group of groups.values()) {
+            if (group.length < 2) continue;
+            if (compare) group.sort(compare);
+            group.forEach((item, index) => onDuplicate(item, index));
+        }
+    }
+
+    function assignPanelDisplayNames(units) {
+        if (!Array.isArray(units) || !units.length) return;
+        forEachDuplicateNameGroup(units, {
+            getName: (unit) => unit?.name,
+            getVillain: (unit) => unit?.villain,
+            compare: compareUnitsForDisplay,
+            onReset: (unit) => {
+                if (!unit) return;
+                unit.panelDisplayName = undefined;
+                unit.panelDisplayColor = undefined;
+                if (!Number.isFinite(unit.spawnTile)) {
+                    const initTile = resolveUnitInitTile(unit);
+                    if (Number.isFinite(initTile)) unit.spawnTile = initTile;
+                }
+            },
+            onDuplicate: (unit, index) => {
+                unit.panelDisplayName = formatDuplicateInstanceName(unit.name, index);
+                unit.panelDisplayColor = duplicateColorAt(index);
+            }
+        });
+    }
+
+    function applyUnitCardDisplayName(nameEl, unit) {
+        if (!nameEl || !unit) return;
+        nameEl.textContent = getUnitDisplayName(unit);
+        if (unit.panelDisplayColor) nameEl.style.color = unit.panelDisplayColor;
+        else nameEl.style.removeProperty('color');
+    }
+
+    function collectUnitsForDuplicateLabels() {
+        try {
+            if (isFightActive()) return collectActorSnapshots() || [];
+            return getBoardPreviewUnits() || [];
+        } catch {
+            return [];
+        }
+    }
+
+    function getTileElementForIndex(tileIndex) {
+        if (tileIndex == null) return null;
+        return document.getElementById(`tile-index-${tileIndex}`)
+            || document.querySelector(`[id="tile-index-${tileIndex}"]`);
+    }
+
+    function findSetupActorHosts() {
+        const hosts = [];
+        const seen = new Set();
+        const outfits = document.querySelectorAll(
+            '#viewport .sprite.outfit, #board .sprite.outfit, #tiles .sprite.outfit'
+        );
+        for (const outfit of outfits) {
+            if (outfit.closest('#actors')) continue;
+            const host = outfit.closest('button[aria-roledescription="draggable"]')
+                || outfit.closest('button.absolute')
+                || outfit.closest('button');
+            if (!host || host.tagName !== 'BUTTON' || seen.has(host) || host.closest(`#${PANEL_ID}`)) continue;
+            seen.add(host);
+            hosts.push({
+                mode: 'setup',
+                el: host,
+                borderEl: null,
+                name: null,
+                gameId: null,
+                actorLeft: null,
+                actorTop: null,
+                rect: null
+            });
+        }
+        return hosts;
+    }
+
+    function findFightNativeBorderEl(actorRoot) {
+        if (!actorRoot) return null;
+        const candidates = actorRoot.querySelectorAll('div.border-solid.size-scaled-sprite, div.size-scaled-sprite.border-solid');
+        for (const el of candidates) {
+            if (el.closest('[data-hud="true"]')) continue;
+            return el;
+        }
+        for (const el of actorRoot.querySelectorAll('div[class*="border-solid"]')) {
+            if (el.closest('[data-hud="true"]')) continue;
+            if (el.classList.contains('size-scaled-sprite')) return el;
+        }
+        return null;
+    }
+
+    function findFightActorHosts() {
+        const hosts = [];
+        const roots = document.querySelectorAll('#actors > [data-name], #viewport #actors > [data-name]');
+        for (const root of roots) {
+            if (root.closest(`#${PANEL_ID}`)) continue;
+            const name = root.getAttribute('data-name') || null;
+            const leftRaw = root.style.getPropertyValue('--actorLeft')
+                || getComputedStyle(root).getPropertyValue('--actorLeft');
+            const topRaw = root.style.getPropertyValue('--actorTop')
+                || getComputedStyle(root).getPropertyValue('--actorTop');
+            const actorLeft = Number.parseFloat(leftRaw);
+            const actorTop = Number.parseFloat(topRaw);
+            const outfit = root.querySelector('.sprite.outfit[data-gameid]');
+            const gameId = outfit?.getAttribute('data-gameid');
+            const button = root.querySelector('button.actor-button') || root.querySelector('button');
+            hosts.push({
+                mode: 'fight',
+                el: root,
+                buttonEl: button,
+                borderEl: findFightNativeBorderEl(root),
+                name,
+                gameId: gameId != null && gameId !== '' ? Number(gameId) : null,
+                actorLeft: Number.isFinite(actorLeft) ? actorLeft : null,
+                actorTop: Number.isFinite(actorTop) ? actorTop : null,
+                rect: null
+            });
+        }
+        return hosts;
+    }
+
+    function findBoardActorHosts() {
+        const fightHosts = findFightActorHosts();
+        if (fightHosts.length) return fightHosts;
+        return findSetupActorHosts();
+    }
+
+    const BS_DUP_SETUP_BORDER_CLASS =
+        'bs-dup-border absolute bottom-0 right-0 size-scaled-sprite border-solid pointer-events-none';
+    const BS_DUP_BORDER_WIDTH = 'calc(1px * var(--zoomFactor))';
+
+    function applyNativeStyleDuplicateBorder(borderEl, color) {
+        if (!borderEl || !color) return;
+        if (borderEl.dataset.bsDupNativeBorder === color) return;
+        borderEl.style.setProperty('border-width', BS_DUP_BORDER_WIDTH, 'important');
+        borderEl.style.setProperty('border-color', color, 'important');
+        borderEl.style.setProperty('opacity', '1', 'important');
+        borderEl.dataset.bsDupNativeBorder = color;
+    }
+
+    function ensureActorDuplicateBorder(host, color) {
+        if (!host || !color) return;
+        if (host.mode === 'fight') {
+            if (host.el?.dataset?.bsDupBorder === color
+                && (host.borderEl?.dataset?.bsDupNativeBorder === color
+                    || findFightNativeBorderEl(host.el)?.dataset?.bsDupNativeBorder === color)) {
+                return;
+            }
+            applyNativeStyleDuplicateBorder(
+                host.borderEl || findFightNativeBorderEl(host.el),
+                color
+            );
+            if (host.el && host.el.dataset.bsDupBorder !== color) {
+                host.el.dataset.bsDupBorder = color;
+            }
+            if (host.buttonEl && host.buttonEl.dataset.bsDupBorder !== color) {
+                host.buttonEl.dataset.bsDupBorder = color;
+            }
+            return;
+        }
+
+        const hostEl = host.el;
+        if (!hostEl || hostEl.tagName !== 'BUTTON') return;
+        if (hostEl.dataset.bsDupBorder === color) {
+            const existing = hostEl.querySelector(':scope > .bs-dup-border');
+            if (existing?.dataset?.bsDupNativeBorder === color) return;
+        }
+
+        let border = hostEl.querySelector(':scope > .bs-dup-border');
+        if (!border) {
+            border = document.createElement('div');
+            border.className = BS_DUP_SETUP_BORDER_CLASS;
+            hostEl.appendChild(border);
+        } else if (border.className !== BS_DUP_SETUP_BORDER_CLASS) {
+            border.className = BS_DUP_SETUP_BORDER_CLASS;
+        }
+        applyNativeStyleDuplicateBorder(border, color);
+        if (hostEl.dataset.bsDupBorder !== color) {
+            hostEl.dataset.bsDupBorder = color;
+        }
+    }
+
+    function clearActorDuplicateBorder(host) {
+        if (!host) return;
+        if (host.mode === 'fight' || host.el?.hasAttribute?.('data-name')) {
+            const root = host.el;
+            const borderEl = host.borderEl || findFightNativeBorderEl(root);
+            if (borderEl) {
+                borderEl.style.borderColor = 'transparent';
+                borderEl.style.removeProperty('border-width');
+                borderEl.style.removeProperty('opacity');
+                delete borderEl.dataset.bsDupNativeBorder;
+            }
+            if (root?.dataset?.bsDupBorder) delete root.dataset.bsDupBorder;
+            if (host.buttonEl?.dataset?.bsDupBorder) delete host.buttonEl.dataset.bsDupBorder;
+            root?.querySelectorAll?.('[data-bs-dup-border]').forEach((el) => {
+                delete el.dataset.bsDupBorder;
+            });
+            return;
+        }
+
+        const hostEl = host.el || host;
+        if (!hostEl) return;
+        hostEl.querySelectorAll('.bs-dup-border').forEach((el) => el.remove());
+        if (hostEl.dataset?.bsDupBorder) delete hostEl.dataset.bsDupBorder;
+    }
+
+    function clearAllBoardDuplicateBorders() {
+        document.querySelectorAll('.bs-dup-border').forEach((el) => el.remove());
+        document.querySelectorAll('[data-bs-dup-native-border]').forEach((el) => {
+            el.style.borderColor = 'transparent';
+            el.style.removeProperty('border-width');
+            el.style.removeProperty('opacity');
+            delete el.dataset.bsDupNativeBorder;
+        });
+        document.querySelectorAll('[data-bs-dup-border]').forEach((el) => {
+            delete el.dataset.bsDupBorder;
+        });
+    }
+
+    function rectCenterDistanceSq(a, b) {
+        const ax = (a.left + a.right) / 2;
+        const ay = (a.top + a.bottom) / 2;
+        const bx = (b.left + b.right) / 2;
+        const by = (b.top + b.bottom) / 2;
+        const dx = ax - bx;
+        const dy = ay - by;
+        return dx * dx + dy * dy;
+    }
+
+    function pairDuplicateUnitsToActors(units, hosts) {
+        const pairs = [];
+        const usedHosts = new Set();
+        const usedUnits = new Set();
+        const maxDistSq = 64 * 64;
+
+        for (const host of hosts) {
+            host.rect = (host.buttonEl || host.el).getBoundingClientRect();
+        }
+
+        const pushPair = (host, unit) => {
+            pairs.push([host, unit]);
+            usedHosts.add(host);
+            usedUnits.add(unit);
+        };
+
+        // Prefer exact name + gameId matches when unique enough.
+        for (const unit of units) {
+            if (!unit?.panelDisplayColor) continue;
+            const nameMatches = hosts.filter((h) =>
+                !usedHosts.has(h)
+                && h.name
+                && h.name === unit.name
+                && (unit.gameId == null || h.gameId == null || h.gameId === unit.gameId)
+            );
+            if (nameMatches.length === 1) pushPair(nameMatches[0], unit);
+        }
+
+        for (const unit of units) {
+            if (!unit?.panelDisplayColor || usedUnits.has(unit)) continue;
+            const tile = getTileElementForIndex(unit.tileIndex);
+            if (!tile) continue;
+            const tileRect = tile.getBoundingClientRect();
+            if (!tileRect.width && !tileRect.height) continue;
+
+            let best = null;
+            let bestDist = Infinity;
+            for (const host of hosts) {
+                if (usedHosts.has(host)) continue;
+                if (host.name && unit.name && host.name !== unit.name) continue;
+                if (unit.gameId != null && host.gameId != null && host.gameId !== unit.gameId) continue;
+                const dist = rectCenterDistanceSq(host.rect, tileRect);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = host;
+                }
+            }
+            if (best && bestDist <= maxDistSq) pushPair(best, unit);
+        }
+
+        const remUnits = units.filter((u) => u?.panelDisplayColor && !usedUnits.has(u));
+        if (!remUnits.length) return pairs;
+
+        const byName = new Map();
+        for (const unit of remUnits) {
+            if (!byName.has(unit.name)) byName.set(unit.name, []);
+            byName.get(unit.name).push(unit);
+        }
+        for (const [name, groupUnits] of byName) {
+            const remHosts = hosts.filter((h) =>
+                !usedHosts.has(h) && (!h.name || h.name === name)
+            );
+            if (!remHosts.length) continue;
+            groupUnits.sort(compareUnitsForDisplay);
+            remHosts.sort((a, b) => {
+                const aLeft = Number.isFinite(a.actorLeft) ? a.actorLeft : (a.rect?.left || 0);
+                const bLeft = Number.isFinite(b.actorLeft) ? b.actorLeft : (b.rect?.left || 0);
+                const aTop = Number.isFinite(a.actorTop) ? a.actorTop : (a.rect?.top || 0);
+                const bTop = Number.isFinite(b.actorTop) ? b.actorTop : (b.rect?.top || 0);
+                if (aTop !== bTop) return aTop - bTop;
+                return aLeft - bLeft;
+            });
+            const n = Math.min(groupUnits.length, remHosts.length);
+            for (let i = 0; i < n; i++) pushPair(remHosts[i], groupUnits[i]);
+        }
+        return pairs;
+    }
+
+    function syncBoardDuplicateActorBorders(labeledUnits) {
+        if (!isPanelOpen()) {
+            clearAllBoardDuplicateBorders();
+            return;
+        }
+        const hosts = findBoardActorHosts();
+        if (!hosts.length) {
+            if (!labeledUnits.length) clearAllBoardDuplicateBorders();
+            return;
+        }
+        const pairs = pairDuplicateUnitsToActors(labeledUnits, hosts);
+        const pairedHosts = new Set(pairs.map(([host]) => host));
+
+        for (const host of hosts) {
+            if (pairedHosts.has(host)) continue;
+            if (host.el.dataset.bsDupBorder
+                || host.borderEl?.dataset?.bsDupNativeBorder
+                || host.el.querySelector?.(':scope > .bs-dup-border')) {
+                clearActorDuplicateBorder(host);
+            }
+        }
+        for (const [host, unit] of pairs) {
+            if (unit.panelDisplayColor) ensureActorDuplicateBorder(host, unit.panelDisplayColor);
+            else clearActorDuplicateBorder(host);
+        }
+    }
+
+    function clearBoardDuplicateBorderRetryTimers() {
+        for (const id of boardDupBorderRetryTimers) clearTimeout(id);
+        boardDupBorderRetryTimers = [];
+    }
+
+    function isBoardDuplicateBorderSyncActive() {
+        return boardNameplateSyncTimer != null || boardNameplateObserver != null;
+    }
+
+    function scheduleBoardDuplicateBordersAfterBattleStart() {
+        if (!isPanelOpen()) return;
+        if (!isBoardDuplicateBorderSyncActive()) setupBoardNameplateSync();
+        clearBoardDuplicateBorderRetryTimers();
+        scheduleBoardDuplicateNameplateSync();
+        for (const ms of [100, 300, 700, 1500]) {
+            boardDupBorderRetryTimers.push(
+                setTimeout(() => scheduleBoardDuplicateNameplateSync(), ms)
+            );
+        }
+    }
+
+    function syncBoardDuplicateNameplates(units = null) {
+        if (!shouldBetterAnalyticsRun()) return;
+        if (!isPanelOpen()) {
+            clearAllBoardDuplicateBorders();
+            return;
+        }
+        const list = Array.isArray(units) ? units : collectUnitsForDuplicateLabels();
+        if (!list.length) {
+            clearAllBoardDuplicateBorders();
+            return;
+        }
+        assignPanelDisplayNames(list);
+        syncBoardDuplicateActorBorders(list.filter((u) => u?.panelDisplayColor));
+    }
+
+    function scheduleBoardDuplicateNameplateSync(units = null) {
+        if (!isPanelOpen() || !isBoardDuplicateBorderSyncActive()) return;
+        if (boardNameplateSyncScheduled) return;
+        boardNameplateSyncScheduled = true;
+        const gen = boardNameplateSyncGen;
+        requestAnimationFrame(() => {
+            if (gen !== boardNameplateSyncGen) return;
+            boardNameplateSyncScheduled = false;
+            try { syncBoardDuplicateNameplates(units); } catch { /* ignore */ }
+        });
+    }
+
+    function teardownBoardNameplateSync() {
+        boardNameplateSyncGen++;
+        boardNameplateSyncScheduled = false;
+        if (boardNameplateObserver) {
+            try { boardNameplateObserver.disconnect(); } catch { /* ignore */ }
+            boardNameplateObserver = null;
+        }
+        if (boardNameplateSyncTimer) {
+            clearInterval(boardNameplateSyncTimer);
+            boardNameplateSyncTimer = null;
+        }
+        clearBoardDuplicateBorderRetryTimers();
+        clearAllBoardDuplicateBorders();
+    }
+
+    function setupBoardNameplateSync() {
+        teardownBoardNameplateSync();
+        if (!isPanelOpen()) return;
+        const host = document.getElementById('viewport') || document.body;
+        if (host) {
+            boardNameplateObserver = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+                    // Ignore our own border overlay churn; react to real board/actor changes.
+                    if (nodes.some((node) =>
+                        node.nodeType === 1 && !node.classList?.contains('bs-dup-border')
+                    )) {
+                        scheduleBoardDuplicateNameplateSync();
+                        return;
+                    }
+                }
+            });
+            boardNameplateObserver.observe(host, { childList: true, subtree: true });
+        }
+        boardNameplateSyncTimer = setInterval(() => scheduleBoardDuplicateNameplateSync(), 800);
+        scheduleBoardDuplicateNameplateSync();
     }
 
     function getAbilityInfo(gameId) {
@@ -11274,12 +11789,43 @@
         }
 
         assignBattleLogSummonDisplayNames(statsMap);
+        assignDuplicateDisplayColorsToStatsMap(statsMap);
 
         for (const stats of statsMap.values()) {
             if (stats.isRoster && !stats.displayName) stats.displayName = stats.name;
         }
 
         return statsMap;
+    }
+
+    function assignDuplicateDisplayColorsToStatsMap(statsMap) {
+        forEachDuplicateNameGroup(statsMap.values(), {
+            getName: (stats) => stats?.name,
+            getVillain: (stats) => stats?.villain,
+            compare: (a, b) => {
+                const ta = Number.isFinite(a.spawnTile) ? a.spawnTile : Infinity;
+                const tb = Number.isFinite(b.spawnTile) ? b.spawnTile : Infinity;
+                if (ta !== tb) return ta - tb;
+                const fa = Number.isFinite(a.firstSeenTick) ? a.firstSeenTick : Infinity;
+                const fb = Number.isFinite(b.firstSeenTick) ? b.firstSeenTick : Infinity;
+                if (fa !== fb) return fa - fb;
+                return String(a.key || '').localeCompare(String(b.key || ''));
+            },
+            onReset: (stats) => {
+                stats.displayColor = undefined;
+            },
+            onDuplicate: (stats, index) => {
+                stats.displayColor = duplicateColorAt(index);
+                if (!/#\d+/.test(String(stats.displayName || ''))) {
+                    stats.displayName = formatDuplicateInstanceName(stats.name, index);
+                    if (stats.isSummon && stats.spawnTile != null) {
+                        stats.displayName += tReplace('mods.betterAnalytics.exportSummarySummonTile', {
+                            tile: stats.spawnTile
+                        });
+                    }
+                }
+            }
+        });
     }
 
     function formatBattleLogDeathsLabel(deaths) {
@@ -11545,6 +12091,7 @@
     }
 
     function getUnitDisplayName(unit) {
+        if (unit?.panelDisplayName) return unit.panelDisplayName;
         if (!battleLog.length) return unit.name;
         const stats = lookupBattleLogStatsForUnit(unit, getPreparedBattleLogSummary().statsMap);
         return stats?.displayName || unit.name;
@@ -11572,6 +12119,9 @@
             ? `<span class="bs-log-summary-share">${escapeHtml(model.share.trim())}</span>`
             : '';
         const label = escapeHtml(model.label);
+        const colorStyle = stats.displayColor
+            ? ` style="color:${escapeHtml(stats.displayColor)}"`
+            : '';
         let body = '';
 
         if (model.damageDealt) {
@@ -11627,7 +12177,7 @@
             : '';
 
         return `<div class="bs-log-summary-creature">` +
-            `<div class="bs-log-summary-creature-head ${teamCls}">${label}${summonTag}${diedTag}${shareTag}</div>` +
+            `<div class="bs-log-summary-creature-head ${teamCls}"${colorStyle}>${label}${summonTag}${diedTag}${shareTag}</div>` +
             (body || extrasHtml
                 ? `<div class="bs-log-summary-creature-body">${body}${extrasHtml}</div>`
                 : '') +
@@ -11819,6 +12369,14 @@
         const style = document.createElement('style');
         style.id = STYLE_ID;
         style.textContent = `
+            .bs-dup-border {
+                pointer-events: none;
+                z-index: 40;
+                box-sizing: border-box;
+            }
+            button[data-bs-dup-border] {
+                overflow: visible;
+            }
             #${PANEL_ID} {
                 --bs-frame-3: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
                 --bs-frame-4: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch;
@@ -13186,6 +13744,7 @@
 
     function patchUnitCardsLiveStats(body, units) {
         return profileUnitsLag('patchUnitCardsLiveStats', () => {
+        assignPanelDisplayNames(units);
         const unitByKey = new Map();
         for (const unit of units) {
             unitByKey.set(normalizeCollapseKey(getUnitCollapseKey(unit)), unit);
@@ -13202,6 +13761,7 @@
                     syncAbilityDetailsDataset(abilityDetails, unit);
                     requestAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey, unit);
                 }
+                applyUnitCardDisplayName(card.querySelector('.bs-card-name'), unit);
                 continue;
             }
 
@@ -13216,6 +13776,7 @@
             if (mechanicsOnly) {
                 patchUnitCardTickMechanics(card, unit);
                 patchUnitCardCompactSummary(card, unit);
+                applyUnitCardDisplayName(card.querySelector('.bs-card-name'), unit);
                 continue;
             }
 
@@ -13240,8 +13801,7 @@
                     requestAbilityTooltipRefresh(abilityDetails, card.dataset.unitKey, unit);
                 }
             }
-            const nameEl = card.querySelector('.bs-card-name');
-            if (nameEl) nameEl.textContent = getUnitDisplayName(unit);
+            applyUnitCardDisplayName(card.querySelector('.bs-card-name'), unit);
         }
         });
     }
@@ -13259,6 +13819,9 @@
         const metaLine = metaParts.join(' · ');
         const nameClass = teamClass(unit.villain);
         const displayName = getUnitDisplayName(unit);
+        const nameColorStyle = unit.panelDisplayColor
+            ? ` style="color:${escapeHtml(unit.panelDisplayColor)}"`
+            : '';
         const compact = renderCompactSummary(unit);
         const hasPortrait = unit.gameId != null;
         const portrait = hasPortrait
@@ -13278,7 +13841,7 @@
             portrait +
             `<div class="bs-compact-meta">` +
                 `<div class="bs-card-name-row">` +
-                    `<div class="bs-card-name ${nameClass}">${escapeHtml(displayName)}</div>` +
+                    `<div class="bs-card-name ${nameClass}"${nameColorStyle}>${escapeHtml(displayName)}</div>` +
                     statusRow +
                 `</div>` +
                 (compact ? `<div class="bs-card-compact">${compact}</div>` : '') +
@@ -13307,6 +13870,7 @@
                 : t('mods.betterAnalytics.sectionEmptyEnemies');
             inner += `<div class="bs-empty">${escapeHtml(emptyText)}</div>`;
         } else {
+            assignPanelDisplayNames(units);
             inner += units.map(renderUnitCard).join('');
         }
         return `<div class="bs-units-column bs-units-column-${cssClass}">${inner}</div>`;
@@ -13451,17 +14015,20 @@
             if (structureKey === prevStructure) {
                 if (renderKey === lastUnitsRenderKey) {
                     patchOpenAbilityTooltips(body, units);
+                    scheduleBoardDuplicateNameplateSync(units);
                     return;
                 }
                 patchUnitCardsLiveStats(body, units);
                 patchOpenAbilityTooltips(body, units);
                 lastUnitsRenderKey = renderKey;
+                scheduleBoardDuplicateNameplateSync(units);
                 return;
             }
         }
 
         if (!force && renderKey === lastUnitsRenderKey) {
             patchOpenAbilityTooltips(body, units);
+            scheduleBoardDuplicateNameplateSync(units);
             return;
         }
         lastUnitsRenderKey = renderKey;
@@ -13476,19 +14043,60 @@
             renderSection(t('mods.betterAnalytics.sectionEnemies'), 'enemy', enemies) +
             `</div>`;
         hydrateAllUnitPortraits(body, units);
+        scheduleBoardDuplicateNameplateSync(units);
         });
     }
 
-    function renderLogName(name, villain) {
+    function findBattleLogStatsByKey(statsMap, key) {
+        if (!statsMap || !key) return null;
+        if (statsMap.has(key)) return statsMap.get(key);
+        const norm = normalizeCollapseKey(key);
+        for (const [mapKey, stats] of statsMap) {
+            if (normalizeCollapseKey(mapKey) === norm) return stats;
+        }
+        return null;
+    }
+
+    function lookupLogDisplayColor(key, name, villain) {
+        try {
+            const statsMap = getPreparedBattleLogSummary()?.statsMap;
+            if (!statsMap) return null;
+            const byKey = findBattleLogStatsByKey(statsMap, key);
+            if (byKey?.displayColor) return byKey.displayColor;
+            if (!name) return null;
+            const matches = [];
+            for (const stats of statsMap.values()) {
+                if (stats.name === name && stats.villain === (villain === true) && stats.displayColor) {
+                    matches.push(stats);
+                }
+            }
+            if (matches.length === 1) return matches[0].displayColor;
+        } catch { /* ignore */ }
+        return null;
+    }
+
+    function lookupLogDisplayName(key, name, villain) {
+        try {
+            const statsMap = getPreparedBattleLogSummary()?.statsMap;
+            if (!statsMap || !key) return name;
+            return findBattleLogStatsByKey(statsMap, key)?.displayName || name;
+        } catch { /* ignore */ }
+        return name;
+    }
+
+    function renderLogName(name, villain, key) {
         const cls = teamClass(villain);
-        return `<span class="bs-log-name ${cls}">${name}</span>`;
+        const label = lookupLogDisplayName(key, name, villain);
+        const color = lookupLogDisplayColor(key, name, villain);
+        const colorStyle = color ? ` style="color:${escapeHtml(color)}"` : '';
+        return `<span class="bs-log-name ${cls}"${colorStyle}>${escapeHtml(label)}</span>`;
     }
 
     function renderHealLogSubject(entry) {
         if (isCrossUnitHealEntry(entry)) {
-            return `${renderLogName(entry.from, entry.fromVillain)} → ${renderLogName(entry.to, entry.toVillain)}`;
+            return `${renderLogName(entry.from, entry.fromVillain, entry.fromKey)} → ${renderLogName(entry.to, entry.toVillain, entry.toKey)}`;
         }
-        return renderLogName(entry.to, entry.toVillain);
+        return renderLogName(entry.to, entry.toVillain, entry.toKey);
     }
 
     function renderActionSourceLabel(entry) {
@@ -13521,11 +14129,11 @@
         if (entry.kind === 'status') {
             const statusCls = `${entry.applied ? 'applied' : 'removed'} ${entry.effectType || 'debuff'}`;
             const sign = entry.applied ? '+' : '−';
-            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.to, entry.toVillain)}: ` +
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.to, entry.toVillain, entry.toKey)}: ` +
                 `<span class="bs-log-status ${statusCls}">${sign}${escapeHtml(entry.effectLabel)}</span></div>`;
         }
         if (entry.kind === 'pathing') {
-            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain)}: ` +
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain, entry.unitKey)}: ` +
                 `<span class="bs-log-pathing">tile ${entry.fromTile} → tile ${entry.toTile}</span></div>`;
         }
         if (entry.kind === 'statChange') {
@@ -13533,30 +14141,30 @@
             const from = escapeHtml(formatStatChangeValue(entry.statKey, entry.from));
             const to = escapeHtml(formatStatChangeValue(entry.statKey, entry.to));
             const delta = escapeHtml(formatStatChangeDelta(entry.statKey, entry.delta));
-            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain)}: ` +
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain, entry.unitKey)}: ` +
                 `<span class="bs-log-stat">${escapeHtml(entry.statLabel)} ${from} → ${to} ` +
                 `<span class="bs-log-stat-delta ${deltaCls}">(${delta})</span></span></div>`;
         }
         if (entry.kind === 'abilityCast') {
-            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain)}: ` +
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain, entry.fromKey)}: ` +
                 `<span class="bs-log-ability">${escapeHtml(t('mods.betterAnalytics.logCast'))} ${escapeHtml(entry.abilityName)}</span></div>`;
         }
         if (entry.kind === 'death') {
             const defeated = escapeHtml(t('mods.betterAnalytics.logDefeated'));
             if (entry.killedBy) {
-                return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.killedBy, entry.killedByVillain)} → ` +
-                    `${renderLogName(entry.unit, entry.unitVillain)}: ` +
+                return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.killedBy, entry.killedByVillain, entry.killedByKey)} → ` +
+                    `${renderLogName(entry.unit, entry.unitVillain, entry.unitKey)}: ` +
                     `<span class="bs-log-death">${defeated}</span></div>`;
             }
-            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain)}: ` +
+            return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.unit, entry.unitVillain, entry.unitKey)}: ` +
                 `<span class="bs-log-death">${defeated}</span></div>`;
         }
         if (entry.kind === 'heal') {
             return `<div class="bs-log-line">${tickLabel} ${renderHealLogSubject(entry)}: ` +
                 `<span class="bs-log-heal">+${entry.amount}</span> ${sourceLabel}${typeLabel}</div>`;
         }
-        return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain)} → ` +
-            `${renderLogName(entry.to, entry.toVillain)}: ` +
+        return `<div class="bs-log-line">${tickLabel} ${renderLogName(entry.from, entry.fromVillain, entry.fromKey)} → ` +
+            `${renderLogName(entry.to, entry.toVillain, entry.toKey)}: ` +
             `${renderLogDamageAmount(entry)} ${sourceLabel}${typeLabel}</div>`;
     }
 
@@ -13693,6 +14301,7 @@
         pendingUnitsForceRefresh = false;
         const forceSummary = activeTab === 'summary' && panelFightTickFrozen != null;
         renderActiveTab(activeTab === 'units' ? forceUnits : false, forceSummary);
+        scheduleBoardDuplicateNameplateSync();
     }
 
     function syncPanelTickTracking() {
@@ -13733,6 +14342,7 @@
             syncPanelTickTracking();
             lastUnitsRenderKey = '';
             render();
+            if (isPanelOpen()) scheduleBoardDuplicateBordersAfterBattleStart();
         };
 
         const onEnd = () => {
@@ -14111,6 +14721,8 @@
         syncPanelTickTracking();
         renderStatusBar(true);
         renderActiveTab(true, activeTab === 'summary');
+        setupBoardNameplateSync();
+        if (isFightActive()) scheduleBoardDuplicateBordersAfterBattleStart();
     }
 
     function closePanel() {
@@ -14125,6 +14737,7 @@
         teardownUnitsBodyListener();
         detachPanelViewportListener();
         panelDragState.reset();
+        teardownBoardNameplateSync();
     }
 
     function togglePanel() {
@@ -14157,6 +14770,7 @@
         resetPanelFightTickState();
         resetTickSpeedToDefault();
         teardownBoardListeners();
+        teardownBoardNameplateSync();
         teardownWorldSubscriptions();
         teardownPanelResizeListeners();
         teardownPanelDragListeners();

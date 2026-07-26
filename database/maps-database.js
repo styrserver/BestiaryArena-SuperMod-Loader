@@ -148,7 +148,8 @@ const REGION_NAME_MAP = {
   abdendriel: 'Ab\'Dendriel',
   kazordoon: 'Kazordoon',
   venore: 'Venore',
-  ankrahmun: 'Ankrahmun'
+  ankrahmun: 'Ankrahmun',
+  edron: 'Edron'
 };
 
 function titleCaseRegionId(regionId) {

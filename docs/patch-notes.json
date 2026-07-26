@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.6.6",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Duplicate creatures on the same team get stable #N names and high-contrast colors in Units, battle log, and summary. While the panel is open, matching thin colored borders appear on the board in setup and during fights (IDs stay tied to spawn tile)."
+        },
+        {
+          "mod": "maps-database.js",
+          "type": "added",
+          "text": "Added Edron to REGION_NAME_MAP ahead of region release."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "New optional mission tracked in the mission log."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Arena ranks use one color each (grey through astral), start at 1 completed mission, and high ranks get subtle themed text animations on the rank display and leaderboard. Internal refactor: shared helpers for mission progress persistence, NPC keyword replies, once-received reward flags, custom-battle load wait, chat modal open shells, single-tile board actions, and tile hints; console QA helpers unified under one registry-driven API; file sections renumbered into a continuous outline — less duplicated code with the same gameplay."
+        }
+      ]
+    },
+    {
       "version": "4.6.5",
       "changes": [
         {
