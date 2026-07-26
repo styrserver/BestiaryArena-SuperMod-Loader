@@ -884,7 +884,7 @@ const MISSION_COMPLETION_SUMMARIES = {
   [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'Descended the secluded herb, defeated the mother of all spiders, and returned the silk to Wyda.',
   [SERPENTINE_TOWER_MISSION.id]: 'Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.',
   [APPRENTICE_SHENG_MISSION.id]: 'Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room.',
-  [CHRISTMAS_MIRACLE_MISSION.id]: 'Received a Christmas present from Santa Claus on Santa Claus Home.'
+  [CHRISTMAS_MIRACLE_MISSION.id]: 'Received a Christmas present from Santa Claus.'
 };
 
 function getMissionCompletionSummary(mission) {

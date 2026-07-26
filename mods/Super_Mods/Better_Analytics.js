@@ -1208,8 +1208,13 @@
     const SPEED_VALUE_ID = 'mod-better-sandbox-speed-value';
     const SPEED_SANDBOX_ONLY_ID = 'mod-better-sandbox-speed-sandbox-only';
     const SLOW_MOTION_TOGGLE_ID = 'mod-better-sandbox-slow-motion-toggle';
+    const BOARD_VIZ_ROW_ID = 'mod-better-sandbox-board-viz-row';
+    const COLORING_BORDERS_TOGGLE_ID = 'mod-better-sandbox-coloring-borders-toggle';
+    const BREADCRUMB_TRAILS_TOGGLE_ID = 'mod-better-sandbox-breadcrumb-trails-toggle';
+    const BREADCRUMB_OVERLAY_ID = 'mod-better-sandbox-breadcrumb-overlay';
     const STYLE_ID = 'better-sandbox-styles';
     const STORAGE_KEY = 'betterSandboxPanel';
+    const BREADCRUMB_MAX_STEPS = 300;
 
     const PANEL_TICK_POLL_MS = 50;
     const LIVE_PANEL_UPDATE_MS = 50;
@@ -1260,6 +1265,7 @@
     const PANEL_DEFAULTS = {
         left: 120, top: 80, width: 400, height: 520, isOpen: false,
         activeTab: 'units', gameSpeedPercent: 100, slowMotionEnabled: false,
+        coloringBordersEnabled: true, breadcrumbTrailsEnabled: true,
         logFilters: { ...LOG_FILTER_DEFAULTS }
     };
     const PANEL_LAYOUT = { minWidth: 300, maxWidth: 900, minHeight: 280, maxHeight: 900 };
@@ -1321,6 +1327,14 @@
     let boardNameplateSyncScheduled = false;
     let boardNameplateSyncGen = 0;
     let boardDupBorderRetryTimers = [];
+    let coloringBordersEnabled = true;
+    let breadcrumbTrailsEnabled = true;
+    const actorPathTrails = new Map();
+    let breadcrumbRenderScheduled = false;
+    let breadcrumbRenderGen = 0;
+    let breadcrumbDataRevision = 0;
+    let breadcrumbRenderedRevision = -1;
+    let breadcrumbLayoutKey = '';
     const boardTrack = { roomId: null, floor: null, gameStarted: false, mode: null, configSig: '' };
     const previewMechanicsLogSig = new Map();
     const previewMechanicsResultCache = new Map();
@@ -1753,6 +1767,7 @@
             cachedSpawnTileKeyLookup = null;
             invalidateBoardPreviewCache();
             lastUnitsRenderKey = '';
+            clearBreadcrumbTrails();
             changed = true;
             needsUnitsRebuild = true;
         }
@@ -1806,6 +1821,7 @@
         if (mode !== boardTrack.mode) {
             boardTrack.mode = mode;
             changed = true;
+            clearBreadcrumbTrails();
             if (!isSandboxMode()) {
                 if (!slowMotionEnabled) restoreTurboIfSuspended();
                 if (ctx.world?.tickEngine?.setTickInterval) {
@@ -1819,6 +1835,7 @@
 
         if (configSig !== boardTrack.configSig) {
             boardTrack.configSig = configSig;
+            clearBreadcrumbTrails();
             invalidateBoardPreviewCache({ clearMechanicsLog: true });
             lastUnitsRenderKey = '';
             changed = true;
@@ -1829,6 +1846,7 @@
             invalidateBoardPreviewCache();
             lastUnitsRenderKey = '';
             if (needsUnitsRebuild) pendingUnitsForceRefresh = true;
+            if (needsUnitsRebuild && isPanelOpen()) scheduleBoardDuplicateBordersRefresh();
         }
 
         return changed;
@@ -2316,6 +2334,12 @@
         const units = collectActorMechanicsSnapshots() || [];
         if (!units.length) return;
 
+        const structureKey = buildUnitsStructureKey(units);
+        if (structureKey !== (body.dataset.unitsStructureKey || '')) {
+            renderUnits(true);
+            return;
+        }
+
         profileUnitsLag('patchUnitsMechanics', () => {
             patchUnitCardsMechanicsOnly(body, units);
         });
@@ -2742,6 +2766,7 @@
         deathLogDedupe.clear();
         pathLogDedupe.clear();
         statLogDedupe.clear();
+        clearBreadcrumbTrails();
     }
 
     function isBattleLogTracking() {
@@ -2784,6 +2809,8 @@
         recordBattleMarker('start', { tick: getCurrentTick() ?? 0 });
         seedBattleLogStatusSnapshots();
         seedActorStatSnapshots(getActiveWorld()?.grid?.actors);
+        clearBreadcrumbTrails();
+        if (breadcrumbTrailsEnabled && isPanelOpen()) scheduleBreadcrumbRender();
     }
 
     function endBattleLogSession(endState) {
@@ -3184,6 +3211,87 @@
                 sandboxOnlyNote.replaceWith(span);
             }
         }
+
+        ensureBoardVizRowUi();
+    }
+
+    function createBoardVizToggleRow({ labelKey, titleKey, inputId, checked, onChange }) {
+        const row = document.createElement('div');
+        row.className = 'bs-speed-toggle-row';
+        const titleWrap = document.createElement('div');
+        titleWrap.className = 'bs-speed-toggle-text';
+        const label = document.createElement('span');
+        label.textContent = t(labelKey);
+        titleWrap.appendChild(label);
+        const switchEl = document.createElement('label');
+        switchEl.className = 'bs-switch';
+        if (titleKey) switchEl.title = t(titleKey);
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = inputId;
+        input.checked = checked === true;
+        input.addEventListener('change', (e) => {
+            e.stopPropagation();
+            onChange(e.target.checked);
+        });
+        input.addEventListener('mousedown', (e) => e.stopPropagation());
+        const slider = document.createElement('span');
+        slider.className = 'bs-switch-slider';
+        switchEl.appendChild(input);
+        switchEl.appendChild(slider);
+        row.appendChild(titleWrap);
+        row.appendChild(switchEl);
+        return row;
+    }
+
+    function fillBoardVizRow(vizRow) {
+        if (!vizRow) return vizRow;
+        vizRow.replaceChildren(
+            createBoardVizToggleRow({
+                labelKey: 'mods.betterAnalytics.coloringBorders',
+                titleKey: 'mods.betterAnalytics.coloringBordersTitle',
+                inputId: COLORING_BORDERS_TOGGLE_ID,
+                checked: coloringBordersEnabled,
+                onChange: setColoringBordersEnabled
+            }),
+            createBoardVizToggleRow({
+                labelKey: 'mods.betterAnalytics.breadcrumbTrails',
+                titleKey: 'mods.betterAnalytics.breadcrumbTrailsTitle',
+                inputId: BREADCRUMB_TRAILS_TOGGLE_ID,
+                checked: breadcrumbTrailsEnabled,
+                onChange: setBreadcrumbTrailsEnabled
+            })
+        );
+        return vizRow;
+    }
+
+    function createBoardVizRow() {
+        const vizRow = document.createElement('div');
+        vizRow.id = BOARD_VIZ_ROW_ID;
+        vizRow.className = 'bs-board-viz-row';
+        return fillBoardVizRow(vizRow);
+    }
+
+    function syncBoardVizToggleState() {
+        const bordersToggle = document.getElementById(COLORING_BORDERS_TOGGLE_ID);
+        if (bordersToggle) bordersToggle.checked = coloringBordersEnabled;
+        const trailsToggle = document.getElementById(BREADCRUMB_TRAILS_TOGGLE_ID);
+        if (trailsToggle) trailsToggle.checked = breadcrumbTrailsEnabled;
+    }
+
+    function ensureBoardVizRowUi() {
+        const speedRow = document.getElementById('mod-better-sandbox-speed-row');
+        if (!speedRow?.parentNode) return;
+
+        let vizRow = document.getElementById(BOARD_VIZ_ROW_ID);
+        if (!vizRow) {
+            vizRow = createBoardVizRow();
+            speedRow.insertAdjacentElement('afterend', vizRow);
+        } else if (vizRow.previousElementSibling !== speedRow) {
+            speedRow.insertAdjacentElement('afterend', vizRow);
+        } else {
+            syncBoardVizToggleState();
+        }
     }
 
     function toggleLogFilter(filterKey) {
@@ -3285,6 +3393,7 @@
     function clearBattleLog() {
         resetBattleLogState();
         renderBattleLog();
+        if (breadcrumbTrailsEnabled && isPanelOpen()) scheduleBreadcrumbRender();
     }
 
     function formatLogDamageAmount(amount, rawAmount) {
@@ -4060,17 +4169,19 @@
         if (pathLogDedupe.has(dedupeKey)) return;
         pathLogDedupe.add(dedupeKey);
 
+        const unitKey = resolveFightCollapseKey(actor);
         battleLog.push({
             tick: tick != null ? tick : '?',
             kind: 'pathing',
             unit: unit.name,
-            unitKey: resolveFightCollapseKey(actor),
+            unitKey,
             unitVillain: unit.villain === true,
             fromTile,
             toTile
         });
         battleLogRevision++;
         scheduleBattleLogRender();
+        recordBreadcrumbStep(unitKey, fromTile, toTile, unit.villain === true);
     }
 
     function unpatchActorPathingLog(actor) {
@@ -4258,6 +4369,22 @@
         if (world) unpatchAllActors(world);
     }
 
+    function refreshUnitsForActorRosterChange() {
+        invalidateActorSnapshotsCache();
+        invalidateActorProbeCache();
+        lastUnitsRenderKey = '';
+        pendingUnitsForceRefresh = true;
+        if (activeTab === 'units' && isPanelOpen()) {
+            renderUnits(true);
+        }
+    }
+
+    function scheduleUnitsRosterRefresh() {
+        refreshUnitsForActorRosterChange();
+        // Summon events can fire before the actor is visible on grid.actors.
+        requestAnimationFrame(() => refreshUnitsForActorRosterChange());
+    }
+
     function setupWorldSubscriptions(world) {
         if (!world?.grid) return;
 
@@ -4267,8 +4394,11 @@
         }
 
         const onActorEnter = (actor) => {
+            if (actor) resolveFightCollapseKey(actor);
             if (shouldPatchBattleLogActors()) patchActorBattleLog(actor);
             subscribeActorUnitsMechanics(actor);
+            // Summons/entries must rebuild the Units list, not only patch existing cards.
+            scheduleUnitsRosterRefresh();
         };
         if (typeof world.grid.onActorEnter?.subscribe === 'function') {
             worldEventSubs.push(world.grid.onActorEnter.subscribe(onActorEnter));
@@ -4277,7 +4407,10 @@
             worldEventSubs.push(world.grid.onActorSummon.subscribe(onActorEnter));
         }
         if (typeof world.grid.onActorDeath?.subscribe === 'function') {
-            worldEventSubs.push(world.grid.onActorDeath.subscribe(recordDeathLogEntry));
+            worldEventSubs.push(world.grid.onActorDeath.subscribe((deathEvent) => {
+                recordDeathLogEntry(deathEvent);
+                scheduleUnitsRosterRefresh();
+            }));
         }
         if (typeof world.onGameEnd?.subscribe === 'function') {
             worldEventSubs.push(world.onGameEnd.subscribe((winner) => {
@@ -7413,7 +7546,15 @@
         '#FB5607', // orange
         '#8338EC', // violet
         '#00BBF9', // sky cyan
-        '#F72585'  // neon rose
+        '#F72585', // neon rose
+        '#90BE6D', // lime
+        '#F94144', // red
+        '#577590', // steel
+        '#F9C74F', // yellow
+        '#43AA8B', // teal
+        '#277DA1', // ocean
+        '#F9844A', // coral
+        '#9B5DE5'  // purple
     ];
 
     function duplicateColorAt(index) {
@@ -7441,10 +7582,11 @@
             if (!groups.has(groupKey)) groups.set(groupKey, []);
             groups.get(groupKey).push(item);
         }
+        let globalColorIndex = 0;
         for (const group of groups.values()) {
             if (group.length < 2) continue;
             if (compare) group.sort(compare);
-            group.forEach((item, index) => onDuplicate(item, index));
+            group.forEach((item, index) => onDuplicate(item, index, globalColorIndex++));
         }
     }
 
@@ -7463,9 +7605,9 @@
                     if (Number.isFinite(initTile)) unit.spawnTile = initTile;
                 }
             },
-            onDuplicate: (unit, index) => {
+            onDuplicate: (unit, index, colorIndex) => {
                 unit.panelDisplayName = formatDuplicateInstanceName(unit.name, index);
-                unit.panelDisplayColor = duplicateColorAt(index);
+                unit.panelDisplayColor = duplicateColorAt(colorIndex);
             }
         });
     }
@@ -7492,29 +7634,458 @@
             || document.querySelector(`[id="tile-index-${tileIndex}"]`);
     }
 
+    const ANALYZER_ALLY_COLOR = '#98C379';
+    const ANALYZER_ENEMY_COLOR = '#E06C75';
+    const BREADCRUMB_TILE_OFFSETS = [
+        [0, 0], [4, -4], [-4, -4], [4, 4], [-4, 4],
+        [0, -5], [0, 5], [5, 0], [-5, 0], [3, 0], [-3, 0]
+    ];
+
+    function buildTrailColorLookup() {
+        const map = new Map();
+        try {
+            const units = collectUnitsForDuplicateLabels();
+            if (!units.length) return map;
+            assignPanelDisplayNames(units);
+            for (const unit of units) {
+                const key = normalizeCollapseKey(unit.collapseKey || getUnitCollapseKey(unit));
+                if (!key) continue;
+                map.set(
+                    key,
+                    unit.panelDisplayColor
+                        || (unit.villain === true ? ANALYZER_ENEMY_COLOR : ANALYZER_ALLY_COLOR)
+                );
+            }
+        } catch { /* ignore */ }
+        return map;
+    }
+
+    function isDistinctTrailColor(color) {
+        return !!color
+            && color !== ANALYZER_ALLY_COLOR
+            && color !== ANALYZER_ENEMY_COLOR;
+    }
+
+    function resolveSpecificTrailColor(unitKey, villain, colorLookup) {
+        const key = normalizeCollapseKey(unitKey);
+        const fromLog = lookupLogDisplayColor(unitKey, null, villain);
+        if (isDistinctTrailColor(fromLog)) return fromLog;
+
+        if (key && colorLookup?.has(key)) {
+            const liveColor = colorLookup.get(key);
+            if (isDistinctTrailColor(liveColor)) return liveColor;
+            return fromLog || liveColor;
+        }
+        return fromLog || null;
+    }
+
+    function resolveAnalyzerTrailColor(unitKey, villain, colorLookup) {
+        const trail = actorPathTrails.get(unitKey);
+        // Keep summon/distinct colors after the fight — never remap pinned trails.
+        if (trail?.colorPinned && trail.color) return trail.color;
+
+        const specific = resolveSpecificTrailColor(unitKey, villain, colorLookup);
+        const fallback = villain === true ? ANALYZER_ENEMY_COLOR : ANALYZER_ALLY_COLOR;
+        const color = specific || trail?.color || fallback;
+
+        if (trail) {
+            trail.color = color;
+            // Pin distinct analyzer colors right away; freeze everything once the fight ends.
+            if (isDistinctTrailColor(color) || !isLiveFightTracking()) {
+                trail.colorPinned = true;
+            }
+        }
+        return color;
+    }
+
+    function restoreTilesContainerLayout() {
+        const tiles = document.getElementById('tiles');
+        if (!tiles) return;
+        // Never leave layout mutations on #tiles — absolute tile positioning depends on it.
+        if (tiles.style.position) tiles.style.removeProperty('position');
+    }
+
+    function getBreadcrumbLayoutKey() {
+        const tiles = document.getElementById('tiles')
+            || document.getElementById('board')
+            || document.getElementById('viewport');
+        if (!tiles) return '0';
+        const r = tiles.getBoundingClientRect();
+        const zoom = document.documentElement.style.getPropertyValue('--zoomFactor')
+            || getComputedStyle(document.documentElement).getPropertyValue('--zoomFactor')
+            || '';
+        return `${Math.round(r.left)}:${Math.round(r.top)}:${Math.round(r.width)}:${String(zoom).trim()}`;
+    }
+
+    function bumpBreadcrumbDataRevision() {
+        breadcrumbDataRevision++;
+    }
+
+    function cancelPendingBreadcrumbRender() {
+        breadcrumbRenderGen++;
+        breadcrumbRenderScheduled = false;
+    }
+
+    function clearBreadcrumbOverlay() {
+        document.getElementById(BREADCRUMB_OVERLAY_ID)?.remove();
+        document.querySelectorAll('.bs-breadcrumb-host, .bs-breadcrumb-dot, .bs-breadcrumb-seg').forEach((el) => {
+            el.remove();
+        });
+        restoreTilesContainerLayout();
+    }
+
+    function clearBreadcrumbTrails() {
+        actorPathTrails.clear();
+        cancelPendingBreadcrumbRender();
+        bumpBreadcrumbDataRevision();
+        breadcrumbRenderedRevision = -1;
+        breadcrumbLayoutKey = '';
+        clearBreadcrumbOverlay();
+    }
+
+    function appendTrailTiles(unitKey, fromTile, toTile, villain) {
+        if (unitKey == null || fromTile == null || toTile == null || fromTile === toTile) return;
+        let trail = actorPathTrails.get(unitKey);
+        let changed = false;
+        if (!trail) {
+            trail = {
+                tiles: [fromTile],
+                villain: villain === true,
+                color: null,
+                colorPinned: false
+            };
+            actorPathTrails.set(unitKey, trail);
+            changed = true;
+        } else if (villain === true && !trail.villain) {
+            trail.villain = true;
+            changed = true;
+        }
+        if (trail.tiles[trail.tiles.length - 1] !== fromTile
+            && trail.tiles[trail.tiles.length - 1] !== toTile) {
+            trail.tiles.push(fromTile);
+            changed = true;
+        }
+        if (trail.tiles[trail.tiles.length - 1] !== toTile) {
+            trail.tiles.push(toTile);
+            changed = true;
+        }
+        if (trail.tiles.length > BREADCRUMB_MAX_STEPS) {
+            trail.tiles = trail.tiles.slice(trail.tiles.length - BREADCRUMB_MAX_STEPS);
+            changed = true;
+        }
+        // Pin analyzer color while the unit is still known (esp. summons).
+        if (!trail.colorPinned) {
+            resolveAnalyzerTrailColor(unitKey, trail.villain, buildTrailColorLookup());
+        }
+        if (changed) bumpBreadcrumbDataRevision();
+    }
+
+    function recordBreadcrumbStep(unitKey, fromTile, toTile, villain) {
+        if (!breadcrumbTrailsEnabled || !isPanelOpen()) return;
+        if (unitKey == null || fromTile == null || toTile == null || fromTile === toTile) return;
+        const before = breadcrumbDataRevision;
+        appendTrailTiles(unitKey, fromTile, toTile, villain);
+        if (breadcrumbDataRevision !== before) scheduleBreadcrumbRender();
+    }
+
+    function rebuildBreadcrumbsFromBattleLog() {
+        actorPathTrails.clear();
+        bumpBreadcrumbDataRevision();
+        if (!breadcrumbTrailsEnabled) {
+            clearBreadcrumbOverlay();
+            breadcrumbRenderedRevision = breadcrumbDataRevision;
+            return;
+        }
+        for (const entry of battleLog) {
+            if (entry?.kind !== 'pathing') continue;
+            const key = entry.unitKey || `${entry.unitVillain ? 'e' : 'a'}:${entry.unit}`;
+            appendTrailTiles(key, entry.fromTile, entry.toTile, entry.unitVillain === true);
+        }
+        scheduleBreadcrumbRender();
+    }
+
+    function ensureTileBreadcrumbHost(tileEl) {
+        if (!tileEl) return null;
+        let host = tileEl.querySelector(':scope > .bs-breadcrumb-host');
+        if (host) return host;
+        host = document.createElement('div');
+        host.className = 'bs-breadcrumb-host';
+        // Tiles use Tailwind *:absolute *:bottom-0 *:right-0 — fill the sprite box.
+        host.style.setProperty('position', 'absolute', 'important');
+        host.style.setProperty('right', '0', 'important');
+        host.style.setProperty('bottom', '0', 'important');
+        host.style.setProperty('left', 'auto', 'important');
+        host.style.setProperty('top', 'auto', 'important');
+        host.style.setProperty('width', '100%', 'important');
+        host.style.setProperty('height', '100%', 'important');
+        host.style.setProperty('pointer-events', 'none', 'important');
+        host.style.setProperty('z-index', '250', 'important');
+        host.style.setProperty('overflow', 'visible', 'important');
+        tileEl.appendChild(host);
+        return host;
+    }
+
+    function ensureBreadcrumbTrailOverlay() {
+        restoreTilesContainerLayout();
+        let overlay = document.getElementById(BREADCRUMB_OVERLAY_ID);
+        if (overlay) return overlay;
+        overlay = document.createElement('div');
+        overlay.id = BREADCRUMB_OVERLAY_ID;
+        overlay.className = 'bs-breadcrumb-overlay';
+        // Fixed overlay — do not parent under #tiles or mutate its layout.
+        overlay.style.cssText = [
+            'position:fixed',
+            'inset:0',
+            'width:100%',
+            'height:100%',
+            'pointer-events:none',
+            'z-index:114',
+            'overflow:visible'
+        ].join(';');
+        document.body.appendChild(overlay);
+        return overlay;
+    }
+
+    function renderBreadcrumbTrails() {
+        if (!breadcrumbTrailsEnabled || !isPanelOpen() || !actorPathTrails.size) {
+            if (document.getElementById(BREADCRUMB_OVERLAY_ID)
+                || document.querySelector('.bs-breadcrumb-host, .bs-breadcrumb-dot')) {
+                clearBreadcrumbOverlay();
+            }
+            breadcrumbRenderedRevision = breadcrumbDataRevision;
+            breadcrumbLayoutKey = getBreadcrumbLayoutKey();
+            return;
+        }
+
+        const layoutKey = getBreadcrumbLayoutKey();
+        if (breadcrumbRenderedRevision === breadcrumbDataRevision
+            && layoutKey === breadcrumbLayoutKey
+            && document.getElementById(BREADCRUMB_OVERLAY_ID)) {
+            return;
+        }
+
+        clearBreadcrumbOverlay();
+
+        const overlay = ensureBreadcrumbTrailOverlay();
+        let colorLookup = null;
+        for (const trail of actorPathTrails.values()) {
+            if (!trail?.colorPinned || !trail.color) {
+                colorLookup = buildTrailColorLookup();
+                break;
+            }
+        }
+        const markersOnTile = new Map();
+
+        for (const [unitKey, trail] of actorPathTrails) {
+            if (!trail?.tiles?.length) continue;
+            const color = resolveAnalyzerTrailColor(unitKey, trail.villain, colorLookup);
+            const n = trail.tiles.length;
+
+            for (let i = 0; i < n; i++) {
+                if (i > 0 && overlay) {
+                    const prevTileEl = getTileElementForIndex(trail.tiles[i - 1]);
+                    const tileEl = getTileElementForIndex(trail.tiles[i]);
+                    if (prevTileEl && tileEl) {
+                        const fromRect = prevTileEl.getBoundingClientRect();
+                        const toRect = tileEl.getBoundingClientRect();
+                        if (fromRect.width && toRect.width) {
+                            const x1 = fromRect.left + fromRect.width / 2;
+                            const y1 = fromRect.top + fromRect.height / 2;
+                            const x2 = toRect.left + toRect.width / 2;
+                            const y2 = toRect.top + toRect.height / 2;
+                            const dx = x2 - x1;
+                            const dy = y2 - y1;
+                            const len = Math.sqrt(dx * dx + dy * dy);
+                            if (len >= 1) {
+                                const age = n <= 1 ? 1 : i / (n - 1);
+                                const seg = document.createElement('div');
+                                seg.className = 'bs-breadcrumb-seg';
+                                seg.style.cssText = [
+                                    'position:absolute',
+                                    `left:${x1}px`,
+                                    `top:${y1}px`,
+                                    `width:${len}px`,
+                                    'height:calc(2px * var(--zoomFactor, 1))',
+                                    'transform-origin:0 50%',
+                                    `transform:rotate(${Math.atan2(dy, dx)}rad)`,
+                                    `background:${color}`,
+                                    `opacity:${0.35 + age * 0.45}`,
+                                    'pointer-events:none',
+                                    'border-radius:1px',
+                                    'z-index:0'
+                                ].join(';');
+                                overlay.appendChild(seg);
+                            }
+                        }
+                    }
+                }
+
+                const tileIndex = trail.tiles[i];
+                const tileEl = getTileElementForIndex(tileIndex);
+                if (!tileEl) continue;
+                const host = ensureTileBreadcrumbHost(tileEl);
+                if (!host) continue;
+
+                const stackIdx = markersOnTile.get(tileIndex) || 0;
+                markersOnTile.set(tileIndex, stackIdx + 1);
+                const offset = BREADCRUMB_TILE_OFFSETS[stackIdx % BREADCRUMB_TILE_OFFSETS.length];
+                const stepNum = i + 1;
+                const label = String(stepNum);
+                const size = label.length > 2 ? 10 : label.length > 1 ? 9 : 8;
+                const fontPx = label.length > 1 ? 5 : 6;
+
+                const dot = document.createElement('div');
+                dot.className = 'bs-breadcrumb-dot';
+                dot.dataset.bsTrailKey = String(unitKey);
+                dot.dataset.bsTrailStep = label;
+                dot.textContent = label;
+                dot.title = label;
+                dot.style.setProperty('position', 'absolute', 'important');
+                dot.style.setProperty('left', `calc(50% + (${offset[0]}px * var(--zoomFactor)))`, 'important');
+                dot.style.setProperty('top', `calc(50% + (${offset[1]}px * var(--zoomFactor)))`, 'important');
+                dot.style.setProperty('right', 'auto', 'important');
+                dot.style.setProperty('bottom', 'auto', 'important');
+                dot.style.setProperty('transform', 'translate(-50%, -50%)', 'important');
+                dot.style.setProperty('width', `calc(${size}px * var(--zoomFactor))`, 'important');
+                dot.style.setProperty('height', `calc(${size}px * var(--zoomFactor))`, 'important');
+                dot.style.setProperty('font-size', `calc(${fontPx}px * var(--zoomFactor))`, 'important');
+                dot.style.setProperty('background', color, 'important');
+                dot.style.setProperty('border-color', 'rgba(0,0,0,0.75)', 'important');
+                dot.style.setProperty('color', '#111', 'important');
+                dot.style.setProperty('z-index', String(260 + stackIdx), 'important');
+                host.appendChild(dot);
+            }
+        }
+
+        breadcrumbRenderedRevision = breadcrumbDataRevision;
+        breadcrumbLayoutKey = layoutKey;
+    }
+
+    function scheduleBreadcrumbRender() {
+        if (!breadcrumbTrailsEnabled || !isPanelOpen()) {
+            clearBreadcrumbOverlay();
+            return;
+        }
+        if (breadcrumbRenderScheduled) return;
+        breadcrumbRenderScheduled = true;
+        const gen = breadcrumbRenderGen;
+        requestAnimationFrame(() => {
+            if (gen !== breadcrumbRenderGen) return;
+            breadcrumbRenderScheduled = false;
+            try { renderBreadcrumbTrails(); } catch { /* ignore */ }
+        });
+    }
+
+    function setColoringBordersEnabled(enabled) {
+        coloringBordersEnabled = enabled === true;
+        savePanelSettings({ coloringBordersEnabled });
+        if (!coloringBordersEnabled) clearAllBoardDuplicateBorders();
+        else scheduleBoardDuplicateBordersRefresh();
+        const toggle = document.getElementById(COLORING_BORDERS_TOGGLE_ID);
+        if (toggle) toggle.checked = coloringBordersEnabled;
+    }
+
+    function setBreadcrumbTrailsEnabled(enabled) {
+        breadcrumbTrailsEnabled = enabled === true;
+        savePanelSettings({ breadcrumbTrailsEnabled });
+        const toggle = document.getElementById(BREADCRUMB_TRAILS_TOGGLE_ID);
+        if (toggle) toggle.checked = breadcrumbTrailsEnabled;
+        if (breadcrumbTrailsEnabled) rebuildBreadcrumbsFromBattleLog();
+        else {
+            clearBreadcrumbOverlay();
+            actorPathTrails.clear();
+        }
+    }
+
+    function bindHostToNearestTile(host, maxDistSq = 48 * 48) {
+        if (!host?.el) return;
+        host.rect = host.el.getBoundingClientRect();
+        if (!host.rect.width && !host.rect.height) return;
+        let bestTile = null;
+        let bestDist = Infinity;
+        for (const tileEl of document.querySelectorAll('[id^="tile-index-"]')) {
+            const tileIndex = Number.parseInt(String(tileEl.id).replace('tile-index-', ''), 10);
+            if (!Number.isFinite(tileIndex)) continue;
+            const tileRect = tileEl.getBoundingClientRect();
+            if (!tileRect.width && !tileRect.height) continue;
+            const dist = rectCenterDistanceSq(host.rect, tileRect);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestTile = tileIndex;
+            }
+        }
+        if (bestTile != null && bestDist <= maxDistSq) host.tileIndex = bestTile;
+    }
+
+    function enrichSetupHostFromBoardConfig(host, boardConfig) {
+        if (!host || !Array.isArray(boardConfig)) return;
+        const piece = boardConfig.find((p) => {
+            const pieceTile = p?.tileIndex ?? p?.tile ?? null;
+            const pieceId = p?.gameId ?? p?.databaseId ?? p?.monsterId ?? null;
+            if (host.tileIndex != null && pieceTile === host.tileIndex) return true;
+            if (host.gameId != null && pieceId === host.gameId && pieceTile == null) return true;
+            return false;
+        });
+        if (!piece) return;
+        host.villain = piece.villain === true;
+        if (host.tileIndex == null) {
+            const pieceTile = piece.tileIndex ?? piece.tile ?? null;
+            if (pieceTile != null) host.tileIndex = pieceTile;
+        }
+        if (!host.name) {
+            const pieceId = piece.gameId ?? piece.databaseId ?? piece.monsterId ?? null;
+            if (pieceId != null) host.name = getMonsterMetadata(pieceId)?.name || host.name;
+        }
+    }
+
     function findSetupActorHosts() {
         const hosts = [];
         const seen = new Set();
+        const boardConfig = getBoardContext()?.boardConfig;
         const outfits = document.querySelectorAll(
             '#viewport .sprite.outfit, #board .sprite.outfit, #tiles .sprite.outfit'
         );
         for (const outfit of outfits) {
             if (outfit.closest('#actors')) continue;
-            const host = outfit.closest('button[aria-roledescription="draggable"]')
+            if (outfit.closest(`#${PANEL_ID}`)) continue;
+            const gameIdRaw = outfit.getAttribute('data-gameid');
+            const gameId = gameIdRaw != null && gameIdRaw !== '' ? Number(gameIdRaw) : null;
+            const metaName = Number.isFinite(gameId) ? (getMonsterMetadata(gameId)?.name || null) : null;
+
+            let host = outfit.closest('button[aria-roledescription="draggable"]')
                 || outfit.closest('button.absolute')
                 || outfit.closest('button');
-            if (!host || host.tagName !== 'BUTTON' || seen.has(host) || host.closest(`#${PANEL_ID}`)) continue;
+            let mode = 'setup';
+            if (host && host.tagName === 'BUTTON') {
+                if (seen.has(host)) continue;
+            } else {
+                // Map/NPC pieces often sit on tiles without a draggable button.
+                host = outfit.closest('[id^="tile-index-"]')
+                    || outfit.closest('.absolute')
+                    || outfit.parentElement;
+                if (!host || seen.has(host)) continue;
+                mode = 'setup-map';
+            }
             seen.add(host);
             hosts.push({
-                mode: 'setup',
+                mode,
                 el: host,
                 borderEl: null,
-                name: null,
-                gameId: null,
+                name: metaName,
+                gameId: Number.isFinite(gameId) ? gameId : null,
+                villain: null,
                 actorLeft: null,
                 actorTop: null,
-                rect: null
+                rect: null,
+                tileIndex: host.id?.startsWith?.('tile-index-')
+                    ? Number.parseInt(String(host.id).replace('tile-index-', ''), 10)
+                    : null
             });
+        }
+
+        for (const host of hosts) {
+            if (host.tileIndex == null) bindHostToNearestTile(host);
+            enrichSetupHostFromBoardConfig(host, boardConfig);
         }
         return hosts;
     }
@@ -7555,9 +8126,13 @@
                 borderEl: findFightNativeBorderEl(root),
                 name,
                 gameId: gameId != null && gameId !== '' ? Number(gameId) : null,
+                villain: root.getAttribute('data-villain') === 'true'
+                    || root.classList?.contains?.('villain')
+                    || null,
                 actorLeft: Number.isFinite(actorLeft) ? actorLeft : null,
                 actorTop: Number.isFinite(actorTop) ? actorTop : null,
-                rect: null
+                rect: null,
+                tileIndex: null
             });
         }
         return hosts;
@@ -7565,12 +8140,32 @@
 
     function findBoardActorHosts() {
         const fightHosts = findFightActorHosts();
-        if (fightHosts.length) return fightHosts;
-        return findSetupActorHosts();
+        if (isFightActive() && fightHosts.length) return fightHosts;
+
+        const setupHosts = findSetupActorHosts();
+        // Preview/setup: map villains often live under #actors while allies are setup buttons.
+        if (!fightHosts.length) return setupHosts;
+        if (!setupHosts.length) {
+            for (const host of fightHosts) {
+                if (host.tileIndex == null) bindHostToNearestTile(host, 64 * 64);
+            }
+            return fightHosts;
+        }
+        const seen = new Set();
+        const merged = [];
+        for (const host of [...setupHosts, ...fightHosts]) {
+            if (!host?.el || seen.has(host.el)) continue;
+            seen.add(host.el);
+            if (host.tileIndex == null) bindHostToNearestTile(host, 64 * 64);
+            merged.push(host);
+        }
+        return merged;
     }
 
     const BS_DUP_SETUP_BORDER_CLASS =
         'bs-dup-border absolute bottom-0 right-0 size-scaled-sprite border-solid pointer-events-none';
+    const BS_DUP_TILE_BORDER_CLASS =
+        'bs-dup-border absolute inset-0 border-solid pointer-events-none z-10';
     const BS_DUP_BORDER_WIDTH = 'calc(1px * var(--zoomFactor))';
 
     function applyNativeStyleDuplicateBorder(borderEl, color) {
@@ -7580,6 +8175,36 @@
         borderEl.style.setProperty('border-color', color, 'important');
         borderEl.style.setProperty('opacity', '1', 'important');
         borderEl.dataset.bsDupNativeBorder = color;
+    }
+
+    function ensureOverlayDuplicateBorder(hostEl, color, className) {
+        if (!hostEl || !color || !className) return null;
+        if (getComputedStyle(hostEl).position === 'static') {
+            hostEl.style.position = 'relative';
+        }
+        if (hostEl.dataset.bsDupBorder === color) {
+            const existing = hostEl.querySelector(':scope > .bs-dup-border');
+            if (existing?.dataset?.bsDupNativeBorder === color) return existing;
+        }
+        let border = hostEl.querySelector(':scope > .bs-dup-border');
+        if (!border) {
+            border = document.createElement('div');
+            border.className = className;
+            hostEl.appendChild(border);
+        } else if (border.className !== className) {
+            border.className = className;
+        }
+        applyNativeStyleDuplicateBorder(border, color);
+        if (hostEl.dataset.bsDupBorder !== color) {
+            hostEl.dataset.bsDupBorder = color;
+        }
+        return border;
+    }
+
+    function ensureTileDuplicateBorder(tileIndex, color) {
+        const tile = getTileElementForIndex(tileIndex);
+        if (!tile || !color) return;
+        ensureOverlayDuplicateBorder(tile, color, BS_DUP_TILE_BORDER_CLASS);
     }
 
     function ensureActorDuplicateBorder(host, color) {
@@ -7603,25 +8228,20 @@
             return;
         }
 
-        const hostEl = host.el;
-        if (!hostEl || hostEl.tagName !== 'BUTTON') return;
-        if (hostEl.dataset.bsDupBorder === color) {
-            const existing = hostEl.querySelector(':scope > .bs-dup-border');
-            if (existing?.dataset?.bsDupNativeBorder === color) return;
+        // setup-map hosts bound to a tile: paint the tile frame directly.
+        if (host.mode === 'setup-map' && host.el?.id?.startsWith?.('tile-index-')) {
+            const tileIndex = host.tileIndex
+                ?? Number.parseInt(String(host.el.id).replace('tile-index-', ''), 10);
+            if (Number.isFinite(tileIndex)) {
+                ensureTileDuplicateBorder(tileIndex, color);
+                return;
+            }
         }
 
-        let border = hostEl.querySelector(':scope > .bs-dup-border');
-        if (!border) {
-            border = document.createElement('div');
-            border.className = BS_DUP_SETUP_BORDER_CLASS;
-            hostEl.appendChild(border);
-        } else if (border.className !== BS_DUP_SETUP_BORDER_CLASS) {
-            border.className = BS_DUP_SETUP_BORDER_CLASS;
-        }
-        applyNativeStyleDuplicateBorder(border, color);
-        if (hostEl.dataset.bsDupBorder !== color) {
-            hostEl.dataset.bsDupBorder = color;
-        }
+        const hostEl = host.el;
+        if (!hostEl) return;
+        if (host.mode === 'setup' && hostEl.tagName !== 'BUTTON') return;
+        ensureOverlayDuplicateBorder(hostEl, color, BS_DUP_SETUP_BORDER_CLASS);
     }
 
     function clearActorDuplicateBorder(host) {
@@ -7679,13 +8299,23 @@
         const maxDistSq = 64 * 64;
 
         for (const host of hosts) {
-            host.rect = (host.buttonEl || host.el).getBoundingClientRect();
+            host.rect = host.rect || (host.buttonEl || host.el).getBoundingClientRect();
         }
 
         const pushPair = (host, unit) => {
             pairs.push([host, unit]);
             usedHosts.add(host);
             usedUnits.add(unit);
+        };
+
+        const hostMatchesUnitIdentity = (host, unit) => {
+            if (!host || !unit) return false;
+            if (unit.gameId != null && host.gameId != null && host.gameId !== unit.gameId) return false;
+            if (unit.gameId != null && host.gameId == null) return false;
+            if (host.name && unit.name && host.name !== unit.name) return false;
+            if (unit.villain === true && host.villain === false) return false;
+            if (unit.villain === false && host.villain === true) return false;
+            return true;
         };
 
         // Prefer exact name + gameId matches when unique enough.
@@ -7695,9 +8325,21 @@
                 !usedHosts.has(h)
                 && h.name
                 && h.name === unit.name
-                && (unit.gameId == null || h.gameId == null || h.gameId === unit.gameId)
+                && (unit.gameId == null || h.gameId === unit.gameId)
             );
             if (nameMatches.length === 1) pushPair(nameMatches[0], unit);
+        }
+
+        // Exact tile + identity match (setup hosts resolve tileIndex).
+        for (const unit of units) {
+            if (!unit?.panelDisplayColor || usedUnits.has(unit)) continue;
+            if (unit.tileIndex == null) continue;
+            const tileMatches = hosts.filter((h) =>
+                !usedHosts.has(h)
+                && h.tileIndex === unit.tileIndex
+                && hostMatchesUnitIdentity(h, unit)
+            );
+            if (tileMatches.length === 1) pushPair(tileMatches[0], unit);
         }
 
         for (const unit of units) {
@@ -7711,8 +8353,7 @@
             let bestDist = Infinity;
             for (const host of hosts) {
                 if (usedHosts.has(host)) continue;
-                if (host.name && unit.name && host.name !== unit.name) continue;
-                if (unit.gameId != null && host.gameId != null && host.gameId !== unit.gameId) continue;
+                if (!hostMatchesUnitIdentity(host, unit)) continue;
                 const dist = rectCenterDistanceSq(host.rect, tileRect);
                 if (dist < bestDist) {
                     bestDist = dist;
@@ -7731,8 +8372,12 @@
             byName.get(unit.name).push(unit);
         }
         for (const [name, groupUnits] of byName) {
+            // Require a real name match — never fall back to nameless hosts (was painting allies).
             const remHosts = hosts.filter((h) =>
-                !usedHosts.has(h) && (!h.name || h.name === name)
+                !usedHosts.has(h)
+                && h.name
+                && h.name === name
+                && groupUnits.some((u) => hostMatchesUnitIdentity(h, u))
             );
             if (!remHosts.length) continue;
             groupUnits.sort(compareUnitsForDisplay);
@@ -7745,7 +8390,10 @@
                 return aLeft - bLeft;
             });
             const n = Math.min(groupUnits.length, remHosts.length);
-            for (let i = 0; i < n; i++) pushPair(remHosts[i], groupUnits[i]);
+            for (let i = 0; i < n; i++) {
+                if (!hostMatchesUnitIdentity(remHosts[i], groupUnits[i])) continue;
+                pushPair(remHosts[i], groupUnits[i]);
+            }
         }
         return pairs;
     }
@@ -7755,25 +8403,40 @@
             clearAllBoardDuplicateBorders();
             return;
         }
-        const hosts = findBoardActorHosts();
-        if (!hosts.length) {
-            if (!labeledUnits.length) clearAllBoardDuplicateBorders();
+        if (!labeledUnits.length) {
+            clearAllBoardDuplicateBorders();
             return;
         }
-        const pairs = pairDuplicateUnitsToActors(labeledUnits, hosts);
+
+        // Drop previous tile-only fallback frames before re-pairing.
+        document.querySelectorAll('[id^="tile-index-"] > .bs-dup-border').forEach((el) => el.remove());
+        document.querySelectorAll('[id^="tile-index-"][data-bs-dup-border]').forEach((el) => {
+            delete el.dataset.bsDupBorder;
+        });
+
+        const hosts = findBoardActorHosts();
+        const pairs = hosts.length ? pairDuplicateUnitsToActors(labeledUnits, hosts) : [];
         const pairedHosts = new Set(pairs.map(([host]) => host));
+        const pairedUnits = new Set(pairs.map(([, unit]) => unit));
 
         for (const host of hosts) {
             if (pairedHosts.has(host)) continue;
-            if (host.el.dataset.bsDupBorder
+            if (host.el?.dataset?.bsDupBorder
                 || host.borderEl?.dataset?.bsDupNativeBorder
-                || host.el.querySelector?.(':scope > .bs-dup-border')) {
+                || host.el?.querySelector?.(':scope > .bs-dup-border')) {
                 clearActorDuplicateBorder(host);
             }
         }
         for (const [host, unit] of pairs) {
             if (unit.panelDisplayColor) ensureActorDuplicateBorder(host, unit.panelDisplayColor);
             else clearActorDuplicateBorder(host);
+        }
+
+        // Reliable fallback: paint the unit's board tile when no actor host paired.
+        for (const unit of labeledUnits) {
+            if (pairedUnits.has(unit) || !unit?.panelDisplayColor) continue;
+            if (unit.tileIndex == null) continue;
+            ensureTileDuplicateBorder(unit.tileIndex, unit.panelDisplayColor);
         }
     }
 
@@ -7786,21 +8449,26 @@
         return boardNameplateSyncTimer != null || boardNameplateObserver != null;
     }
 
-    function scheduleBoardDuplicateBordersAfterBattleStart() {
-        if (!isPanelOpen()) return;
+    function scheduleBoardDuplicateBordersRefresh() {
+        if (!isPanelOpen() || !coloringBordersEnabled) return;
         if (!isBoardDuplicateBorderSyncActive()) setupBoardNameplateSync();
         clearBoardDuplicateBorderRetryTimers();
         scheduleBoardDuplicateNameplateSync();
-        for (const ms of [100, 300, 700, 1500]) {
+        // Board pieces can mount asynchronously after room/setup changes.
+        for (const ms of [50, 150, 350, 800, 1600]) {
             boardDupBorderRetryTimers.push(
                 setTimeout(() => scheduleBoardDuplicateNameplateSync(), ms)
             );
         }
     }
 
+    function scheduleBoardDuplicateBordersAfterBattleStart() {
+        scheduleBoardDuplicateBordersRefresh();
+    }
+
     function syncBoardDuplicateNameplates(units = null) {
         if (!shouldBetterAnalyticsRun()) return;
-        if (!isPanelOpen()) {
+        if (!isPanelOpen() || !coloringBordersEnabled) {
             clearAllBoardDuplicateBorders();
             return;
         }
@@ -7838,6 +8506,19 @@
         }
         clearBoardDuplicateBorderRetryTimers();
         clearAllBoardDuplicateBorders();
+        cancelPendingBreadcrumbRender();
+        clearBreadcrumbOverlay();
+    }
+
+    function isOwnBoardVizMutationNode(node) {
+        if (!node || node.nodeType !== 1) return true;
+        if (node.classList?.contains('bs-dup-border')) return true;
+        if (node.classList?.contains('bs-breadcrumb-overlay')) return true;
+        if (node.classList?.contains('bs-breadcrumb-host')) return true;
+        if (node.classList?.contains('bs-breadcrumb-dot')) return true;
+        if (node.classList?.contains('bs-breadcrumb-seg')) return true;
+        if (node.id === BREADCRUMB_OVERLAY_ID) return true;
+        return false;
     }
 
     function setupBoardNameplateSync() {
@@ -7848,10 +8529,9 @@
             boardNameplateObserver = new MutationObserver((mutations) => {
                 for (const mutation of mutations) {
                     const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
-                    // Ignore our own border overlay churn; react to real board/actor changes.
-                    if (nodes.some((node) =>
-                        node.nodeType === 1 && !node.classList?.contains('bs-dup-border')
-                    )) {
+                    // Ignore our own border / breadcrumb overlay churn; react to real board/actor changes.
+                    if (nodes.some((node) => !isOwnBoardVizMutationNode(node))) {
+                        // Borders only — do not rebuild breadcrumb trails on every actor DOM tick.
                         scheduleBoardDuplicateNameplateSync();
                         return;
                     }
@@ -7859,8 +8539,15 @@
             });
             boardNameplateObserver.observe(host, { childList: true, subtree: true });
         }
-        boardNameplateSyncTimer = setInterval(() => scheduleBoardDuplicateNameplateSync(), 800);
+        boardNameplateSyncTimer = setInterval(() => {
+            scheduleBoardDuplicateNameplateSync();
+            // Reposition trails only when the board moved/zoomed — never full rebuild every tick.
+            if (breadcrumbTrailsEnabled && actorPathTrails.size && isPanelOpen()) {
+                if (getBreadcrumbLayoutKey() !== breadcrumbLayoutKey) scheduleBreadcrumbRender();
+            }
+        }, 800);
         scheduleBoardDuplicateNameplateSync();
+        if (breadcrumbTrailsEnabled) scheduleBreadcrumbRender();
     }
 
     function getAbilityInfo(gameId) {
@@ -11814,8 +12501,8 @@
             onReset: (stats) => {
                 stats.displayColor = undefined;
             },
-            onDuplicate: (stats, index) => {
-                stats.displayColor = duplicateColorAt(index);
+            onDuplicate: (stats, index, colorIndex) => {
+                stats.displayColor = duplicateColorAt(colorIndex);
                 if (!/#\d+/.test(String(stats.displayName || ''))) {
                     stats.displayName = formatDuplicateInstanceName(stats.name, index);
                     if (stats.isSummon && stats.spawnTile != null) {
@@ -12365,9 +13052,12 @@
     }
 
     function injectStyles() {
-        if (document.getElementById(STYLE_ID)) return;
-        const style = document.createElement('style');
-        style.id = STYLE_ID;
+        let style = document.getElementById(STYLE_ID);
+        if (!style) {
+            style = document.createElement('style');
+            style.id = STYLE_ID;
+            document.head.appendChild(style);
+        }
         style.textContent = `
             .bs-dup-border {
                 pointer-events: none;
@@ -12421,6 +13111,7 @@
             #${PANEL_ID} .bs-header,
             #${PANEL_ID} .bs-status,
             #${PANEL_ID} .bs-speed-row,
+            #${PANEL_ID} .bs-board-viz-row,
             #${PANEL_ID} .bs-tab-bar,
             #${PANEL_ID} .bs-body {
                 width: calc(100% - (2 * var(--bs-panel-inset)));
@@ -12584,6 +13275,57 @@
             }
             #${PANEL_ID} .bs-speed-slider-wrap.disabled input[type="range"] {
                 pointer-events: none;
+            }
+            #${PANEL_ID} .bs-board-viz-row {
+                margin-bottom: var(--bs-panel-gap);
+                padding: 6px 8px;
+                border: 4px solid transparent;
+                border-image: var(--bs-frame-4);
+                font-size: 11px;
+                color: var(--bs-text);
+            }
+            #${PANEL_ID} .bs-board-viz-row .bs-speed-toggle-row {
+                margin-bottom: 6px;
+            }
+            #${PANEL_ID} .bs-board-viz-row .bs-speed-toggle-row:last-child {
+                margin-bottom: 0;
+            }
+            .bs-breadcrumb-overlay {
+                position: fixed !important;
+                inset: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+                pointer-events: none !important;
+                z-index: 114 !important;
+                overflow: visible !important;
+            }
+            .bs-breadcrumb-host {
+                pointer-events: none !important;
+                overflow: visible !important;
+            }
+            .bs-breadcrumb-dot {
+                position: absolute !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                border-radius: 50% !important;
+                pointer-events: none !important;
+                box-sizing: border-box !important;
+                color: #111 !important;
+                font-weight: 800 !important;
+                font-family: Arial, Helvetica, sans-serif !important;
+                line-height: 1 !important;
+                border: calc(1px * var(--zoomFactor, 1)) solid rgba(0, 0, 0, 0.75) !important;
+                box-shadow: 0 0 calc(1px * var(--zoomFactor, 1)) rgba(0, 0, 0, 0.4) !important;
+                z-index: 260 !important;
+            }
+            .bs-breadcrumb-seg {
+                position: absolute !important;
+                height: calc(2px * var(--zoomFactor, 1)) !important;
+                transform-origin: 0 50% !important;
+                pointer-events: none !important;
+                border-radius: 1px !important;
+                z-index: 0 !important;
             }
             #${PANEL_ID} .bs-tab-bar {
                 display: flex;
@@ -13161,7 +13903,6 @@
                 user-select: none;
             }
         `;
-        document.head.appendChild(style);
     }
 
     function addResizeHandles(panel) {
@@ -14342,7 +15083,7 @@
             syncPanelTickTracking();
             lastUnitsRenderKey = '';
             render();
-            if (isPanelOpen()) scheduleBoardDuplicateBordersAfterBattleStart();
+            if (isPanelOpen()) scheduleBoardDuplicateBordersRefresh();
         };
 
         const onEnd = () => {
@@ -14367,6 +15108,7 @@
             syncPanelFightTickFromSnapshot();
             syncPanelTickTracking();
             render();
+            if (isPanelOpen()) scheduleBoardDuplicateBordersRefresh();
         };
 
         boardUnsubs.push(board.on('newGame', onNewGame));
@@ -14379,7 +15121,9 @@
                 invalidateBoardPreviewCache();
                 lastUnitsRenderKey = '';
                 pendingUnitsForceRefresh = true;
+                clearBreadcrumbTrails();
                 render();
+                if (isPanelOpen()) scheduleBoardDuplicateBordersRefresh();
             });
             if (autoSetupSub) boardUnsubs.push(autoSetupSub);
         } catch { /* ignore */ }
@@ -14392,10 +15136,12 @@
                     const configSig = getBoardConfigSignature(getBoardContext()?.boardConfig);
                     if (configSig === boardTrack.configSig) return;
                     boardTrack.configSig = configSig;
+                    clearBreadcrumbTrails();
                     invalidateBoardPreviewCache();
                     lastUnitsRenderKey = '';
                     pendingUnitsForceRefresh = true;
                     render();
+                    if (isPanelOpen()) scheduleBoardDuplicateBordersRefresh();
                 });
                 if (configSub) boardUnsubs.push(configSub);
 
@@ -14409,6 +15155,7 @@
                 const roomSub = roomSel.subscribe(() => {
                     cachedSpawnTileKeyLookup = null;
                     if (handleBoardContextChange()) render();
+                    if (isPanelOpen()) scheduleBoardDuplicateBordersRefresh();
                 });
                 if (roomSub) boardUnsubs.push(roomSub);
 
@@ -14416,6 +15163,7 @@
                 const floorSub = floorSel.subscribe(() => {
                     cachedSpawnTileKeyLookup = null;
                     if (handleBoardContextChange()) render();
+                    if (isPanelOpen()) scheduleBoardDuplicateBordersRefresh();
                 });
                 if (floorSub) boardUnsubs.push(floorSub);
             } catch { /* ignore */ }
@@ -14444,6 +15192,8 @@
     function createPanel() {
         injectStyles();
         const s = loadPanelSettings();
+        coloringBordersEnabled = s.coloringBordersEnabled !== false;
+        breadcrumbTrailsEnabled = s.breadcrumbTrailsEnabled !== false;
         const panel = document.createElement('div');
         panel.id = PANEL_ID;
         panel.style.cssText =
@@ -14549,6 +15299,8 @@
 
         speedRow.appendChild(slowMotionRow);
         speedRow.appendChild(speedSliderWrap);
+
+        const boardVizRow = createBoardVizRow();
 
         const tabBar = document.createElement('div');
         tabBar.className = 'bs-tab-bar';
@@ -14666,6 +15418,7 @@
         frame.appendChild(header);
         frame.appendChild(statusEl);
         frame.appendChild(speedRow);
+        frame.appendChild(boardVizRow);
         frame.appendChild(tabBar);
         frame.appendChild(unitsBody);
         frame.appendChild(logBody);
@@ -14673,6 +15426,8 @@
 
         gameSpeedPercent = normalizeSpeedPercent(s.gameSpeedPercent);
         slowMotionEnabled = s.slowMotionEnabled === true;
+        coloringBordersEnabled = s.coloringBordersEnabled !== false;
+        breadcrumbTrailsEnabled = s.breadcrumbTrailsEnabled !== false;
         syncTurboBlockFlag();
         if (slowMotionEnabled) suspendTurboForSlowMotion();
         updateSpeedSliderUi();
@@ -14722,7 +15477,8 @@
         renderStatusBar(true);
         renderActiveTab(true, activeTab === 'summary');
         setupBoardNameplateSync();
-        if (isFightActive()) scheduleBoardDuplicateBordersAfterBattleStart();
+        scheduleBoardDuplicateBordersRefresh();
+        if (breadcrumbTrailsEnabled) rebuildBreadcrumbsFromBattleLog();
     }
 
     function closePanel() {
@@ -14738,6 +15494,8 @@
         detachPanelViewportListener();
         panelDragState.reset();
         teardownBoardNameplateSync();
+        cancelPendingBreadcrumbRender();
+        clearBreadcrumbOverlay();
     }
 
     function togglePanel() {
@@ -14771,6 +15529,7 @@
         resetTickSpeedToDefault();
         teardownBoardListeners();
         teardownBoardNameplateSync();
+        clearBreadcrumbTrails();
         teardownWorldSubscriptions();
         teardownPanelResizeListeners();
         teardownPanelDragListeners();
@@ -14805,9 +15564,12 @@
                 return;
             }
             if (initToken !== sandboxPanelInitToken) return;
+            restoreTilesContainerLayout();
             const saved = loadPanelSettings();
             gameSpeedPercent = normalizeSpeedPercent(saved.gameSpeedPercent);
             slowMotionEnabled = saved.slowMotionEnabled === true;
+            coloringBordersEnabled = saved.coloringBordersEnabled !== false;
+            breadcrumbTrailsEnabled = saved.breadcrumbTrailsEnabled !== false;
             syncTurboBlockFlag();
             if (slowMotionEnabled) suspendTurboForSlowMotion();
             loadCollapsedOverrides();

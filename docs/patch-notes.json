@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.6.7",
+      "changes": [
+        {
+          "mod": "Better Analytics",
+          "type": "added",
+          "text": "Under Slow motion: Coloring borders and Breadcrumb trails toggles (both on by default). Trails draw numbered movement paths on the board in analyzer colors and clear when the board or fight resets."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Duplicate creature colors are unique across all labeled groups (no reuse between different names). Summons show up in Units as soon as they spawn."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "fixed",
+          "text": "Colored borders apply in setup and map preview (including map villains), not only after battle start. Breadcrumb overlay no longer rebuilds on every board DOM update (was causing heavy lag)."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Mission log and NPC dialogue wording polish for the new optional mission."
+        }
+      ]
+    },
+    {
       "version": "4.6.6",
       "changes": [
         {
