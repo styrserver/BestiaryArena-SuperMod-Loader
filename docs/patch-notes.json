@@ -4,6 +4,56 @@
   },
   "notes": [
     {
+      "version": "4.6.9",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "added",
+          "text": "Native Drop chance loot table mirrors Autoseller: clickable icons for sell/squeeze (shiny row preferred), sealed sell/inject, and equipment AD/AP/HP keep/dust. Toggles update lists with toasts; EN/PT locale strings included."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Autoduster cleanup: shared equip-id and post-dust helpers, capped processed-id set, deduped background-retry and loot-UI remove timers (cleared on unload), quieter EquipDrop logging. Saving or toggling all stats to Keep moves the item to the Keep column and clears the custom-stat lock. Loot-table action icons now render before portraits with consistent left spacing, centered icon groups, and reserved empty slot width on rows without controls to keep columns aligned."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Autoduster uses game.gameServer equipDrop ids and dusts after gameEnd (including late/background-tab responses and plant-activate recovery). Immediate dust from cache avoids inventory-lag retry loops; reward loot UI removes dusted equipment. Pending retry window extended; duplicate T1 inventory matches no longer skip dusting. Loot-table icons refresh on map change, support both EN/PT headers (Drop chance / Chance de drop), and only appear when their related feature is enabled (sell, squeeze, sealed inject/sell, autoduster). Sealed sell toggle uses the deny list; plant/squeezer auto badges hide while the loot table is open."
+        },
+        {
+          "mod": "Better Analytics",
+          "type": "changed",
+          "text": "Impact Analyzer no longer auto-opens while Power Saving Mode is on."
+        },
+        {
+          "mod": "Better Tasker",
+          "type": "changed",
+          "text": "Claims task rewards as soon as they are available, including during an ongoing battle (no longer waits for the fight to end)."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Quest dialogue content now loads from dedicated assets files, making mission and NPC text easier to update without touching gameplay logic."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Mission shells in code are now id-only and hydrate from assets at runtime; shared mission/NPC lines and reward summaries were centralized for cleaner maintenance."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Quest assets switched back to strict valid JSON (no comment syntax), with section metadata preserved through JSON-safe keys."
+        },
+        {
+          "mod": "Raid Hunter",
+          "type": "fixed",
+          "text": "Raid Monitor only appears on the main Quest Log overview; it is removed on nested pages such as World Cup quests and restored when returning."
+        }
+      ]
+    },
+    {
       "version": "4.6.8",
       "changes": [
         {

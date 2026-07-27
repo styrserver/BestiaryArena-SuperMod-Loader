@@ -712,6 +712,11 @@
             if (!button || button.disabled || isProcessing) {
                 return;
             }
+
+            // Skip while Power Saving Mode is on (goblin screen / no battlefield UI)
+            if (window.baPowerSavingMode?.isEnabled?.() || document.getElementById('autoplay-goblin')) {
+                return;
+            }
             
             const boardState = globalThis.state.board.getSnapshot();
             if (!boardState.context.gameStarted) {
@@ -721,24 +726,27 @@
             const delay = 100;
             
             setTimeout(() => {
-                if (button && !button.disabled) {
-                    button.click();
-                    
-                    if (boardState.context.mode === 'autoplay') {
-                        setTimeout(() => {
-                            const analyzerPanel = getAnalyzerPanel();
-                            if (analyzerPanel) {
-                                startDamageTracking();
-                            } else {
-                                waitForAnalyzerPanelAndStartTracking();
-                            }
-                        }, 25);
-                    } else {
-                        const trackingDelay = 100;
-                        setTimeout(() => {
+                if (!button || button.disabled) return;
+                // Re-check: Power Saving may have turned on during the delay
+                if (window.baPowerSavingMode?.isEnabled?.() || document.getElementById('autoplay-goblin')) {
+                    return;
+                }
+                button.click();
+                
+                if (boardState.context.mode === 'autoplay') {
+                    setTimeout(() => {
+                        const analyzerPanel = getAnalyzerPanel();
+                        if (analyzerPanel) {
+                            startDamageTracking();
+                        } else {
                             waitForAnalyzerPanelAndStartTracking();
-                        }, trackingDelay);
-                    }
+                        }
+                    }, 25);
+                } else {
+                    const trackingDelay = 100;
+                    setTimeout(() => {
+                        waitForAnalyzerPanelAndStartTracking();
+                    }, trackingDelay);
                 }
             }, delay);
         }

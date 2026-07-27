@@ -2512,11 +2512,13 @@ async function scheduleForegroundTaskRecheck() {
             return;
         }
 
-        if (!isGameRunning && (pendingTaskCompletion || taskReady || quotaReached)) {
+        // Rewards can be claimed during an active battle; only quotaReached alone still needs game idle
+        // (kills may not be fully applied until the run settles).
+        if (pendingTaskCompletion || taskReady || (!isGameRunning && quotaReached)) {
             if (taskCompletionInProgress) {
                 return;
             }
-            console.log('[Better Tasker] Foreground recheck detected completable task state - running post-game completion');
+            console.log('[Better Tasker] Foreground recheck detected completable task state - claiming reward');
             await handlePostGameTaskCompletion(false);
             return;
         }
@@ -5876,35 +5878,18 @@ async function triggerFailsafe(reason) {
         console.warn('[Better Tasker] Failed to stop automations, continuing with task completion anyway');
     }
     
-    // Wait for game to end if running, then complete task
+    // Claim reward immediately — game allows taking task rewards during battles
     await waitForGameEndAndCompleteTask();
 }
 
 
-// Wait for game to end and complete task
+// Complete task / claim reward (no longer waits for battle to end)
 async function waitForGameEndAndCompleteTask() {
     try {
-        // Check if a game is currently running
-        const boardContext = globalThis.state.board.getSnapshot().context;
-        const isGameRunning = boardContext.gameStarted;
-        console.log('[Better Tasker] Game running check after failsafe:', isGameRunning);
+        console.log('[Better Tasker] Proceeding with task reward claim (battle state ignored)...');
+        pendingTaskCompletion = true;
+        updateExposedState();
         
-        if (isGameRunning) {
-            console.log('[Better Tasker] Game is running, waiting for game to finish before claiming task...');
-            pendingTaskCompletion = true;
-            updateExposedState(); // Update exposed state for other mods
-            console.log('[Better Tasker] Pending task completion flag set - waiting for game to end');
-            
-            // Start continuous checking for game end
-            await waitForGameToEnd();
-            
-            // Game has ended, proceed with task completion
-            console.log('[Better Tasker] Game ended, proceeding with task completion...');
-        } else {
-            console.log('[Better Tasker] No game running, proceeding with task completion immediately...');
-        }
-        
-        // Complete task regardless of game state
         resetState('taskComplete');
         await handleTaskReadyCompletion();
         
@@ -6688,20 +6673,9 @@ async function handleTaskReadyCompletion() {
         
         await closeQuestLogIfOpen();
         
-        // Check if a game is actually running before waiting for it to finish
-        const boardContext = globalThis.state.board.getSnapshot().context;
-        const gameTimerContext = globalThis.state.gameTimer.getSnapshot().context;
-        const isGameStarted = boardContext.gameStarted;
-        const gameState = gameTimerContext.state; // 'initial', 'victory', 'defeat'
-        const isGameRunning = isGameStarted && gameState === 'initial';
-        console.log('[Better Tasker] Game running check:', isGameRunning, '(gameStarted:', isGameStarted, ', gameState:', gameState, ')');
-        
-        if (isGameRunning) {
-            console.log('[Better Tasker] Game is running, waiting for game to finish before completing task...');
-        } else {
-            console.log('[Better Tasker] No game running, proceeding with task completion...');
-            await handlePostGameTaskCompletion(true);
-        }
+        // Claim immediately — rewards can be taken while a battle is ongoing
+        console.log('[Better Tasker] Proceeding with task completion (battle state ignored)...');
+        await handlePostGameTaskCompletion(true);
         
     } catch (error) {
         console.error('[Better Tasker] Error in handleTaskReadyCompletion:', error);
@@ -6743,7 +6717,7 @@ async function openQuestLogWithRetry() {
     return false;
 }
 
-// Handle quest log opening and button clicking AFTER game finishes
+// Open quest log and click Finish to claim the task reward
 async function handlePostGameTaskCompletion(fromFailsafeChain = false) {
     try {
         if (!fromFailsafeChain) {
@@ -6756,9 +6730,8 @@ async function handlePostGameTaskCompletion(fromFailsafeChain = false) {
             updateExposedState();
         }
 
-        console.log('[Better Tasker] Handling post-game task completion...');
+        console.log('[Better Tasker] Handling task reward claim...');
         
-        console.log('[Better Tasker] Waiting for game to finish...');
         await sleep(1000);
         
         const playerContext = globalThis.state.player.getSnapshot().context;

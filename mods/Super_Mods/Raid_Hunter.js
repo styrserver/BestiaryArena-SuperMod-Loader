@@ -2564,28 +2564,81 @@ function findQuestLogContainer() {
     return null;
 }
 
-// Aggressive immediate detection function (inspired by Better Yasir)
-function tryImmediateRaidClockCreation() {
-    // Skip if raid clock already exists
-    if (document.getElementById(RAID_CLOCK_ID)) {
+// Main Quest Log overview (raids / Yasir / boosted), not World Cup or other nested quest pages.
+function isMainQuestLogPanel(questLogContainer = null) {
+    const container = questLogContainer || findQuestLogContainer();
+    if (!container) return false;
+
+    // Main overview always includes Yasir (still present if another mod only hides it)
+    if (container.querySelector('img[alt="Yasir"]')) return true;
+
+    const highlightTitles = Array.from(container.querySelectorAll('p.text-whiteHighlight'))
+        .map((el) => (el.textContent || '').trim());
+    if (highlightTitles.some((title) => title === 'Current raid' || title === 'Raid atual')) return true;
+    if (highlightTitles.some((title) => title === 'Daily boosted map' || title === 'Mapa boostado diário')) return true;
+
+    const dialog = container.closest('div[role="dialog"]');
+    const footer = dialog?.querySelector('.widget-bottom .flex.justify-end.gap-2')
+        || dialog?.querySelector('.flex.justify-end.gap-2');
+    if (footer) {
+        const hasBack = Array.from(footer.querySelectorAll('button')).some((btn) => {
+            const text = (btn.textContent || '').replace(/\s+/g, ' ').trim();
+            return text === 'Back' || text === 'Voltar' || !!btn.querySelector('svg.lucide-arrow-left');
+        });
+        if (hasBack) return false;
+
+        const hasWorldCupEntry = Array.from(footer.querySelectorAll('button')).some((btn) => {
+            const text = (btn.textContent || '').replace(/\s+/g, ' ').trim();
+            return /World Cup/i.test(text) || /Copa do Mundo/i.test(text);
+        });
+        if (hasWorldCupEntry) return true;
+    }
+
+    return false;
+}
+
+function removeRaidClockElement() {
+    const raidClockElement = document.getElementById(RAID_CLOCK_ID);
+    if (raidClockElement) {
+        raidClockElement.remove();
+    }
+}
+
+function ensureRaidClockAboveYasir(questLogContainer, raidClockElement) {
+    if (!questLogContainer || !raidClockElement) return;
+    const yasirElement = questLogContainer.querySelector('img[alt="Yasir"]')?.closest('.frame-1');
+    if (!yasirElement) return;
+    if (raidClockElement.nextElementSibling !== yasirElement) {
+        questLogContainer.insertBefore(raidClockElement, yasirElement);
+    }
+}
+
+// Keep Raid Monitor only on the main Quest Log overview panel.
+function syncRaidClockForQuestLogPanel() {
+    const questLogContainer = findQuestLogContainer();
+    const questLogHeader = document.querySelector('h2[id*="radix-"][class*="widget-top"] p[id*="radix-"]');
+    const isQuestLogOpen = !!(questLogHeader && questLogHeader.textContent === 'Quest Log' && questLogContainer);
+    const raidClockElement = document.getElementById(RAID_CLOCK_ID);
+
+    if (!isQuestLogOpen || !isMainQuestLogPanel(questLogContainer)) {
+        if (raidClockElement) {
+            removeRaidClockElement();
+        }
         return false;
     }
-    
-    const questLogContainer = findQuestLogContainer();
-    if (questLogContainer) {
-        // Final verification - check for the exact Quest Log header structure
-        const questLogHeader = document.querySelector('h2[id*="radix-"][class*="widget-top"] p[id*="radix-"]');
-        if (!questLogHeader || questLogHeader.textContent !== 'Quest Log') {
-            console.log('[Raid Hunter] Quest Log verification failed');
-            return false; // Not the actual Quest Log, abort
-        }
-        
-        console.log('[Raid Hunter] Quest Log verified');
+
+    if (!raidClockElement) {
         createRaidClock();
-        return true;
+        return !!document.getElementById(RAID_CLOCK_ID);
     }
-    
+
+    ensureRaidClockAboveYasir(questLogContainer, raidClockElement);
     return false;
+}
+
+// Aggressive immediate detection function (inspired by Better Yasir)
+function tryImmediateRaidClockCreation() {
+    return syncRaidClockForQuestLogPanel();
 }
 
 // Creates the raid clock widget.
@@ -2604,6 +2657,11 @@ function createRaidClock() {
     
     if (!questLogContainer) {
         console.log('[Raid Hunter] createRaidClock: Quest log container not found, aborting');
+        return;
+    }
+
+    if (!isMainQuestLogPanel(questLogContainer)) {
+        console.log('[Raid Hunter] createRaidClock: Not on main Quest Log panel, skipping');
         return;
     }
     
@@ -2689,41 +2747,57 @@ function createRaidClock() {
 // Quest log detection handler
 function handleQuestLogDetection(mutations) {
     safeExecute(() => {
-        let hasQuestLogContent = false;
+        let shouldSyncRaidClock = false;
         
-        // Process mutations for quest log content
+        // Process mutations for quest log content / panel switches
         for (const mutation of mutations) {
-            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                for (const node of mutation.addedNodes) {
-                    if (node.nodeType === Node.ELEMENT_NODE && !document.getElementById(RAID_CLOCK_ID)) {
-                            hasQuestLogContent = checkForQuestLogContent(node);
-                        if (hasQuestLogContent) break;
-                        }
+            if (mutation.type === 'childList' && (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)) {
+                for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+                    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                    if (node.id === RAID_CLOCK_ID) continue;
+                    if (checkForQuestLogContent(node) || node.querySelector?.(`#${RAID_CLOCK_ID}`) || node.id === 'quests-mod-missions-btn') {
+                        shouldSyncRaidClock = true;
+                        break;
+                    }
+                    // Footer Back / World Cup button swaps when entering nested quest pages
+                    if (node.matches?.('button') || node.querySelector?.('button')) {
+                        const text = (node.textContent || '').replace(/\s+/g, ' ');
+                        if (/World Cup|Copa do Mundo|Back|Voltar/i.test(text) || node.querySelector?.('svg.lucide-arrow-left')) {
+                            shouldSyncRaidClock = true;
+                            break;
                         }
                     }
-            if (hasQuestLogContent) break;
+                    // Main markers disappearing (Yasir) means we left the overview
+                    if (node.querySelector?.('img[alt="Yasir"]') || (node.matches?.('img[alt="Yasir"]'))) {
+                        shouldSyncRaidClock = true;
+                        break;
+                    }
+                }
+            }
+            if (shouldSyncRaidClock) break;
         }
         
-        // Handle quest log detection
-        if (hasQuestLogContent) {
-            console.log('[Raid Hunter] Quest log content detected!');
+        // Handle quest log detection / panel sync
+        if (shouldSyncRaidClock) {
+            console.log('[Raid Hunter] Quest log content change detected — syncing Raid Monitor');
             
             // Clear any existing timeout
             if (questLogObserverTimeout) {
                 clearTimeout(questLogObserverTimeout);
             }
             
-            // Try immediate detection first
+            // Try immediate sync first
             if (tryImmediateRaidClockCreation()) {
                 console.log('[Raid Hunter] Raid clock created successfully!');
                 return;
             }
+
+            // Also sync removals immediately (e.g. World Cup subpanel)
+            syncRaidClockForQuestLogPanel();
             
-            // Fallback with minimal delay
+            // Fallback with minimal delay for React panel swaps
             questLogObserverTimeout = setTimeout(() => {
-                if (!document.getElementById(RAID_CLOCK_ID) && tryImmediateRaidClockCreation()) {
-                    console.log('[Raid Hunter] Raid clock created via delayed detection!');
-                }
+                syncRaidClockForQuestLogPanel();
             }, 50);
         }
     });
@@ -2827,11 +2901,8 @@ function startQuestLogMonitoring() {
     // Simple interval monitoring as backup (like Better Yasir)
     questLogMonitorInterval = setInterval(() => {
         safeExecute(() => {
-            // Try immediate detection (like Better Yasir)
-            if (tryImmediateRaidClockCreation()) {
-                console.log('[Raid Hunter] Quest log monitoring: Raid clock created, continuing monitoring for future reopenings');
-                // Don't stop monitoring - keep it running for future quest log reopenings
-            }
+            // Keep Raid Monitor aligned with main vs nested Quest Log panels
+            syncRaidClockForQuestLogPanel();
         });
     }, 10000); // Reduced frequency - MutationObserver handles real-time detection
 }

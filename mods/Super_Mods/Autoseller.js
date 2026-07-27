@@ -19,7 +19,10 @@
     const PENDING_GAME_END_MAX_AGE_MS = 300000;
     const PENDING_GAME_END_MAX_SYNC_ATTEMPTS = 4;
     const PENDING_GAME_END_MAX_ACTION_ATTEMPTS = 3;
-    const PENDING_EQUIPMENT_MISS_TTL_MS = 8000;
+    const PENDING_EQUIPMENT_MISS_TTL_MS = 30000;
+    const PENDING_EQUIPMENT_PROCESSED_MAX = 400;
+    const AUTODUSTER_BACKGROUND_RETRY_MS = 1500;
+    const LOOT_EQUIP_UI_REMOVE_DELAYS_MS = [0, 120, 240, 480, 1000, 2500];
     const MAX_OBSERVER_ATTEMPTS = 10;
     const OBSERVER_DEBOUNCE_MS = 100;
     
@@ -178,6 +181,23 @@
     let autoBadgePositionRafId = null;
     let autoBadgeVisualViewportHandler = null;
     let openContextMenu = null; // Track currently open context menu { overlay, menu, closeMenu }
+    let lootTableMirrorObserver = null;
+    let lootTableMirrorRafId = null;
+    const LOOT_TABLE_MIRROR_ATTR = 'data-autoseller-loot-sig';
+    const LOOT_TABLE_ACTIONS_CLASS = 'autoseller-loot-actions';
+    const LOOT_TABLE_ACTION_ICON_SIZE_PX = 12;
+    const LOOT_TABLE_ACTION_BUTTON_PADDING_PX = 1;
+    const LOOT_TABLE_ACTION_GAP_PX = 2;
+    const LOOT_TABLE_ACTIONS_LEFT_GAP_PX = 6;
+    const LOOT_TABLE_ICON_URLS = {
+        sell: 'https://bestiaryarena.com/assets/icons/goldpile.png',
+        squeeze: 'https://bestiaryarena.com/assets/icons/dust.png',
+        sealedSell: 'https://bestiaryarena.com/assets/icons/goldpile.png',
+        sealedInject: 'https://bestiaryarena.com/assets/icons/upgrades.png',
+        equipAd: 'https://bestiaryarena.com/assets/icons/attackdamage.png',
+        equipAp: 'https://bestiaryarena.com/assets/icons/abilitypower.png',
+        equipHp: 'https://bestiaryarena.com/assets/icons/heal.png'
+    };
     
     // Timeout tracking for memory leak prevention
     let timeoutIds = []; // Track all setTimeout calls for cleanup
@@ -185,9 +205,15 @@
     let gameEndSubscription = null; // Track game.world.onGameEnd subscription
     const pendingGameEndBySeed = new Map(); // seed -> serverResults snapshot for retry after canRun block
     const pendingGameEndMeta = new Map(); // seed -> { attempts, queuedAt, reasons[] }
+    const gameEndSeenSeeds = new Set(); // seeds whose onGameEnd already fired (safe to dust)
+    const cachedGameServerBySeed = new Map(); // seed -> latest gameServer payload with rewards
+    const GAME_END_SEEN_SEEDS_MAX = 20;
     let gameEndRetryTimer = null;
     let pendingRewardsFlushTimer = null;
-    let lastBoardEquipHandledSeed = null;
+    let dustCachedEquipsInFlight = false;
+    let lastBoardEquipSignature = null;
+    const bgEquipRetryTimeoutBySeed = new Map(); // seed -> timeoutId (dedupe background retries)
+    const lootEquipUiRemoveTimeoutsById = new Map(); // equipmentId -> timeoutId[]
     let visibilityChangeHandler = null;
     let pendingGameEndInventorySubscription = null;
     let dragonPlantActivateRetryTimer = null;
@@ -500,6 +526,7 @@
         
         updateAutosellerNavButtonColor();
         updateAutosellerAutoBadges();
+        updateLootTableMirror();
         
         // Manage widget if any tab setting changed (autoMode, autosqueeze, or autoduster)
         const widgetNeedsUpdate = 
@@ -755,15 +782,25 @@
             : { ad: false, ap: false, hp: false }; // Default: disenchant all (all checkboxes checked)
     }
     
+    function isAutodusterKeepAllStats(keepStats) {
+        return keepStats?.ad === true && keepStats?.ap === true && keepStats?.hp === true;
+    }
+
     /**
      * Set autoduster stat settings for a specific equipment
      * @param {string} equipmentName - Name of the equipment
      * @param {Object} keepStats - Stat settings { ad: boolean, ap: boolean, hp: boolean }
      */
     function setAutodusterKeepStats(equipmentName, keepStats) {
+        if (!equipmentName) return;
         const settings = getSettings();
         const allKeepStats = { ...(settings.autodusterKeepStats || {}) };
-        allKeepStats[equipmentName] = keepStats;
+        // All stats kept = no per-stat disenchant profile; drop custom entry.
+        if (isAutodusterKeepAllStats(keepStats)) {
+            delete allKeepStats[equipmentName];
+        } else {
+            allKeepStats[equipmentName] = keepStats;
+        }
         setSettings({ autodusterKeepStats: allKeepStats });
     }
     
@@ -790,7 +827,10 @@
             return false; // No custom settings for this equipment
         }
         const keepStats = allKeepStats[equipmentName];
-        // Check if any stat is not at default (all should be false by default - disenchant all)
+        if (isAutodusterKeepAllStats(keepStats)) {
+            return false;
+        }
+        // Custom when any stat is kept (non-default disenchant-all profile)
         return keepStats.ad !== false || keepStats.ap !== false || keepStats.hp !== false;
     }
     
@@ -1062,7 +1102,7 @@
                 name = fromGame?.metadata?.name;
             } catch (_) { /* ignore */ }
         }
-        const serverId = equipment.id || equipment.databaseId || item?.equipmentId || item?.id;
+        const serverId = getDropEquipmentServerId(item);
         return {
             source,
             name: name || `gameId:${equipment.gameId ?? '?'}`,
@@ -1074,59 +1114,37 @@
     }
 
     /**
-     * Debug-log all equipment-related paths in serverResults (equipDrop, loot.droppedItems, etc.)
-     * @param {Object} serverResults
-     * @param {string} contextLabel - e.g. 'gameEnd', 'canRun-blocked', 'board-update'
+     * Canonical server instance id from an equip drop / inventory-shaped object.
+     */
+    function getDropEquipmentServerId(drop) {
+        if (!drop || typeof drop !== 'object') return null;
+        const equipment = drop.equip || drop;
+        return equipment.id || equipment.databaseId || drop.equipmentId || drop.id || null;
+    }
+
+    /**
+     * Equip-drop flow logger — only call when equipment is actually involved.
+     * Filter console with: EquipDrop
+     */
+    function logEquipDropFlow(step, detail = '') {
+        const msg = detail ? `${step}: ${detail}` : step;
+        console.log(`[Autoseller][EquipDrop] ${msg}`);
+    }
+
+    /**
+     * Log equip drop summary when equipment is present (no empty-path spam).
      */
     function logEquipmentDropDebug(serverResults, contextLabel) {
+        const { battleRewardEquipment, rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
+        if (battleRewardEquipment.length === 0) return;
+
         const seed = serverResults?.seed ?? '?';
-        if (!serverResults) {
-            console.log(`[Autoseller][EquipDrop] seed=? ${contextLabel}: serverResults is null`);
-            return;
-        }
-
-        const rewardScreen = serverResults.rewardScreen;
-        if (!rewardScreen) {
-            console.log(
-                `[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: no rewardScreen ` +
-                `(serverResults keys: ${Object.keys(serverResults).join(', ')})`
-            );
-            return;
-        }
-
-        console.log(
-            `[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: rewardScreen keys=[${Object.keys(rewardScreen).join(', ')}]`
+        const summaries = battleRewardEquipment.map((drop) => getEquipmentDropSummary(drop, 'equip'));
+        logEquipDropFlow(
+            contextLabel,
+            `seed=${seed} ${summaries.length} drop(s) ids=[${[...rewardEquipmentIds].join(',') || 'none'}] ` +
+            summaries.map((s) => `${s.name} T${s.tier} ${s.stat} id=${s.id ?? '?'}`).join(' | ')
         );
-
-        if (rewardScreen.equipDrop) {
-            const summary = getEquipmentDropSummary(rewardScreen.equipDrop, 'equipDrop');
-            console.log(`[Autoseller][EquipDrop] seed=${seed} equipDrop:`, summary, rewardScreen.equipDrop);
-        } else {
-            console.log(`[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: rewardScreen.equipDrop is missing`);
-        }
-
-        const loot = rewardScreen.loot;
-        if (loot) {
-            const lootKeys = typeof loot === 'object' && !Array.isArray(loot) ? Object.keys(loot).join(', ') : '(array)';
-            const droppedItems = Array.isArray(loot?.droppedItems) ? loot.droppedItems : [];
-            const equipmentInLoot = droppedItems.filter(isEquipmentLikeDrop);
-            console.log(
-                `[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: loot present ` +
-                `(loot keys: ${lootKeys}, droppedItems=${droppedItems.length}, equipment-like=${equipmentInLoot.length})`
-            );
-            equipmentInLoot.forEach((item, index) => {
-                const summary = getEquipmentDropSummary(item, 'droppedItems');
-                console.log(`[Autoseller][EquipDrop] seed=${seed} droppedItems[${index}]:`, summary, item);
-            });
-            if (droppedItems.length > 0 && equipmentInLoot.length === 0) {
-                console.log(
-                    `[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: droppedItems sample (non-equipment):`,
-                    droppedItems.slice(0, 3)
-                );
-            }
-        } else {
-            console.log(`[Autoseller][EquipDrop] seed=${seed} ${contextLabel}: no rewardScreen.loot`);
-        }
     }
 
     /**
@@ -1142,22 +1160,20 @@
         function addEquipmentDrop(equip, source) {
             if (!equip || typeof equip !== 'object') return;
             const equipment = equip.equip || equip;
-            const dropKey = `${source}:${equipment.id || equipment.databaseId || equip.equipmentId || equip.id || ''}:${equipment.gameId}:${equipment.stat}:${equipment.tier}`;
+            const serverId = getDropEquipmentServerId(equip);
+            const dropKey = `${source}:${serverId || ''}:${equipment.gameId}:${equipment.stat}:${equipment.tier}`;
             if (seenDropKeys.has(dropKey)) return;
             seenDropKeys.add(dropKey);
             battleRewardEquipment.push(equip);
 
-            const serverId = equipment.id || equipment.databaseId;
             if (serverId) {
                 rewardEquipmentIds.add(serverId);
             }
-            if (equip.equipmentId) {
-                rewardEquipmentIds.add(equip.equipmentId);
-            }
-            if (!serverId && !equip.equipmentId) {
+            if (!serverId) {
                 const summary = getEquipmentDropSummary(equip, source);
-                console.log(
-                    `[Autoseller][EquipDrop] extract: ${summary.name} from ${source} has no server id yet ` +
+                logAutosellerDebug(
+                    'Disenchant',
+                    `drop ${summary.name} from ${source} has no server id yet ` +
                     `(gameId=${summary.gameId} stat=${summary.stat} tier=${summary.tier})`
                 );
             }
@@ -1183,6 +1199,7 @@
 
     /**
      * Match equipment drops that lack server ids to inventory entries (gameId + stat + tier).
+     * Picks the first unused match when several exist (drops are T1; any copy is fine to dust).
      * @param {Array} battleRewardEquipment
      * @param {Array} inventoryEquipment
      * @param {Set} rewardEquipmentIds - Mutated in place
@@ -1192,7 +1209,7 @@
 
         for (const drop of battleRewardEquipment) {
             const equipment = drop?.equip || drop || {};
-            const serverId = equipment.id || equipment.databaseId || drop?.equipmentId || drop?.id;
+            const serverId = getDropEquipmentServerId(drop);
             if (serverId && rewardEquipmentIds.has(serverId)) continue;
 
             const gameId = equipment.gameId;
@@ -1200,7 +1217,8 @@
             const tier = equipment.tier;
             if (gameId == null || !stat || tier == null) continue;
 
-            const matches = inventoryEquipment.filter((inv) =>
+            // Drops are T1 — any matching inventory copy is safe to dust when ids are missing
+            const match = inventoryEquipment.find((inv) =>
                 inv &&
                 inv.gameId === gameId &&
                 inv.stat === stat &&
@@ -1209,21 +1227,87 @@
                 !rewardEquipmentIds.has(inv.id)
             );
 
-            if (matches.length === 1) {
-                rewardEquipmentIds.add(matches[0].id);
-                const summary = getEquipmentDropSummary(drop, 'inventory-resolve');
-                console.log(
-                    `[Autoseller][EquipDrop] resolved ${summary.name} → inventory id=${matches[0].id} ` +
+            if (match) {
+                rewardEquipmentIds.add(match.id);
+                logAutosellerDebug(
+                    'Disenchant',
+                    `resolved ${getEquipmentDropSummary(drop, 'inventory-resolve').name} → id=${match.id} ` +
                     `(gameId=${gameId} stat=${stat} tier=${tier})`
-                );
-            } else if (matches.length > 1) {
-                const summary = getEquipmentDropSummary(drop, 'inventory-resolve');
-                console.log(
-                    `[Autoseller][EquipDrop] ambiguous resolve for ${summary.name}: ${matches.length} inventory matches ` +
-                    `(ids: ${matches.map((m) => m.id).join(', ')})`
                 );
             }
         }
+    }
+
+    function queueUnresolvedEquipmentDrops(battleRewardEquipment) {
+        if (!Array.isArray(battleRewardEquipment)) return 0;
+        let added = 0;
+        for (const drop of battleRewardEquipment) {
+            const equipment = drop?.equip || drop || {};
+            const serverId = getDropEquipmentServerId(drop);
+            if (serverId) continue;
+            if (stateManager.addPendingUnresolvedEquipment({
+                gameId: equipment.gameId,
+                stat: equipment.stat,
+                tier: equipment.tier
+            })) {
+                added++;
+            }
+        }
+        return added;
+    }
+
+    function resolvePendingUnresolvedEquipment(inventoryEquipment) {
+        const pruned = stateManager.prunePendingUnresolvedEquipment();
+        if (pruned > 0) {
+            logAutosellerDebug('Disenchant', `pruned ${pruned} expired id-less drop(s)`);
+        }
+        const pending = stateManager.getPendingUnresolvedEquipment();
+        if (pending.length === 0 || !Array.isArray(inventoryEquipment) || inventoryEquipment.length === 0) {
+            return 0;
+        }
+
+        let resolved = 0;
+        const claimedIds = new Set();
+        for (const entry of pending) {
+            const candidates = inventoryEquipment.filter((inv) =>
+                inv &&
+                inv.gameId === entry.gameId &&
+                inv.stat === entry.stat &&
+                inv.tier === entry.tier &&
+                inv.id
+            );
+            if (candidates.length === 0) continue;
+
+            const match = candidates.find((inv) =>
+                !claimedIds.has(inv.id) &&
+                !stateManager.isProcessed(inv.id) &&
+                !stateManager.getPendingEquipmentIds().has(inv.id)
+            );
+
+            if (match) {
+                claimedIds.add(match.id);
+                stateManager.addPendingEquipment(match.id);
+                resolved++;
+                logAutosellerDebug(
+                    'Disenchant',
+                    `resolved id-less drop → inventory id=${match.id} (gameId=${entry.gameId} stat=${entry.stat} tier=${entry.tier})`
+                );
+            }
+            // Match exists but already pending/processed — drop is handled; clear unresolved either way
+            stateManager.removePendingUnresolvedEquipment(entry.gameId, entry.stat, entry.tier);
+        }
+        return resolved;
+    }
+
+    function getEquipmentBoardSignature(serverResults) {
+        if (!serverResults) return '';
+        const { battleRewardEquipment, rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
+        const ids = [...rewardEquipmentIds].map(String).sort().join(',');
+        const metas = battleRewardEquipment.map((drop) => {
+            const equipment = drop?.equip || drop || {};
+            return `${equipment.gameId ?? ''}:${equipment.stat ?? ''}:${equipment.tier ?? ''}:${getDropEquipmentServerId(drop) || ''}`;
+        }).join('|');
+        return `${serverResults.seed ?? '?'}:${ids}:${metas}`;
     }
     
     /**
@@ -2661,6 +2745,115 @@
         }
     }
 
+    function stripEquipmentFromCachedServerResults(equipmentId) {
+        if (!equipmentId) return;
+
+        function stripFromServerResults(serverResults) {
+            if (!serverResults?.rewardScreen) return false;
+            let changed = false;
+            const rewardScreen = serverResults.rewardScreen;
+
+            if (rewardScreen?.equipDrop && typeof rewardScreen.equipDrop === 'object') {
+                const id = getDropEquipmentServerId(rewardScreen.equipDrop);
+                if (id === equipmentId) {
+                    rewardScreen.equipDrop = null;
+                    changed = true;
+                }
+            }
+
+            const droppedItems = rewardScreen?.loot?.droppedItems;
+            if (Array.isArray(droppedItems) && droppedItems.length > 0) {
+                const filtered = droppedItems.filter((item) => getDropEquipmentServerId(item) !== equipmentId);
+                if (filtered.length !== droppedItems.length) {
+                    rewardScreen.loot.droppedItems = filtered;
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        try {
+            if (stripFromServerResults(latestServerResults)) {
+                logEquipDropFlow('ui-cache-strip', `removed equipmentId=${equipmentId} from latest serverResults cache`);
+            }
+            for (const [seed, cached] of cachedGameServerBySeed.entries()) {
+                if (stripFromServerResults(cached)) {
+                    cachedGameServerBySeed.set(seed, cached);
+                }
+            }
+        } catch (e) {
+            console.warn('[Autoseller] Failed to strip cached reward equipment:', e);
+        }
+    }
+
+    function clearLootEquipUiRemoveTimers(equipmentId) {
+        const scheduled = equipmentId
+            ? lootEquipUiRemoveTimeoutsById.get(equipmentId)
+            : null;
+        if (equipmentId && scheduled) {
+            scheduled.forEach((id) => {
+                try { clearTimeout(id); } catch (_) { /* ignore */ }
+            });
+            lootEquipUiRemoveTimeoutsById.delete(equipmentId);
+            return;
+        }
+        if (!equipmentId) {
+            for (const ids of lootEquipUiRemoveTimeoutsById.values()) {
+                ids.forEach((id) => {
+                    try { clearTimeout(id); } catch (_) { /* ignore */ }
+                });
+            }
+            lootEquipUiRemoveTimeoutsById.clear();
+        }
+    }
+
+    function forceRemoveDustedEquipmentFromLootUI(equipmentId) {
+        if (!equipmentId || typeof document === 'undefined') return;
+
+        clearLootEquipUiRemoveTimers(equipmentId);
+
+        const tryRemove = () => {
+            const root = findAutoplayContainer();
+            if (!root) return false;
+            const portraits = root.querySelectorAll('.equipment-portrait');
+            if (!portraits || portraits.length === 0) return false;
+
+            const target = portraits[0];
+            const removable =
+                target.closest('button') ||
+                target.closest('.container-slot') ||
+                target.parentElement;
+
+            if (!removable) return false;
+            removable.remove();
+            return true;
+        };
+
+        let removed = false;
+        const scheduled = [];
+        for (const delay of LOOT_EQUIP_UI_REMOVE_DELAYS_MS) {
+            const tid = setTimeout(() => {
+                if (isCleaningUp || removed) return;
+                if (tryRemove()) {
+                    removed = true;
+                    logEquipDropFlow('ui-force-remove', `removed reward tile for equipmentId=${equipmentId}`);
+                    clearLootEquipUiRemoveTimers(equipmentId);
+                }
+            }, delay);
+            scheduled.push(tid);
+            timeoutIds.push(tid);
+        }
+        lootEquipUiRemoveTimeoutsById.set(equipmentId, scheduled);
+    }
+
+    /** After a successful dust / 404 — strip caches and clear loot UI tile. */
+    function afterEquipmentDusted(equipmentId) {
+        if (!equipmentId) return;
+        stripEquipmentFromCachedServerResults(equipmentId);
+        forceRemoveDustedEquipmentFromLootUI(equipmentId);
+    }
+
     // =======================
     // 6. UI Utilities & Components
     // =======================
@@ -3461,7 +3654,7 @@
         
         // Function to handle mode change (will be updated after selectedCreatures is defined)
         let handleModeChange = (newMode) => {
-            console.log('[Autoseller] handleModeChange called with:', newMode, 'currentMode:', currentMode);
+            logAutosellerDebug('UI', `handleModeChange called with: ${newMode} currentMode: ${currentMode}`);
             // Prevent clicking if already active
             if (currentMode === newMode) {
                 return;
@@ -4822,10 +5015,34 @@
         saveButton.addEventListener('click', () => {
             // Save the checkbox states for this specific equipment
             // Inverted logic: checked = disenchant (false), unchecked = keep (true)
-            setAutodusterKeepStats(equipmentName, {
+            const keepStats = {
                 ad: !checkboxStates.ad,
                 ap: !checkboxStates.ap,
                 hp: !checkboxStates.hp
+            };
+            setAutodusterKeepStats(equipmentName, keepStats);
+
+            // Keep/disenchant column coherence:
+            // If all stat types are kept, this equipment should be in Keep column (ignore list),
+            // not in Disenchant column.
+            const keepAllStats = keepStats.ad === true && keepStats.ap === true && keepStats.hp === true;
+            const currentSettings = getSettings();
+            const ignoreList = [...(currentSettings.autodusterIgnoreList || [])];
+            const sellList = [...(currentSettings.autodusterSellList || [])];
+
+            if (keepAllStats) {
+                if (!ignoreList.includes(equipmentName)) ignoreList.push(equipmentName);
+                const sellIdx = sellList.indexOf(equipmentName);
+                if (sellIdx !== -1) sellList.splice(sellIdx, 1);
+            } else {
+                if (!sellList.includes(equipmentName)) sellList.push(equipmentName);
+                const keepIdx = ignoreList.indexOf(equipmentName);
+                if (keepIdx !== -1) ignoreList.splice(keepIdx, 1);
+            }
+
+            setSettings({
+                autodusterIgnoreList: ignoreList,
+                autodusterSellList: sellList
             });
             closeMenu();
         });
@@ -6127,16 +6344,17 @@
         return `${name} id=${monster.id ?? '?'} genes=${totalGenes} tier=${monster?.tier ?? '?'}`;
     }
     
-    // Monitor Dragon Plant API for devoured creatures
+    // Monitor Dragon Plant + gameServer APIs (equipDrop.id is reliable on gameServer)
     function setupDragonPlantAPIMonitor() {
         if (!window.fetch) return;
         
         originalFetch = window.fetch;
         window.fetch = function(...args) {
             const [url, options] = args;
+            const urlStr = typeof url === 'string' ? url : (url && typeof url.url === 'string' ? url.url : '');
             
             // Check if this is a Dragon Plant API call
-            if (typeof url === 'string' && url.includes('quest.plantEat')) {
+            if (urlStr.includes('quest.plantEat')) {
                 let devourRequestCount = 0;
                 try {
                     const requestBody = JSON.parse(options?.body || '{}');
@@ -6181,6 +6399,21 @@
                                     logAutosellerDebug('Devour', `plantEat success: +${goldReceived}g (${devouredCount} creatures) | plantGold=${currentPlantGold}/${threshold} (${percentToThreshold}%)`);
                                     console.log(`[Autoseller] Plant: +${goldReceived}g (${devouredCount} creatures) | Total: ${currentPlantGold}/${threshold} (${percentToThreshold}%)`);
                                     stateManager.updateSessionStats('devoured', devouredCount, goldReceived);
+
+                                    // Plant running means the fight is over — flush any equips stuck waiting for onGameEnd
+                                    try {
+                                        let eatenIds = [];
+                                        try {
+                                            const requestBody = JSON.parse(options?.body || '{}');
+                                            if (Array.isArray(requestBody[0]?.json?.monsterIds)) {
+                                                eatenIds = requestBody[0].json.monsterIds;
+                                            }
+                                        } catch (_) { /* ignore */ }
+                                        markGameEndSeenForPlantedMonsters(eatenIds);
+                                        noteBattleEndedForEquipDust('plantEat');
+                                    } catch (equipErr) {
+                                        console.warn('[Autoseller] Error flushing equips after plantEat:', equipErr);
+                                    }
                                     
                                     // Check if we should autocollect now that plant gold has increased
                                     checkDragonPlantAutocollect();
@@ -6196,10 +6429,276 @@
                     return response;
                 });
             }
+
+            // game.gameServer carries rewardScreen.equipDrop with a reliable instance id
+            if (urlStr.includes('gameServer?batch=1') || urlStr.includes('game.gameServer')) {
+                return originalFetch.apply(this, args).then(response => {
+                    const clonedResponse = response.clone();
+                    clonedResponse.json().then((responseData) => {
+                        try {
+                            handleGameServerRewardPayload(responseData);
+                        } catch (e) {
+                            console.warn('[Autoseller] Error processing gameServer response:', e);
+                        }
+                    }).catch(() => {});
+                    return response;
+                });
+            }
             
             return originalFetch.apply(this, args);
         };
         
+    }
+
+    function isTabVisible() {
+        return typeof document === 'undefined' || document.visibilityState === 'visible';
+    }
+
+    function markGameEndSeen(seed) {
+        if (seed == null) return;
+        gameEndSeenSeeds.add(seed);
+        while (gameEndSeenSeeds.size > GAME_END_SEEN_SEEDS_MAX) {
+            const oldest = gameEndSeenSeeds.values().next().value;
+            gameEndSeenSeeds.delete(oldest);
+            cachedGameServerBySeed.delete(oldest);
+        }
+    }
+
+    function cacheGameServerResults(data) {
+        if (!data || data.seed == null) return;
+        cachedGameServerBySeed.set(data.seed, data);
+        while (cachedGameServerBySeed.size > GAME_END_SEEN_SEEDS_MAX) {
+            const oldest = cachedGameServerBySeed.keys().next().value;
+            cachedGameServerBySeed.delete(oldest);
+        }
+    }
+
+    /**
+     * True when gameEnd has already fired (or fully processed) for this seed —
+     * equipToDust is safe and we should not wait for another onGameEnd.
+     */
+    function hasGameEndAlreadyPassed(seed) {
+        if (seed == null) return false;
+        if (gameEndSeenSeeds.has(seed) || lastProcessedServerResultsSeed === seed) return true;
+        // Prefer live board seed (latestServerResults is overwritten by gameServer itself)
+        const boardSeed = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults?.seed ?? null;
+        if (boardSeed != null && seed !== boardSeed) return true;
+        return false;
+    }
+
+    function getMonsterDropIdFromServerResults(data) {
+        const monster = data?.rewardScreen?.monsterDrop;
+        return monster?.databaseId || monster?.id || null;
+    }
+
+    function markGameEndSeenForPlantedMonsters(monsterIds) {
+        if (!Array.isArray(monsterIds) || monsterIds.length === 0) return;
+        const idSet = new Set(monsterIds.map(String));
+        for (const [seed, data] of cachedGameServerBySeed.entries()) {
+            const mid = getMonsterDropIdFromServerResults(data);
+            if (mid && idSet.has(String(mid))) {
+                markGameEndSeen(seed);
+            }
+        }
+        const latestMid = getMonsterDropIdFromServerResults(latestServerResults);
+        if (latestMid && idSet.has(String(latestMid)) && latestServerResults?.seed != null) {
+            markGameEndSeen(latestServerResults.seed);
+        }
+    }
+
+    /**
+     * @param {string} reason
+     * @param {{ requireGameEndPassed?: boolean }} [opts]
+     *   requireGameEndPassed=false: dust any cached equips (plant/tab recovery — fight is clearly over)
+     */
+    function dustCachedGameServerEquips(reason, opts = {}) {
+        const requireGameEndPassed = opts.requireGameEndPassed !== false;
+        const settings = getSettings();
+        if (!settings.autodusterChecked || dustCachedEquipsInFlight || isCleaningUp) return 0;
+
+        const seedsToDust = [];
+        for (const [seed, data] of cachedGameServerBySeed.entries()) {
+            if (requireGameEndPassed && !hasGameEndAlreadyPassed(seed)) continue;
+            const { rewardEquipmentIds } = extractEquipmentFromServerResults(data);
+            if (rewardEquipmentIds.size === 0) continue;
+            const unprocessed = [...rewardEquipmentIds].filter((id) => !stateManager.isProcessed(id));
+            if (unprocessed.length === 0) {
+                cachedGameServerBySeed.delete(seed);
+                clearBackgroundEquipDustRetry(seed);
+                continue;
+            }
+            if (!requireGameEndPassed) markGameEndSeen(seed);
+            seedsToDust.push({ seed, data, unprocessed });
+        }
+        if (seedsToDust.length === 0) return 0;
+
+        dustCachedEquipsInFlight = true;
+        (async () => {
+            try {
+                for (const { seed, data, unprocessed } of seedsToDust) {
+                    logEquipDropFlow(
+                        'recovery',
+                        `seed=${seed} reason=${reason} ids=[${unprocessed.join(',')}] — immediate dust from gameServer cache`
+                    );
+                    const { battleRewardEquipment, rewardEquipmentIds } = extractEquipmentFromServerResults(data);
+                    unprocessed.forEach((id) => stateManager.addPendingEquipment(id));
+                    const inventoryEquipment = await fetchServerEquipment();
+                    await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment, battleRewardEquipment);
+
+                    const stillPending = [...rewardEquipmentIds].some(
+                        (id) => id && !stateManager.isProcessed(id)
+                    );
+                    if (!stillPending) {
+                        cachedGameServerBySeed.delete(seed);
+                        clearBackgroundEquipDustRetry(seed);
+                    }
+                }
+            } catch (e) {
+                console.warn('[Autoseller] Error dusting cached gameServer equips:', e);
+            } finally {
+                dustCachedEquipsInFlight = false;
+                // One follow-up flush for anything still pending — no tight loop
+                if (stateManager.getPendingEquipmentIds().size > 0) {
+                    schedulePendingRewardsFlush();
+                }
+            }
+        })();
+
+        return seedsToDust.length;
+    }
+
+    function noteBattleEndedForEquipDust(reason, seed = null) {
+        if (seed != null) markGameEndSeen(seed);
+        const boardSeed = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults?.seed;
+        if (boardSeed != null) markGameEndSeen(boardSeed);
+        if (latestServerResults?.seed != null) markGameEndSeen(latestServerResults.seed);
+        // Plant / end-game UI means the fight is over — don't leave equips stuck on "waiting for gameEnd"
+        return dustCachedGameServerEquips(reason, { requireGameEndPassed: false });
+    }
+
+    function collectCachedDropsForPendingIds(pendingIds) {
+        const drops = [];
+        const idSet = new Set();
+        if (!pendingIds || pendingIds.size === 0) {
+            return { battleRewardEquipment: drops, rewardEquipmentIds: idSet };
+        }
+        for (const data of cachedGameServerBySeed.values()) {
+            const extracted = extractEquipmentFromServerResults(data);
+            for (const drop of extracted.battleRewardEquipment) {
+                const serverId = getDropEquipmentServerId(drop);
+                if (!serverId || !pendingIds.has(serverId) || idSet.has(serverId)) continue;
+                drops.push(drop);
+                idSet.add(serverId);
+            }
+        }
+        return { battleRewardEquipment: drops, rewardEquipmentIds: idSet };
+    }
+
+    function handleGameServerRewardPayload(responseData) {
+        if (isCleaningUp) return;
+
+        let data = responseData;
+        if (Array.isArray(responseData) && responseData[0]?.result?.data?.json) {
+            data = responseData[0].result.data.json;
+        }
+        if (!data?.rewardScreen || typeof data.seed === 'undefined') return;
+
+        // Capture board seed before overwriting latestServerResults
+        const boardSeedBefore = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults?.seed ?? null;
+
+        cacheGameServerResults(data);
+
+        // Cache only until gameEnd — unless this seed was already finalized (API arrived late)
+        latestServerResults = preferServerResultsWithEquipIds(data, latestServerResults) || data;
+        lastBoardEquipSignature = getEquipmentBoardSignature(latestServerResults);
+
+        // Keep pending retries on the richer payload
+        if (pendingGameEndBySeed.has(data.seed)) {
+            pendingGameEndBySeed.set(data.seed, cloneServerResults(latestServerResults));
+        }
+
+        const { rewardEquipmentIds, battleRewardEquipment } = extractEquipmentFromServerResults(data);
+        if (rewardEquipmentIds.size === 0 && battleRewardEquipment.length === 0) return;
+
+        const settings = getSettings();
+        const idList = [...rewardEquipmentIds].join(',') || 'none';
+        const summaries = battleRewardEquipment.map((drop) => getEquipmentDropSummary(drop, 'equip'));
+        const summaryText = summaries.map((s) => `${s.name} T${s.tier} ${s.stat}`).join(' | ');
+        const tabState = isTabVisible() ? 'foreground' : 'background';
+
+        if (!settings.autodusterChecked) {
+            logEquipDropFlow(
+                '1/gameServer',
+                `seed=${data.seed} ids=[${idList}] ${summaryText} — autoduster OFF, ignored (${tabState})`
+            );
+            return;
+        }
+
+        const gameEndPassed = gameEndSeenSeeds.has(data.seed) ||
+            lastProcessedServerResultsSeed === data.seed ||
+            (boardSeedBefore != null && boardSeedBefore !== data.seed);
+
+        // gameEnd already fired/processed, or board already moved to another battle
+        if (gameEndPassed) {
+            logEquipDropFlow(
+                '1/gameServer-LATE',
+                `seed=${data.seed} ids=[${idList}] ${summaryText} — gameEnd already passed, dusting now (${tabState})`
+            );
+            markGameEndSeen(data.seed);
+            dustCachedGameServerEquips('gameServer-after-gameEnd', { requireGameEndPassed: false });
+            return;
+        }
+
+        const gameEndPending = pendingGameEndBySeed.has(data.seed);
+        logEquipDropFlow(
+            '1/gameServer-cached',
+            `seed=${data.seed} ids=[${idList}] ${summaryText} — waiting for gameEnd (${tabState})` +
+            (gameEndPending ? ' (seed already queued for retry)' : '')
+        );
+
+        // Background tabs often never deliver onGameEnd for this seed — retry dust shortly
+        if (!isTabVisible()) {
+            scheduleBackgroundEquipDustRetry(data.seed);
+        }
+    }
+
+    function clearBackgroundEquipDustRetry(seed) {
+        if (seed == null) {
+            for (const tid of bgEquipRetryTimeoutBySeed.values()) {
+                try { clearTimeout(tid); } catch (_) { /* ignore */ }
+            }
+            bgEquipRetryTimeoutBySeed.clear();
+            return;
+        }
+        const existing = bgEquipRetryTimeoutBySeed.get(seed);
+        if (existing != null) {
+            try { clearTimeout(existing); } catch (_) { /* ignore */ }
+            bgEquipRetryTimeoutBySeed.delete(seed);
+        }
+    }
+
+    function scheduleBackgroundEquipDustRetry(seed) {
+        if (seed == null || isCleaningUp) return;
+        if (bgEquipRetryTimeoutBySeed.has(seed)) return;
+
+        const retryId = setTimeout(() => {
+            bgEquipRetryTimeoutBySeed.delete(seed);
+            if (isCleaningUp) return;
+            const cached = cachedGameServerBySeed.get(seed);
+            if (!cached) return;
+            const { rewardEquipmentIds: ids } = extractEquipmentFromServerResults(cached);
+            const pending = [...ids].filter((id) => id && !stateManager.isProcessed(id));
+            if (pending.length === 0) return;
+            logEquipDropFlow(
+                '1/gameServer-background-retry',
+                `seed=${seed} ids=[${pending.join(',')}] — dusting after background delay`
+            );
+            markGameEndSeen(seed);
+            dustCachedGameServerEquips('gameServer-background-retry', { requireGameEndPassed: false });
+        }, AUTODUSTER_BACKGROUND_RETRY_MS);
+
+        bgEquipRetryTimeoutBySeed.set(seed, retryId);
+        timeoutIds.push(retryId);
     }
     
     // Inventory update tracker for monitoring local inventory sync
@@ -6263,6 +6762,7 @@
         
         pendingEquipmentIds: new Set(),
         pendingEquipmentFirstSeenAt: new Map(),
+        pendingUnresolvedEquipment: [], // { gameId, stat, tier, firstSeenAt } — drops that lacked server ids
         
         errorStats: {
             fetchErrors: 0,
@@ -6295,6 +6795,11 @@
         
         markProcessed(ids) {
             ids.forEach(id => this.processedIds.add(id));
+            // Cap growth — Sets preserve insertion order, so drop oldest first
+            while (this.processedIds.size > PENDING_EQUIPMENT_PROCESSED_MAX) {
+                const oldest = this.processedIds.values().next().value;
+                this.processedIds.delete(oldest);
+            }
         },
         
         isProcessed(id) {
@@ -6345,11 +6850,55 @@
             this.processedIds.clear();
             this.pendingEquipmentIds.clear();
             this.pendingEquipmentFirstSeenAt.clear();
+            this.pendingUnresolvedEquipment = [];
             this.notifyUIUpdate();
         },
         
         clearProcessedIds() {
             this.processedIds.clear();
+        },
+
+        addPendingUnresolvedEquipment(entry) {
+            if (!entry || entry.gameId == null || !entry.stat || entry.tier == null) {
+                return false;
+            }
+            const key = `${entry.gameId}:${entry.stat}:${entry.tier}`;
+            if (this.pendingUnresolvedEquipment.some((p) => `${p.gameId}:${p.stat}:${p.tier}` === key)) {
+                return false;
+            }
+            if (this.pendingUnresolvedEquipment.length >= 50) {
+                this.pendingUnresolvedEquipment.shift();
+            }
+            this.pendingUnresolvedEquipment.push({
+                gameId: entry.gameId,
+                stat: entry.stat,
+                tier: entry.tier,
+                firstSeenAt: Date.now()
+            });
+            return true;
+        },
+
+        prunePendingUnresolvedEquipment() {
+            const now = Date.now();
+            const before = this.pendingUnresolvedEquipment.length;
+            this.pendingUnresolvedEquipment = this.pendingUnresolvedEquipment.filter(
+                (p) => (now - (p.firstSeenAt || 0)) < PENDING_EQUIPMENT_MISS_TTL_MS
+            );
+            return before - this.pendingUnresolvedEquipment.length;
+        },
+
+        getPendingUnresolvedEquipment() {
+            return this.pendingUnresolvedEquipment.slice();
+        },
+
+        removePendingUnresolvedEquipment(gameId, stat, tier) {
+            this.pendingUnresolvedEquipment = this.pendingUnresolvedEquipment.filter(
+                (p) => !(p.gameId === gameId && p.stat === stat && p.tier === tier)
+            );
+        },
+
+        clearPendingUnresolvedEquipment() {
+            this.pendingUnresolvedEquipment = [];
         },
         
         addPendingEquipment(id) {
@@ -6389,6 +6938,7 @@
         clearPendingEquipment() {
             this.pendingEquipmentIds.clear();
             this.pendingEquipmentFirstSeenAt.clear();
+            this.pendingUnresolvedEquipment = [];
             syncAutosellerCoordinationMetadata();
         },
 
@@ -6799,15 +7349,32 @@
         const outcome = { incomplete: false, pendingCount: 0 };
         try {
             const settings = getSettings();
-            logAutosellerDebug('Disenchant', `start: ${rewardEquipmentIds?.size ?? 0} reward equipment id(s), inventory=${Array.isArray(inventoryEquipment) ? inventoryEquipment.length : 0}`);
             
             // Check if autoduster is enabled
             if (!settings.autodusterChecked) {
-                logAutosellerDebug('Disenchant', 'skip: autoduster is disabled');
                 return outcome;
             }
-            
-            // Helper function to filter equipment that should be disenchanted
+
+            if (Array.isArray(battleRewardEquipment) && battleRewardEquipment.length > 0) {
+                queueUnresolvedEquipmentDrops(battleRewardEquipment);
+            }
+            if (Array.isArray(inventoryEquipment) && inventoryEquipment.length > 0) {
+                const resolved = resolvePendingUnresolvedEquipment(inventoryEquipment);
+                if (resolved > 0) {
+                    logAutosellerDebug('Disenchant', `resolved ${resolved} id-less drop(s) before disenchant pass`);
+                }
+            }
+
+            const pendingUpFront = stateManager.getPendingEquipmentIds().size;
+            const unresolvedUpFront = stateManager.getPendingUnresolvedEquipment().length;
+            if ((!(rewardEquipmentIds && rewardEquipmentIds.size > 0)) &&
+                pendingUpFront === 0 &&
+                unresolvedUpFront === 0) {
+                return outcome;
+            }
+
+            logAutosellerDebug('Disenchant', `start: ${rewardEquipmentIds?.size ?? 0} reward equipment id(s), inventory=${Array.isArray(inventoryEquipment) ? inventoryEquipment.length : 0}`);
+
             function filterEquipmentForDisenchant(inventoryEquipmentList, settings, rewardEquipmentIds = null, isPending = false) {
                 const toDisenchant = [];
                 
@@ -6890,32 +7457,41 @@
                     // Server dust succeeded — always mark processed so we never re-dust / TTL-drop falsely
                     stateManager.markProcessed([equipmentId]);
                     stateManager.removePendingEquipment(equipmentId);
+                    logEquipDropFlow(
+                        'dust-ok',
+                        `equipmentId=${equipmentId} +${result.dustGained || 0} dust${isPending ? ' (pending retry)' : ''}`
+                    );
                     const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
                     if (!removalResult.success) {
                         logAutosellerDebug('Disenchant', `local inventory remove failed after disenchant equipmentId=${equipmentId}`);
                         console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory after disenchanting (server dust already applied).`);
                     }
+                    afterEquipmentDusted(equipmentId);
                     outcome = { success: true, dustGained: result.dustGained || 0 };
                 } else if (result.status === 404) {
                     // 404 means equipment no longer exists on server
                     stateManager.markProcessed([equipmentId]);
                     stateManager.removePendingEquipment(equipmentId);
+                    logEquipDropFlow('dust-404', `equipmentId=${equipmentId} (gone on server)`);
                     const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
                     if (!removalResult.success) {
                         console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory (404).`);
                     }
+                    afterEquipmentDusted(equipmentId);
                     outcome = { success: false, status: 404 };
                 } else if (result.status === 429) {
                     await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
                     if (!isPending) {
                         stateManager.addPendingEquipment(equipmentId);
                     }
+                    logEquipDropFlow('dust-429', `equipmentId=${equipmentId} — will retry`);
                     outcome = { success: false, status: 429 };
                 } else {
                     console.warn(`[Autoseller] Failed to disenchant equipment ${equipmentId}, will retry. Status: ${result.status || 'unknown'}`);
                     if (!isPending) {
                         stateManager.addPendingEquipment(equipmentId);
                     }
+                    logEquipDropFlow('dust-fail', `equipmentId=${equipmentId} status=${result.status || 'unknown'} — will retry`);
                     outcome = { success: false, status: result.status };
                 }
 
@@ -6929,7 +7505,7 @@
                 const immediateDropsById = new Map();
                 for (const drop of battleRewardEquipment) {
                     const equipment = drop?.equip || drop || {};
-                    const serverId = equipment.id || equipment.databaseId || drop?.equipmentId || drop?.id;
+                    const serverId = getDropEquipmentServerId(drop);
                     if (!serverId || !rewardEquipmentIds.has(serverId) || immediateDropsById.has(serverId)) continue;
                     immediateDropsById.set(serverId, equipment);
                 }
@@ -6943,11 +7519,18 @@
                         if (!equipmentDetails) continue;
                         const decision = getEquipmentDecisionReason(equipmentDetails, settings);
                         if (!shouldDisenchantEquipment(equipmentDetails, settings)) {
+                            logEquipDropFlow(
+                                'immediate-keep',
+                                `equipmentId=${equipmentId} ${equipmentDetails.name} T${equipmentDetails.tier} ${equipmentDetails.stat} — ${decision.reason}`
+                            );
                             continue;
                         }
                         immediateAttempted++;
                         stateManager.addPendingEquipment(equipmentId);
-                        logAutosellerDebug('Disenchant', `immediate attempt equipmentId=${equipmentId} (${decision.reason})`);
+                        logEquipDropFlow(
+                            'immediate-dust',
+                            `equipmentId=${equipmentId} ${equipmentDetails.name} T${equipmentDetails.tier} ${equipmentDetails.stat} — ${decision.reason}`
+                        );
                         const result = await processEquipmentDisenchant(equipmentId, false);
                         if (result && result.success) {
                             immediateSuccess++;
@@ -7030,82 +7613,114 @@
             // Check and retry pending equipment IDs (always check, even if no new equipment)
             const pendingIds = stateManager.getPendingEquipmentIds();
             if (pendingIds.size > 0) {
-                logAutosellerDebug('Disenchant', `retrying ${pendingIds.size} pending equipment id(s)`);
-                const rapidPendingRetryAttempts = 8;
-                const rapidPendingRetryDelayMs = 150;
-                for (let attempt = 0; attempt < rapidPendingRetryAttempts; attempt++) {
-                    const currentInventory = await fetchServerEquipment();
-                    const inventoryIds = new Set((currentInventory || []).map(eq => eq?.id).filter(Boolean));
-                    const pendingSnapshot = stateManager.getPendingEquipmentIds();
-
-                    // Remove pending IDs that are missing for too long (memory leak prevention)
-                    for (const pendingId of pendingSnapshot) {
-                        if (!inventoryIds.has(pendingId)) {
-                            const pendingAgeMs = stateManager.getPendingEquipmentAgeMs(pendingId);
-                            if (pendingAgeMs >= PENDING_EQUIPMENT_MISS_TTL_MS) {
-                                stateManager.removePendingEquipment(pendingId);
-                                logAutosellerDebug('Disenchant', `pending id ${pendingId} not in inventory for ${pendingAgeMs}ms — dropped`);
-                            }
-                        }
+                // Prefer gameServer drop metadata — works when local inventory hasn't synced yet
+                const cachedForPending = collectCachedDropsForPendingIds(pendingIds);
+                if (cachedForPending.rewardEquipmentIds.size > 0 &&
+                    Array.isArray(battleRewardEquipment) &&
+                    battleRewardEquipment.length === 0) {
+                    // Only run a nested immediate pass when this call didn't already have drops
+                    const nestedDropsById = new Map();
+                    for (const drop of cachedForPending.battleRewardEquipment) {
+                        const equipment = drop?.equip || drop || {};
+                        const serverId = getDropEquipmentServerId(drop);
+                        if (!serverId || nestedDropsById.has(serverId) || stateManager.isProcessed(serverId)) continue;
+                        nestedDropsById.set(serverId, equipment);
                     }
-
-                    const remainingPendingIds = stateManager.getPendingEquipmentIds();
-                    if (remainingPendingIds.size === 0) {
-                        break;
-                    }
-                    if (!currentInventory || currentInventory.length === 0) {
-                        if (attempt < rapidPendingRetryAttempts - 1) {
-                            await new Promise(resolve => setTimeout(resolve, rapidPendingRetryDelayMs));
+                    for (const [equipmentId, dropEquipment] of nestedDropsById.entries()) {
+                        const equipmentDetails = getEquipmentDetails(dropEquipment);
+                        if (!equipmentDetails) continue;
+                        const decision = getEquipmentDecisionReason(equipmentDetails, settings);
+                        if (!shouldDisenchantEquipment(equipmentDetails, settings)) {
+                            stateManager.removePendingEquipment(equipmentId);
                             continue;
                         }
-                        break;
+                        logEquipDropFlow(
+                            'pending-cache-dust',
+                            `equipmentId=${equipmentId} ${equipmentDetails.name} T${equipmentDetails.tier} ${equipmentDetails.stat} — ${decision.reason}`
+                        );
+                        await processEquipmentDisenchant(equipmentId, true);
                     }
+                }
 
-                    // Filter inventory to only include pending equipment IDs
-                    const pendingEquipment = currentInventory.filter(invEquipment =>
-                        invEquipment && invEquipment.id && remainingPendingIds.has(invEquipment.id)
-                    );
+                const remainingAfterCache = stateManager.getPendingEquipmentIds();
+                if (remainingAfterCache.size > 0) {
+                    logAutosellerDebug('Disenchant', `retrying ${remainingAfterCache.size} pending equipment id(s) via inventory`);
+                    const rapidPendingRetryAttempts = 3;
+                    const rapidPendingRetryDelayMs = 200;
+                    for (let attempt = 0; attempt < rapidPendingRetryAttempts; attempt++) {
+                        const currentInventory = await fetchServerEquipment();
+                        const inventoryIds = new Set((currentInventory || []).map(eq => eq?.id).filter(Boolean));
+                        const pendingSnapshot = stateManager.getPendingEquipmentIds();
 
-                    if (pendingEquipment.length > 0) {
-                        // Filter equipment that should be disenchanted (with pending cleanup)
-                        const toDisenchant = filterEquipmentForDisenchant(pendingEquipment, settings, null, true);
-
-                        if (toDisenchant.length > 0) {
-                            let disenchantedCount = 0;
-                            let totalDust = 0;
-
-                            for (const equipment of toDisenchant) {
-                                const result = await processEquipmentDisenchant(equipment.id, true);
-                                if (result && result.success) {
-                                    disenchantedCount++;
-                                    totalDust += result.dustGained || 0;
+                        for (const pendingId of pendingSnapshot) {
+                            if (!inventoryIds.has(pendingId)) {
+                                const pendingAgeMs = stateManager.getPendingEquipmentAgeMs(pendingId);
+                                if (pendingAgeMs >= PENDING_EQUIPMENT_MISS_TTL_MS) {
+                                    stateManager.removePendingEquipment(pendingId);
+                                    logAutosellerDebug('Disenchant', `pending id ${pendingId} not in inventory for ${pendingAgeMs}ms — dropped`);
                                 }
                             }
+                        }
 
-                            if (disenchantedCount > 0) {
-                                console.log(`[Autoseller] Retried ${disenchantedCount} pending equipment → ${totalDust} dust`);
+                        const remainingPendingIds = stateManager.getPendingEquipmentIds();
+                        if (remainingPendingIds.size === 0) break;
+                        if (!currentInventory || currentInventory.length === 0) {
+                            if (attempt < rapidPendingRetryAttempts - 1) {
+                                await new Promise(resolve => setTimeout(resolve, rapidPendingRetryDelayMs));
+                                continue;
+                            }
+                            break;
+                        }
+
+                        const pendingEquipment = currentInventory.filter(invEquipment =>
+                            invEquipment && invEquipment.id && remainingPendingIds.has(invEquipment.id)
+                        );
+
+                        if (pendingEquipment.length > 0) {
+                            const toDisenchant = filterEquipmentForDisenchant(pendingEquipment, settings, null, true);
+                            if (toDisenchant.length > 0) {
+                                let disenchantedCount = 0;
+                                let totalDust = 0;
+                                for (const equipment of toDisenchant) {
+                                    const result = await processEquipmentDisenchant(equipment.id, true);
+                                    if (result && result.success) {
+                                        disenchantedCount++;
+                                        totalDust += result.dustGained || 0;
+                                    }
+                                }
+                                if (disenchantedCount > 0) {
+                                    console.log(`[Autoseller] Retried ${disenchantedCount} pending equipment → ${totalDust} dust`);
+                                }
                             }
                         }
-                    }
 
-                    if (stateManager.getPendingEquipmentIds().size === 0) {
-                        break;
-                    }
-                    if (attempt < rapidPendingRetryAttempts - 1) {
-                        await new Promise(resolve => setTimeout(resolve, rapidPendingRetryDelayMs));
+                        if (stateManager.getPendingEquipmentIds().size === 0) break;
+                        if (attempt < rapidPendingRetryAttempts - 1) {
+                            await new Promise(resolve => setTimeout(resolve, rapidPendingRetryDelayMs));
+                        }
                     }
                 }
-                if (stateManager.getPendingEquipmentIds().size > 0) {
+
+                if (stateManager.getPendingUnresolvedEquipment().length > 0) {
                     schedulePendingRewardsFlush();
+                } else if (stateManager.getPendingEquipmentIds().size > 0) {
+                    const slowRetry = setTimeout(() => {
+                        if (!isCleaningUp && stateManager.getPendingEquipmentIds().size > 0) {
+                            schedulePendingRewardsFlush();
+                        }
+                    }, 3000);
+                    timeoutIds.push(slowRetry);
                 }
             }
-            outcome.pendingCount = stateManager.getPendingEquipmentIds().size;
+            outcome.pendingCount = stateManager.getPendingEquipmentIds().size +
+                stateManager.getPendingUnresolvedEquipment().length;
             outcome.incomplete = outcome.pendingCount > 0;
             return outcome;
         } catch (e) {
             console.error(`[${modName}][ERROR][processEligibleEquipment] Failed to disenchant equipment. Error: ${e.message}`, e);
             stateManager.updateErrorStats('disenchantErrors');
-            outcome.pendingCount = stateManager.getPendingEquipmentIds().size;
+            outcome.pendingCount = stateManager.getPendingEquipmentIds().size +
+                stateManager.getPendingUnresolvedEquipment().length;
             outcome.incomplete = outcome.pendingCount > 0;
             return outcome;
         }
@@ -8301,20 +8916,23 @@
                     
                     const rs = newServerResults?.rewardScreen;
                     const hasEquipDrop = !!(rs?.equipDrop);
+                    const hasLootEquip = Array.isArray(rs?.loot?.droppedItems) &&
+                        rs.loot.droppedItems.some(isEquipmentLikeDrop);
+                    const hasEquipment = hasEquipDrop || hasLootEquip;
 
+                    // Keep the richer snapshot (gameServer ids win over incomplete board payloads).
+                    // Do not queue/dust here — equipToDust only works after gameEnd.
                     if (newSeed !== currentSeed) {
-                        latestServerResults = newServerResults;
-                        lastBoardEquipHandledSeed = null;
-                        if (hasEquipDrop) {
-                            logEquipmentDropDebug(newServerResults, 'board-update');
-                            queueEquipmentFromServerResults(newServerResults, 'board-update');
-                            lastBoardEquipHandledSeed = newSeed;
+                        lastBoardEquipSignature = null;
+                    }
+                    latestServerResults = preferServerResultsWithEquipIds(newServerResults, latestServerResults)
+                        || newServerResults;
+
+                    if (hasEquipment) {
+                        const signature = getEquipmentBoardSignature(latestServerResults);
+                        if (signature !== lastBoardEquipSignature) {
+                            lastBoardEquipSignature = signature;
                         }
-                    } else if (hasEquipDrop && lastBoardEquipHandledSeed !== newSeed) {
-                        // equipDrop arrived on a later board tick for the same seed (fast autoplay)
-                        logEquipmentDropDebug(newServerResults, 'board-update-late-equip');
-                        queueEquipmentFromServerResults(newServerResults, 'board-update-late-equip');
-                        lastBoardEquipHandledSeed = newSeed;
                     }
                 }
 
@@ -8344,6 +8962,7 @@
             
             // Listen for game start/end events for additional widget updates
             emitNewGameHandler1 = () => {
+                scheduleLootTableMirrorRefresh();
                 if (shouldShowAutosellerWidget()) {
                     const timeoutId = setTimeout(() => {
                         if (isCleaningUp) return;
@@ -8355,6 +8974,10 @@
             globalThis.state.board.on('emitNewGame', emitNewGameHandler1);
             
             emitEndGameHandler1 = () => {
+                const seed = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults?.seed
+                    ?? latestServerResults?.seed
+                    ?? null;
+                noteBattleEndedForEquipDust('emitEndGame', seed);
                 if (shouldShowAutosellerWidget()) {
                     const timeoutId = setTimeout(() => {
                         if (isCleaningUp) return;
@@ -8704,16 +9327,29 @@
         }
     }
 
+    function isLootDropTableOverlayOpen() {
+        for (const table of document.querySelectorAll('table')) {
+            if (!isLootDropTable(table)) continue;
+            const rect = table.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) return true;
+        }
+        return false;
+    }
+
     function positionAutoBadges() {
         if (isCleaningUp) return;
 
         refreshAutoBadgeTargets();
 
+        // Plant/squeezer badges are body-fixed at z-index 100; hide them while the
+        // native loot table overlay is open so they don't float over its rows.
+        const hideForLootTable = isLootDropTableOverlayOpen();
+
         for (const slot of Object.values(AUTO_BADGE_SLOTS)) {
             if (!slot.el) continue;
 
             const target = slot.target;
-            if (!target || !document.contains(target)) {
+            if (hideForLootTable || !target || !document.contains(target)) {
                 slot.el.style.display = 'none';
                 continue;
             }
@@ -8883,6 +9519,542 @@
         );
 
         ensureAutoBadgeTracking();
+    }
+
+    function parseLootTablePortraitGameId(src) {
+        const match = String(src || '').match(/\/assets\/portraits\/(\d+)(?:-shiny)?\.png/i);
+        return match ? Number(match[1]) : null;
+    }
+
+    function resolveLootTableCreatureName(gameId) {
+        if (!Number.isFinite(gameId)) return null;
+        try {
+            const monster = globalThis.state?.utils?.getMonster?.(gameId);
+            if (monster?.metadata?.name) return monster.metadata.name;
+        } catch (_) {}
+        return window.creatureDatabase?.findMonsterByGameId?.(gameId)?.metadata?.name || null;
+    }
+
+    function isLootDropTable(table) {
+        if (!table || table.tagName !== 'TABLE') return false;
+        for (const th of table.querySelectorAll('thead th')) {
+            const headerText = String(th.textContent || '').trim().toLowerCase();
+            if (headerText.includes('drop chance') || headerText.includes('chance de drop')) return true;
+        }
+        return false;
+    }
+
+    function parseLootTableRow(tr) {
+        if (!tr || tr.tagName !== 'TR' || tr.closest('thead')) return null;
+
+        const portraitImg = tr.querySelector('img[alt="creature"], img[src*="/assets/portraits/"]');
+        if (portraitImg) {
+            const src = portraitImg.getAttribute('src') || portraitImg.src || '';
+            const gameId = parseLootTablePortraitGameId(src);
+            const isShiny = /-shiny\.png/i.test(src) ||
+                !!tr.querySelector('.rarity-shiny, .text-shiny, img[alt="shiny"][src*="shiny-star"]');
+            const isSealed = /-sealed\.png/i.test(src) ||
+                !!tr.querySelector('.rarity-sealed, .text-sealed, img[alt="sealed"][src*="star-tier-sealed"]');
+            const grid = tr.querySelector('.grid.w-full');
+            const nameFromDom = grid?.querySelector('span.line-clamp-1, span:first-child')?.textContent?.trim();
+            const creatureName = nameFromDom || resolveLootTableCreatureName(gameId);
+            if (!creatureName) return null;
+            return { type: 'creature', name: creatureName, gameId, isShiny, isSealed };
+        }
+
+        const grid = tr.querySelector('.grid.w-full');
+        const equipmentName = grid?.querySelector('span.line-clamp-1, span:first-child')?.textContent?.trim();
+        if (!equipmentName) return null;
+        return { type: 'equipment', name: equipmentName, isShiny: false };
+    }
+
+    function isLootTableSellFeatureEnabled(settings) {
+        return settings.autoMode === 'autosell' || settings.autoMode === 'autoplant';
+    }
+
+    function isLootTableSqueezeFeatureEnabled(settings) {
+        return settings.autosqueezeChecked === true;
+    }
+
+    function isLootTableAutodusterFeatureEnabled(settings) {
+        return settings.autodusterChecked === true;
+    }
+
+    function isLootTableSealedInjectFeatureEnabled(settings) {
+        return isLootTableSellFeatureEnabled(settings) && settings.autoInjectSealedCreaturesGlobal === true;
+    }
+
+    function getLootTableRowActions(rowInfo, settings) {
+        if (!rowInfo) {
+            return { buttons: [] };
+        }
+
+        if (rowInfo.type === 'creature') {
+            if (rowInfo.isSealed) {
+                const buttons = [];
+                if (isLootTableSealedInjectFeatureEnabled(settings)) {
+                    buttons.push({
+                        key: 'sealedInject',
+                        active: isSealedTier5InjectAllowed(rowInfo.name)
+                    });
+                }
+                if (isLootTableSellFeatureEnabled(settings)) {
+                    buttons.push({
+                        key: 'sealedSell',
+                        active: isSealedTier5SellAllowed(rowInfo.name)
+                    });
+                }
+                return { buttons };
+            }
+
+            const buttons = [];
+            if (isLootTableSqueezeFeatureEnabled(settings)) {
+                buttons.push({
+                    key: 'squeeze',
+                    active: !isItemKeptByFilterList(rowInfo.name, 'autosqueezeIgnoreList', settings)
+                });
+            }
+            if (isLootTableSellFeatureEnabled(settings)) {
+                buttons.push({
+                    key: 'sell',
+                    active: !isItemKeptByFilterList(rowInfo.name, 'autoplantIgnoreList', settings)
+                });
+            }
+            return { buttons };
+        }
+
+        if (rowInfo.type === 'equipment') {
+            if (!isLootTableAutodusterFeatureEnabled(settings)) {
+                return { buttons: [] };
+            }
+
+            const equipmentCatalog = window.equipmentDatabase?.ALL_EQUIPMENT || [];
+            // Only show equipment controls for items that are actually in the equipment database.
+            // (e.g. runes / non-equip loot should not get autoduster buttons)
+            if (!equipmentCatalog.includes(rowInfo.name)) {
+                return { buttons: [] };
+            }
+
+            const isKept = isItemKeptByFilterList(rowInfo.name, 'autodusterIgnoreList', settings);
+            if (isKept) {
+                return { buttons: [
+                    { key: 'equipAd', active: false },
+                    { key: 'equipAp', active: false },
+                    { key: 'equipHp', active: false }
+                ] };
+            }
+            const keepStats = getAutodusterKeepStats(rowInfo.name);
+            return {
+                buttons: [
+                    { key: 'equipAd', active: !keepStats.ad },
+                    { key: 'equipAp', active: !keepStats.ap },
+                    { key: 'equipHp', active: !keepStats.hp }
+                ]
+            };
+        }
+
+        return { buttons: [] };
+    }
+
+    function lootTableToggleAction(actionKey, rowInfo) {
+        if (isCleaningUp || !rowInfo) return;
+
+        const settings = getSettings();
+
+        if (actionKey === 'sell') {
+            const isKept = isItemKeptByFilterList(rowInfo.name, 'autoplantIgnoreList', settings);
+            const ignoreList = [...(settings.autoplantIgnoreList || [])];
+            const sellList = [...(settings.autoplantSellList || [])];
+            if (isKept) {
+                const idx = ignoreList.indexOf(rowInfo.name);
+                if (idx !== -1) ignoreList.splice(idx, 1);
+                if (!sellList.includes(rowInfo.name)) sellList.push(rowInfo.name);
+                setSettings({ autoplantIgnoreList: ignoreList, autoplantSellList: sellList });
+                console.log(`[Autoseller] Loot icon toggle: enabled autosell for ${rowInfo.name}`);
+                showAutosellerToast(tReplace('mods.autoseller.lootToastAutosellEnabled', { name: rowInfo.name }));
+            } else {
+                const idx = sellList.indexOf(rowInfo.name);
+                if (idx !== -1) sellList.splice(idx, 1);
+                if (!ignoreList.includes(rowInfo.name)) ignoreList.push(rowInfo.name);
+                setSettings({ autoplantIgnoreList: ignoreList, autoplantSellList: sellList });
+                console.log(`[Autoseller] Loot icon toggle: disabled autosell for ${rowInfo.name}`);
+                showAutosellerToast(tReplace('mods.autoseller.lootToastAutosellDisabled', { name: rowInfo.name }));
+            }
+        } else if (actionKey === 'squeeze') {
+            const isKept = isItemKeptByFilterList(rowInfo.name, 'autosqueezeIgnoreList', settings);
+            const ignoreList = [...(settings.autosqueezeIgnoreList || [])];
+            const sellList = [...(settings.autosqueezeSellList || [])];
+            if (isKept) {
+                const idx = ignoreList.indexOf(rowInfo.name);
+                if (idx !== -1) ignoreList.splice(idx, 1);
+                if (!sellList.includes(rowInfo.name)) sellList.push(rowInfo.name);
+                setSettings({ autosqueezeIgnoreList: ignoreList, autosqueezeSellList: sellList });
+                console.log(`[Autoseller] Loot icon toggle: enabled autosqueeze for ${rowInfo.name}`);
+                showAutosellerToast(tReplace('mods.autoseller.lootToastAutosqueezeEnabled', { name: rowInfo.name }));
+            } else {
+                const idx = sellList.indexOf(rowInfo.name);
+                if (idx !== -1) sellList.splice(idx, 1);
+                if (!ignoreList.includes(rowInfo.name)) ignoreList.push(rowInfo.name);
+                setSettings({ autosqueezeIgnoreList: ignoreList, autosqueezeSellList: sellList });
+                console.log(`[Autoseller] Loot icon toggle: disabled autosqueeze for ${rowInfo.name}`);
+                showAutosellerToast(tReplace('mods.autoseller.lootToastAutosqueezeDisabled', { name: rowInfo.name }));
+            }
+        } else if (actionKey === 'sealedSell') {
+            const isAllowed = isSealedTier5SellAllowed(rowInfo.name);
+            if (isAllowed) {
+                setSealedTier5SellBlocked(rowInfo.name, true);
+                setSealedTier5SellAllowed(rowInfo.name, false);
+                console.log(`[Autoseller] Loot icon toggle: disabled sealed sell/devour for ${rowInfo.name}`);
+                showAutosellerToast(tReplace('mods.autoseller.lootToastSealedSellDisabled', { name: rowInfo.name }));
+            } else {
+                setSealedTier5SellBlocked(rowInfo.name, false);
+                setSealedTier5SellAllowed(rowInfo.name, true);
+                console.log(`[Autoseller] Loot icon toggle: enabled sealed sell/devour for ${rowInfo.name}`);
+                showAutosellerToast(tReplace('mods.autoseller.lootToastSealedSellEnabled', { name: rowInfo.name }));
+            }
+        } else if (actionKey === 'sealedInject') {
+            const isAllowed = isSealedTier5InjectAllowed(rowInfo.name);
+            if (isAllowed) {
+                setSealedTier5InjectAllowed(rowInfo.name, false);
+                console.log(`[Autoseller] Loot icon toggle: disabled sealed auto-inject for ${rowInfo.name}`);
+                showAutosellerToast(tReplace('mods.autoseller.lootToastSealedInjectDisabled', { name: rowInfo.name }));
+            } else {
+                setSealedTier5InjectAllowed(rowInfo.name, true);
+                console.log(`[Autoseller] Loot icon toggle: enabled sealed auto-inject for ${rowInfo.name}`);
+                showAutosellerToast(tReplace('mods.autoseller.lootToastSealedInjectEnabled', { name: rowInfo.name }));
+            }
+        } else if (actionKey === 'equipAd' || actionKey === 'equipAp' || actionKey === 'equipHp') {
+            const stat = actionKey === 'equipAd' ? 'ad' : actionKey === 'equipAp' ? 'ap' : 'hp';
+            const statLabel = stat.toUpperCase();
+            const isKeptByFilter = isItemKeptByFilterList(rowInfo.name, 'autodusterIgnoreList', settings);
+            if (isKeptByFilter) {
+                const ignoreList = [...(settings.autodusterIgnoreList || [])];
+                const sellList = [...(settings.autodusterSellList || [])];
+                const idx = ignoreList.indexOf(rowInfo.name);
+                if (idx !== -1) ignoreList.splice(idx, 1);
+                if (!sellList.includes(rowInfo.name)) sellList.push(rowInfo.name);
+                const keepStats = { ad: true, ap: true, hp: true };
+                keepStats[stat] = false;
+                setAutodusterKeepStats(rowInfo.name, keepStats);
+                setSettings({ autodusterIgnoreList: ignoreList, autodusterSellList: sellList });
+                console.log(`[Autoseller] Loot icon toggle: enabled autodust ${statLabel} for ${rowInfo.name}`);
+                showAutosellerToast(tReplace('mods.autoseller.lootToastAutodustEnabled', {
+                    name: rowInfo.name,
+                    stat: statLabel
+                }));
+            } else {
+                const keepStats = { ...getAutodusterKeepStats(rowInfo.name) };
+                keepStats[stat] = !keepStats[stat];
+                const dustLabel = keepStats[stat] ? 'disabled' : 'enabled';
+                setAutodusterKeepStats(rowInfo.name, keepStats);
+                const latestSettings = getSettings();
+                const ignoreList = [...(latestSettings.autodusterIgnoreList || [])];
+                const sellList = [...(latestSettings.autodusterSellList || [])];
+                const keepAllStats = keepStats.ad === true && keepStats.ap === true && keepStats.hp === true;
+
+                if (keepAllStats) {
+                    if (!ignoreList.includes(rowInfo.name)) ignoreList.push(rowInfo.name);
+                    const sellIdx = sellList.indexOf(rowInfo.name);
+                    if (sellIdx !== -1) sellList.splice(sellIdx, 1);
+                } else {
+                    if (!sellList.includes(rowInfo.name)) sellList.push(rowInfo.name);
+                    const keepIdx = ignoreList.indexOf(rowInfo.name);
+                    if (keepIdx !== -1) ignoreList.splice(keepIdx, 1);
+                }
+
+                setSettings({
+                    autodusterIgnoreList: ignoreList,
+                    autodusterSellList: sellList
+                });
+                console.log(`[Autoseller] Loot icon toggle: ${dustLabel} autodust ${statLabel} for ${rowInfo.name}`);
+                showAutosellerToast(tReplace(
+                    keepStats[stat]
+                        ? 'mods.autoseller.lootToastAutodustDisabled'
+                        : 'mods.autoseller.lootToastAutodustEnabled',
+                    { name: rowInfo.name, stat: statLabel }
+                ));
+            }
+        }
+
+        updateLootTableMirror();
+    }
+
+    function buildLootTableActionTooltip(actionKey, active, settings, rowInfo = null) {
+        const name = rowInfo?.name || 'this creature';
+        const labels = {
+            sell: () => {
+                const min = settings.autosellGenesMin ?? UI_CONSTANTS.SELL_GENE_MIN;
+                const max = settings.autosellGenesMax ?? UI_CONSTANTS.SELL_GENE_MAX;
+                return active
+                    ? tReplace('mods.autoseller.lootTooltipAutosellActive', { name, min, max })
+                    : tReplace('mods.autoseller.lootTooltipAutosellInactive', { name });
+            },
+            squeeze: () => {
+                const min = settings.autosqueezeGenesMin ?? UI_CONSTANTS.SQUEEZE_GENE_MIN;
+                const max = settings.autosqueezeGenesMax ?? UI_CONSTANTS.SQUEEZE_GENE_MAX;
+                return active
+                    ? tReplace('mods.autoseller.lootTooltipAutosqueezeActive', { name, min, max })
+                    : tReplace('mods.autoseller.lootTooltipAutosqueezeInactive', { name });
+            },
+            sealedSell: () => active
+                ? tReplace('mods.autoseller.lootTooltipSealedSellActive', { name })
+                : tReplace('mods.autoseller.lootTooltipSealedSellInactive', { name }),
+            sealedInject: () => active
+                ? tReplace('mods.autoseller.lootTooltipSealedInjectActive', { name })
+                : tReplace('mods.autoseller.lootTooltipSealedInjectInactive', { name }),
+            equipAd: () => active
+                ? tReplace('mods.autoseller.lootTooltipEquipAdActive', { name })
+                : tReplace('mods.autoseller.lootTooltipEquipAdInactive', { name }),
+            equipAp: () => active
+                ? tReplace('mods.autoseller.lootTooltipEquipApActive', { name })
+                : tReplace('mods.autoseller.lootTooltipEquipApInactive', { name }),
+            equipHp: () => active
+                ? tReplace('mods.autoseller.lootTooltipEquipHpActive', { name })
+                : tReplace('mods.autoseller.lootTooltipEquipHpInactive', { name })
+        };
+        return (labels[actionKey] || (() => ''))();
+    }
+
+    function createLootTableActionButton(actionKey, active, settings, rowInfo) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'autoseller-loot-action-btn';
+        btn.style.cssText = `
+            background: none; border: none; padding: 1px; margin: 0; cursor: pointer;
+            display: inline-flex; align-items: center; justify-content: center;
+            opacity: ${active ? '1' : '0.3'};
+            filter: ${active ? 'none' : 'grayscale(100%)'};
+            transition: opacity 0.15s, filter 0.15s;
+        `;
+        btn.title = buildLootTableActionTooltip(actionKey, active, settings, rowInfo);
+
+        const icon = document.createElement('img');
+        icon.src = LOOT_TABLE_ICON_URLS[actionKey];
+        icon.className = 'pixelated';
+        icon.width = 12;
+        icon.height = 12;
+        icon.draggable = false;
+        btn.appendChild(icon);
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            lootTableToggleAction(actionKey, rowInfo);
+        });
+
+        return btn;
+    }
+
+    function getLootTableActionSlotWidthPx() {
+        return LOOT_TABLE_ACTION_ICON_SIZE_PX + (LOOT_TABLE_ACTION_BUTTON_PADDING_PX * 2);
+    }
+
+    function getLootTableActionsWidthPx(slotCount) {
+        if (slotCount <= 0) return 0;
+        const slotWidth = getLootTableActionSlotWidthPx();
+        return (slotCount * slotWidth) + ((slotCount - 1) * LOOT_TABLE_ACTION_GAP_PX);
+    }
+
+    function enhanceLootTableRow(tr, settings, context = null) {
+        const rowInfo = parseLootTableRow(tr);
+        if (!rowInfo) {
+            tr.removeAttribute(LOOT_TABLE_MIRROR_ATTR);
+            tr.querySelector(`.${LOOT_TABLE_ACTIONS_CLASS}`)?.remove();
+            return;
+        }
+
+        const { buttons } = getLootTableRowActions(rowInfo, settings);
+        const maxActionSlots = context?.maxActionSlots ?? 0;
+        const isSpacerOnly = buttons.length === 0 && maxActionSlots > 0;
+        const signature = [
+            rowInfo.type,
+            rowInfo.name,
+            rowInfo.isShiny ? '1' : '0',
+            rowInfo.isSealed ? '1' : '0',
+            `slots:${maxActionSlots}`,
+            ...buttons.map((b) => `${b.key}:${b.active ? '1' : '0'}`)
+        ].join('|');
+
+        if (tr.getAttribute(LOOT_TABLE_MIRROR_ATTR) === signature) return;
+        tr.setAttribute(LOOT_TABLE_MIRROR_ATTR, signature);
+
+        const td = tr.querySelector('td');
+        if (!td) return;
+
+        td.querySelector(`.${LOOT_TABLE_ACTIONS_CLASS}`)?.remove();
+
+        if (buttons.length === 0 && !isSpacerOnly) return;
+
+        const actionsEl = document.createElement('span');
+        actionsEl.className = `${LOOT_TABLE_ACTIONS_CLASS}`;
+        actionsEl.style.cssText = `display: inline-flex; align-items: center; justify-content: center; gap: ${LOOT_TABLE_ACTION_GAP_PX}px; flex-shrink: 0; margin-left: ${LOOT_TABLE_ACTIONS_LEFT_GAP_PX}px; width: ${getLootTableActionsWidthPx(maxActionSlots)}px;`;
+        if (isSpacerOnly) {
+            actionsEl.setAttribute('aria-hidden', 'true');
+        } else {
+            for (const btn of buttons) {
+                actionsEl.appendChild(createLootTableActionButton(btn.key, btn.active, settings, rowInfo));
+            }
+        }
+
+        td.insertBefore(actionsEl, td.firstChild);
+    }
+
+    function findClosestLootDropTable(node) {
+        let el = node;
+        if (el && el.nodeType !== 1) el = el.parentElement;
+        while (el) {
+            if (el.tagName === 'TABLE' && isLootDropTable(el)) return el;
+            el = el.parentElement;
+        }
+        return null;
+    }
+
+    function getLootDropTablesInScope(root = document) {
+        if (!root) return [];
+        if (root === document || root === document.documentElement || root === document.body) {
+            return Array.from(document.querySelectorAll('table')).filter(isLootDropTable);
+        }
+        if (root.nodeType !== 1 || typeof root.querySelectorAll !== 'function') return [];
+
+        const found = new Set();
+        if (root.tagName === 'TABLE' && isLootDropTable(root)) found.add(root);
+        for (const table of root.querySelectorAll('table')) {
+            if (isLootDropTable(table)) found.add(table);
+        }
+        // Row/cell updates are common on map change — walk up to the parent loot table.
+        const closest = findClosestLootDropTable(root);
+        if (closest) found.add(closest);
+        return Array.from(found);
+    }
+
+    function collectLootDropTablesFromMutations(mutations) {
+        const tables = new Set();
+        if (!mutations?.length) return tables;
+
+        for (const mutation of mutations) {
+            if (mutation.type === 'childList') {
+                if (mutation.target) {
+                    for (const table of getLootDropTablesInScope(mutation.target)) {
+                        tables.add(table);
+                    }
+                }
+                for (const node of mutation.addedNodes) {
+                    for (const table of getLootDropTablesInScope(node)) {
+                        tables.add(table);
+                    }
+                }
+            } else if (mutation.type === 'attributes' && mutation.target?.nodeType === 1) {
+                for (const table of getLootDropTablesInScope(mutation.target)) {
+                    tables.add(table);
+                }
+            }
+        }
+
+        return tables;
+    }
+
+    function enhanceLootDropTables(root = document, settings = getSettings()) {
+        if (isCleaningUp || !root) return;
+        for (const table of getLootDropTablesInScope(root)) {
+            const rows = Array.from(table.querySelectorAll('tbody tr'));
+            const shinyCreatureNames = new Set();
+            let maxActionSlots = 0;
+            for (const tr of rows) {
+                const rowInfo = parseLootTableRow(tr);
+                if (rowInfo?.type === 'creature' && rowInfo.isShiny) {
+                    shinyCreatureNames.add(rowInfo.name);
+                }
+                if (rowInfo) {
+                    const { buttons } = getLootTableRowActions(rowInfo, settings);
+                    maxActionSlots = Math.max(maxActionSlots, buttons.length);
+                }
+            }
+            const context = { shinyCreatureNames, maxActionSlots };
+            for (const tr of rows) {
+                enhanceLootTableRow(tr, settings, context);
+            }
+        }
+    }
+
+    function isAutosellerLootMirrorNode(node) {
+        if (!node || node.nodeType !== 1) return false;
+        return node.classList?.contains(LOOT_TABLE_ACTIONS_CLASS) ||
+            node.classList?.contains('autoseller-loot-action-btn') ||
+            !!node.closest?.(`.${LOOT_TABLE_ACTIONS_CLASS}`);
+    }
+
+    function enhanceLootDropTablesFromMutations(mutations) {
+        const tables = collectLootDropTablesFromMutations(mutations);
+        if (tables.size === 0) return;
+        const settings = getSettings();
+        for (const table of tables) {
+            enhanceLootDropTables(table, settings);
+        }
+    }
+
+    function updateLootTableMirror() {
+        if (isCleaningUp) return;
+        enhanceLootDropTables(document);
+    }
+
+    function scheduleLootTableMirrorRefresh() {
+        if (isCleaningUp) return;
+        if (lootTableMirrorRafId !== null) return;
+        lootTableMirrorRafId = requestAnimationFrame(() => {
+            lootTableMirrorRafId = null;
+            updateLootTableMirror();
+        });
+    }
+
+    function teardownLootTableMirror() {
+        if (lootTableMirrorRafId !== null) {
+            cancelAnimationFrame(lootTableMirrorRafId);
+            lootTableMirrorRafId = null;
+        }
+        if (lootTableMirrorObserver) {
+            try {
+                lootTableMirrorObserver.disconnect();
+            } catch (_) {}
+            lootTableMirrorObserver = null;
+        }
+        document.querySelectorAll(`.${LOOT_TABLE_ACTIONS_CLASS}`).forEach((el) => el.remove());
+        document.querySelectorAll(`tr[${LOOT_TABLE_MIRROR_ATTR}]`).forEach((tr) => {
+            tr.removeAttribute(LOOT_TABLE_MIRROR_ATTR);
+        });
+    }
+
+    function setupLootTableMirrorObserver() {
+        if (lootTableMirrorObserver || typeof MutationObserver === 'undefined') return;
+
+        lootTableMirrorObserver = new MutationObserver((mutations) => {
+            const relevantMutations = mutations.filter((mutation) => {
+                if (mutation.type === 'childList') {
+                    if (isAutosellerLootMirrorNode(mutation.target)) return false;
+                    const touched = [...mutation.addedNodes, ...mutation.removedNodes];
+                    if (touched.length > 0 && touched.every(isAutosellerLootMirrorNode)) return false;
+                    return true;
+                }
+                if (mutation.type === 'attributes') {
+                    if (isAutosellerLootMirrorNode(mutation.target)) return false;
+                    return mutation.attributeName === 'data-state' ||
+                        mutation.attributeName === 'class' ||
+                        mutation.attributeName === 'src' ||
+                        mutation.attributeName === 'alt';
+                }
+                return false;
+            });
+            if (relevantMutations.length === 0) return;
+            enhanceLootDropTablesFromMutations(relevantMutations);
+        });
+
+        lootTableMirrorObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['data-state', 'class', 'src', 'alt']
+        });
+
+        updateLootTableMirror();
     }
     
     function applyLocalStorageToGameCheckbox() {
@@ -9257,11 +10429,29 @@
         }
     }
 
+    /**
+     * Prefer the snapshot that already has equip instance ids (gameServer payload)
+     * over an early board snapshot for the same seed.
+     */
+    function preferServerResultsWithEquipIds(primary, secondary) {
+        if (!primary) return secondary || null;
+        if (!secondary) return primary;
+        if (primary.seed != null && secondary.seed != null && primary.seed !== secondary.seed) {
+            return primary;
+        }
+        const primaryIds = extractEquipmentFromServerResults(primary).rewardEquipmentIds.size;
+        const secondaryIds = extractEquipmentFromServerResults(secondary).rewardEquipmentIds.size;
+        if (secondaryIds > primaryIds) return secondary;
+        return primary;
+    }
+
     function queueEquipmentFromServerResults(serverResults, reason) {
         const settings = getSettings();
-        if (!settings.autodusterChecked || !serverResults) return;
-        const { rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
-        if (rewardEquipmentIds.size === 0) return;
+        if (!settings.autodusterChecked || !serverResults) {
+            return { idsFound: 0, newlyQueued: 0, unresolvedQueued: 0 };
+        }
+        const { battleRewardEquipment, rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
+        const unresolvedQueued = queueUnresolvedEquipmentDrops(battleRewardEquipment);
         let newlyQueued = 0;
         rewardEquipmentIds.forEach((id) => {
             if (!id || stateManager.isProcessed(id) || stateManager.getPendingEquipmentIds().has(id)) {
@@ -9270,13 +10460,27 @@
             stateManager.addPendingEquipment(id);
             newlyQueued++;
         });
-        if (newlyQueued === 0) return;
-        logAutosellerDebug('Disenchant', `queued ${newlyQueued} equipment id(s) from ${reason} (seed=${serverResults.seed})`);
+        if (newlyQueued === 0 && unresolvedQueued === 0) {
+            return { idsFound: rewardEquipmentIds.size, newlyQueued: 0, unresolvedQueued: 0 };
+        }
+        if (newlyQueued > 0) {
+            logEquipDropFlow(
+                'queue',
+                `seed=${serverResults.seed} reason=${reason} queued ${newlyQueued} id(s)=[${[...rewardEquipmentIds].join(',')}]`
+            );
+        }
+        if (unresolvedQueued > 0) {
+            logEquipDropFlow(
+                'queue',
+                `seed=${serverResults.seed} reason=${reason} queued ${unresolvedQueued} id-less drop(s) for inventory resolve`
+            );
+        }
         schedulePendingRewardsFlush();
+        return { idsFound: rewardEquipmentIds.size, newlyQueued, unresolvedQueued };
     }
 
     function schedulePendingRewardsFlush() {
-        if (pendingRewardsFlushTimer || isCleaningUp) return;
+        if (pendingRewardsFlushTimer || isCleaningUp || dustCachedEquipsInFlight) return;
         pendingRewardsFlushTimer = setTimeout(async () => {
             pendingRewardsFlushTimer = null;
             if (isCleaningUp) return;
@@ -9286,11 +10490,52 @@
                 schedulePendingRewardsFlush();
                 return;
             }
-            const pendingCount = stateManager.getPendingEquipmentIds().size;
-            if (pendingCount === 0) return;
-            logAutosellerDebug('Disenchant', `flushing ${pendingCount} pending equipment id(s)`);
+
+            // Prefer immediate dust from gameServer cache (works even if local inventory lags)
+            if (dustCachedGameServerEquips('pending-flush-cache', { requireGameEndPassed: false }) > 0) {
+                return;
+            }
+
             const inventoryEquipment = await fetchServerEquipment();
-            await processEligibleEquipment(null, inventoryEquipment);
+            const resolved = resolvePendingUnresolvedEquipment(inventoryEquipment);
+            if (resolved > 0) {
+                logAutosellerDebug('Disenchant', `flush resolved ${resolved} id-less drop(s)`);
+            }
+            const pendingIds = stateManager.getPendingEquipmentIds();
+            const unresolvedCount = stateManager.getPendingUnresolvedEquipment().length;
+            if (pendingIds.size === 0) {
+                if (unresolvedCount > 0) {
+                    schedulePendingRewardsFlush();
+                }
+                return;
+            }
+
+            const fromCache = collectCachedDropsForPendingIds(pendingIds);
+            logAutosellerDebug('Disenchant', `flushing ${pendingIds.size} pending equipment id(s)`);
+            logEquipDropFlow(
+                'flush',
+                `dusting ${pendingIds.size} pending id(s)` +
+                (fromCache.rewardEquipmentIds.size > 0 ? ` (cache drops=${fromCache.rewardEquipmentIds.size})` : '')
+            );
+            await processEligibleEquipment(
+                fromCache.rewardEquipmentIds.size > 0 ? fromCache.rewardEquipmentIds : null,
+                inventoryEquipment,
+                fromCache.battleRewardEquipment
+            );
+
+            // Avoid tight reschedule loops — only retry unresolved id-less drops here.
+            // Pending ids with cache metadata already got an immediate attempt above.
+            if (stateManager.getPendingUnresolvedEquipment().length > 0) {
+                schedulePendingRewardsFlush();
+            } else if (stateManager.getPendingEquipmentIds().size > 0) {
+                // Slow retry if still pending (inventory lag / API fail)
+                const slowRetry = setTimeout(() => {
+                    if (!isCleaningUp && stateManager.getPendingEquipmentIds().size > 0) {
+                        schedulePendingRewardsFlush();
+                    }
+                }, 3000);
+                timeoutIds.push(slowRetry);
+            }
         }, OPERATION_DELAYS.UI_SETTLE_MS);
         timeoutIds.push(pendingRewardsFlushTimer);
     }
@@ -9372,8 +10617,10 @@
 
     function recoverAutosellerAfterTabVisible() {
         if (isCleaningUp) return;
-        logAutosellerDebug('GameEnd', 'tab visible — recovering pending game-end queue');
+        logAutosellerDebug('GameEnd', 'tab visible — recovering pending game-end queue + cached equips');
         stateManager.lastRun = 0;
+        // Don't require gameEndSeen — background battles often skip our onGameEnd mark
+        dustCachedGameServerEquips('tab-visible-recovery', { requireGameEndPassed: false });
         schedulePendingRewardsFlush();
         prunePendingGameEndQueue(false);
         schedulePendingGameEndDrainIfNeeded();
@@ -9449,6 +10696,14 @@
             return { incomplete: false, pendingCount: 0, skipped: true };
         }
 
+        const hasWork = rewardEquipmentIds.size > 0 ||
+            battleRewardEquipment.length > 0 ||
+            stateManager.getPendingEquipmentIds().size > 0 ||
+            stateManager.getPendingUnresolvedEquipment().length > 0;
+        if (!hasWork) {
+            return { incomplete: false, pendingCount: 0 };
+        }
+
         const inventoryEquipment = await fetchServerEquipment();
         if (battleRewardEquipment.length > 0) {
             const idsBeforeResolve = rewardEquipmentIds.size;
@@ -9458,16 +10713,31 @@
             }
         }
         rewardEquipmentIds.forEach((id) => stateManager.addPendingEquipment(id));
-        if (rewardEquipmentIds.size > 0) {
-            console.log('[Autoseller] Processing autoduster for', rewardEquipmentIds.size, 'equipment');
-        }
+        const unresolvedQueued = queueUnresolvedEquipmentDrops(battleRewardEquipment);
+        logEquipDropFlow(
+            '4/autoduster-pass',
+            `seed=${currentSeed} ids=${rewardEquipmentIds.size} drops=${battleRewardEquipment.length} ` +
+            `unresolvedQueued=${unresolvedQueued} inventory=${inventoryEquipment?.length ?? 0}`
+        );
         const dusterResult = await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment, battleRewardEquipment);
+        logEquipDropFlow(
+            '5/autoduster-done',
+            `seed=${currentSeed} incomplete=${!!dusterResult?.incomplete} pending=${dusterResult?.pendingCount ?? 0}`
+        );
         if (rewardEquipmentIds.size === 0 && battleRewardEquipment.length > 0) {
-            console.log(
-                `[Autoseller][EquipDrop] seed=${currentSeed}: ${battleRewardEquipment.length} equipment drop(s) in serverResults ` +
-                'but no inventory ids resolved — queued via pending'
-            );
-            schedulePendingRewardsFlush();
+            const stillUnresolved = stateManager.getPendingUnresolvedEquipment().length;
+            if (unresolvedQueued > 0 || stillUnresolved > 0) {
+                logAutosellerDebug(
+                    'Disenchant',
+                    `seed=${currentSeed}: ${battleRewardEquipment.length} drop(s) deferred for inventory resolve`
+                );
+                schedulePendingRewardsFlush();
+            } else {
+                logAutosellerDebug(
+                    'Disenchant',
+                    `seed=${currentSeed}: ${battleRewardEquipment.length} drop(s) could not be queued (missing gameId/stat/tier)`
+                );
+            }
         }
         return dusterResult || { incomplete: false, pendingCount: 0 };
     }
@@ -9497,8 +10767,14 @@
 
         const { battleRewardMonsters, rewardMonsterIds } = extractMonstersFromServerResults(serverResults);
         const { battleRewardEquipment, rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
-        logEquipmentDropDebug(serverResults, serverResultsSource);
-        logAutosellerDebug('GameEnd', `seed=${currentSeed} source=${serverResultsSource} rewardMonsters=${rewardMonsterIds.size} rewardEquipment=${rewardEquipmentIds.size} equipDropsParsed=${battleRewardEquipment.length}`);
+        if (battleRewardEquipment.length > 0) {
+            logEquipmentDropDebug(serverResults, serverResultsSource);
+        }
+        logAutosellerDebug(
+            'GameEnd',
+            `seed=${currentSeed} source=${serverResultsSource} ` +
+            `monsters=${rewardMonsterIds.size} equipment=${rewardEquipmentIds.size}`
+        );
 
         const squeezeRewardExpected = battleRewardsIncludeSqueezeBandMonsters(battleRewardMonsters, settings);
         const injectRewardExpected = battleRewardsIncludeSealedInjectCandidates(battleRewardMonsters, settings);
@@ -9512,7 +10788,6 @@
         logCreatureDropsForFloor11Plus(battleRewardMonsters, floorFromServerResults ?? floorFromBoardState);
 
         const inventorySnapshot = await fetchServerMonsters();
-        logAutosellerDebug('GameEnd', `inventory fetch: ${Array.isArray(inventorySnapshot) ? inventorySnapshot.length : 0} monster(s)`);
 
         if (rewardMonsterIds.size > 0) {
             const matchedMonsters = filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds);
@@ -9522,8 +10797,10 @@
                     isSealedTier5InjectAllowed(creatureName) &&
                     !isItemKeptByFilterList(creatureName, 'autoplantIgnoreList', settings);
             }).length;
-            console.log(`[Autoseller][Inject] sealed candidates from rewards: ${sealedCandidateCount}`);
-            console.log(`[Autoseller][Inject] mode=${settings.autoMode || 'off'} matchedMonsters=${matchedMonsters.length}`);
+            if (sealedCandidateCount > 0) {
+                console.log(`[Autoseller][Inject] sealed candidates from rewards: ${sealedCandidateCount}`);
+                console.log(`[Autoseller][Inject] mode=${settings.autoMode || 'off'} matchedMonsters=${matchedMonsters.length}`);
+            }
 
             if (matchedMonsters.length === 0 && rewardMonsterIds.size > 0) {
                 const rewardIds = [...rewardMonsterIds];
@@ -9628,10 +10905,37 @@
                 }
 
                 game.world.onGameEnd.once(async () => {
-                    const capturedAtFire = cloneServerResults(
+                    const boardSnap = cloneServerResults(
                         globalThis.state?.board?.getSnapshot?.()?.context?.serverResults
-                    ) || cloneServerResults(latestServerResults);
+                    );
+                    const apiSnap = cloneServerResults(latestServerResults);
+                    const capturedAtFire = preferServerResultsWithEquipIds(boardSnap, apiSnap) || boardSnap || apiSnap;
                     const capturedSeed = capturedAtFire?.seed ?? '?';
+                    markGameEndSeen(capturedAtFire?.seed);
+
+                    // If gameServer already cached equips for this seed, merge them in
+                    const cachedApi = cachedGameServerBySeed.get(capturedAtFire?.seed);
+                    const mergedAtFire = preferServerResultsWithEquipIds(
+                        capturedAtFire,
+                        cloneServerResults(cachedApi)
+                    ) || capturedAtFire;
+
+                    const boardEquipIds = extractEquipmentFromServerResults(boardSnap || {}).rewardEquipmentIds;
+                    const apiEquipIds = extractEquipmentFromServerResults(apiSnap || {}).rewardEquipmentIds;
+                    const cachedEquipIds = extractEquipmentFromServerResults(cachedApi || {}).rewardEquipmentIds;
+                    const capturedEquipIds = extractEquipmentFromServerResults(mergedAtFire || {}).rewardEquipmentIds;
+
+                    if (boardEquipIds.size > 0 || apiEquipIds.size > 0 || cachedEquipIds.size > 0 || capturedEquipIds.size > 0) {
+                        logEquipDropFlow(
+                            '2/onGameEnd',
+                            `seed=${capturedSeed} boardIds=[${[...boardEquipIds].join(',') || 'none'}] ` +
+                            `apiIds=[${[...apiEquipIds].join(',') || 'none'}] ` +
+                            `cachedIds=[${[...cachedEquipIds].join(',') || 'none'}] ` +
+                            `using=[${[...capturedEquipIds].join(',') || 'none'}] ` +
+                            `(delay ${OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS}ms, ` +
+                            `${isTabVisible() ? 'foreground' : 'background'})`
+                        );
+                    }
 
                     logAutosellerDebug('GameEnd', `onGameEnd fired seed=${capturedSeed} (delay ${OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS}ms before processing)`);
                     if (isCleaningUp) {
@@ -9651,20 +10955,47 @@
                             return;
                         }
 
-                        if (!capturedAtFire) {
+                        // Re-merge after the delay — gameServer may have arrived with equipDrop.id
+                        const refreshed = preferServerResultsWithEquipIds(
+                            preferServerResultsWithEquipIds(
+                                mergedAtFire,
+                                cloneServerResults(latestServerResults)
+                            ),
+                            cloneServerResults(cachedGameServerBySeed.get(mergedAtFire?.seed))
+                        ) || mergedAtFire;
+
+                        if (!refreshed) {
                             logAutosellerDebug('GameEnd', 'no serverResults captured at onGameEnd');
                             return;
                         }
 
+                        const beforeIds = extractEquipmentFromServerResults(mergedAtFire || {}).rewardEquipmentIds;
+                        const afterIds = extractEquipmentFromServerResults(refreshed).rewardEquipmentIds;
+                        if (afterIds.size > 0 || beforeIds.size > 0) {
+                            logEquipDropFlow(
+                                '3/pre-process',
+                                `seed=${refreshed.seed} atFire=[${[...beforeIds].join(',') || 'none'}] ` +
+                                `afterDelay=[${[...afterIds].join(',') || 'none'}]` +
+                                (afterIds.size > beforeIds.size ? ' (picked up late gameServer ids)' : '') +
+                                ` (${isTabVisible() ? 'foreground' : 'background'})`
+                            );
+                        }
+
                         if (!stateManager.canRun()) {
-                            logEquipmentDropDebug(capturedAtFire, 'canRun-blocked');
-                            queueGameEndForRetry(capturedAtFire, 'canRun-blocked');
-                            queueEquipmentFromServerResults(capturedAtFire, 'canRun-blocked');
+                            const blockedIds = extractEquipmentFromServerResults(refreshed).rewardEquipmentIds;
+                            if (blockedIds.size > 0) {
+                                logEquipDropFlow('3/canRun-blocked', `seed=${refreshed.seed} ids=[${[...blockedIds].join(',')}] — queued for retry`);
+                            }
+                            logEquipmentDropDebug(refreshed, 'canRun-blocked');
+                            queueGameEndForRetry(refreshed, 'canRun-blocked');
+                            queueEquipmentFromServerResults(refreshed, 'canRun-blocked');
                             return;
                         }
 
-                        await processGameEndRewards(capturedAtFire, 'captured-at-gameEnd');
-                        const pendingSeed = capturedAtFire?.seed;
+                        await processGameEndRewards(refreshed, 'captured-at-gameEnd');
+                        // Catch equips whose gameServer landed during processing
+                        dustCachedGameServerEquips('post-gameEnd-sweep');
+                        const pendingSeed = refreshed?.seed;
                         if (pendingSeed != null && pendingGameEndBySeed.has(pendingSeed)) {
                             logAutosellerDebug('GameEnd', `deferring plant activation — pending retry for seed=${pendingSeed}`);
                         } else {
@@ -9842,6 +11173,9 @@
         
         // Only proceed if autoplant is enabled
         if (settings.autoMode !== 'autoplant') return;
+
+        // Observer/plant path often runs without our onGameEnd mark in background tabs
+        noteBattleEndedForEquipDust('plant-activate');
 
         dragonPlantActivateGiveUpForDrop = false;
         dragonPlantActivateAttempts = 0;
@@ -10248,6 +11582,7 @@
         
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
+        setupLootTableMirrorObserver();
         setupDragonPlantObserver();
         cleanupLegacyDragonPlantBadgeHosts();
         updateAutosellerAutoBadges();
@@ -10412,9 +11747,14 @@
                     timeoutIds = [];
                     pendingGameEndBySeed.clear();
                     pendingGameEndMeta.clear();
+                    gameEndSeenSeeds.clear();
+                    cachedGameServerBySeed.clear();
+                    clearBackgroundEquipDustRetry();
+                    clearLootEquipUiRemoveTimers();
                     gameEndRetryTimer = null;
                     pendingRewardsFlushTimer = null;
-                    lastBoardEquipHandledSeed = null;
+                    dustCachedEquipsInFlight = false;
+                    lastBoardEquipSignature = null;
                     if (visibilityChangeHandler && typeof document !== 'undefined') {
                         document.removeEventListener('visibilitychange', visibilityChangeHandler);
                         visibilityChangeHandler = null;
@@ -10424,6 +11764,7 @@
                         powerSavingModeChangedHandler = null;
                     }
                     resetDragonPlantActivateState();
+                    teardownLootTableMirror();
                     
                     // 3. Remove DOM elements
                     const widget = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET);
@@ -10571,6 +11912,8 @@
                         autoBadgeMutationObserver,
                         autoBadgePositionHandler,
                         autoBadgeVisualViewportHandler,
+                        lootTableMirrorObserver,
+                        lootTableMirrorRafId,
                         emitNewGameHandler1,
                         emitNewGameHandler2,
                         emitEndGameHandler1,

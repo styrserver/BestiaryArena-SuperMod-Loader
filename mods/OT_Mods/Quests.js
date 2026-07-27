@@ -374,6 +374,172 @@ function setupQuestsModalResponsiveLayout(modalRef, contentRoot, maxWidth, maxHe
 }
 
 const KING_GUILD_COIN_REWARD = 50;
+// Quest dialogue loaded from assets/quests/missions.json and assets/quests/npcs.json
+let questMissionsDialogue = null;
+let questNpcsDialogue = null;
+let questDialogueLoadPromise = null;
+let questDialogueReady = false;
+let patchBoardNpcChatFromDialogue = null;
+
+let MISSION_COMPLETION_SUMMARIES = {};
+let SEAL_TRANSCRIPTS = [];
+let COSTELLO_SEAL_GUIDANCE_FALLBACK = '';
+
+let AL_DEE_RESPONSES = {};
+let COSTELLO_RESPONSES = {};
+let WYDA_RESPONSES = {};
+let TESHA_RESPONSES = {};
+let SANTA_THANK_YOU_LINES = [];
+let SANTA_RESPONSES = {};
+let KING_TIBIANUS_CONFUSION_RESPONSES = [];
+let AL_DEE_CONFUSION_RESPONSES = [];
+let COSTELLO_CONFUSION_RESPONSES = [];
+let WYDA_CONFUSION_RESPONSES = [];
+let TESHA_CONFUSION_RESPONSES = [];
+let SANTA_CONFUSION_RESPONSES = [];
+let NPC_QUEST_ITEM_CHAT_RESPONSES = {};
+const NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES = {};
+
+let MISSION_COMMON_DIALOGUE = {};
+
+async function fetchQuestJsonAsset(filename) {
+  const res = await fetch(getQuestJsonAssetUrl(filename));
+  if (!res.ok) throw new Error('Failed to load ' + filename + ': ' + res.status);
+  return res.json();
+}
+
+function getMissionCommonLine(key, fallback = '') {
+  return MISSION_COMMON_DIALOGUE[key] || fallback;
+}
+
+function formatDialogueLine(template, vars = {}) {
+  if (!template) return '';
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => (
+    vars[name] != null ? String(vars[name]) : `{${name}}`
+  ));
+}
+
+function getKingIronOreLine(key, fallback = '') {
+  return questNpcsDialogue?.['king-tibianus']?.ironOre?.[key] || fallback;
+}
+
+function getMissionDialogueLine(mission, key, fallback = '') {
+  return mission?.[key] || fallback;
+}
+
+function getQuestJsonAssetUrl(filename) {
+  const assetPath = '/assets/quests/' + filename;
+  try {
+    const api = typeof window !== 'undefined' && (window.browserAPI || window.chrome || window.browser);
+    if (api?.runtime?.getURL) {
+      return api.runtime.getURL(assetPath);
+    }
+  } catch (_) { /* ignore */ }
+  if (typeof window !== 'undefined' && window.BESTIARY_EXTENSION_BASE_URL) {
+    const base = window.BESTIARY_EXTENSION_BASE_URL.replace(/\/?$/, '/');
+    return base + assetPath.replace(/^\//, '');
+  }
+  return assetPath;
+}
+
+const MISSION_BY_ID = {};
+
+function registerMissionForDialogue(mission) {
+  if (mission?.id) MISSION_BY_ID[mission.id] = mission;
+}
+
+function applyQuestDialogueFromAssets(missionsData, npcsData) {
+  if (missionsData?.common) {
+    MISSION_COMMON_DIALOGUE = { ...missionsData.common };
+  }
+  if (missionsData?.missions) {
+    for (const [id, text] of Object.entries(missionsData.missions)) {
+      const target = MISSION_BY_ID[id];
+      if (target) Object.assign(target, text);
+    }
+  }
+  if (missionsData?.completionSummaries) {
+    MISSION_COMPLETION_SUMMARIES = { ...missionsData.completionSummaries };
+  }
+  if (Array.isArray(missionsData?.sealTranscripts)) {
+    SEAL_TRANSCRIPTS = missionsData.sealTranscripts.map((entry) => ({ ...entry }));
+  }
+
+  const alDee = npcsData['al-dee'] || {};
+  const costello = npcsData.costello || {};
+  const wyda = npcsData.wyda || {};
+  const tesha = npcsData.tesha || {};
+  const santa = npcsData.santa || {};
+  const king = npcsData['king-tibianus'] || {};
+
+  AL_DEE_RESPONSES = { ...(alDee.keywords || {}) };
+  COSTELLO_RESPONSES = { ...(costello.keywords || {}) };
+  WYDA_RESPONSES = { ...(wyda.keywords || {}) };
+  TESHA_RESPONSES = { ...(tesha.keywords || {}) };
+  SANTA_RESPONSES = { ...(santa.keywords || {}) };
+  SANTA_THANK_YOU_LINES = [...(santa.thankYouLines || [])];
+  KING_TIBIANUS_CONFUSION_RESPONSES = [...(king.confusion || [])];
+  AL_DEE_CONFUSION_RESPONSES = [...(alDee.confusion || [])];
+  COSTELLO_CONFUSION_RESPONSES = [...(costello.confusion || [])];
+  WYDA_CONFUSION_RESPONSES = [...(wyda.confusion || [])];
+  TESHA_CONFUSION_RESPONSES = [...(tesha.confusion || [])];
+  SANTA_CONFUSION_RESPONSES = [...(santa.confusion || [])];
+  COSTELLO_SEAL_GUIDANCE_FALLBACK = costello.sealGuidanceFallback || COSTELLO_SEAL_GUIDANCE_FALLBACK;
+  NPC_QUEST_ITEM_CHAT_RESPONSES = JSON.parse(JSON.stringify(npcsData.questItems || {}));
+
+  Object.assign(NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES, npcsData.questItemUninvolvedTemplates || {});
+
+  questMissionsDialogue = missionsData;
+  questNpcsDialogue = npcsData;
+  questDialogueReady = true;
+}
+
+async function loadQuestDialogueAssets() {
+  if (questDialogueReady && questMissionsDialogue && questNpcsDialogue) {
+    return { missions: questMissionsDialogue, npcs: questNpcsDialogue };
+  }
+  if (!questDialogueLoadPromise) {
+    questDialogueLoadPromise = (async () => {
+      const [missionsData, npcsData] = await Promise.all([
+        fetchQuestJsonAsset('missions.json'),
+        fetchQuestJsonAsset('npcs.json')
+      ]);
+      applyQuestDialogueFromAssets(missionsData, npcsData);
+      if (typeof patchBoardNpcChatFromDialogue === 'function') {
+        patchBoardNpcChatFromDialogue();
+      }
+      console.log('[Quests Mod] Loaded quest dialogue from assets/quests');
+      return { missions: missionsData, npcs: npcsData };
+    })().catch((error) => {
+      questDialogueLoadPromise = null;
+      console.error('[Quests Mod] Failed to load quest dialogue assets:', error);
+      throw error;
+    });
+  }
+  return questDialogueLoadPromise;
+}
+
+function getKingTibianusKeywordResponses() {
+  const keywords = { ...(questNpcsDialogue?.['king-tibianus']?.keywords || {}) };
+  if (KING_LETTER_MISSION?.prompt) {
+    keywords.letter = KING_LETTER_MISSION.prompt;
+    keywords.scroll = KING_LETTER_MISSION.prompt;
+  }
+  if (KING_HONEYFLOWER_MISSION?.prompt) {
+    keywords.honeyflower = KING_HONEYFLOWER_MISSION.prompt;
+    keywords['honey flower'] = KING_HONEYFLOWER_MISSION.prompt;
+    keywords.honey = KING_HONEYFLOWER_MISSION.prompt;
+  }
+  return keywords;
+}
+
+async function ensureQuestDialogueLoaded() {
+  try {
+    await loadQuestDialogueAssets();
+  } catch (_) { /* fallback to empty shells */ }
+}
+
+
 
 // Toast duration constants (in milliseconds)
 const TOAST_DURATION_DEFAULT = 5000; // fallback when variant is unknown
@@ -499,27 +665,7 @@ const LOOT_EFFECT_CONFIG = {
   durationMs: 1000
 };
 
-const SERPENTINE_TOWER_MISSION = {
-  id: 'serpentine_tower',
-  title: 'Serpentine Basement Quest',
-  requiresMeetingWithTesha: 'First bring me the scarab coin from the desert sands. Then we may speak of other matters.',
-  prompt: 'There is a matter I would ask of you, Player. Beneath the Serpentine Tower, in the basement, there is a lever. I need someone to go and use it — but be prepared for danger. Will you undertake this task?',
-  accept: 'Descend to the Serpentine Tower basement and use the lever. Be warned — great peril awaits those who are not ready.',
-  answerYesNo: 'Answer yes or no: will you undertake this task?',
-  alreadyActive: 'You have already accepted this task. Go to the Serpentine Tower basement and use the lever — but be prepared for danger.',
-  alreadyCompleted: 'You have already braved what lies beneath the Serpentine Tower. My thanks.',
-  putridChamberReturnObjective: 'Return to Tesha in Darama Oasis to receive your reward.',
-  putridChamberVictoryToast: 'You survived The Cursed Chamber. Return to Tesha in Darama Oasis.',
-  teshaRewardLines: [
-    'You have braved The Cursed Chamber. Take this Scorpion Sceptre — may it serve you well, Player.',
-    'A hermit near Carlin might be able to tell you more about it.'
-  ],
-  destroyFieldRuneHint: 'The destroy field rune you seek lies upon the corpse of a magic elf, Player.',
-  destroyFieldRuneAlreadyHave: 'You already carry the destroy field rune, Player. Use it upon the energy fields that block your path.',
-  objectiveLine1: 'Find the Serpentine Tower basement.',
-  objectiveLine2: 'Use the lever and be prepared for danger.',
-  hint: 'Tesha spoke of a lever in the Serpentine Tower basement.'
-};
+const SERPENTINE_TOWER_MISSION = { id: 'serpentine_tower' };
 
 const SCARAB_COIN_CONFIG = {
   productName: 'Scarab Coin',
@@ -610,283 +756,59 @@ const HONEYFLOWER_CONFIG = {
   rarity: 2
 };
 
-const KING_HONEYFLOWER_MISSION = {
-  id: 'king_honeyflower',
-  title: 'Retrieve the Honeyflower',
-  prompt: 'I require honey for my tea. Journey to Honeyflower Tower and retrieve a honeyflower for me. Will you help?',
-  accept: 'Go to Honeyflower Tower and pick the honeyflower. Return to me when you have it.',
-  askForItem: 'Have you brought the honeyflower?',
-  complete: 'Splendid! My tea shall be sweet once more. Here are 50 guild coins for your trouble.',
-  missingItem: 'You claim yes but carry no honeyflower. Return when you have picked one from Honeyflower Tower.',
-  keepSearching: 'Then journey to Honeyflower Tower and retrieve the honeyflower.',
-  answerYesNo: 'Answer yes or no: have you brought the honeyflower?',
-  alreadyCompleted: 'You already brought me a honeyflower. My thanks.',
-  alreadyActive: 'You are already on this task. Retrieve the honeyflower from Honeyflower Tower and return to me.',
-  objectiveLine1: 'Travel to Honeyflower Tower.',
-  objectiveLine2: 'Pick the honeyflower and return it to King Tibianus.',
-  hint: 'Right-click the glowing flower tile in Honeyflower Tower.',
-  rewardCoins: 50
-};
+const KING_HONEYFLOWER_MISSION = { id: 'king_honeyflower' };
 
 const CITY_BOARDGAMES_ROOM_NAME = 'City Boardgames';
 const CROSSING_THE_LINE_TILES = [18, 25, 123, 130];
 
-const KING_CROSSING_THE_LINE_MISSION = {
-  id: 'king_crossing_the_line',
-  title: 'Fastest Bishop in Carlin',
-  prompt: 'Ah, a game of wits! Travel to City Boardgames and station mages upon the marked tiles of the board, then win a battle with them so placed. Will you prove the fastest bishop in Carlin?',
-  accept: 'Excellent. Go to City Boardgames, place mages on the glowing tiles, and win a match. Return to me when it is done.',
-  askForItem: 'Have you completed the chess drill at City Boardgames?',
-  complete: 'Splendid play! Truly the fastest bishop in Carlin. Here are 50 guild coins for your trouble.',
-  missingItem: 'You claim yes, yet I see no proof of a proper victory. Station mages on the marked tiles, win the battle, then return.',
-  keepSearching: 'Then go to City Boardgames and complete the chess drill with mages on the marked tiles.',
-  answerYesNo: 'Answer yes or no: have you completed the chess drill?',
-  alreadyCompleted: 'You already proved yourself at the board. Well done.',
-  alreadyActive: 'You are already on this chess drill. Station mages on the marked tiles at City Boardgames, win, and return to me.',
-  objectiveLine1: 'Travel to City Boardgames and station mages on the marked tiles.',
-  objectiveLine2: 'Win a battle with mages on those tiles, then return to King Tibianus.',
-  hint: 'Only creatures with the Mage category count on the glowing tiles.',
-  rewardCoins: 50
-};
+const KING_CROSSING_THE_LINE_MISSION = { id: 'king_crossing_the_line' };
 
-const KING_COPPER_KEY_MISSION = {
-  id: 'king_copper_key',
-  title: 'Retrieve King Tibianus belongings',
-  prompt: 'Glad you asked! One of my guards lost my precious copper key down in the mines. Would you be able to help me get it back?',
-  accept: 'Thank you! Take this map to help guide you to the mines. Let me know when you\'ve retrieved it!',
-  askForKey: 'Have you found my key?',
-  complete: 'Splendid! You found my key. The mission is complete.',
-  missingKey: 'You claim yes but carry no key? Begone!',
-  keepSearching: 'Then keep searching and return when you have it.',
-  answerYesNo: 'Answer yes or no: have you found my key?',
-  alreadyCompleted: 'You already completed this mission. Excellent work, my subject.',
-  alreadyActive: 'You are already on this mission. Bring me back the copper key!',
-  notExperiencedEnough: 'That task is beyond you for now. Come back when you are more experienced.',
-  objectiveLine1: 'A guard lost the king\'s copper key deep in the mines.',
-  objectiveLine2: 'Find the copper key and return it to King Tibianus.',
-  hint: 'It seems as I must steal it from the angry Dwarfs as they probably won\'t let me have it without resistance.',
-  rewardCoins: KING_GUILD_COIN_REWARD
-};
+const KING_COPPER_KEY_MISSION = { id: 'king_copper_key' };
 
-const KING_RED_DRAGON_MISSION = {
-  id: 'king_red_dragon',
-  title: 'Stock the Royal Forge',
-  prompt: 'Brave subject, I need supplies for my smiths: bring me 30 red dragon scales and 30 red dragon leathers. Will you help me?',
-  accept: 'Excellent. Return once you have the materials.',
-  askForItems: 'Have you brought the red dragon materials?',
-  complete: 'Well done! The royal forge will thrive with these materials.',
-  missingItems: 'You claim yes but lack the materials. Do not waste my time.',
-  keepSearching: 'Then keep hunting dragons and return when you have them.',
-  answerYesNo: 'Answer yes or no: have you brought the materials?',
-  alreadyCompleted: 'You already completed this task. Impressive work.',
-  alreadyActive: 'You are already on this task. Bring me the materials.',
-  objectiveLine1: 'Gather 30 red dragon scales.',
-  objectiveLine2: 'Gather 30 red dragon leathers.',
-  hint: 'Hunt red dragons and skin them for scales and leather.',
-  rewardCoins: 0
-};
+const KING_RED_DRAGON_MISSION = { id: 'king_red_dragon' };
 
-const KING_LETTER_MISSION = {
-  id: 'king_letter_al_dee',
-  title: 'Letter from Al Dee',
-  prompt: 'Ah, a letter from Al Dee! That old rope merchant has been trying to get my attention for weeks. Can you return this letter to him when you visit him?',
-  accept: 'Take this letter back to Al Dee. He usually hangs around somewhere in Rookgaard. Good luck on your adventure!',
-  acceptNoLetter: 'I\'m afraid the letter has been stolen by monsters in Rookgaard! You\'ll need to defeat them to find it. Once you have the letter, bring it to me and I\'ll stamp it for you to deliver to Al Dee.',
-  askForLetter: 'Have you returned the letter to Al Dee?',
-  complete: 'Well done! Al Dee was most pleased. Perhaps you\'ll find him useful in your future adventures.',
-  missingLetter: 'You claim to have returned it but I see no proof. Find Al Dee and complete his task!',
-  keepSearching: 'Then find Al Dee in Rookgaard and return his letter.',
-  answerYesNo: 'Answer yes or no: have you returned the letter to Al Dee?',
-  alreadyCompleted: 'You already helped Al Dee. Perhaps you should visit his shop again.',
-  alreadyActive: 'You are already on this task. Find Al Dee and return his letter!',
-  objectiveLine1: 'Find the Letter from Al Dee.',
-  objectiveLine2: 'Return the stamped letter to Al Dee.',
-  hint: 'Defeat monsters in Rookgaard to find the letter, then bring it to King Tibianus to get it stamped.',
-  rewardCoins: KING_GUILD_COIN_REWARD
-};
+const KING_LETTER_MISSION = { id: 'king_letter_al_dee' };
 
-const KING_MONKS_STUDY_MISSION = {
-  id: 'king_monks_study',
-  title: 'The Monks Study',
-  prompt: 'I see you carry the Holy Tible – you have proven yourself in the search for the Light. Now I ask you to seek out Costello within the White Raven Monastery. He is a learned man and may have wisdom that serves the crown. Will you undertake this task?',
-  accept: 'Go to the White Raven Monastery and seek out Costello. Return to me when you have news.',
-  askForItem: 'Have you found Costello?',
-  complete: 'Excellent work. Costello has long been a friend of the crown.',
-  missingItem: 'You claim yes but I have had no word from the monastery. Find Costello and speak with him.',
-  keepSearching: 'Then journey to the White Raven Monastery and search for Costello.',
-  answerYesNo: 'Answer yes or no: have you found Costello?',
-  alreadyCompleted: 'You have already completed this task. My thanks.',
-  alreadyActive: 'You are already on this task. Seek Costello in the White Raven Monastery.',
-  objectiveLine1: 'Travel to the White Raven Monastery.',
-  objectiveLine2: 'Search for Costello within the monastery.',
-  hint: 'The White Raven Monastery lies somewhere beyond the realm. Look for Costello there.',
-  rewardCoins: KING_GUILD_COIN_REWARD
-};
+const KING_MONKS_STUDY_MISSION = { id: 'king_monks_study' };
 
-const KING_SCARAB_COIN_MISSION = {
-  id: 'king_scarab_coin',
-  title: 'Lost in the Sands',
-  prompt: 'Rumour speaks of a lost valuable buried somewhere in the desert sands of Darama. Journey to the oasis and search the dunes — will you undertake this hunt?',
-  accept: 'Search the desert sands of Darama Oasis for the lost valuable. Dig where the lone sand tiles lie.',
-  askForCoin: 'Have you found the lost valuable in the desert?',
-  complete: 'Splendid! You unearthed what was lost in the sands. Seek out Tesha in the oasis — she may know its worth.',
-  missingCoin: 'You claim yes but carry nothing from the sands. Return when you have dug up the valuable.',
-  keepSearching: 'Then keep searching the desert and return when you find it.',
-  answerYesNo: 'Answer yes or no: have you found the lost valuable?',
-  alreadyCompleted: 'You have already completed the hunt in the desert sands. My thanks.',
-  alreadyActive: 'You are already searching the desert sands of Darama Oasis for the lost valuable.',
-  objectiveLine1: 'Search the desert sands of Darama Oasis for a lost valuable.',
-  objectiveLine2: 'Show the scarab coin to Tesha in Darama Oasis.',
-  hint: 'Lore tells that the valuable was lost while fighting where the stairs are that lead to Port Hope.',
-  teshaAskForCoin: 'Have you brought me a scarab coin from the desert? Show it to me if you have one.',
-  teshaNoCoin: 'You do not have a scarab coin with you.',
-  teshaAlreadyCompleted: 'You have already shown me a scarab coin. May enlightenment guide you, Player.',
-  teshaCompleteLines: [
-    'A scarab coin from the desert sands! The priests say they are sacred beings, although ... <whispers>I find them scary!',
-    'They are not mere curios — these coins are offerings for the tomb warps. The priests use them to open the paths to ascension.',
-    'Thank you for bringing it to me, Player. I shall keep it safe.'
-  ],
-  teshaCompleteCoinLine: 'Here are {coins} guild coins for your trouble, Player.',
-  rewardCoins: 100
-};
+const KING_SCARAB_COIN_MISSION = { id: 'king_scarab_coin' };
 
-const AL_DEE_FISHING_MISSION = {
-  id: 'al_dee_fishing_gold',
-  title: 'Fishing for gold',
-  prompt: 'Ah, adventurer! I dropped my Small Axe in the waters of a cave while being hunted by minotaurs and goblins. Will you help me retrieve it?',
-  accept: 'Thank you! I\'ll be waiting here for my Small Axe.',
-  askForItem: 'Have you found my Small Axe?',
-  complete: 'My Small Axe! You found it! Here\'s a Light Shovel as a reward for your help.',
-  missingItem: 'You claim yes but I see no Small Axe. Return when you have it!',
-  keepSearching: 'Then keep searching for my axe and return when you find it.',
-  answerYesNo: 'Answer yes or no: have you found my Small Axe?',
-  alreadyCompleted: 'You already helped me find my Small Axe. Thank you again!',
-  alreadyActive: 'You\'re already helping me find my Small Axe. Bring it back when you find it!',
-  objectiveLine1: 'Find Al Dee\'s Small Axe in the waters of a cave.',
-  objectiveLine2: 'Return the Small Axe to Al Dee.',
-  hint: 'Search underwater areas or caves where minotaurs and goblins roam.',
-  rewardCoins: 0
-};
+const AL_DEE_FISHING_MISSION = { id: 'al_dee_fishing_gold' };
 
-const AL_DEE_GOLDEN_ROPE_MISSION = {
-  id: 'al_dee_golden_rope',
-  title: 'The search for the Light',
-  prompt: 'Ah, adventurer! I\'ve lost my precious elvenhair rope to those tricky elves. It\'s said to have magical properties that can lead one to great treasures. Will you help me find it?',
-  accept: 'Excellent! I\'ll be waiting here for my elvenhair rope. Please return it when you find it!',
-  askForItem: 'Have you found my elvenhair rope?',
-  complete: 'My elvenhair rope! You found it! Thank you for your help. Here, take this Holy Tible as a reward for your bravery!',
-  missingItem: 'You claim yes but I see no elvenhair rope. Return when you have it!',
-  keepSearching: 'Then keep searching for my rope and return when you find it.',
-  answerYesNo: 'Answer yes or no: have you found my elvenhair rope?',
-  alreadyCompleted: 'You already helped me find my elvenhair rope. Thank you again!',
-  alreadyActive: 'You\'re already helping me find my elvenhair rope. Bring it back when you find it!',
-  objectiveLine1: 'Find Al Dee\'s elvenhair rope that was taken by elves.',
-  objectiveLine2: 'Return the elvenhair rope to Al Dee.',
-  hint: 'Search areas where elves are known to roam.',
-  rewardCoins: 0
-};
+const AL_DEE_GOLDEN_ROPE_MISSION = { id: 'al_dee_golden_rope' };
 
-// Castello mission (offered after completing The Monks Study). Player receives Castello's diary and must complete the seven seals of Ghostlands.
-const COSTELLO_QUEEN_BANSHEES_MISSION = {
-  id: 'costello_queen_banshees',
-  title: 'The Queen Of The Banshees',
-  prompt: 'There is a matter I would ask of you. The seven seals of Ghostlands – I need you to complete them and return to me when you have done so. I will give you my diary; it may guide you. Will you undertake this task?',
-  accept: 'Complete the seven seals of Ghostlands and return when you have done so.',
-  alreadyCompleted: 'You have already completed this task. My thanks.',
-  alreadyActive: 'You have accepted my task. Complete the seven seals of Ghostlands and return when you have done so.',
-  objectiveLine1: 'Complete the seven seals of Ghostlands.',
-  objectiveLine2: 'Return to Castello when all seven have been completed.',
-  diaryItemName: 'Castello\'s diary',
-  diaryIcon: 'Book_(Black).gif',
-  rewardItemName: 'Blessed Ankh',
-  rewardIcon: 'Blessed_Ankh.gif',
-  rewardDescription: 'You see the engraving of a white raven on its surface.'
-};
+const COSTELLO_QUEEN_BANSHEES_MISSION = { id: 'costello_queen_banshees' };
 
-// The Follower of Zathroth (offered by Castello after completing Queen of the Banshee). Player must bring the Blessed Ankh to Wyda in the swamps of Venore.
-const FOLLOWER_OF_ZATHROTH_MISSION = {
-  id: 'follower_of_zathroth',
-  title: 'The Follower of Zathroth',
-  prompt: 'I have another matter for you. Take the Blessed Ankh you earned and bring it to my friend Wyda in the swamps of Venore. She has need of it. Will you go?',
-  accept: 'Bring the Blessed Ankh to Wyda in the swamps of Venore. She will know what to do with it.',
-  alreadyCompleted: 'You have already brought the Blessed Ankh to Wyda. My thanks.',
-  alreadyActive: 'You must bring the Blessed Ankh to Wyda in the swamps of Venore.',
-  objectiveLine1: 'Bring the Blessed Ankh to Wyda in the swamps of Venore.',
-  objectiveLine2: 'Give the Blessed Ankh to Wyda to complete the task.',
-  rewardCoins: KING_GUILD_COIN_REWARD
-};
+const FOLLOWER_OF_ZATHROTH_MISSION = { id: 'follower_of_zathroth' };
 
-// The Mother of All Spiders (offered by Wyda after completing The Follower of Zathroth). Player must descend the secluded herb, defeat the mother of all spiders, and return with the silk.
-const MOTHER_OF_ALL_SPIDERS_MISSION = {
-  id: 'mother_of_all_spiders',
-  title: 'The Mother of All Spiders',
-  prompt: 'A new task? Very well. You must descend the secluded herb to find the mother of all spiders. Defeat it and return to me with the silk. Will you do this?',
-  accept: 'Descend the secluded herb, find the mother of all spiders, defeat it and bring me the silk.',
-  alreadyCompleted: 'You have already completed that task. My thanks.',
-  alreadyActive: 'You must descend the secluded herb, defeat the mother of all spiders and return with the silk.',
-  objectiveLine1: 'Descend the secluded herb and find the mother of all spiders.',
-  objectiveLine2: 'Defeat the mother of all spiders and return with the silk to Wyda.',
-  rewardItemName: 'Spool of Yarn',
-  rewardIcon: 'Spool_of_Yarn.gif',
-  rewardDescription: 'It is made from fine spider silk.',
-  rewardCoins: 0
-};
+const MOTHER_OF_ALL_SPIDERS_MISSION = { id: 'mother_of_all_spiders' };
 
-// Independent quest (not part of the King Tibianus chain). Unlocked after Retrieve the Honeyflower.
-const APPRENTICE_SHENG_MISSION = {
-  id: 'apprentice_sheng',
-  title: 'Apprentice Sheng',
-  prompt: 'Greetings, traveller. I am Apprentice Sheng. Will you hear me out?',
-  accept: 'Speak with Rookstayer in the Minotaur Mage Room.',
-  alreadyCompleted: 'You have already completed this task.',
-  alreadyActive: 'You have already spoken with Rookstayer.',
-  objectiveLine1: 'Help Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room.',
-  objectiveLine2: 'Speak with Rookstayer after the battle for your reward.',
-  hint: 'After retrieving the honeyflower for King Tibianus, seek Rookstayer in the Minotaur Mage Room.',
-  rewardItemName: 'Minotaur Trophy',
-  rewardIcon: 'Minotaur_Trophy.gif',
-  rewardDescription: 'You see a minotaur trophy.'
-};
+const APPRENTICE_SHENG_MISSION = { id: 'apprentice_sheng' };
+
+const CHRISTMAS_MIRACLE_MISSION = { id: 'christmas_miracle' };
+
+
+registerMissionForDialogue(SERPENTINE_TOWER_MISSION);
+registerMissionForDialogue(KING_HONEYFLOWER_MISSION);
+registerMissionForDialogue(KING_CROSSING_THE_LINE_MISSION);
+registerMissionForDialogue(KING_COPPER_KEY_MISSION);
+registerMissionForDialogue(KING_RED_DRAGON_MISSION);
+registerMissionForDialogue(KING_LETTER_MISSION);
+registerMissionForDialogue(KING_MONKS_STUDY_MISSION);
+registerMissionForDialogue(KING_SCARAB_COIN_MISSION);
+registerMissionForDialogue(AL_DEE_FISHING_MISSION);
+registerMissionForDialogue(AL_DEE_GOLDEN_ROPE_MISSION);
+registerMissionForDialogue(COSTELLO_QUEEN_BANSHEES_MISSION);
+registerMissionForDialogue(FOLLOWER_OF_ZATHROTH_MISSION);
+registerMissionForDialogue(MOTHER_OF_ALL_SPIDERS_MISSION);
+registerMissionForDialogue(APPRENTICE_SHENG_MISSION);
+registerMissionForDialogue(CHRISTMAS_MIRACLE_MISSION);
 
 const MINOTAUR_TROPHY_CONFIG = {
-  productName: APPRENTICE_SHENG_MISSION.rewardItemName,
-  icon: APPRENTICE_SHENG_MISSION.rewardIcon,
-  description: APPRENTICE_SHENG_MISSION.rewardDescription,
+  productName: 'Minotaur Trophy',
+  icon: 'Minotaur_Trophy.gif',
+  description: 'You see a minotaur trophy.',
   rarity: 5
-};
-
-// Independent Folda Christmas quest (not offered by King dialogue). Starts when Wishlist drops.
-const CHRISTMAS_MIRACLE_MISSION = {
-  id: 'christmas_miracle',
-  title: 'A Christmas Miracle',
-  prompt: '',
-  accept: 'Someone in Folda may be waiting for that list.',
-  alreadyCompleted: 'You have already received your Christmas present.',
-  alreadyActive: 'You are already on this Christmas quest.',
-  objectiveLine1: 'You\'ve found a wishlist. Ask Santa about this.',
-  objectiveLine2: 'Unwrap whatever he gives you.',
-  hint: '',
-  rewardItemName: 'Bunny Slippers',
-  rewardIcon: 'Bunnyslippers.gif',
-  rewardDescription: 'Soft pink bunny slippers. A gift from Santa Claus.'
-};
-
-const MISSION_COMPLETION_SUMMARIES = {
-  [KING_HONEYFLOWER_MISSION.id]: 'Retrieved a honeyflower from Honeyflower Tower for King Tibianus.',
-  [KING_CROSSING_THE_LINE_MISSION.id]: 'Won a City Boardgames chess battle with mages stationed on the marked tiles for King Tibianus.',
-  [KING_COPPER_KEY_MISSION.id]: 'Returned the copper key to King Tibianus.',
-  [KING_RED_DRAGON_MISSION.id]: 'Delivered 30 red dragon scales and 30 red dragon leathers to the royal forge.',
-  [KING_LETTER_MISSION.id]: 'Returned the stamped letter to Al Dee in Rookgaard.',
-  [KING_MONKS_STUDY_MISSION.id]: 'Found Costello at the White Raven Monastery.',
-  [KING_SCARAB_COIN_MISSION.id]: 'Unearthed the scarab coin in the desert sands and showed it to Tesha in Darama Oasis.',
-  [AL_DEE_FISHING_MISSION.id]: 'Retrieved Al Dee\'s Small Axe from the cave waters.',
-  [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'Returned Al Dee\'s elvenhair rope.',
-  [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'Completed the seven seals of Ghostlands and returned to Castello.',
-  [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'Brought the Blessed Ankh to Wyda in the swamps of Venore.',
-  [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'Descended the secluded herb, defeated the mother of all spiders, and returned the silk to Wyda.',
-  [SERPENTINE_TOWER_MISSION.id]: 'Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.',
-  [APPRENTICE_SHENG_MISSION.id]: 'Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room.',
-  [CHRISTMAS_MIRACLE_MISSION.id]: 'Received a Christmas present from Santa Claus.'
 };
 
 function getMissionCompletionSummary(mission) {
@@ -896,6 +818,7 @@ function getMissionCompletionSummary(mission) {
 
 function getMissionCompletionRewardText(mission) {
   if (!mission) return '';
+  if (mission.rewardSummary) return mission.rewardSummary;
 
   switch (mission.id) {
     case KING_RED_DRAGON_MISSION.id:
@@ -930,16 +853,6 @@ const SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES = [
 const SEVEN_SEALS_COUNT = SEVEN_SEALS_GHOSTLANDS_ROOM_NAMES.length;
 
 // Transcript text for Castello's diary: shown per seal (incomplete = hint, complete = sealed message).
-const SEAL_TRANSCRIPTS = [
-  { incomplete: 'Wander to the surface and fill the cracks with the green blood to seal the first.', complete: 'Seal I has been sealed.' },
-  { incomplete: 'A lever is hidden among the bookshelves.', complete: 'Seal II has been sealed.' },
-  { incomplete: 'You must activate the runewords in the ritual site.', complete: 'Seal III has been sealed.' },
-  { incomplete: 'You must defeat the hellish skeletons in a timely manner to complete the fourth seal.', complete: 'Seal IV has been sealed.' },
-  { incomplete: 'Find the lever in the Throne of the Destroyer to complete the seal.', complete: 'Seal V has been sealed.' },
-  { incomplete: 'Leverage yourself in the Seal of the Demonrage in the correct order.', complete: 'Seal VI has been sealed.' },
-  { incomplete: 'When the sixth seal is sealed, a portal opens in the Demonrage. Step through to face the last.', complete: 'Seal VII has been sealed.' }
-];
-
 // Seal indices for completing seals separately (use with setSealCompleted(sealIndex, true)).
 const FIRST_SEAL = 0;
 const SECOND_SEAL = 1;
@@ -1028,259 +941,96 @@ const FIREBASE_CONFIG = {
   firebaseUrl: 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app'
 };
 
-// Al Dee standard responses (non-mission related)
-const AL_DEE_RESPONSES = {
-  'hi': 'Hello, hello, Player! Please come in, look, and buy! I\'m a specialist for all sorts of tools. Just ask me for a trade to see my offers!',
-  'hello': 'Hello, hello, Player! Please come in, look, and buy! I\'m a specialist for all sorts of tools. Just ask me for a trade to see my offers!',
-  'how are you': 'I\'m fine. I\'m so glad to have you here as my customer.',
-  'tools': 'As an adventurer, you should always have at least a backpack, a rope, a shovel, a weapon, an armor and a shield.',
-  'offer': 'Just ask me for a trade to see my offers.',
-  'trade': 'Take a look in the trade window below.',
-  'gold': 'Well, no gold, no deal. Earn gold by fighting monsters and picking up the things they carry. Sell it to merchants to make profit!',
-  'money': 'Well, no gold, no deal. Earn gold by fighting monsters and picking up the things they carry. Sell it to merchants to make profit!',
-  'backpack': 'Yes, I am selling that. Simply ask me for a trade to view all my offers.',
-  'rope': 'Yes, I am selling that. Simply ask me for a trade to view all my offers.',
-  'ropes': 'Yes, I am selling that. Simply ask me for a trade to view all my offers.',
-  'shovel': 'Yes, I am selling that. Simply ask me for a trade to view all my offers.',
-  'weapon': 'Oh, I\'m sorry, but I don\'t deal with weapons. That\'s Obi\'s or Lee\'Delle\'s business. I could offer you a pick in exchange for a small axe if you should happen to own one.',
-  'armor': 'Armor and shields can be bought at Dixi\'s or at Lee\'Delle\'s. Dixi runs that shop near Obi\'s.',
-  'shield': 'Armor and shields can be bought at Dixi\'s or at Lee\'Delle\'s. Dixi runs that shop near Obi\'s.',
-  'food': 'Hmm, the best address to look for food might be Willie or Billy. Norma also has some snacks for sale.',
-  'potions': 'Sorry, I don\'t sell potions. You should visit Lily for that.',
-  'cookies': 'I you want to find someone who may want to buy your cookies, you should meet Lily.',
-  'fishing': 'I sell fishing rods and worms if you want to fish. Simply ask me for a trade.',
-  'cooking': 'I you want to find someone who may want to buy your cookies, you should meet Lily.',
-  'fish': 'No thanks. I don\'t like fish.',
-  'torch': 'No thank you. I can already overstock the market with torches.',
-  'worms': 'I have enough worms myself and don\'t want any more. Use them for fishing.',
-  'bone': 'You better put that bone back there where you dug it out.',
-  'help': 'If you need general equipment, just ask me for a trade. I can also provide you with some general hints about the game.',
-  'information': 'If you need general equipment, just ask me for a trade. I can also provide you with some general hints about the game.',
-  'iron ore': 'Hmm.. King Tibianus might be interested in this Iron Ore...',
-  'job': 'I\'m a merchant. Just ask me for a trade to see my offers.',
-  'name': 'My name is Al Dee, but you can call me Al. Can I interest you in a trade?',
-  'time': 'It\'s about 0:00 am. I\'m so sorry, I have no watches to sell. Do you want to buy something else?',
-  'premium': 'As a premium adventurer you have many advantages. You really should check them out!',
-  'king': 'The king encouraged salesmen to travel here, but only I dared to take the risk, and a risk it was!',
-  'sell': 'Just ask me for a trade to see what I buy from you.',
-  'wares': 'Just ask me for a trade to see my offers.',
-  'stuff': 'Just ask me for a trade to see my offers.',
-  'pick': 'Picks are hard to come by. I trade them only in exchange for high quality small axes. Would you like to make that deal?',
-  'small axe': 'Picks are hard to come by. I trade them only in exchange for high quality small axes. Would you like to make that deal?',
-  'dungeon': 'If you want to explore the dungeons such as the sewers, you have to equip yourself with the vital stuff I am selling. It\'s vital in the deepest sense of the word.',
-  'sewers': 'Oh, our sewer system is very primitive - it\'s so primitive that it\'s overrun by rats. But the stuff I sell is safe from them. Just ask me for a trade to see it!',
-  'vital': 'Well, vital means - necessary for you to survive!',
-  'rats': 'Rats plague our sewers. You can sell fresh rat corpses to Seymour or Tom the tanner.',
-  'monsters': 'If you want to challenge monsters in the dungeons, you need some weapons and armor from the local merchants.',
-  'merchants': 'To view the offers of a merchant, simply talk to him or her and ask for a trade. They will gladly show you their offers and also the things they buy from you.',
-  'tibia': 'One day I will return to the continent as a rich, a very rich man!',
-  'rookgaard': 'On the island of Rookgaard you can gather important experiences to prepare yourself for mainland.',
-  'mainland': 'Have you ever wondered what that \'main\' is people are talking about? Well, once you\'ve reached level 8, you should talk to the oracle. You can choose a profession afterwards and explore much more of Tibia.',
-  'profession': 'You will learn everything you need to know about professions once you\'ve reached the Island of Destiny.',
-  'island of destiny': 'The Island of Destiny can be reached via the oracle once you are level 8. This trip will help you choose your profession!',
-  'thais': 'Thais is a crowded town.',
-  'academy': 'The big building in the centre of Rookgaard. They have a library, a training centre, a bank and the room of the oracle. Seymour is the teacher there.',
-  'bank': 'A bank is quite useful. You can deposit your money safely there. This way you don\'t have to carry it around with you all the time. You could also invest your money in my wares!',
-  'oracle': 'You can find the oracle on the top floor of the academy, just above Seymour. Go there when you are level 8.',
-  'temple': 'The monk Cipfried takes care of our temple. He can heal you if you\'re badly injured or poisoned.',
-  'citizen': 'If you tell me the name of a citizen, I\'ll tell you what I know about him or her.',
-  'dallheim': 'Some call him a hero. He protects the town from monsters.',
-  'zerbrus': 'Some call him a hero. He protects the town from monsters.',
-  'al dee': 'Yep, that\'s me. Smart of you to notice that!',
-  'amber': 'She\'s currently recovering from her travels in the academy. It\'s always nice to chat with her!',
-  'billy': 'This is a local farmer. If you need fresh food to regain your health, it\'s a good place to go. He\'s only trading with premium adventurers though.',
-  'cipfried': 'He is just an old monk. However, he can heal you if you are badly injured or poisoned.',
-  'dixi': 'She\'s Obi\'s granddaughter and deals with armors and shields. Her shop is south west of town, close to the temple.',
-  'hyacinth': 'He mostly stays by himself. He\'s a hermit outside of town - good luck finding him.',
-  'lee delle': 'If you are a premium adventurer, you should check out Lee\'Delle\'s shop. She lives in the western part of town, just across the bridge.',
-  'lily': 'She sells health potions and antidote potions. Also, she buys blueberries and cookies in case you find any.',
-  'loui': 'No idea who that is.',
-  'norma': 'She used to sell equipment, but I think she has opened a small bar now. Talks about changing her name to \'Mary\' and such, strange girl.',
-  'obi': 'He sells weapons. His shop is south west of town, close to the temple.',
-  'paulie': 'He\'s the local bank clerk.',
-  'santiago': 'He dedicated his life to welcome newcomers to this island.',
-  'seymour': 'Seymour is a teacher running the academy. He has many important information about Tibia.',
-  'tom': 'He\'s the local tanner. You could try selling fresh corpses or leather to him.',
-  'willie': 'This is a local farmer. If you need fresh food to regain your health, it\'s a good place to go. However, many monsters also carry food such as meat or cheese. Or you could simply pick blueberries.',
-  'zirella': 'Poor old woman, her son Tom never visits her.',
-  'bye': 'Bye, bye Player.',
-  'mission': 'I have a task for you if you\'re willing to help. Would you like to hear about my lost Small Axe?',
-  'missions': 'I have a task for you if you\'re willing to help. Would you like to hear about my lost Small Axe?',
-  'quest': 'I have a task for you if you\'re willing to help. Would you like to hear about my lost Small Axe?',
-  'task': 'I have a task for you if you\'re willing to help. Would you like to hear about my lost Small Axe?',
-  'help': 'I could use some help retrieving my Small Axe from the waters. Would you like to hear about it?',
-  'axe': 'Ah, my Small Axe! It fell into the cave waters while I was fleeing from minotaurs and goblins.',
-  'small axe': 'Ah, my Small Axe! It fell into the cave waters while I was fleeing from minotaurs and goblins.'
-};
-
-// Costello (White Raven Monastery) keyword responses
-const COSTELLO_RESPONSES = {
-  'hi': 'Welcome, Player! Feel free to tell me what brings you here.',
-  'hello': 'Welcome, Player! Feel free to tell me what brings you here.',
-  'name': 'My name is Costello.',
-  'job': "I'm the abbot of the White Raven Monastery on the Isle of the Kings.",
-  'isle': 'We founded our monastery to guard the royal tombs and to gather wisdom and knowledge.',
-  'order': 'We founded our monastery to guard the royal tombs and to gather wisdom and knowledge.',
-  'wisdom': "You may enter the library upstairs. Don't go any further upstairs, though, as this area is reserved for members of our order.",
-  'king': 'The deceased leaders of the Thaian empire rest beneath this monastery in tombs and crypts.',
-  'caves': 'Anselm, the first monk of our order, discovered them while looking for a suitable burial place for his king.',
-  'anselm': 'He was a humble and pious man, and he was chosen by the royal family of Thais to find a resting place for their dead.',
-  'bye': 'Good bye, Player!',
-  'goodbye': 'Good bye, Player!'
-};
-
-// Wyda (swamps of Venore) keyword responses. Each key maps to an array of response lines (Wyda may say multiple lines).
-// Keys are normalized to lowercase; match by containment. Replace "Player" with actual player name at runtime.
-const WYDA_RESPONSES = {
-  'hi': ['What? Talking to me, Player?', "I'm bored! Bored bored bored! Nothing ever happens here!"],
-  'hello': ['Good day, Player.'],
-  'job': ["I am a witch. Didn't you notice?", "I think witches these days are underpaid. Who needs a witch anyway?"],
-  'profession': ["I am a witch. Didn't you notice?", "I think witches these days are underpaid. Who needs a witch anyway?"],
-  'gods': ['I believe that nature itself is God.', 'Goddess, yes, you may call me that, thank you.'],
-  'nature': ['There are many swamp plants, mushrooms, and herbs around here.'],
-  'plants': ['There are many kinds of swamp plants, some can be used for potions, some not.', "I've heard about a whole different set of corrupted plants. I wonder what kind of potions you could make from them?"],
-  'mushrooms': ['Mushrooms taste good and are useful for potions.', 'Some mushrooms have strange effects. I just recently noticed that one certain sort lets your hands grow.'],
-  'herbs': ['The swamp is home to a wide variety of herbs, but the most famous is the blood herb.', "To be honest, I'm drowning in blood herbs by now."],
-  'blood herb': ['The blood herb is very rare. This plant would be very useful for me, but I don\'t know any accessible places to find it.', "To be honest, I'm drowning in blood herbs by now. But if it helps you, well yes.. I guess I could use another blood herb..."],
-  'bloodherb': ['The blood herb is very rare. This plant would be very useful for me, but I don\'t know any accessible places to find it.', "To be honest, I'm drowning in blood herbs by now. But if it helps you, well yes.. I guess I could use another blood herb..."],
-  'potion': ["The recipe of the potions is one of the witches' secrets!"],
-  'recipe': ["The recipe of the potions is one of the witches' secrets!"],
-  'secret': ["The recipe of the potions is one of the witches' secrets!"],
-  'magic': ["The magic of the witches is one of our secrets!", 'I want to invent a new spell. I just need a good idea.'],
-  'spell': ["The magic of the witches is one of our secrets!", 'I want to invent a new spell. I just need a good idea.'],
-  'key': ["I keep my keys where they belong - in my pocket.", "Here's a secret I've never told anyone before. I actually have a key to the Kazordoon treasury. No, you can't have it."],
-  'help': ['I can only help with knowledge. About what do you want me to tell you something?'],
-  'king': ["There are too many royals on this continent if you ask me...", "I've heard of a new festival called 'Kingsday'. Why don't they make a 'Witchday'?"],
-  'tibianus': ["Haha, that's a stupid name. Who's that?", "Haha, still a stupid name."],
-  'queen eloise': ['Eloise is Queen of Carlin. I don\'t care about royals much, as long as they don\'t try to tax me.', "She has become kinda fat over the years, don't you think? Ha... nothing beats some good gossip. I feel almost entertained."],
-  'eloise': ['Eloise is Queen of Carlin. I don\'t care about royals much, as long as they don\'t try to tax me.', "She has become kinda fat over the years, don't you think? Ha... nothing beats some good gossip. I feel almost entertained."],
-  'name': ['My name is Wyda, and what\'s yours?', 'You should know me after all these years!'],
-  'my name is': ['Nice to meet you.'],
-  'quest': ["A quest? Well, if you're so keen on doing me a favour... Why don't you try to find a blood herb?", "To be honest, I'm drowning in blood herbs by now."],
-  'time': ["I think it is the fourth year after Queen Eloise's crowning, but I cannot tell you date or time.", "It's about time SOMETHING HAPPENED HERE!"],
-  'swamp': ["Be careful of the swamp water, it's poisonous!", 'Swamp water is good for your skin.'],
-  'druid': ["Druids are mostly fine people. I'm always happy when I meet one.", 'Being a druid is fine, you know. Since household injuries are among the most common, you can at least mend your own wounds well.'],
-  'sorcerer': ['Sorcerers have forgotten about the root of all beings: nature.', "I wouldn't mind learning a new spell or two. Maybe I should dabble some in sorcerer magic."],
-  'knight': ['Knights succumb to the blindness of rage and the desire for violence and blood.', "Even a knight would be a welcome distraction right now. I could use his little sword to poke him in the eye."],
-  'paladin': ['Paladins can use bows, but not brains.', "I once knew a paladin who had a magic lamp. No wait... different story."],
-  'monsters': ['Many creatures live in, around, and beneath the swamp. Be careful!'],
-  'creatures': ['Many creatures live in, around, and beneath the swamp. Be careful!'],
-  'black knight': ['A black knight? Black is the color of witches, why whould any knight carry black?', 'Many creatures live in, around, and beneath the swamp. Be careful... MWIHIHIHIHIHI.'],
-  'bonelords': ['Bonelords? Strange creatures that have mysterious magical abilities.'],
-  'giant spider': ['Yes, there is such a thing in the east, on a small island. It\'s very powerful.', 'Oooooh why are you asking? *whistles*'],
-  'hunter': ['To the east, there is a little settlement of hunters. They are cruel humans who attack everything they see.', 'To hunt or to be hunted, I guess it\'s either of the two.'],
-  'slime': ["There's lots of slime around. It is said that they live from the swamp water."],
-  'witches': ['Some sisters of mine are having a meeting nearby. Don\'t disturb them, or they will get angry and attack you.', "They never let me join their parties. It's not my fault that I'm smarter and prettier than them. They're just jealous!"],
-  'sister': ['Some sisters of mine are having a meeting nearby. Don\'t disturb them, or they will get angry and attack you.', "They never let me join their parties. It's not my fault that I'm smarter and prettier than them. They're just jealous!"],
-  'cookie': ['I bake cookies now and then in my spare time.', "I was so bored that I made cookies with insects in them. I sold them in Venore. Maybe you ate one recently."],
-  'wand': ['I use a wooden spellwand. Why are you asking?', 'I use a wooden wand. Why are you asking?'],
-  'crystal ball': ["It's a magical item that only witches can use.", "Let me take a look... ah, yes, you'll have a good day. Or maybe a bad one. Doesn't really say it clearly."],
-  'coffin': ["That's none of your business.", 'Want to end up in one? Keep your nose out!'],
-  'broom': ['What about it?'],
-  'fly broom': ['Haha, no... where did you get that idea? I use it to sweep my platform.', 'Sadly, my license expired.'],
-  'fly': ['Haha, no... where did you get that idea? I use it to sweep my platform.', 'Sadly, my license expired.'],
-  'orange': ['I love exotic fruits. I have oranges imported from the south sometimes, but that\'s very expensive.', 'Actually, I feel more like mangos.'],
-  'carlin': ['Carlin is a beautiful town, but far from here. Do you live there?', "I've heard a band of male bards plays there sometimes. Maybe I should pay it a visit."],
-  'kazordoon': ["Isn't that the name of the little bearded fellows' town?", 'Ah, the pretty city of... dullness.'],
-  'little bearded fellows': ["The little bearded fellows have a town somewhere to the north-west."],
-  'dwarf': ["The little bearded fellows have a town somewhere to the north-west."],
-  'dwarves': ["The little bearded fellows have a town somewhere to the north-west."],
-  'thais': ["I've heard stories about that city. It's nowhere near here, that's all I can tell you about it.", 'Not. Interested.'],
-  'plains of havoc': ['Many tales exist about some so-called Plains of Havoc. It seems to be a dangerous place.', 'The Plains of Havoc... ah, fond memories. I used to go there as a little witch and run from all the giant spiders. How scary!'],
-  'dwarven bridge': ["There's a bridge to the west, but it's guarded by dwarfs.", "Good if you don't want to get your feet wet, I guess. Hey, actually that's a brilliant idea. I could destroy a few bridges... hahaha."],
-  'earthquakes': ["The earth in this region shakes now and then. Foolish people think that this is because the gods are angry."],
-  'ferumbras': ["Haha, that's a stupid name. Who's that?", 'Look, behind you!! WAHAHAHAHAHAHA.'],
-  'witch': ['Aye, I am a witch.'],
-  'become witch': ["You're a MAN!"],
-  'evil': ["Evilness doesn't scare me.", "I'm not evil. What are you implying?"],
-  'man': ['There are only female witches.'],
-  'tibia': ['Tibia is the name of our continent.', "You're a smart one, aren't you?"],
-  'health': ['I do not have any potions for healing available right now.', 'Nah sorry. Hehehehehe.'],
-  'platform': ['This platform and house were built by my mother, long ago.'],
-  'mother': ['Of course my mother was also a witch!'],
-  'voodoo': ["I don't practice such nonsense, that's just a rumour.", "I've recently met that fellow Chondur on a convention. He has some... interesting... skills. *giggles*"],
-  'granny weatherwax': ["I think I've heard that name before..."],
-  'nanny ogg': ["I think I've heard that name before..."],
-  'buy': ["I'm currently not selling anything."],
-  'sell': ["There's nothing I need right now, thanks."],
-  'see you': ['Good luck on your journeys, Player.', "NO! Don't go! I need someone to entertain me!"],
-  'bye': ['Good luck on your journeys.', "NO! Don't go! I need someone to entertain me!"],
-  'goodbye': ['Good luck on your journeys.', "NO! Don't go! I need someone to entertain me!"]
-};
-
-const TESHA_RESPONSES = {
-  "akh'rah uthun": 'I don\'t really understand this concept, but from what I know it is the three components that make up every being.',
-  'akh rah uthun': 'I don\'t really understand this concept, but from what I know it is the three components that make up every being.',
-  'oldpharaoh': 'This poor man could not comprehend his son\'s wisdom. Perhaps he has spelled his own eternal doom.',
-  'ab\'dendriel': 'Most elves lack the sincerity to strive for ascension. At least that\'s what the priests are telling us.',
-  'false gods': 'These greedy beings are trying to devour us all. May the pharaoh thwart their evil plans and free us from their reign of terror!',
-  'ankrahmun': 'This city is both a refuge and centre of learning for the believers of the true faith taught by his divine majesty the pharaoh.',
-  'kazordoon': 'Dwarves have a strong Akh. This makes them arrogant and deaf to the true creed.',
-  'darashia': 'Those poor souls there might still be saved if only they listened.',
-  'daraman': 'He was a great man. If he had left his mortal existence behind he might have become one of the greatest prophets of the true faith, second only to the pharaoh himself.',
-  'mortality': 'Mortality can be overcome. It is a sickness, but it can be cured through undeath.',
-  'ascension': 'Oh, I am not asking for much, you know. I mean, I really don\'t have to be a god or something. All I wish for is a bit of the wisdom that comes with ascension.',
-  'pharaoh': [
-    'He is the benevolent father of this nation. Blessed be our saviour.',
-    'The pharaoh has such amazing patience with us puny mortals. He is truly a caring father of this nation.'
-  ],
-  'dwarves': 'Dwarves have a strong Akh. This makes them arrogant and deaf to the true creed.',
-  'dwarfes': 'Dwarves have a strong Akh. This makes them arrogant and deaf to the true creed.',
-  'carlin': 'Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.',
-  'thais': 'Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.',
-  'edron': 'Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.',
-  'venore': 'Those citites are so far away. So far that the enlightened preachings of our divine pharaoh cannot reach those poor misguided souls.',
-  'scarab': 'The priests say they are sacred beings, although ... <whispers>I find them scary!',
-  'chosen': 'I can only hope my humble work for our community and for the temple will make me worthy one day to be elevated to the rank of a chosen one. One to whom the path of ascension is opened up through undeath.',
-  'temple': 'The temple can offer us guidance and solace in our mortal existence.',
-  'palace': 'Isn\'t the palace magnificent to behold? It is so impressive!',
-  'undead': 'Undeath is the reward for a life of faith and service.',
-  'darama': 'In the desert the lines of life and death are clearly drawn. Because of this it is easier for us, its children, to focus on them. In the jungle those lines are fuzzy and blurred, and people easily fall victim to temptation.',
-  'tibia': 'The world is so huge, and I have seen so little. Perhaps if I am chosen one day I will travel and see it all.',
-  'elfes': 'Most elves lack the sincerity to strive for ascension. At least that\'s what the priests are telling us.',
-  'elves': 'Most elves lack the sincerity to strive for ascension. At least that\'s what the priests are telling us.',
-  'pearl': 'There are white and black pearls you can buy or sell, as well as giant green and brown pearls which you can sell.',
-  'jewel': 'Currently you can purchase wedding rings, golden amulets, and ruby necklaces. We also buy gold ingots.',
-  'arena': 'Look for it in the eastern part of the city.',
-  'mourn': 'The dead mourn our tempted existence, and we mourn ourselves.',
-  'talon': 'We don\'t trade with them.',
-  'uthun': 'The Uthun is all we learned in life.',
-  'goodbye': 'May enlightenment be your path, Player.',
-  'hello': 'Be mourned pilgrim in flesh, Player. Welcome to the bank and jewel store.',
-  'name': 'I am the mourned Tesha.',
-  'time': 'Time is yet another burden that lies heavy on our mortal bodies.',
-  'tesha': 'I am the mourned Tesha.',
-  'bye': 'May enlightenment be your path, Player.',
-  'gem': 'You can buy and sell small diamonds, sapphires, rubies, emeralds and amethysts or sell topazes.',
-  'job': 'I sell and buy scarab coins, gems and jewelry. Also I can take care of your bank business.',
-  'rah': 'The Rah is our essence. The spiritual bond that keep the other parts of the Akh\'rah Uthun together.',
-  'akh': 'Our body. The only physical part of the Akh\'rah Uthun.',
-  'hi': 'Be mourned pilgrim in flesh, Player. Welcome to the bank and jewel store.'
-};
-
-const SANTA_THANK_YOU_LINES = [
-  'You had a few hard times last year, I know. Considering all that you did well and I\'m proud of you.',
-  'You\'re one of my favourite children, little Player. But pssht, don\'t tell the others! I love all of you, of course.',
-  'Oh, little Player, watching you from above always makes my heart smile. I\'ll be looking forward to seeing you next Christmas!',
-  'Yes, you should thank me! I ignored that evil thing you did last year and gave you a present anyway. You know what I mean.',
-  'You\'ve been so good during the last year that I was almost tempted to give you a Ferumbras\' hat. But I didn\'t want to make the other children jealous.',
-  'Keep up this friendliness and politeness and we shall see about a really cool present next year!',
-  'Oh - you absolutely deserve it! You\'ve behaved really well this year. Almost no bad things about you in my book!',
-  'Your good and bad deeds are pretty balanced. If you try and lean more towards the good side, I\'ll consider giving you a really nice present next year!',
-  'May the coming year be full of joy, happiness and love for you! You don\'t always have to be on the tough side, you know.',
-  'Thank you too, little Player, for coming to see me this year.'
+// Quest item mentions in NPC chat — longest keyword wins. Involved NPCs get specific lines;
+// others get a unique uninvolved line per NPC (see NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES).
+const QUEST_ITEM_CHAT_ENTRIES = [
+  { id: 'letter_from_al_dee', productName: 'Letter from Al Dee', keywords: ['letter from al dee'] },
+  { id: 'stamped_letter', productName: 'Stamped Letter', keywords: ['stamped letter'] },
+  { id: 'red_dragon_leather', productName: 'Red Dragon Leather', keywords: ['red dragon leather', 'dragon leather'] },
+  { id: 'red_dragon_scale', productName: 'Red Dragon Scale', keywords: ['red dragon scale', 'dragon scale'] },
+  { id: 'elvenhair_rope', productName: 'Elvenhair Rope', keywords: ['elvenhair rope', 'elven hair rope'] },
+  { id: 'destroy_field_rune', productName: DESTROY_FIELD_RUNE_ITEM_NAME, keywords: ['destroy field rune', 'adito grav'] },
+  { id: 'scorpion_sceptre', productName: 'Scorpion Sceptre', keywords: ['scorpion sceptre', 'scorpion scepter'] },
+  { id: 'scarab_coin', productName: 'Scarab Coin', keywords: ['scarab coin'] },
+  { id: 'map_to_mines', productName: 'Map to the Mines', keywords: ['map to the mines', 'map to mines'] },
+  { id: 'obsidian_knife', productName: 'Obsidian Knife', keywords: ['obsidian knife'] },
+  { id: 'light_shovel', productName: 'Light Shovel', keywords: ['light shovel'] },
+  { id: 'holy_tible', productName: 'The Holy Tible', keywords: ['holy tible', 'the holy tible'] },
+  { id: 'castello_diary', productName: 'Castello\'s diary', keywords: ['castello\'s diary', 'castellos diary', 'costello\'s diary', 'costellos diary'] },
+  { id: 'blessed_ankh', productName: 'Blessed Ankh', keywords: ['blessed ankh'] },
+  { id: 'spider_silk', productName: 'Spider Silk', keywords: ['spider silk'] },
+  { id: 'spool_of_yarn', productName: 'Spool of Yarn', keywords: ['spool of yarn'] },
+  { id: 'bunny_slippers', productName: 'Bunny Slippers', keywords: ['bunny slippers', 'bunnyslippers'] },
+  { id: 'minotaur_trophy', productName: 'Minotaur Trophy', keywords: ['minotaur trophy'] },
+  { id: 'dragon_claw', productName: 'Dragon Claw', keywords: ['dragon claw'] },
+  { id: 'fishing_rod', productName: 'Fishing Rod', keywords: ['fishing rod'] },
+  { id: 'silver_token', productName: 'Silver Token', keywords: ['silver token'] },
+  { id: 'copper_key', productName: 'Copper Key', keywords: ['copper key'] },
+  { id: 'honeyflower', productName: 'Honeyflower', keywords: ['honeyflower', 'honey flower'] },
+  { id: 'iron_ore', productName: 'Iron Ore', keywords: ['iron ore'] },
+  { id: 'small_axe', productName: 'Small Axe', keywords: ['small axe'] },
+  { id: 'magnet', productName: 'Magnet', keywords: ['magnet'] },
+  { id: 'wishlist', productName: 'Wishlist', keywords: ['wishlist', 'wish list'] },
+  { id: 'christmas_present', productName: 'Present', keywords: ['christmas present', 'wrapped present'] },
+  { id: 'present', productName: 'Present', keywords: ['present'] },
+  { id: 'yarn', productName: 'Spool of Yarn', keywords: ['yarn'] }
 ];
 
-const SANTA_RESPONSES = {
-  'hi': 'Merry Christmas, little Player!',
-  'hello': 'Merry Christmas, little Player!',
-  'name': 'Ho ho ho! You don\'t know Santa Claus? Never mind. You may ask me for a present.',
-  'job': 'Ho ho ho! You don\'t know Santa Claus? Never mind. You may ask me for a present.',
-  'wishlist': 'Ho ho ho! So you found a wishlist? How thoughtful! You may ask me for a present.',
-  'wish list': 'Ho ho ho! So you found a wishlist? How thoughtful! You may ask me for a present.',
-  'bye': 'Merry Christmas, little Player! Ho ho ho!',
-  'goodbye': 'Merry Christmas, little Player! Ho ho ho!'
-};
+function matchQuestItemInChatMessage(message) {
+  const lower = String(message ?? '').toLowerCase();
+  let bestEntry = null;
+  let bestKeywordLength = 0;
+
+  for (const entry of QUEST_ITEM_CHAT_ENTRIES) {
+    for (const keyword of entry.keywords) {
+      if (lower.includes(keyword) && keyword.length > bestKeywordLength) {
+        bestEntry = entry;
+        bestKeywordLength = keyword.length;
+      }
+    }
+  }
+
+  return bestEntry;
+}
+
+function formatQuestItemChatLine(line, playerName = 'Player') {
+  if (typeof line !== 'string') return line;
+  return line.includes('Player') ? line.replace(/Player/g, playerName) : line;
+}
+
+function getNpcQuestItemUninvolvedResponse(npcId, productName, playerName = 'Player') {
+  const template = NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES[npcId];
+  const line = template
+    ? template.replace(/\{item\}/g, productName)
+    : `I don't know anything about ${productName}.`;
+  return formatQuestItemChatLine(line, playerName);
+}
+
+function getNpcQuestItemChatResponse(npcId, message, playerName = 'Player') {
+  const entry = matchQuestItemInChatMessage(message);
+  if (!entry) return null;
+
+  const npcResponses = NPC_QUEST_ITEM_CHAT_RESPONSES[npcId];
+  if (!npcResponses) {
+    return getNpcQuestItemUninvolvedResponse(npcId, entry.productName, playerName);
+  }
+
+  const line = npcResponses[entry.id];
+  if (line == null) {
+    return getNpcQuestItemUninvolvedResponse(npcId, entry.productName, playerName);
+  }
+
+  return formatQuestItemChatLine(line, playerName);
+}
+
+function getRandomNpcConfusionResponse(responses, playerName = 'Player') {
+  if (!Array.isArray(responses) || responses.length === 0) {
+    return 'I do not understand.';
+  }
+  const line = responses[Math.floor(Math.random() * responses.length)];
+  if (typeof line !== 'string') return line;
+  return line.includes('Player') ? line.replace(/Player/g, playerName) : line;
+}
 
 /**
  * Longest-keyword-first includes match over a response map (sync).
@@ -1375,14 +1125,17 @@ async function matchKeywordResponses(map, message, playerName = 'Player', option
 
 function getTeshaResponse(message, playerName = 'Player') {
   const result = matchKeywordResponsesSync(TESHA_RESPONSES, message, playerName, {
-    defaultResponse: ['I don\'t understand. Ask me about gems, jewels, scarab coins, or the pharaoh.']
+    defaultResponse: null,
+    lowercaseKeys: true
   });
+  if (result == null) return null;
   return Array.isArray(result) ? result : [result];
 }
 
 function getWydaResponse(message, playerName = 'Player') {
   return matchKeywordResponsesSync(WYDA_RESPONSES, message, playerName, {
-    defaultResponse: ["I don't know what you mean. Ask me about plants, mushrooms, herbs, or the swamp."]
+    defaultResponse: null,
+    lowercaseKeys: true
   });
 }
 
@@ -1411,17 +1164,18 @@ function getCostelloResponse(message, playerName = 'Player') {
     }
   }
   if (lowerMessage.includes('seals') || lowerMessage === 'seal') {
-    return "The seven seals of Ghostlands must be completed one by one. I have given you my diary – it will show you which are done. Ask me about a specific seal, such as the first seal, if you wish guidance.";
+    return COSTELLO_SEAL_GUIDANCE_FALLBACK || "The seven seals of Ghostlands must be completed one by one.";
   }
 
   return matchKeywordResponsesSync(COSTELLO_RESPONSES, message, playerName, {
-    defaultResponse: "I'm not sure I understand. You may ask me about my name, my job, this isle and our order, wisdom, the king, the caves, the seals, or Anselm."
+    defaultResponse: null,
+    lowercaseKeys: true
   });
 }
 
 function getAlDeeResponse(message, playerName = 'Player') {
   return matchKeywordResponsesSync(AL_DEE_RESPONSES, message, playerName, {
-    defaultResponse: 'Hello, hello, Player! Please come in, look, and buy! I\'m a specialist for all sorts of tools. Just ask me for a trade to see my offers!',
+    defaultResponse: null,
     lowercaseKeys: true
   });
 }
@@ -1448,14 +1202,14 @@ const QUEST_ITEMS_CONFIG = {
       {
         name: 'Red Dragon Leather',
         icon: 'Red_Dragon_Leather.PNG',
-        dropChance: 0.50, // 50% chance
+        dropChance: 0.25, // 25% per 3 stamina spent (scaled, capped at 100%)
         description: 'Obtained by defeating Dragon Lord',
         rarity: 4
       },
       {
         name: 'Red Dragon Scale',
         icon: 'Red_Dragon_Scale.PNG',
-        dropChance: 0.50, // 50% chance
+        dropChance: 0.25, // 25% per 3 stamina spent (scaled, capped at 100%)
         description: 'Obtained by defeating Dragon Lord',
         rarity: 4
       }
@@ -1470,19 +1224,19 @@ const QUEST_ITEMS_CONFIG = {
   // }
 };
 
-// Rookgaard region drop configuration - applies to ANY creature defeated in Rookgaard
+// Rookgaard region drop configuration - applies to ANY creature defeated in Rookgaard.
+// Letter and Iron Ore share one stamina-scaled roll; letter is awarded first when the roll wins.
+const ROOKGAARD_GLOBAL_POOL_DROP_CHANCE = 0.01; // 1% per 3 stamina spent (scaled, capped at 100%)
 const ROOKGAARD_GLOBAL_DROPS = [
   {
     name: 'Letter from Al Dee',
     icon: 'Scroll.gif',
-    dropChance: 0.01, // 1% chance from any creature in Rookgaard
     description: 'Feeling lost?\nWould you give all your gold for a rope now?\nAl Dee\'s shop - come to where the ropes are!',
     rarity: 1
   },
   {
     name: 'Iron Ore',
     icon: 'Iron_Ore.gif',
-    dropChance: 0.01, // 1% chance from any creature in Rookgaard
     description: 'A chunk of iron ore, useful for crafting and forging.',
     rarity: 2
   }
@@ -1512,7 +1266,7 @@ const MAP_COLOUR_CONFIG = {
 const WISHLIST_CONFIG = {
   productName: 'Wishlist',
   icon: 'Wishlist.gif',
-  dropChance: 0.01,
+  dropChance: 0.01, // 1% per 3 stamina spent (scaled, capped at 100%)
   description: 'A crumpled wishlist. Someone in Folda might be interested.',
   rarity: 2
 };
@@ -1545,6 +1299,50 @@ const ARENA_RANKINGS_OPEN_BTN_ID = 'arena-rankings-open-btn';
 const ARENA_LEADERBOARD_MODAL_LIST_ID = 'arena-leaderboard-modal-list';
 const ARENA_LEADERBOARD_TOP = 10;
 const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
+const ACTIVE_MISSION_TAB_ID_PREFIX = 'quests-mod-active-mission-tab-';
+const ACTIVE_MISSION_TAB_ATTR = 'data-quests-active-mission-id';
+
+// Story order for Quest Log / Mission Log lists. Keep in sync with modal mission list.
+const QUEST_LOG_MISSIONS = [
+  KING_HONEYFLOWER_MISSION,
+  KING_CROSSING_THE_LINE_MISSION,
+  KING_COPPER_KEY_MISSION,
+  KING_RED_DRAGON_MISSION,
+  KING_LETTER_MISSION,
+  AL_DEE_FISHING_MISSION,
+  AL_DEE_GOLDEN_ROPE_MISSION,
+  KING_MONKS_STUDY_MISSION,
+  COSTELLO_QUEEN_BANSHEES_MISSION,
+  FOLLOWER_OF_ZATHROTH_MISSION,
+  MOTHER_OF_ALL_SPIDERS_MISSION,
+  KING_SCARAB_COIN_MISSION,
+  SERPENTINE_TOWER_MISSION,
+  APPRENTICE_SHENG_MISSION,
+  CHRISTMAS_MIRACLE_MISSION
+];
+
+// Quest Log mission card icons — prefer the key quest item or objective over NPC portraits.
+const MISSION_QUEST_LOG_ICON_MAP = {
+  [KING_HONEYFLOWER_MISSION.id]: HONEYFLOWER_CONFIG.icon,
+  [KING_COPPER_KEY_MISSION.id]: COPPER_KEY_CONFIG.icon,
+  [KING_RED_DRAGON_MISSION.id]: 'Red_Dragon_Leather.PNG',
+  [KING_LETTER_MISSION.id]: 'Scroll.gif',
+  [AL_DEE_FISHING_MISSION.id]: 'Small_Axe.gif',
+  [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'Elvenhair_Rope.gif',
+  [KING_MONKS_STUDY_MISSION.id]: 'Costello.gif',
+  [COSTELLO_QUEEN_BANSHEES_MISSION.id]: 'Book_(Black).gif',
+  [FOLLOWER_OF_ZATHROTH_MISSION.id]: 'Blessed_Ankh.gif',
+  [MOTHER_OF_ALL_SPIDERS_MISSION.id]: 'Spider_Silk.gif',
+  [KING_SCARAB_COIN_MISSION.id]: SCARAB_COIN_CONFIG.icon,
+  [SERPENTINE_TOWER_MISSION.id]: DESTROY_FIELD_RUNE_CONFIG.icon,
+  [APPRENTICE_SHENG_MISSION.id]: MINOTAUR_TROPHY_CONFIG.icon,
+  [CHRISTMAS_MIRACLE_MISSION.id]: WISHLIST_CONFIG.icon
+};
+
+// Game board sprite ids used as Quest Log mission card icons (preferred over GIF when set).
+const MISSION_QUEST_LOG_SPRITE_ICON_MAP = {
+  [KING_CROSSING_THE_LINE_MISSION.id]: 3538
+};
 
 // =======================
 // 2. NPC Conversation Cooldown Manager
@@ -2045,8 +1843,8 @@ function createNPCCooldownManager() {
         },
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
-        victoryMessage: 'Mornenion was slain. You found Elvenhair Rope.',
-        defeatMessage: 'Mornenions powers were too strong for you.',
+        victoryMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleVictory', 'Mornenion was slain. You found Elvenhair Rope.'),
+        defeatMessage: getMissionDialogueLine(AL_DEE_GOLDEN_ROPE_MISSION, 'battleDefeat', 'Mornenions powers were too strong for you.'),
         showItems: false,
         items: [{ name: 'Elvenhair Rope', amount: 1 }]
       }
@@ -2195,8 +1993,8 @@ function createNPCCooldownManager() {
         },
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
-        victoryMessage: 'Apprentice Sheng has been defeated.',
-        defeatMessage: 'Apprentice Sheng was too strong.',
+        victoryMessage: getMissionDialogueLine(APPRENTICE_SHENG_MISSION, 'battleVictory', 'Apprentice Sheng has been defeated.'),
+        defeatMessage: getMissionDialogueLine(APPRENTICE_SHENG_MISSION, 'battleDefeat', 'Apprentice Sheng was too strong.'),
         showItems: false,
         items: []
       }
@@ -2469,8 +2267,8 @@ function createNPCCooldownManager() {
         },
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
-        victoryMessage: 'The Old Widow was slain. You found Spider Silk.',
-        defeatMessage: 'The Old Widow was too strong.',
+        victoryMessage: getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'battleVictory', 'The Old Widow was slain. You found Spider Silk.'),
+        defeatMessage: getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'battleDefeat', 'The Old Widow was too strong.'),
         showItems: false,
         items: [{ name: 'Spider Silk', amount: 1 }]
       }
@@ -2744,8 +2542,8 @@ function createNPCCooldownManager() {
         },
         victoryTitle: 'Victory!',
         defeatTitle: 'Defeat',
-        victoryMessage: 'You survived the horrors of The Cursed Chamber. Return to Tesha in Darama Oasis.',
-        defeatMessage: 'The creatures of The Cursed Chamber were too strong.',
+        victoryMessage: getMissionDialogueLine(SERPENTINE_TOWER_MISSION, 'battleVictory', 'You survived the horrors of The Cursed Chamber. Return to Tesha in Darama Oasis.'),
+        defeatMessage: getMissionDialogueLine(SERPENTINE_TOWER_MISSION, 'battleDefeat', 'The creatures of The Cursed Chamber were too strong.'),
         showItems: false,
         items: []
       }
@@ -5235,6 +5033,19 @@ function createNPCCooldownManager() {
     return letterFromAlDeeReceivedStore.remove(playerName);
   }
 
+  /** Iron Ore never drops until the player has obtained Letter from Al Dee first. */
+  async function canDropIronOre(playerName) {
+    if (!playerName) return false;
+    if (await hasReceivedLetterFromAlDee(playerName)) return true;
+
+    const items = await getQuestItems(true);
+    if ((items['Letter from Al Dee'] || 0) > 0) return true;
+    if ((items['Stamped Letter'] || 0) > 0) return true;
+
+    const letterProgress = getMissionProgress(KING_LETTER_MISSION);
+    return !!(letterProgress?.accepted || letterProgress?.completed);
+  }
+
   async function hasReceivedIronOre(playerName) {
     return ironOreReceivedStore.has(playerName);
   }
@@ -5912,6 +5723,7 @@ function createNPCCooldownManager() {
       console.warn('[Quests Mod][Arena Leaderboard] Failed to update entry:', err);
     });
     scheduleArenaRankDisplayUpdate(0);
+    syncActiveMissionTabs();
   }
 
   async function saveArenaLeaderboardEntry(playerName, progress) {
@@ -6527,6 +6339,9 @@ function createNPCCooldownManager() {
       }
 
       refreshBoardNpcsAfterQuestItemsChange();
+      if (typeof syncActiveMissionTabs === 'function') {
+        syncActiveMissionTabs();
+      }
       
       // Quest item added to inventory
       return updatedProducts;
@@ -6578,6 +6393,9 @@ function createNPCCooldownManager() {
       }
 
       refreshBoardNpcsAfterQuestItemsChange();
+      if (typeof syncActiveMissionTabs === 'function') {
+        syncActiveMissionTabs();
+      }
       
       return true;
     } catch (error) {
@@ -6785,6 +6603,17 @@ function createNPCCooldownManager() {
     return 0;
   }
 
+  /** Drop chance scales with stamina spent: baseDropChance per 3 stamina, capped at 100%. */
+  function getStaminaScaledDropChance(staminaSpent, baseDropChance) {
+    const scaled = (staminaSpent / 3) * baseDropChance;
+    return Math.min(scaled, 1.0);
+  }
+
+  function formatStaminaDropChanceLog(staminaSpent, baseDropChance, actualDropChance) {
+    const perThreeStaminaPercent = (baseDropChance * 100).toFixed(1);
+    return `${staminaSpent} stamina → ${(actualDropChance * 100).toFixed(1)}% (${perThreeStaminaPercent}% per 3 stamina)`;
+  }
+
   // Check if defeated creature has quest item drops configured
   function getQuestItemsConfig(creatureGameId) {
     if (!creatureGameId || !QUEST_ITEMS_CONFIG[creatureGameId]) {
@@ -6870,9 +6699,10 @@ function createNPCCooldownManager() {
             console.log(`[Quests Mod][Quest Items] Processing ${creatureConfig.products.length} creature-specific drops`);
             for (let productIndex = 0; productIndex < creatureConfig.products.length; productIndex++) {
               const product = creatureConfig.products[productIndex];
+              const actualDropChance = getStaminaScaledDropChance(staminaSpent, product.dropChance);
               const roll = deterministicRandom(seed, creatureGameId, productIndex);
-              // Drop roll calculated
-              if (roll <= product.dropChance) {
+              console.log(`[Quests Mod][Quest Items] ${product.name} roll: ${(roll * 100).toFixed(1)}% (need ≤ ${(actualDropChance * 100).toFixed(1)}% | ${formatStaminaDropChanceLog(staminaSpent, product.dropChance, actualDropChance)})`);
+              if (roll <= actualDropChance) {
                 try {
                   await addQuestItem(product.name, 1);
                   showQuestItemNotification(product.name, 1);
@@ -6888,28 +6718,30 @@ function createNPCCooldownManager() {
 
           // Process Al Dee fishing Iron Ore drops from dwarves
           if (isAlDeeDwarfLoot) {
-            console.log(`[Quests Mod][Quest Items] Processing Al Dee fishing Iron Ore drop from ${creatureName} (gameId: ${creatureGameId}), seed:`, seed);
-
-            // Check if player has already received Iron Ore (one-time per account)
             const currentPlayer = getCurrentPlayerName();
-            const hasReceived = await hasReceivedIronOre(currentPlayer);
-            if (hasReceived) {
-              console.log('[Quests Mod][Quest Items] Iron Ore already received by this account, skipping drop');
+            if (!(await canDropIronOre(currentPlayer))) {
+              console.log('[Quests Mod][Quest Items] Iron Ore dwarf drop skipped; Letter from Al Dee not obtained yet');
             } else {
-              // Use a unique productIndex (9999) for Iron Ore to avoid conflicts
-              const roll = deterministicRandom(seed, creatureGameId, 9999);
-              // Drop roll calculated
-              console.log(`[Quests Mod][Quest Items] Iron Ore roll: ${(roll * 100).toFixed(1)}% (need ≤ 1.0% | creature: ${creatureName})`);
-              if (roll <= 0.01) { // 1% chance
-                try {
-                  await addQuestItem('Iron Ore', 1);
-                  showQuestItemNotification('Iron Ore', 1);
-                  console.log(`[Quests Mod][Quest Items] Iron Ore awarded from ${creatureName} (Al Dee fishing mission)`);
+              console.log(`[Quests Mod][Quest Items] Processing Al Dee fishing Iron Ore drop from ${creatureName} (gameId: ${creatureGameId}), seed:`, seed);
 
-                  // Mark as received for one-time item
-                  await markIronOreReceived(currentPlayer);
-                } catch (error) {
-                  console.error(`[Quests Mod][Quest Items] Error adding Iron Ore:`, error);
+              const hasReceived = await hasReceivedIronOre(currentPlayer);
+              if (hasReceived) {
+                console.log('[Quests Mod][Quest Items] Iron Ore already received by this account, skipping drop');
+              } else {
+                const ironOreBaseChance = ROOKGAARD_GLOBAL_POOL_DROP_CHANCE;
+                const actualDropChance = getStaminaScaledDropChance(staminaSpent, ironOreBaseChance);
+                const roll = deterministicRandom(seed, creatureGameId, 9999);
+                console.log(`[Quests Mod][Quest Items] Iron Ore roll: ${(roll * 100).toFixed(1)}% (need ≤ ${(actualDropChance * 100).toFixed(1)}% | ${formatStaminaDropChanceLog(staminaSpent, ironOreBaseChance, actualDropChance)} | creature: ${creatureName})`);
+                if (roll <= actualDropChance) {
+                  try {
+                    await addQuestItem('Iron Ore', 1);
+                    showQuestItemNotification('Iron Ore', 1);
+                    console.log(`[Quests Mod][Quest Items] Iron Ore awarded from ${creatureName} (Al Dee fishing mission)`);
+
+                    await markIronOreReceived(currentPlayer);
+                  } catch (error) {
+                    console.error(`[Quests Mod][Quest Items] Error adding Iron Ore:`, error);
+                  }
                 }
               }
             }
@@ -6925,9 +6757,10 @@ function createNPCCooldownManager() {
               if (alreadyFlagged || ownedCount > 0) {
                 console.log('[Quests Mod][Wishlist] Already received or owned — skip drop');
               } else {
+                const actualDropChance = getStaminaScaledDropChance(staminaSpent, WISHLIST_CONFIG.dropChance);
                 const roll = deterministicRandom(seed, creatureGameId, 8801);
-                console.log(`[Quests Mod][Wishlist] roll: ${(roll * 100).toFixed(1)}% (need ≤ ${(WISHLIST_CONFIG.dropChance * 100).toFixed(1)}% | ${goblinName})`);
-                if (roll <= WISHLIST_CONFIG.dropChance) {
+                console.log(`[Quests Mod][Wishlist] roll: ${(roll * 100).toFixed(1)}% (need ≤ ${(actualDropChance * 100).toFixed(1)}% | ${formatStaminaDropChanceLog(staminaSpent, WISHLIST_CONFIG.dropChance, actualDropChance)} | ${goblinName})`);
+                if (roll <= actualDropChance) {
                   try {
                     await addQuestItem(WISHLIST_CONFIG.productName, 1);
                     showQuestItemNotification(WISHLIST_CONFIG.productName, 1);
@@ -6945,54 +6778,42 @@ function createNPCCooldownManager() {
             }
           }
 
-          // Process global Rookgaard drops (applies to ANY creature defeated in Rookgaard)
+          // Process global Rookgaard drops — one stamina-scaled roll; letter before iron ore
           if (isInRookgaard()) {
             console.log('[Quests Mod][Quest Items] Checking global Rookgaard drops');
-            for (let globalIndex = 0; globalIndex < ROOKGAARD_GLOBAL_DROPS.length; globalIndex++) {
-              const globalDrop = ROOKGAARD_GLOBAL_DROPS[globalIndex];
+            const currentPlayer = getCurrentPlayerName();
+            const letterDrop = ROOKGAARD_GLOBAL_DROPS.find((drop) => drop.name === 'Letter from Al Dee');
+            const ironOreDrop = ROOKGAARD_GLOBAL_DROPS.find((drop) => drop.name === 'Iron Ore');
 
-              // Check if player has already received this item (one-time per account)
-              if (globalDrop.name === 'Letter from Al Dee') {
-                const currentPlayer = getCurrentPlayerName();
-                const hasReceived = await hasReceivedLetterFromAlDee(currentPlayer);
-                if (hasReceived) {
-                  console.log('[Quests Mod][Quest Items] Letter from Al Dee already received by this account, skipping drop');
-                  continue;
-                }
-              }
-              if (globalDrop.name === 'Iron Ore') {
-                const currentPlayer = getCurrentPlayerName();
-                const hasReceived = await hasReceivedIronOre(currentPlayer);
-                if (hasReceived) {
-                  console.log('[Quests Mod][Quest Items] Iron Ore already received by this account, skipping drop');
-                  continue;
-                }
-              }
+            const hasLetter = await hasReceivedLetterFromAlDee(currentPlayer);
+            const hasIronOre = await hasReceivedIronOre(currentPlayer);
+            const canAwardLetter = !hasLetter;
+            const canAwardIronOre = !hasIronOre && (await canDropIronOre(currentPlayer));
 
-              // Calculate dynamic drop chance based on stamina spent: 1% per 3 stamina
-              const baseDropChance = (staminaSpent / 3) * 0.01;
-              const actualDropChance = Math.min(baseDropChance, 1.0); // Cap at 100%
+            if (!canAwardLetter && !canAwardIronOre) {
+              console.log('[Quests Mod][Quest Items] Rookgaard global drops complete for this account, skipping');
+            } else {
+              const actualDropChance = getStaminaScaledDropChance(staminaSpent, ROOKGAARD_GLOBAL_POOL_DROP_CHANCE);
+              const roll = deterministicRandom(seed, 999, 0);
+              console.log(`[Quests Mod][Quest Items] Rookgaard global drop roll: ${(roll * 100).toFixed(1)}% (need ≤ ${(actualDropChance * 100).toFixed(1)}% | ${formatStaminaDropChanceLog(staminaSpent, ROOKGAARD_GLOBAL_POOL_DROP_CHANCE, actualDropChance)})`);
 
-              // Use fixed seed (999) for all Rookgaard drops - only depends on battle seed and victory
-              const roll = deterministicRandom(seed, 999, globalIndex);
-              console.log(`[Quests Mod][Quest Items] ${globalDrop.name} roll: ${(roll * 100).toFixed(1)}% (need ≤ ${(actualDropChance * 100).toFixed(1)}% | ${staminaSpent} stamina = ${(staminaSpent / 3).toFixed(1)}% base chance)`);
               if (roll <= actualDropChance) {
                 try {
-                  await addQuestItem(globalDrop.name, 1);
-                  showQuestItemNotification(globalDrop.name, 1);
-                  console.log(`[Quests Mod][Quest Items] ${globalDrop.name} awarded from ${creatureName} (Rookgaard global drop)`);
-
-                  // Mark as received for one-time items
-                  if (globalDrop.name === 'Letter from Al Dee') {
-                    const currentPlayer = getCurrentPlayerName();
+                  if (canAwardLetter) {
+                    await addQuestItem(letterDrop.name, 1);
+                    showQuestItemNotification(letterDrop.name, 1);
                     await markLetterFromAlDeeReceived(currentPlayer);
-                  }
-                  if (globalDrop.name === 'Iron Ore') {
-                    const currentPlayer = getCurrentPlayerName();
+                    console.log(`[Quests Mod][Quest Items] ${letterDrop.name} awarded from ${creatureName} (Rookgaard global drop)`);
+                  } else if (canAwardIronOre) {
+                    await addQuestItem(ironOreDrop.name, 1);
+                    showQuestItemNotification(ironOreDrop.name, 1);
                     await markIronOreReceived(currentPlayer);
+                    console.log(`[Quests Mod][Quest Items] ${ironOreDrop.name} awarded from ${creatureName} (Rookgaard global drop)`);
+                  } else {
+                    console.log('[Quests Mod][Quest Items] Rookgaard global drop roll won but nothing left to award');
                   }
                 } catch (error) {
-                  console.error(`[Quests Mod][Quest Items] Error adding ${globalDrop.name}:`, error);
+                  console.error('[Quests Mod][Quest Items] Error adding Rookgaard global drop:', error);
                 }
               }
             }
@@ -8952,30 +8773,13 @@ function createNPCCooldownManager() {
   // King Tibianus Modal
   // =======================
 
-  // King Tibianus responses based on keywords
+  // King keyword lines load from npcs.json; only the dynamic iron ore handler stays here.
   const KING_TIBIANUS_RESPONSES = {
-    'hail': 'I greet thee, my loyal subject.',
-    'how are you': 'Thank you, I\'m fine.',
-    'good': 'The forces of good are hard pressed in these dark times.',
-    'name': 'Preposterous! You must know the name of your own king!',
-    'enemies': 'Our enemies are numerous. The evil minotaurs, Ferumbras, and the renegade city of Carlin to the north are just some of them.',
-    'gods': 'Honor the gods and pay your taxes.',
-    'job': 'I am your sovereign, King Tibianus III, and its my duty to provide justice and guidance for my subjects.',
-    'king': 'I am the king, so mind your words!',
-    'sell': 'Sell? Sell what? My kingdom isn\'t for sale!',
-    'tbi': 'This organisation is important in holding our enemies in check. Its headquarter is located in the bastion in the northwall.',
-    'tibia': 'Soon the whole land will be ruled by me once again!',
-    'time': 'It\'s a time for heroes, that\'s for sure!',
-    'noodles': 'The royal poodle Noodles is my greatest treasure!',
-    'treasure': 'The royal poodle Noodles is my greatest treasure!',
-    'castle': 'Rain Castle is my home.',
-    'dungeon': 'Dungeons are no places for kings.',
-  'help': 'Visit Quentin the monk for help.',
-  'iron ore': async () => {
+    'iron ore': async () => {
     try {
       const currentPlayer = getCurrentPlayerName();
       if (!currentPlayer) {
-        return 'Yes.. Iron Ore! Let me know if you find one!';
+        return getKingIronOreLine('default', 'Yes.. Iron Ore! Let me know if you find one!');
       }
 
       const currentProducts = await getQuestItems(false);
@@ -8983,7 +8787,7 @@ function createNPCCooldownManager() {
 
       // Check if Al Dee fishing mission is completed - if so, Iron Ore quests shouldn't be claimable
       if (kingChatState.progressAlDeeFishing.completed) {
-        return 'I appreciate your continued interest, but our business with iron ore is concluded.';
+        return getKingIronOreLine('missionConcluded', 'I appreciate your continued interest, but our business with iron ore is concluded.');
       }
 
       // Check if quest timer has expired and reward is ready to be claimed
@@ -9019,27 +8823,27 @@ function createNPCCooldownManager() {
             });
           }
 
-          return 'Thank you for giving me an Iron Ore! Here\'s a small gift for you.';
+          return getKingIronOreLine('rewardGiven', 'Thank you for giving me an Iron Ore! Here\'s a small gift for you.');
         } catch (err) {
           console.error('[Quests Mod][King Tibianus] Error awarding Magnet:', err);
-          return 'Thank you for giving me an Iron Ore! Here\'s a small gift for you.';
+          return getKingIronOreLine('rewardGiven', 'Thank you for giving me an Iron Ore! Here\'s a small gift for you.');
         }
       }
 
       // Check if quest is active and timer is still running
       if (fishingState.ironOreQuestActive && fishingState.ironOreQuestStartTime) {
         // Quest active but timer not expired
-        return 'Come back in a minute.';
+        return getKingIronOreLine('comeBackLater', 'Come back in a minute.');
       }
 
       // Check inventory for Iron Ore - this takes precedence over completion status
       if (ironOreCount > 0) {
         // Check if Al Dee fishing mission is active and not completed - only take Iron Ore if mission is accepted but not finished
         if (!kingChatState.progressAlDeeFishing.accepted) {
-          return 'Thats a fine looking rock you have there.';
+          return getKingIronOreLine('fineRockNoMission', 'Thats a fine looking rock you have there.');
         }
         if (kingChatState.progressAlDeeFishing.completed) {
-          return 'I appreciate the rock, but I have no further use for iron ore now that our business is concluded.';
+          return getKingIronOreLine('fineRockMissionDone', 'I appreciate the rock, but I have no further use for iron ore now that our business is concluded.');
         }
 
         // Player has Iron Ore and mission is active - take it and start timer
@@ -9060,70 +8864,32 @@ function createNPCCooldownManager() {
             }
           });
 
-          return 'Thank you! I\'ll give this to my guard... come back in a minute and I\'ll have something for you.';
+          return getKingIronOreLine('oreAccepted', 'Thank you! I\'ll give this to my guard... come back in a minute and I\'ll have something for you.');
         } catch (err) {
           console.error('[Quests Mod][King Tibianus] Error consuming Iron Ore:', err);
-          return 'Yes.. Iron Ore! Let me know if you find one!';
+          return getKingIronOreLine('default', 'Yes.. Iron Ore! Let me know if you find one!');
         }
       } else {
         // Player has no Iron Ore - check if quest was ever completed
         if (fishingState.ironOreQuestCompleted) {
-          return 'Another thank you for this ore, hope you enjoy the small gift I gave you!';
+          return getKingIronOreLine('repeatThankYou', 'Another thank you for this ore, hope you enjoy the small gift I gave you!');
         } else {
-          return 'Yes.. Iron Ore! Let me know if you find one!';
+          return getKingIronOreLine('default', 'Yes.. Iron Ore! Let me know if you find one!');
         }
       }
     } catch (err) {
       console.error('[Quests Mod][King Tibianus] Error in iron ore response:', err);
-      return 'Yes.. Iron Ore! Let me know if you find one!';
+      return getKingIronOreLine('default', 'Yes.. Iron Ore! Let me know if you find one!');
     }
-  },
-  'druids': 'We need the druidic healing powers to fight evil.',
-    'sorcerers': 'The magic of the sorcerers is a powerful tool to smite our enemies.',
-    'paladins': 'The paladins are great protectors for Thais.',
-    'knights': 'The brave knights are necessary for human survival in Thais.',
-    'heroes': 'It\'s a time for heroes, that\'s for sure!',
-    'monsters': 'Go and hunt them! For king and country!',
-    'excalibug': 'It\'s the sword of the kings. If you could return this weapon to me I would reward you beyond your dreams.',
-    'ferumbras': 'He is a follower of the evil god Zathroth and responsible for many attacks on us. Kill him on sight!',
-    'order': 'We need order to survive!',
-    'zathroth': 'Please ask a priest about the gods.',
-    'carlin': 'They dare to reject my reign over the whole continent!',
-    'eremo': 'It is said that he lives on a small island near Edron. Maybe the people there know more about him.',
-    'thais': 'Our beloved city has some fine shops, guildhouses, and a modern sytem of sewers.',
-    'sewers': 'What a disgusting topic!',
-    'shops': 'Visit the shops of our merchants and craftsmen.',
-    'guilds': 'The four major guilds are the knights, the paladins, the druids, and the sorcerers.',
-    'merchants': 'Ask around about them.',
-    'harkath': 'Harkath Bloodblade is the general of our glorious army.',
-    'bloodblade': 'Harkath Bloodblade is the general of our glorious army.',
-    'general': 'Harkath Bloodblade is the general of our glorious army.',
-    'army': 'Ask the soldiers about that topic.',
-    'evil': 'We need all strength we can muster to smite evil!',
-    'minotaurs': 'Vile monsters, but I must admit they are strong and sometimes even cunning ... in their own bestial way.',
-    'taxes': 'To pay your taxes, visit the royal tax collector.',
-    'royal tax collector': 'He has been lazy lately. I bet you have not payed any taxes at all.',
-    'reward': 'Well, if you want a reward, go on a quest to bring me Excalibug!',
-    'benjamin': 'He was once my greatest general. Now he is very old and senile but we entrusted him with work for the Royal Tibia Mail.',
-    'bozo': 'He is my royal jester and cheers me up now and then.',
-    'chester': 'A very competent person. A little nervous but very competent.',
-    'elane': 'The paladins are great protectors for Thais.',
-    'frodo': 'He is the owner of Frodo\'s Hut and a faithful tax-payer.',
-    'gorn': 'He was once one of Tibia\'s greatest fighters. Now he is selling equipment.',
-    'gregor': 'The brave knights are necessary for human survival in Thais.',
-    'muriel': 'The magic of the sorcerers is a powerful tool to smite our enemies.',
-    'sam': 'He is a skilled blacksmith and a loyal subject.',
-    'letter': KING_LETTER_MISSION.prompt,
-    'scroll': KING_LETTER_MISSION.prompt,
-    'honeyflower': KING_HONEYFLOWER_MISSION.prompt,
-    'honey flower': KING_HONEYFLOWER_MISSION.prompt,
-    'honey': KING_HONEYFLOWER_MISSION.prompt,
-    'al dee': 'I haven\'t seen Al Dee for a while and don\'t know where he holds house. Let me know if you have any information about him!',
-    'bye': 'Good bye, Player!'
+  }
   };
 
   async function getKingTibianusResponse(message, playerName = 'Player') {
-    return matchKeywordResponses(KING_TIBIANUS_RESPONSES, message, playerName, {
+    const kingResponses = {
+      ...KING_TIBIANUS_RESPONSES,
+      ...getKingTibianusKeywordResponses()
+    };
+    return matchKeywordResponses(kingResponses, message, playerName, {
       defaultResponse: null,
       resolveAsync: true,
       lowercaseKeys: true,
@@ -9131,7 +8897,8 @@ function createNPCCooldownManager() {
     });
   }
 
-  function showKingTibianusModal() {
+  async function showKingTibianusModal() {
+    await ensureQuestDialogueLoaded();
     // Clear any pending modal timeouts
     clearTimeoutOrInterval(modalTimeout);
     clearTimeoutOrInterval(dialogTimeout);
@@ -9264,38 +9031,14 @@ function createNPCCooldownManager() {
       }
 
       // kingChatState is now defined globally
-      // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = display order in Quest Log.
-      const MISSIONS = [
-        KING_HONEYFLOWER_MISSION,
-        KING_CROSSING_THE_LINE_MISSION,
-        KING_COPPER_KEY_MISSION,
-        KING_RED_DRAGON_MISSION,
-        KING_LETTER_MISSION,
-        AL_DEE_FISHING_MISSION,
-        AL_DEE_GOLDEN_ROPE_MISSION,
-        KING_MONKS_STUDY_MISSION,
-        COSTELLO_QUEEN_BANSHEES_MISSION,
-        FOLLOWER_OF_ZATHROTH_MISSION,
-        MOTHER_OF_ALL_SPIDERS_MISSION,
-        KING_SCARAB_COIN_MISSION,
-        SERPENTINE_TOWER_MISSION,
-        APPRENTICE_SHENG_MISSION,
-        CHRISTMAS_MIRACLE_MISSION
-      ];
+      // All missions (Al Dee missions are shown but can only be accepted through Al Dee). Order = QUEST_LOG_MISSIONS.
+      const MISSIONS = QUEST_LOG_MISSIONS;
 
       // Uses module Mission Registry MISSION_STATE_MAP / MISSION_FIREBASE_KEY_MAP
 
       // Random responses when Tibianus doesn't understand the player's input
-      const CONFUSION_RESPONSES = [
-        'I do not understand what you mean, my subject.',
-        'Speak clearly, for I cannot comprehend your words.',
-        'Your meaning eludes me. Pray, explain yourself.',
-        'I am confused by your statement. What do you wish to convey?',
-        'These words make no sense to me. Clarify your intent.'
-      ];
-
       function getRandomConfusionResponse() {
-        return CONFUSION_RESPONSES[Math.floor(Math.random() * CONFUSION_RESPONSES.length)];
+        return getRandomNpcConfusionResponse(KING_TIBIANUS_CONFUSION_RESPONSES, getCurrentPlayerName() || 'Player');
       }
 
       function getMissionById(id) {
@@ -10858,8 +10601,8 @@ function createNPCCooldownManager() {
             // If we got a meaningful transcript response, use it
             kingResponse = transcriptResponse;
           } else {
-            // Fall back to confusion responses for truly unrecognized input
-            kingResponse = getRandomConfusionResponse();
+            const questItemResponse = getNpcQuestItemChatResponse('king-tibianus', text, playerName);
+            kingResponse = questItemResponse ?? getRandomConfusionResponse();
           }
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
@@ -11028,7 +10771,8 @@ function createNPCCooldownManager() {
   }
 
   // Al Dee Modal (similar to King Tibianus modal)
-  function showAlDeeModal() {
+  async function showAlDeeModal() {
+    await ensureQuestDialogueLoaded();
     // Clear any pending modal timeouts
     clearTimeoutOrInterval(modalTimeout);
     clearTimeoutOrInterval(dialogTimeout);
@@ -11076,16 +10820,8 @@ function createNPCCooldownManager() {
       messageContainer.id = 'al-dee-messages';
 
       // Confusion responses for Al Dee (merchant style)
-      const AL_DEE_CONFUSION_RESPONSES = [
-        'I\'m just a rope merchant, not a mind reader. What do you want?',
-        'These words mean nothing to me. Speak of ropes or tools!',
-        'I deal in ropes and equipment, not riddles. Be clearer!',
-        'Your meaning escapes me. Perhaps you need some rope to tie your thoughts together?',
-        'I don\'t understand that gibberish. Ask about my wares instead!'
-      ];
-
       function getRandomAlDeeConfusionResponse() {
-        return AL_DEE_CONFUSION_RESPONSES[Math.floor(Math.random() * AL_DEE_CONFUSION_RESPONSES.length)];
+        return getRandomNpcConfusionResponse(AL_DEE_CONFUSION_RESPONSES, getCurrentPlayerName() || 'Player');
       }
 
       // Al Dee mission chat state
@@ -11388,6 +11124,36 @@ function createNPCCooldownManager() {
 
         // Clear input
         textarea.value = '';
+
+        if (lowerText.includes('magnet')) {
+          try {
+            const currentProducts = await getQuestItems();
+            const hasMagnet = (currentProducts['Magnet'] || 0) > 0;
+            const fishingProgress = getMissionProgress(AL_DEE_FISHING_MISSION);
+            const onFishingMission = fishingProgress.accepted && !fishingProgress.completed;
+
+            let magnetResponse;
+            if (hasMagnet) {
+              magnetResponse = onFishingMission
+                ? 'You already have a magnet! Try your fishing rod in the cave waters where goblins roam — it may pull my Small Axe from the depths.'
+                : 'A magnet is handy for pulling metal from water. I do not sell them myself.';
+            } else {
+              magnetResponse = onFishingMission
+                ? 'You will need a magnet to fish my Small Axe out of those waters. King Tibianus may give you one if you help him with a task in Rookgaard.'
+                : 'I do not sell magnets. King Tibianus might reward you with one if you bring him iron ore from Rookgaard.';
+            }
+
+            alDeeCooldown.queueResponse(
+              text,
+              magnetResponse,
+              addMessageToConversation,
+              'Al Dee'
+            );
+            return;
+          } catch (error) {
+            console.error('[Quests Mod][Al Dee] Error handling magnet keyword:', error);
+          }
+        }
 
         // Check for stamped letter delivery mission
         let missionCompleted = false;
@@ -11871,10 +11637,12 @@ function createNPCCooldownManager() {
 
         // Get transcript response (handles all standard Al Dee dialogue)
         let alDeeResponse = getAlDeeResponse(text, playerName);
-
-        // Only use confusion response for messages that are truly nonsensical
-        // The default greeting response should be preserved for unrecognized but reasonable messages
-        // Confusion should only be used for messages that don't make any sense in context
+        if (alDeeResponse == null) {
+          alDeeResponse = getNpcQuestItemChatResponse('al-dee', text, playerName);
+        }
+        if (alDeeResponse == null) {
+          alDeeResponse = getRandomAlDeeConfusionResponse();
+        }
 
         alDeeCooldown.queueResponse(
           text,
@@ -12190,7 +11958,8 @@ function createNPCCooldownManager() {
   }
 
   // Costello Modal (Isle of Kings, Carlin) – uses shared NPC chat layout
-  function showCostelloModal() {
+  async function showCostelloModal() {
+    await ensureQuestDialogueLoaded();
     kingChatState.costelloVisited = true;
     const playerName = getCurrentPlayerName();
     if (playerName) {
@@ -12244,10 +12013,10 @@ function createNPCCooldownManager() {
             await consumeQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName, 1);
             await persistMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION, { accepted: true, completed: true }, { playerName: costelloPlayerName });
             showQueenBansheesCompletionToasts();
-            costelloCooldown.queueResponse(text, 'You have completed the seven seals of Ghostlands. The Queen Of The Banshees task is complete. You have received the Blessed Ankh. My thanks.', addMessageToConversation, 'Costello');
+            costelloCooldown.queueResponse(text, getMissionDialogueLine(COSTELLO_QUEEN_BANSHEES_MISSION, 'complete', 'You have completed the seven seals of Ghostlands. The Queen Of The Banshees task is complete. You have received the Blessed Ankh. My thanks.'), addMessageToConversation, 'Costello');
           } catch (err) {
             console.error('[Quests Mod][Costello] Error completing Queen Banshees:', err);
-            costelloCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessageToConversation, 'Costello');
+            costelloCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessageToConversation, 'Costello');
           }
           return;
         }
@@ -12258,7 +12027,7 @@ function createNPCCooldownManager() {
           const followerOfZathrothProgress = getMissionProgress(FOLLOWER_OF_ZATHROTH_MISSION);
           if (monksProgress.accepted && !monksProgress.completed) {
             costelloAwaitingHolyTible = true;
-            costelloCooldown.queueResponse(text, 'The King has sent you. Do you have the Holy Tible with you? I need to see it to complete your study here.', addMessageToConversation, 'Costello');
+            costelloCooldown.queueResponse(text, getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloHolyTibleAsk', 'The King has sent you. Do you have the Holy Tible with you? I need to see it to complete your study here.'), addMessageToConversation, 'Costello');
           } else if (monksProgress.completed && !queenBansheesProgress.accepted) {
             costelloOfferingQueenBanshees = true;
             costelloCooldown.queueResponse(text, COSTELLO_QUEEN_BANSHEES_MISSION.prompt, addMessageToConversation, 'Costello');
@@ -12270,14 +12039,14 @@ function createNPCCooldownManager() {
                 await consumeQuestItem(COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName, 1);
                 await persistMissionProgress(COSTELLO_QUEEN_BANSHEES_MISSION, { accepted: true, completed: true }, { playerName: costelloPlayerName });
                 showQueenBansheesCompletionToasts();
-                costelloCooldown.queueResponse(text, 'You have completed the seven seals of Ghostlands. The Queen Of The Banshees task is complete. You have received the Blessed Ankh. My thanks.', addMessageToConversation, 'Costello');
+                costelloCooldown.queueResponse(text, getMissionDialogueLine(COSTELLO_QUEEN_BANSHEES_MISSION, 'complete', 'You have completed the seven seals of Ghostlands. The Queen Of The Banshees task is complete. You have received the Blessed Ankh. My thanks.'), addMessageToConversation, 'Costello');
               } catch (err) {
                 console.error('[Quests Mod][Costello] Error completing Queen Banshees:', err);
-                costelloCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessageToConversation, 'Costello');
+                costelloCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessageToConversation, 'Costello');
               }
             } else {
               costelloCooldown.queueResponse(text, hasAllSeven
-                ? 'You have completed all seven seals. Return to me and say you are done when you wish to complete this task.'
+                ? getMissionDialogueLine(COSTELLO_QUEEN_BANSHEES_MISSION, 'allSealsDoneHandIn', 'You have completed all seven seals. Return to me and say you are done when you wish to complete this task.')
                 : COSTELLO_QUEEN_BANSHEES_MISSION.alreadyActive, addMessageToConversation, 'Costello');
             }
           } else if (queenBansheesProgress.completed && !followerOfZathrothProgress.accepted) {
@@ -12288,7 +12057,7 @@ function createNPCCooldownManager() {
           } else if (followerOfZathrothProgress.completed) {
             costelloCooldown.queueResponse(text, FOLLOWER_OF_ZATHROTH_MISSION.alreadyCompleted, addMessageToConversation, 'Costello');
           } else {
-            costelloCooldown.queueResponse(text, 'I have no further mission for you. Perhaps the King has work for you.', addMessageToConversation, 'Costello');
+            costelloCooldown.queueResponse(text, getMissionCommonLine('costelloNoFurtherMissions', 'I have no further mission for you. Perhaps the King has work for you.'), addMessageToConversation, 'Costello');
           }
           return;
         }
@@ -12305,16 +12074,16 @@ function createNPCCooldownManager() {
             kingChatState.progressMonksStudy.completed = true;
             const allProgress = getAllMissionProgress();
             await saveKingTibianusProgress(costelloPlayerName, allProgress);
-            costelloCooldown.queueResponse(text, COSTELLO_QUEEN_BANSHEES_MISSION.accept + ' You have received my diary.', addMessageToConversation, 'Costello');
+            costelloCooldown.queueResponse(text, COSTELLO_QUEEN_BANSHEES_MISSION.accept + getMissionDialogueLine(COSTELLO_QUEEN_BANSHEES_MISSION, 'acceptDiarySuffix', ' You have received my diary.'), addMessageToConversation, 'Costello');
           } catch (err) {
             console.error('[Quests Mod][Costello] Error accepting Queen Banshees:', err);
-            costelloCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessageToConversation, 'Costello');
+            costelloCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessageToConversation, 'Costello');
           }
           return;
         }
         if (costelloOfferingQueenBanshees && (lowerText.includes('no') || lowerText.includes('not'))) {
           costelloOfferingQueenBanshees = false;
-          costelloCooldown.queueResponse(text, 'Return when you are ready for this task.', addMessageToConversation, 'Costello');
+          costelloCooldown.queueResponse(text, getMissionCommonLine('notReady', 'Return when you are ready for this task.'), addMessageToConversation, 'Costello');
           return;
         }
 
@@ -12326,13 +12095,13 @@ function createNPCCooldownManager() {
             costelloCooldown.queueResponse(text, FOLLOWER_OF_ZATHROTH_MISSION.accept, addMessageToConversation, 'Costello');
           } catch (err) {
             console.error('[Quests Mod][Costello] Error accepting Follower of Zathroth:', err);
-            costelloCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessageToConversation, 'Costello');
+            costelloCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessageToConversation, 'Costello');
           }
           return;
         }
         if (costelloOfferingBloodProtector && (lowerText.includes('no') || lowerText.includes('not'))) {
           costelloOfferingBloodProtector = false;
-          costelloCooldown.queueResponse(text, 'Return when you are ready to bring the Blessed Ankh to Wyda.', addMessageToConversation, 'Costello');
+          costelloCooldown.queueResponse(text, getMissionDialogueLine(FOLLOWER_OF_ZATHROTH_MISSION, 'notReadyDecline', 'Return when you are ready to bring the Blessed Ankh to Wyda.'), addMessageToConversation, 'Costello');
           return;
         }
 
@@ -12351,24 +12120,30 @@ function createNPCCooldownManager() {
                 await coinsAdder(KING_GUILD_COIN_REWARD);
               }
               costelloAwaitingHolyTible = false;
-              costelloCooldown.queueResponse(text, 'Thank you. Your study here is complete. Here are ' + KING_GUILD_COIN_REWARD + ' guild coins as a reward.', addMessageToConversation, 'Costello');
+              costelloCooldown.queueResponse(text, formatDialogueLine(getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloStudyComplete', 'Thank you. Your study here is complete. Here are {coins} guild coins as a reward.'), { coins: KING_GUILD_COIN_REWARD }), addMessageToConversation, 'Costello');
             } else {
-              costelloCooldown.queueResponse(text, 'You do not have the Holy Tible. Return when you have it.', addMessageToConversation, 'Costello');
+              costelloCooldown.queueResponse(text, getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloHolyTibleMissing', 'You do not have the Holy Tible. Return when you have it.'), addMessageToConversation, 'Costello');
             }
           } catch (err) {
             console.error('[Quests Mod][Costello] Error completing Monks Study:', err);
-            costelloCooldown.queueResponse(text, 'Something went wrong. Return when you have the Holy Tible.', addMessageToConversation, 'Costello');
+            costelloCooldown.queueResponse(text, getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloHolyTibleError', 'Something went wrong. Return when you have the Holy Tible.'), addMessageToConversation, 'Costello');
           }
           return;
         }
 
         if (costelloAwaitingHolyTible && lowerText.includes('no')) {
           costelloAwaitingHolyTible = false;
-          costelloCooldown.queueResponse(text, 'Return when you have the Holy Tible.', addMessageToConversation, 'Costello');
+          costelloCooldown.queueResponse(text, getMissionDialogueLine(KING_MONKS_STUDY_MISSION, 'costelloHolyTibleReturn', 'Return when you have the Holy Tible.'), addMessageToConversation, 'Costello');
           return;
         }
 
-        const response = getCostelloResponse(text, costelloPlayerName);
+        let response = getCostelloResponse(text, costelloPlayerName);
+        if (response == null) {
+          response = getNpcQuestItemChatResponse('costello', text, costelloPlayerName);
+        }
+        if (response == null) {
+          response = getRandomNpcConfusionResponse(COSTELLO_CONFUSION_RESPONSES, costelloPlayerName);
+        }
         costelloCooldown.queueResponse(
           text,
           response,
@@ -12393,7 +12168,8 @@ function createNPCCooldownManager() {
   }
 
   // Wyda Modal (Wyda's House, swamps of Venore) – uses shared NPC chat layout and transcript
-  function showWydaModal() {
+  async function showWydaModal() {
+    await ensureQuestDialogueLoaded();
     const wydaPlayerName = getCurrentPlayerName() || 'Player';
     const wydaIconUrl = getQuestItemsAssetUrl('Wyda.gif');
     const { contentDiv, addMessage, textarea, sendBtn } = createNPCChatModalContent({
@@ -12434,15 +12210,15 @@ function createNPCCooldownManager() {
             await persistMissionProgress(MOTHER_OF_ALL_SPIDERS_MISSION, { accepted: true, completed: true });
             await addQuestItem(MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName, 1);
             if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
-            wydaCooldown.queueResponse(text, 'The silk! Excellent. I can make good use of this. Here, take this Spool of Yarn as thanks.', addMessage, 'Wyda');
+            wydaCooldown.queueResponse(text, getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'wydaSilkComplete', 'The silk! Excellent. I can make good use of this. Here, take this Spool of Yarn as thanks.'), addMessage, 'Wyda');
             NotificationService.showItemReceived(MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName, '[Quests Mod][Wyda]');
             return;
           }
-          wydaCooldown.queueResponse(text, "You don't have the spider silk. Defeat the mother of all spiders in the secluded herb and return with the silk.", addMessage, 'Wyda');
+          wydaCooldown.queueResponse(text, getMissionDialogueLine(MOTHER_OF_ALL_SPIDERS_MISSION, 'wydaMissingSilk', "You don't have the spider silk. Defeat the mother of all spiders in the secluded herb and return with the silk."), addMessage, 'Wyda');
           return;
         } catch (err) {
           console.error('[Quests Mod][Wyda] Error completing Mother of All Spiders:', err);
-          wydaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Wyda');
+          wydaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Wyda');
           return;
         }
       }
@@ -12465,8 +12241,10 @@ function createNPCCooldownManager() {
               await coinsAdder(FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins);
             }
             if (typeof updateTile83WydaRightClickState === 'function') updateTile83WydaRightClickState();
-            const coinMsg = FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins ? ' Here are ' + FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins + ' guild coins for your trouble.' : '';
-            wydaCooldown.queueResponse(text, 'The Blessed Ankh! Yes, this is what I needed. You have done well. The matter Castello spoke of is complete.' + coinMsg, addMessage, 'Wyda');
+            const coinMsg = FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins
+              ? formatDialogueLine(getMissionDialogueLine(FOLLOWER_OF_ZATHROTH_MISSION, 'wydaHandInCoinLine', ' Here are {coins} guild coins for your trouble.'), { coins: FOLLOWER_OF_ZATHROTH_MISSION.rewardCoins })
+              : '';
+            wydaCooldown.queueResponse(text, getMissionDialogueLine(FOLLOWER_OF_ZATHROTH_MISSION, 'wydaHandInComplete', 'The Blessed Ankh! Yes, this is what I needed. You have done well. The matter Castello spoke of is complete.') + coinMsg, addMessage, 'Wyda');
             NotificationService.showTaskCompletedWithCoins(FOLLOWER_OF_ZATHROTH_MISSION, '[Quests Mod][Wyda]');
             return;
           }
@@ -12500,19 +12278,24 @@ function createNPCCooldownManager() {
           wydaCooldown.queueResponse(text, MOTHER_OF_ALL_SPIDERS_MISSION.accept, addMessage, 'Wyda');
         } catch (err) {
           console.error('[Quests Mod][Wyda] Error accepting Mother of All Spiders:', err);
-          wydaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Wyda');
+          wydaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Wyda');
         }
         return;
       }
       if (wydaOfferingMotherOfAllSpiders && (lowerText.includes('no') || lowerText.includes('not'))) {
         wydaOfferingMotherOfAllSpiders = false;
-        wydaCooldown.queueResponse(text, 'Return when you are ready for this task.', addMessage, 'Wyda');
+        wydaCooldown.queueResponse(text, getMissionCommonLine('notReady', 'Return when you are ready for this task.'), addMessage, 'Wyda');
         return;
       }
 
-      const lines = getWydaResponse(text, wydaPlayerName);
-      if (lines.length === 0) return;
-      wydaCooldown.queueResponse(text, lines, addMessage, 'Wyda', ModalHelpers.getFarewellCloseCallback(text));
+      let wydaResponse = getWydaResponse(text, wydaPlayerName);
+      if (wydaResponse == null) {
+        wydaResponse = getNpcQuestItemChatResponse('wyda', text, wydaPlayerName);
+      }
+      if (wydaResponse == null) {
+        wydaResponse = getRandomNpcConfusionResponse(WYDA_CONFUSION_RESPONSES, wydaPlayerName);
+      }
+      wydaCooldown.queueResponse(text, wydaResponse, addMessage, 'Wyda', ModalHelpers.getFarewellCloseCallback(text));
     }
 
     textarea.addEventListener('keydown', (e) => {
@@ -12538,7 +12321,8 @@ function createNPCCooldownManager() {
   }
 
   // Tesha Modal (Darama Oasis) – uses shared NPC chat layout
-  function showTeshaModal() {
+  async function showTeshaModal() {
+    await ensureQuestDialogueLoaded();
     const teshaPlayerName = getCurrentPlayerName() || 'Player';
     const teshaIconUrl = getQuestItemsAssetUrl('Tesha.gif');
     const { contentDiv, addMessage, textarea, sendBtn } = createNPCChatModalContent({
@@ -12589,11 +12373,11 @@ function createNPCCooldownManager() {
             );
             teshaCooldown.queueResponse(text, completeLines, addMessage, 'Tesha');
           } else {
-            teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+            teshaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Tesha');
           }
         } catch (err) {
           console.error('[Quests Mod][Tesha] Error completing Serpentine Tower quest reward:', err);
-          teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+          teshaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Tesha');
         }
         return;
       }
@@ -12620,7 +12404,7 @@ function createNPCCooldownManager() {
           return;
         } catch (err) {
           console.error('[Quests Mod][Tesha] Error completing Lost in the Sands:', err);
-          teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+          teshaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Tesha');
           return;
         }
       }
@@ -12728,14 +12512,14 @@ function createNPCCooldownManager() {
           }, FISHING_CONFIG.MAP_SWITCH_DELAY);
         } catch (err) {
           console.error('[Quests Mod][Tesha] Error accepting Serpentine Tower quest:', err);
-          teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+          teshaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Tesha');
         }
         return;
       }
 
       if (teshaOfferingSerpentineTower && (lowerText.includes('no') || lowerText.includes('not'))) {
         teshaOfferingSerpentineTower = false;
-        teshaCooldown.queueResponse(text, 'Return when you are ready for this task.', addMessage, 'Tesha');
+        teshaCooldown.queueResponse(text, getMissionCommonLine('notReady', 'Return when you are ready for this task.'), addMessage, 'Tesha');
         return;
       }
 
@@ -12771,15 +12555,21 @@ function createNPCCooldownManager() {
             );
           } catch (err) {
             console.error('[Quests Mod][Tesha] Error responding about Destroy Field Rune:', err);
-            teshaCooldown.queueResponse(text, 'Something went wrong. Please try again.', addMessage, 'Tesha');
+            teshaCooldown.queueResponse(text, getMissionCommonLine('errorGeneric', 'Something went wrong. Please try again.'), addMessage, 'Tesha');
           }
           return;
         }
       }
 
-      const lines = getTeshaResponse(text, teshaPlayerName);
-      if (lines.length === 0) return;
-      teshaCooldown.queueResponse(text, lines, addMessage, 'Tesha', ModalHelpers.getFarewellCloseCallback(text));
+      let teshaLines = getTeshaResponse(text, teshaPlayerName);
+      if (teshaLines == null) {
+        const questItemLine = getNpcQuestItemChatResponse('tesha', text, teshaPlayerName);
+        if (questItemLine != null) teshaLines = [questItemLine];
+      }
+      if (teshaLines == null) {
+        teshaLines = [getRandomNpcConfusionResponse(TESHA_CONFUSION_RESPONSES, teshaPlayerName)];
+      }
+      teshaCooldown.queueResponse(text, teshaLines, addMessage, 'Tesha', ModalHelpers.getFarewellCloseCallback(text));
     }
 
     textarea.addEventListener('keydown', (e) => {
@@ -12893,8 +12683,363 @@ function createNPCCooldownManager() {
     return tab && isInDOM(tab) ? tab : null;
   }
 
+  function getActiveMissionTabId(missionId) {
+    return `${ACTIVE_MISSION_TAB_ID_PREFIX}${missionId}`;
+  }
+
+  function getActiveMissionTabElements() {
+    return Array.from(document.querySelectorAll(`[id^="${ACTIVE_MISSION_TAB_ID_PREFIX}"]`))
+      .filter((el) => isInDOM(el));
+  }
+
+  function getActiveQuestLogMissions() {
+    return QUEST_LOG_MISSIONS.filter((mission) => MissionManager.isActive(mission));
+  }
+
+  function getMissionQuestLogIconFilename(mission) {
+    if (!mission) return 'King_Tibianus.gif';
+    return MISSION_QUEST_LOG_ICON_MAP[mission.id] || 'King_Tibianus.gif';
+  }
+
+  function getMissionQuestLogSpriteId(mission) {
+    if (!mission) return null;
+    const spriteId = MISSION_QUEST_LOG_SPRITE_ICON_MAP[mission.id];
+    return Number.isFinite(spriteId) ? spriteId : null;
+  }
+
+  function createActiveMissionIconElement(mission) {
+    const spriteId = getMissionQuestLogSpriteId(mission);
+    if (spriteId != null) {
+      const wrap = document.createElement('div');
+      wrap.className = `sprite item relative id-${spriteId}`;
+      wrap.style.zIndex = '1000';
+      wrap.innerHTML = `<div class="viewport"><img alt="${spriteId}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div>`;
+      return wrap;
+    }
+
+    const iconImg = document.createElement('img');
+    iconImg.alt = mission?.title || 'Mission';
+    iconImg.className = 'pixelated';
+    iconImg.width = 32;
+    iconImg.height = 32;
+    iconImg.src = getQuestItemsAssetUrl(getMissionQuestLogIconFilename(mission));
+    iconImg.style.imageRendering = 'pixelated';
+    return iconImg;
+  }
+
+  function getCachedQuestItemCount(itemName) {
+    return cachedQuestItems?.[itemName] || 0;
+  }
+
+  function makeActiveMissionCountProgress(current, total) {
+    const safeTotal = Math.max(1, total);
+    return {
+      current: Math.max(0, Math.min(current, safeTotal)),
+      total: safeTotal
+    };
+  }
+
+  function getActiveMissionObjectiveLine(mission) {
+    if (!mission) return 'In progress';
+    const progress = getMissionProgress(mission);
+
+    if (mission.id === SERPENTINE_TOWER_MISSION.id) {
+      if (progress?.putridChamberComplete) {
+        return mission.putridChamberReturnObjective || mission.objectiveLine2 || mission.objectiveLine1;
+      }
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === KING_LETTER_MISSION.id) {
+      if (getCachedQuestItemCount('Stamped Letter') > 0) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === KING_SCARAB_COIN_MISSION.id) {
+      if (getCachedQuestItemCount(SCARAB_COIN_CONFIG.productName) > 0) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === KING_HONEYFLOWER_MISSION.id) {
+      if (getCachedQuestItemCount(HONEYFLOWER_CONFIG.productName) > 0 || progress?.honeyflowerPicked) {
+        return mission.objectiveLine2;
+      }
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === KING_COPPER_KEY_MISSION.id) {
+      if (getCachedQuestItemCount(COPPER_KEY_CONFIG.productName) > 0) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === KING_RED_DRAGON_MISSION.id) {
+      if (getCachedQuestItemCount('Red Dragon Scale') < 30) return mission.objectiveLine1;
+      return mission.objectiveLine2;
+    }
+
+    if (mission.id === AL_DEE_FISHING_MISSION.id) {
+      if (getCachedQuestItemCount('Small Axe') > 0) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
+      if (getCachedQuestItemCount('Elvenhair Rope') > 0) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === COSTELLO_QUEEN_BANSHEES_MISSION.id) {
+      const done = (kingChatState.sevenSealsCompleted || []).filter(Boolean).length;
+      if (done >= SEVEN_SEALS_COUNT) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === FOLLOWER_OF_ZATHROTH_MISSION.id) {
+      if (getCachedQuestItemCount(COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName) > 0) {
+        return mission.objectiveLine2;
+      }
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === MOTHER_OF_ALL_SPIDERS_MISSION.id) {
+      if (getCachedQuestItemCount('Spider Silk') > 0) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === APPRENTICE_SHENG_MISSION.id) {
+      if (progress?.battleCompleted) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === CHRISTMAS_MIRACLE_MISSION.id) {
+      if (getCachedQuestItemCount(PRESENT_CONFIG.productName) > 0) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === KING_CROSSING_THE_LINE_MISSION.id) {
+      if (progress?.crossingObjectiveComplete) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    if (mission.id === KING_MONKS_STUDY_MISSION.id) {
+      if (kingChatState.costelloVisited) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
+    return mission.objectiveLine1 || mission.objectiveLine2 || 'In progress';
+  }
+
+  function getActiveMissionProgressDisplay(mission) {
+    if (!mission) return null;
+    const progress = getMissionProgress(mission);
+
+    if (mission.id === KING_RED_DRAGON_MISSION.id) {
+      const scales = Math.min(getCachedQuestItemCount('Red Dragon Scale'), 30);
+      const leathers = Math.min(getCachedQuestItemCount('Red Dragon Leather'), 30);
+      return makeActiveMissionCountProgress(scales + leathers, 60);
+    }
+
+    if (mission.id === COSTELLO_QUEEN_BANSHEES_MISSION.id) {
+      const done = (kingChatState.sevenSealsCompleted || []).filter(Boolean).length;
+      return makeActiveMissionCountProgress(done, SEVEN_SEALS_COUNT);
+    }
+
+    if (mission.id === KING_HONEYFLOWER_MISSION.id) {
+      const has = getCachedQuestItemCount(HONEYFLOWER_CONFIG.productName) > 0 || !!progress?.honeyflowerPicked;
+      return makeActiveMissionCountProgress(has ? 1 : 0, 1);
+    }
+
+    if (mission.id === KING_CROSSING_THE_LINE_MISSION.id) {
+      return makeActiveMissionCountProgress(progress?.crossingObjectiveComplete ? 1 : 0, 1);
+    }
+
+    if (mission.id === KING_SCARAB_COIN_MISSION.id) {
+      const hasCoin = getCachedQuestItemCount(SCARAB_COIN_CONFIG.productName) > 0;
+      return makeActiveMissionCountProgress(hasCoin ? 1 : 0, 1);
+    }
+
+    if (mission.id === KING_COPPER_KEY_MISSION.id) {
+      const hasKey = getCachedQuestItemCount(COPPER_KEY_CONFIG.productName) > 0;
+      return makeActiveMissionCountProgress(hasKey ? 1 : 0, 1);
+    }
+
+    if (mission.id === KING_LETTER_MISSION.id) {
+      if (getCachedQuestItemCount('Stamped Letter') > 0) {
+        return makeActiveMissionCountProgress(1, 1);
+      }
+      const hasLetter = getCachedQuestItemCount('Letter from Al Dee') > 0;
+      return makeActiveMissionCountProgress(hasLetter ? 1 : 0, 1);
+    }
+
+    if (mission.id === AL_DEE_FISHING_MISSION.id) {
+      return makeActiveMissionCountProgress(getCachedQuestItemCount('Small Axe') > 0 ? 1 : 0, 1);
+    }
+
+    if (mission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
+      return makeActiveMissionCountProgress(getCachedQuestItemCount('Elvenhair Rope') > 0 ? 1 : 0, 1);
+    }
+
+    if (mission.id === FOLLOWER_OF_ZATHROTH_MISSION.id) {
+      return makeActiveMissionCountProgress(
+        getCachedQuestItemCount(COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName) > 0 ? 1 : 0,
+        1
+      );
+    }
+
+    if (mission.id === MOTHER_OF_ALL_SPIDERS_MISSION.id) {
+      return makeActiveMissionCountProgress(getCachedQuestItemCount('Spider Silk') > 0 ? 1 : 0, 1);
+    }
+
+    if (mission.id === KING_MONKS_STUDY_MISSION.id) {
+      return makeActiveMissionCountProgress(kingChatState.costelloVisited ? 1 : 0, 1);
+    }
+
+    if (mission.id === APPRENTICE_SHENG_MISSION.id) {
+      return makeActiveMissionCountProgress(progress?.battleCompleted ? 1 : 0, 1);
+    }
+
+    if (mission.id === CHRISTMAS_MIRACLE_MISSION.id) {
+      const hasPresent = getCachedQuestItemCount(PRESENT_CONFIG.productName) > 0;
+      return makeActiveMissionCountProgress(hasPresent ? 1 : 0, 1);
+    }
+
+    if (mission.id === SERPENTINE_TOWER_MISSION.id) {
+      if (progress?.putridChamberComplete) {
+        return makeActiveMissionCountProgress(1, 1);
+      }
+      const hasRune = getCachedQuestItemCount(DESTROY_FIELD_RUNE_CONFIG.productName) > 0;
+      return makeActiveMissionCountProgress(hasRune ? 1 : 0, 1);
+    }
+
+    return null;
+  }
+
+  function getActiveMissionTabClassName() {
+    return 'frame-1 surface-regular relative grid gap-2 p-1.5 text-left data-[disabled=\'true\']:order-last md:data-[highlighted=\'true\']:brightness-[1.2]';
+  }
+
+  function createActiveMissionProgressBar(progressDisplay) {
+    const wrap = document.createElement('div');
+    wrap.className = '-mt-0.5 flex items-center gap-2';
+
+    const track = document.createElement('div');
+    track.className = 'relative w-full border border-solid border-black bg-black frame-pressed-1 surface-darker h-1.5';
+    const fillRow = document.createElement('div');
+    fillRow.className = 'absolute left-0 top-0 flex h-full w-full';
+    const fill = document.createElement('div');
+    fill.className = 'h-full shrink-0';
+    const pct = progressDisplay.total > 0
+      ? Math.max(0, Math.min(100, (progressDisplay.current / progressDisplay.total) * 100))
+      : 0;
+    fill.style.width = `${pct}%`;
+    fill.style.background = 'rgb(96, 192, 96)';
+    fillRow.appendChild(fill);
+    track.appendChild(fillRow);
+
+    const count = document.createElement('span');
+    count.className = 'text-whiteHighlight data-[completed=\'true\']:text-hpHealthy';
+    count.dataset.completed = progressDisplay.current >= progressDisplay.total ? 'true' : 'false';
+    count.textContent = `${progressDisplay.current}/${progressDisplay.total}`;
+
+    wrap.appendChild(track);
+    wrap.appendChild(count);
+    return wrap;
+  }
+
+  function renderActiveMissionTabContent(tab, mission) {
+    tab.replaceChildren();
+
+    const row = document.createElement('div');
+    row.className = 'flex justify-between gap-2';
+
+    const iconSlot = document.createElement('div');
+    iconSlot.className = 'container-slot surface-darker grid place-items-center px-3.5 py-0.5 relative';
+    iconSlot.appendChild(createActiveMissionIconElement(mission));
+
+    const info = document.createElement('div');
+    info.className = 'flex w-full flex-col justify-center';
+
+    const title = document.createElement('p');
+    title.className = 'text-whiteHighlight';
+    title.textContent = mission.title;
+    info.appendChild(title);
+
+    const objectiveLine = getActiveMissionObjectiveLine(mission);
+    const progressDisplay = getActiveMissionProgressDisplay(mission);
+
+    const statusLine = document.createElement('p');
+    statusLine.className = 'pixel-font-14 mt-1';
+    statusLine.textContent = objectiveLine;
+    info.appendChild(statusLine);
+
+    if (progressDisplay) {
+      info.appendChild(createActiveMissionProgressBar(progressDisplay));
+    }
+
+    row.appendChild(iconSlot);
+    row.appendChild(info);
+    tab.appendChild(row);
+  }
+
+  function syncActiveMissionTabs() {
+    const questLogContainer = findQuestLogContainer();
+    const kingTab = getKingTabElement();
+    const existingTabs = getActiveMissionTabElements();
+
+    if (!questLogContainer || !kingTab) {
+      existingTabs.forEach((tab) => tab.remove());
+      return;
+    }
+
+    const activeMissions = getActiveQuestLogMissions();
+    const activeIds = new Set(activeMissions.map((mission) => mission.id));
+
+    existingTabs.forEach((tab) => {
+      const missionId = tab.getAttribute(ACTIVE_MISSION_TAB_ATTR);
+      if (!activeIds.has(missionId)) {
+        tab.remove();
+      }
+    });
+
+    let insertAfter = kingTab;
+    activeMissions.forEach((mission, index) => {
+      const tabId = getActiveMissionTabId(mission.id);
+      let tab = document.getElementById(tabId);
+
+      if (!tab) {
+        tab = document.createElement('div');
+        tab.id = tabId;
+        tab.setAttribute(ACTIVE_MISSION_TAB_ATTR, mission.id);
+        tab.setAttribute('data-highlighted', 'false');
+        tab.setAttribute('data-disabled', 'false');
+        tab.dataset.questsOriginalDisplay = '';
+        tab.style.display = 'none';
+      }
+
+      tab.className = getActiveMissionTabClassName();
+      tab.style.order = String(-1 + index);
+      renderActiveMissionTabContent(tab, mission);
+
+      const desiredNext = insertAfter.nextElementSibling;
+      if (tab.parentNode !== questLogContainer || desiredNext !== tab) {
+        questLogContainer.insertBefore(tab, insertAfter.nextSibling);
+      }
+
+      if (kingModeActive) {
+        tab.style.display = '';
+      } else {
+        tab.style.display = 'none';
+      }
+
+      insertAfter = tab;
+    });
+  }
+
   function getArenaQuestLogCards() {
-    return [getKingTabElement(), getArenaLeaderboardTabElement()].filter(Boolean);
+    return [
+      getKingTabElement(),
+      getArenaLeaderboardTabElement(),
+      ...getActiveMissionTabElements()
+    ].filter(Boolean);
   }
 
   function getArenaProfileUrl(playerName) {
@@ -13124,6 +13269,7 @@ function createNPCCooldownManager() {
       verifyArenaLeaderboardTabPosition();
       const kingTab = getKingTabElement();
       if (kingTab) {
+        syncActiveMissionTabs();
         hideQuestLogWidgetsExceptKing(questLogContainer, kingTab);
       }
       ensureMissionsFooterButton();
@@ -13252,8 +13398,39 @@ function createNPCCooldownManager() {
     missionsToggleButton.textContent = kingModeActive ? 'Back' : 'Missions';
   }
 
+  function applyMissionsQuestLogGridPacking(questLogContainer) {
+    if (!questLogContainer) return;
+    if (questLogContainer.dataset.questsGridAlignContent === undefined) {
+      questLogContainer.dataset.questsGridAlignContent = questLogContainer.style.alignContent || '';
+    }
+    if (questLogContainer.dataset.questsGridAutoRows === undefined) {
+      questLogContainer.dataset.questsGridAutoRows = questLogContainer.style.gridAutoRows || '';
+    }
+    // Fixed-height quest log stretches few Missions cards apart; pack them to the top.
+    questLogContainer.style.alignContent = 'start';
+    questLogContainer.style.gridAutoRows = 'max-content';
+  }
+
+  function restoreQuestLogGridPacking(questLogContainer) {
+    if (!questLogContainer) return;
+    if (questLogContainer.dataset.questsGridAlignContent !== undefined) {
+      questLogContainer.style.alignContent = questLogContainer.dataset.questsGridAlignContent;
+      delete questLogContainer.dataset.questsGridAlignContent;
+    } else {
+      questLogContainer.style.removeProperty('align-content');
+    }
+    if (questLogContainer.dataset.questsGridAutoRows !== undefined) {
+      questLogContainer.style.gridAutoRows = questLogContainer.dataset.questsGridAutoRows;
+      delete questLogContainer.dataset.questsGridAutoRows;
+    } else {
+      questLogContainer.style.removeProperty('grid-auto-rows');
+    }
+  }
+
   function showAllQuestLogWidgets(questLogContainer, kingTab) {
     if (!questLogContainer) return;
+
+    restoreQuestLogGridPacking(questLogContainer);
 
     const questCards = new Set(getArenaQuestLogCards());
 
@@ -13281,6 +13458,8 @@ function createNPCCooldownManager() {
   function hideQuestLogWidgetsExceptKing(questLogContainer, kingTab) {
     if (!questLogContainer || !kingTab) return;
 
+    applyMissionsQuestLogGridPacking(questLogContainer);
+
     const visibleCards = new Set(getArenaQuestLogCards());
     const children = Array.from(questLogContainer.children);
     children.forEach(child => {
@@ -13296,6 +13475,7 @@ function createNPCCooldownManager() {
   function resetQuestLogView(questLogContainer = findQuestLogContainer()) {
     const kingTab = getKingTabElement();
     const leaderboardTab = getArenaLeaderboardTabElement();
+    const activeMissionTabs = getActiveMissionTabElements();
     if (!questLogContainer) {
       kingModeActive = false;
       updateMissionsButtonState();
@@ -13305,6 +13485,9 @@ function createNPCCooldownManager() {
       if (leaderboardTab) {
         leaderboardTab.style.display = 'none';
       }
+      activeMissionTabs.forEach((tab) => {
+        tab.style.display = 'none';
+      });
       return;
     }
 
@@ -13316,6 +13499,9 @@ function createNPCCooldownManager() {
     if (leaderboardTab) {
       leaderboardTab.style.display = 'none';
     }
+    activeMissionTabs.forEach((tab) => {
+      tab.style.display = 'none';
+    });
     updateMissionsButtonState();
   }
 
@@ -13337,8 +13523,9 @@ function createNPCCooldownManager() {
     verifyArenaLeaderboardTabPosition();
 
     if (!kingModeActive) {
-      hideQuestLogWidgetsExceptKing(questLogContainer, kingTab);
       kingModeActive = true;
+      syncActiveMissionTabs();
+      hideQuestLogWidgetsExceptKing(questLogContainer, kingTab);
     } else {
       resetQuestLogView(questLogContainer);
     }
@@ -13398,6 +13585,9 @@ function createNPCCooldownManager() {
     if (kingTab && !leaderboardTab) {
       createArenaLeaderboardTab();
     }
+    if (kingTab) {
+      syncActiveMissionTabs();
+    }
 
     if (lastQuestLogContainer !== questLogContainer) {
       lastQuestLogContainer = questLogContainer;
@@ -13409,6 +13599,9 @@ function createNPCCooldownManager() {
         if (leaderboardTab) {
           leaderboardTab.style.display = 'none';
         }
+        getActiveMissionTabElements().forEach((tab) => {
+          tab.style.display = 'none';
+        });
         showAllQuestLogWidgets(questLogContainer, kingTab);
         updateMissionsButtonState();
       }
@@ -13511,6 +13704,7 @@ function createNPCCooldownManager() {
       console.log('[Quests Mod] King Tibianus tab already exists, skipping');
       createArenaLeaderboardTab();
       verifyArenaLeaderboardTabPosition();
+      syncActiveMissionTabs();
       return;
     }
 
@@ -13608,6 +13802,7 @@ function createNPCCooldownManager() {
     scheduleArenaRankDisplayUpdate(0);
     createArenaLeaderboardTab();
     verifyArenaLeaderboardTabPosition();
+    syncActiveMissionTabs();
 
     console.log('[Quests Mod] King Tibianus tab created successfully!');
   }
@@ -13658,6 +13853,8 @@ function createNPCCooldownManager() {
         console.log('[Quests Mod] King Tibianus tab placed at top');
       }
     }
+
+    syncActiveMissionTabs();
   }
 
   function tryImmediateKingTibianusCreation() {
@@ -18474,12 +18671,6 @@ function createNPCCooldownManager() {
       isAccessActive: () => miningState.tiles.size > 0 && !!(miningState.enabled && hasLightShovelInInventory()),
       alt: 'Dig'
     });
-
-    registerQuestTileHighlightSource({
-      getTiles: () => [...fishingState.tiles],
-      isAccessActive: () => fishingState.tiles.size > 0 && !!(fishingState.enabled && shouldEnableWaterFishing()),
-      alt: 'Fish'
-    });
   }
 
   function setupTileHighlightObserver() {
@@ -18688,20 +18879,7 @@ function createNPCCooldownManager() {
           && !progress?.rookstayerDismissed
           && !playerAcceptedApprenticeShengBattle;
       },
-      chat: {
-        welcomeMessage: 'Adventurer… Apprentice Sheng has grown too dangerous. Will you help me defeat him?',
-        thankYouMessage: 'Thank you for your help, adventurer. Please accept this trophy as a token of my gratitude.',
-        placeholder: 'Type your message to Rookstayer...',
-        yesResponse: 'Thank you! Prepare yourself — we face him now.',
-        noResponse: 'I understand. Return if you change your mind.',
-        pleadResponses: [
-          'Please, I cannot face Apprentice Sheng alone. Will you help me?',
-          'I beg you — stand with me against Apprentice Sheng!',
-          'He is too strong for me. Please, help me defeat him!',
-          'Do not turn away. I need your aid against Apprentice Sheng.',
-          'Please reconsider. Together we can stop Apprentice Sheng!'
-        ]
-      },
+      chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
     },
@@ -18724,14 +18902,22 @@ function createNPCCooldownManager() {
         const count = cachedQuestItems?.[WISHLIST_CONFIG.productName] || 0;
         return count >= 1;
       },
-      chat: {
-        welcomeMessage: 'Merry Christmas, little Player!',
-        placeholder: 'Type your message to Santa Claus...'
-      },
+      chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
     }
   ];
+
+
+  patchBoardNpcChatFromDialogue = function patchBoardNpcChatFromDialogue() {
+    if (!questNpcsDialogue) return;
+    const rookChat = questNpcsDialogue.rookstayer?.boardChat;
+    const rookConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_ROOKSTAYER_ID);
+    if (rookChat && rookConfig?.chat) Object.assign(rookConfig.chat, rookChat);
+    const santaChat = questNpcsDialogue.santa?.boardChat;
+    const santaConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SANTA_ID);
+    if (santaChat && santaConfig?.chat) Object.assign(santaConfig.chat, santaChat);
+  };
 
   function isApprenticeShengBattleCompletedPendingReward() {
     const progress = getMissionProgress(APPRENTICE_SHENG_MISSION);
@@ -18995,7 +19181,8 @@ function createNPCCooldownManager() {
 
   function getSantaKeywordResponse(message, playerName) {
     return matchKeywordResponsesSync(SANTA_RESPONSES, message, playerName, {
-      defaultResponse: 'Ho ho ho! Ask me for a present, or say thank you!'
+      defaultResponse: null,
+      lowercaseKeys: true
     });
   }
 
@@ -19093,7 +19280,13 @@ function createNPCCooldownManager() {
           return;
         }
 
-        const response = getSantaKeywordResponse(text, playerName);
+        let response = getSantaKeywordResponse(text, playerName);
+        if (response == null) {
+          response = getNpcQuestItemChatResponse('santa-claus', text, playerName);
+        }
+        if (response == null) {
+          response = getRandomNpcConfusionResponse(SANTA_CONFUSION_RESPONSES, playerName);
+        }
         cooldown.queueResponse(
           text,
           response,
@@ -19190,6 +19383,17 @@ function createNPCCooldownManager() {
             addMessageToConversation,
             npcConfig.name,
             () => ModalHelpers.closeModal(NPC_MODAL_CLOSE_DELAY_MS)
+          );
+          return;
+        }
+
+        const questItemResponse = getNpcQuestItemChatResponse(npcConfig.id, text, playerName);
+        if (questItemResponse != null) {
+          cooldown.queueResponse(
+            text,
+            questItemResponse,
+            addMessageToConversation,
+            npcConfig.name
           );
           return;
         }
@@ -20285,6 +20489,7 @@ function createNPCCooldownManager() {
       console.warn('[Quests Mod][Arena Leaderboard] Failed to sync after mission progress hydration:', err);
     });
     refreshSystemsAfterMissionProgressLoaded();
+    syncActiveMissionTabs();
     reloadQuestItemsFromFirebase().catch((err) => {
       console.warn('[Quests Mod] Failed to reload quest items after mission progress sync:', err);
     });
@@ -20580,6 +20785,11 @@ function createNPCCooldownManager() {
   }
 
   async function runPostMissionProgressInitSetup() {
+    try {
+      await loadQuestDialogueAssets();
+    } catch (dialogueError) {
+      console.warn('[Quests Mod] Quest dialogue assets unavailable; using mission shells only.', dialogueError);
+    }
     registerQuestsDevHelpers();
 
     await migrateDwarvenPickaxeToLightShovel();
