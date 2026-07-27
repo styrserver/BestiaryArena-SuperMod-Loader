@@ -451,6 +451,7 @@
             } else {
                 paragraph.textContent = String(message ?? '');
             }
+            colorizeToastStatusText(paragraph);
 
             textLeft.appendChild(paragraph);
             widgetBottom.appendChild(textLeft);
@@ -473,6 +474,116 @@
         } catch (error) {
             console.warn('[Autoseller] Failed to show toast:', error);
         }
+    }
+
+    function colorizeToastStatusText(rootNode) {
+        if (!rootNode) return;
+        const statusRegex = /\b(enabled|disabled|ativad[oa]s?|desativad[oa]s?|ligad[oa]s?|desligad[oa]s?)\b/gi;
+        const walker = document.createTreeWalker(rootNode, NodeFilter.SHOW_TEXT);
+        const textNodes = [];
+
+        while (walker.nextNode()) {
+            const node = walker.currentNode;
+            if (node && node.nodeValue && statusRegex.test(node.nodeValue)) {
+                textNodes.push(node);
+            }
+            statusRegex.lastIndex = 0;
+        }
+
+        textNodes.forEach((textNode) => {
+            const text = textNode.nodeValue || '';
+            statusRegex.lastIndex = 0;
+            if (!statusRegex.test(text)) return;
+            statusRegex.lastIndex = 0;
+
+            const fragment = document.createDocumentFragment();
+            let lastIndex = 0;
+            let match;
+
+            while ((match = statusRegex.exec(text)) !== null) {
+                const [matchedText] = match;
+                const matchIndex = match.index;
+                if (matchIndex > lastIndex) {
+                    fragment.appendChild(document.createTextNode(text.slice(lastIndex, matchIndex)));
+                }
+
+                const statusSpan = document.createElement('span');
+                statusSpan.textContent = matchedText;
+                const normalized = matchedText.toLowerCase();
+                const isPositiveStatus =
+                    normalized === 'enabled' ||
+                    normalized.startsWith('ativad') ||
+                    normalized.startsWith('ligad');
+                statusSpan.style.color = isPositiveStatus
+                    ? 'rgb(100, 255, 100)'
+                    : 'rgb(255, 100, 100)';
+                fragment.appendChild(statusSpan);
+
+                lastIndex = matchIndex + matchedText.length;
+            }
+
+            if (lastIndex < text.length) {
+                fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+            }
+
+            if (textNode.parentNode) {
+                textNode.parentNode.replaceChild(fragment, textNode);
+            }
+        });
+    }
+
+    function showAutodustStatToast(creatureName, statKey, isEnabled) {
+        const templateKey = isEnabled
+            ? 'mods.autoseller.lootToastAutodustEnabled'
+            : 'mods.autoseller.lootToastAutodustDisabled';
+        const fallbackTemplate = isEnabled
+            ? '{name}: Autodust {stat} enabled'
+            : '{name}: Autodust {stat} disabled';
+        const template = String(t(templateKey) || fallbackTemplate);
+        const statLabel = String(statKey || '').toUpperCase();
+        const iconByStat = {
+            ad: LOOT_TABLE_ICON_URLS.equipAd,
+            ap: LOOT_TABLE_ICON_URLS.equipAp,
+            hp: LOOT_TABLE_ICON_URLS.equipHp
+        };
+        const iconUrl = iconByStat[statKey];
+        const withName = template.replace(/\{name\}/g, String(creatureName || ''));
+
+        if (!iconUrl || !withName.includes('{stat}')) {
+            showAutosellerToast(withName.replace(/\{stat\}/g, statLabel));
+            return;
+        }
+
+        const [beforeStat, ...restParts] = withName.split('{stat}');
+        const afterStat = restParts.join('{stat}');
+        const content = document.createElement('span');
+        content.style.display = 'inline-flex';
+        content.style.alignItems = 'center';
+        content.style.gap = '4px';
+        content.style.flexWrap = 'wrap';
+
+        if (beforeStat) {
+            const beforeText = document.createElement('span');
+            beforeText.textContent = beforeStat;
+            content.appendChild(beforeText);
+        }
+
+        const statIcon = document.createElement('img');
+        statIcon.src = iconUrl;
+        statIcon.alt = statLabel;
+        statIcon.className = 'pixelated';
+        statIcon.width = 12;
+        statIcon.height = 12;
+        statIcon.draggable = false;
+        content.appendChild(statIcon);
+
+        if (afterStat) {
+            const afterText = document.createElement('span');
+            afterText.textContent = afterStat;
+            content.appendChild(afterText);
+        }
+
+        showAutosellerToast(content);
     }
     
     function getSettings() {
@@ -731,6 +842,7 @@
 
     function isSealedTier5SqueezeAllowed(creatureName) {
         if (!creatureName) return false;
+        if (isSealedTier5InjectAllowed(creatureName)) return false;
         const settings = getSettings();
         const allowList = settings.sealedTier5SellAllowList || [];
         return allowList.includes(creatureName);
@@ -3959,8 +4071,52 @@
         return [...new Set([...(Array.isArray(pickerNames) ? pickerNames : []), ...activeRaidEventCreatures])].sort((a, b) => a.localeCompare(b));
     }
 
+    function resolveAutosellerCurrentRoomId() {
+        const boardCtx = globalThis.state?.board?.getSnapshot?.()?.context || {};
+        const playerCtx = globalThis.state?.player?.getSnapshot?.()?.context || {};
+        return (boardCtx.selectedMap?.selectedRoom?.id)
+            || (boardCtx.selectedMap?.id)
+            || (boardCtx.area?.id)
+            || (boardCtx.room?.id)
+            || playerCtx.currentRoomId
+            || null;
+    }
+
+    function getCurrentMapPriorityNameSets() {
+        const creatureNames = new Set();
+        const equipmentNames = new Set();
+        const roomId = resolveAutosellerCurrentRoomId();
+        const utils = globalThis.state?.utils;
+        if (!roomId || typeof utils?.getBoardMonstersFromRoomId !== 'function') {
+            return { creatureNames, equipmentNames };
+        }
+
+        try {
+            const board = utils.getBoardMonstersFromRoomId(roomId);
+            if (!Array.isArray(board)) return { creatureNames, equipmentNames };
+
+            for (const piece of board) {
+                const creatureName = piece?.metadata?.name
+                    || piece?.name
+                    || (piece?.gameId && utils.getMonster?.(piece.gameId)?.metadata?.name)
+                    || '';
+                if (creatureName) creatureNames.add(creatureName);
+
+                const equipGameId = piece?.equip?.gameId;
+                if (equipGameId != null && typeof utils.getEquipment === 'function') {
+                    const equipName = utils.getEquipment(equipGameId)?.metadata?.name || '';
+                    if (equipName) equipmentNames.add(equipName);
+                }
+            }
+        } catch (_) {
+            // Ignore map-priority extraction errors and keep default ordering.
+        }
+
+        return { creatureNames, equipmentNames };
+    }
+
     // Helper function to create creature boxes for Autoplant
-    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false, showKeepRangeLock = false, contextMenuType = 'creature', showAutodusterIndicator = false, sealedActionVerb = 'Sell', contextDefaultRangeMin = 0, contextDefaultRangeMax = 100}) {
+    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false, showKeepRangeLock = false, contextMenuType = 'creature', showAutodusterIndicator = false, sealedActionVerb = 'Sell', contextDefaultRangeMin = 0, contextDefaultRangeMax = 100, prioritizedNamesSet = null}) {
         const box = document.createElement('div');
         box.style.display = 'flex';
         box.style.flexDirection = 'column';
@@ -4090,7 +4246,101 @@
             return `${actionSummary}${keepRangeText}${upgradeLadderText} ${sealedStatus} ${priorityText}`.replace(/\s+/g, ' ').trim();
         }
         
-        items.forEach(name => {
+        const normalizedPriorityNames = new Set(
+            [...(prioritizedNamesSet || [])]
+                .map((name) => String(name || '').trim().toLowerCase())
+                .filter(Boolean)
+        );
+        const mapPriorityItems = [];
+        const nonPriorityItems = [];
+        for (const name of items) {
+            const normalizedName = String(name || '').trim().toLowerCase();
+            if (normalizedName && normalizedPriorityNames.has(normalizedName)) {
+                mapPriorityItems.push(name);
+            } else {
+                nonPriorityItems.push(name);
+            }
+        }
+        const orderedItems = [...mapPriorityItems, ...nonPriorityItems];
+        const separatorIndex = mapPriorityItems.length;
+
+        if (separatorIndex > 0) {
+            const topCaption = document.createElement('div');
+            topCaption.style.display = 'flex';
+            topCaption.style.alignItems = 'center';
+            topCaption.style.gap = '6px';
+            topCaption.style.margin = '1px 2px 5px';
+            topCaption.style.pointerEvents = 'none';
+            topCaption.style.opacity = '0.9';
+
+            const topLeftLine = document.createElement('div');
+            topLeftLine.style.flex = '1 1 0';
+            topLeftLine.style.height = '0';
+            topLeftLine.style.borderTop = '1px solid rgba(100, 255, 100, 0.45)';
+
+            const topLabel = document.createElement('span');
+            topLabel.className = 'pixel-font-14';
+            topLabel.textContent = t('mods.autoseller.mapPriorityCurrentLabel') || 'Current map';
+            topLabel.style.fontSize = '10px';
+            topLabel.style.color = 'rgba(100, 255, 100, 0.9)';
+            topLabel.style.textTransform = 'uppercase';
+            topLabel.style.letterSpacing = '0.4px';
+            topLabel.style.whiteSpace = 'nowrap';
+
+            const topRightLine = document.createElement('div');
+            topRightLine.style.flex = '1 1 0';
+            topRightLine.style.height = '0';
+            topRightLine.style.borderTop = '1px solid rgba(100, 255, 100, 0.45)';
+
+            topCaption.appendChild(topLeftLine);
+            topCaption.appendChild(topLabel);
+            topCaption.appendChild(topRightLine);
+            scrollContainer.appendChild(topCaption);
+        }
+
+        const appendOtherDivider = () => {
+            const separator = document.createElement('div');
+            separator.style.display = 'flex';
+            separator.style.alignItems = 'center';
+            separator.style.gap = '6px';
+            separator.style.margin = '6px 2px 5px';
+            separator.style.pointerEvents = 'none';
+            separator.style.opacity = '0.85';
+
+            const leftLine = document.createElement('div');
+            leftLine.style.flex = '1 1 0';
+            leftLine.style.height = '0';
+            leftLine.style.borderTop = '1px solid rgba(255, 100, 100, 0.45)';
+
+            const label = document.createElement('span');
+            label.className = 'pixel-font-14';
+            label.textContent = t('mods.autoseller.mapPrioritySeparatorLabel') || 'Other';
+            label.style.fontSize = '10px';
+            label.style.color = 'rgba(255, 100, 100, 0.9)';
+            label.style.textTransform = 'uppercase';
+            label.style.letterSpacing = '0.4px';
+            label.style.whiteSpace = 'nowrap';
+
+            const rightLine = document.createElement('div');
+            rightLine.style.flex = '1 1 0';
+            rightLine.style.height = '0';
+            rightLine.style.borderTop = '1px solid rgba(255, 100, 100, 0.45)';
+
+            separator.appendChild(leftLine);
+            separator.appendChild(label);
+            separator.appendChild(rightLine);
+            scrollContainer.appendChild(separator);
+        };
+
+        if (separatorIndex === 0 && nonPriorityItems.length > 0) {
+            appendOtherDivider();
+        }
+
+        orderedItems.forEach((name, index) => {
+            if (separatorIndex > 0 && nonPriorityItems.length > 0 && index === separatorIndex) {
+                appendOtherDivider();
+            }
+
             const item = document.createElement('div');
             item.className = 'pixel-font-14 autoplant-creature-item';
             item.style.color = 'rgb(230, 215, 176)';
@@ -4629,12 +4879,17 @@
             }
             const finalSealedInjectAllowed = sealedInjectToggle ? !sealedInjectToggle.checked : sealedInjectAllowed;
             const finalSealedSellAllowed = sealedToggle.checked;
+            let effectiveSealedInjectAllowed = finalSealedInjectAllowed;
             if (isSqueezeContext) {
                 setSealedTier5SellAllowed(creatureName, finalSealedSellAllowed);
+                if (finalSealedSellAllowed) {
+                    // Keep squeeze/sell and auto-inject mutually exclusive per creature.
+                    effectiveSealedInjectAllowed = false;
+                }
             } else if (sealedSellDenyToggle) {
                 setSealedTier5SellBlocked(creatureName, sealedSellDenyToggle.checked);
             }
-            setSealedTier5InjectAllowed(creatureName, finalSealedInjectAllowed);
+            setSealedTier5InjectAllowed(creatureName, effectiveSealedInjectAllowed);
             if (upgradeLadderToggle) {
                 setCreatureKeepUpgradeLadder(creatureName, upgradeLadderToggle.checked);
             }
@@ -5424,6 +5679,7 @@
         
         // Function to render the creature columns
         function renderCreatureColumns() {
+            const mapPrioritySets = getCurrentMapPriorityNameSets();
             // Get or create the columns container
             let columnsContainer = container.querySelector('.creature-columns-container');
             
@@ -5463,6 +5719,7 @@
                 sealedActionVerb: actionTitle,
                 contextDefaultRangeMin,
                 contextDefaultRangeMax,
+                prioritizedNamesSet: mapPrioritySets.creatureNames,
                 onSelectCreature: (creatureName) => {
                     console.log(`[Autoseller] Added to ignore list (${settingKey}):`, creatureName);
                     availableCreatures = availableCreatures.filter(c => c !== creatureName);
@@ -5487,6 +5744,7 @@
                 sealedActionVerb: actionTitle,
                 contextDefaultRangeMin,
                 contextDefaultRangeMax,
+                prioritizedNamesSet: mapPrioritySets.creatureNames,
                 onSelectCreature: (creatureName) => {
                     console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, creatureName);
                     selectedCreatures = selectedCreatures.filter(c => c !== creatureName);
@@ -5560,6 +5818,7 @@
         
         // Function to render the equipment columns
         function renderEquipmentColumns() {
+            const mapPrioritySets = getCurrentMapPriorityNameSets();
             // Get or create the columns container
             let columnsContainer = container.querySelector('.equipment-columns-container');
             
@@ -5597,6 +5856,7 @@
                 enableContextMenu: enableContextMenu,
                 contextMenuType: 'autoduster',
                 showAutodusterIndicator: true,
+                prioritizedNamesSet: mapPrioritySets.equipmentNames,
                 onSelectCreature: (equipmentName) => {
                     console.log(`[Autoseller] Added to ignore list (${settingKey}):`, equipmentName);
                     availableEquipment = availableEquipment.filter(e => e !== equipmentName);
@@ -5619,6 +5879,7 @@
                 enableContextMenu: enableContextMenu,
                 contextMenuType: 'autoduster',
                 showAutodusterIndicator: true,
+                prioritizedNamesSet: mapPrioritySets.equipmentNames,
                 onSelectCreature: (equipmentName) => {
                     console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, equipmentName);
                     selectedEquipment = selectedEquipment.filter(e => e !== equipmentName);
@@ -9720,6 +9981,9 @@
                 showAutosellerToast(tReplace('mods.autoseller.lootToastSealedInjectDisabled', { name: rowInfo.name }));
             } else {
                 setSealedTier5InjectAllowed(rowInfo.name, true);
+                // Auto-inject and sealed squeeze/sell per-creature toggles are mutually exclusive:
+                // enabling inject clears any sealed squeeze/sell allowance for the same creature.
+                setSealedTier5SellAllowed(rowInfo.name, false);
                 console.log(`[Autoseller] Loot icon toggle: enabled sealed auto-inject for ${rowInfo.name}`);
                 showAutosellerToast(tReplace('mods.autoseller.lootToastSealedInjectEnabled', { name: rowInfo.name }));
             }
@@ -9738,10 +10002,7 @@
                 setAutodusterKeepStats(rowInfo.name, keepStats);
                 setSettings({ autodusterIgnoreList: ignoreList, autodusterSellList: sellList });
                 console.log(`[Autoseller] Loot icon toggle: enabled autodust ${statLabel} for ${rowInfo.name}`);
-                showAutosellerToast(tReplace('mods.autoseller.lootToastAutodustEnabled', {
-                    name: rowInfo.name,
-                    stat: statLabel
-                }));
+                showAutodustStatToast(rowInfo.name, stat, true);
             } else {
                 const keepStats = { ...getAutodusterKeepStats(rowInfo.name) };
                 keepStats[stat] = !keepStats[stat];
@@ -9767,12 +10028,7 @@
                     autodusterSellList: sellList
                 });
                 console.log(`[Autoseller] Loot icon toggle: ${dustLabel} autodust ${statLabel} for ${rowInfo.name}`);
-                showAutosellerToast(tReplace(
-                    keepStats[stat]
-                        ? 'mods.autoseller.lootToastAutodustDisabled'
-                        : 'mods.autoseller.lootToastAutodustEnabled',
-                    { name: rowInfo.name, stat: statLabel }
-                ));
+                showAutodustStatToast(rowInfo.name, stat, !keepStats[stat]);
             }
         }
 

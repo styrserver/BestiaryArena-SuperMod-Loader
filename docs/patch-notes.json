@@ -4,6 +4,21 @@
   },
   "notes": [
     {
+      "version": "4.6.10",
+      "changes": [
+        {
+          "mod": "Autoseller",
+          "type": "changed",
+          "text": "Creature and equipment filter lists now prioritize entries from the current map at the top, followed by labeled dividers (Current map / Other). Divider styling supports clear section contrast, and the Other divider is shown even when no current-map entries exist."
+        },
+        {
+          "mod": "Autoseller",
+          "type": "fixed",
+          "text": "Sealed auto-inject and sealed squeeze/sell behavior now stay mutually exclusive per creature across loot-table toggles and context-menu saves. Custom toasts color enabled/disabled status in EN/PT (normal font weight), and autodust stat toasts render AD/AP/HP as icons instead of text."
+        }
+      ]
+    },
+    {
       "version": "4.6.9",
       "changes": [
         {
