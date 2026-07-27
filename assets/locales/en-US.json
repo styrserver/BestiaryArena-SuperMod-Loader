@@ -1520,6 +1520,8 @@
       "actionTitleSqueeze": "Squeeze",
       "actionTitleDisenchant": "Disenchant",
       "actionTitlePlant": "Plant",
+      "mapPriorityCurrentLabel": "Current map",
+      "mapPrioritySeparatorLabel": "Other",
       "autoSellSealedCreatures": "Sell or devour sealed creatures",
       "autoSqueezeSealedCreatures": "Auto-squeeze sealed creatures",
       "autoInjectSealedCreatures": "Auto-inject sealed creatures",

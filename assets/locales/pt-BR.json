@@ -1519,6 +1519,8 @@
       "actionTitleSqueeze": "Espremer",
       "actionTitleDisenchant": "Desencantar",
       "actionTitlePlant": "Plantar",
+      "mapPriorityCurrentLabel": "Mapa atual",
+      "mapPrioritySeparatorLabel": "Outros",
       "autoSellSealedCreatures": "Vender ou devorar criaturas seladas",
       "autoSqueezeSealedCreatures": "Autoespremer criaturas seladas",
       "autoInjectSealedCreatures": "Autoinjetar criaturas seladas",
