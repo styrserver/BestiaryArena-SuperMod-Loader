@@ -7,8 +7,10 @@
     "tesha": "5. Tesha",
     "santa": "6. Santa Claus",
     "rookstayer": "7. Board NPCs (Rookstayer)",
-    "questItems": "8. Quest item chat responses (involved vs uninvolved NPC lines)",
-    "questItemUninvolvedTemplates": "9. Uninvolved quest item templates ({item} placeholder)"
+    "svenson": "8. Board NPCs (Svenson)",
+    "dane": "9. Board NPCs (Dane)",
+    "questItems": "10. Quest item chat responses (involved vs uninvolved NPC lines)",
+    "questItemUninvolvedTemplates": "11. Uninvolved quest item templates ({item} placeholder)"
   },
   "king-tibianus": {
     "keywords": {
@@ -551,7 +553,7 @@
       "akh": "Our body. The only physical part of the Akh'rah Uthun.",
       "hi": "Be mourned pilgrim in flesh, Player. Welcome to the bank and jewel store.",
       "destroy field rune": "The destroy field rune you seek lies upon the corpse of a magic elf, Player.",
-      "scorpion sceptre": "The Scorpion Sceptre is your reward when you survive the Putrid Chamber."
+      "compass": "The Compass is your reward when you survive the Putrid Chamber."
     },
     "confusion": [
       "I beg your pardon? Ask me about gems, jewels, or scarab coins.",
@@ -612,6 +614,122 @@
       ]
     }
   },
+  "svenson": {
+    "keywords": {
+      "hi": "Ahoi, young man Player and welcome to the Nordic Tibia Ferries. If you need a passage, let me know.",
+      "hello": "Ahoi, young man Player and welcome to the Nordic Tibia Ferries. If you need a passage, let me know.",
+      "ferry": "Our ferries are strong enough to stand the high waves of the Nordic Ocean.",
+      "ferries": "Our ferries are strong enough to stand the high waves of the Nordic Ocean.",
+      "ice islands": "We serve the routes to Senja, Folda, and Vega, and back to Tibia.",
+      "passage": "Where do you want to go today? We serve the routes to Senja, Folda, and Vega, and back to Tibia.",
+      "senja": "Do you want a passage to Senja for 10 gold?",
+      "folda": "This island is Folda.",
+      "vega": "Do you want a passage to Vega for 10 gold?",
+      "tibia": "Do you want a free passage back to Tibia?",
+      "yes": "Have a nice trip!",
+      "no": "You shouldn't miss the experience.",
+      "name": "My name is Svenson from the Nordic Tibia Ferries.",
+      "anderson": "The four of us are the captains of the Nordic Tibia Ferries.",
+      "svenson": "The four of us are the captains of the Nordic Tibia Ferries.",
+      "nielson": "The four of us are the captains of the Nordic Tibia Ferries.",
+      "carlson": "The four of us are the captains of the Nordic Tibia Ferries.",
+      "captain": "We are ferrymen. We transport goods and passengers to the Ice Islands.",
+      "job": "We are ferrymen. We transport goods and passengers to the Ice Islands.",
+      "goods": "We can transport everything you want.",
+      "bye": "Good bye. You are welcome.",
+      "goodbye": "Good bye. You are welcome."
+    },
+    "confusion": [
+      "If you need passage, ask me about ferry routes.",
+      "I can take you to Senja, Folda, Vega, or back to Tibia.",
+      "Speak plainly, sailor. Ask me about passage, routes, or my job.",
+      "The Nordic Ocean is rough, but my routes are simple to explain.",
+      "I do not follow. Ask me about ferries or the Ice Islands."
+    ],
+    "boardChat": {
+      "welcomeMessage": "Ahoi, young man Player and welcome to the Nordic Tibia Ferries. If you need a passage, let me know.",
+      "placeholder": "Type your message to Svenson..."
+    }
+  },
+  "dane": {
+    "keywords": {
+      "hi": "Welcome to the Wave Cellar, Player. Have a drink.",
+      "hello": "Welcome to the Wave Cellar, Player. Have a drink.",
+      "name": "I'm Dane.",
+      "time": "It's exactly horas.",
+      "job": "I'm the owner of this place of relaxation.",
+      "saloon": "I'm the owner of this place of relaxation.",
+      "cellar": "It's pretty, isn't it?",
+      "news": "Only whispers of northern routes, strange weather, and ships that return changed.",
+      "drink": "I can offer you milk, water, and lemonade. Ask me for a trade if you need refreshments.",
+      "offer": "I can offer you milk, water, and lemonade. Ask me for a trade if you need refreshments.",
+      "sell": "I can offer you milk, water, and lemonade. Ask me for a trade if you need refreshments.",
+      "food": "Sorry, we just sell drinks.",
+      "alcohol": "Alcohol makes people too aggressive. We don't need such stuff in Carlin.",
+      "wine": "Alcohol makes people too aggressive. We don't need such stuff in Carlin.",
+      "beer": "Alcohol makes people too aggressive. We don't need such stuff in Carlin.",
+      "special": "Well, apart from not selling alcohol, you mean? I guess another specialty of Carlin are evergreen flower bowls.",
+      "svenson": "Svenson finally made it back to White Wave Cellar. You did a brave thing bringing him home.",
+      "captain": "Svenson is one of the toughest captains I've ever known.",
+      "bye": "Please come back from time to time.",
+      "goodbye": "Please come back from time to time."
+    },
+    "rumourLines": [
+      "A sailor from Carlin swore the tribes in the far north pray to powers older than kings. He couldn't tell whether he meant gods... or the wind itself.",
+      "Dock gossip says there are birds in the north that never take wing, yet rule the shoreline all the same. Sounds absurd, but sailors keep repeating it.",
+      [
+        "They say northern folk dine on fish of every color and call it a feast fit for warriors. ...",
+        "... I still don't trust anything brighter than blue on a plate."
+      ],
+      "One miner came back from the far north shaking and sleepless, muttering about buried halls and things best left buried.",
+      "A friend of mine, Captain Ogden Brewboiler, sailed beyond the known charts. Brave man... but I still watch the horizon for his return.",
+      [
+        "The stories about northern clans never agree with each other. ...",
+        "... allies in one tavern tale, enemies in the next."
+      ],
+      "People speak of a towering ice crown in the heart of the northern isles, visible even through storm haze.",
+      "Old sailors tell a creation-war legend: that mages chained winter itself in crystal, and the north never thawed again.",
+      [
+        "For years, captains feared serpent-haunted waters around the northern passage. ...",
+        "... then, one season, the routes opened as if the sea had changed its mind."
+      ],
+      [
+        "A sailor swore some northern raiders can command wolves and bears like trained hounds. ...",
+        "... tavern nonsense, perhaps — though he had the scars to support his tale."
+      ],
+      "Last week an old drunk muttered about tusked beasts with fur thick as winter cloaks. If half these stories are true, the north is wilder than maps admit.",
+      "Rumours name a fierce northern tribe ruled by a shaman no storm or steel can bring down.",
+      [
+        "Traders claim some northern settlements burn through timber faster than ships burn tar. ...",
+        "... where wood runs short, merchants smell profit."
+      ],
+      "Word from the frontier says rival warbands contest the north, and each season redraws the lines.",
+      [
+        "I received a letter from a friend stationed in the north. ...",
+        "... he mentioned trials, secretive locals, and rites for outsiders. The ink was shaking the whole way down the page."
+      ],
+      "A broker told me the Carlin Trading Syndicate is planting new banners in every northern port that stays open long enough.",
+      "Venore hunters reportedly settled on one island and now ship back rare pelts, oils, and stranger things.",
+      [
+        "Expedition after expedition goes north chasing ore and old workings beneath the ice. ...",
+        "... not all of them return on schedule."
+      ],
+      [
+        "There are tales of horned cave-folk beneath one of the smaller ice islands — half traveler, half beast. ...",
+        "Witnesses claim their caverns grow green grass and flowers beneath frozen stone. That smells like old magic to me. ...",
+        "Whether that magic is a blessing or a warning, no one agrees."
+      ]
+    ],
+    "confusion": [
+      "I don't follow. Ask me about drinks, rumours, or this cellar.",
+      "Try asking me about my job, special drinks, or the latest rumour.",
+      "Welcome to the Wave Cellar, Player. Ask clearly and I'll answer."
+    ],
+    "boardChat": {
+      "welcomeMessage": "Welcome to the Wave Cellar, Player. Have a drink.",
+      "placeholder": "Type your message to Dane..."
+    }
+  },
   "questItems": {
     "king-tibianus": {
       "honeyflower": "I require a honeyflower from Honeyflower Tower. Ask about missions if you would serve the crown.",
@@ -635,9 +753,9 @@
       "christmas_present": "Open your present from the inventory, or speak with Santa Claus.",
       "present": "Open your present from the inventory, or speak with Santa Claus.",
       "bunny_slippers": "Comfortable slippers — a gift from Santa, I presume?",
-      "minotaur_trophy": "A fine trophy. Rookstayer in the Minotaur Mage Room may have sent you.",
+      "wooden_plank": "A sturdy plank. Rookstayer in the Minotaur Mage Room may have sent you.",
       "destroy_field_rune": "I know nothing of desert runes. Seek wisdom in Darama.",
-      "scorpion_sceptre": "Tesha in the oasis may know more of desert relics like that sceptre.",
+      "compass": "Tesha in the oasis may know more of desert relics like that compass.",
       "castello_diary": "Costello keeps his diary at the White Raven Monastery.",
       "blessed_ankh": "Wyda in the swamps of Venore has need of such holy relics.",
       "spider_silk": "Spider silk is witch's business. Try Wyda in the Venore swamps.",
@@ -665,11 +783,11 @@
       "blessed_ankh": "A Blessed Ankh is far above my wares. Wyda in Venore may want it.",
       "scarab_coin": "Scarab coins are Tesha's trade in the Darama desert.",
       "destroy_field_rune": "I've never seen a rune like that. Try Tesha in the oasis.",
-      "scorpion_sceptre": "Desert relics are Tesha's business, not mine.",
+      "compass": "Desert relics are Tesha's business, not mine.",
       "spider_silk": "Spider silk? Wyda the witch collects that in the swamps.",
       "spool_of_yarn": "Fine yarn — Wyda spins that from spider silk, I hear.",
       "yarn": "Wyda spins spider silk into yarn in the Venore swamps.",
-      "minotaur_trophy": "A minotaur trophy! Rookstayer would be proud of such a prize.",
+      "wooden_plank": "A wooden plank from Rookstayer's battle? Practical loot.",
       "wishlist": "A wishlist for Santa? You'll find him in Folda at Christmastime.",
       "christmas_present": "A Christmas present! Open it from your quest items, or ask Santa.",
       "present": "A Christmas present! Open it from your quest items, or ask Santa.",
@@ -695,13 +813,13 @@
       "light_shovel": "Al Dee rewards helpers with a Light Shovel.",
       "scarab_coin": "Tesha in the Darama Oasis trades in scarab coins.",
       "destroy_field_rune": "The destroy field rune lies upon a magic elf in the Serpentine Tower.",
-      "scorpion_sceptre": "Tesha rewards those who brave the Putrid Chamber with a sceptre.",
+      "compass": "Tesha rewards those who brave the Putrid Chamber with a Compass.",
       "spider_silk": "Wyda seeks spider silk from the mother of all spiders.",
       "spool_of_yarn": "Wyda spins spider silk into a Spool of Yarn.",
       "yarn": "Wyda crafts yarn from spider silk in the Venore swamps.",
       "obsidian_knife": "An obsidian knife for skinning dragons — the king's hunters carry those.",
       "dragon_claw": "Demodras' claw is a trophy from the red dragon hunt.",
-      "minotaur_trophy": "Rookstayer offers such a trophy to those who defeat Apprentice Sheng.",
+      "wooden_plank": "Rookstayer gives such a plank to those who defeat Apprentice Sheng.",
       "wishlist": "A wishlist for Santa Claus in Folda — not a matter for our order.",
       "christmas_present": "Christmas cheer belongs in Folda with Santa Claus.",
       "present": "Christmas cheer belongs in Folda with Santa Claus.",
@@ -717,7 +835,7 @@
       "castello_diary": "Costello's diary and his seven seals are his affair, not mine.",
       "scarab_coin": "Scarab coins? Tesha trades those in the Darama desert.",
       "destroy_field_rune": "Desert runes are Tesha's concern in the Serpentine Tower.",
-      "scorpion_sceptre": "Tesha rewards a sceptre to those who survive the Putrid Chamber.",
+      "compass": "Tesha rewards a Compass to those who survive the Putrid Chamber.",
       "honeyflower": "Honeyflowers grow in towers, not in my swamp.",
       "copper_key": "Keys to mines? Ask King Tibianus — I keep my own keys in my pocket.",
       "red_dragon_leather": "Dragon leather for the king's forge — hunt far from my swamp.",
@@ -733,7 +851,7 @@
       "map_to_mines": "Mines and maps are dwarf business to the west.",
       "obsidian_knife": "Sharp enough to skin a dragon — the king's hunters use those.",
       "dragon_claw": "A dragon claw? Now that would liven things up around here.",
-      "minotaur_trophy": "A minotaur trophy from Rookstayer's battle — good for him.",
+      "wooden_plank": "A wooden plank from Rookstayer's battle — useful in a storm.",
       "wishlist": "Wishlists are for Santa in Folda. I want excitement, not lists!",
       "christmas_present": "Presents are Santa's business in Folda.",
       "present": "Ask Santa for presents — I want someone to entertain me!",
@@ -743,7 +861,7 @@
     "tesha": {
       "scarab_coin": "A scarab coin from the desert sands! Show it to me if the king sent you.",
       "destroy_field_rune": "The destroy field rune you seek lies upon the corpse of a magic elf, Player.",
-      "scorpion_sceptre": "The Scorpion Sceptre is your reward when you survive the Putrid Chamber.",
+      "compass": "The Compass is your reward when you survive the Putrid Chamber.",
       "honeyflower": "Honeyflowers are gathered for King Tibianus — far from these sands.",
       "copper_key": "The king's copper key was lost in the mines of Kazordoon.",
       "red_dragon_leather": "Red dragon leather is for the royal forge in Thais.",
@@ -764,7 +882,7 @@
       "yarn": "Yarn from Wyda's spider silk — ask her in the Venore swamps.",
       "obsidian_knife": "An obsidian knife for skinning dragons on the king's errand.",
       "dragon_claw": "Demodras' claw — a trophy from the red dragon hunt.",
-      "minotaur_trophy": "A minotaur trophy from Rookstayer's victory over Apprentice Sheng.",
+      "wooden_plank": "A wooden plank from Rookstayer's victory over Apprentice Sheng.",
       "map_to_mines": "That map leads to the mines where the king's key was lost.",
       "wishlist": "A wishlist for Santa Claus in Folda.",
       "christmas_present": "Christmas presents come from Santa in Folda.",
@@ -794,18 +912,18 @@
       "blessed_ankh": "Blessed ankhs go to Wyda in the swamps, not under my tree.",
       "scarab_coin": "Scarab coins are Tesha's trade in the hot desert.",
       "destroy_field_rune": "Magic runes in the Serpentine Tower — ask Tesha.",
-      "scorpion_sceptre": "Tesha rewards brave souls with a scorpion sceptre.",
+      "compass": "Tesha rewards brave souls with a Compass.",
       "spider_silk": "Spider silk is for Wyda the witch in Venore.",
       "spool_of_yarn": "Wyda spins spider silk into yarn.",
       "yarn": "Yarn from Wyda's spiders — not from Santa's elves!",
       "obsidian_knife": "Obsidian knives are for dragon hunters, not gift wrapping.",
       "dragon_claw": "A dragon claw! Ferumbras would be jealous, ho ho ho!",
-      "minotaur_trophy": "A minotaur trophy from Rookstayer's brave battle.",
+      "wooden_plank": "A wooden plank from Rookstayer's brave battle.",
       "map_to_mines": "That map leads to mines — the king's key is down there.",
       "silver_token": "The king's silver token — show it when you hail him in Thais."
     },
     "rookstayer": {
-      "minotaur_trophy": "A minotaur trophy — proof you stood with me against Apprentice Sheng!",
+      "wooden_plank": "A wooden plank — proof you stood with me against Apprentice Sheng!",
       "honeyflower": "Once you brought the king his honeyflower, you found the courage to help me.",
       "copper_key": "The king's key is lost in the mines — I have troubles of my own here.",
       "red_dragon_leather": "Dragon materials are the king's errand. I face minotaurs, not dragons.",
@@ -823,7 +941,7 @@
       "blessed_ankh": "Wyda in Venore needs the Blessed Ankh from Costello's task.",
       "scarab_coin": "Scarab coins are traded in the Darama desert by Tesha.",
       "destroy_field_rune": "Desert runes and towers — far from this minotaur room.",
-      "scorpion_sceptre": "Tesha rewards a sceptre after the Putrid Chamber.",
+      "compass": "Tesha rewards a Compass after the Putrid Chamber.",
       "spider_silk": "Spider silk for Wyda's witchcraft in the Venore swamps.",
       "spool_of_yarn": "Wyda spins spider silk into yarn.",
       "yarn": "Yarn from Wyda — I have no time for spinning.",
@@ -835,6 +953,38 @@
       "present": "Ask Santa for presents — I need help defeating Apprentice Sheng!",
       "bunny_slippers": "Cozy slippers from Santa — but Sheng still threatens us!",
       "silver_token": "Show the king's silver token when you hail King Tibianus."
+    },
+    "svenson": {
+      "wishlist": "Santa handles wishlists in Folda. I handle ferries.",
+      "christmas_present": "Ask Santa in Folda about presents. I can get you there by sea.",
+      "present": "Presents are Santa's concern. Ferries are mine.",
+      "bunny_slippers": "Warm slippers for cold decks. A sensible gift.",
+      "honeyflower": "A flower for the king? I only ship passengers and goods.",
+      "copper_key": "A key for the king's mines? Best bring it to Thais.",
+      "red_dragon_leather": "Dragon cargo sounds heavy, but that's a royal errand.",
+      "red_dragon_scale": "Those scales belong to the king's forge, not my hold.",
+      "letter_from_al_dee": "A merchant letter? Deliver it to its owner in Rookgaard.",
+      "stamped_letter": "Stamped letters are for Al Dee, not for ferrymen.",
+      "iron_ore": "Ore can be shipped, but King Tibianus wants to see that himself.",
+      "small_axe": "Al Dee lost an axe in Rookgaard waters, if tales are true.",
+      "elvenhair_rope": "Al Dee's rope business sounds tangled enough already.",
+      "magnet": "A magnet might help in deep waters.",
+      "fishing_rod": "A good rod is useful at sea. Al Dee sells them.",
+      "light_shovel": "A light shovel is handy cargo.",
+      "holy_tible": "A holy tome belongs with Costello at the monastery.",
+      "castello_diary": "A monk's diary is safer on land than at sea.",
+      "blessed_ankh": "Wyda in Venore would know what to do with that relic.",
+      "scarab_coin": "Scarab coin? Tesha in Darama trades those.",
+      "destroy_field_rune": "A dangerous rune. Best ask Tesha about desert magic.",
+      "compass": "A desert relic fit for navigators, not sailors.",
+      "spider_silk": "Spider silk from Venore swamps is no cargo I enjoy.",
+      "spool_of_yarn": "Fine yarn. Wyda spins the best from spider silk.",
+      "yarn": "Yarn from Wyda? Good trade goods.",
+      "obsidian_knife": "An obsidian blade should be handled with care aboard ship.",
+      "dragon_claw": "A dragon claw trophy? That's a fine story to carry.",
+      "wooden_plank": "A wooden plank looks perfect for emergency hull repairs.",
+      "map_to_mines": "A map to the mines points inland, not across the sea.",
+      "silver_token": "The king's silver token is for your first audience in Thais."
     }
   },
   "questItemUninvolvedTemplates": {
@@ -844,6 +994,7 @@
     "wyda": "{item}? Not my problem. Ask about herbs, potions, or the swamp.",
     "tesha": "I deal in jewels and scarab coins, not {item}.",
     "santa-claus": "Ho ho ho, {item} isn't on my Christmas list!",
-    "rookstayer": "I can't worry about {item} — Apprentice Sheng is the danger here!"
+    "rookstayer": "I can't worry about {item} — Apprentice Sheng is the danger here!",
+    "svenson": "I don't deal in {item}. I ferry passengers across the Nordic routes."
   }
 }

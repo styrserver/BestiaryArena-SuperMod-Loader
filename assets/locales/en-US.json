@@ -439,6 +439,8 @@
       "tblLeagueGridDrop": "Drop",
       "tblLeaguePlayerStandingShiny": "{count} shinies · {lastDropped}",
       "tblLeagueShinyNoneYet": "No shiny Football Elementals yet",
+      "tblLeagueShinyLoadingProgress": "Loading… {processed}/{total}",
+      "tblLeagueShinyLoadingRateLimited": "rate limited, waiting",
       "tblLeagueShinyCountLabel": "{count}x shiny Football Elementals",
       "tblLeagueShinyDropLabel": "Drop: {time}",
       "tblLeagueShinyDropNone": "Never",

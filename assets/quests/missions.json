@@ -26,7 +26,7 @@
       "battleVictory": "You survived the horrors of The Cursed Chamber. Return to Tesha in Darama Oasis.",
       "battleDefeat": "The creatures of The Cursed Chamber were too strong.",
       "teshaRewardLines": [
-        "You have braved The Cursed Chamber. Take this Scorpion Sceptre — may it serve you well, Player.",
+        "You have braved The Cursed Chamber. Take this Compass — may it guide your path, Player.",
         "A hermit near Carlin might be able to tell you more about it."
       ],
       "destroyFieldRuneHint": "The destroy field rune you seek lies upon the corpse of a magic elf, Player.",
@@ -34,7 +34,10 @@
       "objectiveLine1": "Find the Serpentine Tower basement.",
       "objectiveLine2": "Use the lever and be prepared for danger.",
       "hint": "Tesha spoke of a lever in the Serpentine Tower basement.",
-      "rewardSummary": "Reward: Scorpion Sceptre."
+      "rewardItemName": "Compass",
+      "rewardIcon": "The_Time_Compass.gif",
+      "rewardDescription": "It shows the cardinal directions and also many other symbols that you cannot decipher.",
+      "rewardSummary": "Reward: Compass."
     },
     "king_honeyflower": {
       "id": "king_honeyflower",
@@ -279,10 +282,10 @@
       "objectiveLine1": "Help Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room.",
       "objectiveLine2": "Speak with Rookstayer after the battle for your reward.",
       "hint": "After retrieving the honeyflower for King Tibianus, seek Rookstayer in the Minotaur Mage Room.",
-      "rewardItemName": "Minotaur Trophy",
-      "rewardIcon": "Minotaur_Trophy.gif",
-      "rewardDescription": "You see a minotaur trophy.",
-      "rewardSummary": "Reward: Minotaur Trophy.",
+      "rewardItemName": "Wooden Plank",
+      "rewardIcon": "Wooden_Plank.gif",
+      "rewardDescription": "A sturdy wooden plank from the battle wreckage.",
+      "rewardSummary": "Reward: Wooden Plank.",
       "battleVictory": "Apprentice Sheng has been defeated.",
       "battleDefeat": "Apprentice Sheng was too strong."
     },
@@ -300,6 +303,48 @@
       "rewardIcon": "Bunnyslippers.gif",
       "rewardDescription": "Soft pink bunny slippers. A gift from Santa Claus.",
       "rewardSummary": "Reward: Bunny Slippers."
+    },
+    "svenson_love_story": {
+      "id": "svenson_love_story",
+      "title": "A Love Story",
+      "prompt": "The northern waters have not been kind, and my ship is barely holding together. Help me make her seaworthy again, and I'll show you routes few sailors dare to take. Will you help me?",
+      "accept": "Bring me a Wooden Plank so I can reinforce the hull.",
+      "alreadyCompleted": "Your help saved my voyage and my marriage. Thank you again.",
+      "alreadyActive": "Have you found the Wooden Plank?",
+      "objectiveLine1": "Bring Svenson a Wooden Plank on Folda Boat.",
+      "objectiveLine2": "Talk to Svenson and set sail.",
+      "objectiveLine3": "Find Svenson and hear what happened.",
+      "objectiveLine4": "Bring Svenson a Spool of Yarn.",
+      "objectiveLine5": "Talk to Svenson and continue the voyage.",
+      "objectiveLine6": "Find Svenson again and hear his next request.",
+      "objectiveLine7": "Bring Svenson a Compass.",
+      "objectiveLine8": "Talk to Svenson and continue the voyage.",
+      "objectiveLine9": "Bring Svenson Bunny Slippers for Dane.",
+      "hint": "Someone in the Minotaur Mage Room may carry what you need for repairs.",
+      "hintAwash": "Someone in the Venore swamps may know where such yarn can be found.",
+      "hintUnderground": "A mysterious compass may be found by those who brave ancient desert dangers.",
+      "hintWhiteWave": "A warm present from Folda may be just what Svenson needs.",
+      "rewardSummary": "Reward: Passage with Svenson.",
+      "svensonMissingPlank": "The hull still groans with every wave. I need a Wooden Plank before we sail.",
+      "svensonPlankAccepted": "Well done! The hull will hold for now. Are you ready to cast off with me?",
+      "svensonTravelDeclined": "Very well. Tell me when you are ready to sail.",
+      "svensonTravelComplete": "Then aboard with you! Hold fast.",
+      "svensonTravelLocked": "You are not ready for that route yet. Come back when you are stronger.",
+      "svensonAwashWelcome": "Storms and black waves nearly swallowed us whole. We're alive, and that's what matters.",
+      "svensonNeedYarn": "The seams split during the crossing. I need a Spool of Yarn for a quick patch. Do you have one?",
+      "svensonYarnAcceptedAwash": "Excellent. This patch might buy us one more bold voyage.",
+      "svensonAwashTravelPrompt": "Do you want to travel with me once more?",
+      "svensonUndergroundWelcome": "Cursed currents pulled us into shadowed waters below the world. We've drifted far from open sea.",
+      "svensonNeedUndergroundPlank": "I can read no stars down here. Bring me a Compass, and I'll find us a way onward. Do you have one?",
+      "svensonUndergroundPlankAccepted": "A fine find. With this Compass, we have a fighting chance.",
+      "svensonUndergroundTravelPrompt": "The needle steadies... I see a route to safer docks. Sail on?",
+      "svensonWhiteWaveWelcome": "Ha! We made it through storm and darkness. White Wave Cellar at last!",
+      "svensonNeedPresent": "One last favor, friend. I promised Dane a gift but left it behind. Do you have Bunny Slippers?",
+      "svensonPresentAccepted": "You truly saw this voyage through. Dane will treasure these. My thanks, always.",
+      "svensonPostLoveTravelPrompt": "Ready for another run? I can take you to White Wave Cellar. Do you want to travel now?",
+      "svensonPostLoveTravelStart": "Then aboard with you! White Wave awaits.",
+      "daneHomeThanksWelcome": "Thank you for bringing Svenson home, Player. White Wave Cellar owes you one.",
+      "daneHomeThanksMission": "Thanks again for bringing Svenson safely home. We won't forget it."
     }
   },
 
@@ -317,8 +362,9 @@
     "follower_of_zathroth": "Brought the Blessed Ankh to Wyda in the swamps of Venore.",
     "mother_of_all_spiders": "Descended the secluded herb, defeated the mother of all spiders, and returned the silk to Wyda.",
     "serpentine_tower": "Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.",
-    "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room.",
-    "christmas_miracle": "Received a Christmas present from Santa Claus."
+    "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room and claimed a Wooden Plank.",
+    "christmas_miracle": "Received a Christmas present from Santa Claus.",
+    "svenson_love_story": "Guided Svenson through storms and misnavigation, then delivered Bunny Slippers so he could bring Dane her present."
   },
 
   "sealTranscripts": [
