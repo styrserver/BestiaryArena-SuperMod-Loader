@@ -4,6 +4,31 @@
   },
   "notes": [
     {
+      "version": "4.6.11",
+      "changes": [
+        {
+          "mod": "Better Highscores",
+          "type": "changed",
+          "text": "Tibia Ball League Shiny tab now fills standings progressively as participant profiles load, with a processed/total progress indicator (and a rate-limited waiting note when profile fetches pause) instead of a blank Loading state until the full fetch finishes."
+        },
+        {
+          "mod": "Quests",
+          "type": "added",
+          "text": "Added a new continuation chapter to the ferry storyline with additional post-journey NPC interaction."
+        },
+        {
+          "mod": "Quests",
+          "type": "changed",
+          "text": "Ferry dialogue and mission objective text were rewritten to be cleaner, less spoiler-heavy, and more adventure-focused, including improved stage-to-stage objective flow and travel messaging."
+        },
+        {
+          "mod": "Quests",
+          "type": "fixed",
+          "text": "Board-NPC sequencing and interaction gates were tightened so travel transitions now run in deterministic order (navigate → cleanup → placement), legacy item aliases auto-migrate to current names, and post-completion NPC availability/icon/right-click state updates immediately."
+        }
+      ]
+    },
+    {
       "version": "4.6.10",
       "changes": [
         {

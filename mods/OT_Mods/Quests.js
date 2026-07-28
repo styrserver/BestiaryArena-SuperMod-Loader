@@ -391,12 +391,17 @@ let WYDA_RESPONSES = {};
 let TESHA_RESPONSES = {};
 let SANTA_THANK_YOU_LINES = [];
 let SANTA_RESPONSES = {};
+let SVENSON_RESPONSES = {};
+let DANE_RESPONSES = {};
+let DANE_RUMOUR_LINES = [];
 let KING_TIBIANUS_CONFUSION_RESPONSES = [];
 let AL_DEE_CONFUSION_RESPONSES = [];
 let COSTELLO_CONFUSION_RESPONSES = [];
 let WYDA_CONFUSION_RESPONSES = [];
 let TESHA_CONFUSION_RESPONSES = [];
 let SANTA_CONFUSION_RESPONSES = [];
+let SVENSON_CONFUSION_RESPONSES = [];
+let DANE_CONFUSION_RESPONSES = [];
 let NPC_QUEST_ITEM_CHAT_RESPONSES = {};
 const NPC_QUEST_ITEM_UNINVOLVED_TEMPLATES = {};
 
@@ -409,14 +414,36 @@ async function fetchQuestJsonAsset(filename) {
 }
 
 function getMissionCommonLine(key, fallback = '') {
-  return MISSION_COMMON_DIALOGUE[key] || fallback;
+  const line = MISSION_COMMON_DIALOGUE[key] || fallback;
+  return applyPlayerNameSubstitution(line);
+}
+
+function getDialoguePlayerNameFallback() {
+  try {
+    if (typeof getCurrentPlayerName === 'function') {
+      return getCurrentPlayerName() || 'Player';
+    }
+  } catch (_) { /* ignore */ }
+  return 'Player';
+}
+
+function applyPlayerNameSubstitution(value, playerName = null) {
+  const resolvedName = playerName || getDialoguePlayerNameFallback();
+  if (typeof value === 'string') {
+    return value.replace(/Player/g, resolvedName);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => applyPlayerNameSubstitution(entry, resolvedName));
+  }
+  return value;
 }
 
 function formatDialogueLine(template, vars = {}) {
   if (!template) return '';
-  return String(template).replace(/\{(\w+)\}/g, (_, name) => (
+  const formatted = String(template).replace(/\{(\w+)\}/g, (_, name) => (
     vars[name] != null ? String(vars[name]) : `{${name}}`
   ));
+  return applyPlayerNameSubstitution(formatted);
 }
 
 function getKingIronOreLine(key, fallback = '') {
@@ -424,7 +451,8 @@ function getKingIronOreLine(key, fallback = '') {
 }
 
 function getMissionDialogueLine(mission, key, fallback = '') {
-  return mission?.[key] || fallback;
+  const line = mission?.[key] || fallback;
+  return applyPlayerNameSubstitution(line);
 }
 
 function getQuestJsonAssetUrl(filename) {
@@ -470,6 +498,8 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   const wyda = npcsData.wyda || {};
   const tesha = npcsData.tesha || {};
   const santa = npcsData.santa || {};
+  const svenson = npcsData.svenson || {};
+  const dane = npcsData.dane || {};
   const king = npcsData['king-tibianus'] || {};
 
   AL_DEE_RESPONSES = { ...(alDee.keywords || {}) };
@@ -477,6 +507,9 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   WYDA_RESPONSES = { ...(wyda.keywords || {}) };
   TESHA_RESPONSES = { ...(tesha.keywords || {}) };
   SANTA_RESPONSES = { ...(santa.keywords || {}) };
+  SVENSON_RESPONSES = { ...(svenson.keywords || {}) };
+  DANE_RESPONSES = { ...(dane.keywords || {}) };
+  DANE_RUMOUR_LINES = Array.isArray(dane.rumourLines) ? [...dane.rumourLines] : [];
   SANTA_THANK_YOU_LINES = [...(santa.thankYouLines || [])];
   KING_TIBIANUS_CONFUSION_RESPONSES = [...(king.confusion || [])];
   AL_DEE_CONFUSION_RESPONSES = [...(alDee.confusion || [])];
@@ -484,6 +517,8 @@ function applyQuestDialogueFromAssets(missionsData, npcsData) {
   WYDA_CONFUSION_RESPONSES = [...(wyda.confusion || [])];
   TESHA_CONFUSION_RESPONSES = [...(tesha.confusion || [])];
   SANTA_CONFUSION_RESPONSES = [...(santa.confusion || [])];
+  SVENSON_CONFUSION_RESPONSES = [...(svenson.confusion || [])];
+  DANE_CONFUSION_RESPONSES = [...(dane.confusion || [])];
   COSTELLO_SEAL_GUIDANCE_FALLBACK = costello.sealGuidanceFallback || COSTELLO_SEAL_GUIDANCE_FALLBACK;
   NPC_QUEST_ITEM_CHAT_RESPONSES = JSON.parse(JSON.stringify(npcsData.questItems || {}));
 
@@ -569,6 +604,7 @@ const TOAST_MESSAGES = {
   questCompletedWithCoins: (title, coins) => `Mission completed: ${title}. Received ${coins} guild coins!`,
   taskCompletedWithCoins: (title, coins) => `The ${title} task is complete. Received ${coins} guild coins!`,
   itemReceived: (name) => `Received ${name}!`,
+  itemRemoved: (name) => `Removed ${name}.`,
   deliveredTo: (recipient) => `Delivered to ${recipient}!`,
   returnedTo: (recipient) => `Returned to ${recipient}!`,
   diaryReturned: 'Castello\'s diary has been returned.',
@@ -594,6 +630,7 @@ const TOAST_MESSAGES = {
   spiderLairBattleHere: 'Spider Lair battle starting here.',
   putridChamberNotStrongEnough: 'You are not strong enough.',
   travelingPutridChamber: 'The floor gives way — you are pulled into the Putrid Chamber!',
+  travelingWithSvenson: 'Traveling with Svenson...',
   fishingFoundAxe: 'You found a Small Axe with your Magnet!',
   fishingFoundNothingMagnet: 'You found nothing. Maybe a magnet would help?',
   fishingFoundNothing: 'You found nothing.',
@@ -692,9 +729,9 @@ const DESTROY_FIELD_RUNE_CONFIG = {
   maxCount: 1
 };
 const SCORPION_SCEPTRE_CONFIG = {
-  productName: 'Scorpion Sceptre',
-  icon: 'Scorpion_Sceptre.gif',
-  description: 'A hermit near Carlin might be able to tell you more about it.',
+  productName: 'Compass',
+  icon: 'The_Time_Compass.gif',
+  description: 'It shows the cardinal directions and also many other symbols that you cannot decipher.',
   rarity: 5,
   maxCount: 1
 };
@@ -786,6 +823,7 @@ const MOTHER_OF_ALL_SPIDERS_MISSION = { id: 'mother_of_all_spiders' };
 const APPRENTICE_SHENG_MISSION = { id: 'apprentice_sheng' };
 
 const CHRISTMAS_MIRACLE_MISSION = { id: 'christmas_miracle' };
+const SVENSON_LOVE_STORY_MISSION = { id: 'svenson_love_story' };
 
 
 registerMissionForDialogue(SERPENTINE_TOWER_MISSION);
@@ -803,12 +841,14 @@ registerMissionForDialogue(FOLLOWER_OF_ZATHROTH_MISSION);
 registerMissionForDialogue(MOTHER_OF_ALL_SPIDERS_MISSION);
 registerMissionForDialogue(APPRENTICE_SHENG_MISSION);
 registerMissionForDialogue(CHRISTMAS_MIRACLE_MISSION);
+registerMissionForDialogue(SVENSON_LOVE_STORY_MISSION);
 
 const MINOTAUR_TROPHY_CONFIG = {
-  productName: 'Minotaur Trophy',
-  icon: 'Minotaur_Trophy.gif',
-  description: 'You see a minotaur trophy.',
-  rarity: 5
+  productName: 'Wooden Plank',
+  icon: 'Wooden_Plank.gif',
+  description: 'A sturdy wooden plank from the battle wreckage.',
+  rarity: 5,
+  maxCount: 1
 };
 
 function getMissionCompletionSummary(mission) {
@@ -950,7 +990,7 @@ const QUEST_ITEM_CHAT_ENTRIES = [
   { id: 'red_dragon_scale', productName: 'Red Dragon Scale', keywords: ['red dragon scale', 'dragon scale'] },
   { id: 'elvenhair_rope', productName: 'Elvenhair Rope', keywords: ['elvenhair rope', 'elven hair rope'] },
   { id: 'destroy_field_rune', productName: DESTROY_FIELD_RUNE_ITEM_NAME, keywords: ['destroy field rune', 'adito grav'] },
-  { id: 'scorpion_sceptre', productName: 'Scorpion Sceptre', keywords: ['scorpion sceptre', 'scorpion scepter'] },
+  { id: 'compass', productName: 'Compass', keywords: ['compass'] },
   { id: 'scarab_coin', productName: 'Scarab Coin', keywords: ['scarab coin'] },
   { id: 'map_to_mines', productName: 'Map to the Mines', keywords: ['map to the mines', 'map to mines'] },
   { id: 'obsidian_knife', productName: 'Obsidian Knife', keywords: ['obsidian knife'] },
@@ -961,7 +1001,7 @@ const QUEST_ITEM_CHAT_ENTRIES = [
   { id: 'spider_silk', productName: 'Spider Silk', keywords: ['spider silk'] },
   { id: 'spool_of_yarn', productName: 'Spool of Yarn', keywords: ['spool of yarn'] },
   { id: 'bunny_slippers', productName: 'Bunny Slippers', keywords: ['bunny slippers', 'bunnyslippers'] },
-  { id: 'minotaur_trophy', productName: 'Minotaur Trophy', keywords: ['minotaur trophy'] },
+  { id: 'wooden_plank', productName: 'Wooden Plank', keywords: ['wooden plank', 'plank'] },
   { id: 'dragon_claw', productName: 'Dragon Claw', keywords: ['dragon claw'] },
   { id: 'fishing_rod', productName: 'Fishing Rod', keywords: ['fishing rod'] },
   { id: 'silver_token', productName: 'Silver Token', keywords: ['silver token'] },
@@ -1292,6 +1332,23 @@ const BOARD_NPC_SANTA_ID = 'santa-claus';
 const SANTA_CLAUS_OVERLAY_CLASS = 'quests-santa-claus-overlay';
 const SANTA_OUTFIT_SPRITE_ID = '69'; // Dwarf outfit shell; spritesheet swapped to Santa_ClausIdle.png
 const SANTA_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
+const BOARD_NPC_SVENSON_ID = 'svenson';
+const SVENSON_ROOM_NAME = 'Folda Boat';
+const SVENSON_TILE_INDEX = 109;
+const SVENSON_AWASH_ROOM_NAME = 'Awash Steamship';
+const SVENSON_AWASH_TILE_INDEX = 33;
+const SVENSON_UNDERGROUND_ROOM_NAME = 'Underground Lake';
+const SVENSON_UNDERGROUND_TILE_INDEX = 69;
+const SVENSON_WHITE_WAVE_ROOM_NAME = 'White Wave Cellar';
+const SVENSON_WHITE_WAVE_TILE_INDEX = 84;
+const SVENSON_OVERLAY_CLASS = 'quests-svenson-overlay';
+const SVENSON_OUTFIT_SPRITE_ID = ROOKSTAYER_OUTFIT_SPRITE_ID;
+const SVENSON_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
+const BOARD_NPC_DANE_ID = 'dane';
+const DANE_WHITE_WAVE_TILE_INDEX = 80;
+const DANE_OVERLAY_CLASS = 'quests-dane-overlay';
+const DANE_OUTFIT_SPRITE_ID = ROOKSTAYER_OUTFIT_SPRITE_ID;
+const DANE_DIALOGUE_ICON_URL = 'https://bestiaryarena.com/assets/icons/fight.png';
 
 const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
 const ARENA_LEADERBOARD_TAB_ID = 'quests-mod-arena-leaderboard-tab';
@@ -1318,7 +1375,8 @@ const QUEST_LOG_MISSIONS = [
   KING_SCARAB_COIN_MISSION,
   SERPENTINE_TOWER_MISSION,
   APPRENTICE_SHENG_MISSION,
-  CHRISTMAS_MIRACLE_MISSION
+  CHRISTMAS_MIRACLE_MISSION,
+  SVENSON_LOVE_STORY_MISSION
 ];
 
 // Quest Log mission card icons — prefer the key quest item or objective over NPC portraits.
@@ -1336,7 +1394,8 @@ const MISSION_QUEST_LOG_ICON_MAP = {
   [KING_SCARAB_COIN_MISSION.id]: SCARAB_COIN_CONFIG.icon,
   [SERPENTINE_TOWER_MISSION.id]: DESTROY_FIELD_RUNE_CONFIG.icon,
   [APPRENTICE_SHENG_MISSION.id]: MINOTAUR_TROPHY_CONFIG.icon,
-  [CHRISTMAS_MIRACLE_MISSION.id]: WISHLIST_CONFIG.icon
+  [CHRISTMAS_MIRACLE_MISSION.id]: WISHLIST_CONFIG.icon,
+  [SVENSON_LOVE_STORY_MISSION.id]: 'Spool_of_Yarn.gif'
 };
 
 // Game board sprite ids used as Quest Log mission card icons (preferred over GIF when set).
@@ -1490,6 +1549,7 @@ function createNPCCooldownManager() {
     progressSerpentineTower: { accepted: false, completed: false, destroyFieldRuneTaken: false, putridChamberComplete: false },
     progressApprenticeSheng: { accepted: false, completed: false, battleCompleted: false, rookstayerDismissed: false },
     progressChristmasMiracle: { accepted: false, completed: false },
+    progressSvensonLoveStory: { accepted: false, completed: false, plankDelivered: false, strandedAtAwash: false, awashYarnDelivered: false, awashYarnRequested: false, strandedAtUnderground: false, undergroundPlankDelivered: false, undergroundCompassRequested: false, strandedAtWhiteWave: false, whiteWaveSlippersDelivered: false },
     costelloVisited: false,
     mornenionDefeated: false, // Mornenion defeat flag (also stored in Firebase as progress.mornenion.defeated); keep in sync so getAllMissionProgress() includes it when saving
     sevenSealsCompleted: getDefaultSevenSealsCompleted(), // one boolean per seal (index 0 = First Seal … 6 = Seventh Seal); complete each seal separately via setSealCompleted(sealIndex, true)
@@ -4690,6 +4750,18 @@ function createNPCCooldownManager() {
     }
   }
 
+  function isRoomUnlockedByName(roomName) {
+    try {
+      const roomId = getRoomIdByRoomName(roomName);
+      if (!roomId) return false;
+      const rooms = globalThis.state?.player?.getSnapshot?.()?.context?.rooms;
+      return !!(rooms && Object.prototype.hasOwnProperty.call(rooms, roomId));
+    } catch (error) {
+      console.warn('[Quests Mod] Error checking room unlock by name:', roomName, error);
+      return false;
+    }
+  }
+
   function getRoomIdByRoomName(roomName) {
     try {
       if (!roomName || !globalThis.state?.utils?.ROOM_NAME) return null;
@@ -5196,15 +5268,49 @@ function createNPCCooldownManager() {
       'stamped_letter': 'Stamped Letter',
       'small axe': 'Small Axe',
       'small_axe': 'Small Axe',
-      'magnet': 'Magnet'
+      'magnet': 'Magnet',
+      // Legacy reward aliases migrated to current item names
+      'scorpion sceptre': SCORPION_SCEPTRE_CONFIG.productName,
+      'scorpion scepter': SCORPION_SCEPTRE_CONFIG.productName,
+      'scorpion_sceptre': SCORPION_SCEPTRE_CONFIG.productName,
+      'scorpion_scepter': SCORPION_SCEPTRE_CONFIG.productName,
+      'time compass': SCORPION_SCEPTRE_CONFIG.productName,
+      'time_compass': SCORPION_SCEPTRE_CONFIG.productName,
+      'minotaur trophy': MINOTAUR_TROPHY_CONFIG.productName,
+      'minotaur_trophy': MINOTAUR_TROPHY_CONFIG.productName
+    };
+    const maxCountByCanonical = {
+      [MINOTAUR_TROPHY_CONFIG.productName]: MINOTAUR_TROPHY_CONFIG.maxCount || 1
     };
     const normalized = {};
     for (const [key, value] of Object.entries(products)) {
-      const lower = key.toLowerCase();
+      const trimmedKey = String(key ?? '').trim();
+      if (!trimmedKey) continue;
+      const lower = trimmedKey.toLowerCase();
+      if (lower === 'undefined' || lower === 'null' || lower === 'nan') continue;
+      const numericValue = Number(value) || 0;
+      if (numericValue <= 0) continue;
       const canonical = canonicalMap[lower] || key;
-      normalized[canonical] = (normalized[canonical] || 0) + (value || 0);
+      normalized[canonical] = (normalized[canonical] || 0) + numericValue;
+    }
+    for (const [itemName, maxCount] of Object.entries(maxCountByCanonical)) {
+      if ((normalized[itemName] || 0) > maxCount) {
+        normalized[itemName] = maxCount;
+      }
     }
     return normalized;
+  }
+
+  function areQuestItemMapsEqual(a, b) {
+    const aKeys = Object.keys(a || {}).sort();
+    const bKeys = Object.keys(b || {}).sort();
+    if (aKeys.length !== bKeys.length) return false;
+    for (let i = 0; i < aKeys.length; i++) {
+      const key = aKeys[i];
+      if (key !== bKeys[i]) return false;
+      if ((Number(a[key]) || 0) !== (Number(b[key]) || 0)) return false;
+    }
+    return true;
   }
 
   // =======================
@@ -5447,7 +5553,8 @@ function createNPCCooldownManager() {
     [KING_SCARAB_COIN_MISSION.id]: 'progressScarabHunt',
     [SERPENTINE_TOWER_MISSION.id]: 'progressSerpentineTower',
     [APPRENTICE_SHENG_MISSION.id]: 'progressApprenticeSheng',
-    [CHRISTMAS_MIRACLE_MISSION.id]: 'progressChristmasMiracle'
+    [CHRISTMAS_MIRACLE_MISSION.id]: 'progressChristmasMiracle',
+    [SVENSON_LOVE_STORY_MISSION.id]: 'progressSvensonLoveStory'
   };
 
   const MISSION_FIREBASE_KEY_MAP = {
@@ -5465,7 +5572,8 @@ function createNPCCooldownManager() {
     [KING_SCARAB_COIN_MISSION.id]: 'scarabHunt',
     [SERPENTINE_TOWER_MISSION.id]: 'serpentineTower',
     [APPRENTICE_SHENG_MISSION.id]: 'apprenticeSheng',
-    [CHRISTMAS_MIRACLE_MISSION.id]: 'christmasMiracle'
+    [CHRISTMAS_MIRACLE_MISSION.id]: 'christmasMiracle',
+    [SVENSON_LOVE_STORY_MISSION.id]: 'svensonLoveStory'
   };
 
   function getExtraMissionProgressFields(firebaseKey, source = null) {
@@ -5485,6 +5593,19 @@ function createNPCCooldownManager() {
       return {
         battleCompleted: !!source?.battleCompleted,
         rookstayerDismissed: !!source?.rookstayerDismissed
+      };
+    }
+    if (firebaseKey === 'svensonLoveStory') {
+      return {
+        plankDelivered: !!source?.plankDelivered,
+        strandedAtAwash: !!source?.strandedAtAwash,
+        awashYarnDelivered: !!source?.awashYarnDelivered,
+        awashYarnRequested: !!source?.awashYarnRequested,
+        strandedAtUnderground: !!source?.strandedAtUnderground,
+        undergroundPlankDelivered: !!source?.undergroundPlankDelivered,
+        undergroundCompassRequested: !!source?.undergroundCompassRequested,
+        strandedAtWhiteWave: !!source?.strandedAtWhiteWave,
+        whiteWaveSlippersDelivered: !!source?.whiteWaveSlippersDelivered
       };
     }
     return {};
@@ -6087,6 +6208,19 @@ function createNPCCooldownManager() {
     
     const decrypted = await decryptQuestItems(data.encrypted, currentPlayer);
     const normalized = normalizeQuestItems(decrypted);
+    if (!areQuestItemMapsEqual(decrypted, normalized)) {
+      try {
+        const encrypted = await encryptQuestItems(normalized, currentPlayer);
+        await FirebaseService.put(
+          `${getQuestItemsApiUrl()}/${hashedPlayer}`,
+          { encrypted },
+          'sanitize quest items'
+        );
+        console.log('[Quests Mod][Quest Items] Sanitized invalid quest item keys/values');
+      } catch (sanitizeError) {
+        console.warn('[Quests Mod][Quest Items] Failed to persist sanitized items:', sanitizeError);
+      }
+    }
     cachedQuestItems = normalized;
     return normalized;
   }
@@ -7087,6 +7221,7 @@ function createNPCCooldownManager() {
     [TOAST_MESSAGES.spiderLairBattleHere]: 'info',
     [TOAST_MESSAGES.putridChamberNotStrongEnough]: 'warning',
     [TOAST_MESSAGES.travelingPutridChamber]: 'info',
+    [TOAST_MESSAGES.travelingWithSvenson]: 'info',
     [TOAST_MESSAGES.fishingFoundAxe]: 'found',
     [TOAST_MESSAGES.fishingFoundNothingMagnet]: 'nothing',
     [TOAST_MESSAGES.fishingFoundNothing]: 'nothing',
@@ -7118,6 +7253,7 @@ function createNPCCooldownManager() {
     if (message.includes(' task is complete.')) return 'completed';
     if (message.endsWith(' seal completed')) return 'completed';
     if (message.startsWith('Received ') || message.startsWith('Found ')) return 'found';
+    if (message.startsWith('Removed ')) return 'found';
     if (message.startsWith('Delivered to ') || message.startsWith('Returned to ')) return 'found';
     if (message.startsWith('Navigated to ')) return 'found';
     if (/ obtained! \(\+/.test(message) || / obtido! \(\+/.test(message)) return 'found';
@@ -7264,6 +7400,14 @@ function createNPCCooldownManager() {
       this.show({
         productName,
         message: message || TOAST_MESSAGES.itemReceived(productName),
+        logPrefix
+      });
+    },
+
+    showItemRemoved(productName, logPrefix = '[Quests Mod]', message) {
+      this.show({
+        productName,
+        message: message || TOAST_MESSAGES.itemRemoved(productName),
         logPrefix
       });
     },
@@ -9686,6 +9830,20 @@ function createNPCCooldownManager() {
               const line1 = document.createElement('p');
               line1.textContent = selectedMission.objectiveLine1;
               descBlock.appendChild(line1);
+            }
+          } else if (selectedMission.id === SVENSON_LOVE_STORY_MISSION.id) {
+            const line1 = document.createElement('p');
+            line1.textContent = getActiveMissionObjectiveLine(selectedMission);
+            descBlock.appendChild(line1);
+
+            const hintText = getActiveMissionHintLine(selectedMission);
+            if (hintText) {
+              const line3 = document.createElement('p');
+              line3.style.color = '#b0b0b0';
+              line3.style.fontStyle = 'italic';
+              line3.style.marginTop = '6px';
+              line3.textContent = hintText;
+              hintBlock.appendChild(line3);
             }
           } else {
             // For other missions, always show both objectives
@@ -12815,6 +12973,24 @@ function createNPCCooldownManager() {
       return mission.objectiveLine1;
     }
 
+    if (mission.id === SVENSON_LOVE_STORY_MISSION.id) {
+      if (progress?.strandedAtWhiteWave && !progress?.whiteWaveSlippersDelivered) return mission.objectiveLine9 || mission.objectiveLine8 || mission.objectiveLine7;
+      if (progress?.strandedAtUnderground && progress?.undergroundPlankDelivered && !progress?.strandedAtWhiteWave) return mission.objectiveLine8 || mission.objectiveLine7;
+      if (progress?.strandedAtUnderground && !progress?.undergroundPlankDelivered) {
+        if (!progress?.undergroundCompassRequested) return mission.objectiveLine6 || mission.objectiveLine5;
+        return mission.objectiveLine7 || mission.objectiveLine6 || mission.objectiveLine5;
+      }
+      if (progress?.strandedAtAwash && !progress?.awashYarnDelivered) {
+        if (!progress?.awashYarnRequested) return mission.objectiveLine3 || mission.objectiveLine2;
+        return mission.objectiveLine4 || mission.objectiveLine3 || mission.objectiveLine2;
+      }
+      if (progress?.strandedAtAwash && progress?.awashYarnDelivered && !progress?.strandedAtUnderground && !progress?.completed) {
+        return mission.objectiveLine5 || mission.objectiveLine4 || mission.objectiveLine3;
+      }
+      if (progress?.plankDelivered) return mission.objectiveLine2;
+      return mission.objectiveLine1;
+    }
+
     if (mission.id === KING_CROSSING_THE_LINE_MISSION.id) {
       if (progress?.crossingObjectiveComplete) return mission.objectiveLine2;
       return mission.objectiveLine1;
@@ -12826,6 +13002,34 @@ function createNPCCooldownManager() {
     }
 
     return mission.objectiveLine1 || mission.objectiveLine2 || 'In progress';
+  }
+
+  function getActiveMissionHintLine(mission) {
+    if (!mission) return '';
+    const progress = getMissionProgress(mission);
+
+    if (mission.id === SVENSON_LOVE_STORY_MISSION.id) {
+      if (progress?.strandedAtWhiteWave && !progress?.whiteWaveSlippersDelivered) {
+        return mission.hintWhiteWave || mission.hint || '';
+      }
+      if (progress?.strandedAtUnderground && progress?.undergroundPlankDelivered && !progress?.strandedAtWhiteWave) {
+        return '';
+      }
+      if (progress?.strandedAtUnderground && !progress?.undergroundPlankDelivered) {
+        if (!progress?.undergroundCompassRequested) return '';
+        return mission.hintUnderground || mission.hint || '';
+      }
+      if (progress?.strandedAtAwash && progress?.awashYarnDelivered && !progress?.strandedAtUnderground) {
+        return '';
+      }
+      if (progress?.strandedAtAwash && !progress?.awashYarnDelivered) {
+        if (!progress?.awashYarnRequested) return '';
+        return mission.hintAwash || mission.hint || '';
+      }
+      return mission.hint || '';
+    }
+
+    return mission.hint || '';
   }
 
   function getActiveMissionProgressDisplay(mission) {
@@ -12900,6 +13104,35 @@ function createNPCCooldownManager() {
     if (mission.id === CHRISTMAS_MIRACLE_MISSION.id) {
       const hasPresent = getCachedQuestItemCount(PRESENT_CONFIG.productName) > 0;
       return makeActiveMissionCountProgress(hasPresent ? 1 : 0, 1);
+    }
+
+    if (mission.id === SVENSON_LOVE_STORY_MISSION.id) {
+      const delivered = !!progress?.plankDelivered;
+      if (!delivered) {
+        return makeActiveMissionCountProgress(0, 1);
+      }
+      if (progress?.strandedAtWhiteWave) {
+        return makeActiveMissionCountProgress(progress?.whiteWaveSlippersDelivered ? 1 : 0, 1);
+      }
+      if (progress?.strandedAtUnderground) {
+        if (progress?.undergroundPlankDelivered && !progress?.strandedAtWhiteWave) {
+          return makeActiveMissionCountProgress(0, 1);
+        }
+        if (!progress?.undergroundCompassRequested) {
+          return makeActiveMissionCountProgress(0, 1);
+        }
+        return makeActiveMissionCountProgress(progress?.undergroundPlankDelivered ? 1 : 0, 1);
+      }
+      if (progress?.strandedAtAwash && progress?.awashYarnDelivered && !progress?.strandedAtUnderground) {
+        return makeActiveMissionCountProgress(0, 1);
+      }
+      if (!progress?.strandedAtAwash) {
+        return makeActiveMissionCountProgress(0, 1);
+      }
+      if (!progress?.awashYarnRequested) {
+        return makeActiveMissionCountProgress(0, 1);
+      }
+      return makeActiveMissionCountProgress(progress?.awashYarnDelivered ? 1 : 0, 1);
     }
 
     if (mission.id === SERPENTINE_TOWER_MISSION.id) {
@@ -18905,6 +19138,59 @@ function createNPCCooldownManager() {
       chat: {},
       hpBarColor: 'rgb(96, 192, 96)',
       nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      id: BOARD_NPC_SVENSON_ID,
+      name: 'Svenson',
+      hideLevel: true,
+      tileIndex: SVENSON_TILE_INDEX,
+      roomName: SVENSON_ROOM_NAME,
+      overlayClass: SVENSON_OVERLAY_CLASS,
+      outfitSpriteId: SVENSON_OUTFIT_SPRITE_ID,
+      facing: 'south',
+      modalOutfitFacing: 'south',
+      modalOutfitShiny: false,
+      modalOutfitTranslate: '-12px -12px',
+      outfitSpritesheetUrl: getQuestItemsAssetUrl('SvensonIdle.png'),
+      outfitSheetFrameCount: 1,
+      imageUrl: getQuestItemsAssetUrl('Svenson.gif'),
+      dialogueIconUrl: SVENSON_DIALOGUE_ICON_URL,
+      logPrefix: '[Quests Mod][Board NPC][Svenson]',
+      chatMode: 'keywords',
+      isUnlocked: () => MissionManager.isCompleted(KING_CROSSING_THE_LINE_MISSION),
+      chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
+    },
+    {
+      id: BOARD_NPC_DANE_ID,
+      name: 'Dane',
+      hideLevel: true,
+      tileIndex: DANE_WHITE_WAVE_TILE_INDEX,
+      roomName: SVENSON_WHITE_WAVE_ROOM_NAME,
+      overlayClass: DANE_OVERLAY_CLASS,
+      outfitSpriteId: DANE_OUTFIT_SPRITE_ID,
+      facing: 'south',
+      modalOutfitFacing: 'south',
+      modalOutfitShiny: false,
+      modalOutfitTranslate: '-12px -12px',
+      outfitSpritesheetUrl: getQuestItemsAssetUrl('DaneIdle.png'),
+      outfitSheetFrameCount: 1,
+      imageUrl: getQuestItemsAssetUrl('Dane.gif'),
+      dialogueIconUrl: DANE_DIALOGUE_ICON_URL,
+      logPrefix: '[Quests Mod][Board NPC][Dane]',
+      chatMode: 'keywords',
+      isUnlocked: () => {
+        const progress = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+        return !!progress.strandedAtWhiteWave;
+      },
+      isInteractable: () => {
+        const progress = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+        return !!progress.completed;
+      },
+      chat: {},
+      hpBarColor: 'rgb(96, 192, 96)',
+      nameColor: 'rgb(96, 192, 96)'
     }
   ];
 
@@ -18917,6 +19203,12 @@ function createNPCCooldownManager() {
     const santaChat = questNpcsDialogue.santa?.boardChat;
     const santaConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SANTA_ID);
     if (santaChat && santaConfig?.chat) Object.assign(santaConfig.chat, santaChat);
+    const svensonChat = questNpcsDialogue.svenson?.boardChat;
+    const svensonConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SVENSON_ID);
+    if (svensonChat && svensonConfig?.chat) Object.assign(svensonConfig.chat, svensonChat);
+    const daneChat = questNpcsDialogue.dane?.boardChat;
+    const daneConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_DANE_ID);
+    if (daneChat && daneConfig?.chat) Object.assign(daneConfig.chat, daneChat);
   };
 
   function isApprenticeShengBattleCompletedPendingReward() {
@@ -18944,7 +19236,7 @@ function createNPCCooldownManager() {
         removeBoardNpcOverlay(rookstayerConfig);
       }
       updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
-      console.log('[Quests Mod][Apprentice Sheng] Mission completed — Minotaur Trophy awarded; Rookstayer dismissed');
+      console.log('[Quests Mod][Apprentice Sheng] Mission completed — Wooden Plank awarded; Rookstayer dismissed');
       return true;
     } catch (error) {
       console.error('[Quests Mod][Apprentice Sheng] Error completing mission with trophy:', error);
@@ -19186,6 +19478,28 @@ function createNPCCooldownManager() {
     });
   }
 
+  function getSvensonKeywordResponse(message, playerName) {
+    return matchKeywordResponsesSync(SVENSON_RESPONSES, message, playerName, {
+      defaultResponse: null,
+      lowercaseKeys: true
+    });
+  }
+
+  function getDaneKeywordResponse(message, playerName) {
+    return matchKeywordResponsesSync(DANE_RESPONSES, message, playerName, {
+      defaultResponse: null,
+      lowercaseKeys: true
+    });
+  }
+
+  let daneRumourIndex = 0;
+  function getNextDaneRumour(playerName) {
+    if (!Array.isArray(DANE_RUMOUR_LINES) || DANE_RUMOUR_LINES.length === 0) return null;
+    const line = DANE_RUMOUR_LINES[daneRumourIndex % DANE_RUMOUR_LINES.length];
+    daneRumourIndex += 1;
+    return applyPlayerNameSubstitution(line, playerName);
+  }
+
   async function grantSantaPresentIfEligible(playerName) {
     if (await hasSantaPresentClaimed(playerName)) {
       return { ok: false, already: true };
@@ -19209,10 +19523,339 @@ function createNPCCooldownManager() {
     return { ok: true, already: false };
   }
 
+  function syncSvensonBoardPlacement() {
+    const svensonConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SVENSON_ID);
+    if (!svensonConfig) return;
+    const progress = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
+    const missionDone = !!progress?.completed;
+    const atWhiteWave = !!progress?.strandedAtWhiteWave;
+    const atUnderground = !!progress?.strandedAtUnderground;
+    const atAwash = !!progress?.strandedAtAwash;
+    if (missionDone) {
+      svensonConfig.roomName = SVENSON_ROOM_NAME;
+      svensonConfig.tileIndex = SVENSON_TILE_INDEX;
+      return;
+    }
+    if (atWhiteWave) {
+      svensonConfig.roomName = SVENSON_WHITE_WAVE_ROOM_NAME;
+      svensonConfig.tileIndex = SVENSON_WHITE_WAVE_TILE_INDEX;
+      return;
+    }
+    if (atUnderground) {
+      svensonConfig.roomName = SVENSON_UNDERGROUND_ROOM_NAME;
+      svensonConfig.tileIndex = SVENSON_UNDERGROUND_TILE_INDEX;
+      return;
+    }
+    svensonConfig.roomName = atAwash ? SVENSON_AWASH_ROOM_NAME : SVENSON_ROOM_NAME;
+    svensonConfig.tileIndex = atAwash ? SVENSON_AWASH_TILE_INDEX : SVENSON_TILE_INDEX;
+  }
+
+  function clearAllSvensonOverlays() {
+    try {
+      document.querySelectorAll(`.${SVENSON_OVERLAY_CLASS}`).forEach((el) => el.remove());
+      document.querySelectorAll(`[${BOARD_NPC_NAME_TAG_DATA_ATTR}="${BOARD_NPC_SVENSON_ID}"]`).forEach((el) => el.remove());
+      document.querySelectorAll(`.${DANE_OVERLAY_CLASS}`).forEach((el) => el.remove());
+      document.querySelectorAll(`[${BOARD_NPC_NAME_TAG_DATA_ATTR}="${BOARD_NPC_DANE_ID}"]`).forEach((el) => el.remove());
+    } catch (error) {
+      console.warn('[Quests Mod][A Love Story] Error clearing Svenson overlays:', error);
+    }
+  }
+
+  async function startSvensonLoveStoryMission() {
+    const progress = getMissionProgress(SVENSON_LOVE_STORY_MISSION);
+    if (progress?.accepted) return false;
+    await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+      accepted: true,
+      completed: false,
+      plankDelivered: false,
+      strandedAtAwash: false,
+      awashYarnDelivered: false,
+      awashYarnRequested: false,
+      strandedAtUnderground: false,
+      undergroundPlankDelivered: false,
+      undergroundCompassRequested: false,
+      strandedAtWhiteWave: false,
+      whiteWaveSlippersDelivered: false
+    });
+    NotificationService.showQuestAccepted(SVENSON_LOVE_STORY_MISSION, '[Quests Mod][A Love Story]');
+    return true;
+  }
+
+  async function handInSvensonPlank() {
+    const plankItemName = APPRENTICE_SHENG_MISSION.rewardItemName || MINOTAUR_TROPHY_CONFIG.productName;
+    const consumed = await consumeQuestItem(plankItemName, 1);
+    if (!consumed) return false;
+    NotificationService.showItemRemoved(plankItemName, '[Quests Mod][A Love Story]');
+    await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+      accepted: true,
+      completed: false,
+      plankDelivered: true,
+      strandedAtAwash: false,
+      awashYarnDelivered: false,
+      awashYarnRequested: false,
+      strandedAtUnderground: false,
+      undergroundPlankDelivered: false,
+      undergroundCompassRequested: false,
+      strandedAtWhiteWave: false,
+      whiteWaveSlippersDelivered: false
+    });
+    return true;
+  }
+
+  async function handInSvensonAwashYarn() {
+    const yarnItemName = MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName;
+    const consumed = await consumeQuestItem(yarnItemName, 1);
+    if (!consumed) return false;
+    NotificationService.showItemRemoved(yarnItemName, '[Quests Mod][A Love Story]');
+    await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+      accepted: true,
+      completed: false,
+      plankDelivered: true,
+      strandedAtAwash: true,
+      awashYarnDelivered: true,
+      awashYarnRequested: true,
+      strandedAtUnderground: false,
+      undergroundPlankDelivered: false,
+      undergroundCompassRequested: false,
+      strandedAtWhiteWave: false,
+      whiteWaveSlippersDelivered: false
+    });
+    return true;
+  }
+
+  async function handInSvensonUndergroundPlank() {
+    const compassItemName = SERPENTINE_TOWER_MISSION.rewardItemName || SCORPION_SCEPTRE_CONFIG.productName;
+    const consumed = await consumeQuestItem(compassItemName, 1);
+    if (!consumed) return false;
+    NotificationService.showItemRemoved(compassItemName, '[Quests Mod][A Love Story]');
+    await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+      accepted: true,
+      completed: false,
+      plankDelivered: true,
+      strandedAtAwash: true,
+      awashYarnDelivered: true,
+      awashYarnRequested: true,
+      strandedAtUnderground: true,
+      undergroundPlankDelivered: true,
+      undergroundCompassRequested: true,
+      strandedAtWhiteWave: false,
+      whiteWaveSlippersDelivered: false
+    });
+    return true;
+  }
+
+  async function handInSvensonWhiteWavePresent() {
+    const slippersItemName = CHRISTMAS_MIRACLE_MISSION.rewardItemName || BUNNY_SLIPPERS_CONFIG.productName;
+    const consumed = await consumeQuestItem(slippersItemName, 1);
+    if (!consumed) return false;
+    NotificationService.showItemRemoved(slippersItemName, '[Quests Mod][A Love Story]');
+    await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+      accepted: true,
+      completed: true,
+      plankDelivered: true,
+      strandedAtAwash: true,
+      awashYarnDelivered: true,
+      awashYarnRequested: true,
+      strandedAtUnderground: true,
+      undergroundPlankDelivered: true,
+      undergroundCompassRequested: true,
+      strandedAtWhiteWave: true,
+      whiteWaveSlippersDelivered: true
+    });
+    // Immediately refresh board NPC interaction state so Dane gains talk icon/right-click at completion time.
+    boardNpcRuntimeState.lastRoomById.delete(BOARD_NPC_DANE_ID);
+    clearAllSvensonOverlays();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+    NotificationService.showQuestCompleted(SVENSON_LOVE_STORY_MISSION, '[Quests Mod][A Love Story]');
+    return true;
+  }
+
+  async function advanceSvensonLoveStoryToAwash() {
+    await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+      accepted: true,
+      completed: false,
+      plankDelivered: true,
+      strandedAtAwash: true,
+      awashYarnDelivered: false,
+      awashYarnRequested: false,
+      strandedAtUnderground: false,
+      undergroundPlankDelivered: false,
+      undergroundCompassRequested: false,
+      strandedAtWhiteWave: false,
+      whiteWaveSlippersDelivered: false
+    });
+    const svensonConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SVENSON_ID);
+    if (svensonConfig) {
+      svensonConfig.roomName = SVENSON_AWASH_ROOM_NAME;
+      svensonConfig.tileIndex = SVENSON_AWASH_TILE_INDEX;
+    }
+    boardNpcRuntimeState.lastRoomById.delete(BOARD_NPC_SVENSON_ID);
+    clearAllSvensonOverlays();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+  }
+
+  function navigateToAwashSteamship() {
+    try {
+      const roomId = getRoomIdByRoomName(SVENSON_AWASH_ROOM_NAME);
+      if (!roomId) {
+        console.warn('[Quests Mod][A Love Story] Awash Steamship room not found');
+        return;
+      }
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId
+      });
+    } catch (error) {
+      console.error('[Quests Mod][A Love Story] Error navigating to Awash Steamship:', error);
+    }
+  }
+
+  async function advanceSvensonLoveStoryToUnderground() {
+    await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+      accepted: true,
+      completed: false,
+      plankDelivered: true,
+      strandedAtAwash: true,
+      awashYarnDelivered: true,
+      awashYarnRequested: true,
+      strandedAtUnderground: true,
+      undergroundPlankDelivered: false,
+      undergroundCompassRequested: false,
+      strandedAtWhiteWave: false,
+      whiteWaveSlippersDelivered: false
+    });
+    const svensonConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SVENSON_ID);
+    if (svensonConfig) {
+      svensonConfig.roomName = SVENSON_UNDERGROUND_ROOM_NAME;
+      svensonConfig.tileIndex = SVENSON_UNDERGROUND_TILE_INDEX;
+    }
+    boardNpcRuntimeState.lastRoomById.delete(BOARD_NPC_SVENSON_ID);
+    clearAllSvensonOverlays();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+  }
+
+  function navigateToUndergroundLake() {
+    try {
+      const roomId = getRoomIdByRoomName(SVENSON_UNDERGROUND_ROOM_NAME);
+      if (!roomId) {
+        console.warn('[Quests Mod][A Love Story] Underground Lake room not found');
+        return;
+      }
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId
+      });
+    } catch (error) {
+      console.error('[Quests Mod][A Love Story] Error navigating to Underground Lake:', error);
+    }
+  }
+
+  function removeAllVillainCreaturesFromBoard() {
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+      const boardConfig = Array.isArray(boardContext?.boardConfig) ? boardContext.boardConfig : null;
+      if (!boardConfig) return;
+      const filtered = boardConfig.filter((entity) => entity?.villain !== true);
+      if (filtered.length === boardConfig.length) return;
+      globalThis.state.board.send({
+        type: 'setState',
+        fn: (prev) => ({
+          ...prev,
+          boardConfig: filtered
+        })
+      });
+      console.log('[Quests Mod][A Love Story] Removed villain creatures before travel');
+    } catch (error) {
+      console.warn('[Quests Mod][A Love Story] Failed to remove villain creatures before travel:', error);
+    }
+  }
+
+  async function advanceSvensonLoveStoryToWhiteWave() {
+    await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+      accepted: true,
+      completed: false,
+      plankDelivered: true,
+      strandedAtAwash: true,
+      awashYarnDelivered: true,
+      awashYarnRequested: true,
+      strandedAtUnderground: true,
+      undergroundPlankDelivered: true,
+      undergroundCompassRequested: true,
+      strandedAtWhiteWave: true,
+      whiteWaveSlippersDelivered: false
+    });
+    const svensonConfig = BOARD_NPC_CONFIGS.find((c) => c.id === BOARD_NPC_SVENSON_ID);
+    if (svensonConfig) {
+      svensonConfig.roomName = SVENSON_WHITE_WAVE_ROOM_NAME;
+      svensonConfig.tileIndex = SVENSON_WHITE_WAVE_TILE_INDEX;
+    }
+    boardNpcRuntimeState.lastRoomById.delete(BOARD_NPC_SVENSON_ID);
+    boardNpcRuntimeState.lastRoomById.delete(BOARD_NPC_DANE_ID);
+    clearAllSvensonOverlays();
+    updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+  }
+
+  function navigateToWhiteWaveCellar() {
+    try {
+      const roomId = getRoomIdByRoomName(SVENSON_WHITE_WAVE_ROOM_NAME);
+      if (!roomId) {
+        console.warn('[Quests Mod][A Love Story] White Wave Cellar room not found');
+        return;
+      }
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId
+      });
+    } catch (error) {
+      console.error('[Quests Mod][A Love Story] Error navigating to White Wave Cellar:', error);
+    }
+  }
+
   function showBoardNpcKeywordModal(npcConfig) {
     try {
       const playerName = getCurrentPlayerName() || 'Player';
-      const welcome = String(npcConfig.chat.welcomeMessage || '').replace(/Player/g, playerName);
+      let welcome = String(npcConfig.chat.welcomeMessage || '').replace(/Player/g, playerName);
+      if (npcConfig.id === BOARD_NPC_SVENSON_ID) {
+        const progress = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+        const inWhiteWaveCellar = isOnRoomByName(SVENSON_WHITE_WAVE_ROOM_NAME);
+        const inUndergroundLake = isOnRoomByName(SVENSON_UNDERGROUND_ROOM_NAME);
+        const inAwashSteamship = isOnRoomByName(SVENSON_AWASH_ROOM_NAME);
+        if (progress?.completed && progress?.strandedAtWhiteWave && inWhiteWaveCellar) {
+          welcome = getMissionDialogueLine(
+            SVENSON_LOVE_STORY_MISSION,
+            'alreadyCompleted',
+            'Your help saved my voyage and my marriage. Thank you again.'
+          ).replace(/Player/g, playerName);
+        } else if (progress?.strandedAtWhiteWave && inWhiteWaveCellar) {
+          welcome = getMissionDialogueLine(
+            SVENSON_LOVE_STORY_MISSION,
+            'svensonWhiteWaveWelcome',
+            'By the tides, we finally made harbor at White Wave Cellar.'
+          ).replace(/Player/g, playerName);
+        } else if (progress?.strandedAtUnderground && inUndergroundLake) {
+          welcome = getMissionDialogueLine(
+            SVENSON_LOVE_STORY_MISSION,
+            'svensonUndergroundWelcome',
+            'Curses... we crashed again. We barely made it to the Underground Lake.'
+          ).replace(/Player/g, playerName);
+        } else if (progress?.strandedAtAwash && inAwashSteamship) {
+          welcome = getMissionDialogueLine(
+            SVENSON_LOVE_STORY_MISSION,
+            'svensonAwashWelcome',
+            'Damnation, the hull gave way in the storm. We barely reached the Awash Steamship alive.'
+          ).replace(/Player/g, playerName);
+        }
+      } else if (npcConfig.id === BOARD_NPC_DANE_ID) {
+        const progress = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+        const inWhiteWaveCellar = isOnRoomByName(SVENSON_WHITE_WAVE_ROOM_NAME);
+        if (progress?.completed && inWhiteWaveCellar) {
+          welcome = getMissionDialogueLine(
+            SVENSON_LOVE_STORY_MISSION,
+            'daneHomeThanksWelcome',
+            'Thank you for bringing Svenson home, Player. White Wave Cellar owes you one.'
+          ).replace(/Player/g, playerName);
+        }
+      }
       const modalOpts = {
         npcName: npcConfig.name,
         playerName,
@@ -19235,6 +19878,12 @@ function createNPCCooldownManager() {
       const { contentDiv, addMessage: addMessageToConversation, textarea, sendBtn } =
         createNPCChatModalContent(modalOpts);
       const cooldown = createNPCCooldownManager();
+      let awaitingSvensonMissionConfirm = false;
+      let awaitingSvensonPlankConfirm = false;
+      let awaitingSvensonAwashYarnConfirm = false;
+      let awaitingSvensonAwashTravelConfirm = false;
+      let awaitingSvensonUndergroundTravelConfirm = false;
+      let awaitingSvensonPostLoveTravelConfirm = false;
 
       const reply = async () => {
         const text = (textarea.value || '').trim();
@@ -19276,6 +19925,842 @@ function createNPCCooldownManager() {
             getNextSantaThankYou(playerName),
             addMessageToConversation,
             npcConfig.name
+          );
+          return;
+        }
+
+        if (npcConfig.id === BOARD_NPC_SVENSON_ID) {
+          const svensonProgress = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+          const missionAccepted = !!svensonProgress.accepted;
+          const plankDelivered = !!svensonProgress.plankDelivered;
+          const missionDone = !!svensonProgress.completed;
+          const strandedAtAwash = !!svensonProgress.strandedAtAwash;
+          const awashYarnDelivered = !!svensonProgress.awashYarnDelivered;
+          const awashYarnRequested = !!svensonProgress.awashYarnRequested;
+          const strandedAtUnderground = !!svensonProgress.strandedAtUnderground;
+          const undergroundPlankDelivered = !!svensonProgress.undergroundPlankDelivered;
+          const undergroundCompassRequested = !!svensonProgress.undergroundCompassRequested;
+          const askedMission = lower.includes('mission') || lower.includes('quest') || lower.includes('help');
+          const inFoldaBoat = isOnRoomByName(SVENSON_ROOM_NAME);
+
+          if (!missionAccepted && askedMission) {
+            awaitingSvensonMissionConfirm = true;
+            awaitingSvensonPlankConfirm = false;
+            awaitingSvensonAwashYarnConfirm = false;
+            awaitingSvensonAwashTravelConfirm = false;
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'prompt',
+                "I miss my wife Dane, Player. I am stuck on this island and cannot sail back to Carlin. I need a wooden plank to fix my boat. Can you help me?"
+              ),
+              addMessageToConversation,
+              npcConfig.name
+            );
+            return;
+          }
+
+          if (missionAccepted && !plankDelivered && askedMission) {
+            awaitingSvensonPlankConfirm = true;
+            awaitingSvensonAwashYarnConfirm = false;
+            awaitingSvensonAwashTravelConfirm = false;
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              'Do you have a Wooden Plank with you?',
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && !missionDone && !strandedAtAwash && askedMission) {
+            awaitingSvensonAwashYarnConfirm = false;
+            awaitingSvensonAwashTravelConfirm = false;
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonPlankAccepted',
+                'This is exactly what I needed! The boat can sail again. Do you want to travel with me to Carlin?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (!missionAccepted && awaitingSvensonMissionConfirm && lower.includes('yes')) {
+            awaitingSvensonMissionConfirm = false;
+            awaitingSvensonPlankConfirm = false;
+            awaitingSvensonAwashYarnConfirm = false;
+            awaitingSvensonAwashTravelConfirm = false;
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'accept',
+                'Bring me a Wooden Plank so I can repair my boat.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                startSvensonLoveStoryMission().catch((error) => {
+                  console.error(`${npcConfig.logPrefix} Error starting A Love Story:`, error);
+                });
+              }
+            );
+            return;
+          }
+
+          if (!missionAccepted && awaitingSvensonMissionConfirm && lower.includes('no')) {
+            awaitingSvensonMissionConfirm = false;
+            awaitingSvensonPlankConfirm = false;
+            awaitingSvensonAwashYarnConfirm = false;
+            awaitingSvensonAwashTravelConfirm = false;
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionCommonLine('notReady', 'Return when you are ready for this task.'),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && !plankDelivered && awaitingSvensonPlankConfirm && lower.includes('yes')) {
+            awaitingSvensonPlankConfirm = false;
+            awaitingSvensonAwashYarnConfirm = false;
+            awaitingSvensonAwashTravelConfirm = false;
+            awaitingSvensonUndergroundTravelConfirm = false;
+            const plankGiven = await handInSvensonPlank().catch((error) => {
+              console.error(`${npcConfig.logPrefix} Error handing in Wooden Plank:`, error);
+              return false;
+            });
+            cooldown.queueResponse(
+              text,
+              plankGiven
+                ? getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonPlankAccepted',
+                  'This is exactly what I needed! The boat can sail again. Do you want to travel with me to Carlin?'
+                )
+                : getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonMissingPlank',
+                  'I still cannot fix my boat. Please bring me a Wooden Plank, Player.'
+                ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && !plankDelivered && awaitingSvensonPlankConfirm && lower.includes('no')) {
+            awaitingSvensonPlankConfirm = false;
+            awaitingSvensonAwashYarnConfirm = false;
+            awaitingSvensonAwashTravelConfirm = false;
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonMissingPlank',
+                'I still cannot fix my boat. Please bring me a Wooden Plank, Player.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && !plankDelivered && (lower.includes('wooden plank') || /\bplank\b/.test(lower))) {
+            const plankGiven = await handInSvensonPlank().catch((error) => {
+              console.error(`${npcConfig.logPrefix} Error handing in Wooden Plank:`, error);
+              return false;
+            });
+            cooldown.queueResponse(
+              text,
+              plankGiven
+                ? getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonPlankAccepted',
+                  'This is exactly what I needed! The boat can sail again. Do you want to travel with me to Carlin?'
+                )
+                : getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonMissingPlank',
+                  'I still cannot fix my boat. Please bring me a Wooden Plank, Player.'
+                ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && strandedAtAwash && !awashYarnDelivered && !strandedAtUnderground && askedMission) {
+            if (!awashYarnRequested) {
+              await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+                accepted: true,
+                completed: false,
+                plankDelivered: true,
+                strandedAtAwash: true,
+                awashYarnDelivered: false,
+                awashYarnRequested: true,
+                strandedAtUnderground: false,
+                undergroundPlankDelivered: false,
+                undergroundCompassRequested: false,
+                strandedAtWhiteWave: false,
+                whiteWaveSlippersDelivered: false
+              }).catch((error) => {
+                console.error(`${npcConfig.logPrefix} Error setting Awash yarn objective:`, error);
+              });
+            }
+            awaitingSvensonAwashYarnConfirm = true;
+            awaitingSvensonAwashTravelConfirm = false;
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonNeedYarn',
+                'The ship broke again in the crash. I need a Spool of Yarn to patch the hull. Do you have one with you?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && strandedAtAwash && !awashYarnDelivered && !strandedAtUnderground && awaitingSvensonAwashYarnConfirm && lower.includes('yes')) {
+            awaitingSvensonAwashYarnConfirm = false;
+            const undergroundUnlocked = isRoomUnlockedByName(SVENSON_UNDERGROUND_ROOM_NAME);
+            if (!undergroundUnlocked) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonTravelLocked',
+                  'You are not ready for that route yet. Come back when you are stronger.'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            const yarnGiven = await handInSvensonAwashYarn().catch((error) => {
+              console.error(`${npcConfig.logPrefix} Error handing in Spool of Yarn:`, error);
+              return false;
+            });
+            cooldown.queueResponse(
+              text,
+              yarnGiven
+                ? getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonYarnAcceptedAwash',
+                  'Excellent, this yarn will hold for now. Thank you, Player.'
+                )
+                : getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonNeedYarn',
+                  'The ship broke again in the crash. I need a Spool of Yarn to patch the hull. Do you have one with you?'
+                ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                awaitingSvensonAwashTravelConfirm = !!yarnGiven;
+              }
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && strandedAtAwash && !awashYarnDelivered && !strandedAtUnderground && awaitingSvensonAwashYarnConfirm && lower.includes('no')) {
+            awaitingSvensonAwashYarnConfirm = false;
+            awaitingSvensonAwashTravelConfirm = false;
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonNeedYarn',
+                'The ship broke again in the crash. I need a Spool of Yarn to patch the hull. Do you have one with you?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && strandedAtAwash && !awashYarnDelivered && !strandedAtUnderground && (lower.includes('spool of yarn') || /\byarn\b/.test(lower))) {
+            const undergroundUnlocked = isRoomUnlockedByName(SVENSON_UNDERGROUND_ROOM_NAME);
+            if (!undergroundUnlocked) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonTravelLocked',
+                  'You are not ready for that route yet. Come back when you are stronger.'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            const yarnGiven = await handInSvensonAwashYarn().catch((error) => {
+              console.error(`${npcConfig.logPrefix} Error handing in Spool of Yarn:`, error);
+              return false;
+            });
+            cooldown.queueResponse(
+              text,
+              yarnGiven
+                ? getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonYarnAcceptedAwash',
+                  'Excellent, this yarn will hold for now. Thank you, Player.'
+                )
+                : getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonNeedYarn',
+                  'The ship broke again in the crash. I need a Spool of Yarn to patch the hull. Do you have one with you?'
+                ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                awaitingSvensonAwashTravelConfirm = !!yarnGiven;
+              }
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && strandedAtAwash && awashYarnDelivered && !strandedAtUnderground && askedMission) {
+            awaitingSvensonAwashTravelConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonAwashTravelPrompt',
+                'Do you want to travel with me once more?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && strandedAtAwash && awashYarnDelivered && !strandedAtUnderground && awaitingSvensonAwashTravelConfirm && lower.includes('yes')) {
+            awaitingSvensonAwashTravelConfirm = false;
+            const undergroundUnlocked = isRoomUnlockedByName(SVENSON_UNDERGROUND_ROOM_NAME);
+            if (!undergroundUnlocked) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonTravelLocked',
+                  'You are not ready for that route yet. Come back when you are stronger.'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            showToast({
+              message: TOAST_MESSAGES.travelingWithSvenson,
+              logPrefix: '[Quests Mod][A Love Story]'
+            });
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonTravelComplete',
+                'Then aboard with you!'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                const SVENSON_AWASH_TO_UNDERGROUND_DELAY_MS = 2000;
+                setTimeout(() => {
+                  advanceSvensonLoveStoryToUnderground().catch((error) => {
+                    console.error(`${npcConfig.logPrefix} Error advancing A Love Story to Underground:`, error);
+                  });
+                  ModalHelpers.closeModal(0);
+                  setTimeout(() => navigateToUndergroundLake(), 120);
+                }, SVENSON_AWASH_TO_UNDERGROUND_DELAY_MS);
+              }
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && strandedAtAwash && awashYarnDelivered && !strandedAtUnderground && awaitingSvensonAwashTravelConfirm && lower.includes('no')) {
+            awaitingSvensonAwashTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonTravelDeclined',
+                'Very well. Tell me when you are ready to sail.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && strandedAtUnderground && !undergroundPlankDelivered && askedMission) {
+            if (!undergroundCompassRequested) {
+              await persistMissionProgress(SVENSON_LOVE_STORY_MISSION, {
+                accepted: true,
+                completed: false,
+                plankDelivered: true,
+                strandedAtAwash: true,
+                awashYarnDelivered: true,
+                strandedAtUnderground: true,
+                undergroundPlankDelivered: false,
+                undergroundCompassRequested: true,
+                strandedAtWhiteWave: false,
+                whiteWaveSlippersDelivered: false
+              }).catch((error) => {
+                console.error(`${npcConfig.logPrefix} Error setting Underground compass objective:`, error);
+              });
+            }
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonNeedUndergroundPlank',
+                'We are lost down here. I need a Compass so I can find our way out. Do you have one with you?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && strandedAtUnderground && !undergroundPlankDelivered && (lower.includes('compass') || lower.includes('yes'))) {
+            const plankGiven = await handInSvensonUndergroundPlank().catch((error) => {
+              console.error(`${npcConfig.logPrefix} Error handing in Underground Compass:`, error);
+              return false;
+            });
+            cooldown.queueResponse(
+              text,
+              plankGiven
+                ? getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonUndergroundPlankAccepted',
+                  'Excellent. With this Compass, I can chart our way again. Thank you.'
+                )
+                : getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonNeedUndergroundPlank',
+                  'We are lost down here. I need a Compass so I can find our way out. Do you have one with you?'
+                ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                awaitingSvensonUndergroundTravelConfirm = !!plankGiven;
+              }
+            );
+            return;
+          }
+
+          if (missionAccepted && strandedAtUnderground && undergroundPlankDelivered && !svensonProgress.strandedAtWhiteWave && askedMission) {
+            awaitingSvensonUndergroundTravelConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonUndergroundTravelPrompt',
+                'The compass points a path onward. Do you want to travel with me to White Wave Cellar?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && strandedAtUnderground && undergroundPlankDelivered && !svensonProgress.strandedAtWhiteWave && awaitingSvensonUndergroundTravelConfirm && lower.includes('yes')) {
+            awaitingSvensonUndergroundTravelConfirm = false;
+            const whiteWaveUnlocked = isRoomUnlockedByName(SVENSON_WHITE_WAVE_ROOM_NAME);
+            if (!whiteWaveUnlocked) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonTravelLocked',
+                  'You are not ready for that route yet. Come back when you are stronger.'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            showToast({
+              message: TOAST_MESSAGES.travelingWithSvenson,
+              logPrefix: '[Quests Mod][A Love Story]'
+            });
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonTravelComplete',
+                'Then aboard with you!'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                const SVENSON_UNDERGROUND_TO_WHITE_WAVE_DELAY_MS = 2000;
+                const WHITE_WAVE_POST_NAV_CLEANUP_DELAY_MS = 180;
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  setTimeout(() => {
+                    // Required order: navigate -> remove villains -> place NPCs
+                    navigateToWhiteWaveCellar();
+                    setTimeout(() => {
+                      removeAllVillainCreaturesFromBoard();
+                      advanceSvensonLoveStoryToWhiteWave().catch((error) => {
+                        console.error(`${npcConfig.logPrefix} Error advancing A Love Story to White Wave:`, error);
+                      });
+                    }, WHITE_WAVE_POST_NAV_CLEANUP_DELAY_MS);
+                  }, 120);
+                }, SVENSON_UNDERGROUND_TO_WHITE_WAVE_DELAY_MS);
+              }
+            );
+            return;
+          }
+
+          if (missionAccepted && strandedAtUnderground && undergroundPlankDelivered && !svensonProgress.strandedAtWhiteWave && awaitingSvensonUndergroundTravelConfirm && lower.includes('no')) {
+            awaitingSvensonUndergroundTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonTravelDeclined',
+                'Very well. Tell me when you are ready to sail.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && svensonProgress.strandedAtWhiteWave && !svensonProgress.whiteWaveSlippersDelivered && askedMission) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonNeedPresent',
+                'I forgot Dane\'s present. I promised her Bunny Slippers. Do you have them with you?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && svensonProgress.strandedAtWhiteWave && !svensonProgress.whiteWaveSlippersDelivered && (lower.includes('bunny slippers') || /\bslippers\b/.test(lower) || lower.includes('yes'))) {
+            const presentGiven = await handInSvensonWhiteWavePresent().catch((error) => {
+              console.error(`${npcConfig.logPrefix} Error handing in Bunny Slippers:`, error);
+              return false;
+            });
+            cooldown.queueResponse(
+              text,
+              presentGiven
+                ? getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonPresentAccepted',
+                  'You saved me, friend. Dane will love these Bunny Slippers. Thank you!'
+                )
+                : getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonNeedPresent',
+                  'I forgot Dane\'s present. I promised her Bunny Slippers. Do you have them with you?'
+                ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (
+            missionDone &&
+            inFoldaBoat &&
+            (
+              lower.includes('white wave') ||
+              lower.includes('cellar') ||
+              lower.includes('passage') ||
+              lower.includes('travel')
+            )
+          ) {
+            awaitingSvensonPostLoveTravelConfirm = true;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonPostLoveTravelPrompt',
+                'Ready for another run? I can take you to White Wave Cellar. Do you want to travel now?'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionDone && inFoldaBoat && awaitingSvensonPostLoveTravelConfirm && lower.includes('yes')) {
+            awaitingSvensonPostLoveTravelConfirm = false;
+            const whiteWaveUnlocked = isRoomUnlockedByName(SVENSON_WHITE_WAVE_ROOM_NAME);
+            if (!whiteWaveUnlocked) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonTravelLocked',
+                  'You are not ready for that route yet. Come back when you are stronger.'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            showToast({
+              message: TOAST_MESSAGES.travelingWithSvenson,
+              logPrefix: '[Quests Mod][A Love Story]'
+            });
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonPostLoveTravelStart',
+                'Then aboard with you! White Wave awaits.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                const SVENSON_POST_LOVE_TRAVEL_DELAY_MS = 2000;
+                const WHITE_WAVE_POST_LOVE_CLEANUP_DELAY_MS = 180;
+                const WHITE_WAVE_POST_LOVE_NPC_PLACEMENT_DELAY_MS = 260;
+                setTimeout(() => {
+                  ModalHelpers.closeModal(0);
+                  setTimeout(() => {
+                    navigateToWhiteWaveCellar();
+                    setTimeout(() => {
+                      removeAllVillainCreaturesFromBoard();
+                    }, WHITE_WAVE_POST_LOVE_CLEANUP_DELAY_MS);
+                    setTimeout(() => {
+                      boardNpcRuntimeState.lastRoomById.delete(BOARD_NPC_DANE_ID);
+                      clearAllSvensonOverlays();
+                      updateAllBoardNpcStates(globalThis.state?.board?.getSnapshot()?.context);
+                    }, WHITE_WAVE_POST_LOVE_NPC_PLACEMENT_DELAY_MS);
+                  }, 120);
+                }, SVENSON_POST_LOVE_TRAVEL_DELAY_MS);
+              }
+            );
+            return;
+          }
+
+          if (missionDone && inFoldaBoat && awaitingSvensonPostLoveTravelConfirm && lower.includes('no')) {
+            awaitingSvensonPostLoveTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonTravelDeclined',
+                'Very well. Tell me when you are ready to sail.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && strandedAtAwash && awashYarnDelivered && !strandedAtUnderground && askedMission) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonYarnAcceptedAwash',
+                'Excellent, this yarn will hold for now. Thank you, Player.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && !plankDelivered && (lower.includes('passage') || lower.includes('travel') || lower.includes('carlin'))) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonMissingPlank',
+                'I still cannot fix my boat. Please bring me a Wooden Plank, Player.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && !missionDone && !strandedAtAwash && lower.includes('yes')) {
+            awaitingSvensonAwashTravelConfirm = false;
+            const awashUnlocked = isRoomUnlockedByName(SVENSON_AWASH_ROOM_NAME);
+            if (!awashUnlocked) {
+              cooldown.queueResponse(
+                text,
+                getMissionDialogueLine(
+                  SVENSON_LOVE_STORY_MISSION,
+                  'svensonTravelLocked',
+                  'You are not ready for that route yet. Come back when you are stronger.'
+                ),
+                addMessageToConversation,
+                npcConfig.name,
+                ModalHelpers.getFarewellCloseCallback(text)
+              );
+              return;
+            }
+            showToast({
+              message: TOAST_MESSAGES.travelingWithSvenson,
+              logPrefix: '[Quests Mod][A Love Story]'
+            });
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonTravelComplete',
+                'Then aboard with you!'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              () => {
+                const SVENSON_TRAVEL_CLOSE_DELAY_MS = 2000;
+                setTimeout(() => {
+                  advanceSvensonLoveStoryToAwash().catch((error) => {
+                    console.error(`${npcConfig.logPrefix} Error advancing A Love Story to Awash:`, error);
+                  });
+                  ModalHelpers.closeModal(0);
+                  setTimeout(() => navigateToAwashSteamship(), 120);
+                }, SVENSON_TRAVEL_CLOSE_DELAY_MS);
+              }
+            );
+            return;
+          }
+
+          if (missionAccepted && plankDelivered && !missionDone && !strandedAtAwash && lower.includes('no')) {
+            awaitingSvensonAwashTravelConfirm = false;
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'svensonTravelDeclined',
+                'Very well. Tell me when you are ready to sail, Player.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          if (missionDone && askedMission) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'alreadyCompleted',
+                'We made it as far as the Awash Steamship, though the voyage ended in wreckage. Thank you for helping me, Player.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          let response = getSvensonKeywordResponse(text, playerName);
+          if (response == null) {
+            response = getNpcQuestItemChatResponse(BOARD_NPC_SVENSON_ID, text, playerName);
+          }
+          if (response == null) {
+            response = getRandomNpcConfusionResponse(SVENSON_CONFUSION_RESPONSES, playerName);
+          }
+          cooldown.queueResponse(
+            text,
+            response,
+            addMessageToConversation,
+            npcConfig.name,
+            ModalHelpers.getFarewellCloseCallback(text)
+          );
+          return;
+        }
+
+        if (npcConfig.id === BOARD_NPC_DANE_ID) {
+          const svensonProgress = getMissionProgress(SVENSON_LOVE_STORY_MISSION) || {};
+          const askedMission = lower.includes('mission') || lower.includes('quest') || lower.includes('help');
+          if (askedMission && svensonProgress?.completed) {
+            cooldown.queueResponse(
+              text,
+              getMissionDialogueLine(
+                SVENSON_LOVE_STORY_MISSION,
+                'daneHomeThanksMission',
+                'Thanks again for bringing Svenson safely home. We won\'t forget it.'
+              ),
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+          if (lower.includes('rumour')) {
+            const rumourLine = getNextDaneRumour(playerName) || getRandomNpcConfusionResponse(DANE_CONFUSION_RESPONSES, playerName);
+            cooldown.queueResponse(
+              text,
+              rumourLine,
+              addMessageToConversation,
+              npcConfig.name,
+              ModalHelpers.getFarewellCloseCallback(text)
+            );
+            return;
+          }
+
+          let response = getDaneKeywordResponse(text, playerName);
+          if (response == null) {
+            response = getNpcQuestItemChatResponse(BOARD_NPC_DANE_ID, text, playerName);
+          }
+          if (response == null) {
+            response = getRandomNpcConfusionResponse(DANE_CONFUSION_RESPONSES, playerName);
+          }
+          cooldown.queueResponse(
+            text,
+            response,
+            addMessageToConversation,
+            npcConfig.name,
+            ModalHelpers.getFarewellCloseCallback(text)
           );
           return;
         }
@@ -19432,6 +20917,7 @@ function createNPCCooldownManager() {
   }
 
   function openBoardNpcDialogueMenu(npcConfig, clientX, clientY) {
+    if (!isBoardNpcInteractable(npcConfig)) return;
     closeBoardNpcContextMenu(npcConfig.id);
     const menuObj = createContextMenu({
       x: clientX,
@@ -19551,6 +21037,21 @@ function createNPCCooldownManager() {
     // Game CSS targets .actor.spritesheet with OUTFIT-shiny/{id}-idle.png and can re-apply it via
     // animations. Hide that layer inside our overlay and paint our sheet on a dedicated element.
     const url = npcConfig.outfitSpritesheetUrl.replace(/"/g, '\\"');
+    const frameCount = Math.max(1, Number(npcConfig.outfitSheetFrameCount) || 4);
+    const backgroundSize = `${frameCount * 100}% 100%`;
+    const framePositions = frameCount <= 1
+      ? {
+          north: '0% 0%',
+          east: '0% 0%',
+          south: '0% 0%',
+          west: '0% 0%'
+        }
+      : {
+          north: '0% 0%',
+          east: '33.333% 0%',
+          south: '66.666% 0%',
+          west: '100% 0%'
+        };
     style.textContent = `
       .${npcConfig.overlayClass} .sprite.outfit.id-${npcConfig.outfitSpriteId} .actor.spritesheet {
         display: none !important;
@@ -19570,21 +21071,22 @@ function createNPCCooldownManager() {
         height: 100%;
         background-image: url("${url}") !important;
         background-repeat: no-repeat !important;
-        /* 4-frame sheet → each frame fills the box at any zoom */
-        background-size: 400% 100% !important;
+        /* Per-NPC frame count to avoid stretching 1-frame sheets. */
+        background-size: ${backgroundSize} !important;
         image-rendering: pixelated;
         pointer-events: none;
         animation: none !important;
       }
-      .${npcConfig.overlayClass} .quests-custom-outfit-sheet[data-facing="north"] { background-position: 0% 0% !important; }
-      .${npcConfig.overlayClass} .quests-custom-outfit-sheet[data-facing="east"]  { background-position: 33.333% 0% !important; }
-      .${npcConfig.overlayClass} .quests-custom-outfit-sheet[data-facing="south"] { background-position: 66.666% 0% !important; }
-      .${npcConfig.overlayClass} .quests-custom-outfit-sheet[data-facing="west"]  { background-position: 100% 0% !important; }
+      .${npcConfig.overlayClass} .quests-custom-outfit-sheet[data-facing="north"] { background-position: ${framePositions.north} !important; }
+      .${npcConfig.overlayClass} .quests-custom-outfit-sheet[data-facing="east"]  { background-position: ${framePositions.east} !important; }
+      .${npcConfig.overlayClass} .quests-custom-outfit-sheet[data-facing="south"] { background-position: ${framePositions.south} !important; }
+      .${npcConfig.overlayClass} .quests-custom-outfit-sheet[data-facing="west"]  { background-position: ${framePositions.west} !important; }
     `;
   }
 
   function placeBoardNpcOverlay(npcConfig, tileElement) {
     if (!tileElement) return;
+    const isInteractable = isBoardNpcInteractable(npcConfig);
 
     let nameTag = getBoardNpcNameTagElement(npcConfig);
     let dialogueIcon = nameTag?.querySelector('img[alt="Dialogue"]') || null;
@@ -19593,8 +21095,13 @@ function createNPCCooldownManager() {
       dialogueIcon = createBoardNpcDialogueIcon(npcConfig);
       nameTag = buildBoardNpcNameTag(npcConfig, dialogueIcon);
     }
+    if (dialogueIcon) {
+      dialogueIcon.style.display = isInteractable ? '' : 'none';
+    }
     positionBoardNpcNameTag(nameTag, tileElement);
-    bindBoardNpcContextMenuHandlers(npcConfig, [nameTag, dialogueIcon]);
+    if (isInteractable) {
+      bindBoardNpcContextMenuHandlers(npcConfig, [nameTag, dialogueIcon]);
+    }
 
     const existingOverlay = getBoardNpcOverlayElement(npcConfig, tileElement);
     if (existingOverlay) {
@@ -19667,7 +21174,9 @@ function createNPCCooldownManager() {
       ].join(';');
       overlay.appendChild(gif);
     }
-    bindBoardNpcContextMenuHandlers(npcConfig, [overlay]);
+    if (isInteractable) {
+      bindBoardNpcContextMenuHandlers(npcConfig, [overlay]);
+    }
 
     tileElement.setAttribute(TILE_HIGHLIGHT_TILE_ATTR, '1');
     tileElement.removeAttribute('title');
@@ -19680,6 +21189,14 @@ function createNPCCooldownManager() {
     if (!isOnRoomByName(npcConfig.roomName)) return false;
     if (isBoardBattleActive(boardContext)) return false;
     if (countAllyPiecesOnBoard(boardContext) > 0) return false;
+    return true;
+  }
+
+  function isBoardNpcInteractable(npcConfig) {
+    if (!npcConfig) return false;
+    if (typeof npcConfig.isInteractable === 'function') {
+      return !!npcConfig.isInteractable();
+    }
     return true;
   }
 
@@ -19715,6 +21232,7 @@ function createNPCCooldownManager() {
   }
 
   function updateAllBoardNpcStates(boardContext = null) {
+    syncSvensonBoardPlacement();
     BOARD_NPC_CONFIGS.forEach((npcConfig) => updateBoardNpcState(npcConfig, boardContext));
   }
 
@@ -20841,9 +22359,10 @@ function createNPCCooldownManager() {
     honeyflower: HONEYFLOWER_CONFIG.productName,
     scarabCoin: SCARAB_COIN_CONFIG.productName,
     destroyFieldRune: DESTROY_FIELD_RUNE_ITEM_NAME,
-    diary: COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName,
-    spoolOfYarn: MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName,
-    minotaurTrophy: MINOTAUR_TROPHY_CONFIG.productName,
+    diary: "Castello's diary",
+    spoolOfYarn: 'Spool of Yarn',
+    woodenPlank: 'Wooden Plank',
+    compass: 'Compass',
     dragonClaw: 'Dragon Claw',
     lightShovel: 'Light Shovel',
     silverToken: SILVER_TOKEN_CONFIG.productName,
@@ -20867,19 +22386,20 @@ function createNPCCooldownManager() {
     [KING_SCARAB_COIN_MISSION.id]: KING_SCARAB_COIN_MISSION,
     [SERPENTINE_TOWER_MISSION.id]: SERPENTINE_TOWER_MISSION,
     [APPRENTICE_SHENG_MISSION.id]: APPRENTICE_SHENG_MISSION,
-    [CHRISTMAS_MIRACLE_MISSION.id]: CHRISTMAS_MIRACLE_MISSION
+    [CHRISTMAS_MIRACLE_MISSION.id]: CHRISTMAS_MIRACLE_MISSION,
+    [SVENSON_LOVE_STORY_MISSION.id]: SVENSON_LOVE_STORY_MISSION
   };
 
   const QUESTS_DEV_COMPLETE_REWARDS = {
     'Dragon Claw': 1,
     'Light Shovel': 1,
     'The Holy Tible': 1,
-    [COSTELLO_QUEEN_BANSHEES_MISSION.diaryItemName]: 1,
-    [COSTELLO_QUEEN_BANSHEES_MISSION.rewardItemName]: 1,
-    [MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName]: 1,
+    "Castello's diary": 1,
+    'Blessed Ankh': 1,
+    'Spool of Yarn': 1,
     [HONEYFLOWER_CONFIG.productName]: 1,
-    [APPRENTICE_SHENG_MISSION.rewardItemName]: 1,
-    [CHRISTMAS_MIRACLE_MISSION.rewardItemName]: 1
+    'Wooden Plank': 1,
+    [BUNNY_SLIPPERS_CONFIG.productName]: 1
   };
 
   const QUESTS_DEV_SEAL_PARAM_KEYS = [
@@ -20993,7 +22513,7 @@ function createNPCCooldownManager() {
       leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0, copperKey = 0,
       stampedLetter = 0, elvenhairRope = 0, holyTible = 0, blessedAnkh = 0,
       honeyflower = 0, scarabCoin = 0, destroyFieldRune = 0, diary = 0,
-      spoolOfYarn = 0, minotaurTrophy = 0, dragonClaw = 0, lightShovel = 0, silverToken = 0,
+      spoolOfYarn = 0, woodenPlank = 0, compass = 0, dragonClaw = 0, lightShovel = 0, silverToken = 0,
       wishlist = 0, present = 0, bunnySlippers = 0,
       monksStudy = 0, queenBanshees = 0, followerOfZathroth = 0, motherOfAllSpiders = 0,
       firstSeal = 0, secondSeal = 0, thirdSeal = 0, fourthSeal = 0,
@@ -21016,7 +22536,7 @@ function createNPCCooldownManager() {
       const flatItemAmounts = {
         leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter, elvenhairRope,
         holyTible, blessedAnkh, honeyflower, scarabCoin, destroyFieldRune, diary,
-        spoolOfYarn, minotaurTrophy, dragonClaw, lightShovel, silverToken,
+        spoolOfYarn, woodenPlank, compass, dragonClaw, lightShovel, silverToken,
         wishlist, present, bunnySlippers
       };
       for (const [key, itemName] of Object.entries(QUESTS_DEV_ITEM_KEYS)) {
@@ -21065,7 +22585,7 @@ function createNPCCooldownManager() {
           label: 'Mother of All Spiders',
           actions,
           onReset: async (acts) => {
-            await devConsumeAllOfItem(MOTHER_OF_ALL_SPIDERS_MISSION.rewardItemName, acts);
+            await devConsumeAllOfItem('Spool of Yarn', acts);
           }
         }
       ];
@@ -21281,7 +22801,7 @@ function createNPCCooldownManager() {
         try {
           await devConsumeAllOfItem(MINOTAUR_TROPHY_CONFIG.productName, null);
         } catch (trophyError) {
-          console.warn('[Quests Mod][Dev] Could not remove Minotaur Trophy:', trophyError);
+          console.warn('[Quests Mod][Dev] Could not remove Wooden Plank:', trophyError);
         }
       }
 
@@ -21388,11 +22908,31 @@ function createNPCCooldownManager() {
     }
   }
 
+  async function resetLoveStoryWithItems() {
+    try {
+      console.log('[Quests Mod][Dev] Resetting A Love Story and granting progression items');
+      await resetQuest(SVENSON_LOVE_STORY_MISSION.id);
+      // Ensure deterministic inventory for the full Love Story path
+      await devConsumeAllOfItem('Wooden Plank', null);
+      await devConsumeAllOfItem('Spool of Yarn', null);
+      await devConsumeAllOfItem('Compass', null);
+      await devConsumeAllOfItem('Bunny Slippers', null);
+      // Legacy cleanup safety (for players with old save keys before migration)
+      await devConsumeAllOfItem('Scorpion Sceptre', null);
+      await devConsumeAllOfItem('Time Compass', null);
+      await questsDevGrant({ woodenPlank: 1, spoolOfYarn: 1, compass: 1, bunnySlippers: 1 });
+      await refreshDevQuestUi();
+      console.log('[Quests Mod][Dev] A Love Story reset complete (+1 Wooden Plank, +1 Spool of Yarn, +1 Compass, +1 Bunny Slippers)');
+    } catch (error) {
+      console.error('[Quests Mod][Dev] Error in resetLoveStoryWithItems:', error);
+    }
+  }
+
   function questsDevHelp() {
     console.log('[Quests Mod][Dev] QuestsDev API:', Object.keys(QuestsDev));
     console.log('[Quests Mod][Dev] Mission IDs:', Object.keys(MISSION_STATE_MAP));
     console.log('[Quests Mod][Dev] Item keys for grant():', Object.keys(QUESTS_DEV_ITEM_KEYS));
-    console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.reset("king_copper_key"); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
+    console.log('[Quests Mod][Dev] Examples: QuestsDev.grant({ leather: 1, monksStudy: 1 }); QuestsDev.reset("king_copper_key"); QuestsDev.reset("svenson_love_story"); QuestsDev.resetLoveStoryWithItems(); QuestsDev.resetSanta(); QuestsDev.completeAll(); QuestsDev.resetAll();');
   }
 
   const QuestsDev = {
@@ -21404,6 +22944,7 @@ function createNPCCooldownManager() {
     resetAll: resetAllQuests,
     resetIronOreReceived,
     resetSanta: resetSantaClaus,
+    resetLoveStoryWithItems,
     debugTile79,
     updateTile79,
     setSealCompleted,
@@ -21433,6 +22974,11 @@ function createNPCCooldownManager() {
       console.log('[Quests Mod][Dev] Resetting Lost in the Sands');
       await resetQuest(KING_SCARAB_COIN_MISSION.id);
     };
+    window.resetLoveStory = async function() {
+      console.log('[Quests Mod][Dev] Resetting A Love Story');
+      await resetQuest(SVENSON_LOVE_STORY_MISSION.id);
+    };
+    window.resetLoveStoryWithItems = resetLoveStoryWithItems;
     window.setSealCompleted = setSealCompleted;
     window.getSealCompleted = getSealCompleted;
     window.areAllSevenSealsCompleted = areAllSevenSealsCompleted;
