@@ -601,7 +601,7 @@
   "rookstayer": {
     "boardChat": {
       "welcomeMessage": "Adventurer… Apprentice Sheng has grown too dangerous. Will you help me defeat him?",
-      "thankYouMessage": "Thank you for your help, adventurer. Please accept this trophy as a token of my gratitude.",
+      "thankYouMessage": "Thank you for your help, adventurer. Please accept this Wooden Plank as a token of my gratitude.",
       "placeholder": "Type your message to Rookstayer...",
       "yesResponse": "Thank you! Prepare yourself — we face him now.",
       "noResponse": "I understand. Return if you change your mind.",
@@ -671,6 +671,8 @@
       "special": "Well, apart from not selling alcohol, you mean? I guess another specialty of Carlin are evergreen flower bowls.",
       "svenson": "Svenson finally made it back to White Wave Cellar. You did a brave thing bringing him home.",
       "captain": "Svenson is one of the toughest captains I've ever known.",
+      "ghazbaran": "They say the archdemon Ghazbaran has been weakened. Ask me about a mission if you dare face him.",
+      "archdemon": "They say the archdemon Ghazbaran has been weakened. Ask me about a mission if you dare face him.",
       "bye": "Please come back from time to time.",
       "goodbye": "Please come back from time to time."
     },

@@ -341,10 +341,34 @@
       "svensonWhiteWaveWelcome": "Ha! We made it through storm and darkness. White Wave Cellar at last!",
       "svensonNeedPresent": "One last favor, friend. I promised Dane a gift but left it behind. Do you have Bunny Slippers?",
       "svensonPresentAccepted": "You truly saw this voyage through. Dane will treasure these. My thanks, always.",
-      "svensonPostLoveTravelPrompt": "Ready for another run? I can take you to White Wave Cellar. Do you want to travel now?",
+      "svensonPostLoveTravelPrompt": "I can take you to White Wave Cellar. Do you want to travel now?",
       "svensonPostLoveTravelStart": "Then aboard with you! White Wave awaits.",
       "daneHomeThanksWelcome": "Thank you for bringing Svenson home, Player. White Wave Cellar owes you one.",
       "daneHomeThanksMission": "Thanks again for bringing Svenson safely home. We won't forget it."
+    },
+    "weakened_archdemon": {
+      "id": "weakened_archdemon",
+      "title": "The Weakened Archdemon",
+      "prompt": "Player... word reaches me that Ghazbaran has been weakened. The archdemon hides in the north still, but this may be our only chance. Will you seek him out and defeat him?",
+      "accept": "Good. Speak with Svenson on Folda Boat — ask him for passage to Ghazbaran's Hideout.",
+      "answerYesNo": "Answer yes or no: will you hunt the weakened archdemon?",
+      "alreadyActive": "You already accepted this task. Ask Svenson for passage to Ghazbaran's Hideout, then defeat the archdemon.",
+      "alreadyCompleted": "You already struck down the weakened archdemon. White Wave Cellar sleeps easier for it.",
+      "objectiveLine1": "Talk to Svenson on Folda Boat and sail to Ghazbaran's Hideout.",
+      "objectiveLine2": "Defeat the weakened Ghazbaran.",
+      "objectiveLine3": "Return to Dane at White Wave Cellar.",
+      "hint": "Svenson can ferry you to White Wave Cellar or Ghazbaran's Hideout.",
+      "rewardSummary": "Reward: Orb.",
+      "rewardItemName": "Orb",
+      "battleVictory": "Ghazbaran has fallen. Return to Dane to claim your reward.",
+      "battleDefeat": "The weakened archdemon still proved too strong.",
+      "daneCompletion": "You did it, Player. The north is safer because of you. Take this orb — may it serve you well.",
+      "daneAwaitingReward": "Ghazbaran is fallen. Speak with me when you are ready to claim your reward.",
+      "svensonDestinationPrompt": "Where shall I take you — White Wave Cellar, or Ghazbaran's Hideout?",
+      "svensonGhazTravelPrompt": "Ghazbaran's Hideout... few who sail there return. The archdemon may be weakened, but his aura still kills. Are you certain you want to go?",
+      "svensonGhazTravelStart": "Then may the gods watch over you. Once we land, there is no turning back until the fight is done.",
+      "svensonGhazTravelLocked": "You are not ready for that route yet. Come back when you are stronger.",
+      "daneMissionAccepted": "Then go. Svenson knows the northern routes — ask him for passage to the hideout."
     }
   },
 
@@ -364,7 +388,8 @@
     "serpentine_tower": "Used the lever in the Serpentine Tower basement and survived The Cursed Chamber.",
     "apprentice_sheng": "Helped Rookstayer defeat Apprentice Sheng in the Minotaur Mage Room and claimed a Wooden Plank.",
     "christmas_miracle": "Received a Christmas present from Santa Claus.",
-    "svenson_love_story": "Guided Svenson through storms and misnavigation, then delivered Bunny Slippers so he could bring Dane her present."
+    "svenson_love_story": "Guided Svenson through storms and misnavigation, then delivered Bunny Slippers so he could bring Dane her present.",
+    "weakened_archdemon": "Defeated the weakened archdemon and received an Orb from Dane."
   },
 
   "sealTranscripts": [
